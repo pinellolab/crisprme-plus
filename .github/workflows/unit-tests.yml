@@ -214,13 +214,17 @@ jobs:
           python test_indel_snp_cis.py
           python test_indel_snp_bruteforce.py
 
-      - name: "Indel+SNP per-haplotype resolution (2.8.1: each carrier's own SNP alleles, never another sample's; the PAM over every IUPAC code; the real analisi_indels_NNN.py on a phased fixture) + the ALT-PAM release gate"
+      - name: "Indel+SNP per-haplotype resolution (2.8.1: each carrier's own SNP alleles, never another sample's; the PAM over every IUPAC code; a second indel read on the carrier's bases; the real analisi_indels_NNN.py on a phased fixture) + the ALT-PAM release gate"
         # Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid
         # fake-indel genome column by column, without genotypes: one sample's indel
         # was reported with SNP alleles only other samples carry, and an R at NRG's
         # last PAM base was shown as A. test_indel_haplotype_resolution pins the
         # resolver (indel_snp_cis.resolve_target) over every IUPAC code at every PAM
-        # position and on table-driven phased cases; test_indel_overlaid_rows runs
+        # position and on table-driven phased cases, and that a second indel inside the
+        # target takes a carrier off only when it changes the target's bases (real chr22
+        # shapes and the review's synthetic ones: a repeat unit gained or lost at the
+        # target's edge leaves them, a stretch another variant lengthened does not hold
+        # them through the indel); test_indel_overlaid_rows runs
         # the shipped analyzer on a fixture with the repo's own Tier-0 / Tier-1 /
         # indel-store writers (pandas + numpy; intervaltree is stubbed when absent);
         # test_check_alt_pam covers scripts/check_alt_pam.py (and its check that no

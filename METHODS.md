@@ -467,15 +467,28 @@ haplotype** (`indel_snp_cis.resolve_target`):
   `download --what index --no-genotypes`) the row is that worst case too, under every
   carrier of the indel the log lists, PUTATIVE;
 - the fake-indel window holds **one indel**, so a haplotype that carries a second indel
-  inside the target does not have the window's sequence and is not listed for it, on any
-  indel row (§8, residuals). That includes a second indel inserted right next to the
-  indel's anchor base and, on the same phased slot, an indel overlapping the first at another
-  position (one complex allele the VCF splits into overlapping records; the window keeps the
-  reference there). A variant only on bases the indel deletes is not in the window's sequence
-  and changes nothing. Another allele at the indel's own position, an indel or a SNP, is an
-  alternative to it (a haplotype holding both would be one record), so a slot phased with both
-  is a phasing artefact. And an unphased carrier of two overlapping records is a multi-allelic
-  heterozygote, one allele per haplotype. All of these stay listed;
+  inside the target may not have the window's sequence there, and whether it has is read on
+  its bases, not on the indel's position: the reference around the target is written out
+  with every indel of the phased store the haplotype carries there and its own SNP alleles,
+  and the haplotype is listed when the target's bases are on it at the target's place, from
+  the target's first base on or up to its last base, through the indel (not in a stretch
+  that another of its variants lengthened, pushing the indel out of it). In a tandem repeat
+  a unit gained or lost at the target's edge leaves the bases as they are (the repeat puts
+  the same bases back), so such a carrier keeps its row; one whose second indel changes the
+  bases is not listed for it, on any indel row (§8, residuals), nor one whose bases cannot
+  be read either way: each way meets an unphased or missing call, or two of its variants
+  that overlap (two indels, or a SNP on a base of the second indel's REF, two records of one
+  base). A reading from the target's first base on meets no variant upstream of that base,
+  one up to its last base none downstream of it. A second indel inserted right next to the
+  indel's anchor base is inside the target.
+  On the same phased slot, an indel overlapping the first at another position (one complex
+  allele the VCF splits into overlapping records; the window keeps the reference there)
+  takes the haplotype off the target's rows whatever its bases. A variant only on bases the
+  indel deletes is not in the window's sequence and changes nothing. Another allele at the
+  indel's own position, an indel or a SNP, is an alternative to it (a haplotype holding both
+  would be one record), so a slot phased with both is a phasing artefact. And an unphased
+  carrier of two overlapping records is a multi-allelic heterozygote, one allele per
+  haplotype. These three stay listed;
 - a target of the window that holds **no base of the indel** — none the ALT adds or replaces,
   and not the two bases on either side of the deleted ones — lies wholly in a flank and gives
   **no indel row**, with or without a code: its sequence is reference (or SNP) sequence, which
@@ -1072,9 +1085,11 @@ keeps the best, not the first it reads.) One **residual**: the indel search mate
 **one indel per fake contig**, so an off-target requiring **≥ 2 co-occurring cis indels
 within a single protospacer** is not generated as a candidate — a pre-existing
 single-indel-search property, independent of the analysis mode; since 2.8.1 an individual
-whose haplotype carries such a second indel inside a target (or, as one complex allele
-split into overlapping records, an indel overlapping it at another position) is not listed
-for that target, whose sequence it does not have. This residual is **low-frequency**: raw multi-indel cis
+whose haplotype carries such a second indel inside a target is not listed for that target
+when the second indel changes the target's bases, read on the haplotype's own bases (a
+repeat unit gained or lost at the target's edge leaves them, and the individual stays
+listed: §4), nor when, as one complex allele split into overlapping records, an indel
+overlaps it at another position. This residual is **low-frequency**: raw multi-indel cis
 co-occurrence is dominated by STR/VNTR repeats (which off-target analysis should
 soft-mask), falling to **~1–2%** of indel loci after
 repeat-masking and deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%**

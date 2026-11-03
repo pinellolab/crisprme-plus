@@ -47,7 +47,7 @@ import zipfile
 G = "ACTGAAATCTGTAAGCAGGC"  # the guide
 COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 CODES = set("RYSWKMBDHVryswkmbdhv")
-NSAMPLES = 50
+NSAMPLES = 53
 
 
 def rc(s):
@@ -322,6 +322,28 @@ def generate(wd):
     # (no one-mismatch row is expected for S50: that alignment of its haplotype ties on
     # mismatches + bulges with a DNA-bulge one with none, which each file keeps)
     expect["K2"] = {"perfect": ["S49"], "never_perfect": ["S50"]}
+
+    # W (+): a deletion restores a perfect target whose PAM TGG is followed by one more G;
+    # on S51's slot a 1-bp deletion in that G run leaves the target's bases as they are
+    # (the run puts a G back), so S51 has the target; on S52's slot a spacer deletion
+    # changes them, and S52 has none. A second indel inside a target is read on the
+    # carrier's bases, not on its position.
+    w0 = 14500
+    put(w0, G[:10] + "C" + G[10:] + "TGGG" + "A")
+    var("W", "del", w0 + 10, G[9] + "C", G[9], {"S51": "1|0", "S52": "1|0"})
+    var("W", "pamrun", w0 + 22, "TG", "T", {"S51": "1|0"})
+    var("W", "spacer", w0 + 3, G[2:4], G[2], {"S52": "1|0"})
+    expect["W"] = {"perfect": ["S51"], "never_any": ["S52"]}
+
+    # V (+): the same deletion, the target's 5' end inside an AC repeat; on S53's slot a CA
+    # insertion written inside the target (a record left unnormalized: bcftools norm moves
+    # it upstream, out of the target) leaves the target on the haplotype up to its last
+    # base, not from its first.
+    v0 = 14800
+    put(v0, "ACAC" + G[:10] + "C" + G[10:] + "TGG")
+    var("V", "del", v0 + 14, G[9] + "C", G[9], {"S53": "0|1"})
+    var("V", "ins", v0 + 5, "A", "ACA", {"S53": "0|1"})
+    expect["V"] = {"perfect": ["S53"]}
 
     # (No split multi-allelic SNP records here: CRISPRitz add-variants keeps only the
     # last of two records at one position in the enriched genome and the dictionary,

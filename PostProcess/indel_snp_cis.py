@@ -28,6 +28,7 @@ the sequences that still hold the PAM and fit the search budget (see the section
 test_indel_haplotype_resolution.py).
 """
 
+import bisect
 import itertools
 
 from overlay_indel_snps import map_fake_offset_to_real
@@ -457,6 +458,132 @@ def holds_indel(first, last, indel_pos1, indel_start, ref, alt):
     return first < added_from and last >= added_from  # the bases either side of a deletion
 
 
+# ---------------------------------------------------------------------------
+# A second indel inside a target, read on the sequence (2.8.1)
+# ---------------------------------------------------------------------------
+# The fake-indel window holds one indel, so a carrier whose haplotype also holds a
+# second indel inside the target may not have the window's sequence there. Whether it
+# has is a question of bases, not of positions: in a tandem repeat a unit gained or lost
+# at the target's edge leaves the target's bases as they are (the repeat puts the same
+# bases back), and that carrier does have the row's sequence. local_haplotype writes out
+# a haplotype's bases around the target, each with the place it holds, and
+# holds_target_bases asks whether the window's target is on it at the target's own
+# place: from its first base on, or up to its last base.
+
+
+def window_place(offset, indel_pos1, indel_start, ref, alt):
+    """The place (local_haplotype) of the base at ``offset`` of a fake-indel window
+    whose real 0-based start is ``indel_start``: a reference base before the indel, one
+    of the ALT bases (its anchor included: the window writes the ALT as it is), or a
+    reference base past the REF."""
+    alt_at = indel_pos1 - 1 - indel_start
+    if offset < alt_at:
+        return (indel_start + offset, 0)
+    if offset < alt_at + len(alt):
+        return (indel_pos1 - 2, 2, offset - alt_at)
+    return (indel_start + offset - len(alt) + len(ref), 0)
+
+
+def local_haplotype(lo, hi, window, others=()):
+    """The bases of a haplotype over the reference positions lo..hi (0-based,
+    inclusive), as [(place, source)] in the order the haplotype holds them.
+
+    ``window`` (VCF POS, REF, ALT) is the indel of the fake-indel window, written as the
+    window writes it: its REF out, its ALT in, the anchor base included. ``others`` are
+    the haplotype's other indels; the bases one shares with its REF at either end
+    (kept_bases, shared_tail) stay reference bases. A source is a reference position
+    (int), whose base is the haplotype's own allele there, or a base an ALT puts in
+    (str). A place sorts as the haplotype runs: (p, 0) for reference position p, and
+    (p, rank, k) for the k-th base an ALT puts in after reference position p, another
+    indel's (rank 1) before the window's (rank 2), which follows the bases an indel
+    inserted before its anchor. None where two of the variants overlap, or insert at
+    one point: no one haplotype holds both (a VCF writes such a haplotype as one
+    record)."""
+    edits = []
+    p1, ref, alt = window
+    s = p1 - 1
+    edits.append((s, s + len(ref), alt, s - 1, 2))
+    for p1, ref, alt in others:
+        s = p1 - 1
+        c = kept_bases(ref, alt)
+        t = shared_tail(ref, alt)
+        edits.append((s + c, s + len(ref) - t, alt[c:len(alt) - t], s + c - 1, 1))
+    edits.sort(key=lambda e: (e[0], e[4]))
+    out = []
+    at = lo
+    last = None
+    for start, end, put, after, rank in edits:
+        if last is not None and (start < last[1] or (
+                start == last[0] == last[1] == end and rank == last[2])):
+            return None
+        out.extend(((p, 0), p) for p in range(at, min(start, hi + 1)))
+        out.extend(((after, rank, k), b.upper()) for k, b in enumerate(put))
+        at = max(at, end)
+        last = (start, end, rank)
+    out.extend(((p, 0), p) for p in range(at, hi + 1))
+    return out
+
+
+def _same_base(x, y, value):
+    """Whether sources x and y (local_haplotype) are the same base on a haplotype: the
+    same reference position is, whatever its allele; otherwise their bases are
+    compared, and a base ``value`` cannot tell (None) is not the same."""
+    if x == y:
+        return True
+    bx = x if isinstance(x, str) else value(x)
+    by = y if isinstance(y, str) else value(y)
+    return bx is not None and bx == by
+
+
+def target_pairs(window_hap, hap, first, last):
+    """The ways ``hap`` can hold the bases ``window_hap`` holds at places first..last
+    (the target's first and last base on the window; local_haplotype), at the target's
+    own place: one from the place of its first base on, one up to the place of its last
+    base. Each is the list of (window source, haplotype source) pairs that are not the
+    same reference position, or None where it cannot hold them there: an ALT base
+    against another, a stretch that runs past the haplotype written out, or one that
+    leaves out what the target holds of the window's indel (its ALT bases on the window,
+    and the base past them: for a deletion, the junction). The haplotype must have the
+    bases through that indel, as the row names it, not only in a stretch that another of
+    its variants has lengthened (a repeat unit gained upstream can push the indel out of
+    a stretch whose bases are those of the window). Always two, in that order: a target
+    the window written out does not hold has neither."""
+    keys = [k for k, _s in window_hap]
+    try:
+        i, j = keys.index(first), keys.index(last)
+    except ValueError:
+        return [None, None]
+    want = [s for _k, s in window_hap[i:j + 1]]
+    n = len(want)
+    lit = [x for x in range(i, j + 1) if len(keys[x]) == 3 and keys[x][1] == 2]
+    core = {keys[x] for x in lit}
+    if lit and lit[-1] < j:
+        core.add(keys[lit[-1] + 1])  # the base past the window's ALT: a deletion's junction
+    hkeys = [k for k, _s in hap]
+    ways = []
+    for a in (bisect.bisect_left(hkeys, first), bisect.bisect_right(hkeys, last) - n):
+        if a < 0 or a + n > len(hap) or not core <= set(hkeys[a:a + n]):
+            ways.append(None)  # past the bases written out, or not through the indel
+            continue
+        pairs = []
+        for x, (_k, y) in zip(want, hap[a:a + n]):
+            if x == y:
+                continue
+            if isinstance(x, str) and isinstance(y, str):
+                pairs = None  # two ALT bases that differ
+                break
+            pairs.append((x, y))
+        ways.append(pairs)
+    return ways
+
+
+def holds_target_bases(ways, value):
+    """True iff one of ``ways`` (target_pairs) holds: every pair is the same base on the
+    haplotype whose alleles ``value`` gives (source -> base, None where not known)."""
+    return any(pairs is not None and all(_same_base(x, y, value) for x, y in pairs)
+               for pairs in ways)
+
+
 class IndelCarriers(object):
     """The carriers of one indel, parsed once: {sample: (genotype tokens, kind,
     indel-carrying slots)} plus the slot total. ``phase_known`` is False when they
@@ -541,11 +668,12 @@ def resolve_carriers(columns, indel_gts, phase_known=True, others=()):
       phase_known: False when the indel's carriers come without phase (the indel
         log, no phased indel genotype store): no slot can then be tied to a SNP.
         (An IndelCarriers carries its own.)
-      others: one {sample: normalized genotype} per OTHER indel that changes the
-        target's reference span (changes_span). The fake-indel window holds one
-        indel, so a slot that carries a second one there does not have the window's
-        sequence: it is no carrier of any row of this target. A sample whose second
-        indel cannot be put on a slot (unphased) is PUTATIVE.
+      others: one {sample: normalized genotype} per OTHER variant that leaves a slot
+        without the window's sequence there: a second indel that changes the target's
+        bases (the caller reads that on the slot's sequence: local_haplotype), or a
+        complex allele split into overlapping records. The fake-indel window holds one
+        indel, so a slot marked "1" there is no carrier of any row of this target. A
+        sample whose second variant cannot be put on a slot (unphased) is PUTATIVE.
 
     Returns ``(exact, putative)``:
       exact: {bases: [samples, n_slots]} -- ``bases`` is a tuple with the base each
@@ -609,7 +737,7 @@ def resolve_carriers(columns, indel_gts, phase_known=True, others=()):
         if blocked.get(sample):
             islots = [h for h in islots if h not in blocked[sample]]
             if not islots:
-                continue  # every indel slot also holds a second indel here
+                continue  # every indel slot also holds a variant that breaks the window
         if not seen and not any_unknown and not unsure:
             ent = exact.setdefault(ref_bases, [set(), 0])
             ent[0].add(sample)

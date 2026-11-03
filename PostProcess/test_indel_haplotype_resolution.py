@@ -480,6 +480,178 @@ class PerHaplotypeCases(unittest.TestCase):
         self.assertEqual(isc.ambiguous_columns("ACrTyACG"), [2, 4])
 
 
+class ASecondIndelIsReadOnTheBases(unittest.TestCase):
+    """indel_snp_cis.local_haplotype / target_pairs / holds_target_bases: a carrier whose
+    haplotype holds a second indel inside an indel target lacks the window's sequence only
+    when that indel changes the target's bases. Decided on the position alone
+    (changes_span), as at 9c6b4046, in a tandem repeat, where a unit gained or lost at the
+    target's edge leaves the bases as they are, carriers that do hold the row's sequence
+    were taken off, and a row left with none vanished. The three real shapes below are
+    chr22 of the HGDP + 1000 Genomes panel (hg38 bases, 0-based offsets); dataset C is
+    the review's synthetic case (a 1-bp deletion in the PAM's G run, and a spacer deletion
+    that does change the target); dataset A its record left unnormalized inside the
+    target's 5' repeat. Each "holds" fails on the position rule."""
+
+    # chr22:48348960-48349080 and 48349080-48349180 (0-based, end exclusive), hg38
+    C22A = ("CTCACACACACTCTCACACAGACTCACACTCACACACACTCTCACACAGACACGCTCACACACATTCACATACTTACA"
+            "CTCTCACACAGACTCACACTCACACATACACTGTCACACAGT")
+    C22B = ("CACATGCACTCATATACATACTTACACACACTCTCTCACACACACTCAGCCAGTCACACACACACCCACAGAGACTTT"
+            "CACACACAGACTCACACACACA")
+    # chr22:48634700-48634800
+    C22C = ("TCATTCATTCACCCTCTCATTCATCTACTCATTCACTCTCTCACTCATTCATTCACTCAGTCACTCAGCCACTCATTTAG"
+            "TCACTCACTCATTCACTGTC")
+
+    @staticmethod
+    def _bases(seq, at):
+        def value(src):
+            return src if isinstance(src, str) else seq[src - at]
+        return value
+
+    def _holds(self, seq, at, window, others, first, n, value=None):
+        """Whether a slot carrying ``window`` and ``others`` (VCF POS, REF, ALT) holds the
+        window's n bases from the place ``first`` on; ``seq`` holds the reference from
+        0-based ``at``."""
+        lo, hi = at, at + len(seq) - 1
+        on_window = isc.local_haplotype(lo, hi, window)
+        keys = [k for k, _s in on_window]
+        last = keys[keys.index(first) + n - 1]
+        hap = isc.local_haplotype(lo, hi, window, others)
+        ways = isc.target_pairs(on_window, hap, first, last)
+        return isc.holds_target_bases(ways, value or self._bases(seq, at))
+
+    def _target(self, seq, at, window, first, n):
+        on_window = isc.local_haplotype(at, at + len(seq) - 1, window)
+        keys = [k for k, _s in on_window]
+        i = keys.index(first)
+        value = self._bases(seq, at)
+        return "".join(value(s) for _k, s in on_window[i:i + n])
+
+    def test_vegfa3_a_deletion_takes_the_last_base_and_the_repeat_puts_it_back(self):
+        """chr22:48349010(-), the VEGFA3 guide: A>ACT makes the target; on 1,180 of its
+        1,199 carriers the same slot holds CAT>C at 48349029, whose AT deletion takes the
+        target's last forward base, and the repeat puts an A back. HG00100 slot 0."""
+        window, second = (48349010, "A", "ACT"), (48349029, "CAT", "C")
+        first = isc.window_place(25 + 1, 48349010, 48349010 - 26, "A", "ACT")
+        self.assertEqual(first, (48349008, 2, 1))  # the first inserted base
+        self.assertEqual(self._target(self.C22A, 48348960, window, first, 22),
+                         "CTCACGCTCACACACATTCACA")
+        self.assertTrue(isc.changes_span(*second, 48349009, 48349029))  # the position rule
+        self.assertTrue(self._holds(self.C22A, 48348960, window, [second], first, 22))
+        # each way is read on its own (_breaking_slots), so there are always two: a target
+        # the window written out does not hold has neither
+        on_window = isc.local_haplotype(48348960, 48348960 + len(self.C22A) - 1, window)
+        self.assertEqual(isc.target_pairs(on_window, on_window, (48340000, 0), first),
+                         [None, None])
+
+    def test_a_repeat_unit_inserted_before_the_last_base(self):
+        """chr22:48349112(-) (AGT>A at 48349132; NA19327's slot also holds A>ACAGT at
+        48349136 and ACACT>A at 48349108, just before the target) and chr22:48634743(-)
+        (CTCAT>C at 48634744; NA18907 holds C>CCACT at 48634769 on both slots): the
+        inserted unit's first base is the one it displaces. Each was the only carrier: the
+        row vanished."""
+        window = (48349132, "AGT", "A")
+        first = (48349112, 0)
+        self.assertEqual(self._target(self.C22B, 48349080, window, first, 23),
+                         "CTCTCACACACACTCAGCCACAC")
+        others = [(48349108, "ACACT", "A"), (48349136, "A", "ACAGT")]
+        self.assertTrue(self._holds(self.C22B, 48349080, window, others, first, 23))
+        window = (48634744, "CTCAT", "C")
+        first = isc.window_place(25, 48634744, 48634744 - 26, "CTCAT", "C")
+        self.assertEqual(first, (48634742, 2, 0))  # the anchor: the window writes the ALT
+        self.assertEqual(self._target(self.C22C, 48634700, window, first, 23),
+                         "CTCATTCACTCAGTCACTCAGCC")
+        self.assertTrue(self._holds(self.C22C, 48634700, window, [(48634769, "C", "CCACT")],
+                                    first, 23))
+        # an insertion there whose first base is not the one it displaces changes it
+        self.assertFalse(self._holds(self.C22C, 48634700, window,
+                                     [(48634769, "C", "CTACTCACT")], first, 23))
+
+    # dataset C of the review (make_cases.py): a T, the guide CACACACTTGCT with an extra G
+    # the window's TG>T deletes, TTTATCAC, then the PAM TGG with one more G and an A
+    SITE_C = "T" + "CACACACTTGCT" + "G" + "TTTATCAC" + "TGGG" + "A" + "CCCC"
+
+    def test_a_deletion_in_the_pams_g_run_and_a_spacer_deletion(self):
+        seq, at = self.SITE_C, 1999
+        window = (2012, "TG", "T")  # 0-based 2011 is the T before the extra G
+        first = (2000, 0)
+        self.assertEqual(self._target(seq, at, window, first, 23),
+                         "CACACACTTGCTTTTATCACTGG")
+        pam_run = (2022, "TG", "T")   # S1: the PAM keeps its G from the run
+        spacer = (2016, "TA", "T")    # S2: the spacer loses a base
+        self.assertTrue(isc.changes_span(*pam_run, 2000, 2023))
+        self.assertTrue(self._holds(seq, at, window, [pam_run], first, 23))
+        self.assertFalse(self._holds(seq, at, window, [spacer], first, 23))
+        self.assertFalse(self._holds(seq, at, window, [pam_run, spacer], first, 23))
+
+    def test_a_unit_inserted_in_the_5prime_repeat_by_a_record_left_unnormalized(self):
+        """Dataset A: the CA insertion written at a POS inside the target's 5' CA repeat
+        (bcftools norm moves it upstream, out of the target). The slot holds the 23-mer
+        at the PAM, up to the target's last base, not from its first."""
+        guide = "CACACACTTGCTTTTATCAC"
+        seq = "GTA" + "CACACACACACA" + guide[:12] + "G" + guide[12:] + "TGG" + "ATC"
+        at = 1985
+        g0 = at + 3 + 12
+        window = (g0 + 12, "TG", "T")
+        first = (g0, 0)
+        self.assertEqual(self._target(seq, at, window, first, 23), guide + "TGG")
+        self.assertTrue(self._holds(seq, at, window, [(g0 + 2, "A", "ACA")], first, 23))
+        # the same unit, left-aligned (bcftools norm), is outside the target: no change
+        self.assertFalse(isc.changes_span(at + 3, "A", "ACA", g0, g0 + 23))
+
+    def test_a_snp_the_shift_brings_into_the_target(self):
+        """The bases a deletion brings in from past the target are the slot's own: a SNP
+        alt there, on the same slot, changes the target; on the other slot it does not."""
+        seq, at = self.SITE_C, 1999
+        window, pam_run = (2012, "TG", "T"), (2022, "TG", "T")
+        first = (2000, 0)
+        brought = 2024  # the run's last G: the PAM's last base on the slot
+
+        def on_slot(alt_here):
+            def value(src):
+                if isinstance(src, str):
+                    return src
+                return alt_here if src == brought and alt_here else seq[src - at]
+            return value
+
+        self.assertTrue(self._holds(seq, at, window, [pam_run], first, 23, on_slot(None)))
+        self.assertFalse(self._holds(seq, at, window, [pam_run], first, 23, on_slot("A")))
+        # an allele the genotypes cannot put on the slot is not the same base
+        self.assertFalse(self._holds(seq, at, window, [pam_run], first, 23,
+                                     lambda s: s if isinstance(s, str) else (
+                                         None if s == brought else seq[s - at])))
+
+    # chr22:33466660-33466760
+    C22D = ("AGCCCTGGCCTCATTCACCCCCTCTCTCTCTCTACACACACACACACACACACATACACACACACACTACACACACACACC"
+            "TTAAGAGTTTGTTATCACC")
+
+    def test_the_bases_must_come_through_the_indel(self):
+        """chr22:33466691(-) on the window of CACACAT>C at 33466709: HGDP01094's slot also
+        holds T>TACACAC at 33466693, inside the target. From the target's first base its
+        haplotype has the target's bases, but the three CA units gained upstream push the
+        deletion's junction out of that stretch: it holds the bases through its insertion,
+        not through the deletion the row names, and is not listed for it (the audit's
+        carrier check calls such a listing a failure)."""
+        window, ins = (33466709, "CACACAT", "C"), (33466693, "T", "TACACAC")
+        first = (33466691, 0)
+        self.assertEqual(self._target(self.C22D, 33466660, window, first, 23),
+                         "CTACACACACACACACACACACA")
+        lo, hi = 33466660, 33466660 + len(self.C22D) - 1
+        hap = isc.local_haplotype(lo, hi, window, [ins])
+        hkeys = [k for k, _s in hap]
+        stretch = hap[hkeys.index(first):hkeys.index(first) + 23]
+        value = self._bases(self.C22D, 33466660)
+        self.assertEqual("".join(value(src) for _k, src in stretch), "CTACACACACACACACACACACA")
+        self.assertFalse(self._holds(self.C22D, 33466660, window, [ins], first, 23))
+
+    def test_variants_that_overlap_are_no_haplotype(self):
+        self.assertIsNone(isc.local_haplotype(100, 140, (120, "TCA", "T"), [(121, "CA", "C")]))
+        self.assertIsNone(isc.local_haplotype(100, 140, (120, "T", "TC"),
+                                              [(110, "A", "AG"), (110, "A", "AT")]))
+        # an indel inserted right before the window's anchor comes first
+        hap = isc.local_haplotype(118, 122, (121, "G", "GTT"), [(120, "C", "CA")])
+        self.assertEqual([s for _k, s in hap], [118, 119, "A", "G", "T", "T", 121, 122])
+
+
 class TargetsThatHoldTheirIndel(unittest.TestCase):
     """indel_snp_cis.holds_indel: a fake-indel window is 25 bp of plain flank, the ALT,
     then the downstream flank. A target wholly in a flank is reference (or SNP) sequence

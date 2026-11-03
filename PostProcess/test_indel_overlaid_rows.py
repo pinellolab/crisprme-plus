@@ -63,7 +63,7 @@ CODE = {frozenset("AG"): "R", frozenset("CT"): "Y", frozenset("CG"): "S",
         frozenset("ACG"): "V"}
 ALLELES = {v: set(k) for k, v in CODE.items()}
 COMP = str.maketrans("ACGTRYSWKMBDHVacgtryswkmbdhv", "TGCAYRSWMKVHDBtgcayrswmkvhdb")
-SAMPLES = ["S%02d" % i for i in range(1, 31)]
+SAMPLES = ["S%02d" % i for i in range(1, 32)]
 AN = 2 * len(SAMPLES)
 SAMPLE_META = {s: ("synth", "POP", "female") for s in SAMPLES}
 
@@ -111,7 +111,7 @@ class World(object):
 
     def __init__(self):
         rng = random.Random(28101)
-        self.seq = [rng.choice("ACGT") for _ in range(5000)]
+        self.seq = [rng.choice("ACGT") for _ in range(6000)]
         self.snps = []    # (pos1, ref, alt, rsid, {sample: gt})
         self.indels = []  # (pos1, ref, alt, rsid, {sample: gt})
         self.alt_token = {}   # (pos1, alt) -> its allele index, on a multi-allelic line
@@ -297,6 +297,55 @@ class World(object):
         self._put(c2, g[:3] + "T" + g[4:10] + "C" + g[10:] + "TGG")
         self._indel("C2", c2 + 10, g[9] + "C", g[9], {"S29": "1|0"})
         self.extra_codes[c2 + 4] = "R"
+        # A second indel inside the target is read on the slot's bases: it takes a carrier
+        # off only when it changes them. PR (+): a deletion restores a perfect target, PAM
+        # TGG and one more G; on S12's slot a 1-bp deletion in the G run (PR2) leaves the
+        # target's bases as they are (the run puts a G back); on S13's a spacer deletion
+        # (PR3) changes them; S14 holds PR2 on its other slot. On S30's slot PR2 comes with
+        # a T>C SNP on its anchor, the PAM's first base: two records of one base, a phasing
+        # artefact, so the slot has no one sequence there and stays off; S19 holds the SNP
+        # and PR alone (PAM CGG).
+        pr = 4400
+        self._put(pr, g[:10] + "C" + g[10:] + "TGGG" + "A")
+        self._indel("PR", pr + 10, g[9] + "C", g[9], {"S11": "1|0", "S12": "1|0", "S13": "1|0",
+                                                       "S14": "1|0", "S19": "1|0", "S30": "1|0"})
+        self._indel("PR2", pr + 22, "TG", "T", {"S12": "1|0", "S14": "0|1", "S30": "1|0"})
+        self._indel("PR3", pr + 3, g[2:4], g[2], {"S13": "1|0"})
+        self._snp("PR", pr + 22, "T", "C", {"S19": "1|0", "S30": "1|0"})
+        # RP (+): the same deletion; on S15's slot a CA insertion written inside the
+        # target's 5' AC repeat (a record left unnormalized: bcftools norm moves it out of
+        # the target) holds the target up to its last base, not from its first.
+        rp = 4600
+        self._put(rp, "ACAC" + g[:10] + "C" + g[10:] + "TGG")
+        self._indel("RP", rp + 14, g[9] + "C", g[9], {"S15": "0|1", "S17": "1|0"})
+        self._indel("RP2", rp + 5, "A", "ACA", {"S15": "0|1"})
+        # TL (+): the PAM is the first unit of a TGG repeat; a left-aligned deletion of one
+        # unit takes the PAM, and the next unit puts it back (S18 on one slot, S20 on both).
+        # S31 holds both too, and upstream of the target an unphased deletion (TLU), which no
+        # stretch read from the target's first base reaches: it does not stop that reading.
+        tl = 4800
+        self._put(tl, g[:10] + "C" + g[10:] + "TGG" + "TGG" + "A")
+        self._indel("TL", tl + 10, g[9] + "C", g[9],
+                    {"S18": "1|0", "S19": "1|0", "S20": "1|0", "S31": "1|0"})
+        self._indel("TL2", tl + 21, g[19] + "TGG", g[19], {"S18": "1|0", "S20": "1|1", "S31": "1|0"})
+        self._indel("TLU", tl - 8, "".join(self.seq[tl - 9:tl - 7]), self.seq[tl - 9], {"S31": "0/1"})
+        # SH (+): the same, with a G>A SNP on the base the deletion brings into the PAM: on
+        # S21's slot the target has no PAM; on S28's other slot it does not matter; S24's
+        # SNP is unphased, so its slot's bases cannot be read: it stays off.
+        sh = 5000
+        self._put(sh, g[:10] + "C" + g[10:] + "TGG" + "TGG" + "A")
+        self._indel("SH", sh + 10, g[9] + "C", g[9],
+                    {"S21": "1|0", "S23": "1|0", "S24": "1|0", "S28": "1|0"})
+        self._indel("SH2", sh + 21, g[19] + "TGG", g[19],
+                    {"S21": "1|0", "S24": "1|0", "S28": "1|0"})
+        self._snp("SH", sh + 27, "G", "A", {"S21": "1|0", "S24": "0/1", "S28": "0|1"})
+        # CO (+): a target with a SNP code, the guide's base an alt in cis in S25, and the
+        # deletion of the PAM's unit on S25's and S26's slots: both keep their rows.
+        co = 5200
+        self._put(co, g[:5] + "C" + g[6:10] + "C" + g[10:] + "TGG" + "TGG" + "A")
+        self._indel("CO", co + 10, g[9] + "C", g[9], {"S25": "1|0", "S26": "1|0", "S27": "1|0"})
+        self._indel("CO2", co + 21, g[19] + "TGG", g[19], {"S25": "1|0", "S26": "1|0"})
+        self._snp("CO", co + 6, "C", "A", {"S25": "1|0"})
         self.ref = "".join(self.seq)
 
     def _put(self, start0, s):
@@ -585,7 +634,7 @@ class FullTiers(_Base):
         # variant of a position only. (S07, S22, S27 and S29 are unphased or unresolved at
         # some site: their rows are pinned below.)
         self.assert_on_carrier_haplotypes(
-            rows, putative_ok=("S07", "S10", "S11", "S16", "S22", "S27", "S29"))
+            rows, putative_ok=("S07", "S10", "S11", "S16", "S22", "S27", "S29", "S31"))
         site = self.by_site(rows)
         g = GUIDE
         best = lambda rs: max(rs, key=lambda r: r["cfd"])  # noqa: E731
@@ -696,6 +745,28 @@ class FullTiers(_Base):
         # C2: a code without the reference base: resolved over the code, and reported
         self.assertEqual([(r["dna"], r["samples"]) for r in site["C2"]], [(g + "TGG", "S29")])
         self.assertIn("did not map onto the reference base", fx.proc.stdout)
+        # PR..CO: a second indel inside the target takes a carrier off only when it changes
+        # the target's bases (decided on the position alone, as at 9c6b4046, S12, S15,
+        # S18, S20, S25, S26 and S28 were taken off too)
+        listed = lambda rs, s: [r for r in rs if s in r["samples"].split(",")]  # noqa: E731
+        self.assertEqual([r["samples"] for r in site["PR"] if r["dna"] == g + "TGG"],
+                         ["S11,S12,S14"])
+        self.assertFalse(listed(site["PR"], "S13"))  # its spacer deletion changes the bases
+        self.assertEqual([r["samples"] for r in site["PR"] if r["dna"] == g + "CGG"], ["S19"])
+        self.assertFalse(listed(site["PR"], "S30"))  # a SNP on the second indel's anchor
+        rp = best(site["RP"])  # the target is on S15's slot up to its last base
+        self.assertEqual((rp["dna"], rp["samples"]), (g + "TGG", "S15,S17"))
+        tl = best(site["TL"])
+        self.assertEqual((tl["dna"], tl["samples"]), (g + "TGG", "S18,S19,S20,S31"))
+        sh = best(site["SH"])
+        self.assertEqual((sh["dna"], sh["samples"]), (g + "TGG", "S23,S28"))
+        self.assertFalse(listed(site["SH"], "S21") + listed(site["SH"], "S24"))
+        co = {r["samples"]: r for r in site["CO"] if r["mm"] <= 1}
+        self.assertEqual(sorted(co), ["S25", "S26,S27"])
+        self.assertEqual(co["S25"]["dna"], g + "TGG")
+        self.assertEqual(co["S25"]["var"].split(","),
+                         ["%s_5210_TC_T" % CHROM, "%s_5206_C_A" % CHROM])
+        self.assertEqual(co["S26,S27"]["dna"], g[:5] + "c" + g[6:] + "TGG")
         # every recomputed CFD, mismatch count and total agrees with its alignment
         for r in rows:
             self.assertAlmostEqual(cfd_score_bulge_aware(r["crRNA"], r["dna"]), r["cfd"],
@@ -717,6 +788,7 @@ class FullTiers(_Base):
             ("3010", "3004", "rs_Z_snp", "CONFIRMED", "1", "S21"),
             ("3409", "3404", "rs_AA_snp", "CONFIRMED", "1", "S24"),  # its kept-base SNP is /
             ("4010", "4004", ".", "PUTATIVE", "1", "S29"),  # the code without a record
+            ("5210", "5206", "rs_CO_snp", "CONFIRMED", "1", "S25"),  # and a second indel
         ]))
         # the joint frequency counts cis copies: 1|1 is two, on the panel's alleles
         z = [c for c in cooc if c[1] == "3010"]

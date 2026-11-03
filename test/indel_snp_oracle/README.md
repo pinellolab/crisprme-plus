@@ -1,7 +1,7 @@
 # SNP+indel oracle (synthetic, real CLI)
 
 `run_oracle.sh <empty work dir>` runs inside a CRISPRme image. It generates a 16 kb
-reference chromosome and a phased VCF of 50 samples (`oracle.py generate`), builds the
+reference chromosome and a phased VCF of 53 samples (`oracle.py generate`), builds the
 indexes and dictionaries with `build-index-only`, runs `complete-search` with
 `--per-sample` and with `--population-level`, then checks every row whose variant list
 holds an indel or an MNV (`oracle.py check`) against each sample's two haplotypes
@@ -39,6 +39,8 @@ who has which target:
 | I | a long insertion holding a whole perfect target | S44 CFD 1 |
 | P | an insertion, and on S45's slot another insertion and a SNP at its POS and anchor | S45 (a phasing artefact) and S46 CFD 1 |
 | K, K2 | an equal-length multi-base record, an MNV (+, -), and on both of S48's, S50's slots a SNP at the target's far-end base | S47, S49 CFD 1 alone; S48, S50 off the perfect row (an RNA-bulge alignment that does not reach that base lists them under the MNV alone); S48 on a one-mismatch row |
+| W | a deletion, the PAM TGG followed by a G; on S51's slot a 1-bp deletion in that G run, on S52's a spacer deletion | S51 CFD 1 (the run puts the G back: the target's bases are unchanged); S52 on no row |
+| V | a deletion, the target's 5' end in an AC repeat; on S53's slot a CA insertion written inside the target (left unnormalized) | S53 CFD 1 (the target is on its haplotype up to its last base) |
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid fake-indel
 genome column by column, without genotypes: on aa9c54b (the 2.8.1 release candidate)
@@ -49,7 +51,9 @@ RNA,DNA row, whose REF text had no gap and one base too many; and S50 is listed 
 perfect row, in both modes. On d4730a0, which has that fix but not the merge keeping an
 MNV row's carriers on its sequence, it fails at K and K2 in both modes: S48 and S50 are
 listed on the perfect row (K's RNA-bulge row, no longer one base early, now meets the
-site's other alignments).
+site's other alignments). On 9c6b4046, which took a carrier off an indel row whenever its
+slot held a second indel inside the target, decided on the indel's position, it fails at W
+and V in both modes: S51 and S53, whose haplotypes hold the target, are on no row.
 
 Not covered: split multi-allelic SNP records at one position. CRISPRitz add-variants
 keeps only the last of them in the enriched genome and in the dictionary, so the other
