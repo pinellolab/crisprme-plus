@@ -109,8 +109,13 @@ when no GPU is available — a CPU-only machine is fully supported. To use a GPU
 - Docker: add `--gpus all` on an NVIDIA host and pass `--compute-backend cuda`.
 - The accepted devices are `cpu | cuda | metal | auto` (`complete-search
   --compute-backend`; `targets-scoring --device` accepts the same set).
-- If the `cbulge` scorer environment is absent, the run completes **CFD-only** (the
-  CRISPR-Bulge column reads `-1`/N/A) rather than failing.
+- If the `cbulge` scorer environment or its weights are missing or broken,
+  `complete-search` stops before it searches and names the fix
+  (`crisprme.py scorer-env create`; `crisprme.py scorer-env doctor` says what is wrong).
+  Set `CRISPRME_SKIP_SCORER_ENV=1` to run it **CFD-only** anyway. `targets-scoring` and
+  searches started from the web interface do not check first: with the env absent they
+  complete **CFD-only**. A CFD-only run has the CRISPR-Bulge column at `-1` and says so
+  (a search in its `log_verbose.txt`, `targets-scoring` on stdout).
 
 GPU helps on large/dense searches; a tiny single-guide run is often faster on CPU
 due to initialization overhead.

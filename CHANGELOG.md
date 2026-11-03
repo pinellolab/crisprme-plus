@@ -760,8 +760,9 @@ and the `release-crisprme` skill.
   package specs as one positional argument, so the specs after `-c` were rejected as "unrecognized
   arguments" (conda 25.3 and 26.9 alike; mamba and micromamba accept either order). conda is the
   manager whenever the env was activated with `conda activate` (it sets `CONDA_EXE`), which covers a
-  Bioconda install and `install_from_source.sh`: the scorer env was never created, and every search
-  then refused to start (or ran CFD-only under `CRISPRME_SKIP_SCORER_ENV=1`). The command now puts
+  Bioconda install and `install_from_source.sh`: the scorer env was never created, and every
+  `complete-search` then refused to start (or ran CFD-only under `CRISPRME_SKIP_SCORER_ENV=1`; a
+  search started from the web interface ran CFD-only). The command now puts
   every option before the package specs. The Docker image builds the env with micromamba and was not
   affected. Found by installing `crisprme` 2.8.0 from Bioconda the way a new user would (fresh
   Miniforge, conda 26.9.4); with the fix, `scorer-env create`, its compute self-test and real

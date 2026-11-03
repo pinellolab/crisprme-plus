@@ -13,6 +13,9 @@ crisprme_pannot_* folder; the merge looked for the plain copy of the sorted --an
 which bgzip had removed, and stopped the search. And the personal file was read as text,
 so a bgzipped one, which --help asked for, stopped it too: it is now decompressed first.
 
+A search whose CRISPR-Bulge scorer env is not ready stops before the pipeline, after the
+annotations are sorted, as --help now says: it leaves none of their folders either.
+
 These tests run complete-search the way the CLI does -- the dispatch statement is taken
 verbatim from crisprme.py, whose definitions are exec'd without the dispatch (the
 truncate-and-exec loader of test_bulge_cap) -- on a tiny synthetic genome, with the
@@ -324,6 +327,24 @@ class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.search("--personal_annotation", "personal.bed.gz")
         self.assertIn("Error: Decompressing personal annotation file failed", self.stderr)
+        self.assertFalse(self.launched)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_search_whose_scorer_env_is_not_ready_stops_before_the_pipeline(self):
+        # --help, the README and TROUBLESHOOTING said such a run completes on CFD only;
+        # complete-search stops, naming the fix and the opt-out (CRISPRME_SKIP_SCORER_ENV=1,
+        # which every other test here sets). An env of a name no install has, so that the
+        # release image, whose cbulge env is ready, gives the same answer as a bare runner.
+        import scorer_env
+        env = {k: v for k, v in os.environ.items() if k != "CRISPRME_SKIP_SCORER_ENV"}
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(scorer_env, "DEFAULT_ENV", "crisprme_test_no_such_env"):
+            with self.assertRaises(SystemExit):
+                self.search(*self.ANNOTATED)
+        self.assertIn("'crisprme_test_no_such_env' CRISPR-Bulge scorer env is not ready",
+                      self.stderr)
+        self.assertIn("crisprme.py scorer-env create", self.stderr)
+        self.assertIn("set CRISPRME_SKIP_SCORER_ENV=1", self.stderr)
         self.assertFalse(self.launched)
         self.assertEqual(self.leftovers(), [])
 

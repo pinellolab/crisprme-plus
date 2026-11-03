@@ -966,8 +966,11 @@ Linux/Docker/GPU runs; **metal** (Apple Silicon) is guarded by a **load-time
 numerical self-test** — `tensorflow-metal` silently miscomputes this GRU kernel
 (collapsing every prediction to 1.0), so on detecting the miscompute the scorer
 transparently falls back to a CPU device context, producing **bit-identical**
-results. Missing env or weights degrade cleanly to a **CFD-only** run rather than
-failing the search. The released **amd64** Docker image bundles the CUDA
+results. With the env or its weights missing or broken, `complete-search` stops
+before the search, naming the fix, unless `CRISPRME_SKIP_SCORER_ENV=1` is set, which
+runs it **CFD-only**; `targets-scoring` and searches started from the web interface do
+not check first, and complete **CFD-only**. A CFD-only run has the CRISPR-Bulge score at
+`-1` and a banner saying so in its log. The released **amd64** Docker image bundles the CUDA
 TensorFlow build, so `docker run --gpus all ... --compute-backend cuda` runs
 CRISPR-Bulge on an NVIDIA GPU with transparent CPU fallback; the **arm64** image
 stays CPU.

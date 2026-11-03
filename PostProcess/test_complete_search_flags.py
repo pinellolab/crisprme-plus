@@ -324,6 +324,32 @@ class TestThePrunePamHelpSaysWhichSideItServes(unittest.TestCase):
         self.assertNotIn("The result is identical to a dedicated index", entry)
 
 
+class TestTheComputeBackendHelpSaysWhatAMissingScorerEnvDoes(unittest.TestCase):
+    """The --compute-backend help said "if the cbulge scorer env is absent the run completes
+    on CFD only". complete-search refuses to start unless CRISPRME_SKIP_SCORER_ENV=1 (since
+    2.7.3), so a user who read the help got exit 1. The help now says so; the refusal itself
+    is pinned by test_annotation_tmpdirs, which runs complete-search with an env not ready."""
+
+    def _entry(self):
+        block = "\n".join(_block(_source_lines(), "def print_help_complete_search"))
+        text = "".join(re.findall(r'^\s*"(.*)"\s*$', block, flags=re.M))
+        start = text.index("\\t--compute-backend,")
+        return text[start:text.index("\\n", start)]
+
+    def test_it_says_complete_search_refuses_and_names_the_fix_and_the_opt_out(self):
+        entry = self._entry()
+        self.assertIn("complete-search refuses to start while the cbulge scorer env or its "
+                      "weights are missing or broken", entry)
+        self.assertIn("`crisprme.py scorer-env create`", entry)
+        self.assertIn("`crisprme.py scorer-env doctor`", entry)
+        self.assertIn("set CRISPRME_SKIP_SCORER_ENV=1 to run CFD-only", entry)
+        self.assertNotIn("completes on CFD only", entry)
+
+    def test_the_opt_out_it_names_is_the_one_complete_search_reads(self):
+        body = "\n".join(_block(_source_lines(), "def complete_search"))
+        self.assertIn('os.environ.get("CRISPRME_SKIP_SCORER_ENV", "0") == "1"', body)
+
+
 # Needs crisprme.py to be importable: these run it as a subprocess, and it imports
 # Bio.Seq at module scope. The static checks above parse the source instead and must
 # stay unguarded -- gating them on a dependency they do not use is how the --bmax
