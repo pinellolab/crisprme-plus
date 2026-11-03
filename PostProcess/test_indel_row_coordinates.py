@@ -213,9 +213,16 @@ class RowCoordinates(unittest.TestCase):
                 self.assertEqual(int(c[4]) - int(c[5]), (n_rna - n_dna) if forward else 0,
                                  where + ": Cluster_Position")
                 self.assertEqual(c[18].upper(), "".join(ref), where + ": REF text")
-                # PAM_gen: the ALT's PAM when the reference there lacks the motif
+                # PAM_gen: the ALT's PAM when the reference bases it sits on, read through
+                # the deletion (the junk lies inside the protospacer), lack the motif. Up to
+                # 2.8.0 they were read from the row's start, three bases off past the junk.
                 cut, motif = MOTIF[side]
-                ref_pam = "".join(ref)[cut]
+                text = s["dna"].replace("-", "")
+                shown = list(range(len(text)))[cut]  # the PAM's bases, as shown
+                fwd_idx = sorted(j if s["strand"] == "+" else len(text) - 1 - j for j in shown)
+                q, d = s["pos1"] - s["start0"], len(s["ref"]) - len(s["alt"])
+                ref_pam = "".join(p.ref[s["start0"] + i + (d if i >= q else 0)] for i in fwd_idx)
+                ref_pam = ref_pam if s["strand"] == "+" else rc(ref_pam)
                 created = any(b not in BASES[m] for b, m in zip(ref_pam, motif))
                 self.assertEqual(c[10], s["dna"][cut] if created else "n", where + ": PAM_gen")
                 self.assertEqual(c[12], s["sample"], where)

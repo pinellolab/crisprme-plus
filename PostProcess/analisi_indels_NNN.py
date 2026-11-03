@@ -1385,6 +1385,44 @@ def _report_overlaid():
               % (_ovl_stats["unmapped"], current_chr), flush=True)
 
 
+def _reference_pam(final_result, ref_aligned):
+    """The reference bases under an indel row's PAM, in the target's orientation, for
+    telling whether the row's indel created its PAM: the bases the PAM sits on, read
+    through the indel (final_result[17]'s first token). A PAM past the indel on the
+    target -- on the + strand for a 3' PAM, on the - strand for a 5' one -- sits
+    len(REF) - len(ALT) bases from where the row's REF alignment, read from the row's
+    start, puts it (alignRefFromVar), so up to 2.8.0 a deletion or an insertion in the
+    protospacer read the wrong bases there, and a PAM the reference already has was
+    flagged as created. A PAM that holds an ALT base or spans a deletion's junction has
+    no reference bases of its own, nor does one with a bulge in it: those keep the REF
+    alignment's, as before. So does a PAM on the other side, which no indel inside the
+    target moves."""
+    window = ref_aligned[pam_begin:pam_end].upper()
+    if len(window) != len(pam) or "-" in final_result[2][pam_begin:pam_end]:
+        return window
+    try:
+        tok = final_result[17].split(",")[0].split("_")
+        ipos, iref, ialt = int(tok[-3]), tok[-2], tok[-1]
+        start = int(final_result[4])
+    except (IndexError, ValueError):
+        return window
+    k = len(pam)
+    n = len(final_result[2].replace("-", ""))
+    first = start + n - k if (final_result[6] == "+") != pam_at_beginning else start
+    reals = []
+    for w in range(first, first + k):  # a base's place on the haplotype -> the reference
+        if w < ipos - 1:
+            reals.append(w)
+        elif w < ipos - 1 + len(ialt):
+            return window  # an ALT base
+        else:
+            reals.append(w - len(ialt) + len(iref))
+    if reals[-1] - reals[0] != k - 1 or not 0 <= reals[0] <= reals[-1] < len(genomeStr):
+        return window  # across a deletion's junction
+    ref = genomeStr[reals[0]:reals[-1] + 1]
+    return (ref if final_result[6] == "+" else reverse_complement_table(ref)).upper()
+
+
 def _queue_row(final_result):
     """Reference alignment, PAM creation and the scoring sentinels for one indel
     row, then queue it for scoring."""
@@ -1416,7 +1454,9 @@ def _queue_row(final_result):
     # uppercase (the guide carries N there, so those positions always "match" and
     # alignRefFromVar leaves them uppercase), making this defensive only -- but it
     # removes the false-positive class outright rather than relying on that.
-    ref_pam = ref_aligned[pam_begin:pam_end].upper()
+    # The reference bases are those the PAM sits on, read through the indel
+    # (_reference_pam), not the REF alignment's, which is read from the row's start.
+    ref_pam = _reference_pam(final_result, ref_aligned)
     if len(ref_pam) == len(pam) and all(c in iupac_code_set for c in ref_pam):
         for pos_pam, pam_char in enumerate(ref_pam):
             if not iupac_code_set[pam[pos_pam]] & iupac_code_set[pam_char]:
