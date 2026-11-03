@@ -1979,7 +1979,11 @@ is under `data/`). Reading top to bottom:
   cleanly marks reconstructions no one actually carries. (In a population-level run a
   multi-variant SNP list is the union of each variant's carriers, flagged
   `(>=1 of K vars, poss. chimera)`; an indel (or MNV) row is resolved per carrier in
-  either mode.) On a sites-only panel (e.g.
+  either mode and reads `N carrier(s)`: CONFIRMED where each carrier is placed on its
+  phased haplotype, PUTATIVE where the phase is unknown (an unphased call, an MNV). On an
+  install without SNP genotypes (`download --what index --no-genotypes`), a row an indel
+  and a SNP make together lists every carrier of the indel, with or without the SNP; its
+  phase is in `indel_snp_cooc.tsv`.) On a sites-only panel (e.g.
   `mega`) the panel tie-break is inert but the column is still shown (values `observed`
   / `putative`); it is dropped only for a reference-only run.
 - **`Gene_region` column** — where the off-target sits relative to the nearest

@@ -829,7 +829,11 @@ cis carriers**, so `putative` cleanly marks reconstructions that no one actually
 carries — separating genuine haplotypes from worst-case combinations. In a
 population-level analysis a multi-variant SNP roster is the union of each variant's
 carriers and reads `N carriers (>=1 of K vars, poss. chimera)`; an indel (or MNV) row's
-roster is resolved per carrier in both modes (§4), so it reads `N carrier(s)`.
+roster is resolved per carrier in both modes (§4), so it reads `N carrier(s)`: CONFIRMED
+where each carrier is placed on its phased haplotype, PUTATIVE where the phase is unknown
+(an unphased call, an MNV). On an install without SNP genotypes (`download --what index
+--no-genotypes`, §4), a row an indel and a SNP make together lists every carrier of the
+indel, with or without the SNP; its phase is in `indel_snp_cooc.tsv`.
 
 The
 recommended validation panel uses this to **prioritize observed sites** among
