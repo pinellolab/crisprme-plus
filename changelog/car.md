@@ -25,11 +25,15 @@ are those of `CHANGELOG.md` at 9c6b4046) with the text after it. All three entri
    >   repeat a unit gained or lost at the target's edge leaves the bases as they are (the repeat
    >   puts the same bases back), so such a carrier stays listed; one whose second indel changes
    >   them does not, nor one whose bases cannot be read either way: each way meets an unphased or
-   >   missing call, or two of its variants that overlap, two records of one base: two other indels
+   >   missing SNP call, an unphased indel that does not itself change the target, or two of its
+   >   variants that overlap, two records of one base: two other indels
    >   whose REFs share a base (any two at one position do, even a duplication and the deletion of
    >   the same bases, which together would leave the reference), or a SNP on a base of the second
    >   indel's REF. A reading from the first base on meets no variant upstream of it, one up to the
-   >   last base none downstream. Nor is one listed whose second indel, on the same phased slot,
+   >   last base none downstream. A carrier whose second indel inside the target has an unphased
+   >   call cannot be tied to a haplotype and stays listed, PUTATIVE, as every carrier on an
+   >   unphased panel is, even when another, phased second indel on its indel haplotype changes
+   >   the target. Nor is one listed whose second indel, on the same phased slot,
    >   overlaps the first at another position (one complex allele that the VCF splits into
    >   overlapping records). A variant only on bases the indel deletes changes nothing. Another
    >   allele at the indel's own position, an indel or a SNP, is an alternative to it (a haplotype
@@ -99,13 +103,14 @@ are those of `CHANGELOG.md` at 9c6b4046) with the text after it. All three entri
   1000 Genomes index (per sample, 4 mismatches + 1 DNA + 1 RNA bulge), on the highest-CFD block: for
   guide `ACTGAAATCTGTAAGCAGGC` (NRG) the flag is no longer set on 1,954 indel rows and is set on 1
   more; rebuilt from the reference through each row's variants, every one of the 1,834 of them that
-  could be checked lies over a reference PAM and the one more over none, and the 11 rows left
-  flagged hold a PAM the reference lacks, beside the 120 whose PAM holds a base of the indel,
-  flagged as before. For the README's guide, `CTAACAGTTGCTTTTATCAC`, 2,655 no longer set (2,561
-  checked, all over a reference PAM; 19 + 150 left), which on its report changes that column, and no
+  could be checked lies over a reference PAM and the one more over none; of the rows still
+  flagged that could be checked, 11 hold a PAM the reference lacks and 120 a PAM that holds a
+  base of the indel, flagged as before, and the other 55 (186 in all) have their PAM across the
+  indel's junction or inside a long insertion, also flagged as before. For the README's guide, `CTAACAGTTGCTTTTATCAC`, 2,655 no longer set (2,561
+  checked, all over a reference PAM; of the rows left that could be checked, 19 + 150), which on its report changes that column, and no
   other, on 15 rows of the top-1000 table and 2 of the recommended panel; for TRAC,
-  `CTCTCAGCTGGTACACGGCA`, 1,124 no longer set and 1 more (1,047 checked; 10 + 89 left); for
-  `ACTGAAATCTGTAAGCAGGC` on the NRR index, 2,761 and 2 more (2,585 checked; 15 + 196 left). **What
+  `CTCTCAGCTGGTACACGGCA`, 1,124 no longer set and 1 more (1,047 checked; of the rows left that could be checked, 10 + 89); for
+  `ACTGAAATCTGTAAGCAGGC` on the NRR index, 2,761 and 2 more (2,585 checked; of the rows left that could be checked, 15 + 196). **What
   to do:** run such searches again. Covered by `PostProcess/test_indel_pam_creation.py` (the WALK J
   and N rows among them) and `PostProcess/test_indel_row_coordinates.py`.
 
