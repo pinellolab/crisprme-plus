@@ -107,9 +107,9 @@ on a primary chromosome; CRISPRme+ says so when a search reads such a flank.
 Measured genome-wide at `NRG` 4 mismatches + 1 DNA bulge + 1 RNA bulge over HGDP +
 1000 Genomes with per-sample resolution: the flank-8 arm, the flank-3 arm and the
 dedicated `NRG_3` arm give **byte-identical** `integrated_results.tsv`
-(189,950 rows), with every indel row justified by its own window; that guide has no site
-at a contig's end. The archives here were built by CRISPRitz 2.9.1, which keeps a target
-whose flank holds an `N`: an index of this flank built by an earlier release misses
+files <!-- {{EQUIVALENCE_NUMBERS}} --> (that guide has no site at a contig's end). The
+archives here were built by CRISPRitz 2.9.1, which keeps a target whose flank holds an
+`N`: an index of this flank built by an earlier release misses
 those sites, and CRISPRme+ 2.8.1 warns when a search reads one.
 
 ## Verifying a download

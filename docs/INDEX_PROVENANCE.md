@@ -124,13 +124,12 @@ pre-fix builder (CRISPRitz `5c612c0^`) and one from the 2.9.1 builder:
 | `20bp-NG-SpCas9NG` (`--prune-pam`) | 1 row | **5 rows** | the pre-fix index misses the two sites whose PAM (`AG`, `TG`) is followed by an `N`, and a 1-bulge row at each of the other two; a dedicated `NG_2` index gives the same 5 rows, byte-identical |
 
 So in a 2.8.1 search with **any 3-nt 3′ PAM** the 2026-10-25 archives already behaved
-exactly like a fresh build. Confirmed at full scale: the published
-`NNN_3_hg38+hg38_HGDP1kGP`, downloaded from Hugging Face and searched with
+exactly like a fresh build. Confirmed at full scale by a 2.8.1 release candidate: the
+published `NNN_3_hg38+hg38_HGDP1kGP`, downloaded from Hugging Face and searched with
 `NRG --prune-pam` genome-wide at 4 mismatches + 1 DNA + 1 RNA bulge with per-sample
-resolution, reproduces the dedicated-`NRG_3` report **byte-for-byte**: md5
-`6af7a94e4a5f36c26e8c3a0871638ad0`, 189,950 rows, 13,253 indel rows each justified by
-its own window, 0 unjustified. What they miss is a **shorter 3′ PAM** searched with
-`--prune-pam`: a site whose base just past that PAM is an assembly `N` is a real
+resolution, reproduces the dedicated-`NRG_3` report **byte-for-byte**. What they miss is a
+**shorter 3′ PAM** searched with `--prune-pam`: a site whose base just past that PAM is an
+assembly `N` is a real
 target there, since the engine tests the real PAM positions and not the pad
 ([METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)), and a
 dedicated index of that PAM keeps it.
@@ -159,14 +158,13 @@ growth is; a 3-nt PAM such as NRG still filters those targets out, while a short
 **Reproducible.** ml008 and ml007 each built the reference index independently, from
 the same binary and the same inputs: 1,628 of 1,628 bins byte-identical.
 
-**Verified.** The rebuilt pair, searched by a 2.8.1 release candidate genome-wide with
-`NRG --prune-pam` (4 mm + 1 DNA + 1 RNA bulge, per-sample, HGDP + 1000 Genomes):
-189,950 rows, 13,253 indel rows each justified by its own window, 0 unjustified, and
+**Verified.** The rebuilt pair was searched by a 2.8.1 release candidate genome-wide with
+`NRG --prune-pam` (4 mm + 1 DNA + 1 RNA bulge, per-sample, HGDP + 1000 Genomes), with
 `pam_filter` dropping nothing on any of the three searches. Every column is
 byte-identical to the gate's report except `Annotation_COSMIC`: that run used a fresh
 `download --what annotations`, where COSMIC stays off until its licence is attested
 (its log: "COSMIC EXCLUDED ... dropped 742 COSMIC feature(s)"), so the column reads
-`NA` throughout. With that column removed, both reports have md5 `a02f03c5…`. For a
+`NA` throughout. With that column removed, the two reports are byte-identical. For a
 user still on 2.8.0, the released 2.8.0 image, unmodified, searching chr22 on the
 rebuilt reference index and on the published one gives **byte-identical** reports,
 both with NRG (the NNN index as a stand-in, how 2.8.0 serves a PAM it has no dedicated

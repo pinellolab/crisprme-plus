@@ -19,8 +19,8 @@ and the `release-crisprme` skill.
   a leaf whose stored flank cannot match it. One index therefore answers any 3′ PAM no longer than
   its flank, instead of one index per PAM. Verified genome-wide over HGDP + 1000 Genomes (4,091
   samples, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index, an
-  8-nt-flank PAM-less index, and a dedicated NRG index produce **byte-identical** reports — the
-  same 189,950 rows, every indel row justified by its own variant window. That was measured for
+  8-nt-flank PAM-less index, and a dedicated NRG index produce **byte-identical**
+  reports. <!-- {{EQUIVALENCE_NUMBERS}} --> That was measured for
   one guide, which has no site at a contig's end: from a flank wider than the PAM the build does
   not index a PAM at a contig's very end or start (on hg38, 549 NRG and 246 NGG sites, none on a
   primary chromosome; see Changed). Pruning changes only which leaves are written out, never how a
@@ -348,7 +348,7 @@ and the `release-crisprme` skill.
   the `Chromosome` column with that one. One raw search row therefore became one correct plus N phantom
   report rows, each indistinguishable from a genuine annotated variant off-target. Measured genome-wide
   on `ACTGAAATCTGTAAGCAGGC` at NRG 4+1+1 over HGDP+1kGP: 8 phantom rows on a dedicated NRG index and 11
-  on a pamless index, against an identical 13,253-row justified core; because the injected row is
+  on a pamless index, against an identical justified core of indel rows; because the injected row is
   whatever lands at line 1, the count varied with the index. `pam_filter.py` and the edits cap now keep
   `#` lines, `post_analisi_indel.sh` prepends only an actual header, and the indel post-analysis rejects
   and counts rows carrying another contig's label. The injected row also moved one legitimate row's
@@ -417,7 +417,7 @@ and the `release-crisprme` skill.
   every ~56 bases by construction (222 bins become 245, +2.1 GB). Built independently on two nodes,
   the reference index is byte-identical. Searched genome-wide by a 2.8.1 release candidate (NRG
   `--prune-pam`, 4 mm + 1 DNA + 1 RNA bulge, per-sample), the rebuilt pair matches the gate's
-  report in every column but `Annotation_COSMIC` (189,950 rows, 0 unjustified indel rows), which
+  report in every column but `Annotation_COSMIC`, which
   differs only because that run used freshly downloaded annotations, where COSMIC stays off until
   its licence is attested. The released 2.8.0, searching chr22, gives byte-identical reports on
   the old and the new reference index, with NRG and with NNN, but only because no hit there has an

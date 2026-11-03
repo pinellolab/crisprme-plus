@@ -1175,9 +1175,9 @@ aligned to the genome, so it cannot move an alignment or a score. Measured genom
 over HGDP + 1000 Genomes (4,091 samples, guide `ACTGAAATCTGTAAGCAGGC`, NRG, 4 mismatches +
 1 DNA bulge + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index with `--prune-pam`, an
 8-nt-flank PAM-less index with `--prune-pam`, and a dedicated NRG index produce
-**byte-identical** reports — the same 189,950 rows, every indel row justified by its own
-variant window. That holds at *L = K*, and at *K > L* for a guide with no site at a contig's
-very end or start, as this one has none. The build scans a contig for a PAM only where a whole
+**byte-identical** reports. <!-- {{EQUIVALENCE_NUMBERS}} --> That holds at *L = K*, and at
+*K > L* for a guide with no site at a contig's very end or start, as this one has none. The
+build scans a contig for a PAM only where a whole
 window of *K* bases fits, so with *K > L* a + strand PAM with 1 to *K − L* bases after it to the
 contig's end, and a − strand PAM in the contig's first *K − L* bases, are not indexed, and a −
 strand PAM exactly *K − L* bases from the start is reported on the + strand at another
