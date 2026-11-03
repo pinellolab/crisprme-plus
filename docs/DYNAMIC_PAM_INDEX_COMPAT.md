@@ -1,5 +1,19 @@
 # Dynamic-PAM pam-less indexes — design & backward-compatibility contract
 
+> **Status: pre-implementation design (2026-10-24), not a description of CRISPRme+ 2.8.1.**
+> What 2.8.1 ships: `--prune-pam` is explicit and needs `--index-path`; CRISPRme never passes
+> it for you. It is command-line only (the web interface never passes it) and serves a 3′ PAM
+> only. CRISPRme uses an index only if its PAM is the search PAM or all-N: an all-N flank as
+> wide as the PAM (`NNN_3` for a 3-nt PAM) serves without the flag, narrowed by the
+> post-search PAM filter; a wider flank (`NNNNNNNN_3`) serves only under `--prune-pam`; a
+> dedicated index of another PAM is refused, even one whose PAM holds the search PAM (an `NRG`
+> index does not serve an `NGG` search). No `index_meta.json` sidecar is written or read:
+> `build-index-only` writes only `.pam_build` and `.genome_source` beside an index's trees.
+> `NNN_3` is published in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
+> `lucapinello/crisprme-data-general-index`. The parts below marked *planned* are not in
+> 2.8.1. What ships is described in
+> [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering) and the README.
+
 Design contract for the CRISPRitz "on-the-fly PAM filter" + CRISPRme's consumption of it.
 Drives the CRISPRitz PR (`feat/dynamic-pam-filter`) and the CRISPRme-side wiring. Nothing
 here changes existing indexes, commands, or results — it is strictly additive and opt-in.
@@ -14,7 +28,9 @@ builds.
 
 - **Validity rule:** a search PAM is valid for an index iff `L ≤ K` **and** at every position
   `search_bit[i] & build_bit[i] == search_bit[i]` (IUPAC subset). So an `NRG` index serves
-  {NGG, NAG, NGA, NRG}; an all-N flank-K index serves anything ≤ K. You can only *narrow*.
+  {NGG, NAG, NRG}; an all-N flank-K index serves any 3′ PAM ≤ K. You can only *narrow*.
+  (This is the engine's rule. CRISPRme 2.8.1 narrows only an all-N index: see the status
+  note above.)
 - **Size cost (measured, 2×):** the flank is 4-bit nibble-packed → `+2 bytes/leaf` for 3→8,
   i.e. **~+9%** (ref index ~134 GB → ~146 GB). Linear, not multiplicative.
 - **Measured:** NNN+`--prune-pam NGG` == a dedicated NGG index, identical loci (chr22 cross-check,
@@ -41,11 +57,13 @@ standard repo**: CRISPRme 2.8.0 can download and search it with no update (as an
 survey — the top of the NGG->NRR->NNN ladder). Only **variable/longer-flank** indexes (width > 3,
 e.g. `NNNNNNNN_3` with an 8-nt flank) are unsafe for old code — a 3-nt search is a width mismatch
 and old tools lack the guard — so those go in a **SEPARATE HF repo** (proposed
-`pinellolab/crisprme-indexes-pamless`) the old default never points at. New code's resolver knows
-both; `publish-index` targets the pam-less repo only for width>3 indexes.
+`pinellolab/crisprme-indexes-pamless`; 2.8.1 publishes them in
+`lucapinello/crisprme-data-general-index`) the old default never points at. New code's resolver
+knows both; `publish-index` targets the pam-less repo only for width>3 indexes.
 
 ### Layer 2 — RUNTIME version-gate: fail-safe even if an index is hand-moved
-Each pam-less index ships a sidecar `index_meta.json`:
+*Planned, not in 2.8.1 (which writes and reads no sidecar):* each pam-less index ships a sidecar
+`index_meta.json`:
 ```json
 { "build_pam": "NNNNNNNN", "flank_len": 8, "pam_at_start": false,
   "min_crispritz_version": "<this release>", "min_crisprme_version": "<consuming release>" }
@@ -72,26 +90,30 @@ flank-tagged + distinct (e.g. `NNNNNNNN_3_<genome>`, K=8) so it is never confuse
 ## 4. CLI
 - **CRISPRitz:** default call unchanged (byte-identical). `--prune-pam` (opt-in) applies the PAM
   file as a subset filter, validating subset + `L ≤ K` against the index name/sidecar.
-- **CRISPRme:** `complete-search --index-path <idx> --pam <searchPAM>` — `--pam` may be any valid
+- **CRISPRme** (*planned*; in 2.8.1 the user passes `--prune-pam` with `--index-path`, and only
+  an all-N index is narrowed: see the status note):
+  `complete-search --index-path <idx> --pam <searchPAM>` — `--pam` may be any valid
   subset of the index's `build_pam`; CRISPRme **auto-passes `--prune-pam` to crispritz when
   `--pam ⊊ build_pam`** (narrower than build) and validates with a clear error on an invalid PAM.
   `--pam == build_pam` is the legacy path (unchanged). Inline `--genome --vcf` build unchanged.
 
-## 5. Web
+## 5. Web (*planned*, not in 2.8.1: the web interface never passes `--prune-pam`)
 On index selection, read the sidecar → a **PAM picker** populated with that index's valid set
 (dropdown of common subsets + a custom field with live subset/length validation); default =
 `build_pam`. A one-line hint states the index's supported PAM family and max length.
 
-## 6. NNN index publish plan
+## 6. NNN index publish plan (*superseded*)
+2.8.1 publishes `NNN_3` in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
+`lucapinello/crisprme-data-general-index`, with no sidecar. The plan was:
 The genome-wide NNN HGDP+1kGP index (in progress) is published to the **new pam-less HF repo**,
 flank-tagged name, with the `index_meta.json` sidecar (`build_pam`, `flank_len`, min versions) —
 **not** the legacy `lucapinello/crisprme-data` repo. So no old client ever discovers it.
 
-## 7. CHANGELOG / README wording (both repos)
+## 7. CHANGELOG / README wording (both repos) (*planned*)
 State plainly: *existing indexes and commands are unchanged; pam-less (dynamic-PAM) indexes live
 at a separate HF repo and require CRISPRitz ≥ `<X>` and CRISPRme ≥ `<Y>`.*
 
-## 8. Web PAM picker
+## 8. Web PAM picker (*planned*, not in 2.8.1)
 Legacy per-PAM indexes keep the **existing flat dropdown** (the `guidelen-PAM-enzyme` list)
 unchanged. Pam-less indexes get a new **index-scoped, data-driven** picker:
 
@@ -132,6 +154,7 @@ fast default for a fixed known PAM; use the pam-less index for PAM flexibility /
 arbitrary PAMs, accepting the per-search cost.
 
 ## Net
-Not a breaking change: a new, opt-in index **type** + capability, quarantined to a new HF repo,
-version-gated, distinctly named; defaults and legacy paths untouched. The pam-less index trades
+Not a breaking change: a new, opt-in index **type** + capability, quarantined to a new HF repo
+(in 2.8.1 the wider flanks only), version-gated (*planned*), distinctly named; defaults and
+legacy paths untouched. The pam-less index trades
 per-search speed/RAM for one-index-any-PAM flexibility.

@@ -68,8 +68,8 @@ crisprme-data/
 choice for off-target screening); NRG and NRR are published on all three variant
 panels, NGG and a PAM-less index on HGDP + 1000 Genomes only. All are scored with
 **CFD + CRISPR-Bulge**. Every index here stores a **3-nt PAM region**, which is
-what any CRISPRme release reads for a 3-nt PAM, so all of them work with older
-clients.
+what any CRISPRme release reads for a 3-nt PAM, so any CRISPRme release can read
+them; use the rebuilt `NNN_3` archives with CRISPRme+ 2.8.1 or later (see below).
 
 ### Variant panels (the axis that matters most)
 
