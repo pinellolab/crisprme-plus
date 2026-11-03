@@ -10,7 +10,8 @@ annotations.
 
 --personal_annotation with --annotation is merged into one sorted file in the
 crisprme_pannot_* folder; the merge looked for the plain copy of the sorted --annotation,
-which bgzip had removed, and stopped the search.
+which bgzip had removed, and stopped the search. And the personal file was read as text,
+so a bgzipped one, which --help asked for, stopped it too: it is now decompressed first.
 
 These tests run complete-search the way the CLI does -- the dispatch statement is taken
 verbatim from crisprme.py, whose definitions are exec'd without the dispatch (the
@@ -31,6 +32,7 @@ import os
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -38,6 +40,7 @@ import textwrap
 import time
 import types
 import unittest
+import zlib
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -113,6 +116,21 @@ def _compress_file(fname):
         shutil.copyfileobj(src, dst)
     os.remove(fname)
     return f"{fname}.gz"
+
+
+def _bgzf(data, block=65280):
+    """The bytes `bgzip` writes for ``data`` (the light CI env has no bgzip): gzip members of
+    at most 64 KiB, each with the BC extra field that holds the member's size less one, then
+    bgzip's empty end-of-file member."""
+    out = b""
+    for i in range(0, len(data), block):
+        chunk = data[i:i + block]
+        deflate = zlib.compressobj(6, zlib.DEFLATED, -15)
+        body = deflate.compress(chunk) + deflate.flush()
+        out += (b"\x1f\x8b\x08\x04" + b"\x00" * 4 + b"\x00\xff" + struct.pack("<H", 6)
+                + b"BC" + struct.pack("<HH", 2, len(body) + 25) + body
+                + struct.pack("<II", zlib.crc32(chunk) & 0xFFFFFFFF, len(chunk)))
+    return out + bytes.fromhex("1f8b08040000000000ff0600424302001b0003000000000000000000")
 
 
 # The pipeline, as far as the annotation folders go: it starts a worker in the
@@ -200,16 +218,20 @@ class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
 
     def search(self, *extra, pipeline_rc=0, output="ann"):
         """Run `crisprme.py complete-search ...` as the CLI dispatch does, the pipeline
-        stubbed; return the annotation folders that existed while it ran."""
+        stubbed; return the annotation folders that existed while it ran. What it wrote to
+        stderr is left in self.stderr, and whether it launched the pipeline in
+        self.launched."""
         argv = ["crisprme.py", "complete-search", "--genome", "Genomes/synth",
                 "--pam", "PAMs/20bp-NGG-SpCas9.txt", "--guide", "guide.txt",
                 "--mm", "1", "--bDNA", "0", "--bRNA", "0", "--output", output,
                 "--thread", "1", *extra]
         during = []
         real_call = subprocess.call
+        self.launched = False
 
         def call(cmd, *a, **k):
             if isinstance(cmd, str) and "submit_job_automated_new_multiple_vcfs.sh" in cmd:
+                self.launched = True
                 # the pipeline is handed the sorted files in folders that still exist
                 during.extend(d for d in self.leftovers()
                               if os.path.join(self.work, d) in cmd)
@@ -218,11 +240,15 @@ class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
                 return pipeline_rc
             return real_call(cmd, *a, **k)
 
-        with mock.patch.object(crisprme, "input_args", argv), \
-             mock.patch.object(crisprme.subprocess, "call", side_effect=call), \
-             contextlib.redirect_stdout(io.StringIO()), \
-             contextlib.redirect_stderr(io.StringIO()):
-            exec(_dispatch("complete-search"), crisprme.__dict__)
+        err = io.StringIO()
+        try:
+            with mock.patch.object(crisprme, "input_args", argv), \
+                 mock.patch.object(crisprme.subprocess, "call", side_effect=call), \
+                 contextlib.redirect_stdout(io.StringIO()), \
+                 contextlib.redirect_stderr(err):
+                exec(_dispatch("complete-search"), crisprme.__dict__)
+        finally:
+            self.stderr = err.getvalue()
         return during
 
     ANNOTATED = ("--annotation", "myann/func.bed", "--gene_annotation", "myann/genes.bed")
@@ -260,6 +286,46 @@ class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
             self.assertEqual(fh.read().splitlines(), sorted([
                 "chrS\t2000\t4600\tpromoter_test", "chrS\t0\t2000\texon_test",
                 "chrS\t10\t200\tmy_site_personal"]))
+
+    def merged_personal(self, personal, output):
+        """The one sorted file the pipeline gets for --annotation with --personal_annotation
+        ``personal``, as lines (the folder kept to read it, then removed)."""
+        during = self.search("--annotation", "myann/func.bed", "--personal_annotation",
+                             personal, "--keep-intermediates", output=output)
+        self.assertEqual([d[:16] for d in during], ["crisprme_pannot_"])
+        with gzip.open(os.path.join(self.work, during[0], "annotation+personal.bed.gz"),
+                       "rt") as fh:
+            lines = fh.read().splitlines()
+        shutil.rmtree(os.path.join(self.work, during[0]))
+        return lines
+
+    def test_a_bgzipped_or_gzipped_personal_annotation_is_read_as_the_plain_one(self):
+        # --help said the file "must be compressed using bgzip", but the tagging read it as
+        # text: a bgzipped one reached sort-bed garbled ("No tabs/spaces found at line 1")
+        # and the search stopped. A compressed file is told by its content, not its name.
+        with open("personal.bed", "rb") as fh:
+            plain = fh.read()
+        expected = self.merged_personal("personal.bed", "plain")
+        self.assertIn("chrS\t10\t200\tmy_site_personal", expected)
+        for i, (name, data) in enumerate((("personal.bed.gz", _bgzf(plain)),
+                                          ("personal.gzip.bed.gz", gzip.compress(plain)),
+                                          ("personal_bgzipped_unsuffixed.bed", _bgzf(plain)))):
+            with self.subTest(file=name):
+                with open(name, "wb") as fh:
+                    fh.write(data)
+                self.assertEqual(self.merged_personal(name, f"compressed{i}"), expected)
+
+    def test_a_damaged_compressed_personal_annotation_stops_the_search(self):
+        # cut short, as an interrupted copy leaves it: one line that says so, no search
+        with open("personal.bed", "rb") as fh:
+            data = gzip.compress(fh.read())
+        with open("personal.bed.gz", "wb") as fh:
+            fh.write(data[:-12])
+        with self.assertRaises(SystemExit):
+            self.search("--personal_annotation", "personal.bed.gz")
+        self.assertIn("Error: Decompressing personal annotation file failed", self.stderr)
+        self.assertFalse(self.launched)
+        self.assertEqual(self.leftovers(), [])
 
     def test_a_personal_annotation_with_an_annotation_leaves_none(self):
         self.search("--annotation", "myann/func.bed", "--personal_annotation", "personal.bed")
@@ -410,6 +476,24 @@ class TheHelpSaysWhatKeepIntermediatesKeeps(unittest.TestCase):
         removed, kept = self._entry().split("kept either way")[0].split("canonical outputs")
         self.assertNotIn("bestMerge", removed)
         self.assertIn("bestMerge", kept)
+
+
+class TheHelpSaysWhichPersonalAnnotationFilesWork(unittest.TestCase):
+    """--help is the only place that says what --personal_annotation reads, and it said the
+    file "must be compressed using bgzip": since 2.2.0 only a plain one had worked, and a
+    bgzipped one stopped the search. Both work now, and gzip too."""
+
+    def test_it_says_plain_bgzip_and_gzip_work(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            try:
+                crisprme.print_help_complete_search()
+            except SystemExit:
+                pass
+        entry = next(ln for ln in err.getvalue().split("\n")
+                     if ln.lstrip().startswith("--personal_annotation,"))
+        self.assertIn("may be plain text or compressed with bgzip or gzip", entry)
+        self.assertNotIn("must be compressed", entry)
 
 
 if __name__ == "__main__":

@@ -469,9 +469,9 @@ def print_help_complete_search() -> None:
         "terms: https://www.cosmickb.org/terms/. To include them, attest your licence "
         "ONCE with `crisprme.py cosmic-license enable` or in the web Settings -- the "
         "choice persists. Without it, COSMIC features are stripped from the output.)\n"
-        "\t--personal_annotation, specify BED files with personal genomic "
+        "\t--personal_annotation, specify a BED file with personal genomic "
         "annotations. The fourth column must contain the annotation name. The "
-        "input BED files must be compressed using bgzip [OPTIONAL]\n"
+        "file may be plain text or compressed with bgzip or gzip [OPTIONAL]\n"
         "\t--samplesID, specify a file listing sample files (one per line) "
         "present in samplesIDs folder [OPTIONAL: with --vcf, a dataset's "
         "samplesIDs/<dataset>.samplesID.txt is used without it, and with none the by-sample "
@@ -1425,20 +1425,38 @@ def _tag_personal_annotation(fname: str, outfname) -> str:
     """Tags the fourth column of a BED file as personal and writes the result to 
     a new file.
 
-    Modifies the annotation name in the fourth column by appending '_personal', 
-    replaces spaces with tabs, and updates commas in the annotation name. Raises 
-    an error if tagging fails.
+    Modifies the annotation name in the fourth column by appending '_personal',
+    replaces spaces with tabs, and updates commas in the annotation name. Raises
+    an error if tagging fails. A gzip- or bgzip-compressed file (told by its magic
+    bytes, whatever its name) is first decompressed beside outfname: the tagging
+    reads plain text, and a compressed file used to reach the sort garbled.
 
     Args:
-        fname: Path to the input BED file.
+        fname: Path to the input BED file, plain or gzip/bgzip-compressed.
         outfname: Path where the tagged BED file will be written.
 
     Returns:
         The path to the tagged BED file.
 
     Raises:
-        SystemExit: If tagging fails.
+        SystemExit: If decompressing or tagging fails.
     """
+    try:
+        with open(fname, "rb") as fh:
+            compressed = fh.read(2) == b"\x1f\x8b"
+    except OSError:
+        compressed = False  # unreadable: awk says so below, as before
+    if compressed:  # bgzip writes gzip members, so gzip reads both
+        import gzip
+        import zlib
+
+        plain = os.path.join(os.path.dirname(outfname), "personal.decompressed.bed")
+        try:
+            with gzip.open(fname, "rb") as src, open(plain, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        except (OSError, EOFError, zlib.error) as e:
+            error(f"Decompressing personal annotation file failed: {e}")
+        fname = plain
     code = subprocess.call(
         f"awk '$4 = $4\"_personal\"' {fname} | sed \"s/ /\t/g\" | sed "
         f"\"s/,/_personal,/g\" > {outfname}", 

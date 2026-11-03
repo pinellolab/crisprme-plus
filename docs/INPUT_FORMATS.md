@@ -295,6 +295,11 @@ result columns** — they are not interchangeable:
 Both accept either a plain `.bed` or a bgzipped `.bed.gz` file (the sort helper
 transparently handles both; see `_sort_annotation` in `crisprme.py`, line 822).
 
+A third input, **`--personal_annotation`**, adds a BED of your own named intervals (fourth
+column = the name) to `--annotation`'s, or stands alone without it; its names show in the
+`Annotation_personal` column. The file may be plain text or compressed with bgzip or gzip:
+a compressed file is told by its content, not its name.
+
 **Sorting.** BEDs must be sorted with BEDOPS/GRCh ordering. As of 2.1.12,
 **both `--annotation` and `--gene_annotation` are auto-sorted for you** — each is
 routed through `_sort_annotation` (via `_check_annotation` / `_check_gene_annotation`
