@@ -19,10 +19,12 @@ on them and its rows checked:
     SNP, an unphased carrier, a minus-strand PAM SNP and a minus-strand spacer SNP, a
     second variant on the same slot: an indel inside the target, inserted next to the
     indel's anchor or overlapping the indel (one complex allele), a SNP on a base a
-    record keeps past its POS; and one that changes nothing: a SNP or a nested indel on
-    bases the indel deletes, another allele (an indel or a SNP) at the indel's own POS, a
-    SNP on a kept base the target does not hold; several SNP alts on one VCF line; a
-    target that lies wholly in a flank of the window and holds no base of the indel);
+    record keeps past its POS, two indels at one POS inside the target that together
+    would leave the reference (no one haplotype holds both); and one that changes
+    nothing: a SNP or a nested indel on bases the indel deletes, another allele (an
+    indel or a SNP) at the indel's own POS, a SNP on a kept base the target does not
+    hold; several SNP alts on one VCF line; a target that lies wholly in a flank of the
+    window and holds no base of the indel);
   * the SNP+indel co-occurrence companion names the SNPs a row requires, CONFIRMED
     or PUTATIVE, PAM-window SNPs included, its joint frequency counting haplotype
     copies;
@@ -346,6 +348,18 @@ class World(object):
         self._indel("CO", co + 10, g[9] + "C", g[9], {"S25": "1|0", "S26": "1|0", "S27": "1|0"})
         self._indel("CO2", co + 21, g[19] + "TGG", g[19], {"S25": "1|0", "S26": "1|0"})
         self._snp("CO", co + 6, "C", "A", {"S25": "1|0"})
+        # XT (+): a deletion restores a perfect target; inside it, at one POS, a tandem
+        # duplication of two bases (XT2, C>CTG) and the deletion of those two bases (XT3,
+        # CTG>C), each of which changes the target's bases (the review's X1). S02's slot holds
+        # both with the first: two alleles of one site, which no one haplotype holds, so its
+        # bases cannot be read and it stays off, as S03 (XT2) and S04 (XT3) do; S01 holds the
+        # deletion alone. (At f1b75ba XT2 and XT3 added up to the reference, and S02 was listed.)
+        xt = 5400
+        self._put(xt, g[:13] + "T" + g[13:] + "TGG" + "A")
+        self._indel("XT", xt + 13, g[12] + "T", g[12],
+                    {"S01": "1|0", "S02": "1|0", "S03": "1|0", "S04": "1|0"})
+        self._indel("XT2", xt + 2, g[1], g[1:4], {"S02": "1|0", "S03": "1|0"})
+        self._indel("XT3", xt + 2, g[1:4], g[1], {"S02": "1|0", "S04": "1|0"})
         self.ref = "".join(self.seq)
 
     def _put(self, start0, s):
@@ -767,6 +781,9 @@ class FullTiers(_Base):
         self.assertEqual(co["S25"]["var"].split(","),
                          ["%s_5210_TC_T" % CHROM, "%s_5206_C_A" % CHROM])
         self.assertEqual(co["S26,S27"]["dna"], g[:5] + "c" + g[6:] + "TGG")
+        # XT: an insertion and a deletion at one POS on S02's slot, added together, are the
+        # reference, but no one haplotype holds both: S02 is not listed
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["XT"]], [(g + "TGG", "S01")])
         # every recomputed CFD, mismatch count and total agrees with its alignment
         for r in rows:
             self.assertAlmostEqual(cfd_score_bulge_aware(r["crRNA"], r["dna"]), r["cfd"],

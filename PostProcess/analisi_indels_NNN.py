@@ -1060,9 +1060,10 @@ def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
     way reads the variants it can reach: none upstream of the first base for the first,
     none downstream of the last base for the second. A slot whose bases cannot be read
     either way stays out: each way meets an indel or a SNP that cannot be put on a slot,
-    or two of its variants that overlap (two indels, or a SNP alt on a base of a second
-    indel's REF: a VCF writes a haplotype holding both as one record, so the slot has no
-    one sequence there, a phasing artefact). So do the slots
+    or two of its variants that overlap (two indels whose REFs share a base, any two at
+    one POS among them, even a duplication and the deletion of the same bases; or a SNP
+    alt on a base of a second indel's REF: a VCF writes a haplotype holding both as one
+    record, so the slot has no one sequence there, a phasing artefact). So do the slots
     that hold a complex allele (a record overlapping the window's) or a SNP alt on a base
     the indel keeps past its POS (_ref_snps)."""
     if carriers is None or not carriers.phase_known:

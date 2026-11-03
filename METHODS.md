@@ -484,10 +484,12 @@ haplotype** (`indel_snp_cis.resolve_target`):
   the same bases back), so such a carrier keeps its row; one whose second indel changes the
   bases is not listed for it, on any indel row (§8, residuals), nor one whose bases cannot
   be read either way: each way meets an unphased or missing call, or two of its variants
-  that overlap (two indels, or a SNP on a base of the second indel's REF, two records of one
-  base). A reading from the target's first base on meets no variant upstream of that base,
-  one up to its last base none downstream of it. A second indel inserted right next to the
-  indel's anchor base is inside the target.
+  that overlap, two records of one base: two other indels whose REFs share a base (any two
+  at one position do, even a duplication and the deletion of the same bases, which together
+  would leave the reference), or a SNP on a base of the second indel's REF. A reading from
+  the target's first base on meets no variant upstream of that base, one up to its last base
+  none downstream of it. A second indel inserted right next to the indel's anchor base is
+  inside the target.
   On the same phased slot, an indel overlapping the first at another position (one complex
   allele the VCF splits into overlapping records; the window keeps the reference there)
   takes the haplotype off the target's rows whatever its bases. A variant only on bases the
@@ -1095,9 +1097,10 @@ single-indel-search property, independent of the analysis mode; since 2.8.1 an i
 whose haplotype carries such a second indel inside a target is not listed for that target
 when the second indel changes the target's bases, read on the haplotype's own bases (a
 repeat unit gained or lost at the target's edge leaves them, and the individual stays
-listed: §4), nor when, as one complex allele split into overlapping records, an indel
-overlaps it at another position. This residual is **low-frequency**: raw multi-indel cis
-co-occurrence is dominated by STR/VNTR repeats (which off-target analysis should
+listed: §4), or when those bases cannot be read (an unphased or missing call, or two of its
+variants that overlap: §4), nor when, as one complex allele split into overlapping records,
+an indel overlaps it at another position. This residual is **low-frequency**: raw
+multi-indel cis co-occurrence is dominated by STR/VNTR repeats (which off-target analysis should
 soft-mask), falling to **~1–2%** of indel loci after
 repeat-masking and deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%**
 of indel off-targets — all at the edit-budget ceiling (the weakest, ≈0-CFD tier). Windows

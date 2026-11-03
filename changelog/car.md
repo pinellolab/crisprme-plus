@@ -25,26 +25,28 @@ are those of `CHANGELOG.md` at 9c6b4046) with the text after it. All three entri
    >   repeat a unit gained or lost at the target's edge leaves the bases as they are (the repeat
    >   puts the same bases back), so such a carrier stays listed; one whose second indel changes
    >   them does not, nor one whose bases cannot be read either way: each way meets an unphased or
-   >   missing call, or two of its variants that overlap (two indels, or a SNP on a base of the
-   >   second indel's REF, two records of one base). A reading from the first base on meets no
-   >   variant upstream of it, one up to the last base none downstream. Nor is one listed whose
-   >   second indel, on the same phased slot, overlaps the first at another position (one complex
-   >   allele that the VCF splits into overlapping records). A variant only on bases the indel
-   >   deletes changes nothing. Another allele at the indel's own position, an indel or a SNP, is an
-   >   alternative to it (a haplotype holding both would be one record), so a slot phased with both
-   >   is a phasing artefact: on chr22 of the HGDP + 1000 Genomes panel, two indels at one position
-   >   share a slot for 40,679 carrier pairs against 2,463,324 on opposite slots, a SNP and an indel
-   >   for 2,404 against 167,951. And an unphased carrier of two overlapping records is a
-   >   multi-allelic heterozygote, one allele per haplotype. All of these stay listed. This needs
-   >   the phased indel genotype store, which the build writes with the SNP overlay; a row left with
-   >   no carrier is dropped. Its own target, which needs both indels, is still not searched
-   >   (METHODS §8). On the search above, 693 targets with no SNP code lost such carriers. On chr22
-   >   of that panel (per sample, five guides), checked against haplotypes built from the phased
-   >   VCF: of the 7,046 carrier listings the rule takes off the integrated results' highest-CFD
-   >   block (96 rows are left with none, and dropped), 7,043 are of a haplotype that lacks the
-   >   row's sequence within 40 bases of it, 2 of one that has it a few bases away without the indel
-   >   (a repeat's copy, a target of its own) and 1 of a slot with two overlapping records; no
-   >   carrier left on an indel row lacks the row's sequence because of a second indel.
+   >   missing call, or two of its variants that overlap, two records of one base: two other indels
+   >   whose REFs share a base (any two at one position do, even a duplication and the deletion of
+   >   the same bases, which together would leave the reference), or a SNP on a base of the second
+   >   indel's REF. A reading from the first base on meets no variant upstream of it, one up to the
+   >   last base none downstream. Nor is one listed whose second indel, on the same phased slot,
+   >   overlaps the first at another position (one complex allele that the VCF splits into
+   >   overlapping records). A variant only on bases the indel deletes changes nothing. Another
+   >   allele at the indel's own position, an indel or a SNP, is an alternative to it (a haplotype
+   >   holding both would be one record), so a slot phased with both is a phasing artefact: on chr22
+   >   of the HGDP + 1000 Genomes panel, two indels at one position share a slot for 40,679 carrier
+   >   pairs against 2,463,324 on opposite slots, a SNP and an indel for 2,404 against 167,951. And
+   >   an unphased carrier of two overlapping records is a multi-allelic heterozygote, one allele
+   >   per haplotype. All of these stay listed. This needs the phased indel genotype store, which
+   >   the build writes with the SNP overlay; a row left with no carrier is dropped. Its own target,
+   >   which needs both indels, is still not searched (METHODS §8). On the search above, 693 targets
+   >   with no SNP code lost such carriers. On chr22 of that panel (per sample, five guides),
+   >   checked against haplotypes built from the phased VCF: of the 7,046 carrier listings the rule
+   >   takes off the integrated results' highest-CFD block (96 rows are left with none, and
+   >   dropped), 7,043 are of a haplotype that lacks the row's sequence within 40 bases of it, 2 of
+   >   one that has it a few bases away without the indel (a repeat's copy, a target of its own) and
+   >   1 of a slot with two overlapping records; no carrier left on an indel row lacks the row's
+   >   sequence because of a second indel.
 
 2. **"An indel off-target with an RNA bulge was reported one base early, and the reference sequence
    shown for one with both bulge types was a base off"**, lines 2514-2515. Replace

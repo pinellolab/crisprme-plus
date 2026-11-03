@@ -647,9 +647,81 @@ class ASecondIndelIsReadOnTheBases(unittest.TestCase):
         self.assertIsNone(isc.local_haplotype(100, 140, (120, "TCA", "T"), [(121, "CA", "C")]))
         self.assertIsNone(isc.local_haplotype(100, 140, (120, "T", "TC"),
                                               [(110, "A", "AG"), (110, "A", "AT")]))
+        # Two second indels whose REFs share a base, in either order, though the bases each
+        # changes do not meet: at one anchor a tandem duplication and the deletion of the
+        # same bases (the review's X1, C>CTA and CTA>C), which f1b75ba added together into
+        # the reference when the insertion came first, as _breaking_slots sorts them; an
+        # insertion anchored on a base another record deletes; a record left unnormalized
+        # (TCA>TA) whose shared last base anchors an insertion.
+        window = (130, "T", "TC")
+        for pair in ([(110, "A", "ACA"), (110, "ACA", "A")],
+                     [(110, "ACA", "A"), (112, "A", "AG")],
+                     [(110, "TCA", "TA"), (112, "A", "AG")]):
+            for others in (pair, pair[::-1]):
+                self.assertIsNone(isc.local_haplotype(105, 116, window, others), others)
         # an indel inserted right before the window's anchor comes first
         hap = isc.local_haplotype(118, 122, (121, "G", "GTT"), [(120, "C", "CA")])
         self.assertEqual([s for _k, s in hap], [118, 119, "A", "G", "T", "T", 121, 122])
+        # an insertion where the bases a record that keeps none deletes start (TA>A at the
+        # next base) comes first, whatever the order: f1b75ba gave None with the deletion first
+        pair = [(110, "A", "ACA"), (111, "TA", "A")]
+        for others in (pair, pair[::-1]):
+            hap = isc.local_haplotype(108, 131, window, others)
+            self.assertEqual([s for _k, s in hap],
+                             [108, 109, "C", "A"] + list(range(111, 129)) + ["T", "C", 130, 131])
+
+    def test_one_answer_whatever_the_order_of_the_variants(self):
+        """Every set of records, in every order, gives one answer: None when two REFs share
+        a base, else the bases of the haplotype that holds them all (each REF replaced by
+        its ALT, by position), or None for two insertions at one point, whose bases have no
+        one order. At f1b75ba the answer of an insertion and a deletion at one anchor, or
+        of an insertion where the bases a record keeping none deletes start, depended on
+        which came first."""
+        rng = random.Random(2810)
+        ref = "".join(rng.choice("ACGT") for _ in range(60))
+
+        def record(p1):
+            r0 = ref[p1 - 1]
+            new = "".join(rng.choice("ACGT") for _ in range(rng.randint(1, 3)))
+            kind = rng.randrange(5)
+            if kind == 0:
+                return (p1, r0, r0 + new)                       # an insertion
+            if kind == 1:
+                return (p1, ref[p1 - 1:p1 + rng.randint(1, 3)], r0)  # a deletion
+            if kind == 2 and new[0] != r0:
+                return (p1, r0, new + r0)                       # inserted before REF
+            if kind == 3 and ref[p1] != r0:
+                return (p1, ref[p1 - 1:p1 + 1], ref[p1])        # deletes its first base
+            return (p1, ref[p1 - 1:p1 + 2], r0 + ref[p1 + 1])   # left unnormalized
+
+        def holding_all(records):
+            out, at = [], 0
+            for p1, r, a in sorted(records):
+                out += [ref[at:p1 - 1], a]
+                at = p1 - 1 + len(r)
+            return "".join(out) + ref[at:]
+
+        seen = {"overlap": 0, "bases": 0, "one point": 0}
+        for _ in range(3000):
+            window, *others = [record(rng.randint(20, 32)) for _ in range(rng.randint(2, 4))]
+            answers = set()
+            for order in itertools.permutations(others):
+                hap = isc.local_haplotype(0, len(ref) - 1, window, list(order))
+                answers.add(None if hap is None else tuple(hap))
+            self.assertEqual(len(answers), 1, (window, others))
+            hap = answers.pop()
+            refs = sorted((p1 - 1, p1 - 1 + len(r)) for p1, r, _a in [window] + others)
+            if any(b[0] < a[1] for a, b in zip(refs, refs[1:])):
+                self.assertIsNone(hap, (window, others))
+                seen["overlap"] += 1
+            elif hap is not None:
+                self.assertEqual("".join(s if isinstance(s, str) else ref[s] for _k, s in hap),
+                                 holding_all([window] + others), (window, others))
+                seen["bases"] += 1
+            else:
+                self.assertGreaterEqual(sum(len(a) > len(r) for _p, r, a in others), 2)
+                seen["one point"] += 1
+        self.assertTrue(all(seen.values()), seen)
 
 
 class TargetsThatHoldTheirIndel(unittest.TestCase):

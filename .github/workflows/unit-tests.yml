@@ -229,7 +229,8 @@ jobs:
         # target takes a carrier off only when it changes the target's bases (real chr22
         # shapes and the review's synthetic ones: a repeat unit gained or lost at the
         # target's edge leaves them, a stretch another variant lengthened does not hold
-        # them through the indel); test_indel_overlaid_rows runs
+        # them through the indel, and two second indels whose REFs share a base leave
+        # the slot unread, in either order); test_indel_overlaid_rows runs
         # the shipped analyzer on a fixture with the repo's own Tier-0 / Tier-1 /
         # indel-store writers (pandas + numpy; intervaltree is stubbed when absent);
         # test_check_alt_pam covers scripts/check_alt_pam.py (and its check that no

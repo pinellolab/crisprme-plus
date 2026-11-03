@@ -498,7 +498,13 @@ def local_haplotype(lo, hi, window, others=()):
     indel's (rank 1) before the window's (rank 2), which follows the bases an indel
     inserted before its anchor. None where two of the variants overlap, or insert at
     one point: no one haplotype holds both (a VCF writes such a haplotype as one
-    record)."""
+    record). Two variants overlap when their REFs share a base, whatever bases each
+    keeps: two records at one POS always do (an insertion and a deletion there are two
+    alleles of one site, though the bases each changes do not meet). The bases do not
+    depend on the order of ``others``."""
+    refs = sorted((p1 - 1, p1 - 1 + len(ref)) for p1, ref, _alt in [window, *others])
+    if any(b[0] < a[1] for a, b in zip(refs, refs[1:])):
+        return None  # two REFs share a base
     edits = []
     p1, ref, alt = window
     s = p1 - 1
@@ -508,14 +514,15 @@ def local_haplotype(lo, hi, window, others=()):
         c = kept_bases(ref, alt)
         t = shared_tail(ref, alt)
         edits.append((s + c, s + len(ref) - t, alt[c:len(alt) - t], s + c - 1, 1))
-    edits.sort(key=lambda e: (e[0], e[4]))
+    # with no two REFs sharing a base, only an insertion can start where another record's
+    # changed bases start, and it comes first: its bases go in before them
+    edits.sort(key=lambda e: (e[0], e[1], e[4]))
     out = []
     at = lo
     last = None
     for start, end, put, after, rank in edits:
-        if last is not None and (start < last[1] or (
-                start == last[0] == last[1] == end and rank == last[2])):
-            return None
+        if last is not None and start == last[0] == last[1] == end and rank == last[2]:
+            return None  # two insertions at one point: their bases have no one order
         out.extend(((p, 0), p) for p in range(at, min(start, hi + 1)))
         out.extend(((after, rank, k), b.upper()) for k, b in enumerate(put))
         at = max(at, end)
