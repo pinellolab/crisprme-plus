@@ -86,14 +86,17 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
     A replay of both workflows' steps, logging each file read, found more: the report tests
     read assets/ and test/data/samplesIDs/, test_complete_search_flags reads every script in
     the repository, seq_script/ and the paper's included, for a complete-search caller, and
-    the web pages import seq_script/ and download_hprc_assembly.py."""
+    the web pages import seq_script/ and download_hprc_assembly.py. Replayed again once
+    test_install_from_source read the release skill in .claude/, the skill was the one file
+    read that no filter matched: a pull request to it alone started nothing."""
 
     # read in that replay, by a test the workflow runs, and matched by none of its filters before
     SEEN = {"unit-tests.yml": ("assets/crisprme-logo.svg", "assets/crisprme_bg_report.jpg",
                                "test/data/samplesIDs/samplesIDs.1000G.txt", "environment.yml",
                                "seq_script/merge_panels/build_combined_panel.sh",
                                "download_hprc_assembly.py", "plot_generation_paper/plot_generation.sh",
-                               "paper/reproducibility/variant-datasets/hg38_AoU/csv_to_vcf.py"),
+                               "paper/reproducibility/variant-datasets/hg38_AoU/csv_to_vcf.py",
+                               ".claude/skills/release-crisprme/SKILL.md"),
             "web-e2e.yml": ("seq_script/convert_pam.py", "seq_script/extract_seq.py",
                             "download_hprc_assembly.py", "PAMs/20bp-NRG-SpCas9.txt")}
 
@@ -105,7 +108,7 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
         for path in ("pages/**", "scripts/**", "docs/**", "README.md", "METHODS.md",
                      "test/benchmark/**", "PAMs/**", "CHANGELOG.md", "changelog/**",
                      ".github/workflows/**", "assets/**", "test/data/**", "**.py", "**.sh",
-                     "**.yml", "**.yaml", "install/**", "Dockerfile"):
+                     "**.yml", "**.yaml", "install/**", "Dockerfile", ".claude/**"):
             with self.subTest(path=path):
                 self.assertIn(path, paths)
 

@@ -44,9 +44,13 @@ on:
       - "install_from_source.sh"
       - ".gitignore"
       # test_documented_sizes reads the one-line installers' README there too, and
-      # test_install_from_source compares the Dockerfile's CRISPRitz pin with the script's.
+      # test_install_from_source compares the Dockerfile's CRISPRitz pin with the script's
+      # and its header comment with crisprme.py's version. It also reads the release skill
+      # (.claude/skills/release-crisprme/SKILL.md) and runs, as it runs RELEASING.md's, the
+      # skill's command that bumps that comment.
       - "install/**"
       - "Dockerfile"
+      - ".claude/**"
       # test_ci_workflows reads all of them
       - ".github/workflows/**"
       # generate_report.py, which the report tests run, puts assets/'s logo and background
