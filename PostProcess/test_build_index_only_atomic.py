@@ -3426,14 +3426,30 @@ class AnInstallWithoutGenotypesRunsPopulationLevel(_Fixture):
         for options, instead in (((), ""), (("--per-sample",), " instead of --per-sample")):
             rc, out, err = self.run_search(*options)
             self.assertEqual(self.mode(), "population-level")
+            # what it names: its indel rows still list carriers, from the indel logs the
+            # index holds (every carrier of the indel where a SNP makes the site with it)
             self.assertIn("WARNING [complete-search]: no genotype store (Dictionaries/"
                           "genotypes_<vcf>/) and no per-sample dictionaries for ds: running the "
-                          f"POPULATION-LEVEL analysis{instead}", out)
+                          f"POPULATION-LEVEL analysis{instead}, which reports each site's worst "
+                          "case: a row of its SNPs names no carrier, and a row with an indel "
+                          "lists the indel's carriers; a per-sample one would lose the "
+                          "off-targets that need two SNPs of a sample together.", out)
             self.assertNotIn("PER-SAMPLE analysis", out)
         # an empty store is none
         os.makedirs(self.path("Dictionaries", "genotypes_ds"))
         rc, out, err = self.run_search()
         self.assertEqual(self.mode(), "population-level")
+        # two such datasets: the WARNING names both, and their SNPs
+        for suffix in ("", "_INDELS"):
+            shutil.copytree(self.lib(f"{VAR}{suffix}"), self.lib(f"NRG_2_hg38+ds2{suffix}"))
+        for tier in ("registry", "log_indels"):
+            shutil.copytree(self.path("Dictionaries", f"{tier}_ds"),
+                            self.path("Dictionaries", f"{tier}_ds2"))
+        rc, out, err = self.run_search(vcfs="ds\nds2\n")
+        self.assertEqual(self.mode(), "population-level")
+        self.assertIn("no per-sample dictionaries for ds, ds2: running the POPULATION-LEVEL "
+                      "analysis, which reports each site's worst case: a row of their SNPs names "
+                      "no carrier, and a row with an indel lists the indel's carriers;", out)
 
     def sites_only(self, name, copy_of=None, by_aggregation=False):
         """Dataset name's registry says sites-only, as the published mega panel's does, and

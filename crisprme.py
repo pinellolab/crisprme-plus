@@ -2521,12 +2521,18 @@ def complete_search() -> None:
         per_sample = _dt == "genotyped-phased"
     if per_sample and _no_store:
         per_sample = False
+        # Such a run's indel rows still name carriers: the indel logs (Dictionaries/
+        # log_indels_<vcf>/) come with the index, and a row whose site needs a SNP too lists
+        # every carrier of the indel, as no genotype says which of them has the SNP
+        # (analisi_indels_NNN.py).
         print(
             f"WARNING [complete-search]: no genotype store (Dictionaries/genotypes_<vcf>/) "
             f"and no per-sample dictionaries for {', '.join(_no_store)}: running the "
             f"POPULATION-LEVEL analysis{' instead of --per-sample' if _force_ps else ''}, "
-            f"which reports each site's worst case with no carriers; a per-sample one would "
-            f"lose the off-targets that need two SNPs of a sample together. To get carriers "
+            f"which reports each site's worst case: a row of "
+            f"{'its' if len(_no_store) == 1 else 'their'} SNPs names no carrier, and a row "
+            f"with an indel lists the indel's carriers; a per-sample one would lose the "
+            f"off-targets that need two SNPs of a sample together. To get carriers "
             f"and CONFIRMED cis phasing, install the store: crisprme.py download --what "
             f"index --index-name <the index> (without --no-genotypes).",
             flush=True,
@@ -5486,9 +5492,9 @@ def print_help_download() -> None:
         "\t--no-genotypes, for --what index: skip fetching the separate Tier-1 "
         "genotype store (genotypes_<vcf>.tar.gz). A search then runs the "
         "population-level analysis from the bundled Tier-0 registry (each site's "
-        "worst case, with no carriers and no CONFIRMED cis phasing; --per-sample falls "
-        "back to it with a warning) until the store is present [OPTIONAL, default: "
-        "fetch it]\n"
+        "worst case, with no CONFIRMED cis phasing and no carriers but those of an "
+        "indel; --per-sample falls back to it with a warning) until the store is "
+        "present [OPTIONAL, default: fetch it]\n"
         "\t--path, working directory the CRISPRme dir-tree lives under "
         "[OPTIONAL, default: current directory]\n"
     )

@@ -91,8 +91,9 @@ forces it on any other genotyped one.
 - Named carriers / personal risk cards come from the **genotype store** bundled with
   the index (`download --what index`, unless you pass `--no-genotypes`). Without it
   (and without the classic per-sample dictionaries) a search runs population-level,
-  and `--per-sample` falls back to it with a `WARNING` that names the dataset:
-  re-download without `--no-genotypes` to get carriers.
+  naming the carriers of an indel alone (the index holds them), and `--per-sample`
+  falls back to it with a `WARNING` that names the dataset: re-download without
+  `--no-genotypes` to get carriers.
 - If you only need site-level results, pass `--population-level` — it is much lighter.
   On a phased index leaving out `--per-sample` is not enough, since per-sample is that
   index's default; population-level is the default only on a sites-only, unphased,

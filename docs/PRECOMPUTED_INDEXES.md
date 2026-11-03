@@ -347,10 +347,12 @@ crisprme.py download --what index \
   back to fetching the per-db lists from HF and synthesizing the combined file.)
 - The **Tier-1 genotype store** is fetched automatically. Add `--no-genotypes`
   to skip the big companion: a search then runs the **population-level** analysis
-  from the Tier-0 registry (each site's worst case, with no carriers and no
-  CONFIRMED cis phasing) until the store is present, and `--per-sample` falls back
-  to it with a warning: a per-sample analysis without genotypes would lose the
-  off-targets that need two SNPs of one sample together.
+  from the Tier-0 registry (each site's worst case, with no CONFIRMED cis phasing
+  and no carriers but those of an indel, which the indel logs of the main tarball
+  name; where a site needs a SNP too, its row lists every carrier of the indel)
+  until the store is present, and `--per-sample` falls back to it with a warning:
+  a per-sample analysis without genotypes would lose the off-targets that need two
+  SNPs of one sample together.
 - The **CLI search-list files** `list_vcf.txt` (the dataset, `hg38_HGDP1kGP`)
   and `list_samplesID.txt` (its combined samplesID) are written at the install
   root, so a CLI search works out of the box — the same lists the web form builds
@@ -633,7 +635,8 @@ itself is what `complete-search` consumes.
 - A published variant index is **self-complete**: the samplesID lists are
   bundled, so `download --what index` + search works without a separate
   `--what samples`. The genotype store is the only optional piece (skip it with
-  `--no-genotypes` for a population-level install, with no carriers).
+  `--no-genotypes` for a population-level install, with no carriers but those of an
+  indel).
 - If `--index-path` is given but no matching reference index is found there,
   `complete-search` fails fast with a clear message rather than silently
   rebuilding — so a missing/wrong download is caught immediately. A variant index
