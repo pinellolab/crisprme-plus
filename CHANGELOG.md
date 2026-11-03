@@ -119,9 +119,10 @@ and the `release-crisprme` skill.
   hashes exactly, and so does `enricher.py` under pandas 3 (the recipe leaves pandas unpinned);
   inside the arm64 image, the binary it ships reproduces them too.
 - **When a dedicated index for the PAM is installed beside a PAM-less one, the dedicated index is
-  now searched.** The index scans settle every choice by rule: the requested PAM first, then the
-  smallest sufficient bulge budget, then the narrowest PAM-less flank. 2.8.0 kept the smallest
-  budget first, so with `NRG_4` and `NNN_3` installed it searched `NNN_3`; 2.8.1 searches `NRG_4`,
+  now searched.** The index scans settle every choice by rule: the requested PAM first, then an
+  index built for this very guide length, then the smallest sufficient bulge budget, then the
+  narrowest PAM-less flank. 2.8.0 kept the smallest budget first, so with `NRG_4` and `NNN_3`
+  installed it searched `NNN_3`; 2.8.1 searches `NRG_4`,
   which gives the same report faster (genome-wide, the search stage took 44-51 min on a dedicated
   NRG index against 2 h 59 min on `NNN_3` under `--prune-pam`). No rule depends on glob order, so
   the choice cannot depend on the shell's locale either, which matters now that PAM-less indexes
@@ -209,21 +210,20 @@ and the `release-crisprme` skill.
   the same two SNPs, one that carries both on one haplotype is named on the row of both SNPs, and
   one that carries one on each haplotype is not, where a population-level search names both).
   Measured on a phased 6-sample panel, with a population-level search of one index on its
-  dictionaries and then on its tiers, the tables change as follows: an indel and a SNP that one
-  haplotype carries are reported as one off-target, for the samples one of whose haplotypes carries
-  both (the dictionaries gave the SNP alone, aligned with a bulge, or, for the fewest mismatches and
-  bulges, the indel alone, for every sample that carries either; a sample that carries them on
-  different haplotypes is no longer named at that site, and the per-sample summary and the report's
-  threshold counts change with that row); a SNP's allele frequency is computed from the genotypes of
-  the samples the list names, to six significant digits (`0.333333`), where the dictionaries gave
-  the VCF's `AF` (`0.3333`), and an indel's is still the VCF's; `Other_motifs` counts the alignments
-  the tiers give at a site: one more at the site of that indel and SNP (their row), and one fewer at
-  a site where the dictionaries also listed the reference alignment as a variant one, for the
-  carriers of a SNP that destroys its PAM; and rows come in another order. The result folder also
-  holds the SNP + indel and SNP + SNP co-occurrence and phase-confirmation tables, and the shareable
-  report gives the dataset's SNP and indel counts and its SNP + indel cis co-occurrences. A dataset
-  built in Settings before this release has no tiers until its variant index is built again there,
-  and its searches read its dictionaries until then, as before. Writing the tiers takes memory that
+  dictionaries and then on its tiers, the tables change as follows: a SNP's allele frequency is
+  computed from the genotypes of the samples the list names, to six significant digits
+  (`0.333333`), where the dictionaries gave the VCF's `AF` (`0.3333`), and an indel's is still the
+  VCF's; and `Other_motifs` counts the alignments the tiers give at a site: one fewer at a site
+  where the dictionaries also listed the reference alignment as a variant one, for the carriers of
+  a SNP that destroys its PAM. The row of an indel and a SNP that one haplotype carries is the same
+  on both, with the same carriers, since this release's indel fix resolves it from the per-sample
+  SNP dictionary too (the entry "An indel off-target near a SNP was reported with SNP alleles its
+  carriers do not have" under Fixed). The result folder also holds the SNP + indel and SNP + SNP
+  co-occurrence and phase-confirmation tables, and the shareable report gives the dataset's SNP and
+  indel counts and its SNP + indel cis co-occurrences. A dataset built in Settings before this
+  release has no tiers until its variant index is built again there, and its searches read its
+  dictionaries until then; their SNP + indel rows change all the same, with that indel fix. Writing
+  the tiers takes memory that
   a build without them did not need: at panel scale ~150-180 GB a chromosome, by default up to 4
   chromosomes at once (~700 GB, `CRISPRME_TIER_WORKERS` sets how many). A build that runs out of it
   fails with a message that says what to do (see Fixed).
@@ -579,8 +579,9 @@ and the `release-crisprme` skill.
   (`NNN_3`, or a wider flank under `--prune-pam`) was sized as constrained (4 GB base, 0.8 GB per
   thread) instead of PAM-less (12 GB base, 2.2 GB per thread), and could be given more threads than
   the host's memory holds, and be OOM-killed. A bulge search is now sized by the index it actually
-  searches; a search with no bulges, which scans the genome FASTA and opens no index, is sized as
-  before. Only the thread count changes, never the results.
+  searches. So is a variant search with no bulges that lacks its whole enriched genome (a
+  download), which searches its variant index. Any other search with no bulges scans the genome
+  FASTA, opens no index, and is sized as before. Only the thread count changes, never the results.
 
 - **A downloaded variant index warned that its genotype store was missing right after installing
   it.** The "no `genotypes_<vcf>.tar.gz` companion ... per-sample Samples degraded" note was written
