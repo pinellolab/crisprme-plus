@@ -858,8 +858,8 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_search_mode_note_population_level_default_and_per_sample(self):
         """The 'Analysis inputs & criteria' card surfaces the analysis mode:
-        POPULATION-LEVEL (default) warns per-sample carriers are NOT computed and
-        points to --per-sample; PER-SAMPLE states the observed-haplotype resolution."""
+        POPULATION-LEVEL warns per-sample carriers are NOT computed and points to
+        --per-sample; PER-SAMPLE states the observed-haplotype resolution."""
         base = {"datasets": "1000G+HGDP", "mm": "6", "bdna": 2, "brna": 2,
                 "max_edits": "4"}
         html_pop = gr.render_inputs_criteria({**base, "search_mode": "population-level"})
@@ -870,6 +870,24 @@ class TestGenerateReport(unittest.TestCase):
         html_ps = gr.render_inputs_criteria({**base, "search_mode": "per-sample"})
         self.assertIn("observed haplotypes", html_ps)
         self.assertNotIn("NOT computed", html_ps)        # no caveat in per-sample mode
+
+    def test_search_mode_row_names_the_mode_not_how_it_was_chosen(self):
+        """The 'Search mode' row read 'Population-level (default)' in every
+        population-level report and 'Per-sample (--per-sample)' in every per-sample one.
+        Since 2.8.0 per-sample is the default on a genotyped + phased index (the default
+        HGDP + 1000 Genomes one), where population-level is the --population-level
+        opt-out, and the web passes no flag: .search_mode records the mode that ran, not
+        whether it was the default, so the row names the mode alone."""
+        base = {"datasets": "hg38_HGDP1kGP", "mm": "4", "bdna": 1, "brna": 1,
+                "max_edits": "6"}
+        for mode, name in (("population-level", "Population-level"),
+                           ("per-sample", "Per-sample")):
+            with self.subTest(mode=mode):
+                html = gr.render_inputs_criteria({**base, "search_mode": mode})
+                row = re.search(r'Search mode</td><td>(.*?)</td>', html, re.S).group(1)
+                self.assertTrue(row.startswith(f"<strong>{name}</strong> &mdash; "), row[:90])
+                self.assertNotIn("(default)", row)
+                self.assertNotIn("(<code>--per-sample</code>)", row)
 
     def test_variant_contributed_prose_tracks_whether_file_is_bundled(self):
         """The 'Variant-contributed sites' row must not claim variant_created.tsv is

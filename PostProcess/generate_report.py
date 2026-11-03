@@ -1329,11 +1329,14 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     # module-level active scorer that drives the column's display label + tier thresholds.
     _set_active_scorer(params.get("Scorer"))
 
-    # search mode marker written by complete-search
-    # (.search_mode = "population-level" | "per-sample"). The default is population-level;
-    # treat a missing marker as population-level (the default) so older result dirs still
-    # surface the correct caveat. Legacy 2.5.3 markers ("fast"/"full") are mapped for
-    # back-compat when rendering old result dirs.
+    # search mode marker written by complete-search and by the web form
+    # (.search_mode = "population-level" | "per-sample"): the mode that ran. Which mode is
+    # the default depends on the index (since 2.8.0 per-sample on a genotyped + phased one,
+    # population-level otherwise), and the marker does not say whether the mode was the
+    # default or asked for, so the report names the mode, not how it was chosen. A missing
+    # marker reads as population-level, so older result dirs still surface its caveat.
+    # Legacy 2.5.3 markers ("fast"/"full") are mapped for back-compat when rendering old
+    # result dirs.
     search_mode = "population-level"
     if result_dir:
         try:
@@ -1658,16 +1661,19 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
              f"{_esc(mm)} mismatches and DNA/RNA bulges up to {_esc(bulges)} (max "
              f"total edits {_esc(max_edits)})."),
         ])
+    # The mode that ran, not how it was chosen: .search_mode does not record whether it was
+    # the index's default (per-sample on a genotyped + phased index) or asked for
+    # (--per-sample / --population-level, or the web form's choice).
     if meta.get("search_mode") == "per-sample":
         sm_note = (
-            "<strong>Per-sample</strong> (<code>--per-sample</code>) &mdash; per-sample genotypes "
+            "<strong>Per-sample</strong> &mdash; per-sample genotypes "
             "resolved into observed haplotypes. Every per-sample haplotype is reported with "
             "CONFIRMED cis phasing, named carrier samples and exact joint allele frequency (the "
             "per-sample resolution genotyped panels are built for)."
         )
     else:
         sm_note = (
-            "<strong>Population-level</strong> (default) &mdash; the SNP off-target analysis "
+            "<strong>Population-level</strong> &mdash; the SNP off-target analysis "
             "reports one <em>worst-possible</em> representative per variant window instead of "
             "enumerating every per-sample haplotype. CFD is the <strong>exact worst case</strong>; "
             f"{scorer_label()} is a best-effort screen. <strong>Per-sample carriers, CONFIRMED cis phasing "
