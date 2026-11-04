@@ -282,10 +282,10 @@ reports its variants only through a per-dataset allele-frequency registry, which
 here does not make. To search the mega variants, download the published
 `NRG_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
 dataset whose sample list is missing too, and the note says so, with how to get one:
-removing a VCF dataset in Settings takes its list and leaves the variant index built
-from it, and the dataset stays listed here only if its name begins with the genome's
-and an underscore (as `hg38_<name>`); add the dataset again there, under the same name,
-to search that index again.
+removing a VCF dataset in Settings takes the list it wrote for it and leaves the variant
+index built from it, and the dataset stays listed here only if its name begins with the
+genome's and an underscore (as `hg38_<name>`); add the dataset again there, under the
+same name, to search that index again.
 
 > **RNA-targeting strategies:** For RNA-targeting Cas proteins, you can either
 > provide a custom transcriptome genome or use a variant-enriched genome. Be aware
