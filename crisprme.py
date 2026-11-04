@@ -529,8 +529,9 @@ def print_help_complete_search() -> None:
         "the SNP variant post-analysis: reports every per-sample haplotype with CONFIRMED "
         "cis phasing + named carrier samples + exact joint AF (the resolution the genotyped "
         "indexes are built for). Requires a genotyped index (no-op with a warning on "
-        "sites-only panels). Slower, and can be intractable on dense panels (measured 49h+ "
-        "without completing on a 4x-density panel) [OPTIONAL]\n"
+        "sites-only panels); on one without the dict-less tiers (built without --samplesID) "
+        "it names the carrier samples only. Slower, and can be intractable on dense panels "
+        "(measured 49h+ without completing on a 4x-density panel) [OPTIONAL]\n"
         "\t--population-level, force the fast population-level analysis: one worst-possible "
         "PUTATIVE representative per variant window, exact worst-case CFD, dataset-level "
         "allele frequencies -- lossless for detection, tractable on any panel. Use this to "
@@ -3261,6 +3262,16 @@ def complete_search() -> None:
             _sm.write("per-sample" if per_sample else "population-level")
     except OSError:
         pass
+    # and, for a per-sample one, the datasets its banner names as having no dict-less
+    # tiers, one per line, so that the report says what the banner says of them: it
+    # cannot tell from the results, nor from the install, whose index can have the tiers
+    # by the time the report is built again.
+    if variant and per_sample and _untiered:
+        try:
+            with open(os.path.join(outputfolder, ".untiered_datasets"), "w") as _ud:
+                _ud.write("".join(f"{_vn}\n" for _vn in _untiered))
+        except OSError:
+            pass
     # record whether alternative (non-best) alignments were emitted, so generate-report can
     # note their absence in a population-level run (and how to get them).
     try:

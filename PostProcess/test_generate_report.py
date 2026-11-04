@@ -889,6 +889,78 @@ class TestGenerateReport(unittest.TestCase):
                 self.assertNotIn("(default)", row)
                 self.assertNotIn("(<code>--per-sample</code>)", row)
 
+    def test_search_mode_row_of_a_per_sample_search_without_the_dict_less_tiers(self):
+        """An index built without --samplesID (the benchmark complete-test's, the one the
+        documented self-test builds) has only the classic per-sample dictionaries. On it a
+        --per-sample search names the carriers, with the VCF's allele frequencies, and no
+        CONFIRMED/PUTATIVE cis phasing, SNP+SNP co-occurrence or exact joint AF, as
+        complete-search's banner says. The Search mode row promised CONFIRMED cis phasing
+        and exact joint AF for every haplotype all the same. complete-search records the
+        datasets it says this of (.untiered_datasets, read into meta["untiered"]); the row
+        now says what the banner does, and with the tiers it is as it was, byte for byte."""
+        base = {"datasets": "hg38_1000G", "mm": "4", "bdna": 1, "brna": 1, "max_edits": "6",
+                "search_mode": "per-sample"}
+
+        def row(meta):
+            html = gr.render_inputs_criteria(meta)
+            return re.search(r'Search mode</td><td>(.*?)</td>', html, re.S).group(1)
+
+        with_tiers = (
+            "<strong>Per-sample</strong> &mdash; per-sample genotypes resolved into observed "
+            "haplotypes. Every per-sample haplotype is reported with CONFIRMED cis phasing, named "
+            "carrier samples and exact joint allele frequency (the per-sample resolution "
+            "genotyped panels are built for).")
+        for meta in (base, {**base, "untiered": []}):
+            self.assertEqual(row(meta), with_tiers)
+        self.assertEqual(
+            row({**base, "untiered": ["hg38_1000G"]}),
+            "<strong>Per-sample</strong> &mdash; per-sample genotypes resolved into named carrier "
+            "samples only for <code>hg38_1000G</code>, which has no dict-less tiers "
+            "(<code>Dictionaries/registry_&lt;vcf&gt;/</code> and "
+            "<code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample dictionaries: the "
+            "CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint "
+            "allele frequency come from those tiers, and none of them is reported for its "
+            "variants, whose allele frequencies are the ones the VCF gives. To get them, rebuild "
+            "the index with <code>build-index-only --samplesID</code>, or download a prebuilt one "
+            "(<code>crisprme.py download --what index --index-name "
+            "NRG_3_hg38+hg38_HGDP1kGP</code>).")
+        two = row({**base, "untiered": ["hg38_1000G", "hg38_<x>"]})
+        for said in ("named carrier samples only for <code>hg38_1000G</code>, "
+                     "<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
+                     "none of them is reported for their variants"):
+            self.assertIn(said, two)
+        # a population-level row claims none of what the tiers give, so it does not change
+        pop = {**base, "search_mode": "population-level"}
+        self.assertEqual(row({**pop, "untiered": ["hg38_1000G"]}), row(pop))
+
+    def test_the_datasets_a_search_records_reach_the_search_mode_row(self):
+        """build_summary_meta reads .untiered_datasets beside .search_mode, one dataset per
+        line; a run folder without it (every dataset with the tiers, or a run of an earlier
+        release) reads as before."""
+        import shutil
+        rd = os.path.join(self.tmp, "Results", "job")
+        os.makedirs(rd)
+        shutil.copy(self.tsv, rd)
+        with open(os.path.join(rd, ".search_mode"), "w") as h:
+            h.write("per-sample")
+
+        def report(name):
+            out = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir,
+                                  out_zip=os.path.join(self.tmp, name + "_report.zip"))
+            with zipfile.ZipFile(out) as zf:
+                return zf.read("report.html").decode("utf-8")
+
+        confirmed = "Every per-sample haplotype is reported with CONFIRMED cis phasing"
+        html = report("tiered")
+        self.assertIn(confirmed, html)
+        self.assertNotIn("dict-less tiers", html)
+        with open(os.path.join(rd, ".untiered_datasets"), "w") as h:
+            h.write("hg38_1000G_HGDP\n")
+        html = report("untiered")
+        self.assertIn("named carrier samples only for <code>hg38_1000G_HGDP</code>, which has "
+                      "no dict-less tiers", html)
+        self.assertNotIn(confirmed, html)
+
     def test_variant_contributed_prose_tracks_whether_file_is_bundled(self):
         """The 'Variant-contributed sites' row must not claim variant_created.tsv is
         bundled when it is not (the slim default report skips that tier -> no

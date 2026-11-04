@@ -2629,7 +2629,9 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
     dictionaries, and takes the CONFIRMED/PUTATIVE cis phasing, the SNP+SNP
     co-occurrence and the exact joint AF from the dict-less tiers, which a build without
     --samplesID does not write (the benchmark complete-test's, a build from the web
-    Settings page). On such an index its banner promised them all the same."""
+    Settings page). On such an index its banner promised them all the same. The search
+    records the datasets it names so (.untiered_datasets), for the report's Search mode
+    row (test_generate_report), which cannot tell from the results."""
 
     BANNER = ("[complete-search] PER-SAMPLE analysis ({}): resolving per-sample genotypes "
               "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and "
@@ -2637,6 +2639,14 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
               "to resolve -- the population-level analysis runs instead). Slower, and can be "
               "intractable on dense panels; pass --population-level for the fast worst-case "
               "screen.\n")
+
+    def recorded(self):
+        """What the search recorded in .untiered_datasets (None: no such file)."""
+        try:
+            with open(self.path("Results", "search", ".untiered_datasets")) as fh:
+                return fh.read()
+        except FileNotFoundError:
+            return None
 
     def test_on_an_index_without_the_tiers_it_says_it_names_the_carriers_only(self):
         settings = ["build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
@@ -2663,6 +2673,11 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                     "download a prebuilt one (crisprme.py download --what index --index-name "
                     "NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on dense panels; "
                     "pass --population-level for the fast worst-case screen.\n", out)
+                self.assertEqual(self.recorded(), "ds\n")
+        # a population-level search claims none of it, and records nothing
+        rc, out, err = self.run_search("--population-level")
+        self.assertIn("Launching job ", out)
+        self.assertIsNone(self.recorded())
 
     def test_on_an_index_with_them_it_says_what_it_said(self):
         rc, out, err = self.run_bio()
@@ -2673,6 +2688,7 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                 rc, out, err = self.run_search(*options)
                 self.assertIn("Launching job ", out)
                 self.assertIn(self.BANNER.format(why), out)
+                self.assertIsNone(self.recorded())
 
 
 def save_tst(targets, guide_len=23):

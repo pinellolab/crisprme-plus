@@ -1348,6 +1348,17 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
                     search_mode = "population-level"
         except OSError:
             pass
+    # the datasets a per-sample complete-search resolved without the dict-less tiers
+    # (.untiered_datasets, one per line; absent when every dataset has them, and for a run
+    # of an earlier release): its banner says what their results lack, and so does the
+    # Search mode row.
+    untiered = []
+    if result_dir:
+        try:
+            with open(os.path.join(result_dir, ".untiered_datasets")) as _udf:
+                untiered = [_l.strip() for _l in _udf if _l.strip()]
+        except OSError:
+            pass
 
     fn = _parse_results_filename(tsv_path)
 
@@ -1450,6 +1461,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "n_offtarget": n_offtarget,
         "obs_max_mmb": obs_max_mmb,
         "search_mode": search_mode,
+        "untiered": untiered,
         "reference_only": reference_only,
     }
 
@@ -1664,7 +1676,26 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     # The mode that ran, not how it was chosen: .search_mode does not record whether it was
     # the index's default (per-sample on a genotyped + phased index) or asked for
     # (--per-sample / --population-level, or the web form's choice).
-    if meta.get("search_mode") == "per-sample":
+    if meta.get("search_mode") == "per-sample" and meta.get("untiered"):
+        # what complete-search's banner says of the datasets it resolved without the
+        # dict-less tiers (.untiered_datasets): their classic per-sample dictionaries name
+        # the carriers, and no more
+        _ut = meta["untiered"]
+        _one = len(_ut) == 1
+        sm_note = (
+            "<strong>Per-sample</strong> &mdash; per-sample genotypes resolved into named "
+            "carrier samples only for " + ", ".join(f"<code>{_esc(d)}</code>" for d in _ut)
+            + f", which {'has' if _one else 'have'} no dict-less tiers "
+            "(<code>Dictionaries/registry_&lt;vcf&gt;/</code> and "
+            "<code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample dictionaries: the "
+            "CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint "
+            "allele frequency come from those tiers, and none of them is reported for "
+            f"{'its' if _one else 'their'} variants, whose allele frequencies are the ones the "
+            "VCF gives. To get them, rebuild the index with <code>build-index-only "
+            "--samplesID</code>, or download a prebuilt one (<code>crisprme.py download --what "
+            "index --index-name NRG_3_hg38+hg38_HGDP1kGP</code>)."
+        )
+    elif meta.get("search_mode") == "per-sample":
         sm_note = (
             "<strong>Per-sample</strong> &mdash; per-sample genotypes "
             "resolved into observed haplotypes. Every per-sample haplotype is reported with "

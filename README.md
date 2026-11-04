@@ -1008,7 +1008,11 @@ its purpose and usage:
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP
   post-analysis. Reports each observed haplotype with CONFIRMED cis phasing, named carrier
-  samples, and exact joint allele frequency. On a genotyped+PHASED index (HGDP + 1000
+  samples, and exact joint allele frequency, which come from the index's dict-less tiers. On
+  an index without them (built without `--samplesID`, as the benchmark `complete-test`
+  builds its own) it names the carrier samples only, with the allele frequencies the VCF
+  gives; `complete-search` and the report's Search mode row say so. Rebuild it with
+  `build-index-only --samplesID`, or use a prebuilt index. On a genotyped+PHASED index (HGDP + 1000
   Genomes (the default), or HPRC) this is already the context-aware default; on
   a sites-only index (`mega`) it cannot resolve carriers (no genotypes) and
   `complete-search` warns. Can be slow / intractable on dense or aggregate panels. To opt
