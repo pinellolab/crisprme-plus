@@ -467,8 +467,8 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
         raise PreventUpdate
     not_avail = html.P("Not available", style={"color": "red"})
     job_id = dir_name.split("=")[-1]
-    job_dir = os.path.join(current_working_directory, RESULTS_DIR, job_id)
-    if not os.path.isdir(job_dir):
+    job_dir = results_job_dir(job_id)  # the URL's: a job folder of Results/ only
+    if job_dir is None:
         return (
             {"visibility": "hidden"}, not_avail, not_avail, not_avail, "",
             dbc.Alert("The selected result does not exist", color="danger"),
@@ -572,8 +572,12 @@ def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
     string convention here too."""
     if not n:
         raise PreventUpdate
-    combined_dir_name = dir_name.split("=")[-1]
-    combined_dir = os.path.join(current_working_directory, RESULTS_DIR, combined_dir_name)
+    # the job id is the URL's, and the two names its .Params.txt holds are read from that
+    # folder: only job folders of Results/ are removed, as by remove_result ('../' in
+    # either reached any folder, outside the data folder too)
+    combined_dir = results_job_dir(dir_name.split("=")[-1])
+    if combined_dir is None:
+        raise PreventUpdate
     dirs_to_remove = [combined_dir]
     params_path = os.path.join(combined_dir, PARAMS_FILE)
     if os.path.isfile(params_path):
@@ -586,8 +590,8 @@ def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
         for key in ("Paternal_dir", "Maternal_dir"):
             name = params.get(key)
             if name:
-                sibling_dir = os.path.join(current_working_directory, RESULTS_DIR, name)
-                if os.path.isdir(sibling_dir):
+                sibling_dir = results_job_dir(name)
+                if sibling_dir is not None:
                     dirs_to_remove.append(sibling_dir)
     for d in dirs_to_remove:
         shutil.rmtree(d, ignore_errors=True)
@@ -607,7 +611,9 @@ def show_assembly_full_log(n: int, dir_name: str, currently_hidden: bool) -> Tup
         raise PreventUpdate
     if not currently_hidden:
         return True, ""
-    job_dir = os.path.join(current_working_directory, RESULTS_DIR, dir_name.split("=")[-1])
+    job_dir = results_job_dir(dir_name.split("=")[-1])  # the URL's: Results/ only
+    if job_dir is None:
+        return False, "No log file found for this job yet."
     path = os.path.join(job_dir, LOG_FILE)
     if not os.path.isfile(path):
         return False, "No log file found for this job yet."
@@ -817,9 +823,11 @@ def show_full_log(n: int, dir_name: str, currently_hidden: bool) -> Tuple[bool, 
         raise PreventUpdate
     if not currently_hidden:  # it's open -> collapse it
         return True, ""
-    job_dir = os.path.join(
-        current_working_directory, RESULTS_DIR, dir_name.split("=")[-1]
-    )
+    # the job id is the URL's: the logs of a job folder of Results/ only ('../' in it
+    # served the log files of any folder)
+    job_dir = results_job_dir(dir_name.split("=")[-1])
+    if job_dir is None:
+        return False, "No log files found for this job yet."
     sections: List[str] = []
     # (display label, filename, tail_lines or None for full)
     for label, fname, tail in (

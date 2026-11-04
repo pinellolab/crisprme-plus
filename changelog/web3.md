@@ -2,8 +2,8 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (23 tests, the Security
-block) to that step, and on this branch the step then ran 490 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (27 tests, the Security
+block) to that step, and on this branch the step then ran 494 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged. The indel search's
 chromosome-name check (the last Security entry) adds three tests to `test_indel_empty_chromosome`,
 in unit-tests' own job.
@@ -133,6 +133,17 @@ in unit-tests' own job.
   says "The selected position does not exist"), and the results pages read only a folder of
   `Results/` whose id has the form the search form gives its jobs. Pre-existing. Covered by
   `PostProcess/test_web_shell_safety.py` and `PostProcess/test_web_results_links.py`.
+- **A job's status page, and the opening of a job's pages, read and remove only that job's
+  folders.** These pages take the job id from their address, which a client can set to any
+  text, in local mode and on a website alike, and joined it as it was into the paths of the
+  files they use: an id holding a path reached a folder elsewhere, outside the data folder too.
+  Remove result of a personal-assembly search removed that folder, and the haplotype folders its
+  `.Params.txt` names, joined the same way; Show full log, and the status of a personal-assembly
+  search, read the log files there and showed them; and the opening of a job's pages read its
+  `.Params.txt` there. Each now takes only a folder of `Results/` whose id has the form the
+  search form gives its jobs, as Remove result of a search does (above), and otherwise changes
+  nothing, shows no log, or says that there is no such job. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
 - **The indel steps of a search pass no chromosome name of a variant dataset to a shell.**
   A search with bulges takes each chromosome name of a variant dataset, read from the CHROM
   column of its VCFs (or from the per-chromosome indel logs named after it), into the shell

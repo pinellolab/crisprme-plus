@@ -26,10 +26,18 @@ Up to 2.8.0 the web app took such text into shell commands as it was:
 pages/sequence_utils.py, which no module imports, ran bedtools getfasta through a shell
 the same way; it is checked too (with Biopython and bedtools), for a page that would.
 
+And up to 2.8.0 the pages of a job took the job id of their URL (/load?job=,
+/result?job=) into paths as it was, with no shell: '../' in it reached a folder outside
+Results/, outside the data folder too. Remove result of a personal-assembly search
+removed that folder (and the haplotype folders its .Params.txt names, joined the same
+way), Show full log and the status of a personal-assembly search read its log files, and
+the routes to a job's pages read its .Params.txt.
+
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
-normal value still works. The extraction's checks run everywhere (those that read a
-sequence need bedtools); the pages' need the web stack (Dash), and run in the image.
+normal value still works; a job id holding '../' reads, writes and removes nothing
+outside Results/. The extraction's checks run everywhere (those that read a sequence
+need bedtools); the pages' need the web stack (Dash), and run in the image.
 
 Run with:
 
@@ -505,7 +513,8 @@ class TestActiveAnnotation(_WebFolder):
 
 @NEEDS_DASH
 class TestRemoveResult(_WebFolder):
-    """Remove result on a job's status page, which removes the job of its URL."""
+    """Remove result on a job's status page, which removes the job of its URL (and, for a
+    personal-assembly search, the haplotype searches its .Params.txt names)."""
 
     def test_only_a_job_folder_is_removed(self):
         results = os.path.join(self.data, "Results")
@@ -528,6 +537,108 @@ class TestRemoveResult(_WebFolder):
         os.makedirs(os.path.join(self.data, "Results", "job_2.a-b"))
         self.assertEqual(pu.results_job_dir("job_2.a-b"),
                          os.path.join(self.data, "Results", "job_2.a-b"))
+
+    def test_only_the_folders_of_an_assembly_search_are_removed(self):
+        results = os.path.join(self.data, "Results")
+        # asm1's .Params.txt as the Personal assembly tab writes it; asm2's names a
+        # haplotype folder outside Results/
+        for job, paternal in (("asm1_ABC", "asm1_ABC_paternal"),
+                              ("asm2_ABC", "../../outside/victim")):
+            os.makedirs(os.path.join(results, f"{job}_combined"))
+            with open(os.path.join(results, f"{job}_combined", ".Params.txt"), "w") as fh:
+                fh.write(f"1\tGenome_type\tassembly\n2\tPaternal_dir\t{paternal}\n"
+                         f"3\tMaternal_dir\t{job}_maternal\n")
+        for name in ("asm1_ABC_paternal", "asm1_ABC_maternal"):
+            os.makedirs(os.path.join(results, name))
+        os.makedirs(os.path.join(self.outside, "victim"))
+        open(os.path.join(self.outside, "victim", "keep.txt"), "w").close()
+        self.before = self.outside_files()
+        for search in ("?job=../../outside/victim", "?job=X;touch${IFS}MARK_a;#", "?job=..",
+                       "?job=", "?job=nosuchjob_combined"):
+            with self.subTest(search=search), self.assertRaises(PreventUpdate):
+                lp.remove_assembly_result(1, search)
+        self.assertNothingRun()
+        self.assertEqual(lp.remove_assembly_result(1, "?job=asm2_ABC_combined").children,
+                         "Results deleted")
+        self.assertNothingRun()  # its job folder only
+        self.assertEqual(lp.remove_assembly_result(1, "?job=asm1_ABC_combined").children,
+                         "Results deleted")
+        self.assertEqual(os.listdir(results), [])  # the three folders of the search
+
+
+@NEEDS_DASH
+class TestStatusPage(_WebFolder):
+    """A job's status page and the routes to a job's pages, which read the job of their
+    URL: a search's and a personal-assembly search's job folders, and a folder beside the
+    data folder that '../' reaches, holding the files they read."""
+
+    OUT = "../../outside/logs"  # Results/<this> is the folder beside the data folder
+
+    def setUp(self):
+        super().setUp()
+        results = os.path.join(self.data, "Results")
+        for folder, files in (
+            (os.path.join(results, "job1_ABC"),
+             {"log_error.txt": "the job's error\n", "log_verbose.txt": "the job's step\n"}),
+            (os.path.join(results, "asm1_ABC_combined"),
+             {".Params.txt": "1\tGenome_type\tassembly\n",
+              "log.txt": "Running paternal haplotype search\n"}),
+            (os.path.join(self.outside, "logs"),
+             {".Params.txt": "1\tGenome_type\tassembly\n", "log_error.txt": "OUTSIDE\n",
+              "log_verbose.txt": "OUTSIDE\n",
+              "log.txt": "OUTSIDE\nReconciliation complete. Wrote x\n"}),
+        ):
+            os.makedirs(folder)
+            for name, text in files.items():
+                with open(os.path.join(folder, name), "w") as fh:
+                    fh.write(text)
+        p = patch.object(index, "current_working_directory", self.data + os.sep)
+        p.start()
+        self.addCleanup(p.stop)
+        self.before = self.outside_files()
+
+    def test_the_logs_of_a_job_folder_only_are_shown(self):
+        self.assertEqual(
+            lp.show_full_log(1, "?job=job1_ABC", True),
+            (False, "===== log_error.txt =====\nthe job's error\n\n"
+                    "===== log_verbose.txt (tail) =====\nthe job's step"))
+        self.assertEqual(lp.show_assembly_full_log(1, "?job=asm1_ABC_combined", True),
+                         (False, "Running paternal haplotype search"))
+        for search in (f"?job={self.OUT}", "?job=..", "?job=nosuchjob"):
+            with self.subTest(search=search):
+                self.assertEqual(lp.show_full_log(1, search, True),
+                                 (False, "No log files found for this job yet."))
+                self.assertEqual(lp.show_assembly_full_log(1, search, True),
+                                 (False, "No log file found for this job yet."))
+        self.assertNothingRun()
+
+    def test_the_status_of_an_assembly_search_is_read_from_its_folder_only(self):
+        status = lp.refresh_assembly_search(1, "?job=asm1_ABC_combined")
+        self.assertEqual(status[1].children, "Searching paternal haplotype...")
+        self.assertEqual(status[5], "")
+        for search in (f"?job={self.OUT}", "?job=nosuchjob"):
+            with self.subTest(search=search):
+                status = lp.refresh_assembly_search(1, search)
+                self.assertEqual(status[5].children, "The selected result does not exist")
+        self.assertNothingRun()
+
+    def test_the_routes_to_a_job_take_a_job_folder_only(self):
+        def route(path, search):
+            return index.change_page(f"http://127.0.0.1:8080{path}{search}", path, search, "")
+
+        layout, link = route("/load", "?job=asm1_ABC_combined")
+        self.assertTrue(link.endswith("/load?job=asm1_ABC_combined"))
+        self.assertIn("div-assembly-status-report", repr(layout))  # its status page
+        with patch.object(rp, "result_page_assembly", side_effect=lambda job: f"page of {job}"):
+            self.assertEqual(route("/result", "?job=asm1_ABC_combined")[0],
+                             "page of asm1_ABC_combined")
+            for search in (f"?job={self.OUT}", "?job=..", "?job="):
+                with self.subTest(search=search):
+                    self.assertEqual(route("/load", search)[1], "/index")  # no job to show
+                    page, _link = route("/result", search)
+                    self.assertEqual(page.children.children,
+                                     "The selected result does not exist")
+        self.assertNothingRun()
 
 
 SAMPLE_CMD = "S3;touch${IFS}MARK_s;"  # a VCF's sample name; Settings uploads one as it is

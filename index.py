@@ -39,6 +39,7 @@ from pages import (
     contacts_page,
     settings_page,
 )
+from pages.pages_utils import results_job_dir
 
 from dash import Dash
 from dash import Input, Output, State
@@ -63,8 +64,12 @@ def _is_assembly_job(job_id: str) -> bool:
     .Params.txt (written by submit_assembly_search_job) -- same
     substring-check style refresh_search already uses for Ref_comp. Shared
     by both the /load and /result routes below so the check isn't
-    duplicated a third time."""
-    params_path = os.path.join(current_working_directory, "Results", job_id, ".Params.txt")
+    duplicated a third time. The id is the URL's: only a job folder of Results/
+    is read (results_job_dir)."""
+    job_dir = results_job_dir(job_id)
+    if job_dir is None:
+        return False
+    params_path = os.path.join(job_dir, ".Params.txt")
     if not os.path.isfile(params_path):
         return False
     try:
@@ -170,10 +175,9 @@ def change_page(href: str, path: str, search: str, hash_guide: str) -> Tuple:
         if search and "job=" in search:
             job_id = search.split("job=")[-1].split("&")[0].strip()
         # a bare or malformed /load with no real job -> friendly empty state
-        # instead of a misleading "Job submitted" status page
-        if not job_id or not os.path.isdir(
-            os.path.join(current_working_directory, "Results", job_id)
-        ):
+        # instead of a misleading "Job submitted" status page (a job folder of
+        # Results/ only: '../' in the id reached any folder)
+        if results_job_dir(job_id) is None:
             return (load_page.load_page_no_job(), "/index")
         # define url to display on load page to check on job status
         # if online show the webaddress, show the ip address otherwise
