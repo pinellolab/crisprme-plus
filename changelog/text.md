@@ -90,24 +90,25 @@ the Changed entry below; what the entry says of the banner still holds.
 - **A population-level search on an index without the dict-less tiers says where its allele
   frequencies come from, and what `--per-sample` gives there.** On such an index both modes read
   the classic per-sample dictionaries, so a population-level search reports the `AF` the VCF gives
-  too: on the self-test panel above, 198 of its 257 alt rows have a blank MAF. `complete-search`
-  recorded such datasets for a per-sample search only, so the report of a population-level one
-  said AC/AN over the panel (the Allele-frequency basis row, the MAF note, the legend's MAF entry).
-  Its Search mode row, as the banner, advised re-running with `--per-sample` for per-sample
-  carriers, CONFIRMED cis phasing and exact joint allele frequency; the legend said that
-  `--per-sample` computes the exact joint allele frequency and lists the exact cis carriers, and
-  the caption of the top-1000 tables that it resolves the true cis haplotypes and carriers. On
-  such a dataset `--per-sample` names the carriers only, with neither CONFIRMED cis phasing nor a
-  joint allele frequency, and can still report a dense window by its greedy worst-case alignment.
-  `complete-search` now records those datasets (`.untiered_datasets`, `.variant_datasets`) for
-  any variant search, and the web search job, which runs the search script itself, records them
+  too: on the self-test panel above, 198 of its 257 alt rows have a blank MAF. Its report said
+  AC/AN over the panel all the same (the Allele-frequency basis row, the MAF note, the legend's MAF
+  entry), as these texts did whatever the index. The Search mode row, as the banner, advised
+  re-running with `--per-sample` for per-sample carriers, CONFIRMED cis phasing and exact joint
+  allele frequency; the legend said that `--per-sample` computes the exact joint allele frequency
+  and lists the exact cis carriers, and the caption of the top-1000 tables that it resolves the
+  true cis haplotypes and carriers. On such a dataset `--per-sample` names the carriers only, with
+  neither CONFIRMED cis phasing nor a joint allele frequency, and can still report a dense window
+  by its greedy worst-case alignment. `complete-search` now records those datasets
+  (`.untiered_datasets`, `.variant_datasets`) for any variant search, per-sample (the entry above)
+  or population-level, and the web search job, which runs the search script itself, records them
   the same way. The population-level banner and the report's Search mode row say, after their
   `--per-sample` advice, what `--per-sample` gives on those datasets and how to get the tiers; the
   allele-frequency texts say what they say in a per-sample report; the legend's MAF and Observed
-  entries and the caption say what `--per-sample` gives there. With the tiers the banner and the
-  report are as they were, byte for byte. Pre-existing: the allele-frequency texts have read so
-  since 2.4.0, the banner and the Search mode row since 2.5.3, the legend's entries since 2.6.0
-  and the caption since 2.8.0. Covered by `PostProcess/test_generate_report.py`,
+  entries and the caption say what `--per-sample` gives there. With the tiers this change leaves
+  the banner and the report as they were, byte for byte (but for the order of tied rows, which the
+  next entry changes in every report). Pre-existing: the allele-frequency texts have read so since
+  2.4.0, the banner and the Search mode row since 2.5.3, the legend's entries since 2.6.0 and the
+  caption since 2.8.0. Covered by `PostProcess/test_generate_report.py`,
   `PostProcess/test_build_index_only_atomic.py` and `PostProcess/test_web_search_reuse.py`.
 - **Rows of one score keep the table's order in the report's ranked tables and plots, and in the
   results page's plots.** The top-1000 by CRISPR-Bulge (`top1000_crispr_bulge.tsv` and its
