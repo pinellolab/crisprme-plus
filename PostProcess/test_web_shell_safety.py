@@ -44,12 +44,18 @@ each FASTA file of the genome folder, as a chromosome's, into shell commands as 
 and a personal-assembly bundle, imported in Settings, brings its genome folders with the
 names of its archive.
 
+And up to 2.8.0 the results pages' tables wrote the values of a link, a table and a form
+(a guide, a sample's name, a chromosome, positions, counts; Custom Ranking's columns, order
+and thresholds) into their queries of the job's database as they were, where a quote ended
+the text a value was written in and the rest was read as SQL.
+
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
 normal value still works; a job id holding '../' reads, writes and removes nothing
-outside Results/. The extraction's and the post-analysis's checks run everywhere (those
-that read a sequence need bedtools); the pages' need the web stack (Dash), and run in the
-image.
+outside Results/; a value that, written into a query, widened it to every row matches
+what it says once bound to it. The extraction's and the post-analysis's checks run
+everywhere (those that read a sequence need bedtools); the pages' need the web stack
+(Dash), and run in the image.
 
 Run with:
 
@@ -919,6 +925,9 @@ class TestStatusPage(_WebFolder):
 
 
 SAMPLE_CMD = "S3;touch${IFS}MARK_s;"  # a VCF's sample name; Settings uploads one as it is
+# a value that, written into a query of a job's database, ended the text it was written in
+# and matched every row
+WIDEN = "' OR 1=1 OR '"
 
 
 @NEEDS_DASH
@@ -1177,6 +1186,109 @@ class TestResultsPages(_WebFolder):
                 self.assertTrue(read(f"?job={job}"))  # the job's own
                 with self.assertRaises(PreventUpdate):
                     read(f"?job=../../outside/{job}")  # its copy beside the data folder
+        self.assertNothingRun()
+
+    def test_the_sample_and_targets_tables_bind_the_values_of_their_link(self):
+        """The guide and sample of a sample link, and the guide and counts of a Show
+        Targets link, went into the tables' queries of the job's database as written: a
+        quote ended the text they were written in, and the rest was read as SQL. Each
+        crafted value below widened the query to every row (or ended it in an error); bound
+        to the query, it matches what it says: nothing."""
+        for hash_term, rows in ((f"#{GUIDE}-Sample-S1", 2),
+                                (f"#{GUIDE}-Sample-S9%{WIDEN}%", 0),
+                                (f"#G{WIDEN}-Sample-S1", 0)):
+            with self.subTest(hash=hash_term):
+                data, _cols = rp.update_table_sample(0, 10, [], None, f"?job={self.JOB}",
+                                                     hash_term)
+                self.assertEqual(len(data), rows)
+        for hide in ([], ["hide-ref"]):  # (all targets; those of the variants only)
+            for hash_term, rows in ((f"#{GUIDE}newX00", 2), (f"#G{WIDEN}newX00", 0)):
+                with self.subTest(hide=hide, hash=hash_term):
+                    data, _cols = rp.update_table_subset(0, 10, [], None, hide,
+                                                         f"?job={self.JOB}", hash_term)
+                    self.assertEqual(len(data), rows)
+            for hash_term in (f"#{GUIDE}newX0'", f"#{GUIDE}newX'0"):  # the counts: digits
+                with self.subTest(hide=hide, hash=hash_term), self.assertRaises(PreventUpdate):
+                    rp.update_table_subset(0, 10, [], None, hide, f"?job={self.JOB}", hash_term)
+        self.assertNothingRun()
+
+    def test_the_region_table_binds_the_values_of_its_form_and_the_summary_table(self):
+        """Query Genomic Regions: the chromosome and positions typed, and the guide of the
+        summary table's row, went into the query as written."""
+        def rows(guide, query):
+            out, _page = rp.filter_position_table(query, 1, "CFD", f"?job={self.JOB}",
+                                                  [{"row": 0}], [{"Guide": guide}], "1/1")
+            return len(getattr(out[0], "data", None) or [])  # (a table, or "No results")
+
+        self.assertEqual(rows(GUIDE, "chr1,0,2500"), 2)
+        self.assertEqual(rows(GUIDE, "chr1, 0 ,2500 "), 2)
+        self.assertEqual(rows(GUIDE, f"chr1{WIDEN},0,2500"), 0)
+        self.assertEqual(rows(f"G{WIDEN}", "chr1,0,2500"), 0)
+        for query in ("chr1,0,2500 OR 1=1", "chr1,0 OR 1=1,2500"):
+            with self.subTest(query=query), self.assertRaises(PreventUpdate):
+                rows(GUIDE, query)  # (a position is a whole number)
+        self.assertNothingRun()
+
+    def test_a_sample_s_name_is_bound_to_its_table_and_risk_card(self):
+        """A sample's name, as its VCF gives it, went into the queries of the sample's table
+        and Personal Risk Card as written: a quote in it failed them, or widened the card's
+        query to every sample's targets, which the card then refused as more than the
+        sample's count."""
+        job, quoted, widen = "card_ABC", "O'Hara", f"S9%{WIDEN}%"
+        d = self.finished(os.path.join(self.data, "Results", job))
+        with sqlite3.connect(os.path.join(d, f".{job}.db")) as conn:  # a site of O'Hara's
+            conn.execute("INSERT INTO final_table SELECT * FROM final_table LIMIT 1")
+            conn.execute("UPDATE final_table SET " + ", ".join(
+                f'"Variant_samples_({crit})"=?' for crit in CRITERIA)
+                + " WHERE rowid=(SELECT MAX(rowid) FROM final_table)", [quoted] * 3)
+        for crit in ("CFD", "CRISPR-Bulge", "fewest"):
+            with open(os.path.join(d, f"{job}.summary_by_samples.{GUIDE}_{crit}.txt"),
+                      "a") as fh:
+                fh.write(f"{quoted}\tfemale\tPOPA\tSUPX\t1\t1\t1\t0\n"
+                         f"{widen}\tmale\tPOPB\tSUPX\t0\t0\t0\t0\n")
+        for sample, private_sites in ((quoted, 1), (widen, 0)):
+            with self.subTest(sample=sample):
+                data, _cols = rp.update_table_sample(0, 10, [], None, f"?job={job}",
+                                                     f"#{GUIDE}-Sample-{sample}")
+                self.assertEqual(len(data), private_sites)
+                rp.generate_sample_card(1, "CFD", sample, [{"row": 0}], [{"Guide": GUIDE}],
+                                        f"?job={job}")
+                private = os.path.join(d, f"{job}.{sample}.{GUIDE}.private_targets.tsv")
+                self.assertEqual(len(pd.read_csv(private, sep="\t")), private_sites)
+        self.assertNothingRun()
+
+    def test_custom_ranking_queries_only_what_its_form_offers(self):
+        """Custom Ranking's query (query_manager) bound the guide, and wrote the columns it
+        groups by, the order and the thresholds into the query as sent. It takes only what
+        its form offers now, and query_manager binds the thresholds and refuses a column's
+        name that would end its quotes, or an order other than ASC and DESC: no query can
+        bind those."""
+        sel, guides, search = [{"row": 0}], [{"Guide": GUIDE}], f"?job={self.JOB}"
+
+        def ranked(target="CFD", order="Mismatches", second=None, low="0", high="2",
+                   asc="ASC"):
+            _cols, data, _tips, _alert = rp.update_output(
+                1, 0, target, 10, sel, "Target1 :with highest CFD", order, guides, second,
+                low, asc, high, search, False)
+            return [row["Mismatches_(highest_CFD)"] for row in data]
+
+        self.assertEqual(ranked(), [0, 0, 2])  # 0 to 2 mismatches, fewest first
+        self.assertEqual(ranked(low=None, high=None, asc="DESC"), [4, 3, 2, 0, 0])
+        self.assertEqual(ranked(order="CFD_score", second="Mismatches", low="0.5", high="1"),
+                         [3, 0, 0])  # a CFD score of 0.5 to 1, lowest first
+        for form in ({"asc": "ASC LIMIT ?*0+1 OFFSET ? --", "low": None, "high": None},
+                     {"order": 'Mismatches_(highest_CFD)" LIMIT ?*0+1 OFFSET ? --',
+                      "low": None, "high": None},
+                     {"low": "0 AND 9 OR 1"}, {"high": "2 OR 1=1"},
+                     {"second": 'Bulges" --'}, {"target": "other"}):
+            with self.subTest(form=form), self.assertRaises(PreventUpdate):
+                ranked(**form)
+        qm = rp.query_manager
+        self.assertEqual(len(qm.shold("CFD", 1, 0, 10, "Mismatches", None, "0 AND 9 OR 1", "2",
+                                      "ASC", search, GUIDE, self.data)), 0)
+        for order, asc in (('Mismatches" --', "ASC"), ("Mismatches", "ASC LIMIT 1 --")):
+            with self.subTest(order=order, asc=asc), self.assertRaises(ValueError):
+                qm.noshold("CFD", 1, 0, 10, order, None, asc, search, GUIDE, self.data)
         self.assertNothingRun()
 
 

@@ -22,6 +22,22 @@ import sqlite3
 guide_column = "Spacer+PAM"
 
 
+def _column(name):
+    """``name`` back, to be written between double quotes into a query as a column's:
+    one holding a double quote would end the name there and have the rest read as SQL.
+    A column's name cannot be bound to a query as a value is."""
+    if '"' in str(name):
+        raise ValueError(f"Not a column name: {name!r}")
+    return name
+
+
+def _order(asc1):
+    """``asc1`` back, if it is the order ASC or DESC, written into a query as it is."""
+    if asc1 not in ("ASC", "DESC"):
+        raise ValueError(f"Not an order: {asc1!r}")
+    return asc1
+
+
 def shold(
     target,
     n_clicks,
@@ -69,6 +85,8 @@ def shold(
             pass
         radio_order = str(radio_order) + "_(highest_CRISPR_BULGE)"
         orderdrop = str(orderdrop) + "_(highest_CRISPR_BULGE)"
+    # the columns and the order are written into the query, the values bound to it
+    radio_order, orderdrop, asc1 = _column(radio_order), _column(orderdrop), _order(asc1)
 
     # print(radio_order, orderdrop)
 
@@ -80,18 +98,16 @@ def shold(
         #         guide_column, radio_order, sholddrop, radio_order, asc1, orderdrop, asc1), conn, params=param)
         # else:  # min e max
         df = pd.read_sql_query(
-            'SELECT * FROM final_table WHERE "{}"=? AND "{}" BETWEEN {} AND {} ORDER BY "{}" {},"{}" {}  LIMIT ? OFFSET ?'.format(
+            'SELECT * FROM final_table WHERE "{}"=? AND "{}" BETWEEN ? AND ? ORDER BY "{}" {},"{}" {}  LIMIT ? OFFSET ?'.format(
                 guide_column,
                 radio_order,
-                sholddrop,
-                maxdrop,
                 radio_order,
                 asc1,
                 orderdrop,
                 asc1,
             ),
             conn,
-            params=param,
+            params=[guide, sholddrop, maxdrop] + param[1:],
         )
     else:  # ordinamento singolo
         if maxdrop == None:  # min
@@ -100,11 +116,11 @@ def shold(
             #     guide_column, radio_order, sholddrop, radio_order, asc1), conn, params=param)  # ok
         # else:  # min e max
         df = pd.read_sql_query(
-            'SELECT * FROM final_table WHERE "{}"=? AND "{}" BETWEEN {} AND {} ORDER BY "{}" {} LIMIT ? OFFSET ?'.format(
-                guide_column, radio_order, sholddrop, maxdrop, radio_order, asc1
+            'SELECT * FROM final_table WHERE "{}"=? AND "{}" BETWEEN ? AND ? ORDER BY "{}" {} LIMIT ? OFFSET ?'.format(
+                guide_column, radio_order, radio_order, asc1
             ),
             conn,
-            params=param,
+            params=[guide, sholddrop, maxdrop] + param[1:],
         )  # ok
 
     conn.commit()
@@ -157,6 +173,8 @@ def noshold(
             pass
         radio_order = str(radio_order) + "_(highest_CRISPR_BULGE)"
         orderdrop = str(orderdrop) + "_(highest_CRISPR_BULGE)"
+    # the columns and the order are written into the query, the values bound to it
+    radio_order, orderdrop, asc1 = _column(radio_order), _column(orderdrop), _order(asc1)
 
     # print(radio_order, orderdrop)
 

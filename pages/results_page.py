@@ -3711,17 +3711,15 @@ def global_get_sample_targets(
     c = conn.cursor()
     filter_criterion = read_json(job_id)  # recover filter criterion selected
     query_cols = get_query_column(filter_criterion)
-    # query the db
+    # query the db (the guide and sample are the link's, which a client can set to any
+    # text: they are bound to the query, not written into it)
     result = pd.read_sql_query(
-        "SELECT * FROM final_table WHERE \"{}\"='{}' AND \"{}\" LIKE '%{}%' LIMIT {} OFFSET {}".format(
+        "SELECT * FROM final_table WHERE \"{}\"=? AND \"{}\" LIKE ? LIMIT ? OFFSET ?".format(
             GUIDE_COLUMN,
-            guide,
             query_cols["samples"],
-            sample,
-            PAGE_SIZE,
-            page * PAGE_SIZE,
         ),
         conn,
+        params=[guide, f"%{sample}%", PAGE_SIZE, page * PAGE_SIZE],
     )
     return result
 
@@ -4164,6 +4162,8 @@ def update_table_subset(
     guide = hash_guide[1 : hash_guide.find("new")]
     mms = hash_guide[-1:]
     bulge_s = hash_guide[-2:-1]
+    if not re.fullmatch(r"[0-9]", mms) or not re.fullmatch(r"[0-9]", bulge_s):
+        raise PreventUpdate  # (the link's: a digit each, as its table writes them)
     if "DNA" in hash_guide:
         bulge_t = "DNA"
     elif "RNA" in hash_guide:
@@ -4437,22 +4437,18 @@ def global_store_subset_no_ref(
     if filter_criterion not in FILTERING_CRITERIA:
         raise ValueError(f"Forbidden filtering criterion ({filter_criterion})")
     query_cols = get_query_column(filter_criterion)
-    # perform query on db
+    # perform query on db (the guide and counts are the link's, which a client can set
+    # to any text: they are bound to the query, not written into it)
     result = pd.read_sql_query(
-        'SELECT * FROM final_table WHERE "{}"=\'{}\' AND "{}"=\'{}\' AND "{}"={} AND "{}"={} AND "{}"<>\'NA\' LIMIT {} OFFSET {}'.format(
+        'SELECT * FROM final_table WHERE "{}"=? AND "{}"=? AND "{}"=? AND "{}"=? AND "{}"<>\'NA\' LIMIT ? OFFSET ?'.format(
             GUIDE_COLUMN,
-            guide,
             query_cols["bul_type"],
-            bulge_t,
             query_cols["bul"],
-            bulge_s,
             query_cols["mm"],
-            mms,
             query_cols["samples"],
-            PAGE_SIZE,
-            page * PAGE_SIZE,
         ),
         conn,
+        params=[guide, bulge_t, int(bulge_s), int(mms), PAGE_SIZE, page * PAGE_SIZE],
     )
     return result
 
@@ -4510,21 +4506,17 @@ def global_store_subset(
     if not filter_criterion in FILTERING_CRITERIA:
         raise ValueError(f"Forbidden filtering criterion ({filter_criterion})")
     query_cols = get_query_column(filter_criterion)
-    # perform query on db
+    # perform query on db (the guide and counts are the link's, which a client can set
+    # to any text: they are bound to the query, not written into it)
     result = pd.read_sql_query(
-        'SELECT * FROM final_table WHERE "{}"=\'{}\' AND "{}"=\'{}\' AND "{}"={} AND "{}"={} LIMIT {} OFFSET {}'.format(
+        'SELECT * FROM final_table WHERE "{}"=? AND "{}"=? AND "{}"=? AND "{}"=? LIMIT ? OFFSET ?'.format(
             GUIDE_COLUMN,
-            guide,
             query_cols["bul_type"],
-            bulge_t,
             query_cols["bul"],
-            bulge_s,
             query_cols["mm"],
-            mms,
-            PAGE_SIZE,
-            page * PAGE_SIZE,
         ),
         conn,
+        params=[guide, bulge_t, int(bulge_s), int(mms), PAGE_SIZE, page * PAGE_SIZE],
     )
     # add mismatches and bulges
     targets_with_mm_bul = os.path.join(
@@ -5177,6 +5169,8 @@ def filter_position_table(
     end = filter_q[2]
     if end == "None":
         raise PreventUpdate  # invalid stop
+    if not re.fullmatch(r"[0-9]+", start.strip()) or not re.fullmatch(r"[0-9]+", end.strip()):
+        raise PreventUpdate  # (a position is a whole number, compared as one)
     current_page = int(current_page.split("/")[0])
     job_id = search.split("=")[-1]
     if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
@@ -5190,23 +5184,21 @@ def filter_position_table(
     # connect db with sqlite3
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    query = 'SELECT * FROM final_table WHERE "{}"=\'{}\' AND "{}">={} AND "{}"<={} AND "{}"=\'{}\''
+    query = 'SELECT * FROM final_table WHERE "{}"=? AND "{}">=? AND "{}"<=? AND "{}"=?'
     # recover filtering criterion
     filter_criterion = read_json(job_id)
     query_cols = get_query_column(filter_criterion)  # recover query columns
-    # query the db
+    # query the db (the guide, positions and chromosome are the form's and the table's,
+    # which a client can set to any text: they are bound to the query, not written into it)
     result = pd.read_sql_query(
         query.format(
             GUIDE_COLUMN,
-            guide,
             query_cols["start"],
-            start,
             query_cols["start"],
-            end,
             CHR_COLUMN,
-            chrom,
         ),
         conn,
+        params=[guide, int(start), int(end), chrom],
     )
     conn.commit()
     conn.close()  # close db connection
@@ -6120,12 +6112,15 @@ def generate_sample_card(
             query_cols = get_query_column(filter_criterion)  # get query columns
             # recover colname for sample column and filtering/sorting criterion
             samples_cname, criterion_cname = query_cols["samples"], query_cols["sort"]
-            # define and perform sql database to retrieve sample targets
+            # define and perform sql database to retrieve sample targets (the guide is the
+            # table's and the sample's name a VCF's: bound to the query, not written into it)
             sqlquery = (
-                f"SELECT * FROM final_table WHERE \"{GUIDE_COLUMN}\"='{guide}' "
-                f"AND \"{samples_cname}\" LIKE '%{sample}%'"
+                f"SELECT * FROM final_table WHERE \"{GUIDE_COLUMN}\"=? "
+                f"AND \"{samples_cname}\" LIKE ?"
             )
-            targets_personal = pd.read_sql_query(sqlquery, conn)  # perform query
+            targets_personal = pd.read_sql_query(  # perform query
+                sqlquery, conn, params=[guide, f"%{sample}%"]
+            )
         except sqlite3.Error as e:
             raise sqlite3.Error(f"Database error ({db_path})") from e
         except KeyError as e:
@@ -7681,6 +7676,11 @@ def update_table(
 # ------------------------------------------------------------------------------
 # Callbacks for querying part
 
+# The columns Custom Ranking groups by, first and second, as set_columns_options and
+# set_display_children offer them
+RANKING_ORDERS = ("Mismatches", "Bulges", "Mismatches+bulges", "CFD_score", "CFD_risk_score")
+RANKING_SECOND_ORDERS = ("Mismatches", "Bulges", "Mismatches+bulges", "CFD", "CFD_score")
+
 
 # Return the table with the query's result
 @app.callback(
@@ -7784,6 +7784,19 @@ def update_output(
     # query_manager reads the job of the URL's search after "?job=": a job folder of
     # Results/ only
     if results_job_dir(url[5:]) is None:
+        raise PreventUpdate
+    # query_manager writes the columns and the order into its query (it binds the
+    # thresholds and the guide), and a client can send any: only what the form offers
+    if (
+        filter_target_value not in FILTERING_CRITERIA
+        or radio_order not in RANKING_ORDERS
+        or order_drop not in RANKING_SECOND_ORDERS + (None,)
+        or asc1 not in ("ASC", "DESC", None)
+        or any(
+            value is not None and not re.fullmatch(r"[0-9]+(\.[0-9]+)?", str(value))
+            for value in (thresh_drop, maxdrop)
+        )
+    ):
         raise PreventUpdate
     # recover guide
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]

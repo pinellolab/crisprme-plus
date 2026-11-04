@@ -212,3 +212,15 @@ and the Settings and personal-assembly entries add tests to `test_settings_progr
   genome or bundle is searched as before. Pre-existing (bundles since 2.6.0). Covered by
   `PostProcess/test_personal_assembly.py`, `PostProcess/test_settings_progress.py` and
   `PostProcess/test_web_shell_safety.py`.
+- **The results pages' tables bind the values of a link, a table and a form to their queries of
+  a search's database.** The guide and sample of a results link, the guide and numbers of
+  mismatches and bulges of a Show Targets link, the chromosome and positions typed in Query
+  Genomic Regions, the guide of the summary table's row and a sample's name, as its VCF gives
+  it, went as they were into the SQL that reads a search's results, and Custom Ranking wrote the
+  columns it groups by, the order and the thresholds of its form into its SQL too: a quote in
+  such a value ended the text it was written in, and the rest was read as SQL, which could widen
+  the query, on the search's own database, or end it in an error. Each value is now bound to
+  the query; Custom Ranking takes only the columns, orders and thresholds its form offers, and
+  the positions of a region and the numbers of a link are whole numbers. A sample whose name
+  holds a quote, whose table and Personal Risk Card failed, now has them. Pre-existing. Covered
+  by `PostProcess/test_web_shell_safety.py`.
