@@ -44,7 +44,8 @@ names outside its folder.
 And up to 2.8.0 Remove result removed the job of its URL whatever its state (finished,
 running or queued; through a personal-assembly search's button, a search that is none),
 though its status page offers it only for a search that failed, and a personal-assembly
-search that failed or is reconciled: it removes only a job its status page offers it for.
+search that failed or is reconciled: it removes only a job its status page offers it for,
+and a personal-assembly search's page offers it, as a search's, for one that failed.
 
 And up to 2.8.0 the post-analysis of a search (pool_post_analisi_snp.py) took the name of
 each FASTA file of the genome folder, as a chromosome's, into shell commands as it was,
@@ -1002,7 +1003,7 @@ _SEARCH_STATES = {
     "queued": dict(_SEARCH_PARAMS, **{"queue.txt": ""}),
 }
 # a personal-assembly search's combined folder in each state of its status page
-# (refresh_assembly_search), which offers Remove result once it failed or is reconciled
+# (refresh_assembly_search), which offers Remove result once it failed, as a search's does
 _ASSEMBLY_STATES = {
     "failed": "Running paternal haplotype search\nError: the search failed\n",
     "reconciled": ("Running paternal haplotype search\nRunning maternal haplotype search\n"
@@ -1025,11 +1026,11 @@ def _job_folder(folder, files):
 class TestRemoveResult(_WebFolder):
     """Remove result on a job's status page, which removes the job of its URL (and, for a
     personal-assembly search, the haplotype searches its .Params.txt names). The page offers
-    it for a search that failed, and for a personal-assembly search that failed or is
-    reconciled; the id is the URL's, which a client can set to any job's, and the job was
-    removed whatever its state: a finished, running or queued search, and through the
-    personal-assembly button a search that is no personal-assembly search. Only a job the
-    page offers it for is removed."""
+    it for a search that failed, a personal-assembly search's too (a reconciled one's page
+    offered it, and anyone with that finished search's link removed it); the id is the
+    URL's, which a client can set to any job's, and the job was removed whatever its state:
+    a finished, running or queued search, and through the personal-assembly button a search
+    that is no personal-assembly search. Only a job the page offers it for is removed."""
 
     def test_only_a_job_folder_is_removed(self):
         results = os.path.join(self.data, "Results")
@@ -1079,8 +1080,11 @@ class TestRemoveResult(_WebFolder):
                 _job_folder(os.path.join(results, f"{job}_combined"), files)
                 for hap in ("paternal", "maternal"):
                     _job_folder(os.path.join(results, f"{job}_{hap}"), {"log.txt": ""})
-                offered = not lp.refresh_assembly_search(1, f"?job={job}_combined")[-1]
-                self.assertEqual(offered, state in ("failed", "reconciled"))
+                status = lp.refresh_assembly_search(1, f"?job={job}_combined")
+                offered = not status[-1]
+                # (a reconciled search's page offers View Results, as a finished search's)
+                self.assertEqual((offered, status[0] == {"visibility": "visible"}),
+                                 (state == "failed", state == "reconciled"))
                 if offered:
                     self.assertEqual(lp.remove_assembly_result(
                         1, f"?job={job}_combined").children, "Results deleted")
@@ -1102,9 +1106,9 @@ class TestRemoveResult(_WebFolder):
     def test_only_the_folders_of_an_assembly_search_are_removed(self):
         results = os.path.join(self.data, "Results")
         # asm1's .Params.txt as the Personal assembly tab writes it; asm2's names a
-        # haplotype folder outside Results/ (one reconciled, one failed: their status
-        # pages offer Remove result)
-        for job, paternal, state in (("asm1_ABC", "asm1_ABC_paternal", "reconciled"),
+        # haplotype folder outside Results/ (both failed: their status pages offer Remove
+        # result)
+        for job, paternal, state in (("asm1_ABC", "asm1_ABC_paternal", "failed"),
                                      ("asm2_ABC", "../../outside/victim", "failed")):
             _job_folder(os.path.join(results, f"{job}_combined"), {
                 ".Params.txt": f"1\tGenome_type\tassembly\n2\tPaternal_dir\t{paternal}\n"

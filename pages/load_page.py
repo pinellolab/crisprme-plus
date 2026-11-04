@@ -91,8 +91,9 @@ def is_assembly_folder(job_directory: str) -> bool:
 
 def _assembly_search_ended(current_log: str) -> Tuple[bool, bool]:
     """(failed, reconciled) of a personal-assembly search, from its log.txt, as its
-    status page says (refresh_assembly_search): the page offers Remove result once
-    either is true, and remove_assembly_result removes no other search.
+    status page says (refresh_assembly_search): the page offers Remove result for a
+    search that failed and is not reconciled, as a search's page offers it for one that
+    failed only (refresh_search), and remove_assembly_result removes no other search.
 
     Reconciled: assembly_search() prints "Reconciliation complete. Wrote" only after
     combined.to_csv() succeeds (crisprme.py:2653-2654), so seeing it is itself proof
@@ -564,6 +565,7 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
             False,
         )
     if reconcile_done:
+        # finished: View Results, and no Remove result, as for a finished search
         return (
             {"visibility": "visible"},
             paternal_status,
@@ -571,7 +573,7 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
             reconcile_status,
             os.path.join(URL, f"result?job={job_id}"),
             "",
-            False,
+            True,
         )
     return (
         {"visibility": "hidden"},
@@ -590,7 +592,7 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
     [State("url", "search")],
 )
 def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
-    """Deletes all three sibling directories a completed assembly-search job
+    """Deletes all three sibling directories a failed assembly-search job
     left behind (<id>_paternal, _maternal, _combined) -- not just the single
     <id>_combined directory named in the URL. Reads Paternal_dir/
     Maternal_dir from .Params.txt (written explicitly at submit time by
@@ -602,7 +604,7 @@ def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
     # folder: only job folders of Results/ are removed, as by remove_result ('../' in
     # either reached any folder, outside the data folder too), and only those of a
     # personal-assembly search its status page offers Remove result for, one that failed
-    # or is reconciled (refresh_assembly_search): the id can be any job's
+    # (refresh_assembly_search): the id can be any job's, a finished one's too
     combined_dir = results_job_dir(dir_name.split("=")[-1])
     if combined_dir is None or not is_assembly_folder(combined_dir):
         raise PreventUpdate
@@ -611,7 +613,7 @@ def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
             failed, reconciled = _assembly_search_ended(handle_log.read())
     except OSError:  # no log yet: queued
         raise PreventUpdate
-    if not (failed or reconciled):  # running
+    if not failed or reconciled:  # running, or finished
         raise PreventUpdate
     dirs_to_remove = [combined_dir]
     params_path = os.path.join(combined_dir, PARAMS_FILE)
