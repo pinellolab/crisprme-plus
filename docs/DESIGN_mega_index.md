@@ -55,15 +55,15 @@ AN 1,071,324; Aug 2026 snapshot).
 
 ### 2. SNP registry (INFO-AF) — CODE DONE + tested + validated on real chr22
 `PostProcess/tier0_registry.py::compile_registry_from_info_af` (+ helper
-`_hwe_counts_from_af`) reuses `_write_registry` → **binary format byte-identical**
+`_af_only_counts`) reuses `_write_registry` → **binary format byte-identical**
 to `compile_registry` (read by the shipped `RegistryReader`, no reader change).
 Per site: each dataset → one db-level group with `AC=round(AF*AN_nom)`,
 `AN=AN_nom` (AF exact to ±0.5/AN — <8e-5 for 1000G, <3e-7 for gnomAD); the GLOBAL
 group carries **`AF_max`** over the pooled nominal panel. Individual carrier/hom
-counts do not exist for aggregate data → **Hardy-Weinberg expectations** from AF
-(`n_carrier=N(1-(1-af)²)`, `n_hom=N·af²`), bounded + self-consistent; **AF is
-exact, carrier/hom are estimates** (documented; flag for user review). `aggregation`
-tag = `"info_af"`, taxonomy carries `aggregate_af_only: True`.
+counts do not exist for aggregate data, and none is estimated: they are stored as
+**0** (`n_called` = the nominal cohort size); **AF is exact** (see *Carrier/hom
+presentation* below). `aggregation` tag = `"info_af"`, taxonomy carries
+`aggregate_af_only: True`.
 
 Driver: `PostProcess/build_mega_registry.py` — dependency-free gzip VCF reader →
 `reg_<chrom>.bin/.idx`. **SNP-only**: the Tier-0 registry packs single-char
@@ -80,7 +80,7 @@ HGDP 0.065 / TOPMed 0.075 / global=AF_max 0.075.
 
 Tests: `test_registry_from_info_af.py` (9), `test_build_mega_registry.py` (4) —
 AF round-trip, GLOBAL=AF_max, sparsity, multiallelic, tiny-AF floor, SNP/indel
-split, HWE bounds, RegistryReader round-trip. Existing `test_tier0_registry` (20) +
+split, carrier/hom 0, RegistryReader round-trip. Existing `test_tier0_registry` (20) +
 `test_tier0_compile` (14) still green.
 
 ### 3. Enriched genome + fake-indel contigs — DE-RISKED (sites-only OK)
@@ -138,8 +138,10 @@ from a **separate sites-only sidecar**:
 ## Carrier/hom presentation (decided: AF-only)
 Aggregate data has no genotypes, so per-individual carrier/hom counts are **0** in
 the registry (never a fabricated Hardy-Weinberg estimate). The taxonomy sets
-`aggregate_af_only: True`; the report must render carrier/hom as N/A for these groups
-and show only AF + AF_max (report-side branch — pending, part of report integration).
+`aggregate_af_only: True` and the manifest `aggregation: "info_af"`, from which the
+population-summary companion (`*.population_summary.tsv`) renders every carrier/hom field
+as NA and keeps AF + AF_max (`test_aggregate_carrier_na.py`); the report shows no
+carrier/hom count from the registry. `targets-scoring`'s carrier overlay prints the stored 0.
 
 ## Other notes
 - **No pooled global AF** (ΣAC/ΣAN not computable: gnomAD AF-only, TOPMed AN=0,
@@ -162,7 +164,7 @@ and show only AF + AF_max (report-side branch — pending, part of report integr
   sampled AFs round-trip on **every** chromosome — ALL PASS.
 
 ## Files
-- `PostProcess/tier0_registry.py` — `compile_registry_from_info_af`, `_hwe_counts_from_af`
+- `PostProcess/tier0_registry.py` — `compile_registry_from_info_af`, `_af_only_counts`
 - `PostProcess/build_mega_registry.py` — merged-VCF → registry driver (CLI + `build()`)
 - `PostProcess/test_registry_from_info_af.py`, `test_build_mega_registry.py`
 - ml007: `/srv/local/lp698/mega_gw.sh` (GW merge), `mega_gw/` (outputs), `mega_dryrun/` (chr22 proof)

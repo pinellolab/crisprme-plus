@@ -3,10 +3,10 @@
 **For the merge, not for the changelog.** The second Fixed entry completes the Changed entry
 "`--per-sample` on an index without the dict-less tiers now says what it reports" (the banner,
 new in 2.8.1), and can go right after it instead. That banner now also gives the known limit of
-the Changed entry below; what the entry says of the banner still holds. Three references name an
-entry by its place: the second Fixed entry's "the last entry below" and the third's "the next
-entry" are the entry on tied rows, the last of this fragment, and the third's "the entry above"
-is the second; keep them true where the entries land.
+the first Changed entry below; what the entry says of the banner still holds. Three references
+name an entry by its place: the second Fixed entry's "the last entry below" and the third's "the
+next entry" are the entry on tied rows, the last of this fragment, and the third's "the entry
+above" is the second; keep them true where the entries land.
 
 ### Changed
 
@@ -39,6 +39,19 @@ is the second; keep them true where the entries land.
   Results are unchanged. Pre-existing: 2.8.0 behaves the same; it is fixed in the next release.
   Covered by `PostProcess/test_build_index_only_atomic.py` (the banner) and
   `PostProcess/test_generate_report.py` (the report).
+- **METHODS section 2 says what a sites-only panel's registry holds for carriers and
+  homozygotes.** It said that the carrier and homozygote counts of the mega index are reported as
+  Hardy–Weinberg expectations from the allele frequency, flagged as estimates, and
+  `docs/DESIGN_mega_index.md` and `seq_script/merge_panels/README.md` said so too. None is
+  estimated: `compile_registry_from_info_af` (`build_mega_registry.py`) stores 0 for both, beside
+  the exact allele frequencies, and marks the registry as aggregate (`aggregation` `info_af`, and
+  `aggregate_af_only` for each dataset), from which the population-summary companion gives them
+  as NA; the report shows no carrier or homozygote count from the registry, and the carrier
+  overlay of `targets-scoring` prints the stored 0. METHODS sections 2 and 7, the two docs and the
+  README's `targets-scoring` section now say so (the overlay gives each variant's carrier count
+  over the panel and each dataset's highest allele frequency, not a carrier count per dataset, as
+  the README said). The code is unchanged: it has stored 0 since the mega index came, in 2.5.2,
+  whose METHODS already said otherwise. Covered by `PostProcess/test_registry_from_info_af.py`.
 
 ### Fixed
 

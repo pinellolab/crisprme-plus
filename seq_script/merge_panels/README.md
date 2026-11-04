@@ -249,5 +249,6 @@ Then the hybrid index assembly (enrich via `build-index-only` **without**
 - **Indel per-dataset AF absent in v1** (SNP-only registry). Indel off-targets are
   still discovered via fake-indel contigs, just un-annotated. Fast-follow: a
   sites-only indel-AF store.
-- **Carrier/hom counts are HWE expectations** from AF (AF itself is exact) — the
-  registry taxonomy sets `aggregate_af_only: True` so the report can mark them.
+- **Carrier/hom counts are not estimated**: the registry stores 0 for both (AF itself is
+  exact), and its taxonomy sets `aggregate_af_only: True` (manifest `aggregation: "info_af"`),
+  so the population-summary companion renders them NA.

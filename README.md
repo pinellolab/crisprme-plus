@@ -2151,10 +2151,12 @@ position). CFD still cannot *rank* bulges; use the CRISPR-Bulge column for those
 (see `docs/offtarget_risk_summary_METHODS.md` §3).
 
 With `--index-path` pointing at an installed variant index, each site also gets a
-**variant carrier overlay**: the variants overlapping its protospacer+PAM window
-and, per population dataset, their allele frequency and carrier count — i.e. in how
-many individuals the site is polymorphic (read from the index's
-`Dictionaries/registry_<vcf>` tier).
+**variant carrier overlay**: the variants overlapping its protospacer+PAM window, each
+with its allele frequency and carrier count over the panel (how many individuals carry
+it), the highest frequency and carrier count among them, and the highest allele frequency
+in each population dataset (read from the index's `Dictionaries/registry_<vcf>` tier). A
+sites-only index (`mega`) has no genotypes: its registry stores 0 carriers, so the carrier
+count reads 0 there.
 
 Usage example (Cas-OFFinder output, with the carrier overlay):
 

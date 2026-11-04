@@ -281,12 +281,15 @@ database group with allele count `AC = round(AF · AN_nom)` and `AN = AN_nom` (t
 the source's nominal sample size — so the reported allele frequency reproduces the
 source AF exactly, to within `0.5/AN`, and the reported AN is the source's true
 cohort size), and the GLOBAL group carries `AF_max`. Per-individual carrier and
-homozygote counts do not exist for aggregate data, so they are reported as
-Hardy–Weinberg expectations from the allele frequency (the frequency itself is exact;
-carrier/hom are flagged as estimates). The Tier-0 registry stores SNPs only (single-base
-ref/alt); indels (~24 % of merged sites) are surfaced as off-targets through the
-fake-indel genome and **are** per-dataset frequency-annotated via a separate `indel_af`
-sidecar (per-dataset `AF_<dataset>` + `AF_max`), which the report reads for the mega panel.
+homozygote counts do not exist for aggregate data, and none is estimated: the registry
+stores 0 for both (the frequency itself is exact), and its manifest marks the panel as
+aggregate (`aggregation` `info_af`, and `aggregate_af_only` for each dataset), so the
+population-summary companion gives them as NA, not 0 (§7), while `targets-scoring`'s
+carrier overlay prints the stored 0 as the carrier count. The Tier-0 registry stores SNPs
+only (single-base ref/alt); indels (~24 % of merged sites) are surfaced as off-targets
+through the fake-indel genome and **are** per-dataset frequency-annotated via a separate
+`indel_af` sidecar (per-dataset `AF_<dataset>` + `AF_max`), which the report reads for the
+mega panel.
 
 The two modes are therefore complementary: the genotyped panel gives phased,
 cis-capable frequencies over a curated sample set; the mega gives one-scan,
@@ -926,9 +929,10 @@ variants, which is blank when no variant of the row has one. No floor is applied
 frequency below 1×10⁻⁵ is reported as it is, and the plots, whose log scale is the site's
 rank, use a frequency only to size the points. For an **aggregate (sites-only) panel** (e.g.
 the all-source mega index, §2), only allele frequencies exist — there are no per-individual
-genotypes — so carrier and homozygote frequencies are rendered **NA** rather than
-fabricated, and a per-dataset **`indel_af.tsv`** companion carries indel allele
-frequencies by source alongside the SNP+indel co-occurrence table.
+genotypes — so no carrier or homozygote count is estimated: the registry holds 0 for both
+(§2), which the population-summary companion (`*.population_summary.tsv`, kept with
+`--keep-intermediates`) gives as **NA**, and a per-dataset **`indel_af.tsv`** companion
+carries indel allele frequencies by source alongside the SNP+indel co-occurrence table.
 
 ## 8. Off-target scoring, assumptions and limitations
 
