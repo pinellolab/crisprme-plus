@@ -11,14 +11,18 @@ import io
 import json
 import os
 import shutil
+import stat
 import sys
 import tarfile
 import tempfile
 import unittest
+import warnings
 import zipfile
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import personal_assembly as pa  # noqa: E402
+import safe_tar  # noqa: E402
 
 
 def _make_haplotype(cwd, individual, hap, acc, n_contigs=3):
@@ -224,6 +228,75 @@ class TestBundleImport(unittest.TestCase):
         # importing into the SAME cwd (already has HG01255) must refuse
         with self.assertRaises(ValueError):
             pa.import_archive(arc, self.cwd)
+
+    # the modes a bundle's archive gives its members (by path in the bundle; "" is its
+    # folder): the folder setgid, sticky and writable by all, a FASTA setgid, a file setuid
+    MODES = {"": 0o3777, "paternal/genome/chr1.fa": 0o2775, "tool": 0o4755}
+
+    def test_files_go_in_with_safe_modes_and_none_of_the_archive_s_owners(self):
+        # tarfile gave each file the mode its member has, setuid and setgid too, and, run
+        # as root (as the Docker image runs the web app, whose data folder is mounted from
+        # the host), the owner it names: a bundle put a setuid file of any owner there
+        src = pa.individual_dir(self.cwd, "HG01255")
+        with open(os.path.join(src, "tool"), "w") as fh:
+            fh.write("#!/bin/sh\n")
+
+        def owned(info):  # (each member owned by another user, 1234)
+            info.mode = self.MODES.get(info.name.partition("/")[2], info.mode)
+            info.uid = info.gid = 1234
+            info.uname = info.gname = ""
+            return info
+
+        arc = os.path.join(self.cwd, "modes.tar.gz")
+        with tarfile.open(arc, "w:gz") as t:
+            t.add(src, arcname="HG01255", filter=owned)
+        umask = os.umask(0)  # (the 'data' filter makes a folder with the mode umask gives)
+        os.umask(umask)
+        for fallback in (False, True):  # (True: Python before 3.11.4, with no 'data' filter)
+            with self.subTest(fallback=fallback):
+                dest = tempfile.mkdtemp()
+                self.addCleanup(shutil.rmtree, dest, ignore_errors=True)
+                owners = []
+                record = lambda path, uid, gid, *a, **kw: owners.append((path, uid, gid))  # noqa: E731
+                with mock.patch("os.geteuid", return_value=0), \
+                        mock.patch("os.chown", record), mock.patch("os.lchown", record), \
+                        mock.patch.object(safe_tar, "_DATA_FILTER",
+                                          None if fallback else safe_tar._DATA_FILTER), \
+                        warnings.catch_warnings():
+                    warnings.simplefilter("ignore", DeprecationWarning)
+                    self.assertEqual(pa.import_archive(arc, dest), "HG01255")
+                self.assertTrue(pa.resolve(dest, "HG01255")["complete"])
+                root = pa.individual_dir(dest, "HG01255")
+                modes = {os.path.relpath(path, root): stat.S_IMODE(os.stat(path).st_mode)
+                         for path in [root] + [os.path.join(top, name)
+                                               for top, dirs, files in os.walk(root)
+                                               for name in dirs + files]}
+                self.assertEqual((modes.pop("."), modes.pop("paternal/genome/chr1.fa"),
+                                  modes.pop("tool")),
+                                 (0o755 if fallback else 0o777 & ~umask, 0o755, 0o755))
+                self.assertEqual({path: oct(m) for path, m in modes.items() if m & 0o7022}, {})
+                self.assertEqual([o for o in owners if o[1:] != (-1, -1)], [])
+
+    def test_a_zip_s_files_go_in_with_no_mode_of_the_archive_s(self):
+        # zipfile sets no mode bits (nor an owner, which a zip does not hold): as before
+        src = pa.individual_dir(self.cwd, "HG01255")
+        arc = os.path.join(self.cwd, "modes.zip")
+        with zipfile.ZipFile(arc, "w") as z:
+            for top, _dirs, files in os.walk(src):
+                for name in files:
+                    full = os.path.join(top, name)
+                    info = zipfile.ZipInfo(os.path.join("HG01255", os.path.relpath(full, src)))
+                    info.external_attr = (stat.S_IFREG | 0o4755) << 16
+                    with open(full, "rb") as fh:
+                        z.writestr(info, fh.read())
+        dest = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, dest, ignore_errors=True)
+        self.assertEqual(pa.import_archive(arc, dest), "HG01255")
+        self.assertTrue(pa.resolve(dest, "HG01255")["complete"])
+        root = pa.individual_dir(dest, "HG01255")
+        self.assertEqual([os.path.join(top, name) for top, _dirs, files in os.walk(root)
+                          for name in files
+                          if os.stat(os.path.join(top, name)).st_mode & 0o7022], [])
 
 
 class TestBundlePathsStayInsideIt(unittest.TestCase):

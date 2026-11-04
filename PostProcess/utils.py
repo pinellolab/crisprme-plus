@@ -40,6 +40,8 @@ import sys
 import os
 import shutil
 
+import safe_tar
+
 CRISPRME_DIRS = [
     "Genomes",
     "Results",
@@ -457,11 +459,12 @@ def untar(fname_tar_gz: str, dest: str, outdir: Optional[str] = "") -> str:
         with gzip.open(fname_tar_gz, mode="rb") as fin:
             with tarfile.open(fileobj=fin, mode="r") as tar:  # type: ignore
                 # vet every member first: a bad archive is refused before
-                # anything is extracted (a ValueError, not the IOError below)
+                # anything is extracted (a ValueError, not the IOError below);
+                # then each goes in with safe modes, owned by this user (safe_tar)
                 err = _unsafe_tar_member(tar, dest)
                 if err:
                     raise ValueError(f"refusing {os.path.basename(fname_tar_gz)}: {err}")
-                tar.extractall(dest)
+                safe_tar.extract(tar, dest)
     except IOError as e:
         raise IOError(f"An error occurred while decompressing {fname_tar_gz}") from e
     outdir = os.path.join(dest, outdir) if outdir else dest

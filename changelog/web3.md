@@ -273,3 +273,16 @@ and the Settings, personal-assembly and History entries add tests to `test_setti
   the four now asks for the password again, and `CRISPRME_SMTP_PSW` is used with the default
   server (`smtp.gmail.com`) only (`docs/crisprme_web_interface_user_guide.md`). Pre-existing,
   since 2.2.0. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The archives the web app unpacks go in with safe modes, owned by the user unpacking
+  them.** A genome `.tar.gz` uploaded in Settings or fetched from its Direct URL, a
+  personal-assembly bundle, and a downloaded index, genotype store or build-inputs kit were
+  unpacked with the mode bits and the owner each member of the archive gives: a setuid or setgid
+  file, and, where the web app runs as root (the Docker image does), any owner the archive
+  names, went into the data folder, which `docker run -v` mounts from the host, where a setuid
+  file runs with its owner's rights. Each file now goes in with no setuid, setgid or sticky bit
+  and no write for others than its owner, owned by the user unpacking it (tarfile's `data`
+  filter, or the same done by hand on a Python before 3.11.4), and a member refused before (an
+  absolute or `..` path, a link, a device, a FIFO) is still refused. A zip archive keeps no mode
+  or owner when Python unpacks it, as before. Pre-existing. Covered by
+  `PostProcess/test_settings_progress.py`, `PostProcess/test_genome_layout.py`,
+  `PostProcess/test_personal_assembly.py` and `PostProcess/test_index_bundle.py`.

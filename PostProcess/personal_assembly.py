@@ -48,6 +48,8 @@ import tarfile
 import zipfile
 from typing import Dict, List, Optional
 
+import safe_tar  # (PostProcess/, the standard library only)
+
 ASSEMBLIES_DIR = "Assemblies"       # top-level folder holding one dir per individual
 METADATA_NAME = "metadata.json"     # the single source of truth inside each individual dir
 BUNDLE_FORMAT = "crisprme-personal-assembly"
@@ -459,8 +461,13 @@ def import_archive(archive_path: str, cwd: str) -> str:
                 target = os.path.realpath(os.path.join(staging, n))
                 if target != staging_real and not target.startswith(staging_real + os.sep):
                     raise ValueError(f"archive member escapes the extraction directory: {n!r}")
-            # extract into staging/<top>/… then validate before publishing
-            arch.extractall(staging)
+            # extract into staging/<top>/… then validate before publishing: a tar
+            # archive's files with safe modes, owned by this user, not with the modes
+            # and owners it gives them (safe_tar); zipfile sets neither
+            if is_tar:
+                safe_tar.extract(arch, staging)
+            else:
+                arch.extractall(staging)
             extracted = os.path.join(staging, top)
             err = validate_bundle_dir(extracted)
             if err:

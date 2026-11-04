@@ -53,6 +53,7 @@ from .pages_utils import (
 import personal_assembly
 import assembly_reconcile  # (PostProcess/, as personal_assembly)
 import genome_in_use  # (PostProcess/, as personal_assembly)
+import safe_tar  # (PostProcess/, as personal_assembly)
 
 from dash import Input, Output, State, html, dcc, no_update
 from dash.exceptions import PreventUpdate
@@ -173,7 +174,8 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
     folder of Genomes/, which no genome listing shows, and replaces a genome of the
     same name only once whole. A .tar.gz has had its members vetted
     (_unsafe_tar_member), and nothing is built on a genome of this name
-    (_genome_upload_problem)."""
+    (_genome_upload_problem); its files go in with safe modes and the web app's user as
+    owner (safe_tar), not with the modes and owners the archive gives them."""
     from genome_layout import split_multi_record_fastas
 
     genomes = os.path.dirname(dest_dir)
@@ -184,7 +186,7 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
         os.makedirs(unpacked)
         if name.endswith((".tar.gz", ".tgz")):
             with gzip.open(part_path, "rb") as fin, tarfile.open(fileobj=fin, mode="r") as tar:
-                tar.extractall(unpacked)
+                safe_tar.extract(tar, unpacked)
         elif name.endswith(".gz"):
             with gzip.open(part_path, "rb") as fin, open(
                 os.path.join(unpacked, f"{assembly}.fa"), "wb"

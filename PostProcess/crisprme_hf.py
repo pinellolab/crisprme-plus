@@ -46,6 +46,8 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+import safe_tar  # (PostProcess/: each archive is unpacked with safe modes, owned by this user)
+
 # Default HuggingFace dataset repo. Overridable per-invocation with --hf-repo or
 # the CRISPRME_HF_REPO environment variable (e.g. switch to a pinellolab org
 # repo once it exists).
@@ -1260,7 +1262,7 @@ def _fetch_genotypes_companion(
         with _decompress_progress(
             reporter, extract_tmp, phase="Extracting genotypes"
         ), tarfile.open(gt_tarball) as tf:
-            tf.extractall(extract_tmp)
+            safe_tar.extract(tf, extract_tmp)
         staged = os.path.join(extract_tmp, "Dictionaries")
         # tolerate an archive rooted at genotypes_<vcf>/ directly (no Dictionaries/
         # prefix) as well as the canonical Dictionaries/genotypes_<vcf>/ layout.
@@ -1583,7 +1585,7 @@ def download_component(
                 if dest != extract_real and not dest.startswith(extract_real + os.sep):
                     raise ValueError(
                         f"build-inputs: refusing tar entry outside the staging dir: {m.name!r}")
-            tf.extractall(extract)
+            safe_tar.extract(tf, extract)
         os.makedirs(local_dir, exist_ok=True)
         moved = []
         for root, dirs, _files in os.walk(extract):
@@ -1743,7 +1745,7 @@ def download_component(
                 with _decompress_progress(
                     reporter, extract_tmp, phase="Extracting index"
                 ):
-                    tf.extractall(extract_tmp, members=members)
+                    safe_tar.extract(tf, extract_tmp, members)
                 try:
                     mf = tf.extractfile("manifest.json")
                     if mf is not None:

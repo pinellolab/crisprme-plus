@@ -14,6 +14,7 @@ archives the tests build.
 """
 
 import ast
+import contextlib
 import gzip
 import hashlib
 import io
@@ -29,9 +30,12 @@ import tempfile
 import threading
 import time
 import unittest
+import warnings
 from typing import List, Optional
+from unittest import mock
 
 import genome_in_use  # (PostProcess/: the rule _genome_upload_problem reads)
+import safe_tar  # (PostProcess/: how _install_uploaded_genome unpacks an archive)
 
 _SETTINGS_PAGE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -594,11 +598,46 @@ def _tree(root, meta=False):
     return out
 
 
+def _write_owned_tar_gz(path, entries):
+    """Write ``entries``, (name, mode, payload) tuples (payload None for a folder), as a
+    .tar.gz at ``path`` whose members name another user (uid and gid 1234) as owner."""
+    with tarfile.open(path, "w:gz") as tar:
+        for name, mode, payload in entries:
+            info = tarfile.TarInfo(name)
+            info.mtime, info.mode, info.uid, info.gid = 1_700_000_000, mode, 1234, 1234
+            if payload is None:
+                info.type = tarfile.DIRTYPE
+                tar.addfile(info)
+            else:
+                info.size = len(payload)
+                tar.addfile(info, io.BytesIO(payload))
+
+
+@contextlib.contextmanager
+def _unpacking_as_root(fallback=False):
+    """Unpacking as root, as the Docker image runs the web app: tarfile then gives each file
+    the owner its member names, which is recorded instead, as (path, uid, gid), in the list
+    yielded. ``fallback``: as on Python before 3.11.4, which has no 'data' filter."""
+    owners = []
+
+    def record(path, uid, gid, *_args, **_kwargs):
+        owners.append((path, uid, gid))
+
+    with mock.patch("os.geteuid", return_value=0), mock.patch("os.chown", record), \
+            mock.patch("os.lchown", record), \
+            mock.patch.object(safe_tar, "_DATA_FILTER",
+                              None if fallback else safe_tar._DATA_FILTER), \
+            warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)  # (3.12's, for no filter)
+        yield owners
+
+
 class TestGenomeTarUpload(unittest.TestCase):
     """The genome .tar.gz branch of _finalize_upload, run on archives built here:
     a bad member refuses the whole archive with nothing written anywhere, and a
-    normal genome archive extracts exactly as tarfile's own extractall does
-    (which is all the code did before)."""
+    normal genome archive extracts as tarfile's own extractall does (which is all
+    the code did before), but for its members' modes and owners: no setuid, setgid
+    or sticky bit, and the web app's user as owner."""
 
     # Each bad case comes after a benign chroms/chr1.fa, so an extractor that
     # vets member by member would already have written something.
@@ -659,6 +698,7 @@ class TestGenomeTarUpload(unittest.TestCase):
             shutil=shutil,
             tempfile=tempfile,
             genome_in_use=genome_in_use,
+            safe_tar=safe_tar,
         )
         return root, cwd, outside, ns
 
@@ -667,6 +707,27 @@ class TestGenomeTarUpload(unittest.TestCase):
         part = os.path.join(cwd, "Settings", "uploads", name + ".part")
         _write_tar_gz(part, entries)
         return part
+
+    def test_files_go_in_with_safe_modes_and_none_of_the_archive_s_owners(self):
+        # tarfile gave each file the mode its member has, setuid and setgid too, and, run
+        # as root (as the image runs the web app, on a data folder mounted from the host),
+        # the owner it names: a setuid file of any owner went into Genomes/
+        for fallback in (False, True):
+            with self.subTest(fallback=fallback):
+                _root, cwd, _outside, ns = self.sandbox()
+                part = os.path.join(cwd, "Settings", "uploads", "modes.tar.gz.part")
+                _write_owned_tar_gz(part, [("chroms", 0o3777, None),
+                                           ("chroms/chr1.fa", 0o4755, _FA1),
+                                           ("chroms/chr2.fa", 0o2666, _FA2)])
+                with _unpacking_as_root(fallback) as owners:
+                    got = ns["_finalize_upload"]("genome", part, "modes.tar.gz", "", "")
+                self.assertEqual(got, "modes")
+                dest = os.path.join(cwd, "Genomes", "modes")
+                self.assertEqual({name: what[-2] for name, what in _tree(dest, meta=True).items()},
+                                 {"chr1.fa": 0o755, "chr2.fa": 0o644})
+                self.assertEqual([o for o in owners if o[1:] != (-1, -1)], [])
+                with open(os.path.join(dest, "chr1.fa"), "rb") as fh:
+                    self.assertEqual(fh.read(), _FA1)
 
     def test_unsafe_member_refuses_whole_archive_writing_nothing(self):
         for label, bad in self.BAD:
@@ -1774,6 +1835,7 @@ class TestSettingsRefusesNamesAShellReads(unittest.TestCase):
             shutil=shutil,
             tempfile=tempfile,
             genome_in_use=genome_in_use,
+            safe_tar=safe_tar,
             personal_assembly=personal_assembly,
             ONLINE=False,
             PreventUpdate=_PreventUpdate,

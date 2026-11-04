@@ -16,16 +16,19 @@ import gzip
 import io
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
+import warnings
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import genome_layout as gl  # noqa: E402
+import safe_tar  # noqa: E402
 import utils  # noqa: E402
 import validate_inputs as vi  # noqa: E402
 
@@ -710,7 +713,8 @@ class TestDownloadSplits(unittest.TestCase):
 class TestDownloadRefusesUnsafeArchive(unittest.TestCase):
     """--source url extracts an archive from a URL the web client chose: a member
     that is absolute, has a '..' component, or is a link/device/FIFO refuses the
-    whole archive before anything is extracted; a chromFa archive still works."""
+    whole archive before anything is extracted; a chromFa archive still works, its
+    files with safe modes and none of the archive's owners."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -775,6 +779,37 @@ class TestDownloadRefusesUnsafeArchive(unittest.TestCase):
             dest = utils.download_reference_genome(
                 "myasm", self.genomes, source="url", url="http://x/asm.tar.gz")
         self.assertEqual(sorted(os.listdir(dest)), ["chr1.fa", "chr2.fa"])
+
+    def test_files_go_in_with_safe_modes_and_none_of_the_archive_s_owners(self):
+        # tarfile gave each file the mode its member has, setuid and setgid too, and, run
+        # as root (as the Docker image runs the web app, whose data folder is mounted from
+        # the host), the owner it names
+        def owned(name, mode, data=None):
+            info, data = (self._file(name, data) if data else
+                          self._special(name, tarfile.DIRTYPE))
+            info.mode, info.uid, info.gid = mode, 1234, 1234
+            return info, data
+
+        members = [owned("chroms", 0o3777), owned("chroms/chr1.fa", 0o4755, b">chr1\nACGT\n"),
+                   owned("chroms/chr2.fa", 0o2666, b">chr2\nGG\n")]
+        for fallback in (False, True):  # (True: Python before 3.11.4, with no 'data' filter)
+            with self.subTest(fallback=fallback):
+                owners = []
+                record = lambda path, uid, gid, *a, **kw: owners.append((path, uid, gid))  # noqa: E731
+                with mock.patch.object(utils, "download", self._fake_download(members)), \
+                        mock.patch("os.geteuid", return_value=0), \
+                        mock.patch("os.chown", record), mock.patch("os.lchown", record), \
+                        mock.patch.object(safe_tar, "_DATA_FILTER",
+                                          None if fallback else safe_tar._DATA_FILTER), \
+                        warnings.catch_warnings():
+                    warnings.simplefilter("ignore", DeprecationWarning)
+                    dest = utils.download_reference_genome(
+                        "modes", self.genomes, source="url", url="http://x/asm.tar.gz")
+                modes = {name: stat.S_IMODE(os.stat(os.path.join(dest, name)).st_mode)
+                         for name in os.listdir(dest)}
+                self.assertEqual(modes, {"chr1.fa": 0o755, "chr2.fa": 0o644})
+                self.assertEqual([o for o in owners if o[1:] != (-1, -1)], [])
+                self.assertEqual(_read(os.path.join(dest, "chr2.fa")), ">chr2\nGG\n")
 
     def test_an_archive_goes_in_as_the_settings_guide_says(self):
         # docs/SETTINGS_DATA_MANAGER.md, Direct URL: each header written as >id; unlike an
