@@ -78,10 +78,10 @@ read-back of chr22:10516173 A>G is exact — HGDP AF 0.0307 (src 0.0305), TOPMed
 chr1:10147 C>G → AoU 0.056 / gnomAD 0.004 / global=AF_max 0.056; chrX:10072 G>T →
 HGDP 0.065 / TOPMed 0.075 / global=AF_max 0.075.
 
-Tests: `test_registry_from_info_af.py` (9), `test_build_mega_registry.py` (4) —
+Tests: `test_registry_from_info_af.py` (13), `test_build_mega_registry.py` (7) —
 AF round-trip, GLOBAL=AF_max, sparsity, multiallelic, tiny-AF floor, SNP/indel
 split, carrier/hom 0, RegistryReader round-trip. Existing `test_tier0_registry` (20) +
-`test_tier0_compile` (14) still green.
+`test_tier0_compile` (19) still green.
 
 ### 3. Enriched genome + fake-indel contigs — DE-RISKED (sites-only OK)
 `crispritz.py add-variants` on a sites-only (8-column, no FORMAT/samples) VCF

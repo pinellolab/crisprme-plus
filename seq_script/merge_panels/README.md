@@ -229,7 +229,8 @@ routed to the fake-indel path, not annotated with AF in v1.
 - Registry: **51,174,004 SNPs** (+15.7M indels routed out, 23.5%); read-back exact —
   chr1:10147 C>G → gnomAD 0.004 / AoU 0.056 / global=`AF_max` 0.056; chrX:10072 G>T →
   HGDP 0.065 / TOPMed 0.075 / global=`AF_max` 0.075.
-- 13 unit tests: `PostProcess/test_registry_from_info_af.py`, `test_build_mega_registry.py`.
+- 20 unit tests: `PostProcess/test_registry_from_info_af.py` (13),
+  `test_build_mega_registry.py` (7).
 
 ### Reproduce
 ```bash

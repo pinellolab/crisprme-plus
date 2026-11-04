@@ -14,9 +14,12 @@ replaced by the supplied list:
                             -1.0 when the env is absent (never fails the run).
   * carrier overlay      -- OPTIONAL, when an installed variant index is given
                             (--index-path): for each site, the variants overlapping
-                            its protospacer+PAM window and, per population dataset,
-                            their allele frequency + carrier count ("in how many
-                            people the site is polymorphic").
+                            its protospacer+PAM window, each with its allele frequency
+                            and carrier count over the panel ("in how many people the
+                            site is polymorphic"), the highest of each among them, and
+                            each population dataset's highest allele frequency (no
+                            carrier count per dataset; a sites-only index's registry
+                            stores 0 carriers).
 
 No index is needed for pure scoring; the carrier overlay reads the index's
 ``Dictionaries/registry_<vcf>/`` tier (the same registry the report uses).
