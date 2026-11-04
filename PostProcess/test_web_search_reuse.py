@@ -63,10 +63,10 @@ class TestSearchReuse(unittest.TestCase):
         self.addCleanup(p.stop)
         pu.write_enabled_annotations("hg38", ["a.hg38.bed"])
 
-    def submit(self, *, mode="per-sample", full=False, name=None):
+    def submit(self, *, mode="per-sample", full=False, name=None, variant="ref"):
         """One click on Submit, as the form sends it (Advanced options open)."""
         return mp.change_url(
-            1, "http://127.0.0.1:8080/index", "hg38", "ref", "20bp-NRG-SpCas9", "IP",
+            1, "http://127.0.0.1:8080/index", "hg38", variant, "20bp-NRG-SpCas9", "IP",
             GUIDE, 4, 1, 1, "N", None, None, None, [], None, name, 6, True,
             mode, ["full"] if full else [],
         )
@@ -145,6 +145,43 @@ class TestSearchReuse(unittest.TestCase):
         self.assertEqual(key["annotations"], ["a.hg38.bed"])
         self.assertEqual(key["crisprme_version"], mp._crisprme_version())
         self.assertNotEqual(key["crisprme_version"], "unknown")
+
+
+class TestDatasetsWithoutTheTiers(unittest.TestCase):
+    """A search of a variant dataset with neither Dictionaries/registry_<vcf>/ nor
+    genotypes_<vcf>/ (an index built without --samplesID, such as the one the benchmark
+    complete-test builds) reports the allele frequencies its VCF gives, and the form runs it
+    population-level (it offers per-sample only with a genotype store). complete-search
+    records such datasets (.untiered_datasets, beside .variant_datasets), so that the report
+    says so, and what --per-sample gives there; the web job, which launches the search
+    script itself, now records them too."""
+
+    setUp, submit, finish = TestSearchReuse.setUp, TestSearchReuse.submit, TestSearchReuse.finish
+
+    def records(self, url):
+        """The job's .untiered_datasets and .variant_datasets (None: not written)."""
+        job = os.path.join(self.tmp, "Results", self.finish(url))
+        out = []
+        for name in (".untiered_datasets", ".variant_datasets"):
+            try:
+                with open(os.path.join(job, name)) as f:
+                    out.append(f.read())
+            except FileNotFoundError:
+                out.append(None)
+        return out
+
+    def test_a_dataset_without_the_tiers_is_recorded_as_complete_search_records_it(self):
+        os.makedirs(os.path.join(self.tmp, "VCFs", "hg38_ds"))
+        os.makedirs(os.path.join(self.tmp, "samplesIDs"))
+        with open(os.path.join(self.tmp, "samplesIDs", "hg38_ds.samplesID.txt"), "w") as f:
+            f.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\nS1\tGBR\tEUR\tmale\n")
+        self.assertEqual(self.records(self.submit(mode="population-level", variant="ds")),
+                         ["hg38_ds\n", "hg38_ds\n"])
+        # with the tiers, or with no dataset, nothing
+        os.makedirs(os.path.join(self.tmp, "Dictionaries", "registry_hg38_ds"))
+        self.assertEqual(self.records(self.submit(mode="population-level", variant="ds",
+                                                  name="tiered")), [None, None])
+        self.assertEqual(self.records(self.submit(mode="population-level")), [None, None])
 
 
 if __name__ == "__main__":

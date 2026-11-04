@@ -3203,6 +3203,25 @@ def complete_search() -> None:
                     % ", ".join(_no_reg)
                 )
 
+    # The CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint AF
+    # come from the dict-less tiers (registry_<vcf>/, genotypes_<vcf>/). An index without
+    # either -- built without --samplesID, as the benchmark complete-test builds its own --
+    # has only the classic per-sample dictionaries, which name the carriers, each variant
+    # with the allele frequency its VCF gives (in either mode), and no more. Their per-sample
+    # post-analysis still reports a window denser than CRISPRME_IUPAC_CAP by its greedy
+    # worst-case alignment, listing the carriers of any of the variants it takes
+    # (new_simple_analysis.py). (each dataset once: a --vcf list may name one twice)
+    _searched, _untiered = [], []
+    if variant:
+        _dict_root = os.path.join(current_working_directory, "Dictionaries")
+        _searched = list(dict.fromkeys(os.path.basename(os.path.normpath(_v))
+                                       for _v in vcf_dataset_dirs))
+        _untiered = [
+            _vn for _vn in _searched
+            if not any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
+                       for _tier in ("registry", "genotypes"))
+        ]
+    _one = len(_untiered) == 1
     if population_level and variant:
         print(
             "[complete-search] POPULATION-LEVEL analysis: the SNP variant post-analysis "
@@ -3213,29 +3232,25 @@ def complete_search() -> None:
             "(worst case over the emitted representatives, not an exhaustive per-haplotype search). "
             "**Per-sample carriers, CONFIRMED cis phasing and exact joint AF are NOT "
             "computed** -- re-run with --per-sample for that per-sample resolution on a genotyped "
-            "panel (recommended for clinical validation). SNP+indel co-occurrence is UNCHANGED "
+            "panel (recommended for clinical validation). "
+            # which --per-sample cannot give on a dataset without the tiers
+            + (f"On {', '.join(_untiered)}, which {'has' if _one else 'have'} no dict-less "
+               f"tiers (Dictionaries/registry_<vcf>/ and genotypes_<vcf>/), only the classic "
+               f"per-sample dictionaries, --per-sample names the carrier samples only: the "
+               f"CONFIRMED/PUTATIVE cis phasing and the exact joint AF come from those tiers, "
+               f"and in either mode {'its' if _one else 'their'} variants' allele frequencies "
+               f"are the ones the VCF gives; where {'its' if _one else 'their'} variants are "
+               f"dense, it can still report a window by its greedy worst-case alignment, whose "
+               f"listed carriers need not carry every variant in it. To get the tiers, rebuild "
+               f"the index with build-index-only --samplesID, or download a prebuilt one "
+               f"(crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP). "
+               if _untiered else "")
+            + "SNP+indel co-occurrence is UNCHANGED "
             "(the indel cis-phasing pass is unaffected). See METHODS.md, 'Context-aware analysis mode'."
         )
     elif variant:
-        # The CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint
-        # AF come from the dict-less tiers (registry_<vcf>/, genotypes_<vcf>/). An index
-        # without either -- built without --samplesID, as the benchmark complete-test
-        # builds its own -- has only the classic per-sample dictionaries, which name the
-        # carriers, each variant with the allele frequency its VCF gives, and no more. Their
-        # post-analysis still reports a window denser than CRISPRME_IUPAC_CAP by its greedy
-        # worst-case alignment, listing the carriers of any of the variants it takes
-        # (new_simple_analysis.py). (each dataset once: a --vcf list may name one twice)
-        _dict_root = os.path.join(current_working_directory, "Dictionaries")
-        _searched = list(dict.fromkeys(os.path.basename(os.path.normpath(_v))
-                                       for _v in vcf_dataset_dirs))
-        _untiered = [
-            _vn for _vn in _searched
-            if not any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
-                       for _tier in ("registry", "genotypes"))
-        ]
         _why = "--per-sample" if _force_ps else "the default on this phased genotyped index"
         if _untiered:
-            _one = len(_untiered) == 1
             print(
                 f"[complete-search] PER-SAMPLE analysis ({_why}): resolving per-sample "
                 f"genotypes into named carrier samples only for {', '.join(_untiered)}, which "
@@ -3270,14 +3285,14 @@ def complete_search() -> None:
             _sm.write("per-sample" if per_sample else "population-level")
     except OSError:
         pass
-    # and, for a per-sample one, the datasets its banner names as having no dict-less
-    # tiers, one per line, so that the report says what the banner says of them: it
-    # cannot tell from the results, nor from the install, whose index can have the tiers
-    # by the time the report is built again. Beside them, every dataset it searches
+    # and the datasets its banner names as having no dict-less tiers, one per line, so
+    # that the report says what the banner says of them, in either mode: it cannot tell
+    # from the results, nor from the install, whose index can have the tiers by the time
+    # the report is built again. Beside them, every dataset it searches
     # (.variant_datasets): no column says which dataset a row comes from, and two
     # datasets can name the same samples, so what holds of their rows alone the report
     # says of a row only when they are all of them.
-    if variant and per_sample and _untiered:
+    if variant and _untiered:
         try:
             with open(os.path.join(outputfolder, ".untiered_datasets"), "w") as _ud:
                 _ud.write("".join(f"{_vn}\n" for _vn in _untiered))

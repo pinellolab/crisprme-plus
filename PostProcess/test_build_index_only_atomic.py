@@ -2642,6 +2642,18 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
               "to resolve -- the population-level analysis runs instead). Slower, and can be "
               "intractable on dense panels; pass --population-level for the fast worst-case "
               "screen.\n")
+    # a population-level search's, which {} splits where it says what --per-sample gives
+    POPULATION = ("[complete-search] POPULATION-LEVEL analysis: the SNP variant post-analysis "
+                  "reports one WORST-POSSIBLE off-target per variant window (no 2^k haplotype "
+                  "enumeration; rows are worst-possible / PUTATIVE, not per-sample phased). CFD "
+                  "is the EXACT worst case -- a safe actionable gate (genome-wide validation: 0 "
+                  "CFD>=0.2 loci lost or demoted vs the per-sample path). CRISPR-Bulge is a "
+                  "best-effort SCREEN (worst case over the emitted representatives, not an "
+                  "exhaustive per-haplotype search). **Per-sample carriers, CONFIRMED cis "
+                  "phasing and exact joint AF are NOT computed** -- re-run with --per-sample for "
+                  "that per-sample resolution on a genotyped panel (recommended for clinical "
+                  "validation). {}SNP+indel co-occurrence is UNCHANGED (the indel cis-phasing "
+                  "pass is unaffected). See METHODS.md, 'Context-aware analysis mode'.\n")
 
     def recorded(self, name=".untiered_datasets"):
         """What the search recorded in the file name (None: no such file)."""
@@ -2681,11 +2693,23 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                     "pass --population-level for the fast worst-case screen.\n", out)
                 self.assertEqual(self.recorded(), "ds\n")
                 self.assertEqual(self.recorded(".variant_datasets"), "ds\n")
-        # a population-level search claims none of it, and records nothing
+        # a population-level search, whose allele frequencies are the VCF's too, records
+        # them as well; and its banner says what --per-sample gives there, as it promised
+        # CONFIRMED cis phasing and exact joint AF
         rc, out, err = self.run_search("--population-level")
         self.assertIn("Launching job ", out)
-        self.assertIsNone(self.recorded())
-        self.assertIsNone(self.recorded(".variant_datasets"))
+        self.assertIn(self.POPULATION.format(
+            "On ds, which has no dict-less tiers (Dictionaries/registry_<vcf>/ and "
+            "genotypes_<vcf>/), only the classic per-sample dictionaries, --per-sample names the "
+            "carrier samples only: the CONFIRMED/PUTATIVE cis phasing and the exact joint AF "
+            "come from those tiers, and in either mode its variants' allele frequencies are the "
+            "ones the VCF gives; where its variants are dense, it can still report a window by "
+            "its greedy worst-case alignment, whose listed carriers need not carry every variant "
+            "in it. To get the tiers, rebuild the index with build-index-only --samplesID, or "
+            "download a prebuilt one (crisprme.py download --what index --index-name "
+            "NRG_3_hg38+hg38_HGDP1kGP). "), out)
+        self.assertEqual(self.recorded(), "ds\n")
+        self.assertEqual(self.recorded(".variant_datasets"), "ds\n")
 
     def test_on_an_index_with_them_it_says_what_it_said(self):
         rc, out, err = self.run_bio()
@@ -2698,6 +2722,11 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                 self.assertIn(self.BANNER.format(why), out)
                 self.assertIsNone(self.recorded())
                 self.assertIsNone(self.recorded(".variant_datasets"))
+        rc, out, err = self.run_search("--population-level")
+        self.assertIn("Launching job ", out)
+        self.assertIn(self.POPULATION.format(""), out)
+        self.assertIsNone(self.recorded())
+        self.assertIsNone(self.recorded(".variant_datasets"))
 
     def test_beside_a_dataset_with_them_it_records_every_dataset_it_searches(self):
         # ds with its tiers, and du: the same dataset as a build without --samplesID has it

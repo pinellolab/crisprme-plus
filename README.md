@@ -1013,8 +1013,9 @@ its purpose and usage:
   builds its own) it names the carrier samples only, with the allele frequencies the VCF
   gives, and a dense window can still be reported by its greedy worst-case alignment, whose
   listed carriers need not carry every variant in it; `complete-search` and the report's
-  Search mode row say so. Rebuild it with `build-index-only --samplesID`, or use a prebuilt
-  index. On a genotyped+PHASED index (HGDP + 1000
+  Search mode row say so (a population-level search's too, of what `--per-sample` gives
+  there). Rebuild it with `build-index-only --samplesID`, or use a prebuilt index. On a
+  genotyped+PHASED index (HGDP + 1000
   Genomes (the default), or HPRC) this is already the context-aware default; on
   a sites-only index (`mega`) it cannot resolve carriers (no genotypes) and
   `complete-search` warns. Can be slow / intractable on dense or aggregate panels. To opt
@@ -2006,7 +2007,7 @@ is under `data/`). Reading top to bottom:
   (built without `--samplesID`, as the benchmark `complete-test` builds its own) it is the
   `AF` the VCF gives, as rounded there: the self-test's 1000 Genomes VCF gives two decimals,
   so a rare variant reads 0, its MAF is blank, and a multi-variant row's minimum leaves it
-  out. The report of a `--per-sample` search there says so
+  out. The report of a search there says so, in either mode
   ([methods](METHODS.md#3-allele-frequency-estimation)).
 - **Key off-target table columns** — in the per-site table (and every download TSV):
   - **Chromosome / Position / Direction (`+`/`-`)** — where the off-target is and on which strand.

@@ -346,7 +346,7 @@ a rare variant reads 0 and has no frequency, and a multi-variant row's minimum l
 out. On the self-test panel a `--per-sample` search gives 154 of its 189 variant rows a
 blank MAF (3 of 184 with the tiers), and four two-variant rows the frequency of their
 commoner variant (0.09 to 0.86) for a haplotype that one to five of the VCF's 2,548
-individuals carry. The report of a `--per-sample` search on such an index says so;
+individuals carry. The report of a search on such an index says so, in either mode;
 rebuild the index with `build-index-only --samplesID`, or use a prebuilt one.
 
 ---
@@ -914,7 +914,7 @@ from a build-time `Dictionaries/registry_<vcf>/variant_count.json` sidecar
 report needs no VCF access at report time (e.g. the earlier 1000 Genomes + HGDP
 merge recorded 106,664,924 SNPs). Reported allele frequencies are AC/AN over the genotyped
 panel (on an index without the dict-less tiers, the `AF` the VCF gives, §3, as the report of
-a `--per-sample` search there says); a variant present in the panel but whose source allele
+a search there says); a variant present in the panel but whose source allele
 frequency is exactly 0 (e.g. a secondary allele of a multiallelic site) is shown at a
 **display floor of 1×10⁻⁵** so it still renders on the log-scale plots — this is a plotting floor,
 read as "present, frequency effectively 0", not a measured frequency. For an

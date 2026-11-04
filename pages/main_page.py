@@ -1882,6 +1882,26 @@ def change_url(
             _sm.write("per-sample" if fast_env == "0" else "population-level")
     except OSError:
         pass
+    # and, as complete-search does, the variant datasets of the search without the
+    # dict-less tiers (.untiered_datasets), beside every one it names (.variant_datasets):
+    # the report says what their results carry, the allele frequencies their VCF gives,
+    # and what --per-sample gives there (the form offers it only with a genotype store)
+    try:
+        with open(vcfs) as _lv:
+            _searched = list(dict.fromkeys(
+                os.path.basename(os.path.normpath(_l.strip())) for _l in _lv
+                if _l.strip() and _l.strip() != "_"))
+        _dict_root = os.path.join(current_working_directory, "Dictionaries")
+        _untiered = [_vn for _vn in _searched
+                     if not any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
+                                for _tier in ("registry", "genotypes"))]
+        if _untiered:
+            with open(os.path.join(result_dir, ".untiered_datasets"), "w") as _ud:
+                _ud.write("".join(f"{_vn}\n" for _vn in _untiered))
+            with open(os.path.join(result_dir, ".variant_datasets"), "w") as _vd:
+                _vd.write("".join(f"{_vn}\n" for _vn in _searched))
+    except OSError:
+        pass
     # every argument quoted: the genome's and PAM's names in the paths as Settings took
     # them (quoting leaves the rest as is). The 17th says whether the search sends its
     # notification, to the address of its email.txt: not the address, which the search's

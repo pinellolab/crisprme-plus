@@ -936,9 +936,7 @@ class TestGenerateReport(unittest.TestCase):
                      "none of them is reported for their variants",
                      "Where their variants are dense"):
             self.assertIn(said, two)
-        # a population-level row claims none of what the tiers give, so it does not change
-        pop = {**base, "search_mode": "population-level"}
-        self.assertEqual(row({**pop, "untiered": ["hg38_1000G"]}), row(pop))
+        # (a population-level row: test_a_population_level_search_without_the_tiers_says_so_too)
 
     def test_the_texts_that_make_the_rows_claims_qualify_them_too(self):
         """The rest of that report still made the claims its Search mode row withdraws: the
@@ -949,8 +947,8 @@ class TestGenerateReport(unittest.TestCase):
         VCF's two-decimal AF reads 0, a two-variant row showed 8.10e-01 from Variant_MAF
         "NA,0.81", and the 5 greedy rows read "N cis carriers" though none of the 114 carriers
         they list carries every variant of its row. Each text now says what holds for the
-        datasets without the tiers; with the tiers, and in a population-level report, each is
-        as it was, byte for byte."""
+        datasets without the tiers; with the tiers each is as it was, byte for byte. (A
+        population-level report: test_a_population_level_search_without_the_tiers_says_so_too.)"""
         base = {"datasets": "hg38+1000G", "mm": "4", "bdna": 1, "brna": 1, "max_edits": "6",
                 "search_mode": "per-sample"}
         pop = {**base, "search_mode": "population-level"}
@@ -966,7 +964,7 @@ class TestGenerateReport(unittest.TestCase):
               "for genotyped databases this is AC/AN across the panel; a frequency-only database "
               "contributes its reported population allele frequency directly. Per-dataset and "
               "per-superpopulation frequencies are available in the interactive website.")
-        for meta in (base, {**base, "untiered": []}, pop, {**pop, "untiered": one}):
+        for meta in (base, {**base, "untiered": []}, pop):
             self.assertEqual(af_row(meta), af)
         self.assertEqual(af_row({**base, "untiered": one}), af.replace(
             "directly. ", "directly. For " + named + ", it is instead the <code>AF</code> its VCF "
@@ -993,9 +991,12 @@ class TestGenerateReport(unittest.TestCase):
         legend = gr.build_score_legend_html()
         self.assertEqual(gr.build_score_legend_html([]), legend)
         self.assertEqual(entries(legend), list(gr._SCORE_LEGEND))
-        # (when no dataset of the search has the tiers, as build_report finds: _UNTIERED)
+        # (in a per-sample report, when no dataset of the search has the tiers, as
+        # build_report finds: _PER_SAMPLE, _UNTIERED)
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
         self.addCleanup(setattr, gr, "_UNTIERED", False)
-        gr._UNTIERED = True
+        gr._PER_SAMPLE, gr._UNTIERED = True, True
+        self.assertEqual(gr.build_score_legend_html([]), legend)
         added = {
             "Observed": (
                 " On " + named + ", a dense window flagged in <code>High_complexity_region</code> "
@@ -1029,9 +1030,6 @@ class TestGenerateReport(unittest.TestCase):
         gr._UNTIERED = True
 
         # the caption of the per-sample top-1000 tables' observed haplotypes (Section 6)
-        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
-        gr._PER_SAMPLE = True
-
         def caption(**kwargs):
             html = gr.render_html("job", "", [], "", "", "", None, "top1000.tsv", "",
                                   observed_haplotypes_bundle_name="observed_haplotypes.tsv",
@@ -1059,6 +1057,93 @@ class TestGenerateReport(unittest.TestCase):
             "row of two or more SNPs there still reads <strong>&ldquo;N cis "
             "carriers&rdquo;</strong>, and its link <strong>&ldquo;N other observed "
             "haplotypes&rdquo;</strong>, and can be such an alignment."))
+
+    def test_a_population_level_search_without_the_tiers_says_so_too(self):
+        """A population-level search of an index without the dict-less tiers reports the AF
+        its VCF gives as well (both modes decode the classic dictionaries), but complete-search
+        recorded such datasets for a per-sample search only, so its report said AC/AN over the
+        panel (the Allele-frequency basis row, the MAF note); and its Search mode row, as the
+        banner, the legend's MAF and Observed entries and the Section-6 caption said that
+        --per-sample gives CONFIRMED cis phasing, the exact joint AF and the true cis
+        carriers, which it does not give there. The search now records them in either mode,
+        and each text says what holds for them; without the record, as with the tiers, each
+        is as it was, byte for byte."""
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
+        gr._PER_SAMPLE = False  # (build_report sets it from .search_mode)
+        base = {"datasets": "hg38_1000G", "mm": "4", "bdna": 1, "brna": 1, "max_edits": "6",
+                "search_mode": "population-level"}
+        one, two = ["hg38_1000G"], ["hg38_1000G", "hg38_<x>"]
+        named = "<code>hg38_1000G</code>, which has no dict-less tiers"
+
+        def cell(meta, label):
+            html = gr.render_inputs_criteria(meta)
+            return re.search(label + r'</td><td>(.*?)</td>', html, re.S).group(1)
+
+        # the Search mode row: what --per-sample gives on those datasets
+        row = cell(base, "Search mode")
+        self.assertEqual(cell({**base, "untiered": []}, "Search mode"), row)
+        after = "(recommended for clinical validation). "
+        self.assertEqual(row.count(after), 1)
+        self.assertEqual(cell({**base, "untiered": one}, "Search mode"), row.replace(after, after + (
+            "On " + named + " (<code>Dictionaries/registry_&lt;vcf&gt;/</code> and "
+            "<code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample dictionaries, "
+            "<code>--per-sample</code> names the carrier samples only: the CONFIRMED/PUTATIVE "
+            "cis phasing and the exact joint allele frequency come from those tiers, and in "
+            "either mode its variants' allele frequencies are the ones the VCF gives; where its "
+            "variants are dense, it can still report a window by its greedy worst-case "
+            "alignment, whose listed carriers need not carry every variant in it. To get the "
+            "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
+            "download a prebuilt one (<code>crisprme.py download --what index --index-name "
+            "NRG_3_hg38+hg38_HGDP1kGP</code>). ")))
+        plural = cell({**base, "untiered": two}, "Search mode")
+        for said in ("<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
+                     "in either mode their variants' allele frequencies",
+                     "where their variants are dense"):
+            self.assertIn(said, plural)
+        # the Allele-frequency basis row reads as in a per-sample report (the MAF note under
+        # the tables takes the datasets alone, whatever the mode)
+        per_sample = {**base, "search_mode": "per-sample"}
+        for meta in ({}, {"untiered": one}, {"untiered": two}):
+            self.assertEqual(cell({**base, **meta}, "Allele-frequency basis"),
+                             cell({**per_sample, **meta}, "Allele-frequency basis"))
+        self.assertIn("For " + named + ", it is instead the <code>AF</code> its VCF gives",
+                      cell({**base, "untiered": one}, "Allele-frequency basis"))
+
+        # the legend's Observed and MAF entries: what --per-sample gives there
+        def entries(html):
+            return re.findall(r'<div class="legend-term">(.*?)</div>'
+                              r'<div class="legend-def">(.*?)</div>', html, re.S)
+
+        self.assertEqual(gr.build_score_legend_html([]), gr.build_score_legend_html())
+        added = {
+            "Observed": (" On " + named + ", <code>--per-sample</code> can still report a dense "
+                         "window by its greedy worst-case alignment, which lists the carriers of "
+                         "any of its variants rather than its exact cis carriers."),
+            "MAF": (" For " + named + ", no joint allele frequency is computed under "
+                    "<code>--per-sample</code> either, and each variant's frequency is the "
+                    "<code>AF</code> its VCF gives, as rounded there: one whose <code>AF</code> "
+                    "reads 0 is left out of the minimum, so the value shown can be that of a far "
+                    "more common variant (it is blank where all of them read 0)."),
+        }
+        self.assertEqual(entries(gr.build_score_legend_html(one)),
+                         [(t, d + added.get(t, "")) for t, d in gr._SCORE_LEGEND])
+
+        # the caption of the population-level top-1000 tables' variant combinations
+        def caption(**kwargs):
+            html = gr.render_html("job", "", [], "", "", "", None, "top1000.tsv", "",
+                                  observed_haplotypes_bundle_name="observed_haplotypes.tsv",
+                                  **kwargs)
+            return re.search(r'<p class="caption">(Each row is the per-site representative.*?)'
+                             r'</p>', html, re.S).group(1)
+
+        said = caption()
+        self.assertTrue(said.endswith("run <code>--per-sample</code> to resolve the true cis "
+                                      "haplotypes and carriers."), said)
+        self.assertEqual(caption(untiered=[]), said)
+        self.assertEqual(caption(untiered=one), said + (
+            " On " + named + ", <code>--per-sample</code> can still report a dense window by "
+            "its greedy worst-case alignments, whose listed carriers need not carry every "
+            "variant in them."))
 
     def test_the_datasets_a_search_records_reach_the_search_mode_row(self):
         """build_summary_meta reads .untiered_datasets beside .search_mode, one dataset per
@@ -1094,10 +1179,24 @@ class TestGenerateReport(unittest.TestCase):
                      "For " + named + ", no joint allele frequency is computed"):
             self.assertIn(said, html)
         self.assertNotIn(confirmed, html)
-        # a population-level search records none, and its report would qualify nothing
+        # a population-level search records them too: its report qualifies the AF texts the
+        # same way, and says what --per-sample gives there
         with open(os.path.join(rd, ".search_mode"), "w") as h:
             h.write("population-level")
-        self.assertNotIn("dict-less tiers", report("population"))
+        html = report("population")
+        for said in ("For " + named + ", it is instead the <code>AF</code> its VCF gives",
+                     "For " + named + ", the frequency is instead the <code>AF</code> its VCF",
+                     "On " + named + " (<code>Dictionaries/registry_&lt;vcf&gt;/</code> and "
+                     "<code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample "
+                     "dictionaries, <code>--per-sample</code> names the carrier samples only",
+                     "On " + named + ", <code>--per-sample</code> can still report a dense window",
+                     "For " + named + ", no joint allele frequency is computed under "
+                     "<code>--per-sample</code> either"):
+            self.assertIn(said, html)
+        self.assertNotIn("named carrier samples only for", html)
+        # and without it, nothing
+        os.remove(os.path.join(rd, ".untiered_datasets"))
+        self.assertNotIn("dict-less tiers", report("population_tiered"))
 
     def test_a_greedy_row_of_a_search_without_the_tiers_reads_so_in_every_table(self):
         """End to end: when the search recorded that none of its datasets has the dict-less
