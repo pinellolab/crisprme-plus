@@ -100,6 +100,7 @@ from plotly.subplots import make_subplots
 from dash import dash_table
 import sqlite3
 import flask
+from werkzeug.security import safe_join
 import errno
 import re
 import os
@@ -2885,10 +2886,15 @@ def download_link_sumbysample(  # a name of its own: as download_link_sample it 
     if n is None:
         raise PreventUpdate
     job_id = search.split("=")[-1]
-    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+    job_directory = results_job_dir(job_id)  # the URL's: a job folder of Results/ only
+    if job_directory is None:
         raise PreventUpdate
     file_to_load = ".".join([file_to_load, "zip"])
-    if os.path.exists(os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)):
+    # the page's name of the file (the link's guide and sample, or counts), which a
+    # client can set to any text: a file of the job's folder only, as the /Results/
+    # route serves one (safe_join); another is not there
+    zip_path = safe_join(job_directory, file_to_load)
+    if zip_path is not None and os.path.exists(zip_path):
         return (
             html.A(
                 "Download zip",
@@ -2944,10 +2950,15 @@ def downloadLinkGuide(
     if n is None:
         raise PreventUpdate
     job_id = search.split("=")[-1]
-    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+    job_directory = results_job_dir(job_id)  # the URL's: a job folder of Results/ only
+    if job_directory is None:
         raise PreventUpdate
     file_to_load = ".".join([file_to_load, "zip"])
-    if os.path.exists(os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)):
+    # the page's name of the file (the link's guide and sample, or counts), which a
+    # client can set to any text: a file of the job's folder only, as the /Results/
+    # route serves one (safe_join); another is not there
+    zip_path = safe_join(job_directory, file_to_load)
+    if zip_path is not None and os.path.exists(zip_path):
         return (
             html.A(
                 "Download zip",

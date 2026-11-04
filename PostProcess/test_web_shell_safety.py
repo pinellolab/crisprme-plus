@@ -32,12 +32,14 @@ Results/, outside the data folder too. Remove result of a personal-assembly sear
 removed that folder (and the haplotype folders its .Params.txt names, joined the same
 way), Show full log and the status of a personal-assembly search read its log files,
 the results pages wrote the table filter they keep (.dropdown.json) into it, and their
-tables, lists, download links and the routes to a job read its files. The callbacks that
-fill in and check the search form (its variant datasets, analysis modes, bulge options and
-the note under them, the Submit check) joined the genome, PAM and dataset a request sends
-into the paths they list and read the same way, and what they found outside the data
-folder changed what they answered; and the Individual picker filled in, and the Personal
-assembly tab's Submit searched, the files a bundle's metadata.json names outside its folder.
+tables, lists, download links and the routes to a job read its files; two of those links
+also looked for the zip the page names wherever its name led, outside the data folder too.
+The callbacks that fill in and check the search form (its variant datasets, analysis
+modes, bulge options and the note under them, the Submit check) joined the genome, PAM and
+dataset a request sends into the paths they list and read the same way, and what they
+found outside the data folder changed what they answered; and the Individual picker filled
+in, and the Personal assembly tab's Submit searched, the files a bundle's metadata.json
+names outside its folder.
 
 And up to 2.8.0 the post-analysis of a search (pool_post_analisi_snp.py) took the name of
 each FASTA file of the genome folder, as a chromosome's, into shell commands as it was,
@@ -1289,6 +1291,36 @@ class TestResultsPages(_WebFolder):
         for order, asc in (('Mismatches" --', "ASC"), ("Mismatches", "ASC LIMIT 1 --")):
             with self.subTest(order=order, asc=asc), self.assertRaises(ValueError):
                 qm.noshold("CFD", 1, 0, 10, order, None, asc, search, GUIDE, self.data)
+        self.assertNothingRun()
+
+
+    def test_the_download_links_check_a_file_of_the_job_folder_only(self):
+        """The Summary by Sample and Show Targets links offer their zip once it is there.
+        Its name is the page's (a link's guide and sample, or counts), which a client can
+        set to any text, and they checked the path it led to, outside the data folder too:
+        whether a file was there showed in their answer. They check a file of the job's
+        folder only now, as the /Results/ route serves one, and answer for another as for a
+        zip not made yet."""
+        open(os.path.join(self.outside, "secret.zip"), "w").close()
+        other = self.finished(os.path.join(self.data, "Results", "other_ABC"))
+        open(os.path.join(other, "theirs.zip"), "w").close()
+        self.before = self.outside_files()
+        job = os.path.realpath(self.job)
+        waiting = ("Generating download link, Please wait...", False)
+        for link, own in (
+                (rp.download_link_sumbysample, f"{self.JOB}.S1.{GUIDE}.personal_targets"),
+                (rp.downloadLinkGuide, f"{self.JOB}.X.0.0.{GUIDE}.targets")):
+            open(os.path.join(self.job, own + ".zip"), "w").close()
+            answer, done = link(1, own, f"?job={self.JOB}")
+            self.assertEqual((answer.href, done),
+                             (os.path.join(rp.URL, "Results", self.JOB, own + ".zip"), True))
+            for name in ("../../../outside/secret", os.path.join(self.outside, "secret"),
+                         "../other_ABC/theirs", "nothing"):
+                with self.subTest(link=link.__name__, name=name):
+                    with _paths_read() as seen:
+                        self.assertEqual(link(1, name, f"?job={self.JOB}"), waiting)
+                    self.assertEqual(
+                        [p for p in seen if os.path.commonpath([job, p]) != job], [])
         self.assertNothingRun()
 
 

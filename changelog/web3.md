@@ -224,3 +224,10 @@ and the Settings and personal-assembly entries add tests to `test_settings_progr
   the positions of a region and the numbers of a link are whole numbers. A sample whose name
   holds a quote, whose table and Personal Risk Card failed, now has them. Pre-existing. Covered
   by `PostProcess/test_web_shell_safety.py`.
+- **Two download links of the results pages look only for a file of their search's folder.**
+  The Summary by Sample and Show Targets links offer their zip once it is there, under a name
+  the page gives, which a client can set to any text, and they looked for it wherever that name
+  led, outside the data folder too: whether a file was there showed in their answer, though
+  nothing was served (the download route serves files of `Results/` only). They now look only in
+  the search's folder, as that route would serve the file, and answer for any other name as for
+  a zip not made yet. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
