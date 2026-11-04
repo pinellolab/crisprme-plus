@@ -26,6 +26,24 @@ def _normalize_chrom(chrom: str) -> str:
     return chrom if chrom.startswith("chr") else "chr" + chrom
 
 
+def _checked_chrom(chrom: str) -> str:
+    """``chrom`` back, unless its name holds a character a shell reads. Each name here
+    comes from a dataset VCF's CHROM column (or a bundled indel log named after it) and
+    is taken, unquoted, into the search and merge commands this script runs through a
+    shell: a broken or hostile dataset whose CHROM holds such a character would run it. A
+    real chromosome name holds none; refused as a genome's sequence id is (genome_layout).
+    See the twin in ``pool_post_analisi_indel.py``."""
+    from genome_layout import PATTERN_CHARS, UNUSABLE_ID_START, UNUSABLE_IN_ID
+
+    bad = next((c for c in chrom if c in UNUSABLE_IN_ID + PATTERN_CHARS or c.isspace()), None)
+    if bad is not None or chrom[:1] in UNUSABLE_ID_START:
+        raise ValueError(
+            f"chromosome name {chrom!r} holds {(bad if bad else chrom[:1])!r}, which "
+            "CRISPRme cannot take into a shell command: fix the dataset's CHROM column"
+        )
+    return chrom
+
+
 # CRISPRitz's targets header, written on its own when every chromosome was skipped,
 # so the stages downstream still read a well-formed (empty) targets file.
 _TARGETS_HEADER = (
@@ -80,7 +98,7 @@ def _dataset_chroms(vcf_dir: str, log_indels_dir: str):
     if vcf_dir and os.path.isdir(vcf_dir):
         vcfs = sorted(f for f in os.listdir(vcf_dir) if f.endswith("vcf.gz"))
         if vcfs:
-            return [_normalize_chrom(_chrom_from_vcf(os.path.join(vcf_dir, f))) for f in vcfs]
+            return [_checked_chrom(_normalize_chrom(_chrom_from_vcf(os.path.join(vcf_dir, f)))) for f in vcfs]
     if log_indels_dir and os.path.isdir(log_indels_dir):
         chroms = []
         for f in sorted(os.listdir(log_indels_dir)):
@@ -90,7 +108,7 @@ def _dataset_chroms(vcf_dir: str, log_indels_dir: str):
             stem = f[:-3] if f.endswith(".gz") else f
             if not stem.endswith(".txt"):
                 continue
-            chroms.append(_normalize_chrom(stem[len("log"):-len(".txt")]))
+            chroms.append(_checked_chrom(_normalize_chrom(stem[len("log"):-len(".txt")])))
         if chroms:
             return chroms
     raise ValueError(

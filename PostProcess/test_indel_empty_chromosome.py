@@ -75,6 +75,7 @@ from test_index_resolution import _ShippedScript
 HERE = os.path.dirname(os.path.abspath(__file__))
 SEARCH = os.path.join(HERE, "pool_search_indels.py")
 INDEX = os.path.join(HERE, "pool_index_indels.py")
+POSTINDEL = os.path.join(HERE, "pool_post_analisi_indel.py")
 HEADER = ("#Bulge type\tcrRNA\tDNA\tChromosome\tPosition\tCluster Position\t"
           "Direction\tMismatches\tBulge Size\tTotal")
 LOG_HEADER = "CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq"
@@ -1284,6 +1285,86 @@ class LogCriterion(unittest.TestCase):
 
     def test_missing_log_is_unknown_not_empty(self):
         self.assertFalse(self.f(self.d, "chr1"))
+
+
+class TheChromColumn(unittest.TestCase):
+    """_dataset_chroms (and its helpers), lifted out of both indel scripts, refuses a
+    dataset whose CHROM holds a character a shell reads. The CHROM of a dataset VCF's
+    first record is taken, unquoted, into the search, merge and post-analysis commands
+    both scripts run through a shell (os.system / shell=True): a VCF uploaded with a
+    crafted CHROM would run it. A real chromosome name holds none, so a normal dataset is
+    read as before. The twin helper in each script is checked; both must agree."""
+
+    @staticmethod
+    def _dataset_chroms(script):
+        with open(script) as fh:
+            tree = ast.parse(fh.read())
+        wanted = {"_chrom_from_vcf", "_normalize_chrom", "_checked_chrom", "_dataset_chroms"}
+        body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
+        ns = {"os": os, "gzip": gzip}
+        exec(compile(ast.Module(body=body, type_ignores=[]), script, "exec"), ns)
+        return ns["_dataset_chroms"]
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="indel_chrom_")
+        self.addCleanup(shutil.rmtree, self.d)
+        self.marker = os.path.join(self.d, "MARK_from_chrom")
+
+    def _vcf_dir(self, chrom):
+        vdir = os.path.join(self.d, "VCFs", "ds")
+        os.makedirs(vdir, exist_ok=True)
+        with gzip.open(os.path.join(vdir, "ds.vcf.gz"), "wt") as fh:
+            fh.write("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n")
+            fh.write(f"{chrom}\t1\t.\tA\tAT\t.\t.\t.\n")
+        return vdir
+
+    def _log_dir(self, chrom):
+        ldir = os.path.join(self.d, "Dictionaries", "log_indels_ds")
+        os.makedirs(ldir, exist_ok=True)
+        with open(os.path.join(ldir, f"log{chrom}.txt"), "w") as fh:
+            fh.write("CHR\n")
+        return ldir
+
+    # the CHROM a crafted VCF (or a bundled log named after it) would carry into a shell
+    CRAFTED = ("chr1$(touch MARK_from_chrom)", "chr1;touch MARK;#", "chr1 extra", "chr1|x")
+
+    def test_a_vcf_chrom_a_shell_reads_is_refused(self):
+        for script in (SEARCH, POSTINDEL):
+            dataset_chroms = self._dataset_chroms(script)
+            for chrom in self.CRAFTED:
+                with self.subTest(script=os.path.basename(script), chrom=chrom):
+                    vdir = self._vcf_dir(chrom)
+                    with self.assertRaises(ValueError):
+                        dataset_chroms(vdir, "")
+                    self.assertFalse(os.path.exists(self.marker))
+                    shutil.rmtree(os.path.dirname(vdir))
+
+    def test_a_bundled_log_chrom_a_shell_reads_is_refused(self):
+        for script in (SEARCH, POSTINDEL):
+            dataset_chroms = self._dataset_chroms(script)
+            with self.subTest(script=os.path.basename(script)):
+                ldir = self._log_dir("chr1;touch MARK;#")
+                with self.assertRaises(ValueError):
+                    dataset_chroms("", ldir)
+                self.assertFalse(os.path.exists(self.marker))
+                shutil.rmtree(os.path.dirname(ldir))
+
+    def test_a_normal_dataset_is_read_as_before(self):
+        for script in (SEARCH, POSTINDEL):
+            dataset_chroms = self._dataset_chroms(script)
+            with self.subTest(script=os.path.basename(script)):
+                # a raw VCF whose CHROM has no 'chr' prefix is normalized, as before
+                self.assertEqual(dataset_chroms(self._vcf_dir("1"), ""), ["chr1"])
+                shutil.rmtree(os.path.join(self.d, "VCFs"))
+                # the log fallback (no raw VCFs) reads chr1 and chrUn_KI270302v1 (an
+                # underscore is allowed), in order
+                ldir = os.path.join(self.d, "Dictionaries", "log_indels_ds")
+                os.makedirs(ldir, exist_ok=True)
+                for name in ("logchr1.txt", "logchrUn_KI270302v1.txt"):
+                    with open(os.path.join(ldir, name), "w") as fh:
+                        fh.write("CHR\n")
+                self.assertEqual(dataset_chroms("", ldir), ["chr1", "chrUn_KI270302v1"])
+                shutil.rmtree(os.path.dirname(ldir))
 
 
 if __name__ == "__main__":

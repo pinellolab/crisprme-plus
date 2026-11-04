@@ -2,9 +2,11 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (22 tests, the Security
-block) to that step, and on this branch the step then ran 489 tests in about 100 s, with its
-two allowed skips: correct the count there as these entries are merged.
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (23 tests, the Security
+block) to that step, and on this branch the step then ran 490 tests in about 100 s, with its
+two allowed skips: correct the count there as these entries are merged. The indel search's
+chromosome-name check (the last Security entry) adds three tests to `test_indel_empty_chromosome`,
+in unit-tests' own job.
 
 ### Fixed
 
@@ -131,3 +133,14 @@ two allowed skips: correct the count there as these entries are merged.
   says "The selected position does not exist"), and the results pages read only a folder of
   `Results/` whose id has the form the search form gives its jobs. Pre-existing. Covered by
   `PostProcess/test_web_shell_safety.py` and `PostProcess/test_web_results_links.py`.
+- **The indel steps of a search pass no chromosome name of a variant dataset to a shell.**
+  A search with bulges takes each chromosome name of a variant dataset, read from the CHROM
+  column of its VCFs (or from the per-chromosome indel logs named after it), into the shell
+  commands that search and merge the indel off-targets and run the indel post-analysis, where
+  characters a shell reads ran as commands, as the web app's user. A VCF dataset added in
+  Settings carries its own CHROM column, which this did not check, and Settings changes data
+  in local mode only, which is how CRISPRme runs by default. The indel search and its
+  post-analysis now refuse a chromosome name that holds a blank or a character a sequence's
+  name may not hold (the same characters Settings refuses in a name, above), and say so; a
+  real chromosome name holds none, so a normal dataset is searched as before. Pre-existing.
+  Covered by `PostProcess/test_indel_empty_chromosome.py`.
