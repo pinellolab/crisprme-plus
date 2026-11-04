@@ -149,6 +149,14 @@ and the Settings, personal-assembly and History entries add tests to `test_setti
   otherwise (a command-line search's `--output` may be) with no link, and says why its pages do
   not open and what to do (`docs/crisprme_web_interface_user_guide.md`). Pre-existing. Covered
   by `PostProcess/test_web_shell_safety.py` and `PostProcess/test_history_page_assembly.py`.
+- **Remove result removes only a search its status page offers it for.** A search's status page
+  offers Remove result once the search has failed, and a personal-assembly search's once it has
+  failed or is reconciled, but the button's request, which a client can send for any job,
+  removed the search of the page's address whatever its state: a finished, running or queued
+  search, and, through a personal-assembly search's button, a search of either kind. History
+  lists every search in local mode, which is how CRISPRme runs by default, and on a website a
+  search's link names it. Each now removes only a search in a state its page offers it for, and
+  otherwise changes nothing. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
 - **Remove installed data, in Settings, removes only an item it lists.** It took the item as a
   request sent it, and a name of `..` named the data folder (or, through a folder of it that is a
   link to other storage, the folder there that holds the link's target), and `.` or no name the

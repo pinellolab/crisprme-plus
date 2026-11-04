@@ -64,6 +64,56 @@ def _failure_text(job_directory: str) -> str:
     )
 
 
+# Remove result removes only a job its status page offers it for: the job id is the
+# URL's, which a client can set to any job's, finished, running or queued.
+def _search_failed(job_directory: str) -> bool:
+    """Whether a search failed, as its status page says (refresh_search): its folder
+    holds its log.txt and a log_error.txt that is not empty. The page offers Remove
+    result for such a search only, and remove_result removes no other."""
+    error_log = os.path.join(job_directory, "log_error.txt")
+    return (
+        os.path.isfile(os.path.join(job_directory, LOG_FILE))
+        and os.path.isfile(error_log)
+        and os.path.getsize(error_log) > 0
+    )
+
+
+def is_assembly_folder(job_directory: str) -> bool:
+    """Whether a job folder is a personal-assembly search's, per its .Params.txt
+    (written by submit_assembly_search_job), as the routes to a job's pages tell
+    (index._is_assembly_job), which open its status page."""
+    try:
+        with open(os.path.join(job_directory, PARAMS_FILE)) as params_handle:
+            return "Genome_type\tassembly" in params_handle.read()
+    except OSError:
+        return False
+
+
+def _assembly_search_ended(current_log: str) -> Tuple[bool, bool]:
+    """(failed, reconciled) of a personal-assembly search, from its log.txt, as its
+    status page says (refresh_assembly_search): the page offers Remove result once
+    either is true, and remove_assembly_result removes no other search.
+
+    Reconciled: assembly_search() prints "Reconciliation complete. Wrote" only after
+    combined.to_csv() succeeds (crisprme.py:2653-2654), so seeing it is itself proof
+    the combined TSV was written. Failed mirrors refresh_search's log_error.txt check,
+    for a single merged log.txt (stdout+stderr combined -- see
+    _run_assembly_search_job): a clean crisprme.py error() call always writes
+    "Error: ..." to stderr before exiting; an unhandled exception writes a Python
+    traceback; the web launcher's own defensive except clause prefixes with
+    "[web] launcher error:". Not exhaustive -- a raw shell-level failure (e.g. a
+    command not found) won't match any of these and would just appear to hang at
+    "To do" -- known gap, not solved here."""
+    reconciled = "Reconciliation complete. Wrote" in current_log
+    failed = (
+        "\nError: " in current_log
+        or current_log.startswith("Error: ")
+        or "Traceback (most recent call last)" in current_log
+        or "[web] launcher error:" in current_log
+    )
+    return failed, reconciled
+
+
 # Check job completion
 @app.callback(
     [
@@ -275,15 +325,7 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
                         database_status = html.P(
                             "Inserting data... Step [1/1]", style={"color": "orange"}
                         )
-                    if (
-                        os.path.isfile(
-                            os.path.join(current_job_directory, "log_error.txt")
-                        )
-                        and os.path.getsize(
-                            os.path.join(current_job_directory, "log_error.txt")
-                        )
-                        > 0
-                    ):
+                    if _search_failed(current_job_directory):
                         return (
                             {"visibility": "hidden"},
                             html.P("Not available", style={"color": "red"}),
@@ -497,10 +539,9 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
         or "Found existing completed maternal search results" in current_log
     )
     reconcile_started = "Reconciling paternal and maternal predictions" in current_log
-    # Only printed AFTER combined.to_csv() succeeds (assembly_search(),
-    # crisprme.py:2653-2654) -- seeing this string is itself proof the
-    # combined TSV was written, no separate file-existence check needed.
-    reconcile_done = "Reconciliation complete. Wrote" in current_log
+    # (no separate file-existence check needed for the combined TSV: see
+    # _assembly_search_ended, which remove_assembly_result reads the same way)
+    failed, reconcile_done = _assembly_search_ended(current_log)
 
     paternal_status = _assembly_status_cell(
         paternal_started, maternal_started or reconcile_started, "Searching paternal haplotype..."
@@ -512,21 +553,6 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
         reconcile_started, reconcile_done, "Reconciling against hg38..."
     )
 
-    # Mirrors refresh_search's log_error.txt-non-empty check, adapted for a
-    # single merged log.txt (stdout+stderr combined -- see
-    # _run_assembly_search_job): a clean crisprme.py error() call always
-    # writes "Error: ..." to stderr before exiting; an unhandled exception
-    # writes a Python traceback; the web launcher's own defensive except
-    # clause prefixes with "[web] launcher error:". Not exhaustive -- a raw
-    # shell-level failure (e.g. a command not found) won't match any of
-    # these and would just appear to hang at "To do" -- known gap, not
-    # solved here.
-    failed = (
-        "\nError: " in current_log
-        or current_log.startswith("Error: ")
-        or "Traceback (most recent call last)" in current_log
-        or "[web] launcher error:" in current_log
-    )
     if failed and not reconcile_done:
         return (
             {"visibility": "hidden"}, not_avail, not_avail, not_avail, "",
@@ -574,9 +600,18 @@ def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
         raise PreventUpdate
     # the job id is the URL's, and the two names its .Params.txt holds are read from that
     # folder: only job folders of Results/ are removed, as by remove_result ('../' in
-    # either reached any folder, outside the data folder too)
+    # either reached any folder, outside the data folder too), and only those of a
+    # personal-assembly search its status page offers Remove result for, one that failed
+    # or is reconciled (refresh_assembly_search): the id can be any job's
     combined_dir = results_job_dir(dir_name.split("=")[-1])
-    if combined_dir is None:
+    if combined_dir is None or not is_assembly_folder(combined_dir):
+        raise PreventUpdate
+    try:
+        with open(os.path.join(combined_dir, LOG_FILE), errors="replace") as handle_log:
+            failed, reconciled = _assembly_search_ended(handle_log.read())
+    except OSError:  # no log yet: queued
+        raise PreventUpdate
+    if not (failed or reconciled):  # running
         raise PreventUpdate
     dirs_to_remove = [combined_dir]
     params_path = os.path.join(combined_dir, PARAMS_FILE)
@@ -798,9 +833,11 @@ def remove_result(n: int, dir_name: str) -> html.P:
     elif n == 1:
         # the job id is the URL's: only a job folder of Results/ is removed, with no
         # shell (rm -rf through one ran a command the id held, and removed what '../'
-        # in it reached, outside the data folder too)
+        # in it reached, outside the data folder too), and only a failed search's, the
+        # one the status page offers Remove result for (refresh_search): the id can be
+        # any job's, finished, running or queued
         current_job_directory = results_job_dir(dir_name.split("=")[-1])
-        if current_job_directory is None:
+        if current_job_directory is None or not _search_failed(current_job_directory):
             raise PreventUpdate
         # remove job data
         shutil.rmtree(current_job_directory)

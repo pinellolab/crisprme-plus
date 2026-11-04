@@ -41,6 +41,11 @@ found outside the data folder changed what they answered; and the Individual pic
 in, and the Personal assembly tab's Submit searched, the files a bundle's metadata.json
 names outside its folder.
 
+And up to 2.8.0 Remove result removed the job of its URL whatever its state (finished,
+running or queued; through a personal-assembly search's button, a search that is none),
+though its status page offers it only for a search that failed, and a personal-assembly
+search that failed or is reconciled: it removes only a job its status page offers it for.
+
 And up to 2.8.0 the post-analysis of a search (pool_post_analisi_snp.py) took the name of
 each FASTA file of the genome folder, as a chromosome's, into shell commands as it was,
 and a personal-assembly bundle, imported in Settings, brings its genome folders with the
@@ -858,14 +863,59 @@ class TestActiveAnnotation(_WebFolder):
         self.assertNothingRun()
 
 
+# A search's job folder in each state its status page tells apart (load_page.refresh_search),
+# as the search script leaves it; the page offers Remove result for a failed one only.
+_SEARCH_PARAMS = {".Params.txt": "Genome_selected\thg38\nRef_comp\tFalse\n"}
+_SEARCH_STATES = {
+    "failed": dict(_SEARCH_PARAMS, **{
+        "log.txt": "Job\tStart\tFri\nOff-targets search\tStart\tFri\n",
+        "log_error.txt": "ERROR: the search failed\n"}),
+    "finished": dict(_SEARCH_PARAMS, **{
+        "log.txt": "Job\tStart\tFri\nCreating database\tEnd\tFri\nJob\tDone\tFri\n",
+        "log_error.txt": ""}),
+    "finished, no log_error.txt": dict(_SEARCH_PARAMS, **{
+        "log.txt": "Job\tStart\tFri\nCreating database\tEnd\tFri\nJob\tDone\tFri\n"}),
+    "finished, no off-targets": dict(_SEARCH_PARAMS, **{
+        "log.txt": "Job\tStart\tFri\nPost-analysis\tEnd\tFri\nNo off-targets found\n",
+        "log_error.txt": ""}),
+    "running": dict(_SEARCH_PARAMS, **{
+        "log.txt": "Job\tStart\tFri\nOff-targets search\tStart\tFri\n",
+        "log_error.txt": ""}),
+    "queued": dict(_SEARCH_PARAMS, **{"queue.txt": ""}),
+}
+# a personal-assembly search's combined folder in each state of its status page
+# (refresh_assembly_search), which offers Remove result once it failed or is reconciled
+_ASSEMBLY_STATES = {
+    "failed": "Running paternal haplotype search\nError: the search failed\n",
+    "reconciled": ("Running paternal haplotype search\nRunning maternal haplotype search\n"
+                   "Reconciling paternal and maternal predictions\n"
+                   "Reconciliation complete. Wrote x_hg38.tsv\n"),
+    "running": "Running paternal haplotype search\n",
+    "queued": None,  # no log.txt yet, a queue.txt
+}
+
+
+def _job_folder(folder, files):
+    os.makedirs(folder)
+    for name, text in files.items():
+        with open(os.path.join(folder, name), "w") as fh:
+            fh.write(text)
+    return folder
+
+
 @NEEDS_DASH
 class TestRemoveResult(_WebFolder):
     """Remove result on a job's status page, which removes the job of its URL (and, for a
-    personal-assembly search, the haplotype searches its .Params.txt names)."""
+    personal-assembly search, the haplotype searches its .Params.txt names). The page offers
+    it for a search that failed, and for a personal-assembly search that failed or is
+    reconciled; the id is the URL's, which a client can set to any job's, and the job was
+    removed whatever its state: a finished, running or queued search, and through the
+    personal-assembly button a search that is no personal-assembly search. Only a job the
+    page offers it for is removed."""
 
     def test_only_a_job_folder_is_removed(self):
         results = os.path.join(self.data, "Results")
-        os.makedirs(os.path.join(results, "job1_ABC"))
+        _job_folder(os.path.join(results, "job1_ABC"), _SEARCH_STATES["failed"])
         os.makedirs(os.path.join(self.outside, "victim"))
         self.before = self.outside_files()
         for search in ("?job=X;touch${IFS}MARK_a;#", "?job=../../outside/victim",
@@ -875,6 +925,52 @@ class TestRemoveResult(_WebFolder):
         self.assertNothingRun()
         self.assertEqual(lp.remove_result(1, "?job=job1_ABC").children, "Results deleted")
         self.assertEqual(os.listdir(results), [])
+
+    def test_only_a_search_its_status_page_offers_it_for_is_removed(self):
+        results = os.path.join(self.data, "Results")
+        for i, (state, files) in enumerate(_SEARCH_STATES.items()):
+            with self.subTest(state=state):
+                job = f"job{i}_ABC"
+                folder = _job_folder(os.path.join(results, job), files)
+                offered = not lp.refresh_search(1, f"?job={job}")[-1]  # (hidden)
+                self.assertEqual(offered, state == "failed")
+                if offered:
+                    self.assertEqual(lp.remove_result(1, f"?job={job}").children,
+                                     "Results deleted")
+                    self.assertFalse(os.path.exists(folder))
+                else:
+                    with self.assertRaises(PreventUpdate):
+                        lp.remove_result(1, f"?job={job}")
+                    self.assertEqual(sorted(os.listdir(folder)), sorted(files))
+
+    def test_only_a_personal_assembly_search_its_page_offers_it_for_is_removed(self):
+        results = os.path.join(self.data, "Results")
+        # searches that are no personal-assembly search, failed or finished, are kept
+        for job, state in (("done_ABC", "finished"), ("fail_ABC", "failed")):
+            folder = _job_folder(os.path.join(results, job), _SEARCH_STATES[state])
+            with self.subTest(job=job):
+                with self.assertRaises(PreventUpdate):
+                    lp.remove_assembly_result(1, f"?job={job}")
+                self.assertEqual(sorted(os.listdir(folder)), sorted(_SEARCH_STATES[state]))
+        for state, log in _ASSEMBLY_STATES.items():
+            with self.subTest(state=state):
+                job = f"asm_{state}"
+                files = {".Params.txt": f"1\tGenome_type\tassembly\n2\tPaternal_dir\t{job}"
+                                        f"_paternal\n3\tMaternal_dir\t{job}_maternal\n"}
+                files.update({"log.txt": log} if log else {"queue.txt": ""})
+                _job_folder(os.path.join(results, f"{job}_combined"), files)
+                for hap in ("paternal", "maternal"):
+                    _job_folder(os.path.join(results, f"{job}_{hap}"), {"log.txt": ""})
+                offered = not lp.refresh_assembly_search(1, f"?job={job}_combined")[-1]
+                self.assertEqual(offered, state in ("failed", "reconciled"))
+                if offered:
+                    self.assertEqual(lp.remove_assembly_result(
+                        1, f"?job={job}_combined").children, "Results deleted")
+                else:
+                    with self.assertRaises(PreventUpdate):
+                        lp.remove_assembly_result(1, f"?job={job}_combined")
+                left = [name for name in os.listdir(results) if name.startswith(job)]
+                self.assertEqual(len(left), 0 if offered else 3)
 
     def test_a_link_leaving_results_is_not_a_job_folder(self):
         os.makedirs(os.path.join(self.outside, "victim"))
@@ -888,13 +984,14 @@ class TestRemoveResult(_WebFolder):
     def test_only_the_folders_of_an_assembly_search_are_removed(self):
         results = os.path.join(self.data, "Results")
         # asm1's .Params.txt as the Personal assembly tab writes it; asm2's names a
-        # haplotype folder outside Results/
-        for job, paternal in (("asm1_ABC", "asm1_ABC_paternal"),
-                              ("asm2_ABC", "../../outside/victim")):
-            os.makedirs(os.path.join(results, f"{job}_combined"))
-            with open(os.path.join(results, f"{job}_combined", ".Params.txt"), "w") as fh:
-                fh.write(f"1\tGenome_type\tassembly\n2\tPaternal_dir\t{paternal}\n"
-                         f"3\tMaternal_dir\t{job}_maternal\n")
+        # haplotype folder outside Results/ (one reconciled, one failed: their status
+        # pages offer Remove result)
+        for job, paternal, state in (("asm1_ABC", "asm1_ABC_paternal", "reconciled"),
+                                     ("asm2_ABC", "../../outside/victim", "failed")):
+            _job_folder(os.path.join(results, f"{job}_combined"), {
+                ".Params.txt": f"1\tGenome_type\tassembly\n2\tPaternal_dir\t{paternal}\n"
+                               f"3\tMaternal_dir\t{job}_maternal\n",
+                "log.txt": _ASSEMBLY_STATES[state]})
         for name in ("asm1_ABC_paternal", "asm1_ABC_maternal"):
             os.makedirs(os.path.join(results, name))
         os.makedirs(os.path.join(self.outside, "victim"))

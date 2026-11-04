@@ -65,18 +65,10 @@ def _is_assembly_job(job_id: str) -> bool:
     substring-check style refresh_search already uses for Ref_comp. Shared
     by both the /load and /result routes below so the check isn't
     duplicated a third time. The id is the URL's: only a job folder of Results/
-    is read (results_job_dir)."""
+    is read (results_job_dir). Remove result of a personal-assembly search
+    removes only a job this takes (load_page.is_assembly_folder)."""
     job_dir = results_job_dir(job_id)
-    if job_dir is None:
-        return False
-    params_path = os.path.join(job_dir, ".Params.txt")
-    if not os.path.isfile(params_path):
-        return False
-    try:
-        with open(params_path) as params_handle:
-            return "Genome_type\tassembly" in params_handle.read()
-    except OSError:
-        return False
+    return job_dir is not None and load_page.is_assembly_folder(job_dir)
 CRISPRME_DIRS = [
     "Genomes",
     "Results",
