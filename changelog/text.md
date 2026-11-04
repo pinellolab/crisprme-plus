@@ -57,8 +57,8 @@ above" is the third; keep them true where the entries land.
   the lowest frequency of the list, does not change; the rsIDs its `Variant` column gives after the
   variants, and the rsIDs and AFs of `observed_haplotypes.tsv` and of a site's haplotype table in
   the report, come in the list's order. METHODS section 8 states the limit. Pre-existing: 2.8.0 and
-  every earlier release behave so (before 2.4.0 each list came in an arbitrary order); it will be
-  fixed in the next release. Covered by `PostProcess/test_generate_report.py`.
+  every release since 2.2.0 behave so (before 2.4.0 each list came in an arbitrary order); it will
+  be fixed in the next release. Covered by `PostProcess/test_generate_report.py`.
 - **METHODS section 2 says what a sites-only panel's registry holds for carriers and
   homozygotes.** It said that the carrier and homozygote counts of the mega index are reported as
   Hardy–Weinberg expectations from the allele frequency, flagged as estimates, and
