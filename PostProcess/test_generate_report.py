@@ -2151,8 +2151,9 @@ class TestGenerateReport(unittest.TestCase):
         limits = " ".join(methods[methods.index("## 8. "):methods.index("## 9. ")].split())
         for said in ("On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists "
                      "of the results tables are not in the order of its `Variant_info_genome`",
+                     # of the 293, 267 hold one SNP beside the indel, 22 two and 4 three
                      "953 of 1,967 rows of two or more SNPs and 118 of 293 rows of an indel and "
-                     "a SNP list their rsIDs in another order than their variants",
+                     "one or more SNPs list their rsIDs in another order than their variants",
                      "are in the list's order. 2.8.0 behaves the same, and it will be fixed in "
                      "the next release."):
             self.assertIn(said, limits)

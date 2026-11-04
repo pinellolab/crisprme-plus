@@ -1180,11 +1180,11 @@ tables are not in the order of its `Variant_info_genome`: the merge of a cluster
 each value once, so the n-th rsID or MAF need not be the n-th variant's, and two variants
 of one frequency show it once. On ACTGA (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per
 sample, genome-wide, HGDP + 1000 Genomes), 953 of 1,967 rows of two or more SNPs and 118 of
-293 rows of an indel and a SNP list their rsIDs in another order than their variants (in the
-highest-CFD columns). The report's MAF, the lowest frequency of the list, does not depend on
-it; the rsIDs its `Variant` column gives after the variants, and the rsIDs and AFs of
-`observed_haplotypes.tsv` and of a site's haplotype table in the report, are in the list's
-order. 2.8.0 behaves the same, and it will be fixed in the next release.
+293 rows of an indel and one or more SNPs list their rsIDs in another order than their
+variants (in the highest-CFD columns). The report's MAF, the lowest frequency of the list,
+does not depend on it; the rsIDs its `Variant` column gives after the variants, and the rsIDs
+and AFs of `observed_haplotypes.tsv` and of a site's haplotype table in the report, are in
+the list's order. 2.8.0 behaves the same, and it will be fixed in the next release.
 The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
 alignments may exceed it (the report surfaces the observed maximum), while an indel row,
