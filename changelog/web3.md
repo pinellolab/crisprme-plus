@@ -14,9 +14,9 @@
 - **The search form says before Submit that a variant dataset has no sample list, and how to get
   one, whether its variant index was built in Settings or downloaded.** Removing a VCF dataset in
   Settings takes the sample list the page wrote for it (`samplesIDs/<dataset>.samplesID.txt`) and
-  leaves its variant index, and the search form still offers the dataset, labelled as before, if
-  its name begins with its genome's and an underscore (as `hg38_<name>`; one named otherwise is not
-  offered until it is added again). The note under the bulge options then offered its search, and
+  leaves its variant index, and the search form still offers the dataset if its name begins with
+  its genome's and an underscore (as `hg38_<name>`; one named otherwise is not offered until it is
+  added again). The note under the bulge options then offered its search, and
   Submit refused it, saying to download its index again, which installs the list, or to add the
   file yourself: an index built in Settings cannot be downloaded, and one downloaded is not
   downloaded again while it is installed (Settings answers "already installed — nothing to
