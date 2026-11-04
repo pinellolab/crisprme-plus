@@ -8,7 +8,9 @@ Up to 2.8.0 the web app took such text into shell commands as it was:
   header named the BED it wrote in the data folder, and the BED line's chromosome the
   FASTA bedtools read, in a command run through a shell; a header holding '../' wrote the
   BED outside the data folder, and the index bedtools wrote beside the FASTA was then
-  removed, one there before too.
+  removed, one there before too;
+* the search launch (main_page.change_url): the e-mail address, and the mismatches and
+  genome, which a request can set past the Submit check.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -39,6 +41,8 @@ try:  # the pages need the web stack (Dash), which the light unit-test CI does n
 except ImportError:  # pragma: no cover
     dash = None
 if dash is not None:
+    from dash.exceptions import PreventUpdate
+
     sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app object
     import index  # noqa: E402  (check_directories: the data folder the web app starts with)
     import pages.load_page as lp  # noqa: E402
@@ -244,12 +248,39 @@ class TestSearchLaunch(_WebFolder):
     def jobs(self):
         return sorted(os.listdir(os.path.join(self.data, "Results")))
 
+    def test_a_search_runs_as_before_and_the_email_address_is_one_argument(self):
+        cmd, args = self.submit(name="run1")
+        # nothing is quoted: the command is the one of 2.8.0
+        self.assertNotIn("'", cmd)
+        job = os.path.join(self.data, "Results", self.jobs()[0])
+        self.assertEqual(args[:3], [os.path.join(self.data, "Genomes", "hg38"),
+                                    os.path.join(job, ".list_vcfs.txt"),
+                                    os.path.join(job, ".guides.txt")])
+        self.assertEqual((len(args), args[7], args[16], args[25]), (26, "4", "_", "6"))
+        email = "a@b;touch${IFS}MARK_a;#"
+        _cmd, args = self.submit(email=email, name="run2")
+        self.assertEqual(len(args), 26)
+        self.assertEqual(args[16], email)  # the search's 17th argument
+        self.assertNothingRun()
+
     @NEEDS_BEDTOOLS
     def test_a_genomic_sequence_header_runs_nothing(self):
         self.submit(guides=">s;touch${IFS}MARK_b;#\nchr1 0 43", guide_type="GS")
         job = os.path.join(self.data, "Results", self.jobs()[0])
         with open(os.path.join(job, ".guides.txt")) as fh:
             self.assertIn("CTAACAGTTGCTTTTATCACNNN", fh.read().split("\n"))
+        self.assertNothingRun()
+
+    def test_what_the_form_does_not_offer_is_refused(self):
+        for kwargs in (dict(mms="4;touch${IFS}MARK_c;#"), dict(mms="x"),
+                       dict(genome="hg38;touch${IFS}MARK_d;#"),
+                       dict(genome="../../outside/hg38"), dict(pam=f"../../outside/{PAM}"),
+                       dict(variant="1000G$(touch${IFS}MARK_e)"), dict(genome=None)):
+            with self.subTest(**kwargs):
+                with self.assertRaises(PreventUpdate):
+                    self.submit(**kwargs)
+                self.assertEqual(self.pool.submit.call_count, 0)
+                self.assertEqual(self.jobs(), [])
         self.assertNothingRun()
 
 

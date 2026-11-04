@@ -1079,6 +1079,12 @@ def change_url(
             raise TypeError(f"Expected {str.__name__}, got {type(job_name).__name__}")
     if n is None:
         raise PreventUpdate  # do not update the page
+    # Submit fires this once check_input has passed the form, but a request can call it
+    # with any values, which name the folders and files the search reads and go into its
+    # command line (and its steps' shell commands): only what the form offers runs.
+    if not _launchable(genome_selected, pam, variant_choice, mms, dna, rna):
+        raise PreventUpdate
+    mms = int(mms)
     # job start
     print("Launching JOB")
     # ---- Check input. If fails, give simple input
@@ -1856,10 +1862,40 @@ def change_url(
             _sm.write("per-sample" if fast_env == "0" else "population-level")
     except OSError:
         pass
-    cmd = f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} CRISPRME_REPORT_FULL={report_full_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
+    # every argument quoted: the e-mail address is as the request sent it, and the genome's
+    # and PAM's names in the paths as Settings took them (quoting leaves the rest as is)
+    args = [run_job_sh, genome, vcfs, guides_file, pam_file, annotation, samples_ids,
+            max_bulges, mms, dna, rna, merge_default, result_dir, postprocess, 4,
+            current_working_directory, gencode, dest_email, be_start, be_stop, be_nt,
+            sorting_criteria_scoring, sorting_criteria, False, "PASS,.", "_", max_total_edits]
+    cmd = (
+        f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} "
+        f"CRISPRME_REPORT_FULL={report_full_env} "
+        + " ".join(shlex.quote(str(a)) for a in args)
+        + f" 1> {shlex.quote(log_verbose)} 2>{shlex.quote(log_error)}"
+    )
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
     return ("/load", f"?job={job_id}", "")
+
+
+def _launchable(genome: Optional[str], pam: Optional[str], variant_choice: Optional[str],
+                mms, dna, rna) -> bool:
+    """Whether change_url runs a search of these values: a genome and a PAM the form
+    offers (installed), "ref" or a variant dataset it offers for the genome, and whole
+    numbers of mismatches and bulges."""
+    if genome not in [g["value"] for g in get_available_genomes()]:
+        return False
+    if pam not in [p["value"] for p in get_available_PAM()]:
+        return False
+    if variant_choice not in (None, "", "ref") and variant_choice not in [
+        o["value"] for o in get_variant_dataset_options(genome)
+    ]:
+        return False
+    try:
+        return all(int(v) >= 0 for v in (mms, dna, rna))
+    except (TypeError, ValueError):
+        return False
 
 
 def _not_installed(field: str, selected: Optional[str], installed: List[str], what: str,

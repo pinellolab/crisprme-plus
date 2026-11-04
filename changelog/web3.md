@@ -2,8 +2,8 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (7 tests, the Security
-block) to that step, and on this branch the step then ran 474 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (9 tests, the Security
+block) to that step, and on this branch the step then ran 476 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged.
 
 ### Fixed
@@ -75,3 +75,12 @@ two allowed skips: correct the count there as these entries are merged.
   where it writes the index too: the header names no file, the sequence name must be that of a
   FASTA of the genome selected, and the genome an installed one. Pre-existing, in every earlier
   release. Covered by `PostProcess/test_web_shell_safety.py`.
+- **Submit's launch of a search runs only what the form offers, and quotes each value it passes
+  on.** A request can call the launch with any values, past Submit's check of the form: the
+  genome, the PAM and the variant dataset name the folders and files the search reads, and the
+  genome, the e-mail address and the number of mismatches went as sent into the shell command
+  that starts the search, where characters a shell reads ran as commands. The launch now runs
+  only a genome and a PAM that are installed, "Reference only" or a variant dataset the form
+  offers for the genome, and whole numbers of mismatches and bulges, and it quotes each value of
+  that command, which is unchanged for the values the form sends. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
