@@ -189,6 +189,16 @@ and the Settings, personal-assembly and History entries add tests to `test_setti
   as incomplete and not offered (`docs/crisprme_web_interface_user_guide.md`). Pre-existing,
   since 2.6.0. Covered by `PostProcess/test_personal_assembly.py` and
   `PostProcess/test_web_shell_safety.py`.
+- **Remove of a personal assembly in Settings removes that bundle's folder, and of a pairing of
+  the older layout its own markers only.** Settings listed a bundle under the individual its
+  `metadata.json` names, which an archive imported there brings: one naming another individual
+  took that one's place in the Individual picker and the Remove card, and one naming an
+  individual with no folder was removed as a pairing of the older layout, by the files named
+  after the assembly names the bundle gives, outside the data folder too. A bundle is now listed
+  under the name of its folder, as `assembly-search --assembly-individual` takes it, and only a
+  pairing of the older layout is removed as one (`docs/crisprme_web_interface_user_guide.md`).
+  Pre-existing, since 2.6.0. Covered by `PostProcess/test_personal_assembly.py` and
+  `PostProcess/test_settings_progress.py`.
 - **The search form reads only what it offers.** The callbacks that fill in and check the form
   (the variant datasets offered for a genome, the analysis modes, the bulge options and the note
   under them, and Submit's check) took the genome, PAM and variant dataset a request sends into

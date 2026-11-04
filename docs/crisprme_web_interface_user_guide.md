@@ -480,13 +480,14 @@ Two ways to provide the inputs:
   liftOver chains, and the chromAlias files, and registers them with the Data Manager.
 - **Bring your own bundle:** upload a single `.zip`/`.tar.gz` whose one top-level
   `<individual>/` folder holds the same structure and a valid `metadata.json` (see below);
-  CRISPRme extracts, validates, and registers it. The paths `metadata.json` gives are
-  those of files and folders inside `<individual>/`: a bundle naming one anywhere else is
-  refused. A search takes the name of each FASTA file of a haplotype's genome folder for
-  its chromosome's, so name each file after the sequence it holds (`chr1.fa` holding
-  `>chr1`): a bundle holding a FASTA file whose name holds a blank or any of `|`, `;`, `'`,
-  `"`, `$`, `(`, `)`, `&`, `<`, `>`, a backquote or `#` is refused, as CRISPRme takes that
-  name into shell commands.
+  CRISPRme extracts, validates, and registers it under the name of that folder, which the
+  Individual picker, Settings and `--assembly-individual` use whatever individual
+  `metadata.json` names. The paths `metadata.json` gives are those of files and folders
+  inside `<individual>/`: a bundle naming one anywhere else is refused. A search takes the
+  name of each FASTA file of a haplotype's genome folder for its chromosome's, so name each
+  file after the sequence it holds (`chr1.fa` holding `>chr1`): a bundle holding a FASTA
+  file whose name holds a blank or any of `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`,
+  `>`, a backquote or `#` is refused, as CRISPRme takes that name into shell commands.
 
 **How an assembly is stored.** Each individual is one self-contained folder,
 `Assemblies/<individual>/`, holding both haplotypes and a single `metadata.json` that

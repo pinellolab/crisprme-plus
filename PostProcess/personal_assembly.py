@@ -186,13 +186,19 @@ def resolve(cwd: str, individual: str) -> Optional[Dict]:
     """One individual's registration dict (bundle layout), or ``None`` if there
     is no ``metadata.json`` for it. Shape matches
     ``pages.pages_utils.installed_assemblies`` entries, with extra ``layout`` /
-    ``root`` / ``source`` / ``*_path`` fields."""
+    ``root`` / ``source`` / ``*_path`` fields. The individual is named after its
+    folder, as ``--assembly-individual`` and Settings' Remove take it, not after
+    metadata.json's ``individual``: that is the bundle's own content, a client's
+    for an archive imported in Settings, and naming another individual listed the
+    bundle in that one's place, or one with no folder, which Remove then took for
+    a pairing of the legacy layout, removing paths named after the bundle's
+    assembly names (outside the data folder too)."""
     meta = read_metadata(cwd, individual)
     if meta is None:
         return None
     haps = meta.get("haplotypes", {}) or {}
     out = {
-        "individual": meta.get("individual", os.path.basename(individual)),
+        "individual": os.path.basename(individual),
         "layout": "bundle",
         "root": os.path.relpath(individual_dir(cwd, individual), cwd),
         "source": meta.get("source"),

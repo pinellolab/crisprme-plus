@@ -1574,10 +1574,13 @@ def _delete_targets(kind: str, name: str) -> List[str]:
         # reason), so silently deleting them on an "un-pair this individual"
         # action would be a surprising data-loss footgun. Those legacy files,
         # if wanted gone too, are removed one at a time via the "genome" delete
-        # kind with its own explicit confirmation.
+        # kind with its own explicit confirmation. A legacy pairing's names are
+        # those of the genome folders and liftover files listed: a bundle's are
+        # its metadata.json's, which an archive imported here brings, and paths
+        # built from them reached outside the data folder.
         targets = []
         for a in installed_assemblies():
-            if a["individual"] != name:
+            if a["individual"] != name or a.get("layout") != "legacy":
                 continue
             for hap_key in ("paternal", "maternal"):
                 hap = a[hap_key]

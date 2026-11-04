@@ -405,5 +405,52 @@ class TestBundleFastaNamesAShellReads(unittest.TestCase):
                 shutil.rmtree(pa.individual_dir(self.cwd, "IND1"))
 
 
+class TestABundleIsNamedAfterItsFolder(unittest.TestCase):
+    """An individual is listed (discover_bundles, resolve) under the name of its folder of
+    Assemblies/, as assembly-search --assembly-individual and Settings' Remove take it.
+    metadata.json's "individual", the bundle's own content, a client's for an archive
+    imported in Settings, was the name listed: a bundle naming another individual took that
+    one's place in the Individual picker and the Remove card, and one naming an individual
+    with no folder was taken by Remove for a pairing of the legacy layout, removing paths
+    named after the bundle's assembly names, outside the data folder too
+    (test_settings_progress)."""
+
+    def setUp(self):
+        self.top = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.top, ignore_errors=True)
+        self.cwd = os.path.join(self.top, "data")
+        _make_haplotype(self.cwd, "HG01255", "paternal", "CM1")
+        _make_haplotype(self.cwd, "HG01255", "maternal", "CM2")
+
+    def test_an_imported_bundle_is_listed_under_its_folder_s_name(self):
+        # archives of HG01255's bundle under other top folders (as the import's own error
+        # says to rename one), their metadata naming HG01255, or GHOST, who has no folder
+        src = pa.individual_dir(self.cwd, "HG01255")
+        for folder, individual in (("EVIL", "HG01255"), ("EVIL2", "GHOST")):
+            meta = pa.read_metadata(self.cwd, "HG01255")
+            meta["individual"] = individual
+            for hap in pa.HAPLOTYPES:
+                meta["haplotypes"][hap]["assembly_name"] = "./../outside/victim"
+            arc = os.path.join(self.top, f"{folder}.tar.gz")
+            with tarfile.open(arc, "w:gz") as t:
+                t.add(src, arcname=folder, filter=lambda info: None
+                      if info.name.endswith(pa.METADATA_NAME) else info)
+                data = json.dumps(meta).encode()
+                info = tarfile.TarInfo(f"{folder}/{pa.METADATA_NAME}")
+                info.size = len(data)
+                t.addfile(info, io.BytesIO(data))
+            self.assertEqual(pa.import_archive(arc, self.cwd), folder)
+        found = {b["individual"]: b for b in pa.discover_bundles(self.cwd)}
+        self.assertEqual(sorted(found), ["EVIL", "EVIL2", "HG01255"])
+        for name in found:
+            self.assertEqual(found[name]["root"], os.path.join(pa.ASSEMBLIES_DIR, name))
+            self.assertTrue(found[name]["complete"])
+            self.assertEqual(pa.resolve(self.cwd, name)["individual"], name)
+            self.assertEqual(pa.delete_target(self.cwd, name), pa.individual_dir(self.cwd, name))
+        # the downloader's bundle, its folder named after its individual: as before
+        self.assertEqual(pa.read_metadata(self.cwd, "HG01255")["individual"], "HG01255")
+        self.assertEqual(found["HG01255"]["paternal"]["assembly_name"], "HG01255_paternal_CM1")
+
+
 if __name__ == "__main__":
     unittest.main()

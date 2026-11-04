@@ -2114,6 +2114,57 @@ class TestRemoveTakesAnItemTheCardLists(unittest.TestCase):
                 with self.subTest(kind=kind, name=name), self.assertRaises(ValueError):
                     self.ns["_delete_targets"](kind, name)
 
+    def test_a_bundle_whose_metadata_names_another_individual(self):
+        # bundle EVIL as an archive imported in Settings brings it, valid, its metadata.json
+        # naming the individual GHOST, who has no folder, and assembly names leading out of
+        # Genomes/: it was listed as GHOST, and Remove took GHOST for a pairing of the legacy
+        # layout, whose markers are named after a haplotype's genome, and removed
+        # Genomes/.<assembly name>.assembly_individual, outside the data folder here
+        import personal_assembly
+
+        evil = os.path.join(self.cwd, "Assemblies", "EVIL")
+        haps = {}
+        for hap, target in (("paternal", "victim"), ("maternal", "vdir")):
+            for name, text in (("genome/chr1.fa", ">chr1\nACGT\n"), ("x.chain", "chain\n"),
+                               ("x.chromAlias.txt", "x\n")):
+                os.makedirs(os.path.dirname(os.path.join(evil, hap, name)), exist_ok=True)
+                with open(os.path.join(evil, hap, name), "w") as fh:
+                    fh.write(text)
+            haps[hap] = {"assembly_name": f"./../outside/{target}",
+                         "genome_dir": f"{hap}/genome", "chain": f"{hap}/x.chain",
+                         "chromalias": f"{hap}/x.chromAlias.txt"}
+        with open(os.path.join(evil, personal_assembly.METADATA_NAME), "w") as fh:
+            json.dump({"format": personal_assembly.BUNDLE_FORMAT, "format_version": 1,
+                       "individual": "GHOST", "haplotypes": haps}, fh)
+        self.assertIsNone(personal_assembly.validate_bundle_dir(evil))  # it is imported
+        outside = os.path.join(self.root, "outside")
+        os.makedirs(os.path.join(outside, "vdir.assembly_individual"))
+        for path in ("victim.assembly_individual", "vdir.assembly_individual/keep.txt"):
+            with open(os.path.join(outside, path), "w") as fh:
+                fh.write("someone else's\n")
+        self.ns["installed_assemblies"] = lambda: personal_assembly.discover_bundles(self.cwd)
+        listed = [o["value"] for o in self.ns["_deletable_options"]()]
+        self.assertIn("assembly:EVIL", listed)
+        self.assertNotIn("assembly:GHOST", listed)
+        before = _tree(self.root)
+        said = self.ns["do_delete"](1, "assembly:GHOST")[0]
+        self.assertEqual(said.args, ("assembly:GHOST not found (already removed?).",))
+        self.assertEqual(_tree(self.root), before)
+        # nor is a bundle taken for a legacy pairing when it is listed under that name (its
+        # folder gone since the card was drawn, say): only a legacy pairing's markers go
+        entry = dict(personal_assembly.resolve(self.cwd, "EVIL"), individual="GHOST")
+        self.ns["installed_assemblies"] = lambda: [entry]
+        self.assertEqual(self.ns["_delete_targets"]("assembly", "GHOST"), [])
+        self.ns["do_delete"](1, "assembly:GHOST")
+        self.assertEqual(_tree(self.root), before)
+        # the bundle itself goes whole, under its folder's name, as before
+        self.ns["installed_assemblies"] = lambda: personal_assembly.discover_bundles(self.cwd)
+        said = self.ns["do_delete"](1, "assembly:EVIL")[0]
+        self.assertTrue(said.args[0].startswith("Deleted assembly:EVIL (freed "), said)
+        bundle = os.path.join("data", "Assemblies", "EVIL")
+        self.assertEqual(set(_tree(self.root)), {
+            p for p in before if p != bundle and not p.startswith(bundle + os.sep)})
+
 
 class TestVcfUploadIntoARegisteredFolder(unittest.TestCase):
     """The upload route, add_vcf (which registers a folder of the server as a VCF dataset,
