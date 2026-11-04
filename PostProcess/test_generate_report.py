@@ -1546,12 +1546,13 @@ class TestGenerateReport(unittest.TestCase):
             self.assertIn(f"mismatches + bulges &le; {t}", html)
         # of the selected panel, 3 are variant-created (the fixture has exactly 3)
         self.assertRegex(html, r"<strong>3</strong>[^<]*are\s+variant-created")
-        # E) MAF FOOTNOTE (the v2.4 blank-MAF explanation)
+        # E) MAF FOOTNOTE (the v2.4 blank-MAF explanation; an indel has the AF its VCF gives,
+        #    test_an_indels_maf_is_the_af_its_vcf_gives)
         self.assertIn(
-            "MAF blank (&mdash;) = reference off-target (no variant), "
-            "an indel-derived variant", html,
+            "MAF blank (&mdash;) = reference off-target (no variant), a SNP not in the "
+            "frequency panel, or an indel whose VCF gives it an <code>AF</code> of 0", html,
         )
-        self.assertIn("frequency registry is SNP-only", html)
+        self.assertIn("SNP-only frequency registry", html)
         self.assertIn("AC/AN over the genotyped panel", html)
 
     def test_section4_hybrid_floors_are_module_level(self):
@@ -2000,38 +2001,28 @@ class TestGenerateReport(unittest.TestCase):
         self.assertNotIn("paper-style", html)
         self.assertIn("the same ref/alt scatter as for the cfd score", html.lower())
 
-    def test_the_maf_texts_say_what_the_integrator_writes(self):
-        """The MAF note under the top-1000 tables and the legend's MAF entry said that a
-        variant whose source allele frequency is 0 is shown at a display floor of 1e-05, so
-        that it renders on the log-scale plots, to be read as "present, frequency effectively
-        0". No release that said so did it: resultIntegrator.py wrote 1e-05 for an AF of 0 up
-        to 2.3.3, and since 2.4.0, the release whose report first said so, it writes NA for
-        an AF that is 0 or missing, which the report leaves out of a row's MAF (the lowest AF
-        of its variants, blank when none has one); a smaller AF is printed as it is. Run
-        through the REAL resultIntegrator.py, then the report's MAF cell; the two texts say
-        that now, in every report, and nothing else changes in them."""
+    def _integrated_mafs(self, rows):
+        """Each criterion's ``Variant_MAF``, in the rows' order, that the REAL
+        resultIntegrator.py writes for bestMerge rows given as (variant field, AF field): the
+        AF column of a variant row as the merge step hands it on. Skips without GNU cut."""
         import csv
         import subprocess
         from test_seed_counts_dna_bulge import INTERVALTREE_STUB, SPACER_3P, _block, _gnu_cut
         if not _gnu_cut():
             self.skipTest("resultIntegrator.py needs GNU cut --complement")
         pp = os.path.dirname(os.path.abspath(__file__))
-        # the AF column of a variant row, as the merge step hands it on -> Variant_MAF
-        afs = {"0": "NA", "0.0": "NA", "": "NA", "NA": "NA", "3.1e-06": "3.1e-06",
-               "1e-05": "1e-05", "0,0.81": "NA,0.81", "0.25": "0.25"}
         d = tempfile.mkdtemp(prefix="maf_", dir=self.tmp)
         with open(os.path.join(d, "intervaltree.py"), "w") as fh:
             fh.write(INTERVALTREE_STUB)
         best = os.path.join(d, "job.bestMerge.txt")
         with open(best, "w") as fh:
-            for af in afs:
-                snp = "chrT_1005_A_T,chrT_1012_G_C" if "," in af else "chrT_1005_A_T"
+            for snp, af in rows:
                 block = _block("X", SPACER_3P, SPACER_3P, "CTAACtGTTGCTTTTATCACTGG",
                                "CTAACtGTTGCTTTTATCgCTGG", 1, 0, "HG00001", snp)
                 block[17] = af
                 fh.write("\t".join(block * 3) + "\n")
         with open(os.path.join(d, "job.found.bed"), "w") as fh:
-            fh.write("NA\n" * len(afs))
+            fh.write("NA\n" * len(rows))
         open(os.path.join(d, "dummy.txt"), "w").close()
         with open(os.path.join(d, "guides.txt"), "w") as fh:
             fh.write(SPACER_3P + "\n")
@@ -2042,10 +2033,28 @@ class TestGenerateReport(unittest.TestCase):
             cwd=pp, env=dict(os.environ, PYTHONPATH=d), capture_output=True, text=True)
         self.assertEqual((res.returncode, res.stderr), (0, ""))
         with open(best + ".integrated_results.tsv", newline="") as fh:
-            rows = list(csv.DictReader(fh, delimiter="\t"))
-        for criterion in ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE"):
-            self.assertEqual([r["Variant_MAF_(%s)" % criterion] for r in rows],
-                             list(afs.values()), criterion)
+            integrated = list(csv.DictReader(fh, delimiter="\t"))
+        return {criterion: [r["Variant_MAF_(%s)" % criterion] for r in integrated]
+                for criterion in ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")}
+
+    def test_the_maf_texts_say_what_the_integrator_writes(self):
+        """The MAF note under the top-1000 tables and the legend's MAF entry said that a
+        variant whose source allele frequency is 0 is shown at a display floor of 1e-05, so
+        that it renders on the log-scale plots, to be read as "present, frequency effectively
+        0". No release that said so did it: resultIntegrator.py wrote 1e-05 for an AF of 0 up
+        to 2.3.3, and since 2.4.0, the release whose report first said so, it writes NA for
+        an AF that is 0 or missing, which the report leaves out of a row's MAF (the lowest AF
+        of its variants, blank when none has one); a smaller AF is printed as it is. Run
+        through the REAL resultIntegrator.py, then the report's MAF cell; the two texts say
+        that now, in every report, and nothing else changes in them."""
+        # the AF column of a variant row, as the merge step hands it on -> Variant_MAF
+        afs = {"0": "NA", "0.0": "NA", "": "NA", "NA": "NA", "3.1e-06": "3.1e-06",
+               "1e-05": "1e-05", "0,0.81": "NA,0.81", "0.25": "0.25"}
+        mafs = self._integrated_mafs(
+            [("chrT_1005_A_T,chrT_1012_G_C" if "," in af else "chrT_1005_A_T", af)
+             for af in afs])
+        for criterion, got in mafs.items():
+            self.assertEqual(got, list(afs.values()), criterion)
         # the report's MAF cell: NA is blank, a row's MAF is the lowest of the others, and a
         # value below 1e-05 is printed as it is
         self.assertEqual([gr._curated_cell("maf", {"m": m}, {"maf": "m"}) for m in afs.values()],
@@ -2054,11 +2063,13 @@ class TestGenerateReport(unittest.TestCase):
         said = ("No floor is applied: a frequency below 1&times;10<sup>&minus;5</sup> is "
                 "shown as it is.")
         note = gr.maf_footnote("hg38+1000G")
+        # (an indel has the AF its VCF gives: test_an_indels_maf_is_the_af_its_vcf_gives)
         self.assertTrue(note.endswith(
-            "not a single ancestry. A variant whose allele frequency is 0 or missing (e.g. an "
-            "allele that no individual of the panel carries) has no frequency: it is left out "
-            "of a row's MAF, the lowest frequency of the row's variants, which is blank when "
-            "none of them has one. " + said), note)
+            "not a single ancestry. An indel, which the SNP-only frequency registry does not "
+            "hold, has the <code>AF</code> its VCF gives, as rounded there. A variant whose "
+            "allele frequency is 0 or missing (e.g. an allele that no individual of the panel "
+            "carries) has no frequency: it is left out of a row's MAF, the lowest frequency of "
+            "the row's variants, which is blank when none of them has one. " + said), note)
         maf = dict(gr._SCORE_LEGEND)["MAF"]
         self.assertTrue(maf.endswith(
             "computed from the actual carriers instead. A variant whose allele frequency is 0 "
@@ -2104,6 +2115,123 @@ class TestGenerateReport(unittest.TestCase):
         found = ["%s:%d" % (os.path.relpath(p, repo), n) for p in pages
                  for n in floor_claims(self._read(p))]
         self.assertEqual(found, [])
+
+    def test_an_indels_maf_is_the_af_its_vcf_gives(self):
+        """The MAF note under the top-1000 tables gave an indel-derived variant as one whose MAF
+        is blank, the frequency registry being SNP-only. The registry is, but the indel
+        post-analysis (analisi_indels_NNN.py, which reads no analysis mode) gives an indel row
+        the AF of the index's indel log, which CRISPRitz add-variants copies from the VCF (the
+        SNPs a row holds beside the indel take theirs from the registry, else the dictionary),
+        and the report shows it as it shows a SNP's: an indel's MAF is blank only when its AF
+        is 0 or missing, as any variant's. Run through the SHIPPED analyzer on
+        test_indel_overlaid_rows' panel (the full tiers, a classic dictionary install, and a
+        sites-only panel, whose per-dataset indel AF sidecar feeds a companion, not the row),
+        the REAL resultIntegrator.py and the report's MAF cell; the note says so now, and no
+        text of the report and no shipped page gives an indel as such for a blank MAF."""
+        import html as htmlmod
+        import test_indel_overlaid_rows as tor
+        if not tor._gnu_wc():
+            self.skipTest(tor._SKIP_WC)
+        world = tor.World()
+        cases = []  # (variant field, AF field) of an indel row and of an indel and SNP row
+        for install in ({"tiers": ("registry", "tier1", "indelgt")},
+                        {"tiers": ("dict", "indelgt")},
+                        {"tiers": ("registry",), "indel_af": "0.002"}):
+            tmp = tempfile.mkdtemp(prefix="indel_maf_", dir=self.tmp)
+            fx = tor._Fixture(tmp, world, **install)
+            self.assertEqual(fx.proc.returncode, 0,
+                             fx.proc.stdout[-2000:] + fx.proc.stderr[-2000:])
+            with open(os.path.join(tmp, "Dictionaries", "log_indels_" + tor.VCF,
+                                   "log%s.txt" % tor.CHROM)) as fh:
+                log_af = {c[4]: c[3] for c in (line.rstrip("\n").split("\t") for line in fh)}
+            rows = fx.rows()
+            for r in rows:
+                var, af = r["var"].split(","), r["af"].split(",")
+                # one AF per variant, the indel's first: its indel log's (not the sidecar's)
+                self.assertEqual((len(af), af[0]), (len(var), log_af[var[0]]), (install, r))
+            alone = [r for r in rows if "," not in r["var"]]
+            beside = [r for r in rows if "," in r["var"]]
+            self.assertTrue(alone and beside, install)
+            cases += [(alone[0]["var"], alone[0]["af"]), (beside[0]["var"], beside[0]["af"])]
+        # and an indel whose AF its VCF gives as 0 (the self-test's VCF gives two decimals,
+        # so most of its indels read 0), or not at all
+        cases += [(cases[0][0], "0"), (cases[0][0], "")]
+        mafs = self._integrated_mafs(cases)
+        na = [",".join("NA" if a in ("", "NA") or float(a) == 0 else a for a in af.split(","))
+              for _var, af in cases]
+        for criterion, got in mafs.items():
+            self.assertEqual(got, na, criterion)
+
+        def lowest(maf):
+            vals = [float(a) for a in maf.split(",") if a != "NA"]
+            return "%.2e" % min(vals) if vals else "-"
+
+        # the report's MAF cell: each analyzed row shows the lowest AF of its variants, and
+        # the indel whose AF reads 0, or is missing, is blank
+        cells = [lowest(m) for m in na]
+        self.assertEqual(cells[-2:], ["-", "-"])
+        self.assertNotIn("-", cells[:-2])
+        self.assertEqual([gr._curated_cell("maf", {"m": m}, {"maf": "m"})
+                          for m in mafs["highest_CFD"]], cells)
+
+        def blank_indel_claims(text):
+            """The lines of ``text`` that give an indel as such for a blank MAF: a clause
+            naming a blank and an indel, but for an indel whose AF it says (``indel whose``)."""
+            found = []
+            plain = htmlmod.unescape(re.sub(r"<[^>\n]*>", " ", text))
+            for m in re.finditer(r"[^.;]+", plain):
+                if not re.search(r"\bblank\b", m.group(0), re.I):
+                    continue
+                for i in re.finditer(r"\bindel(?:s|-derived)?\b", m.group(0), re.I):
+                    if not re.match(r"\s+whose\b", m.group(0)[i.end():]):
+                        found.append(plain.count("\n", 0, m.start() + i.start()) + 1)
+            return found
+
+        # the scan finds what the note said, and not what it says now
+        self.assertEqual(blank_indel_claims(
+            "MAF blank (&mdash;) = reference off-target (no variant), an\nindel-derived variant "
+            "(the frequency registry is SNP-only), or a SNP not in the frequency panel"), [2])
+        self.assertEqual(blank_indel_claims("the MAF of an indel off-target is blank"), [1])
+        self.assertEqual(blank_indel_claims("a rare variant reads 0 and its MAF is blank"), [])
+        said = ("An indel, which the SNP-only frequency registry does not hold, has the "
+                "<code>AF</code> its VCF gives, as rounded there.")
+        note = gr.maf_footnote("hg38+1000G")
+        self.assertIn("MAF blank (&mdash;) = reference off-target (no variant), a SNP not in the "
+                      "frequency panel, or an indel whose VCF gives it an <code>AF</code> of 0, "
+                      "or no <code>AF</code>; for SNP variant off-targets", note)
+        self.assertIn(" not a single ancestry. " + said + " A variant whose", note)
+        for text in (note, gr.maf_footnote("hg38+1000G", untiered=["hg38_1000G"]),
+                     gr.maf_footnote(reference_only=True), gr.build_score_legend_html(),
+                     gr.build_score_legend_html(["hg38_1000G"])):
+            self.assertEqual(blank_indel_claims(text), [], text)
+        # in the report: the note under both top-1000 tables
+        _, _, extract = self._build_and_extract()
+        report = self._read(os.path.join(extract, "report.html"))
+        self.assertEqual(report.count(said), 2)
+        self.assertEqual(blank_indel_claims(report), [])
+        # the README, METHODS and docs/ (md and html: the website's example report printed
+        # the note); the changelog, which is history, is not read
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        pages = [os.path.join(repo, "README.md"), os.path.join(repo, "METHODS.md")]
+        for root, _dirs, files in os.walk(os.path.join(repo, "docs")):
+            pages += [os.path.join(root, f) for f in sorted(files)
+                      if f.endswith((".md", ".html"))]
+        self.assertIn(os.path.join(repo, "docs", "example-report.html"), pages)
+        found = ["%s:%d" % (os.path.relpath(p, repo), n) for p in pages
+                 for n in blank_indel_claims(self._read(p))]
+        self.assertEqual(found, [])
+        self.assertEqual(self._read(os.path.join(repo, "docs", "example-report.html"))
+                         .count(said), 2)
+        readme, methods = (" ".join(self._read(p).split()) for p in pages[:2])
+        self.assertIn("An indel's frequency is the `AF` its VCF gives, as rounded there, on "
+                      "every index (the allele-frequency registry holds SNPs only).", readme)
+        self.assertIn("The Tier-0 registry holds SNPs only; an indel has the `AF` its VCF gives "
+                      "(kept in the index's indel log), as rounded there, on every index and in "
+                      "either mode.", methods)
+        self.assertIn("Reported SNP allele frequencies are AC/AN over the genotyped panel (on an "
+                      "index without the dict-less tiers, the `AF` the VCF gives, §3, as the "
+                      "report of a search there says), and an indel's is the `AF` its VCF gives, "
+                      "on every index.", methods)
 
     def test_a_rows_rsids_and_mafs_come_in_the_merges_order_not_its_variants(self):
         """A known limit, to be fixed in the next release (METHODS section 8): the post-

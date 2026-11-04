@@ -337,6 +337,9 @@ genotyped-panel called-allele count rather than the alleles among carriers only.
 Homozygous carriers contribute 2 to AC; heterozygous carriers contribute 1 —
 so AF is a true allele frequency, not a carrier-individual frequency.
 
+The Tier-0 registry holds SNPs only; an indel has the `AF` its VCF gives (kept
+in the index's indel log), as rounded there, on every index and in either mode.
+
 For a multi-variant haplotype off-target, the reported frequency is bounded by
 the **rarest** contributing allele (the haplotype can be no more frequent than
 its least-frequent variant), and the exact carriers of the haplotype (Section 4)
@@ -920,19 +923,20 @@ size and the number of SNPs and indels searched. These database counts are read
 from a build-time `Dictionaries/registry_<vcf>/variant_count.json` sidecar
 (`n_records` SNPs + `n_indels`) written when the dict-less index is built, so the
 report needs no VCF access at report time (e.g. the earlier 1000 Genomes + HGDP
-merge recorded 106,664,924 SNPs). Reported allele frequencies are AC/AN over the genotyped
-panel (on an index without the dict-less tiers, the `AF` the VCF gives, §3, as the report of
-a search there says). A variant whose allele frequency is 0 or missing (e.g. an allele that
-no individual of the panel carries) has no frequency: `integrated_results.tsv` lists it as
-`NA`, and the report leaves it out of a row's MAF, the lowest frequency of the row's
-variants, which is blank when no variant of the row has one. No floor is applied: a
-frequency below 1×10⁻⁵ is reported as it is, and the plots, whose log scale is the site's
-rank, use a frequency only to size the points. For an **aggregate (sites-only) panel** (e.g.
-the all-source mega index, §2), only allele frequencies exist — there are no per-individual
-genotypes — so no carrier or homozygote count is estimated: the registry holds 0 for both
-(§2), which the population-summary companion (`*.population_summary.tsv`, kept with
-`--keep-intermediates`) gives as **NA**, and a per-dataset **`indel_af.tsv`** companion
-carries indel allele frequencies by source alongside the SNP+indel co-occurrence table.
+merge recorded 106,664,924 SNPs). Reported SNP allele frequencies are AC/AN over the
+genotyped panel (on an index without the dict-less tiers, the `AF` the VCF gives, §3, as the
+report of a search there says), and an indel's is the `AF` its VCF gives, on every index. A
+variant whose allele frequency is 0 or missing (e.g. an allele that no individual of the
+panel carries) has no frequency: `integrated_results.tsv` lists it as `NA`, and the report
+leaves it out of a row's MAF, the lowest frequency of the row's variants, which is blank when
+no variant of the row has one. No floor is applied: a frequency below 1×10⁻⁵ is reported as
+it is, and the plots, whose log scale is the site's rank, use a frequency only to size the
+points. For an **aggregate (sites-only) panel** (e.g. the all-source mega index, §2), only
+allele frequencies exist — there are no per-individual genotypes — so no carrier or
+homozygote count is estimated: the registry holds 0 for both (§2), which the
+population-summary companion (`*.population_summary.tsv`, kept with `--keep-intermediates`)
+gives as **NA**, and a per-dataset **`indel_af.tsv`** companion carries indel allele
+frequencies by source alongside the SNP+indel co-occurrence table.
 
 ## 8. Off-target scoring, assumptions and limitations
 

@@ -2001,16 +2001,17 @@ is under `data/`). Reading top to bottom:
   It is coherent with `Gene_distance_kb` — `intergenic` iff the distance is `> 0`.
   Present in the curated report table, all download TSVs, and the raw
   `integrated_results.tsv`.
-- **MAF column** — the allele frequency of the variant behind a variant off-target; on a
-  row of several variants, the lowest of their frequencies. A variant whose allele frequency
-  is 0 or missing (e.g. an allele that no individual of the panel carries) has no frequency:
-  the row's minimum leaves it out, and the MAF is blank when no variant of the row has one.
-  No floor is applied, so a value below `1e-05` is the frequency itself. On an index without
-  the dict-less tiers (built without `--samplesID`, as the benchmark `complete-test` builds its
-  own) the frequency is the `AF` the VCF gives, as rounded there: the self-test's 1000 Genomes
-  VCF gives two decimals, so a rare variant reads 0, its MAF is blank, and a multi-variant
-  row's minimum leaves it out. The report of a search there says so, in either mode
-  ([methods](METHODS.md#3-allele-frequency-estimation)).
+- **MAF column** — the allele frequency of the variant behind a variant off-target; on a row of
+  several variants, the lowest of their frequencies. An indel's frequency is the `AF` its VCF
+  gives, as rounded there, on every index (the allele-frequency registry holds SNPs only). A
+  variant whose allele frequency is 0 or missing (e.g. an allele that no individual of the
+  panel carries) has no frequency: the row's minimum leaves it out, and the MAF is blank when
+  no variant of the row has one. No floor is applied, so a value below `1e-05` is the frequency
+  itself. On an index without the dict-less tiers (built without `--samplesID`, as the
+  benchmark `complete-test` builds its own) the frequency is the `AF` the VCF gives, as rounded
+  there: the self-test's 1000 Genomes VCF gives two decimals, so a rare variant reads 0, its
+  MAF is blank, and a multi-variant row's minimum leaves it out. The report of a search there
+  says so, in either mode ([methods](METHODS.md#3-allele-frequency-estimation)).
 - **Key off-target table columns** — in the per-site table (and every download TSV):
   - **Chromosome / Position / Direction (`+`/`-`)** — where the off-target is and on which strand.
   - **crRNA vs DNA (aligned)** — the guide and the genomic sequence aligned; `-` marks a bulge.

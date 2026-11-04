@@ -1,12 +1,12 @@
 <!-- text track: [2.8.1] entries for CHANGELOG.md, to be merged by the docs track. -->
 
-**For the merge, not for the changelog.** The second Fixed entry completes the Changed entry
+**For the merge, not for the changelog.** The third Fixed entry completes the Changed entry
 "`--per-sample` on an index without the dict-less tiers now says what it reports" (the banner,
 new in 2.8.1), and can go right after it instead. That banner now also gives the known limit of
 the first Changed entry below; what the entry says of the banner still holds. Three references
-name an entry by its place: the second Fixed entry's "the last entry below" and the third's "the
-next entry" are the entry on tied rows, the last of this fragment, and the third's "the entry
-above" is the second; keep them true where the entries land.
+name an entry by its place: the third Fixed entry's "the last entry below" and the fourth's "the
+next entry" are the entry on tied rows, the last of this fragment, and the fourth's "the entry
+above" is the third; keep them true where the entries land.
 
 ### Changed
 
@@ -89,6 +89,22 @@ above" is the second; keep them true where the entries land.
   report (`docs/example-report.html`, a 2.8.0 report, which gets the sentence as 2.8.1 renders it
   there and nothing else). The rest of each report is unchanged, byte for byte, and no result
   changes. Covered by `PostProcess/test_generate_report.py`.
+- **The report's MAF note no longer says that an indel's MAF is blank.** The note under the top-1000
+  tables gave an indel-derived variant as one whose MAF is blank, the frequency registry being
+  SNP-only. The registry is, but the indel post-analysis gives an indel the `AF` of the index's
+  indel log, which CRISPRitz `add-variants` copies from the VCF, in either mode and with or without
+  the dict-less tiers, and the report shows it as it shows a SNP's frequency. In the self-test
+  panel's `--per-sample` report with the tiers (the README's guide, `20bp-NGG-SpCas9` PAM, 4
+  mismatches, 1 DNA and 1 RNA bulge), the indel off-target at chr22:33985503 shows 3.00e-02 and the
+  indel-and-SNP one at chr22:21052642 1.80e-01, and the 3 of its 184 variant rows whose MAF is blank
+  are indels whose `AF` the VCF gives as 0 (it gives two decimals); the 183 indel rows of the
+  website's example report all show one. Only an indel whose `AF` is 0 or missing is blank, as the
+  note says of any variant. It now says that an indel has the `AF` its VCF gives, as rounded there,
+  in every report (the combined report of `assembly-search` too), as do the README's MAF column,
+  METHODS sections 3 and 7 and the example report (`docs/example-report.html`, which gets the note
+  as 2.8.1 renders it there). Nothing else in a report changes, and no result changes. Pre-existing:
+  the note has said so since 2.4.0, which wrote it. Covered by
+  `PostProcess/test_generate_report.py`.
 - **The report of a `--per-sample` search on an index without the dict-less tiers says what the
   search reported.** On such an index (one built without `--samplesID`, such as the one the
   benchmark `complete-test` builds), the report's Search mode row now says what

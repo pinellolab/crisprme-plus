@@ -3499,11 +3499,17 @@ def maf_footnote(datasets=None, reference_only=False, untiered=None):
     ds = datasets or "the variant panel"
     return (
         "MAF = combined-panel minor/alternate allele frequency. "
-        "MAF blank (&mdash;) = reference off-target (no variant), an indel-derived "
-        "variant (the frequency registry is SNP-only), or a SNP not in the frequency "
-        "panel; for SNP variant off-targets the frequency is AC/AN over the genotyped "
-        f"panel &mdash; here the merged {ds} union panel (the combined global "
+        "MAF blank (&mdash;) = reference off-target (no variant), a SNP not in the "
+        "frequency panel, or an indel whose VCF gives it an <code>AF</code> of 0, or no "
+        "<code>AF</code>; for SNP variant off-targets the frequency is AC/AN over the "
+        f"genotyped panel &mdash; here the merged {ds} union panel (the combined global "
         "AF), not a single ancestry. "
+        # as analisi_indels_NNN.py has done in every release: an indel row takes the AF of
+        # the index's indel log, which add-variants copies from the VCF, in either mode and
+        # with or without the tiers (the SNPs beside it take the registry's, else the
+        # dictionary's)
+        "An indel, which the SNP-only frequency registry does not hold, has the "
+        "<code>AF</code> its VCF gives, as rounded there. "
         # as resultIntegrator and _min_maf have done since 2.4.0: an AF that is 0 or
         # missing is NA, which the row's minimum leaves out, and a smaller AF is printed as
         # it is (no floor; up to 2.3.3 the integrator wrote 1e-05 for an AF of 0)
