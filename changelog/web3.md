@@ -6,7 +6,7 @@ runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `t
 block) to that step, and on this branch the step then ran 496 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged. The indel search's
 chromosome-name check (the last Security entry) adds three tests to `test_indel_empty_chromosome`,
-in unit-tests' own job.
+and the Settings entries add tests to `test_settings_progress`, in unit-tests' own job.
 
 ### Fixed
 
@@ -145,6 +145,13 @@ in unit-tests' own job.
   takes only a folder of `Results/` whose id has the form the search form gives its jobs, as
   Remove result of a search does (above), and otherwise changes nothing, shows no log, or says
   that there is no such job. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **Remove installed data, in Settings, removes only an item it lists.** It took the item as a
+  request sent it, and a name of `..` named the data folder (or, through a folder of it that is a
+  link to other storage, the folder there that holds the link's target), and `.` or no name the
+  folder of every item of that kind: all of it was removed, every search's results with the data
+  folder. It now measures and removes only an item the card lists, and says another is not
+  found. Settings changes data in local mode only, which is how CRISPRme runs by default.
+  Pre-existing, since 2.2.0. Covered by `PostProcess/test_settings_progress.py`.
 - **The indel steps of a search pass no chromosome name of a variant dataset to a shell.**
   A search with bulges takes each chromosome name of a variant dataset, read from the CHROM
   column of its VCFs (or from the per-chromosome indel logs named after it), into the shell

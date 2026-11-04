@@ -1466,6 +1466,13 @@ def _deletable_options() -> List:
     return opts
 
 
+def _deletable(item) -> bool:
+    """Whether ``item`` is one the Remove card lists (_deletable_options). Its dropdown's
+    value comes back from the browser, which a client can set to anything (Dash does not
+    check a value against a dropdown's options), and the paths deleted are built from it."""
+    return isinstance(item, str) and item in [o["value"] for o in _deletable_options()]
+
+
 def _delete_targets(kind: str, name: str) -> List[str]:
     """All on-disk paths to remove for a '<type>:<name>' item, incl. companions.
 
@@ -1474,9 +1481,12 @@ def _delete_targets(kind: str, name: str) -> List[str]:
     naming-alias symlinks that resolve into either, so no orphaned index is left
     behind. Deleting a VCF dataset also drops its ``.refgenome`` marker, and the
     sample list this page wrote for it, with the files that go with that list (a list
-    from anywhere else stays). Names are basename-guarded against path traversal.
+    from anywhere else stays). A name that is not one plain entry of its folder is
+    refused: '..', '.' and '' named the data folder (or, through a folder of it that is
+    a link, the folder its target is in) and the folder itself.
     """
-    name = os.path.basename(name)  # never allow traversal
+    if name in ("", ".", "..") or os.path.basename(name) != name:  # never allow traversal
+        raise ValueError(f"not an installed {kind}: {name!r}")
     cwd = current_working_directory
     if kind == "genome":
         return [os.path.join(cwd, "Genomes", name)]
@@ -3298,7 +3308,10 @@ def _lock_buttons_while_busy(active_job, *feedback):
 def ask_delete(n, item):
     if n is None or ONLINE or not item:
         raise PreventUpdate
-    # open the confirmation dialog with a message naming the item + size to free
+    # open the confirmation dialog with a message naming the item + size to free; of an
+    # item the card does not list, nothing is measured (do_delete then says it is not found)
+    if not _deletable(item):
+        return True, "Delete this item? This cannot be undone."
     return True, _delete_summary(item)
 
 
@@ -3317,7 +3330,8 @@ def do_delete(n, item):
         raise PreventUpdate
     kind, _sep, name = item.partition(":")
     try:
-        targets = _delete_targets(kind, name)
+        # only an item the card lists (one deleted since is not)
+        targets = _delete_targets(kind, name) if _deletable(item) else []
     except ValueError as e:
         return html.Span(str(e), style={"color": "#b00"}), no_update, no_update
     freed, removed = 0, 0

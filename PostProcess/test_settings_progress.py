@@ -1870,5 +1870,147 @@ class TestSettingsRefusesNamesAShellReads(unittest.TestCase):
                                                     "metadata.json")))
 
 
+# --- what a Settings dropdown offers --------------------------------------------------
+# Dash does not check a dropdown's value against its options, and a request can send a
+# callback any value, which names the folders and files the callback removes, writes,
+# archives or reads: outside the data folder too, unless it takes only what it offers.
+def _listing(root, folder, keep=os.path.isdir, value=lambda name: name):
+    """A stand-in for a pages_utils listing (get_available_genomes, ...) of the entries of
+    <root>/<folder> that ``keep`` takes, hidden ones left out, as its dropdown offers them."""
+    def listed():
+        top = os.path.join(root, folder)
+        return [{"label": value(n), "value": value(n)} for n in sorted(os.listdir(top))
+                if not n.startswith(".") and keep(os.path.join(top, n))]
+    return listed
+
+
+class TestRemoveTakesAnItemTheCardLists(unittest.TestCase):
+    """ask_delete and do_delete, undecorated, on a data folder (data/) beside a folder of
+    someone else's (outside/). The item's name was only basename-guarded, which leaves
+    '..', '.' and '' as they are: '<kind>:..' removed the whole data folder, every job's
+    results with it, and, through a folder of it that is a link, the folder its target is
+    in; '<kind>:.' and '<kind>:' removed every item of the kind. Only an item the card lists
+    is measured and removed; of another, nothing is, and Delete says it is not found."""
+
+    KINDS = ("genome", "index", "vcf", "annotation", "pam", "assembly")
+
+    def setUp(self):
+        import assembly_reconcile
+        import personal_assembly
+
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.cwd = os.path.join(self.root, "data")
+        for path, text in (("Genomes/hg38/chr1.fa", ">chr1\nACGTACGT\n"),
+                           ("Genomes/delme/chr1.fa", ">chr1\nACGT\n"),
+                           ("genome_library/NRG_2_hg38/NRG_chr1_1.bin", "x"),
+                           ("VCFs/walk/walk.chr1.vcf.gz", "x"),
+                           ("Annotations/a.bed", "chr1\t1\t2\tx\n"),
+                           ("PAMs/20bp-NRG-SpCas9.txt", "NNNNNNNNNNNNNNNNNNNNNRG 3\n"),
+                           ("Results/JOB1/results.txt", "a job's results\n"),
+                           ("../outside/keep.txt", "someone else's\n")):
+            path = os.path.join(self.cwd, path)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write(text)
+        os.makedirs(os.path.join(self.cwd, "samplesIDs"))
+        self.ns = _load_functions(
+            ["_deletable_options", "_deletable", "_delete_targets", "_delete_dependents",
+             "_delete_summary", "_dir_size", "_fmt_size", "_own_lists_record", "_own_list",
+             "ask_delete", "do_delete"],
+            current_working_directory=self.cwd + "/",
+            shutil=shutil,
+            hashlib=hashlib,
+            personal_assembly=personal_assembly,
+            assembly_reconcile=assembly_reconcile,
+            get_available_genomes=_listing(self.cwd, "Genomes"),
+            get_available_indexes=_listing(
+                self.cwd, "genome_library",
+                keep=lambda p: os.path.isdir(p) and not p.endswith("_INDELS")),
+            get_all_vcf_datasets=_listing(self.cwd, "VCFs"),
+            get_custom_annotations=_listing(self.cwd, "Annotations", keep=os.path.isfile),
+            get_available_PAM=_listing(self.cwd, "PAMs", keep=os.path.isfile,
+                                       value=lambda name: name[:-len(".txt")]),
+            installed_assemblies=lambda: [],
+            index_build_pam=lambda index_dir: (None, 0, 0),
+            _render_all_tables=lambda: "tables",
+            _render_storage=lambda: "storage",
+            GENOMES_DIR="Genomes",
+            LIFTOVER_DIR="LiftoverFiles",
+            ONLINE=False,
+            PreventUpdate=_PreventUpdate,
+            no_update=_NO_UPDATE,
+        )
+        self.measured = []  # what ask_delete measures, as the size the dialog says it frees
+        dir_size = self.ns["_dir_size"]
+        self.ns["_dir_size"] = lambda path: self.measured.append(path) or dir_size(path)
+
+    def crafted(self):
+        outside = os.path.join(self.root, "outside")
+        return ([f"{kind}:{name}" for kind in self.KINDS for name in ("..", ".", "")]
+                + ["genome:../../outside", f"genome:{outside}", "genome:hg38/../..",
+                   "index:NRG_2_hg38/..", "vcf:walk/../../../outside", "nosuchkind:.."])
+
+    def test_an_item_the_card_does_not_list_is_neither_measured_nor_removed(self):
+        before = _tree(self.root)
+        for item in self.crafted():
+            with self.subTest(item=item):
+                self.assertEqual(self.ns["ask_delete"](1, item),
+                                 (True, "Delete this item? This cannot be undone."))
+                said = self.ns["do_delete"](1, item)[0]
+                self.assertEqual(said.args, (f"{item} not found (already removed?).",))
+                self.assertEqual(_tree(self.root), before)
+        self.assertEqual(self.measured, [])
+
+    def test_through_a_folder_of_the_data_folder_that_is_a_link(self):
+        # genome_library kept on other storage, beside someone else's data: '<link>/..' is
+        # the folder the link's target is in
+        shared = os.path.join(self.root, "shared")
+        os.makedirs(os.path.join(shared, "other_lab_data"))
+        with open(os.path.join(shared, "other_lab_data", "keep.txt"), "w") as fh:
+            fh.write("someone else's\n")
+        os.rename(os.path.join(self.cwd, "genome_library"),
+                  os.path.join(shared, "genome_library"))
+        os.symlink(os.path.join(shared, "genome_library"),
+                   os.path.join(self.cwd, "genome_library"))
+        before = _tree(self.root)
+        for item in self.crafted():
+            with self.subTest(item=item):
+                self.ns["do_delete"](1, item)
+                self.assertEqual(_tree(self.root), before)
+        # an index of it goes as before, and only it
+        said = self.ns["do_delete"](1, "index:NRG_2_hg38")[0]
+        self.assertEqual(said.args, ("Deleted index:NRG_2_hg38 (freed 1 B). You can download "
+                                     "or rebuild it later.",))
+        self.assertEqual(os.listdir(os.path.join(shared, "genome_library")), [])
+        self.assertTrue(os.path.isfile(os.path.join(shared, "other_lab_data", "keep.txt")))
+
+    def test_an_item_the_card_lists_is_removed_as_before(self):
+        self.assertTrue(self.ns["ask_delete"](1, "genome:delme")[1].startswith(
+            "Delete reference genome “delme”?\n\nThis frees about 11 B"))
+        for item, path in (("genome:delme", "Genomes/delme"),
+                           ("index:NRG_2_hg38", "genome_library/NRG_2_hg38"),
+                           ("vcf:walk", "VCFs/walk"),
+                           ("annotation:a.bed", "Annotations/a.bed"),
+                           ("pam:20bp-NRG-SpCas9", "PAMs/20bp-NRG-SpCas9.txt")):
+            with self.subTest(item=item):
+                before = _tree(self.root)
+                said = self.ns["do_delete"](1, item)[0]
+                self.assertTrue(said.args[0].startswith(f"Deleted {item} (freed "), said)
+                gone = {p for p in before if p == os.path.join("data", path)
+                        or p.startswith(os.path.join("data", path) + os.sep)}
+                self.assertTrue(gone)
+                self.assertEqual(set(_tree(self.root)), set(before) - gone)
+        # deleted since the card was drawn: not found
+        said = self.ns["do_delete"](1, "genome:delme")[0]
+        self.assertEqual(said.args, ("genome:delme not found (already removed?).",))
+
+    def test_a_name_that_is_not_an_entry_of_its_folder_is_refused(self):
+        for kind in self.KINDS + ("nosuchkind",):
+            for name in ("", ".", "..", "a/b", "../x", "/x", "hg38/.."):
+                with self.subTest(kind=kind, name=name), self.assertRaises(ValueError):
+                    self.ns["_delete_targets"](kind, name)
+
+
 if __name__ == "__main__":
     unittest.main()
