@@ -107,11 +107,14 @@ is the first; keep them true where the entries land.
   the same way. The population-level banner and the report's Search mode row say, after their
   `--per-sample` advice, what `--per-sample` gives on those datasets and how to get the tiers; the
   allele-frequency texts say what they say in a per-sample report; the legend's MAF and Observed
-  entries and the caption say what `--per-sample` gives there. With the tiers this change leaves
-  the banner and the report as they were, byte for byte (but for the order of tied rows, which the
-  next entry changes in every report). Pre-existing: the allele-frequency texts have read so since
-  2.4.0, the banner and the Search mode row since 2.5.3, the legend's entries since 2.6.0 and the
-  caption since 2.8.0. Covered by `PostProcess/test_generate_report.py`,
+  entries and the caption say what `--per-sample` gives there. A sites-only dataset (one whose VCFs
+  have no sample columns), to which a build without `--samplesID` writes no tiers either, is not
+  one of those datasets, in the records, the banners or the report: with no carrier to name and no
+  allele-frequency registry, its search reports none of its variants, in either mode. With the
+  tiers this change leaves the banner and the report as they were, byte for byte (but for the order
+  of tied rows, which the next entry changes in every report). Pre-existing: the allele-frequency
+  texts have read so since 2.4.0, the banner and the Search mode row since 2.5.3, the legend's
+  entries since 2.6.0 and the caption since 2.8.0. Covered by `PostProcess/test_generate_report.py`,
   `PostProcess/test_build_index_only_atomic.py` and `PostProcess/test_web_search_reuse.py`.
 - **Rows of one score keep the table's order in the report's ranked tables and plots, and in the
   results page's plots.** The top-1000 by CRISPR-Bulge (`top1000_crispr_bulge.tsv` and its
