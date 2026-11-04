@@ -480,7 +480,9 @@ Two ways to provide the inputs:
   liftOver chains, and the chromAlias files, and registers them with the Data Manager.
 - **Bring your own bundle:** upload a single `.zip`/`.tar.gz` whose one top-level
   `<individual>/` folder holds the same structure and a valid `metadata.json` (see below);
-  CRISPRme extracts, validates, and registers it.
+  CRISPRme extracts, validates, and registers it. The paths `metadata.json` gives are
+  those of files and folders inside `<individual>/`: a bundle naming one anywhere else is
+  refused.
 
 **How an assembly is stored.** Each individual is one self-contained folder,
 `Assemblies/<individual>/`, holding both haplotypes and a single `metadata.json` that

@@ -10,6 +10,7 @@ Pure stdlib (no pandas / dash), so it runs anywhere:
 import io
 import json
 import os
+import shutil
 import sys
 import tarfile
 import tempfile
@@ -223,6 +224,107 @@ class TestBundleImport(unittest.TestCase):
         # importing into the SAME cwd (already has HG01255) must refuse
         with self.assertRaises(ValueError):
             pa.import_archive(arc, self.cwd)
+
+
+class TestBundlePathsStayInsideIt(unittest.TestCase):
+    """metadata.json is the bundle's own content, a client's for an archive imported in
+    Settings, and its paths were joined to the bundle folder as they were: an absolute
+    path or '../' named a genome folder, chain and chromAlias file anywhere on the server.
+    Only their existence was checked, so the bundle was imported, the individual listed as
+    complete, and its search read those folders and files (its results held their
+    sequences). A bundle naming anything outside its folder is refused, and one already
+    installed (imported before this check) is not resolved: it is incomplete, so neither
+    the search form nor assembly-search --assembly-individual takes it."""
+
+    def setUp(self):
+        self.top = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.top, ignore_errors=True)
+        self.cwd = os.path.join(self.top, "data")
+        os.makedirs(self.cwd)
+        # someone else's files beside the data folder, and another individual's bundle
+        self.other = os.path.join(self.top, "other_user")
+        for name in ("genome/chrS.fa", "genome2/chrS.fa", "private.chain",
+                     "private.chromAlias.txt"):
+            path = os.path.join(self.other, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write(">chrS\nACGT\n" if name.endswith(".fa") else "SECRET\n")
+        _make_haplotype(self.cwd, "HG01255", "paternal", "CM1")
+        _make_haplotype(self.cwd, "HG01255", "maternal", "CM2")
+
+    def metadata(self, **paternal):
+        """The metadata.json of bundle EVIL: its paternal entry with ``paternal``'s paths,
+        the rest as a valid bundle gives them."""
+        haps = {hap: {"genome_dir": f"{hap}/genome", "chain": f"{hap}/x.chain",
+                      "chromalias": f"{hap}/x.chromAlias.txt"} for hap in pa.HAPLOTYPES}
+        haps["paternal"].update(paternal)
+        return {"format": pa.BUNDLE_FORMAT, "format_version": 1, "individual": "EVIL",
+                "haplotypes": haps}
+
+    def bundle(self, folder, meta):
+        """``folder`` laid out as a valid bundle, with ``meta`` as its metadata.json."""
+        for hap in pa.HAPLOTYPES:
+            os.makedirs(os.path.join(folder, hap, "genome"), exist_ok=True)
+            for name, text in (("genome/chr1.fa", ">chr1\nACGT\n"), ("x.chain", "chain\n"),
+                               ("x.chromAlias.txt", "x\n")):
+                with open(os.path.join(folder, hap, name), "w") as fh:
+                    fh.write(text)
+        with open(os.path.join(folder, pa.METADATA_NAME), "w") as fh:
+            json.dump(meta, fh)
+
+    def outside(self):
+        """Paternal entries naming a file or folder outside the bundle, each one there
+        once the bundle is Assemblies/EVIL/."""
+        other = os.path.join("..", "..", "..", "other_user")  # from Assemblies/EVIL/
+        return [
+            {"genome_dir": os.path.join(self.other, "genome")},
+            {"chain": os.path.join(self.other, "private.chain")},
+            {"chromalias": os.path.join(self.other, "private.chromAlias.txt")},
+            {"genome_dir": os.path.join(other, "genome2")},
+            {"chain": os.path.join("paternal", "..", other, "private.chain")},
+            {"genome_dir": os.path.join("..", "HG01255", "paternal", "genome")},
+            {"chain": ["paternal/x.chain"]},  # not a path at all
+        ]
+
+    def test_an_archive_naming_paths_outside_its_folder_is_refused(self):
+        src = os.path.join(self.top, "src")
+        for paternal in self.outside():
+            with self.subTest(**{k: str(v) for k, v in paternal.items()}):
+                self.bundle(os.path.join(src, "EVIL"), self.metadata(**paternal))
+                arc = os.path.join(self.top, "evil.zip")
+                with zipfile.ZipFile(arc, "w") as z:
+                    for root, _dirs, files in os.walk(src):
+                        for f in files:
+                            full = os.path.join(root, f)
+                            z.write(full, os.path.relpath(full, src))
+                with self.assertRaisesRegex(ValueError, "is not a path inside the bundle"):
+                    pa.import_archive(arc, self.cwd)
+                self.assertEqual(os.listdir(os.path.join(self.cwd, pa.ASSEMBLIES_DIR)),
+                                 ["HG01255"])
+                shutil.rmtree(src)
+        # one naming its own files only is imported as before
+        self.bundle(os.path.join(src, "EVIL"), self.metadata())
+        arc = os.path.join(self.top, "good.tar.gz")
+        with tarfile.open(arc, "w:gz") as t:
+            t.add(os.path.join(src, "EVIL"), arcname="EVIL")
+        self.assertEqual(pa.import_archive(arc, self.cwd), "EVIL")
+        self.assertTrue(pa.resolve(self.cwd, "EVIL")["complete"])
+
+    def test_an_installed_bundle_naming_paths_outside_its_folder_is_not_resolved(self):
+        folder = pa.individual_dir(self.cwd, "EVIL")
+        for paternal in self.outside():
+            with self.subTest(**{k: str(v) for k, v in paternal.items()}):
+                self.bundle(folder, self.metadata(**paternal))
+                entry = pa.resolve(self.cwd, "EVIL")
+                self.assertIsNone(entry["paternal"])
+                self.assertIsNotNone(entry["maternal"])
+                self.assertFalse(entry["complete"])
+                self.assertIn("EVIL", [b["individual"] for b in pa.discover_bundles(self.cwd)])
+                self.assertEqual(pa.delete_target(self.cwd, "EVIL"), folder)  # removable
+        # the individual whose files one of them named is as it was
+        self.assertTrue(pa.resolve(self.cwd, "HG01255")["complete"])
+        self.bundle(folder, self.metadata())
+        self.assertTrue(pa.resolve(self.cwd, "EVIL")["complete"])
 
 
 if __name__ == "__main__":

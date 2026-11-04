@@ -131,14 +131,30 @@ def write_haplotype(
 # ---------------------------------------------------------------------------
 # Resolution (metadata -> concrete, existence-checked paths)
 # ---------------------------------------------------------------------------
+def _inside(bundle_dir: str, rel) -> bool:
+    """Whether ``rel``, a path ``metadata.json`` gives, names a file or folder inside
+    the bundle folder ``bundle_dir`` once '..' and links are resolved. metadata.json is
+    the bundle's own content, a client's for an archive imported in Settings: an
+    absolute path or '../' in it named any file or folder of the server, which the
+    individual was then searched with."""
+    if not isinstance(rel, str):
+        return False
+    root = os.path.realpath(bundle_dir)
+    return os.path.commonpath([root, os.path.realpath(os.path.join(bundle_dir, rel))]) == root
+
+
 def _resolve_haplotype(cwd: str, individual: str, hap_meta: Dict) -> Optional[Dict]:
     """Turn one haplotype's relative metadata into cwd-relative, existence-checked
-    paths. Returns ``None`` if the metadata is missing required keys."""
+    paths. Returns ``None`` if the metadata is missing required keys, or names a file
+    or folder outside the individual's folder (a bundle imported before 2.8.1, whose
+    import did not check that)."""
     root = individual_dir(cwd, individual)
     genome_rel = hap_meta.get("genome_dir")
     chain_rel = hap_meta.get("chain")
     chromalias_rel = hap_meta.get("chromalias")
     if not (genome_rel and chain_rel and chromalias_rel):
+        return None
+    if not all(_inside(root, rel) for rel in (genome_rel, chain_rel, chromalias_rel)):
         return None
     genome_abs = os.path.join(root, genome_rel)
     chain_abs = os.path.join(root, chain_rel)
@@ -283,7 +299,7 @@ def delete_target(cwd: str, individual: str) -> Optional[str]:
 def validate_bundle_dir(bundle_dir: str) -> Optional[str]:
     """Return an error string if ``bundle_dir`` is not a valid personal-assembly
     bundle (has a parseable ``metadata.json`` of a supported version, and every
-    file it references exists), else ``None``."""
+    file it references exists, inside the bundle), else ``None``."""
     mpath = os.path.join(bundle_dir, METADATA_NAME)
     try:
         with open(mpath) as fh:
@@ -308,6 +324,9 @@ def validate_bundle_dir(bundle_dir: str) -> Optional[str]:
         genome_rel, chain_rel, ca_rel = hm.get("genome_dir"), hm.get("chain"), hm.get("chromalias")
         if not (genome_rel and chain_rel and ca_rel):
             return f"{hap} entry is missing genome_dir/chain/chromalias"
+        for key, rel in (("genome_dir", genome_rel), ("chain", chain_rel), ("chromalias", ca_rel)):
+            if not _inside(bundle_dir, rel):
+                return f"{hap} {key} {rel!r} is not a path inside the bundle"
         gdir = os.path.join(bundle_dir, genome_rel)
         if not (os.path.isdir(gdir) and any(f.endswith(".fa") for f in os.listdir(gdir))):
             return f"{hap} genome dir {genome_rel!r} missing or has no .fa contigs"

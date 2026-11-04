@@ -36,7 +36,8 @@ tables, lists, download links and the routes to a job read its files. The callba
 fill in and check the search form (its variant datasets, analysis modes, bulge options and
 the note under them, the Submit check) joined the genome, PAM and dataset a request sends
 into the paths they list and read the same way, and what they found outside the data
-folder changed what they answered.
+folder changed what they answered; and the Individual picker filled in, and the Personal
+assembly tab's Submit searched, the files a bundle's metadata.json names outside its folder.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -653,6 +654,31 @@ class TestAssemblySearchLaunch(_WebFolder):
         guide_file, _ = self.submit(GUIDE[:-3])  # (as the form sends it)
         with open(guide_file) as fh:
             self.assertEqual(fh.read(), f"{GUIDE}\n")
+        self.assertNothingRun()
+
+    def test_an_individual_whose_metadata_names_files_outside_its_folder(self):
+        # metadata.json, a client's for a bundle imported in Settings, named a genome folder,
+        # chain and chromAlias file outside the data folder (an import before 2.8.1 took it):
+        # the picker filled them in, as for any individual, and Submit searched them
+        os.makedirs(os.path.join(self.outside, "hg38b"))
+        shutil.copy(os.path.join(self.outside, "hg38", "chr1.fa"),
+                    os.path.join(self.outside, "hg38b"))
+        haplotypes = {hap: {"genome_dir": os.path.join(self.outside, folder),
+                            "chain": os.path.join(self.outside, f"{PAM}.txt"),
+                            "chromalias": os.path.join(self.outside, f"{PAM}.txt")}
+                      for hap, folder in (("paternal", "hg38"), ("maternal", "hg38b"))}
+        os.makedirs(os.path.join(self.data, "Assemblies", "EVIL"))
+        with open(os.path.join(self.data, "Assemblies", "EVIL", "metadata.json"), "w") as fh:
+            json.dump({"format": "crisprme-personal-assembly", "format_version": 1,
+                       "individual": "EVIL", "haplotypes": haplotypes}, fh)
+        self.before = self.outside_files()
+        self.assertEqual([o["value"] for o in mp._complete_assembly_options()], [self.IND])
+        fields = mp.populate_assembly_fields_from_individual("EVIL")
+        self.assertEqual(fields, (None,) * 6)
+        guide_file, said = self.submit(GUIDE[:-3], fields=fields, individual="EVIL")
+        self.assertIsNone(guide_file)
+        self.assertEqual(said[:2], ["paternal genome", "maternal genome"])
+        self.assertEqual(os.listdir(os.path.join(self.data, "Results")), [])
         self.assertNothingRun()
 
 

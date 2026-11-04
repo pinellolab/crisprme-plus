@@ -2,11 +2,12 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (34 tests, the Security
-block) to that step, and on this branch the step then ran 501 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (35 tests, the Security
+block) to that step, and on this branch the step then ran 502 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged. The indel search's
 chromosome-name check (the last Security entry) adds three tests to `test_indel_empty_chromosome`,
-and the Settings entries add tests to `test_settings_progress`, in unit-tests' own job.
+and the Settings and personal-assembly entries add tests to `test_settings_progress` and
+`test_personal_assembly`, in unit-tests' own job.
 
 ### Fixed
 
@@ -169,6 +170,14 @@ and the Settings entries add tests to `test_settings_progress`, in unit-tests' o
   index locally" took them as a request sent them, and a path in one built an index of a folder
   outside the data folder. Pre-existing, since 2.2.0. Covered by
   `PostProcess/test_settings_progress.py`.
+- **A personal-assembly bundle names its own files only.** The genome folder, chain and
+  chromAlias file of each haplotype are paths its `metadata.json` gives, which an imported archive
+  brings, and they were taken as they were: a bundle naming files and folders outside its own
+  folder was imported, its individual offered as complete, and its search read them, its results
+  holding what it found there. Such a bundle is now refused, and one imported before is listed
+  as incomplete and not offered (`docs/crisprme_web_interface_user_guide.md`). Pre-existing,
+  since 2.6.0. Covered by `PostProcess/test_personal_assembly.py` and
+  `PostProcess/test_web_shell_safety.py`.
 - **The search form reads only what it offers.** The callbacks that fill in and check the form
   (the variant datasets offered for a genome, the analysis modes, the bulge options and the note
   under them, and Submit's check) took the genome, PAM and variant dataset a request sends into
