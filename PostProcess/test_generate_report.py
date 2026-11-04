@@ -1102,6 +1102,74 @@ class TestGenerateReport(unittest.TestCase):
             ["By CFD score", "By variant effect (CFD ALT - REF delta)"],
         )
 
+    def test_tied_rows_keep_the_tables_order_in_every_ranked_view(self):
+        """The top-1000 by CRISPR-Bulge was ordered with pandas' default sort, a quicksort,
+        which is not stable: rows of exactly one score (identical aligned pairs at other
+        sites score the same) came out in an order the whole column decided, so rows added
+        elsewhere renumbered them (8 to 99 rows of top1000_crispr_bulge.tsv changed only
+        their rank between two runs, each within an exact tie). So did the top-1000 by CFD
+        and the Section-2 plots' top-N. Each sort is now stable: tied rows keep the table's
+        order, whatever else the table holds. (The panel sorts on several keys at once,
+        which pandas always sorts stably.)"""
+        import pandas as pd
+        from unittest import mock
+
+        cfd_cols = [h for h in _HEADER if h.startswith("CFD_score")]
+        cb_cols = [h for h in _HEADER if h.startswith("CRISPR_BULGE_score")]
+        template = dict(zip(_HEADER, _ROWS[2]))  # a reference site with 3 mismatches
+
+        def frame(rows):
+            """Rows of (Chromosome tag, CFD, CRISPR-Bulge), REF = ALT (every delta 0)."""
+            out = []
+            for tag, cfd, cb in rows:
+                row = dict(template, Chromosome=tag)
+                row.update({h: cfd for h in cfd_cols})
+                row.update({h: cb for h in cb_cols})
+                out.append(row)
+            return pd.DataFrame(out, columns=_HEADER)
+
+        # 300 sites in three ties, on each score (insertion sort, which numpy's quicksort
+        # runs below 17 elements, keeps a tie in order: too few rows would not tell)
+        tied = [(f"t{i}", ("0.30", "0.20", "0.10")[i % 3], ("0.6", "0.4", "0.2")[i * 7 % 3])
+                for i in range(300)]
+        # and the same with 120 more sites between them, each of a score of its own
+        more = list(tied)
+        for j in range(120):
+            more.insert(j * 3, (f"u{j}", f"{0.0505 + j / 1000:.4f}", f"{0.1505 + j / 1000:.4f}"))
+
+        def by(*scores):
+            """The tags in the order a stable sort by these scores, descending, gives."""
+            return [r[0] for r in sorted(tied, key=lambda r: [-float(r[k]) for k in scores])]
+
+        def ranked(df, cols):
+            seen = []
+
+            def record(sub, *args, **kwargs):
+                seen.append(list(sub[cols["chrom"]]))
+                return "data:,"
+
+            with mock.patch.object(gr, "_cfd_style_scatter", record):
+                gr.plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=True)
+            views = {"top-1000 by CFD": gr.select_top(df, cols),
+                     "top-1000 by CRISPR-Bulge": gr.select_top_crispr_bulge(df, cols),
+                     "panel": gr.select_worstcase_panel(df, cols)}
+            views = {k: list(v[cols["chrom"]]) for k, v in views.items()}
+            views.update(zip(("plot by CFD", "plot by CFD delta", "plot by CRISPR-Bulge",
+                              "plot by CRISPR-Bulge delta"), seen))
+            return views
+
+        tag_order = [r[0] for r in tied]
+        # (every site is a hard-include of the panel, of one severity: then CFD, CRISPR-Bulge)
+        expected = {"top-1000 by CFD": by(1), "top-1000 by CRISPR-Bulge": by(2),
+                    "panel": by(1, 2), "plot by CFD": by(1), "plot by CFD delta": tag_order,
+                    "plot by CRISPR-Bulge": by(2), "plot by CRISPR-Bulge delta": tag_order}
+        for rows in (tied, more):
+            df = frame(rows)
+            cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+            for view, got in ranked(df, cols).items():
+                with self.subTest(rows=len(rows), view=view):
+                    self.assertEqual([t for t in got if t.startswith("t")], expected[view])
+
     def test_section4_hybrid_panel_floors_note_and_maf_footnote(self):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))

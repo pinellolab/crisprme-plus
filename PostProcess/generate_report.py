@@ -2478,15 +2478,17 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
         base = base[_to_int_series(base[cols["mmb"]]) > 1]
     n_shown = min(n, len(base))
 
+    # stable, as in select_top: tied rows keep the table's order, and a top-N that ends
+    # inside a tie keeps the tie's first rows
     def _score_sorted(score_col):
         s = _to_float_series(base[score_col]).fillna(-1.0)
-        return base.assign(_s=s).sort_values("_s", ascending=False).head(n)
+        return base.assign(_s=s).sort_values("_s", ascending=False, kind="stable").head(n)
 
     def _delta_sorted(alt_col, ref_col):
         delta = _to_float_series(base[alt_col]) - _to_float_series(base[ref_col])
         return (
             base.assign(_delta=delta)
-            .sort_values("_delta", ascending=False, na_position="last")
+            .sort_values("_delta", ascending=False, na_position="last", kind="stable")
             .head(n)
         )
 
@@ -3302,6 +3304,10 @@ def select_top(df, cols, n=1000):
     (plot_scatter_panels), and the report says so under each (top_exclusion_note):
     they are all in the validation panel. (CRISPRme_plots.py, the results page's
     top-1000 plots, no longer filters them since 2.8.1.)
+
+    The sort is stable: rows of one score keep the table's order. pandas' default
+    (quicksort) is not: the order it gave tied rows depended on the whole column, so a
+    row added anywhere could renumber them.
     """
     work = df.copy()
     if "mmb" in cols:
@@ -3309,7 +3315,7 @@ def select_top(df, cols, n=1000):
     if "cfd" in cols:
         work = work.assign(
             _cfd=pd.to_numeric(work[cols["cfd"]], errors="coerce").fillna(-1.0)
-        ).sort_values("_cfd", ascending=False).drop(columns=["_cfd"])
+        ).sort_values("_cfd", ascending=False, kind="stable").drop(columns=["_cfd"])
     return work.head(n)
 
 
@@ -3317,9 +3323,9 @@ def select_top_crispr_bulge(df, cols, n=1000):
     """Top-N off-targets by CRISPR-Bulge desc (mm+b > 1), when CRISPR-Bulge is computed.
 
     Mirrors :func:`select_top` (same on-/near-on-target filter, same curated
-    columns) but ranks by the CRISPR-Bulge score instead of CFD. Returns an EMPTY frame
-    when CRISPR-Bulge is absent, so the caller renders the CRISPR-Bulge table only when it
-    exists.
+    columns, same stable sort) but ranks by the CRISPR-Bulge score instead of CFD.
+    Returns an EMPTY frame when CRISPR-Bulge is absent, so the caller renders the
+    CRISPR-Bulge table only when it exists.
     """
     if "crispr_bulge" not in cols:
         return df.iloc[0:0]
@@ -3328,7 +3334,7 @@ def select_top_crispr_bulge(df, cols, n=1000):
         work = work[_to_int_series(work[cols["mmb"]]) > 1]
     work = work.assign(
         _cr=pd.to_numeric(work[cols["crispr_bulge"]], errors="coerce").fillna(-1.0)
-    ).sort_values("_cr", ascending=False).drop(columns=["_cr"])
+    ).sort_values("_cr", ascending=False, kind="stable").drop(columns=["_cr"])
     return work.head(n)
 
 
