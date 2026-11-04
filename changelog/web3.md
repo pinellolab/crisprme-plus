@@ -2,8 +2,9 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests) to that step (the last entry below), and on this branch the step then ran 467 tests in
-about 100 s, with its two allowed skips: correct the count there as these entries are merged.
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (7 tests, the Security
+block) to that step, and on this branch the step then ran 474 tests in about 100 s, with its
+two allowed skips: correct the count there as these entries are merged.
 
 ### Fixed
 
@@ -59,3 +60,18 @@ about 100 s, with its two allowed skips: correct the count there as these entrie
   them, with Biopython beside a stray `pyproject.toml`, which runs where the web stack and
   Biopython are installed: in the image, where `web-e2e.yml` runs it with the other tests that
   skip in the light job.
+
+### Security
+
+- **The search form's genomic-sequence input passes nothing typed to a shell.** For a sequence
+  given by BED coordinates, the sequence's `>` header and the sequence name on the coordinates'
+  line went as typed into a shell command that ran `bedtools getfasta`: when Submit checked the
+  form, as the base-editing window list was filled at each change, and when the search was
+  launched. Characters a shell reads in either ran as commands, as the web app's user, which
+  matters wherever the web app is served to other people. The header named the BED file written
+  in the data folder, so a header holding a path wrote it elsewhere, and the index bedtools wrote
+  beside the genome's FASTA was removed afterwards, one that was there before as well. bedtools
+  now runs with no shell, on a BED file and a link to the FASTA in a private temporary folder,
+  where it writes the index too: the header names no file, the sequence name must be that of a
+  FASTA of the genome selected, and the genome an installed one. Pre-existing, in every earlier
+  release. Covered by `PostProcess/test_web_shell_safety.py`.

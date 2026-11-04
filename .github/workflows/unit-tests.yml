@@ -112,6 +112,15 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_settings_progress -v
 
+      - name: "Text a web request sends runs no command (the genomic-sequence input's extraction here; the pages in web-e2e's image)"
+        # The web app took text a request sends into shell commands: the genomic-sequence
+        # input's header and sequence name, the search launch's arguments, Remove result's
+        # job id, the values of a results link or table. The checks of seq_script/extract_seq.py
+        # run here; its read of a sequence needs bedtools, and the pages' checks Dash, so
+        # web-e2e's in-image step runs the module whole, and fails on a skip.
+        working-directory: PostProcess
+        run: python -m unittest test_web_shell_safety -v
+
       - name: HF fallback contract (hf_fetch must raise so callers fall back)
         working-directory: PostProcess
         run: python -m unittest test_hf_downloads.TestHfFetchFallbackContract -v

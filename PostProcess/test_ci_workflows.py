@@ -188,10 +188,12 @@ class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
     """unit-tests.yml's job has no BEDOPS, minimap2, impg, Dash or Biopython, so its step for
     post_process.sh ran one test and skipped it, the impg truth tests, the flag-gate behaviour
     tests and test_app_settings' start of the web app skipped too, and test_assembly_annotate
-    was in no workflow. All pass in the image, where no job ran them."""
+    was in no workflow. All pass in the image, where no job ran them. test_web_shell_safety's
+    checks of the web pages, which need Dash and bedtools, skip there too."""
 
     MODULES = ("test_assembly_annotate", "test_assembly_reconcile", "test_complete_search_flags",
-               "test_post_process_tempdir", "test_index_resolution", "test_app_settings")
+               "test_post_process_tempdir", "test_index_resolution", "test_app_settings",
+               "test_web_shell_safety")
 
     def in_image_step(self):
         text = workflow("web-e2e.yml")
