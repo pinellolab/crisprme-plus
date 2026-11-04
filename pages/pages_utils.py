@@ -1995,7 +1995,12 @@ def samplesid_problem(vcf_folder: str, dataset: str) -> Optional[str]:
         how = ("Build its variant index in Settings, which writes the list from the VCF "
                "header, or add the file yourself")
     else:
-        how = "Download its index again, which installs the list, or add the file yourself"
+        # an index with no VCF folder: one downloaded, or one built here from a VCF
+        # dataset since removed in Settings, which takes the list with it and leaves
+        # the index
+        how = ("Download its index again if it came from HuggingFace, which installs the "
+               f"list; add the VCF dataset {vcf_folder} again in Settings, which writes the "
+               "list from the VCF header; or add the file yourself")
     return (
         f"No sample list for the variant dataset '{dataset}': a search with it reads "
         f"samplesIDs/{vcf_folder}.samplesID.txt (one row per sample its VCFs genotype) "

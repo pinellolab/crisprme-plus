@@ -280,7 +280,11 @@ columns, such as the hosted `hg38_mega` VCFs) is listed too, but **Submit** refu
 search of it, built here or not, and the note under the bulge options says why: a search
 reports its variants only through a per-dataset allele-frequency registry, which a build
 here does not make. To search the mega variants, download the published
-`NRG_3_hg38+hg38_mega` index instead, which ships one.
+`NRG_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
+dataset whose sample list is missing too, and the note says so, with how to get one:
+removing a VCF dataset in Settings takes its list and leaves the variant index built
+from it, which is still listed here; add the dataset again there, under the same name,
+to search that index again.
 
 > **RNA-targeting strategies:** For RNA-targeting Cas proteins, you can either
 > provide a custom transcriptome genome or use a variant-enriched genome. Be aware

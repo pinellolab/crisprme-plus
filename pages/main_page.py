@@ -2140,26 +2140,15 @@ def check_input(
                 % (need, dna, rna)
             )
     # A variant search reads each dataset's samplesIDs/<folder>.samplesID.txt only
-    # after the search and post-analysis, and fails there without it: refuse it now.
-    # The folder and the combined list a merged panel synthesizes are change_url's.
+    # after the search and post-analysis, and fails there without it, and one of a
+    # dataset added as a single multi-chromosome VCF, with no variant index for this
+    # PAM, fails as it prepares the variant genome: refuse them now, with the words of
+    # the bulge note (_dataset_refusals).
     if genome_update is None and variant_choice not in (None, "", "ref"):
-        _genome = genome_selected.replace(" ", "_")
         for _d in [v for v in str(variant_choice).split("+") if v]:
-            _folder = _resolve_vcf_folder(_genome, _d)
-            _ensure_samplesid(_genome, _folder)
-            _why = samplesid_problem(_folder, _d)
-            if _why:
+            for _why in _dataset_refusals(genome_selected, pam, _d):
                 update_style = True
                 miss_input_list.append(_why)
-            # A dataset added as a single multi-chromosome VCF, with no variant index for
-            # this PAM: the search would fail as it prepares the variant genome. Refused
-            # with what the bulge note says, unless the dataset is sites-only, which no
-            # build makes searchable (the message above says so).
-            if pam and not _sites_only_refusal(_genome, _d):
-                _unsplit = _unsplit_vcf_refusal(_genome, pam, _d)
-                if _unsplit:
-                    update_style = True
-                    miss_input_list.append(_unsplit)
     miss_input = html.Div(
         [
             html.P("The following inputs are wrong or missing:"),
@@ -2672,6 +2661,23 @@ def _unsplit_vcf_refusal(genome: str, pam: str, panel: str) -> Optional[str]:
     )
 
 
+def _dataset_refusals(genome: str, pam: str, panel: str) -> List[str]:
+    """What Submit says (check_input) of a search of the variant dataset ``panel``,
+    whatever the bulges, and so the bulge note too: that it has no sample list
+    (samplesid_problem), once the combined list a merged panel synthesizes is made
+    (_ensure_samplesid; the folder and that list are change_url's), and, unless it is
+    sites-only, which no build makes searchable (the first says so), that the search
+    cannot prepare its variant genome from a single multi-chromosome VCF
+    (_unsplit_vcf_refusal). [] when Submit does not refuse it."""
+    genome = genome.replace(" ", "_")
+    folder = _resolve_vcf_folder(genome, panel)
+    _ensure_samplesid(genome, folder)
+    found = [samplesid_problem(folder, panel)]
+    if pam and not _sites_only_refusal(genome, panel):
+        found.append(_unsplit_vcf_refusal(genome, pam, panel))
+    return [why for why in found if why]
+
+
 # The note under the Advanced bulge caps: how many bulges this genome, PAM and variant
 # panel allow, and what a search with the bulges selected builds first, if anything.
 @app.callback(
@@ -2690,9 +2696,9 @@ def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
     # a dataset whose search Submit refuses whatever the bulges: the note says what Submit
     # says (check_input), and offers no search of it and no build that would not help
     for panel in _selected_panels(variant_choice):
-        why = _sites_only_refusal(genome, panel) or _unsplit_vcf_refusal(genome, pam, panel)
+        why = _dataset_refusals(genome, pam, panel)
         if why:
-            return why
+            return " ".join(why)
     maxb = _bulge_cap(genome, pam, variant_choice)
     ref_capacity = reference_bulge_capacity(genome, pam)
     if maxb == 0 and ref_capacity == 0:

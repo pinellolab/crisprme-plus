@@ -24,6 +24,10 @@ fails as it prepares the variant genome (only a build of its index splits the fi
 chromosome), and a sites-only one, whose search Submit refuses with or without its
 index. The note offered a 0-bulge search of either and a build in Settings, or the
 bulges of its index; now it says what Submit says, and Submit refuses the first too.
+So it does of a dataset with no sample list, which Submit refused while the note offered
+its search: one whose VCFs have no list yet, and one whose index stays after its VCF
+dataset was removed in Settings, which takes the list with it. For that one Submit said
+to download its index again, which a locally built index cannot be.
 
 Run with:
 
@@ -31,6 +35,7 @@ Run with:
 """
 
 import gzip
+import json
 import os
 import shutil
 import sys
@@ -50,6 +55,7 @@ sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app ob
 
 import pages.main_page as mp  # noqa: E402
 import pages.pages_utils as pu  # noqa: E402
+import pages.settings_page as sp  # noqa: E402
 
 PAM = "20bp-NRG-SpCas9"
 
@@ -57,7 +63,7 @@ PAM = "20bp-NRG-SpCas9"
 class _Install(unittest.TestCase):
     """A data folder: genome hg38 (raw FASTA), panels "walk" (VCFs + a 1-bulge
     index), "fresh" (VCFs, no index), "zero" (VCFs + a 0-bulge index) and "shipped"
-    (a 0-bulge index, no VCF files)."""
+    (a 0-bulge index, no VCF files), each with its sample list."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -72,13 +78,23 @@ class _Install(unittest.TestCase):
             open(os.path.join(self.tmp, "VCFs", f"hg38_{panel}", "x.chr1.vcf.gz"), "w").close()
         for d in ("NRG_2_hg38+hg38_walk", "NRG_1_hg38+hg38_zero", "NRG_1_hg38+hg38_shipped"):
             self.index(d)
-        for mod in (mp, pu):
+        for panel in ("walk", "fresh", "zero", "shipped"):
+            self.sample_list(panel)
+        for mod in (mp, pu, sp):
             p = patch.object(mod, "current_working_directory", self.tmp + os.sep)
             p.start()
             self.addCleanup(p.stop)
 
     def index(self, name):
         os.makedirs(os.path.join(self.tmp, "genome_library", name))
+
+    def sample_list(self, panel, samples=("S1", "S2")):
+        """The sample list a search of panel reads, as a download or Settings installs it:
+        without it Submit refuses the search, and the note says so."""
+        os.makedirs(os.path.join(self.tmp, "samplesIDs"), exist_ok=True)
+        with open(os.path.join(self.tmp, "samplesIDs", f"hg38_{panel}.samplesID.txt"), "w") as fh:
+            fh.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+                     + "".join(f"{s}\thg38_{panel}\tunknown\tunknown\n" for s in samples))
 
 
 class TestBulgeNote(_Install):
@@ -127,6 +143,7 @@ class TestBulgeNote(_Install):
         # does not promise that a first search prepares anything
         self.index("NRG_2_hg38")
         self.index("NNNNNNNN_3_hg38+hg38_k8")
+        self.sample_list("k8")
         note = self.note("k8", 0, 0)
         self.assertNotIn("prepares", note)
         self.assertIn("neither the panel's VCF files nor its enriched genome are here", note)
@@ -135,6 +152,7 @@ class TestBulgeNote(_Install):
     def test_panel_with_its_enriched_genome_can_still_build_one(self):
         self.index("NRG_2_hg38")
         self.index("NNNNNNNN_3_hg38+hg38_k8")
+        self.sample_list("k8")
         os.makedirs(os.path.join(self.tmp, "Genomes", "hg38+hg38_k8"))
         open(os.path.join(self.tmp, "Genomes", "hg38+hg38_k8", "chr1.enriched.fa"), "w").close()
         self.assertIn("the first one prepares", self.note("k8", 0, 0))
@@ -261,14 +279,81 @@ class TestRefusedDatasets(_Install):
                      "gnomAD\tgnomAD\tgnomAD\tunknown\n")
         self.index("NRG_2_hg38+hg38_mega")
         self.assertEqual(self.note("mega", 1, 1), "Up to 1 DNA/RNA bulge(s) available.")
-        # a genotyped dataset with no sample list: Submit refuses it, saying how to get
-        # one (a build in Settings writes it); the note is the bulge note
+        # a merged panel, as the combined 1000G + HGDP index, with the lists of its datasets
+        # and none of its own: Submit makes it from theirs, so the note does not refuse it
+        self.sample_list("1000G")
+        self.sample_list("HGDP")
+        self.index("NRG_2_hg38+hg38_1000G_HGDP")
+        self.assertEqual(self.note("1000G_HGDP", 1, 1), "Up to 1 DNA/RNA bulge(s) available.")
+        self.assertEqual(self.submit("1000G_HGDP", 1, 1), (True, []))
+
+    def test_a_dataset_without_its_sample_list(self):
+        # a genotyped dataset with no sample list: Submit refuses it, saying how to get one
+        # (a build in Settings writes it), and the note offered its search
         self.dataset("nolist", ["nolist.chr1.vcf.gz"], sample_list=False)
-        self.assertIn("the first one prepares", self.note("nolist"))
-        ok, msgs = self.submit("nolist")
-        self.assertFalse(ok)
-        self.assertEqual(len(msgs), 1)
-        self.assertTrue(msgs[0].startswith("No sample list for the variant dataset 'nolist'"))
+        note = self.note("nolist")
+        self.assertEqual(note, pu.samplesid_problem("hg38_nolist", "nolist"))
+        self.assertTrue(note.startswith("No sample list for the variant dataset 'nolist'"))
+        self.assertIn("Build its variant index in Settings, which writes the list", note)
+        self.assertEqual(self.submit("nolist"), (False, [note]))
+        # added as a single multi-chromosome file too: the note says both things Submit says
+        self.dataset("nolistone", ["nolistone.vcf.gz"], sample_list=False)
+        ok, msgs = self.submit("nolistone")
+        self.assertEqual((ok, len(msgs)), (False, 2))
+        self.assertEqual(self.note("nolistone"), " ".join(msgs))
+
+    def test_a_dataset_removed_in_settings_whose_index_stays(self):
+        # Settings: per-chromosome VCFs uploaded as hg38_walkint, its variant index built,
+        # then 'VCF dataset: hg38_walkint' removed, which takes the sample list the page
+        # wrote and leaves the index. The search form offered the dataset as before, the
+        # note said nothing, and Submit said to download its index again, which a local
+        # build cannot be
+        def upload():
+            part = os.path.join(self.tmp, "walkint.chr1.vcf.gz.part")
+            _vcf(part)
+            sp._finalize_upload("vcf", part, "walkint.chr1.vcf.gz", "hg38_walkint", "hg38")
+
+        upload()
+        sid = os.path.join(self.tmp, "samplesIDs", "hg38_walkint.samplesID.txt")
+        self.assertTrue(os.path.isfile(sid))
+        # its build: the index, and the tiers that say what it holds
+        self.index("NRG_2_hg38+hg38_walkint")
+        os.makedirs(os.path.join(self.tmp, "Dictionaries", "registry_hg38_walkint"))
+        with open(os.path.join(self.tmp, "Dictionaries", "registry_hg38_walkint",
+                               "reg_chr1.idx"), "w") as fh:
+            json.dump({"data_type": "genotyped-phased"}, fh)
+
+        def label():
+            return {o["value"]: o["label"] for o in pu.get_variant_dataset_options("hg38")}
+
+        built = label()["walkint"]
+        self.assertTrue(built.endswith("[genotyped, phased]"), built)
+        self.assertEqual(self.note("walkint", 1, 1), "Up to 1 DNA/RNA bulge(s) available.")
+        self.assertEqual(self.submit("walkint", 1, 1), (True, []))
+        self.assertIn("searches using them will break until you re-add it",
+                      sp._delete_summary("vcf:hg38_walkint"))
+        sp.do_delete(1, "vcf:hg38_walkint")
+        self.assertFalse(os.path.exists(sid))
+        self.assertTrue(os.path.isdir(os.path.join(self.tmp, "genome_library",
+                                                   "NRG_2_hg38+hg38_walkint")))
+        # offered as before, with the same label; the note says what Submit says, and what
+        # to do fits an index built here as well as a downloaded one
+        self.assertEqual(label()["walkint"], built)
+        note = self.note("walkint", 1, 1)
+        self.assertEqual(note, pu.samplesid_problem("hg38_walkint", "walkint"))
+        self.assertEqual(note, (
+            "No sample list for the variant dataset 'walkint': a search with it reads "
+            "samplesIDs/hg38_walkint.samplesID.txt (one row per sample its VCFs genotype) and "
+            "fails at its end without it. Download its index again if it came from "
+            "HuggingFace, which installs the list; add the VCF dataset hg38_walkint again in "
+            "Settings, which writes the list from the VCF header; or add the file yourself, "
+            "then submit again."))
+        self.assertEqual(self.submit("walkint", 1, 1), (False, [note]))
+        # added again in Settings: its list is written, and its index serves the search
+        upload()
+        self.assertTrue(os.path.isfile(sid))
+        self.assertEqual(self.note("walkint", 1, 1), "Up to 1 DNA/RNA bulge(s) available.")
+        self.assertEqual(self.submit("walkint", 1, 1), (True, []))
 
 
 class _Form:
