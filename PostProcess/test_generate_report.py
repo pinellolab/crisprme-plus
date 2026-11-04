@@ -2105,6 +2105,58 @@ class TestGenerateReport(unittest.TestCase):
                  for n in floor_claims(self._read(p))]
         self.assertEqual(found, [])
 
+    def test_a_rows_rsids_and_mafs_come_in_the_merges_order_not_its_variants(self):
+        """A known limit, to be fixed in the next release (METHODS section 8): the post-
+        analysis writes a row's variant, rsID and AF lists one to one, in the variants' order,
+        and the merge of a cluster's rows (remove_contiguous_samples.get_best_targets) sorts
+        each list on its own, as text, and keeps each value once. So in the results the n-th
+        rsID or AF need not be the n-th variant's, two variants of one AF show it once, and
+        the report's Variant cell gives the rsIDs in the list's order. The report's MAF, the
+        lowest AF of the list, does not change. When the next release keeps the lists
+        together, this test changes with METHODS."""
+        import subprocess
+        import test_representative_tiebreak as rtb
+        pp = os.path.dirname(os.path.abspath(__file__))
+        given = [  # (position, variants, rsIDs, AFs), one to one as the post-analysis writes
+            (1000, "chr1_1003_G_T,chr1_1006_C_A", "rs9,rs1", "0.3,0.003"),
+            (5000, "chr1_5003_A_G,chr1_5009_T_C", ".,.", "0.2,0.2"),
+        ]
+        infile, outfile = os.path.join(self.tmp, "in.txt"), os.path.join(self.tmp, "out.txt")
+        with open(infile, "w") as fh:
+            fh.write("\t".join(rtb.POST_ADJUST_HEADER) + "\n")
+            for pos, snp, rsid, af in given:
+                r = rtb._row("CTCTCAGCTGGTACACGGCAAGG", "0.5", cluster_pos=pos, position=pos,
+                             snp=snp, samples="HG00096")
+                r[3], r[16], r[17] = r[2].upper(), rsid, af
+                fh.write("\t".join(r) + "\n")
+        res = subprocess.run(
+            [sys.executable, os.path.join(pp, "remove_contiguous_samples.py"), infile, outfile,
+             "3", "5", "7", "11", "16", "19", "21", "score", "mm+bulges"],
+            cwd=pp, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        with open(outfile) as fh:
+            merged = [line.rstrip("\n").split("\t") for line in fh.readlines()[1:]]
+        self.assertEqual([(m[rtb.SNP_COL], m[16], m[17]) for m in merged], [
+            ("chr1_1003_G_T,chr1_1006_C_A", "rs1,rs9", "0.003,0.3"),  # not rs9 then rs1
+            ("chr1_5003_A_G,chr1_5009_T_C", ".", "0.2"),              # one of each
+        ])
+        cols = {"var_genome": "g", "rsid": "r", "maf": "m"}
+        cells = [{"g": m[rtb.SNP_COL], "r": m[16], "m": m[17]} for m in merged]
+        self.assertEqual(gr._curated_cell("variant", cells[0], cols),
+                         "chr1;1003;G;T,chr1;1006;C;A (rs1,rs9)")
+        # the lowest AF of the variants, whatever the order of the list
+        self.assertEqual([gr._curated_cell("maf", c, cols) for c in cells],
+                         ["3.00e-03", "2.00e-01"])
+        methods = self._read(os.path.join(os.path.dirname(pp), "METHODS.md"))
+        limits = " ".join(methods[methods.index("## 8. "):methods.index("## 9. ")].split())
+        for said in ("On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists "
+                     "of the results tables are not in the order of its `Variant_info_genome`",
+                     "953 of 1,967 rows of two or more SNPs and 118 of 293 rows of an indel and "
+                     "a SNP list their rsIDs in another order than their variants",
+                     "are in the list's order. 2.8.0 behaves the same, and it will be fixed in "
+                     "the next release."):
+            self.assertIn(said, limits)
+
     def test_registry_variant_count_idx_and_sidecar(self):
         """Cheap variant count + genotyped sample counts from the Tier-0 registry
         (sums reg_*.idx n_records; sidecar takes precedence; never scans VCFs)."""

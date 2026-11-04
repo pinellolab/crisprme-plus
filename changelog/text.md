@@ -39,6 +39,26 @@ above" is the second; keep them true where the entries land.
   Results are unchanged. Pre-existing: 2.8.0 behaves the same; it is fixed in the next release.
   Covered by `PostProcess/test_build_index_only_atomic.py` (the banner) and
   `PostProcess/test_generate_report.py` (the report).
+- **A known limit, stated with its scale: on a row of several variants, the rsID and
+  allele-frequency lists are not in the order of its variants.** The post-analysis writes a row's
+  variant, rsID and AF lists one to one, in the variants' order, and the merge of a cluster's rows
+  (`remove_contiguous_samples.get_best_targets`) sorts each of the three on its own, as text, and
+  keeps each value once. So in `integrated_results.tsv` and the alternative alignments the n-th
+  item of `Variant_rsID` or `Variant_MAF` need not belong to the n-th variant of
+  `Variant_info_genome`, and two variants of one frequency show it once. A `--per-sample` search
+  of the README's guide (`20bp-NGG-SpCas9` PAM, 4 mismatches, 1 DNA and 1 RNA bulge) on the
+  self-test's index rebuilt with `build-index-only --samplesID` lists chr22:16858220 with the
+  variants `chr22_16858239_C_G,chr22_16858242_G_T` and the frequencies `0.000981162,0.805338`,
+  where the first variant's is 0.805338 and the second's 0.000981162, and two of its seven
+  multi-variant rows give one frequency for two variants. On ACTGA (`ACTGAAATCTGTAAGCAGGC`, NRG,
+  4 mismatches + 1 DNA + 1 RNA bulge, per sample, genome-wide, on the HGDP + 1000 Genomes index),
+  953 of 1,967 rows of two or more SNPs and 118 of 293 rows of an indel and a SNP list their rsIDs
+  in another order than their variants (in the highest-CFD columns). The report's MAF, the lowest
+  frequency of the list, does not change; the rsIDs its `Variant` column gives after the
+  variants, and the rsIDs and AFs of `observed_haplotypes.tsv` and of a site's haplotype table in
+  the report, come in the list's order. METHODS section 8 states the limit. Pre-existing: 2.8.0
+  and every earlier release behave so (before 2.4.0 each list came in an arbitrary order); it
+  will be fixed in the next release. Covered by `PostProcess/test_generate_report.py`.
 - **METHODS section 2 says what a sites-only panel's registry holds for carriers and
   homozygotes.** It said that the carrier and homozygote counts of the mega index are reported as
   Hardy–Weinberg expectations from the allele frequency, flagged as estimates, and
