@@ -21,7 +21,9 @@ the name of a file you upload here (but a personal-assembly bundle's, which is n
 top folder) and the name a Direct URL ends in may hold no blank and none of `|`, `;`, `'`, `"`,
 `$`, `(`, `)`, `&`, `<`, `>`, a backquote, `#`, `*`, `?` or `[`, and may not start with `-` or
 `.`: CRISPRme takes these names into shell commands as they are. The page refuses such a name,
-and says why.
+and says why. A personal-assembly bundle is refused, saying why, when the name of a FASTA file
+of its genome folders holds a blank or any of `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`,
+a backquote or `#`: a search takes that name, as its chromosome's, into shell commands too.
 
 ### Add a reference genome
 Type an assembly name and pick a source:

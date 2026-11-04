@@ -1914,6 +1914,47 @@ class TestSettingsRefusesNamesAShellReads(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(self.cwd, "Assemblies", "HG01255",
                                                     "metadata.json")))
 
+    def test_a_personal_assembly_bundle(self):
+        # a search takes the name of each FASTA file of a haplotype's genome folder for a
+        # chromosome's, into shell commands as it is, and a bundle brings its files named
+        # as its archive names them: one holding a FASTA named with what a shell reads is
+        # refused, installing nothing. ('*', '?' and '[', which a sequence's name may hold,
+        # and a first '-' or '.' are not refused here: a shell runs nothing of them.)
+        from genome_layout import UNUSABLE_IN_ID
+
+        def bundle(fasta, data=_FA1):
+            meta = {"format": "crisprme-personal-assembly", "format_version": 1,
+                    "individual": "HG01255", "haplotypes": {
+                        hap: {"genome_dir": f"{hap}/genome", "chain": f"{hap}/x.chain",
+                              "chromalias": f"{hap}/x.chromAlias.txt"}
+                        for hap in ("paternal", "maternal")}}
+            entries = [("HG01255/metadata.json", "file", json.dumps(meta).encode())]
+            for hap in ("paternal", "maternal"):
+                entries += [(f"HG01255/{hap}/genome/chr1.fa", "file", _FA1),
+                            (f"HG01255/{hap}/x.chain", "file", b"x\n"),
+                            (f"HG01255/{hap}/x.chromAlias.txt", "file", b"x\n")]
+            entries.append((f"HG01255/paternal/genome/{fasta}", "file", data))
+            folder = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+            _write_tar_gz(os.path.join(folder, "bundle.tar.gz"), entries)
+            with open(os.path.join(folder, "bundle.tar.gz"), "rb") as fh:
+                return fh.read()
+
+        os.makedirs(os.path.join(self.cwd, "Assemblies"))  # (as one import leaves it)
+        for name in _SHELL_NAMES:
+            if not any(c in UNUSABLE_IN_ID or c.isspace() for c in name):
+                continue
+            with self.subTest(name=name):
+                body = bundle(f"{name}.fa")
+                said = lambda out: (self.assertEqual(out[1], 500), self.assertIn(
+                    f"invalid personal-assembly bundle: paternal genome dir 'paternal/genome' "
+                    f"holds {name + '.fa'!r}: a FASTA file's name must not hold a blank", out[0]))
+                self.refused(lambda: self.upload("assembly-bundle", "HG01255.tar.gz", body), said)
+        self.assertEqual(self.upload("assembly-bundle", "HG01255.tar.gz",
+                                     bundle("chr2.fa", _FA2)), ("complete:HG01255", 200))
+        self.assertEqual(sorted(os.listdir(os.path.join(
+            self.cwd, "Assemblies", "HG01255", "paternal", "genome"))), ["chr1.fa", "chr2.fa"])
+
 
 # --- what a Settings dropdown offers --------------------------------------------------
 # Dash does not check a dropdown's value against its options, and a request can send a

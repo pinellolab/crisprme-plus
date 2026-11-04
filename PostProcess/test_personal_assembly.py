@@ -327,5 +327,83 @@ class TestBundlePathsStayInsideIt(unittest.TestCase):
         self.assertTrue(pa.resolve(self.cwd, "EVIL")["complete"])
 
 
+class TestBundleFastaNamesAShellReads(unittest.TestCase):
+    """A search takes the name of each FASTA file of a genome folder, less its extension,
+    for a chromosome's, and its post-analysis took that name, unquoted, into shell
+    commands. A bundle brings its genome folders with the names its archive gives, a
+    client's for one imported in Settings, and only some .fa had to be there: a FASTA
+    named with characters a shell reads, of a sequence named chr1 (the name the search's
+    own check of the folder reads), was imported, the individual listed as complete, and
+    its search ran them (pool_post_analisi_snp.py now refuses such a name too:
+    test_web_shell_safety). A bundle holding one is refused, with nothing installed; one
+    of the usual names goes in as before."""
+
+    # a FASTA file's name, less .fa, holding what a shell reads
+    CRAFTED = ("chr1;touch MARK;x", "chr1$(touch MARK)", "chr1`touch MARK`", "chr1|touch MARK",
+               "chr1&&touch MARK", "chr1>MARK", "chr1<x", "chr1'x'", 'chr1"x"', "chr1#x",
+               "chr1 x", "chr1\tx", "chr1\ntouch MARK")
+
+    def setUp(self):
+        self.cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cwd, ignore_errors=True)
+
+    def archive(self, names, kind):
+        """Bundle IND1 as a ``kind`` (zip or tar.gz) archive, its paternal genome folder
+        holding an entry of each name of ``names`` (a folder for one that ends in '/', else
+        a FASTA of sequence chr1), its maternal one chr1.fa."""
+        meta = {"format": pa.BUNDLE_FORMAT, "format_version": 1, "individual": "IND1",
+                "haplotypes": {hap: {"genome_dir": f"{hap}/genome", "chain": f"{hap}/x.chain",
+                                     "chromalias": f"{hap}/x.chromAlias.txt"}
+                               for hap in pa.HAPLOTYPES}}
+        entries = [("IND1/metadata.json", json.dumps(meta).encode())]
+        for hap, fastas in (("paternal", names), ("maternal", ["chr1.fa"])):
+            entries += [(f"IND1/{hap}/genome/{name}", b">chr1\nACGT\n") for name in fastas]
+            entries += [(f"IND1/{hap}/x.chain", b"chain\n"), (f"IND1/{hap}/x.chromAlias.txt", b"x\n")]
+        path = os.path.join(self.cwd, f"IND1.{kind}")
+        if kind == "zip":
+            with zipfile.ZipFile(path, "w") as z:
+                for name, data in entries:
+                    z.writestr(name, b"" if name.endswith("/") else data)
+        else:
+            with tarfile.open(path, "w:gz") as t:
+                for name, data in entries:
+                    info = tarfile.TarInfo(name.rstrip("/"))
+                    if name.endswith("/"):
+                        info.type, info.mode = tarfile.DIRTYPE, 0o755
+                        t.addfile(info)
+                    else:
+                        info.size = len(data)
+                        t.addfile(info, io.BytesIO(data))
+        return path
+
+    def test_a_bundle_holding_a_fasta_named_so_is_refused(self):
+        for kind in ("zip", "tar.gz"):
+            for chrom in self.CRAFTED:
+                for name in (f"{chrom}.fa", f"{chrom}.fa/"):  # (the search lists a folder too)
+                    with self.subTest(kind=kind, name=name):
+                        shutil.rmtree(os.path.join(self.cwd, pa.ASSEMBLIES_DIR), ignore_errors=True)
+                        arc = self.archive(["chr1.fa", name], kind)
+                        with self.assertRaisesRegex(
+                                ValueError, r"^invalid personal-assembly bundle: paternal genome "
+                                r"dir 'paternal/genome' holds .*: a FASTA file's name must not "
+                                r"hold a blank or any of "):
+                            pa.import_archive(arc, self.cwd)
+                        self.assertEqual(os.listdir(os.path.join(self.cwd, pa.ASSEMBLIES_DIR)),
+                                         [])
+
+    def test_a_bundle_of_the_usual_names_goes_in_as_before(self):
+        # what a sequence's name may hold ('*' and ':' of an HLA allele's too), and the file
+        # of attributes macOS tar writes beside a FASTA (._chr1.fa), which is not refused
+        names = ["chr1.fa", "chrUn_KI270302v1.fa", "NC_000913.3.fa", "HLA-A*01:01.fa",
+                 "._chr1.fa"]
+        for kind in ("zip", "tar.gz"):
+            with self.subTest(kind=kind):
+                self.assertEqual(pa.import_archive(self.archive(names, kind), self.cwd), "IND1")
+                self.assertTrue(pa.resolve(self.cwd, "IND1")["complete"])
+                genome = os.path.join(pa.individual_dir(self.cwd, "IND1"), "paternal", "genome")
+                self.assertEqual(sorted(os.listdir(genome)), sorted(names))
+                shutil.rmtree(pa.individual_dir(self.cwd, "IND1"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -296,10 +296,35 @@ def delete_target(cwd: str, individual: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Import a bring-your-own bundle archive (.zip / .tar.gz)
 # ---------------------------------------------------------------------------
+def _unusable_fasta_name(genome_dir: str) -> Optional[str]:
+    """Why a FASTA file of the haplotype genome folder ``genome_dir`` cannot be
+    searched under its name, else ``None``. A search takes each ``.fa`` file's name,
+    less the extension, for its chromosome's, and its post-analysis takes that name
+    into shell commands as it is (pool_post_analisi_snp.py refuses one it cannot
+    take). A bundle brings its files named as its archive names them, a client's for
+    one imported in Settings: a name holding a character a shell reads ran it when the
+    individual was searched. Refused as in a sequence's name (genome_layout.py), and
+    so is any blank; a real chromosome's file, named after its sequence, holds none."""
+    from genome_layout import UNUSABLE_IN_ID
+
+    for fname in sorted(os.listdir(genome_dir)):
+        if not fname.endswith(".fa"):
+            continue
+        chrom = os.path.splitext(fname)[0]
+        if any(c in UNUSABLE_IN_ID or c.isspace() for c in chrom):
+            return (
+                f"holds {fname!r}: a FASTA file's name must not hold a blank or any of "
+                f"{' '.join(UNUSABLE_IN_ID)}, which a search takes into shell commands as "
+                f"the chromosome's; name each file after the sequence it holds"
+            )
+    return None
+
+
 def validate_bundle_dir(bundle_dir: str) -> Optional[str]:
     """Return an error string if ``bundle_dir`` is not a valid personal-assembly
-    bundle (has a parseable ``metadata.json`` of a supported version, and every
-    file it references exists, inside the bundle), else ``None``."""
+    bundle (has a parseable ``metadata.json`` of a supported version, every file
+    it references exists, inside the bundle, and its FASTA files are named as a
+    search can take them), else ``None``."""
     mpath = os.path.join(bundle_dir, METADATA_NAME)
     try:
         with open(mpath) as fh:
@@ -330,6 +355,9 @@ def validate_bundle_dir(bundle_dir: str) -> Optional[str]:
         gdir = os.path.join(bundle_dir, genome_rel)
         if not (os.path.isdir(gdir) and any(f.endswith(".fa") for f in os.listdir(gdir))):
             return f"{hap} genome dir {genome_rel!r} missing or has no .fa contigs"
+        unusable = _unusable_fasta_name(gdir)
+        if unusable:
+            return f"{hap} genome dir {genome_rel!r} {unusable}"
         if not os.path.isfile(os.path.join(bundle_dir, chain_rel)):
             return f"{hap} chain file {chain_rel!r} not found in the bundle"
         if not os.path.isfile(os.path.join(bundle_dir, ca_rel)):

@@ -197,14 +197,18 @@ and the Settings and personal-assembly entries add tests to `test_settings_progr
   name may not hold (the same characters Settings refuses in a name, above), and say so; a
   real chromosome name holds none, so a normal dataset is searched as before. Pre-existing.
   Covered by `PostProcess/test_indel_empty_chromosome.py`.
-- **The post-analysis of a search passes no FASTA file's name to a shell.** It takes the name
-  of each FASTA file of the genome folder searched, as its chromosome's, into shell commands as
-  it is, where characters a shell reads ran as commands, as the web app's user. A genome added
-  in Settings has its files named after their sequences, whose names are checked, but a
-  personal-assembly bundle imported there brings its genome folders with the names its archive
-  gives, and Settings changes data in local mode only, which is how CRISPRme runs by default.
-  The post-analysis now refuses a name that holds a blank or a character a sequence's name may
-  not hold (`|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a backquote or `#`), and says so,
-  and runs its step for each chromosome with no shell. A chromosome's off-targets are kept only
-  from the file named after its sequence, whose name holds none of these, so a normal genome is
-  searched as before. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The post-analysis of a search passes no FASTA file's name to a shell, and a personal-assembly
+  bundle brings only FASTA files named as a search can take them.** The post-analysis takes the
+  name of each FASTA file of the genome folder searched, as its chromosome's, into shell
+  commands as it is, where characters a shell reads ran as commands, as the web app's user. A
+  genome added in Settings has its files named after their sequences, whose names are checked,
+  but a personal-assembly bundle imported there brought its genome folders with the names its
+  archive gives, which were not, and Settings changes data in local mode only, which is how
+  CRISPRme runs by default. A bundle holding a FASTA file whose name holds a blank or a character
+  a sequence's name may not hold (`|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a backquote or
+  `#`) is now refused, and the import says why; the post-analysis refuses such a name too, and
+  says so, and runs its step for each chromosome with no shell. A chromosome's off-targets are
+  kept only from the file named after its sequence, whose name holds none of these, so a normal
+  genome or bundle is searched as before. Pre-existing (bundles since 2.6.0). Covered by
+  `PostProcess/test_personal_assembly.py`, `PostProcess/test_settings_progress.py` and
+  `PostProcess/test_web_shell_safety.py`.

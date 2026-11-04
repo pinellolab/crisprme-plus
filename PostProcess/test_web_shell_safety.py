@@ -694,9 +694,10 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
     file of the genome folder, less its extension, for a chromosome's: it ran
     post_analisi_snp.sh on each through a shell, with that name unquoted, and the scripts
     that runs take the name into shell commands too. A personal-assembly bundle brings its
-    genome folders with the names its archive gives. post_analisi_snp.sh is a stand-in here,
-    which records its arguments, in the folder the post-analysis runs in (the search runs it
-    in PostProcess/)."""
+    genome folders with the names its archive gives (one holding such a name is no longer
+    imported: test_personal_assembly; one imported before can be searched).
+    post_analisi_snp.sh is a stand-in here, which records its arguments, in the folder the
+    post-analysis runs in (the search runs it in PostProcess/)."""
 
     def setUp(self):
         super().setUp()
