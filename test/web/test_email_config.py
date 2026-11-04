@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Email-notification config tests: write/read round-trip (password not echoed,
-kept on re-save), validation, 0600 perms, and send_mail resolving .email.json."""
+kept on a re-save of the same account, asked again for another), validation, 0600
+perms, and send_mail resolving .email.json."""
 import sys, tempfile, os, json
 sys.path.insert(0, "/opt/conda/opt/crisprme")
 from pages import pages_utils as pu  # noqa: E402
@@ -17,9 +18,15 @@ chk(c["smtp_host"] == "smtp.gmail.com" and c["password_set"] is False, "defaults
 chk(pu.write_email_config("smtp.gmail.com", 465, "me@gmail.com", "app-pw-123", True) is None, "save valid")
 c = pu.read_email_config()
 chk(c["sender"] == "me@gmail.com" and c["password_set"] is True and "password" not in c, "password not echoed, flag set")
-chk(pu.write_email_config("smtp.example.com", 587, "me@gmail.com", None, False) is None, "re-save w/ password=None")
+chk(pu.write_email_config("smtp.gmail.com", 465, "me@gmail.com", None, True) is None, "re-save w/ password=None")
 raw = json.load(open(os.path.join(d, ".email.json")))
-chk(raw["password"] == "app-pw-123" and raw["smtp_host"] == "smtp.example.com" and raw["use_ssl"] is False, "kept password, updated fields")
+chk(raw["password"] == "app-pw-123" and raw["smtp_host"] == "smtp.gmail.com", "kept password, same account")
+err = pu.write_email_config("smtp.example.com", 587, "me@gmail.com", None, False)
+chk(bool(err) and err.startswith("Type the app password again"), "another host w/ password=None refused")
+chk(json.load(open(os.path.join(d, ".email.json"))) == raw, "refused save changes nothing")
+chk(pu.write_email_config("smtp.example.com", 587, "me@gmail.com", "app-pw-123", False) is None, "re-save w/ the password typed")
+raw = json.load(open(os.path.join(d, ".email.json")))
+chk(raw["password"] == "app-pw-123" and raw["smtp_host"] == "smtp.example.com" and raw["use_ssl"] is False, "updated fields")
 chk(pu.write_email_config("", 465, "x@y.com", "p") == "SMTP host is required.", "reject empty host")
 chk(pu.write_email_config("h", "notaport", "x@y.com", "p") == "SMTP port must be a number.", "reject bad port")
 chk(pu.write_email_config("h", 465, "bad", "p") == "Sender must be a valid email address.", "reject bad sender")

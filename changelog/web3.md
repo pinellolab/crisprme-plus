@@ -263,3 +263,13 @@ and the Settings, personal-assembly and History entries add tests to `test_setti
   nothing was served (the download route serves files of `Results/` only). They now look only in
   the search's folder, as that route would serve the file, and answer for any other name as for
   a zip not made yet. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **A saved e-mail password goes only to the mail server it was saved for.** Settings' Email
+  notifications kept the saved password when a save named another server, port, SSL setting or
+  sender address with the password field empty, as the page shows it, and the notification a
+  search sends at its end logs in to the server saved, as the sender saved, with that password:
+  a request, which can save any server in local mode (how CRISPRme runs by default), had the
+  password sent to a server of its choosing. The password of `CRISPRME_SMTP_PSW` went the same
+  way to a server the settings named with no password of their own. A save that changes any of
+  the four now asks for the password again, and `CRISPRME_SMTP_PSW` is used with the default
+  server (`smtp.gmail.com`) only (`docs/crisprme_web_interface_user_guide.md`). Pre-existing,
+  since 2.2.0. Covered by `PostProcess/test_web_shell_safety.py`.

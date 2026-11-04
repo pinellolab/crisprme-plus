@@ -586,8 +586,12 @@ To have CRISPRme+ email you when a job finishes, configure a mail server once in
 
 Click **Save email settings**. The settings are stored locally in your data folder
 (`.email.json`, readable only by you; it holds the app password, so set it only on a
-machine you control). You can also configure the sender/password without the UI via
-the `CRISPRME_SMTP_SENDER` / `CRISPRME_SMTP_PSW` environment variables.
+machine you control). The password field stays empty once a password is saved: saving
+again with it empty keeps that password only while the host, port, SSL setting and sender
+address stay as they were saved, so type it again when you change any of them. You can
+also configure the sender/password without the UI via the `CRISPRME_SMTP_SENDER` /
+`CRISPRME_SMTP_PSW` environment variables; the password of `CRISPRME_SMTP_PSW` is used
+with `smtp.gmail.com` only, never with another host saved here.
 
 Once configured, tick **Notify me by email** on the search form and enter your
 address. Email is best-effort: if the mail server rejects the message the search

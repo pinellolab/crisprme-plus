@@ -2482,8 +2482,11 @@ def write_email_config(
     use_ssl: bool = True,
 ) -> Optional[str]:
     """Persist SMTP settings atomically. ``password=None`` keeps the previously
-    saved password (so re-saving other fields does not require re-typing it);
-    an empty string clears it. Returns None on success, else an error string."""
+    saved password (so saving again does not require re-typing it) when the host,
+    port, SSL setting and sender are those it was saved with, and is refused
+    otherwise: send_mail.py logs in to the saved host as the sender with it, and
+    a request can save any host. An empty string clears it. Returns None on
+    success, else an error string."""
     if not smtp_host or not str(smtp_host).strip():
         return "SMTP host is required."
     try:
@@ -2500,15 +2503,23 @@ def write_email_config(
                 existing_pw = json.load(fh).get("password", "") or ""
         except (json.JSONDecodeError, OSError):
             existing_pw = ""
-    if password is None:
-        password = existing_pw  # keep what was there
     cfg = {
         "smtp_host": str(smtp_host).strip(),
         "smtp_port": port,
         "use_ssl": bool(use_ssl),
         "sender": str(sender).strip(),
-        "password": password,
     }
+    if password is None:
+        # keep what was there, for the account it was saved for only: kept with another
+        # host, it was sent to that host at the next notification
+        saved = read_email_config()
+        if existing_pw and any(saved[key] != value for key, value in cfg.items()):
+            return (
+                "Type the app password again: a saved password is kept only while the "
+                "SMTP host, port, SSL setting and sender address stay as they were saved."
+            )
+        password = existing_pw
+    cfg["password"] = password
     tmp = path + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(cfg, fh, indent=2)

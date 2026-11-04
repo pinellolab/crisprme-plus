@@ -93,8 +93,9 @@ jobs:
             -v "${GITHUB_WORKSPACE}/test/web:/t" \
             crisprme:web python -u /t/test_settings_vcf_datasets.py
 
-      # Email-notification config: write/read round-trip (password never echoed,
-      # kept on re-save), validation, 0600 perms, and send_mail resolving .email.json.
+      # Email-notification config: write/read round-trip (password never echoed, kept on
+      # a re-save of the same account, asked again for another), validation, 0600 perms,
+      # and send_mail resolving .email.json.
       - name: Email-config unit tests
         run: |
           docker run --rm \

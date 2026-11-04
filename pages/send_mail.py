@@ -13,6 +13,8 @@ Configuration (resolved in this order; first hit wins):
        results folder passed on argv[1], i.e. <data_dir>/Results/<job>).
     2. Environment: CRISPRME_SMTP_PSW (password/app password) and
        CRISPRME_SMTP_SENDER (sender address); host/port default to gmail SSL.
+       CRISPRME_SMTP_PSW is never sent to another host the config file names
+       with no password of its own: no notification is sent then.
 
 Email notifications are OPTIONAL and best-effort: with no password configured,
 or if delivery fails, send_mail() no-ops gracefully (message to STDOUT only) so a
@@ -54,6 +56,7 @@ def _load_config(output_folder: str) -> dict:
     # <output_folder> = <data_dir>/Results/<job>  ->  <data_dir>
     data_dir = os.path.dirname(os.path.dirname(os.path.abspath(output_folder.rstrip("/"))))
     config_path = os.path.join(data_dir, ".email.json")
+    file_password = False
     try:
         if os.path.isfile(config_path):
             with open(config_path) as fh:
@@ -69,8 +72,18 @@ def _load_config(output_folder: str) -> dict:
                     cfg["sender"] = str(filecfg["sender"])
                 if filecfg.get("password"):
                     cfg["password"] = str(filecfg["password"])
+                    file_password = True
     except Exception as exc:  # never let a bad config file fail the job
         print(f"Could not read email config ({config_path}): {exc}")
+    if cfg["password"] and not file_password and cfg["host"].lower() != _DEFAULT_HOST:
+        # CRISPRME_SMTP_PSW goes with the default host: never to a host the file names
+        # with no password of its own (Settings saves the host a request sends), which
+        # would receive it at login
+        print(
+            f"CRISPRME_SMTP_PSW is used with {_DEFAULT_HOST} only, not with "
+            f"{cfg['host']}: save that host's password in Settings -> Email notifications."
+        )
+        cfg["password"] = None
     return cfg
 
 

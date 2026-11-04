@@ -62,6 +62,14 @@ And up to 2.8.0 the results pages' tables wrote the values of a link, a table an
 and thresholds) into their queries of the job's database as they were, where a quote ended
 the text a value was written in and the rest was read as SQL.
 
+And up to 2.8.0 Settings' e-mail notifications kept the saved password for a save naming
+another host, port, SSL setting or sender with the password field empty, as any request
+can, and the notification a search sends at its end (pages/send_mail.py) logged in to that
+host with it; the password of CRISPRME_SMTP_PSW went to a host the settings named with none
+of their own. The password is kept for its own account only (the page's check, in the
+image), and the environment's goes to the default host only (the notification's, which runs
+everywhere).
+
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
 normal value still works; a job id holding '../' reads, writes and removes nothing
@@ -78,6 +86,7 @@ Run with:
 import builtins
 import contextlib
 import gzip
+import io
 import json
 import os
 import shutil
@@ -95,6 +104,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
 from seq_script import extract_seq  # noqa: E402  (no Dash, no Biopython)
+from pages import send_mail  # noqa: E402  (the standard library only)
 
 try:  # pages/sequence_utils.py needs Biopython, which the light unit-test CI does not have
     from pages import sequence_utils  # noqa: E402
@@ -114,6 +124,7 @@ if dash is not None:
     import pages.main_page as mp  # noqa: E402
     import pages.pages_utils as pu  # noqa: E402
     import pages.results_page as rp  # noqa: E402
+    import pages.settings_page as sp  # noqa: E402
 
 BEDTOOLS = shutil.which("bedtools")
 NEEDS_DASH = unittest.skipUnless(dash, "dash not installed: web page tests skipped")
@@ -1523,6 +1534,107 @@ class TestResultsPages(_WebFolder):
                     self.assertEqual(
                         [p for p in seen if os.path.commonpath([job, p]) != job], [])
         self.assertNothingRun()
+
+
+@NEEDS_DASH
+class TestEmailNotificationSettings(_WebFolder):
+    """Settings > Email notifications (settings_page._email_save), which any request can
+    save in local mode, the default. The page shows the password field empty, and a save
+    with it empty kept the saved password whatever host, port, SSL setting and sender it
+    saved: a request naming its own host had the operator's password sent there, at the
+    login of the next notification (TestSendMail). It is kept for its own account only."""
+
+    OPERATOR = {"smtp_host": "smtp.operator.example", "smtp_port": 465, "use_ssl": True,
+                "sender": "lab@operator.example", "password": "OPERATOR-SECRET"}
+    SAVED = 'Saved. Tick "Notify me by email" on the search form to use it.'
+
+    def save(self, host, port, sender, password, use_ssl=("ssl",)):
+        return sp._email_save(1, host, port, sender, password, list(use_ssl)).children
+
+    def saved(self):
+        with open(os.path.join(self.data, ".email.json")) as fh:
+            return json.load(fh)
+
+    def test_the_saved_password_is_kept_for_its_own_account_only(self):
+        self.assertEqual(self.save("smtp.operator.example", 465, "lab@operator.example",
+                                   "OPERATOR-SECRET"), self.SAVED)
+        self.assertEqual(self.saved(), self.OPERATOR)
+        for host, port, sender, use_ssl in (
+                ("attacker.test", 2465, "x@attacker.test", ["ssl"]),
+                ("attacker.test", 465, "lab@operator.example", ["ssl"]),
+                ("smtp.operator.example", 2465, "lab@operator.example", ["ssl"]),
+                ("smtp.operator.example", 465, "lab@operator.example", []),
+                ("smtp.operator.example", 465, "x@attacker.test", ["ssl"])):
+            with self.subTest(host=host, port=port, sender=sender, use_ssl=use_ssl):
+                said = self.save(host, port, sender, "", use_ssl)
+                self.assertTrue(said.startswith("Type the app password again"), said)
+                self.assertEqual(self.saved(), self.OPERATOR)
+        # saved again as it was, the field empty as the page shows it: kept, as before
+        self.assertEqual(self.save("smtp.operator.example", "465", "lab@operator.example",
+                                   None), self.SAVED)
+        self.assertEqual(self.saved(), self.OPERATOR)
+        # another account with its own password: saved as typed, as before
+        self.assertEqual(self.save("smtp.example.org", 587, "me@example.org", "OWN-PW", []),
+                         self.SAVED)
+        self.assertEqual(self.saved(), {"smtp_host": "smtp.example.org", "smtp_port": 587,
+                                        "use_ssl": False, "sender": "me@example.org",
+                                        "password": "OWN-PW"})
+
+
+class TestSendMail(unittest.TestCase):
+    """pages/send_mail.py, which a search with e-mail notification runs at its end: it logs
+    in to the host the settings name, as their sender, with their password or, when they
+    hold none, with CRISPRME_SMTP_PSW, which went to whatever host they named (a request
+    saves any host: TestEmailNotificationSettings). That password goes to the default host
+    only. The login is recorded, not made."""
+
+    def setUp(self):
+        self.data = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.data, ignore_errors=True)
+        self.job = os.path.join(self.data, "Results", "J")
+        os.makedirs(self.job)
+        with open(os.path.join(self.job, "email.txt"), "w") as fh:
+            fh.write("someone@example.org\nhttp://127.0.0.1:8080/load?job=J\n11/04/2026\n")
+        env = patch.dict(os.environ, {"CRISPRME_SMTP_PSW": "ENV-SECRET"})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("CRISPRME_SMTP_SENDER", None)
+        self.logins = []
+        deliver = patch.object(send_mail, "_deliver", side_effect=lambda cfg, msg: (
+            self.logins.append((cfg["host"], cfg["port"], cfg["sender"], cfg["password"]))))
+        deliver.start()
+        self.addCleanup(deliver.stop)
+
+    def notify(self, **settings):
+        """The notification's logins (host, port, sender, password) and what it printed,
+        with ``settings`` saved."""
+        if settings:
+            with open(os.path.join(self.data, ".email.json"), "w") as fh:
+                json.dump(settings, fh)
+        with patch.object(sys, "argv", ["send_mail.py", self.job]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            send_mail.main()
+        logins, self.logins = self.logins, []
+        return logins, out.getvalue()
+
+    def test_the_environment_password_goes_to_the_default_host_only(self):
+        # no settings saved, or settings naming the default host: as before
+        self.assertEqual(self.notify()[0],
+                         [("smtp.gmail.com", 465, "crisprme.job@gmail.com", "ENV-SECRET")])
+        self.assertEqual(self.notify(smtp_host="smtp.gmail.com", smtp_port=587,
+                                     use_ssl=False, sender="me@gmail.com", password="")[0],
+                         [("smtp.gmail.com", 587, "me@gmail.com", "ENV-SECRET")])
+        # another host, with no password of its own: no login, and the log says why
+        logins, said = self.notify(smtp_host="attacker.test", smtp_port=2465, use_ssl=True,
+                                   sender="x@attacker.test", password="")
+        self.assertEqual(logins, [])
+        self.assertIn("CRISPRME_SMTP_PSW is used with smtp.gmail.com only, not with "
+                      "attacker.test", said)
+        # a host with its own password: that one, as before
+        self.assertEqual(self.notify(smtp_host="smtp.example.org", smtp_port=465,
+                                     use_ssl=True, sender="me@example.org",
+                                     password="OWN-PW")[0],
+                         [("smtp.example.org", 465, "me@example.org", "OWN-PW")])
 
 
 if __name__ == "__main__":
