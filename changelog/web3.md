@@ -2,8 +2,8 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (44 tests, the Security
-block) to that step, and on this branch the step then ran 511 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (49 tests, the Security
+block) to that step, and on this branch the step then ran 516 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged. The indel search's
 chromosome-name check (its Security entry) adds three tests to `test_indel_empty_chromosome`,
 and the Settings, personal-assembly and History entries add tests to `test_settings_progress`,
