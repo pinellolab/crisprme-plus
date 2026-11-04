@@ -35,8 +35,9 @@ All five entries are pre-existing (2.8.0 did the same) and change no search resu
   --vcf_dataset 1000G` always printed `HuggingFace fetch failed for
   ALL.chr22.shapeit2_integrated_snvindels_v2a_27022019.GRCh38.phased.vcf.gz (404 Client Error ...
   Entry Not Found for url ...); falling back to original source`, then downloaded the VCF from EBI
-  and passed. `complete-test` tries the Hugging Face data repo first for each file it downloads,
-  and `lucapinello/crisprme-data` holds no raw 1000 Genomes or HGDP VCF (its `vcfs/` holds the
+  and passed. `complete-test` tries the Hugging Face data repo first for the chromosome's FASTA,
+  the VCFs and the sample lists it downloads (the annotations come from GitHub), and
+  `lucapinello/crisprme-data` holds no raw 1000 Genomes or HGDP VCF (its `vcfs/` holds the
   source VCFs of the three shipped panels), nor `samplesIDs.HGDP.txt`, nor the unpacked FASTA of
   any chromosome but chr22, so `--vcf_dataset HGDP` and `--chrom chr21` printed it too. A file the
   Hub answers it does not hold is now said in one line on stdout, `<file> is not on HuggingFace
