@@ -9,8 +9,10 @@
   refusals' ERRORs, and said "The selected result encountered some errors, please remove it and try
   to submit again.": submitted again, the search was refused the same way, and the reason was shown
   only under Show full log. They now say "The search was not run: " and the ERROR, as they do for
-  the other refusals. New in 2.8.1. Covered by `PostProcess/test_results_summary_and_status.py` and
-  `PostProcess/test_web_results_links.py`.
+  the other refusals. The search form gives no warning of such an index before Submit: which index
+  a search reads is decided by the search script, and the form would need its own copy of that
+  choice; after Submit, those pages say why. New in 2.8.1. Covered by
+  `PostProcess/test_results_summary_and_status.py` and `PostProcess/test_web_results_links.py`.
 - **The search form says before Submit that a variant dataset has no sample list, and how to get
   one, whether its variant index was built in Settings or downloaded.** Removing a VCF dataset in
   Settings takes the sample list the page wrote for it (`samplesIDs/<dataset>.samplesID.txt`) and
