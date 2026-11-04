@@ -16,6 +16,18 @@ Attributes:
     app.layout (html.Div): The layout structure of the Dash application.
 """
 
+# dash-bootstrap-components' sdist drops a pyproject.toml directly into
+# site-packages/, which Biopython's Bio/__init__.py misreads as "importing from a
+# source tree" and warns about at import -- a harmless false positive (a Bioconda
+# install has it: conda-forge's package ships the file). crisprme.py silences it for
+# its own process, but `crisprme.py web-interface` runs this file in a new
+# interpreter, whose pages import Bio (seq_script/convert_pam.py,
+# pages/sequence_utils.py): the same filter, before anything is imported.
+import warnings as _warnings
+_warnings.filterwarnings(
+    "ignore", message=r".*importing Biopython from inside the source tree.*"
+)
+
 from app import URL, IPADDRESS, WEBADDRESS, ONLINE, current_working_directory, app, cache, pool_executor
 from pages import (
     main_page,

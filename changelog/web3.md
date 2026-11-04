@@ -36,3 +36,13 @@
   genome, Define a nuclease / PAM), and the BED coordinates it cannot read; the bulge check, which
   needs both, waits for them. Pre-existing: 2.8.0 did the same. Covered by
   `PostProcess/test_web_bulge_notes.py`.
+- **The web interface no longer prints a `BiopythonWarning` as it starts on a Bioconda install.**
+  A stray `site-packages/pyproject.toml`, which conda-forge's `dash-bootstrap-components` ships,
+  makes Biopython warn at import that it is imported from inside its source tree. `crisprme.py`
+  has filtered that warning since 2.7.10, but `web-interface` starts `index.py` in a new
+  interpreter, which inherits no filter and whose pages import Biopython. `index.py` now sets the
+  same filter before its first import. The Docker image and `install_from_source.sh` remove the
+  stray file, so they never showed it. Pre-existing. Covered by `PostProcess/test_app_settings.py`:
+  a check of `index.py`'s code, which runs everywhere, and its imports run as `web-interface` runs
+  them, with Biopython beside a stray `pyproject.toml`, which runs where the web stack and
+  Biopython are installed, as in the image.

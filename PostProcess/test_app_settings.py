@@ -3,7 +3,9 @@
 Default stays a conservative 2; env var overrides a persisted value; values are
 clamped to [1, MAX_JOBS_CAP] so the pool is never oversubscribed. app.py, loaded
 the way the web app is really started, must size its search pool from it, and
-while the env var pins it the Settings page must say so and disable its input."""
+while the env var pins it the Settings page must say so and disable its input.
+index.py, the web app's process, must not print Biopython's source-tree warning as it
+starts (TestWebProcessBiopythonWarning)."""
 
 import ast
 import json
@@ -432,6 +434,77 @@ class TestSettingsPageEnvOverride(unittest.TestCase):
                     self.assertTrue(
                         feedback.startswith("Could not persist the setting"), feedback
                     )
+
+
+def _importable(name):
+    try:
+        __import__(name)
+    except ImportError:
+        return False
+    return True
+
+
+_SOURCE_TREE_WARNING = "importing Biopython from inside the source tree"
+
+
+class TestWebProcessBiopythonWarning(unittest.TestCase):
+    """A stray site-packages/pyproject.toml (conda-forge's dash-bootstrap-components
+    ships one, so a Bioconda install has it) makes Biopython warn, at import, that it
+    is imported from inside its source tree. crisprme.py filters that warning, but
+    `crisprme.py web-interface` runs index.py in a new interpreter, which inherits no
+    filter and whose pages import Bio: the web app printed the warning as it started.
+    index.py now sets crisprme.py's filter before its first import."""
+
+    @staticmethod
+    def _filter_call(path):
+        """The module's warnings.filterwarnings statement, and the statements before it."""
+        with open(path) as fh:
+            body = ast.parse(fh.read()).body
+        for i, node in enumerate(body):
+            if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                    and getattr(node.value.func, "attr", None) == "filterwarnings"):
+                return node, body[:i]
+        return None, body
+
+    def test_index_py_sets_crisprme_py_filter_before_any_import(self):
+        ours, before = self._filter_call(os.path.join(_REPO_ROOT, "index.py"))
+        theirs, _ = self._filter_call(os.path.join(_REPO_ROOT, "crisprme.py"))
+        self.assertIsNotNone(ours, "index.py sets no warnings filter")
+        self.assertEqual(ast.dump(ours), ast.dump(theirs))
+        imports = [ast.unparse(n) for n in before if isinstance(n, (ast.Import, ast.ImportFrom))]
+        self.assertEqual(imports, ["import warnings as _warnings"])
+
+    @unittest.skipUnless(_importable("dash") and _importable("Bio"),
+                         "needs the web stack and Biopython (the image has both)")
+    def test_the_web_app_starts_without_it_on_a_bioconda_install(self):
+        """index.py imported as `crisprme.py web-interface` runs it (a new interpreter, the
+        install root first on sys.path, the user's data folder as its cwd), with Biopython
+        beside a stray pyproject.toml, as on a Bioconda install."""
+        import Bio
+
+        with tempfile.TemporaryDirectory() as tmp:
+            site = os.path.join(tmp, "site-packages")
+            os.makedirs(site)
+            # the stray file, and the one an older Biopython looks for instead
+            for stray in ("pyproject.toml", "setup.py"):
+                open(os.path.join(site, stray), "w").close()
+            os.symlink(os.path.dirname(Bio.__file__), os.path.join(site, "Bio"))
+            workdir = os.path.join(tmp, "data")
+            os.makedirs(workdir)
+
+            def start(code):
+                return subprocess.run(
+                    [sys.executable, "-I", "-c",
+                     f"import sys; sys.path[:0] = [{site!r}, {_REPO_ROOT!r}]; {code}"],
+                    cwd=workdir, capture_output=True, text=True, timeout=300,
+                )
+
+            # the layout makes Biopython warn, so that its absence below says something
+            bare = start("import Bio.Seq")
+            self.assertIn(_SOURCE_TREE_WARNING, bare.stderr)
+            web = start("import index")
+            self.assertEqual(web.returncode, 0, web.stderr)
+            self.assertNotIn(_SOURCE_TREE_WARNING, web.stderr)
 
 
 if __name__ == "__main__":
