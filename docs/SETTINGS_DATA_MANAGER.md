@@ -147,10 +147,10 @@ here: until then a build leaves the tiers as they are, from the list they were b
 with. The search form refuses a variant search whose sample list is missing, rather
 than letting it fail at its end, and the note under its bulge options says so before
 you submit, with how to get one. A variant index built here stays when you remove its
-dataset here: the search form still offers it, and searches it again once you add the
-dataset again under the same name, which writes the list. A sites-only VCF (no sample
-columns) gets no list: a search reports its variants only through a per-dataset
-allele-frequency registry, as the shipped `hg38_mega` index has.
+dataset here: the search form still offers the dataset, and runs a search of it again
+once you add the dataset again under the same name, which writes the list. A sites-only
+VCF (no sample columns) gets no list: a search reports its variants only through a
+per-dataset allele-frequency registry, as the shipped `hg38_mega` index has.
 
 ### Add an annotation
 Upload a `.bed` file (annotations are small), then enable it under *Manage

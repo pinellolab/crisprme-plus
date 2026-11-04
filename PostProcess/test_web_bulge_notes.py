@@ -626,7 +626,7 @@ class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
                 self.assertIsNone(out[0])
                 self.assertIn(f"Cannot read {chrom}:{start}-{stop} from genome hg38: its "
                               f"folder holds no FASTA of {chrom}, or the coordinates are past "
-                              "its end", msgs)
+                              f"the end of {chrom}", msgs)
 
 
 if __name__ == "__main__":

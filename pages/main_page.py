@@ -2093,7 +2093,7 @@ def check_input(
                         miss_input_list.append(
                             f"Cannot read {seq_read} from genome {genome_ref}: its folder "
                             f"holds no FASTA of {line_split[0]}, or the coordinates are past "
-                            "its end"
+                            f"the end of {line_split[0]}"
                         )
                         guides = []  # reset guides
                         break
