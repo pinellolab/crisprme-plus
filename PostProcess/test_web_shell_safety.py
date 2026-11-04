@@ -70,6 +70,11 @@ of their own. The password is kept for its own account only (the page's check, i
 image), and the environment's goes to the default host only (the notification's, which runs
 everywhere).
 
+And up to 2.8.0 Submit took any text with an '@' as the address of a search's notification
+and made the e-mail's link of the page's URL: a list had one search notify every address on
+it, a line break wrote the link, and the URL, which a request sets, chose it. It takes one
+plain address, and the link is the server's own.
+
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
 normal value still works; a job id holding '../' reads, writes and removes nothing
@@ -344,9 +349,10 @@ class TestSearchLaunch(_WebFolder):
         self.addCleanup(p.stop)
 
     def submit(self, genome="hg38", pam=PAM, variant="ref", guides="CTAACAGTTGCTTTTATCAC",
-               guide_type="IP", mms=4, email=None, name=None):
+               guide_type="IP", mms=4, email=None, name=None,
+               href="http://127.0.0.1:8080/index"):
         """Submit, as the form sends it (Advanced options open), and the search it ran."""
-        mp.change_url(1, "http://127.0.0.1:8080/index", genome, variant, pam, guide_type,
+        mp.change_url(1, href, genome, variant, pam, guide_type,
                       guides, mms, 1, 1, "N", None, None, None, ["email"] if email else [],
                       email, name, 6, True, "population-level", [])
         self.assertEqual(self.pool.submit.call_count, 1)
@@ -369,11 +375,59 @@ class TestSearchLaunch(_WebFolder):
                                     os.path.join(job, ".list_vcfs.txt"),
                                     os.path.join(job, ".guides.txt")])
         self.assertEqual((len(args), args[7], args[16], args[25]), (26, "4", "_", "6"))
-        email = "a@b;touch${IFS}MARK_a;#"
-        _cmd, args = self.submit(email=email, name="run2")
+        _cmd, args = self.submit(email="someone@example.org", name="run2")
         self.assertEqual(len(args), 26)
-        self.assertEqual(args[16], email)  # the search's 17th argument
+        self.assertEqual(args[16], "someone@example.org")  # the search's 17th argument
         self.assertNothingRun()
+
+    def test_a_notification_goes_to_one_plain_address_by_the_server_s_link(self):
+        # anything with an '@' was taken: a list had one search notify every address on
+        # it, and a line break, which a request can send, wrote the e-mail's link; the
+        # link was made of the page's URL, which a request sets to anything too
+        for i, email in enumerate(("someone@example.org,other@example.org",
+                                   "someone@example.org other@example.org",
+                                   "someone@example.org;other@example.org",
+                                   "Someone <someone@example.org>",
+                                   "someone@example.org\nhttp://phish.example/",
+                                   "someone@example.org\r\nBcc: other@example.org",
+                                   "a@b;touch${IFS}MARK_a;#", "someone")):
+            with self.subTest(email=email):
+                before = set(self.jobs())
+                # (a job name of its own: an identical search is sent to the earlier job)
+                _cmd, args = self.submit(email=email, name=f"refused{i}")
+                (job,) = set(self.jobs()) - before
+                self.assertEqual(args[16], "_")
+                self.assertFalse(os.path.exists(os.path.join(self.data, "Results", job,
+                                                             "email.txt")))
+        self.assertNothingRun()
+        _cmd, args = self.submit(email="someone@example.org", name="sent",
+                                 href="http://phish.example/x/index")
+        (job,) = [j for j in self.jobs() if j.startswith("sent_")]
+        with open(os.path.join(self.data, "Results", job, "email.txt")) as fh:
+            self.assertEqual(fh.read().split("\n")[:2],
+                             ["someone@example.org", f"http://127.0.0.1:8080/load?job={job}"])
+
+    def test_a_search_sent_to_an_identical_one_notifies_by_the_server_s_link_to_it(self):
+        # Submit sends a search identical to a queued or finished one to that job, whose
+        # email.txt takes the address, and the link (it was the page's URL, too)
+        self.submit(name="same")
+        (first,) = self.jobs()  # (queued: the search here writes no log.txt)
+        out = mp.change_url(1, "http://phish.example/x/index", "hg38", "ref", PAM, "IP",
+                            "CTAACAGTTGCTTTTATCAC", 4, 1, 1, "N", None, None, None, ["email"],
+                            "someone@example.org", "same", 6, True, "population-level", [])
+        self.assertEqual(out, ("/load", f"?job={first}", lp.REUSED_HASH))
+        self.assertEqual(self.jobs(), [first])
+        self.assertEqual(self.pool.submit.call_count, 0)
+        with open(os.path.join(self.data, "Results", first, "email.txt")) as fh:
+            self.assertEqual(fh.read().split("\n")[:2],
+                             ["someone@example.org", f"http://127.0.0.1:8080/load?job={first}"])
+
+    def test_the_address_field_shows_red_for_an_address_submit_does_not_notify(self):
+        red = {"border": "1px solid red"}
+        self.assertNotEqual(mp.is_email_valid("someone@example.org"), red)
+        for email in ("someone@example.org,c", "Someone <someone@example.org>", "someone@", ""):
+            with self.subTest(email=email):
+                self.assertEqual(mp.is_email_valid(email), red)
 
     @NEEDS_BEDTOOLS
     def test_a_genomic_sequence_header_runs_nothing(self):
@@ -1586,7 +1640,11 @@ class TestSendMail(unittest.TestCase):
     in to the host the settings name, as their sender, with their password or, when they
     hold none, with CRISPRME_SMTP_PSW, which went to whatever host they named (a request
     saves any host: TestEmailNotificationSettings). That password goes to the default host
-    only. The login is recorded, not made."""
+    only. The login and the message are recorded, not sent.
+
+    It sent each entry of the job's email.txt to its first line, any text with an '@' that
+    Submit took (a list of addresses, one with a line break): one plain address is a
+    recipient (the one Submit now takes: TestSearchLaunch)."""
 
     def setUp(self):
         self.data = tempfile.mkdtemp()
@@ -1599,9 +1657,13 @@ class TestSendMail(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         os.environ.pop("CRISPRME_SMTP_SENDER", None)
-        self.logins = []
-        deliver = patch.object(send_mail, "_deliver", side_effect=lambda cfg, msg: (
-            self.logins.append((cfg["host"], cfg["port"], cfg["sender"], cfg["password"]))))
+        self.logins, self.sent = [], []
+
+        def deliver(cfg, msg):
+            self.logins.append((cfg["host"], cfg["port"], cfg["sender"], cfg["password"]))
+            self.sent.append((msg["To"], msg.get_content()))
+
+        deliver = patch.object(send_mail, "_deliver", side_effect=deliver)
         deliver.start()
         self.addCleanup(deliver.stop)
 
@@ -1635,6 +1697,34 @@ class TestSendMail(unittest.TestCase):
                                      use_ssl=True, sender="me@example.org",
                                      password="OWN-PW")[0],
                          [("smtp.example.org", 465, "me@example.org", "OWN-PW")])
+
+    def test_one_plain_address_is_a_recipient(self):
+        for address in ("someone@example.org", "some.one+tag@mail.example.co.uk",
+                        "user@localhost", "o'neil@example.org"):
+            with self.subTest(address=address):
+                self.assertTrue(send_mail.plain_address(address))
+        for address in (None, "", "someone", "someone@", "@example.org", "someone@@example.org",
+                        "someone@example.org,other@example.org",
+                        "someone@example.org;other@example.org",
+                        "someone@example.org other@example.org",
+                        "someone@example.org\nhttp://phish.example/",
+                        "someone@example.org\r\nBcc: other@example.org",
+                        "Someone <someone@example.org>", "<someone@example.org>",
+                        "someone@example.org (Someone)", '"some one"@example.org',
+                        "group:someone@example.org", "someone@example.org.",
+                        "someone--OTHEREMAIL--other@example.org", "someone@example.org\x00"):
+            with self.subTest(address=address):
+                self.assertFalse(send_mail.plain_address(address))
+
+    def test_an_entry_that_is_not_one_plain_address_is_not_sent(self):
+        # (as an earlier version wrote one, of any text with an '@')
+        with open(os.path.join(self.job, "email.txt"), "w") as fh:
+            fh.write("someone@example.org,other@example.org\nhttp://phish.example/\n11/04/2026\n"
+                     "--OTHEREMAIL--third@example.org\nhttp://127.0.0.1:8080/load?job=J\n"
+                     "11/04/2026\n")
+        _logins, said = self.notify()
+        self.assertEqual([to for to, _body in self.sent], ["third@example.org"])
+        self.assertIn("Email notification skipped: its address is not one plain address.", said)
 
 
 if __name__ == "__main__":

@@ -53,8 +53,12 @@ from .pages_utils import (
 )
 # the URL fragment a reused job's status page is opened with (the page says so)
 from .load_page import REUSED_HASH
+# the one plain address a notification goes to (the standard library only)
+from .send_mail import plain_address
 from app import (
     URL,
+    IPADDRESS,
+    WEBADDRESS,
     app,
     operators,
     current_working_directory,
@@ -1236,7 +1240,8 @@ def change_url(
                 handle_samples.write(f"{e}\n")
     except OSError as e:
         raise e
-    # manage email sending
+    # manage email sending: one plain address, as typed, and the link the server makes
+    # (_notification_entry)
     send_email = False
     if adv_opts is None:
         adv_opts = []
@@ -1244,13 +1249,7 @@ def change_url(
         send_email = True
         try:
             with open(os.path.join(result_dir, EMAIL_FILE), mode="w") as handle_mail:
-                handle_mail.write(f"{dest_email}\n")
-                handle_mail.write(
-                    f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
-                )
-                handle_mail.write(
-                    f"{datetime.utcnow().strftime('%m/%d/%Y, %H:%M:%S')}\n"
-                )
+                handle_mail.write(_notification_entry(dest_email, job_id))
         except OSError as e:
             raise e
     else:
@@ -1626,20 +1625,7 @@ def change_url(
                                         ),
                                         mode="w+",
                                     ) as handle_email:
-                                        handle_email.write(f"{dest_email}\n")
-                                        handle_email.write(
-                                            f"{''.join(href.split('/')[:-1])}/load?job={res_dir}\n"
-                                        )
-                                        handle_email.write(
-                                            "".join(
-                                                [
-                                                    datetime.utcnow().strftime(
-                                                        "%m/%d/%Y, %H:%M:%S"
-                                                    ),
-                                                    "\n",
-                                                ]
-                                            )
-                                        )
+                                        handle_email.write(_notification_entry(dest_email, res_dir))
                                 except OSError as e:
                                     raise e
                         elif send_email:
@@ -1664,20 +1650,7 @@ def change_url(
                                         mode="a+",
                                     ) as handle_email:
                                         handle_email.write("--OTHEREMAIL--")
-                                        handle_email.write(f"{dest_email}\n")
-                                        handle_email.write(
-                                            f"{''.join(href.split('/')[:-1])}/load?job={res_dir}\n"
-                                        )
-                                        handle_email.write(
-                                            "".join(
-                                                [
-                                                    datetime.utcnow().strftime(
-                                                        "%m/%d/%Y, %H:%M:%S"
-                                                    ),
-                                                    "\n",
-                                                ]
-                                            )
-                                        )
+                                        handle_email.write(_notification_entry(dest_email, res_dir))
                                 except OSError as e:
                                     raise e
                             else:
@@ -1691,20 +1664,7 @@ def change_url(
                                         ),
                                         mode="w+",
                                     ) as handle_email:
-                                        handle_email.write(f"{dest_email}\n")
-                                        handle_email.write(
-                                            f"{''.join(href.split('/')[:-1])}/load?job={res_dir}\n"
-                                        )
-                                        handle_email.write(
-                                            "".join(
-                                                [
-                                                    datetime.utcnow().strftime(
-                                                        "%m/%d/%Y, %H:%M:%S"
-                                                    ),
-                                                    "\n",
-                                                ]
-                                            )
-                                        )
+                                        handle_email.write(_notification_entry(dest_email, res_dir))
                                 except OSError as e:
                                     raise e
                         current_job_dir = os.path.join(
@@ -1746,20 +1706,8 @@ def change_url(
                                             mode="a+",
                                         ) as handle_email:
                                             handle_email.write("--OTHEREMAIL--")
-                                            handle_email.write(f"{dest_email}\n")
                                             handle_email.write(
-                                                f"{''.join(href.split('/')[:-1])}/load?job={res_dir}\n"
-                                            )
-                                            handle_email.write(
-                                                "".join(
-                                                    [
-                                                        datetime.utcnow().strftime(
-                                                            "%m/%d/%Y, %H:%M:%S"
-                                                        ),
-                                                        "\n",
-                                                    ]
-                                                )
-                                            )
+                                                _notification_entry(dest_email, res_dir))
                                     except OSError as e:
                                         raise e
                                 else:
@@ -1773,20 +1721,8 @@ def change_url(
                                             ),
                                             mode="w+",
                                         ) as handle_email:
-                                            handle_email.write(f"{dest_email}\n")
                                             handle_email.write(
-                                                f"{''.join(href.split('/')[:-1])}/load?job={res_dir}\n"
-                                            )
-                                            handle_email.write(
-                                                "".join(
-                                                    [
-                                                        datetime.utcnow().strftime(
-                                                            "%m/%d/%Y, %H:%M:%S"
-                                                        ),
-                                                        "\n",
-                                                    ]
-                                                )
-                                            )
+                                                _notification_entry(dest_email, res_dir))
                                     except OSError as e:
                                         raise e
                             # this job directory never runs: remove it, as above
@@ -1898,6 +1834,18 @@ def change_url(
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
     return ("/load", f"?job={job_id}", "")
+
+
+def _notification_entry(address: str, job_id: str) -> str:
+    """The entry of email.txt (pages/send_mail.py) for the notification of the job
+    ``job_id`` to ``address``, one plain address (check_mail_address): the address, the link
+    of the job's status page and the date. The link is the server's own address, as the
+    status page shows it (index.change_page), with the job id the server gave the job: it
+    was the page's URL, which a request sets to anything, so the e-mail the server sent
+    linked where the request chose."""
+    base = WEBADDRESS if ONLINE else f"http://{IPADDRESS}"
+    date = datetime.utcnow().strftime("%m/%d/%Y, %H:%M:%S")
+    return f"{address}\n{base}/load?job={job_id}\n{date}\n"
 
 
 def _launchable(genome: Optional[str], pam: Optional[str], variant_choice: Optional[str],
@@ -2392,8 +2340,8 @@ def is_email_valid(email: str) -> Dict[str, str]:
             raise TypeError(f"Expected {str.__name__}, got {type(email).__name__}")
     if email is None:
         raise PreventUpdate  # do not do anything
-    if ("@" in email) and (len(email.split("@")) == 2):
-        # mail address should be valid
+    if check_mail_address(email):
+        # one plain address: the one Submit sends the notification to
         return {"border": "1px solid #94f033", "outline": "0"}
     return {"border": "1px solid red"}
 
@@ -4059,7 +4007,10 @@ def update_base_editing_dropdown(
 
 
 def check_mail_address(mail_address: str) -> bool:
-    """Check mail address consistency.
+    """Check mail address consistency: one plain address, name@domain (send_mail's
+    plain_address). Anything with an '@' was taken: a comma-separated list had one search
+    notify every address on it, and a line break, which a request can send, wrote the line
+    email.txt keeps the e-mail's link on.
 
     ...
 
@@ -4078,7 +4029,4 @@ def check_mail_address(mail_address: str) -> bool:
     assert mail_address is not None
     if not isinstance(mail_address, str):
         raise TypeError(f"Expected {str.__name__}, got {type(mail_address).__name__}")
-    mail_address_fields = mail_address.split("@")
-    if len(mail_address_fields) > 1 and bool(mail_address_fields[-1]):
-        return True
-    return False
+    return plain_address(mail_address)

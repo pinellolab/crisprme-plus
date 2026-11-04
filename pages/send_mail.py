@@ -5,6 +5,9 @@ Structure of email.txt
     - Contact
     - link to CRISPRme job
     - Job submission date
+(an entry for each search sent to the job, separated by "--OTHEREMAIL--"). The search
+form writes it (pages/main_page.py change_url), each entry with one plain address
+(plain_address) and the link the server makes.
 
 Configuration (resolved in this order; first hit wins):
     1. <data_dir>/.email.json  -- written by Settings -> Email notifications
@@ -31,6 +34,7 @@ import sys
 import ssl
 import json
 import smtplib
+from email import policy
 from email.message import EmailMessage
 
 # default mail-server settings (used when neither the config file nor the
@@ -38,6 +42,29 @@ from email.message import EmailMessage
 _DEFAULT_HOST = "smtp.gmail.com"
 _DEFAULT_PORT = 465
 _DEFAULT_SENDER = "crisprme.job@gmail.com"
+
+# between the entries of email.txt: an address holding it is read as two entries
+_ENTRY_SEPARATOR = "--OTHEREMAIL--"
+# what makes an address list, a group, a display name or a comment of a To header
+_NOT_IN_A_PLAIN_ADDRESS = set(',;:<>()[]"\\')
+
+
+def plain_address(address) -> bool:
+    """Whether ``address`` is one plain e-mail address, name@domain, as the To header of a
+    notification reads it: no list, group, display name or comment, no blank or control
+    character, and not the separator of email.txt's entries. The search form takes no other
+    address for a notification (pages/main_page.py check_mail_address): with commas one
+    search notified several addresses, and a line break wrote the e-mail's link."""
+    if (not isinstance(address, str) or _ENTRY_SEPARATOR in address
+            or address.count("@") != 1 or address.startswith("@") or address.endswith("@")
+            or any(c.isspace() or not c.isprintable() or c in _NOT_IN_A_PLAIN_ADDRESS
+                   for c in address)):
+        return False
+    try:
+        header = policy.default.header_factory("To", address)  # (EmailMessage's reading)
+    except Exception:  # an address the e-mail library cannot read
+        return False
+    return not header.defects and [a.addr_spec for a in header.addresses] == [address]
 
 
 def _load_config(output_folder: str) -> dict:
@@ -117,7 +144,7 @@ def send_mail() -> None:
         return
     try:
         with open(os.path.join(output_folder, "email.txt"), "r") as e:
-            all_content = e.read().strip().split("--OTHEREMAIL--")
+            all_content = e.read().strip().split(_ENTRY_SEPARATOR)
     except OSError as exc:
         print(f"No email recipients to notify ({exc}).")
         return
@@ -125,6 +152,9 @@ def send_mail() -> None:
     for em in all_content:
         em = em.strip().split("\n")
         if not em or not em[0]:
+            continue
+        if not plain_address(em[0]):  # (an email.txt an earlier version wrote)
+            print("Email notification skipped: its address is not one plain address.")
             continue
         try:
             msg = EmailMessage()
