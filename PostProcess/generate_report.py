@@ -286,7 +286,7 @@ CURATED_COLUMNS = (
     ("REF/ALT_origin", "origin"),
     ("PAM_creation", "pam_creation"),
     ("Variant", "variant"),  # chrom;pos;ref;alt of the variant(s) creating THIS off-target (rsID companion)
-    ("Observed", "observed"),  # reference / N cis carriers (--per-sample) / N carriers (pop, 1 variant) / "N carriers (>=1 of K vars, poss. chimera)" (pop, multi-variant union) / observed / putative
+    ("Observed", "observed"),  # reference / N cis carriers (--per-sample) / N carriers (pop, 1 variant) / "N carriers (>=1 of K vars, poss. chimera)" (pop, multi-variant union; and a --per-sample _greedy_union row) / observed / putative
     ("MAF", "maf"),  # em-dash when blank
     ("Gene", "gene_name"),
     ("Gene_distance_kb", "gene_dist"),
@@ -316,14 +316,36 @@ _DROP_MAF = False
 # variants (the stacked combination may exist on no single haplotype), so we flag it.
 _PER_SAMPLE = False
 
+# Set True when a --per-sample search resolved datasets without the dict-less tiers
+# (meta["untiered"], from .untiered_datasets). Their classic per-sample path still
+# reports a window denser than CRISPRME_IUPAC_CAP by its greedy worst-case alignment,
+# flagged in High_complexity_region, whose roster is every carrier of any allele it
+# takes: such a row reads as it does in a population-level report (_greedy_union).
+_UNTIERED = False
 
-def _hap_label(n, head=False):
+
+def _greedy_union(row, cols):
+    """True for a row of a --per-sample report whose named roster can be the union of its
+    variants' carriers rather than its cis carriers: one flagged in High_complexity_region,
+    when the search resolved datasets without the dict-less tiers (_UNTIERED), with >=2
+    variants and no indel (an indel row is resolved per carrier haplotype in both modes).
+    Its Observed cell and its per-site link read as in a population-level report."""
+    if not (_PER_SAMPLE and _UNTIERED and "complex_region" in cols and "var_genome" in cols):
+        return False
+    variants = row.get(cols["var_genome"])
+    return (not _is_na(row.get(cols["complex_region"]))
+            and _count_variants(variants) >= 2 and not _has_indel(variants))
+
+
+def _hap_label(n, head=False, greedy=False):
     """Noun for the per-site distinct-combination rows (the "Observed"-cell modal).
     Under --per-sample these are genuinely resolved (phased) OBSERVED haplotypes; in the
     population-level default they are worst-case VARIANT COMBINATIONS enumerated from the
     observed variants (not phased, not confirmed on any one individual's haplotype).
-    ``head=True`` adds a worst-case qualifier to the population-level modal heading."""
-    if _PER_SAMPLE:
+    ``head=True`` adds a worst-case qualifier to the population-level modal heading.
+    ``greedy=True`` (the site of a _greedy_union row, whose other rows are the dense
+    window's other greedy alignments) gives the population-level noun under --per-sample."""
+    if _PER_SAMPLE and not greedy:
         return "observed haplotype" + ("" if n == 1 else "s")
     base = "variant combination" + ("" if n == 1 else "s")
     return (base + " (worst-case)") if head else base
@@ -874,8 +896,10 @@ def _curated_cell(kind, row, cols):
         n = _count_samples(_get("samples"))
         nvar = _count_variants(_get("var_genome")) if "var_genome" in cols else 0
         if n > 0:
-            if _PER_SAMPLE:
-                # --per-sample: the roster is the EXACT cis carriers (phased)
+            if _PER_SAMPLE and not _greedy_union(row, cols):
+                # --per-sample: the roster is the EXACT cis carriers (phased) -- but for
+                # a dense window's greedy alignment on a dataset without the dict-less
+                # tiers (_greedy_union), whose roster is the union below
                 return f"{n} cis carrier{'' if n == 1 else 's'}"
             if nvar >= 2 and not _has_indel(_get("var_genome")):
                 # population-level, multi-variant window: the roster is the worst-case
@@ -3486,7 +3510,7 @@ def _oh_modal_cfd(hap):
         return float("-inf")
 
 
-def _oh_modal_html(mid, haps, download_name, omitted_note=""):
+def _oh_modal_html(mid, haps, download_name, omitted_note="", greedy=False):
     """Build the hidden per-site observed-haplotypes modal HTML.
 
     ``mid`` is the stable modal element id (also the ``data-oh`` target of the link
@@ -3494,7 +3518,8 @@ def _oh_modal_html(mid, haps, download_name, omitted_note=""):
     companion rows), ``download_name`` the bundled companion TSV filename. The modal
     lists EVERY observed haplotype at the site in a table (sorted by CFD desc) and
     carries a close button + a download link; the toggle JS lives in render_html.
-    Returns "" when there are no haplotypes.
+    Returns "" when there are no haplotypes. ``greedy``: the site of a _greedy_union
+    row, whose heading names them as the link does (_hap_label).
 
     When ``download_name`` is falsy (the full companion TSV was size-gated out of the
     slim bundle), the download button is omitted and ``omitted_note`` -- a short HTML
@@ -3536,7 +3561,7 @@ def _oh_modal_html(mid, haps, download_name, omitted_note=""):
         f'<div class="oh-modal-box">'
         f'<button class="oh-close" aria-label="Close">&times;</button>'
         f'<div class="oh-modal-head">{_esc(chrom)}:{_esc(start)} ({_esc(strand)}) '
-        f'&mdash; {len(ordered)} {_hap_label(len(ordered), head=True)}</div>'
+        f'&mdash; {len(ordered)} {_hap_label(len(ordered), head=True, greedy=greedy)}</div>'
         f'<div class="oh-modal-body"><table class="oh-table"><thead><tr>{th}</tr>'
         f'</thead><tbody>{"".join(trs)}</tbody></table></div>'
         f'{download_link}</div></div>'
@@ -3657,13 +3682,17 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
                         n_other = len(haps) - 1
                         mid = "ohm-" + re.sub(r"[^0-9A-Za-z]+", "-",
                                               _key[0] + "-" + _key[1])
+                        # a dense window's greedy alignment (_greedy_union): the site's
+                        # other rows are its other greedy alignments, not observed
+                        # haplotypes
+                        greedy = _greedy_union(raw.iloc[i], cols)
                         cell += (
                             f' &middot; <a class="oh-open" href="#" data-oh="{mid}">'
-                            f'{n_other} other {_hap_label(n_other)}</a>'
+                            f'{n_other} other {_hap_label(n_other, greedy=greedy)}</a>'
                         )
                         if oh_modals is not None and mid not in oh_modals:
                             oh_modals[mid] = _oh_modal_html(
-                                mid, haps, oh_download_name, oh_omitted_note)
+                                mid, haps, oh_download_name, oh_omitted_note, greedy)
                 cells.append(cell)
             else:
                 cells.append(_esc(val))
@@ -4017,15 +4046,18 @@ def build_score_legend_html(untiered=None):
     legend = list(_SCORE_LEGEND)
     if untiered:
         # what complete-search's banner says of them (and the Search mode row): a dense
-        # window's greedy worst-case alignment lists the carriers of any of its variants,
-        # and each variant has the AF its VCF gives, with no joint AF
+        # window's greedy worst-case alignment lists the carriers of any of its variants
+        # (and reads so: _greedy_union), and each variant has the AF its VCF gives, with
+        # no joint AF
         named = _untiered_named(untiered)
         extra = {
             "Observed": (
                 f" On {named}, a dense window flagged in <code>High_complexity_region</code> "
                 "can be reported by its greedy worst-case alignment, which lists the carriers "
                 "of any of its variants rather than its exact cis carriers: they need not carry "
-                "every variant in it."),
+                "every variant in it, so a row of two or more SNPs flagged there reads "
+                "<code>N&nbsp;carriers (&gt;=1 of K vars, poss. chimera)</code>, as in a "
+                "population-level search."),
             "MAF": (
                 f" For {named}, no joint allele frequency is computed, and each variant's "
                 "frequency is the <code>AF</code> "
@@ -4395,7 +4427,10 @@ def render_html(
                 f" On {_untiered_named(untiered)}, a site flagged in "
                 "<code>High_complexity_region</code> can be reported by its dense window's "
                 "greedy worst-case alignments instead, whose listed carriers need not carry "
-                "every variant in them." if untiered else ""
+                "every variant in them: a row of two or more SNPs there reads "
+                "<strong>&ldquo;N carriers (&gt;=1 of K vars, poss. chimera)&rdquo;</strong>, "
+                "and its link <strong>&ldquo;N other variant combinations&rdquo;</strong>, as "
+                "in a population-level search." if untiered else ""
             )
         else:
             _oh_expl = (
@@ -5264,13 +5299,15 @@ def build_report(
     )
     # Under --per-sample a named carrier roster is the EXACT cis set; population-level
     # multi-variant rosters are a worst-case union (see the "Observed" cell labelling).
-    global _PER_SAMPLE
+    global _PER_SAMPLE, _UNTIERED
     _PER_SAMPLE = meta.get("search_mode") == "per-sample"
     # but not on the datasets a per-sample search resolved without the dict-less tiers
     # (.untiered_datasets), whose rows carry no more than the classic dictionaries give:
     # the texts that say otherwise qualify it for them (the MAF footnote, the Section-6
-    # caption, the legend; the Search mode and Allele-frequency basis rows read meta)
+    # caption, the legend; the Search mode and Allele-frequency basis rows read meta),
+    # and a dense window's greedy alignment reads as in population-level (_greedy_union)
     untiered = (meta.get("untiered") or []) if _PER_SAMPLE else []
+    _UNTIERED = bool(untiered)
     version = meta.get("version") or _package_version()
     has_crispr_bulge = crispr_bulge_computed(df, cols)
 

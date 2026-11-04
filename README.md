@@ -2046,8 +2046,10 @@ is under `data/`). Reading top to bottom:
   sites-only/unphased index) still reports the conservative worst-case representative, as it should for a screen.
   On an index without the tiers (one built without `--samplesID`, such as the one the benchmark
   `complete-test` builds), a dense window can still be reported by its greedy worst-case alignment,
-  flagged in `High_variant_density_region`, whose listed carriers need not carry every variant in it:
-  rebuild the index with `build-index-only --samplesID`, or use a prebuilt one.
+  flagged in `High_variant_density_region`, whose listed carriers need not carry every variant in it
+  (the report's `Observed` column reads `N carriers (>=1 of K vars, poss. chimera)` for such a row
+  of two or more SNPs, as in a population-level run): rebuild the index with
+  `build-index-only --samplesID`, or use a prebuilt one.
 
 ##### Input Arguments
 ---

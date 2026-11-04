@@ -998,7 +998,9 @@ class TestGenerateReport(unittest.TestCase):
                 " On " + named + ", a dense window flagged in <code>High_complexity_region</code> "
                 "can be reported by its greedy worst-case alignment, which lists the carriers of "
                 "any of its variants rather than its exact cis carriers: they need not carry "
-                "every variant in it."),
+                "every variant in it, so a row of two or more SNPs flagged there reads "
+                "<code>N&nbsp;carriers (&gt;=1 of K vars, poss. chimera)</code>, as in a "
+                "population-level search."),
             "MAF": (
                 " For " + named + ", no joint allele frequency is computed, and each variant's "
                 "frequency is the <code>AF</code> its VCF gives, as rounded there: one whose "
@@ -1028,7 +1030,10 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(caption(untiered=one), said + (
             " On " + named + ", a site flagged in <code>High_complexity_region</code> can be "
             "reported by its dense window's greedy worst-case alignments instead, whose listed "
-            "carriers need not carry every variant in them."))
+            "carriers need not carry every variant in them: a row of two or more SNPs there "
+            "reads <strong>&ldquo;N carriers (&gt;=1 of K vars, poss. chimera)&rdquo;</strong>, "
+            "and its link <strong>&ldquo;N other variant combinations&rdquo;</strong>, as in a "
+            "population-level search."))
 
     def test_the_datasets_a_search_records_reach_the_search_mode_row(self):
         """build_summary_meta reads .untiered_datasets beside .search_mode, one dataset per
@@ -1068,6 +1073,75 @@ class TestGenerateReport(unittest.TestCase):
         with open(os.path.join(rd, ".search_mode"), "w") as h:
             h.write("population-level")
         self.assertNotIn("dict-less tiers", report("population"))
+
+    def test_a_greedy_row_of_a_search_without_the_tiers_reads_so_in_every_table(self):
+        """End to end: when the search recorded a dataset without the dict-less tiers, a row
+        flagged in High_variant_density_region with two or more SNPs (a dense window's
+        greedy worst-case alignment, which lists the carriers of any of its variants) reads
+        "N carriers (>=1 of K vars, poss. chimera)" in report.html and in every curated TSV
+        that holds it, not "N cis carriers"; a flagged single-SNP row, and every row of a
+        report without the record, reads as before, and no other cell changes."""
+        rd = os.path.join(self.tmp, "Results", "job")
+        os.makedirs(rd)
+        dense = ("high_variant_density (12 variants): a greedy worst-case alignment is "
+                 "reported here; additional haplotype alignments may exist")
+        # the fixture with the flag on its two-SNP row (chr7) and on a one-SNP row (chr5)
+        with open(self.tsv) as src:
+            lines = src.read().splitlines()
+        with open(os.path.join(rd, os.path.basename(self.tsv)), "w") as dst:
+            for i, line in enumerate(lines):
+                fields = line.split("\t")
+                flag = ("High_variant_density_region" if i == 0
+                        else dense if fields[1] in ("chr5", "chr7") else "NA")
+                dst.write("\t".join(fields + [flag]) + "\n")
+        with open(os.path.join(rd, ".search_mode"), "w") as h:
+            h.write("per-sample")
+
+        def report(name):
+            out = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir,
+                                  out_zip=os.path.join(self.tmp, name + "_report.zip"))
+            with zipfile.ZipFile(out) as zf:
+                return {n: zf.read(n).decode("utf-8") for n in zf.namelist()
+                        if n.endswith((".html", ".tsv"))}
+
+        tiered = report("tiered")
+        with open(os.path.join(rd, ".untiered_datasets"), "w") as h:
+            h.write("hg38_1000G_HGDP\n")
+        untiered = report("untiered")
+        tsvs = [n for n in tiered if n.endswith(".tsv")]
+        self.assertIn("data/top1000.tsv", tsvs)
+        self.assertIn("data/top1000_crispr_bulge.tsv", tsvs)
+        self.assertEqual(sorted(untiered), sorted(tiered))
+        for name in tsvs:
+            before = [line.split("\t") for line in tiered[name].splitlines()]
+            after = [line.split("\t") for line in untiered[name].splitlines()]
+            observed = before[0].index("Observed")
+            for b, a in zip(before, after):
+                with self.subTest(tsv=name, row=b[1]):
+                    if b[1] == "chr7":
+                        self.assertEqual((b[observed], a[observed]), (
+                            "2 cis carriers", "2 carriers (>=1 of 2 vars, poss. chimera)"))
+                        b[observed] = a[observed]
+                    elif b[1] == "chr5":
+                        self.assertEqual(a[observed], "2 cis carriers")
+            self.assertEqual(after, before, name)
+        # and in the report's tables
+        def observed(html):
+            """The (Chromosome, Observed) cells of the rows of the report's tables."""
+            cells = set()
+            for table in re.findall(r'<table class="ottable">(.*?)</table>', html, re.S):
+                head = re.findall(r"<th>(.*?)</th>", table)
+                for tr in re.findall(r"<tr>(<td>.*?)</tr>", table, re.S):
+                    tds = re.findall(r"<td>(.*?)</td>", tr, re.S)
+                    cells.add((tds[head.index("Chromosome")], tds[head.index("Observed")]))
+            return cells
+
+        before, after = observed(tiered["report.html"]), observed(untiered["report.html"])
+        self.assertIn(("chr7", "2 cis carriers"), before)
+        self.assertIn(("chr5", "2 cis carriers"), before)
+        self.assertEqual(after, before - {("chr7", "2 cis carriers")}
+                         | {("chr7", "2 carriers (&gt;=1 of 2 vars, poss. chimera)")})
+        self.assertNotIn("poss. chimera", tiered["report.html"])
 
     def test_variant_contributed_prose_tracks_whether_file_is_bundled(self):
         """The 'Variant-contributed sites' row must not claim variant_created.tsv is
@@ -2124,6 +2198,74 @@ class TestGenerateReport(unittest.TestCase):
         self.assertFalse(gr._has_indel("NA"))
         gr._PER_SAMPLE = True
         self.assertEqual(cell("alt", "S1,S2", indel_snp), "2 cis carriers")
+
+    def test_observed_cell_of_a_greedy_alignment_without_the_dict_less_tiers(self):
+        """On an index without the dict-less tiers a --per-sample search still reports a
+        window denser than CRISPRME_IUPAC_CAP by its greedy worst-case alignment, flagged in
+        High_variant_density_region, whose roster is every carrier of any allele it takes.
+        Its Observed cell read "N cis carriers" all the same: on the self-test panel 5 such
+        rows read "16/40/22/18/18 cis carriers" though none of the 114 carriers they list
+        carries every variant of its row, and three linked their site's other greedy
+        alignments as "N other observed haplotypes". Such a row now reads as in a
+        population-level report; every other row, and every row with the tiers, as before."""
+        import pandas as pd
+
+        dense = ("high_variant_density (15 variants): a greedy worst-case alignment is "
+                 "reported here; additional haplotype alignments may exist")
+        multi = "chr22_22687076_A_C,chr22_22687077_A_G,chr22_22687081_A_T"
+        cols = {"origin": "o", "samples": "s", "var_genome": "v", "complex_region": "c"}
+
+        def cell(samples, variants, flag=dense):
+            row = {"o": "alt", "s": samples, "v": variants, "c": flag}
+            return gr._curated_cell("observed", row, cols)
+
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
+        self.addCleanup(setattr, gr, "_UNTIERED", False)
+        gr._PER_SAMPLE, gr._UNTIERED = True, True
+        self.assertEqual(cell("A,B,C,D", multi), "4 carriers (>=1 of 3 vars, poss. chimera)")
+        # a single variant's carriers carry it, an indel row is resolved per carrier
+        # haplotype, and a row outside a dense window has its exact cis carriers
+        self.assertEqual(cell("A,B", "chr22_22687076_A_C"), "2 cis carriers")
+        self.assertEqual(cell("A,B", "chr2_53829114_TG_T,chr2_53829121_C_A"), "2 cis carriers")
+        self.assertEqual(cell("A,B,C,D", multi, flag="NA"), "4 cis carriers")
+        # with the tiers a dense window has no greedy row: a row flagged there is observed
+        gr._UNTIERED = False
+        self.assertEqual(cell("A,B,C,D", multi), "4 cis carriers")
+        # and a population-level report reads as it did
+        gr._PER_SAMPLE = False
+        for untiered in (False, True):
+            gr._UNTIERED = untiered
+            self.assertEqual(cell("A,B,C,D", multi), "4 carriers (>=1 of 3 vars, poss. chimera)")
+            self.assertEqual(cell("A,B", "chr22_22687076_A_C"), "2 carriers")
+
+        # the link to the site's other rows (its other greedy alignments), and their modal
+        top_df = pd.DataFrame([{
+            "Chromosome": "chr22", "Start_coordinate_(highest_CFD)": "22687072",
+            "REF/ALT_origin_(highest_CFD)": "alt", "Variant_info_genome_(highest_CFD)": multi,
+            "Variant_samples_(highest_CFD)": "A,B,C,D", "High_variant_density_region": dense}])
+        tcols = gr._resolve(top_df.columns, list(gr._COLS.keys()))
+        hap = {"Chromosome": "chr22", "Site_start": "22687072", "Strand": "-", "CFD": "0.001"}
+        site_map = {("chr22", "22687072"): [hap, {**hap, "CFD": "0.0"}, {**hap, "CFD": "0.0"}]}
+
+        def table(flag=dense):
+            modals = {}
+            html = gr.build_table_html(
+                top_df.assign(High_variant_density_region=flag), tcols, has_crispr_bulge=False,
+                site_map=site_map, oh_modals=modals, oh_download_name="observed_haplotypes.tsv")
+            return html, "".join(modals.values())
+
+        gr._PER_SAMPLE, gr._UNTIERED = True, True
+        html, modal = table()
+        self.assertIn("<td>4 carriers (&gt;=1 of 3 vars, poss. chimera) &middot; ", html)
+        self.assertIn(">2 other variant combinations</a>", html)
+        self.assertIn("&mdash; 3 variant combinations (worst-case)</div>", modal)
+        self.assertIn("Download all observed haplotypes (TSV)", modal)  # the whole file's
+        for untiered, flag in ((True, "NA"), (False, dense)):
+            gr._UNTIERED = untiered
+            html, modal = table(flag)
+            self.assertIn("<td>4 cis carriers &middot; ", html)
+            self.assertIn(">2 other observed haplotypes</a>", html)
+            self.assertIn("&mdash; 3 observed haplotypes</div>", modal)
 
     def test_hap_label_mode_aware(self):
         """The per-site modal noun is mode-aware: population-level = 'variant

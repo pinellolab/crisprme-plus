@@ -646,8 +646,10 @@ carriers they list lacks one of its row's variants: 342 of the run's 56,730 SNP-
 listings (a row lists its carriers once for each of its three alignments). After
 `build-index-only --samplesID` the same search returns exactly those 5 rows fewer, and every
 carrier it lists has all of its row's variants on one phased haplotype. `complete-search` and
-the report's Search mode row say so; rebuild the index with `build-index-only --samplesID`,
-or use a prebuilt one. It is fixed in the next release.
+the report say so (its Search mode row; and such a row of two or more SNPs reads
+`N carriers (>=1 of K vars, poss. chimera)` in its `Observed` column, as in a population-level
+analysis, not `N cis carriers`); rebuild the index with `build-index-only --samplesID`, or use
+a prebuilt one. It is fixed in the next release.
 
 ### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
