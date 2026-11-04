@@ -165,6 +165,10 @@ and the Settings entries add tests to `test_settings_progress`, in unit-tests' o
   name holding a path had any folder of the server archived and uploaded. It now publishes only
   an index its list offers. Pre-existing, since 2.2.0. Covered by
   `PostProcess/test_settings_progress.py`.
+- **Settings builds an index only of a genome, PAM and VCF dataset its card offers.** "Build an
+  index locally" took them as a request sent them, and a path in one built an index of a folder
+  outside the data folder. Pre-existing, since 2.2.0. Covered by
+  `PostProcess/test_settings_progress.py`.
 - **The indel steps of a search pass no chromosome name of a variant dataset to a shell.**
   A search with bulges takes each chromosome name of a variant dataset, read from the CHROM
   column of its VCFs (or from the per-chromosome indel logs named after it), into the shell

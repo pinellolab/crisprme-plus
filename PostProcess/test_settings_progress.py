@@ -1394,6 +1394,13 @@ class TestSettingsBuildPassesSampleList(_SamplesIDCase):
             "ONLINE": False,
             "PreventUpdate": _PreventUpdate,
             "no_update": _NO_UPDATE,
+            # what the card's dropdowns offer (pages_utils): genome hg38, the NRG PAM, and
+            # the datasets of VCFs/
+            "get_available_genomes": lambda: [{"label": "hg38", "value": "hg38"}],
+            "get_available_PAM": lambda: [{"label": "NRG", "value": "20bp-NRG-SpCas9"}],
+            "get_all_vcf_datasets": lambda: [
+                {"label": d, "value": d}
+                for d in sorted(os.listdir(os.path.join(self.cwd, "VCFs")))],
         }
         super().setUp()
 
@@ -1458,6 +1465,44 @@ class TestSettingsBuildPassesSampleList(_SamplesIDCase):
     def test_reference_build_command_unchanged(self):
         self.assertEqual(self.argv("", "my index"),
                          (self.base_argv() + ["--name", "my index"], "Build index"))
+
+    def test_only_what_the_card_offers_is_built(self):
+        # a request can send the build any values, and the genome, PAM and dataset name
+        # the folders and files it reads: '../' or an absolute path built an index of a
+        # genome folder outside the data folder, with any PAM file and VCF folder
+        outside = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
+        os.makedirs(os.path.join(outside, "genome"))
+        with open(os.path.join(outside, "genome", "chrS.fa"), "w") as fh:
+            fh.write(">chrS\nACGT\n")
+        with open(os.path.join(outside, "pam.txt"), "w") as fh:
+            fh.write("NNNNNNNNNNNNNNNNNNNNNGG 3\n")
+        _write_vcf(os.path.join(outside, "cohort", "cohort.chr1.vcf.gz"), ["S1"])
+
+        def up(folder, path):  # path, as a value joined to the data folder's <folder>/
+            return os.path.relpath(path, os.path.join(self.cwd, folder))
+
+        genome_or_pam = "Select an installed genome and PAM."
+        dataset = "Select an installed VCF dataset, or reference only."
+        for genome, pam, vcf, said in (
+                (up("Genomes", os.path.join(outside, "genome")), "20bp-NRG-SpCas9", "",
+                 genome_or_pam),
+                (os.path.join(outside, "genome"), "20bp-NRG-SpCas9", "", genome_or_pam),
+                ("..", "20bp-NRG-SpCas9", "", genome_or_pam),
+                ("hg38/..", "20bp-NRG-SpCas9", "", genome_or_pam),
+                ("hg38", up("PAMs", os.path.join(outside, "pam")), "", genome_or_pam),
+                ("hg38", "20bp-NRG-SpCas9", up("VCFs", os.path.join(outside, "cohort")),
+                 dataset),
+                ("hg38", "20bp-NRG-SpCas9", os.path.join(outside, "cohort"), dataset),
+                ("hg38", "20bp-NRG-SpCas9", "..", dataset)):
+            with self.subTest(genome=genome, pam=pam, vcf=vcf):
+                self.assertEqual(self.ns["build_index"](1, genome, pam, 1, 1, vcf, None),
+                                 (_NO_UPDATE, _NO_UPDATE, said))
+        self.assertEqual(self.launched, [])
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "samplesIDs")), [])
+        # what the card offers is built as before
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1"])
+        self.assertEqual(self.argv("walk")[0][:len(self.base_argv())], self.base_argv())
 
 
 # --- the false 'Samples degraded' alert after a build (final review FR#8) ------------

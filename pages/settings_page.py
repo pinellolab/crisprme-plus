@@ -2666,8 +2666,13 @@ def add_index_hf(n, name):
 def build_index(n, genome, pam, bdna, brna, vcf, display_name):
     if n is None or ONLINE:
         raise PreventUpdate
-    if not genome or not pam:
+    # only what the dropdowns offer: a request can send any value, and the genome, PAM
+    # and dataset name the folders and files the build reads (and its index's name)
+    if (genome not in [g["value"] for g in get_available_genomes()]
+            or pam not in [p["value"] for p in get_available_PAM()]):
         return no_update, no_update, "Select an installed genome and PAM."
+    if vcf and vcf not in [v["value"] for v in get_all_vcf_datasets()]:
+        return no_update, no_update, "Select an installed VCF dataset, or reference only."
     if int(bdna or 0) == 0 and int(brna or 0) == 0:
         # build-index-only no-ops for zero bulges; tell the user up front rather
         # than launching a job that reports "done" without producing an index.
