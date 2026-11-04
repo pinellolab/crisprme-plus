@@ -24,36 +24,51 @@ the Changed entry below; what the entry says of the banner still holds.
   SNP-row carrier listings (a row lists its carriers once for each of its three alignments). After
   `build-index-only --samplesID` the same search returns exactly those 5 rows fewer, and every
   carrier it lists has all of its row's variants on one phased haplotype. The `complete-search`
-  banner and the report's Search mode row of such a search, the `--per-sample` help, the README,
-  METHODS sections 5 and 7 and `docs/HGDP_1KGP_PHASED_INDEX_METHODS.md` now say so, and to rebuild
-  the index with `build-index-only --samplesID` or use a prebuilt one. Results are unchanged.
-  Pre-existing: 2.8.0 behaves the same; it is fixed in the next release. Covered by
+  banner and the report of such a search (its Search mode row, the legend's Observed entry and the
+  caption of the top-1000 tables), the `--per-sample` help, the README, METHODS sections 5 and 7
+  and `docs/HGDP_1KGP_PHASED_INDEX_METHODS.md` now say so, and to rebuild the index with
+  `build-index-only --samplesID` or use a prebuilt one. Results are unchanged. Pre-existing: 2.8.0
+  behaves the same; it is fixed in the next release. Covered by
   `PostProcess/test_build_index_only_atomic.py` (the banner) and
-  `PostProcess/test_generate_report.py` (the Search mode row).
+  `PostProcess/test_generate_report.py` (the report).
 
 ### Fixed
 
 - **The report of a `--per-sample` search on an index without the dict-less tiers says what the
-  search reported.** On such an index (one built without `--samplesID`, such as the one the
-  benchmark `complete-test` builds), the report's Search mode row now says what `complete-search`'s
-  banner says: the carrier samples are named, with the allele frequencies the VCF gives, and no
-  CONFIRMED/PUTATIVE cis phasing, SNP+SNP co-occurrence or exact joint allele frequency is
-  reported, as they come from the tiers; a dense window can still be reported by its greedy
-  worst-case alignment (the known limit under Changed); and to get the tiers, rebuild the index
-  with `build-index-only --samplesID` or download a prebuilt one. The row read `.search_mode`
-  alone, so every per-sample report said "Every per-sample haplotype is reported with CONFIRMED
-  cis phasing, named carrier samples and exact joint allele frequency": the self-test panel's
-  search (the README's guide, 4 mismatches + 1 DNA + 1 RNA bulge) has no CONFIRMED line in any of
-  its files, and `Variant_MAF` is NA on 154 of its 189 alt rows, those whose variants' AF reads 0
-  in the VCF, which gives it to two decimals. The report cannot tell from the results, nor from
-  the install, whose index can have the tiers by the time the report is built again, so
-  `complete-search` now records the datasets its banner names in the result folder
-  (`.untiered_datasets`), as it records `.search_mode`; a report built again from an earlier
-  search's folder keeps the old row. With the tiers the row is the same, byte for byte, and no
-  result changes. The `--per-sample` texts of `complete-search`'s help and of the README now say
-  so too. The web search form offers per-sample only on an index with a genotype store, so a web
-  search is never such a search. Pre-existing: the row has read so since 2.5.3. Covered by
-  `PostProcess/test_generate_report.py` and `PostProcess/test_build_index_only_atomic.py`.
+  search reported, in every section.** On such an index (one built without `--samplesID`, such as
+  the one the benchmark `complete-test` builds), the report's Search mode row now says what
+  `complete-search`'s banner says: the carrier samples are named, with the allele frequencies the
+  VCF gives, and no CONFIRMED/PUTATIVE cis phasing, SNP+SNP co-occurrence or exact joint allele
+  frequency is reported, as they come from the tiers; a dense window can still be reported by its
+  greedy worst-case alignment (the known limit under Changed); and to get the tiers, rebuild the
+  index with `build-index-only --samplesID` or download a prebuilt one. The texts that made the
+  same claims elsewhere in the report now say what holds for those datasets: the
+  Allele-frequency basis row and the MAF note under the top-1000 tables (a variant's frequency is
+  the `AF` its VCF gives, as rounded there, not AC/AN, and one whose `AF` reads 0 is blank), the
+  legend's MAF entry (no joint allele frequency is computed, and a variant whose `AF` reads 0 is
+  left out of a row's minimum), and the legend's Observed entry and the caption of the top-1000
+  tables (a dense window's greedy alignment lists the carriers of any of its variants, not its
+  exact cis carriers). The report read `.search_mode` alone, so every per-sample report said
+  "Every per-sample haplotype is reported with CONFIRMED cis phasing, named carrier samples and
+  exact joint allele frequency", AC/AN over the genotyped panel, an exact joint allele frequency
+  and exact cis carriers. The self-test panel's search (the README's guide, 4 mismatches + 1 DNA +
+  1 RNA bulge) has no CONFIRMED line in any of its files; `Variant_MAF` is NA on 154 of its 189
+  alt rows (3 of 184 with the tiers), those whose variants' AF reads 0 in the VCF, which gives it
+  to two decimals; four two-variant rows show the frequency of their commoner variant (0.09 to
+  0.86: chr22:16858220 shows 8.10e-01, from `Variant_MAF` "NA,0.81") for a haplotype that one to
+  five individuals carry (9.81e-04 and 1.96e-04 with the tiers); and the 5 greedy rows read "N cis
+  carriers" though none of the 114 carriers they list carries every variant of its row. The
+  report cannot tell from the results, nor from the install, whose index can have the tiers by
+  the time the report is built again, so `complete-search` now records the datasets its banner
+  names in the result folder (`.untiered_datasets`), as it records `.search_mode`; a report built
+  again from an earlier search's folder keeps the old texts. With the tiers, and for a
+  population-level search, the report is the same, byte for byte, and no result changes. The
+  `--per-sample` texts of `complete-search`'s help and of the README, the README's MAF column and
+  METHODS sections 3 and 7 now say so too. The web search form offers per-sample only on an index
+  with a genotype store, so a web search is never such a search. Pre-existing: the row has read so
+  since 2.5.3, the allele-frequency texts since 2.4.0, the legend's entries since 2.6.0 and the
+  caption since 2.7.10. Covered by `PostProcess/test_generate_report.py` and
+  `PostProcess/test_build_index_only_atomic.py`.
 - **Rows of one score keep the table's order in the report's ranked tables and plots.** The
   top-1000 by CRISPR-Bulge (`top1000_crispr_bulge.tsv` and its table), the top-1000 by CFD
   (`top1000.tsv` and its table) and the Section-2 plots' top-N were sorted with pandas' default
