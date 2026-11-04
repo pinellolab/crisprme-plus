@@ -1845,6 +1845,22 @@ def change_url(
     return ("/load", f"?job={job_id}", "")
 
 
+def _not_installed(field: str, selected: Optional[str], installed: List[str], what: str,
+                   card: str) -> Optional[str]:
+    """The missing-input line for the search form's ``field`` (Genome, PAM) when
+    ``selected`` is not among the values ``installed``, or None: the field's name when
+    none is selected and one is installed, as before; else that no ``what`` is installed,
+    or that the one selected is not, and where to add one (the Settings card ``card``)."""
+    if selected in installed:
+        return None
+    if not installed:
+        return f"{field}: no {what} is installed. Add one in Settings ({card})."
+    if not selected:
+        return field
+    return (f"{field}: {selected} is not installed. Select an installed {what}, or add it "
+            f"in Settings ({card}).")
+
+
 # Check input presence
 @app.callback(
     [
@@ -1945,18 +1961,25 @@ def check_input(
     be_stop_update = None
     update_style = False
     miss_input_list = []  # recover missing inputs
-    # display missing genome
-    if genome_selected is None or not bool(genome_selected):
+    # display missing genome and PAM: none selected, or one selected that is not
+    # installed (a fresh data folder has neither, and Load Example selects hg38 and
+    # 20bp-NRG-SpCas9 whatever is installed), with where to add one (_not_installed)
+    missing = _not_installed("Genome", genome_selected,
+                             [g["value"] for g in get_available_genomes()],
+                             "reference genome", "Add a reference genome")
+    if missing:
         genome_update = classname_red
         update_style = True
-        miss_input_list.append("Genome")
+        miss_input_list.append(missing)
     if genome_selected is None or not bool(genome_selected):
         genome_selected = "hg38_ref"
     genome_ref = genome_selected
-    if pam is None or not bool(pam):
+    missing = _not_installed("PAM", pam, [p["value"] for p in get_available_PAM()], "PAM",
+                             "Define a nuclease / PAM")
+    if missing:
         pam_update = classname_red
         update_style = True
-        miss_input_list.append("PAM")
+        miss_input_list.append(missing)
     if mms is None:
         mms_update = classname_red
         update_style = True
@@ -1986,7 +2009,8 @@ def check_input(
             [len(g) == len(text_guides.split("\n")[0]) for g in text_guides.split("\n")]
         ):
             text_guides = select_same_len_guides(text_guides)
-    # check PAM
+    # check PAM (one not installed is said above)
+    pam_char = None
     try:
         with open(
             os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
@@ -2001,9 +2025,14 @@ def check_input(
                 end_idx = index_pam_value
                 pam_char = pam_char.split()[0][(end_idx * (-1)) :]
                 pam_begin = False
-    except OSError as e:
-        raise e
-    if guide_type == "GS":
+    except OSError:
+        pass
+    if guide_type == "GS" and (pam_char is None or genome_update is not None):
+        # the guides of a genomic sequence are found with its PAM, and those of BED
+        # coordinates in the genome: with either missing (said above) they are not
+        # looked for
+        text_guides = "A" * len_guide_sequence
+    elif guide_type == "GS":
         # Extract sequence and create the guides
         guides = []
         for seqname_and_seq in text_guides.split(">"):
@@ -2054,9 +2083,20 @@ def check_input(
                     assert bool(seqname)
                     assert bool(seq_read)
                     assert bool(genome_ref)
-                    seq_read = extract_seq.extractSequence(
-                        seqname, seq_read, genome_ref.replace(" ", "_")
-                    )
+                    try:
+                        seq_read = extract_seq.extractSequence(
+                            seqname, seq_read, genome_ref.replace(" ", "_")
+                        )
+                    except (OSError, IndexError, subprocess.CalledProcessError):
+                        # bedtools getfasta finds no FASTA of that sequence in the genome
+                        # folder, or nothing at those coordinates
+                        miss_input_list.append(
+                            f"Cannot read {seq_read} from genome {genome_ref}: its folder "
+                            f"holds no FASTA of {line_split[0]}, or the coordinates are past "
+                            "its end"
+                        )
+                        guides = []  # reset guides
+                        break
                     guides.extend(
                         convert_pam.getGuides(
                             seq_read, pam_char, len_guide_sequence, pam_begin
@@ -2115,8 +2155,10 @@ def check_input(
     # exactly matching the CLI (bMax = max(bDNA, bRNA); index folder N = bMax+1) and the
     # shell scan (N >= bMax+1). reference_bulge_capacity / index_max_bulges return N-1, so
     # ">= max(dna, rna)" is precisely the shell's reachability test (incl. NNN-pamless +
-    # combined-dataset matching, and the buildable-reference relaxation).
-    if genome_selected and pam and dna is not None and rna is not None:
+    # combined-dataset matching, and the buildable-reference relaxation). Without a genome
+    # and a PAM selected and installed it is not run: what is missing is said above.
+    if (genome_selected and pam and genome_update is None and pam_update is None
+            and dna is not None and rna is not None):
         need = max(int(dna), int(rna))
         # REFERENCE term: buildable-aware (raw genome shipped -> reference index buildable).
         _ok = reference_bulge_capacity(genome_selected, pam) >= need

@@ -24,3 +24,15 @@
   HuggingFace, to add the VCF dataset again in Settings under its name, which writes the list, or
   to add the file yourself. A merged panel, whose list Submit makes from those of its datasets, is
   offered as before. New in 2.8.1. Covered by `PostProcess/test_web_bulge_notes.py`.
+- **Submit with a genome or PAM selected that is not installed says what is missing and where to
+  add it, instead of failing.** On the empty data folder the web app starts with (as Settings /
+  Data Manager starts), Load Example selects `hg38` and `20bp-NRG-SpCas9`, and Submit's input
+  check opened `PAMs/20bp-NRG-SpCas9.txt` (the default one, too, with no PAM selected), which is not
+  there: the check failed with a server error (HTTP 500), no "Missing or wrong input" dialog
+  opened, and the page did nothing. It read the genome folder of a genomic sequence given by BED
+  coordinates the same way, so a genome not installed failed too, and so did coordinates on a
+  sequence whose FASTA the genome folder does not hold, or past its end. The dialog now lists the
+  genome and the PAM that are not installed, with where to add one in Settings (Add a reference
+  genome, Define a nuclease / PAM), and the BED coordinates it cannot read; the bulge check, which
+  needs both, waits for them. Pre-existing: 2.8.0 did the same. Covered by
+  `PostProcess/test_web_bulge_notes.py`.

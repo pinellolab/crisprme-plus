@@ -29,6 +29,11 @@ its search: one whose VCFs have no list yet, and one whose index stays after its
 dataset was removed in Settings, which takes the list with it. For that one Submit said
 to download its index again, which a locally built index cannot be.
 
+Submit itself failed with a server error, and the page did nothing, when the genome or
+PAM selected was not installed (TestSubmitWithoutAGenomeOrPAM), as after Load Example on
+the empty data folder the web app starts with: it said what is missing only once both
+were installed. Now it says so, and where to add them.
+
 Run with:
 
     <env>/bin/python3 -m unittest discover -s PostProcess -p 'test_web_bulge_notes.py' -v
@@ -56,6 +61,7 @@ sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app ob
 import pages.main_page as mp  # noqa: E402
 import pages.pages_utils as pu  # noqa: E402
 import pages.settings_page as sp  # noqa: E402
+import index  # noqa: E402  (check_directories: the data folder the web app starts with)
 
 PAM = "20bp-NRG-SpCas9"
 
@@ -536,6 +542,91 @@ class TestBulgeCap(_Install):
                 form.v["edits"] = 3
                 self.assertEqual(form.change("walk", order), (1, 1, 3))
                 self.assertEqual(form.change("ref", order), (2, 1, 3))
+
+
+class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
+    """Submit with a genome or PAM selected that is not installed, or none installed: on the
+    data folder the web app starts with (index.check_directories: its folders, all empty),
+    Load Example selects hg38 and 20bp-NRG-SpCas9, and check_input opened
+    PAMs/20bp-NRG-SpCas9.txt (the default one, too, with no PAM selected), which is not
+    there: a server error (HTTP 500), and the page did nothing. It read the genome folder of
+    BED coordinates the same way. Now the missing-input dialog says what is missing, and
+    where to add it."""
+
+    NO_GENOME = ("Genome: no reference genome is installed. Add one in Settings (Add a "
+                 "reference genome).")
+    NO_PAM = "PAM: no PAM is installed. Add one in Settings (Define a nuclease / PAM)."
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        index.check_directories(self.tmp)
+        for mod in (mp, pu):
+            p = patch.object(mod, "current_working_directory", self.tmp + os.sep)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def submit(self, genome, pam, guides="CTAACAGTTGCTTTTATCAC", guide_type="IP",
+               variant="ref", mms=4, dna=1, rna=1):
+        """check_input, as the Submit button runs it: its outputs, and the dialog's lines."""
+        out = mp.check_input(1, None, genome, pam, guide_type, guides, mms, dna, rna, variant,
+                             False)
+        return out, [li.children for li in out[-1].children[1].children]
+
+    def install(self, genome, pam, motif):
+        os.makedirs(os.path.join(self.tmp, "Genomes", genome))
+        with open(os.path.join(self.tmp, "Genomes", genome, "chr1.fa"), "w") as fh:
+            fh.write(">chr1\n" + "T" * 10 + "CTAACAGTTGCTTTTATCACAGG" + "T" * 10 + "\n")
+        with open(os.path.join(self.tmp, "PAMs", f"{pam}.txt"), "w") as fh:
+            fh.write("N" * 20 + motif + " 3\n")
+
+    def test_load_example_then_submit_on_a_fresh_data_folder(self):
+        guide, pam, genome, variant, mms, dna, rna = mp.load_example_data(1)[:7]
+        self.assertEqual((genome, pam), ("hg38", PAM))
+        # the PAM dropdown, which offers nothing, can lose the value Load Example set
+        for chosen in (pam, None):
+            with self.subTest(pam=chosen):
+                out, msgs = self.submit(genome, chosen, guide, "IP", variant, mms, dna, rna)
+                # not run: the dialog opens, the genome and PAM boxes in red
+                self.assertEqual(out[:4], (None, True, "missing-input", "missing-input"))
+                self.assertEqual(msgs, [self.NO_GENOME, self.NO_PAM])
+        # nothing selected, and a genomic sequence given by BED coordinates
+        out, msgs = self.submit(None, None, ">s\nchr1 0 43", "GS")
+        self.assertEqual((out[0], msgs), (None, [self.NO_GENOME, self.NO_PAM]))
+
+    def test_a_genome_or_pam_selected_that_is_not_installed(self):
+        self.install("susScr11", "20bp-NGG-SpCas9", "NGG")
+        no_hg38 = ("Genome: hg38 is not installed. Select an installed reference genome, or "
+                   "add it in Settings (Add a reference genome).")
+        out, msgs = self.submit("hg38", PAM)
+        self.assertEqual(out[:4], (None, True, "missing-input", "missing-input"))
+        self.assertEqual(msgs, [no_hg38, "PAM: 20bp-NRG-SpCas9 is not installed. Select an "
+                                         "installed PAM, or add it in Settings (Define a "
+                                         "nuclease / PAM)."])
+        # BED coordinates in a genome not installed are not read
+        out, msgs = self.submit("hg38", "20bp-NGG-SpCas9", ">s\nchr1 0 43", "GS")
+        self.assertEqual((out[0], msgs), (None, [no_hg38]))
+        # none selected, with some installed: as before
+        self.assertEqual(self.submit(None, None)[1], ["Genome", "PAM"])
+        # both installed: Submit runs the search
+        self.assertEqual(self.submit("susScr11", "20bp-NGG-SpCas9")[0][0], 1)
+
+    def test_bed_coordinates_the_genome_folder_holds_no_sequence_at(self):
+        # extract_seq reads the genome from the working directory: the web app's is its
+        # data folder
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.tmp)
+        self.install("hg38", PAM, "NRG")
+        out, msgs = self.submit("hg38", PAM, ">s\nchr1 0 43", "GS")
+        self.assertEqual((out[0], msgs), (1, []))  # read, and its guide searched
+        for bed in ("chrZ 0 43", "chr1 100 200"):  # no FASTA of chrZ; past chr1's end
+            with self.subTest(bed=bed):
+                chrom, start, stop = bed.split()
+                out, msgs = self.submit("hg38", PAM, f">s\n{bed}", "GS")
+                self.assertIsNone(out[0])
+                self.assertIn(f"Cannot read {chrom}:{start}-{stop} from genome hg38: its "
+                              f"folder holds no FASTA of {chrom}, or the coordinates are past "
+                              "its end", msgs)
 
 
 if __name__ == "__main__":
