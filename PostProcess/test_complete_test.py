@@ -218,8 +218,8 @@ class AnEarlierRunInTheWayIsNamedWhole(unittest.TestCase):
 
     def test_the_benchmark_modes_folders_are_named_in_one_line(self):
         self.assertEqual(len(self.benchmarks), 6)
-        # a heavy one's under CRISPRME_SKIP_HEAVY=1, and one of a benchmark an earlier
-        # release ran, too: validate-test would read the first, and stops on neither
+        # a heavy one's too under CRISPRME_SKIP_HEAVY=1 (a validate-test without it reads
+        # it), and, as before, one of a benchmark an earlier release ran
         named = sorted(self.benchmarks + [f"{ct.COMPLETETESTRESDIR}_cas9"])
         for skip_heavy in (None, "1"):
             with self.subTest(CRISPRME_SKIP_HEAVY=skip_heavy):

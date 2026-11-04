@@ -284,9 +284,9 @@ class TheEnvironmentPinsWhatTheImagePins(unittest.TestCase):
     flask-compress and werkzeug unpinned, and cachelib out, all of which the Dockerfile
     (and the Bioconda recipe) pins: unpinned, they had drifted once, and a newer
     flask-caching crashed the web app at import. Solved for linux-64 on 2026-11-03, it took
-    flask-caching 2.5.1, flask-compress 1.26 and werkzeug 3.1.9, a set no image ran. Every
-    package whose version the Dockerfile's install of the main env constrains,
-    environment.yml constrains alike."""
+    flask-caching 2.5.1, flask-compress 1.26 and werkzeug 3.1.9, not the set the release
+    image runs. Every package whose version the Dockerfile's install of the main env
+    constrains, environment.yml constrains alike."""
 
     SPEC = re.compile(r"([A-Za-z0-9_.-]+)([=<>!].*)?")
 
