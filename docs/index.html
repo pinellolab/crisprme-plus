@@ -335,13 +335,17 @@ crisprme.py --version</code></pre>
           remains the simplest route: it ships the CRISPR-Bulge scorer pre-built.
         </p>
 
-        <h3>Build the full reference database from the original sources</h3>
+        <h3>Build the full reference database from scratch</h3>
         <p>
           Instead of the fast download, you can download and configure everything
-          (hg38, 1000&nbsp;Genomes, HGDP, annotations, PAMs) directly from the original
-          sources with the built-in <code>setup</code>. This is a large, multi-hour,
-          ~410&nbsp;GB one-time download; the fast <code>download</code> above is
-          recommended for most users.
+          (hg38, 1000&nbsp;Genomes, HGDP, annotations, PAMs) with the built-in
+          <code>setup</code>. It takes only two files from the
+          <code>lucapinello/crisprme-data</code> repo (the chr22 FASTA, for
+          <code>setup --chrom chr22</code>, and the 1000&nbsp;Genomes sample list); everything
+          else it downloads comes from its original source: UCSC, the EBI and Sanger FTP
+          servers, and the CRISPRme GitHub repository. This is a large, multi-hour,
+          ~410&nbsp;GB one-time download; the fast <code>download</code> above is recommended
+          for most users.
         </p>
         <pre><code># Docker
 docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:latest \

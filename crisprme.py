@@ -6895,8 +6895,11 @@ def print_help_setup_database_test() -> None:
         "(fetches the reference genome + annotations over HuggingFace's CDN), then\n"
         "  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP\n"
         "for the recommended default variant index. 'setup' is the legacy "
-        "from-scratch download (UCSC/EBI/Sanger FTP, hundreds of GB) retained for "
-        "advanced / offline builds.\n\n"
+        "from-scratch download (hundreds of GB) retained for advanced / offline "
+        "builds. It takes only two files from the HuggingFace data repo "
+        "(lucapinello/crisprme-data): chr22.fa, for --chrom chr22, and "
+        "samplesIDs.1000G.txt. Everything else it downloads comes from UCSC, the EBI "
+        "and Sanger FTP servers and the CRISPRme GitHub repository.\n\n"
         "The downloaded resources can then be reused across analyses without "
         "requiring additional downloads\n\n"
     )
