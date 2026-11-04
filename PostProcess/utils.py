@@ -369,6 +369,23 @@ def hf_fetch(repo_filename: str, dest_path: str) -> str:
     return dest_path
 
 
+def hf_missing(error: Exception) -> bool:
+    """Whether ``error``, raised by ``hf_fetch``, is the Hub's answer that the dataset
+    repo holds no such file: one it does not host, such as the raw 1000 Genomes and
+    HGDP VCFs, which the caller then downloads from their original source as it
+    should. Any other error is a failure to fetch: no connection (with nothing cached,
+    huggingface_hub raises LocalEntryNotFoundError, a kind of EntryNotFoundError), no
+    huggingface_hub, a repo that is not there.
+    """
+    try:
+        from huggingface_hub.utils import EntryNotFoundError, LocalEntryNotFoundError
+    except ImportError:
+        return False
+    return isinstance(error, EntryNotFoundError) and not isinstance(
+        error, LocalEntryNotFoundError
+    )
+
+
 def remove(fname: str) -> None:
     """
     Remove a file or directory specified by the given path.

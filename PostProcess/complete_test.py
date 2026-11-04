@@ -36,6 +36,7 @@ from utils import (
     check_crisprme_directory_tree,
     download,
     hf_fetch,
+    hf_missing,
     HF_DATA_REPO,
     gunzip,
     untar,
@@ -274,16 +275,21 @@ def download_genome_data(chrom: str, dest: str) -> str:
         chromfa = os.path.join(genome_dir, f"{chrom}.fa")
         # fast path: fetch the extracted FASTA from HuggingFace; on any failure
         # (repo/file missing, no network, huggingface_hub absent) fall back to
-        # the original UCSC source transparently
+        # the original UCSC source transparently. A file the repo does not hold
+        # is no failure: one line on stdout says where it comes from instead
         try:
             hf_fetch(f"genomes/hg38/{chrom}.fa", chromfa)
             sys.stderr.write(f"Fetched {chrom}.fa from HuggingFace ({HF_DATA_REPO})\n")
             assert os.path.isfile(chromfa)
             return os.path.abspath(genome_dir)
         except Exception as e:
-            sys.stderr.write(
-                f"HuggingFace fetch failed for {chrom}.fa ({e}); falling back to UCSC\n"
-            )
+            if hf_missing(e):
+                print(f"{chrom}.fa is not on HuggingFace ({HF_DATA_REPO}); downloading it "
+                      "from UCSC", flush=True)
+            else:
+                sys.stderr.write(
+                    f"HuggingFace fetch failed for {chrom}.fa ({e}); falling back to UCSC\n"
+                )
         chromgz = download(dest, http_url=f"{HG38URL}/chromosomes/{chrom}.fa.gz")
         chromfa = gunzip(
             chromgz,
@@ -362,7 +368,9 @@ def download_vcf_data(chrom: str, dest: str, dataset: str) -> None:
                 )
                 continue
             # fast path: fetch the bgzipped VCF from HuggingFace and MD5-verify it;
-            # on any failure fall through to the original FTP/HTTPS source below
+            # on any failure fall through to the original FTP/HTTPS source below. The
+            # default repo hosts none of these raw VCFs (its vcfs/ holds the inputs of
+            # the shipped panels), which is no failure: one line on stdout says so
             try:
                 hf_fetch(f"vcfs/{ds}/{expected_fname}", dest_path)
                 if md5data.get(expected_fname) == compute_md5(dest_path):
@@ -372,10 +380,14 @@ def download_vcf_data(chrom: str, dest: str, dataset: str) -> None:
                     continue
                 raise ValueError("MD5 mismatch after HuggingFace fetch")
             except Exception as e:
-                sys.stderr.write(
-                    f"HuggingFace fetch failed for {expected_fname} ({e}); "
-                    "falling back to original source\n"
-                )
+                if hf_missing(e):
+                    print(f"{expected_fname} is not on HuggingFace ({HF_DATA_REPO}); "
+                          "downloading it from its original source", flush=True)
+                else:
+                    sys.stderr.write(
+                        f"HuggingFace fetch failed for {expected_fname} ({e}); "
+                        "falling back to original source\n"
+                    )
             # Retry on checksum mismatch (e.g. a truncated transfer from a slow or
             # flaky host) instead of aborting the whole run on the first failure.
             attempts = 3
@@ -458,7 +470,8 @@ def download_samples_ids_data(dataset: str) -> None:
         # success path left it as "samplesIDs.<ds>.txt" and the run failed with
         # "hg38_<ds>.samplesID.txt: No such file or directory".
         final_path = os.path.join(samplesids_dir, f"hg38_{ds}.samplesID.txt")
-        # fast path: HuggingFace, then fall back to the original source
+        # fast path: HuggingFace, then fall back to the original source (a file the
+        # repo does not hold is no failure: one line on stdout says so)
         try:
             hf_fetch(f"samplesIDs/{samplesid_fname}", final_path)
             if MD5SAMPLES.get(samplesid_fname) == compute_md5(final_path):
@@ -469,10 +482,14 @@ def download_samples_ids_data(dataset: str) -> None:
                 continue
             raise ValueError("MD5 mismatch after HuggingFace fetch")
         except Exception as e:
-            sys.stderr.write(
-                f"HuggingFace fetch failed for {samplesid_fname} ({e}); "
-                "falling back to original source\n"
-            )
+            if hf_missing(e):
+                print(f"{samplesid_fname} is not on HuggingFace ({HF_DATA_REPO}); "
+                      "downloading it from its original source", flush=True)
+            else:
+                sys.stderr.write(
+                    f"HuggingFace fetch failed for {samplesid_fname} ({e}); "
+                    "falling back to original source\n"
+                )
         samplesids = download(
             samplesids_dir,
             http_url=f"{TESTDATAURL.rstrip('/')}/samplesIDs/{samplesid_fname}",

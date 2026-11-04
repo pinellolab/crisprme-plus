@@ -247,6 +247,151 @@ class AnEarlierRunInTheWayIsNamedWhole(unittest.TestCase):
         self.assertEqual(os.listdir("Genomes"), [])
 
 
+class WhatTheDataRepoDoesNotHostIsNoFailure(unittest.TestCase):
+    """The documented self-test (CRISPRME_ALLOW_ONDEMAND_BUILD=1 complete-test --chrom chr22
+    --vcf_dataset 1000G) always said 'HuggingFace fetch failed for
+    ALL.chr22.shapeit2_integrated_snvindels_v2a_27022019.GRCh38.phased.vcf.gz (404 Client
+    Error ... Entry Not Found ...); falling back to original source', then downloaded it
+    from EBI and passed: the data repo hosts no raw 1000 Genomes or HGDP VCF, nor
+    samplesIDs.HGDP.txt, nor the unpacked FASTA of a chromosome but chr22. A file the Hub
+    answers it does not hold is said in one line on stdout; a failure to fetch one (no
+    connection, a checksum that does not match) is still said on stderr, as before.
+
+    The Hub's errors are huggingface_hub's own where it is installed; the light CI env has
+    none, and stand-ins of their hierarchy take its place for the test."""
+
+    VCF = "ALL.chr22.shapeit2_integrated_snvindels_v2a_27022019.GRCh38.phased.vcf.gz"
+
+    def setUp(self):
+        try:
+            from huggingface_hub.utils import EntryNotFoundError, LocalEntryNotFoundError
+        except ImportError:
+            class EntryNotFoundError(Exception):
+                pass
+
+            class LocalEntryNotFoundError(FileNotFoundError, EntryNotFoundError):
+                pass
+
+            hub = types.ModuleType("huggingface_hub")
+            hub.utils = types.ModuleType("huggingface_hub.utils")
+            hub.utils.EntryNotFoundError = EntryNotFoundError
+            hub.utils.LocalEntryNotFoundError = LocalEntryNotFoundError
+            patcher = mock.patch.dict(sys.modules, {"huggingface_hub": hub,
+                                                    "huggingface_hub.utils": hub.utils})
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        # what hf_hub_download raises for a file the repo does not hold (named
+        # RemoteEntryNotFoundError from huggingface_hub 1.0 on), and with no connection
+        # and the file not cached
+        self.missing = type("RemoteEntryNotFoundError", (EntryNotFoundError,), {})(
+            "404 Client Error. Entry Not Found for url: https://huggingface.co/datasets/...")
+        self.offline = LocalEntryNotFoundError(
+            "An error happened while trying to locate the file on the Hub and we cannot find "
+            "the requested files in the local cache.")
+        self.wd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.wd)
+        cwd = os.getcwd()
+        os.chdir(self.wd)
+        self.addCleanup(os.chdir, cwd)
+
+    def fetch(self, call, hf_error, md5s=()):
+        """``call`` with hf_fetch raising ``hf_error`` (None: fetching the file), the
+        other downloads faked, and compute_md5 answering ``md5s``, then each file's MD5
+        from the tables: its stdout, its stderr and the URLs it downloaded from."""
+        tables = dict(ct.MD51000G, **ct.MD5HGDP, **ct.MD5SAMPLES)
+        md5s, fetched = list(md5s), []
+
+        def hf_fetch(_name, dest):
+            if hf_error is not None:
+                raise hf_error
+            open(dest, "w").close()
+
+        def download(dest, fname=None, ftp_conn=False, ftp_server=None, ftp_path=None,
+                     http_url=None):
+            fetched.append(http_url or f"ftp://{ftp_server}{ftp_path}")
+            path = os.path.join(dest, os.path.basename(fetched[-1]))
+            open(path, "w").close()
+            return path
+
+        def gunzip(_gz, out):
+            open(out, "w").close()
+            return out
+
+        def compute_md5(path):
+            return md5s.pop(0) if md5s else tables.get(os.path.basename(path))
+
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(ct, "hf_fetch", hf_fetch), \
+             mock.patch.object(ct, "download", download), \
+             mock.patch.object(ct, "gunzip", gunzip), \
+             mock.patch.object(ct, "compute_md5", compute_md5), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            call()
+        return out.getvalue(), err.getvalue(), fetched
+
+    def test_the_raw_vcfs_of_the_self_test(self):
+        os.makedirs("VCFs")
+        for ds, fname, source in (
+                ("1000G", self.VCF, "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/"
+                 "1000_genomes_project/release/20190312_biallelic_SNV_and_INDEL/"),
+                ("HGDP", "hgdp_wgs.20190516.full.chr22.vcf.gz",
+                 "ftp://ngs.sanger.ac.uk/production/hgdp/hgdp_wgs.20190516/")):
+            with self.subTest(dataset=ds):
+                out, err, fetched = self.fetch(
+                    lambda: ct.download_vcf_data("chr22", "VCFs", ds), self.missing)
+                self.assertEqual(out, f"{fname} is not on HuggingFace ({ct.HF_DATA_REPO}); "
+                                      "downloading it from its original source\n")
+                self.assertEqual(err, "Downloading VCF data for chromsome(s) chr22\n")
+                self.assertEqual(fetched, [source + fname])
+
+    def test_the_hgdp_sample_list(self):
+        out, err, fetched = self.fetch(lambda: ct.download_samples_ids_data("HGDP"),
+                                       self.missing)
+        self.assertEqual(out, f"samplesIDs.HGDP.txt is not on HuggingFace ({ct.HF_DATA_REPO}); "
+                              "downloading it from its original source\n")
+        self.assertEqual(err, "Downloading sample ids for dataset(s) HGDP\n")
+        self.assertEqual(fetched, [f"{ct.TESTDATAURL.rstrip('/')}/samplesIDs/samplesIDs.HGDP.txt"])
+        self.assertTrue(os.path.isfile(os.path.join("samplesIDs", "hg38_HGDP.samplesID.txt")))
+
+    def test_the_fasta_of_another_chromosome(self):
+        os.makedirs("Genomes")
+        out, err, fetched = self.fetch(lambda: ct.download_genome_data("chr21", "Genomes"),
+                                       self.missing)
+        self.assertEqual(out, f"chr21.fa is not on HuggingFace ({ct.HF_DATA_REPO}); "
+                              "downloading it from UCSC\n")
+        self.assertEqual(err, "Downloading fasta file for chromosome(s) chr21\n")
+        self.assertEqual(fetched, [f"{ct.HG38URL}/chromosomes/chr21.fa.gz"])
+
+    def test_a_failure_to_fetch_is_still_said(self):
+        os.makedirs("VCFs")
+        for hf_error, md5s, why in ((self.offline, (), self.offline),
+                                    (None, ("0" * 32,), "MD5 mismatch after HuggingFace fetch")):
+            with self.subTest(why=str(why)[:40]):
+                out, err, fetched = self.fetch(
+                    lambda: ct.download_vcf_data("chr22", "VCFs", "1000G"), hf_error, md5s)
+                self.assertEqual(out, "")
+                self.assertEqual(err, "Downloading VCF data for chromsome(s) chr22\n"
+                                      f"HuggingFace fetch failed for {self.VCF} ({why}); "
+                                      "falling back to original source\n")
+                self.assertEqual(len(fetched), 1)
+                os.remove(os.path.join("VCFs", "hg38_1000G", self.VCF))
+        os.makedirs("Genomes")
+        out, err, _ = self.fetch(lambda: ct.download_genome_data("chr22", "Genomes"),
+                                 self.offline)
+        self.assertEqual((out, err), ("", "Downloading fasta file for chromosome(s) chr22\n"
+                                          f"HuggingFace fetch failed for chr22.fa "
+                                          f"({self.offline}); falling back to UCSC\n"))
+
+    def test_what_tells_one_from_the_other(self):
+        self.assertTrue(ct.hf_missing(self.missing))
+        for error in (self.offline, ValueError("MD5 mismatch after HuggingFace fetch"),
+                      ImportError("No module named 'huggingface_hub'"), OSError("timed out")):
+            self.assertFalse(ct.hf_missing(error), error)
+        with mock.patch.dict(sys.modules, {"huggingface_hub": None,
+                                           "huggingface_hub.utils": None}):
+            self.assertFalse(ct.hf_missing(self.missing))  # (no huggingface_hub to ask)
+
+
 # --------------------------------------------------------------------------- #
 # A small working directory, as `download --what index` or build-index-only leave one:
 # genome toy (chr2, chr22, a chr22_ random contig, and chrY no index has), a reference
