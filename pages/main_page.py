@@ -2292,10 +2292,13 @@ def check_input(
     # after the search and post-analysis, and fails there without it, and one of a
     # dataset added as a single multi-chromosome VCF, with no variant index for this
     # PAM, fails as it prepares the variant genome: refuse them now, with the words of
-    # the bulge note (_dataset_refusals).
+    # the bulge note (_dataset_refusals). That index is looked for with the PAM's file,
+    # of an installed PAM only: one not installed is said above, and its value, which a
+    # request can set to anything, names the file read. With none the second is not said.
     if genome_update is None and variant_choice not in (None, "", "ref"):
         for _d in [v for v in str(variant_choice).split("+") if v]:
-            for _why in _dataset_refusals(genome_selected, pam, _d):
+            for _why in _dataset_refusals(genome_selected, pam if pam in pams else None,
+                                          _d):
                 update_style = True
                 miss_input_list.append(_why)
     miss_input = html.Div(

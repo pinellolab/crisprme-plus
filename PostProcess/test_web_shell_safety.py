@@ -52,6 +52,11 @@ and a personal-assembly bundle, imported in Settings, brings its genome folders 
 names of its archive; post_analisi_snp.sh looked the chromosome's targets up with that name
 unquoted, which the shell took for a pattern of the files of the folder it runs in.
 
+And Submit's check, new in 2.8.1 for a dataset of one multi-chromosome VCF, read the PAM
+file a request names, when that PAM is not installed, to look for the dataset's variant
+index: whether the file was there, and its motif, showed in what Submit said. It answers
+such a PAM the same, whatever file its value names.
+
 And up to 2.8.0 the results pages' tables wrote the values of a link, a table and a form
 (a guide, a sample's name, a chromosome, positions, counts; Custom Ranking's columns, order
 and thresholds) into their queries of the job's database as they were, where a quote ended
@@ -559,6 +564,43 @@ class TestSearchFormReadsItsOwnValues(_WebFolder):
         self.assertNothingReadOutside(seen)
         self.assertEqual(self.submit(variant="walk"), (True, []))
         self.assertEqual(self.submit(guide_type="GS", guides=">s\n" + SEQ), (True, []))
+
+    def test_the_submit_check_of_a_single_file_dataset_reads_no_pam_it_does_not_offer(self):
+        # a dataset of one multi-chromosome VCF with its sample list, whose variant index is
+        # installed and its variant genome not: Submit says a search cannot prepare that
+        # genome unless the index is there for the PAM, whose file gives its motif. Of a
+        # PAM not installed it read the file the value names: whether it was there, and
+        # the motif in it, showed in that line
+        _vcf(os.path.join(self.data, "VCFs", "hg38_single", "panel.vcf.gz"), True)
+        with open(os.path.join(self.data, "samplesIDs", "hg38_single.samplesID.txt"),
+                  "w") as fh:
+            fh.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+                     "S1\tsingle\tunknown\tunknown\n")
+        variant_index = os.path.join(self.data, "genome_library", "NRG_2_hg38+hg38_single")
+        os.makedirs(variant_index)
+        for name, motif in (("index-20bp-y", "NRG"), ("other-20bp-y", "NAA")):
+            with open(os.path.join(self.outside, f"{name}.txt"), "w") as fh:
+                fh.write("N" * 20 + f"{motif} 3\n")
+        self.before = self.outside_files()
+        answers = []
+        with _paths_read() as seen:
+            for pam in ("../../outside/index-20bp-y", "../../outside/other-20bp-y",
+                        "../../outside/absent-20bp-y"):
+                ran, lines = self.submit(pam=pam, variant="single")
+                answers.append((ran, [line.replace(pam, "<pam>") for line in lines]))
+        self.assertNothingReadOutside(seen)
+        self.assertEqual(answers, [(False, [
+            "PAM: <pam> is not installed. Select an installed PAM, or add it in Settings "
+            "(Define a nuclease / PAM)."])] * 3)
+        # the PAM the form offers: its index is there, and with none the line is said
+        self.assertEqual(self.submit(variant="single"), (True, []))
+        os.rmdir(variant_index)
+        ran, lines = self.submit(variant="single")
+        self.assertFalse(ran)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith(
+            "No single variant index for this PAM is installed yet, and the dataset's VCF is "
+            "a single multi-chromosome file"), lines)
 
 
 @NEEDS_DASH

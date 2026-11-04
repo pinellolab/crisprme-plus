@@ -196,7 +196,9 @@ and the Settings, personal-assembly and History entries add tests to `test_setti
   folder, and what was there changed what they answered, in local mode and on a website alike.
   They now answer for a value the form does not offer as for none, and Submit lists a variant
   dataset that is not installed for the genome, as it does a genome or PAM that is not installed.
-  Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+  Submit's check of a dataset of one multi-chromosome VCF, new in 2.8.1, looks for its variant
+  index with the PAM file of an installed PAM only, too. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
 - **The indel steps of a search pass no chromosome name of a variant dataset to a shell.**
   A search with bulges takes each chromosome name of a variant dataset, read from the CHROM
   column of its VCFs (or from the per-chromosome indel logs named after it), into the shell
