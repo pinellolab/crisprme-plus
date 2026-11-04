@@ -2684,19 +2684,25 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                     "tiers (Dictionaries/registry_<vcf>/ and genotypes_<vcf>/), only the classic "
                     "per-sample dictionaries: the CONFIRMED/PUTATIVE cis phasing, the SNP+SNP "
                     "co-occurrence and the exact joint AF come from those tiers, and none of them "
-                    "is reported for its variants, whose allele frequencies are the ones the VCF "
-                    "gives. Where its variants are dense, a window can still be reported by its "
-                    "greedy worst-case alignment, flagged in High_variant_density_region, whose "
-                    "listed carriers need not carry every variant in it. To get the tiers, "
-                    "rebuild the index with build-index-only --samplesID, or download a prebuilt "
-                    "one (crisprme.py download --what index --index-name "
-                    "NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on dense panels; "
-                    "pass --population-level for the fast worst-case screen.\n", out)
+                    "is reported for its variants, whose allele frequencies are the AF of those "
+                    "dictionaries (an indel's, of the index's indel log), which CRISPRitz "
+                    "add-variants copied from its VCF: a variant whose AF they give as 0, or not "
+                    "at all, has no frequency. Where its variants are dense, a window can still "
+                    "be reported by its greedy worst-case alignment, flagged in "
+                    "High_variant_density_region, whose listed carriers need not carry every "
+                    "variant in it. To get the tiers, rebuild the index with build-index-only "
+                    "--samplesID, or download a prebuilt one (crisprme.py download --what index "
+                    "--index-name NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
+                    "dense panels; pass --population-level for the fast worst-case screen.\n", out)
+                # (and no frequency "the VCF gives": a variant has the AF that add-variants
+                # copied, none where its record has AF at another place in INFO than the
+                # first record's, test_generate_report)
+                self.assertNotIn("the VCF gives", out)
                 self.assertEqual(self.recorded(), "ds\n")
                 self.assertEqual(self.recorded(".variant_datasets"), "ds\n")
-        # a population-level search, whose allele frequencies are the VCF's too, records
-        # them as well; and its banner says what --per-sample gives there, as it promised
-        # CONFIRMED cis phasing and exact joint AF
+        # a population-level search, whose allele frequencies are the classic dictionaries'
+        # too, records them as well; and its banner says what --per-sample gives there, as it
+        # promised CONFIRMED cis phasing and exact joint AF
         rc, out, err = self.run_search("--population-level")
         self.assertIn("Launching job ", out)
         self.assertIn(self.POPULATION.format(
@@ -2704,11 +2710,14 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
             "genotypes_<vcf>/), only the classic per-sample dictionaries, --per-sample names the "
             "carrier samples only: the CONFIRMED/PUTATIVE cis phasing and the exact joint AF "
             "come from those tiers, and in either mode its variants' allele frequencies are the "
-            "ones the VCF gives; where its variants are dense, it can still report a window by "
+            "AF of those dictionaries (an indel's, of the index's indel log), which CRISPRitz "
+            "add-variants copied from its VCF (a variant whose AF they give as 0, or not at all, "
+            "has no frequency); where its variants are dense, it can still report a window by "
             "its greedy worst-case alignment, whose listed carriers need not carry every variant "
             "in it. To get the tiers, rebuild the index with build-index-only --samplesID, or "
             "download a prebuilt one (crisprme.py download --what index --index-name "
             "NRG_3_hg38+hg38_HGDP1kGP). "), out)
+        self.assertNotIn("the VCF gives", out)
         self.assertEqual(self.recorded(), "ds\n")
         self.assertEqual(self.recorded(".variant_datasets"), "ds\n")
 

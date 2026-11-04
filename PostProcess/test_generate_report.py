@@ -892,9 +892,10 @@ class TestGenerateReport(unittest.TestCase):
     def test_search_mode_row_of_a_per_sample_search_without_the_dict_less_tiers(self):
         """An index built without --samplesID (the benchmark complete-test's, the one the
         documented self-test builds) has only the classic per-sample dictionaries. On it a
-        --per-sample search names the carriers, with the VCF's allele frequencies, and no
-        CONFIRMED/PUTATIVE cis phasing, SNP+SNP co-occurrence or exact joint AF, as
-        complete-search's banner says; and a dense window can still come as its greedy
+        --per-sample search names the carriers, with the AF of those dictionaries (an indel's,
+        of the index's indel log, as on any index), which CRISPRitz add-variants copied from
+        the VCF, and no CONFIRMED/PUTATIVE cis phasing, SNP+SNP co-occurrence or exact joint
+        AF, as complete-search's banner says; and a dense window can still come as its greedy
         worst-case alignment, whose listed carriers need not carry all of its variants. The
         Search mode row promised CONFIRMED cis phasing and exact joint AF for every
         haplotype all the same. complete-search records the datasets it says this of
@@ -922,9 +923,12 @@ class TestGenerateReport(unittest.TestCase):
             "<code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample dictionaries: the "
             "CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint "
             "allele frequency come from those tiers, and none of them is reported for its "
-            "variants, whose allele frequencies are the ones the VCF gives. Where its variants "
-            "are dense, a window can still be reported by its greedy worst-case alignment, "
-            "flagged in <code>High_complexity_region</code> "
+            "variants, whose allele frequencies are the <code>AF</code> of those dictionaries "
+            "(an indel's, of the index's indel log), which CRISPRitz <code>add-variants</code> "
+            "copied from its VCF: a variant whose <code>AF</code> they give as 0, or not at "
+            "all, has no frequency. Where its variants are dense, a window can still be "
+            "reported by its greedy worst-case alignment, flagged in "
+            "<code>High_complexity_region</code> "
             "(<code>High_variant_density_region</code> in the integrated results), whose listed "
             "carriers need not carry every variant in it. To get the tiers, rebuild the index "
             "with <code>build-index-only --samplesID</code>, or download a prebuilt one "
@@ -934,6 +938,7 @@ class TestGenerateReport(unittest.TestCase):
         for said in ("named carrier samples only for <code>hg38_1000G</code>, "
                      "<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
                      "none of them is reported for their variants",
+                     "which CRISPRitz <code>add-variants</code> copied from their VCFs: a variant",
                      "Where their variants are dense"):
             self.assertIn(said, two)
         # (a population-level row: test_a_population_level_search_without_the_tiers_says_so_too)
@@ -967,11 +972,19 @@ class TestGenerateReport(unittest.TestCase):
               "per-superpopulation frequencies are available in the interactive website.")
         for meta in (base, {**base, "untiered": []}, pop):
             self.assertEqual(af_row(meta), af)
+        # (the AF that add-variants copied into the classic dictionaries and the indel log,
+        # and none for a record whose INFO has AF at another place than the VCF's first
+        # record: test_no_text_ties_an_indels_or_snps_frequency_to_what_its_vcf_gives)
         self.assertEqual(af_row({**base, "untiered": one}), af.replace(
-            "directly. ", "directly. For " + named + ", it is instead the <code>AF</code> its VCF "
-            "gives, as rounded there (a rare variant can read 0, and its MAF is then blank). "))
+            "directly. ", "directly. For " + named + ", it is instead the <code>AF</code> of its "
+            "classic per-sample dictionaries (an indel's, of the index's indel log), which "
+            "<code>add-variants</code> copied from its VCF, as rounded there (a rare variant can "
+            "read 0). A variant whose <code>AF</code> they give as 0, or not at all, has no "
+            "frequency, and its MAF is then blank. "))
         self.assertIn("<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers, it is instead "
-                      "the <code>AF</code> their VCFs give", af_row({**base, "untiered": two}))
+                      "the <code>AF</code> of their classic per-sample dictionaries (an indel's, of "
+                      "the index's indel log), which <code>add-variants</code> copied from their "
+                      "VCFs,", af_row({**base, "untiered": two}))
 
         # the MAF footnote under the top-1000 tables (Section 6)
         foot = gr.maf_footnote("hg38+1000G")
@@ -1020,13 +1033,17 @@ class TestGenerateReport(unittest.TestCase):
                 "population-level search."),
             "MAF": (
                 " For " + named + ", no joint allele frequency is computed, and each variant's "
-                "frequency is the <code>AF</code> its VCF gives, as rounded there: one whose "
-                "<code>AF</code> reads 0 is left out of the minimum, so the value shown can be "
-                "that of a far more common variant (it is blank where all of them read 0)."),
+                "frequency is the <code>AF</code> of its classic per-sample dictionaries (an "
+                "indel's, of the index's indel log), which CRISPRitz <code>add-variants</code> "
+                "copied from its VCF, as rounded there. One whose <code>AF</code> they give as 0, "
+                "or not at all, is left out of the minimum, so the value shown can be that of a "
+                "far more common variant (it is blank where none of them has a frequency)."),
         }
         self.assertEqual(entries(gr.build_score_legend_html(one)),
                          [(t, d + added.get(t, "")) for t, d in gr._SCORE_LEGEND])
-        self.assertIn("frequency is the <code>AF</code> their VCFs give",
+        self.assertIn("frequency is the <code>AF</code> of their classic per-sample dictionaries "
+                      "(an indel's, of the index's indel log), which CRISPRitz "
+                      "<code>add-variants</code> copied from their VCFs,",
                       gr.build_score_legend_html(two))
         # in a search that also has a dataset with the tiers no row reads so, as the report
         # cannot tell a row's dataset, and the entry says that instead
@@ -1072,15 +1089,15 @@ class TestGenerateReport(unittest.TestCase):
             "haplotypes&rdquo;</strong>, and can be such an alignment."))
 
     def test_a_population_level_search_without_the_tiers_says_so_too(self):
-        """A population-level search of an index without the dict-less tiers reports the AF
-        its VCF gives as well (both modes decode the classic dictionaries), but its report
-        said AC/AN over the panel all the same (the Allele-frequency basis row, the MAF note),
-        as these texts did whatever the index; and its Search mode row, as the banner, the
-        legend's MAF and Observed entries and the Section-6 caption said that --per-sample
-        gives CONFIRMED cis phasing, the exact joint AF and the true cis carriers, which it
-        does not give there. complete-search now records such datasets in either mode, and
-        each text says what holds for them; without the record, as with the tiers, each is
-        as it was, byte for byte."""
+        """A population-level search of an index without the dict-less tiers reports a SNP
+        with the AF that CRISPRitz add-variants copied into the classic dictionaries from the
+        VCF as well (both modes decode them), but its report said AC/AN over the panel all the
+        same (the Allele-frequency basis row, the MAF note), as these texts did whatever the
+        index; and its Search mode row, as the banner, the legend's MAF and Observed entries
+        and the Section-6 caption said that --per-sample gives CONFIRMED cis phasing, the
+        exact joint AF and the true cis carriers, which it does not give there. complete-search
+        now records such datasets in either mode, and each text says what holds for them;
+        without the record, as with the tiers, each is as it was, byte for byte."""
         self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
         gr._PER_SAMPLE = False  # (build_report sets it from .search_mode)
         base = {"datasets": "hg38_1000G", "mm": "4", "bdna": 1, "brna": 1, "max_edits": "6",
@@ -1102,15 +1119,19 @@ class TestGenerateReport(unittest.TestCase):
             "<code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample dictionaries, "
             "<code>--per-sample</code> names the carrier samples only: the CONFIRMED/PUTATIVE "
             "cis phasing and the exact joint allele frequency come from those tiers, and in "
-            "either mode its variants' allele frequencies are the ones the VCF gives; where its "
-            "variants are dense, it can still report a window by its greedy worst-case "
-            "alignment, whose listed carriers need not carry every variant in it. To get the "
+            "either mode its variants' allele frequencies are the <code>AF</code> of those "
+            "dictionaries (an indel's, of the index's indel log), which CRISPRitz "
+            "<code>add-variants</code> copied from its VCF (a variant whose <code>AF</code> they "
+            "give as 0, or not at all, has no frequency); where its variants are dense, it can "
+            "still report a window by its greedy worst-case alignment, whose listed carriers "
+            "need not carry every variant in it. To get the "
             "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
             "download a prebuilt one (<code>crisprme.py download --what index --index-name "
             "NRG_3_hg38+hg38_HGDP1kGP</code>). ")))
         plural = cell({**base, "untiered": two}, "Search mode")
         for said in ("<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
                      "in either mode their variants' allele frequencies",
+                     "which CRISPRitz <code>add-variants</code> copied from their VCFs (a variant",
                      "where their variants are dense"):
             self.assertIn(said, plural)
         # the Allele-frequency basis row reads as in a per-sample report (the MAF note under
@@ -1119,7 +1140,9 @@ class TestGenerateReport(unittest.TestCase):
         for meta in ({}, {"untiered": one}, {"untiered": two}):
             self.assertEqual(cell({**base, **meta}, "Allele-frequency basis"),
                              cell({**per_sample, **meta}, "Allele-frequency basis"))
-        self.assertIn("For " + named + ", it is instead the <code>AF</code> its VCF gives",
+        self.assertIn("For " + named + ", it is instead the <code>AF</code> of its classic "
+                      "per-sample dictionaries (an indel's, of the index's indel log), which "
+                      "<code>add-variants</code> copied from its VCF,",
                       cell({**base, "untiered": one}, "Allele-frequency basis"))
 
         # the legend's Observed and MAF entries: what --per-sample gives there
@@ -1134,9 +1157,11 @@ class TestGenerateReport(unittest.TestCase):
                          "any of its variants rather than its exact cis carriers."),
             "MAF": (" For " + named + ", no joint allele frequency is computed under "
                     "<code>--per-sample</code> either, and each variant's frequency is the "
-                    "<code>AF</code> its VCF gives, as rounded there: one whose <code>AF</code> "
-                    "reads 0 is left out of the minimum, so the value shown can be that of a far "
-                    "more common variant (it is blank where all of them read 0)."),
+                    "<code>AF</code> of its classic per-sample dictionaries (an indel's, of the "
+                    "index's indel log), which CRISPRitz <code>add-variants</code> copied from its "
+                    "VCF, as rounded there. One whose <code>AF</code> they give as 0, or not at "
+                    "all, is left out of the minimum, so the value shown can be that of a far more "
+                    "common variant (it is blank where none of them has a frequency)."),
         }
         self.assertEqual(entries(gr.build_score_legend_html(one)),
                          [(t, d + added.get(t, "")) for t, d in gr._SCORE_LEGEND])
@@ -1186,7 +1211,8 @@ class TestGenerateReport(unittest.TestCase):
         named = "<code>hg38_1000G_HGDP</code>, which has no dict-less tiers"
         for said in ("named carrier samples only for " + named,
                      # the Allele-frequency basis row, the MAF footnote, the legend
-                     "For " + named + ", it is instead the <code>AF</code> its VCF gives",
+                     "For " + named + ", it is instead the <code>AF</code> of its classic "
+                     "per-sample dictionaries (an indel's, of the index's indel log)",
                      "For " + named + ", a SNP's frequency is instead the <code>AF</code> of its "
                      "classic per-sample dictionaries",
                      "On " + named + ", a dense window flagged in",
@@ -1198,7 +1224,8 @@ class TestGenerateReport(unittest.TestCase):
         with open(os.path.join(rd, ".search_mode"), "w") as h:
             h.write("population-level")
         html = report("population")
-        for said in ("For " + named + ", it is instead the <code>AF</code> its VCF gives",
+        for said in ("For " + named + ", it is instead the <code>AF</code> of its classic "
+                     "per-sample dictionaries (an indel's, of the index's indel log)",
                      "For " + named + ", a SNP's frequency is instead the <code>AF</code> of its "
                      "classic per-sample dictionaries",
                      "On " + named + " (<code>Dictionaries/registry_&lt;vcf&gt;/</code> and "
@@ -2271,29 +2298,42 @@ class TestGenerateReport(unittest.TestCase):
         what is not true in general: the MAF note, that an indel has the AF its VCF gives and
         that one whose VCF gives it an AF of 0, or none, is blank; the README and METHODS
         sections 3 and 7, that an indel's frequency is the AF its VCF gives "on every index";
-        the text fragment, that only an indel whose AF is 0 or missing is blank. Each now names
-        the AF the index holds (its indel log, or, on an index without the dict-less tiers, a
-        SNP's classic per-sample dictionaries); METHODS section 8, the README and the merge
-        recipe state the limit, and docs/DESIGN_mega_index.md no longer says that the shipped
-        mega's merge gives its indels AF_max. When CRISPRitz is fixed and the logs rebuilt,
-        this test changes with METHODS."""
+        the text fragment, that only an indel whose AF is 0 or missing is blank. And, of a
+        dataset without the dict-less tiers, where a SNP's frequency is its dictionaries', the
+        report's Search mode and Allele-frequency basis rows and its legend's MAF entry, the
+        README's --per-sample text and the fragment said that every variant's frequency is the
+        AF its VCF gives (complete-search's banners too: test_build_index_only_atomic). Each now
+        names the AF the index holds (a SNP's in the classic per-sample dictionaries on an index
+        without the tiers, an indel's in its indel log, as add-variants copied them); METHODS
+        section 8, the README and the merge recipe state the limit, and
+        docs/DESIGN_mega_index.md and merge_mega_sites.sh no longer say that a plain INFO/AF =
+        AF_max reaches every indel (it reaches those laid out like the first record), nor that
+        the shipped mega's merge gives its indels AF_max. When CRISPRitz is fixed and the logs
+        rebuilt, this test changes with METHODS."""
         import glob
         import html as htmlmod
+        import shutil
 
         def vcf_af_claims(text):
-            """The lines of ``text`` with a clause that names an indel (the index's indel log
-            is none) and ties a frequency to what the VCF gives, or to "every index", or says
-            that "only an indel" is so."""
+            """The lines of ``text`` with a clause that ties a variant's frequency to what the
+            VCF gives, whatever variant it names: a frequency or AF that its, their or the VCF
+            gives, or the VCF's AF or allele frequency; or with a clause that names an indel
+            (the index's indel log is none) and ties it to what the VCF gives, to "every
+            index", or says that "only an indel" is so."""
             found = []
             plain = htmlmod.unescape(re.sub(r"<[^>\n]*>", " ", text))
             for m in re.finditer(r"[^.;]+", plain):
                 clause = m.group(0)
-                if not re.search(r"\bindels?\b(?!\s+logs?\b)", clause, re.I):
-                    continue
-                k = re.search(r"\bVCFs?\s+gives?\b|\bon every index\b|\bonly an indel\b",
+                k = re.search(r"\b(?:AFs?|frequenc(?:y|ies))\b\W+(?:[\w'’-]+\W+){0,5}?"
+                              r"(?:its|their|the)\s+VCFs?\s+gives?\b|"
+                              r"\bVCFs?['’]s?\s+\W*(?:AF\b|allele\s+frequenc|frequenc)",
                               clause, re.I)
-                if k:
-                    found.append(plain.count("\n", 0, m.start() + k.start()) + 1)
+                if not k and re.search(r"\bindels?\b(?!\s+logs?\b)", clause, re.I):
+                    k = re.search(r"\bVCFs?\s+gives?\b|\bon every index\b|\bonly an indel\b",
+                                  clause, re.I)
+                if k:  # (the line of its "VCF", if it names one)
+                    at = max(k.group(0).upper().find("VCF"), 0)
+                    found.append(plain.count("\n", 0, m.start() + k.start() + at) + 1)
             return found
 
         # the scan finds what the texts said, and not what they say now
@@ -2306,20 +2346,71 @@ class TestGenerateReport(unittest.TestCase):
                                        "blank, as the note says of any variant"), [1])
         self.assertEqual(vcf_af_claims("SNPs are AC/AN; and an indel's is the `AF` its\nVCF "
                                        "gives, on every index."), [2])
+        # (and of a dataset without the tiers, naming no indel)
+        self.assertEqual(vcf_af_claims("and none of them is reported for its variants, whose "
+                                       "allele frequencies are the ones the\nVCF gives. Where"),
+                         [2])
+        self.assertEqual(vcf_af_claims("and in either mode their variants' allele frequencies "
+                                       "are the ones the VCF gives; where"), [1])
+        self.assertEqual(vcf_af_claims("For <code>x</code>, it is instead the <code>AF</code> "
+                                       "their VCFs give, as rounded there"), [1])
+        self.assertEqual(vcf_af_claims("and each variant's frequency is the <code>AF</code> its "
+                                       "VCF gives, as rounded there"), [1])
+        self.assertEqual(vcf_af_claims("the carrier samples are named, with the allele "
+                                       "frequencies the\nVCF gives, and no"), [2])
+        self.assertEqual(vcf_af_claims("so a population-level search reports the `AF` the VCF "
+                                       "gives\ntoo"), [1])
+        self.assertEqual(vcf_af_claims("(a variant's frequency is its VCF's `AF`, as "
+                                       "`add-variants` copied it, not AC/AN"), [1])
         self.assertEqual(vcf_af_claims("the self-test's 1000 Genomes VCF gives two decimals, so "
                                        "a rare variant reads 0"), [])
         self.assertEqual(vcf_af_claims("an indel whose <code>AF</code> the index's indel log "
                                        "gives as 0, or not at all"), [])
         self.assertEqual(vcf_af_claims("the indel log holds what the VCF gives"), [])
-        # the report's texts: the MAF note in each form, the legend in each, and a built report
-        for text in (gr.maf_footnote("hg38+1000G"),
-                     gr.maf_footnote("hg38+1000G", untiered=["hg38_1000G"]),
-                     gr.maf_footnote("hg38+1000G", untiered=["hg38_1000G", "hg38_x"]),
-                     gr.maf_footnote(reference_only=True), gr.build_score_legend_html(),
-                     gr.build_score_legend_html(["hg38_1000G"])):
+        self.assertEqual(vcf_af_claims("which CRISPRitz `add-variants` copied from the VCF's "
+                                       "`INFO/AF` when the index was built"), [])
+        self.assertEqual(vcf_af_claims("whose allele frequencies are the <code>AF</code> of those "
+                                       "dictionaries (an indel's, of the index's indel log), "
+                                       "which CRISPRitz <code>add-variants</code> copied from "
+                                       "its VCF"), [])
+        # the report's texts: the MAF note in each form, the legend in each (in a per-sample
+        # report, when every dataset of the search lacks the tiers or not, and in a
+        # population-level one), the Search mode and Allele-frequency basis rows in either
+        # mode, and a built report with the tiers and without them, in either mode
+        one, two = ["hg38_1000G"], ["hg38_1000G", "hg38_x"]
+        texts = [gr.maf_footnote(reference_only=True)]
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
+        self.addCleanup(setattr, gr, "_UNTIERED", False)
+        for untiered in (None, one, two):
+            texts.append(gr.maf_footnote("hg38+1000G", untiered=untiered))
+            for per_sample, none_tiered in ((True, True), (True, False), (False, False)):
+                gr._PER_SAMPLE, gr._UNTIERED = per_sample, none_tiered
+                texts.append(gr.build_score_legend_html(untiered))
+            for mode in ("per-sample", "population-level"):
+                texts.append(gr.render_inputs_criteria({
+                    "datasets": "hg38+1000G", "mm": "4", "bdna": 1, "brna": 1,
+                    "max_edits": "6", "search_mode": mode, "untiered": untiered}))
+        gr._PER_SAMPLE, gr._UNTIERED = False, False
+        self.assertEqual(len(texts), 1 + 3 * 6)
+        for text in texts:
             self.assertEqual(vcf_af_claims(text), [], text)
         _, _, extract = self._build_and_extract()
         self.assertEqual(vcf_af_claims(self._read(os.path.join(extract, "report.html"))), [])
+        rd = os.path.join(self.tmp, "Results", "scan")
+        os.makedirs(rd)
+        shutil.copy(self.tsv, rd)
+        with open(os.path.join(rd, ".untiered_datasets"), "w") as h:
+            h.write("hg38_1000G_HGDP\n")
+        for mode in ("per-sample", "population-level"):
+            with open(os.path.join(rd, ".search_mode"), "w") as h:
+                h.write(mode)
+            out = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir,
+                                  out_zip=os.path.join(self.tmp, f"scan_{mode}_report.zip"))
+            with zipfile.ZipFile(out) as zf:
+                html = zf.read("report.html").decode("utf-8")
+            self.assertIn("<code>hg38_1000G_HGDP</code>, which has no dict-less tiers", html)
+            self.assertIn("copied from its VCF", html)
+            self.assertEqual(vcf_af_claims(html), [], mode)
         # the README, METHODS, docs/ (md and html: the website's example report prints the
         # note) and the text fragments of the release in the making; not CHANGELOG.md, which
         # is history
@@ -2333,12 +2424,13 @@ class TestGenerateReport(unittest.TestCase):
         found = ["%s:%d" % (os.path.relpath(p, repo), n) for p in pages
                  for n in vcf_af_claims(self._read(p))]
         self.assertEqual(found, [])
-        # the limit, where it is stated (the recipe's header comment read without its "#")
-        readme, methods, design, recipe, recipe_doc, formats = (" ".join(re.sub(
+        # the limit, where it is stated (the recipes' comments read without their "#")
+        readme, methods, design, recipe, recipe_doc, formats, mega_recipe = (" ".join(re.sub(
             r"(?m)^[ \t]*#", " ", self._read(os.path.join(repo, *p))).split()) for p in (
             ("README.md",), ("METHODS.md",), ("docs", "DESIGN_mega_index.md"),
             ("seq_script", "merge_panels", "merge_vcf_panels.sh"),
-            ("seq_script", "merge_panels", "README.md"), ("docs", "INPUT_FORMATS.md")))
+            ("seq_script", "merge_panels", "README.md"), ("docs", "INPUT_FORMATS.md"),
+            ("seq_script", "merge_panels", "merge_mega_sites.sh")))
         self.assertIn("**`INFO/AF`** — a **numeric** allele frequency, at **one place in `INFO` "
                       "in every record**: CRISPRitz `add-variants` reads each record's `AF` where "
                       "the first record has it, so a record that has it elsewhere gets none",
@@ -2348,6 +2440,9 @@ class TestGenerateReport(unittest.TestCase):
                       "gets none: its indel has no frequency on any index, nor its SNP on an "
                       "index without the tiers. Of the shipped indexes this affects only HPRC's "
                       "chrY;", readme)
+        self.assertIn("it names the carrier samples only, with the `AF` of the classic per-sample "
+                      "dictionaries (an indel's, of the index's indel log), which CRISPRitz "
+                      "`add-variants` copied from the VCF (see the MAF column below)", readme)
         self.assertIn("`add-variants` also looks for the `AF` key in the VCF's first record "
                       "only, and reads every record's `AF` at that place in `INFO`: a record that "
                       "has it at another place gets none, in the index's indel log and in its "
@@ -2359,7 +2454,7 @@ class TestGenerateReport(unittest.TestCase):
                      "(HPRC's chrY log needs rebuilding with it)."):
             self.assertIn(said, methods)
         # (a SNP has the same limit only where the dictionaries give its frequency: METHODS
-        # section 3, and the MAF note's clause for datasets without the tiers)
+        # section 3, and the report's texts for datasets without the tiers)
         self.assertIn("a SNP has the `AF` of the classic per-sample dictionaries, which "
                       "`add-variants` also copied from the VCF's `INFO/AF`, as rounded there, "
                       "with the same limit as an indel's (§8).", methods)
@@ -2369,11 +2464,30 @@ class TestGenerateReport(unittest.TestCase):
                       "another place gets NO AF", recipe)
         self.assertIn("But `add-variants` looks for the key in the VCF's first record only and "
                       "reads every record's `AF` at that place in `INFO`", recipe_doc)
-        self.assertNotIn("so the **global** AF_max reaches indel off-targets through the "
-                         "existing fake-indel MAF path with no post-analysis change", design)
+        # merge_mega_sites.sh writes AF after the site's AF_<src> keys and AF_max, so its
+        # place moves with the number of sources at the site: its plain AF reaches only the
+        # indels whose site has as many sources as the first record's
+        for said in ("so the **global** AF_max reaches indel off-targets through the existing "
+                     "fake-indel MAF path with no post-analysis change",
+                     "so on an index built from its output the **global** AF_max would reach "
+                     "indel off-targets through the existing fake-indel MAF path"):
+            self.assertNotIn(said, design)
+        self.assertIn("On an index built from its output the **global** AF_max would reach an "
+                      "indel off-target through the existing fake-indel MAF path just where the "
+                      "indel's site has as many sources as the VCF's first record: CRISPRitz "
+                      "`add-variants` reads each record's `AF` at the place in `INFO` where the "
+                      "first record has it (a known limit, METHODS section 8)", design)
         self.assertIn("`mega_gw_merge.sh` (read by `mega_build_indels.sh`), writes only "
                       "`AF_<src>` and `AF_max`, with no plain `INFO/AF`, so the shipped mega's "
                       "indel logs hold no AF", design)
+        self.assertNotIn("so INDEL off-targets carry the global AF_max through the existing path",
+                         mega_recipe)
+        self.assertIn("BUT add-variants looks for the AF key in the VCF's FIRST record only, and "
+                      "reads every later record's AF at the same place in INFO. Here AF comes "
+                      "after the site's AF_<src> keys and AF_max, and the number of AF_<src> keys "
+                      "is the number of sources that hold the site, so only an indel whose site "
+                      "has as many sources as the first record's gets the global AF_max through "
+                      "that path; every other one gets NO AF in the log", mega_recipe)
 
     def test_a_rows_rsids_and_mafs_come_in_the_merges_order_not_its_variants(self):
         """A known limit, to be fixed in the next release (METHODS section 8): the post-

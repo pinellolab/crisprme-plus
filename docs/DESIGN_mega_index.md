@@ -127,14 +127,19 @@ from a **separate sites-only sidecar**:
   no-op if absent) and emits a companion `<output>.indel_af.tsv` (one row per indel
   off-target: chrom, off-target start, indel pos/ref/alt, per-dataset AF, AF_max) —
   mirrors the cooc companion, never touches the fixed indel columns/scores.
-- `merge_mega_sites.sh` also writes a plain `INFO/AF = AF_max`, so on an index built
-  from its output the **global** AF_max would reach indel off-targets through the
-  existing fake-indel MAF path. The as-run genome-wide merge that made the shipped mega's
-  VCFs, `mega_gw_merge.sh` (read by `mega_build_indels.sh`), writes only `AF_<src>` and
-  `AF_max`, with no plain `INFO/AF`, so the shipped mega's indel logs hold no AF (for
-  none of its 13,853,761 indels, 222,283 of them on chr22) and a row of an indel alone
-  has no MAF there; the sidecar gives each indel's **per-dataset** AF and its `AF_max`,
-  in the `indel_af.tsv` companion.
+- `merge_mega_sites.sh` also writes a plain `INFO/AF = AF_max`, after the site's
+  `AF_<src>` keys and `AF_max`. On an index built from its output the **global** AF_max
+  would reach an indel off-target through the existing fake-indel MAF path just where
+  the indel's site has as many sources as the VCF's first record: CRISPRitz
+  `add-variants` reads each record's `AF` at the place in `INFO` where the first record
+  has it (a known limit, METHODS section 8), and this `AF`'s place moves with the number
+  of sources at the site, so every other indel would get none. The as-run genome-wide
+  merge that made the shipped mega's VCFs, `mega_gw_merge.sh` (read by
+  `mega_build_indels.sh`), writes only `AF_<src>` and `AF_max`, with no plain `INFO/AF`,
+  so the shipped mega's indel logs hold no AF (for none of its 13,853,761 indels,
+  222,283 of them on chr22) and a row of an indel alone has no MAF there; the sidecar
+  gives each indel's **per-dataset** AF and its `AF_max`, in the `indel_af.tsv`
+  companion.
 - Tests: `test_build_mega_indel_af.py`. Remaining: surface `indel_af.tsv` in the
   report (same merge pattern as the cooc companion) + validate end-to-end in the
   assembly smoke (the `analisi_indels_NNN.py` hook is guarded but untested in a live

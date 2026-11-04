@@ -1884,8 +1884,10 @@ def change_url(
         pass
     # and, as complete-search does, the variant datasets of the search without the
     # dict-less tiers (.untiered_datasets), beside every one it names (.variant_datasets):
-    # the report says what their results carry, the allele frequencies their VCF gives,
-    # and what --per-sample gives there (the form offers it only with a genotype store).
+    # the report says what their results carry, the allele frequencies of their classic
+    # dictionaries (an indel's, of its indel log), which CRISPRitz add-variants copied from
+    # their VCF, and what --per-sample gives there (the form offers it only with a genotype
+    # store).
     # A sites-only one without them (its VCFs have no sample columns) is in neither: with
     # no allele-frequency registry, its search reports none of its variants
     # (samplesid_problem), and none of that holds of it

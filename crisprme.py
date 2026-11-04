@@ -3214,16 +3214,19 @@ def complete_search() -> None:
     # The CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint AF
     # come from the dict-less tiers (registry_<vcf>/, genotypes_<vcf>/). An index without
     # either -- built without --samplesID, as the benchmark complete-test builds its own --
-    # has only the classic per-sample dictionaries, which name the carriers, each variant
-    # with the allele frequency its VCF gives (in either mode), and no more. Their per-sample
-    # post-analysis still reports a window denser than CRISPRME_IUPAC_CAP by its greedy
-    # worst-case alignment, listing the carriers of any of the variants it takes
-    # (new_simple_analysis.py). (each dataset once: a --vcf list may name one twice) A
-    # sites-only dataset without them (its VCFs have no sample columns) is in neither list:
-    # its dictionaries name no carrier, and a search reports a sites-only VCF's variants
-    # only with a registry's allele frequencies (docs/DESIGN_mega_index.md), so it reports
-    # none of its variants, in either mode -- what the banner and the report say of the
-    # others does not hold of it, and none of the rows is its.
+    # has only the classic per-sample dictionaries, which name the carriers, each SNP with
+    # the AF that CRISPRitz add-variants copied into them from the VCF (in either mode; an
+    # indel has the AF it copied into the indel log, as on any index; none for a record
+    # whose INFO has AF at another place than the VCF's first record: METHODS section 8),
+    # and no more. Their per-sample post-analysis still reports a window denser than
+    # CRISPRME_IUPAC_CAP by its greedy worst-case alignment, listing the carriers of any of
+    # the variants it takes (new_simple_analysis.py). (each dataset once: a --vcf list may
+    # name one twice) A sites-only dataset without them (its VCFs have no sample columns)
+    # is in neither list: its dictionaries name no carrier, and a search reports a
+    # sites-only VCF's variants only with a registry's allele frequencies
+    # (docs/DESIGN_mega_index.md), so it reports none of its variants, in either mode --
+    # what the banner and the report say of the others does not hold of it, and none of
+    # the rows is its.
     _searched, _untiered = [], []
     if variant:
         _dict_root = os.path.join(current_working_directory, "Dictionaries")
@@ -3253,7 +3256,10 @@ def complete_search() -> None:
                f"per-sample dictionaries, --per-sample names the carrier samples only: the "
                f"CONFIRMED/PUTATIVE cis phasing and the exact joint AF come from those tiers, "
                f"and in either mode {'its' if _one else 'their'} variants' allele frequencies "
-               f"are the ones the VCF gives; where {'its' if _one else 'their'} variants are "
+               f"are the AF of those dictionaries (an indel's, of the index's indel log), which "
+               f"CRISPRitz add-variants copied from {'its VCF' if _one else 'their VCFs'} (a "
+               f"variant whose AF they give as 0, or not at all, has no frequency); "
+               f"where {'its' if _one else 'their'} variants are "
                f"dense, it can still report a window by its greedy worst-case alignment, whose "
                f"listed carriers need not carry every variant in it. To get the tiers, rebuild "
                f"the index with build-index-only --samplesID, or download a prebuilt one "
@@ -3272,8 +3278,11 @@ def complete_search() -> None:
                 f"and genotypes_<vcf>/), only the classic per-sample dictionaries: the "
                 f"CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact "
                 f"joint AF come from those tiers, and none of them is reported for "
-                f"{'its' if _one else 'their'} variants, whose allele frequencies are the ones "
-                f"the VCF gives. Where {'its' if _one else 'their'} variants are dense, a "
+                f"{'its' if _one else 'their'} variants, whose allele frequencies are the AF of "
+                f"those dictionaries (an indel's, of the index's indel log), which CRISPRitz "
+                f"add-variants copied from {'its VCF' if _one else 'their VCFs'}: a variant whose "
+                f"AF they give as 0, or not at all, has no frequency. "
+                f"Where {'its' if _one else 'their'} variants are dense, a "
                 f"window can still be reported by its greedy worst-case alignment, flagged in "
                 f"High_variant_density_region, whose listed carriers need not carry every "
                 f"variant in it. To get the tiers, rebuild the index with build-index-only "

@@ -151,8 +151,9 @@ class TestSearchReuse(unittest.TestCase):
 class TestDatasetsWithoutTheTiers(unittest.TestCase):
     """A search of a variant dataset with neither Dictionaries/registry_<vcf>/ nor
     genotypes_<vcf>/ (an index built without --samplesID, such as the one the benchmark
-    complete-test builds) reports the allele frequencies its VCF gives, and the form runs it
-    population-level (it offers per-sample only with a genotype store). complete-search
+    complete-test builds) reports the allele frequencies of its classic dictionaries (an
+    indel's, of its indel log), which CRISPRitz add-variants copied from its VCF, and the form
+    runs it population-level (it offers per-sample only with a genotype store). complete-search
     records such datasets (.untiered_datasets, beside .variant_datasets), so that the report
     says so, and what --per-sample gives there; the web job, which launches the search
     script itself, now records them too."""

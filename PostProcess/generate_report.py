@@ -1725,10 +1725,12 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     _ut = meta.get("untiered") or None
     _one = bool(_ut) and len(_ut) == 1
     if _ut and meta.get("search_mode") == "per-sample":
-        # their classic per-sample dictionaries name the carriers, each variant with the
-        # AF its VCF gives, and their post-analysis still reports a window denser than
-        # CRISPRME_IUPAC_CAP by its greedy worst-case alignment, listing the carriers of any
-        # of the variants it takes
+        # their classic per-sample dictionaries name the carriers, each SNP with the AF that
+        # CRISPRitz add-variants copied into them from the VCF (an indel has the AF it copied
+        # into the indel log, as on any index), none for a record whose INFO has AF at
+        # another place than the VCF's first record (METHODS section 8; maf_footnote), and
+        # their post-analysis still reports a window denser than CRISPRME_IUPAC_CAP by its
+        # greedy worst-case alignment, listing the carriers of any of the variants it takes
         sm_note = (
             "<strong>Per-sample</strong> &mdash; per-sample genotypes resolved into named "
             "carrier samples only for " + _untiered_named(_ut) + " "
@@ -1736,8 +1738,12 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
             "<code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample dictionaries: the "
             "CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint "
             "allele frequency come from those tiers, and none of them is reported for "
-            f"{'its' if _one else 'their'} variants, whose allele frequencies are the ones the "
-            f"VCF gives. Where {'its' if _one else 'their'} variants are dense, a window can "
+            f"{'its' if _one else 'their'} variants, whose allele frequencies are the "
+            "<code>AF</code> of those dictionaries (an indel's, of the index's indel log), "
+            "which CRISPRitz <code>add-variants</code> copied from "
+            f"{'its VCF' if _one else 'their VCFs'}: a variant whose <code>AF</code> they give "
+            "as 0, or not at all, has no frequency. "
+            f"Where {'its' if _one else 'their'} variants are dense, a window can "
             "still be reported by its greedy worst-case alignment, flagged in "
             "<code>High_complexity_region</code> (<code>High_variant_density_region</code> in "
             "the integrated results), whose listed carriers need not carry every variant in "
@@ -1767,7 +1773,11 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
                 "dictionaries, <code>--per-sample</code> names the carrier samples only: the "
                 "CONFIRMED/PUTATIVE cis phasing and the exact joint allele frequency come from "
                 f"those tiers, and in either mode {'its' if _one else 'their'} variants' allele "
-                f"frequencies are the ones the VCF gives; where {'its' if _one else 'their'} "
+                "frequencies are the <code>AF</code> of those dictionaries (an indel's, of the "
+                "index's indel log), which CRISPRitz <code>add-variants</code> copied from "
+                f"{'its VCF' if _one else 'their VCFs'} (a variant whose <code>AF</code> they "
+                "give as 0, or not at all, has no frequency); "
+                f"where {'its' if _one else 'their'} "
                 "variants are dense, it can still report a window by its greedy worst-case "
                 "alignment, whose listed carriers need not carry every variant in it. To get the "
                 "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
@@ -1793,9 +1803,12 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
          f"{_esc(ds)} panel: for genotyped databases this is AC/AN across the "
          f"panel; a frequency-only database contributes its reported population "
          f"allele frequency directly. "
-         + (f"For {_untiered_named(_ut)}, it is instead the <code>AF</code> "
-            f"{'its VCF gives' if _one else 'their VCFs give'}, as rounded there (a rare "
-            "variant can read 0, and its MAF is then blank). " if _ut else "")
+         + (f"For {_untiered_named(_ut)}, it is instead the <code>AF</code> of "
+            f"{'its' if _one else 'their'} classic per-sample dictionaries (an indel's, of the "
+            "index's indel log), which <code>add-variants</code> copied from "
+            f"{'its VCF' if _one else 'their VCFs'}, as rounded there (a rare variant can read "
+            "0). A variant whose <code>AF</code> they give as 0, or not at all, has no "
+            "frequency, and its MAF is then blank. " if _ut else "")
          + "Per-dataset and per-superpopulation frequencies are available in the "
          "interactive website."),
         ("Off-target search criteria",
@@ -4095,7 +4108,9 @@ def build_score_legend_html(untiered=None):
         # what complete-search's banner says of them (and the Search mode row): a dense
         # window's greedy worst-case alignment lists the carriers of any of its variants
         # (and reads so when no dataset of the search has the tiers, _UNTIERED:
-        # _greedy_union), and each variant has the AF its VCF gives, with no joint AF
+        # _greedy_union), and each variant has the AF that CRISPRitz add-variants copied from
+        # the VCF into the classic dictionaries (an indel's, into the indel log), with no
+        # joint AF
         named = _untiered_named(untiered)
         extra = {
             "Observed": (
@@ -4117,11 +4132,13 @@ def build_score_legend_html(untiered=None):
             "MAF": (
                 f" For {named}, no joint allele frequency is computed"
                 + ("" if _PER_SAMPLE else " under <code>--per-sample</code> either")
-                + ", and each variant's frequency is the <code>AF</code> "
-                f"{'its VCF gives' if len(untiered) == 1 else 'their VCFs give'}, as rounded "
-                "there: one whose <code>AF</code> reads 0 is left out of the minimum, so the "
-                "value shown can be that of a far more common variant (it is blank where all of "
-                "them read 0)."),
+                + ", and each variant's frequency is the <code>AF</code> of "
+                f"{'its' if len(untiered) == 1 else 'their'} classic per-sample dictionaries (an "
+                "indel's, of the index's indel log), which CRISPRitz <code>add-variants</code> "
+                f"copied from {'its VCF' if len(untiered) == 1 else 'their VCFs'}, as rounded "
+                "there. One whose <code>AF</code> they give as 0, or not at all, is left out of "
+                "the minimum, so the value shown can be that of a far more common variant (it is "
+                "blank where none of them has a frequency)."),
         }
         legend = [(term, definition + extra.get(term, "")) for term, definition in legend]
     items = "".join(
