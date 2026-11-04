@@ -27,7 +27,8 @@ bulges of its index; now it says what Submit says, and Submit refuses the first 
 So it does of a dataset with no sample list, which Submit refused while the note offered
 its search: one whose VCFs have no list yet, and one whose index stays after its VCF
 dataset was removed in Settings, which takes the list with it. For that one Submit said
-to download its index again, which a locally built index cannot be.
+to download its index again, which a locally built index cannot be, and which Settings
+does not do for an index that is installed: it now says to remove a downloaded one first.
 
 Submit itself failed with a server error, and the page did nothing, when the genome or
 PAM selected was not installed (TestSubmitWithoutAGenomeOrPAM), as after Load Example on
@@ -350,16 +351,39 @@ class TestRefusedDatasets(_Install):
         self.assertEqual(note, (
             "No sample list for the variant dataset 'walkint': a search with it reads "
             "samplesIDs/hg38_walkint.samplesID.txt (one row per sample its VCFs genotype) and "
-            "fails at its end without it. Download its index again if it came from "
-            "HuggingFace, which installs the list; add the VCF dataset hg38_walkint again in "
-            "Settings, which writes the list from the VCF header; or add the file yourself, "
-            "then submit again."))
+            "fails at its end without it. If its index came from HuggingFace, remove the "
+            "index in Settings and download it again there, which installs the list; add the "
+            "VCF dataset hg38_walkint again in Settings, which writes the list from the VCF "
+            "header; or add the file yourself, then submit again."))
         self.assertEqual(self.submit("walkint", 1, 1), (False, [note]))
         # added again in Settings: its list is written, and its index serves the search
         upload()
         self.assertTrue(os.path.isfile(sid))
         self.assertEqual(self.note("walkint", 1, 1), "Up to 1 DNA/RNA bulge(s) available.")
         self.assertEqual(self.submit("walkint", 1, 1), (True, []))
+
+    def test_a_downloaded_index_without_its_sample_list(self):
+        # a downloaded index whose list is gone, with no VCF folder. The message said to
+        # download the index again, which installs the list (test_samplesid_emit), but
+        # Settings downloads no index that is installed, and `download --what index`
+        # skips a complete install whatever its list (test_crisprme_hf): it says to
+        # remove the index in Settings first, after which its download starts
+        name = "NRG_1_hg38+hg38_shipped"
+        os.remove(os.path.join(self.tmp, "samplesIDs", "hg38_shipped.samplesID.txt"))
+        note = self.note("shipped")
+        self.assertEqual(note, pu.samplesid_problem("hg38_shipped", "shipped"))
+        self.assertIn("If its index came from HuggingFace, remove the index in Settings and "
+                      "download it again there, which installs the list", note)
+        self.assertEqual(self.submit("shipped"), (False, [note]))
+        self.assertEqual(sp.add_index_hf(1, name)[2],
+                         f"Index '{name}' is already installed — nothing to download.")
+        sp.do_delete(1, f"index:{name}")
+        with patch.object(sp, "_catalog_size", return_value=0), \
+                patch.object(sp, "_preflight_disk", return_value=None), \
+                patch.object(sp, "launch_settings_job", return_value="job") as launch:
+            self.assertEqual(sp.add_index_hf(1, name)[0], "job")
+        launch.assert_called_once_with(
+            ["download", "--what", "index", "--index-name", name], "Download index")
 
 
 class _Form:
