@@ -127,7 +127,10 @@ Bulge-enabled searches need a genome **index**.
 ### Add a VCF dataset
 Variant datasets are large, so they are **fetched server-side** rather than
 uploaded from the browser: from HuggingFace, an existing server folder already on
-the machine (registered in place), or a chunked upload for a local file. Pick the
+the machine (registered in place), or a chunked upload for a local file. An upload
+takes a dataset's `.vcf.gz` files and their `.tbi` or `.csi` index, into a dataset
+added by upload or download: a server folder registered as a dataset is read where
+it is, and nothing is uploaded into it (copy the file into that folder). Pick the
 reference genome the VCF is called against on the card first: the search form
 offers the dataset for that genome, whatever the dataset's name. Your VCF does
 **not** need special preparation — a single multi-chromosome `.vcf.gz` is

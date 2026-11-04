@@ -152,6 +152,13 @@ and the Settings entries add tests to `test_settings_progress`, in unit-tests' o
   folder. It now measures and removes only an item the card lists, and says another is not
   found. Settings changes data in local mode only, which is how CRISPRme runs by default.
   Pre-existing, since 2.2.0. Covered by `PostProcess/test_settings_progress.py`.
+- **A VCF upload in Settings goes only into a dataset uploaded or downloaded there, and takes a
+  dataset's own files only.** An upload into a dataset registered as a server folder was written
+  through the registration into that folder, under any file name, a new file or one replacing a
+  file there: a request could write any file into any folder the web app's user can write. A
+  registered folder is now read where it is and nothing is uploaded into it, and an upload takes
+  `.vcf.gz` files and their `.tbi` or `.csi` index only (`docs/SETTINGS_DATA_MANAGER.md`).
+  Pre-existing, since 2.2.0. Covered by `PostProcess/test_settings_progress.py`.
 - **The indel steps of a search pass no chromosome name of a variant dataset to a shell.**
   A search with bulges takes each chromosome name of a variant dataset, read from the CHROM
   column of its VCFs (or from the per-chromosome indel logs named after it), into the shell

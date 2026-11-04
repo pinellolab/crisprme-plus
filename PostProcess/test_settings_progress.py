@@ -1359,7 +1359,7 @@ class TestRemovingADatasetRemovesItsOwnList(_SamplesIDCase):
 
 class TestVcfUploadWritesItsSampleList(_SamplesIDCase):
     names = _SID_NAMES + ["_validate_name", "_unusable_in_shell", "_write_vcf_marker",
-                          "_finalize_upload"]
+                          "_vcf_upload_problem", "_finalize_upload"]
 
     def test_uploaded_vcf_gets_its_marker_and_list(self):
         part = os.path.join(self.cwd, "Settings", "uploads", "walk.chr1.vcf.gz.part")
@@ -1733,8 +1733,8 @@ class TestSettingsRefusesNamesAShellReads(unittest.TestCase):
             ["_validate_name", "_unusable_in_shell", "_genome_upload_problem", "add_genome",
              "_write_vcf_marker", "add_vcf", "_fb_refresh", "add_pam", "_shlex_quote",
              "fetch_from_hprc", "_uploads_dir", "_unsafe_tar_member", "_genome_upload_assembly",
-             "_install_uploaded_genome", "_finalize_upload", "_MAX_UPLOAD_BYTES", "_fmt_size",
-             "_settings_upload_chunk"],
+             "_install_uploaded_genome", "_vcf_upload_problem", "_finalize_upload",
+             "_MAX_UPLOAD_BYTES", "_fmt_size", "_settings_upload_chunk"],
             current_working_directory=self.cwd,
             __file__=_SETTINGS_PAGE,
             sys=__import__("sys"),
@@ -2010,6 +2010,98 @@ class TestRemoveTakesAnItemTheCardLists(unittest.TestCase):
             for name in ("", ".", "..", "a/b", "../x", "/x", "hg38/.."):
                 with self.subTest(kind=kind, name=name), self.assertRaises(ValueError):
                     self.ns["_delete_targets"](kind, name)
+
+
+class TestVcfUploadIntoARegisteredFolder(unittest.TestCase):
+    """The upload route, add_vcf (which registers a folder of the server as a VCF dataset,
+    linking VCFs/<name> to it) and _finalize_upload, undecorated. An upload into a
+    registered dataset went through the link into that folder, under any file name, new
+    or replacing a file there: a request could write any file into any folder the server
+    can write. A registered folder is read where it is, and nothing is uploaded into it,
+    whenever it was registered; an upload takes a VCF dataset's own files only."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.cwd = os.path.join(self.root, "data")
+        for d in ("Genomes/hg38", "VCFs", "samplesIDs", "Settings/uploads"):
+            os.makedirs(os.path.join(self.cwd, d))
+        self.server = os.path.join(self.root, "server_folder")  # a folder of the server's
+        os.makedirs(self.server)
+        for name in ("existing.vcf.gz", "notes.txt"):
+            with open(os.path.join(self.server, name), "w") as fh:
+                fh.write("ORIGINAL\n")
+        self.ns = _load_functions(
+            ["_validate_name", "_unusable_in_shell", "_write_vcf_marker", "add_vcf",
+             "_uploads_dir", "_vcf_upload_problem", "_finalize_upload", "_MAX_UPLOAD_BYTES",
+             "_fmt_size", "_settings_upload_chunk"],
+            current_working_directory=self.cwd,
+            shutil=shutil,
+            ONLINE=False,
+            PreventUpdate=_PreventUpdate,
+            no_update=_NO_UPDATE,
+            _write_dataset_samplesid=lambda dataset: None,
+            _render_all_tables=lambda: "tables",
+            _render_storage=lambda: "storage",
+        )
+
+    def upload(self, name, body, dataset, index=0, total=1):
+        """One chunk of an upload, as the uploader sends it: the route's (text, status)."""
+        self.ns["request"] = _Request("vcf", name, body, dataset=dataset, genome="hg38")
+        self.ns["request"].headers.update({"X-Chunk-Index": str(index),
+                                           "X-Total-Chunks": str(total)})
+        return self.ns["_settings_upload_chunk"]()
+
+    def register(self, dataset):
+        said = self.ns["add_vcf"](1, dataset, "path", self.server, None, "hg38")[2]
+        self.assertEqual(said, f"Registered VCF dataset '{dataset}' for hg38.")
+
+    def assert_refused(self, answer, status=400):
+        self.assertEqual(answer[1], status, answer)
+        self.assertIn(" was registered from a folder on the server: its files are read "
+                      "there, and nothing is uploaded into it.", answer[0])
+
+    def test_nothing_is_uploaded_into_a_registered_folder(self):
+        self.register("regdir")
+        before = _tree(self.server, meta=True)
+        for name in ("new.chr1.vcf.gz", "existing.vcf.gz", "existing.vcf.gz.tbi"):
+            with self.subTest(name=name):
+                self.assert_refused(self.upload(name, b"UPLOADED\n", "regdir"))
+        self.assertEqual(_tree(self.server, meta=True), before)
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "Settings", "uploads")), [])
+        # registered while an upload into a dataset of its name was on its way, and named
+        # by a later chunk of another upload (each chunk sends its own names)
+        self.assertEqual(self.upload("x.chr1.vcf.gz", b"PART1\n", "later", 0, 2),
+                         ("chunk received", 200))
+        self.register("later")
+        self.assertEqual(self.upload("y.chr1.vcf.gz", b"PART1\n", "mine", 0, 2),
+                         ("chunk received", 200))
+        before = _tree(self.server, meta=True)
+        for name, dataset in (("x.chr1.vcf.gz", "later"), ("y.chr1.vcf.gz", "regdir")):
+            with self.subTest(dataset=dataset):
+                text, status = self.upload(name, b"PART2\n", dataset, 1, 2)
+                self.assert_refused((text, status), 500)
+        self.assertEqual(_tree(self.server, meta=True), before)
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "Settings", "uploads")), [])
+        self.assertFalse(os.path.exists(os.path.join(self.cwd, "VCFs", "mine")))
+
+    def test_only_a_vcf_datasets_own_files_are_uploaded(self):
+        for name in ("sitecustomize.py", "notes.txt", "walk.chr1.vcf", "walk.chr1.vcf.gz.bak",
+                     "walk.tbi"):
+            with self.subTest(name=name):
+                text, status = self.upload(name, b"x\n", "walk")
+                self.assertEqual(status, 400)
+                self.assertIn("a VCF dataset takes bgzip-compressed VCF files (.vcf.gz) and "
+                              "their index (.vcf.gz.tbi or .vcf.gz.csi)", text)
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "VCFs")), [])
+        # a dataset's own files go in as before
+        for name in ("walk.chr1.vcf.gz", "walk.chr1.vcf.gz.tbi", "walk.chr2.vcf.gz",
+                     "walk.chr2.vcf.gz.csi"):
+            with self.subTest(name=name):
+                self.assertEqual(self.upload(name, b"x\n", "walk"), ("complete:walk", 200))
+        self.assertEqual(sorted(os.listdir(os.path.join(self.cwd, "VCFs", "walk"))),
+                         ["walk.chr1.vcf.gz", "walk.chr1.vcf.gz.tbi", "walk.chr2.vcf.gz",
+                          "walk.chr2.vcf.gz.csi"])
 
 
 if __name__ == "__main__":

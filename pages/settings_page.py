@@ -240,6 +240,30 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
         shutil.rmtree(stage, ignore_errors=True)
 
 
+def _vcf_upload_problem(name: str, dataset: str) -> Optional[str]:
+    """Why the file ``name`` must not be uploaded into the VCF dataset ``dataset``, else
+    None: it is not a bgzip-compressed VCF or its index (``.vcf.gz``, ``.vcf.gz.tbi``,
+    ``.vcf.gz.csi``), which is all a VCF dataset holds; or the dataset was registered as
+    a server folder (add_vcf links VCFs/<dataset> to it), or its folder's real path
+    leaves VCFs/ in another way. A registered folder is read where it is and never
+    written: an upload went in through the link, into any folder a request had
+    registered, under any name, replacing a file of that name."""
+    if not name.endswith((".vcf.gz", ".vcf.gz.tbi", ".vcf.gz.csi")):
+        return (
+            f"invalid file name {name!r}: a VCF dataset takes bgzip-compressed VCF files "
+            "(.vcf.gz) and their index (.vcf.gz.tbi or .vcf.gz.csi)"
+        )
+    vcfs = os.path.join(current_working_directory, "VCFs")
+    dest = os.path.join(vcfs, dataset)
+    if os.path.islink(dest) or os.path.dirname(os.path.realpath(dest)) != os.path.realpath(vcfs):
+        return (
+            f"The VCF dataset {dataset!r} was registered from a folder on the server: its "
+            "files are read there, and nothing is uploaded into it. Copy the file into that "
+            "folder, or upload it into a VCF dataset of another name."
+        )
+    return None
+
+
 def _finalize_upload(
     target: str, part_path: str, name: str, dataset: str, genome: str = ""
 ) -> str:
@@ -273,11 +297,16 @@ def _finalize_upload(
             os.remove(part_path)
         return assembly
     if target == "vcf":
-        err = _validate_name(dataset)
+        # (the last chunk's names: each chunk sends its own)
+        err = _validate_name(dataset) or _vcf_upload_problem(name, dataset)
         if err:
             raise ValueError(err)
         dest_dir = os.path.join(current_working_directory, "VCFs", dataset)
         os.makedirs(dest_dir, exist_ok=True)
+        # and once the folder is there: one registered under its name meanwhile is a link
+        err = _vcf_upload_problem(name, dataset)
+        if err:
+            raise ValueError(err)
         os.replace(part_path, os.path.join(dest_dir, name))
         _write_vcf_marker(dataset, genome)  # record the reference genome
         try:
@@ -353,6 +382,10 @@ def _settings_upload_chunk():
         verr = _validate_name(dataset)
         if verr:
             return (f"invalid dataset name: {verr}", 400)
+        # nor a file a VCF dataset does not hold, nor into a server folder registered as one
+        verr = _vcf_upload_problem(name, dataset)
+        if verr:
+            return (verr, 400)
         # the reference genome the dataset is called against: the search form offers
         # the dataset for that genome only, so one the dataset has no marker for yet
         # must be named (the card's dropdown), and must be installed
