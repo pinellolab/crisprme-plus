@@ -53,6 +53,12 @@ real one) names and reads the working directory's paths, a refusal ends the run 
 own stage, a contig with an underscore in its name is named by the build, expected by no
 check, and refused by no search, and the normal path is unchanged.
 
+Every line the pool workers of either script print reaches the log. They printed
+"Searching for INDELs in"/"Search ended for INDELs in" (and "Indexing ...") unflushed, and
+the pool's exit terminates the workers it finds idle: 3 to 23 of those lines went missing
+from a search's log_verbose.txt, a different number each run. A sitecustomize makes every
+worker meet that end, so that no line gets through by chance.
+
 Hermetic: a stub crispritz.py on PATH stands in for the engine and, like
 CRISPRitz 2.9.1, refuses an index directory with no .bin; its index-genome writes
 the layout the real one writes.
@@ -150,6 +156,26 @@ UNPLACED, RANDOM = "chrUn_KI270302v1", "chr1_KI270706v1_random"
 LEFT_OUT = ("No INDELS sub-index for {}: a contig with an underscore in its name gets none, so "
             "a search does not find the indel off-targets there that need a bulge")
 
+# Imported first by each Python process of a run that has it on PYTHONPATH (sitecustomize):
+# a pool worker that has taken the sentinel that ends it cleanly, flushing its stdout, waits
+# instead for the SIGTERM with which the pool's exit (terminate()) ends a worker it finds
+# idle. Which of the two a worker meets is a race; here every worker meets the second.
+POOL_EXIT_SHIM = r'''
+import multiprocessing.pool
+import signal
+
+_worker = multiprocessing.pool.worker
+
+
+def worker(*args, **kwargs):
+    _worker(*args, **kwargs)
+    while True:
+        signal.pause()
+
+
+multiprocessing.pool.worker = worker
+'''
+
 
 def _gnu_sed():
     try:
@@ -183,6 +209,18 @@ class _Fixture(unittest.TestCase):
     def calls(self):
         with open(self.stub_log) as fh:
             return [ln.split() for ln in fh if ln.strip()]
+
+    def pool_exit_shim(self):
+        """The PYTHONPATH that puts POOL_EXIT_SHIM in each Python process of a run."""
+        shim = os.path.join(self.tmp, "shim")
+        os.makedirs(shim, exist_ok=True)
+        with open(os.path.join(shim, "sitecustomize.py"), "w") as fh:
+            fh.write(POOL_EXIT_SHIM)
+        return os.pathsep.join(filter(None, (shim, os.environ.get("PYTHONPATH"))))
+
+    def worker_lines(self, out, *starts):
+        """The lines of ``out`` that start with one of ``starts``, sorted (a pool's order)."""
+        return sorted(ln for ln in out.splitlines() if ln.startswith(starts))
 
 
 @unittest.skipUnless(_gnu_sed(), "pool_search_indels.py merges with GNU `sed -i`, as the pipeline image does")
@@ -778,6 +816,18 @@ class SearchSide(_Fixture):
         self.assertEqual([ln.split("\t")[3] for ln in lines[1:] if ln], ["fakechrA", "fakechrB"])
         self.assertNotIn("target in the indels", res.stdout)
 
+    def test_every_line_of_a_worker_reaches_the_log(self):
+        chroms = [f"chr{c}" for c in "ABCDEF"]
+        self.env["PYTHONPATH"] = self.pool_exit_shim()
+        res, lines = self.run_search({c: [f"{c}\t\trs{i}\t0.1\tA>AT\t5\tACGT"]
+                                      for i, c in enumerate(chroms)}, dict.fromkeys(chroms, True))
+        self.assertEqual(res.stderr, "")
+        self.assertEqual(sorted(ln.split("\t")[3] for ln in lines[1:] if ln),
+                         [f"fake{c}" for c in chroms])
+        self.assertEqual(self.worker_lines(res.stdout, "Search"), sorted(
+            [f"Searching for INDELs in {c}" for c in chroms]
+            + [f"Search ended for INDELs in {c}" for c in chroms]))
+
 
 class IndexSide(_Fixture):
     """pool_index_indels.py must not hand an empty fake genome to buildTST, and records
@@ -900,6 +950,15 @@ class IndexSide(_Fixture):
         self.assertEqual(self.built_with(), (["pam.txt", "pam.txt"], [NRG]))
         self.assertNotIn("stands in", res.stdout)
         self.assertNotIn("No INDELS sub-index", res.stdout)
+
+    def test_every_line_of_a_worker_reaches_the_log(self):
+        chroms = [f"chr{c}" for c in "ABCDEF"]
+        res, indexed = self.run_index({c: f">fake{c}\n{WITH_NRG}\n" for c in chroms},
+                                      PYTHONPATH=self.pool_exit_shim())
+        self.assertEqual((res.returncode, res.stderr, indexed), (0, "", chroms))
+        self.assertEqual(self.worker_lines(res.stdout, "Indexing"), sorted(
+            [f"Indexing INDELs in {c}" for c in chroms]
+            + [f"Indexing ended for INDELs in {c}" for c in chroms]))
 
     # A contig with an underscore in its name gets no sub-index, on any release: the build
     # names them, in one line (a dataset's name may hold an underscore: it does not count).

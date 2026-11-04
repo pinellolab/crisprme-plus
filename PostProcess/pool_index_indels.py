@@ -180,13 +180,15 @@ def index_indels(chrom):
     if _fake_genome_is_empty(fake_dir):
         print(f"No indels on {chrom}: nothing to index", flush=True)
         return
-    print("Indexing INDELs in", chrom)
+    # (flushed, as every line of a worker: the pool's exit terminates the workers, and
+    # what one still holds in its buffer is lost)
+    print("Indexing INDELs in", chrom, flush=True)
     status = os.system(
         f"crispritz.py index-genome {ref_name}+{vcf_name}_INDELS/{true_pam}_{bMax}_fake{chrom} {indels_folder}/fake_{vcf_name}_{chrom} {build_pam_arg} -bMax {bMax} -th 1  >/dev/null"
     )  # {indels_folder}/fake_{vcf_name}_{chrom}
     if not status:
         status = _record_no_targets(chrom, fake_dir)
-    print("Indexing ended for INDELs in", chrom)
+    print("Indexing ended for INDELs in", chrom, flush=True)
     return status
 
 

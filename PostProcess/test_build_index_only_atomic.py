@@ -3837,9 +3837,10 @@ class SameTreeAsBefore(_Fixture):
         def lines(text):
             for path, label in normalize:
                 text = text.replace(path, label)
-            # Not the INDELS pool's workers' lines: they print unflushed, and the pool's
-            # exit terminates a worker that is still idle, so a line can go missing
-            # (before this fix as after; its order is the pool's too, hence sorted).
+            # Not the INDELS pool's workers' lines: printed unflushed by the code before
+            # this fix (and until 2.8.1, test_indel_empty_chromosome), a line could go
+            # missing, as the pool's exit terminates a worker that is still idle (their
+            # order is the pool's too, hence sorted).
             return sorted(ln for ln in text.splitlines()
                           if not ln.startswith(("Indexing INDELs in ",
                                                 "Indexing ended for INDELs in ")))

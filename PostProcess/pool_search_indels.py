@@ -511,7 +511,9 @@ def search_indels(chrom):
             sys.stderr.write(said + "\n")
             sys.stderr.flush()
             return REFUSED
-    print("Searching for INDELs in", chrom)
+    # (flushed, as every line of a worker: the pool's exit terminates the workers, and
+    # what one still holds in its buffer is lost to log_verbose.txt)
+    print("Searching for INDELs in", chrom, flush=True)
     out_name = f"fake{chrom}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}"
     if os.path.isdir(indexed_fakechrom) or not os.path.isdir(raw_fakechrom):
         # Preferred / batteries path: indexed search (valid for 0 bulges too).
@@ -527,7 +529,7 @@ def search_indels(chrom):
             f"crispritz.py search {raw_fakechrom}/ {pam_file} {guide_file} "
             f"{out_name} -mm {mm} -t -th 1 >/dev/null"
         )
-    print("Search ended for INDELs in", chrom)
+    print("Search ended for INDELs in", chrom, flush=True)
     return SEARCHED
 
 
