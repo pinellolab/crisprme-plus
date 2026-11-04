@@ -337,25 +337,32 @@ genotyped-panel called-allele count rather than the alleles among carriers only.
 Homozygous carriers contribute 2 to AC; heterozygous carriers contribute 1 —
 so AF is a true allele frequency, not a carrier-individual frequency.
 
-The Tier-0 registry holds SNPs only; an indel has the `AF` its VCF gives (kept
-in the index's indel log), as rounded there, on every index and in either mode.
+The Tier-0 registry holds SNPs only. An indel has, in either mode, the `AF` of the
+index's indel log, which CRISPRitz `add-variants` copied from the VCF's `INFO/AF` when
+it built the index, as rounded there; one whose `AF` the log gives as 0, or not at all,
+has no frequency. The log holds none for a record whose `INFO` has `AF` at another place
+than the VCF's first record (a known limit of `add-variants`, §8), and none for any
+indel of the sites-only mega, whose VCF has no `INFO/AF` (only `AF_<dataset>` and
+`AF_max`, §2): a mega indel's per-dataset frequencies are in the `indel_af.tsv`
+companion.
 
 For a multi-variant haplotype off-target, the reported frequency is bounded by
 the **rarest** contributing allele (the haplotype can be no more frequent than
 its least-frequent variant), and the exact carriers of the haplotype (Section 4)
 give the tightest available estimate.
 
-An index without the dict-less tiers (one built without `--samplesID`, such as the one
-the benchmark `complete-test` builds) has no Tier-0 registry: each variant has the `AF`
-its VCF gives, as rounded there. The benchmark's 1000 Genomes VCF gives two decimals, so
-a rare variant reads 0 and has no frequency, and a multi-variant row's minimum leaves it
-out. On the NGG index the README's self-test builds (`NGG_2_hg38_chr22+hg38_1000G`, Section
-5's known limit), a `--per-sample` search of the README's guide with the `20bp-NGG-SpCas9`
-PAM, 4 mismatches, 1 DNA and 1 RNA bulge gives 154 of its 189 variant rows a blank MAF (3 of
-184 with the tiers), and four two-variant rows the frequency of their commoner variant (0.09
-to 0.86) for a haplotype that one to five of the VCF's 2,548 individuals carry. The report of
-a search on such an index says so, in either mode;
-rebuild the index with `build-index-only --samplesID`, or use a prebuilt one.
+An index without the dict-less tiers (one built without `--samplesID`, such as the one the
+benchmark `complete-test` builds) has no Tier-0 registry: a SNP has the `AF` of the classic
+per-sample dictionaries, which `add-variants` also copied from the VCF's `INFO/AF`, as
+rounded there, with the same limit as an indel's (§8). The benchmark's 1000 Genomes VCF
+gives two decimals, so a rare variant reads 0 and has no frequency, and a multi-variant
+row's minimum leaves it out. On the NGG index the README's self-test builds
+(`NGG_2_hg38_chr22+hg38_1000G`, Section 5's known limit), a `--per-sample` search of the
+README's guide with the `20bp-NGG-SpCas9` PAM, 4 mismatches, 1 DNA and 1 RNA bulge gives 154
+of its 189 variant rows a blank MAF (3 of 184 with the tiers), and four two-variant rows the
+frequency of their commoner variant (0.09 to 0.86) for a haplotype that one to five of the
+VCF's 2,548 individuals carry. The report of a search on such an index says so, in either
+mode; rebuild the index with `build-index-only --samplesID`, or use a prebuilt one.
 
 ---
 
@@ -924,19 +931,20 @@ from a build-time `Dictionaries/registry_<vcf>/variant_count.json` sidecar
 (`n_records` SNPs + `n_indels`) written when the dict-less index is built, so the
 report needs no VCF access at report time (e.g. the earlier 1000 Genomes + HGDP
 merge recorded 106,664,924 SNPs). Reported SNP allele frequencies are AC/AN over the
-genotyped panel (on an index without the dict-less tiers, the `AF` the VCF gives, §3, as the
-report of a search there says), and an indel's is the `AF` its VCF gives, on every index. A
-variant whose allele frequency is 0 or missing (e.g. an allele that no individual of the
-panel carries) has no frequency: `integrated_results.tsv` lists it as `NA`, and the report
-leaves it out of a row's MAF, the lowest frequency of the row's variants, which is blank when
-no variant of the row has one. No floor is applied: a frequency below 1×10⁻⁵ is reported as
-it is, and the plots, whose log scale is the site's rank, use a frequency only to size the
-points. For an **aggregate (sites-only) panel** (e.g. the all-source mega index, §2), only
-allele frequencies exist — there are no per-individual genotypes — so no carrier or
-homozygote count is estimated: the registry holds 0 for both (§2), which the
-population-summary companion (`*.population_summary.tsv`, kept with `--keep-intermediates`)
-gives as **NA**, and a per-dataset **`indel_af.tsv`** companion carries indel allele
-frequencies by source alongside the SNP+indel co-occurrence table.
+genotyped panel (on an index without the dict-less tiers, the `AF` of the classic per-sample
+dictionaries, §3, as the report of a search there says), and an indel's is the `AF` of the
+index's indel log; `add-variants` copied both from the VCF's `INFO/AF` (§3), and §8 gives
+when they hold none. A variant whose allele frequency is 0 or missing (e.g. an allele that
+no individual of the panel carries) has no frequency: `integrated_results.tsv` lists it as
+`NA`, and the report leaves it out of a row's MAF, the lowest frequency of the row's
+variants, which is blank when no variant of the row has one. No floor is applied: a
+frequency below 1×10⁻⁵ is reported as it is, and the plots, whose log scale is the site's
+rank, use a frequency only to size the points. For an **aggregate (sites-only) panel** (e.g.
+the all-source mega index, §2), only allele frequencies exist — there are no per-individual
+genotypes — so no carrier or homozygote count is estimated: the registry holds 0 for both
+(§2), which the population-summary companion (`*.population_summary.tsv`, kept with
+`--keep-intermediates`) gives as **NA**, and a per-dataset **`indel_af.tsv`** companion
+carries indel allele frequencies by source alongside the SNP+indel co-occurrence table.
 
 ## 8. Off-target scoring, assumptions and limitations
 
@@ -1169,7 +1177,24 @@ a carrier of an earlier record's alt is read as reference there, in the SNP and 
 post-analysis alike, however common that alt: on the HGDP + 1000 Genomes panel
 chr8:4174067 T>C (8,170 copies) is read as reference because T>G (1 copy) is the later
 record. That is 1.95 % of the panel's SNP records, whose effect §2 gives as measured; it
-will be fixed, with rebuilt indexes, in the next release. The phased indel genotype store
+will be fixed, with rebuilt indexes, in the next release. `add-variants` also looks for the
+`AF` key in the VCF's first record only, and reads every record's `AF` at that place in
+`INFO`: a record that has it at another place gets none, in the index's indel log and in its
+classic per-sample dictionaries. Its indel then has no frequency on any index (§3), nor its
+SNP on an index without the dict-less tiers (the registry, which gives a SNP's frequency with
+them, counts AC/AN from the genotypes, or on the mega reads each source's `AF_<dataset>` by
+its key), and the report's MAF leaves it out. A VCF merged with
+`seq_script/merge_panels/merge_vcf_panels.sh` has such records, since a site of one source has
+fewer keys before `AF` than a site of two: the retired `NRG_3_hg38+hg38_1000G2021_HGDP` index
+(1000 Genomes 2021 + HGDP, built from such a merge, retired in 2.7.8) has no `AF` for
+14,567,429 of its 15,583,931 indels (224,981 of the 232,384 of chr22). Of the shipped indexes only HPRC's chrY is affected,
+whose VCF has `AF` at five places in `INFO`, after one to five other keys: its log has none for
+91,950 of its 102,665 indels. The HGDP1kGP index and HPRC's other chromosomes have an `AF` for
+each of their 17,192,381 and 12,000,599 indels, as the self-test's 1000 Genomes index (chr22)
+has for its 64,528 indels and 993,880 SNPs; the mega's VCF has no `INFO/AF` at all (§2), so
+none of its 13,853,761 indels has one, and their per-dataset frequencies are in the
+`indel_af.tsv` companion. 2.8.0 behaves the same; it will be fixed in the next CRISPRitz
+release (HPRC's chrY log needs rebuilding with it). The phased indel genotype store
 leaves out equal-length multi-base records (MNVs), so their carriers are resolved with the
 phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
 among its 195,813 indel-search records. A SNP row's carriers are resolved from SNP genotypes

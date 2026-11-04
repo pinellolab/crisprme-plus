@@ -2002,16 +2002,24 @@ is under `data/`). Reading top to bottom:
   Present in the curated report table, all download TSVs, and the raw
   `integrated_results.tsv`.
 - **MAF column** — the allele frequency of the variant behind a variant off-target; on a row of
-  several variants, the lowest of their frequencies. An indel's frequency is the `AF` its VCF
-  gives, as rounded there, on every index (the allele-frequency registry holds SNPs only). A
-  variant whose allele frequency is 0 or missing (e.g. an allele that no individual of the
-  panel carries) has no frequency: the row's minimum leaves it out, and the MAF is blank when
-  no variant of the row has one. No floor is applied, so a value below `1e-05` is the frequency
+  several variants, the lowest of their frequencies. An indel's frequency is the `AF` of the
+  index's indel log, which CRISPRitz `add-variants` copied from the VCF's `INFO/AF` when the
+  index was built, as rounded there (the allele-frequency registry holds SNPs only). A variant
+  whose allele frequency is 0 or missing (e.g. an allele that no individual of the panel
+  carries) has no frequency: the row's minimum leaves it out, and the MAF is blank when no
+  variant of the row has one. No floor is applied, so a value below `1e-05` is the frequency
   itself. On an index without the dict-less tiers (built without `--samplesID`, as the
-  benchmark `complete-test` builds its own) the frequency is the `AF` the VCF gives, as rounded
-  there: the self-test's 1000 Genomes VCF gives two decimals, so a rare variant reads 0, its
-  MAF is blank, and a multi-variant row's minimum leaves it out. The report of a search there
-  says so, in either mode ([methods](METHODS.md#3-allele-frequency-estimation)).
+  benchmark `complete-test` builds its own) a SNP's frequency is the `AF` of the classic
+  per-sample dictionaries, which `add-variants` also copied from the VCF, as rounded there: the
+  self-test's 1000 Genomes VCF gives two decimals, so a rare variant reads 0, its MAF is blank,
+  and a multi-variant row's minimum leaves it out. The report of a search there says so, in
+  either mode ([methods](METHODS.md#3-allele-frequency-estimation)). `add-variants` looks for
+  `AF` in the VCF's first record only and reads every record's at that place in `INFO`, so a
+  record that has it elsewhere gets none: its indel has no frequency on any index, nor its SNP
+  on an index without the tiers. Of the shipped indexes this affects only HPRC's chrY; the
+  mega's VCF has no `INFO/AF` at all, so none of its indels has a frequency there, and the
+  report's `indel_af.tsv` gives their per-dataset ones (a known limit, to be fixed in the next
+  CRISPRitz release: [§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)).
 - **Key off-target table columns** — in the per-site table (and every download TSV):
   - **Chromosome / Position / Direction (`+`/`-`)** — where the off-target is and on which strand.
   - **crRNA vs DNA (aligned)** — the guide and the genomic sequence aligned; `-` marks a bulge.

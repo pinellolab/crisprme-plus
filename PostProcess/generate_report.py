@@ -3488,7 +3488,11 @@ def _linkify_bundled_filenames(html, names):
 # datasets), never hardcoded, so it stays correct for any variant database(s). A
 # reference-only search has no panel: every MAF is blank, and the note says why.
 # ``untiered``: the datasets a search resolved without the dict-less tiers, whose
-# rows carry the AF their VCF gives, not AC/AN, in either mode.
+# SNP rows carry the AF of their classic per-sample dictionaries, not AC/AN, in either
+# mode. An AF the index holds is the one CRISPRitz add-variants copied from the VCF's
+# INFO/AF; add-variants looks for the AF key in the VCF's first record only and reads
+# every record's AF at that place in INFO, so a record that has it elsewhere gets none
+# (METHODS section 8): the note says "the index's", not "the VCF's".
 def maf_footnote(datasets=None, reference_only=False, untiered=None):
     if reference_only:
         return (
@@ -3500,16 +3504,20 @@ def maf_footnote(datasets=None, reference_only=False, untiered=None):
     return (
         "MAF = combined-panel minor/alternate allele frequency. "
         "MAF blank (&mdash;) = reference off-target (no variant), a SNP not in the "
-        "frequency panel, or an indel whose VCF gives it an <code>AF</code> of 0, or no "
-        "<code>AF</code>; for SNP variant off-targets the frequency is AC/AN over the "
+        "frequency panel, or an indel whose <code>AF</code> the index's indel log gives "
+        "as 0, or not at all; for SNP variant off-targets the frequency is AC/AN over the "
         f"genotyped panel &mdash; here the merged {ds} union panel (the combined global "
         "AF), not a single ancestry. "
         # as analisi_indels_NNN.py has done in every release: an indel row takes the AF of
-        # the index's indel log, which add-variants copies from the VCF, in either mode and
-        # with or without the tiers (the SNPs beside it take the registry's, else the
-        # dictionary's)
+        # the index's indel log (final_result[16] = indel_data[3]), in either mode and with
+        # or without the tiers (the SNPs beside it take the registry's, else the
+        # dictionary's). The log holds no AF for any indel of the sites-only mega (its VCF
+        # has no INFO/AF), nor for one whose record has AF elsewhere in INFO than the
+        # VCF's first record
         "An indel, which the SNP-only frequency registry does not hold, has the "
-        "<code>AF</code> its VCF gives, as rounded there. "
+        "<code>AF</code> of the index's indel log, which CRISPRitz "
+        "<code>add-variants</code> copied from the VCF's <code>INFO/AF</code>, as rounded "
+        "there. "
         # as resultIntegrator and _min_maf have done since 2.4.0: an AF that is 0 or
         # missing is NA, which the row's minimum leaves out, and a smaller AF is printed as
         # it is (no floor; up to 2.3.3 the integrator wrote 1e-05 for an AF of 0)
@@ -3519,10 +3527,12 @@ def maf_footnote(datasets=None, reference_only=False, untiered=None):
         "them has one. No floor is applied: a frequency below "
         "1&times;10<sup>&minus;5</sup> is shown as it is."
     ) + (
-        f" For {_untiered_named(untiered)}, the frequency is instead the <code>AF</code> "
-        f"{'its VCF gives' if len(untiered) == 1 else 'their VCFs give'}, as rounded there: "
-        "a variant whose <code>AF</code> reads 0 there, or is missing, has no frequency, "
-        "and its MAF is blank." if untiered else ""
+        f" For {_untiered_named(untiered)}, a SNP's frequency is instead the <code>AF</code> "
+        f"of {'its' if len(untiered) == 1 else 'their'} classic per-sample dictionaries, "
+        "which <code>add-variants</code> also copied from "
+        f"{'its VCF' if len(untiered) == 1 else 'their VCFs'}, as rounded there: a SNP whose "
+        "<code>AF</code> they give as 0, or not at all, has no frequency, and its MAF is "
+        "blank." if untiered else ""
     )
 
 

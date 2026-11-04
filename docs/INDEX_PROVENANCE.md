@@ -383,6 +383,18 @@ compiled into `buildTST`, so it cannot affect index content.
   `S` (C/G), and the stores hold C alone. A fix changes the enriched genomes, and
   with them every affected index: it will be fixed, with rebuilt indexes, in the next
   release.
+- **A record whose `INFO` has `AF` at another place than the VCF's first record gets
+  no `AF`** (CRISPRitz `add-variants`, both enricher ports: it looks for the `AF` key
+  in the first record only and reads every record's `AF` at that place). Of the
+  published indexes it affects HPRC's chrY alone (the NRG and NRR archives install the
+  same logs), whose VCF has `AF` at five places: its indel log has no `AF` for 91,950
+  of its 102,665 indels, which the report then shows with no MAF; its SNPs, whose
+  frequencies the registry counts from the genotypes, are not affected. HPRC's other
+  chromosomes and HGDP1kGP have an `AF` for each of their 12,000,599 and 17,192,381
+  indels. The mega's VCF has no `INFO/AF` at all, so none of its 13,853,761 indels has
+  one there, by design: their per-dataset frequencies are in `indel_af.tsv`. It will
+  be fixed in the next CRISPRitz release, and HPRC's chrY log needs rebuilding with it
+  (METHODS section 8).
 
 ## How to re-run these measurements
 

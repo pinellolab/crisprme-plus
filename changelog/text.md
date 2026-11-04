@@ -60,6 +60,29 @@ above" is the third; keep them true where the entries land.
   every release since early 2022 behave so, the 2.1.x releases this changelog lists among them
   (before 2.4.0 each list came in an arbitrary order); it will be fixed in the next release.
   Covered by `PostProcess/test_generate_report.py`.
+- **A known limit, stated with its scale: a variant whose record has `AF` at another place in `INFO`
+  than the VCF's first record has no allele frequency.** CRISPRitz `add-variants`, which writes an
+  index's indel log and classic per-sample dictionaries, looks for the `AF` key in the VCF's first
+  record only and reads every record's `AF` at that place in `INFO`, so a record that has it
+  elsewhere gets none: its indel has no frequency on any index, nor its SNP on an index without the
+  dict-less tiers (with them a SNP's frequency is the registry's, which `add-variants` does not
+  write), and the report's MAF leaves it out. A VCF merged with
+  `seq_script/merge_panels/merge_vcf_panels.sh` has such records, since a site of one source has
+  fewer keys before `AF` than a site of two: the retired `NRG_3_hg38+hg38_1000G2021_HGDP` index,
+  built from such a merge, has no `AF` for 14,567,429 of its 15,583,931 indels (224,981 of the
+  232,384 of chr22). Of the shipped indexes only HPRC's chrY is affected, whose VCF has `AF` at five
+  places: its log has none for 91,950 of its 102,665 indels. The HGDP1kGP index and HPRC's other
+  chromosomes have an `AF` for each of their 17,192,381 and 12,000,599 indels, as the self-test's
+  1000 Genomes index has for its 64,528 indels and 993,880 SNPs. The mega's VCF has no `INFO/AF` at
+  all, only `AF_<dataset>` and `AF_max`, so none of its 13,853,761 indels has one and the MAF of a
+  row of an indel alone is blank there; the `indel_af.tsv` companion gives their per-dataset
+  frequencies. The report's MAF note, the README's MAF column, METHODS sections 3, 7 and 8,
+  `docs/DESIGN_mega_index.md`, the gaps of `docs/INDEX_PROVENANCE.md` and the VCF requirements of
+  `docs/INPUT_FORMATS.md` (with a check) now say so, and the header of `merge_vcf_panels.sh` and
+  `seq_script/merge_panels/README.md`, which said that the enricher reads the pooled `AF` by its
+  exact key, say what it does. Results are unchanged. Pre-existing: 2.8.0 behaves the same; it will
+  be fixed in the next CRISPRitz release (HPRC's chrY log needs rebuilding with it). Covered by
+  `PostProcess/test_generate_report.py`.
 - **METHODS section 2 says what a sites-only panel's registry holds for carriers and
   homozygotes.** It said that the carrier and homozygote counts of the mega index are reported as
   Hardy–Weinberg expectations from the allele frequency, flagged as estimates, and
@@ -93,19 +116,21 @@ above" is the third; keep them true where the entries land.
 - **The report's MAF note no longer says that an indel's MAF is blank.** The note under the top-1000
   tables gave an indel-derived variant as one whose MAF is blank, the frequency registry being
   SNP-only. The registry is, but the indel post-analysis gives an indel the `AF` of the index's
-  indel log, which CRISPRitz `add-variants` copies from the VCF, in either mode and with or without
-  the dict-less tiers, and the report shows it as it shows a SNP's frequency. In the self-test
-  panel's `--per-sample` report with the tiers (the README's guide, `20bp-NGG-SpCas9` PAM, 4
-  mismatches, 1 DNA and 1 RNA bulge), the indel off-target at chr22:33985503 shows 3.00e-02 and the
-  indel-and-SNP one at chr22:21052642 1.80e-01, and the 3 of its 184 variant rows whose MAF is blank
-  are indels whose `AF` the VCF gives as 0 (it gives two decimals); the 183 indel rows of the
-  website's example report all show one. Only an indel whose `AF` is 0 or missing is blank, as the
-  note says of any variant. It now says that an indel has the `AF` its VCF gives, as rounded there,
-  in every report (the combined report of `assembly-search` too), as do the README's MAF column,
-  METHODS sections 3 and 7 and the example report (`docs/example-report.html`, which gets the note
-  as 2.8.1 renders it there). Nothing else in a report changes, and no result changes. Pre-existing:
-  the note has said so since 2.4.0, which wrote it. Covered by
-  `PostProcess/test_generate_report.py`.
+  indel log, which CRISPRitz `add-variants` copied from the VCF's `INFO/AF`, in either mode and
+  with or without the dict-less tiers, and the report shows it as it shows a SNP's frequency. In
+  the self-test panel's `--per-sample` report with the tiers (the README's guide, `20bp-NGG-SpCas9`
+  PAM, 4 mismatches, 1 DNA and 1 RNA bulge), the indel off-target at chr22:33985503 shows 3.00e-02
+  and the indel-and-SNP one at chr22:21052642 1.80e-01, and the 3 of its 184 variant rows whose MAF
+  is blank are indels whose `AF` reads 0 in the indel log (the VCF rounds it to two decimals); the
+  183 indel rows of the website's example report all show one. The note now says that an indel has
+  the `AF` of the index's indel log, and that its MAF is blank where the log gives that `AF` as 0,
+  or not at all, in every report (the combined report of `assembly-search` too). The log gives
+  none for a record that has `AF` at another place in `INFO` than the VCF's first record (the known
+  limit on the place of `AF` under Changed), nor for any indel of the mega index, whose VCF has no
+  `INFO/AF`. The README's MAF column, METHODS sections 3 and 7 and the example report
+  (`docs/example-report.html`, which gets the note as 2.8.1 renders it there) say so too. Nothing
+  else in a report changes, and no result changes. Pre-existing: the note has said so since 2.4.0,
+  which wrote it. Covered by `PostProcess/test_generate_report.py`.
 - **The report of a `--per-sample` search on an index without the dict-less tiers says what the
   search reported.** On such an index (one built without `--samplesID`, such as the one the
   benchmark `complete-test` builds), the report's Search mode row now says what
@@ -115,8 +140,8 @@ above" is the third; keep them true where the entries land.
   greedy worst-case alignment (the known limit under Changed); and to get the tiers, rebuild the
   index with `build-index-only --samplesID` or download a prebuilt one. The texts that made the
   same claims elsewhere in the report now say what holds for those datasets: the Allele-frequency
-  basis row and the MAF note under the top-1000 tables (a variant's frequency is the `AF` its VCF
-  gives, as rounded there, not AC/AN, and one whose `AF` reads 0 has no frequency and is blank),
+  basis row and the MAF note under the top-1000 tables (a variant's frequency is its VCF's `AF`,
+  as `add-variants` copied it, not AC/AN, and one whose `AF` reads 0 has no frequency and is blank),
   the legend's MAF entry (no joint allele frequency is computed, and a variant whose `AF` reads 0
   is left out of a row's minimum), the legend's Observed entry and the caption of the top-1000
   tables (a dense window's greedy alignment lists the carriers of any of its variants, not its

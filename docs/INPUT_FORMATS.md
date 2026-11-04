@@ -315,7 +315,18 @@ For a variant-aware search, each VCF record needs:
 
 - a **`FILTER`** value — use `PASS` (records not marked `PASS` may be dropped by
   filtering);
-- **`INFO/AF`** — a **numeric** allele frequency;
+- **`INFO/AF`** — a **numeric** allele frequency, at **one place in `INFO` in every record**:
+  CRISPRitz `add-variants` reads each record's `AF` where the first record has it, so a record
+  that has it elsewhere gets none: its indel has no frequency, nor, on an index without the
+  dict-less tiers, its SNP (a known limit, to be fixed in the next CRISPRitz release:
+  [METHODS §8](../METHODS.md#8-off-target-scoring-assumptions-and-limitations)). A VCF merged
+  with `seq_script/merge_panels/merge_vcf_panels.sh` has such records; this prints one line for
+  a VCF that has none:
+
+  ```bash
+  bcftools query -f '%INFO\n' your.vcf.gz \
+    | awk -F';' '{for(i=1;i<=NF;i++) if($i ~ /^AF=/){print i; break}}' | sort | uniq -c
+  ```
 - **`FORMAT/GT`** — genotype fields for the samples.
 
 ### Variant types
