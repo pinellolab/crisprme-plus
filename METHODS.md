@@ -339,6 +339,16 @@ the **rarest** contributing allele (the haplotype can be no more frequent than
 its least-frequent variant), and the exact carriers of the haplotype (Section 4)
 give the tightest available estimate.
 
+An index without the dict-less tiers (one built without `--samplesID`, such as the one
+the benchmark `complete-test` builds) has no Tier-0 registry: each variant has the `AF`
+its VCF gives, as rounded there. The benchmark's 1000 Genomes VCF gives two decimals, so
+a rare variant reads 0 and has no frequency, and a multi-variant row's minimum leaves it
+out. On the self-test panel a `--per-sample` search gives 154 of its 189 variant rows a
+blank MAF (3 of 184 with the tiers), and four two-variant rows the frequency of their
+commoner variant (0.09 to 0.86) for a haplotype that one to five of the VCF's 2,548
+individuals carry. The report of a `--per-sample` search on such an index says so;
+rebuild the index with `build-index-only --samplesID`, or use a prebuilt one.
+
 ---
 
 ## 4. Haplotype scanning: observed-haplotype enumeration
@@ -899,9 +909,10 @@ from a build-time `Dictionaries/registry_<vcf>/variant_count.json` sidecar
 (`n_records` SNPs + `n_indels`) written when the dict-less index is built, so the
 report needs no VCF access at report time (e.g. the earlier 1000 Genomes + HGDP
 merge recorded 106,664,924 SNPs). Reported allele frequencies are AC/AN over the genotyped
-panel; a variant present in the panel but whose source allele frequency is exactly
-0 (e.g. a secondary allele of a multiallelic site) is shown at a **display floor of
-1×10⁻⁵** so it still renders on the log-scale plots — this is a plotting floor,
+panel (on an index without the dict-less tiers, the `AF` the VCF gives, §3, as the report of
+a `--per-sample` search there says); a variant present in the panel but whose source allele
+frequency is exactly 0 (e.g. a secondary allele of a multiallelic site) is shown at a
+**display floor of 1×10⁻⁵** so it still renders on the log-scale plots — this is a plotting floor,
 read as "present, frequency effectively 0", not a measured frequency. For an
 **aggregate (sites-only) panel** (e.g. the all-source mega index, §2), only allele
 frequencies exist — there are no per-individual genotypes — so carrier and homozygote

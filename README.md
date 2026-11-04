@@ -2002,7 +2002,12 @@ is under `data/`). Reading top to bottom:
   `integrated_results.tsv`.
 - **MAF column** — a value of **`1e-05` is a display floor** meaning "present but
   frequency effectively 0" (used so a zero-frequency allele still renders on the
-  log-scale plots), **not** a measured frequency.
+  log-scale plots), **not** a measured frequency. On an index without the dict-less tiers
+  (built without `--samplesID`, as the benchmark `complete-test` builds its own) it is the
+  `AF` the VCF gives, as rounded there: the self-test's 1000 Genomes VCF gives two decimals,
+  so a rare variant reads 0, its MAF is blank, and a multi-variant row's minimum leaves it
+  out. The report of a `--per-sample` search there says so
+  ([methods](METHODS.md#3-allele-frequency-estimation)).
 - **Key off-target table columns** — in the per-site table (and every download TSV):
   - **Chromosome / Position / Direction (`+`/`-`)** — where the off-target is and on which strand.
   - **crRNA vs DNA (aligned)** — the guide and the genomic sequence aligned; `-` marks a bulge.

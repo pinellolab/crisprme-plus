@@ -328,6 +328,15 @@ def _hap_label(n, head=False):
     base = "variant combination" + ("" if n == 1 else "s")
     return (base + " (worst-case)") if head else base
 
+
+def _untiered_named(untiered):
+    """The datasets a --per-sample search resolved without the dict-less tiers
+    (meta["untiered"], from .untiered_datasets), named as each text that qualifies a
+    --per-sample claim for them names them: "<code>a</code>, which has no dict-less
+    tiers" ("have" for two or more)."""
+    return (", ".join(f"<code>{_esc(d)}</code>" for d in untiered)
+            + f", which {'has' if len(untiered) == 1 else 'have'} no dict-less tiers")
+
 # Annotation curated kinds that are dropped when their source column is absent from
 # the run's TSV, so a run without a given annotation (legacy no-COSMIC bundle, a
 # dict-less no-annotation run, a non-human genome) does not show an all-"-" column
@@ -1676,18 +1685,19 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     # The mode that ran, not how it was chosen: .search_mode does not record whether it was
     # the index's default (per-sample on a genotyped + phased index) or asked for
     # (--per-sample / --population-level, or the web form's choice).
-    if meta.get("search_mode") == "per-sample" and meta.get("untiered"):
-        # what complete-search's banner says of the datasets it resolved without the
-        # dict-less tiers (.untiered_datasets): their classic per-sample dictionaries name
-        # the carriers, and their post-analysis still reports a window denser than
+    # The datasets a per-sample search resolved without the dict-less tiers
+    # (.untiered_datasets): the Search mode and Allele-frequency basis rows say what
+    # complete-search's banner says of them.
+    _ut = meta.get("untiered") if meta.get("search_mode") == "per-sample" else None
+    _one = bool(_ut) and len(_ut) == 1
+    if _ut:
+        # their classic per-sample dictionaries name the carriers, each variant with the
+        # AF its VCF gives, and their post-analysis still reports a window denser than
         # CRISPRME_IUPAC_CAP by its greedy worst-case alignment, listing the carriers of any
         # of the variants it takes
-        _ut = meta["untiered"]
-        _one = len(_ut) == 1
         sm_note = (
             "<strong>Per-sample</strong> &mdash; per-sample genotypes resolved into named "
-            "carrier samples only for " + ", ".join(f"<code>{_esc(d)}</code>" for d in _ut)
-            + f", which {'has' if _one else 'have'} no dict-less tiers "
+            "carrier samples only for " + _untiered_named(_ut) + " "
             "(<code>Dictionaries/registry_&lt;vcf&gt;/</code> and "
             "<code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample dictionaries: the "
             "CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint "
@@ -1735,8 +1745,12 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
          f"Combined-panel minor/alternate allele frequency over the merged "
          f"{_esc(ds)} panel: for genotyped databases this is AC/AN across the "
          f"panel; a frequency-only database contributes its reported population "
-         f"allele frequency directly. Per-dataset and per-superpopulation "
-         f"frequencies are available in the interactive website."),
+         f"allele frequency directly. "
+         + (f"For {_untiered_named(_ut)}, it is instead the <code>AF</code> "
+            f"{'its VCF gives' if _one else 'their VCFs give'}, as rounded there (a rare "
+            "variant can read 0, and its MAF is then blank). " if _ut else "")
+         + "Per-dataset and per-superpopulation frequencies are available in the "
+         "interactive website."),
         ("Off-target search criteria",
          f"Sites where a variant increases homology to the guide by reducing "
          f"mismatches (up to {_esc(mm)}) and/or lowering gaps (DNA/RNA bulges up to "
@@ -3426,7 +3440,9 @@ def _linkify_bundled_filenames(html, names):
 # and the curated download files. The panel name is READ FROM THE RUN (meta
 # datasets), never hardcoded, so it stays correct for any variant database(s). A
 # reference-only search has no panel: every MAF is blank, and the note says why.
-def maf_footnote(datasets=None, reference_only=False):
+# ``untiered``: the datasets a --per-sample search resolved without the dict-less
+# tiers, whose rows carry the AF their VCF gives, not AC/AN.
+def maf_footnote(datasets=None, reference_only=False, untiered=None):
     if reference_only:
         return (
             "MAF = minor/alternate allele frequency of the variant behind an off-target. "
@@ -3445,6 +3461,11 @@ def maf_footnote(datasets=None, reference_only=False):
         "site) is shown at a display floor of 1&times;10<sup>&minus;5</sup> so it "
         "renders on log-scale plots &mdash; read it as &ldquo;present, frequency "
         "effectively 0&rdquo;, not as a measured frequency of 10<sup>&minus;5</sup>."
+    ) + (
+        f" For {_untiered_named(untiered)}, the frequency is instead the <code>AF</code> "
+        f"{'its VCF gives' if len(untiered) == 1 else 'their VCFs give'}, as rounded there: "
+        "a variant whose <code>AF</code> reads 0 there, or is missing, is blank too, not "
+        "shown at the floor." if untiered else ""
     )
 
 
@@ -3574,7 +3595,7 @@ def build_observed_haplotypes_modals_html(oh_modals):
 
 def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
                      oh_modals=None, oh_download_name=None, oh_omitted_note="",
-                     reference_only=False):
+                     reference_only=False, untiered=None):
     """Scrollable inline top-N table, sorted by CFD desc (opens offline).
 
     The ONLY interactivity is the per-site observed-haplotype modal: when ``site_map``
@@ -3592,7 +3613,8 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
     come from ``build_curated_frame`` (values resolved by name; missing -> "-").
     The aligned protospacer+PAM cell is wrapped in <code>; the MAF em-dash keeps
     its footnote (``reference_only`` gives the footnote of a search with no variant
-    dataset). Extra columns don't break the scroll box / sticky header.
+    dataset; ``untiered``, the one of a --per-sample search with datasets without the
+    dict-less tiers). Extra columns don't break the scroll box / sticky header.
     """
     curated = build_curated_frame(top_df, cols, has_crispr_bulge, start_rank=1)
     headers = list(curated.columns)
@@ -3649,7 +3671,7 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
 
     footnote = ""
     if maf_missing_seen:
-        footnote = f'<p class="caption">{maf_footnote(datasets, reference_only)}</p>'
+        footnote = f'<p class="caption">{maf_footnote(datasets, reference_only, untiered)}</p>'
 
     table = (
         '<div class="ottable-wrap"><table class="ottable">'
@@ -3988,9 +4010,31 @@ _SCORE_LEGEND = [
 ]
 
 
-def build_score_legend_html():
-    """Render the scores-&-columns legend (Section 7, always present)."""
+def build_score_legend_html(untiered=None):
+    """Render the scores-&-columns legend (Section 7, always present). ``untiered``: the
+    datasets a --per-sample search resolved without the dict-less tiers, for which the
+    Observed and MAF entries say what holds instead of their --per-sample claims."""
     legend = list(_SCORE_LEGEND)
+    if untiered:
+        # what complete-search's banner says of them (and the Search mode row): a dense
+        # window's greedy worst-case alignment lists the carriers of any of its variants,
+        # and each variant has the AF its VCF gives, with no joint AF
+        named = _untiered_named(untiered)
+        extra = {
+            "Observed": (
+                f" On {named}, a dense window flagged in <code>High_complexity_region</code> "
+                "can be reported by its greedy worst-case alignment, which lists the carriers "
+                "of any of its variants rather than its exact cis carriers: they need not carry "
+                "every variant in it."),
+            "MAF": (
+                f" For {named}, no joint allele frequency is computed, and each variant's "
+                "frequency is the <code>AF</code> "
+                f"{'its VCF gives' if len(untiered) == 1 else 'their VCFs give'}, as rounded "
+                "there: one whose <code>AF</code> reads 0 is left out of the minimum, so the "
+                "value shown can be that of a far more common variant (it is blank where all of "
+                "them read 0)."),
+        }
+        legend = [(term, definition + extra.get(term, "")) for term, definition in legend]
     items = "".join(
         '<div class="legend-item"><div class="legend-term">%s</div>'
         '<div class="legend-def">%s</div></div>' % (term, definition)
@@ -4180,10 +4224,12 @@ def render_html(
     indel_af_bundle_name=None, indel_af_n_rows=0,
     observed_haplotypes_bundle_name=None, observed_haplotypes_modals="",
     table_crispr_bulge_html="", inputs_criteria_html="", legend_html=None,
-    next_steps_html="", plots_exclusion_note="", table_exclusion_note="",
+    next_steps_html="", plots_exclusion_note="", table_exclusion_note="", untiered=None,
 ):
     # ``plots_exclusion_note`` / ``table_exclusion_note``: the top_exclusion_note
-    # captions of Section 2 and Section 6 (empty when nothing is left out)
+    # captions of Section 2 and Section 6 (empty when nothing is left out).
+    # ``untiered``: the datasets a --per-sample search resolved without the dict-less
+    # tiers, whose dense windows the Section-6 caption qualifies.
     scatter_html = []
     for title, caption, uri in scatter_panels:
         scatter_html.append(
@@ -4345,6 +4391,11 @@ def render_html(
                 "<strong>&ldquo;N other observed haplotypes&rdquo;</strong> link in the "
                 "<code>Observed</code> column &mdash; click it to see every haplotype a "
                 "real individual carries at that site."
+            ) + (
+                f" On {_untiered_named(untiered)}, a site flagged in "
+                "<code>High_complexity_region</code> can be reported by its dense window's "
+                "greedy worst-case alignments instead, whose listed carriers need not carry "
+                "every variant in them." if untiered else ""
             )
         else:
             _oh_expl = (
@@ -5215,6 +5266,11 @@ def build_report(
     # multi-variant rosters are a worst-case union (see the "Observed" cell labelling).
     global _PER_SAMPLE
     _PER_SAMPLE = meta.get("search_mode") == "per-sample"
+    # but not on the datasets a per-sample search resolved without the dict-less tiers
+    # (.untiered_datasets), whose rows carry no more than the classic dictionaries give:
+    # the texts that say otherwise qualify it for them (the MAF footnote, the Section-6
+    # caption, the legend; the Search mode and Allele-frequency basis rows read meta)
+    untiered = (meta.get("untiered") or []) if _PER_SAMPLE else []
     version = meta.get("version") or _package_version()
     has_crispr_bulge = crispr_bulge_computed(df, cols)
 
@@ -5446,7 +5502,7 @@ def build_report(
             site_map=observed_haplotypes_site_map, oh_modals=oh_modals,
             oh_download_name=observed_haplotypes_bundle_name,
             oh_omitted_note=observed_haplotypes_omitted_note,
-            reference_only=meta.get("reference_only", False),
+            reference_only=meta.get("reference_only", False), untiered=untiered,
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
@@ -5464,7 +5520,7 @@ def build_report(
                     site_map=observed_haplotypes_site_map, oh_modals=oh_modals,
                     oh_download_name=observed_haplotypes_bundle_name,
                     oh_omitted_note=observed_haplotypes_omitted_note,
-                    reference_only=meta.get("reference_only", False),
+                    reference_only=meta.get("reference_only", False), untiered=untiered,
                 )
                 # (the CRISPR-Bulge top-1000 is surfaced in the Section-5 top-1000 row next
                 # to the CFD one by render_html, not appended to the per-tier list here.)
@@ -5765,9 +5821,10 @@ def build_report(
         inputs_criteria_html=inputs_criteria_html,
         plots_exclusion_note=plots_exclusion_note,
         table_exclusion_note=table_exclusion_note,
+        untiered=untiered,
         legend_html=(
             '<h3 style="margin:0.6em 0 0.3em">Scores &amp; columns</h3>'
-            + build_score_legend_html()
+            + build_score_legend_html(untiered)
             + (
                 '<h3 style="margin:1.2em 0 0.3em">Annotations</h3>' + _ann_legend
                 if (_ann_legend := build_annotation_legend_html(cols, df)) else ""

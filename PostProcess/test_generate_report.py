@@ -940,10 +940,101 @@ class TestGenerateReport(unittest.TestCase):
         pop = {**base, "search_mode": "population-level"}
         self.assertEqual(row({**pop, "untiered": ["hg38_1000G"]}), row(pop))
 
+    def test_the_texts_that_make_the_rows_claims_qualify_them_too(self):
+        """The rest of that report still made the claims its Search mode row withdraws: the
+        Allele-frequency basis row and the MAF footnote gave AC/AN over the genotyped panel,
+        the legend's MAF entry an exact joint AF under --per-sample, its Observed entry exact
+        cis carriers, and the Section-6 caption every haplotype a real individual carries.
+        On the self-test panel 154 of the search's 189 alt rows had a blank MAF because the
+        VCF's two-decimal AF reads 0, a two-variant row showed 8.10e-01 from Variant_MAF
+        "NA,0.81", and the 5 greedy rows read "N cis carriers" though none of the 114 carriers
+        they list carries every variant of its row. Each text now says what holds for the
+        datasets without the tiers; with the tiers, and in a population-level report, each is
+        as it was, byte for byte."""
+        base = {"datasets": "hg38+1000G", "mm": "4", "bdna": 1, "brna": 1, "max_edits": "6",
+                "search_mode": "per-sample"}
+        pop = {**base, "search_mode": "population-level"}
+        one, two = ["hg38_1000G"], ["hg38_1000G", "hg38_<x>"]
+        named = "<code>hg38_1000G</code>, which has no dict-less tiers"
+
+        # the Allele-frequency basis row (Section 1)
+        def af_row(meta):
+            html = gr.render_inputs_criteria(meta)
+            return re.search(r'Allele-frequency basis</td><td>(.*?)</td>', html, re.S).group(1)
+
+        af = ("Combined-panel minor/alternate allele frequency over the merged hg38+1000G panel: "
+              "for genotyped databases this is AC/AN across the panel; a frequency-only database "
+              "contributes its reported population allele frequency directly. Per-dataset and "
+              "per-superpopulation frequencies are available in the interactive website.")
+        for meta in (base, {**base, "untiered": []}, pop, {**pop, "untiered": one}):
+            self.assertEqual(af_row(meta), af)
+        self.assertEqual(af_row({**base, "untiered": one}), af.replace(
+            "directly. ", "directly. For " + named + ", it is instead the <code>AF</code> its VCF "
+            "gives, as rounded there (a rare variant can read 0, and its MAF is then blank). "))
+        self.assertIn("<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers, it is instead "
+                      "the <code>AF</code> their VCFs give", af_row({**base, "untiered": two}))
+
+        # the MAF footnote under the top-1000 tables (Section 6)
+        foot = gr.maf_footnote("hg38+1000G")
+        self.assertTrue(foot.startswith("MAF = combined-panel minor/alternate allele frequency. "))
+        self.assertTrue(foot.endswith("not as a measured frequency of 10<sup>&minus;5</sup>."))
+        self.assertEqual(gr.maf_footnote("hg38+1000G", untiered=[]), foot)
+        self.assertEqual(gr.maf_footnote("hg38+1000G", untiered=one), foot + (
+            " For " + named + ", the frequency is instead the <code>AF</code> its VCF gives, as "
+            "rounded there: a variant whose <code>AF</code> reads 0 there, or is missing, is "
+            "blank too, not shown at the floor."))
+        self.assertIn("their VCFs give", gr.maf_footnote("hg38+1000G", untiered=two))
+
+        # the legend's Observed and MAF entries (Section 7), and no other
+        def entries(html):
+            return re.findall(r'<div class="legend-term">(.*?)</div>'
+                              r'<div class="legend-def">(.*?)</div>', html, re.S)
+
+        legend = gr.build_score_legend_html()
+        self.assertEqual(gr.build_score_legend_html([]), legend)
+        self.assertEqual(entries(legend), list(gr._SCORE_LEGEND))
+        added = {
+            "Observed": (
+                " On " + named + ", a dense window flagged in <code>High_complexity_region</code> "
+                "can be reported by its greedy worst-case alignment, which lists the carriers of "
+                "any of its variants rather than its exact cis carriers: they need not carry "
+                "every variant in it."),
+            "MAF": (
+                " For " + named + ", no joint allele frequency is computed, and each variant's "
+                "frequency is the <code>AF</code> its VCF gives, as rounded there: one whose "
+                "<code>AF</code> reads 0 is left out of the minimum, so the value shown can be "
+                "that of a far more common variant (it is blank where all of them read 0)."),
+        }
+        self.assertEqual(entries(gr.build_score_legend_html(one)),
+                         [(t, d + added.get(t, "")) for t, d in gr._SCORE_LEGEND])
+        self.assertIn("frequency is the <code>AF</code> their VCFs give",
+                      gr.build_score_legend_html(two))
+
+        # the caption of the per-sample top-1000 tables' observed haplotypes (Section 6)
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
+        gr._PER_SAMPLE = True
+
+        def caption(**kwargs):
+            html = gr.render_html("job", "", [], "", "", "", None, "top1000.tsv", "",
+                                  observed_haplotypes_bundle_name="observed_haplotypes.tsv",
+                                  **kwargs)
+            return re.search(r'<p class="caption">(Each row is the per-site representative.*?)'
+                             r'</p>', html, re.S).group(1)
+
+        said = caption()
+        self.assertTrue(said.endswith("click it to see every haplotype a real individual "
+                                      "carries at that site."), said)
+        self.assertEqual(caption(untiered=[]), said)
+        self.assertEqual(caption(untiered=one), said + (
+            " On " + named + ", a site flagged in <code>High_complexity_region</code> can be "
+            "reported by its dense window's greedy worst-case alignments instead, whose listed "
+            "carriers need not carry every variant in them."))
+
     def test_the_datasets_a_search_records_reach_the_search_mode_row(self):
         """build_summary_meta reads .untiered_datasets beside .search_mode, one dataset per
-        line; a run folder without it (every dataset with the tiers, or a run of an earlier
-        release) reads as before."""
+        line, and the report's other texts that make the row's claims qualify them for those
+        datasets too; a run folder without it (every dataset with the tiers, or a run of an
+        earlier release) reads as before."""
         import shutil
         rd = os.path.join(self.tmp, "Results", "job")
         os.makedirs(rd)
@@ -964,9 +1055,19 @@ class TestGenerateReport(unittest.TestCase):
         with open(os.path.join(rd, ".untiered_datasets"), "w") as h:
             h.write("hg38_1000G_HGDP\n")
         html = report("untiered")
-        self.assertIn("named carrier samples only for <code>hg38_1000G_HGDP</code>, which has "
-                      "no dict-less tiers", html)
+        named = "<code>hg38_1000G_HGDP</code>, which has no dict-less tiers"
+        for said in ("named carrier samples only for " + named,
+                     # the Allele-frequency basis row, the MAF footnote, the legend
+                     "For " + named + ", it is instead the <code>AF</code> its VCF gives",
+                     "For " + named + ", the frequency is instead the <code>AF</code> its VCF",
+                     "On " + named + ", a dense window flagged in",
+                     "For " + named + ", no joint allele frequency is computed"):
+            self.assertIn(said, html)
         self.assertNotIn(confirmed, html)
+        # a population-level search records none, and its report would qualify nothing
+        with open(os.path.join(rd, ".search_mode"), "w") as h:
+            h.write("population-level")
+        self.assertNotIn("dict-less tiers", report("population"))
 
     def test_variant_contributed_prose_tracks_whether_file_is_bundled(self):
         """The 'Variant-contributed sites' row must not claim variant_created.tsv is
