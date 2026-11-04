@@ -549,7 +549,11 @@ Enumerating the lattice is 2^k in the number of co-located variants, so extreme-
   risk and the carrier count (seen in the wild as a 15-SNP / "47-carrier" / CFD-0.57 row at
   chr14:106770868 that nobody actually carries; the real observed haplotypes there are ≤2 variants,
   CFD ≈ 0). Per the per-sample contract — report an off-target only when ≥1 real individual carries it —
-  the chimera is suppressed; the window surfaces only its real observed haplotypes.
+  the chimera is suppressed; the window surfaces only its real observed haplotypes. This is the path
+  of an index with the dict-less tiers, such as this one: an index built without `--samplesID` has
+  none, and its per-sample search goes the classic dictionary path, which still reports a capped
+  window by its greedy worst-case alignment, whose listed carriers need not carry every variant in it
+  (METHODS.md §5).
 - Every capped window is still logged to **`<out>.high_variant_density_regions.bed`** so approximated
   regions are visible, never silent; the reference off-target row keeps the locus in the table.
 - The **`observed_haplotypes.tsv`** report companion lists, for every multi-haplotype site, EACH real

@@ -2629,9 +2629,11 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
     dictionaries, and takes the CONFIRMED/PUTATIVE cis phasing, the SNP+SNP
     co-occurrence and the exact joint AF from the dict-less tiers, which a build without
     --samplesID does not write (the benchmark complete-test's, a build from the web
-    Settings page). On such an index its banner promised them all the same. The search
-    records the datasets it names so (.untiered_datasets), for the report's Search mode
-    row (test_generate_report), which cannot tell from the results."""
+    Settings page). On such an index its banner promised them all the same. Its
+    post-analysis also still reports a dense window by its greedy worst-case alignment,
+    with the carriers of any of the variants that alignment takes. The search records
+    the datasets it names so (.untiered_datasets), for the report's Search mode row
+    (test_generate_report), which cannot tell from the results."""
 
     BANNER = ("[complete-search] PER-SAMPLE analysis ({}): resolving per-sample genotypes "
               "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and "
@@ -2669,8 +2671,11 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                     "per-sample dictionaries: the CONFIRMED/PUTATIVE cis phasing, the SNP+SNP "
                     "co-occurrence and the exact joint AF come from those tiers, and none of them "
                     "is reported for its variants, whose allele frequencies are the ones the VCF "
-                    "gives. To get them, rebuild the index with build-index-only --samplesID, or "
-                    "download a prebuilt one (crisprme.py download --what index --index-name "
+                    "gives. Where its variants are dense, a window can still be reported by its "
+                    "greedy worst-case alignment, flagged in High_variant_density_region, whose "
+                    "listed carriers need not carry every variant in it. To get the tiers, "
+                    "rebuild the index with build-index-only --samplesID, or download a prebuilt "
+                    "one (crisprme.py download --what index --index-name "
                     "NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on dense panels; "
                     "pass --population-level for the fast worst-case screen.\n", out)
                 self.assertEqual(self.recorded(), "ds\n")

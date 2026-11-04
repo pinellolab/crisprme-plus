@@ -894,10 +894,12 @@ class TestGenerateReport(unittest.TestCase):
         documented self-test builds) has only the classic per-sample dictionaries. On it a
         --per-sample search names the carriers, with the VCF's allele frequencies, and no
         CONFIRMED/PUTATIVE cis phasing, SNP+SNP co-occurrence or exact joint AF, as
-        complete-search's banner says. The Search mode row promised CONFIRMED cis phasing
-        and exact joint AF for every haplotype all the same. complete-search records the
-        datasets it says this of (.untiered_datasets, read into meta["untiered"]); the row
-        now says what the banner does, and with the tiers it is as it was, byte for byte."""
+        complete-search's banner says; and a dense window can still come as its greedy
+        worst-case alignment, whose listed carriers need not carry all of its variants. The
+        Search mode row promised CONFIRMED cis phasing and exact joint AF for every
+        haplotype all the same. complete-search records the datasets it says this of
+        (.untiered_datasets, read into meta["untiered"]); the row now says what the banner
+        does, and with the tiers it is as it was, byte for byte."""
         base = {"datasets": "hg38_1000G", "mm": "4", "bdna": 1, "brna": 1, "max_edits": "6",
                 "search_mode": "per-sample"}
 
@@ -920,14 +922,19 @@ class TestGenerateReport(unittest.TestCase):
             "<code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample dictionaries: the "
             "CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint "
             "allele frequency come from those tiers, and none of them is reported for its "
-            "variants, whose allele frequencies are the ones the VCF gives. To get them, rebuild "
-            "the index with <code>build-index-only --samplesID</code>, or download a prebuilt one "
+            "variants, whose allele frequencies are the ones the VCF gives. Where its variants "
+            "are dense, a window can still be reported by its greedy worst-case alignment, "
+            "flagged in <code>High_complexity_region</code> "
+            "(<code>High_variant_density_region</code> in the integrated results), whose listed "
+            "carriers need not carry every variant in it. To get the tiers, rebuild the index "
+            "with <code>build-index-only --samplesID</code>, or download a prebuilt one "
             "(<code>crisprme.py download --what index --index-name "
             "NRG_3_hg38+hg38_HGDP1kGP</code>).")
         two = row({**base, "untiered": ["hg38_1000G", "hg38_<x>"]})
         for said in ("named carrier samples only for <code>hg38_1000G</code>, "
                      "<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
-                     "none of them is reported for their variants"):
+                     "none of them is reported for their variants",
+                     "Where their variants are dense"):
             self.assertIn(said, two)
         # a population-level row claims none of what the tiers give, so it does not change
         pop = {**base, "search_mode": "population-level"}

@@ -1679,7 +1679,9 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     if meta.get("search_mode") == "per-sample" and meta.get("untiered"):
         # what complete-search's banner says of the datasets it resolved without the
         # dict-less tiers (.untiered_datasets): their classic per-sample dictionaries name
-        # the carriers, and no more
+        # the carriers, and their post-analysis still reports a window denser than
+        # CRISPRME_IUPAC_CAP by its greedy worst-case alignment, listing the carriers of any
+        # of the variants it takes
         _ut = meta["untiered"]
         _one = len(_ut) == 1
         sm_note = (
@@ -1691,7 +1693,11 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
             "CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint "
             "allele frequency come from those tiers, and none of them is reported for "
             f"{'its' if _one else 'their'} variants, whose allele frequencies are the ones the "
-            "VCF gives. To get them, rebuild the index with <code>build-index-only "
+            f"VCF gives. Where {'its' if _one else 'their'} variants are dense, a window can "
+            "still be reported by its greedy worst-case alignment, flagged in "
+            "<code>High_complexity_region</code> (<code>High_variant_density_region</code> in "
+            "the integrated results), whose listed carriers need not carry every variant in "
+            "it. To get the tiers, rebuild the index with <code>build-index-only "
             "--samplesID</code>, or download a prebuilt one (<code>crisprme.py download --what "
             "index --index-name NRG_3_hg38+hg38_HGDP1kGP</code>)."
         )

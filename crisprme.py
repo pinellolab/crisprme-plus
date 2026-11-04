@@ -530,8 +530,10 @@ def print_help_complete_search() -> None:
         "cis phasing + named carrier samples + exact joint AF (the resolution the genotyped "
         "indexes are built for). Requires a genotyped index (no-op with a warning on "
         "sites-only panels); on one without the dict-less tiers (built without --samplesID) "
-        "it names the carrier samples only. Slower, and can be intractable on dense panels "
-        "(measured 49h+ without completing on a 4x-density panel) [OPTIONAL]\n"
+        "it names the carrier samples only, and a dense window can still be reported by its "
+        "greedy worst-case alignment, whose listed carriers need not carry every variant in "
+        "it. Slower, and can be intractable on dense panels (measured 49h+ "
+        "without completing on a 4x-density panel) [OPTIONAL]\n"
         "\t--population-level, force the fast population-level analysis: one worst-possible "
         "PUTATIVE representative per variant window, exact worst-case CFD, dataset-level "
         "allele frequencies -- lossless for detection, tractable on any panel. Use this to "
@@ -3219,8 +3221,10 @@ def complete_search() -> None:
         # AF come from the dict-less tiers (registry_<vcf>/, genotypes_<vcf>/). An index
         # without either -- built without --samplesID, as the benchmark complete-test
         # builds its own -- has only the classic per-sample dictionaries, which name the
-        # carriers, each variant with the allele frequency its VCF gives, and no more.
-        # (each dataset once: a --vcf list may name one twice)
+        # carriers, each variant with the allele frequency its VCF gives, and no more. Their
+        # post-analysis still reports a window denser than CRISPRME_IUPAC_CAP by its greedy
+        # worst-case alignment, listing the carriers of any of the variants it takes
+        # (new_simple_analysis.py). (each dataset once: a --vcf list may name one twice)
         _dict_root = os.path.join(current_working_directory, "Dictionaries")
         _untiered = [
             _vn for _vn in dict.fromkeys(os.path.basename(os.path.normpath(_v))
@@ -3239,7 +3243,10 @@ def complete_search() -> None:
                 f"CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact "
                 f"joint AF come from those tiers, and none of them is reported for "
                 f"{'its' if _one else 'their'} variants, whose allele frequencies are the ones "
-                f"the VCF gives. To get them, rebuild the index with build-index-only "
+                f"the VCF gives. Where {'its' if _one else 'their'} variants are dense, a "
+                f"window can still be reported by its greedy worst-case alignment, flagged in "
+                f"High_variant_density_region, whose listed carriers need not carry every "
+                f"variant in it. To get the tiers, rebuild the index with build-index-only "
                 f"--samplesID, or download a prebuilt one (crisprme.py download --what index "
                 f"--index-name NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
                 f"dense panels; pass --population-level for the fast worst-case screen."

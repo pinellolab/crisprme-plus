@@ -1011,8 +1011,10 @@ its purpose and usage:
   samples, and exact joint allele frequency, which come from the index's dict-less tiers. On
   an index without them (built without `--samplesID`, as the benchmark `complete-test`
   builds its own) it names the carrier samples only, with the allele frequencies the VCF
-  gives; `complete-search` and the report's Search mode row say so. Rebuild it with
-  `build-index-only --samplesID`, or use a prebuilt index. On a genotyped+PHASED index (HGDP + 1000
+  gives, and a dense window can still be reported by its greedy worst-case alignment, whose
+  listed carriers need not carry every variant in it; `complete-search` and the report's
+  Search mode row say so. Rebuild it with `build-index-only --samplesID`, or use a prebuilt
+  index. On a genotyped+PHASED index (HGDP + 1000
   Genomes (the default), or HPRC) this is already the context-aware default; on
   a sites-only index (`mega`) it cannot resolve carriers (no genotypes) and
   `complete-search` warns. Can be slow / intractable on dense or aggregate panels. To opt
@@ -1981,7 +1983,8 @@ is under `data/`). Reading top to bottom:
   | `observed` | A single variant with non-zero allele frequency — carried by ≥1 individual by definition, even where the carrier cannot be named | Any variant-aware run, incl. sites-only panels |
   | `putative` | A multi-variant combination whose cis co-occurrence cannot be confirmed | Any variant-aware run |
 
-  Under **`--per-sample`** the carrier list is the exact cis carriers, so `putative`
+  Under **`--per-sample`** the carrier list is the exact cis carriers (but for a dense
+  window's greedy alignment on an index without the dict-less tiers: see below), so `putative`
   cleanly marks reconstructions no one actually carries. (In a population-level run a
   multi-variant SNP list is the union of each variant's carriers, flagged
   `(>=1 of K vars, poss. chimera)`; an indel (or MNV) row is resolved per carrier in
@@ -2030,11 +2033,16 @@ is under `data/`). Reading top to bottom:
   representative per site (highest score, ties → most carriers); this companion is where you see the
   *full* set of real haplotypes a dense/multi-haplotype site contributes (it serves the CFD- and the
   CRISPR-Bulge-ranked views alike).
-- **`--per-sample` reports only off-targets a real individual carries.** In a high-variant-density
+- **`--per-sample` reports only off-targets a real individual carries, on an index with the dict-less
+  tiers.** In a high-variant-density
   window CRISPRme does **not** fabricate a synthetic cross-sample "worst-case" haplotype under
   `--per-sample`; it reports the real observed haplotypes (exact carriers) and flags the dense region in
   `high_variant_density_regions.bed`. A population-level run (`--population-level`, or the default on a
   sites-only/unphased index) still reports the conservative worst-case representative, as it should for a screen.
+  On an index without the tiers (one built without `--samplesID`, such as the one the benchmark
+  `complete-test` builds), a dense window can still be reported by its greedy worst-case alignment,
+  flagged in `High_variant_density_region`, whose listed carriers need not carry every variant in it:
+  rebuild the index with `build-index-only --samplesID`, or use a prebuilt one.
 
 ##### Input Arguments
 ---

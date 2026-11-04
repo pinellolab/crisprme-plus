@@ -621,6 +621,24 @@ for every genotyped / legacy install (the genotyped path is already lossless via
 observed enumerator). Set `CRISPRME_LOSSLESS_DENSE=0` to opt out. A per-sample union on
 the genotyped path is intentionally *not* done — it would risk trans-as-cis phantoms.
 
+Under `--per-sample` a capped window emits no greedy representative at all (since 2.7.10):
+the representative unions the carriers of alleles that different individuals carry, so it
+can be a haplotype no single one has, and the window is reported by its observed haplotypes,
+its reference row and its BED line. That is the observed-haplotype path, which reads the
+index's dict-less tiers. **Known limit:** an index without them (one built without
+`--samplesID`, such as the one the benchmark `complete-test` builds) goes the classic
+dictionary path, which still reports a capped window by its greedy worst-case alignment,
+flagged in `High_variant_density_region`, whose listed carriers (the carriers of any allele
+it takes) need not carry every variant in it. On chr22 of the benchmark's phased 1000 Genomes
+VCF, the README's guide (`CTAACAGTTGCTTTTATCAC`, 4 mismatches + 1 DNA + 1 RNA bulge) searched
+per sample gives 5 such rows (8 to 13 variants each, CFD at most 0.001), and each of the 114
+carriers they list lacks one of its row's variants: 342 of the run's 56,730 SNP-row carrier
+listings (a row lists its carriers once for each of its three alignments). After
+`build-index-only --samplesID` the same search returns exactly those 5 rows fewer, and every
+carrier it lists has all of its row's variants on one phased haplotype. `complete-search` and
+the report's Search mode row say so; rebuild the index with `build-index-only --samplesID`,
+or use a prebuilt one. It is fixed in the next release.
+
 ### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
 The controls above bound any *single* window, but a **dense panel** (many merged
@@ -852,7 +870,8 @@ one real individual:
 
 On a genotyped index the carrier roster is
 populated in both analysis modes; under `--per-sample` it is pruned to the **exact
-cis carriers**, so `putative` cleanly marks reconstructions that no one actually
+cis carriers** (but for a dense window's greedy alignment on an index without the
+dict-less tiers, §5), so `putative` cleanly marks reconstructions that no one actually
 carries — separating genuine haplotypes from worst-case combinations. In a
 population-level analysis a multi-variant SNP roster is the union of each variant's
 carriers and reads `N carriers (>=1 of K vars, poss. chimera)`; an indel (or MNV) row's
