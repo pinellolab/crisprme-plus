@@ -39,11 +39,17 @@ into the paths they list and read the same way, and what they found outside the 
 folder changed what they answered; and the Individual picker filled in, and the Personal
 assembly tab's Submit searched, the files a bundle's metadata.json names outside its folder.
 
+And up to 2.8.0 the post-analysis of a search (pool_post_analisi_snp.py) took the name of
+each FASTA file of the genome folder, as a chromosome's, into shell commands as it was,
+and a personal-assembly bundle, imported in Settings, brings its genome folders with the
+names of its archive.
+
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
 normal value still works; a job id holding '../' reads, writes and removes nothing
-outside Results/. The extraction's checks run everywhere (those that read a sequence
-need bedtools); the pages' need the web stack (Dash), and run in the image.
+outside Results/. The extraction's and the post-analysis's checks run everywhere (those
+that read a sequence need bedtools); the pages' need the web stack (Dash), and run in the
+image.
 
 Run with:
 
@@ -680,6 +686,82 @@ class TestAssemblySearchLaunch(_WebFolder):
         self.assertEqual(said[:2], ["paternal genome", "maternal genome"])
         self.assertEqual(os.listdir(os.path.join(self.data, "Results")), [])
         self.assertNothingRun()
+
+
+class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
+    """The post-analysis of a search's off-targets (pool_post_analisi_snp.py: of a reference
+    or personal-assembly search, and of the variants), which takes the name of each FASTA
+    file of the genome folder, less its extension, for a chromosome's: it ran
+    post_analisi_snp.sh on each through a shell, with that name unquoted, and the scripts
+    that runs take the name into shell commands too. A personal-assembly bundle brings its
+    genome folders with the names its archive gives. post_analisi_snp.sh is a stand-in here,
+    which records its arguments, in the folder the post-analysis runs in (the search runs it
+    in PostProcess/)."""
+
+    def setUp(self):
+        super().setUp()
+        self.post = os.path.join(self.top, "PostProcess")
+        os.makedirs(self.post)
+        stand_in = os.path.join(self.post, "post_analisi_snp.sh")
+        with open(stand_in, "w") as fh:
+            fh.write('#!/bin/bash\nprintf "%s\\0" "$@" >> "$(dirname "$0")/args"\n')
+        os.chmod(stand_in, 0o755)
+        self.genome = os.path.join(self.data, "Genomes", "hg38")
+        self.job = os.path.join(self.data, "Results", "JOB1")
+        os.makedirs(self.job)
+        # the arguments of a reference search's post-analysis, as the search script gives
+        # them, but the chromosome's
+        self.head = [self.job, self.genome, "_", os.path.join(self.job, "guides.txt"), "4",
+                     "1", "1", "_", os.path.join(self.data, "PAMs", f"{PAM}.txt"), "_",
+                     os.path.join(self.job, "final_results_JOB1.bestMerge.txt"),
+                     os.path.join(self.job, "final_results_JOB1.altMerge.txt")]
+        self.before = self.outside_files()
+
+    def post_analysis(self):
+        """pool_post_analisi_snp.py, run as the search runs it, and the arguments of each
+        run of post_analisi_snp.sh it made."""
+        record = os.path.join(self.post, "args")
+        if os.path.exists(record):
+            os.remove(record)
+        done = subprocess.run(
+            [sys.executable, os.path.join(HERE, "pool_post_analisi_snp.py")] + self.head + ["1"],
+            cwd=self.post, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        words = []
+        if os.path.exists(record):
+            with open(record, "rb") as fh:
+                words = [w.decode() for w in fh.read().split(b"\0")[:-1]]
+            os.remove(record)
+        return done, [words[i:i + 13] for i in range(0, len(words), 13)]
+
+    def test_a_fasta_named_with_a_command_runs_nothing(self):
+        # a FASTA of sequence chr1 named so: the search's own check of the folder reads the
+        # sequence's name, and the post-analysis ran the file's
+        for name in ("chr1;touch${IFS}MARK_a;x", "chr1$(touch${IFS}MARK_b)",
+                     "chr1`touch${IFS}MARK_c`", "chr1|touch${IFS}MARK_d",
+                     "chr1&&touch${IFS}MARK_e", "chr1>MARK_f", "chr1\ntouch${IFS}MARK_g",
+                     "chr1 x", "chr1\tx"):
+            with self.subTest(name=name):
+                fasta = os.path.join(self.genome, f"{name}.fa")
+                with open(fasta, "w") as fh:
+                    fh.write(">chr1\n" + SEQ + "\n")
+                done, runs = self.post_analysis()
+                os.remove(fasta)
+                self.assertNothingRun()
+                self.assertEqual(runs, [])  # nothing ran, chr1's post-analysis neither
+                self.assertNotEqual(done.returncode, 0)
+                self.assertIn(f"chromosome name {name!r} holds ", done.stderr)
+
+    def test_a_genome_is_post_analysed_as_before(self):
+        # each chromosome once, with the arguments the command gave post_analisi_snp.sh: an
+        # HLA allele's ('*'), which a shell expanded to no file, among them
+        for name in ("chr2", "HLA-A*01:01"):
+            with open(os.path.join(self.genome, f"{name}.fa"), "w") as fh:
+                fh.write(f">{name}\n" + SEQ + "\n")
+        done, runs = self.post_analysis()
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual(sorted(runs), [self.head + [chrom]
+                                        for chrom in ("HLA-A*01:01", "chr1", "chr2")])
+        self.assertEqual(self.markers(), [])
 
 
 @NEEDS_DASH

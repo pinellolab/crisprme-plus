@@ -2,10 +2,10 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (35 tests, the Security
-block) to that step, and on this branch the step then ran 502 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (37 tests, the Security
+block) to that step, and on this branch the step then ran 504 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged. The indel search's
-chromosome-name check (the last Security entry) adds three tests to `test_indel_empty_chromosome`,
+chromosome-name check (its Security entry) adds three tests to `test_indel_empty_chromosome`,
 and the Settings and personal-assembly entries add tests to `test_settings_progress` and
 `test_personal_assembly`, in unit-tests' own job.
 
@@ -197,3 +197,14 @@ and the Settings and personal-assembly entries add tests to `test_settings_progr
   name may not hold (the same characters Settings refuses in a name, above), and say so; a
   real chromosome name holds none, so a normal dataset is searched as before. Pre-existing.
   Covered by `PostProcess/test_indel_empty_chromosome.py`.
+- **The post-analysis of a search passes no FASTA file's name to a shell.** It takes the name
+  of each FASTA file of the genome folder searched, as its chromosome's, into shell commands as
+  it is, where characters a shell reads ran as commands, as the web app's user. A genome added
+  in Settings has its files named after their sequences, whose names are checked, but a
+  personal-assembly bundle imported there brings its genome folders with the names its archive
+  gives, and Settings changes data in local mode only, which is how CRISPRme runs by default.
+  The post-analysis now refuses a name that holds a blank or a character a sequence's name may
+  not hold (`|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a backquote or `#`), and says so,
+  and runs its step for each chromosome with no shell. A chromosome's off-targets are kept only
+  from the file named after its sequence, whose name holds none of these, so a normal genome is
+  searched as before. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
