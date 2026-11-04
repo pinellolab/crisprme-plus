@@ -171,11 +171,17 @@ and the Settings, personal-assembly and History entries add tests to `test_setti
   registered folder is now read where it is and nothing is uploaded into it, and an upload takes
   `.vcf.gz` files and their `.tbi` or `.csi` index only (`docs/SETTINGS_DATA_MANAGER.md`).
   Pre-existing, since 2.2.0. Covered by `PostProcess/test_settings_progress.py`.
-- **Publish, in maintainer mode, publishes only an installed index.** With a Hugging Face token
-  in the web app's environment, Settings' Publish took any index name, and `publish-index`
-  archives the folder that name leads to, beside it, and uploads the archive with that token: a
-  name holding a path had any folder of the server archived and uploaded. It now publishes only
-  an index its list offers. Pre-existing, since 2.2.0. Covered by
+- **Settings publishes no index; an index is published from the command line.** With a Hugging
+  Face token in the web app's environment (maintainer mode), Settings' Publish took any index
+  name, and `publish-index` archives the folder that name leads to, beside it, and uploads the
+  archive with that token to the shared repository, over a file of the same name there: a name
+  holding a path had any folder of the server archived and uploaded. Taking only an index its
+  list offers did not bound that, as a request has the list offer what it installs through the
+  page: a VCF dataset of any server folder registered, or of a VCF uploaded, and its index
+  built, whose archive holds the dataset's per-sample dictionaries and sample list. Settings now
+  publishes nothing, and Retry runs no publish an earlier version started; in maintainer mode
+  the page says to publish with `crisprme.py publish-index`, which is unchanged
+  (`docs/SETTINGS_DATA_MANAGER.md`). Pre-existing, since 2.2.0. Covered by
   `PostProcess/test_settings_progress.py`.
 - **Settings builds an index only of a genome, PAM and VCF dataset its card offers.** "Build an
   index locally" took them as a request sent them, and a path in one built an index of a folder

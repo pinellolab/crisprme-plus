@@ -209,7 +209,7 @@ CLI-built install and a web-built install are interchangeable.
 | **Define a nuclease / PAM** | write the one-line PAM file under `PAMs/<name>.txt` (`<IUPAC_motif> <signed_position>`; see `docs/INPUT_FORMATS.md`) and pass `--pam PAMs/<name>.txt` |
 | **COSMIC licence** enable/disable | `crisprme.py cosmic-license {enable|disable|status}` |
 | CRISPR-Bulge **scorer environment** | `crisprme.py scorer-env {create|check|update|list|doctor}` |
-| **Publish an index** to HuggingFace | `crisprme.py publish-index --index genome_library/<name> [--dictless]` |
+| **Publish an index** to HuggingFace: command line only (the web app does not publish; in maintainer mode Settings says so) | `crisprme.py publish-index --index genome_library/<name> [--dictless]` |
 | **Remove installed data** | delete the folder/file (e.g. `rm -r genome_library/<name>` · `Genomes/<name>` · `Assemblies/<name>`) |
 | Shareable **report** | produced by each search; regenerate with `crisprme.py generate-report …` |
 

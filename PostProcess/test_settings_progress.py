@@ -267,20 +267,6 @@ class _PreventUpdate(Exception):
 _NO_UPDATE = object()  # stand-in for dash.no_update
 
 
-def _publish_stage():
-    """The stage publish_index_cb launches its job with. That callback is only
-    defined under ``if MAINTAINER_MODE:``, so it is read from the AST."""
-    with open(_SETTINGS_PAGE) as fh:
-        tree = ast.parse(fh.read())
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "publish_index_cb":
-            for call in ast.walk(node):
-                if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-                        and call.func.id == "launch_settings_job"):
-                    return call.args[1].value
-    raise AssertionError("publish_index_cb's launch_settings_job(...) call not found")
-
-
 class _JobDirCase(unittest.TestCase):
     """A temp data dir with Settings/ and, beside it, an ``outside`` dir holding
     a job-shaped cmd.json + logs that no callback may ever read or run."""
@@ -417,7 +403,7 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
     """Retry, Show-full-log and the progress poll, undecorated: a bad id is
     refused before anything is read or run; a real job id works as before.
     Retry re-runs only a job the FAILED banner is shown for, and never a
-    'Publish index' job outside MAINTAINER_MODE."""
+    'Publish index' job (the page's Publish, before 2.8.1)."""
 
     names = [
         "_JOB_ID_RE",
@@ -500,22 +486,22 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
                     self.assertEqual(self.launched, [])
                     self.assertIs(out[0], _NO_UPDATE)  # the neutral "could not retry"
 
-    def test_retry_refuses_publish_index_outside_maintainer_mode(self):
-        # publish_index_cb only exists in MAINTAINER_MODE: a publish recorded
-        # while it was on must not be re-run through Retry once it is off
-        stage = _publish_stage()
+    def test_retry_never_reruns_a_publish(self):
+        # the page's Publish (maintainer mode, before 2.8.1) ran publish-index, which uploads
+        # an index with the server's token: one it left failed is not re-run, maintainer
+        # mode or not (the page does not publish: TestThePageDoesNotPublish)
+        stage = "Publish index"
         cmd = "crisprme.py publish-index --index /data/genome_library/NRG_3_hg38 --path /data"
         self.make_job(_GOOD_ID, {
             "log.txt": f"{stage}\tQueued\n{stage}\tStart\n{stage}\tFAILED\n",
             "cmd.json": json.dumps({"cmd": cmd, "stage": stage}),
         })
-        out = self.ns["_retry_settings_job"](1, _GOOD_ID)
-        self.assertEqual(self.launched, [])
-        self.assertIs(out[0], _NO_UPDATE)
-        self.ns["MAINTAINER_MODE"] = True  # a maintainer may retry a failed publish
-        out = self.ns["_retry_settings_job"](1, _GOOD_ID)
-        self.assertEqual(self.launched, [(cmd, stage)])
-        self.assertEqual(out[0], "set_NEWJOB0001")
+        for maintainer in (False, True):
+            with self.subTest(maintainer=maintainer):
+                self.ns["MAINTAINER_MODE"] = maintainer
+                out = self.ns["_retry_settings_job"](1, _GOOD_ID)
+                self.assertEqual(self.launched, [])
+                self.assertIs(out[0], _NO_UPDATE)
 
     def test_show_full_log_refuses_bad_ids_without_reading(self):
         for bad in self.bad_ids():
@@ -1970,23 +1956,6 @@ def _listing(root, folder, keep=os.path.isdir, value=lambda name: name):
     return listed
 
 
-def _maintainer_callback(name, **namespace):
-    """A callback that settings_page.py defines only under ``if MAINTAINER_MODE:``,
-    undecorated, exec'd in ``namespace`` as _load_functions does."""
-    with open(_SETTINGS_PAGE) as fh:
-        tree = ast.parse(fh.read())
-    for node in tree.body:
-        if isinstance(node, ast.If) and getattr(node.test, "id", None) == "MAINTAINER_MODE":
-            for func in node.body:
-                if isinstance(func, ast.FunctionDef) and func.name == name:
-                    func.decorator_list = []
-                    ns = dict(os=os, List=List, Optional=Optional, **namespace)
-                    exec(compile(ast.Module(body=[func], type_ignores=[]),  # noqa: S102
-                                 _SETTINGS_PAGE, "exec"), ns)
-                    return ns[name]
-    raise AssertionError(f"{name} not found under 'if MAINTAINER_MODE:' in settings_page.py")
-
-
 class TestRemoveTakesAnItemTheCardLists(unittest.TestCase):
     """ask_delete and do_delete, undecorated, on a data folder (data/) beside a folder of
     someone else's (outside/). The item's name was only basename-guarded, which leaves
@@ -2258,45 +2227,53 @@ class TestVcfUploadIntoARegisteredFolder(unittest.TestCase):
                           "walk.chr2.vcf.gz.csi"])
 
 
-class TestPublishTakesAnInstalledIndex(unittest.TestCase):
-    """publish_index_cb (maintainer mode: an HF token in the server's environment),
-    undecorated. It joined any name to genome_library/, and publish-index tars the folder
-    it names beside that folder and uploads the tarball with the server's token: '../' or
-    an absolute name had any folder of the server tarred and uploaded. Only an installed
-    index, as the dropdown offers, is published."""
+class TestThePageDoesNotPublish(unittest.TestCase):
+    """Maintainer mode (an HF token in the server's environment, or CRISPRME_MAINTAINER):
+    Settings' Publish ran publish-index on an index its list offered, which archives the
+    index with its dataset's per-sample dictionaries, registry and sample list and uploads
+    it with the server's token to the shared repository, over a file of its name there, for
+    any request; and any request installs what that list offers (a VCF dataset of any server
+    folder registered, or of a VCF uploaded, and its index built). The page publishes
+    nothing now, and says to publish from the command line; Retry re-runs no publish
+    (TestJobCallbacksRefuseBadIds)."""
 
-    def setUp(self):
-        self.root = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
-        self.cwd = os.path.join(self.root, "data")
-        for d in ("genome_library/NRG_2_hg38", "genome_library/NRG_2_hg38_INDELS",
-                  "../outside/.ssh"):
-            os.makedirs(os.path.join(self.cwd, d))
-        self.launched = []
-        self.publish = _maintainer_callback(
-            "publish_index_cb",
-            current_working_directory=self.cwd,
-            get_available_indexes=_listing(
-                self.cwd, "genome_library",
-                keep=lambda p: os.path.isdir(p) and not p.endswith("_INDELS")),
-            launch_settings_job=lambda argv, stage: self.launched.append(argv) or "job",
-            _start=lambda job: (job, False, "started"),
-            ONLINE=False,
-            PreventUpdate=_PreventUpdate,
-            no_update=_NO_UPDATE,
-        )
+    def test_no_callback_of_the_page_starts_a_publish(self):
+        with open(_SETTINGS_PAGE) as fh:
+            tree = ast.parse(fh.read())
+        names = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+        texts = {node.value for node in ast.walk(tree)
+                 if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+        self.assertNotIn("publish_index_cb", names)
+        # no job's argv, and no Publish button or index list to start one from
+        for text in ("publish-index", "index-publish-btn", "index-publish-name"):
+            self.assertNotIn(text, texts)
+        # (the scan reads the page: the jobs of its other cards are there)
+        self.assertLessEqual({"download", "build-index-only"}, texts)
 
-    def test_only_an_installed_index_is_published(self):
-        for name in ("../../outside/.ssh", "../outside", os.path.join(self.root, "outside"),
-                     "..", ".", "NRG_2_hg38/..", "NRG_2_hg38/../../../outside/.ssh"):
-            with self.subTest(name=name):
-                self.assertEqual(self.publish(1, name), (
-                    _NO_UPDATE, _NO_UPDATE, "Select an installed index to publish."))
-        self.assertEqual(self.launched, [])
-        self.assertEqual(self.publish(1, "NRG_2_hg38"), ("job", False, "started"))
-        self.assertEqual(self.launched, [["publish-index", "--index", os.path.join(
-            self.cwd, "genome_library", "NRG_2_hg38")]])
-        self.assertEqual(self.publish(1, None)[2], "Select an index to publish.")
+    def test_maintainer_mode_says_to_publish_from_the_command_line(self):
+        made = []
+
+        class _Recording:  # html, dbc, dcc: the kind of each element made
+            def __getattr__(self, kind):
+                def element(*args, **kwargs):
+                    made.append(kind)
+                    return _Stub(*args, **kwargs)
+                return element
+
+        for maintainer in (False, True):
+            with self.subTest(maintainer=maintainer):
+                del made[:]
+                ns = _load_functions(
+                    ["_publish_index_section"], MAINTAINER_MODE=maintainer,
+                    html=_Recording(), dbc=_Recording(), dcc=_Recording(),
+                    get_available_indexes=lambda: [{"label": "NRG", "value": "NRG_2_hg38"}])
+                section = ns["_publish_index_section"]()
+                if not maintainer:
+                    self.assertEqual(section, [])
+                    continue
+                self.assertIn("crisprme.py publish-index --index genome_library/<name>",
+                              repr(section))
+                self.assertFalse({"Button", "Dropdown", "Input"} & set(made), made)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,9 @@ single-slot executor so they never starve the search slots (1-16, 2 by default),
 and their progress is polled from the browser exactly like a search.
 
 All mutations are local-mode only (disabled when app.ONLINE is True). Publishing
-an index to the shared HuggingFace repo is maintainer-only (app.MAINTAINER_MODE).
+an index to the shared HuggingFace repo is done from the command line
+(crisprme.py publish-index); in maintainer mode (app.MAINTAINER_MODE) the page
+says so.
 """
 
 from app import (
@@ -867,8 +869,9 @@ def _relaunch_job(job_id: str) -> Optional[str]:
     """Re-launch the download recorded in <job_id>/cmd.json (the Retry action);
     returns the NEW job id, or None if the original command can't be recovered
     or may not be re-run. The id is client data, so the server re-checks what
-    the page implies: the job FAILED, and a maintainer-only 'Publish index' job
-    is never re-run outside MAINTAINER_MODE."""
+    the page implies: the job FAILED, and a 'Publish index' job, which the page's
+    Publish ran in maintainer mode before 2.8.1, is never re-run: the page does not
+    publish (_publish_index_section)."""
     jobdir = _settings_jobdir(job_id)
     if not jobdir:  # not a Settings job id: never read or run that cmd.json
         return None
@@ -886,7 +889,7 @@ def _relaunch_job(job_id: str) -> Optional[str]:
     cmd, stage = rec.get("cmd"), rec.get("stage") or "Retry download"
     if not cmd:
         return None
-    if stage == "Publish index" and not MAINTAINER_MODE:  # publish_index_cb's job
+    if stage == "Publish index":  # it uploaded an index with the server's token
         return None
     return _launch_job_cmd(cmd, stage)
 
@@ -2514,24 +2517,23 @@ def settings_page() -> List:
 
 
 def _publish_index_section() -> List:
-    """Maintainer-only 'publish index to HuggingFace' controls (else nothing)."""
+    """Maintainer mode's note on publishing an index to HuggingFace (else nothing).
+    The page does not publish: whoever reaches it could, with the server's token, and
+    what they had installed through it (a dataset of any server folder registered, or
+    of a VCF uploaded, and its index built), over an index the repository serves."""
     if not MAINTAINER_MODE:
         return []
     return [
         html.Hr(),
         html.B("Publish an index to HuggingFace (maintainers)"),
-        dbc.Row(
+        html.P(
             [
-                dbc.Col(
-                    dcc.Dropdown(
-                        id="index-publish-name",
-                        options=get_available_indexes(),
-                        placeholder="index to publish",
-                    ),
-                    width=8,
-                ),
-                dbc.Col(html.Button("Publish", id="index-publish-btn"), width=4),
-            ]
+                "Publish from a shell on this machine: ",
+                html.Code("crisprme.py publish-index --index genome_library/<name>"),
+                " (docs/PRECOMPUTED_INDEXES.md). This page does not publish: anyone "
+                "who can reach it could, with this server's token.",
+            ],
+            style={"color": "#555"},
         ),
     ]
 
@@ -3110,32 +3112,6 @@ def add_pam(n, name, length, motif, position):
     )
 
 
-if MAINTAINER_MODE:
-
-    @app.callback(
-        [
-            Output("settings-active-job", "data", allow_duplicate=True),
-            Output("settings-check", "disabled", allow_duplicate=True),
-            Output("index-feedback", "children", allow_duplicate=True),
-        ],
-        [Input("index-publish-btn", "n_clicks")],
-        [State("index-publish-name", "value")],
-        prevent_initial_call=True,
-    )
-    def publish_index_cb(n, name):
-        if n is None or ONLINE:
-            raise PreventUpdate
-        if not name:
-            return no_update, no_update, "Select an index to publish."
-        # only an installed index, as the dropdown offers: a request can send any name,
-        # and publish-index tars the folder it names beside itself and uploads it
-        if name not in [i["value"] for i in get_available_indexes()]:
-            return no_update, no_update, "Select an installed index to publish."
-        index_dir = os.path.join(current_working_directory, "genome_library", name)
-        argv = ["publish-index", "--index", index_dir]
-        return _start(launch_settings_job(argv, "Publish index"))
-
-
 # ---------------------------------------------------------------------------
 # Progress polling
 # ---------------------------------------------------------------------------
@@ -3308,7 +3284,7 @@ def _retry_settings_job(n, failed_job):
 # Disable the data-mutating buttons while a job is active (single-slot executor;
 # a second launch would queue behind the first and overwrite its progress view).
 # Buttons re-enable when refresh_settings_job clears settings-active-job on
-# completion. index-publish-btn is omitted (only present in maintainer mode).
+# completion.
 _LOCKABLE_BUTTON_IDS = [
     "genome-add-btn",
     "index-hf-btn",

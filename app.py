@@ -158,9 +158,10 @@ pool_executor = concurrent.futures.ProcessPoolExecutor(max_workers=_MAX_CONCURRE
 # search `pool_executor` means a long download or index build never starves the
 # search slots (_MAX_CONCURRENT_JOBS of them: 1-16, 2 by default).
 settings_executor = concurrent.futures.ProcessPoolExecutor(max_workers=1)
-# Maintainer-only actions (e.g. publishing an index to the shared HuggingFace
-# repo) are gated behind this flag: enabled only when a HuggingFace write token
-# is configured or CRISPRME_MAINTAINER is set. Never exposed to normal users.
+# Maintainer mode: on when a HuggingFace write token is configured or
+# CRISPRME_MAINTAINER is set. Settings then says how to publish an index to the
+# shared HuggingFace repo (crisprme.py publish-index): the page itself does not,
+# since anyone who can reach it could, with the server's token.
 MAINTAINER_MODE = bool(
     os.environ.get("CRISPRME_MAINTAINER")
     or os.environ.get("HF_TOKEN")
