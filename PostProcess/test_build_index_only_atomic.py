@@ -3795,6 +3795,36 @@ class ARefusedSearchWithoutSamplesIDLeavesItsOutputFolderEmpty(_Fixture):
                          [])
 
 
+class AFailedSearchEndsOnItsSummary(_Fixture):
+    """A complete-search whose pipeline failed printed the summary of the failure (the
+    stage, the last lines of its error log, the log's path), then raised an OSError: every
+    failed search, the refusal of an index of format 2 among them, ended in a Python
+    traceback. It ends on the summary now, with exit status 1, as before."""
+
+    def test_the_cli_exits_1_after_the_summary_without_a_traceback(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        index = self.lib(REF)
+        first = self.bins(REF)[0]
+        with open(os.path.join(index, first), "rb") as fh:
+            body = fh.read()
+        with open(os.path.join(index, first), "wb") as fh:  # (as a newer CRISPRitz writes it)
+            fh.write(b"CZI\xfe" + struct.pack("=6i", 2, 31, 0, 20, 3, 2) + b"NRG" + body
+                     + b"CZI\xfe")
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        log = self.path("Results", "search", "log_error.txt")
+        with open(log) as fh:
+            logged = [ln for ln in fh.read().splitlines() if ln.strip()]
+        self.assertTrue(logged[-1].startswith(f"ERROR: {index} was built by a newer CRISPRitz"),
+                        logged)
+        self.assertEqual(err, "\nCRISPRme run failed.\n  Failed during stage: Job\n"
+                              "  Last lines of the error log:\n"
+                              + "".join(f"      {ln}\n" for ln in logged[-15:])
+                              + f"  Full error log: {log}\n")
+        self.assertNotIn("Traceback", out)
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix."""

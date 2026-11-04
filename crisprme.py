@@ -1144,7 +1144,7 @@ _ANNOTATION_TMPDIRS = []
 def _run_and_remove_annotation_tmpdirs(subcommand) -> None:
     """Runs a subcommand that sorts annotations (complete-search, assembly-search),
     then removes the annotation temp folders it made, whether it returned or failed
-    (an error() exit, a failed pipeline's OSError). Left behind, they took ~1.7 GB
+    (an error() exit, the exit of a failed pipeline). Left behind, they took ~1.7 GB
     per annotated search with the shipped annotations. --keep-intermediates
     (CRISPRME_KEEP_INTERMEDIATES=True) keeps them, like the pipeline's other working
     files. So does a Ctrl-C or a signal that leaves the pipeline, or its workers,
@@ -3366,15 +3366,15 @@ def complete_search() -> None:
                         outputfolder, genomedir, f"{pam_char}_{bMax + 1}_{genome_ref}"
                     )
             if code != 0:
-                # surface WHERE it failed + the actual error, not just "failed"
+                # surface WHERE it failed + the actual error, not just "failed", and end
+                # there with exit status 1: the summary names the error log, and a
+                # traceback after it would only bury it
                 sys.stderr.write(
                     "\nCRISPRme run failed.\n"
                     + summarize_pipeline_failure(outputfolder)
                     + "\n"
                 )
-                raise OSError(
-                    f"\nCRISPRme run failed! See {os.path.join(outputfolder, 'log_error.txt')} for details\n"
-                )
+                sys.exit(1)
             # subprocess.run([script_path+'./submit_job_automated_new_multiple_vcfs.sh', str(genomedir), str(vcfdir), str(outputfolder)+"/guides.txt", str(pamfile), str(annotationfile), str(
             #     samplefile), str(bMax), str(mm), str(bDNA), str(bRNA), str(merge_t), str(outputfolder), str(script_path), str(thread), str(current_working_directory), str(gene_annotation),void_mail,str(base_start),str(base_end),str(base_set)], stdout=log_verbose, stderr=log_error)
     # else:
@@ -5951,9 +5951,11 @@ def _run_haplotype_search(
     finally:
         stamp_built_haplotype_indexes(current_working_directory, genomedir, present)
     if code != 0:
-        raise OSError(
-            f"\nHaplotype search failed for --output {output_name}! See "
-            f"{os.path.join(output_folder, 'log_error.txt')} for details\n"
+        # its complete-search has said why above, and a traceback would only bury it;
+        # the web's assembly job reads this "Error: " line as the job's failure
+        error(
+            f"Haplotype search failed for --output {output_name}! See "
+            f"{os.path.join(output_folder, 'log_error.txt')} for details"
         )
     return output_folder
 

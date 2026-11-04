@@ -263,8 +263,9 @@ class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
         self.assertEqual(self.leftovers(), [])
 
     def test_a_failed_pipeline_leaves_none(self):
-        with self.assertRaises(OSError):  # complete-search: "CRISPRme run failed!"
+        with self.assertRaises(SystemExit) as stop:  # complete-search: "CRISPRme run failed."
             self.search(*self.ANNOTATED, pipeline_rc=1)
+        self.assertEqual(stop.exception.code, 1)
         self.assertEqual(self.leftovers(), [])
 
     def test_an_input_error_after_sorting_leaves_none(self):
@@ -378,8 +379,9 @@ class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
             with self.subTest(rc=rc):
                 for d in self.leftovers():
                     shutil.rmtree(os.path.join(self.work, d))
-                with self.assertRaises(OSError):  # complete-search: "CRISPRme run failed!"
+                with self.assertRaises(SystemExit) as stop:  # "CRISPRme run failed."
                     self.search(*self.ANNOTATED, pipeline_rc=rc, output=f"sig{i}")
+                self.assertEqual(stop.exception.code, 1)
                 self.assertEqual(len(self.leftovers()), 2)
 
     def test_a_sigint_to_crisprme_py_alone_leaves_the_running_pipeline_its_folders(self):

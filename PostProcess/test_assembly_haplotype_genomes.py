@@ -20,7 +20,8 @@ These tests pin:
   * assembly_search itself (crisprme.py run in-process; each haplotype's complete-search
     replaced by a stand-in that names, builds and reuses indexes by genome name as the
     pipeline does, and records which sequence it searched): each haplotype is searched
-    on its own sequence, and a result written by the colliding search is not reused;
+    on its own sequence, and a result written by the colliding search is not reused; a
+    haplotype search that fails ends it in one line, exit status 1, not a traceback;
   * the record of which genome an index holds (.genome_source): an index of the same
     name built from another folder, or before the folder's FASTA files changed (names,
     sizes and modification times are compared, not the sequence), is removed and built
@@ -735,6 +736,22 @@ class AssemblySearchSearchesEachHaplotypeOnItsOwnGenome(_Workdir):
             self.assertEqual(_shipped_resolve(lib, own, 2), f"NRG_2_{own}")
             self.assertEqual(_shipped_resolve(lib, f"W1_{hap}", 2), "")
 
+    def test_a_failed_haplotype_search_ends_in_one_line(self):
+        # its complete-search has said why: assembly-search then ended in an OSError
+        # traceback; the web's job reads this line as the failure, as it read that
+        def call(cmd, shell=True, cwd=None):
+            return 1 if "--output job_paternal " in cmd else self.engine.call(cmd, shell, cwd)
+
+        err = io.StringIO()
+        with mock.patch.object(crisprme, "subprocess", types.SimpleNamespace(call=call)), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as stop:
+            self.run_search("job", individual="W1")
+        self.assertEqual(stop.exception.code, 1)
+        log = os.path.join(self.cwd, "Results", "job_paternal", "log_error.txt")
+        self.assertEqual(err.getvalue(), f"Error: Haplotype search failed for --output "
+                                         f"job_paternal! See {log} for details\n")
+        self.assertEqual(self.reconciled, [])
+
 
 # --------------------------------------------------------------------------- #
 # complete-search, run in-process as the CLI dispatch runs it
@@ -986,8 +1003,9 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
                       "it builds the index of its name from this folder.", self.err)
         advice = self.err
         shutil.rmtree(os.path.join(self.lib, "NRG_2_ref"))
-        with self.assertRaises(OSError):  # the same command: none there, and none built
+        with self.assertRaises(SystemExit) as stop:  # the same command: none there, none built
             self.search("b2", "projB/ref", 1, *ip)
+        self.assertEqual(stop.exception.code, 1)
         with open(os.path.join(self.cwd, "Results", "b2", "log_error.txt")) as fh:
             self.assertIn("ERROR: no matching reference index under --index-path", fh.read())
         self.assertEqual(self.follow(advice, "b3", "projB/ref", 1, *ip), self.SEQ["maternal"])
