@@ -3,7 +3,10 @@
 **For the merge, not for the changelog.** The first Fixed entry completes the Changed entry
 "`--per-sample` on an index without the dict-less tiers now says what it reports" (the banner,
 new in 2.8.1), and can go right after it instead. That banner now also gives the known limit of
-the Changed entry below; what the entry says of the banner still holds.
+the Changed entry below; what the entry says of the banner still holds. Three references name an
+entry by its place: the first Fixed entry's "the last entry below" and the second's "the next
+entry" are the entry on tied rows, the last of this fragment, and the second's "the entry above"
+is the first; keep them true where the entries land.
 
 ### Changed
 
