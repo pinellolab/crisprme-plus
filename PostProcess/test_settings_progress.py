@@ -1884,6 +1884,23 @@ def _listing(root, folder, keep=os.path.isdir, value=lambda name: name):
     return listed
 
 
+def _maintainer_callback(name, **namespace):
+    """A callback that settings_page.py defines only under ``if MAINTAINER_MODE:``,
+    undecorated, exec'd in ``namespace`` as _load_functions does."""
+    with open(_SETTINGS_PAGE) as fh:
+        tree = ast.parse(fh.read())
+    for node in tree.body:
+        if isinstance(node, ast.If) and getattr(node.test, "id", None) == "MAINTAINER_MODE":
+            for func in node.body:
+                if isinstance(func, ast.FunctionDef) and func.name == name:
+                    func.decorator_list = []
+                    ns = dict(os=os, List=List, Optional=Optional, **namespace)
+                    exec(compile(ast.Module(body=[func], type_ignores=[]),  # noqa: S102
+                                 _SETTINGS_PAGE, "exec"), ns)
+                    return ns[name]
+    raise AssertionError(f"{name} not found under 'if MAINTAINER_MODE:' in settings_page.py")
+
+
 class TestRemoveTakesAnItemTheCardLists(unittest.TestCase):
     """ask_delete and do_delete, undecorated, on a data folder (data/) beside a folder of
     someone else's (outside/). The item's name was only basename-guarded, which leaves
@@ -2102,6 +2119,47 @@ class TestVcfUploadIntoARegisteredFolder(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(os.path.join(self.cwd, "VCFs", "walk"))),
                          ["walk.chr1.vcf.gz", "walk.chr1.vcf.gz.tbi", "walk.chr2.vcf.gz",
                           "walk.chr2.vcf.gz.csi"])
+
+
+class TestPublishTakesAnInstalledIndex(unittest.TestCase):
+    """publish_index_cb (maintainer mode: an HF token in the server's environment),
+    undecorated. It joined any name to genome_library/, and publish-index tars the folder
+    it names beside that folder and uploads the tarball with the server's token: '../' or
+    an absolute name had any folder of the server tarred and uploaded. Only an installed
+    index, as the dropdown offers, is published."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.cwd = os.path.join(self.root, "data")
+        for d in ("genome_library/NRG_2_hg38", "genome_library/NRG_2_hg38_INDELS",
+                  "../outside/.ssh"):
+            os.makedirs(os.path.join(self.cwd, d))
+        self.launched = []
+        self.publish = _maintainer_callback(
+            "publish_index_cb",
+            current_working_directory=self.cwd,
+            get_available_indexes=_listing(
+                self.cwd, "genome_library",
+                keep=lambda p: os.path.isdir(p) and not p.endswith("_INDELS")),
+            launch_settings_job=lambda argv, stage: self.launched.append(argv) or "job",
+            _start=lambda job: (job, False, "started"),
+            ONLINE=False,
+            PreventUpdate=_PreventUpdate,
+            no_update=_NO_UPDATE,
+        )
+
+    def test_only_an_installed_index_is_published(self):
+        for name in ("../../outside/.ssh", "../outside", os.path.join(self.root, "outside"),
+                     "..", ".", "NRG_2_hg38/..", "NRG_2_hg38/../../../outside/.ssh"):
+            with self.subTest(name=name):
+                self.assertEqual(self.publish(1, name), (
+                    _NO_UPDATE, _NO_UPDATE, "Select an installed index to publish."))
+        self.assertEqual(self.launched, [])
+        self.assertEqual(self.publish(1, "NRG_2_hg38"), ("job", False, "started"))
+        self.assertEqual(self.launched, [["publish-index", "--index", os.path.join(
+            self.cwd, "genome_library", "NRG_2_hg38")]])
+        self.assertEqual(self.publish(1, None)[2], "Select an index to publish.")
 
 
 if __name__ == "__main__":

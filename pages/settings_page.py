@@ -3119,6 +3119,10 @@ if MAINTAINER_MODE:
             raise PreventUpdate
         if not name:
             return no_update, no_update, "Select an index to publish."
+        # only an installed index, as the dropdown offers: a request can send any name,
+        # and publish-index tars the folder it names beside itself and uploads it
+        if name not in [i["value"] for i in get_available_indexes()]:
+            return no_update, no_update, "Select an installed index to publish."
         index_dir = os.path.join(current_working_directory, "genome_library", name)
         argv = ["publish-index", "--index", index_dir]
         return _start(launch_settings_job(argv, "Publish index"))

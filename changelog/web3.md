@@ -159,6 +159,12 @@ and the Settings entries add tests to `test_settings_progress`, in unit-tests' o
   registered folder is now read where it is and nothing is uploaded into it, and an upload takes
   `.vcf.gz` files and their `.tbi` or `.csi` index only (`docs/SETTINGS_DATA_MANAGER.md`).
   Pre-existing, since 2.2.0. Covered by `PostProcess/test_settings_progress.py`.
+- **Publish, in maintainer mode, publishes only an installed index.** With a Hugging Face token
+  in the web app's environment, Settings' Publish took any index name, and `publish-index`
+  archives the folder that name leads to, beside it, and uploads the archive with that token: a
+  name holding a path had any folder of the server archived and uploaded. It now publishes only
+  an index its list offers. Pre-existing, since 2.2.0. Covered by
+  `PostProcess/test_settings_progress.py`.
 - **The indel steps of a search pass no chromosome name of a variant dataset to a shell.**
   A search with bulges takes each chromosome name of a variant dataset, read from the CHROM
   column of its VCFs (or from the per-chromosome indel logs named after it), into the shell
