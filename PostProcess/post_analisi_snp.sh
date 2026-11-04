@@ -30,11 +30,13 @@ fi
 chrom=$key
 echo "Processing SNPs for ${chrom}"
 
-# extract chrom-specific reference and alternative targets
+# extract chrom-specific reference and alternative targets (the name as text: unquoted,
+# the shell took '*', '?' and '[' in it for a pattern of the files of the folder this runs
+# in, which grep then read, and grep took a first '-' for an option)
 targets_tsv_ref_chrom="${targets_tsv_ref}.${chrom}"
 targets_tsv_alt_chrom="${targets_tsv_alt}.${chrom}"
-LC_ALL=C grep -F -w $chrom "$targets_tsv_ref" > "$targets_tsv_ref_chrom"
-LC_ALL=C grep -F -w $chrom "$targets_tsv_alt" > "$targets_tsv_alt_chrom"
+LC_ALL=C grep -F -w -e "$chrom" "$targets_tsv_ref" > "$targets_tsv_ref_chrom"
+LC_ALL=C grep -F -w -e "$chrom" "$targets_tsv_alt" > "$targets_tsv_alt_chrom"
 
 # perform targets analysis by chromosome (scores, annotation, etc.)
 targets_chrom_prefix="$output_folder/${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${annotation_name}_${mm}_${bDNA}_${bRNA}_${key}"

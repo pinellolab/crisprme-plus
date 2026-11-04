@@ -212,7 +212,10 @@ and the Settings and personal-assembly entries add tests to `test_settings_progr
   `#`) is now refused, and the import says why; the post-analysis refuses such a name too, and
   says so, and runs its step for each chromosome with no shell. A chromosome's off-targets are
   kept only from the file named after its sequence, whose name holds none of these, so a normal
-  genome or bundle is searched as before. Pre-existing (bundles since 2.6.0). Covered by
+  genome or bundle is searched as before. That step also looked a chromosome's off-targets up
+  with its name as a shell word, where `*`, `?` and `[` (an HLA allele's name holds `*`) made a
+  pattern of the files of the folder it runs in, outside the data folder, which were then read:
+  it now looks the name up as it is. Pre-existing (bundles since 2.6.0). Covered by
   `PostProcess/test_personal_assembly.py`, `PostProcess/test_settings_progress.py` and
   `PostProcess/test_web_shell_safety.py`.
 - **The results pages' tables bind the values of a link, a table and a form to their queries of

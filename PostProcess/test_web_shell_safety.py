@@ -44,7 +44,8 @@ names outside its folder.
 And up to 2.8.0 the post-analysis of a search (pool_post_analisi_snp.py) took the name of
 each FASTA file of the genome folder, as a chromosome's, into shell commands as it was,
 and a personal-assembly bundle, imported in Settings, brings its genome folders with the
-names of its archive.
+names of its archive; post_analisi_snp.sh looked the chromosome's targets up with that name
+unquoted, which the shell took for a pattern of the files of the folder it runs in.
 
 And up to 2.8.0 the results pages' tables wrote the values of a link, a table and a form
 (a guide, a sample's name, a chromosome, positions, counts; Custom Ranking's columns, order
@@ -771,6 +772,67 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
         self.assertEqual(sorted(runs), [self.head + [chrom]
                                         for chrom in ("HLA-A*01:01", "chr1", "chr2")])
         self.assertEqual(self.markers(), [])
+
+
+class TestTheTargetsOfAChromosome(_Folder):
+    """post_analisi_snp.sh, which the post-analysis runs for each chromosome in
+    PostProcess/: it looked the chromosome's targets up with grep, the name unquoted, a word
+    the shell took for a pattern of the files of that folder ('*', '?' and '[', which an HLA
+    allele's name holds, and a bundle's FASTA file's may), which grep then read, and grep
+    took a first '-' for an option. scriptAnalisiNNN_v3.sh, which it runs next, is a
+    stand-in here that keeps the targets it is given."""
+
+    def setUp(self):
+        super().setUp()
+        self.post = os.path.join(self.top, "PostProcess")
+        os.makedirs(self.post)
+        shutil.copy(os.path.join(HERE, "post_analisi_snp.sh"), self.post)
+        stand_in = os.path.join(self.post, "scriptAnalisiNNN_v3.sh")
+        with open(stand_in, "w") as fh:
+            fh.write('#!/bin/bash\ncat "$1" "$2" > "$(dirname "$0")/looked_up"\n')
+        os.chmod(stand_in, 0o755)
+        # two files of the folder it runs in, outside the data folder, the second naming
+        # the first
+        for name, text in (("app_a.py", "a = 1\n"), ("app_b.py", "from app_a.py import a\n")):
+            with open(os.path.join(self.post, name), "w") as fh:
+                fh.write(text)
+        self.job = os.path.join(self.data, "Results", "JOB1")
+        os.makedirs(os.path.join(self.job, "crispritz_targets"))
+        # the reference search's targets, named as post_analisi_snp.sh names them
+        with open(os.path.join(self.job, "crispritz_targets",
+                               f"hg38_{PAM}.txt_guides.txt_4_1_1.targets.txt"), "w") as fh:
+            fh.write("X\tG\tD\tchr1\t100\nX\tG\tD\tchr2\t200\nX\tG\tD\tHLA-A*01:01\t300\n")
+        self.before = self.outside_files()
+
+    def looked_up(self, chrom):
+        """The targets post_analisi_snp.sh gave its next step for ``chrom``, run as the
+        post-analysis runs it for a reference search."""
+        done = subprocess.run(
+            ["./post_analisi_snp.sh", self.job, os.path.join(self.data, "Genomes", "hg38"),
+             "_", os.path.join(self.job, "guides.txt"), "4", "1", "1", "_",
+             os.path.join(self.data, "PAMs", f"{PAM}.txt"), "_",
+             os.path.join(self.job, "final_results_JOB1.bestMerge.txt"),
+             os.path.join(self.job, "final_results_JOB1.altMerge.txt"), chrom],
+            cwd=self.post, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        record = os.path.join(self.post, "looked_up")
+        with open(record) as fh:
+            targets = fh.read()
+        os.remove(record)
+        return targets
+
+    def test_a_chromosome_s_targets_are_looked_up_by_its_name(self):
+        self.assertEqual(self.looked_up("chr1"), "X\tG\tD\tchr1\t100\n")
+        self.assertEqual(self.looked_up("HLA-A*01:01"), "X\tG\tD\tHLA-A*01:01\t300\n")
+        self.assertNothingRun()
+
+    def test_a_name_a_shell_or_grep_reads_otherwise_is_looked_up_as_it_is(self):
+        # three patterns of the files app_a.py and app_b.py: grep took the first for what
+        # to look for and read the second; and an option that counts
+        for name in ("app_*", "app_?.py", "app_[ab].py", "-c"):
+            with self.subTest(name=name):
+                self.assertEqual(self.looked_up(name), "")
+        self.assertNothingRun()
 
 
 @NEEDS_DASH
