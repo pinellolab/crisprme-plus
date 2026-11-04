@@ -312,11 +312,10 @@ class TestRiskCardPlots(_Tmp):
         os.makedirs(os.path.join(d, "imgs"))
         calls = []
 
-        def _call(cmd, shell=False):  # record the commands; make the plots they would
+        def _call(cmd):  # record the commands (argument lists); make the plots they would
             calls.append(cmd)
-            parts = cmd.split()
-            if "CRISPRme_plots_personal.py" in cmd:
-                out, tag = parts[-2], parts[-1]
+            if cmd[1].endswith("CRISPRme_plots_personal.py"):
+                out, tag = cmd[-2], cmd[-1]
                 for kind in ("CFD", "CRISPR_BULGE", "fewest"):
                     open(os.path.join(out, f"CRISPRme_{kind}_top_1000_log_for_main_text_{tag}.png"),
                          "wb").close()
@@ -324,14 +323,14 @@ class TestRiskCardPlots(_Tmp):
 
         with patch.object(rp.subprocess, "call", _call):
             rp.generate_sample_card(1, "CFD", "S1", [{"row": 0}], [{"Guide": GUIDE}], f"?job={job}")
-        plots = [c for c in calls if "CRISPRme_plots_personal.py" in c]
+        plots = [c for c in calls if c[1].endswith("CRISPRme_plots_personal.py")]
         self.assertEqual(len(plots), 2)
         personal = os.path.join(d, f"{job}.S1.{GUIDE}.personal_targets.tsv")
         private = os.path.join(d, f"{job}.S1.{GUIDE}.private_targets.tsv")
-        self.assertIn(f" {personal} ", plots[0])
-        self.assertTrue(plots[0].endswith(f"{GUIDE}.S1.personal"))
-        self.assertIn(f" {private} ", plots[1])
-        self.assertTrue(plots[1].endswith(f"{GUIDE}.S1.private"))
+        self.assertEqual(plots[0][2], personal)
+        self.assertEqual(plots[0][-1], f"{GUIDE}.S1.personal")
+        self.assertEqual(plots[1][2], private)
+        self.assertEqual(plots[1][-1], f"{GUIDE}.S1.private")
         # and the two files hold what their names say
         self.assertEqual(len(pd.read_csv(personal, sep="\t")), 2)  # S1 carries 2 sites
         self.assertEqual(len(pd.read_csv(private, sep="\t")), 1)   # 1 of them only S1

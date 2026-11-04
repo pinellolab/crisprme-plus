@@ -2,8 +2,8 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (13 tests, the Security
-block) to that step, and on this branch the step then ran 480 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (19 tests, the Security
+block) to that step, and on this branch the step then ran 486 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged.
 
 ### Fixed
@@ -94,3 +94,14 @@ two allowed skips: correct the count there as these entries are merged.
   a folder elsewhere, outside the data folder too, which was removed. It now removes, with no
   shell, only a folder of `Results/` whose id has the form the search form gives its jobs.
   Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The results pages pass no value of a link or a table to a shell.** The guide, sample,
+  chromosome and position a results link names, the guide and number of mismatches the results
+  tables send back, a sample's name, as its VCF gives it, and the name of a search's results
+  file, which holds the genome's, went into the shell commands that zip a table for download,
+  draw the Graphical Reports and Personal Risk Card plots, and look up the targets at a
+  position, where characters a shell reads ran as commands. Those commands now run with no
+  shell, but for the look-up at a position, which now takes only a guide of the search, a
+  position in digits and a chromosome name of letters, digits and `_.:,+=@%` (for another it
+  says "The selected position does not exist"), and the results pages read only a folder of
+  `Results/` whose id has the form the search form gives its jobs. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py` and `PostProcess/test_web_results_links.py`.

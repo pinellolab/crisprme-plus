@@ -56,6 +56,7 @@ from .pages_utils import (
     split_filter_part,
     generate_table,
     generate_table_samples,
+    results_job_dir,
 )
 from .load_page import _failure_text
 from app import (
@@ -181,9 +182,11 @@ def _result_not_ready(job_id: str) -> Optional[html.Div]:
     integration, plots, database), or is still in them, already has its integrated
     results file, but not the other files the results pages read. Only a finished job
     (its log says "Job Done" and its log_error.txt is empty, or set aside at the end)
-    with its integrated results is left to the results pages, as before."""
-    job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
-    if not job_id or not os.path.isdir(job_directory):
+    with its integrated results is left to the results pages, as before. The job id is
+    the link's, which a client can set to any text: a job folder of Results/ is read
+    only for an id of the form the search form gives (results_job_dir)."""
+    job_directory = results_job_dir(job_id)
+    if job_directory is None:
         return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
     try:
         with open(os.path.join(job_directory, "log.txt"), errors="replace") as fh:
@@ -3275,6 +3278,23 @@ def cluster_page(job_id: str, hash_term: str) -> html.Div:
     not_ready = _result_not_ready(job_id)
     if not_ready is not None:
         return not_ready
+    # The guide, chromosome and position are the link's (its #hash), which a client can
+    # set to any text, and the commands below run them through a shell: only a guide of
+    # the job, a position of digits and a chromosome name of characters a shell takes as
+    # they are (shlex.quote leaves them unquoted) are looked up.
+    try:
+        with open(
+            os.path.join(current_working_directory, RESULTS_DIR, job_id, GUIDES_FILE)
+        ) as handle_guides:
+            job_guides = handle_guides.read().split()
+    except OSError:
+        job_guides = []
+    if (
+        guide not in job_guides
+        or not re.fullmatch(r"[0-9]+", position)
+        or not re.fullmatch(r"[A-Za-z0-9_@%+=:,.]+", chromosome)
+    ):
+        return html.Div(dbc.Alert("The selected position does not exist", color="danger"))
     try:
         with open(
             os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)
@@ -3737,6 +3757,8 @@ def update_table_sample(
     if not isinstance(hash_term, str):
         raise TypeError(f"Expected {str.__name__}, got {type(hash_term).__name__}")
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     filter_criterion = read_json(job_id)  # recover filter criterion
     assert isinstance(filter_criterion, str)
     assert filter_criterion in FILTERING_CRITERIA
@@ -3779,11 +3801,10 @@ def update_table_sample(
     integrated_sample_personal_zip_fname = (  # the extension only, as for the guide's
         os.path.splitext(integrated_sample_personal_fname)[0] + ".zip"
     )
-    # zip operation, non blocking
-    cmd = f"zip -j {integrated_sample_personal_zip_fname} {integrated_sample_personal_fname} &"
-    code = subprocess.call(cmd, shell=True)
-    if code != 0:
-        raise ValueError(f'An error occurred while running "{cmd}"')
+    # zip operation, non blocking, with no shell: the guide and sample are the link's
+    subprocess.Popen(
+        ["zip", "-j", integrated_sample_personal_zip_fname, integrated_sample_personal_fname]
+    )
     columns_df = [
         {"name": i, "id": i, "hideable": True}
         for col, i in enumerate(sample_df.columns)
@@ -4091,6 +4112,8 @@ def update_table_subset(
         raise TypeError(f"Expected {str.__name__}, got {type(hash_guide).__name__}")
     # recover job identifier
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     # recover the filtering criterion from drop-down bar
     filter_criterion = read_json(job_id)
     try:
@@ -4148,11 +4171,8 @@ def update_table_subset(
     # change name to zip file (the extension only: a "tsv" elsewhere in the path, in
     # a job name say, must stay, or the zip lands in a folder that does not exist)
     targets_with_mm_bul_zip = os.path.splitext(targets_with_mm_bul)[0] + ".zip"
-    # zip operation, non blocking
-    cmd = f"zip -j {targets_with_mm_bul_zip} {targets_with_mm_bul} &"
-    code = subprocess.call(cmd, shell=True)
-    if code != 0:
-        raise ValueError(f"An error occurred while running {cmd}")
+    # zip operation, non blocking, with no shell: the guide and counts are the link's
+    subprocess.Popen(["zip", "-j", targets_with_mm_bul_zip, targets_with_mm_bul])
     columns_result = [
         {"name": i, "id": i, "hideable": True}
         for col, i in enumerate(result.columns.tolist())
@@ -4744,6 +4764,8 @@ def update_table_general_profile(
         raise TypeError(f"Expected {str.__name__}, got {type(search).__name__}")
     # recover job identifier
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     try:
         with open(
             os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)
@@ -4942,10 +4964,9 @@ def update_table_general_profile(
     # zip integrated file
     integrated_to_zip = integrated_fname.replace("tsv", "zip")
     if not os.path.exists(integrated_to_zip):
-        cmd = f"zip -j {integrated_to_zip} {integrated_fname} &"
-        code = subprocess.call(cmd, shell=True)
-        if code != 0:
-            raise ValueError(f"An error occurred while running {cmd}")
+        # non blocking, with no shell: the file name holds the genome's name, as Settings
+        # took it
+        subprocess.Popen(["zip", "-j", integrated_to_zip, integrated_fname])
     # zip alt_merge results
     alt_merge_fname = glob(
         os.path.join(
@@ -4957,10 +4978,7 @@ def update_table_general_profile(
     # zip integrated file
     alt_merge_to_zip = alt_merge_fname.replace("tsv", "zip")
     if not os.path.exists(alt_merge_to_zip):
-        cmd = f"zip -j {alt_merge_to_zip} {alt_merge_fname} &"
-        code = subprocess.call(cmd, shell=True)
-        if code != 0:
-            raise ValueError(f"An error occurred while running {cmd}")
+        subprocess.Popen(["zip", "-j", alt_merge_to_zip, alt_merge_fname])
     # score checking
     if "NO SCORES" not in all_scores:
         try:
@@ -5786,6 +5804,8 @@ def update_images_tabs(
         raise PreventUpdate
     bulge = 0
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     # For a non-SpCas9 nuclease, CFD/CRISPR-Bulge are not computed, so the barplot + radar
@@ -5863,10 +5883,14 @@ def update_images_tabs(
         ),
     )
     # TODO: do not call python script, rather define functions
-    cmd = f"python {app_directory}/PostProcess/generate_img_radar_chart.py {guide} {job_directory}/.guide_dict_{guide}_{filter_criterion}.json {job_directory}/.motif_dict_{guide}_{filter_criterion}.json {mm} {bulge} TOTAL_{filter_criterion} {job_directory}/imgs/"
-    code = subprocess.call(cmd, shell=True)
+    # no shell: the guide (the table's data) and mm (the dropdown's) are the request's
+    cmd = ["python", f"{app_directory}/PostProcess/generate_img_radar_chart.py", guide,
+           f"{job_directory}/.guide_dict_{guide}_{filter_criterion}.json",
+           f"{job_directory}/.motif_dict_{guide}_{filter_criterion}.json", mm, str(bulge),
+           f"TOTAL_{filter_criterion}", f"{job_directory}/imgs/"]
+    code = subprocess.call(cmd)
     if code != 0:
-        raise ValueError(f'An error occurred while running "{cmd}"')
+        raise ValueError(f'An error occurred while running "{" ".join(cmd)}"')
     img_found = False  # look for radar chart image
     try:
         radar_src_encode_gencode = "data:image/png;base64,{}".format(
@@ -5996,6 +6020,8 @@ def generate_sample_card(
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     # recover job id
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     # directory holding the personal/private target plots for this job
     imgsdir = os.path.join(job_directory, "imgs")
@@ -6115,14 +6141,14 @@ def generate_sample_card(
             raise Exception(
                 "An unexpected error occurred while saving personal and integrated targets"
             ) from e
-        # compute sample's personal and private targets with lolliplots
-        crisprme_plots_personal = (
-            f"python {app_directory}/PostProcess/CRISPRme_plots_personal.py"
-        )
+        # compute sample's personal and private targets with lolliplots (no shell: the
+        # guide is the table's data, and the sample's name is a VCF's, as uploaded)
+        crisprme_plots_personal = [
+            "python", f"{app_directory}/PostProcess/CRISPRme_plots_personal.py"
+        ]
         code = subprocess.call(
-            f"{crisprme_plots_personal} {targets_personal_fname} {imgsdir}/ "
-            f"{guide}.{sample}.personal",
-            shell=True,
+            crisprme_plots_personal
+            + [targets_personal_fname, f"{imgsdir}/", f"{guide}.{sample}.personal"]
         )
         if code != 0:
             raise subprocess.SubprocessError(
@@ -6131,9 +6157,8 @@ def generate_sample_card(
         # the private plot is drawn from the private targets: it was drawn from the
         # personal ones, so "Top 100 Private Targets" showed the personal plot again
         code = subprocess.call(
-            f"{crisprme_plots_personal} {targets_private_fname} {imgsdir}/ "
-            f"{guide}.{sample}.private",
-            shell=True,
+            crisprme_plots_personal
+            + [targets_private_fname, f"{imgsdir}/", f"{guide}.{sample}.private"]
         )
         if code != 0:
             raise subprocess.SubprocessError(
@@ -6145,9 +6170,7 @@ def generate_sample_card(
         os.path.basename(f"{os.path.splitext(targets_private_fname)[0]}.zip"),
     )
     if not os.path.isfile(targets_private_zip):
-        code = subprocess.call(
-            f"zip -j {targets_private_zip} {targets_private_fname}", shell=True
-        )
+        code = subprocess.call(["zip", "-j", targets_private_zip, targets_private_fname])
         if code != 0:
             raise subprocess.SubprocessError(
                 f"Failed to compress {targets_private_fname}"
