@@ -1389,7 +1389,8 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     # and so does the Search mode row. Beside them, every dataset it searched
     # (.variant_datasets): no column says which dataset a row comes from, so what holds of
     # their rows alone is said of a row only when they are all of them (untiered_all,
-    # _greedy_union).
+    # _greedy_union). (Neither names a sites-only dataset without the tiers, which gives
+    # no row.)
     untiered, searched = [], []
     if result_dir:
         for _name, _into in ((".untiered_datasets", untiered),

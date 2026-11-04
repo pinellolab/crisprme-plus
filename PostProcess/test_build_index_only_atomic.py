@@ -2634,7 +2634,8 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
     with the carriers of any of the variants that alignment takes. The search records
     the datasets it names so (.untiered_datasets), for the report's Search mode row
     (test_generate_report), which cannot tell from the results; and beside them every
-    dataset it searches (.variant_datasets), as no column of a row says its dataset."""
+    dataset it searches (.variant_datasets), as no column of a row says its dataset. A
+    sites-only dataset without the tiers, which gives no row, is in neither."""
 
     BANNER = ("[complete-search] PER-SAMPLE analysis ({}): resolving per-sample genotypes "
               "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and "
@@ -2745,6 +2746,46 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                       "which has no dict-less tiers", out)
         self.assertEqual(self.recorded(), "du\n")
         self.assertEqual(self.recorded(".variant_datasets"), "ds\ndu\n")
+
+    def test_a_sites_only_dataset_without_them_is_named_nowhere(self):
+        # so: ds's VCFs without their sample columns, built without --samplesID, as the web
+        # Settings page builds a sites-only dataset. Its dictionaries name no carrier, and
+        # with no allele-frequency registry its search reports none of its variants: what
+        # the banners say of a dataset without the tiers does not hold of it, and none of
+        # the rows is its. (ds is built so too, a genotyped dataset without the tiers.)
+        os.makedirs(self.path("VCFs", "so"))
+        for chrom in GENOME:
+            with gzip.open(self.path("VCFs", "ds", f"ds.{chrom}.vcf.gz"), "rt") as fh:
+                lines = ["\t".join(line.rstrip("\n").split("\t")[:8]) + "\n" for line in fh]
+            with gzip.open(self.path("VCFs", "so", f"so.{chrom}.vcf.gz"), "wt") as fh:
+                fh.writelines(lines)
+        for vcf in ("ds", "so"):
+            rc, out, err = self.finish(self.start(command=[
+                "build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
+                "--bDNA", "1", "--bRNA", "1", "--vcf", self.path("VCFs", vcf),
+                "--path", self.work]))  # (no --samplesID)
+            self.assertEqual(rc, 0, err)
+        self.assertFalse(os.path.lexists(self.path("Dictionaries", "registry_so")))
+        rc, out, err = self.run_search("--population-level", vcfs="so\n")
+        self.assertIn("Launching job ", out, out + err)
+        self.assertIn(self.POPULATION.format(""), out)
+        self.assertIsNone(self.recorded())
+        self.assertIsNone(self.recorded(".variant_datasets"))
+        rc, out, err = self.run_search("--per-sample", vcfs="so\n")
+        self.assertIn("Launching job ", out, out + err)
+        self.assertIn(self.BANNER.format("--per-sample"), out)
+        self.assertIsNone(self.recorded())
+        self.assertIsNone(self.recorded(".variant_datasets"))
+        # beside ds, ds alone ("has": one dataset named)
+        for option, named in (("--population-level", "On ds, which has no dict-less tiers"),
+                              ("--per-sample", "named carrier samples only for ds, which has "
+                                               "no dict-less tiers")):
+            with self.subTest(option=option):
+                rc, out, err = self.run_search(option, vcfs="ds\nso\n")
+                self.assertIn("Launching job ", out, out + err)
+                self.assertIn(named, out)
+                self.assertEqual(self.recorded(), "ds\n")
+                self.assertEqual(self.recorded(".variant_datasets"), "ds\n")
 
 
 def save_tst(targets, guide_len=23):

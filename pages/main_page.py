@@ -1885,16 +1885,25 @@ def change_url(
     # and, as complete-search does, the variant datasets of the search without the
     # dict-less tiers (.untiered_datasets), beside every one it names (.variant_datasets):
     # the report says what their results carry, the allele frequencies their VCF gives,
-    # and what --per-sample gives there (the form offers it only with a genotype store)
+    # and what --per-sample gives there (the form offers it only with a genotype store).
+    # A sites-only one without them (its VCFs have no sample columns) is in neither: with
+    # no allele-frequency registry, its search reports none of its variants
+    # (samplesid_problem), and none of that holds of it
     try:
         with open(vcfs) as _lv:
-            _searched = list(dict.fromkeys(
+            _named = list(dict.fromkeys(
                 os.path.basename(os.path.normpath(_l.strip())) for _l in _lv
                 if _l.strip() and _l.strip() != "_"))
         _dict_root = os.path.join(current_working_directory, "Dictionaries")
-        _untiered = [_vn for _vn in _searched
-                     if not any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
-                                for _tier in ("registry", "genotypes"))]
+        _searched, _untiered = [], []
+        for _vn in _named:
+            if any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
+                   for _tier in ("registry", "genotypes")):
+                _searched.append(_vn)
+            elif _vcf_folder_has_samples(
+                    os.path.join(current_working_directory, "VCFs", _vn)) is not False:
+                _searched.append(_vn)
+                _untiered.append(_vn)
         if _untiered:
             with open(os.path.join(result_dir, ".untiered_datasets"), "w") as _ud:
                 _ud.write("".join(f"{_vn}\n" for _vn in _untiered))

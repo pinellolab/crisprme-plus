@@ -15,6 +15,7 @@ Run with:
     <env>/bin/python3 -m unittest discover -s PostProcess -p 'test_web_search_reuse.py' -v
 """
 
+import gzip
 import json
 import os
 import shutil
@@ -182,6 +183,30 @@ class TestDatasetsWithoutTheTiers(unittest.TestCase):
         self.assertEqual(self.records(self.submit(mode="population-level", variant="ds",
                                                   name="tiered")), [None, None])
         self.assertEqual(self.records(self.submit(mode="population-level")), [None, None])
+
+    def test_a_sites_only_dataset_without_the_tiers_is_not_recorded(self):
+        # its VCFs have no sample columns: with no allele-frequency registry its search
+        # reports none of its variants, so the report says nothing of it, alone or beside a
+        # dataset whose VCFs have them, which is recorded
+        os.makedirs(os.path.join(self.tmp, "samplesIDs"))
+        head = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+        for name, columns, genotypes, listed in (
+                ("so", "", "", ""), ("gt", "\tFORMAT\tS1", "\tGT\t0|1", "S1\tGBR\tEUR\tmale\n")):
+            os.makedirs(os.path.join(self.tmp, "VCFs", f"hg38_{name}"))
+            with gzip.open(os.path.join(self.tmp, "VCFs", f"hg38_{name}",
+                                        f"{name}.chr1.vcf.gz"), "wt") as f:
+                f.write("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"
+                        f"{columns}\nchr1\t11\trs1\tA\tG\t.\tPASS\tAF=0.25{genotypes}\n")
+            with open(os.path.join(self.tmp, "samplesIDs", f"hg38_{name}.samplesID.txt"),
+                      "w") as f:
+                f.write(head + listed)
+        self.assertEqual(self.records(self.submit(mode="population-level", variant="so")),
+                         [None, None])
+        for variant in ("gt", "gt+so"):
+            with self.subTest(variant=variant):
+                self.assertEqual(self.records(self.submit(mode="population-level",
+                                                          variant=variant)),
+                                 ["hg38_gt\n", "hg38_gt\n"])
 
 
 if __name__ == "__main__":

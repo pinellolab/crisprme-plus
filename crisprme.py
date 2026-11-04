@@ -89,7 +89,7 @@ except Exception:  # pragma: no cover - defensive; memory check is optional
         return None
 
 sys.path.insert(0, script_path)
-from validate_inputs import run_lightweight, run_full, resolve_vcf_dataset_dirs  # noqa: E402
+from validate_inputs import run_lightweight, run_full, resolve_vcf_dataset_dirs, _vcf_header_samples  # noqa: E402
 from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside)
     download_component,
     publish_index,
@@ -428,6 +428,14 @@ def _datasets_without_genotypes(vcf_list: str) -> List[str]:
                 and vcf not in found):
             found.append(vcf)
     return found
+
+
+def _sites_only_vcfs(vdir: str) -> bool:
+    """True when the VCF folder ``vdir`` holds .vcf.gz files and none of them has sample
+    columns (a sites-only dataset, as the input validator tells one); False when one has
+    them, or when there is none to read (a dataset installed as an index)."""
+    vcfs = [os.path.join(vdir, f) for f in sorted(_listdir(vdir)) if f.endswith(".vcf.gz")]
+    return bool(vcfs) and not any(_vcf_header_samples(vf) for vf in vcfs)
 
 
 def print_help_complete_search() -> None:
@@ -3210,17 +3218,23 @@ def complete_search() -> None:
     # with the allele frequency its VCF gives (in either mode), and no more. Their per-sample
     # post-analysis still reports a window denser than CRISPRME_IUPAC_CAP by its greedy
     # worst-case alignment, listing the carriers of any of the variants it takes
-    # (new_simple_analysis.py). (each dataset once: a --vcf list may name one twice)
+    # (new_simple_analysis.py). (each dataset once: a --vcf list may name one twice) A
+    # sites-only dataset without them (its VCFs have no sample columns) is in neither list:
+    # its dictionaries name no carrier, and a search reports a sites-only VCF's variants
+    # only with a registry's allele frequencies (docs/DESIGN_mega_index.md), so it reports
+    # none of its variants, in either mode -- what the banner and the report say of the
+    # others does not hold of it, and none of the rows is its.
     _searched, _untiered = [], []
     if variant:
         _dict_root = os.path.join(current_working_directory, "Dictionaries")
-        _searched = list(dict.fromkeys(os.path.basename(os.path.normpath(_v))
-                                       for _v in vcf_dataset_dirs))
-        _untiered = [
-            _vn for _vn in _searched
-            if not any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
-                       for _tier in ("registry", "genotypes"))
-        ]
+        for _vn in dict.fromkeys(os.path.basename(os.path.normpath(_v))
+                                 for _v in vcf_dataset_dirs):
+            if any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
+                   for _tier in ("registry", "genotypes")):
+                _searched.append(_vn)
+            elif not _sites_only_vcfs(os.path.join(current_working_directory, "VCFs", _vn)):
+                _searched.append(_vn)
+                _untiered.append(_vn)
     _one = len(_untiered) == 1
     if population_level and variant:
         print(
@@ -3288,10 +3302,10 @@ def complete_search() -> None:
     # and the datasets its banner names as having no dict-less tiers, one per line, so
     # that the report says what the banner says of them, in either mode: it cannot tell
     # from the results, nor from the install, whose index can have the tiers by the time
-    # the report is built again. Beside them, every dataset it searches
-    # (.variant_datasets): no column says which dataset a row comes from, and two
-    # datasets can name the same samples, so what holds of their rows alone the report
-    # says of a row only when they are all of them.
+    # the report is built again. Beside them, every dataset it searches but a sites-only
+    # one without the tiers, which gives no row (.variant_datasets): no column says which
+    # dataset a row comes from, and two datasets can name the same samples, so what holds
+    # of their rows alone the report says of a row only when they are all of them.
     if variant and _untiered:
         try:
             with open(os.path.join(outputfolder, ".untiered_datasets"), "w") as _ud:
