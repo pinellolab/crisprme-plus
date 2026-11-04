@@ -100,7 +100,7 @@ You never have to merge these by hand — that is what "combine everything" mean
 
 ### 2d. Faster downloads via HuggingFace (optional)
 
-`setup` pulls the genome and variants from their original UCSC/FTP sources, which can be slow. When the data has been published to a HuggingFace dataset repository, you can instead fetch it over HF's CDN with the `download` command — typically much faster, and resumable:
+`setup` tries the HuggingFace data repo first for a single chromosome's FASTA, the VCFs and the two sample-ID files, but of these files the default repo holds only two: the unpacked chr22 FASTA, which `setup --chrom chr22` takes from it, and the 1000 Genomes sample-ID file. Everything else comes from its original source, which can be slow: the genome from UCSC (the whole assembly, or any single chromosome but chr22), the VCFs from the EBI and Sanger FTP servers, and the HGDP sample-ID file and the annotations from the CRISPRme GitHub repository. When the data has been published to a HuggingFace dataset repository, you can instead fetch it over HF's CDN with the `download` command — typically much faster, and resumable:
 
 ```bash
 # reference bundle in one shot: genome + annotations + PAMs + sample-ID files
@@ -628,7 +628,7 @@ All subsequent commands must be run from inside this working directory. CRISPRme
 
 **Full genome (default):** downloads the complete hg38 assembly from UCSC (~900 MB compressed) and unpacks it as one uncompressed FASTA per chromosome. The archive MD5 is verified before extraction to catch truncated downloads. Existing chromosomes that pass the integrity check are skipped on re-runs.
 
-**Single chromosome (`--chrom chrN`):** downloads only `chrN.fa.gz` from the UCSC per-chromosome endpoint and unpacks it to `Genomes/hg38_chrN/chrN.fa`. Use this for testing before committing to the full download.
+**Single chromosome (`--chrom chrN`):** downloads only that chromosome, to `Genomes/hg38_chrN/chrN.fa`. It tries the HuggingFace data repo first (see Section 2d), and the default repo holds the unpacked FASTA of chr22 only: `--chrom chr22` takes `chr22.fa` from it as is; for any other chromosome it downloads `chrN.fa.gz` from the UCSC per-chromosome endpoint and unpacks it. Use this for testing before committing to the full download.
 
 Expected result: `Genomes/hg38/` (full) or `Genomes/hg38_chrN/` (single-chrom) containing one `.fa` file per downloaded chromosome.
 
