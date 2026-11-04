@@ -362,6 +362,33 @@ class TestRefusedDatasets(_Install):
         self.assertEqual(self.note("walkint", 1, 1), "Up to 1 DNA/RNA bulge(s) available.")
         self.assertEqual(self.submit("walkint", 1, 1), (True, []))
 
+    def test_a_dataset_named_otherwise_removed_in_settings(self):
+        # the same with the dataset named walkint, not hg38_walkint: a Settings build names
+        # its index after the folder (NRG_2_hg38+walkint), and the search form reads a
+        # dataset off an index name only as a download names it (+hg38_<dataset>), so it
+        # offers the dataset no more once its folder is gone; added again under the same
+        # name, the dataset is offered and its index serves the search
+        # (docs/SETTINGS_DATA_MANAGER.md says both)
+        def upload():
+            part = os.path.join(self.tmp, "walkint.chr1.vcf.gz.part")
+            _vcf(part)
+            sp._finalize_upload("vcf", part, "walkint.chr1.vcf.gz", "walkint", "hg38")
+
+        def offered():
+            return [o["value"] for o in pu.get_variant_dataset_options("hg38")]
+
+        upload()
+        self.index("NRG_2_hg38+walkint")
+        self.assertIn("walkint", offered())
+        sp.do_delete(1, "vcf:walkint")
+        self.assertTrue(os.path.isdir(os.path.join(self.tmp, "genome_library",
+                                                   "NRG_2_hg38+walkint")))
+        self.assertNotIn("walkint", offered())
+        upload()
+        self.assertIn("walkint", offered())
+        self.assertEqual(self.note("walkint", 1, 1), "Up to 1 DNA/RNA bulge(s) available.")
+        self.assertEqual(self.submit("walkint", 1, 1), (True, []))
+
     def test_a_downloaded_index_without_its_sample_list(self):
         # a downloaded index whose list is gone, with no VCF folder. The message said to
         # download the index again, which installs the list (test_samplesid_emit), but
