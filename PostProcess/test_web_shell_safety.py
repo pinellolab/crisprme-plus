@@ -32,7 +32,11 @@ Results/, outside the data folder too. Remove result of a personal-assembly sear
 removed that folder (and the haplotype folders its .Params.txt names, joined the same
 way), Show full log and the status of a personal-assembly search read its log files,
 the results pages wrote the table filter they keep (.dropdown.json) into it, and their
-tables, lists, download links and the routes to a job read its files.
+tables, lists, download links and the routes to a job read its files. The callbacks that
+fill in and check the search form (its variant datasets, analysis modes, bulge options and
+the note under them, the Submit check) joined the genome, PAM and dataset a request sends
+into the paths they list and read the same way, and what they found outside the data
+folder changed what they answered.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -45,6 +49,9 @@ Run with:
     <env>/bin/python3 -m unittest discover -s PostProcess -p 'test_web_shell_safety.py' -v
 """
 
+import builtins
+import contextlib
+import gzip
 import json
 import os
 import shutil
@@ -371,6 +378,166 @@ class TestSearchLaunch(_WebFolder):
         self.assertTrue(args[4].endswith(f".active.{genome}.bed.gz"))
         self.assertTrue(os.path.isfile(args[4]))
         self.assertNothingRun()
+
+
+@contextlib.contextmanager
+def _paths_read():
+    """A list of the real path of every path listed, tested or opened under it
+    (os.listdir, os.scandir, os.path.isdir / isfile / exists, open, gzip.open)."""
+    seen = []
+
+    def recording(func):
+        def recorded(*args, **kwargs):
+            if args and isinstance(args[0], (str, bytes, os.PathLike)):
+                seen.append(os.fsdecode(os.path.realpath(args[0])))
+            return func(*args, **kwargs)
+        return recorded
+
+    with contextlib.ExitStack() as stack:
+        for owner, name in ((os, "listdir"), (os, "scandir"), (os.path, "isdir"),
+                            (os.path, "isfile"), (os.path, "exists"), (builtins, "open"),
+                            (gzip, "open")):
+            stack.enter_context(patch.object(owner, name, recording(getattr(owner, name))))
+        yield seen
+
+
+def _vcf(path, samples):
+    """A gzipped VCF of a header only: with a sample column, or none (sites-only)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with gzip.open(path, "wt") as fh:
+        fh.write("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"
+                 + ("\tFORMAT\tS1" if samples else "") + "\n")
+
+
+@NEEDS_DASH
+class TestSearchFormReadsItsOwnValues(_WebFolder):
+    """The callbacks that fill in and check the search form, which a request can call with
+    any genome, PAM and variant dataset: they joined them into the paths of the folders and
+    files they list and read, so an absolute path or '../' reached outside the data folder,
+    and what was there changed what they answered (a bit about any folder or file of the
+    server a request). Values the form does not offer are answered as none is, and nothing
+    outside is read; those it offers are answered as before."""
+
+    def setUp(self):
+        super().setUp()
+        # an installed dataset: a VCF with samples, its sample list and genotype store
+        _vcf(os.path.join(self.data, "VCFs", "hg38_walk", "walk.chr1.vcf.gz"), True)
+        with open(os.path.join(self.data, "samplesIDs", "hg38_walk.samplesID.txt"), "w") as fh:
+            fh.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+                     "S1\twalk\tunknown\tunknown\n")
+        os.makedirs(os.path.join(self.data, "Dictionaries", "genotypes_hg38_walk"))
+        open(os.path.join(self.data, "Dictionaries", "genotypes_hg38_walk", "chr1"), "w").close()
+        # outside the data folder: VCF folders with and without samples, a genome folder,
+        # a full folder and an empty one, and two PAM files
+        for folder, samples in (("cohort_geno", True), ("cohort_sites", False),
+                                ("a/cohort_1000G", True), ("b/cohort_1000G", False)):
+            _vcf(os.path.join(self.outside, folder, "x.chr1.vcf.gz"), samples)
+        os.makedirs(os.path.join(self.outside, "genome_x"))
+        shutil.copy(os.path.join(self.outside, "hg38", "chr1.fa"),
+                    os.path.join(self.outside, "genome_x"))
+        os.makedirs(os.path.join(self.outside, "store"))
+        open(os.path.join(self.outside, "store", "chr1"), "w").close()
+        os.makedirs(os.path.join(self.outside, "empty"))
+        for name in ("pam", "x-20bp-y"):  # a PAM motif the guide's sequence does not hold
+            with open(os.path.join(self.outside, f"{name}.txt"), "w") as fh:
+                fh.write("N" * 20 + "CCC 3\n")
+        self.before = self.outside_files()
+        self.cohort = os.path.join(self.outside, "cohort")  # '<genome>_<dataset>' reaches
+        self.through = "walk/../../../outside/"  # VCFs/hg38_<this>... is outside/...
+
+    def assertNothingReadOutside(self, seen):
+        outside = os.path.realpath(self.outside) + os.sep
+        self.assertEqual([p for p in seen if p.startswith(outside)], [])
+        self.assertNothingRun()
+
+    def test_the_variant_datasets_offered(self):
+        none = mp.change_variant_dataset_options(None)
+        with _paths_read() as seen:
+            for folder in ("a", "b", "c"):  # samples, sites-only, no folder
+                with self.subTest(folder=folder):
+                    self.assertEqual(mp.change_variant_dataset_options(
+                        os.path.join(self.outside, folder, "cohort")), none)
+        self.assertNothingReadOutside(seen)
+        options, value = mp.change_variant_dataset_options("hg38")
+        self.assertEqual(([o["value"] for o in options], value), (["ref", "walk"], "walk"))
+
+    def test_the_analysis_modes(self):
+        none = mp.update_search_mode_availability(None, None, "population-level")
+        self.assertTrue(none[0][1]["disabled"])  # per-sample: no genotypes to resolve
+        with _paths_read() as seen:
+            for dataset in (self.through + "store", self.through + "empty"):
+                with self.subTest(dataset=dataset):
+                    self.assertEqual(mp.update_search_mode_availability(
+                        dataset, "hg38", "population-level"), none)
+            self.assertEqual(mp.update_search_mode_availability(
+                "walk", self.cohort, "population-level"), none)
+        self.assertNothingReadOutside(seen)
+        options, _value = mp.update_search_mode_availability("walk", "hg38", "population-level")
+        self.assertFalse(options[1]["disabled"])  # the genotype store of walk
+
+    def test_the_bulge_options(self):
+        none = mp.limit_bulges_to_index(None, PAM, "ref", 1, 1, 4, 6, {})
+        ref = mp.limit_bulges_to_index("hg38", PAM, "ref", 1, 1, 4, 6, {})
+        with _paths_read() as seen:
+            for genome, pam, variant, want in (
+                    (os.path.join(self.outside, "genome_x"), PAM, "ref", none),
+                    (os.path.join(self.outside, "nothing_here"), PAM, "ref", none),
+                    ("hg38", "../../outside/pam", "ref", none),
+                    ("hg38", "../../outside/nothing_here", "ref", none),
+                    ("hg38", PAM, self.through + "cohort_geno", ref),
+                    ("hg38", PAM, self.through + "nothing_here", ref)):
+                with self.subTest(genome=genome, pam=pam, variant=variant):
+                    self.assertEqual(
+                        mp.limit_bulges_to_index(genome, pam, variant, 1, 1, 4, 6, {}), want)
+        self.assertNothingReadOutside(seen)
+        # walk, which has no variant index: 0 bulges, as before
+        opts, _, dna, rna, _, _ = mp.limit_bulges_to_index("hg38", PAM, "walk", 1, 1, 4, 6, {})
+        self.assertEqual(([o["value"] for o in opts], dna, rna), ([0], 0, 0))
+
+    def test_the_bulge_note(self):
+        ref = mp.update_bulge_note("hg38", PAM, "ref", 1, 1)
+        with _paths_read() as seen:
+            for genome, pam, variant, want in (
+                    (self.cohort, PAM, "sites", ""), (self.cohort, PAM, "geno", ""),
+                    (self.cohort, PAM, "absent", ""),
+                    (os.path.join(self.outside, "genome_x"), PAM, "ref", ""),
+                    ("hg38", "../../outside/pam", "ref", ""),
+                    ("hg38", "../../outside/nothing_here", "ref", ""),
+                    ("hg38", PAM, self.through + "cohort_sites", ref),
+                    ("hg38", PAM, self.through + "cohort_geno", ref),
+                    ("hg38", PAM, self.through + "nothing_here", ref)):
+                with self.subTest(genome=genome, pam=pam, variant=variant):
+                    self.assertEqual(mp.update_bulge_note(genome, pam, variant, 1, 1), want)
+        self.assertNothingReadOutside(seen)
+        self.assertTrue(mp.update_bulge_note("hg38", PAM, "walk", 1, 1).startswith(
+            "No walk variant index for this PAM is installed yet, so only a 0-bulge search "
+            "is offered"))
+
+    def submit(self, pam=PAM, variant="ref", guide_type="IP", guides="CTAACAGTTGCTTTTATCAC"):
+        """check_input, as the Submit button runs it: (runs, the dialog's lines)."""
+        out = mp.check_input(1, None, "hg38", pam, guide_type, guides, 4, 0, 0, variant, False)
+        return out[0] == 1, [li.children for li in out[-1].children[1].children]
+
+    def test_the_submit_check(self):
+        with _paths_read() as seen:
+            # a PAM file outside, and one not there: the same lines, but for its name
+            answers = []
+            for pam in ("../../outside/x-20bp-y", "../../outside/z-20bp-y"):
+                ran, lines = self.submit(pam=pam, guide_type="GS", guides=">s\n" + SEQ)
+                answers.append((ran, [line.replace(pam, "<pam>") for line in lines]))
+            self.assertEqual(answers[0], answers[1])
+            self.assertEqual(answers[0], (False, [
+                "PAM: <pam> is not installed. Select an installed PAM, or add it in Settings "
+                "(Define a nuclease / PAM)."]))
+            for variant in (self.through + "cohort_sites", self.through + "cohort_geno",
+                            self.through + "nothing_here", "walk+" + self.through + "empty"):
+                with self.subTest(variant=variant):
+                    self.assertEqual(self.submit(variant=variant), (False, [
+                        f"Variants: {variant} is not installed for hg38. Select an installed "
+                        "variant dataset, or add it in Settings (Add a VCF dataset)."]))
+        self.assertNothingReadOutside(seen)
+        self.assertEqual(self.submit(variant="walk"), (True, []))
+        self.assertEqual(self.submit(guide_type="GS", guides=">s\n" + SEQ), (True, []))
 
 
 @NEEDS_DASH

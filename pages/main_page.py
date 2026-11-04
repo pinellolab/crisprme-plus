@@ -1919,6 +1919,26 @@ def _launchable(genome: Optional[str], pam: Optional[str], variant_choice: Optio
         return False
 
 
+def _offered(genome: Optional[str], pam: Optional[str],
+             variant_choice: Optional[str]) -> Tuple:
+    """The genome, PAM and variant dataset of the search form as the callbacks that fill
+    in and check the form take them: each one only when the form offers it (a genome and
+    a PAM that are installed; "ref", or datasets the form offers for that genome), else
+    None. Their values come back from the browser, which a client can set to anything,
+    and they name the folders and files these callbacks read: an absolute path or '../'
+    reached outside the data folder, and what was there changed what they answered. So
+    they answer as for none, as change_url runs only what the form offers (_launchable)."""
+    if genome not in [g["value"] for g in get_available_genomes()]:
+        genome = None
+    if pam not in [p["value"] for p in get_available_PAM()]:
+        pam = None
+    panels = _selected_panels(variant_choice)
+    if panels and (genome is None or not set(panels) <= {
+            o["value"] for o in get_variant_dataset_options(genome)}):
+        variant_choice = None
+    return genome, pam, variant_choice
+
+
 def _not_installed(field: str, selected: Optional[str], installed: List[str], what: str,
                    card: str) -> Optional[str]:
     """The missing-input line for the search form's ``field`` (Genome, PAM) when
@@ -2048,8 +2068,8 @@ def check_input(
     if genome_selected is None or not bool(genome_selected):
         genome_selected = "hg38_ref"
     genome_ref = genome_selected
-    missing = _not_installed("PAM", pam, [p["value"] for p in get_available_PAM()], "PAM",
-                             "Define a nuclease / PAM")
+    pams = [p["value"] for p in get_available_PAM()]
+    missing = _not_installed("PAM", pam, pams, "PAM", "Define a nuclease / PAM")
     if missing:
         pam_update = classname_red
         update_style = True
@@ -2083,24 +2103,26 @@ def check_input(
             [len(g) == len(text_guides.split("\n")[0]) for g in text_guides.split("\n")]
         ):
             text_guides = select_same_len_guides(text_guides)
-    # check PAM (one not installed is said above)
+    # check PAM (one not installed is said above, and not read: a request can send any
+    # value, which names the file read)
     pam_char = None
-    try:
-        with open(
-            os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
-        ) as handle_pam:
-            pam_char = handle_pam.readline()
-            index_pam_value = int(pam_char.split()[-1])
-            if index_pam_value < 0:
-                end_idx = index_pam_value * (-1)
-                pam_char = pam_char.split()[0][:end_idx]
-                pam_begin = True
-            else:
-                end_idx = index_pam_value
-                pam_char = pam_char.split()[0][(end_idx * (-1)) :]
-                pam_begin = False
-    except OSError:
-        pass
+    if pam in pams:
+        try:
+            with open(
+                os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
+            ) as handle_pam:
+                pam_char = handle_pam.readline()
+                index_pam_value = int(pam_char.split()[-1])
+                if index_pam_value < 0:
+                    end_idx = index_pam_value * (-1)
+                    pam_char = pam_char.split()[0][:end_idx]
+                    pam_begin = True
+                else:
+                    end_idx = index_pam_value
+                    pam_char = pam_char.split()[0][(end_idx * (-1)) :]
+                    pam_begin = False
+        except OSError:
+            pass
     if guide_type == "GS" and (pam_char is None or genome_update is not None):
         # the guides of a genomic sequence are found with its PAM, and those of BED
         # coordinates in the genome: with either missing (said above) they are not
@@ -2231,6 +2253,17 @@ def check_input(
     # ">= max(dna, rna)" is precisely the shell's reachability test (incl. NNN-pamless +
     # combined-dataset matching, and the buildable-reference relaxation). Without a genome
     # and a PAM selected and installed it is not run: what is missing is said above.
+    # Nor for a variant dataset the form does not offer for the genome (a request can send
+    # any value, which names the folders read below): it is said, as a genome or PAM that
+    # is not installed.
+    if (genome_update is None and variant_choice not in (None, "", "ref")
+            and _offered(genome_selected, None, variant_choice)[2] is None):
+        update_style = True
+        miss_input_list.append(
+            f"Variants: {variant_choice} is not installed for {genome_selected}. Select an "
+            "installed variant dataset, or add it in Settings (Add a VCF dataset)."
+        )
+        variant_choice = None
     if (genome_selected and pam and genome_update is None and pam_update is None
             and dna is not None and rna is not None):
         need = max(int(dna), int(rna))
@@ -2520,6 +2553,7 @@ def change_variant_dataset_options(genome_value: str) -> List:
 
     if genome_value is not None and not isinstance(genome_value, str):
         raise TypeError(f"Expected {str.__name__}, got {type(genome_value).__name__}")
+    genome_value = _offered(genome_value, None, None)[0]  # an installed genome, or none
     options = get_variant_dataset_options(genome_value)
     # default to a variant-aware search, preferring a genotyped-PHASED panel (clean
     # real-haplotype default), then the richest installed panel — chosen dynamically
@@ -2540,6 +2574,7 @@ def change_variant_dataset_options(genome_value: str) -> List:
     [State("search-mode", "value")],
 )
 def update_search_mode_availability(dataset_value, genome_value, current_mode):
+    genome_value, _pam, dataset_value = _offered(genome_value, None, dataset_value)
     has_gt = variant_dataset_has_genotypes(genome_value, dataset_value)
     # tailor the label to what per-sample actually BUYS on THIS panel: a phased panel
     # yields CONFIRMED cis + named carriers; an unphased panel can name carriers but the
@@ -2628,6 +2663,7 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
 def limit_bulges_to_index(
     genome, pam, variant_choice, cur_dna, cur_rna, mms=None, cur_edits=None, held=None
 ):
+    genome, pam, variant_choice = _offered(genome, pam, variant_choice)
     if not genome or not pam:
         return AV_BULGES, AV_BULGES, no_update, no_update, no_update, no_update
     maxb = _bulge_cap(genome, pam, variant_choice)
@@ -2812,6 +2848,7 @@ def _dataset_refusals(genome: str, pam: str, panel: str,
     ],
 )
 def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
+    genome, pam, variant_choice = _offered(genome, pam, variant_choice)
     if not genome or not pam:
         return ""
     # a dataset whose search Submit refuses whatever the bulges: the note says what Submit

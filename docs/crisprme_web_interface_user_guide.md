@@ -437,8 +437,9 @@ making it easier to locate a specific search in the Results listing.
 Once all required fields in Steps 1 and 2 are complete, click the **Submit** button
 at the bottom of the form. The interface validates the inputs and highlights any
 missing required fields in red. A genome or PAM selected that is not installed (a fresh
-data folder has none, though **Load Example** selects `hg38` and `20bp-NRG-SpCas9`) is
-listed too, with where to add one in **Settings**. If validation passes, the job is
+data folder has none, though **Load Example** selects `hg38` and `20bp-NRG-SpCas9`), or a
+variant dataset that is not installed for the genome, is listed too, with where to add one
+in **Settings**. If validation passes, the job is
 queued and the interface navigates automatically to the Job Status page.
 
 > **Important:** Do not close the browser tab while a job is running. Closing the

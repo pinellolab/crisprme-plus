@@ -2,8 +2,8 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (29 tests, the Security
-block) to that step, and on this branch the step then ran 496 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (34 tests, the Security
+block) to that step, and on this branch the step then ran 501 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged. The indel search's
 chromosome-name check (the last Security entry) adds three tests to `test_indel_empty_chromosome`,
 and the Settings entries add tests to `test_settings_progress`, in unit-tests' own job.
@@ -169,6 +169,14 @@ and the Settings entries add tests to `test_settings_progress`, in unit-tests' o
   index locally" took them as a request sent them, and a path in one built an index of a folder
   outside the data folder. Pre-existing, since 2.2.0. Covered by
   `PostProcess/test_settings_progress.py`.
+- **The search form reads only what it offers.** The callbacks that fill in and check the form
+  (the variant datasets offered for a genome, the analysis modes, the bulge options and the note
+  under them, and Submit's check) took the genome, PAM and variant dataset a request sends into
+  the paths of the folders and files they list and read: a path in them reached outside the data
+  folder, and what was there changed what they answered, in local mode and on a website alike.
+  They now answer for a value the form does not offer as for none, and Submit lists a variant
+  dataset that is not installed for the genome, as it does a genome or PAM that is not installed.
+  Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
 - **The indel steps of a search pass no chromosome name of a variant dataset to a shell.**
   A search with bulges takes each chromosome name of a variant dataset, read from the CHROM
   column of its VCFs (or from the per-chromosome indel logs named after it), into the shell
