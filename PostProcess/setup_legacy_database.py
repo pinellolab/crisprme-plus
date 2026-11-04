@@ -61,6 +61,7 @@ from utils import (
     compute_md5,
     download,
     hf_fetch,
+    hf_missing,
     HF_DATA_REPO,
     gunzip,
     rename,
@@ -237,7 +238,9 @@ def _download_chrom_genome_data(chrom: str, genomes_dir: Path, force: bool) -> N
     if not force and _file_is_valid(fa_path):
         sys.stderr.write(f"Genome FASTA already valid, skipping: {fa_path}\n")
         return
-    # fast path: fetch the extracted FASTA from HuggingFace; fall back to UCSC
+    # fast path: fetch the extracted FASTA from HuggingFace; fall back to UCSC. The
+    # default repo holds it unpacked for chr22 only, and a file the repo does not
+    # hold is no failure: one line on stdout says where it comes from instead
     try:
         os.makedirs(chrom_dir, exist_ok=True)
         hf_fetch(f"genomes/hg38/{chrom}.fa", str(fa_path))
@@ -245,9 +248,13 @@ def _download_chrom_genome_data(chrom: str, genomes_dir: Path, force: bool) -> N
         if Path(fa_path).is_file():
             return
     except Exception as e:
-        sys.stderr.write(
-            f"HuggingFace fetch failed for {chrom}.fa ({e}); falling back to UCSC\n"
-        )
+        if hf_missing(e):
+            print(f"{chrom}.fa is not on HuggingFace ({HF_DATA_REPO}); downloading it "
+                  "from UCSC", flush=True)
+        else:
+            sys.stderr.write(
+                f"HuggingFace fetch failed for {chrom}.fa ({e}); falling back to UCSC\n"
+            )
     gz_path = download(
         str(genomes_dir),
         http_url=f"{HG38_BASE_URL}/chromosomes/{archive_basename}",
@@ -331,7 +338,9 @@ def _download_vcf_data(chrom: str, vcfs_dir: Path, force: bool) -> None:
                 sys.stderr.write(f"VCF already valid, skipping: {local_vcf}\n")
                 continue
             # fast path: fetch the bgzipped VCF from HuggingFace, MD5-verify, then
-            # fall back to the original FTP source on any failure
+            # fall back to the original FTP source on any failure. The default repo
+            # hosts none of these raw VCFs (its vcfs/ holds the inputs of the shipped
+            # panels), which is no failure: one line on stdout says so
             try:
                 hf_fetch(f"vcfs/{ds_label}/{remote_basename}", str(local_vcf))
                 _verify_md5(str(local_vcf), md5_map)
@@ -340,10 +349,14 @@ def _download_vcf_data(chrom: str, vcfs_dir: Path, force: bool) -> None:
                 )
                 continue
             except Exception as e:
-                sys.stderr.write(
-                    f"HuggingFace fetch failed for {remote_basename} ({e}); "
-                    "falling back to original source\n"
-                )
+                if hf_missing(e):
+                    print(f"{remote_basename} is not on HuggingFace ({HF_DATA_REPO}); "
+                          "downloading it from its original source", flush=True)
+                else:
+                    sys.stderr.write(
+                        f"HuggingFace fetch failed for {remote_basename} ({e}); "
+                        "falling back to original source\n"
+                    )
             vcf_path = download(
                 str(vcf_dataset_dir),
                 ftp_conn=True,
@@ -382,7 +395,8 @@ def _download_samples_ids_data(base_dir: Path, force: bool) -> None:
         if not force and _file_is_valid(renamed_target):
             sys.stderr.write(f"Sample IDs already valid, skipping: {renamed_target}\n")
             continue
-        # fast path: HuggingFace (MD5-verify + rename), fall back to source
+        # fast path: HuggingFace (MD5-verify + rename), fall back to source (a file
+        # the repo does not hold is no failure: one line on stdout says so)
         try:
             hf_local = os.path.join(str(samplesids_dir), fname)
             hf_fetch(f"samplesIDs/{fname}", hf_local)
@@ -394,10 +408,14 @@ def _download_samples_ids_data(base_dir: Path, force: bool) -> None:
             sys.stderr.write(f"Fetched {fname} from HuggingFace ({HF_DATA_REPO})\n")
             continue
         except Exception as e:
-            sys.stderr.write(
-                f"HuggingFace fetch failed for {fname} ({e}); "
-                "falling back to original source\n"
-            )
+            if hf_missing(e):
+                print(f"{fname} is not on HuggingFace ({HF_DATA_REPO}); "
+                      "downloading it from its original source", flush=True)
+            else:
+                sys.stderr.write(
+                    f"HuggingFace fetch failed for {fname} ({e}); "
+                    "falling back to original source\n"
+                )
         local_path = download(
             str(samplesids_dir),
             http_url=f"{TEST_DATA_BASE_URL}/samplesIDs/{fname}",

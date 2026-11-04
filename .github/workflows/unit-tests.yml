@@ -128,6 +128,12 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_hf_downloads.TestHfFetchFallbackContract -v
 
+      - name: "Legacy setup: a file the data repo does not host is said in one line on stdout, not as a HuggingFace failure"
+        # `crisprme.py setup` printed the Hub's 404 for every VCF, samplesIDs.HGDP.txt and the
+        # FASTA of any chromosome but chr22 as a failure, then downloaded each from its source.
+        working-directory: PostProcess
+        run: python -m unittest test_setup_legacy_database -v
+
       - name: Variant-index bundle round-trip (dicts travel with the index)
         working-directory: PostProcess
         run: python -m unittest test_index_bundle -v
