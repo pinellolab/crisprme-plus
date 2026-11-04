@@ -23,6 +23,9 @@ Up to 2.8.0 the web app took such text into shell commands as it was:
   guide and mismatches the tables send back, a sample's name (a VCF's), and the results
   file's name, which holds the genome's.
 
+pages/sequence_utils.py, which no module imports, ran bedtools getfasta through a shell
+the same way; it is checked too (with Biopython and bedtools), for a page that would.
+
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
 normal value still works. The extraction's checks run everywhere (those that read a
@@ -51,6 +54,10 @@ sys.path.insert(0, HERE)
 
 from seq_script import extract_seq  # noqa: E402  (no Dash, no Biopython)
 
+try:  # pages/sequence_utils.py needs Biopython, which the light unit-test CI does not have
+    from pages import sequence_utils  # noqa: E402
+except ImportError:  # pragma: no cover
+    sequence_utils = None
 try:  # the pages need the web stack (Dash), which the light unit-test CI does not have
     import dash  # noqa: F401
 except ImportError:  # pragma: no cover
@@ -69,6 +76,7 @@ if dash is not None:
 BEDTOOLS = shutil.which("bedtools")
 NEEDS_DASH = unittest.skipUnless(dash, "dash not installed: web page tests skipped")
 NEEDS_BEDTOOLS = unittest.skipUnless(BEDTOOLS, "bedtools not on PATH")
+NEEDS_BIOPYTHON = unittest.skipUnless(sequence_utils, "Biopython not installed")
 PAM = "20bp-NRG-SpCas9"
 # chr1 of the test genome: one 20-nt guide and its NGG, between T runs
 SEQ = "T" * 10 + "CTAACAGTTGCTTTTATCACAGG" + "T" * 10
@@ -172,6 +180,30 @@ class TestExtractSequence(_Folder):
             fh.write(">chr2\n" + SEQ + "\n")
         self.assertEqual(extract_seq.extractSequence("s", "chr2:0-43", "mm"), SEQ)
         self.assertEqual(os.listdir(os.path.join(self.data, "Genomes", "mm")), ["chr2.fasta"])
+
+
+@NEEDS_BIOPYTHON
+@NEEDS_BEDTOOLS
+class TestSequenceUtils(_Folder):
+    """pages/sequence_utils.py, which no module imports: its bedtools getfasta ran
+    through a shell on a BED named after the header and the FASTA of the genome's
+    folder, so a page that imported it would have run what either holds."""
+
+    def test_the_sequence_is_read_as_before_and_runs_nothing(self):
+        genome = os.path.join(self.data, "Genomes", "hg38")
+        self.assertEqual(sequence_utils.extract_sequence("s", "chr1:0-43", "hg38"), SEQ)
+        for name in ("s;touch${IFS}MARK_a;#", "s$(touch${IFS}MARK_b)", "s`touch${IFS}MARK_c`"):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    sequence_utils.extract_sequence(name, "chr1:10-33", "hg38"), SEQ[10:33])
+        os.rename(genome, os.path.join(self.data, "Genomes", "g;touch${IFS}MARK_d;#"))
+        self.assertEqual(
+            sequence_utils.extract_sequence("s", "chr1:0-43", "g;touch${IFS}MARK_d;#"), SEQ)
+        self.assertNothingRun()
+        # as before: the BED and the FASTA's index are removed
+        self.assertEqual(sorted(os.listdir(self.data)), ["Genomes", "PAMs"])
+        self.assertEqual(
+            os.listdir(os.path.join(self.data, "Genomes", "g;touch${IFS}MARK_d;#")), ["chr1.fa"])
 
 
 class _WebFolder(_Folder):

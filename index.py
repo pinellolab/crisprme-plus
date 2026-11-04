@@ -21,8 +21,8 @@ Attributes:
 # source tree" and warns about at import -- a harmless false positive (a Bioconda
 # install has it: conda-forge's package ships the file). crisprme.py silences it for
 # its own process, but `crisprme.py web-interface` runs this file in a new
-# interpreter, whose pages import Bio (seq_script/convert_pam.py,
-# pages/sequence_utils.py): the same filter, before anything is imported.
+# interpreter, whose pages import Bio (seq_script/convert_pam.py): the same filter,
+# before anything is imported.
 import warnings as _warnings
 _warnings.filterwarnings(
     "ignore", message=r".*importing Biopython from inside the source tree.*"

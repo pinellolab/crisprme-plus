@@ -133,9 +133,9 @@ def getfasta(bedfname: str, chromfasta: str) -> str:
     Returns:
         The extracted sequence string.
     """
-    # extract sequence from input coordinates
+    # extract sequence from input coordinates (no shell: each path is one argument)
     sequence = subprocess.check_output(
-        [f"{GETFASTA} -fi {chromfasta} -bed {bedfname}"], shell=True
+        GETFASTA.split() + ["-fi", chromfasta, "-bed", bedfname]
     ).decode("utf-8")
     return sequence.split("\n")[1].strip()  # remove header
 
