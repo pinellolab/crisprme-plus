@@ -57,8 +57,11 @@ change no search result.
   `complete-test` does: `<file> is not on HuggingFace (lucapinello/crisprme-data); downloading it
   from its original source` (`from UCSC` for a FASTA). Any other failure to fetch a file is still
   a warning on stderr, word for word as before. What is downloaded, and from where, is unchanged.
-  Pre-existing, in 2.8.0 too. Covered by `PostProcess/test_setup_legacy_database.py`, a new step
-  of `unit-tests.yml`.
+  The setup guide, `docs/crisprme_data_setup_051826.md`, said `setup` pulls the genome and the
+  variants from their original sources, a single chromosome's FASTA from UCSC; it now says `setup`
+  takes two files from the data repo, `chr22.fa` for `--chrom chr22` and `samplesIDs.1000G.txt`,
+  and everything else from UCSC, EBI, Sanger or GitHub. Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_setup_legacy_database.py`, a new step of `unit-tests.yml`.
 - **The `lucapinello/crisprme-data` card says what its `genomes/hg38/` holds.** Its layout, kept
   from the live card, gave the folder as a per-chromosome FASTA mirror, `chr1.fa … chrX.fa`. The
   repo holds one gzipped FASTA per hg38 sequence (`chr1.fa.gz` … `chrY.fa.gz`, `chrM.fa.gz` and
