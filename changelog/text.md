@@ -86,9 +86,9 @@ is the first; keep them true where the entries land.
   observed-haplotypes callout of Section 5 and the header of `observed_haplotypes.tsv`, as in every
   mode, and the download button of a greedy row's modal, which names the whole file, still call its
   rows observed haplotypes. The web search form offers per-sample only on an index with a genotype
-  store, so a web search is never such a search. Pre-existing: the row has read so since 2.5.3, the allele-frequency texts
-  since 2.4.0, the legend's entries since 2.6.0, the caption since 2.7.10 and the Observed cell
-  since 2.8.0. Covered by `PostProcess/test_generate_report.py` and
+  store, so a web search is never such a search. Pre-existing: the row has read so since 2.5.3,
+  the allele-frequency texts since 2.4.0, the legend's entries since 2.6.0, the caption since
+  2.7.10 and the Observed cell since 2.8.0. Covered by `PostProcess/test_generate_report.py` and
   `PostProcess/test_build_index_only_atomic.py`.
 - **A population-level search on an index without the dict-less tiers says where its allele
   frequencies come from, and what `--per-sample` gives there.** On such an index both modes read
