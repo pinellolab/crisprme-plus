@@ -2,12 +2,13 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (49 tests, the Security
-block) to that step, and on this branch the step then ran 516 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (57 tests, the Security
+block) to that step, and on this branch the step then ran 524 tests in about 105 s, with its
 two allowed skips: correct the count there as these entries are merged. The indel search's
 chromosome-name check (its Security entry) adds three tests to `test_indel_empty_chromosome`,
-and the Settings, personal-assembly and History entries add tests to `test_settings_progress`,
-`test_personal_assembly` and `test_history_page_assembly`, in unit-tests' own job.
+and the Settings, personal-assembly, History and archive entries add tests to
+`test_settings_progress`, `test_personal_assembly`, `test_history_page_assembly`,
+`test_genome_layout` and `test_index_bundle`, in unit-tests' own job.
 
 ### Fixed
 
@@ -318,3 +319,12 @@ and the Settings, personal-assembly and History entries add tests to `test_setti
   searched. It now takes 0 to 6 mismatches and 0 to 2 DNA and RNA bulges, and a Max edits of 1
   to 10 where that governs, and otherwise says which is wrong, with nothing written.
   Pre-existing, since 2.5.5. Covered by `PostProcess/test_web_shell_safety.py`.
+- **What stays as it is.** A search's results TSVs, and their zips, hold the values they report
+  as they are: an annotation label of a BED added in Settings, or a sample name or variant ID of
+  a VCF dataset added there, that starts with `=`, `+`, `-` or `@` is a cell a spreadsheet may
+  take for a formula. Escaping such cells would change the content of every TSV, so open them
+  as text in a spreadsheet when that matters. Two features of Settings, which changes data in
+  local mode only, are for whoever runs the server: Add a VCF dataset's "Register a server
+  folder" registers any folder the web app can read as a dataset, and Add a reference genome's
+  Direct URL has the server fetch any `http(s)` address. The online version of the web app
+  disables both, with every other change Settings makes.
