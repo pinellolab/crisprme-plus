@@ -6729,7 +6729,8 @@ def complete_test_crisprme():
 
     Raises:
         SystemExit: With status 1 if the CRISPRme test fails (2 for a --chrom the
-            genome or the index lacks), having said why on stderr.
+            genome or the index lacks, or the results of an earlier run in the way),
+            having said why on stderr.
     """
 
     warn_low_memory()  # non-fatal low-memory warning (Docker Desktop, etc.)
@@ -6786,8 +6787,9 @@ def complete_test_crisprme():
         f"python {script_test} {chrom} {vcf_dataset} {threads} {debug}", shell=True
     )
     if code == 2:
-        # complete_test.py refused --chrom, a chromosome the genome or the index lacks,
-        # and said so in one line before searching; a traceback would only bury it
+        # complete_test.py refused --chrom, a chromosome the genome or the index lacks, or
+        # to run over the results of an earlier run, and said so in one line before
+        # searching; a traceback would only bury it
         sys.exit(2)
     if code != 0:
         # complete_test.py, or the search it ran, has said why above; a traceback would

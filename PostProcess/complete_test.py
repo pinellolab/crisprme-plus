@@ -50,7 +50,7 @@ from utils import (
     MD5ANNOTATION,
 )
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import index_fit
 import unfinished_marks
@@ -177,32 +177,39 @@ def _smoke_rank(index_name: str) -> tuple:
     return (int(bmax < 2), rank, index_name)
 
 
-def check_output() -> None:
+def check_output(outputs: List[str]) -> None:
     """
-    Check whether complete-test results already exist and prevent rerunning tests
-    if previous output is detected.
+    Refuse to run complete-test over the results of an earlier run.
 
-    This function inspects the expected results directory and exits with an error
-    message if a complete-test output folder is found, avoiding accidental
-    overwriting or conflicting test runs.
+    ``outputs`` are the folders in Results/ that this run's mode writes: the
+    prebuilt-index smoke's crisprme-test-out, or the benchmark mode's
+    crisprme-test-out_<name> of each registered benchmark, a heavy one included where
+    CRISPRME_SKIP_HEAVY=1 leaves it out. complete-search refuses an output folder that is
+    not empty, and validate-test would read an earlier run's results as this run's: each
+    of them that is there is named, all in one message, before anything is downloaded or
+    searched. A folder of the other mode is in neither's way.
+
+    Args:
+        outputs (List[str]): The names of the folders in Results/ this run writes.
 
     Raises:
-        SystemExit: If a previous complete-test results folder is found.
+        SystemExit: With status 2 if any of them is there.
         AssertionError: If the main results directory does not exist.
     """
     results_dir = os.path.abspath(os.path.join(os.getcwd(), CRISPRME_DIRS[1]))
     assert os.path.isdir(results_dir)
-    # the complete-test output dir (COMPLETETESTRESDIR) -- or any legacy per-benchmark
-    # crisprme-test-out_<name> dir from an older run
-    for d in sorted(os.listdir(results_dir)):
-        if d == COMPLETETESTRESDIR or d.startswith(f"{COMPLETETESTRESDIR}_"):
-            full = os.path.join(results_dir, d)
-            if os.path.isdir(full):
-                sys.stderr.write(
-                    "Complete-test already run once. Please delete the complete-test "
-                    f"results folder before running it again: {full}\n"
-                )
-                sys.exit(0)  # avoid throwing complete-search error on output folder
+    found = [os.path.join(results_dir, d) for d in sorted(outputs)
+             if os.path.isdir(os.path.join(results_dir, d))]
+    if found:
+        # all in one message (named one at a time, the benchmark mode's six stopped a user
+        # five more times), and exit 2, not 0, which a script or a CI step read as a pass
+        # though nothing ran; crisprme.py passes it on
+        sys.stderr.write(
+            "Complete-test already run once. Please delete the complete-test results "
+            f"folder{'s' if len(found) > 1 else ''} before running it again: "
+            f"{' '.join(found)}\n"
+        )
+        sys.exit(2)
 
 
 def _assign_genome_directory_name(chrom: str) -> str:
@@ -1361,8 +1368,14 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
       truth. The ``validate-benchmarks`` CI sets this flag.
     """
     check_crisprme_directory_tree(os.getcwd())  # check crisprme directory tree
-    check_output()  # refuse to overwrite a previous complete-test output folder
-    if os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
+    ondemand = os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD")
+    if ondemand:  # the folder of each registered benchmark
+        outputs = [f"{COMPLETETESTRESDIR}_{bench['name']}"
+                   for bench in load_benchmarks()["benchmarks"]]
+    else:  # the smoke's own
+        outputs = [COMPLETETESTRESDIR]
+    check_output(outputs)  # refuse to overwrite the results of an earlier run
+    if ondemand:
         _run_benchmarks_ondemand(chrom, dataset, threads, debug)
     else:
         _run_prebuilt_index_smoke(threads, debug, chrom)

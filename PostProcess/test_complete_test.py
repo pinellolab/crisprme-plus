@@ -163,6 +163,90 @@ class DispatchContract(unittest.TestCase):
         self.assertIsNone(self.kwargs[0].get("cwd"))
 
 
+class AnEarlierRunInTheWayIsNamedWhole(unittest.TestCase):
+    """complete-test refuses to run over the results of an earlier run. It named one folder
+    (of the benchmark mode's six, crisprme-test-out_cas12a_hbg: a user who removed it was
+    stopped five more times), refused the prebuilt-index smoke on those six too, which it
+    does not write, and exited 0, which a script or a CI step reads as a pass though
+    nothing ran. It names every folder in the way of this run's mode, in one line, and
+    exits 2 before it downloads or searches anything; crisprme.py passes the 2 on."""
+
+    SCRIPT = os.path.join(HERE, "complete_test.py")
+
+    def setUp(self):
+        self.wd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.wd)
+        cwd = os.getcwd()
+        os.chdir(self.wd)
+        self.addCleanup(os.chdir, cwd)
+        self.results = os.path.join(os.getcwd(), "Results")
+        self.benchmarks = sorted(f"{ct.COMPLETETESTRESDIR}_{bench['name']}"
+                                 for bench in ct.load_benchmarks()["benchmarks"])
+
+    @staticmethod
+    def env(ondemand, skip_heavy=None):
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("CRISPRME_ALLOW_ONDEMAND_BUILD", "CRISPRME_SKIP_HEAVY")}
+        if ondemand:
+            env["CRISPRME_ALLOW_ONDEMAND_BUILD"] = "1"
+        if skip_heavy:
+            env["CRISPRME_SKIP_HEAVY"] = skip_heavy
+        return env
+
+    def run_test(self, folders, ondemand, skip_heavy=None):
+        """run_crisprme_test with ``folders`` in Results/, the benchmark mode for
+        ``ondemand``: its exit status, its stderr, and the mode it ran (none if refused)."""
+        for name in folders:
+            os.makedirs(os.path.join(self.results, name), exist_ok=True)
+        ran, err = [], io.StringIO()
+        with mock.patch.dict(os.environ, self.env(ondemand, skip_heavy), clear=True), \
+             mock.patch.object(ct, "_run_benchmarks_ondemand", lambda *a: ran.append("bench")), \
+             mock.patch.object(ct, "_run_prebuilt_index_smoke", lambda *a: ran.append("smoke")), \
+             contextlib.redirect_stderr(err):
+            try:
+                ct.run_crisprme_test("chr22", "1000G", 4, False)
+                code = 0
+            except SystemExit as stop:
+                code = stop.code
+        return code, err.getvalue(), ran
+
+    def said(self, names):
+        return ("Complete-test already run once. Please delete the complete-test results "
+                f"folder{'s' if len(names) > 1 else ''} before running it again: "
+                + " ".join(os.path.join(self.results, n) for n in names) + "\n")
+
+    def test_the_benchmark_modes_folders_are_named_in_one_line(self):
+        self.assertEqual(len(self.benchmarks), 6)
+        for skip_heavy in (None, "1"):  # (validate-test reads a heavy one's either way)
+            with self.subTest(CRISPRME_SKIP_HEAVY=skip_heavy):
+                code, err, ran = self.run_test(self.benchmarks + [ct.COMPLETETESTRESDIR], True,
+                                               skip_heavy)
+                self.assertEqual((code, ran), (2, []))
+                self.assertEqual(err, self.said(self.benchmarks))
+
+    def test_only_those_that_are_there(self):
+        code, err, ran = self.run_test(self.benchmarks[3:5], True)
+        self.assertEqual((code, err, ran), (2, self.said(self.benchmarks[3:5]), []))
+
+    def test_the_smoke_is_refused_on_its_own_folder_only(self):
+        code, err, ran = self.run_test(self.benchmarks, False)
+        self.assertEqual((code, err, ran), (0, "", ["smoke"]))
+        code, err, ran = self.run_test([ct.COMPLETETESTRESDIR], False)
+        self.assertEqual((code, err, ran), (2, self.said([ct.COMPLETETESTRESDIR]), []))
+
+    def test_the_benchmark_mode_is_not_refused_on_the_smokes(self):
+        code, err, ran = self.run_test([ct.COMPLETETESTRESDIR], True)
+        self.assertEqual((code, err, ran), (0, "", ["bench"]))
+
+    def test_the_script_exits_2_having_downloaded_nothing(self):
+        os.makedirs(os.path.join(self.results, self.benchmarks[0]))
+        res = subprocess.run([sys.executable, self.SCRIPT, "chr22", "1000G", "4", "False"],
+                             env=self.env(True), capture_output=True, text=True, timeout=120)
+        self.assertEqual((res.returncode, res.stdout, res.stderr),
+                         (2, "", self.said(self.benchmarks[:1])))
+        self.assertEqual(os.listdir("Genomes"), [])
+
+
 # --------------------------------------------------------------------------- #
 # A small working directory, as `download --what index` or build-index-only leave one:
 # genome toy (chr2, chr22, a chr22_ random contig, and chrY no index has), a reference
@@ -1239,11 +1323,12 @@ def _load_crisprme():
 
 
 class TheCliPassesTheRefusalOn(unittest.TestCase):
-    """complete_test.py refuses a --chrom the genome or the index lacks with exit 2,
-    having said why in one line; crisprme.py exits 2 too, without the OSError traceback
-    (whose 'See Results/crisprme-test-out/log_error.txt' names a file no search wrote).
-    Any other failure ends with exit 1 and one line, which names the search's error log
-    only where one was written."""
+    """complete_test.py refuses a --chrom the genome or the index lacks, or to run over an
+    earlier run's results, with exit 2, having said why in one line; crisprme.py exits 2
+    too, adding nothing: neither the OSError traceback (whose 'See
+    Results/crisprme-test-out/log_error.txt' names a file no search wrote) nor the line of
+    a failure, which would name the earlier run's error logs. Any other failure ends with
+    exit 1 and one line, which names the search's error log only where one was written."""
 
     ARGV = ["crisprme.py", "complete-test", "--chrom", "chrQ"]
 
@@ -1263,9 +1348,10 @@ class TheCliPassesTheRefusalOn(unittest.TestCase):
                 self.assertTrue(cmd.endswith(f"complete_test.py {passed}"), cmd)
 
     def test_a_refused_chrom_exits_2_without_a_traceback(self):
-        with self.assertRaises(SystemExit) as cm:
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
             self._cli(2)
-        self.assertEqual(cm.exception.code, 2)
+        self.assertEqual((cm.exception.code, err.getvalue()), (2, ""))
 
     def test_a_failed_test_ends_in_one_line_naming_the_log_it_left(self):
         """It raised an OSError, a traceback ending in 'See
