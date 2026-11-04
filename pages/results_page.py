@@ -2573,6 +2573,8 @@ def update_assembly_site_set_controls(site_set: str, search: str) -> Tuple:
     if not isinstance(site_set, str):
         raise PreventUpdate
     job_id = _job_id_from_search(search)
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     region_children = _assembly_region_filter_children(job_directory, site_set, "hg38")
     sort_options, sort_default = _SITE_SET_SORT_CONFIG.get(
@@ -2599,6 +2601,8 @@ def update_assembly_region_chrom_options(coord_space: str, site_set: str, search
     if coord_space not in _COORD_SPACE_COLS:
         raise PreventUpdate
     job_id = _job_id_from_search(search)
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     df, _ = _assembly_mappable_frame(job_directory)
     chrom_col, _ = _COORD_SPACE_COLS[coord_space]
@@ -2658,6 +2662,8 @@ def update_assembly_results_table(
     if not isinstance(site_set, str) or not isinstance(sort_col, str) or not isinstance(sort_order, str):
         raise PreventUpdate
     job_id = _job_id_from_search(search)
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     df, display_cols = _assembly_site_set_frame(job_directory, site_set)
     if df.empty:
@@ -2717,6 +2723,8 @@ def sendto_write_json(filter_criterion: str, search: str) -> None:
     if not isinstance(search, str):
         raise TypeError(f"Expected {str.__name__}, got {type(search).__name__}")
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     write_json(filter_criterion, job_id)
 
 
@@ -2762,6 +2770,8 @@ def download_link_sample(
     if n is None:
         raise PreventUpdate  # nothing to do
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     file_to_load = ".".join([file_to_load, "txt"])
     file_to_load = file_to_load.strip().split("/")[-1]
     # print(file_to_load)
@@ -2809,6 +2819,8 @@ def download_report(
     if n is None:
         raise PreventUpdate
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     file_to_load = file_to_load.split("/")[-1]
     if os.path.exists(
         os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)
@@ -2873,6 +2885,8 @@ def download_link_sumbysample(  # a name of its own: as download_link_sample it 
     if n is None:
         raise PreventUpdate
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     file_to_load = ".".join([file_to_load, "zip"])
     if os.path.exists(os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)):
         return (
@@ -2930,6 +2944,8 @@ def downloadLinkGuide(
     if n is None:
         raise PreventUpdate
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     file_to_load = ".".join([file_to_load, "zip"])
     if os.path.exists(os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)):
         return (
@@ -3029,6 +3045,8 @@ def update_iupac_decomposition_table_cluster(
     if not isinstance(hash_term, str):
         raise TypeError(f"Expected {str.__name__}, got {type(hash_term).__name__}")
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     hash_term = hash_term.split("#")[1]
     guide = hash_term[: hash_term.find("-Pos-")]
     chr_pos = hash_term[(hash_term.find("-Pos-") + 5) :]
@@ -3147,6 +3165,8 @@ def update_table_cluster(
     if not isinstance(hash_term, str):
         raise TypeError(f"Expected {str.__name__}, got {type(hash_term).__name__}")
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     hash_term = hash_term.split("#")[1]
     guide = hash_term[: hash_term.find("-Pos-")]
@@ -4557,6 +4577,8 @@ def load_distribution_populations(
     # get the guide
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     job_id = job_id.split("=")[-1]  # job identifier
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     try:
         with open(
             os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)
@@ -5157,6 +5179,8 @@ def filter_position_table(
         raise PreventUpdate  # invalid stop
     current_page = int(current_page.split("/")[0])
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     # recover the guide
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     # recover db file
@@ -5408,6 +5432,8 @@ def filter_sample_table(
     btn_sample_section = [n, n_prev, n_next]
     # get job identifier
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     population_1000gp = associateSample.loadSampleAssociation(
         os.path.join(job_directory, SAMPLES_ID_FILE)
@@ -5658,6 +5684,8 @@ def update_sample_drop(pop: str, search: str) -> Tuple[List, None]:
     if pop is None or pop == "":
         return [], None  # no update required
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     pop_dict = associateSample.loadSampleAssociation(
         os.path.join(job_directory, SAMPLES_ID_FILE)
@@ -5699,6 +5727,8 @@ def update_population_drop(superpop: str, search: str) -> Tuple[Dict, None]:
     if superpop is None or superpop == "":
         raise PreventUpdate  # no update required
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     population_1000gp = associateSample.loadSampleAssociation(
         os.path.join(job_directory, SAMPLES_ID_FILE)
@@ -6482,6 +6512,8 @@ def update_content_tab(
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     # recover job ID
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     # read parameters file
     try:
@@ -7580,6 +7612,8 @@ def update_table(
         raise PreventUpdate  # do not do anything
     # recover job ID
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     # recover job directory
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     # recover guide
@@ -7747,6 +7781,10 @@ def update_output(
         order_drop is None and thresh_drop is None and asc1 is None
     ):
         raise PreventUpdate  # do not do anything
+    # query_manager reads the job of the URL's search after "?job=": a job folder of
+    # Results/ only
+    if results_job_dir(url[5:]) is None:
+        raise PreventUpdate
     # recover guide
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     # target is the filter value to query on the db

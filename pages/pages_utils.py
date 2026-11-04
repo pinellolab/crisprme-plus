@@ -447,7 +447,10 @@ def write_json(dropdown_value: str, job_id: str) -> None:
     """
     if not isinstance(dropdown_value, str):
         raise TypeError(f"Expected {str.__name__}, got {type(dropdown_value).__name__}")
-    dropdown_json_file = os.path.join(current_working_directory, RESULTS_DIR, job_id, ".dropdown.json")
+    job_directory = results_job_dir(job_id)  # the URL's: a job folder of Results/ only
+    if job_directory is None:
+        raise FileNotFoundError(f"No job folder Results/{job_id}")
+    dropdown_json_file = os.path.join(job_directory, ".dropdown.json")
     try:
         handle = open(dropdown_json_file, mode="w")
         handle.write(f"{dropdown_value}")
@@ -473,7 +476,10 @@ def read_json(job_id: str) -> str:
     str
         Table filtering criterion
     """
-    dropdown_json_file = os.path.join(current_working_directory, RESULTS_DIR, job_id, ".dropdown.json")
+    job_directory = results_job_dir(job_id)  # the URL's: a job folder of Results/ only
+    if job_directory is None:
+        raise FileNotFoundError(f"No job folder Results/{job_id}")
+    dropdown_json_file = os.path.join(job_directory, ".dropdown.json")
     if not os.path.isfile(dropdown_json_file):
         raise FileNotFoundError(f"Unable to locate {dropdown_json_file}")
     try:

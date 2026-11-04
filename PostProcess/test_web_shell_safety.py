@@ -30,8 +30,9 @@ And up to 2.8.0 the pages of a job took the job id of their URL (/load?job=,
 /result?job=) into paths as it was, with no shell: '../' in it reached a folder outside
 Results/, outside the data folder too. Remove result of a personal-assembly search
 removed that folder (and the haplotype folders its .Params.txt names, joined the same
-way), Show full log and the status of a personal-assembly search read its log files, and
-the routes to a job's pages read its .Params.txt.
+way), Show full log and the status of a personal-assembly search read its log files,
+the results pages wrote the table filter they keep (.dropdown.json) into it, and their
+tables, lists, download links and the routes to a job read its files.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -697,6 +698,7 @@ class TestResultsPages(_WebFolder):
                 row[f"Bulge_type_({crit})"] = "X"
                 row[f"Mismatches+bulges_({crit})"] = mmb
                 row[f"Variant_samples_({crit})"] = samples
+                row[f"Variant_info_genome_({crit})"] = "NA"
             row["CFD_score_(highest_CFD)"] = 1.0 - 0.2 * i
             row["CRISPR_BULGE_score_(highest_CRISPR_BULGE)"] = 1.0 - 0.2 * i
             rows.append(row)
@@ -813,6 +815,92 @@ class TestResultsPages(_WebFolder):
         with self.assertRaises(PreventUpdate):
             rp.generate_sample_card(1, "CFD", "S1", [{"row": 0}], [{"Guide": GUIDE}],
                                     f"?job={self.OUT}")
+        self.assertNothingRun()
+
+    def test_the_table_filter_is_kept_in_the_job_folder_only(self):
+        # the criterion of the results pages' dropdown, which their tables read back
+        self.assertIsNone(rp.sendto_write_json("fewest", f"?job={self.JOB}"))
+        self.assertEqual(pu.read_json(self.JOB), "fewest")
+        with self.assertRaises(PreventUpdate):
+            rp.sendto_write_json("fewest", f"?job={self.OUT}")
+        for call in (lambda: pu.write_json("fewest", self.OUT), lambda: pu.read_json(self.OUT)):
+            with self.assertRaises(FileNotFoundError):
+                call()
+        with open(os.path.join(self.outside, self.JOB, ".dropdown.json")) as fh:
+            self.assertEqual(fh.read(), "CFD")  # the copy's, as it was
+        self.assertNothingRun()
+
+    def test_the_tables_lists_and_links_read_the_job_folder_only(self):
+        """Each of the other callbacks that reads the job of the URL: the job's files, and
+        no file of its copy beside the data folder."""
+        var, asm = "var_ABC", "asm_ABC_combined"  # a variant search's, an assembly one's
+        targets = ["#Bulge type", "crRNA", "DNA", "Chromosome", "Position",
+                   "Cluster Position", "Direction", "Mismatches", "Bulge Size", "Total"]
+        targets += [f"col{i}" for i in range(len(targets), 38)]
+        for top in (os.path.join(self.data, "Results"), self.outside):
+            files = {
+                ".sampleID.txt": "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+                                 "S1\tPOPA\tSUPX\tmale\nS2\tPOPB\tSUPX\tfemale\n",
+                f"{self.JOB}.chr1_1000.{GUIDE}.txt": "Chromosome\tPosition\tSamples\n"
+                                                     "chr1\t1000\tn\n",
+                f"{self.JOB}.targets.txt": "\t".join(targets) + "\n" + "\t".join(
+                    ["X", GUIDE, "CTAACAGTTGCTTTTATCACAGG", "chr1", "1000", "1000", "+"]
+                    + ["0"] * (len(targets) - 7)) + "\n",
+                f"{self.JOB}_report.zip": "",
+                f"{self.JOB}.S1.{GUIDE}.personal_targets.zip": "",
+                f"{self.JOB}.X.0.0.{GUIDE}.targets.zip": "",
+            }
+            for name, text in files.items():
+                with open(os.path.join(top, self.JOB, name), "w") as fh:
+                    fh.write(text)
+            d = self.finished(os.path.join(top, var))
+            with open(os.path.join(d, ".Params.txt")) as fh:
+                params = fh.read().replace("Ref_comp\tFalse", "Ref_comp\tTrue")
+            with open(os.path.join(d, ".Params.txt"), "w") as fh:
+                fh.write(params)
+            with open(os.path.join(d, f"{var}.chr1_1000.{GUIDE}.scomposition.txt"), "w") as fh:
+                fh.write("Chromosome\tPosition\tSamples\nchr1\t1000\tS1\n")
+            os.makedirs(os.path.join(top, asm))
+            with open(os.path.join(top, asm, ".Params.txt"), "w") as fh:
+                fh.write("1\tGenome_type\tassembly\n")
+            pd.DataFrame([{"origin": "both", "hg38_chr": "chr1", "hg38_start": 1000,
+                           "Spacer+PAM_paternal": GUIDE, "Spacer+PAM_maternal": GUIDE,
+                           "CFD_score_(fewest_mm+b)_paternal": 0.9}]).to_csv(
+                os.path.join(top, asm, f"{asm}_hg38.tsv"), sep="\t", index=False)
+        self.before = self.outside_files()
+        # the tables' loaders cache what they read in Cache/ of the folder the app runs in
+        os.makedirs(os.path.join(self.data, "Cache"), exist_ok=True)
+        sel, guides, region = [{"row": 0}], [{"Guide": GUIDE}], f"#{GUIDE}-Pos-chr1-1000"
+        for job, read in (
+            (asm, lambda s: rp.update_assembly_site_set_controls("mappable", s)),
+            (asm, lambda s: rp.update_assembly_region_chrom_options("hg38", "mappable", s)),
+            (asm, lambda s: rp.update_assembly_results_table("mappable", "hg38_start", "asc",
+                                                             None, s)),
+            (self.JOB, lambda s: rp.download_link_sample(
+                1, f"{self.JOB}.summary_by_samples.{GUIDE}_CFD", s)),
+            (self.JOB, lambda s: rp.download_report(1, f"{self.JOB}_report.zip", s)),
+            (self.JOB, lambda s: rp.download_link_sumbysample(
+                1, f"{self.JOB}.S1.{GUIDE}.personal_targets", s)),
+            (self.JOB, lambda s: rp.downloadLinkGuide(1, f"{self.JOB}.X.0.0.{GUIDE}.targets", s)),
+            (var, lambda s: rp.update_iupac_decomposition_table_cluster(0, 10, "", s, region)),
+            (self.JOB, lambda s: rp.update_table_cluster(0, 10, [], "", "", s, region)),
+            (self.JOB, lambda s: rp.load_distribution_populations(sel, guides, s)),
+            (self.JOB, lambda s: rp.filter_position_table("chr1,0,10000", 1, "CFD", s, sel,
+                                                          guides, "1/1")),
+            (self.JOB, lambda s: rp.filter_sample_table(None, None, "None,None,None", "CFD", 1,
+                                                        s, sel, guides, "1/1")),
+            (self.JOB, lambda s: rp.update_sample_drop("POPA", s)),
+            (self.JOB, lambda s: rp.update_population_drop("SUPX", s)),
+            (self.JOB, lambda s: rp.update_content_tab("tab-summary-by-sample", sel, "CFD",
+                                                       guides, s, "both")),
+            (self.JOB, lambda s: rp.update_table(0, 10, [], "", s, f"#{GUIDE}")),
+            (self.JOB, lambda s: rp.update_output(1, 0, "CFD", 10, sel, "CFD", "Mismatches",
+                                                  guides, None, None, "ASC", None, s, False)),
+        ):
+            with self.subTest(callback=read.__code__.co_names[1]):  # rp.<the callback>(...)
+                self.assertTrue(read(f"?job={job}"))  # the job's own
+                with self.assertRaises(PreventUpdate):
+                    read(f"?job=../../outside/{job}")  # its copy beside the data folder
         self.assertNothingRun()
 
 
