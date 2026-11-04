@@ -95,10 +95,23 @@ two allowed skips: correct the count there as these entries are merged.
   an N is now left out too. Pre-existing, since 2.5.5. Covered by
   `PostProcess/test_web_shell_safety.py`.
 - **The annotation a search applies is put together with no shell.** It is written as
-  `Annotations/.active.<genome>.bed.gz`, and Settings takes a genome's name as typed: the
-  commands that sort, compress, move and remove it ran through a shell with that name in them,
-  where characters a shell reads ran as commands. They now run with no shell. Pre-existing.
-  Covered by `PostProcess/test_web_shell_safety.py`.
+  `Annotations/.active.<genome>.bed.gz`, and the name of a genome folder, which Settings took as
+  typed and which can be put in `Genomes/` by hand, went into the commands that sort, compress,
+  move and remove it, run through a shell, where characters a shell reads ran as commands. They
+  now run with no shell. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **Settings refuses a name that CRISPRme would take into a shell command.** It took the name of
+  a genome (typed, or that of the file uploaded), of a VCF dataset and of a nuclease with any
+  character but a space, `+`, `/`, `\` and `..`, that of a file uploaded with any but `..`, and a
+  genome download's URL as typed. CRISPRme takes these names into shell commands as they are (a
+  search's post-analysis a genome's, a dataset's and a PAM file's, an index build a genome's and a
+  dataset's, a genome download its own and the name its URL ends in), where characters a shell
+  reads ran as commands, as the web app's user. Settings changes data in local mode only, which is
+  how CRISPRme runs by default. It now refuses, and says why, a name that holds a blank, a
+  character a sequence's name may not hold (`|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a
+  backquote or `#`), `*`, `?` or `[`, or that starts with `-` or `.`: any name it takes, the name
+  a URL ends in, and that of a file uploaded, but for a personal-assembly bundle, whose file's
+  name only says how it is packed. Pre-existing. Covered by
+  `PostProcess/test_settings_progress.py`.
 - **Remove result, on a search's status page, removes only that search's folder.** It removed the
   folder the page's address named, through a shell: the job id there could run commands, or name
   a folder elsewhere, outside the data folder too, which was removed. It now removes, with no

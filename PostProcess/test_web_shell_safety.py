@@ -15,7 +15,8 @@ Up to 2.8.0 the web app took such text into shell commands as it was:
   guides, which it wrote to the search's guide file as sent, and the search passes each
   guide of that file to a shell command (process_summaries.py);
 * the active annotation of a genome (pages_utils.build_active_annotation), whose file is
-  named after the genome, a name Settings takes as typed;
+  named after the genome, a name Settings took as typed (test_settings_progress.py checks
+  that it no longer takes one a shell reads; a genome folder can be put there by hand);
 * Remove result on a job's status page (load_page.remove_result): the job id of the URL;
 * the results pages: the guide, sample, chromosome and position of a results link, the
   guide and mismatches the tables send back, a sample's name (a VCF's), and the results
@@ -310,8 +311,9 @@ class TestSearchLaunch(_WebFolder):
 
     @unittest.skipUnless(shutil.which("sort-bed") and shutil.which("bgzip"),
                          "BEDOPS sort-bed or bgzip not on PATH")
-    def test_a_genome_named_with_a_command_in_settings_runs_nothing(self):
-        # Settings takes a genome's name as typed; its active annotation is named after it
+    def test_a_genome_named_with_a_command_runs_nothing(self):
+        # Settings took a genome's name as typed, and a genome folder can be put in Genomes/
+        # by hand; its active annotation is named after it
         genome = "x$(touch${IFS}MARK_f)"
         os.makedirs(os.path.join(self.data, "Genomes", genome))
         shutil.copy(os.path.join(self.data, "Genomes", "hg38", "chr1.fa"),

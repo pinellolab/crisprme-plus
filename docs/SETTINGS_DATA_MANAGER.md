@@ -16,6 +16,13 @@ Open it from the **"Settings / Data Manager"** button on the home page, or go to
 
 ## What you can do
 
+A name you give on this page (a genome's, a VCF dataset's, a nuclease's, an HPRC sample's),
+the name of a file you upload here (but a personal-assembly bundle's, which is named after its
+top folder) and the name a Direct URL ends in may hold no blank and none of `|`, `;`, `'`, `"`,
+`$`, `(`, `)`, `&`, `<`, `>`, a backquote, `#`, `*`, `?` or `[`, and may not start with `-` or
+`.`: CRISPRme takes these names into shell commands as they are. The page refuses such a name,
+and says why.
+
 ### Add a reference genome
 Type an assembly name and pick a source:
 - **UCSC** — downloads the assembly by name from UCSC (e.g. the pig genome

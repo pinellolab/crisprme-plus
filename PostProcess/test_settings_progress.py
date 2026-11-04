@@ -664,9 +664,9 @@ class TestGenomeTarUpload(unittest.TestCase):
         with open(os.path.join(outside, "secret.txt"), "w") as fh:
             fh.write("ORIGINAL\n")
         ns = _load_functions(
-            ["_validate_name", "_unsafe_tar_member", "_genome_upload_assembly",
-             "_built_on_genome", "_genome_upload_problem", "_install_uploaded_genome",
-             "_finalize_upload"],
+            ["_validate_name", "_unusable_in_shell", "_unsafe_tar_member",
+             "_genome_upload_assembly", "_built_on_genome", "_genome_upload_problem",
+             "_install_uploaded_genome", "_finalize_upload"],
             current_working_directory=cwd,
             gzip=gzip,
             tarfile=tarfile,
@@ -1358,7 +1358,8 @@ class TestRemovingADatasetRemovesItsOwnList(_SamplesIDCase):
 
 
 class TestVcfUploadWritesItsSampleList(_SamplesIDCase):
-    names = _SID_NAMES + ["_validate_name", "_write_vcf_marker", "_finalize_upload"]
+    names = _SID_NAMES + ["_validate_name", "_unusable_in_shell", "_write_vcf_marker",
+                          "_finalize_upload"]
 
     def test_uploaded_vcf_gets_its_marker_and_list(self):
         part = os.path.join(self.cwd, "Settings", "uploads", "walk.chr1.vcf.gz.part")
@@ -1634,7 +1635,8 @@ class TestAnnotationUploadResetsItsContents(unittest.TestCase):
         cwd = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, cwd, ignore_errors=True)
         ns = _load_functions(
-            ["_validate_name", "_fb_refresh", "_add_annotation", "add_annotation"],
+            ["_validate_name", "_unusable_in_shell", "_fb_refresh", "_add_annotation",
+             "add_annotation"],
             current_working_directory=cwd,
             base64=base64,
             validate_annotation_bed=lambda path: None,
@@ -1681,6 +1683,191 @@ class TestStartedFeedback(unittest.TestCase):
         self.assertEqual(out, [True] * n + [_NO_UPDATE] * 4)  # running: kept
         out = self.ns["_lock_buttons_while_busy"](None, started, error, None, self.ns["_STARTED"])
         self.assertEqual(out, [False] * n + ["", _NO_UPDATE, _NO_UPDATE, ""])
+
+
+# --- names CRISPRme takes into shell commands -----------------------------------------
+# Settings took the name of a genome (typed, or an upload's file name), a VCF dataset, a
+# nuclease and an HPRC sample with any character but a space, '+', '/', '\' and '..', an
+# uploaded file's name with any but '..', and a genome download's URL as typed. CRISPRme
+# takes such names into shell commands as they are: a search's post-analysis the genome's,
+# the dataset's and the PAM file's (named after the nuclease), an index build the genome's
+# and the dataset's, a genome download its own and the name its URL ends in. Each name
+# below holds what a shell reads there: a command in it would have run, a pattern stood for
+# other names, a blank split it, and a '-' or '.' first made it an option or a hidden file.
+_SHELL_NAMES = [
+    "x$(touch${IFS}MARK)", "x;touch${IFS}MARK;", "x`touch${IFS}MARK`", "x|touch${IFS}MARK",
+    "x&&touch${IFS}MARK", "x>MARK", "x<MARK", "x'MARK'", 'x"MARK"', "x#MARK", "x*", "x?",
+    "x[ab]", "x\ttouch", "x\ntouch${IFS}MARK", "-x", ".x",
+]
+# names the catalogs, HPRC and the docs use: they go in as before
+_USUAL_NAMES = ["hg38", "susScr11", "T2T-CHM13v2.0", "GRCh38.p14", "hg38_HGDP1kGP",
+                "my_pig_vcf", "HG01255", "SpCas9", "e2epanel"]
+
+
+class _Request:
+    """A stand-in for flask.request: one chunk of an upload, as the uploader sends it."""
+
+    def __init__(self, target, file_name, body, dataset="", genome=""):
+        self.headers = {"X-Target": target, "X-File-Name": file_name, "X-Dataset": dataset,
+                        "X-Genome": genome, "X-Chunk-Index": "0", "X-Total-Chunks": "1"}
+        self.body = body
+
+    def get_data(self):
+        return self.body
+
+
+class TestSettingsRefusesNamesAShellReads(unittest.TestCase):
+    """The callbacks that add a genome, a VCF dataset or a nuclease, fetch an HPRC sample
+    or take an upload, undecorated, on a data folder holding genome hg38: a name a shell
+    reads is refused, with nothing written or launched, and the usual names go in."""
+
+    def setUp(self):
+        import personal_assembly  # (PostProcess/: a bundle upload's import)
+
+        self.cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cwd, ignore_errors=True)
+        for d in ("Genomes/hg38", "VCFs", "PAMs", "samplesIDs", "Settings/uploads"):
+            os.makedirs(os.path.join(self.cwd, d))
+        self.launched = []
+        self.ns = _load_functions(
+            ["_validate_name", "_unusable_in_shell", "_genome_upload_problem", "add_genome",
+             "_write_vcf_marker", "add_vcf", "_fb_refresh", "add_pam", "_shlex_quote",
+             "fetch_from_hprc", "_uploads_dir", "_unsafe_tar_member", "_genome_upload_assembly",
+             "_install_uploaded_genome", "_finalize_upload", "_MAX_UPLOAD_BYTES", "_fmt_size",
+             "_settings_upload_chunk"],
+            current_working_directory=self.cwd,
+            __file__=_SETTINGS_PAGE,
+            sys=__import__("sys"),
+            gzip=gzip,
+            tarfile=tarfile,
+            shutil=shutil,
+            tempfile=tempfile,
+            genome_in_use=genome_in_use,
+            personal_assembly=personal_assembly,
+            ONLINE=False,
+            PreventUpdate=_PreventUpdate,
+            no_update=_NO_UPDATE,
+            launch_settings_job=lambda argv, stage: self.launched.append(argv) or "job",
+            launch_settings_job_raw=lambda cmd, stage: self.launched.append(cmd) or "job",
+            _start=lambda job: (job, False, "started"),
+            _preflight_disk=lambda need: None,
+            _catalog_size=lambda component, name: 0,
+            _write_dataset_samplesid=lambda dataset: None,
+            _render_all_tables=lambda: "tables",
+            _render_storage=lambda: "storage",
+            validate_annotation_bed=lambda path: None,
+            LIFTOVER_DIR="LiftoverFiles",
+        )
+
+    def refused(self, call, said):
+        """``call()`` refused a name, saying why, with nothing written or launched."""
+        before = _tree(self.cwd)
+        said(call())
+        self.assertEqual(_tree(self.cwd), before)
+        self.assertEqual(self.launched, [])
+
+    def assert_says_shell(self, message):
+        self.assertIn("CRISPRme takes it into shell commands", str(message))
+
+    def test_a_name_a_shell_reads_is_refused_and_the_usual_go_in(self):
+        for name in _SHELL_NAMES:
+            with self.subTest(name=name):
+                self.assert_says_shell(self.ns["_validate_name"](name))
+        for name in _USUAL_NAMES + [" hg38 "]:  # (the blanks around a name typed go)
+            with self.subTest(name=name):
+                self.assertIsNone(self.ns["_validate_name"](name))
+
+    def test_a_genome_download(self):
+        url = "https://example.org/x.fa.gz"
+        for name in _SHELL_NAMES:
+            with self.subTest(name=name):
+                self.refused(lambda: self.ns["add_genome"](1, name, "url", url, None),
+                             lambda out: self.assert_says_shell(out[2]))
+                # the download is saved under the name its URL ends in
+                self.refused(lambda: self.ns["add_genome"](
+                    1, "susScr11", "url", f"https://example.org/{name}.fa.gz", None),
+                    lambda out: self.assert_says_shell(out[2]))
+        self.assertEqual(self.ns["add_genome"](1, "T2T-CHM13v2.0", "url", url, None),
+                         ("job", False, "started"))
+        self.assertEqual(self.launched, [["download", "--what", "genome", "--ref",
+                                          "T2T-CHM13v2.0", "--source", "url", "--url", url]])
+
+    def test_a_vcf_dataset_registered_from_a_folder(self):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        for name in _SHELL_NAMES:
+            with self.subTest(name=name):
+                self.refused(lambda: self.ns["add_vcf"](1, name, "path", folder, None, "hg38"),
+                             lambda out: self.assert_says_shell(out[2]))
+        out = self.ns["add_vcf"](1, "hg38_HGDP1kGP", "path", folder, None, "hg38")
+        self.assertEqual(out[2], "Registered VCF dataset 'hg38_HGDP1kGP' for hg38.")
+        self.assertEqual(os.readlink(os.path.join(self.cwd, "VCFs", "hg38_HGDP1kGP")), folder)
+
+    def test_a_nuclease(self):
+        for name in _SHELL_NAMES:
+            with self.subTest(name=name):
+                self.refused(lambda: self.ns["add_pam"](1, name, 20, "NGG", "3"),
+                             lambda out: self.assert_says_shell(out[0]))
+        self.assertEqual(self.ns["add_pam"](1, "SpCas9", 20, "NGG", "3")[1:],
+                         ("tables", "storage"))
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "PAMs")), ["20bp-NGG-SpCas9.txt"])
+
+    def test_an_hprc_sample(self):
+        for name in _SHELL_NAMES:
+            with self.subTest(name=name):
+                self.refused(lambda: self.ns["fetch_from_hprc"](1, name),
+                             lambda out: self.assert_says_shell(out[2]))
+        self.assertEqual(self.ns["fetch_from_hprc"](1, "HG01255"), ("job", False, "started"))
+        self.assertEqual(len(self.launched), 1)
+        self.assertIn(" HG01255 --data-dir ", self.launched[0])
+
+    def upload(self, *args, **kwargs):
+        self.ns["request"] = _Request(*args, **kwargs)
+        return self.ns["_settings_upload_chunk"]()
+
+    def test_an_upload(self):
+        vcf = io.BytesIO()
+        with gzip.GzipFile(fileobj=vcf, mode="wb", mtime=0) as fh:
+            fh.write(b"##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n")
+        for name in _SHELL_NAMES:
+            with self.subTest(name=name):
+                said = lambda out: (self.assertEqual(out[1], 400), self.assert_says_shell(out[0]))
+                # a genome, under its file's name; a VCF dataset; a VCF file, the part of
+                # whose name that holds 'chr' a variant search names its indels after
+                self.refused(lambda: self.upload("genome", f"{name}.fa", _FA1), said)
+                self.refused(lambda: self.upload("vcf", "walk.chr1.vcf.gz", vcf.getvalue(),
+                                                 dataset=name, genome="hg38"), said)
+                self.refused(lambda: self.upload("vcf", f"{name}chr1.vcf.gz", vcf.getvalue(),
+                                                 dataset="walk", genome="hg38"), said)
+        self.assertEqual(self.upload("genome", "susScr11.fa", _FA1 + _FA2),
+                         ("complete:susScr11", 200))
+        self.assertEqual(sorted(os.listdir(os.path.join(self.cwd, "Genomes", "susScr11"))),
+                         ["chr1.fa", "chr2.fa"])
+        self.assertEqual(self.upload("vcf", "walk.chr1.vcf.gz", vcf.getvalue(), dataset="walk",
+                                     genome="hg38"), ("complete:walk", 200))
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "VCFs", "walk")), ["walk.chr1.vcf.gz"])
+        # a personal-assembly bundle is named after its archive's top folder: the file's
+        # name only says how it is packed, and goes in with a blank too (as a second
+        # download of it is named)
+        meta = {"format": "crisprme-personal-assembly", "format_version": 1,
+                "individual": "HG01255", "haplotypes": {
+                    hap: {"genome_dir": f"{hap}/genome", "chain": f"{hap}/x.chain",
+                          "chromalias": f"{hap}/x.chromAlias.txt"}
+                    for hap in ("paternal", "maternal")}}
+        part = os.path.join(self.cwd, "bundle.tar.gz")
+        entries = [("HG01255/metadata.json", "file", json.dumps(meta).encode())]
+        for hap in ("paternal", "maternal"):
+            entries += [(f"HG01255/{hap}/genome/chr1.fa", "file", _FA1),
+                        (f"HG01255/{hap}/x.chain", "file", b"x\n"),
+                        (f"HG01255/{hap}/x.chromAlias.txt", "file", b"x\n")]
+        _write_tar_gz(part, entries)
+        with open(part, "rb") as fh:
+            body = fh.read()
+        os.remove(part)
+        self.assertEqual(self.upload("assembly-bundle", "HG01255 (1).tar.gz", body),
+                         ("complete:HG01255", 200))
+        self.assertTrue(os.path.isfile(os.path.join(self.cwd, "Assemblies", "HG01255",
+                                                    "metadata.json")))
 
 
 if __name__ == "__main__":

@@ -109,6 +109,7 @@ jobs:
         run: python -m unittest test_crisprme_hf -v
 
       - name: "Web Settings download progress + failure relay (2.8.1; AST-extracted, no Dash)"
+        # with the names Settings refuses, which CRISPRme takes into shell commands
         working-directory: PostProcess
         run: python -m unittest test_settings_progress -v
 

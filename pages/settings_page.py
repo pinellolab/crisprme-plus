@@ -333,6 +333,11 @@ def _settings_upload_chunk():
         return ("bad chunk headers", 400)
     if target not in ("genome", "vcf", "annotation", "chain", "chromalias", "assembly-bundle") or not name or ".." in name:
         return ("bad target or file name", 400)
+    # a file goes in under its name (a genome under its name less the extension), but a
+    # personal-assembly bundle, whose name only says how it is packed
+    unusable = _unusable_in_shell(name) if target != "assembly-bundle" else None
+    if unusable:
+        return (f"invalid file name {name!r}: it {unusable}", 400)
     # validate the destination name on the FIRST chunk so a bad name fails now,
     # not after a multi-GB upload has already streamed to disk
     if idx == 0 and target == "genome":
@@ -527,6 +532,32 @@ def _validate_name(name: str) -> Optional[str]:
         return (
             "Name must not contain spaces, '+', 'None', '..' or path separators "
             "(these break auto-discovery)."
+        )
+    unusable = _unusable_in_shell(name)
+    if unusable:
+        return f"Name {unusable}."
+    return None
+
+
+def _unusable_in_shell(name: str) -> Optional[str]:
+    """Why ``name`` cannot name a folder or file of the data folder, else None: a
+    genome, a VCF dataset or a nuclease added on this page, an individual fetched from
+    HPRC, a file uploaded or downloaded here. CRISPRme takes such names into shell
+    commands as they are: a search's post-analysis a genome's, a dataset's and the PAM
+    file's (named after its nuclease), an index build a genome's and a dataset's, a
+    genome download its own and that of the file it fetches, where a character a shell
+    reads ran as a command, as the web app's user; and the search script reads a VCF
+    file's unquoted, where a blank split it. Refused as in a sequence's name
+    (genome_layout.py), and so are '*', '?' and '[', which make a name a shell pattern,
+    and any blank."""
+    from genome_layout import PATTERN_CHARS, UNUSABLE_ID_START, UNUSABLE_IN_ID
+
+    if (any(c in UNUSABLE_IN_ID + PATTERN_CHARS or c.isspace() for c in name)
+            or name.startswith(tuple(UNUSABLE_ID_START))):
+        return (
+            f"must not hold a blank or any of {' '.join(UNUSABLE_IN_ID + PATTERN_CHARS)}, "
+            f"nor start with {' or '.join(repr(c) for c in UNUSABLE_ID_START)}: CRISPRme "
+            f"takes it into shell commands"
         )
     return None
 
@@ -2521,6 +2552,11 @@ def add_genome(n, assembly, source, url, hf_name):
         if not url:
             return no_update, no_update, "Direct URL source requires a URL."
         argv += ["--url", url.strip()]
+        # the download is saved under the name the URL ends in, which the shell command
+        # that removes it once it is unpacked takes as it is (utils.remove)
+        unusable = _unusable_in_shell(os.path.basename(url.strip()))
+        if unusable:
+            return no_update, no_update, f"The file name the URL ends in {unusable}."
         # (the download refuses it too; said here at once, as for an upload)
         err = _genome_upload_problem(assembly.strip(), "download")
         if err:
