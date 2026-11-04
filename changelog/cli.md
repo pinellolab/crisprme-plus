@@ -15,7 +15,7 @@ with
 > names only that mode's: `Results/crisprme-test-out_<name>` in the benchmark mode,
 > `Results/crisprme-test-out` in the smoke)
 
-All seven entries are pre-existing (2.8.0 did the same; the card's line is the live card's) and
+All seven entries are pre-existing (2.8.0 did the same; the card's layout is the live card's) and
 change no search result.
 
 ### Fixed
@@ -58,17 +58,21 @@ change no search result.
   from its original source` (`from UCSC` for a FASTA). Any other failure to fetch a file is still
   a warning on stderr, word for word as before. What is downloaded, and from where, is unchanged.
   The setup guide, `docs/crisprme_data_setup_051826.md`, said `setup` pulls the genome and the
-  variants from their original sources, a single chromosome's FASTA from UCSC; it now says `setup`
-  takes two files from the data repo, `chr22.fa` for `--chrom chr22` and `samplesIDs.1000G.txt`,
-  and everything else from UCSC, EBI, Sanger or GitHub. Pre-existing, in 2.8.0 too. Covered by
+  variants from their original sources, a single chromosome's FASTA from UCSC, and the website and
+  `setup --help` that it downloads everything from them; all three now say `setup` takes two files
+  from the data repo, `chr22.fa` for `--chrom chr22` and `samplesIDs.1000G.txt`, and everything
+  else from UCSC, EBI, Sanger or GitHub. Pre-existing, in 2.8.0 too. Covered by
   `PostProcess/test_setup_legacy_database.py`, a new step of `unit-tests.yml`.
-- **The `lucapinello/crisprme-data` card says what its `genomes/hg38/` holds.** Its layout, kept
-  from the live card, gave the folder as a per-chromosome FASTA mirror, `chr1.fa … chrX.fa`. The
-  repo holds one gzipped FASTA per hg38 sequence (`chr1.fa.gz` … `chrY.fa.gz`, `chrM.fa.gz` and
-  the alt, random and unplaced contigs: 455 files, which `download --what genome` unpacks) and one
-  unpacked FASTA, `chr22.fa`, which `complete-test` and `setup` fetch as is. The layout now lists
-  both, as the repo's file list gave them on 2026-11-04. The live card is corrected when the
-  release uploads `docs/hf/crisprme-data_README.md`.
+- **The `lucapinello/crisprme-data` card says what its `genomes/hg38/` holds, and lists its
+  `guides/`.** Its layout, kept from the live card, gave the folder as a per-chromosome FASTA
+  mirror, `chr1.fa … chrX.fa`. The repo holds one gzipped FASTA per hg38 sequence (`chr1.fa.gz` …
+  `chrY.fa.gz`, `chrM.fa.gz` and the alt, random and unplaced contigs: 455 files, which
+  `download --what genome` unpacks) and one unpacked FASTA, `chr22.fa`, which `complete-test` and
+  `setup` fetch as is. The layout also left out the repo's `guides/` folder, which holds
+  `sg1617.txt`, the example guide `CTAACAGTTGCTTTTATCACNNN` (no `download` fetches it), and the
+  card itself, `README.md`. The layout now lists all of these, as the repo's file list gave them on
+  2026-11-04. The live card is corrected when the release uploads
+  `docs/hf/crisprme-data_README.md`.
 - **`complete-test` run again over an earlier run's results names every folder in its way, and
   exits 2.** It named only the first such folder in sorted order, so after a benchmark-mode run it
   named `Results/crisprme-test-out_cas12a_hbg`, one of six, and a user who deleted it was stopped
