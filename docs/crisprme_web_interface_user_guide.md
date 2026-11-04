@@ -997,6 +997,11 @@ expires or you close the tab:
    directory and that its `log_error_no_check.txt` (the name `log_error.txt` takes
    when a job runs to the end; a job that found no off-targets keeps `log_error.txt`)
    is empty.
+3. A search run from the command line whose `--output` name holds a character other
+   than letters, digits, `.`, `_` and `-`, or does not begin with a letter or digit, is
+   listed in History with no link: the results pages open only a job named so (they
+   take the name from the page's address). Run the search again with such an
+   `--output` name to view it here; its files are in `Results/<output-name>/`.
 
 ---
 

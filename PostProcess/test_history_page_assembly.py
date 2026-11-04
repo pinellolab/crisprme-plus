@@ -17,6 +17,7 @@ uses for pages/main_page.py.
 
 import ast
 import os
+import re
 import tempfile
 import unittest
 from datetime import datetime
@@ -27,6 +28,7 @@ import pandas as pd
 _HISTORY_PAGE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pages", "history_page.py"
 )
+_PAGES_UTILS = os.path.join(os.path.dirname(_HISTORY_PAGE), "pages_utils.py")
 
 _NAMES = [
     "count_guides",
@@ -302,22 +304,23 @@ class _Tag:
 
 
 class _Html:
-    A = Td = Th = Tr = Thead = Tbody = Table = Div = _Tag
+    A = Td = Th = Tr = Thead = Tbody = Table = Div = Br = Small = _Tag
 
 
 def _load_history_table():
     """construct_history_summary and history_table_body_, with what they call, from
-    pages/history_page.py, the html components replaced by _Tag (no Dash here)."""
+    pages/history_page.py, the html components replaced by _Tag (no Dash here), and the
+    form of a job's id, from pages/pages_utils.py."""
     src = open(_HISTORY_PAGE).read()
     ns = {
         "os": os, "sys": __import__("sys"), "pd": pd, "datetime": datetime, "Dict": Dict,
         "List": __import__("typing").List, "Optional": Optional,
         "Tuple": __import__("typing").Tuple, "html": _Html, "URL": "",
         "PARAMS_FILE": ".Params.txt", "GUIDES_FILE": ".guides.txt", "LOG_FILE": "log.txt",
-        "RESULTS_DIR": "Results",
+        "RESULTS_DIR": "Results", "re": re,
     }
     names = set(_NAMES) | {"read_params", "process_genome", "construct_history_summary",
-                           "history_table_body_"}
+                           "history_table_body_", "_job_link"}
     found = set()
     for node in ast.parse(src).body:
         if isinstance(node, ast.FunctionDef) and node.name in names:
@@ -327,9 +330,17 @@ def _load_history_table():
                 getattr(t, "id", None) == "SUMMARYTABCOLS" for t in node.targets):
             exec(ast.get_source_segment(src, node), ns)  # noqa: S102
             found.add("SUMMARYTABCOLS")
-    missing = (names | {"SUMMARYTABCOLS"}) - found
+    with open(_PAGES_UTILS) as fh:
+        utils = fh.read()
+    for node in ast.parse(utils).body:
+        if isinstance(node, ast.Assign) and any(
+                getattr(t, "id", None) == "_JOB_ID_RE" for t in node.targets):
+            exec(ast.get_source_segment(utils, node), ns)  # noqa: S102 - trusted own source
+            found.add("_JOB_ID_RE")
+    # (_job_link is the History cell of a job; the code before it had none)
+    missing = (names | {"SUMMARYTABCOLS", "_JOB_ID_RE"}) - found - {"_job_link"}
     if missing:
-        raise AssertionError(f"Not found in pages/history_page.py: {sorted(missing)}")
+        raise AssertionError(f"Not found in pages/: {sorted(missing)}")
     return ns
 
 
@@ -372,6 +383,49 @@ class TestHistoryTableNewestFirst(unittest.TestCase):
             # each row's Start is its own job's
             for job, start in shown:
                 self.assertEqual(start, pd.to_datetime(starts[job], utc=True))
+
+
+class TestHistoryJobsItsPagesDoNotOpen(unittest.TestCase):
+    """A job's pages open only a folder of Results/ whose id has the form the search form
+    gives its jobs (pages_utils.results_job_dir: they take the id of their address into
+    paths, and the region page into shell commands). A command-line search names its
+    folder after its --output, which may hold other characters: History listed such a job
+    with a link to pages that said there was no such job. It says why they do not open
+    now, and what to do."""
+
+    def test_a_job_named_otherwise_is_listed_with_why_its_pages_do_not_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ns = _load_history_table()
+            ns["current_working_directory"] = tmp
+            # the search form's ids, and an assembly search's, and three --output names
+            jobs = ["web_G05B8KHU0H", "8CYCH5VMZ5_combined", "run.2-b", "run+2", "_test",
+                    "my run"]
+            for n, jobid in enumerate(jobs):
+                job_dir = os.path.join(tmp, "Results", jobid)
+                os.makedirs(job_dir)
+                with open(os.path.join(job_dir, ".Params.txt"), "w") as f:
+                    f.write("Genome_selected\thg38\nGenome_idx\tNRG_2_hg38\nPam\tNRG\n"
+                            "Mismatches\t4\nDNA\t1\nRNA\t1\nMax_total_edits\t6\n")
+                with open(os.path.join(job_dir, "log.txt"), "w") as f:
+                    f.write(f"Job\tStart\tTue Nov 3 09:5{n}:00 UTC 2026\n")
+                with open(os.path.join(job_dir, ".guides.txt"), "w") as f:
+                    f.write("CTAACAGTTGCTTTTATCACNNN\n")
+            summary = ns["construct_history_summary"](jobs)
+            rows = ns["history_table_body_"](summary, 1, 1000000, summary.shape[0])
+            linked, notes = {}, {}
+            for row in rows:
+                cell = row.children[0].children  # the Job cell
+                if isinstance(cell, list):  # the name, a line break, why and what to do
+                    name, _br, note = cell
+                    notes[name] = note.children
+                else:
+                    linked[cell.children] = cell.kwargs["href"]
+            self.assertEqual(linked, {j: f"load?job={j}" for j in jobs[:3]})
+            self.assertEqual(sorted(notes), sorted(jobs[3:]))
+            for name, note in notes.items():
+                self.assertIn("letters, digits, '.', '_' and '-' only", note)
+                self.assertIn(f"Results/{name}/", note)
+                self.assertIn("--output", note)
 
 
 if __name__ == "__main__":

@@ -145,7 +145,10 @@ and the Settings and personal-assembly entries add tests to `test_settings_progr
   their tables, sample and population lists and download links read the files there. Each now
   takes only a folder of `Results/` whose id has the form the search form gives its jobs, as
   Remove result of a search does (above), and otherwise changes nothing, shows no log, or says
-  that there is no such job. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+  that there is no such job. History, which lists every search of `Results/`, shows one named
+  otherwise (a command-line search's `--output` may be) with no link, and says why its pages do
+  not open and what to do (`docs/crisprme_web_interface_user_guide.md`). Pre-existing. Covered
+  by `PostProcess/test_web_shell_safety.py` and `PostProcess/test_history_page_assembly.py`.
 - **Remove installed data, in Settings, removes only an item it lists.** It took the item as a
   request sent it, and a name of `..` named the data folder (or, through a folder of it that is a
   link to other storage, the folder there that holds the link's target), and `.` or no name the

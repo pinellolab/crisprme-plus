@@ -6,7 +6,7 @@ functions for retrieving job parameters, displaying a history table, and
 handling user interactions such as row selection and filtering.
 """
 
-from .pages_utils import RESULTS_DIR, PARAMS_FILE, LOG_FILE, GUIDES_FILE
+from .pages_utils import RESULTS_DIR, PARAMS_FILE, LOG_FILE, GUIDES_FILE, _JOB_ID_RE
 
 from typing import Dict, List, Optional, Tuple
 from dash import Input, Output, State
@@ -480,6 +480,26 @@ def table_header_(results: pd.DataFrame) -> html.Thead:
         )
     )
 
+def _job_link(job: str):
+    """The History table's link to the status page of the job ``job``, or, for a job named
+    otherwise than the search form names its jobs, why its pages do not open and what to
+    do. A job's pages take its id from their address, which a client can set to any text,
+    and open only a folder of Results/ whose id has that form (pages_utils.results_job_dir):
+    they take it into paths, and the region page into shell commands. A command-line
+    search names its folder after its --output, which may hold any character."""
+    if _JOB_ID_RE.fullmatch(job):
+        return html.A(job, target="_blank", href=os.path.join(URL, f"load?job={job}"))
+    return [
+        job,
+        html.Br(),
+        html.Small(
+            "Not opened here: the web interface opens a job named with letters, digits, "
+            "'.', '_' and '-' only, beginning with a letter or digit. Its files are in "
+            f"Results/{job}/; to open it here, run the search again with an --output "
+            "named so."
+        ),
+    ]
+
 def history_table_body_(results: pd.DataFrame, page: int, max_rows: int, remaining_rows: int) -> List[html.Tr]:
     """Generate the body of the history table.
 
@@ -499,11 +519,7 @@ def history_table_body_(results: pd.DataFrame, page: int, max_rows: int, remaini
     return [
         html.Tr([
             html.Td(
-                html.A(
-                    str(results.at[i + (page - 1) * max_rows, "Job"]),
-                    target="_blank",
-                    href=os.path.join(URL, f"load?job={results.at[i + (page - 1) * max_rows, 'Job']}")
-                ),
+                _job_link(str(results.at[i + (page - 1) * max_rows, "Job"])),
                 style={"vertical-align": "middle", "text-align": "center"},
             ) if col == "Job" else 
             html.Td(

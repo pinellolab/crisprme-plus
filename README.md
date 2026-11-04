@@ -897,7 +897,9 @@ its purpose and usage:
 - `--output` (*Required*)
   <br>Specifies the name of the output directory where all results from the 
   analysis will be saved. This directory will be created within the `Results` 
-  directory.
+  directory. The web interface opens the results of a search named with letters,
+  digits, `.`, `_` and `-` only, beginning with a letter or digit; its History
+  lists one named otherwise and says why it does not open it.
 
 - `--thread` (*Optional - Default: 8*)
   <br>Defines the number of CPU threads to use for parallel computation. 

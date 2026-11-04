@@ -409,6 +409,8 @@ def drop_columns(table: pd.DataFrame, filter_criterion: str) -> List[str]:
 # name; an assembly search adds _paternal, _maternal and _combined). The pages of a job
 # take its id from the URL (/load?job=, /result?job=), which a client can set to anything,
 # so one that builds a path or a command from it checks it with results_job_dir first.
+# History lists a job named otherwise (a command-line search's --output may name it so)
+# and says why it does not open (history_page._job_link).
 _JOB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
