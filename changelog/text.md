@@ -1,12 +1,12 @@
 <!-- text track: [2.8.1] entries for CHANGELOG.md, to be merged by the docs track. -->
 
-**For the merge, not for the changelog.** The first Fixed entry completes the Changed entry
+**For the merge, not for the changelog.** The second Fixed entry completes the Changed entry
 "`--per-sample` on an index without the dict-less tiers now says what it reports" (the banner,
 new in 2.8.1), and can go right after it instead. That banner now also gives the known limit of
 the Changed entry below; what the entry says of the banner still holds. Three references name an
-entry by its place: the first Fixed entry's "the last entry below" and the second's "the next
-entry" are the entry on tied rows, the last of this fragment, and the second's "the entry above"
-is the first; keep them true where the entries land.
+entry by its place: the second Fixed entry's "the last entry below" and the third's "the next
+entry" are the entry on tied rows, the last of this fragment, and the third's "the entry above"
+is the second; keep them true where the entries land.
 
 ### Changed
 
@@ -42,6 +42,20 @@ is the first; keep them true where the entries land.
 
 ### Fixed
 
+- **The report no longer says that a MAF of 1e-05 is a display floor.** The MAF note under the
+  top-1000 tables and the legend's MAF entry said that a variant whose source allele frequency is
+  0 is shown at a display floor of 1e-05 so that it renders on the log-scale plots, to be read as
+  "present, frequency effectively 0"; the README's MAF column and METHODS sections 7 and 8 said
+  so too. No release with these texts applied it: up to 2.3.3 `resultIntegrator.py` wrote 1e-05
+  for an allele frequency of 0, and since 2.4.0, the first release with them, it writes `NA` for
+  one that is 0 or missing, which the report leaves out of a row's MAF, the lowest frequency of
+  the row's variants, blank when none of them has one; a frequency below 1e-05 is shown as it is,
+  and the plots' log scale is their rank axis, a frequency only sizing a point. The note and the
+  legend now say so, in that one sentence of each, in every report (the combined report of
+  `assembly-search` too), as do the README, METHODS sections 7 and 8 and the website's example
+  report (`docs/example-report.html`, a 2.8.0 report, which gets the sentence as 2.8.1 renders it
+  there and nothing else). The rest of each report is unchanged, byte for byte, and no result
+  changes. Covered by `PostProcess/test_generate_report.py`.
 - **The report of a `--per-sample` search on an index without the dict-less tiers says what the
   search reported.** On such an index (one built without `--samplesID`, such as the one the
   benchmark `complete-test` builds), the report's Search mode row now says what

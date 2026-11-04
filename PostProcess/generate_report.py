@@ -3503,14 +3503,16 @@ def maf_footnote(datasets=None, reference_only=False, untiered=None):
         "variant (the frequency registry is SNP-only), or a SNP not in the frequency "
         "panel; for SNP variant off-targets the frequency is AC/AN over the genotyped "
         f"panel &mdash; here the merged {ds} union panel (the combined global "
-        "AF), not a single ancestry. A variant present in the panel but whose "
-        "source allele frequency is 0 (e.g. a secondary allele of a multiallelic "
-        "site) is shown at a display floor of 1&times;10<sup>&minus;5</sup> so it "
-        "renders on log-scale plots &mdash; read it as &ldquo;present, frequency "
-        "effectively 0&rdquo;, not as a measured frequency of 10<sup>&minus;5</sup>."
+        "AF), not a single ancestry. "
+        # as resultIntegrator and _min_maf have done since 2.4.0: an AF that is 0 or
+        # missing is NA, which the row's minimum leaves out, and a smaller AF is printed as
+        # it is (no floor; up to 2.3.3 the integrator wrote 1e-05 for an AF of 0)
+        "A variant whose allele frequency is 0 or missing (e.g. an allele that no "
+        "individual of the panel carries) has no frequency: it is left out of a row's "
+        "MAF, the lowest frequency of the row's variants, which is blank when none of "
+        "them has one. No floor is applied: a frequency below "
+        "1&times;10<sup>&minus;5</sup> is shown as it is."
     ) + (
-        # (no 1e-5 display floor is drawn on: the integrator has given an AF of 0 as NA
-        # since 2.4.0, and a value below it is printed as it is)
         f" For {_untiered_named(untiered)}, the frequency is instead the <code>AF</code> "
         f"{'its VCF gives' if len(untiered) == 1 else 'their VCFs give'}, as rounded there: "
         "a variant whose <code>AF</code> reads 0 there, or is missing, has no frequency, "
@@ -4055,9 +4057,10 @@ _SCORE_LEGEND = [
      "frequent than its rarest variant, and may be much rarer&nbsp;&mdash;&nbsp;or "
      "absent&nbsp;&mdash;&nbsp;if the variants do not lie on the same haplotype. Under "
      "<code>--per-sample</code> the EXACT joint (cis) allele frequency is computed from "
-     "the actual carriers instead. A value of <b>1&times;10<sup>&minus;5</sup></b> is a "
-     "display floor meaning &ldquo;present, frequency effectively&nbsp;0&rdquo;, not a "
-     "measured frequency."),
+     "the actual carriers instead. A variant whose allele frequency is 0 or missing has "
+     "none and is left out of the minimum, and the value is blank when no variant of the "
+     "off-target has one. No floor is applied: a frequency below "
+     "1&times;10<sup>&minus;5</sup> is shown as it is."),
     ("Aligned protospacer+PAM notation",
      "In the aligned-sequence column: <b>UPPERCASE</b> = a base matching the guide, "
      "<b>lowercase</b> = a mismatch, and a dash <code>-</code> = a bulge/gap."),

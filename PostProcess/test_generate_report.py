@@ -976,7 +976,8 @@ class TestGenerateReport(unittest.TestCase):
         # the MAF footnote under the top-1000 tables (Section 6)
         foot = gr.maf_footnote("hg38+1000G")
         self.assertTrue(foot.startswith("MAF = combined-panel minor/alternate allele frequency. "))
-        self.assertTrue(foot.endswith("not as a measured frequency of 10<sup>&minus;5</sup>."))
+        self.assertTrue(foot.endswith("No floor is applied: a frequency below "
+                                      "1&times;10<sup>&minus;5</sup> is shown as it is."))
         self.assertEqual(gr.maf_footnote("hg38+1000G", untiered=[]), foot)
         clause = gr.maf_footnote("hg38+1000G", untiered=one)[len(foot):]
         self.assertEqual(gr.maf_footnote("hg38+1000G", untiered=one), foot + clause)
@@ -1991,11 +1992,118 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("<strong>5</strong> individuals", html)  # 3 + 2 (samplesID)
         # the impossible 1e-05 "finest resolution" line is GONE
         self.assertNotIn("Finest allele-frequency resolution", html)
-        # the MAF footnote now explains the 1e-05 DISPLAY floor
-        self.assertIn("display floor of 1&times;10<sup>&minus;5</sup>", html)
+        # the MAF footnote says what a blank MAF is, and draws on no 1e-05 display floor
+        # (test_the_maf_texts_say_what_the_integrator_writes)
+        self.assertIn("No floor is applied", html)
+        self.assertNotIn("display floor", html)
         # captions no longer use the "paper-style" jargon; CRISPR-Bulge panel references CFD
         self.assertNotIn("paper-style", html)
         self.assertIn("the same ref/alt scatter as for the cfd score", html.lower())
+
+    def test_the_maf_texts_say_what_the_integrator_writes(self):
+        """The MAF note under the top-1000 tables and the legend's MAF entry said that a
+        variant whose source allele frequency is 0 is shown at a display floor of 1e-05, so
+        that it renders on the log-scale plots, to be read as "present, frequency effectively
+        0". No release that said so did it: resultIntegrator.py wrote 1e-05 for an AF of 0 up
+        to 2.3.3, and since 2.4.0, the release whose report first said so, it writes NA for
+        an AF that is 0 or missing, which the report leaves out of a row's MAF (the lowest AF
+        of its variants, blank when none has one); a smaller AF is printed as it is. Run
+        through the REAL resultIntegrator.py, then the report's MAF cell; the two texts say
+        that now, in every report, and nothing else changes in them."""
+        import csv
+        import subprocess
+        from test_seed_counts_dna_bulge import INTERVALTREE_STUB, SPACER_3P, _block, _gnu_cut
+        if not _gnu_cut():
+            self.skipTest("resultIntegrator.py needs GNU cut --complement")
+        pp = os.path.dirname(os.path.abspath(__file__))
+        # the AF column of a variant row, as the merge step hands it on -> Variant_MAF
+        afs = {"0": "NA", "0.0": "NA", "": "NA", "NA": "NA", "3.1e-06": "3.1e-06",
+               "1e-05": "1e-05", "0,0.81": "NA,0.81", "0.25": "0.25"}
+        d = tempfile.mkdtemp(prefix="maf_", dir=self.tmp)
+        with open(os.path.join(d, "intervaltree.py"), "w") as fh:
+            fh.write(INTERVALTREE_STUB)
+        best = os.path.join(d, "job.bestMerge.txt")
+        with open(best, "w") as fh:
+            for af in afs:
+                snp = "chrT_1005_A_T,chrT_1012_G_C" if "," in af else "chrT_1005_A_T"
+                block = _block("X", SPACER_3P, SPACER_3P, "CTAACtGTTGCTTTTATCACTGG",
+                               "CTAACtGTTGCTTTTATCgCTGG", 1, 0, "HG00001", snp)
+                block[17] = af
+                fh.write("\t".join(block * 3) + "\n")
+        with open(os.path.join(d, "job.found.bed"), "w") as fh:
+            fh.write("NA\n" * len(afs))
+        open(os.path.join(d, "dummy.txt"), "w").close()
+        with open(os.path.join(d, "guides.txt"), "w") as fh:
+            fh.write(SPACER_3P + "\n")
+        res = subprocess.run(
+            [sys.executable, os.path.join(pp, "resultIntegrator.py"), best,
+             os.path.join(d, "dummy.txt"), os.path.join(d, "job.found.bed"),
+             os.path.join(d, "guides.txt"), d + "/", "true", "hg38", "vuota", "1", "0", "none"],
+            cwd=pp, env=dict(os.environ, PYTHONPATH=d), capture_output=True, text=True)
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        with open(best + ".integrated_results.tsv", newline="") as fh:
+            rows = list(csv.DictReader(fh, delimiter="\t"))
+        for criterion in ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE"):
+            self.assertEqual([r["Variant_MAF_(%s)" % criterion] for r in rows],
+                             list(afs.values()), criterion)
+        # the report's MAF cell: NA is blank, a row's MAF is the lowest of the others, and a
+        # value below 1e-05 is printed as it is
+        self.assertEqual([gr._curated_cell("maf", {"m": m}, {"maf": "m"}) for m in afs.values()],
+                         ["-", "-", "-", "-", "3.10e-06", "1.00e-05", "8.10e-01", "2.50e-01"])
+
+        said = ("No floor is applied: a frequency below 1&times;10<sup>&minus;5</sup> is "
+                "shown as it is.")
+        note = gr.maf_footnote("hg38+1000G")
+        self.assertTrue(note.endswith(
+            "not a single ancestry. A variant whose allele frequency is 0 or missing (e.g. an "
+            "allele that no individual of the panel carries) has no frequency: it is left out "
+            "of a row's MAF, the lowest frequency of the row's variants, which is blank when "
+            "none of them has one. " + said), note)
+        maf = dict(gr._SCORE_LEGEND)["MAF"]
+        self.assertTrue(maf.endswith(
+            "computed from the actual carriers instead. A variant whose allele frequency is 0 "
+            "or missing has none and is left out of the minimum, and the value is blank when "
+            "no variant of the off-target has one. " + said), maf)
+        for text in (note, maf, gr.maf_footnote("hg38+1000G", untiered=["hg38_1000G"]),
+                     gr.build_score_legend_html(["hg38_1000G"])):
+            self.assertNotIn("display floor", text)
+            self.assertNotIn("effectively", text)
+        # in the report: the note under both top-1000 tables, and the legend
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        self.assertEqual(html.count(said), 3)
+        self.assertNotIn("display floor", html)
+
+    def test_no_shipped_page_calls_a_maf_of_1e05_a_display_floor(self):
+        """The README's MAF column, METHODS sections 7 and 8 and the website's example report
+        said it too (test_the_maf_texts_say_what_the_integrator_writes). The changelog,
+        which is history, is not read."""
+        one_e_minus_5 = re.compile(r"1e-0?5\b|1&times;10<sup>&minus;5|1×10⁻⁵|10<sup>&minus;5")
+
+        def floor_claims(text):
+            """The lines that call a value of 1e-05 a display or plotting floor."""
+            return [text.count("\n", 0, m.start()) + 1
+                    for m in re.finditer(r"(?:display|plotting) floor", text)
+                    if one_e_minus_5.search(text[max(0, m.start() - 300):m.end() + 300])]
+
+        # the scan finds what the pages said, and not another floor
+        self.assertEqual(floor_claims("- **MAF column** — a value of **`1e-05` is a display "
+                                      "floor** meaning"), [1])
+        self.assertEqual(floor_claims("a\nfrequency is shown at a\n**display floor of "
+                                      "1×10⁻⁵** so it renders"), [3])
+        self.assertEqual(floor_claims("A value of <b>1&times;10<sup>&minus;5</sup></b> is a "
+                                      "display floor meaning"), [1])
+        self.assertEqual(floor_claims("the default (1.9e-4) is below the old 3-decimal "
+                                      "display floor (5e-4)"), [])
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        pages = [os.path.join(repo, "README.md"), os.path.join(repo, "METHODS.md")]
+        for root, _dirs, files in os.walk(os.path.join(repo, "docs")):
+            pages += [os.path.join(root, f) for f in sorted(files)
+                      if f.endswith((".md", ".html"))]
+        self.assertIn(os.path.join(repo, "docs", "example-report.html"), pages)
+        found = ["%s:%d" % (os.path.relpath(p, repo), n) for p in pages
+                 for n in floor_claims(self._read(p))]
+        self.assertEqual(found, [])
 
     def test_registry_variant_count_idx_and_sidecar(self):
         """Cheap variant count + genotyped sample counts from the Tier-0 registry

@@ -919,15 +919,16 @@ from a build-time `Dictionaries/registry_<vcf>/variant_count.json` sidecar
 report needs no VCF access at report time (e.g. the earlier 1000 Genomes + HGDP
 merge recorded 106,664,924 SNPs). Reported allele frequencies are AC/AN over the genotyped
 panel (on an index without the dict-less tiers, the `AF` the VCF gives, §3, as the report of
-a search there says); a variant present in the panel but whose source allele
-frequency is exactly 0 (e.g. a secondary allele of a multiallelic site) is shown at a
-**display floor of 1×10⁻⁵** so it still renders on the log-scale plots — this is a plotting floor,
-read as "present, frequency effectively 0", not a measured frequency. For an
-**aggregate (sites-only) panel** (e.g. the all-source mega index, §2), only allele
-frequencies exist — there are no per-individual genotypes — so carrier and homozygote
-frequencies are rendered **NA** rather than fabricated, and a per-dataset **`indel_af.tsv`**
-companion carries indel allele frequencies by source alongside the SNP+indel co-occurrence
-table.
+a search there says). A variant whose allele frequency is 0 or missing (e.g. an allele that
+no individual of the panel carries) has no frequency: `integrated_results.tsv` lists it as
+`NA`, and the report leaves it out of a row's MAF, the lowest frequency of the row's
+variants, which is blank when no variant of the row has one. No floor is applied: a
+frequency below 1×10⁻⁵ is reported as it is, and the plots, whose log scale is the site's
+rank, use a frequency only to size the points. For an **aggregate (sites-only) panel** (e.g.
+the all-source mega index, §2), only allele frequencies exist — there are no per-individual
+genotypes — so carrier and homozygote frequencies are rendered **NA** rather than
+fabricated, and a per-dataset **`indel_af.tsv`** companion carries indel allele
+frequencies by source alongside the SNP+indel co-occurrence table.
 
 ## 8. Off-target scoring, assumptions and limitations
 
@@ -1172,9 +1173,10 @@ over-lists, 2.8.0 behaves the same, and it is fixed in the next release.
 The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
 alignments may exceed it (the report surfaces the observed maximum), while an indel row,
-recounted on its carriers' own sequence, is dropped past it as past `--mm` (§4). A reported MAF
-of `1e-05` is a **display floor** for a source-AF of 0, not a measured frequency
-(§3, §7). These are computational predictions and are **not a substitute for
+recounted on its carriers' own sequence, is dropped past it as past `--mm` (§4). No floor is
+applied to a MAF: a variant whose allele frequency is 0 or missing has none, which a
+multi-variant row's minimum leaves out, and a reported MAF below `1e-05` is the frequency
+itself (§3, §7). These are computational predictions and are **not a substitute for
 experimental off-target validation** (e.g. GUIDE-seq / CIRCLE-seq / targeted
 amplicon or rhAMP-Seq sequencing of the recommended panel).
 
