@@ -1383,12 +1383,13 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
                     search_mode = "population-level"
         except OSError:
             pass
-    # the datasets a per-sample complete-search resolved without the dict-less tiers
-    # (.untiered_datasets, one per line; absent when every dataset has them, and for a run
-    # of an earlier release): its banner says what their results lack, and so does the
-    # Search mode row. Beside them, every dataset it searched (.variant_datasets): no
-    # column says which dataset a row comes from, so what holds of their rows alone is
-    # said of a row only when they are all of them (untiered_all, _greedy_union).
+    # the datasets a complete-search (or a web search job) resolved without the dict-less
+    # tiers, in either mode (.untiered_datasets, one per line; absent when every dataset has
+    # them, and for a run of an earlier release): its banner says what their results lack,
+    # and so does the Search mode row. Beside them, every dataset it searched
+    # (.variant_datasets): no column says which dataset a row comes from, so what holds of
+    # their rows alone is said of a row only when they are all of them (untiered_all,
+    # _greedy_union).
     untiered, searched = [], []
     if result_dir:
         for _name, _into in ((".untiered_datasets", untiered),
