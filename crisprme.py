@@ -3226,9 +3226,10 @@ def complete_search() -> None:
         # worst-case alignment, listing the carriers of any of the variants it takes
         # (new_simple_analysis.py). (each dataset once: a --vcf list may name one twice)
         _dict_root = os.path.join(current_working_directory, "Dictionaries")
+        _searched = list(dict.fromkeys(os.path.basename(os.path.normpath(_v))
+                                       for _v in vcf_dataset_dirs))
         _untiered = [
-            _vn for _vn in dict.fromkeys(os.path.basename(os.path.normpath(_v))
-                                         for _v in vcf_dataset_dirs)
+            _vn for _vn in _searched
             if not any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
                        for _tier in ("registry", "genotypes"))
         ]
@@ -3272,11 +3273,16 @@ def complete_search() -> None:
     # and, for a per-sample one, the datasets its banner names as having no dict-less
     # tiers, one per line, so that the report says what the banner says of them: it
     # cannot tell from the results, nor from the install, whose index can have the tiers
-    # by the time the report is built again.
+    # by the time the report is built again. Beside them, every dataset it searches
+    # (.variant_datasets): no column says which dataset a row comes from, and two
+    # datasets can name the same samples, so what holds of their rows alone the report
+    # says of a row only when they are all of them.
     if variant and per_sample and _untiered:
         try:
             with open(os.path.join(outputfolder, ".untiered_datasets"), "w") as _ud:
                 _ud.write("".join(f"{_vn}\n" for _vn in _untiered))
+            with open(os.path.join(outputfolder, ".variant_datasets"), "w") as _vd:
+                _vd.write("".join(f"{_vn}\n" for _vn in _searched))
         except OSError:
             pass
     # record whether alternative (non-best) alignments were emitted, so generate-report can

@@ -2633,7 +2633,8 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
     post-analysis also still reports a dense window by its greedy worst-case alignment,
     with the carriers of any of the variants that alignment takes. The search records
     the datasets it names so (.untiered_datasets), for the report's Search mode row
-    (test_generate_report), which cannot tell from the results."""
+    (test_generate_report), which cannot tell from the results; and beside them every
+    dataset it searches (.variant_datasets), as no column of a row says its dataset."""
 
     BANNER = ("[complete-search] PER-SAMPLE analysis ({}): resolving per-sample genotypes "
               "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and "
@@ -2642,10 +2643,10 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
               "intractable on dense panels; pass --population-level for the fast worst-case "
               "screen.\n")
 
-    def recorded(self):
-        """What the search recorded in .untiered_datasets (None: no such file)."""
+    def recorded(self, name=".untiered_datasets"):
+        """What the search recorded in the file name (None: no such file)."""
         try:
-            with open(self.path("Results", "search", ".untiered_datasets")) as fh:
+            with open(self.path("Results", "search", name)) as fh:
                 return fh.read()
         except FileNotFoundError:
             return None
@@ -2679,10 +2680,12 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                     "NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on dense panels; "
                     "pass --population-level for the fast worst-case screen.\n", out)
                 self.assertEqual(self.recorded(), "ds\n")
+                self.assertEqual(self.recorded(".variant_datasets"), "ds\n")
         # a population-level search claims none of it, and records nothing
         rc, out, err = self.run_search("--population-level")
         self.assertIn("Launching job ", out)
         self.assertIsNone(self.recorded())
+        self.assertIsNone(self.recorded(".variant_datasets"))
 
     def test_on_an_index_with_them_it_says_what_it_said(self):
         rc, out, err = self.run_bio()
@@ -2694,6 +2697,25 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                 self.assertIn("Launching job ", out)
                 self.assertIn(self.BANNER.format(why), out)
                 self.assertIsNone(self.recorded())
+                self.assertIsNone(self.recorded(".variant_datasets"))
+
+    def test_beside_a_dataset_with_them_it_records_every_dataset_it_searches(self):
+        # ds with its tiers, and du: the same dataset as a build without --samplesID has it
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        for tier in ("dictionaries", "log_indels"):
+            shutil.copytree(self.path("Dictionaries", f"{tier}_ds"),
+                            self.path("Dictionaries", f"{tier}_du"))
+        for suffix in ("", "_INDELS"):
+            shutil.copytree(self.lib(VAR + suffix), self.lib(f"{REF}+du{suffix}"))
+            shutil.copytree(self.path("Genomes", f"hg38+ds{suffix}"),
+                            self.path("Genomes", f"hg38+du{suffix}"))
+        rc, out, err = self.run_search("--per-sample", vcfs="ds\ndu\n")
+        self.assertIn("Launching job ", out, out + err)
+        self.assertIn("resolving per-sample genotypes into named carrier samples only for du, "
+                      "which has no dict-less tiers", out)
+        self.assertEqual(self.recorded(), "du\n")
+        self.assertEqual(self.recorded(".variant_datasets"), "ds\ndu\n")
 
 
 def save_tst(targets, guide_len=23):

@@ -993,6 +993,9 @@ class TestGenerateReport(unittest.TestCase):
         legend = gr.build_score_legend_html()
         self.assertEqual(gr.build_score_legend_html([]), legend)
         self.assertEqual(entries(legend), list(gr._SCORE_LEGEND))
+        # (when no dataset of the search has the tiers, as build_report finds: _UNTIERED)
+        self.addCleanup(setattr, gr, "_UNTIERED", False)
+        gr._UNTIERED = True
         added = {
             "Observed": (
                 " On " + named + ", a dense window flagged in <code>High_complexity_region</code> "
@@ -1011,6 +1014,19 @@ class TestGenerateReport(unittest.TestCase):
                          [(t, d + added.get(t, "")) for t, d in gr._SCORE_LEGEND])
         self.assertIn("frequency is the <code>AF</code> their VCFs give",
                       gr.build_score_legend_html(two))
+        # in a search that also has a dataset with the tiers no row reads so, as the report
+        # cannot tell a row's dataset, and the entry says that instead
+        gr._UNTIERED = False
+        mixed = dict(added, Observed=added["Observed"].replace(
+            ", so a row of two or more SNPs flagged there reads <code>N&nbsp;carriers "
+            "(&gt;=1 of K vars, poss. chimera)</code>, as in a population-level search.",
+            ". This search's other datasets have dict-less tiers, and the report cannot tell "
+            "which dataset a row comes from, so a row of two or more SNPs flagged there still "
+            "reads <code>N&nbsp;cis carriers</code>, and can be such an alignment."))
+        self.assertNotEqual(mixed, added)
+        self.assertEqual(entries(gr.build_score_legend_html(one)),
+                         [(t, d + mixed.get(t, "")) for t, d in gr._SCORE_LEGEND])
+        gr._UNTIERED = True
 
         # the caption of the per-sample top-1000 tables' observed haplotypes (Section 6)
         self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
@@ -1034,6 +1050,15 @@ class TestGenerateReport(unittest.TestCase):
             "reads <strong>&ldquo;N carriers (&gt;=1 of K vars, poss. chimera)&rdquo;</strong>, "
             "and its link <strong>&ldquo;N other variant combinations&rdquo;</strong>, as in a "
             "population-level search."))
+        gr._UNTIERED = False  # a search that also has a dataset with the tiers
+        self.assertEqual(caption(untiered=one), said + (
+            " On " + named + ", a site flagged in <code>High_complexity_region</code> can be "
+            "reported by its dense window's greedy worst-case alignments instead, whose listed "
+            "carriers need not carry every variant in them. This search's other datasets have "
+            "dict-less tiers, and the report cannot tell which dataset a row comes from, so a "
+            "row of two or more SNPs there still reads <strong>&ldquo;N cis "
+            "carriers&rdquo;</strong>, and its link <strong>&ldquo;N other observed "
+            "haplotypes&rdquo;</strong>, and can be such an alignment."))
 
     def test_the_datasets_a_search_records_reach_the_search_mode_row(self):
         """build_summary_meta reads .untiered_datasets beside .search_mode, one dataset per
@@ -1075,12 +1100,15 @@ class TestGenerateReport(unittest.TestCase):
         self.assertNotIn("dict-less tiers", report("population"))
 
     def test_a_greedy_row_of_a_search_without_the_tiers_reads_so_in_every_table(self):
-        """End to end: when the search recorded a dataset without the dict-less tiers, a row
-        flagged in High_variant_density_region with two or more SNPs (a dense window's
-        greedy worst-case alignment, which lists the carriers of any of its variants) reads
-        "N carriers (>=1 of K vars, poss. chimera)" in report.html and in every curated TSV
-        that holds it, not "N cis carriers"; a flagged single-SNP row, and every row of a
-        report without the record, reads as before, and no other cell changes."""
+        """End to end: when the search recorded that none of its datasets has the dict-less
+        tiers, a row flagged in High_variant_density_region with two or more SNPs (a dense
+        window's greedy worst-case alignment, which lists the carriers of any of its
+        variants) reads "N carriers (>=1 of K vars, poss. chimera)" in report.html and in
+        every curated TSV that holds it, not "N cis carriers"; a flagged single-SNP row, and
+        every row of a report without the record, reads as before, and no other cell
+        changes. In a search that also has a dataset with the tiers, whose dense windows
+        come as their observed haplotypes, flagged there too, no row reads so: no column
+        says which dataset a row comes from. Every row was relabelled there."""
         rd = os.path.join(self.tmp, "Results", "job")
         os.makedirs(rd)
         dense = ("high_variant_density (12 variants): a greedy worst-case alignment is "
@@ -1106,6 +1134,8 @@ class TestGenerateReport(unittest.TestCase):
 
         tiered = report("tiered")
         with open(os.path.join(rd, ".untiered_datasets"), "w") as h:
+            h.write("hg38_1000G_HGDP\n")
+        with open(os.path.join(rd, ".variant_datasets"), "w") as h:
             h.write("hg38_1000G_HGDP\n")
         untiered = report("untiered")
         tsvs = [n for n in tiered if n.endswith(".tsv")]
@@ -1142,6 +1172,23 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(after, before - {("chr7", "2 cis carriers")}
                          | {("chr7", "2 carriers (&gt;=1 of 2 vars, poss. chimera)")})
         self.assertNotIn("poss. chimera", tiered["report.html"])
+
+        # a search of it beside a dataset with the tiers: every cell as in the report without
+        # the record, and the legend says why
+        with open(os.path.join(rd, ".variant_datasets"), "w") as h:
+            h.write("hg38_HGDP1kGP\nhg38_1000G_HGDP\n")
+        mixed = report("mixed")
+        for name in tsvs:
+            self.assertEqual(mixed[name], tiered[name], name)
+        self.assertEqual(observed(mixed["report.html"]), before)
+        self.assertNotIn("poss. chimera", mixed["report.html"])
+        self.assertIn("This search's other datasets have dict-less tiers, and the report cannot "
+                      "tell which dataset a row comes from", mixed["report.html"])
+        # and without the record of every dataset the search names, it cannot tell either
+        os.remove(os.path.join(rd, ".variant_datasets"))
+        unknown = report("unknown")
+        for name in tsvs:
+            self.assertEqual(unknown[name], tiered[name], name)
 
     def test_variant_contributed_prose_tracks_whether_file_is_bundled(self):
         """The 'Variant-contributed sites' row must not claim variant_created.tsv is

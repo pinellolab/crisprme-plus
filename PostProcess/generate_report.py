@@ -316,20 +316,23 @@ _DROP_MAF = False
 # variants (the stacked combination may exist on no single haplotype), so we flag it.
 _PER_SAMPLE = False
 
-# Set True when a --per-sample search resolved datasets without the dict-less tiers
-# (meta["untiered"], from .untiered_datasets). Their classic per-sample path still
-# reports a window denser than CRISPRME_IUPAC_CAP by its greedy worst-case alignment,
-# flagged in High_complexity_region, whose roster is every carrier of any allele it
-# takes: such a row reads as it does in a population-level report (_greedy_union).
+# Set True when a --per-sample search resolved its datasets without the dict-less tiers,
+# every one of them (meta["untiered_all"], from .untiered_datasets and .variant_datasets).
+# Their classic per-sample path still reports a window denser than CRISPRME_IUPAC_CAP by
+# its greedy worst-case alignment, flagged in High_complexity_region, whose roster is
+# every carrier of any allele it takes: such a row reads as it does in a population-level
+# report (_greedy_union). No column says which dataset a row comes from, and two datasets
+# can name the same samples, so in a search that also has a dataset with the tiers, whose
+# dense windows come as their observed haplotypes, flagged there too, no row reads so.
 _UNTIERED = False
 
 
 def _greedy_union(row, cols):
     """True for a row of a --per-sample report whose named roster can be the union of its
     variants' carriers rather than its cis carriers: one flagged in High_complexity_region,
-    when the search resolved datasets without the dict-less tiers (_UNTIERED), with >=2
-    variants and no indel (an indel row is resolved per carrier haplotype in both modes).
-    Its Observed cell and its per-site link read as in a population-level report."""
+    when no dataset of the search has the dict-less tiers (_UNTIERED), with >=2 variants
+    and no indel (an indel row is resolved per carrier haplotype in both modes). Its
+    Observed cell and its per-site link read as in a population-level report."""
     if not (_PER_SAMPLE and _UNTIERED and "complex_region" in cols and "var_genome" in cols):
         return False
     variants = row.get(cols["var_genome"])
@@ -1384,14 +1387,18 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     # the datasets a per-sample complete-search resolved without the dict-less tiers
     # (.untiered_datasets, one per line; absent when every dataset has them, and for a run
     # of an earlier release): its banner says what their results lack, and so does the
-    # Search mode row.
-    untiered = []
+    # Search mode row. Beside them, every dataset it searched (.variant_datasets): no
+    # column says which dataset a row comes from, so what holds of their rows alone is
+    # said of a row only when they are all of them (untiered_all, _greedy_union).
+    untiered, searched = [], []
     if result_dir:
-        try:
-            with open(os.path.join(result_dir, ".untiered_datasets")) as _udf:
-                untiered = [_l.strip() for _l in _udf if _l.strip()]
-        except OSError:
-            pass
+        for _name, _into in ((".untiered_datasets", untiered),
+                             (".variant_datasets", searched)):
+            try:
+                with open(os.path.join(result_dir, _name)) as _udf:
+                    _into.extend(_l.strip() for _l in _udf if _l.strip())
+            except OSError:
+                pass
 
     fn = _parse_results_filename(tsv_path)
 
@@ -1495,6 +1502,8 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "obs_max_mmb": obs_max_mmb,
         "search_mode": search_mode,
         "untiered": untiered,
+        # True when every dataset the search names is one of them
+        "untiered_all": bool(untiered) and bool(searched) and set(searched) <= set(untiered),
         "reference_only": reference_only,
     }
 
@@ -4042,22 +4051,30 @@ _SCORE_LEGEND = [
 def build_score_legend_html(untiered=None):
     """Render the scores-&-columns legend (Section 7, always present). ``untiered``: the
     datasets a --per-sample search resolved without the dict-less tiers, for which the
-    Observed and MAF entries say what holds instead of their --per-sample claims."""
+    Observed and MAF entries say what holds instead of their --per-sample claims (the
+    Observed one as it holds when they are all of the search's datasets, _UNTIERED, or
+    when they are not)."""
     legend = list(_SCORE_LEGEND)
     if untiered:
         # what complete-search's banner says of them (and the Search mode row): a dense
         # window's greedy worst-case alignment lists the carriers of any of its variants
-        # (and reads so: _greedy_union), and each variant has the AF its VCF gives, with
-        # no joint AF
+        # (and reads so when no dataset of the search has the tiers, _UNTIERED:
+        # _greedy_union), and each variant has the AF its VCF gives, with no joint AF
         named = _untiered_named(untiered)
         extra = {
             "Observed": (
                 f" On {named}, a dense window flagged in <code>High_complexity_region</code> "
                 "can be reported by its greedy worst-case alignment, which lists the carriers "
                 "of any of its variants rather than its exact cis carriers: they need not carry "
-                "every variant in it, so a row of two or more SNPs flagged there reads "
+                "every variant in it"
+            ) + (
+                ", so a row of two or more SNPs flagged there reads "
                 "<code>N&nbsp;carriers (&gt;=1 of K vars, poss. chimera)</code>, as in a "
-                "population-level search."),
+                "population-level search." if _UNTIERED else
+                ". This search's other datasets have dict-less tiers, and the report cannot "
+                "tell which dataset a row comes from, so a row of two or more SNPs flagged "
+                "there still reads <code>N&nbsp;cis carriers</code>, and can be such an "
+                "alignment."),
             "MAF": (
                 f" For {named}, no joint allele frequency is computed, and each variant's "
                 "frequency is the <code>AF</code> "
@@ -4427,10 +4444,17 @@ def render_html(
                 f" On {_untiered_named(untiered)}, a site flagged in "
                 "<code>High_complexity_region</code> can be reported by its dense window's "
                 "greedy worst-case alignments instead, whose listed carriers need not carry "
-                "every variant in them: a row of two or more SNPs there reads "
-                "<strong>&ldquo;N carriers (&gt;=1 of K vars, poss. chimera)&rdquo;</strong>, "
-                "and its link <strong>&ldquo;N other variant combinations&rdquo;</strong>, as "
-                "in a population-level search." if untiered else ""
+                "every variant in them" + (
+                    ": a row of two or more SNPs there reads "
+                    "<strong>&ldquo;N carriers (&gt;=1 of K vars, poss. chimera)&rdquo;</strong>, "
+                    "and its link <strong>&ldquo;N other variant combinations&rdquo;</strong>, "
+                    "as in a population-level search." if _UNTIERED else
+                    # (a search that also has a dataset with the tiers)
+                    ". This search's other datasets have dict-less tiers, and the report "
+                    "cannot tell which dataset a row comes from, so a row of two or more SNPs "
+                    "there still reads <strong>&ldquo;N cis carriers&rdquo;</strong>, and its "
+                    "link <strong>&ldquo;N other observed haplotypes&rdquo;</strong>, and can be "
+                    "such an alignment.") if untiered else ""
             )
         else:
             _oh_expl = (
@@ -5305,9 +5329,10 @@ def build_report(
     # (.untiered_datasets), whose rows carry no more than the classic dictionaries give:
     # the texts that say otherwise qualify it for them (the MAF footnote, the Section-6
     # caption, the legend; the Search mode and Allele-frequency basis rows read meta),
-    # and a dense window's greedy alignment reads as in population-level (_greedy_union)
+    # and, when no dataset of the search has the tiers (untiered_all), a dense window's
+    # greedy alignment reads as in population-level (_greedy_union)
     untiered = (meta.get("untiered") or []) if _PER_SAMPLE else []
-    _UNTIERED = bool(untiered)
+    _UNTIERED = bool(untiered) and bool(meta.get("untiered_all"))
     version = meta.get("version") or _package_version()
     has_crispr_bulge = crispr_bulge_computed(df, cols)
 
