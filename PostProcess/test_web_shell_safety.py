@@ -12,7 +12,8 @@ Up to 2.8.0 the web app took such text into shell commands as it was:
 * the search launch (main_page.change_url): the e-mail address, and the mismatches and
   genome, which a request can set past the Submit check;
 * the active annotation of a genome (pages_utils.build_active_annotation), whose file is
-  named after the genome, a name Settings takes as typed.
+  named after the genome, a name Settings takes as typed;
+* Remove result on a job's status page (load_page.remove_result): the job id of the URL.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -328,6 +329,33 @@ class TestActiveAnnotation(_WebFolder):
                 self.assertEqual(pd.read_csv(path, sep="\t", header=None)[3].tolist(),
                                  ["enhancer", "promoter"])  # both, sorted
         self.assertNothingRun()
+
+
+@NEEDS_DASH
+class TestRemoveResult(_WebFolder):
+    """Remove result on a job's status page, which removes the job of its URL."""
+
+    def test_only_a_job_folder_is_removed(self):
+        results = os.path.join(self.data, "Results")
+        os.makedirs(os.path.join(results, "job1_ABC"))
+        os.makedirs(os.path.join(self.outside, "victim"))
+        self.before = self.outside_files()
+        for search in ("?job=X;touch${IFS}MARK_a;#", "?job=../../outside/victim",
+                       "?job=..", "?job=", "?job=nosuchjob"):
+            with self.subTest(search=search), self.assertRaises(PreventUpdate):
+                lp.remove_result(1, search)
+        self.assertNothingRun()
+        self.assertEqual(lp.remove_result(1, "?job=job1_ABC").children, "Results deleted")
+        self.assertEqual(os.listdir(results), [])
+
+    def test_a_link_leaving_results_is_not_a_job_folder(self):
+        os.makedirs(os.path.join(self.outside, "victim"))
+        os.symlink(os.path.join(self.outside, "victim"),
+                   os.path.join(self.data, "Results", "linked"))
+        self.assertIsNone(pu.results_job_dir("linked"))
+        os.makedirs(os.path.join(self.data, "Results", "job_2.a-b"))
+        self.assertEqual(pu.results_job_dir("job_2.a-b"),
+                         os.path.join(self.data, "Results", "job_2.a-b"))
 
 
 if __name__ == "__main__":

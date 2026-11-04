@@ -10,7 +10,9 @@ are automatically deleted and could not be accessed anymore.
 """
 
 from app import app, current_working_directory, URL
-from .pages_utils import RESULTS_DIR, GUIDES_FILE, LOG_FILE, PARAMS_FILE, QUEUE_FILE
+from .pages_utils import (
+    RESULTS_DIR, GUIDES_FILE, LOG_FILE, PARAMS_FILE, QUEUE_FILE, results_job_dir,
+)
 
 from dash import Input, Output, State
 from dash.exceptions import PreventUpdate
@@ -20,7 +22,6 @@ from dash import dcc
 from dash import html
 import dash_bootstrap_components as dbc
 
-import subprocess
 import shutil
 import os
 
@@ -789,14 +790,14 @@ def remove_result(n: int, dir_name: str) -> html.P:
     if n == 0 or n is None:
         raise PreventUpdate  # do not do anything
     elif n == 1:
-        current_job_directory = os.path.join(
-            current_working_directory, RESULTS_DIR, dir_name.split("=")[-1]
-        )
+        # the job id is the URL's: only a job folder of Results/ is removed, with no
+        # shell (rm -rf through one ran a command the id held, and removed what '../'
+        # in it reached, outside the data folder too)
+        current_job_directory = results_job_dir(dir_name.split("=")[-1])
+        if current_job_directory is None:
+            raise PreventUpdate
         # remove job data
-        cmd = f"rm -rf {current_job_directory}"
-        code = subprocess.call(cmd, shell=True)
-        if code != 0:
-            raise ValueError(f"An error occurrend while running {cmd}")
+        shutil.rmtree(current_job_directory)
         return html.P("Results deleted")
     return None
 

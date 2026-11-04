@@ -16,6 +16,7 @@ import sys
 import os
 import json
 import gzip
+import re
 
 # personal_assembly lives in PostProcess/ (like assembly_reconcile). crisprme.py's
 # sys.path inserts never reach the web app (`crisprme.py web-interface` runs
@@ -402,6 +403,28 @@ def drop_columns(table: pd.DataFrame, filter_criterion: str) -> List[str]:
         raise ValueError(f"Wrong filtering criterion {filter_criterion}")
     assert bool(drops)
     return drops
+
+
+# The ids the search form gives its jobs (change_url: a random id after the sanitized job
+# name; an assembly search adds _paternal, _maternal and _combined). The pages of a job
+# take its id from the URL (/load?job=, /result?job=), which a client can set to anything,
+# so one that builds a path or a command from it checks it with results_job_dir first.
+_JOB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def results_job_dir(job_id) -> Optional[str]:
+    """``<cwd>/Results/<job_id>`` when that is a job folder and ``job_id`` has the form of
+    the search form's ids, else None: refuses a traversal (``../x``), an absolute path, a
+    name with any other character (a shell reads some), a non-string, and a folder whose
+    real path leaves Results/ (a link)."""
+    if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
+        return None
+    root = os.path.realpath(os.path.join(current_working_directory, RESULTS_DIR))
+    jobdir = os.path.join(current_working_directory, RESULTS_DIR, job_id)
+    real = os.path.realpath(jobdir)
+    if not os.path.isdir(jobdir) or real == root or os.path.commonpath([root, real]) != root:
+        return None
+    return jobdir
 
 
 def write_json(dropdown_value: str, job_id: str) -> None:

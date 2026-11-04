@@ -2,8 +2,8 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (11 tests, the Security
-block) to that step, and on this branch the step then ran 478 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (13 tests, the Security
+block) to that step, and on this branch the step then ran 480 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged.
 
 ### Fixed
@@ -89,3 +89,8 @@ two allowed skips: correct the count there as these entries are merged.
   commands that sort, compress, move and remove it ran through a shell with that name in them,
   where characters a shell reads ran as commands. They now run with no shell. Pre-existing.
   Covered by `PostProcess/test_web_shell_safety.py`.
+- **Remove result, on a search's status page, removes only that search's folder.** It removed the
+  folder the page's address named, through a shell: the job id there could run commands, or name
+  a folder elsewhere, outside the data folder too, which was removed. It now removes, with no
+  shell, only a folder of `Results/` whose id has the form the search form gives its jobs.
+  Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
