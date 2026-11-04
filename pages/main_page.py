@@ -389,11 +389,19 @@ def _pad_guides_for_pam(text_guides: str, pam_len: int, pam_begin: bool, guide_s
     already-padded or otherwise wrong-length guide (e.g. pasted from
     somewhere that already included the PAM placeholder) rather than
     silently double-padding it into a corrupt search.
+
+    So are lines holding a character not in VALID_CHARS (the nucleotide
+    codes but N), which `change_url` takes out of a guide: dropped here
+    rather than taken out, which would leave a guide of the wrong length. A
+    request can send any text, and the search runs a shell command holding
+    each guide of the file (process_summaries.py), where such characters ran
+    as commands.
     """
     lines = [
         line.strip().upper()
         for line in (text_guides or "").splitlines()
         if line.strip() and len(line.strip()) == guide_seqlen
+        and all(nt in VALID_CHARS for nt in line.strip())
     ]
     pad = "N" * pam_len
     if pam_begin:

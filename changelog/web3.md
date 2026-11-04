@@ -2,8 +2,8 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (19 tests, the Security
-block) to that step, and on this branch the step then ran 486 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (21 tests, the Security
+block) to that step, and on this branch the step then ran 488 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged.
 
 ### Fixed
@@ -83,6 +83,16 @@ two allowed skips: correct the count there as these entries are merged.
   only a genome and a PAM that are installed, "Reference only" or a variant dataset the form
   offers for the genome, and whole numbers of mismatches and bulges, and it quotes each value of
   that command, which is unchanged for the values the form sends. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
+- **A personal-assembly search takes only guides of the nucleotide codes a reference search
+  keeps.** Submit on the search form's Personal assembly tab wrote the guides of the PAM's length
+  into the search's guide file as sent, upper-cased, and the search passes each guide of that
+  file to a shell command: characters a shell reads in a guide ran as commands, as the web app's
+  user, and a request can send that Submit any text. It now leaves out a guide holding a
+  character other than those the Reference genome tab's Submit keeps of a guide (A, C, G, T and
+  the IUPAC codes for two or three of them), as it leaves out one not of the PAM's length,
+  rather than search a shorter one. A guide of those letters is searched as before; one holding
+  an N is now left out too. Pre-existing, since 2.5.5. Covered by
   `PostProcess/test_web_shell_safety.py`.
 - **The annotation a search applies is put together with no shell.** It is written as
   `Annotations/.active.<genome>.bed.gz`, and Settings takes a genome's name as typed: the

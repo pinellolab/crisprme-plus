@@ -11,6 +11,9 @@ Up to 2.8.0 the web app took such text into shell commands as it was:
   removed, one there before too;
 * the search launch (main_page.change_url): the e-mail address, and the mismatches and
   genome, which a request can set past the Submit check;
+* the Personal assembly tab's search launch (main_page.submit_assembly_search_job): the
+  guides, which it wrote to the search's guide file as sent, and the search passes each
+  guide of that file to a shell command (process_summaries.py);
 * the active annotation of a genome (pages_utils.build_active_annotation), whose file is
   named after the genome, a name Settings takes as typed;
 * Remove result on a job's status page (load_page.remove_result): the job id of the URL;
@@ -32,6 +35,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -323,6 +327,96 @@ class TestSearchLaunch(_WebFolder):
         self.assertTrue(args[4].endswith(f".active.{genome}.bed.gz"))
         self.assertTrue(os.path.isfile(args[4]))
         self.assertNothingRun()
+
+
+@NEEDS_DASH
+class TestAssemblySearchLaunch(_WebFolder):
+    """The Personal assembly tab's Submit (submit_assembly_search_job), which a request can
+    call with any guides, and the search's look-up of each guide of the guide file it writes
+    (process_summaries.py, which runs a shell command holding the guide). The job pool is a
+    stand-in, whose command runs as the pool runs it, and so is assembly-search, which
+    records its arguments."""
+
+    IND = "HG1"
+
+    def setUp(self):
+        super().setUp()
+        self.pool = MagicMock()
+        p = patch.object(mp, "pool_executor", self.pool)
+        p.start()
+        self.addCleanup(p.stop)
+        # a personal assembly as Settings installs one (Assemblies/<individual>/)
+        root = os.path.join(self.data, "Assemblies", self.IND)
+        haplotypes = {}
+        for hap in ("paternal", "maternal"):
+            os.makedirs(os.path.join(root, hap, "genome"))
+            shutil.copy(os.path.join(self.data, "Genomes", "hg38", "chr1.fa"),
+                        os.path.join(root, hap, "genome"))
+            for name in (f"{self.IND}_{hap}_vs_GRCh38.chain", f"{self.IND}_{hap}.chromAlias.txt"):
+                with open(os.path.join(root, hap, name), "w") as fh:
+                    fh.write("x\n")
+            haplotypes[hap] = {"assembly_name": f"{self.IND}_{hap}", "genome_dir": f"{hap}/genome",
+                               "chain": f"{hap}/{self.IND}_{hap}_vs_GRCh38.chain",
+                               "chromalias": f"{hap}/{self.IND}_{hap}.chromAlias.txt"}
+        with open(os.path.join(root, "metadata.json"), "w") as fh:
+            json.dump({"format": "crisprme-personal-assembly", "format_version": 1,
+                       "individual": self.IND, "haplotypes": haplotypes}, fh)
+        with open(os.path.join(self.app, "crisprme.py"), "w") as fh:
+            fh.write("import json, os, sys\nwith open(os.path.join(os.path.dirname(__file__), "
+                     "'assembly_args.json'), 'w') as fh:\n    json.dump(sys.argv[1:], fh)\n")
+        self.before = self.outside_files()
+
+    def submit(self, guides):
+        """Submit, as the form sends it with the individual picked: the guide file of the
+        search it ran and None, or None and the lines of the warning it gave instead."""
+        result = mp.submit_assembly_search_job(
+            1, *mp.populate_assembly_fields_from_individual(self.IND), PAM, guides, 4, 1, 1,
+            None, self.IND, 6, False)
+        if not self.pool.submit.call_count:
+            return None, [li.children for li in result[3].children]
+        fn, *args = self.pool.submit.call_args[0]
+        fn(*args)
+        self.pool.reset_mock()
+        with open(os.path.join(self.app, "assembly_args.json")) as fh:
+            argv = json.load(fh)
+        return argv[argv.index("--guide") + 1], None
+
+    def look_up(self, guide_file):
+        """process_summaries.py on guide_file, as the search runs it (here on a search that
+        found nothing), in the data folder, where a file a command leaves is found."""
+        best = os.path.join(self.data, "Results", "best.txt")
+        open(best, "w").close()
+        return subprocess.run(
+            [sys.executable, os.path.join(HERE, "process_summaries.py"), best, guide_file, "_",
+             "4", "1", "1", os.path.dirname(guide_file), "ref", "CFD"],
+            cwd=self.data, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+
+    def test_a_guide_holding_a_command_or_a_path_runs_nothing(self):
+        # the guides went into the guide file as sent, upper-cased: the look-up of one ran
+        # the command in it, and wrote where a path in it led
+        for guide in ("CTAACAG;>MARK_A;ATCA", "CTAACAG$(>MARK_B)TCA", "CTAACAG;>../MARK_C;A"):
+            with self.subTest(guide=guide):
+                guide_file, _ = self.submit(f"{guide}\n{GUIDE[:-3].lower()}")
+                done = self.look_up(guide_file)
+                self.assertNothingRun()
+                self.assertEqual(done.returncode, 0, done.stderr)
+                with open(guide_file) as fh:
+                    self.assertEqual(fh.read(), f"{GUIDE}\n")
+                job = os.path.dirname(guide_file)
+                self.assertTrue(os.path.isfile(os.path.join(
+                    job, f"{os.path.basename(job)}.summary_by_guide.{GUIDE}_CFD.txt")))
+        # alone, it leaves no guide to search
+        self.assertEqual(self.submit("CTAACAG;>MARK_A;ATCA"),
+                         (None, ["at least one guide sequence"]))
+        self.assertNothingRun()
+
+    def test_a_guide_is_searched_in_the_letters_a_reference_search_keeps(self):
+        # an N, a U and a space went into the guide file too
+        guide_file, _ = self.submit("CTAACAGTTGCTTTTATCAN\nCTAACAGUUGCTTTTATCAC\n"
+                                    "CTAACAG TGCTTTTATCAC\nctaacagttgcttttatcac\n"
+                                    "RYSWKMBDHVACGTACGTAC")
+        with open(guide_file) as fh:
+            self.assertEqual(fh.read(), f"{GUIDE}\nRYSWKMBDHVACGTACGTACNNN\n")
 
 
 @NEEDS_DASH
