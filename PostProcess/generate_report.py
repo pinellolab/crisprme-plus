@@ -3507,10 +3507,12 @@ def maf_footnote(datasets=None, reference_only=False, untiered=None):
         "renders on log-scale plots &mdash; read it as &ldquo;present, frequency "
         "effectively 0&rdquo;, not as a measured frequency of 10<sup>&minus;5</sup>."
     ) + (
+        # (no 1e-5 display floor is drawn on: the integrator has given an AF of 0 as NA
+        # since 2.4.0, and a value below it is printed as it is)
         f" For {_untiered_named(untiered)}, the frequency is instead the <code>AF</code> "
         f"{'its VCF gives' if len(untiered) == 1 else 'their VCFs give'}, as rounded there: "
-        "a variant whose <code>AF</code> reads 0 there, or is missing, is blank too, not "
-        "shown at the floor." if untiered else ""
+        "a variant whose <code>AF</code> reads 0 there, or is missing, has no frequency, "
+        "and its MAF is blank." if untiered else ""
     )
 
 

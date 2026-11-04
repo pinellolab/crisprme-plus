@@ -945,10 +945,11 @@ class TestGenerateReport(unittest.TestCase):
         cis carriers, and the Section-6 caption every haplotype a real individual carries.
         On the self-test panel 154 of the search's 189 alt rows had a blank MAF because the
         VCF's two-decimal AF reads 0, a two-variant row showed 8.10e-01 from Variant_MAF
-        "NA,0.81", and the 5 greedy rows read "N cis carriers" though none of the 114 carriers
-        they list carries every variant of its row. Each text now says what holds for the
-        datasets without the tiers; with the tiers each is as it was, byte for byte. (A
-        population-level report: test_a_population_level_search_without_the_tiers_says_so_too.)"""
+        "NA,0.81", and the 5 greedy rows read "N cis carriers" though none of the 102
+        individuals they list (114 times) carries every variant of a row that lists it.
+        Each text now says what holds for the datasets without the tiers; with the tiers
+        each is as it was, byte for byte. (A population-level report:
+        test_a_population_level_search_without_the_tiers_says_so_too.)"""
         base = {"datasets": "hg38+1000G", "mm": "4", "bdna": 1, "brna": 1, "max_edits": "6",
                 "search_mode": "per-sample"}
         pop = {**base, "search_mode": "population-level"}
@@ -977,10 +978,16 @@ class TestGenerateReport(unittest.TestCase):
         self.assertTrue(foot.startswith("MAF = combined-panel minor/alternate allele frequency. "))
         self.assertTrue(foot.endswith("not as a measured frequency of 10<sup>&minus;5</sup>."))
         self.assertEqual(gr.maf_footnote("hg38+1000G", untiered=[]), foot)
-        self.assertEqual(gr.maf_footnote("hg38+1000G", untiered=one), foot + (
+        clause = gr.maf_footnote("hg38+1000G", untiered=one)[len(foot):]
+        self.assertEqual(gr.maf_footnote("hg38+1000G", untiered=one), foot + clause)
+        self.assertEqual(clause, (
             " For " + named + ", the frequency is instead the <code>AF</code> its VCF gives, as "
-            "rounded there: a variant whose <code>AF</code> reads 0 there, or is missing, is "
-            "blank too, not shown at the floor."))
+            "rounded there: a variant whose <code>AF</code> reads 0 there, or is missing, has no "
+            "frequency, and its MAF is blank."))
+        # (and leans on no 1e-5 display floor: the integrator has given an AF of 0 as NA
+        # since 2.4.0, and the report prints a smaller value as it is)
+        self.assertNotIn("floor", clause)
+        self.assertEqual(gr._curated_cell("maf", {"m": "3.1e-06"}, {"maf": "m"}), "3.10e-06")
         self.assertIn("their VCFs give", gr.maf_footnote("hg38+1000G", untiered=two))
 
         # the legend's Observed and MAF entries (Section 7), and no other
@@ -2350,10 +2357,11 @@ class TestGenerateReport(unittest.TestCase):
         window denser than CRISPRME_IUPAC_CAP by its greedy worst-case alignment, flagged in
         High_variant_density_region, whose roster is every carrier of any allele it takes.
         Its Observed cell read "N cis carriers" all the same: on the self-test panel 5 such
-        rows read "16/40/22/18/18 cis carriers" though none of the 114 carriers they list
-        carries every variant of its row, and three linked their site's other greedy
-        alignments as "N other observed haplotypes". Such a row now reads as in a
-        population-level report; every other row, and every row with the tiers, as before."""
+        rows read "16/40/22/18/18 cis carriers" though none of the 102 individuals they list
+        (114 times) carries every variant of a row that lists it, and three linked their
+        site's other greedy alignments as "N other observed haplotypes". Such a row now
+        reads as in a population-level report; every other row, and every row with the
+        tiers, as before."""
         import pandas as pd
 
         dense = ("high_variant_density (15 variants): a greedy worst-case alignment is "

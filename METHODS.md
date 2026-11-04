@@ -343,10 +343,12 @@ An index without the dict-less tiers (one built without `--samplesID`, such as t
 the benchmark `complete-test` builds) has no Tier-0 registry: each variant has the `AF`
 its VCF gives, as rounded there. The benchmark's 1000 Genomes VCF gives two decimals, so
 a rare variant reads 0 and has no frequency, and a multi-variant row's minimum leaves it
-out. On the self-test panel a `--per-sample` search gives 154 of its 189 variant rows a
-blank MAF (3 of 184 with the tiers), and four two-variant rows the frequency of their
-commoner variant (0.09 to 0.86) for a haplotype that one to five of the VCF's 2,548
-individuals carry. The report of a search on such an index says so, in either mode;
+out. On the NGG index the README's self-test builds (`NGG_2_hg38_chr22+hg38_1000G`, Section
+5's known limit), a `--per-sample` search of the README's guide with the `20bp-NGG-SpCas9`
+PAM, 4 mismatches, 1 DNA and 1 RNA bulge gives 154 of its 189 variant rows a blank MAF (3 of
+184 with the tiers), and four two-variant rows the frequency of their commoner variant (0.09
+to 0.86) for a haplotype that one to five of the VCF's 2,548 individuals carry. The report of
+a search on such an index says so, in either mode;
 rebuild the index with `build-index-only --samplesID`, or use a prebuilt one.
 
 ---
@@ -639,13 +641,16 @@ index's dict-less tiers. **Known limit:** an index without them (one built witho
 `--samplesID`, such as the one the benchmark `complete-test` builds) goes the classic
 dictionary path, which still reports a capped window by its greedy worst-case alignment,
 flagged in `High_variant_density_region`, whose listed carriers (the carriers of any allele
-it takes) need not carry every variant in it. On chr22 of the benchmark's phased 1000 Genomes
-VCF, the README's guide (`CTAACAGTTGCTTTTATCAC`, 4 mismatches + 1 DNA + 1 RNA bulge) searched
-per sample gives 5 such rows (8 to 13 variants each, CFD at most 0.001), and each of the 114
-carriers they list lacks one of its row's variants: 342 of the run's 56,730 SNP-row carrier
-listings (a row lists its carriers once for each of its three alignments). After
-`build-index-only --samplesID` the same search returns exactly those 5 rows fewer, and every
-carrier it lists has all of its row's variants on one phased haplotype. `complete-search` and
+it takes) need not carry every variant in it. On the NGG index the README's self-test builds
+(`complete-test`'s benchmark mode: `NGG_2_hg38_chr22+hg38_1000G`, chr22 of the benchmark's
+phased 1000 Genomes VCF, built without `--samplesID`), the README's guide
+(`CTAACAGTTGCTTTTATCAC`) with the `20bp-NGG-SpCas9` PAM, 4 mismatches, 1 DNA and 1 RNA bulge,
+searched per sample at the default `CRISPRME_IUPAC_CAP`, gives 5 such rows (8 to 13 variants
+each, CFD at most 0.001). They name 102 individuals as carriers 114 times (some on more than
+one row), and each time the carrier lacks one of its row's variants: 342 of the run's 56,730
+SNP-row carrier listings (a row lists its carriers once for each of its three alignments).
+After `build-index-only --samplesID` the same search returns exactly those 5 rows fewer, and
+every carrier it lists has all of its row's variants on one phased haplotype. `complete-search` and
 the report say so (its Search mode row; and, when no dataset of the search has the tiers, such
 a row of two or more SNPs reads `N carriers (>=1 of K vars, poss. chimera)` in its `Observed`
 column, as in a population-level analysis, not `N cis carriers`: the report cannot tell which
