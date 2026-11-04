@@ -56,7 +56,9 @@ crisprme-data/
 │   └── hg38_mega.tar.gz     (+ .SHA256SUMS)
 ├── vcfs/                           # SOURCE VCFs — build any index from scratch / with a new PAM
 │   └── hg38_{HGDP1kGP,HPRC,mega}/         # download --what vcf --dataset <name>
-├── genomes/hg38/                   # per-chromosome FASTA mirror (chr1.fa … chrX.fa)
+├── genomes/hg38/                   # hg38 FASTA mirror, one file per sequence (download --what genome unpacks it)
+│   ├── chr1.fa.gz … chrY.fa.gz, chrM.fa.gz     # gzipped; the alt, random and unplaced contigs too (455 files)
+│   └── chr22.fa                                # chr22 also unpacked: complete-test and setup fetch it as is
 ├── annotations/                    # functional + cancer-driver tracks (see below)
 ├── pams/                           # 20bp-NRG-SpCas9, 20bp-NGG-SpCas9, 20bp-NNN-NO-PAM
 └── samplesIDs/                     # per-dataset sample-id lists
