@@ -127,9 +127,14 @@ from a **separate sites-only sidecar**:
   no-op if absent) and emits a companion `<output>.indel_af.tsv` (one row per indel
   off-target: chrom, off-target start, indel pos/ref/alt, per-dataset AF, AF_max) —
   mirrors the cooc companion, never touches the fixed indel columns/scores.
-- The merge also writes a plain `INFO/AF = AF_max`, so the **global** AF_max reaches
-  indel off-targets through the existing fake-indel MAF path with no post-analysis
-  change; the sidecar adds the **per-dataset** breakdown.
+- `merge_mega_sites.sh` also writes a plain `INFO/AF = AF_max`, so on an index built
+  from its output the **global** AF_max would reach indel off-targets through the
+  existing fake-indel MAF path. The as-run genome-wide merge that made the shipped mega's
+  VCFs, `mega_gw_merge.sh` (read by `mega_build_indels.sh`), writes only `AF_<src>` and
+  `AF_max`, with no plain `INFO/AF`, so the shipped mega's indel logs hold no AF (for
+  none of its 13,853,761 indels, 222,283 of them on chr22) and a row of an indel alone
+  has no MAF there; the sidecar gives each indel's **per-dataset** AF and its `AF_max`,
+  in the `indel_af.tsv` companion.
 - Tests: `test_build_mega_indel_af.py`. Remaining: surface `indel_af.tsv` in the
   report (same merge pattern as the cooc companion) + validate end-to-end in the
   assembly smoke (the `analisi_indels_NNN.py` hook is guarded but untested in a live
