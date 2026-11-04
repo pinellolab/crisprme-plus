@@ -6795,10 +6795,14 @@ def complete_test_crisprme():
         # complete_test.py, or the search it ran, has said why above; a traceback would
         # only bury it. The search's error log is named where one was written: a search
         # refused before it starts writes none, and the benchmark mode writes one per
-        # benchmark, in Results/crisprme-test-out_<name>.
+        # benchmark, in Results/crisprme-test-out_<name>. Only this mode's folders are
+        # this run's: complete_test.py refuses to start over an earlier run's of the
+        # same mode, not over the other mode's.
         from glob import glob as _glob
 
-        logs = [p for p in sorted(_glob(os.path.join(CRISPRMEDIRS[1], "crisprme-test-out*",
+        folders = ("crisprme-test-out_*" if os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD")
+                   else "crisprme-test-out")
+        logs = [p for p in sorted(_glob(os.path.join(CRISPRMEDIRS[1], folders,
                                                      "log_error.txt")))
                 if os.path.getsize(p)]
         sys.stderr.write(

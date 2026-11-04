@@ -51,7 +51,7 @@ from utils import (
     MD5ANNOTATION,
 )
 
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import index_fit
 import unfinished_marks
@@ -178,29 +178,31 @@ def _smoke_rank(index_name: str) -> tuple:
     return (int(bmax < 2), rank, index_name)
 
 
-def check_output(outputs: List[str]) -> None:
+def check_output(benchmarks: bool) -> None:
     """
-    Refuse to run complete-test over the results of an earlier run.
+    Refuse to run complete-test over the results of an earlier run of the same mode.
 
-    ``outputs`` are the folders in Results/ that this run's mode writes: the
-    prebuilt-index smoke's crisprme-test-out, or the benchmark mode's
-    crisprme-test-out_<name> of each registered benchmark, a heavy one included where
-    CRISPRME_SKIP_HEAVY=1 leaves it out. complete-search refuses an output folder that is
-    not empty, and validate-test would read an earlier run's results as this run's: each
-    of them that is there is named, all in one message, before anything is downloaded or
-    searched. A folder of the other mode is in neither's way.
+    The benchmark mode (``benchmarks``) writes a crisprme-test-out_<name> folder in
+    Results/ for each benchmark, which validate-test reads, and the prebuilt-index smoke
+    writes crisprme-test-out. complete-search refuses an output folder that is not empty,
+    and validate-test would read an earlier run's results as this run's: every folder of
+    this mode there (crisprme-test-out_<name> of any benchmark, a heavy one or one an
+    earlier release ran too) is named, all in one message, before anything is downloaded
+    or searched. A folder of the other mode is in neither's way.
 
     Args:
-        outputs (List[str]): The names of the folders in Results/ this run writes.
+        benchmarks (bool): Whether this run is the benchmark mode's.
 
     Raises:
-        SystemExit: With status 2 if any of them is there.
+        SystemExit: With status 2 if any is there.
         AssertionError: If the main results directory does not exist.
     """
     results_dir = os.path.abspath(os.path.join(os.getcwd(), CRISPRME_DIRS[1]))
     assert os.path.isdir(results_dir)
-    found = [os.path.join(results_dir, d) for d in sorted(outputs)
-             if os.path.isdir(os.path.join(results_dir, d))]
+    found = [os.path.join(results_dir, d) for d in sorted(os.listdir(results_dir))
+             if (d.startswith(f"{COMPLETETESTRESDIR}_") if benchmarks
+                 else d == COMPLETETESTRESDIR)
+             and os.path.isdir(os.path.join(results_dir, d))]
     if found:
         # all in one message (named one at a time, the benchmark mode's six stopped a user
         # five more times), and exit 2, not 0, which a script or a CI step read as a pass
@@ -1385,14 +1387,9 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
       truth. The ``validate-benchmarks`` CI sets this flag.
     """
     check_crisprme_directory_tree(os.getcwd())  # check crisprme directory tree
-    ondemand = os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD")
-    if ondemand:  # the folder of each registered benchmark
-        outputs = [f"{COMPLETETESTRESDIR}_{bench['name']}"
-                   for bench in load_benchmarks()["benchmarks"]]
-    else:  # the smoke's own
-        outputs = [COMPLETETESTRESDIR]
-    check_output(outputs)  # refuse to overwrite the results of an earlier run
-    if ondemand:
+    benchmarks = bool(os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"))
+    check_output(benchmarks)  # refuse to overwrite an earlier run's results
+    if benchmarks:
         _run_benchmarks_ondemand(chrom, dataset, threads, debug)
     else:
         _run_prebuilt_index_smoke(threads, debug, chrom)

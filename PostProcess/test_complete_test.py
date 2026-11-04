@@ -168,7 +168,8 @@ class AnEarlierRunInTheWayIsNamedWhole(unittest.TestCase):
     (of the benchmark mode's six, crisprme-test-out_cas12a_hbg: a user who removed it was
     stopped five more times), refused the prebuilt-index smoke on those six too, which it
     does not write, and exited 0, which a script or a CI step reads as a pass though
-    nothing ran. It names every folder in the way of this run's mode, in one line, and
+    nothing ran. It names every folder of this run's mode there, in one line (the benchmark
+    mode's crisprme-test-out_<name> of any benchmark, the smoke's crisprme-test-out), and
     exits 2 before it downloads or searches anything; crisprme.py passes the 2 on."""
 
     SCRIPT = os.path.join(HERE, "complete_test.py")
@@ -217,12 +218,14 @@ class AnEarlierRunInTheWayIsNamedWhole(unittest.TestCase):
 
     def test_the_benchmark_modes_folders_are_named_in_one_line(self):
         self.assertEqual(len(self.benchmarks), 6)
-        for skip_heavy in (None, "1"):  # (validate-test reads a heavy one's either way)
+        # a heavy one's under CRISPRME_SKIP_HEAVY=1, and one of a benchmark an earlier
+        # release ran, too: validate-test would read the first, and stops on neither
+        named = sorted(self.benchmarks + [f"{ct.COMPLETETESTRESDIR}_cas9"])
+        for skip_heavy in (None, "1"):
             with self.subTest(CRISPRME_SKIP_HEAVY=skip_heavy):
-                code, err, ran = self.run_test(self.benchmarks + [ct.COMPLETETESTRESDIR], True,
-                                               skip_heavy)
+                code, err, ran = self.run_test(named + [ct.COMPLETETESTRESDIR], True, skip_heavy)
                 self.assertEqual((code, ran), (2, []))
-                self.assertEqual(err, self.said(self.benchmarks))
+                self.assertEqual(err, self.said(named))
 
     def test_only_those_that_are_there(self):
         code, err, ran = self.run_test(self.benchmarks[3:5], True)
@@ -1501,29 +1504,37 @@ class TheCliPassesTheRefusalOn(unittest.TestCase):
     def test_a_failed_test_ends_in_one_line_naming_the_log_it_left(self):
         """It raised an OSError, a traceback ending in 'See
         Results/crisprme-test-out/log_error.txt', which a search refused before it
-        starts never writes, and which the benchmark mode writes under another name."""
+        starts never writes, and which the benchmark mode writes under another name. The
+        logs of the other mode are not this run's: complete_test.py runs beside them."""
+        smoke = "Results/crisprme-test-out/log_error.txt"
+        bench = "Results/crisprme-test-out_cas12a_hbg/log_error.txt"
         cases = (
-            ({}, "see the messages above"),
-            ({"Results/crisprme-test-out/log_error.txt": ""}, "see the messages above"),
-            ({"Results/crisprme-test-out/log_error.txt": "ERROR: x\n"},
-             "see Results/crisprme-test-out/log_error.txt for details"),
-            ({"Results/crisprme-test-out_cas9_sg1617/log_error_no_check.txt": "",
-              "Results/crisprme-test-out_cas12a_hbg/log_error.txt": "ERROR: y\n"},
-             "see Results/crisprme-test-out_cas12a_hbg/log_error.txt for details"),
+            (False, {}, "see the messages above"),
+            (False, {smoke: ""}, "see the messages above"),
+            (False, {smoke: "ERROR: x\n"}, f"see {smoke} for details"),
+            (True, {"Results/crisprme-test-out_cas9_sg1617/log_error_no_check.txt": "",
+                    bench: "ERROR: y\n"}, f"see {bench} for details"),
+            (False, {bench: "ERROR: y\n"}, "see the messages above"),
+            (True, {smoke: "ERROR: x\n", bench: "ERROR: y\n"}, f"see {bench} for details"),
         )
-        for logs, says in cases:
-            with self.subTest(logs=sorted(logs)):
+        for benchmarks, logs, says in cases:
+            with self.subTest(benchmarks=benchmarks, logs=sorted(logs)):
                 wd = tempfile.mkdtemp()
                 self.addCleanup(shutil.rmtree, wd)
                 for rel, text in logs.items():
                     os.makedirs(os.path.dirname(os.path.join(wd, rel)), exist_ok=True)
                     with open(os.path.join(wd, rel), "w") as fh:
                         fh.write(text)
+                env = {k: v for k, v in os.environ.items()
+                       if k != "CRISPRME_ALLOW_ONDEMAND_BUILD"}
+                if benchmarks:
+                    env["CRISPRME_ALLOW_ONDEMAND_BUILD"] = "1"
                 cwd = os.getcwd()
                 os.chdir(wd)
                 err = io.StringIO()
                 try:
-                    with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+                    with mock.patch.dict(os.environ, env, clear=True), \
+                         contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
                         self._cli(1)
                 finally:
                     os.chdir(cwd)
