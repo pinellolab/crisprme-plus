@@ -2,8 +2,8 @@
 
 **For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
 runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
-(25 tests, the last Fixed entry below) and `test_web_shell_safety` (9 tests, the Security
-block) to that step, and on this branch the step then ran 476 tests in about 100 s, with its
+(25 tests, the last Fixed entry below) and `test_web_shell_safety` (11 tests, the Security
+block) to that step, and on this branch the step then ran 478 tests in about 100 s, with its
 two allowed skips: correct the count there as these entries are merged.
 
 ### Fixed
@@ -84,3 +84,8 @@ two allowed skips: correct the count there as these entries are merged.
   offers for the genome, and whole numbers of mismatches and bulges, and it quotes each value of
   that command, which is unchanged for the values the form sends. Pre-existing. Covered by
   `PostProcess/test_web_shell_safety.py`.
+- **The annotation a search applies is put together with no shell.** It is written as
+  `Annotations/.active.<genome>.bed.gz`, and Settings takes a genome's name as typed: the
+  commands that sort, compress, move and remove it ran through a shell with that name in them,
+  where characters a shell reads ran as commands. They now run with no shell. Pre-existing.
+  Covered by `PostProcess/test_web_shell_safety.py`.

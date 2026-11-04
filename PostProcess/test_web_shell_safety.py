@@ -10,7 +10,9 @@ Up to 2.8.0 the web app took such text into shell commands as it was:
   BED outside the data folder, and the index bedtools wrote beside the FASTA was then
   removed, one there before too;
 * the search launch (main_page.change_url): the e-mail address, and the mismatches and
-  genome, which a request can set past the Submit check.
+  genome, which a request can set past the Submit check;
+* the active annotation of a genome (pages_utils.build_active_annotation), whose file is
+  named after the genome, a name Settings takes as typed.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -42,6 +44,7 @@ except ImportError:  # pragma: no cover
     dash = None
 if dash is not None:
     from dash.exceptions import PreventUpdate
+    import pandas as pd
 
     sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app object
     import index  # noqa: E402  (check_directories: the data folder the web app starts with)
@@ -281,6 +284,49 @@ class TestSearchLaunch(_WebFolder):
                     self.submit(**kwargs)
                 self.assertEqual(self.pool.submit.call_count, 0)
                 self.assertEqual(self.jobs(), [])
+        self.assertNothingRun()
+
+    @unittest.skipUnless(shutil.which("sort-bed") and shutil.which("bgzip"),
+                         "BEDOPS sort-bed or bgzip not on PATH")
+    def test_a_genome_named_with_a_command_in_settings_runs_nothing(self):
+        # Settings takes a genome's name as typed; its active annotation is named after it
+        genome = "x$(touch${IFS}MARK_f)"
+        os.makedirs(os.path.join(self.data, "Genomes", genome))
+        shutil.copy(os.path.join(self.data, "Genomes", "hg38", "chr1.fa"),
+                    os.path.join(self.data, "Genomes", genome))
+        for name, row in (("a.bed", "chr1\t10\t500\tpromoter\n"),
+                          ("b.bed", "chr1\t2\t9\tenhancer\n")):
+            with open(os.path.join(self.data, "Annotations", name), "w") as fh:
+                fh.write(row)
+        pu.write_enabled_annotations(genome, ["a.bed", "b.bed"])
+        # (the form offers a genome folder with its underscores as spaces)
+        _cmd, args = self.submit(genome=genome.replace("_", " "))
+        self.assertEqual(args[0], os.path.join(self.data, "Genomes", genome))
+        self.assertTrue(args[4].endswith(f".active.{genome}.bed.gz"))
+        self.assertTrue(os.path.isfile(args[4]))
+        self.assertNothingRun()
+
+
+@NEEDS_DASH
+@unittest.skipUnless(shutil.which("sort-bed") and shutil.which("bgzip"),
+                     "BEDOPS sort-bed or bgzip not on PATH")
+class TestActiveAnnotation(_WebFolder):
+    """The annotation a search applies, assembled from those enabled for its genome in
+    Settings, in a file named after the genome."""
+
+    def test_it_is_built_whatever_the_genome_is_named(self):
+        for name, row in (("a.bed", "chr1\t10\t500\tpromoter\n"),
+                          ("b.bed", "chr1\t2\t9\tenhancer\n")):
+            with open(os.path.join(self.data, "Annotations", name), "w") as fh:
+                fh.write(row)
+        for genome in ("hg38", "x$(touch${IFS}MARK_a)", "y;touch${IFS}MARK_b;#"):
+            with self.subTest(genome=genome):
+                pu.write_enabled_annotations(genome, ["a.bed", "b.bed"])
+                active, _gencode = pu.build_active_annotation(genome)
+                self.assertEqual(active, f".active.{genome}.bed.gz")
+                path = os.path.join(self.data, "Annotations", active)
+                self.assertEqual(pd.read_csv(path, sep="\t", header=None)[3].tolist(),
+                                 ["enhancer", "promoter"])  # both, sorted
         self.assertNothingRun()
 
 

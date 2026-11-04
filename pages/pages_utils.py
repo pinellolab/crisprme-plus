@@ -2173,6 +2173,8 @@ def get_custom_annotations() -> List:
     return annotations
 
 
+# The annotation helpers below run their commands with no shell: the file names hold a
+# genome's name (.active.<genome>.bed), which a request sends, or Settings took as typed.
 def _sort_bed(fname: str, outfname: str) -> str:
     """Sorts a BED file and writes the sorted output to a new file.
 
@@ -2189,7 +2191,8 @@ def _sort_bed(fname: str, outfname: str) -> str:
     Raises:
         SystemExit: If sorting fails.
     """
-    code = subprocess.call(f"sort-bed {fname} > {outfname}", shell=True)
+    with open(outfname, "w") as out:
+        code = subprocess.call(["sort-bed", fname], stdout=out)
     if code != 0:
         raise subprocess.SubprocessError("Sorting BED file failed")
     assert os.path.isfile(outfname)
@@ -2225,7 +2228,7 @@ def compress_file(fname: str) -> str:
     # temporary or lock file cannot corrupt the shared annotation directory
     for cruft in (f"{plain_path}.tmp", f"{gz_path}.tmp", f"{gz_path}.tbi.lock"):
         if os.path.isfile(cruft):
-            subprocess.call(f"rm -f {cruft}", shell=True)
+            subprocess.call(["rm", "-f", cruft])
     # idempotent path: the plain file was already compressed by a previous run
     # (bgzip -f had removed it) - reuse the existing .gz instead of failing
     if not os.path.isfile(plain_path):
@@ -2236,7 +2239,7 @@ def compress_file(fname: str) -> str:
         )
     # non-destructive compression: keep the source file (-k) and overwrite any
     # stale .gz (-f) so re-submitting the same job is safe
-    code = subprocess.call(f"bgzip -k -f {plain_path}", shell=True)
+    code = subprocess.call(["bgzip", "-k", "-f", plain_path])
     if code != 0:
         raise subprocess.SubprocessError("Compressing and indexing file failed")
     assert os.path.isfile(gz_path)
@@ -2259,7 +2262,7 @@ def _mv_file(fname: str, outfname: str) -> str:
     Raises:
         SystemExit: If the move or rename operation fails.
     """
-    code = subprocess.call(f"mv {fname} {outfname}", shell=True)
+    code = subprocess.call(["mv", fname, outfname])
     if code != 0:
         raise subprocess.SubprocessError("Renaming file failed")
     assert os.path.isfile(outfname)
@@ -2301,9 +2304,9 @@ def sort_annotation(annotationfile: str) -> str:
     # clean up the intermediate sorted BED (compress_file keeps its source with
     # -k, so remove it here) to avoid leaving cruft in the shared annotation dir
     if os.path.isfile(annotationfile_sorted):
-        subprocess.call(f"rm -f {annotationfile_sorted}", shell=True)
+        subprocess.call(["rm", "-f", annotationfile_sorted])
     if decompressed_here and os.path.isfile(plain_path):
-        subprocess.call(f"rm {plain_path}", shell=True)
+        subprocess.call(["rm", plain_path])
     return result
 
 
@@ -2646,7 +2649,8 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
 
 def _decompress_file(fname: str, outfname: str) -> str:
     """Decompresses a bgzipped file to a specified output file."""
-    code = subprocess.call(f"gunzip -k -c {fname} > {outfname}", shell=True)
+    with open(outfname, "wb") as out:
+        code = subprocess.call(["gunzip", "-k", "-c", fname], stdout=out)
     if code != 0:
         raise subprocess.SubprocessError("Decompressing annotation file failed")
     assert os.path.isfile(outfname)
