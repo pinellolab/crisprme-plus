@@ -557,6 +557,16 @@ def populate_assembly_fields_from_individual(individual: str) -> Tuple:
     )
 
 
+def _form_number(value, low: int, high: int) -> Optional[int]:
+    """``value`` as a whole number from ``low`` to ``high``, the range a dropdown or slider
+    of the form offers, else None: a request can send a callback any value."""
+    if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if low <= value <= high else None
+
+
 @app.callback(
     [
         Output("url", "pathname", allow_duplicate=True),
@@ -682,13 +692,24 @@ def submit_assembly_search_job(
     # Parity with check_input's own validation of these same shared fields --
     # they carry dropdown defaults so this rarely fires in practice, but
     # there's no reason assembly-search's checklist should be less defensive
-    # than complete-search's for identical fields.
+    # than complete-search's for identical fields. Each is a whole number of the
+    # form's range (its dropdown's, and the Max edits slider's when it governs), checked
+    # before anything is written: they go into .Params.txt and the command, and a request
+    # can send any value, which went into .Params.txt as sent, a line break too, before
+    # int() refused it and left a job folder that never ran.
+    mms = _form_number(mms, 0, MAX_MMS - 1)
+    dna = _form_number(dna, 0, MAX_BULGES - 1)
+    rna = _form_number(rna, 0, MAX_BULGES - 1)
     if mms is None:
         missing.append("mismatches")
     if dna is None:
         missing.append("DNA bulges")
     if rna is None:
         missing.append("RNA bulges")
+    if not advanced_open and max_edits_val is not None:
+        max_edits_val = _form_number(max_edits_val, 1, (MAX_MMS - 1) + 2 * (MAX_BULGES - 1))
+        if max_edits_val is None:
+            missing.append("maximum edits (mismatches + bulges)")
     if not pam:
         missing.append("PAM")
         guide_lines = []

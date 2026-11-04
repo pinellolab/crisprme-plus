@@ -76,7 +76,9 @@ and made the e-mail's link of the page's URL: a list had one search notify every
 it, a line break wrote the link, and the URL, which a request sets, chose it. It takes one
 plain address, and the link is the server's own. The address went into the search's command,
 which prints it into the search's log, and the /Results/ route served the job's email.txt:
-anyone with the job's link read it.
+anyone with the job's link read it. And the Personal assembly tab's Submit wrote the counts
+it was sent into .Params.txt before int() refused one: it takes whole numbers of the form's
+ranges, before anything is written.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -818,6 +820,41 @@ class TestAssemblySearchLaunch(_WebFolder):
         self.assertIsNone(guide_file)
         self.assertEqual(said[:2], ["paternal genome", "maternal genome"])
         self.assertEqual(os.listdir(os.path.join(self.data, "Results")), [])
+        self.assertNothingRun()
+
+    def test_counts_are_whole_numbers_of_the_form_s_ranges_before_anything_is_written(self):
+        # the mismatches and bulges went into .Params.txt as sent, a line break too, before
+        # int() refused one: a job folder that never ran (and that no page could remove);
+        # and a number the form does not offer was searched
+        fields = mp.populate_assembly_fields_from_individual(self.IND)
+        line = "4\n12\tPaternal_dir\t../../outside"  # (a line of .Params.txt more)
+        edits = ["maximum edits (mismatches + bulges)"]
+        for mms, dna, rna, cap, said in (
+                ("x", 1, 1, 6, ["mismatches"]), (line, 1, 1, 6, ["mismatches"]),
+                (7, 1, 1, 6, ["mismatches"]), (-1, 1, 1, 6, ["mismatches"]),
+                (2.5, 1, 1, 6, ["mismatches"]), (True, 1, 1, 6, ["mismatches"]),
+                (4, 3, 1, 6, ["DNA bulges"]), (4, 1, "1;x", 6, ["RNA bulges"]),
+                (4, 1, 1, "x", edits), (4, 1, 1, 0, edits), (4, 1, 1, 11, edits)):
+            with self.subTest(mms=mms, dna=dna, rna=rna, cap=cap):
+                result = mp.submit_assembly_search_job(
+                    1, *fields, PAM, GUIDE[:-3], mms, dna, rna, None, self.IND, cap, False)
+                self.assertEqual([li.children for li in result[3].children], said)
+                self.assertEqual(os.listdir(os.path.join(self.data, "Results")), [])
+                self.assertEqual(self.pool.submit.call_count, 0)
+        # the form's own values (and as text): with Advanced open the slider is not read
+        for mms, dna, rna, cap, advanced in ((6, 2, 2, 10, False), ("0", "0", "0", "1", False),
+                                             (4, 1, 1, "x", True)):
+            with self.subTest(mms=mms, dna=dna, rna=rna, cap=cap, advanced=advanced):
+                result = mp.submit_assembly_search_job(
+                    1, *fields, PAM, GUIDE[:-3], mms, dna, rna, None, self.IND, cap, advanced)
+                self.assertEqual(self.pool.submit.call_count, 1)
+                self.pool.reset_mock()
+                job = os.path.join(self.data, "Results", result[1].split("=", 1)[1])
+                with open(os.path.join(job, ".Params.txt")) as fh:
+                    params = dict(row.rstrip("\n").split("\t")[1:] for row in fh)
+                self.assertEqual((params["Mismatches"], params["DNA"], params["RNA"]),
+                                 (str(mms), str(dna), str(rna)))
+                shutil.rmtree(job)
         self.assertNothingRun()
 
 

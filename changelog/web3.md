@@ -310,3 +310,11 @@ and the Settings, personal-assembly and History entries add tests to `test_setti
   `MAIL: _` for none), and what the notification prints names no address, not even in a mail
   server's refusal. Notifications are sent as before; the log of a search run by an earlier
   version keeps its line. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The Personal assembly tab's Submit takes whole numbers of mismatches and bulges, as its form
+  offers them, before it writes anything.** It wrote the mismatches and bulges a request sends
+  into the new search's `.Params.txt` as they were, a line break too, and only then converted
+  them to numbers: a value that is not one left a job folder that never ran, listed as in queue,
+  which no page removes, one for each such request; and a number the form does not offer was
+  searched. It now takes 0 to 6 mismatches and 0 to 2 DNA and RNA bulges, and a Max edits of 1
+  to 10 where that governs, and otherwise says which is wrong, with nothing written.
+  Pre-existing, since 2.5.5. Covered by `PostProcess/test_web_shell_safety.py`.
