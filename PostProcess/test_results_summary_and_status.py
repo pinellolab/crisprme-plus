@@ -31,6 +31,8 @@ sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app ob
 
 import pages.load_page as lp  # noqa: E402
 import pages.results_page as rp  # noqa: E402
+import index_fit  # noqa: E402
+from test_index_fit import _newer_index_error  # noqa: E402
 
 
 def _counts(rows):
@@ -159,7 +161,12 @@ class TestNoHitsStatus(unittest.TestCase):
                    "'/data/genome_library/NRG_2_hg38') and run this search again, which builds "
                    "it anew where it can, or download it again or build it with crisprme.py "
                    "build-index-only")
+        # (an index a newer CRISPRitz built, in index format 2: the line the search script
+        # prints for it, and the text index_fit.py gives of it)
+        index = os.path.join(self.tmp, "genome_library", "NRG_2_hg38")
+        newer_err, newer = _newer_index_error(index), index_fit.newer_format_error(index)
         for name, err, says in (
+                ("newer index", newer_err, f"The search was not run: {newer}."),
                 ("partial", f"ERROR: {partial}\n", f"The search was not run: {partial}."),
                 ("no variant", f"ERROR: {no_variant}\n", f"The search was not run: {no_variant}."),
                 ("refused", f"ERROR: {refused}\n", f"The search was not run: {refused}."),

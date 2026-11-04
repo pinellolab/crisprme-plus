@@ -45,6 +45,16 @@ def _bin2(folder, guide=20, version=2, name="NGG_chr1_1.bin"):
                  + struct.pack("=ii", 7, guide) + b"\0" * 8 + b"CZI\xfe")
 
 
+def _newer_index_error(index):
+    """What the search script prints on stderr, which a web job keeps in its log_error.txt,
+    when it stops on ``index``, made here in index format 2 (_bin2): its own
+    _refuse_newer_index, run on it."""
+    _bin2(index)
+    script = _functions("_index_format", "_refuse_newer_index") + '\n_refuse_newer_index "$1"\n'
+    return subprocess.run(["bash", "-c", script, "bash", index], capture_output=True,
+                          text=True).stderr
+
+
 class TheHeaderOfAnIndex(unittest.TestCase):
     def test_the_second_int32_of_a_bin_is_the_built_guide_length(self):
         with tempfile.TemporaryDirectory() as tmp:

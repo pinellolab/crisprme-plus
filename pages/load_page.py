@@ -37,6 +37,7 @@ _NO_INDEX_REFUSALS = (
     " stores too few bases per site",  # an index in the way, built for a shorter guide
     "no variant index here serves this search",  # nor VCFs or an enriched genome to build one
     " lacks trees of FASTAs that hold sites of its PAM: ",  # an index missing a chromosome
+    " was built by a newer CRISPRitz (",  # an index in a format this release does not read
 )
 
 

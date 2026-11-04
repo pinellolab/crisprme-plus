@@ -47,6 +47,8 @@ sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app ob
 
 import pages.load_page as lp  # noqa: E402
 import pages.results_page as rp  # noqa: E402
+import index_fit  # noqa: E402
+from test_index_fit import _newer_index_error  # noqa: E402
 
 GUIDE = "CTAACAGTTGCTTTTATCACNNN"
 CRITERIA = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
@@ -172,11 +174,16 @@ class TestResultLinkWithoutResults(_Tmp):
                 self.assertIn("The selected result does not exist", _text(page))
 
     def test_job_without_results_says_why_and_links_its_status_page(self):
+        # (an index a newer CRISPRitz built: the line the search script prints for it)
+        index = os.path.join(self.tmp, "genome_library", "NRG_2_hg38")
+        newer = _newer_index_error(index)
         cases = {
             "failed": (dict(log="Job\tStart\tFri\n", log_error="ERROR: search failed\n"),
                        "The selected result encountered some errors"),
             "refused": (dict(log="Job\tStart\tFri\n", log_error=f"ERROR: {self.REFUSED}\n"),
                         f"The search was not run: {self.REFUSED}."),
+            "newer": (dict(log="Job\tStart\tFri\n", log_error=newer),
+                      f"The search was not run: {index_fit.newer_format_error(index)}."),
             "nohits": (dict(log="Job\tStart\tFri\nNo off-targets found\nJob\tEnd\tFri\n"),
                        "no off-targets were found"),
             "queued": (dict(queued=True), "has not finished yet"),
