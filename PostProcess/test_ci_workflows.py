@@ -186,12 +186,12 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
 class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
     """unit-tests.yml's job has no BEDOPS, minimap2, impg, Dash or Biopython, so its step for
-    post_process.sh ran one test and skipped it, the impg truth tests and the flag-gate
-    behaviour tests skipped too, and test_assembly_annotate was in no workflow. All pass in the
-    image, where no job ran them."""
+    post_process.sh ran one test and skipped it, the impg truth tests, the flag-gate behaviour
+    tests and test_app_settings' start of the web app skipped too, and test_assembly_annotate
+    was in no workflow. All pass in the image, where no job ran them."""
 
     MODULES = ("test_assembly_annotate", "test_assembly_reconcile", "test_complete_search_flags",
-               "test_post_process_tempdir", "test_index_resolution")
+               "test_post_process_tempdir", "test_index_resolution", "test_app_settings")
 
     def in_image_step(self):
         text = workflow("web-e2e.yml")

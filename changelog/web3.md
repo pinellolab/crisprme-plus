@@ -1,5 +1,10 @@
 <!-- web3 track: [2.8.1] entries for CHANGELOG.md, from the final validation of 38a7c4e (W1-W4). -->
 
+**For the merge, not for the changelog:** CHANGELOG.md's [2.8.1] entry "CI runs what it says it
+runs" gives web-e2e's in-image step "440 tests, about 100 s". This track adds `test_app_settings`
+(25 tests) to that step (the last entry below), and on this branch the step then ran 467 tests in
+about 100 s, with its two allowed skips: correct the count there as these entries are merged.
+
 ### Fixed
 
 - **A web search refused for an index a newer CRISPRitz built now says why on its status and
@@ -52,4 +57,5 @@
   stray file, so they never showed it. Pre-existing. Covered by `PostProcess/test_app_settings.py`:
   a check of `index.py`'s code, which runs everywhere, and its imports run as `web-interface` runs
   them, with Biopython beside a stray `pyproject.toml`, which runs where the web stack and
-  Biopython are installed, as in the image.
+  Biopython are installed: in the image, where `web-e2e.yml` runs it with the other tests that
+  skip in the light job.
