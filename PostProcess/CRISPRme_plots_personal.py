@@ -88,8 +88,10 @@ def plot_with_MMvBUL(df, out_folder, guide):
                 index, "Mismatches+bulges_(fewest_mm+b)"
             ]
 
-    # sort in order to have highest REF mm+bul on top
-    df.sort_values("Mismatches+bulges_(fewest_mm+b)", ascending=True, inplace=True)
+    # sort in order to have highest REF mm+bul on top (stable, as CRISPRme_plots.filter_table:
+    # sites of one value keep the table's order)
+    df.sort_values("Mismatches+bulges_(fewest_mm+b)", ascending=True, inplace=True,
+                   kind="stable")
     # top1000 targets
     df = df.head(100)
     # Make index column that numbers the OTs starting from 1
@@ -250,8 +252,9 @@ def plot_with_MMvBUL(df, out_folder, guide):
 def plot_with_CRISPR_BULGE_score(df, out_folder, guide):
     # Every site is kept (see plot_with_MMvBUL); a copy, as sorting is in place
     df = df.copy()
-    # sort values to have highest scored target on top
-    df.sort_values("CRISPR_BULGE_score_(highest_CRISPR_BULGE)", ascending=False, inplace=True)
+    # sort values to have highest scored target on top (stable: see plot_with_MMvBUL)
+    df.sort_values("CRISPR_BULGE_score_(highest_CRISPR_BULGE)", ascending=False, inplace=True,
+                   kind="stable")
     # keep top1000 targets
     df = df.head(100)
     # Make index column that numbers the OTs starting from 1
@@ -411,8 +414,8 @@ def plot_with_CFD_score(df, out_folder, guide):
     # Every site is kept (see plot_with_MMvBUL); a copy, as sorting is in place
     df = df.copy()
 
-    # sort values to have highest scored target on top
-    df.sort_values("CFD_score_(highest_CFD)", ascending=False, inplace=True)
+    # sort values to have highest scored target on top (stable: see plot_with_MMvBUL)
+    df.sort_values("CFD_score_(highest_CFD)", ascending=False, inplace=True, kind="stable")
     # keep top1000 targets
     df = df.head(100)
     # Make index column that numbers the OTs starting from 1

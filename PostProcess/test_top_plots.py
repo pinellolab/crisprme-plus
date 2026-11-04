@@ -227,6 +227,93 @@ class TestTopPlots(unittest.TestCase):
                               os.listdir(out))
 
 
+class TestTiedSitesKeepTheTablesOrder(unittest.TestCase):
+    """The results page's top-1000 plots (filter_table) and the Personal Risk Card plots
+    ranked with pandas' default sort, a quicksort, which is not stable: sites of exactly
+    one score (identical aligned pairs at other sites score the same) came in an order the
+    whole column decided, so sites added elsewhere moved them, and a top-N that ended inside
+    a tie held whichever of them the sort put first. The report's top-1000 tables and plots
+    sort stably since 2.8.1 (test_generate_report). These sorts are stable now too: tied
+    sites keep the table's order, as in the report."""
+
+    @staticmethod
+    def frame(rows):
+        """Sites (tag, CFD, CRISPR-Bulge, fewest mismatches+bulges, MAF), REF = ALT (every
+        variant-effect delta 0), each with a MAF of its own, which sizes its REF point."""
+        data = []
+        for tag, cfd, cb, mmb, maf in rows:
+            row = {"Spacer+PAM": GUIDE, "Chromosome": "chr1", "Start_coordinate": tag}
+            for crit in CRITERIA:
+                row[f"Mismatches+bulges_({crit})"] = mmb
+                row[f"Bulges_({crit})"] = 0
+                row[f"REF/ALT_origin_({crit})"] = "ref"
+                row[f"Variant_MAF_({crit})"] = maf
+                row[f"Variant_samples_({crit})"] = None
+                row[f"Aligned_protospacer+PAM_REF_({crit})"] = "CTAACAGTTGCTTTTATCACTGG"
+            for score, value in (("CFD_score", cfd), ("CRISPR_BULGE_score", cb)):
+                crit = "highest_CFD" if score == "CFD_score" else "highest_CRISPR_BULGE"
+                for suffix in ("", "_REF", "_ALT"):
+                    row[f"{score}{suffix}_({crit})"] = value
+            data.append(row)
+        return pd.DataFrame(data)
+
+    @staticmethod
+    def drawn_order(plot, df, maf_of):
+        """The tags of the sites a Personal Risk Card plot draws, in its order: its REF
+        points (zorder 1) are sized by sqrt(1000 * (1 - MAF)), one size per site here."""
+        seen = {}
+
+        def _capture(*_a, **_k):
+            if "sizes" not in seen:
+                ref = [c for c in plt.gca().collections if c.get_zorder() == 1][0]
+                seen["sizes"] = list(ref.get_sizes())
+
+        by_size = {round((1000 * (1 - maf)) ** 0.5, 6): tag for tag, maf in maf_of.items()}
+        with tempfile.TemporaryDirectory() as out, patch.object(plt, "savefig", _capture):
+            plot(df, out + os.sep, GUIDE)
+        return [by_size[round(float(s), 6)] for s in seen["sizes"]]
+
+    def test_tied_sites_keep_the_tables_order_in_every_plot(self):
+        # 300 sites in three ties on each score (below 17 sites numpy's quicksort falls back
+        # to an insertion sort, which keeps a tie in order: too few would not tell)
+        tied = [(i, (0.3, 0.2, 0.1)[i % 3], (0.6, 0.4, 0.2)[i // 3 % 3], (2, 3, 4)[i // 9 % 3],
+                 (i + 1) / 1000) for i in range(300)]
+        # and the same with 120 more sites between them, each of a score of its own
+        more = list(tied)
+        for j in range(120):
+            more.insert(j * 3, (1000 + j, 0.0505 + j / 1000, 0.1505 + j / 1000, 5 + j,
+                                0.5 + j / 1000))
+        maf_of = {r[0]: r[4] for r in more}
+
+        def by(col, descending=True):
+            """The tied sites' tags in the order a stable sort on column col gives."""
+            return [r[0] for r in sorted(tied, key=lambda r: -r[col] if descending else r[col])]
+
+        for rows in (tied, more):
+            df = self.frame(rows)
+            views = {
+                ("top-1000 by CFD", tuple(by(1))): plots.filter_table(df, "cfd"),
+                ("top-1000 by CRISPR-Bulge", tuple(by(2))): plots.filter_table(df, "crispr_bulge"),
+                ("top-1000 by mismatches+bulges", tuple(by(3, False))):
+                    plots.filter_table(df, "mm+b"),
+                # every delta is 0: one tie, in the table's order
+                ("top-1000 by CFD effect", tuple(r[0] for r in tied)):
+                    plots.filter_table(df, "cfd", sort_by="delta"),
+                ("top-1000 by CRISPR-Bulge effect", tuple(r[0] for r in tied)):
+                    plots.filter_table(df, "crispr_bulge", sort_by="delta"),
+            }
+            for (view, expected), got in views.items():
+                with self.subTest(sites=len(rows), view=view):
+                    self.assertEqual([t for t in got["Start_coordinate"] if t < 1000],
+                                     list(expected))
+            # the Personal Risk Card's top 100 of each (the first tie, whole, on each score)
+            for plot, expected in ((personal.plot_with_CFD_score, by(1)[:100]),
+                                   (personal.plot_with_CRISPR_BULGE_score, by(2)[:100]),
+                                   (personal.plot_with_MMvBUL, by(3, False)[:100])):
+                with self.subTest(sites=len(rows), view=plot.__name__):
+                    self.assertEqual(self.drawn_order(plot, df, maf_of), expected)
+
+
 # A results table as the report reads it (columns by name): the on-target and a
 # variant-created perfect match, a reference and a variant 1-edit off-target, and
 # three farther sites.

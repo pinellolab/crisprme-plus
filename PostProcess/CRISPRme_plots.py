@@ -570,6 +570,10 @@ def filter_table(df, plot_term, sort_by="score"):
     # plot to say so -- the strongest off-targets, a variant-created perfect match
     # among them. The plots star the perfect matches (mark_perfect_matches).
     _mmb_col, sort_cname = score_mapping[plot_term]
+    # Both sorts are stable, as the report's top-1000 (generate_report.select_top): sites
+    # of one score keep the table's order, and a top-1000 that ends inside a tie keeps the
+    # tie's first sites. pandas' default (quicksort) gave tied sites an order the whole
+    # column decided.
     if sort_by == "delta":
         # Rank by the size of the variant-induced change |ALT - REF|, so the impactful
         # variants (which the score sort buries among many zero-effect ones) come first.
@@ -581,13 +585,14 @@ def filter_table(df, plot_term, sort_by="score"):
         ).abs()
         df_sorted = (
             df.assign(_variant_delta=_delta)
-            .sort_values("_variant_delta", ascending=False, na_position="last")
+            .sort_values("_variant_delta", ascending=False, na_position="last",
+                         kind="stable")
             .drop(columns=["_variant_delta"])
         )
     else:
         # sort values to have highest scored target on top
         ascending = plot_term == "mm+b"
-        df_sorted = df.sort_values(sort_cname, ascending=ascending)
+        df_sorted = df.sort_values(sort_cname, ascending=ascending, kind="stable")
     return df_sorted.head(1000)  # keep top 1000 targets
 
 
