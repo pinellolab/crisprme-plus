@@ -13,7 +13,8 @@ Up to 2.8.0 the web app took such text into shell commands as it was:
   genome, which a request can set past the Submit check;
 * the Personal assembly tab's search launch (main_page.submit_assembly_search_job): the
   guides, which it wrote to the search's guide file as sent, and the search passes each
-  guide of that file to a shell command (process_summaries.py);
+  guide of that file to a shell command (process_summaries.py); and the PAM and the six
+  folders and files of the individual, which it searched as sent, '../' too;
 * the active annotation of a genome (pages_utils.build_active_annotation), whose file is
   named after the genome, a name Settings took as typed (test_settings_progress.py checks
   that it no longer takes one a shell reads; a genome folder can be put there by hand);
@@ -334,10 +335,10 @@ class TestSearchLaunch(_WebFolder):
 @NEEDS_DASH
 class TestAssemblySearchLaunch(_WebFolder):
     """The Personal assembly tab's Submit (submit_assembly_search_job), which a request can
-    call with any guides, and the search's look-up of each guide of the guide file it writes
-    (process_summaries.py, which runs a shell command holding the guide). The job pool is a
-    stand-in, whose command runs as the pool runs it, and so is assembly-search, which
-    records its arguments."""
+    call with any guides, PAM and six fields, and the search's look-up of each guide of the
+    guide file it writes (process_summaries.py, which runs a shell command holding the
+    guide). The job pool is a stand-in, whose command runs as the pool runs it, and so is
+    assembly-search, which records its arguments."""
 
     IND = "HG1"
 
@@ -368,12 +369,13 @@ class TestAssemblySearchLaunch(_WebFolder):
                      "'assembly_args.json'), 'w') as fh:\n    json.dump(sys.argv[1:], fh)\n")
         self.before = self.outside_files()
 
-    def submit(self, guides):
-        """Submit, as the form sends it with the individual picked: the guide file of the
-        search it ran and None, or None and the lines of the warning it gave instead."""
+    def submit(self, guides, pam=PAM, fields=None, individual=IND):
+        """Submit, as the form sends it with the individual picked (and the six fields the
+        picker fills in for it, unless ``fields``): the guide file of the search it ran and
+        None, or None and the lines of the warning it gave instead."""
+        fields = fields or mp.populate_assembly_fields_from_individual(self.IND)
         result = mp.submit_assembly_search_job(
-            1, *mp.populate_assembly_fields_from_individual(self.IND), PAM, guides, 4, 1, 1,
-            None, self.IND, 6, False)
+            1, *fields, pam, guides, 4, 1, 1, None, individual, 6, False)
         if not self.pool.submit.call_count:
             return None, [li.children for li in result[3].children]
         fn, *args = self.pool.submit.call_args[0]
@@ -419,6 +421,31 @@ class TestAssemblySearchLaunch(_WebFolder):
                                     "RYSWKMBDHVACGTACGTAC")
         with open(guide_file) as fh:
             self.assertEqual(fh.read(), f"{GUIDE}\nRYSWKMBDHVACGTACGTACNNN\n")
+
+    def test_only_an_installed_pam_and_the_files_of_the_individual_picked_are_searched(self):
+        # any PAM file '../' led to, and any folders and files as the six fields the picker
+        # fills in, were searched as sent: the search takes the PAM file's name, and that of
+        # a genome folder of Genomes/, into its shell commands
+        with open(os.path.join(self.outside, "NRG-20bp.txt"), "w") as fh:
+            fh.write("N" * 20 + "NRG 3\n")  # (a name whose guide length the submit reads)
+        self.before = self.outside_files()
+        fields = list(mp.populate_assembly_fields_from_individual(self.IND))
+        outside_genome = os.path.join("..", "outside", "hg38")
+        outside_file = os.path.join(self.outside, f"{PAM}.txt")
+        pick = ["select an individual on the Personal assembly tab"]
+        for kwargs, said in (
+                (dict(pam="../../outside/NRG-20bp"),
+                 ["PAM (file unreadable)", "at least one guide sequence"]),
+                (dict(fields=[outside_genome] + fields[1:]), pick),
+                (dict(fields=fields[:3] + [outside_file] + fields[4:]), pick),
+                (dict(individual="HG2"), pick)):
+            with self.subTest(**kwargs):
+                self.assertEqual(self.submit(GUIDE[:-3], **kwargs), (None, said))
+                self.assertEqual(os.listdir(os.path.join(self.data, "Results")), [])
+        guide_file, _ = self.submit(GUIDE[:-3])  # (as the form sends it)
+        with open(guide_file) as fh:
+            self.assertEqual(fh.read(), f"{GUIDE}\n")
+        self.assertNothingRun()
 
 
 @NEEDS_DASH

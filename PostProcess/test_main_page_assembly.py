@@ -31,6 +31,7 @@ sys.path.insert(0, _REPO_ROOT)
 sys.path.insert(0, os.path.join(_REPO_ROOT, "PostProcess"))
 
 import pages.main_page as mp  # noqa: E402
+import pages.pages_utils as pu  # noqa: E402
 
 PAM = "20bp-NRG-SpCas9"
 GUIDE = "CTAACAGTTGCTTTTATCAC"
@@ -60,17 +61,20 @@ class _SubmitHarness(unittest.TestCase):
     def setUp(self):
         self.cwd = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.cwd, ignore_errors=True)
-        os.makedirs(os.path.join(self.cwd, "Results"))
-        os.makedirs(os.path.join(self.cwd, "PAMs"))
+        for d in ("Results", "PAMs", "Genomes"):
+            os.makedirs(os.path.join(self.cwd, d))
         shutil.copy(os.path.join(_REPO_ROOT, "PAMs", f"{PAM}.txt"), os.path.join(self.cwd, "PAMs"))
         _make_bundle(self.cwd, "WALK01")
         self.jobs = []
-        for target, value in (
-            ("current_working_directory", self.cwd + "/"),
-            ("build_active_annotation", lambda genome: ("vuoto.txt", "vuoto.txt")),
-            ("pool_executor", type("Pool", (), {"submit": lambda _s, fn, *a: self.jobs.append(a)})()),
+        for module, target, value in (
+            (mp, "current_working_directory", self.cwd + "/"),
+            # the submit searches only the installed PAMs and individuals it reads there
+            (pu, "current_working_directory", self.cwd + "/"),
+            (mp, "build_active_annotation", lambda genome: ("vuoto.txt", "vuoto.txt")),
+            (mp, "pool_executor",
+             type("Pool", (), {"submit": lambda _s, fn, *a: self.jobs.append(a)})()),
         ):
-            patcher = patch.object(mp, target, value)
+            patcher = patch.object(module, target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 

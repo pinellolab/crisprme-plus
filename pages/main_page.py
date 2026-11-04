@@ -525,10 +525,10 @@ def _run_assembly_search_job(cmd: str, combined_dir: str, note: str = "") -> Non
 def populate_assembly_fields_from_individual(individual: str) -> Tuple:
     """Auto-derives the 6 hidden genome/chain/chromAlias fields from the
     visible "Individual" picker, via the same `installed_assemblies()`
-    grouping Settings uses. `submit_assembly_search_job` below is otherwise
-    completely unchanged -- it still just reads these 6 State values, same
-    as when they were directly user-picked; only where the values come from
-    changed. Clearing the picker clears all 6 back to None.
+    grouping Settings uses. `submit_assembly_search_job` below reads these 6
+    State values, as when they were directly user-picked, and searches them
+    only when they are what this gives for the individual picked. Clearing
+    the picker clears all 6 back to None.
     """
     if not individual:
         return None, None, None, None, None, None
@@ -617,12 +617,23 @@ def submit_assembly_search_job(
     so there's no format difference between the two modes' guide boxes.
     These 6 State values are auto-derived from the visible "Individual"
     picker by `populate_assembly_fields_from_individual` above (component C
-    / Data Manager, built 2026-09-02) -- this function's own validation and
-    path-resolution logic is unchanged from when they were directly
-    user-picked dropdowns.
+    / Data Manager, built 2026-09-02), and are searched only when they are
+    what it derives for the individual picked; this function's path
+    resolution is unchanged from when they were directly user-picked
+    dropdowns.
     """
     if not n:
         raise PreventUpdate
+
+    # A request can send this callback any values: a path anywhere for each of the six
+    # fields, and any name of a file for the PAM. The search reads the folders and files
+    # they name, and takes their names into shell commands, so only the files the picker
+    # fills in for the individual picked, as it is installed now, are searched, with a PAM
+    # the form offers (as change_url runs only what the form offers).
+    picked = bool(individual) and (
+        genome_paternal, genome_maternal, chain_paternal, chain_maternal,
+        chromalias_paternal, chromalias_maternal,
+    ) == tuple(populate_assembly_fields_from_individual(individual))
 
     # All 6 fields arrive as cwd-RELATIVE paths, auto-derived from the
     # "Individual" picker by populate_assembly_fields_from_individual (which
@@ -658,10 +669,11 @@ def submit_assembly_search_job(
         missing.append("paternal chromAlias file")
     if not chromalias_maternal or not os.path.isfile(chromalias_maternal):
         missing.append("maternal chromAlias file")
-    if not individual:
+    if not picked:
         # These six fields are filled from the Individual picker, so with none
         # picked all six are empty, and listing them names fields the form does
-        # not show. Say what to do instead, once.
+        # not show. Say what to do instead, once. (The same when they are not
+        # what it fills in for the one picked: one no longer installed, say.)
         missing = ["select an individual on the Personal assembly tab"]
     # Parity with check_input's own validation of these same shared fields --
     # they carry dropdown defaults so this rarely fires in practice, but
@@ -677,7 +689,8 @@ def submit_assembly_search_job(
         missing.append("PAM")
         guide_lines = []
     else:
-        pam_parsed = _parse_pam(pam)
+        installed_pams = [p["value"] for p in get_available_PAM()]
+        pam_parsed = _parse_pam(pam) if pam in installed_pams else None
         if pam_parsed is None:
             missing.append("PAM (file unreadable)")
             guide_lines = []
