@@ -23,7 +23,8 @@
 #   ${14}: Number of CPUs to use.
 #   ${15}: Current working directory path.
 #   ${16}: Gene proximity file path.
-#   ${17}: Email address for notifications.
+#   ${17}: "_", or (the web app) another value: send_mail.py then notifies the address
+#          of the job's email.txt (no address here: this is printed to the log).
 #   ${18}: Base check start (base editing window).
 #   ${19}: Base check end (base editing window).
 #   ${20}: Base check set (base editing bases).
@@ -58,7 +59,7 @@ starting_dir=$(realpath ${13})  # root dir
 ncpus=${14}  # number of threads
 current_working_directory=$(realpath ${15})  # current working directory
 gene_proximity=$(realpath ${16})  # gene annotation bed
-email=${17}  # email address (website only)
+email=${17}  # "_", or notify the address of email.txt (website only; see above)
 
 echo -e "MAIL: $email"
 echo -e "CPU used: $ncpus"

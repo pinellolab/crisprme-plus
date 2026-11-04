@@ -73,7 +73,9 @@ everywhere).
 And up to 2.8.0 Submit took any text with an '@' as the address of a search's notification
 and made the e-mail's link of the page's URL: a list had one search notify every address on
 it, a line break wrote the link, and the URL, which a request sets, chose it. It takes one
-plain address, and the link is the server's own.
+plain address, and the link is the server's own. The address went into the search's command,
+which prints it into the search's log, and the /Results/ route served the job's email.txt:
+anyone with the job's link read it.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -95,6 +97,7 @@ import io
 import json
 import os
 import shutil
+import smtplib
 import sqlite3
 import subprocess
 import sys
@@ -366,7 +369,7 @@ class TestSearchLaunch(_WebFolder):
     def jobs(self):
         return sorted(os.listdir(os.path.join(self.data, "Results")))
 
-    def test_a_search_runs_as_before_and_the_email_address_is_one_argument(self):
+    def test_a_search_runs_as_before_and_no_email_address_goes_into_its_command(self):
         cmd, args = self.submit(name="run1")
         # nothing is quoted: the command is the one of 2.8.0
         self.assertNotIn("'", cmd)
@@ -375,9 +378,17 @@ class TestSearchLaunch(_WebFolder):
                                     os.path.join(job, ".list_vcfs.txt"),
                                     os.path.join(job, ".guides.txt")])
         self.assertEqual((len(args), args[7], args[16], args[25]), (26, "4", "_", "6"))
-        _cmd, args = self.submit(email="someone@example.org", name="run2")
-        self.assertEqual(len(args), 26)
-        self.assertEqual(args[16], "someone@example.org")  # the search's 17th argument
+        self.assertFalse(os.path.exists(os.path.join(job, "email.txt")))
+        # a notification: the search's 17th argument says so, and the address is in the
+        # job's email.txt only (the search prints the argument into its log, which the
+        # job's status page and link show)
+        cmd, args = self.submit(email="someone@example.org", name="run2")
+        self.assertEqual((len(args), args[16]), (26, "email.txt"))
+        self.assertNotIn("someone@example.org", cmd)
+        (job,) = [j for j in self.jobs() if j.startswith("run2_")]
+        with open(os.path.join(self.data, "Results", job, "email.txt")) as fh:
+            self.assertEqual(fh.read().split("\n")[:2],
+                             ["someone@example.org", f"http://127.0.0.1:8080/load?job={job}"])
         self.assertNothingRun()
 
     def test_a_notification_goes_to_one_plain_address_by_the_server_s_link(self):
@@ -1192,6 +1203,30 @@ class TestStatusPage(_WebFolder):
         self.assertNothingRun()
 
 
+@NEEDS_DASH
+class TestTheNotificationAddressIsNotServed(_WebFolder):
+    """The /Results/ route (results_page.download_file), which serves any file of a job's
+    folder to anyone with the job's link (in local mode History lists every job): it served
+    email.txt, which holds the address the job's notification goes to. It serves the job's
+    other files as before. (The search's log names no address now: TestSearchLaunch and
+    TestSendMail.)"""
+
+    def test_a_job_s_email_txt_is_not_served(self):
+        _job_folder(os.path.join(self.data, "Results", "job1_ABC"), {
+            "email.txt": "someone@example.org\nhttp://127.0.0.1:8080/load?job=job1_ABC\n",
+            "job1_ABC.targets.txt": "chr1\t42\n"})
+        client = rp.app.server.test_client()
+        served = client.get("/Results/job1_ABC/job1_ABC.targets.txt")
+        self.assertEqual((served.status_code, served.data), (200, b"chr1\t42\n"))
+        # (in any case: a data folder on a disk that ignores case opens it by any)
+        for path in ("job1_ABC/email.txt", "job1_ABC/EMAIL.TXT", "job1_ABC/./email.txt",
+                     "job1_ABC//email.txt", "job1_ABC/x/../email.txt", "job1_ABC/email.txt/"):
+            with self.subTest(path=path):
+                got = client.get(f"/Results/{path}")
+                self.assertEqual(got.status_code, 404)
+                self.assertNotIn(b"someone@example.org", got.data)
+
+
 SAMPLE_CMD = "S3;touch${IFS}MARK_s;"  # a VCF's sample name; Settings uploads one as it is
 # a value that, written into a query of a job's database, ended the text it was written in
 # and matched every row
@@ -1643,8 +1678,9 @@ class TestSendMail(unittest.TestCase):
     only. The login and the message are recorded, not sent.
 
     It sent each entry of the job's email.txt to its first line, any text with an '@' that
-    Submit took (a list of addresses, one with a line break): one plain address is a
-    recipient (the one Submit now takes: TestSearchLaunch)."""
+    Submit took (a list of addresses, one with a line break), and printed that address into
+    the search's log, which the job's status page and link show: one plain address is a
+    recipient (the one Submit now takes: TestSearchLaunch), and the log names none."""
 
     def setUp(self):
         self.data = tempfile.mkdtemp()
@@ -1716,6 +1752,22 @@ class TestSendMail(unittest.TestCase):
             with self.subTest(address=address):
                 self.assertFalse(send_mail.plain_address(address))
 
+    def test_the_log_names_no_recipient(self):
+        _logins, said = self.notify()
+        self.assertEqual([to for to, _body in self.sent], ["someone@example.org"])
+        self.assertIn("visit the following link http://127.0.0.1:8080/load?job=J to view",
+                      self.sent[0][1])
+        self.assertIn("EMAIL SENT", said)
+        self.assertNotIn("someone@example.org", said.lower())
+        # the mail server's refusal names the address (in any case): said without it
+        refused = smtplib.SMTPRecipientsRefused(
+            {"someone@example.org": (550, b"5.1.1 <Someone@Example.org>: Recipient rejected")})
+        with patch.object(send_mail, "_deliver", side_effect=refused):
+            _logins, said = self.notify()
+        self.assertIn("Email notification failed: ", said)
+        self.assertIn("550", said)
+        self.assertNotIn("someone@example.org", said.lower())
+
     def test_an_entry_that_is_not_one_plain_address_is_not_sent(self):
         # (as an earlier version wrote one, of any text with an '@')
         with open(os.path.join(self.job, "email.txt"), "w") as fh:
@@ -1725,6 +1777,7 @@ class TestSendMail(unittest.TestCase):
         _logins, said = self.notify()
         self.assertEqual([to for to, _body in self.sent], ["third@example.org"])
         self.assertIn("Email notification skipped: its address is not one plain address.", said)
+        self.assertNotIn("example.org", said)
 
 
 if __name__ == "__main__":

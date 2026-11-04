@@ -297,3 +297,13 @@ and the Settings, personal-assembly and History entries add tests to `test_setti
   address. The link is the address the job's status page shows (in local mode
   `http://127.0.0.1:8080`) with the job's id. Pre-existing. Covered by
   `PostProcess/test_web_shell_safety.py`.
+- **A job's link no longer gives the e-mail address its search was submitted with.** The
+  `/Results/` route serves the files of a job's folder to anyone with the job's link, and in
+  local mode, which is how CRISPRme runs by default, History lists every job. It served
+  `email.txt`, which holds the address (and that of each search sent to the job as identical to
+  it), and the search printed the address into its log (`MAIL: <address>`, then `EMAIL SENT to
+  <address>`), which the status page's Show full log shows. The route now serves no `email.txt`,
+  the search is not passed the address (its log says `MAIL: email.txt` for a notification,
+  `MAIL: _` for none), and what the notification prints names no address, not even in a mail
+  server's refusal. Notifications are sent as before; the log of a search run by an earlier
+  version keeps its line. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.

@@ -7,7 +7,9 @@ Structure of email.txt
     - Job submission date
 (an entry for each search sent to the job, separated by "--OTHEREMAIL--"). The search
 form writes it (pages/main_page.py change_url), each entry with one plain address
-(plain_address) and the link the server makes.
+(plain_address) and the link the server makes; the web app serves no email.txt
+(pages/results_page.py download_file), and what this prints, which goes into the
+search's log that its status page shows, names no recipient.
 
 Configuration (resolved in this order; first hit wins):
     1. <data_dir>/.email.json  -- written by Settings -> Email notifications
@@ -30,6 +32,7 @@ TODO: add run parameters to mail (job date + other params)
 """
 
 import os
+import re
 import sys
 import ssl
 import json
@@ -65,6 +68,12 @@ def plain_address(address) -> bool:
     except Exception:  # an address the e-mail library cannot read
         return False
     return not header.defects and [a.addr_spec for a in header.addresses] == [address]
+
+
+def _without(text: str, address: str) -> str:
+    """``text``, an error of the mail server or the e-mail library, with ``address`` left
+    out: what this prints goes into the search's log, which its status page shows."""
+    return re.sub(re.escape(address), "<recipient>", text, flags=re.IGNORECASE)
 
 
 def _load_config(output_folder: str) -> dict:
@@ -168,9 +177,9 @@ def send_mail() -> None:
                 + " to view the report."
             )
             _deliver(cfg, msg)
-            print(f"EMAIL SENT to {em[0]}")
+            print("EMAIL SENT")
         except Exception as exc:  # best-effort: log to stdout, keep going
-            print(f"Email notification to {em[0]} failed: {exc}")
+            print(f"Email notification failed: {_without(str(exc), em[0])}")
 
 
 def main():

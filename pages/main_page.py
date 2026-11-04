@@ -1819,12 +1819,15 @@ def change_url(
             _sm.write("per-sample" if fast_env == "0" else "population-level")
     except OSError:
         pass
-    # every argument quoted: the e-mail address is as the request sent it, and the genome's
-    # and PAM's names in the paths as Settings took them (quoting leaves the rest as is)
+    # every argument quoted: the genome's and PAM's names in the paths as Settings took
+    # them (quoting leaves the rest as is). The 17th says whether the search sends its
+    # notification, to the address of its email.txt: not the address, which the search's
+    # log would show (it prints the argument), and its status page and link with it
     args = [run_job_sh, genome, vcfs, guides_file, pam_file, annotation, samples_ids,
             max_bulges, mms, dna, rna, merge_default, result_dir, postprocess, 4,
-            current_working_directory, gencode, dest_email, be_start, be_stop, be_nt,
-            sorting_criteria_scoring, sorting_criteria, False, "PASS,.", "_", max_total_edits]
+            current_working_directory, gencode, EMAIL_FILE if send_email else "_", be_start,
+            be_stop, be_nt, sorting_criteria_scoring, sorting_criteria, False, "PASS,.", "_",
+            max_total_edits]
     cmd = (
         f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} "
         f"CRISPRME_REPORT_FULL={report_full_env} "

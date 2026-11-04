@@ -30,6 +30,7 @@ TODO: complete doc string with missing info --> read paper carefully
 """
 
 from .pages_utils import (
+    EMAIL_FILE,
     GUIDES_FILE,
     PAGE_SIZE,
     BARPLOT_LEN,
@@ -2996,6 +2997,12 @@ def download_file(path: str) -> flask.Response:
 
     if not isinstance(path, str):
         raise TypeError(f"Expected {str.__name__}, got {type(path).__name__}")
+    # a job's email.txt holds the address its notification goes to, which only the
+    # search reads (pages/send_mail.py): anyone with the job's link read it here. The name
+    # the path leads to, normalised as send_from_directory normalises it, in any case (a
+    # data folder on a disk that ignores case opens the file by any)
+    if os.path.basename(os.path.normpath(path)).casefold() == EMAIL_FILE:
+        flask.abort(404)
     # print(current_working_directory)
     # print('test', path)
     return flask.send_from_directory(
