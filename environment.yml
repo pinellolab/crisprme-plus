@@ -66,11 +66,15 @@ dependencies:
                                    # empty content under React 16, no console error.
                                    # Pin to the last React-16-compatible 1.x release.
   - dash-daq
-  - flask
-  - flask-caching
-  - flask-compress
+  # flask, flask-caching, flask-compress, werkzeug and cachelib: pinned as in the
+  # Dockerfile and the Bioconda recipe. Unpinned, they drifted, and a newer flask-caching
+  # crashed the web app at import (the Dockerfile's note)
+  - flask=3.1.3
+  - flask-caching=2.4.1
+  - flask-compress=1.24
   - gunicorn
-  - werkzeug
+  - werkzeug=3.1.8
+  - cachelib=0.17.0
   # --- build toolchain to compile the CRISPRitz C++ binaries (OpenMP-enabled)
   - cxx-compiler
   - make

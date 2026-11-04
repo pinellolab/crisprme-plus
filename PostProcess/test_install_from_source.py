@@ -16,6 +16,7 @@ changes only the script or the .gitignore still runs this module in CI.
 import ast
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -275,6 +276,60 @@ class TheVersionSweepComparesLikeWithLike(unittest.TestCase):
                 self.assertRegex(changed[0][0], r"^# CRISPRme\+ \d+\.\d+\.\d+ — ")
                 self.assertEqual(changed[0][1],
                                  re.sub(r"\d+\.\d+\.\d+", "9.10.11", changed[0][0], count=1))
+
+
+class TheEnvironmentPinsWhatTheImagePins(unittest.TestCase):
+    """environment.yml, the environment this script installs into, says it mirrors the
+    dependency set validated in the Dockerfile, but left flask, flask-caching,
+    flask-compress and werkzeug unpinned, and cachelib out, all of which the Dockerfile
+    (and the Bioconda recipe) pins: unpinned, they had drifted once, and a newer
+    flask-caching crashed the web app at import. Solved for linux-64 on 2026-11-03, it took
+    flask-caching 2.5.1, flask-compress 1.26 and werkzeug 3.1.9, a set no image ran. Every
+    package whose version the Dockerfile's install of the main env constrains,
+    environment.yml constrains alike."""
+
+    SPEC = re.compile(r"([A-Za-z0-9_.-]+)([=<>!].*)?")
+
+    @staticmethod
+    def dockerfile_specs():
+        """The packages of the Dockerfile's `micromamba install ... -n base`, as given."""
+        lines = (REPO / "Dockerfile").read_text(encoding="utf-8").splitlines()
+        start = next(i for i, ln in enumerate(lines) if ln.startswith("RUN micromamba install"))
+        run = []
+        for ln in lines[start:]:
+            run.append(ln.rstrip("\\").strip())
+            if not ln.endswith("\\"):
+                break
+        words = shlex.split(" ".join(run).split("&&")[0])[3:]  # (after RUN micromamba install)
+        specs, i = [], 0
+        while i < len(words):
+            if words[i] in ("-n", "-c"):
+                i += 2
+                continue
+            if not words[i].startswith("-"):
+                specs.append(words[i])
+            i += 1
+        return specs
+
+    @staticmethod
+    def environment_specs():
+        """The packages of environment.yml's dependencies, as given."""
+        text = (REPO / "environment.yml").read_text(encoding="utf-8")
+        return [m.group(1) for ln in text.split("\ndependencies:\n", 1)[1].splitlines()
+                if (m := re.fullmatch(r"\s+- (\S+)\s*", ln.split("#")[0]))]
+
+    def test_the_scan_reads_the_dockerfiles_install(self):
+        specs = self.dockerfile_specs()
+        self.assertIn("python=3.11", specs)
+        self.assertIn("cachelib=0.17.0", specs)
+        self.assertIn("gunicorn", specs)
+
+    def test_every_version_the_dockerfile_constrains_environment_yml_constrains_alike(self):
+        env = {self.SPEC.fullmatch(s).group(1): s for s in self.environment_specs()}
+        pinned = [s for s in self.dockerfile_specs() if self.SPEC.fullmatch(s).group(2)]
+        self.assertGreaterEqual(len(pinned), 13)
+        self.assertEqual([s for s in pinned if env.get(self.SPEC.fullmatch(s).group(1)) != s],
+                         [], "environment.yml constrains these otherwise than the Dockerfile")
 
 
 if __name__ == "__main__":
