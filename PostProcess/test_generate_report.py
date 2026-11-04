@@ -1067,14 +1067,14 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_a_population_level_search_without_the_tiers_says_so_too(self):
         """A population-level search of an index without the dict-less tiers reports the AF
-        its VCF gives as well (both modes decode the classic dictionaries), but complete-search
-        recorded such datasets for a per-sample search only, so its report said AC/AN over the
-        panel (the Allele-frequency basis row, the MAF note); and its Search mode row, as the
-        banner, the legend's MAF and Observed entries and the Section-6 caption said that
-        --per-sample gives CONFIRMED cis phasing, the exact joint AF and the true cis
-        carriers, which it does not give there. The search now records them in either mode,
-        and each text says what holds for them; without the record, as with the tiers, each
-        is as it was, byte for byte."""
+        its VCF gives as well (both modes decode the classic dictionaries), but its report
+        said AC/AN over the panel all the same (the Allele-frequency basis row, the MAF note),
+        as these texts did whatever the index; and its Search mode row, as the banner, the
+        legend's MAF and Observed entries and the Section-6 caption said that --per-sample
+        gives CONFIRMED cis phasing, the exact joint AF and the true cis carriers, which it
+        does not give there. complete-search now records such datasets in either mode, and
+        each text says what holds for them; without the record, as with the tiers, each is
+        as it was, byte for byte."""
         self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
         gr._PER_SAMPLE = False  # (build_report sets it from .search_mode)
         base = {"datasets": "hg38_1000G", "mm": "4", "bdna": 1, "brna": 1, "max_edits": "6",
