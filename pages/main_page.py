@@ -264,6 +264,23 @@ def _ensure_samplesid(genome_selected: str, vcf_folder: str) -> None:
             pass
 
 
+def _samplesid_makeable(genome_selected: str, vcf_folder: str) -> bool:
+    """Whether _ensure_samplesid would make ``samplesIDs/<vcf_folder>.samplesID.txt``: it
+    is missing, and the lists of the datasets the merged dataset joins are all there. Its
+    test, which writes nothing: the bulge note asks it, and only Submit writes the list.
+    _ensure_samplesid keeps its own copy of the test: test_samplesid_emit runs that function
+    alone, from its source (crisprme_hf mirrors it too)."""
+    sdir = os.path.join(current_working_directory, "samplesIDs")
+    if os.path.isfile(os.path.join(sdir, f"{vcf_folder}.samplesID.txt")):
+        return False
+    gpref = genome_selected[:-4] if genome_selected.endswith("_ref") else genome_selected
+    dataset = vcf_folder[len(gpref) + 1:] if vcf_folder.startswith(gpref + "_") else vcf_folder
+    return "_" in dataset and all(
+        os.path.isfile(os.path.join(sdir, f"{gpref}_{c}.samplesID.txt"))
+        for c in dataset.split("_")
+    )
+
+
 # MAX_BULGES (the app-wide bulge ceiling; usable bulges = MAX_BULGES - 1) is single-
 # sourced in pages_utils so the dropdown ceiling here and reference_bulge_capacity's
 # buildable-cap agree. Imported above.
@@ -2703,19 +2720,24 @@ def _unsplit_vcf_refusal(genome: str, pam: str, panel: str) -> Optional[str]:
     )
 
 
-def _dataset_refusals(genome: str, pam: str, panel: str) -> List[str]:
+def _dataset_refusals(genome: str, pam: str, panel: str,
+                      make_list: bool = True) -> List[str]:
     """What Submit says (check_input) of a search of the variant dataset ``panel``,
     whatever the bulges, and so the bulge note too: that it has no sample list
     (samplesid_problem), once the combined list a merged panel synthesizes is made
     (_ensure_samplesid; the folder and that list are change_url's), and, unless it is
     sites-only, which no build makes searchable (the first says so), that the search
     cannot prepare its variant genome from a single multi-chromosome VCF
-    (_unsplit_vcf_refusal). [] when Submit does not refuse it."""
+    (_unsplit_vcf_refusal). [] when Submit does not refuse it. The note passes
+    ``make_list`` False: it writes nothing, and takes a list that Submit makes
+    (_samplesid_makeable) as made."""
     genome = genome.replace(" ", "_")
     folder = _resolve_vcf_folder(genome, panel)
-    _ensure_samplesid(genome, folder)
-    found = [samplesid_problem(folder, panel)]
-    if pam and not _sites_only_refusal(genome, panel):
+    if make_list:
+        _ensure_samplesid(genome, folder)
+    made = not make_list and _samplesid_makeable(genome, folder)
+    found = [] if made else [samplesid_problem(folder, panel)]
+    if pam and (made or not _sites_only_refusal(genome, panel)):
         found.append(_unsplit_vcf_refusal(genome, pam, panel))
     return [why for why in found if why]
 
@@ -2736,9 +2758,10 @@ def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
     if not genome or not pam:
         return ""
     # a dataset whose search Submit refuses whatever the bulges: the note says what Submit
-    # says (check_input), and offers no search of it and no build that would not help
+    # says (check_input), and offers no search of it and no build that would not help. It
+    # makes no sample list, which only Submit does
     for panel in _selected_panels(variant_choice):
-        why = _dataset_refusals(genome, pam, panel)
+        why = _dataset_refusals(genome, pam, panel, make_list=False)
         if why:
             return " ".join(why)
     maxb = _bulge_cap(genome, pam, variant_choice)

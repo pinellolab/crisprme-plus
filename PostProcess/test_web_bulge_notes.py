@@ -29,6 +29,8 @@ its search: one whose VCFs have no list yet, and one whose index stays after its
 dataset was removed in Settings, which takes the list with it. For that one Submit said
 to download its index again, which a locally built index cannot be, and which Settings
 does not do for an index that is installed: it now says to remove a downloaded one first.
+The note makes no list to say so: a merged panel's, which Submit makes from the lists of
+its datasets, it takes as made when they are all there.
 
 Submit itself failed with a server error, and the page did nothing, when the genome or
 PAM selected was not installed (TestSubmitWithoutAGenomeOrPAM), as after Load Example on
@@ -411,6 +413,50 @@ class TestRefusedDatasets(_Install):
             self.assertEqual(sp.add_index_hf(1, name)[0], "job")
         launch.assert_called_once_with(
             ["download", "--what", "index", "--index-name", name], "Download index")
+
+    def test_the_note_writes_no_sample_list(self):
+        # Submit (check_input, then change_url) makes a merged panel's list from those of its
+        # datasets. The note made it too, drawn as the page loads with the panel selected,
+        # with no Submit: it writes nothing now, and says what Submit says, whether Submit
+        # can make the list or not
+        sdir = os.path.join(self.tmp, "samplesIDs")
+
+        def lists():
+            found = {}
+            for name in os.listdir(sdir):
+                with open(os.path.join(sdir, name)) as fh:
+                    found[name] = fh.read()
+            return found
+
+        self.index("NRG_2_hg38+hg38_1000G_HGDP")
+        self.sample_list("1000G")
+        # the list of one of its datasets missing: Submit cannot make it, and refuses
+        before = lists()
+        note = self.note("1000G_HGDP", 1, 1)
+        self.assertEqual(lists(), before)
+        self.assertEqual(note, pu.samplesid_problem("hg38_1000G_HGDP", "1000G_HGDP"))
+        self.assertEqual(self.submit("1000G_HGDP", 1, 1), (False, [note]))
+        self.assertEqual(lists(), before)
+        # both there: Submit makes it and runs the search, and the note offers it
+        self.sample_list("HGDP")
+        before = lists()
+        note = self.note("1000G_HGDP", 1, 1)
+        self.assertEqual(lists(), before)
+        self.assertEqual(note, "Up to 1 DNA/RNA bulge(s) available.")
+        self.assertEqual(self.submit("1000G_HGDP", 1, 1), (True, []))
+        self.assertEqual(set(lists()) - set(before), {"hg38_1000G_HGDP.samplesID.txt"})
+        self.assertEqual(self.note("1000G_HGDP", 1, 1), note)
+        # with the list Submit makes, the rest is what Submit says of the dataset's VCFs: of
+        # one named as a merged panel, with a single sites-only multi-chromosome file and no
+        # index for this PAM, that its variant genome cannot be prepared from that file
+        self.dataset("A_B", ["ab.vcf.gz"], samples=(), sample_list=False)
+        self.sample_list("A")
+        self.sample_list("B")
+        before = lists()
+        note = self.note("A_B")
+        self.assertEqual(lists(), before)
+        self.assertIn(self.SINGLE, note)
+        self.assertEqual(self.submit("A_B"), (False, [note]))
 
 
 class _Form:
