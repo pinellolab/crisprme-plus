@@ -56,8 +56,10 @@ Confirmed resolver facts (`PostProcess/crisprme_hf.py`):
 pam-less index (e.g. `NNN_3`) searched with any 3-nt PAM has NO mismatch, so old code handles it as
 an ordinary NNN index — it simply emits ALL 3-nt PAMs (per-PAM narrowing is what `--prune-pam`
 adds). A width-3 NNN index is therefore format- AND width-safe for old code and **ships in the
-standard repo**: CRISPRme 2.8.0 can download and search it with no update (as an all-PAM / broadest
-survey — the top of the NGG->NRR->NNN ladder). Only **variable/longer-flank** indexes (width > 3,
+standard repo**: CRISPRme 2.8.0 could download and search the first such archive (2026-10-25) with no
+update (as an all-PAM / broadest survey — the top of the NGG->NRR->NNN ladder). The rebuilt archives
+(2026-10-30) keep the targets with an `N` in their flank, and a 2.8.0 search of them can fail or
+report malformed rows: use them with 2.8.1 or later. Only **variable/longer-flank** indexes (width > 3,
 e.g. `NNNNNNNN_3` with an 8-nt flank) are unsafe for old code — a 3-nt search is a width mismatch
 and old tools lack the guard — so those go in a **SEPARATE HF repo** (proposed
 `pinellolab/crisprme-indexes-pamless`; 2.8.1 publishes them in

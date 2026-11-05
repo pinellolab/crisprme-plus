@@ -3428,7 +3428,7 @@ and the `release-crisprme` skill.
   Direct URL has the server fetch any `http(s)` address. The online version of the web app
   disables both, with every other change Settings makes.
 
-## [2.8.0] - 2026-10-23
+## [2.8.0] - 2026-10-24
 
 ### Added
 - **Reference-sequence score columns + aligned spacer in the curated tables.** The top-1000 tables and

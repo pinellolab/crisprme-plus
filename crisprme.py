@@ -470,7 +470,7 @@ def print_help_complete_search() -> None:
         "A,C) [OPTIONAL]\n"
         "\t--annotation, specify BED files with genome annotations (e.g., "
         "regulatory elements, enhancers). The fourth column must contain the "
-        "annotation name. The input BED files must be compressed using bgzip "
+        "annotation name. The input BED files may be plain or compressed with bgzip "
         "[OPTIONAL]\n"
         "\t(COSMIC cancer annotations are EXCLUDED by default because their "
         "commercial use requires a licence, Genome Research Ltd / Wellcome Sanger; "
@@ -485,7 +485,7 @@ def print_help_complete_search() -> None:
         "samplesIDs/<dataset>.samplesID.txt is used without it, and with none the by-sample "
         "and population tables stay empty]\n"
         "\t--gene_annotation, specify gene annotation (e.g., GENCODE) to find "
-        "nearest gene for each target (must be bgzip-compressed) [OPTIONAL]\n"
+        "nearest gene for each target (plain or bgzip-compressed BED) [OPTIONAL]\n"
         "\t--mm, number of mismatches allowed in the search [REQUIRED]\n"
         "\t--bDNA, number of DNA bulges allowed in the search [OPTIONAL]\n"
         "\t--bRNA, number of RNA bulges allowed in the search [OPTIONAL]\n"
@@ -2797,8 +2797,8 @@ def complete_search() -> None:
     # C++ engine with a heap-corruption abort) was fixed in CRISPRitz, and CRISPRme+
     # hard-pins a CRISPRitz >= 2.9.1 on every install surface (Docker and
     # install_from_source.sh build the tag in crispritz_ref / CRISPRITZ_REF, and the
-    # 2.8.1 Bioconda recipe pins crispritz >=2.9.1). The pin moves with each release,
-    # so this says ">=" and not an exact version.
+    # 2.8.1 Bioconda recipe pins crispritz >=2.9.1,<2.9.2). The lower bound moves with each
+    # release, so this says ">=" and not an exact version.
     # No supported install can therefore run a vulnerable engine, so the old runtime
     # warning here was removed: it fired on the DEFAULT PAM (NRG is odd-length and
     # carries the partially-degenerate "R"), crying wolf on essentially every default
