@@ -341,8 +341,8 @@ examined **6,151,531 sites**, which split as:
 
 Because the scorers are sequence-based (§1), **both the reference and the variant-allele
 ≤1-gap sites are calibrated**; only the ≥2-gap sites (88% of the enumeration) are not. The
-rows below therefore cover the full ≤1-gap off-target set (5,671 at CFD ≥0.2 = 217 at ≥0.5
-+ 5,454 at 0.2–0.5), **reference and variant-allele together**. What they do *not* resolve
+rows below therefore cover the full ≤1-gap off-target set (5,671 at CFD ≥0.2 = 217 at ≥0.5 +
+5,454 at 0.2–0.5), **reference and variant-allele together**. What they do *not* resolve
 is per-sample **carrier incidence**: which of the 4,091 haplotypes carries each variant
 site (a separate genotype axis, §1). The 2 perfect matches mean **no single unambiguous
 on-target**.

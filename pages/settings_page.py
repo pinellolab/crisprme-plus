@@ -9,11 +9,13 @@ Large data (multi-GB genomes/VCFs) never goes through an in-memory browser
 upload: it is fetched server-side (UCSC by assembly, HuggingFace by name, an
 explicit URL, or an already-staged server path). Only small files (annotations)
 use a direct upload. Long operations run as detached jobs on a dedicated
-single-slot executor so they never starve the two search slots, and their
-progress is polled from the browser exactly like a search.
+single-slot executor so they never starve the search slots (1-16, 2 by default),
+and their progress is polled from the browser exactly like a search.
 
 All mutations are local-mode only (disabled when app.ONLINE is True). Publishing
-an index to the shared HuggingFace repo is maintainer-only (app.MAINTAINER_MODE).
+an index to the shared HuggingFace repo is done from the command line
+(crisprme.py publish-index); in maintainer mode (app.MAINTAINER_MODE) the page
+says so.
 """
 
 from app import (
@@ -49,6 +51,9 @@ from .pages_utils import (
     ASSEMBLIES_DIR,
 )
 import personal_assembly
+import assembly_reconcile  # (PostProcess/, as personal_assembly)
+import genome_in_use  # (PostProcess/, as personal_assembly)
+import safe_tar  # (PostProcess/, as personal_assembly)
 
 from dash import Input, Output, State, html, dcc, no_update
 from dash.exceptions import PreventUpdate
@@ -58,13 +63,17 @@ from flask import request
 from typing import List, Optional
 import subprocess
 import tarfile
+import tempfile
 import string
 import random
+import re
 import base64
+import hashlib
 import shutil
 import gzip
 import os
 import sys
+import threading
 import time
 
 SETTINGS_DIR = "Settings"
@@ -91,6 +100,174 @@ def _uploads_dir() -> str:
     return d
 
 
+def _unsafe_tar_member(tar: tarfile.TarFile, dest_dir: str) -> Optional[str]:
+    """Why an uploaded archive must not be extracted into ``dest_dir``, else None.
+
+    Every member is checked before anything is written, so a bad archive is
+    refused whole: an absolute name or any ``..`` component; anything but a
+    regular file or directory (a symlink or hardlink member can redirect a later
+    write out of dest_dir, and devices/FIFOs have no place in a genome); and any
+    member whose real path leaves dest_dir (e.g. through a symlink already in
+    it). The checks personal_assembly.import_archive makes, minus its single
+    top-folder rule (a UCSC chromFa archive holds many top-level chr*.fa). Does
+    not rely on tarfile's ``filter=``, which is absent before Python 3.11.4.
+    PostProcess/utils.py's _unsafe_tar_member is its twin for downloaded archives
+    (kept separate because the light-env tests AST-extract this page); change both.
+    """
+    dest_real = os.path.realpath(dest_dir)
+    for m in tar.getmembers():
+        if m.name.startswith("/") or ".." in m.name.split("/"):
+            return f"unsafe archive entry {m.name!r} (absolute or '..' path)"
+        if not (m.isreg() or m.isdir()):
+            return (
+                f"unsupported archive entry {m.name!r} "
+                "(only regular files and directories are allowed)"
+            )
+        target = os.path.realpath(os.path.join(dest_dir, m.name))
+        if target != dest_real and not target.startswith(dest_real + os.sep):
+            return f"archive member escapes the extraction directory: {m.name!r}"
+    return None
+
+
+def _genome_upload_assembly(name: str) -> str:
+    """The genome an upload of the file ``name`` installs: its name less the FASTA or
+    archive extension (Genomes/<assembly>/)."""
+    for ext in (".chromFa.tar.gz", ".fa.gz", ".fasta.gz", ".tar.gz", ".fa", ".fasta"):
+        if name.endswith(ext):
+            return name[: -len(ext)]
+    return name
+
+
+def _built_on_genome(assembly: str) -> List[str]:
+    """What is installed built on a genome named ``assembly``, as paths under the data
+    folder: its indexes (genome_library/<PAM>_<N>_<assembly>[+<dataset>], with their
+    _INDELS companions) and its variant genomes (Genomes/<assembly>+<dataset>[_INDELS]).
+    A search, and a build of an index, take each one that is there as it is
+    (genome_in_use, which a Direct URL download of a genome checks too)."""
+    return genome_in_use.built_on(current_working_directory, assembly)
+
+
+def _genome_upload_problem(assembly: str, how: str = "upload") -> Optional[str]:
+    """Why a genome upload (``how`` "upload") or a Direct URL download ("download") must
+    not install ``assembly``: indexes or variant genomes built on a genome of that name are
+    installed. They hold that genome's sequences and positions, and every search and build
+    of the new one would go on using them: a genome uploaded again with its sequences
+    swapped was searched at the old positions, and one split on upload, at chr1 for its
+    chr2 sites, by the index of the one FASTA it was before (final review round 1, F2). None
+    when nothing is built on it."""
+    return genome_in_use.replace_problem(current_working_directory, assembly, how)
+
+
+def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir: str) -> None:
+    """Puts the genome of a finished upload into ``dest_dir`` (Genomes/<assembly>/) as
+    a Direct URL download does (utils.download_reference_genome): every FASTA of the
+    archive moved to the top of the folder (a UCSC chromFa.tar.gz holds them in
+    chroms/), each file holding several sequences split into one file a sequence, and
+    one of a single sequence named after it (genome_layout.py: CRISPRme takes each
+    FASTA file for the chromosome it is named after, and indexes only those at the top
+    of the folder; an upload of hg38_chr22.fa holding >chr22 went in as <assembly>.fa,
+    and every search of it found its off-targets and dropped them all, round 3 review
+    F2). A sequence that would go in under the name of another file is refused. Each
+    goes in as a .fa file, a .fasta one renamed (chr1.fasta as chr1.fa), which that
+    download does not do: index-genome indexes the .fa files only, and a search lists
+    a genome's chromosomes as its *.fa (round 2 review, R2-1). It is built in a hidden
+    folder of Genomes/, which no genome listing shows, and replaces a genome of the
+    same name only once whole. A .tar.gz has had its members vetted
+    (_unsafe_tar_member), and nothing is built on a genome of this name
+    (_genome_upload_problem); its files go in with safe modes and the web app's user as
+    owner (safe_tar), not with the modes and owners the archive gives them."""
+    from genome_layout import split_multi_record_fastas
+
+    genomes = os.path.dirname(dest_dir)
+    os.makedirs(genomes, exist_ok=True)
+    stage = tempfile.mkdtemp(prefix=f".upload_{assembly}_", dir=genomes)
+    try:
+        unpacked = os.path.join(stage, "unpacked")
+        os.makedirs(unpacked)
+        if name.endswith((".tar.gz", ".tgz")):
+            with gzip.open(part_path, "rb") as fin, tarfile.open(fileobj=fin, mode="r") as tar:
+                safe_tar.extract(tar, unpacked)
+        elif name.endswith(".gz"):
+            with gzip.open(part_path, "rb") as fin, open(
+                os.path.join(unpacked, f"{assembly}.fa"), "wb"
+            ) as fout:
+                shutil.copyfileobj(fin, fout)
+        else:
+            os.replace(part_path, os.path.join(unpacked, f"{assembly}.fa"))
+        # not a hidden file: macOS tar puts each file's extended attributes in a
+        # ._<name> member beside it (._chr1.fa), which every search read as a chromosome
+        # and failed on (a search lists a genome's chromosomes as every .fa file there)
+        fastas = sorted(
+            os.path.join(root, f)
+            for root, _dirs, files in os.walk(unpacked)
+            for f in files
+            if f.endswith((".fa", ".fasta")) and not f.startswith(".")
+        )
+        if not fastas:
+            raise ValueError(f"no .fa or .fasta file in {name}")
+        seen = {}  # the name each goes in under -> the file
+        for fa in fastas:
+            fname = os.path.splitext(os.path.basename(fa))[0] + ".fa"
+            other = seen.setdefault(fname, fa)
+            if other != fa:  # (a/chr1.fa and b/chr1.fa, or chr1.fa and chr1.fasta)
+                raise ValueError(
+                    f"{name} holds two FASTA files that would both be installed as "
+                    f"{fname} ({os.path.relpath(other, unpacked)}, "
+                    f"{os.path.relpath(fa, unpacked)})"
+                )
+        built = os.path.join(stage, assembly)
+        os.makedirs(built)
+        for fname, fa in seen.items():
+            os.rename(fa, os.path.join(built, fname))
+        try:
+            split_multi_record_fastas(built)
+        except FileExistsError as e:  # (two sequences of one name; the message has no
+            raise ValueError(str(e).replace(built + os.sep, "")) from None  # stage path)
+        # the genome it replaces is moved aside, never written through (a link to a
+        # shared copy is only unlinked), and back if this one cannot go in
+        old, link = os.path.join(stage, "replaced"), None
+        if os.path.islink(dest_dir):
+            link = os.readlink(dest_dir)
+            os.unlink(dest_dir)
+        elif os.path.isdir(dest_dir):
+            os.rename(dest_dir, old)
+        try:
+            os.rename(built, dest_dir)
+        except OSError:
+            if not os.path.lexists(dest_dir):
+                if link is not None:
+                    os.symlink(link, dest_dir)
+                elif os.path.isdir(old):
+                    os.rename(old, dest_dir)
+            raise
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def _vcf_upload_problem(name: str, dataset: str) -> Optional[str]:
+    """Why the file ``name`` must not be uploaded into the VCF dataset ``dataset``, else
+    None: it is not a bgzip-compressed VCF or its index (``.vcf.gz``, ``.vcf.gz.tbi``,
+    ``.vcf.gz.csi``), which is all a VCF dataset holds; or the dataset was registered as
+    a server folder (add_vcf links VCFs/<dataset> to it), or its folder's real path
+    leaves VCFs/ in another way. A registered folder is read where it is and never
+    written: an upload went in through the link, into any folder a request had
+    registered, under any name, replacing a file of that name."""
+    if not name.endswith((".vcf.gz", ".vcf.gz.tbi", ".vcf.gz.csi")):
+        return (
+            f"invalid file name {name!r}: a VCF dataset takes bgzip-compressed VCF files "
+            "(.vcf.gz) and their index (.vcf.gz.tbi or .vcf.gz.csi)"
+        )
+    vcfs = os.path.join(current_working_directory, "VCFs")
+    dest = os.path.join(vcfs, dataset)
+    if os.path.islink(dest) or os.path.dirname(os.path.realpath(dest)) != os.path.realpath(vcfs):
+        return (
+            f"The VCF dataset {dataset!r} was registered from a folder on the server: its "
+            "files are read there, and nothing is uploaded into it. Copy the file into that "
+            "folder, or upload it into a VCF dataset of another name."
+        )
+    return None
+
+
 def _finalize_upload(
     target: str, part_path: str, name: str, dataset: str, genome: str = ""
 ) -> str:
@@ -107,37 +284,39 @@ def _finalize_upload(
         os.replace(part_path, os.path.join(dest_dir, name))
         return name
     if target == "genome":
-        assembly = name
-        for ext in (".chromFa.tar.gz", ".fa.gz", ".fasta.gz", ".tar.gz", ".fa", ".fasta"):
-            if assembly.endswith(ext):
-                assembly = assembly[: -len(ext)]
-                break
-        err = _validate_name(assembly)
+        assembly = _genome_upload_assembly(name)
+        err = _validate_name(assembly) or _genome_upload_problem(assembly)
         if err:
             raise ValueError(err)
         dest_dir = os.path.join(current_working_directory, "Genomes", assembly)
-        os.makedirs(dest_dir, exist_ok=True)
         if name.endswith((".tar.gz", ".tgz")):
             with gzip.open(part_path, "rb") as fin, tarfile.open(fileobj=fin, mode="r") as tar:
-                tar.extractall(dest_dir)
+                # the member names are client data: vet them all first, so a bad
+                # archive is refused before anything (dest_dir too) is written
+                err = _unsafe_tar_member(tar, dest_dir)
+                if err:
+                    raise ValueError(err)
+        _install_uploaded_genome(part_path, name, assembly, dest_dir)
+        if os.path.exists(part_path):
             os.remove(part_path)
-        elif name.endswith(".gz"):
-            with gzip.open(part_path, "rb") as fin, open(
-                os.path.join(dest_dir, f"{assembly}.fa"), "wb"
-            ) as fout:
-                shutil.copyfileobj(fin, fout)
-            os.remove(part_path)
-        else:
-            os.replace(part_path, os.path.join(dest_dir, f"{assembly}.fa"))
         return assembly
     if target == "vcf":
-        err = _validate_name(dataset)
+        # (the last chunk's names: each chunk sends its own)
+        err = _validate_name(dataset) or _vcf_upload_problem(name, dataset)
         if err:
             raise ValueError(err)
         dest_dir = os.path.join(current_working_directory, "VCFs", dataset)
         os.makedirs(dest_dir, exist_ok=True)
+        # and once the folder is there: one registered under its name meanwhile is a link
+        err = _vcf_upload_problem(name, dataset)
+        if err:
+            raise ValueError(err)
         os.replace(part_path, os.path.join(dest_dir, name))
         _write_vcf_marker(dataset, genome)  # record the reference genome
+        try:
+            _write_dataset_samplesid(dataset)
+        except OSError:
+            pass  # a build of the dataset writes it, and says so when it cannot
         return dataset
     if target == "chain":
         if not name.endswith((".chain", ".chain.gz")):
@@ -160,7 +339,8 @@ def _finalize_upload(
         # Assemblies/<individual>/ and validates before publishing).
         ext = next((s for s in (".tar.gz", ".tgz", ".zip") if name.endswith(s)), None)
         if ext is None:
-            raise ValueError("personal-assembly bundle must be a .zip or .tar.gz/.tgz archive")
+            raise personal_assembly.BundleError(
+                "personal-assembly bundle must be a .zip or .tar.gz/.tgz archive")
         scratch = part_path + ext  # import_archive picks zip vs tar by extension
         os.replace(part_path, scratch)
         try:
@@ -187,12 +367,40 @@ def _settings_upload_chunk():
         return ("bad chunk headers", 400)
     if target not in ("genome", "vcf", "annotation", "chain", "chromalias", "assembly-bundle") or not name or ".." in name:
         return ("bad target or file name", 400)
+    # a file goes in under its name (a genome under its name less the extension), but a
+    # personal-assembly bundle, whose name only says how it is packed
+    unusable = _unusable_in_shell(name) if target != "assembly-bundle" else None
+    if unusable:
+        return (f"invalid file name {name!r}: it {unusable}", 400)
     # validate the destination name on the FIRST chunk so a bad name fails now,
     # not after a multi-GB upload has already streamed to disk
+    if idx == 0 and target == "genome":
+        assembly = _genome_upload_assembly(name)
+        verr = _validate_name(assembly)
+        if verr:
+            return (f"invalid genome name: {verr}", 400)
+        # nor under the name of a genome that installed indexes were built on
+        verr = _genome_upload_problem(assembly)
+        if verr:
+            return (verr, 400)
     if idx == 0 and target == "vcf":
         verr = _validate_name(dataset)
         if verr:
             return (f"invalid dataset name: {verr}", 400)
+        # nor a file a VCF dataset does not hold, nor into a server folder registered as one
+        verr = _vcf_upload_problem(name, dataset)
+        if verr:
+            return (verr, 400)
+        # the reference genome the dataset is called against: the search form offers
+        # the dataset for that genome only, so one the dataset has no marker for yet
+        # must be named (the card's dropdown), and must be installed
+        ref = genome.replace(" ", "_")
+        if ref:
+            if (ref.startswith(".") or os.path.basename(ref) != ref or not os.path.isdir(
+                    os.path.join(current_working_directory, "Genomes", ref))):
+                return (f"reference genome {genome!r} is not installed", 400)
+        elif not os.path.isfile(os.path.join(current_working_directory, "VCFs", f".{dataset}.refgenome")):
+            return ("select the reference genome this VCF is called against first", 400)
     part = os.path.join(_uploads_dir(), name + ".part")
     with open(part, "wb" if idx == 0 else "ab") as fout:
         fout.write(request.get_data())
@@ -209,6 +417,10 @@ def _settings_upload_chunk():
         except Exception as e:
             if os.path.exists(part):
                 os.remove(part)
+            if isinstance(e, personal_assembly.BundleError):
+                # a bundle refused, saying why (its packing, its members, what its
+                # metadata.json names): the client's to fix, as the refusals above
+                return (str(e), 400)
             return (f"finalize failed: {e}", 500)
         return (f"complete:{result}", 200)
     return ("chunk received", 200)
@@ -229,6 +441,28 @@ def _new_job_id(prefix: str = "set") -> str:
             return jid
 
 
+# Exactly the ids _new_job_id makes (its default "set" prefix is the only one in
+# use). Job ids come back from the browser as dcc.Store data, which a client can
+# set to anything, so _settings_jobdir checks them before any path is built.
+_JOB_ID_RE = re.compile(r"set_[A-Z0-9]{10}")
+
+
+def _settings_jobdir(job_id) -> Optional[str]:
+    """``<cwd>/Settings/<job_id>`` for an id `_new_job_id` could have made, else
+    None. Refuses a traversal (``../x``), an absolute path, a non-string, and a
+    job dir whose real path leaves Settings/ (a symlink), so the callbacks that
+    read a job's logs or re-run its cmd.json (Retry, shell=True) never act on a
+    directory outside Settings/."""
+    if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
+        return None
+    root = os.path.realpath(os.path.join(current_working_directory, SETTINGS_DIR))
+    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
+    real = os.path.realpath(jobdir)
+    if real == root or os.path.commonpath([root, real]) != root:
+        return None
+    return jobdir
+
+
 def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
     """Run a data-management shell command, recording stage markers.
 
@@ -245,8 +479,13 @@ def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
         # submit time; the single-slot executor may hold it queued for a while).
         with open(logtxt, "a") as lt:
             lt.write(f"{stage}\tStart\n")
+        # Point the download's progress emitter (crisprme_hf._ProgressReporter) at
+        # this job's progress.json so refresh_settings_job can render a real % bar.
+        # Harmless for jobs that don't emit progress (they simply never write it).
+        env = dict(os.environ)
+        env["CRISPRME_PROGRESS_FILE"] = os.path.join(jobdir, "progress.json")
         with open(logverb, "w") as vout, open(logerr, "w") as eout:
-            proc = subprocess.Popen(cmd, shell=True, stdout=vout, stderr=eout)
+            proc = subprocess.Popen(cmd, shell=True, stdout=vout, stderr=eout, env=env)
             # heartbeat: bump log.txt's mtime every 60s while the subprocess runs
             # so refresh_settings_job's stale detector doesn't mistake a long,
             # output-quiet stage (e.g. a big extraction) for a dead worker.
@@ -283,6 +522,15 @@ def _launch_job_cmd(cmd: str, stage: str) -> str:
     # executor actually begins running it, so the banner can distinguish the two.
     with open(os.path.join(jobdir, "log.txt"), "w") as lt:
         lt.write(f"{stage}\tQueued\n")
+    # Persist the exact command + stage so a failed download can be RE-LAUNCHED
+    # verbatim from the web "Retry" button without the page having to reconstruct
+    # the argv (crisprme_hf resumes partial transfers, so a retry is cheap).
+    try:
+        import json
+        with open(os.path.join(jobdir, "cmd.json"), "w") as cf:
+            json.dump({"cmd": cmd, "stage": stage}, cf)
+    except OSError:
+        pass
     settings_executor.submit(_run_settings_job, cmd, jobdir, stage)
     return job_id
 
@@ -327,6 +575,32 @@ def _validate_name(name: str) -> Optional[str]:
             "Name must not contain spaces, '+', 'None', '..' or path separators "
             "(these break auto-discovery)."
         )
+    unusable = _unusable_in_shell(name)
+    if unusable:
+        return f"Name {unusable}."
+    return None
+
+
+def _unusable_in_shell(name: str) -> Optional[str]:
+    """Why ``name`` cannot name a folder or file of the data folder, else None: a
+    genome, a VCF dataset or a nuclease added on this page, an individual fetched from
+    HPRC, a file uploaded or downloaded here. CRISPRme takes such names into shell
+    commands as they are: a search's post-analysis a genome's, a dataset's and the PAM
+    file's (named after its nuclease), an index build a genome's and a dataset's, a
+    genome download its own and that of the file it fetches, where a character a shell
+    reads ran as a command, as the web app's user; and the search script reads a VCF
+    file's unquoted, where a blank split it. Refused as in a sequence's name
+    (genome_layout.py), and so are '*', '?' and '[', which make a name a shell pattern,
+    and any blank."""
+    from genome_layout import PATTERN_CHARS, UNUSABLE_ID_START, UNUSABLE_IN_ID
+
+    if (any(c in UNUSABLE_IN_ID + PATTERN_CHARS or c.isspace() for c in name)
+            or name.startswith(tuple(UNUSABLE_ID_START))):
+        return (
+            f"must not hold a blank or any of {' '.join(UNUSABLE_IN_ID + PATTERN_CHARS)}, "
+            f"nor start with {' or '.join(repr(c) for c in UNUSABLE_ID_START)}: CRISPRme "
+            f"takes it into shell commands"
+        )
     return None
 
 
@@ -365,6 +639,268 @@ def _error_tail(logerr_path: str, n: int = 3) -> str:
     return "  ".join((meaningful or lines)[-n:])
 
 
+# ---------------------------------------------------------------------------
+# Download progress (2.8.1): crisprme_hf writes <jobdir>/progress.json while a
+# download runs; refresh_settings_job renders it as a real dbc.Progress bar. The
+# file is absent on the current happy path / older code, so every reader here
+# degrades gracefully to the existing spinner.
+# ---------------------------------------------------------------------------
+# A progress file older than this (no update) is treated as stale -> fall back to
+# the spinner rather than showing a frozen bar.
+_PROGRESS_STALE_SECONDS = 120
+
+
+def _read_progress(jobdir: str) -> Optional[dict]:
+    """Parsed <jobdir>/progress.json, or None if absent / unreadable / stale."""
+    path = os.path.join(jobdir, "progress.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        import json
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    updated = data.get("updated")
+    if isinstance(updated, (int, float)) and (time.time() - updated) > _PROGRESS_STALE_SECONDS:
+        return None  # frozen -> let the stale/heartbeat logic take over
+    return data
+
+
+def _fmt_eta(seconds) -> str:
+    """'~N min left' / '~N sec left' for the progress line (…'' if unknown)."""
+    if not isinstance(seconds, (int, float)) or seconds <= 0:
+        return ""
+    if seconds < 90:
+        return f"~{int(seconds)} sec left"
+    return f"~{int(round(seconds / 60))} min left"
+
+
+def _render_progress_bar(stage: str, prog: dict):
+    """A dbc.Progress bar + 'X.X / Y.Y GB · ~N min left' + the phase label.
+
+    Falls back (returns None) if the payload has no usable total AND no bytes, so
+    the caller shows the plain spinner instead of an empty bar."""
+    try:
+        done = float(prog.get("bytes_done", 0) or 0)
+        total = float(prog.get("bytes_total", 0) or 0)
+        pct = float(prog.get("pct", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    phase = str(prog.get("phase") or stage)
+    detail = str(prog.get("detail") or "")
+    eta = _fmt_eta(prog.get("eta_seconds"))
+    if total > 0:
+        sizes = f"{_fmt_size(done)} / {_fmt_size(total)}"
+        bar = dbc.Progress(value=max(0, min(100, pct)), label=f"{pct:.0f}%",
+                           striped=True, animated=True, style={"height": "18px"})
+    elif done > 0:
+        # unknown total (size API offline): show bytes moved + an indeterminate bar
+        sizes = f"{_fmt_size(done)} downloaded"
+        bar = dbc.Progress(value=100, striped=True, animated=True,
+                           style={"height": "18px"})
+    else:
+        return None
+    line = "  ·  ".join([p for p in (sizes, eta) if p])
+    return html.Div(
+        [
+            html.Div(phase + (f" — {detail}" if detail else ""),
+                     style={"fontWeight": "bold", "fontSize": "0.9em"}),
+            bar,
+            html.Small(line, style={"color": "#367"}) if line else None,
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Failure relay (2.8.1 piece D): on a FAILED download, show a scrollable
+# full-log panel (log_error.txt + a verbose tail) plus a Retry button that
+# re-launches the same job — modelled on load_page.show_full_log.
+# ---------------------------------------------------------------------------
+def _full_job_log(jobdir: str, verbose_tail: int = 400) -> str:
+    """log_error.txt (full) + log_verbose.txt (tail) for the scrollable panel —
+    the same shape load_page.show_full_log uses for a failed search."""
+    sections: List[str] = []
+    for label, fname, tail in (
+        ("log_error.txt", "log_error.txt", None),
+        ("log_verbose.txt (tail)", "log_verbose.txt", verbose_tail),
+    ):
+        path = os.path.join(jobdir, fname)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError as exc:
+            sections.append(f"===== {label} =====\n(could not read: {exc})")
+            continue
+        if tail and len(lines) > tail:
+            lines = [f"... (showing last {tail} lines) ...\n"] + lines[-tail:]
+        body = "".join(lines).rstrip() or "(empty)"
+        sections.append(f"===== {label} =====\n{body}")
+    return "\n\n".join(sections) if sections else "No log files found for this job."
+
+
+def _render_failure(stage: str, jobdir: str, job_id: str):
+    """Failure banner: a short tail + a scrollable full-log textarea + Retry."""
+    tail = _error_tail(os.path.join(jobdir, "log_error.txt"))
+    return html.Div(
+        [
+            html.Div(f"{stage}: failed.", style={"color": "#b00", "fontWeight": "bold"}),
+            html.Small(tail) if tail else None,
+            _build_dirs_left_warning(jobdir),
+            html.Div(
+                [
+                    html.Button(
+                        "Retry", id="settings-retry-btn",
+                        style={"margin-right": "0.5rem"},
+                    ),
+                    html.Button("Show full log", id="settings-show-log-btn"),
+                ],
+                style={"margin": "0.4rem 0"},
+            ),
+            # the full log starts hidden; the button toggles the container
+            # (callback below) — same copy-pasteable panel as load_page.
+            html.Div(
+                dcc.Textarea(
+                    id="settings-full-log",
+                    value="",
+                    readOnly=True,
+                    style={"width": "100%", "height": "260px",
+                           "fontFamily": "monospace", "fontSize": "12px",
+                           "whiteSpace": "pre", "overflow": "auto"},
+                ),
+                id="settings-full-log-container",
+                hidden=True,
+                style={"marginTop": "6px"},
+            ),
+            # stash the failed job id so Retry / Show-log know which job to act on
+            dcc.Store(id="settings-failed-job", data=job_id),
+        ]
+    )
+
+
+def _genotypes_degraded_warning(jobdir: str):
+    """A visible DEGRADED warning when a variant index installed but its Tier-1
+    genotype store did NOT (per-sample Samples degraded), else None.
+
+    crisprme_hf emits a STDOUT NOTE ("... Samples degraded") to log_verbose.txt
+    when the genotypes_<vcf>.tar.gz companion fetch fails or is absent; the user
+    never saw it. Detect that marker on a successful install and surface it so the
+    user knows to re-download to complete the per-sample store. Only a 'Download
+    index' job is checked (refresh_settings_job): a build or a publish prints other
+    lines that name the genotype store."""
+    verb = os.path.join(jobdir, "log_verbose.txt")
+    if not os.path.isfile(verb):
+        return None
+    try:
+        with open(verb, "r", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    # crisprme_hf's own notes: the companion failed to fetch or is absent ("...
+    # Samples degraded."), or --no-genotypes skipped it ("Skipping Tier-1 genotype
+    # store ... Samples will be degraded ...")
+    if "Samples degraded" not in text and "Skipping Tier-1 genotype store" not in text:
+        return None
+    # only warn if it was NOT installed (an "Installed Tier-1 genotype store" line
+    # means it succeeded despite any earlier chatter)
+    if "Installed Tier-1 genotype store" in text:
+        return None
+    return dbc.Alert(
+        "Index installed but per-sample Samples degraded — the genotype store is "
+        "missing. Off-target detection works, but named carriers / per-sample "
+        "output are unavailable. Re-download this index to complete it.",
+        color="warning",
+        style={"margin-top": "0.5rem", "fontSize": "0.9em"},
+    )
+
+
+def _build_dirs_left_warning(jobdir: str):
+    """A warning naming the hidden build directories a build-index-only run of this
+    job left in place (its 'Leaving <dir>: ...' lines in log_verbose.txt), with the
+    size of each one still there, else None.
+
+    A build stopped with its container (docker stop) leaves its build directory,
+    holding a partial index or enrichment as large as the finished one. Every later
+    run is in another container, which cannot tell whether that build still runs
+    there, so it leaves it and says so on stdout (crisprme.py _reclaim_build_dirs):
+    a line the page shows only after a failure."""
+    try:
+        with open(os.path.join(jobdir, "log_verbose.txt"), errors="replace") as fh:
+            left = [line[len("Leaving "):].split(": ", 1)[0]
+                    for line in fh if line.startswith("Leaving ")]
+    except OSError:
+        return None
+    root = os.path.join(current_working_directory, "")
+    shown = []
+    for path in dict.fromkeys(left):
+        if os.path.isdir(path):
+            name = path[len(root):] if path.startswith(root) else path
+            shown.append(f"{name} ({_fmt_size(_dir_size(path))})")
+    if not shown:
+        return None
+    return dbc.Alert(
+        [
+            "A build that stopped before it ended (e.g. with its container: docker "
+            "stop) left unfinished build directories, which take disk space: ",
+            html.Code(", ".join(shown)),
+            ". If no other CRISPRme container is building an index or a variant "
+            "genome, delete them from your data folder.",
+        ],
+        color="warning",
+        style={"margin-top": "0.5rem", "fontSize": "0.9em"},
+    )
+
+
+def _job_failed(jobdir: str) -> bool:
+    """Whether the job's log.txt is in the state refresh_settings_job renders as
+    the FAILED banner (its first marker's stage FAILED, not End) -- the only
+    place the page offers Retry."""
+    try:
+        with open(os.path.join(jobdir, "log.txt")) as handle:
+            log = handle.read()
+    except (OSError, ValueError):
+        return False
+    stage = "Operation"
+    for line in log.splitlines():
+        if "\t" in line:
+            stage = line.split("\t")[0]
+            break
+    return f"{stage}\tEnd" not in log and f"{stage}\tFAILED" in log
+
+
+def _relaunch_job(job_id: str) -> Optional[str]:
+    """Re-launch the download recorded in <job_id>/cmd.json (the Retry action);
+    returns the NEW job id, or None if the original command can't be recovered
+    or may not be re-run. The id is client data, so the server re-checks what
+    the page implies: the job FAILED, and a 'Publish index' job, which the page's
+    Publish ran in maintainer mode before 2.8.1, is never re-run: the page does not
+    publish (_publish_index_section)."""
+    jobdir = _settings_jobdir(job_id)
+    if not jobdir:  # not a Settings job id: never read or run that cmd.json
+        return None
+    if not _job_failed(jobdir):  # queued, running, done, or no log at all
+        return None
+    cmd_path = os.path.join(jobdir, "cmd.json")
+    if not os.path.isfile(cmd_path):
+        return None
+    try:
+        import json
+        with open(cmd_path) as cf:
+            rec = json.load(cf)
+    except (OSError, ValueError):
+        return None
+    cmd, stage = rec.get("cmd"), rec.get("stage") or "Retry download"
+    if not cmd:
+        return None
+    if stage == "Publish index":  # it uploaded an index with the server's token
+        return None
+    return _launch_job_cmd(cmd, stage)
+
+
 def _write_vcf_marker(dataset: str, genome: str) -> None:
     """Record which reference genome a VCF dataset belongs to (a marker file
     beside the dataset dir), so the search form only pairs it with that genome."""
@@ -377,6 +913,215 @@ def _write_vcf_marker(dataset: str, genome: str) -> None:
             fh.write(genome.replace(" ", "_"))
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Sample list of a VCF dataset added here: samplesIDs/<dataset>.samplesID.txt
+# ---------------------------------------------------------------------------
+# A variant search reads it (the search form refuses one without it), and a build
+# given it (--samplesID) also writes the dict-less tiers, which per-sample analysis and
+# the data type the search form shows read. A dataset added on this page gets one
+# written from its VCF headers, in the 4-column layout of the shipped lists, as
+# seq_script/merge_panels/hprc_build.sh writes one: each sample with the population,
+# superpopulation and sex an installed list gives it, and, for a sample no list
+# names, the dataset as its population, superpopulation and sex unknown. The
+# shareable report reads every list of samplesIDs/ for a sample's superpopulation:
+# written "unknown" for a sample another list knows, the list turned it unknown in
+# the reports of that list's searches (round 3 review, F1). It lists exactly the
+# samples the VCFs genotype: a listed sample a VCF does not genotype counts as
+# hom-ref in every allele number, and so deflates every allele frequency (#46).
+SAMPLESID_HEADER = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+# what a list gives for a superpopulation it does not know (as the shareable report
+# reads one: generate_report._unknown_superpop)
+_UNKNOWN_SUPERPOPULATION = {"", "unknown", "na", "n/a", "n", ".", "-", "-1", "nan", "none"}
+# one list written at a time: the server runs each request in a thread of one
+# process, and two uploads into a dataset that finish together write its list at once
+_SAMPLESID_LOCK = threading.Lock()
+
+
+def _vcf_header_samples(vcf_dir: str) -> Optional[List[str]]:
+    """The samples the .vcf.gz files of ``vcf_dir`` genotype: the sample columns of
+    their #CHROM header lines, each once, in the order first seen (files by name).
+    [] for a sites-only dataset; None when there is no .vcf.gz, or one has no
+    readable header."""
+    try:
+        files = sorted(f for f in os.listdir(vcf_dir) if f.endswith(".vcf.gz"))
+    except OSError:
+        return None
+    if not files:
+        return None
+    seen, samples = set(), []
+    for fname in files:
+        header = None
+        try:
+            with gzip.open(os.path.join(vcf_dir, fname), "rt", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("#CHROM"):
+                        header = line
+                        break
+                    if not line.startswith("##"):
+                        break  # a record before the header: not a VCF
+        except Exception:  # noqa: BLE001 - not gzip, cut short, unreadable
+            return None
+        if header is None:
+            return None
+        for sample in header.rstrip("\r\n").split("\t")[9:]:
+            if sample and sample not in seen:
+                seen.add(sample)
+                samples.append(sample)
+    return samples
+
+
+def _own_lists_record(dataset: str) -> str:
+    """samplesIDs/.<dataset>.samplesID.sha256: the SHA-256 of the list this page last
+    wrote for ``dataset`` (_write_dataset_samplesid), one a line."""
+    return os.path.join(current_working_directory, "samplesIDs", f".{dataset}.samplesID.sha256")
+
+
+def _own_list(dataset: str) -> Optional[str]:
+    """The text of samplesIDs/<dataset>.samplesID.txt when this page wrote it as it is
+    now (its SHA-256 is one _own_lists_record names), else None: for a list from
+    anywhere else (yours, a download's, one you have edited since), and when there is
+    none."""
+    try:
+        with open(os.path.join(current_working_directory, "samplesIDs",
+                               f"{dataset}.samplesID.txt"), "rb") as fh:
+            data = fh.read()
+        with open(_own_lists_record(dataset)) as fh:
+            written = fh.read().split()
+    except OSError:
+        return None
+    if hashlib.sha256(data).hexdigest() not in written:
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+def _record_own_lists(dataset: str, *texts: Optional[str]) -> None:
+    """Records ``texts`` (None skipped) as lists this page wrote for ``dataset``
+    (_own_lists_record), through a hidden temporary file renamed into place."""
+    path = _own_lists_record(dataset)
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        with open(tmp, "w") as out:
+            out.write("".join(hashlib.sha256(t.encode("utf-8")).hexdigest() + "\n"
+                              for t in texts if t is not None))
+        os.replace(tmp, path)
+    finally:
+        if os.path.lexists(tmp):
+            os.remove(tmp)
+
+
+def _installed_sample_metadata(skip: str) -> dict:
+    """sample -> (population, superpopulation, sex), from the sample lists of
+    samplesIDs/ but ``skip`` (a download's, yours, another dataset's), read in the
+    order the shareable report reads them (generate_report._iter_samplesid_files, by
+    name), a later list's row for a sample replacing an earlier one's. A row that
+    gives no superpopulation (unknown, NA) gives nothing: it is what a list writes for
+    a sample it has no metadata for, as this page does."""
+    sdir = os.path.join(current_working_directory, "samplesIDs")
+    try:
+        names = sorted(
+            f for f in os.listdir(sdir)
+            if (f.endswith(".samplesID.txt") or (f.startswith("samplesID") and f.endswith(".txt")))
+            and ".config." not in f and os.path.join(sdir, f) != skip
+        )
+    except OSError:
+        return {}
+    meta = {}
+    for fname in names:
+        try:
+            with open(os.path.join(sdir, fname), errors="replace") as fh:
+                for line in fh:
+                    cols = line.rstrip("\r\n").split("\t")
+                    if (len(cols) < 3 or not cols[0] or cols[0].startswith("#")
+                            or cols[0].upper() == "SAMPLE_ID"
+                            or cols[2].strip().lower() in _UNKNOWN_SUPERPOPULATION):
+                        continue
+                    meta[cols[0]] = (cols[1], cols[2], cols[3] if len(cols) > 3 else "unknown")
+        except OSError:
+            continue
+    return meta
+
+
+def _listed_samples(path: str) -> List[str]:
+    """The samples the list ``path`` names: the first column of its rows, a header
+    line and blank lines skipped, as the tiers read one (tier0_compile.read_samplesid).
+    [] when it cannot be read."""
+    try:
+        with open(path, errors="replace") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return []
+    if lines and (lines[0].startswith("#") or "SAMPLE_ID" in lines[0].upper()):
+        lines = lines[1:]
+    return [s for s in (line.split("\t")[0].strip() for line in lines) if s]
+
+
+def _write_dataset_samplesid(dataset: str) -> Optional[str]:
+    """Writes samplesIDs/<dataset>.samplesID.txt from the VCF headers of
+    VCFs/<dataset> (above) when there is none, or when the one there is the list this
+    page wrote (_own_list) and it would write it otherwise now: a file of the dataset
+    added or replaced since, or a list that names its samples installed or removed. A
+    list from anywhere else (the command line, a download, one you edited) is never
+    changed. Returns its path when a build of the dataset is to pass it
+    (--samplesID): when it names a sample the VCFs genotype. None when the VCFs
+    genotype no sample (a sites-only dataset) or cannot be read, or the list names
+    none of theirs: the tiers a build emits from such a list hold no sample, and they
+    replace a per-dataset AF registry put there by hand (the mega index's, from the
+    VCFs' INFO allele frequencies) with one that has no allele frequency. Raises
+    OSError when it cannot write it."""
+    if not dataset or os.path.basename(dataset) != dataset or dataset.startswith("."):
+        return None  # (dropdown values are client data: a folder of VCFs/ only)
+    sdir = os.path.join(current_working_directory, "samplesIDs")
+    target = os.path.join(sdir, f"{dataset}.samplesID.txt")
+    with _SAMPLESID_LOCK:
+        exists = os.path.isfile(target)
+        ours = _own_list(dataset) if exists else None
+        samples = _vcf_header_samples(os.path.join(current_working_directory, "VCFs", dataset))
+        if not samples:
+            # sites-only, or no VCF to read: no list is written or passed. A list of this
+            # page's goes, as it names samples the files no longer have; any other stays
+            if samples == [] and ours is not None:
+                os.remove(target)
+                os.remove(_own_lists_record(dataset))
+            return None
+        if exists and ours is None:
+            return target if set(_listed_samples(target)) & set(samples) else None
+        meta = _installed_sample_metadata(target)
+        text = SAMPLESID_HEADER + "".join(
+            "\t".join((s,) + meta.get(s, (dataset, "unknown", "unknown"))) + "\n"
+            for s in samples
+        )
+        if text == ours:
+            return target
+        os.makedirs(sdir, exist_ok=True)
+        # recorded as this page's before and after it goes in, so that the list there is
+        # one whatever stops this; through a hidden temporary file (this thread's) renamed
+        # into place, as the search side writes a combined list
+        # (main_page._ensure_samplesid): never one cut short
+        _record_own_lists(dataset, ours, text)
+        tmp = os.path.join(sdir, f".{dataset}.samplesID.txt.{os.getpid()}."
+                                 f"{threading.get_ident()}.tmp")
+        try:
+            with open(tmp, "wb") as out:
+                out.write(text.encode("utf-8"))
+            os.replace(tmp, target)
+        finally:
+            if os.path.lexists(tmp):
+                os.remove(tmp)
+        _record_own_lists(dataset, text)
+    return target
+
+
+def _samplesid_listing(dataset: str) -> str:
+    """The --samplesID listing a build of ``dataset`` from this page passes: a hidden
+    file beside the list (samplesIDs/.<dataset>.samplesID.list) naming it, as
+    build-index-only reads a listing (one samplesID file name a line, resolved under
+    samplesIDs/)."""
+    path = os.path.join(current_working_directory, "samplesIDs", f".{dataset}.samplesID.list")
+    with open(path, "w") as fh:
+        fh.write(f"{dataset}.samplesID.txt\n")
+    return path
 
 
 
@@ -537,10 +1282,11 @@ def _dir_size(path: str) -> int:
 
 
 def _fmt_size(n: float) -> str:
+    # decimal units (1 GB = 10^9 bytes), as the docs and Hugging Face give sizes
     for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024 or unit == "TB":
+        if n < 1000 or unit == "TB":
             return f"{int(n)} B" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1024
+        n /= 1000
     return f"{n:.1f} TB"
 
 
@@ -630,11 +1376,12 @@ def _hf_options(component: str, installed: List[str]) -> List[dict]:
     return opts
 
 
-# Rough "space required" hints for the download actions (uncompressed on disk).
+# Rough "space required" hints for the download actions (disk space once installed).
 _SIZE_HINTS = {
     "genome": "a reference genome is typically ~1-3 GB",
-    "index": "a genome-wide bulge index is typically ~5-10 GB",
-    "vcf": "a population VCF set (e.g. 1000G) is typically ~15-20 GB",
+    "index": ("the download size shown in the list (from a few GB to over 100 GB) "
+              "plus room to unpack it"),
+    "vcf": "a hosted VCF set takes about 2-30 GB (the list shows each one's size)",
 }
 
 
@@ -762,16 +1509,27 @@ def _deletable_options() -> List:
     return opts
 
 
+def _deletable(item) -> bool:
+    """Whether ``item`` is one the Remove card lists (_deletable_options). Its dropdown's
+    value comes back from the browser, which a client can set to anything (Dash does not
+    check a value against a dropdown's options), and the paths deleted are built from it."""
+    return isinstance(item, str) and item in [o["value"] for o in _deletable_options()]
+
+
 def _delete_targets(kind: str, name: str) -> List[str]:
     """All on-disk paths to remove for a '<type>:<name>' item, incl. companions.
 
     Deleting an INDEX also removes its ``_INDELS`` indel-genome companion (which the
     UI hides but which can be many GB — e.g. ~15 GB for the pamless index) and any
     naming-alias symlinks that resolve into either, so no orphaned index is left
-    behind. Deleting a VCF dataset also drops its ``.refgenome`` marker. Names are
-    basename-guarded against path traversal.
+    behind. Deleting a VCF dataset also drops its ``.refgenome`` marker, and the
+    sample list this page wrote for it, with the files that go with that list (a list
+    from anywhere else stays). A name that is not one plain entry of its folder is
+    refused: '..', '.' and '' named the data folder (or, through a folder of it that is
+    a link, the folder its target is in) and the folder itself.
     """
-    name = os.path.basename(name)  # never allow traversal
+    if name in ("", ".", "..") or os.path.basename(name) != name:  # never allow traversal
+        raise ValueError(f"not an installed {kind}: {name!r}")
     cwd = current_working_directory
     if kind == "genome":
         return [os.path.join(cwd, "Genomes", name)]
@@ -790,10 +1548,19 @@ def _delete_targets(kind: str, name: str) -> List[str]:
             pass
         return targets
     if kind == "vcf":
-        return [
+        targets = [
             os.path.join(cwd, "VCFs", name),
             os.path.join(cwd, "VCFs", f".{name}.refgenome"),  # marker sidecar
         ]
+        # the list this page wrote names the samples of the VCFs that go (and gave
+        # the reports of other datasets' searches their superpopulations, round 3
+        # review F1); the record of it and the --samplesID listing a build here passed
+        # go with it
+        sdir = os.path.join(cwd, "samplesIDs")
+        if _own_list(name) is not None:
+            targets.append(os.path.join(sdir, f"{name}.samplesID.txt"))
+        return targets + [_own_lists_record(name),
+                          os.path.join(sdir, f".{name}.samplesID.list")]
     if kind == "annotation":
         return [os.path.join(cwd, "Annotations", name)]
     if kind == "pam":
@@ -803,10 +1570,13 @@ def _delete_targets(kind: str, name: str) -> List[str]:
         # Bundle layout (Assemblies/<individual>/ + metadata.json): the
         # individual is one self-contained folder, so delete removes the WHOLE
         # folder -- reclaiming every genome/chain/chromAlias file for that
-        # person, which is what "remove this individual" should do.
+        # person, which is what "remove this individual" should do -- and what
+        # its searches left: each haplotype's own indexes, the size of a
+        # reference index each, and the link it is searched through. Computed
+        # BEFORE deletion: their names come from its metadata.json.
         bundle = personal_assembly.delete_target(cwd, name)
         if bundle is not None:
-            return [bundle]
+            return [bundle] + assembly_reconcile.bundle_search_leftovers(cwd, name)
         # Legacy flat layout: remove only the pairing MARKERS, never the
         # underlying genome/chain/chromAlias files -- the genome folders there
         # are shared with plain single-haplotype complete-search (Component A's
@@ -814,10 +1584,13 @@ def _delete_targets(kind: str, name: str) -> List[str]:
         # reason), so silently deleting them on an "un-pair this individual"
         # action would be a surprising data-loss footgun. Those legacy files,
         # if wanted gone too, are removed one at a time via the "genome" delete
-        # kind with its own explicit confirmation.
+        # kind with its own explicit confirmation. A legacy pairing's names are
+        # those of the genome folders and liftover files listed: a bundle's are
+        # its metadata.json's, which an archive imported here brings, and paths
+        # built from them reached outside the data folder.
         targets = []
         for a in installed_assemblies():
-            if a["individual"] != name:
+            if a["individual"] != name or a.get("layout") != "legacy":
                 continue
             for hap_key in ("paternal", "maternal"):
                 hap = a[hap_key]
@@ -882,10 +1655,12 @@ def _delete_dependents(kind: str, name: str) -> str:
     if not dependents:
         return ""
     shown = ", ".join(dependents[:3]) + ("…" if len(dependents) > 3 else "")
-    return (
-        f"\n\n⚠ {len(dependents)} installed index(es) were {what} "
-        f"({shown}); searches using them will break until you re-add it."
-    )
+    then = "searches using them will break until you re-add it."
+    if kind == "genome":  # (a genome uploaded under its name would be searched with them)
+        then = ("they stay installed, and searches using them break until this same "
+                "genome is downloaded again. To upload a genome under this name, remove "
+                "them too: an upload is refused while they are installed.")
+    return f"\n\n⚠ {len(dependents)} installed index(es) were {what} ({shown}); {then}"
 
 
 def _delete_summary(item: str) -> str:
@@ -913,10 +1688,13 @@ def _delete_summary(item: str) -> str:
     extra = " (with its _INDELS companion)" if kind == "index" and has_indels else ""
     if kind == "assembly":
         if personal_assembly.delete_target(current_working_directory, name) is not None:
+            built = [os.path.basename(t) for t in targets
+                     if os.path.basename(os.path.dirname(t)) == "genome_library"]
+            with_built = f", with the indexes its searches built ({', '.join(built)})" if built else ""
             return (
                 f"Delete personal assembly “{name}”?\n\nThis removes the whole "
                 f"Assemblies/{name}/ folder — both haplotypes' genome, chain and "
-                f"chromAlias files — and frees about {_fmt_size(total)}. This "
+                f"chromAlias files — and frees about {_fmt_size(total)}{with_built}. This "
                 "cannot be undone; you can re-download or re-import it later."
             )
         return (
@@ -945,12 +1723,24 @@ def _add_card(title: str, blurb: str, body: List) -> dbc.Card:
     )
 
 
+def _annotation_for_genome(name: str, genome: str, genomes: List[str]) -> bool:
+    """Whether the enable/disable checklist offers custom annotation ``name`` for
+    ``genome``: one whose file name holds this genome's name (mytrack.hg38.bed), and
+    one whose file name holds no installed genome's name (offered for every genome,
+    the user picking the one its coordinates are on), so an upload the page accepts
+    can always be enabled."""
+    if genome and genome in name:
+        return True
+    return not any(g and g in name for g in genomes)
+
+
 def _annotation_choices(genome: str):
     """(options, value) for the enable/disable checklist: the built-in bundle (hg38,
-    if installed) plus custom annotations carrying this genome's token; value = the
-    ones currently enabled (per the .enabled.json manifest)."""
+    if installed) plus the custom annotations for this genome (_annotation_for_genome);
+    value = the ones currently enabled (per the .enabled.json manifest)."""
     d = os.path.join(current_working_directory, "Annotations")
     norm = (genome or "").replace(" ", "_")
+    genomes = [g["value"].replace(" ", "_") for g in get_available_genomes()]
     options = []
     _builtin = resolve_builtin_annotation() if norm == "hg38" else None
     if _builtin is not None:
@@ -965,7 +1755,7 @@ def _annotation_choices(genome: str):
         })
     for a in get_custom_annotations():
         name = a["value"]
-        if norm and norm in name and name != BUILTIN_INTOGEN_HG38:
+        if norm and name != BUILTIN_INTOGEN_HG38 and _annotation_for_genome(name, norm, genomes):
             options.append({"label": name, "value": name})
     valid = {o["value"] for o in options}
     value = [e for e in read_enabled_annotations(genome) if e in valid]
@@ -1052,7 +1842,10 @@ def settings_page() -> List:
             ),
             html.Small(
                 "Or upload a local genome file (.fa / .fa.gz / .tar.gz) — chunked, "
-                "no browser size limit. The assembly name is taken from the file name."
+                "no browser size limit. The assembly name is taken from the file name. "
+                "An upload replaces an installed genome of that name, and is refused "
+                "while indexes or variant genomes built on a genome of that name are "
+                "installed: remove them first."
             ),
             html.Div(
                 className="crisprme-chunk-upload",
@@ -1197,10 +1990,16 @@ def settings_page() -> List:
     vcf_card = _add_card(
         "Add a VCF dataset",
         "Variant datasets are large, so they are fetched server-side (from "
-        "HuggingFace, a URL, or an existing folder on this machine) or chunk-"
-        "uploaded. CRISPRme works with the files kept COMPRESSED — provide "
-        "bgzip-compressed, per-chromosome files (the chromosome in the file name, "
-        f"e.g. mydata.chr1.vcf.gz); no flat .vcf. Space: {_SIZE_HINTS['vcf']}.",
+        "HuggingFace, or an existing folder on this machine) or chunk-uploaded. "
+        "CRISPRme works with the files kept COMPRESSED — provide bgzip-compressed, "
+        "per-chromosome files (the chromosome in the file name, e.g. "
+        "mydata.chr1.vcf.gz); no flat .vcf. A single multi-chromosome .vcf.gz is "
+        "split per chromosome when you build an index from it (upload its .tbi too, "
+        "or CRISPRme indexes it). Searches read the dataset's samples from "
+        "samplesIDs/<name>.samplesID.txt, written from the VCF header when there is "
+        "none, with the populations an installed sample list gives them; to give "
+        "the others' populations and sex, put your own 4-column list there before "
+        f"you build the index. Space: {_SIZE_HINTS['vcf']}.",
         [
             dbc.Row(
                 [
@@ -1269,8 +2068,12 @@ def settings_page() -> List:
                     "data-target": "vcf",
                     "data-dataset-input": "vcf-name",
                     "data-genome-input": "vcf-ref-genome",
+                    "data-genome-value": "vcf-ref-genome-value",
                 },
             ),
+            # the reference-genome dropdown's value, which a clientside callback
+            # (after add_vcf) mirrors here for the uploader to send
+            html.Span(id="vcf-ref-genome-value", hidden=True),
             html.Div(id="vcf-feedback", style={"color": "#b00", "margin-top": "0.4rem"}),
         ],
     )
@@ -1332,7 +2135,10 @@ def settings_page() -> List:
     # ---- Annotations -------------------------------------------------------
     annotation_card = _add_card(
         "Add an annotation (BED)",
-        "Annotation BED files are small, so you can upload one directly.",
+        "Annotation BED files are small, so you can upload one directly. 'Manage "
+        "annotations' offers a BED for the genome its file name names (e.g. "
+        "mytrack.hg38.bed for hg38), and a BED whose file name names no installed "
+        "genome for every genome: enable it for the one its coordinates are on.",
         [
             dcc.Upload(
                 id="annotation-upload",
@@ -1433,6 +2239,50 @@ def settings_page() -> List:
             ),
             html.Button("Save COSMIC setting", id="cosmic-license-save-btn"),
             html.Div(id="cosmic-license-feedback", style={"margin-top": "0.4rem"}),
+        ],
+    )
+
+    # ---- Concurrent search jobs ------------------------------------------
+    try:
+        import app_settings as _appcfg  # app.py and pages_utils put PostProcess/ on sys.path
+        _cur_maxjobs, _maxjobs_cap = _appcfg.get_max_concurrent_jobs(), _appcfg.MAX_JOBS_CAP
+        _maxjobs_env = _appcfg.env_override()
+    except Exception:
+        _cur_maxjobs, _maxjobs_cap, _maxjobs_env = 2, 16, None
+    concurrency_card = _add_card(
+        "Concurrent search jobs",
+        "How many searches run at the same time. The default is 2 (conservative — each "
+        "genome-wide search is memory-heavy, ~tens of GB of RAM). Raise it only on a "
+        "machine with enough RAM and cores; extra jobs beyond this limit simply queue. "
+        "Takes effect after the app restarts."
+        + (
+            " CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, sets this "
+            f"to {_maxjobs_env} concurrent search job(s). To change it, set "
+            "CRISPRME_MAX_CONCURRENT_JOBS to another value, or unset it to use this "
+            "setting, and restart the app."
+            if _maxjobs_env is not None
+            else ""
+        ),
+        [
+            # While the env var pins the value, a value saved here would not
+            # apply, so the input and Save are disabled; the blurb says why.
+            dcc.Input(
+                id="max-jobs-input",
+                type="number",
+                min=1,
+                max=_maxjobs_cap,
+                step=1,
+                value=_cur_maxjobs,
+                disabled=_maxjobs_env is not None,
+                style={"width": "6rem", "margin-right": "0.5rem"},
+            ),
+            html.Button(
+                "Save", id="max-jobs-save-btn", disabled=_maxjobs_env is not None
+            ),
+            html.Div(
+                id="max-jobs-feedback",
+                style={"margin-top": "0.4rem", "color": "#555"},
+            ),
         ],
     )
 
@@ -1636,6 +2486,7 @@ def settings_page() -> List:
                                 annotation_card,
                                 annotation_manage_card,
                                 cosmic_card,
+                                concurrency_card,
                                 email_card,
                                 pam_card,
                                 delete_card,
@@ -1661,7 +2512,10 @@ def settings_page() -> List:
                     ]
                 ),
                 dcc.Store(id="settings-active-job"),
-                dcc.Interval(id="settings-check", interval=3000, disabled=True),
+                # 1s poll (was 3s) so the download progress bar advances smoothly;
+                # the Interval is disabled unless a job is active, so this only
+                # fires while something is actually running.
+                dcc.Interval(id="settings-check", interval=1000, disabled=True),
             ],
             fluid=True,
             style={"margin-top": "1rem"},
@@ -1670,24 +2524,23 @@ def settings_page() -> List:
 
 
 def _publish_index_section() -> List:
-    """Maintainer-only 'publish index to HuggingFace' controls (else nothing)."""
+    """Maintainer mode's note on publishing an index to HuggingFace (else nothing).
+    The page does not publish: whoever reaches it could, with the server's token, and
+    what they had installed through it (a dataset of any server folder registered, or
+    of a VCF uploaded, and its index built), over an index the repository serves."""
     if not MAINTAINER_MODE:
         return []
     return [
         html.Hr(),
         html.B("Publish an index to HuggingFace (maintainers)"),
-        dbc.Row(
+        html.P(
             [
-                dbc.Col(
-                    dcc.Dropdown(
-                        id="index-publish-name",
-                        options=get_available_indexes(),
-                        placeholder="index to publish",
-                    ),
-                    width=8,
-                ),
-                dbc.Col(html.Button("Publish", id="index-publish-btn"), width=4),
-            ]
+                "Publish from a shell on this machine: ",
+                html.Code("crisprme.py publish-index --index genome_library/<name>"),
+                " (docs/PRECOMPUTED_INDEXES.md). This page does not publish: anyone "
+                "who can reach it could, with this server's token.",
+            ],
+            style={"color": "#555"},
         ),
     ]
 
@@ -1695,9 +2548,22 @@ def _publish_index_section() -> List:
 # ---------------------------------------------------------------------------
 # Launch callbacks (all guarded against ONLINE mode)
 # ---------------------------------------------------------------------------
+_STARTED = "Started — progress is shown in the Activity panel on the right. ↗"
+
+
 def _start(job_id: str):
-    """Standard 3-tuple for a launched job: (store, interval-enabled, feedback)."""
-    return job_id, False, "Started — progress is shown in the Activity panel on the right. ↗"
+    """Standard 3-tuple for a launched job: (store, interval-enabled, feedback). The
+    feedback is in the page's neutral colour (the card's own colour is for errors),
+    and goes once the job has ended (_lock_buttons_while_busy)."""
+    return job_id, False, html.Span(_STARTED, style={"color": "#555"})
+
+
+def _shows_started(feedback) -> bool:
+    """Whether a card's feedback (a callback State: a string, or a component as JSON)
+    is _start's message."""
+    if isinstance(feedback, dict):
+        feedback = (feedback.get("props") or {}).get("children")
+    return feedback == _STARTED
 
 
 def _fb_refresh(msg, refresh: bool = False):
@@ -1741,6 +2607,15 @@ def add_genome(n, assembly, source, url, hf_name):
         if not url:
             return no_update, no_update, "Direct URL source requires a URL."
         argv += ["--url", url.strip()]
+        # the download is saved under the name the URL ends in, which the shell command
+        # that removes it once it is unpacked takes as it is (utils.remove)
+        unusable = _unusable_in_shell(os.path.basename(url.strip()))
+        if unusable:
+            return no_update, no_update, f"The file name the URL ends in {unusable}."
+        # (the download refuses it too; said here at once, as for an upload)
+        err = _genome_upload_problem(assembly.strip(), "download")
+        if err:
+            return no_update, no_update, err
     derr = _preflight_disk(_catalog_size("genome", assembly.strip()) if source == "hf" else 0)
     if derr:
         return no_update, no_update, derr
@@ -1803,8 +2678,13 @@ def add_index_hf(n, name):
 def build_index(n, genome, pam, bdna, brna, vcf, display_name):
     if n is None or ONLINE:
         raise PreventUpdate
-    if not genome or not pam:
+    # only what the dropdowns offer: a request can send any value, and the genome, PAM
+    # and dataset name the folders and files the build reads (and its index's name)
+    if (genome not in [g["value"] for g in get_available_genomes()]
+            or pam not in [p["value"] for p in get_available_PAM()]):
         return no_update, no_update, "Select an installed genome and PAM."
+    if vcf and vcf not in [v["value"] for v in get_all_vcf_datasets()]:
+        return no_update, no_update, "Select an installed VCF dataset, or reference only."
     if int(bdna or 0) == 0 and int(brna or 0) == 0:
         # build-index-only no-ops for zero bulges; tell the user up front rather
         # than launching a job that reports "done" without producing an index.
@@ -1831,6 +2711,16 @@ def build_index(n, genome, pam, bdna, brna, vcf, display_name):
     if vcf:  # pre-build a variant-aware index (enrichment + SNP/indels indexing)
         argv += ["--vcf", os.path.join(current_working_directory, "VCFs", vcf)]
         stage = "Build variant index"
+        # with the dataset's sample list (written from its VCF headers when it has
+        # none), so the build writes the dict-less tiers too: per-sample analysis and
+        # the data type the search form shows read them, as a search reads the list.
+        # None for a sites-only dataset, built without one as the mega index is
+        # (docs/DESIGN_mega_index.md): its tiers would have no sample
+        try:
+            if _write_dataset_samplesid(vcf):
+                argv += ["--samplesID", _samplesid_listing(vcf)]
+        except OSError as e:
+            return no_update, no_update, f"Could not write the sample list of {vcf}: {e}"
     if display_name and display_name.strip():
         # optional human label; build_index_only writes it to a .display_label
         # sidecar so the index list / search form shows it instead of the
@@ -1901,6 +2791,10 @@ def add_vcf(n, name, source, path, hf_name, ref_genome):
             os.symlink(os.path.abspath(path), dest)
     except OSError as e:
         return no_update, no_update, f"Could not register folder: {e}", no_update, no_update
+    try:
+        _write_dataset_samplesid(name)  # its sample list, from the VCF headers
+    except OSError:
+        pass  # a build of the dataset writes it, and says so when it cannot
     # synchronous register -> refresh the installed tables + storage immediately
     return (
         no_update,
@@ -1909,6 +2803,18 @@ def add_vcf(n, name, source, path, hf_name, ref_genome):
         _render_all_tables(),
         _render_storage(),
     )
+
+
+# The chunked uploader (assets/chunked_upload.js) is plain JavaScript outside Dash,
+# and a dcc.Dropdown keeps its value in React state, not in an element of the page:
+# mirror the value into a hidden element that the uploader reads and sends as the
+# dataset's reference genome. In the browser, so it is there as soon as a genome is
+# picked, before an Upload click can come.
+app.clientside_callback(
+    "function (value) { return value || ''; }",
+    Output("vcf-ref-genome-value", "children"),
+    Input("vcf-ref-genome", "value"),
+)
 
 
 @app.callback(
@@ -1961,14 +2867,22 @@ def fetch_from_hprc(n, sample_id):
         Output("annotation-feedback", "children"),
         Output("settings-tables-container", "children", allow_duplicate=True),
         Output("settings-storage", "children", allow_duplicate=True),
+        Output("annotation-upload", "contents"),
     ],
     [Input("annotation-upload", "contents")],
     [State("annotation-upload", "filename")],
     prevent_initial_call=True,
 )
 def add_annotation(contents, filename):
+    """Adds the uploaded BED, then empties the upload's contents: dcc.Upload fires
+    on a CHANGE of its contents, so the next file would otherwise do nothing when its
+    bytes are the same as this one's."""
     if contents is None or ONLINE:
         raise PreventUpdate
+    return _add_annotation(contents, filename) + (None,)
+
+
+def _add_annotation(contents, filename):
     if not filename or not filename.endswith(".bed"):
         return _fb_refresh("Please upload a .bed file.")
     err = _validate_name(filename[:-4])
@@ -1990,10 +2904,17 @@ def add_annotation(contents, filename):
         os.replace(tmp, dest)
     except Exception as e:
         return _fb_refresh(f"Upload failed: {e}")
+    genomes = [g["value"] for g in get_available_genomes()]
+    named = [g for g in genomes if g.replace(" ", "_") in filename]
+    where = (
+        f"for {', '.join(named)}" if named
+        else "for the genome its coordinates are on (its file name names no "
+        "installed genome, so every genome offers it)"
+    )
     return _fb_refresh(
         html.Span(
             f"Added annotation '{filename}'. Enable it under 'Manage annotations' "
-            f"to apply it in searches.",
+            f"{where} to apply it in searches.",
             style={"color": "green"},
         ),
         refresh=True,
@@ -2063,6 +2984,53 @@ def _cosmic_license_save(n, value):
     return html.Span(
         "Saved: COSMIC disabled — COSMIC annotations are EXCLUDED from searches "
         "(licence-safe default).",
+        style={"color": "green"},
+    )
+
+
+@app.callback(
+    Output("max-jobs-feedback", "children"),
+    [Input("max-jobs-save-btn", "n_clicks")],
+    [State("max-jobs-input", "value")],
+    prevent_initial_call=True,
+)
+def _max_jobs_save(n, value):
+    """Persist the max concurrent search jobs. The process pool is built at app
+    startup, so the new value applies on the next restart, unless
+    CRISPRME_MAX_CONCURRENT_JOBS pins it: then nothing is saved (the page shows
+    the input and Save disabled)."""
+    if n is None or ONLINE:
+        raise PreventUpdate
+    try:
+        import app_settings as _appcfg
+    except Exception:
+        return html.Span(
+            "Could not persist the setting (config helper unavailable).",
+            style={"color": "#b00"},
+        )
+    pinned = _appcfg.env_override()
+    if pinned is not None:  # a page rendered before a restart set the env var
+        return html.Span(
+            "Not saved: CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, "
+            f"sets this to {pinned} concurrent search job(s). To change it, set "
+            "CRISPRME_MAX_CONCURRENT_JOBS to another value, or unset it to use this "
+            "setting, and restart the app.",
+            style={"color": "#b00"},
+        )
+    if value is None:
+        return html.Span(
+            f"Enter a number between 1 and {_appcfg.MAX_JOBS_CAP}.",
+            style={"color": "#b00"},
+        )
+    try:
+        stored = _appcfg.set_max_concurrent_jobs(value)
+    except Exception as e:  # e.g. a config dir it cannot write
+        return html.Span(
+            f"Could not persist the setting: {e}",
+            style={"color": "#b00"},
+        )
+    return html.Span(
+        f"Saved: up to {stored} concurrent search job(s). Restart the app to apply.",
         style={"color": "green"},
     )
 
@@ -2151,28 +3119,6 @@ def add_pam(n, name, length, motif, position):
     )
 
 
-if MAINTAINER_MODE:
-
-    @app.callback(
-        [
-            Output("settings-active-job", "data", allow_duplicate=True),
-            Output("settings-check", "disabled", allow_duplicate=True),
-            Output("index-feedback", "children", allow_duplicate=True),
-        ],
-        [Input("index-publish-btn", "n_clicks")],
-        [State("index-publish-name", "value")],
-        prevent_initial_call=True,
-    )
-    def publish_index_cb(n, name):
-        if n is None or ONLINE:
-            raise PreventUpdate
-        if not name:
-            return no_update, no_update, "Select an index to publish."
-        index_dir = os.path.join(current_working_directory, "genome_library", name)
-        argv = ["publish-index", "--index", index_dir]
-        return _start(launch_settings_job(argv, "Publish index"))
-
-
 # ---------------------------------------------------------------------------
 # Progress polling
 # ---------------------------------------------------------------------------
@@ -2189,9 +3135,9 @@ if MAINTAINER_MODE:
     prevent_initial_call=True,
 )
 def refresh_settings_job(n, job_id):
-    if not job_id:
+    jobdir = _settings_jobdir(job_id)
+    if not jobdir:  # no active job, or not a Settings job id
         raise PreventUpdate
-    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
     logtxt = os.path.join(jobdir, "log.txt")
     if not os.path.isfile(logtxt):
         raise PreventUpdate
@@ -2204,20 +3150,26 @@ def refresh_settings_job(n, job_id):
             stage = line.split("\t")[0]
             break
     if f"{stage}\tEnd" in log:
-        # success: stop polling, clear the active job, refresh tables + storage
+        # success: stop polling, clear the active job, refresh tables + storage.
+        # If an index download installed a variant index but its genotypes companion
+        # fetch failed, the index detects off-targets but per-sample Samples are
+        # degraded — surface that as a visible warning, not a quiet stdout NOTE.
+        # (A Retry keeps the stage cmd.json recorded.) And the build directories a
+        # stopped build left, which this run could not reclaim.
+        done = html.Div(f"{stage}: done.", style={"color": "green"})
+        degraded = _genotypes_degraded_warning(jobdir) if stage == "Download index" else None
+        notes = [w for w in (degraded, _build_dirs_left_warning(jobdir)) if w is not None]
+        children = html.Div([done] + notes) if notes else done
         return (
-            html.Div(f"{stage}: done.", style={"color": "green"}),
+            children,
             True,
             _render_all_tables(),
             _render_storage(),
             None,
         )
     if f"{stage}\tFAILED" in log:
-        tail = _error_tail(os.path.join(jobdir, "log_error.txt"))
         return (
-            html.Div(
-                [html.Div(f"{stage}: failed.", style={"color": "#b00"}), html.Small(tail)]
-            ),
+            _render_failure(stage, jobdir, job_id),
             True,
             no_update,
             no_update,
@@ -2256,6 +3208,14 @@ def refresh_settings_job(n, job_id):
             no_update,
             None,
         )
+    # running: render the real progress bar when progress.json is present +
+    # fresh; otherwise fall back to the existing spinner (older code / non-
+    # download jobs / the brief window before the first progress write).
+    prog = _read_progress(jobdir)
+    if prog:
+        bar = _render_progress_bar(stage, prog)
+        if bar is not None:
+            return (bar, False, no_update, no_update, no_update)
     return (
         html.Div(
             [
@@ -2270,10 +3230,68 @@ def refresh_settings_job(n, job_id):
     )
 
 
+# --- failure-relay callbacks (2.8.1 piece D) --------------------------------
+# These target components that only exist after refresh_settings_job renders a
+# FAILED banner (suppress_callback_exceptions=True allows that). Both are
+# prevent_initial_call so they never fire before a failure is shown.
+@app.callback(
+    [Output("settings-full-log-container", "hidden"),
+     Output("settings-full-log", "value")],
+    [Input("settings-show-log-btn", "n_clicks")],
+    [State("settings-full-log-container", "hidden"),
+     State("settings-failed-job", "data")],
+    prevent_initial_call=True,
+)
+def _toggle_settings_full_log(n, currently_hidden, failed_job):
+    """Show/hide the scrollable full job log (log_error.txt + verbose tail), the
+    same copy-pasteable panel the search page offers for a failed search."""
+    if not n:
+        raise PreventUpdate
+    if not currently_hidden:  # open -> collapse
+        return True, ""
+    jobdir = _settings_jobdir(failed_job)
+    if not jobdir:  # no failed job, or not a Settings job id
+        return False, "No job to show."
+    return False, _full_job_log(jobdir)
+
+
+@app.callback(
+    [
+        Output("settings-active-job", "data", allow_duplicate=True),
+        Output("settings-check", "disabled", allow_duplicate=True),
+        Output("settings-progress", "children", allow_duplicate=True),
+    ],
+    [Input("settings-retry-btn", "n_clicks")],
+    [State("settings-failed-job", "data")],
+    prevent_initial_call=True,
+)
+def _retry_settings_job(n, failed_job):
+    """Re-launch the failed download (same command, via cmd.json) and resume
+    polling. crisprme_hf resumes partial transfers, so a retry is cheap."""
+    if not n or ONLINE or not failed_job:
+        raise PreventUpdate
+    new_job = _relaunch_job(failed_job)
+    if not new_job:
+        return (
+            no_update,
+            no_update,
+            html.Div(
+                "Could not retry: the original download command was not found. "
+                "Please start the download again from its card above.",
+                style={"color": "#b00"},
+            ),
+        )
+    return (
+        new_job,
+        False,
+        html.Div([dbc.Spinner(size="sm"), html.Span("  Retrying download...")]),
+    )
+
+
 # Disable the data-mutating buttons while a job is active (single-slot executor;
 # a second launch would queue behind the first and overwrite its progress view).
 # Buttons re-enable when refresh_settings_job clears settings-active-job on
-# completion. index-publish-btn is omitted (only present in maintainer mode).
+# completion.
 _LOCKABLE_BUTTON_IDS = [
     "genome-add-btn",
     "index-hf-btn",
@@ -2284,13 +3302,23 @@ _LOCKABLE_BUTTON_IDS = [
 ]
 
 
+# The cards whose feedback _start's message goes into (each launches a job).
+_JOB_FEEDBACK_IDS = ["genome-feedback", "index-feedback", "vcf-feedback", "hprc-fetch-feedback"]
+
+
 @app.callback(
-    [Output(bid, "disabled") for bid in _LOCKABLE_BUTTON_IDS],
+    [Output(bid, "disabled") for bid in _LOCKABLE_BUTTON_IDS]
+    + [Output(fid, "children", allow_duplicate=True) for fid in _JOB_FEEDBACK_IDS],
     [Input("settings-active-job", "data")],
+    [State(fid, "children") for fid in _JOB_FEEDBACK_IDS],
     prevent_initial_call=True,
 )
-def _lock_buttons_while_busy(active_job):
-    return [bool(active_job)] * len(_LOCKABLE_BUTTON_IDS)
+def _lock_buttons_while_busy(active_job, *feedback):
+    """Disables the data-mutating buttons while a job is active; once it has ended
+    (refresh_settings_job clears the active job), clears the 'Started' message of the
+    card that launched it."""
+    cleared = [no_update if active_job or not _shows_started(f) else "" for f in feedback]
+    return [bool(active_job)] * len(_LOCKABLE_BUTTON_IDS) + cleared
 
 
 # ---------------------------------------------------------------------------
@@ -2308,7 +3336,10 @@ def _lock_buttons_while_busy(active_job):
 def ask_delete(n, item):
     if n is None or ONLINE or not item:
         raise PreventUpdate
-    # open the confirmation dialog with a message naming the item + size to free
+    # open the confirmation dialog with a message naming the item + size to free; of an
+    # item the card does not list, nothing is measured (do_delete then says it is not found)
+    if not _deletable(item):
+        return True, "Delete this item? This cannot be undone."
     return True, _delete_summary(item)
 
 
@@ -2327,7 +3358,8 @@ def do_delete(n, item):
         raise PreventUpdate
     kind, _sep, name = item.partition(":")
     try:
-        targets = _delete_targets(kind, name)
+        # only an item the card lists (one deleted since is not)
+        targets = _delete_targets(kind, name) if _deletable(item) else []
     except ValueError as e:
         return html.Span(str(e), style={"color": "#b00"}), no_update, no_update
     freed, removed = 0, 0

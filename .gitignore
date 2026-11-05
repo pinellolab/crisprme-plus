@@ -172,6 +172,9 @@ genome_library/
 Results/
 Dictionaries/
 VCFs/
+# the checkout's own, as install_from_source.sh leaves it (scorer-env state); anchored,
+# as test/data/Annotations/ holds tracked fixtures
+/Annotations/
 Gencode/
 Cache/
 *nohup*

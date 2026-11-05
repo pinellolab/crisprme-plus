@@ -120,6 +120,19 @@ class TestCreateCommand(unittest.TestCase):
                                           "CONDA_CHANNEL_BASE": "https://conda.anaconda.org"}, clear=True):
             self.assertEqual(se._channel_args(spec), ["-c", "https://prefix.dev/conda-forge"])
 
+    def test_package_specs_follow_every_option(self):
+        # conda takes the specs as ONE positional: a spec before `-c` makes it reject the
+        # rest as "unrecognized arguments" (conda 25.x/26.x), so `scorer-env create` failed
+        # outright whenever conda was the manager (a Bioconda install + `conda activate`).
+        for kind in ("conda", "mamba", "micromamba"):
+            for variant in ("cpu", "cuda", "metal", "linux_aarch64"):
+                with mock.patch.object(se, "detect_env_manager", return_value=("/m/" + kind, kind)):
+                    cmd = se.build_create_command("cbulge", variant=variant)
+                first_spec = cmd.index("python=3.10")
+                self.assertIn("-c", cmd[:first_spec])
+                self.assertEqual([a for a in cmd[first_spec:] if a.startswith("-")], [],
+                                 f"{kind}/{variant}: an option follows the package specs: {cmd}")
+
     def test_no_manager_returns_none(self):
         with mock.patch.object(se, "detect_env_manager", return_value=None):
             self.assertIsNone(se.build_create_command("cbulge"))
@@ -258,6 +271,36 @@ class TestHealthCheck(unittest.TestCase):
         text = se.render_health(rec)
         self.assertIn("WARN", text)
         self.assertIn("numpy=1.23.5", text)
+
+
+class TestProbeVersions(unittest.TestCase):
+    """The import probe runs for real, in this interpreter standing in for the env's.
+    pkg_resources has no __version__, so a healthy env listed it as 'pkg_resources=?',
+    which read like a missing package: it now reports the setuptools version."""
+
+    def test_a_module_without_a_version_is_not_shown_as_unknown(self):
+        with tempfile.TemporaryDirectory() as d:
+            for mod, body in (("pkg_resources", ""), ("noversion", ""),
+                              ("withversion", "__version__ = '1.2.3'\n")):
+                os.mkdir(os.path.join(d, mod))
+                with open(os.path.join(d, mod, "__init__.py"), "w") as fh:
+                    fh.write(body)
+            info = os.path.join(d, "setuptools-80.9.0.dist-info")
+            os.mkdir(info)
+            with open(os.path.join(info, "METADATA"), "w") as fh:
+                fh.write("Metadata-Version: 2.1\nName: setuptools\nVersion: 80.9.0\n")
+            with mock.patch.dict(se.SCORER_ENVS["cbulge"],
+                                 {"probe_imports": ["pkg_resources", "noversion", "withversion"]}), \
+                 mock.patch.dict(os.environ, {"PYTHONPATH": d}), \
+                 mock.patch.object(se, "detect_env_manager", return_value=("/m/mamba", "mamba")), \
+                 mock.patch.object(se, "env_python", return_value=sys.executable), \
+                 mock.patch.object(se, "source_present", return_value=True):
+                rec = se.health_check("cbulge")
+        self.assertEqual(rec["status"], se.OK, rec["issues"])
+        self.assertEqual(rec["versions"], {"pkg_resources": "80.9.0 (setuptools)",
+                                           "noversion": "ok", "withversion": "1.2.3"})
+        self.assertIn("packages: pkg_resources=80.9.0 (setuptools), noversion=ok, "
+                      "withversion=1.2.3", se.render_health(rec))
 
 
 if __name__ == "__main__":

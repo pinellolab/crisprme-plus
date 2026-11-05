@@ -43,14 +43,19 @@ from typing import Dict, List, Optional, Tuple
 
 import glob
 import hashlib
+import json
 import os
+import re
 import shutil
 import subprocess
 import time
+import uuid
 
 from datetime import datetime
 
 import pandas as pd
+
+import personal_assembly
 
 PRED_COLS = [
     "Spacer+PAM", "Chromosome", "Start_coordinate_(fewest_mm+b)",
@@ -382,6 +387,11 @@ def haplotype_params_match(
         results_dir: The haplotype's output directory to check.
         genome_dir, guide_file, pam_file: Absolute paths, as resolved by
             `assembly_search()`'s own arg-checking (must match exactly).
+            `genome_dir` is the folder the haplotype is searched with, its
+            `haplotype_genome_view`: a result recorded with the haplotype's
+            bare bundle folder (`.../<hap>/genome`) comes from a search that
+            found its index by the name "genome" -- possibly the other
+            haplotype's, or another individual's -- and so never matches.
         mm, bDNA, bRNA, merge_bp: The current invocation's values.
         max_total_edits: The current invocation's resolved total-edits cap
             (an explicit `--max-total-edits` override if the user gave one,
@@ -406,6 +416,350 @@ def haplotype_params_match(
         "--merge": str(merge_bp), "--max-total-edits": str(max_total_edits),
     }
     return recorded == current
+
+
+# Each haplotype is searched by complete-search, which knows a genome -- and the
+# index it builds or reuses, genome_library/<PAM>_<N>_<name> -- by the genome
+# folder's NAME alone. A bundle keeps every haplotype in a folder named "genome",
+# so both haplotypes of every individual shared one index: the first search built
+# it, and every later one searched that sequence instead of its own. So each
+# haplotype is searched through a link named after it (haplotype_genome_view), and
+# each index a haplotype search builds records which genome it holds. So does an
+# index complete-search builds of any other folder outside Genomes/, and a search of
+# a folder whose name an index recorded from another folder carries is refused
+# (crisprme.py _check_genome_name_is_its_own).
+HAPLOTYPE_GENOMES_DIRNAME = "haplotype_genomes"
+GENOMES_DIRNAME = "Genomes"
+INDEX_LIBRARY_DIRNAME = "genome_library"
+INDEX_SOURCE_FILENAME = ".genome_source"
+_FASTA_EXTENSIONS = (".fa", ".fasta")
+
+
+def _genome_identity(cwd: str, genome_dir: str) -> str:
+    """A genome folder's real path, relative to the working directory when it
+    lies inside it, so the same data folder mounted elsewhere (Docker's /DATA)
+    keeps the same identity."""
+    real = os.path.realpath(genome_dir)
+    root = os.path.realpath(cwd)
+    if real.startswith(root + os.sep):
+        return os.path.relpath(real, root)
+    return real
+
+
+def haplotype_search_name(cwd: str, genome_dir: str, haplotype: str) -> str:
+    """The name one haplotype's genome is searched, and so indexed, under.
+
+    A bundle haplotype (`personal_assembly.bundle_haplotype`) is named
+    `<individual folder>_<haplotype>_<8 hex digits of its path>`, e.g.
+    `HG01255_paternal_5aeb0fc6`; any other folder `<folder name>_<8 hex digits of
+    its path>`. Two genome folders therefore never share a name, whatever the
+    folders themselves are called (`HG.002` and `HG_002` included), and the name
+    is none that CRISPRme gives a genome in `Genomes/`, or gave one before: the
+    layout before 2.6.0 kept the same haplotype as `Genomes/HG01255_paternal`,
+    and complete-search picks an index by the genome's name alone, so the two
+    would share `<PAM>_<N>_HG01255_paternal`. Only letters, digits, `_` and `-`
+    are kept: the name becomes part of the index folder's name and of every
+    intermediate file name of the search."""
+    digest = hashlib.sha1(_genome_identity(cwd, genome_dir).encode()).hexdigest()[:8]
+    hap = personal_assembly.bundle_haplotype(genome_dir, haplotype)
+    if hap is not None:
+        name = f"{hap['folder']}_{hap['haplotype']}_{digest}"
+    else:
+        name = f"{os.path.basename(os.path.realpath(genome_dir))}_{digest}"
+    return re.sub(r"[^A-Za-z0-9_-]", "_", name)
+
+
+def _haplotype_view_dir(cwd: str, genome_dir: str) -> str:
+    """`haplotype_genomes/<key>/`, the folder of the link a genome folder outside
+    `Genomes/` is searched through (`haplotype_genome_view`); `<key>` is derived from
+    the folder's path."""
+    key = hashlib.sha1(_genome_identity(cwd, genome_dir).encode()).hexdigest()[:12]
+    return os.path.join(os.path.abspath(cwd), HAPLOTYPE_GENOMES_DIRNAME, key)
+
+
+def haplotype_genome_view(cwd: str, genome_dir: str, haplotype: str) -> str:
+    """The `--genome` folder one haplotype is searched with.
+
+    A folder directly in `<cwd>/Genomes/` (the legacy flat layout) is returned
+    unchanged: its name is unique there and already is its index's name, as for
+    any reference genome. Any other folder is searched through a link named
+    `haplotype_search_name`, at `haplotype_genomes/<key>/<name>` with `<key>`
+    derived from the folder's path, so one link never stands for two folders and
+    a later run of the same haplotype passes the same `--genome` again (which
+    `haplotype_params_match` relies on). The pipeline resolves the link to read the
+    sequence. The link is relative when the folder is in the working directory, so
+    it still resolves when that directory is mounted elsewhere.
+
+    Returns:
+        The folder to pass as the haplotype's `--genome`.
+    """
+    cwd_abs = os.path.abspath(cwd)
+    if os.path.dirname(os.path.abspath(genome_dir)) == os.path.join(cwd_abs, GENOMES_DIRNAME):
+        return genome_dir
+    identity = _genome_identity(cwd_abs, genome_dir)
+    view_dir = _haplotype_view_dir(cwd_abs, genome_dir)
+    view = os.path.join(view_dir, haplotype_search_name(cwd_abs, genome_dir, haplotype))
+    os.makedirs(view_dir, exist_ok=True)
+    real = os.path.realpath(genome_dir)
+    target = real if os.path.isabs(identity) else os.path.relpath(real, os.path.realpath(view_dir))
+    if not (os.path.islink(view) and os.readlink(view) == target):
+        # Replaced in one step, so a run starting meanwhile never sees it missing.
+        # The temporary link's name is this call's own: runs starting together
+        # each make one, and crisprme.py is PID 1 in every Docker container.
+        tmp = os.path.join(view_dir, f".{os.path.basename(view)}.{uuid.uuid4().hex}.tmp")
+        os.symlink(target, tmp)
+        try:
+            os.replace(tmp, view)
+        except OSError:
+            if os.path.lexists(tmp):
+                os.remove(tmp)
+            # a run starting together may have made the same link meanwhile
+            if not (os.path.islink(view) and os.readlink(view) == target):
+                raise
+    return view
+
+
+def genome_fingerprint(genome_dir: str) -> str:
+    """A fingerprint of a genome folder's FASTA files: their names, sizes and
+    modification times (whole seconds), hashed. Only file metadata is read, not
+    the sequence: a FASTA file added, removed, resized or modified at another time
+    changes it -- a bundle deleted and imported again with other files, say -- but
+    a file replaced by other content of the same size and modification time (an
+    archive that restores the old times) does not. A copy that does not keep the
+    times (cp without -p) changes it too, which costs an index rebuild, never a
+    result."""
+    real = os.path.realpath(genome_dir)
+    lines = []
+    for fname in sorted(os.listdir(real)):
+        if fname.startswith(".") or not fname.endswith(_FASTA_EXTENSIONS):
+            continue
+        st = os.stat(os.path.join(real, fname))
+        lines.append(f"{fname}\t{st.st_size}\t{int(st.st_mtime)}")
+    return hashlib.sha1("\n".join(lines).encode()).hexdigest()
+
+
+def _haplotype_index_dirs(cwd: str, search_name: str) -> List[str]:
+    """The genome_library indexes of the genome named `search_name`, i.e. every
+    `<PAM>_<N>_<search_name>` folder the search could pick (never an INDELS
+    companion or a `...+<vcf>` variant index)."""
+    lib = os.path.join(cwd, INDEX_LIBRARY_DIRNAME)
+    if not os.path.isdir(lib):
+        return []
+    name_re = re.compile(r"[^_]+_[0-9]+_" + re.escape(search_name))
+    return sorted(
+        os.path.join(lib, d) for d in os.listdir(lib)
+        if name_re.fullmatch(d) and os.path.isdir(os.path.join(lib, d))
+    )
+
+
+def _read_index_source(index_dir: str) -> Optional[Dict]:
+    """An index's `.genome_source` record, or `None` when it has none."""
+    try:
+        with open(os.path.join(index_dir, INDEX_SOURCE_FILENAME)) as handle:
+            record = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _take_index_away(index_dir: str) -> Optional[str]:
+    """Takes an index folder, or a link to one, away from its name in one step, so
+    no search finds it there half removed: a link is removed, a folder renamed to a
+    hidden name beside it, returned for removal (`None` for a link).
+
+    Raises:
+        FileNotFoundError: When it is gone already: a run that started together
+            took it away first.
+        OSError: When it cannot be taken away.
+    """
+    if os.path.islink(index_dir):
+        os.remove(index_dir)
+        return None
+    aside = os.path.join(os.path.dirname(index_dir),
+                         f".{os.path.basename(index_dir)}.stale.{uuid.uuid4().hex}")
+    os.rename(index_dir, aside)
+    return aside
+
+
+def clear_stale_haplotype_indexes(cwd: str, genome_view: str) -> List[str]:
+    """Run before a haplotype search. The search reuses any index of the genome's
+    name, so remove each one whose `.genome_source` names another genome folder,
+    or another `genome_fingerprint` of this one (its FASTA files added, removed,
+    resized or modified since -- a bundle deleted and imported again with other
+    files, say), and the search builds it again from this genome. An index that
+    records nothing is left as it is: of a folder in `Genomes/`, one built by an
+    earlier CRISPRme or downloaded; of any other folder, whose name no earlier
+    index carries (`haplotype_search_name`), one a search of this haplotype
+    built and may still be using (the record is written when the search ends),
+    or one whose search was killed before it ended. One still being built (it
+    has a `.lock`) is left too. complete-search runs it too, for a genome folder
+    outside `Genomes/` (crisprme.py `_check_genome_name_is_its_own`).
+
+    Runs that start together may both find an index stale: each takes it away
+    from its name in one step before removing it (`_take_index_away`), and the
+    one that finds it gone already goes on.
+
+    Args:
+        cwd: The working directory (its `genome_library/` is the one searched).
+        genome_view: The folder the haplotype is searched with
+            (`haplotype_genome_view`); its name is the index's genome name.
+
+    Returns:
+        The index folders of that name there now, to hand to
+        `stamp_built_haplotype_indexes` once the search has run.
+
+    Raises:
+        OSError: When such an index cannot be taken away.
+    """
+    name = os.path.basename(os.path.normpath(genome_view))
+    identity = _genome_identity(cwd, genome_view)
+    fingerprint = genome_fingerprint(genome_view)
+    for index_dir in _haplotype_index_dirs(cwd, name):
+        if os.path.isdir(f"{index_dir}.lock"):
+            continue
+        record = _read_index_source(index_dir)
+        if record is None or (record.get("genome"), record.get("fingerprint")) == (identity, fingerprint):
+            continue
+        if record.get("genome") == identity:
+            why = f"{identity} has changed since it was built"
+        else:
+            why = f"it was built from {record.get('genome', 'another genome')}, not {identity}"
+        try:
+            aside = _take_index_away(index_dir)
+        except FileNotFoundError:
+            continue  # a run that started together took it away first
+        print(f"Removing index {os.path.basename(index_dir)}: {why}. This search builds it again.")
+        if aside is not None:
+            try:
+                shutil.rmtree(aside)
+            except OSError as e:
+                # no search takes it under this name any more
+                print(f"Note: could not remove {aside} ({e}). Remove it by hand.")
+    return [d for d in _haplotype_index_dirs(cwd, name) if not os.path.isdir(f"{d}.lock")]
+
+
+def _write_index_source(index_dir: str, record: Dict) -> None:
+    """Writes `record` as `index_dir`'s `.genome_source`, in one step.
+
+    Raises:
+        OSError: When it cannot be written.
+    """
+    # this call's own temporary file, as in haplotype_genome_view
+    tmp = os.path.join(index_dir, f"{INDEX_SOURCE_FILENAME}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "w") as handle:
+            json.dump(record, handle)
+            handle.write("\n")
+        os.replace(tmp, os.path.join(index_dir, INDEX_SOURCE_FILENAME))
+    finally:
+        if os.path.lexists(tmp):
+            os.remove(tmp)
+
+
+def stamp_built_haplotype_indexes(cwd: str, genome_view: str, present_before: List[str]) -> None:
+    """Run after a haplotype search, whether it succeeded or not: write into each
+    index of the genome's name that the search built -- one not in
+    `present_before`, holding `.bin` files and no longer locked -- which genome it
+    holds, as `.genome_source` (the genome folder and its `genome_fingerprint`),
+    so `clear_stale_haplotype_indexes` can tell it apart later. CRISPRitz reads
+    only the `.bin` files of an index folder, as with the `.pam_build` sidecar.
+    Never fails the run: without the record the index is reused as before."""
+    name = os.path.basename(os.path.normpath(genome_view))
+    try:
+        record = {
+            "genome": _genome_identity(cwd, genome_view),
+            "fingerprint": genome_fingerprint(genome_view),
+        }
+        index_dirs = _haplotype_index_dirs(cwd, name)
+    except OSError as e:
+        print(f"Note: could not record which genome the indexes of {name} hold ({e})")
+        return
+    for index_dir in index_dirs:
+        if index_dir in present_before or os.path.isdir(f"{index_dir}.lock"):
+            continue
+        if _read_index_source(index_dir) is not None:
+            continue
+        try:
+            if not any(f.endswith(".bin") for f in os.listdir(index_dir)):
+                continue
+            _write_index_source(index_dir, record)
+        except OSError as e:
+            print(f"Note: could not record which genome {os.path.basename(index_dir)} holds ({e})")
+
+
+def stamp_index_source(cwd: str, genome_dir: str, index_dir: str) -> None:
+    """Writes into `index_dir`, an index a complete-search has just built from
+    `genome_dir`, which genome it holds (`.genome_source`, as
+    `stamp_built_haplotype_indexes` does), unless it records one already, is still
+    locked, or holds no `.bin` file. Never fails the run: without the record the
+    index is used as before."""
+    try:
+        if (os.path.isdir(f"{index_dir}.lock") or _read_index_source(index_dir) is not None
+                or not any(f.endswith(".bin") for f in os.listdir(index_dir))):
+            return
+        _write_index_source(index_dir, {
+            "genome": _genome_identity(cwd, genome_dir),
+            "fingerprint": genome_fingerprint(genome_dir),
+        })
+    except OSError as e:
+        print(f"Note: could not record which genome {os.path.basename(index_dir)} holds ({e})")
+
+
+def foreign_index_sources(cwd: str, genome_dir: str) -> List[Tuple[str, str]]:
+    """The indexes of the genome's name in `cwd`'s `genome_library/` that record
+    (`.genome_source`) another genome folder than `genome_dir`. A search takes an
+    index by the genome's name alone, so a search of `genome_dir` would take them
+    and search that other folder's sequence. An index that records nothing is none
+    of them: one built by an earlier CRISPRme, or downloaded.
+
+    Returns:
+        (index folder, the genome folder it records) pairs; the genome folder as
+        an absolute path.
+    """
+    name = os.path.basename(os.path.normpath(genome_dir))
+    identity = _genome_identity(cwd, genome_dir)
+    found = []
+    for index_dir in _haplotype_index_dirs(cwd, name):
+        held = (_read_index_source(index_dir) or {}).get("genome")
+        if held and held != identity:
+            found.append((index_dir, held if os.path.isabs(held)
+                          else os.path.join(os.path.realpath(cwd), held)))
+    return found
+
+
+def unrecorded_index_dirs(cwd: str, genome_dir: str) -> List[str]:
+    """The indexes of the genome's name in `cwd`'s `genome_library/` that record no
+    genome folder (`.genome_source`): built by an earlier CRISPRme, downloaded, built
+    by build-index-only, or built by a search that has not ended (the record is
+    written when it ends) or was killed. Which folder they hold is unknown."""
+    name = os.path.basename(os.path.normpath(genome_dir))
+    return [d for d in _haplotype_index_dirs(cwd, name)
+            if not (_read_index_source(d) or {}).get("genome")]
+
+
+def bundle_search_leftovers(cwd: str, individual: str) -> List[str]:
+    """What the searches of a bundle individual's haplotypes left in the working
+    directory, to remove with the individual (Settings > Delete): each
+    haplotype's indexes (`genome_library/<PAM>_<N>_<haplotype_search_name>`, each
+    the size of a reference index) and the folder of the link it is searched
+    through (`haplotype_genomes/<key>/`). `[]` for an individual that is no
+    bundle."""
+    meta = personal_assembly.read_metadata(cwd, individual)
+    if meta is None:
+        return []
+    root = personal_assembly.individual_dir(cwd, individual)
+    found = []
+    for hap in personal_assembly.HAPLOTYPES:
+        hap_meta = (meta.get("haplotypes") or {}).get(hap)
+        rel = hap_meta.get("genome_dir") if isinstance(hap_meta, dict) else None
+        if not rel:
+            continue
+        genome_dir = os.path.join(root, rel)
+        view_dir = _haplotype_view_dir(cwd, genome_dir)
+        for path in _haplotype_index_dirs(cwd, haplotype_search_name(cwd, genome_dir, hap)) + [view_dir]:
+            if os.path.lexists(path) and path not in found:
+                found.append(path)
+    return found
 
 
 def _read_haplotype_pam_label(haplotype_results_dir: str) -> str:
@@ -463,7 +817,9 @@ def write_combined_params_file(
         combined_dir: The `{output_base}_combined` output directory.
         output_base: The `--output` value the run was invoked with.
         genome_paternal, genome_maternal: Absolute paths to the two haplotype
-            genome folders.
+            genome folders, recorded by their display name
+            (`personal_assembly.haplotype_label`: the bundle's assembly name,
+            not the folder name "genome" every bundle haplotype has).
         chain_paternal, chain_maternal, chrom_alias_paternal,
             chrom_alias_maternal: Absolute paths to the liftOver/chromAlias
             files.
@@ -474,8 +830,8 @@ def write_combined_params_file(
     """
     params_lines = [
         ("Genome_type", "assembly"),
-        ("Genome_paternal", os.path.basename(genome_paternal.rstrip(os.sep))),
-        ("Genome_maternal", os.path.basename(genome_maternal.rstrip(os.sep))),
+        ("Genome_paternal", personal_assembly.haplotype_label(genome_paternal, "paternal")),
+        ("Genome_maternal", personal_assembly.haplotype_label(genome_maternal, "maternal")),
         ("Chain_paternal", chain_paternal),
         ("Chain_maternal", chain_maternal),
         ("ChromAlias_paternal", chrom_alias_paternal),
@@ -1651,26 +2007,30 @@ def _combine_across_haplotypes(
     left = hg38_predictions[a].sort_values(_MERGE_ASOF_SORT_COLS).reset_index(drop=True)
     right = hg38_predictions[b].sort_values(_MERGE_ASOF_SORT_COLS).reset_index(drop=True).copy()
 
-    # an entirely non-mappable haplotype leaves an empty frame here (e.g.
-    # every prediction failed to lift over) -- pandas infers an `object`
-    # dtype for an empty column, which merge_asof rejects when the other
-    # side is a real int64 `hg38_start` ("incompatible merge keys" error).
-    # Short-circuit rather than coerce dtypes into a merge that has nothing
-    # to actually match against either way.
-    if left.empty and right.empty:
-        return pd.DataFrame(columns=list(left.columns) + ["origin"])
-    if right.empty:
-        out = left.rename(columns={
-            col: f"{col}_{a}" for col in left.columns if col not in _SHARED_KEY_COLS
+    # a haplotype without off-targets, or an entirely non-mappable one (e.g.
+    # every prediction failed to lift over), leaves an empty frame here --
+    # pandas infers an `object` dtype for an empty column, which merge_asof
+    # rejects when the other side is a real int64 `hg38_start` ("incompatible
+    # merge keys" error). Short-circuit rather than coerce dtypes into a merge
+    # that has nothing to actually match against either way, but keep the
+    # columns the merge gives (both haplotypes' own, suffixed, the shared keys
+    # once, then origin): the empty haplotype's columns are left blank, as on
+    # any "<a>_only" row of a merge, not missing. The combined report reads
+    # both haplotypes' columns, and stopped with a TypeError without them.
+    if left.empty or right.empty:
+        columns = (
+            [col if col in _SHARED_KEY_COLS else f"{col}_{a}" for col in left.columns]
+            + [f"{col}_{b}" for col in right.columns if col not in _SHARED_KEY_COLS]
+            + ["origin"]
+        )
+        if left.empty and right.empty:
+            return pd.DataFrame(columns=columns)
+        name, found = (a, left) if right.empty else (b, right)
+        out = found.rename(columns={
+            col: f"{col}_{name}" for col in found.columns if col not in _SHARED_KEY_COLS
         })
-        out["origin"] = f"{a}_only"
-        return out
-    if left.empty:
-        out = right.rename(columns={
-            col: f"{col}_{b}" for col in right.columns if col not in _SHARED_KEY_COLS
-        })
-        out["origin"] = f"{b}_only"
-        return out
+        out["origin"] = f"{name}_only"
+        return out.reindex(columns=columns)
 
     # merge_asof collapses the "on" column to a single (left's) value, so
     # keep a copy of the right side's own position to compute the true gap

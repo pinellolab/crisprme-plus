@@ -34,8 +34,11 @@ literals lives in test_dictless_defaults below (source-level, no Dash import).
 (Bio.Seq + absent-scientific-module stubs). ``pages_utils`` is loaded with TARGETED stubs
 for its web-only top-level imports (app, dash, pandas) -- never a catch-all.
 """
+import contextlib
+import io
 import os
 import shutil
+import struct
 import sys
 import tempfile
 import types
@@ -233,6 +236,261 @@ class TestCliBulgeCap(unittest.TestCase):
         cap = crisprme._installed_index_bulge_cap(_MOTIF, _REF, is_variant=False)
         self.assertEqual(cap, 3, "an installed deeper reference index must win")
 
+    def test_a_wider_pamless_index_counts_only_where_the_search_uses_it(self):
+        """The search shell takes an all-N index WIDER than the PAM only under
+        --prune-pam and for a 3' PAM; the derived default must not come from one the
+        search will not use. No raw genome, so the installed index is the only term."""
+        _mkfile(os.path.join(self.root, "genome_library", f"NNNNNNNN_4_{_REF}",
+                             "TSTgenome.NNNNNNNN.bin"))
+        cap = crisprme._installed_index_bulge_cap
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=True), 3)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=True,
+                             three_prime=False), 0)
+        # ... and only a 3' build: a 5' one stores no 3' flank
+        _mkfile(os.path.join(self.root, "genome_library", f"NNNNNNNN_4_{_REF}",
+                             ".pam_build"), "28bp-NNNNNNNN-5p 28 -8\n")
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=True), 0)
+
+    def test_an_equal_width_pamless_index_counts_for_the_side_it_was_built_for(self):
+        """The search shell takes an all-N index only for a PAM on the side its build's
+        PAM file put the PAM, as its .pam_build records, and one without it for a 3'
+        build: on the other side the engine finds nothing at all."""
+        idx = os.path.join(self.root, "genome_library", f"NNN_4_{_REF}")
+        _mkfile(os.path.join(idx, "TSTgenome.NNN.bin"))
+        cap = crisprme._installed_index_bulge_cap
+        for record, built_three_prime in ((None, True), ("20bp-NNN-NO-PAM 23 3\n", True),
+                                          ("23bp-NNN-5p 23 -3\n", False)):
+            if record is not None:
+                _mkfile(os.path.join(idx, ".pam_build"), record)
+            for prune in (False, True):
+                for three_prime in (True, False):
+                    self.assertEqual(
+                        cap(_MOTIF, _REF, is_variant=False, prune=prune,
+                            three_prime=three_prime),
+                        3 if three_prime == built_three_prime else 0,
+                        (record, prune, three_prime))
+
+    def test_a_dedicated_pam_starting_with_n_is_not_pamless(self):
+        _mkfile(os.path.join(self.root, "genome_library", f"NNNRRT_4_{_REF}",
+                             "TSTgenome.NNNRRT.bin"))
+        self.assertEqual(crisprme._installed_index_bulge_cap(
+            _MOTIF, _REF, is_variant=False, prune=True), 0)
+
+    def test_an_index_at_index_path_counts(self):
+        """A library the search names with --index-path holds the index it reads; given no
+        bulges, the search stayed bulge-free with no message."""
+        shared = os.path.join(self.root, "shared")
+        _mkfile(os.path.join(shared, f"{_MOTIF}_2_{_REF}", "TSTgenome.NRG.bin"))
+        _mkfile(os.path.join(shared, f"{_MOTIF}_2_{_REF}+{_VCF}", "TSTgenome.NRG.bin"))
+        cap = crisprme._installed_index_bulge_cap
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=True), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path=shared), 1)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=True, index_path=shared), 1)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path="_"), 0)
+
+    def test_a_wider_pamless_index_at_index_path_counts_under_prune(self):
+        shared = os.path.join(self.root, "shared")
+        _mkfile(os.path.join(shared, f"NNNNNNNN_3_{_REF}", "TSTgenome.N.bin"))
+        cap = crisprme._installed_index_bulge_cap
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path=shared), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=True, index_path=shared), 2)
+
+    def test_a_genome_folder_outside_genomes_makes_a_reference_index_buildable(self):
+        """--genome may name a folder elsewhere, the shared-mount recipe: the raw-genome
+        term looked at cwd/Genomes/<name> alone."""
+        outside = os.path.join(self.root, "elsewhere", _REF)
+        _mkfile(os.path.join(outside, "chr22.fa"), ">chr22\nA\n")
+        cap = crisprme._installed_index_bulge_cap
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, genomedir=outside), 2)
+
+    def test_an_index_built_for_a_shorter_guide_serves_fewer_bulges_or_none(self):
+        """The derived default bulges must not come from an index that cannot answer the
+        guide: a 20-nt N=3 index serves a 21-nt guide at one bulge of each type, and a
+        23-nt one at none (index_fit, as the search shell takes it). A longer build, or
+        one whose length cannot be read, keeps the name's budget."""
+        for built, guide, expected in ((20, 20, 2), (20, 21, 1), (20, 22, 0), (20, 23, 0),
+                                       (23, 20, 2), (None, 23, 2), (20, 0, 2)):
+            with self.subTest(built=built, guide=guide):
+                idx = os.path.join(self.root, "genome_library", f"{_MOTIF}_3_{_REF}")
+                shutil.rmtree(idx, ignore_errors=True)
+                os.makedirs(idx)
+                with open(os.path.join(idx, "NRG_chr1_1.bin"), "wb") as fh:
+                    if built:
+                        fh.write(struct.pack("=ii", 7, built))
+                self.assertEqual(crisprme._installed_index_bulge_cap(
+                    _MOTIF, _REF, is_variant=False, guide_len=guide), expected)
+
+
+# --------------------------------------------------------------------------- #
+# A variant search given no --samplesID takes the list a download installs
+# --------------------------------------------------------------------------- #
+class TestSamplesListForSearch(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="sampleslist_")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self._orig_cwd = crisprme.current_working_directory
+        crisprme.current_working_directory = self.root + "/"
+        self.addCleanup(setattr, crisprme, "current_working_directory", self._orig_cwd)
+        self.out = os.path.join(self.root, "out")
+        os.makedirs(self.out)
+        self.vcfs = os.path.join(self.root, "list_vcf.txt")
+
+    def call(self, *datasets):
+        with open(self.vcfs, "w") as fh:
+            fh.write("".join(f"{d}\n" for d in datasets))
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            got = crisprme._samples_list_for_search(self.vcfs)
+        return got, err.getvalue(), out.getvalue()
+
+    def test_a_dataset_with_its_list_gets_a_listing_of_it(self):
+        _mkfile(os.path.join(self.root, "samplesIDs", "ds.samplesID.txt"), "#h\n")
+        got, err, out = self.call("ds")
+        self.assertEqual(got, ["ds.samplesID.txt"])
+        self.assertEqual(err, "")  # (the pre-flight's stderr is shown; none is due here)
+        self.assertIn("using ds.samplesID.txt from samplesIDs/", out)
+        listing = crisprme._write_samples_list(self.out, got)
+        self.assertEqual(listing, os.path.join(self.out, ".list_samplesID.txt"))
+        with open(listing) as fh:
+            self.assertEqual(fh.read(), "ds.samplesID.txt\n")
+
+    def test_it_writes_nothing_in_the_output_folder(self):
+        """The listing went in the output folder before the pre-flight: a refused search
+        left it there, and the corrected command was refused as 'not empty'. It goes there
+        at the launch now (test_build_index_only_atomic runs that)."""
+        _mkfile(os.path.join(self.root, "samplesIDs", "ds.samplesID.txt"), "#h\n")
+        self.call("ds")
+        self.assertEqual(os.listdir(self.out), [])
+
+    def test_a_panel_with_one_and_one_without_lists_the_one_and_each_once(self):
+        _mkfile(os.path.join(self.root, "samplesIDs", "ds.samplesID.txt"), "#h\n")
+        got, _, _ = self.call("ds", "mega", "ds")
+        self.assertEqual(got, ["ds.samplesID.txt"])
+
+    def test_with_none_it_stays_empty_and_says_what_that_costs(self):
+        got, err, _ = self.call("mega")
+        self.assertEqual(got, [])
+        self.assertIn("using an empty sample set", err)
+        self.assertIn("the by-sample and population tables stay empty", err)
+        self.assertIn("pass --samplesID", err)
+        self.assertEqual(os.listdir(self.out), [])
+
+
+# --------------------------------------------------------------------------- #
+# The pre-flight's refusal of a variant search nothing here can serve or build
+# --------------------------------------------------------------------------- #
+class TestPreflightNoVariantIndex(unittest.TestCase):
+    """The search script stops there too, for the web; this stops a CLI search before the
+    pre-flight prints '[OK] ... source VCFs not required' and the run writes anything. The
+    rules are the script's (test_index_resolution runs those)."""
+
+    DS = _VCF
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="novariant_")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self._orig_cwd = crisprme.current_working_directory
+        crisprme.current_working_directory = self.root + "/"
+        self.addCleanup(setattr, crisprme, "current_working_directory", self._orig_cwd)
+        for d in (f"registry_{self.DS}", f"log_indels_{self.DS}"):
+            os.makedirs(os.path.join(self.root, "Dictionaries", d))
+        self.vdir = os.path.join(self.root, "VCFs", self.DS)
+
+    def index(self, name, record=None, guide=None, library="genome_library"):
+        folder = os.path.join(self.root, library, name)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "X_chr1_1.bin"), "wb") as fh:
+            fh.write(struct.pack("=ii", 7, guide) if guide else b"")
+        if record:
+            _mkfile(os.path.join(folder, ".pam_build"), record)
+
+    def check(self, motif="NGG", b=(1, 1), prune=False, three_prime=True, guide=20, path="_"):
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                crisprme._refuse_no_variant_index([self.vdir], _REF, motif, b[0], b[1], prune,
+                                                  three_prime, guide, path)
+        except SystemExit as stop:
+            self.assertEqual(stop.code, 1)
+            return err.getvalue()
+        return None
+
+    def test_another_pam_is_refused_naming_what_is_there_and_what_to_do(self):
+        self.index(f"NRG_3_{_REF}+{self.DS}", guide=20)
+        said = self.check()
+        self.assertIn(f"no variant index here serves this search (genome {_REF}, dataset "
+                      f"{self.DS}, PAM NGG, 1 DNA and 1 RNA bulge(s), a 20-nt guide)", said)
+        self.assertIn(f"NRG_3_{_REF}+{self.DS} (up to 2 bulge(s) of each type, built for a 20-nt "
+                      "guide)", said)
+        self.assertIn(f"--index-name NGG_3_{_REF}+{self.DS} if it is published", said)
+        self.assertEqual(len(said.splitlines()), 1)
+
+    def test_a_deeper_budget_is_told_the_bulges_there(self):
+        self.index(f"NGG_2_{_REF}+{self.DS}")
+        self.assertIn("up to 1 bulge(s) of each type: search with no more",
+                      self.check(b=(2, 2)))
+
+    def test_a_wider_pam_less_index_is_named_with_its_flags(self):
+        self.index(f"NNNNNNNN_3_{_REF}+{self.DS}")
+        self.assertIn("--prune-pam --index-path genome_library", self.check())
+
+    def test_a_variant_index_at_index_path_serves(self):
+        # the search script reads one there first, then in genome_library/ (OF-5)
+        self.index(f"NGG_2_{_REF}+{self.DS}", guide=20, library="shared")
+        self.assertIsNone(self.check(path=os.path.join(self.root, "shared")))
+
+    def test_under_index_path_it_names_the_indexes_of_both_libraries(self):
+        self.index(f"NRG_3_{_REF}+{self.DS}", guide=20, library="shared")
+        self.index(f"NAG_3_{_REF}+{self.DS}", guide=20)
+        said = self.check(path=os.path.join(self.root, "shared"))
+        self.assertIn(f"Variant indexes installed for {self.DS}: NRG_3_{_REF}+{self.DS} (up to 2 "
+                      f"bulge(s) of each type, built for a 20-nt guide), NAG_3_{_REF}+{self.DS} ",
+                      said)
+        self.assertNotIn("supplies the reference index only", said)
+
+    def test_a_wider_pam_less_index_at_index_path_is_named_with_that_library(self):
+        shared = os.path.join(self.root, "shared")
+        self.index(f"NNNNNNNN_3_{_REF}+{self.DS}", library="shared")
+        self.assertIn(f"--prune-pam --index-path {shared}.", self.check(path=shared))
+
+    def test_an_index_that_serves_goes_on(self):
+        self.index(f"NGG_2_{_REF}+{self.DS}", guide=20)
+        self.assertIsNone(self.check())
+
+    def test_a_wider_pam_less_index_goes_on_under_prune(self):
+        self.index(f"NNNNNNNN_3_{_REF}+{self.DS}")
+        self.assertIsNone(self.check(prune=True))
+
+    def test_an_index_for_another_guide_does_not_serve(self):
+        self.index(f"NGG_2_{_REF}+{self.DS}", guide=20)
+        self.assertIn("a 23-nt guide", self.check(guide=23))
+        self.assertIsNone(self.check(guide=21, b=(1, 0)))
+
+    def test_an_index_of_the_other_side_does_not_serve(self):
+        self.index(f"NNN_3_{_REF}+{self.DS}", "23bp-NNN-5p 23 -3\n")
+        self.assertIsNotNone(self.check())
+        self.assertIsNone(self.check(three_prime=False))
+
+    def test_an_index_a_run_holds_the_lock_of_does_not_serve(self):
+        self.index(f"NGG_2_{_REF}+{self.DS}")
+        os.makedirs(os.path.join(self.root, "genome_library", f"NGG_2_{_REF}+{self.DS}.lock"))
+        self.assertIsNotNone(self.check())
+
+    def test_the_vcfs_can_build_it(self):
+        _mkfile(os.path.join(self.vdir, "x.chr1.vcf.gz"))
+        self.assertIsNone(self.check())
+
+    def test_the_enriched_genome_can_build_it(self):
+        os.makedirs(os.path.join(self.root, "Genomes", f"{_REF}+{self.DS}"))
+        self.assertIsNone(self.check())
+
+    def test_no_dictionaries_is_left_to_the_check_that_names_them(self):
+        shutil.rmtree(os.path.join(self.root, "Dictionaries", f"registry_{self.DS}"))
+        self.assertIsNone(self.check())
+
 
 # --------------------------------------------------------------------------- #
 # (1) BULGE-CAP -- web pages_utils.reference_bulge_capacity
@@ -271,6 +529,56 @@ class TestWebReferenceBulgeCapacity(unittest.TestCase):
         ref = pages_utils.reference_bulge_capacity(_REF, _PAM_VALUE)
         var = pages_utils.index_max_bulges(_REF, _PAM_VALUE, _DATASET)
         self.assertEqual(min(ref, var), 2)
+
+    def test_only_an_equal_width_pamless_index_counts(self):
+        """The web never passes --prune-pam, so the search shell never takes a WIDER
+        all-N index for it; the slider must not offer bulges on the strength of one."""
+        _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
+        _mkfile(os.path.join(self.root, "genome_library", f"NNNNNNNN_3_{_REF}",
+                             "TSTgenome.NNNNNNNN.bin"))
+        self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 0)
+        _mkfile(os.path.join(self.root, "genome_library", f"NNN_3_{_REF}",
+                             "TSTgenome.NNN.bin"))
+        self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 2)
+
+    def _index_built_for(self, name, guide):
+        idx = os.path.join(self.root, "genome_library", name)
+        os.makedirs(idx, exist_ok=True)
+        with open(os.path.join(idx, "NRG_chr1_1.bin"), "wb") as fh:
+            fh.write(struct.pack("=ii", 7, guide))
+
+    def test_an_index_built_for_a_shorter_guide_offers_fewer_bulges_or_none(self):
+        """The form must not offer bulges on the strength of an index the search does not
+        take for this PAM file's guide (index_fit)."""
+        _mkfile(os.path.join(self.root, "PAMs", "21bp-NRG-X.txt"), "N" * 21 + "NRG 3\n")
+        _mkfile(os.path.join(self.root, "PAMs", "23bp-NRG-X.txt"), "N" * 23 + "NRG 3\n")
+        _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
+        self._index_built_for(f"NRG_3_{_REF}", 20)
+        self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 2)
+        self.assertEqual(pages_utils.index_max_bulges(_REF, "21bp-NRG-X", None), 1)
+        self.assertEqual(pages_utils.index_max_bulges(_REF, "23bp-NRG-X", None), 0)
+
+    def test_two_pam_files_of_one_motif_read_differently(self):
+        """20bp- and 23bp-TTTV-Cas12a read the same in the dropdown, and the first was
+        taken for both; a label alone in its motif stays as it was."""
+        _mkfile(os.path.join(self.root, "PAMs", "20bp-TTTV-Cas12a.txt"), "TTTV" + "N" * 20 + " -4\n")
+        _mkfile(os.path.join(self.root, "PAMs", "23bp-TTTV-Cas12a.txt"), "TTTV" + "N" * 23 + " -4\n")
+        _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
+        labels = {p["value"]: p["label"] for p in pages_utils.get_available_PAM()}
+        self.assertEqual(labels["20bp-TTTV-Cas12a"], "Cas12a · TTTV (20 nt)")
+        self.assertEqual(labels["23bp-TTTV-Cas12a"], "Cas12a · TTTV (23 nt)")
+        self.assertEqual(labels[_PAM_VALUE], pages_utils.friendly_pam_label(_PAM_VALUE))
+
+    def test_a_dedicated_variant_index_offers_the_pam_files_it_fits(self):
+        """The form lists a PAM file of the motif of a panel's index only where the index
+        stores enough for its guide: "the index length matches that PAM by construction"
+        does not hold, as the name carries no guide length."""
+        _mkfile(os.path.join(self.root, "PAMs", "20bp-TTTV-Cas12a.txt"), "TTTV" + "N" * 20 + " -4\n")
+        _mkfile(os.path.join(self.root, "PAMs", "23bp-TTTV-Cas12a.txt"), "TTTV" + "N" * 23 + " -4\n")
+        _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
+        self._index_built_for(f"TTTV_2_{_REF}+{_VCF}", 20)
+        values = [p["value"] for p in pages_utils.get_pam_options(_REF, _DATASET)]
+        self.assertEqual(values, ["20bp-TTTV-Cas12a"])
 
 
 # --------------------------------------------------------------------------- #
@@ -501,6 +809,56 @@ class TestIndelZeroBulgeRouting(unittest.TestCase):
         self.assertIn("genome_library", cmd)
         self.assertIn("-index", cmd)
 
+
+
+# --------------------------------------------------------------------------- #
+# A working folder the run cannot write to (skip audit D10)
+# --------------------------------------------------------------------------- #
+class TestUnwritableWorkingFolder(unittest.TestCase):
+    """complete-search, assembly-search and build-index-only ended in a raw OSError traceback
+    when a folder of the working directory, or the output folder, could not be created (a
+    read-only mount, no write permission); now one line says so and what to do. crisprme.py
+    with no arguments still prints its help there."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="unwritable_")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self._orig_cwd = crisprme.current_working_directory
+        crisprme.current_working_directory = self.root + "/"
+        self.addCleanup(setattr, crisprme, "current_working_directory", self._orig_cwd)
+        self._orig_makedirs = crisprme.os.makedirs
+
+        def refuse(path, *args, **kwargs):
+            raise OSError(30, "Read-only file system", path)
+
+        crisprme.os.makedirs = refuse
+        self.addCleanup(setattr, crisprme.os, "makedirs", self._orig_makedirs)
+
+    def stops(self, call):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as stop:
+            call()
+        self.assertEqual(stop.exception.code, 1)
+        return err.getvalue()
+
+    def test_a_folder_of_the_tree_that_cannot_be_made_stops_in_one_line(self):
+        said = self.stops(crisprme.check_crisprme_dirtree)
+        self.assertEqual(said, f"Error: cannot create {self.root}/Genomes: Read-only file "
+                               "system. Run CRISPRme from a working folder you can write to.\n")
+
+    def test_the_output_folder_too(self):
+        said = self.stops(lambda: crisprme._check_output(["--output", "job"]))
+        self.assertEqual(said, f"Error: cannot create {self.root}/Results/job: Read-only file "
+                               "system. Run CRISPRme from a working folder you can write to.\n")
+
+    def test_the_help_is_not_stopped(self):
+        crisprme.check_crisprme_dirtree(strict=False)  # (no SystemExit)
+
+    def test_a_tree_in_place_needs_nothing_made(self):
+        # the read-only use that works: every folder there, an --output elsewhere
+        for d in crisprme.CRISPRMEDIRS:
+            self._orig_makedirs(os.path.join(self.root, d))
+        crisprme.check_crisprme_dirtree()
 
 if __name__ == "__main__":
     unittest.main()

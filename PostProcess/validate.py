@@ -93,13 +93,24 @@ def find_crispritz_targets(name: str, pam_name: str, mm: int, bdna: int, brna: i
     return None
 
 
-def check_variant_dataset() -> None:
+def check_variant_dataset(chrom: str) -> None:
     """Ensure complete-test used the 1000G dataset (required for validation)."""
     vcf_config_file = "vcf.config.test.txt"
     if not os.path.isfile(vcf_config_file):
-        raise FileNotFoundError(
-            f"Variant dataset configuration file not found: {vcf_config_file}"
+        # nothing to validate here: complete-test's benchmark mode writes this file, the
+        # default prebuilt-index smoke does not. Say what to run, without a traceback:
+        # for the chromosome asked for, and without --chrom ("all", a whole-genome run)
+        # the documented chr22 self-test. The variable set in front of `docker run` stays
+        # on the host: in Docker it goes with -e.
+        run_chrom = "chr22" if chrom == "all" else chrom
+        sys.stderr.write(
+            f"ERROR: {vcf_config_file} not found in {os.getcwd()}: validate-test checks "
+            "the output of complete-test's benchmark mode, so run that here first: "
+            "CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py "
+            f"complete-test --chrom {run_chrom} --vcf_dataset 1000G (Docker: pass it "
+            f"with -e), then crisprme.py validate-test --chrom {run_chrom}\n"
         )
+        sys.exit(1)
     with open(vcf_config_file, mode="r") as fin:
         datasets = [d for line in fin if (d := line.strip())]
     if len(datasets) != 1 or datasets[0] != "hg38_1000G":
@@ -194,7 +205,11 @@ def compute_sites(targets: pd.DataFrame, crisprme: bool = False) -> List[str]:
     if crisprme:
         targets["site"] = targets.apply(lambda x: _compute_site(x[3], x[4], x[6]), axis=1)
     else:
-        targets["site"] = targets.apply(lambda x: _compute_site(x[0], x[4], x[3]), axis=1)
+        # the brute-force reference is headered (CHR RNA DNA Strand Start ...), so its
+        # columns are taken by position: x[0] on a name-labelled row warned on pandas 2
+        # and is a KeyError on pandas 3
+        targets["site"] = targets.apply(
+            lambda x: _compute_site(x.iloc[0], x.iloc[4], x.iloc[3]), axis=1)
     return targets["site"].tolist()
 
 
@@ -220,21 +235,32 @@ def validate(name: str, crisprme_targets: pd.DataFrame, bf_targets: pd.DataFrame
 
 
 def run_test_validation(chrom: str) -> None:
-    """Validate every registered benchmark that has complete-test output present."""
-    check_variant_dataset()
+    """Validate every registered benchmark that has complete-test output present, on a
+    chromosome its brute-force reference covers."""
+    check_variant_dataset(chrom)
     registry = load_benchmarks()
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
     base_url = registry["reference_base_url"]
-    # Mirror complete_test.py: on a hosted CI runner (CRISPRME_SKIP_HEAVY=1) the "heavy"
-    # bulge-2 benchmarks are not run, so don't try to validate them (avoids a misleading
-    # "targets not found" skip). Locally (env unset) all cases validate.
+    # Mirror complete_test.py: with CRISPRME_SKIP_HEAVY=1, the opt-out for a very small
+    # machine, the "heavy" bulge-2 benchmarks are not run, so don't try to validate them
+    # (avoids a misleading "targets not found" skip). Unset, all cases validate.
     skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
     validated = failed = skipped = 0
     for bench in registry["benchmarks"]:
         name = bench["name"]
         if skip_heavy and bench.get("heavy"):
-            sys.stderr.write(f"[{name}] SKIPPED: heavy benchmark not run on this runner "
-                             "(CRISPRME_SKIP_HEAVY=1).\n")
+            sys.stderr.write(f"[{name}] SKIPPED: bulge-2 benchmark, left out by "
+                             "CRISPRME_SKIP_HEAVY=1.\n")
+            skipped += 1
+            continue
+        # A reference that covers one chromosome only ("scope": the chr22 Cas12a and
+        # single-"n edits" ones) cannot check another chromosome or a whole genome:
+        # every site CRISPRme finds outside it would count as "extra" and fail the case.
+        scope = bench.get("scope")
+        if scope and scope != chrom:
+            where = "the whole genome" if chrom == "all" else chrom
+            sys.stderr.write(f"[{name}] SKIPPED: its brute-force reference covers {scope} "
+                             f"only, not {where}.\n")
             skipped += 1
             continue
         # Per-case thresholds mirror complete_test.py, so the output-report filename

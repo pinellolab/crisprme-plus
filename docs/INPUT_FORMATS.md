@@ -143,9 +143,9 @@ for example `20bp-NGG-SpCas9.txt` or `TTTV-20bp-Cas12a.txt`.
 **Important:** the three fields are cosmetic labels used for naming/reporting.
 The **file contents** (the motif and the signed length on line 1) are what
 actually drive the search. If your filename has fewer than three `-`-separated
-fields, the label parse will fail (`IndexError`); if the label is "wrong" but
-the contents are right, the search still runs correctly — only the reported
-nuclease label is affected.
+fields, `complete-search` refuses it in one line (`Error: Invalid PAM filename ...`,
+exit 1) before it does anything; if the label is "wrong" but the contents are right,
+the search still runs correctly — only the reported nuclease label is affected.
 
 ---
 
@@ -157,8 +157,12 @@ CRISPRme reads **only the first line** of the PAM file:
 pam_char = pam_file.readline()
 ```
 
-(`crisprme.py`, in the `complete_search` PAM setup — a single `readline`.) A PAM file with multiple lines will **silently** use
-only line 1 — the rest is ignored, with no warning.
+(`crisprme.py`, in the `complete_search` PAM setup — a single `readline`.) So `complete-search`
+refuses a PAM file holding a second non-empty line, rather than search line 1 alone, in one line
+before it does anything (`Error: Only one PAM motif per file is supported; ...`, exit 1). It
+refuses one whose first line is not `<motif> <length>` the same way, with its own message
+(`Error: The PAM file '...' must hold the motif and the PAM's length on its first line, ...`,
+exit 1).
 
 To search **more than one PAM motif at once**, do not stack multiple lines.
 Instead, encode the alternatives as a **single IUPAC motif**. For example, to
@@ -293,7 +297,12 @@ result columns** — they are not interchangeable:
   closest gene / genic context.
 
 Both accept either a plain `.bed` or a bgzipped `.bed.gz` file (the sort helper
-transparently handles both; see `_sort_annotation` in `crisprme.py`, line 822).
+transparently handles both; see `_sort_annotation` in `crisprme.py`).
+
+A third input, **`--personal_annotation`**, adds a BED of your own named intervals (fourth
+column = the name) to `--annotation`'s, or stands alone without it; its names show in the
+`Annotation_personal` column. The file may be plain text or compressed with bgzip or gzip:
+a compressed file is told by its content, not its name.
 
 **Sorting.** BEDs must be sorted with BEDOPS/GRCh ordering. As of 2.1.12,
 **both `--annotation` and `--gene_annotation` are auto-sorted for you** — each is
@@ -310,7 +319,18 @@ For a variant-aware search, each VCF record needs:
 
 - a **`FILTER`** value — use `PASS` (records not marked `PASS` may be dropped by
   filtering);
-- **`INFO/AF`** — a **numeric** allele frequency;
+- **`INFO/AF`** — a **numeric** allele frequency, at **one place in `INFO` in every record**:
+  CRISPRitz `add-variants` reads each record's `AF` where the first record has it, so a record
+  that has it elsewhere gets none: its indel has no frequency, nor, on an index without the
+  dict-less tiers, its SNP (a known limit, to be fixed in the next CRISPRitz release:
+  [METHODS §8](../METHODS.md#8-off-target-scoring-assumptions-and-limitations)). A VCF merged
+  with `seq_script/merge_panels/merge_vcf_panels.sh` has such records; this prints one line for
+  a VCF that has none:
+
+  ```bash
+  bcftools query -f '%INFO\n' your.vcf.gz \
+    | awk -F';' '{for(i=1;i<=NF;i++) if($i ~ /^AF=/){print i; break}}' | sort | uniq -c
+  ```
 - **`FORMAT/GT`** — genotype fields for the samples.
 
 ### Variant types
@@ -394,8 +414,8 @@ allowed budget.
 
 Search cost grows **combinatorially** with mismatches and DNA/RNA bulges, and
 again with local variant density. Allowing **more than one bulge in both DNA and
-RNA simultaneously** is especially expensive: a single chromosome at mm6 + 2 DNA
-+ 2 RNA bulges has produced **~207 GB of intermediate files and OOMed** the
+RNA simultaneously** is especially expensive: a single chromosome at mm6 + 2 DNA +
+2 RNA bulges has produced **~207 GB of intermediate files and OOMed** the
 analysis (see the header of `PostProcess/search_budget.py`).
 
 **Estimate before you launch.** A dependency-light heuristic ships in the repo:

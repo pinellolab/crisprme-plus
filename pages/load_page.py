@@ -10,7 +10,9 @@ are automatically deleted and could not be accessed anymore.
 """
 
 from app import app, current_working_directory, URL
-from .pages_utils import RESULTS_DIR, GUIDES_FILE, LOG_FILE, PARAMS_FILE, QUEUE_FILE
+from .pages_utils import (
+    RESULTS_DIR, GUIDES_FILE, LOG_FILE, PARAMS_FILE, QUEUE_FILE, results_job_dir,
+)
 
 from dash import Input, Output, State
 from dash.exceptions import PreventUpdate
@@ -20,9 +22,97 @@ from dash import dcc
 from dash import html
 import dash_bootstrap_components as dbc
 
-import subprocess
 import shutil
 import os
+
+
+# The URL fragment main_page.change_url opens a job's status page with when it did
+# not run the search submitted, because an identical earlier one is this job.
+REUSED_HASH = "#reused"
+
+
+# What the search script's ERROR says when no index here can serve the search, and the
+# run cannot build one: each is one line that says what to do.
+_NO_INDEX_REFUSALS = (
+    " is not installed, and this run cannot build it: ",  # a library that takes no lock
+    " stores too few bases per site",  # an index in the way, built for a shorter guide
+    "no variant index here serves this search",  # nor VCFs or an enriched genome to build one
+    " lacks trees of FASTAs that hold sites of its PAM: ",  # an index missing a chromosome
+    " was built by a newer CRISPRitz (",  # an index in a format this release does not read
+)
+
+
+def _failure_text(job_directory: str) -> str:
+    """The banner of a job whose log_error.txt is not empty. A search the pipeline
+    refused because build-index-only has not finished a part of its dataset (its
+    "... is unfinished: ..." ERROR), or because no index here can serve it
+    (_NO_INDEX_REFUSALS), says so, and what to do: submitted again, it fails the same
+    way until then. Any other failure gets the general text."""
+    try:
+        with open(os.path.join(job_directory, "log_error.txt"), errors="replace") as fh:
+            for line in fh:
+                if line.startswith("ERROR: ") and (
+                        (" is unfinished: " in line
+                         and "build-index-only again to its end" in line)
+                        or any(said in line for said in _NO_INDEX_REFUSALS)):
+                    return f"The search was not run: {line[len('ERROR: '):].strip()}."
+    except OSError:
+        pass
+    return str(
+        "The selected result encountered some errors, "
+        "please remove it and try to submit again."
+    )
+
+
+# Remove result removes only a job its status page offers it for: the job id is the
+# URL's, which a client can set to any job's, finished, running or queued.
+def _search_failed(job_directory: str) -> bool:
+    """Whether a search failed, as its status page says (refresh_search): its folder
+    holds its log.txt and a log_error.txt that is not empty. The page offers Remove
+    result for such a search only, and remove_result removes no other."""
+    error_log = os.path.join(job_directory, "log_error.txt")
+    return (
+        os.path.isfile(os.path.join(job_directory, LOG_FILE))
+        and os.path.isfile(error_log)
+        and os.path.getsize(error_log) > 0
+    )
+
+
+def is_assembly_folder(job_directory: str) -> bool:
+    """Whether a job folder is a personal-assembly search's, per its .Params.txt
+    (written by submit_assembly_search_job), as the routes to a job's pages tell
+    (index._is_assembly_job), which open its status page."""
+    try:
+        with open(os.path.join(job_directory, PARAMS_FILE)) as params_handle:
+            return "Genome_type\tassembly" in params_handle.read()
+    except OSError:
+        return False
+
+
+def _assembly_search_ended(current_log: str) -> Tuple[bool, bool]:
+    """(failed, reconciled) of a personal-assembly search, from its log.txt, as its
+    status page says (refresh_assembly_search): the page offers Remove result for a
+    search that failed and is not reconciled, as a search's page offers it for one that
+    failed only (refresh_search), and remove_assembly_result removes no other search.
+
+    Reconciled: assembly_search() prints "Reconciliation complete. Wrote" only after
+    combined.to_csv() succeeds (crisprme.py:2653-2654), so seeing it is itself proof
+    the combined TSV was written. Failed mirrors refresh_search's log_error.txt check,
+    for a single merged log.txt (stdout+stderr combined -- see
+    _run_assembly_search_job): a clean crisprme.py error() call always writes
+    "Error: ..." to stderr before exiting; an unhandled exception writes a Python
+    traceback; the web launcher's own defensive except clause prefixes with
+    "[web] launcher error:". Not exhaustive -- a raw shell-level failure (e.g. a
+    command not found) won't match any of these and would just appear to hang at
+    "To do" -- known gap, not solved here."""
+    reconciled = "Reconciliation complete. Wrote" in current_log
+    failed = (
+        "\nError: " in current_log
+        or current_log.startswith("Error: ")
+        or "Traceback (most recent call last)" in current_log
+        or "[web] launcher error:" in current_log
+    )
+    return failed, reconciled
 
 
 # Check job completion
@@ -236,15 +326,7 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
                         database_status = html.P(
                             "Inserting data... Step [1/1]", style={"color": "orange"}
                         )
-                    if (
-                        os.path.isfile(
-                            os.path.join(current_job_directory, "log_error.txt")
-                        )
-                        and os.path.getsize(
-                            os.path.join(current_job_directory, "log_error.txt")
-                        )
-                        > 0
-                    ):
+                    if _search_failed(current_job_directory):
                         return (
                             {"visibility": "hidden"},
                             html.P("Not available", style={"color": "red"}),
@@ -256,10 +338,7 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
                             html.P("Not available", style={"color": "red"}),
                             "",
                             dbc.Alert(
-                                str(
-                                    "The selected result encountered some errors, "
-                                    "please remove it and try to submit again."
-                                ),
+                                _failure_text(current_job_directory),
                                 color="danger",
                             ),
                             False,
@@ -359,6 +438,24 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
     )
 
 
+# Say so when the search just submitted was not run: an identical earlier search
+# (main_page._reuse_key) is this job, so its status and results are shown instead.
+@app.callback(
+    Output("reused-search-note", "children"),
+    [Input("url", "hash")],
+)
+def show_reused_search_note(hash_value: Optional[str]):
+    if hash_value != REUSED_HASH:
+        return ""
+    return dbc.Alert(
+        "Your search was not run again: it is identical to this earlier search (the "
+        "same guides, genome, variants, PAM, thresholds, analysis mode, report option, "
+        "annotations and job name, on this version of CRISPRme), so that search and "
+        "its results are shown. To run it again, submit it with another job name.",
+        color="info",
+    )
+
+
 # =============================================================================
 # Assembly-search (personal diploid genome) status polling
 #
@@ -413,8 +510,8 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
         raise PreventUpdate
     not_avail = html.P("Not available", style={"color": "red"})
     job_id = dir_name.split("=")[-1]
-    job_dir = os.path.join(current_working_directory, RESULTS_DIR, job_id)
-    if not os.path.isdir(job_dir):
+    job_dir = results_job_dir(job_id)  # the URL's: a job folder of Results/ only
+    if job_dir is None:
         return (
             {"visibility": "hidden"}, not_avail, not_avail, not_avail, "",
             dbc.Alert("The selected result does not exist", color="danger"),
@@ -443,10 +540,9 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
         or "Found existing completed maternal search results" in current_log
     )
     reconcile_started = "Reconciling paternal and maternal predictions" in current_log
-    # Only printed AFTER combined.to_csv() succeeds (assembly_search(),
-    # crisprme.py:2653-2654) -- seeing this string is itself proof the
-    # combined TSV was written, no separate file-existence check needed.
-    reconcile_done = "Reconciliation complete. Wrote" in current_log
+    # (no separate file-existence check needed for the combined TSV: see
+    # _assembly_search_ended, which remove_assembly_result reads the same way)
+    failed, reconcile_done = _assembly_search_ended(current_log)
 
     paternal_status = _assembly_status_cell(
         paternal_started, maternal_started or reconcile_started, "Searching paternal haplotype..."
@@ -458,21 +554,6 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
         reconcile_started, reconcile_done, "Reconciling against hg38..."
     )
 
-    # Mirrors refresh_search's log_error.txt-non-empty check, adapted for a
-    # single merged log.txt (stdout+stderr combined -- see
-    # _run_assembly_search_job): a clean crisprme.py error() call always
-    # writes "Error: ..." to stderr before exiting; an unhandled exception
-    # writes a Python traceback; the web launcher's own defensive except
-    # clause prefixes with "[web] launcher error:". Not exhaustive -- a raw
-    # shell-level failure (e.g. a command not found) won't match any of
-    # these and would just appear to hang at "To do" -- known gap, not
-    # solved here.
-    failed = (
-        "\nError: " in current_log
-        or current_log.startswith("Error: ")
-        or "Traceback (most recent call last)" in current_log
-        or "[web] launcher error:" in current_log
-    )
     if failed and not reconcile_done:
         return (
             {"visibility": "hidden"}, not_avail, not_avail, not_avail, "",
@@ -484,6 +565,7 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
             False,
         )
     if reconcile_done:
+        # finished: View Results, and no Remove result, as for a finished search
         return (
             {"visibility": "visible"},
             paternal_status,
@@ -491,7 +573,7 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
             reconcile_status,
             os.path.join(URL, f"result?job={job_id}"),
             "",
-            False,
+            True,
         )
     return (
         {"visibility": "hidden"},
@@ -510,7 +592,7 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
     [State("url", "search")],
 )
 def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
-    """Deletes all three sibling directories a completed assembly-search job
+    """Deletes all three sibling directories a failed assembly-search job
     left behind (<id>_paternal, _maternal, _combined) -- not just the single
     <id>_combined directory named in the URL. Reads Paternal_dir/
     Maternal_dir from .Params.txt (written explicitly at submit time by
@@ -518,8 +600,21 @@ def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
     string convention here too."""
     if not n:
         raise PreventUpdate
-    combined_dir_name = dir_name.split("=")[-1]
-    combined_dir = os.path.join(current_working_directory, RESULTS_DIR, combined_dir_name)
+    # the job id is the URL's, and the two names its .Params.txt holds are read from that
+    # folder: only job folders of Results/ are removed, as by remove_result ('../' in
+    # either reached any folder, outside the data folder too), and only those of a
+    # personal-assembly search its status page offers Remove result for, one that failed
+    # (refresh_assembly_search): the id can be any job's, a finished one's too
+    combined_dir = results_job_dir(dir_name.split("=")[-1])
+    if combined_dir is None or not is_assembly_folder(combined_dir):
+        raise PreventUpdate
+    try:
+        with open(os.path.join(combined_dir, LOG_FILE), errors="replace") as handle_log:
+            failed, reconciled = _assembly_search_ended(handle_log.read())
+    except OSError:  # no log yet: queued
+        raise PreventUpdate
+    if not failed or reconciled:  # running, or finished
+        raise PreventUpdate
     dirs_to_remove = [combined_dir]
     params_path = os.path.join(combined_dir, PARAMS_FILE)
     if os.path.isfile(params_path):
@@ -532,8 +627,8 @@ def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
         for key in ("Paternal_dir", "Maternal_dir"):
             name = params.get(key)
             if name:
-                sibling_dir = os.path.join(current_working_directory, RESULTS_DIR, name)
-                if os.path.isdir(sibling_dir):
+                sibling_dir = results_job_dir(name)
+                if sibling_dir is not None:
                     dirs_to_remove.append(sibling_dir)
     for d in dirs_to_remove:
         shutil.rmtree(d, ignore_errors=True)
@@ -553,7 +648,9 @@ def show_assembly_full_log(n: int, dir_name: str, currently_hidden: bool) -> Tup
         raise PreventUpdate
     if not currently_hidden:
         return True, ""
-    job_dir = os.path.join(current_working_directory, RESULTS_DIR, dir_name.split("=")[-1])
+    job_dir = results_job_dir(dir_name.split("=")[-1])  # the URL's: Results/ only
+    if job_dir is None:
+        return False, "No log file found for this job yet."
     path = os.path.join(job_dir, LOG_FILE)
     if not os.path.isfile(path):
         return False, "No log file found for this job yet."
@@ -657,7 +754,7 @@ def load_page_assembly(job_link: str = "link") -> html.Div:
                 ),
                 html.Div(
                     [
-                        html.Div([view_results]),
+                        # View Results sits once, below this report (see load_page)
                         html.Div(id="assembly-no-directory-error"),
                         html.Div(
                             [
@@ -736,14 +833,16 @@ def remove_result(n: int, dir_name: str) -> html.P:
     if n == 0 or n is None:
         raise PreventUpdate  # do not do anything
     elif n == 1:
-        current_job_directory = os.path.join(
-            current_working_directory, RESULTS_DIR, dir_name.split("=")[-1]
-        )
+        # the job id is the URL's: only a job folder of Results/ is removed, with no
+        # shell (rm -rf through one ran a command the id held, and removed what '../'
+        # in it reached, outside the data folder too), and only a failed search's, the
+        # one the status page offers Remove result for (refresh_search): the id can be
+        # any job's, finished, running or queued
+        current_job_directory = results_job_dir(dir_name.split("=")[-1])
+        if current_job_directory is None or not _search_failed(current_job_directory):
+            raise PreventUpdate
         # remove job data
-        cmd = f"rm -rf {current_job_directory}"
-        code = subprocess.call(cmd, shell=True)
-        if code != 0:
-            raise ValueError(f"An error occurrend while running {cmd}")
+        shutil.rmtree(current_job_directory)
         return html.P("Results deleted")
     return None
 
@@ -763,9 +862,11 @@ def show_full_log(n: int, dir_name: str, currently_hidden: bool) -> Tuple[bool, 
         raise PreventUpdate
     if not currently_hidden:  # it's open -> collapse it
         return True, ""
-    job_dir = os.path.join(
-        current_working_directory, RESULTS_DIR, dir_name.split("=")[-1]
-    )
+    # the job id is the URL's: the logs of a job folder of Results/ only ('../' in it
+    # served the log files of any folder)
+    job_dir = results_job_dir(dir_name.split("=")[-1])
+    if job_dir is None:
+        return False, "No log files found for this job yet."
     sections: List[str] = []
     # (display label, filename, tail_lines or None for full)
     for label, fname, tail in (
@@ -904,6 +1005,8 @@ def load_page(job_link: str = "link") -> List:
             style={"text-align": "center"},
         )
     )
+    # says so when the search submitted was not run again (show_reused_search_note)
+    final_list.append(html.Div(id="reused-search-note", style={"margin": "1% 15%"}))
     # button to view results
     view_results = dcc.Link(
         html.Button(
@@ -960,7 +1063,9 @@ def load_page(job_link: str = "link") -> List:
                 ),
                 html.Div(
                     [
-                        html.Div([view_results]),  # hidden till analysis is completed
+                        # (the View Results button sits once, below this report: an id
+                        # placed twice in a page is not valid HTML, and the callback
+                        # only ever updated the second copy)
                         html.Div(id="no-directory-error"),
                         html.Div(
                             [

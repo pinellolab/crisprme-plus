@@ -16,11 +16,14 @@ those AFs directly into the mmap registry (no genotypes to count). Guarantees:
       is never silently dropped).
   (5) It round-trips through the SHIPPED RegistryReader -- the binary format is
       byte-for-byte the compile_registry format (this reuses _write_registry).
-  (6) _hwe_counts_from_af unit properties (AF exactness + Hardy-Weinberg bounds).
+  (6) _af_only_counts unit properties (AF exactness; carrier/hom are 0, never an
+      estimate).
+  (7) No shipped page says those counts are Hardy-Weinberg estimates.
 
 STDLIB only.
 """
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -177,6 +180,65 @@ class TestCompileFromInfoAf(unittest.TestCase):
         for i in range(500):
             for gid, cnt in reader.lookup(1000 + i, "C").items():
                 self.assertTrue(_well_formed(cnt), f"rec {i} group {gid}: {cnt}")
+
+
+class TheDocsSayWhatTheRegistryHolds(unittest.TestCase):
+    """METHODS section 2 said that a sites-only panel's carrier and homozygote counts "are
+    reported as Hardy-Weinberg expectations from the allele frequency (the frequency itself is
+    exact; carrier/hom are flagged as estimates)", and docs/DESIGN_mega_index.md and
+    seq_script/merge_panels/README.md that they are HWE expectations, from a helper
+    (_hwe_counts_from_af) that tier0_registry does not have. compile_registry_from_info_af
+    estimates none: it stores 0 for both (test_carrier_hom_are_zero_af_only above), and the
+    population-summary companion gives them as NA (test_aggregate_carrier_na)."""
+
+    CLAIM = re.compile(
+        r"(?:Hardy[-\u2013]Weinberg|HWE) (?:expectations|estimates)"
+        r"|carrier/hom(?:ozygote)? (?:counts )?are (?:flagged as )?(?:HWE )?"
+        r"(?:expectations|estimates)"
+        r"|_hwe_counts_from_af|HWE bounds", re.I)
+
+    @staticmethod
+    def _prose(text):
+        """Markdown emphasis dropped and whitespace runs folded, so a claim split over two
+        lines or set in bold reads as one."""
+        return " ".join(text.replace("**", "").split())
+
+    def test_the_scan_finds_what_the_pages_said(self):
+        for said in ("so they are reported as\nHardy\u2013Weinberg expectations from the "
+                     "allele frequency (the frequency itself is exact;\ncarrier/hom are "
+                     "flagged as estimates)",
+                     "counts do not exist for aggregate data \u2192 **Hardy-Weinberg "
+                     "expectations** from AF",
+                     "bounded + self-consistent; **AF is\nexact, carrier/hom are estimates**",
+                     "- **Carrier/hom counts are HWE expectations** from AF",
+                     "helper\n`_hwe_counts_from_af`) reuses `_write_registry`"):
+            self.assertTrue(self.CLAIM.search(self._prose(said)), said)
+        for not_said in ("the registry (never a fabricated Hardy-Weinberg estimate)",
+                         "view -i'HWE>=1e-30 && F_MISSING<=0.1 && ExcHet>=0.5",
+                         "**Carrier/hom counts are not estimated**: the registry stores 0"):
+            self.assertIsNone(self.CLAIM.search(self._prose(not_said)), not_said)
+
+    def test_no_shipped_page_says_they_are_estimated(self):
+        import tier0_registry
+        self.assertFalse(hasattr(tier0_registry, "_hwe_counts_from_af"))
+        repo = os.path.dirname(_HERE)
+        pages = [os.path.join(repo, "README.md"), os.path.join(repo, "METHODS.md")]
+        for top in ("docs", "seq_script"):
+            for root, _dirs, files in os.walk(os.path.join(repo, top)):
+                pages += [os.path.join(root, f) for f in sorted(files) if f.endswith(".md")]
+        self.assertIn(os.path.join(repo, "docs", "DESIGN_mega_index.md"), pages)
+        self.assertIn(os.path.join(repo, "seq_script", "merge_panels", "README.md"), pages)
+        found = []
+        for page in pages:
+            with open(page, encoding="utf-8") as fh:
+                for m in self.CLAIM.finditer(self._prose(fh.read())):
+                    found.append("%s: %s" % (os.path.relpath(page, repo), m.group(0)))
+        self.assertEqual(found, [])
+        # and METHODS section 2 says what it holds
+        with open(os.path.join(repo, "METHODS.md"), encoding="utf-8") as fh:
+            methods = self._prose(fh.read())
+        self.assertIn("Per-individual carrier and homozygote counts do not exist for aggregate "
+                      "data, and none is estimated: the registry stores 0 for both", methods)
 
 
 if __name__ == "__main__":

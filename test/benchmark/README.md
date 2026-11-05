@@ -10,16 +10,34 @@ alignment instead of CRISPRme's TST index search).
   guide `sg1617`, thresholds mm=4 / DNA-bulge=1 / RNA-bulge=1) on the hg38 +
   1000G variant-enriched genome.
 - `brute-force-cas12-1000G/brute_force_cas12_1000G.tsv` — Cas12a reference
-  (HBG1/HBG2 clinical guide, TTTV PAM). **Currently chr22-scoped** (953 off-targets);
-  run `validate-test --chrom chr22`. Regenerate genome-wide with the driver below.
+  (HBG1/HBG2 clinical guide, TTTV PAM). **Currently chr22-scoped** (953 off-targets;
+  `"scope": "chr22"` in `benchmarks.json`, so `validate-test` skips it on any other
+  chromosome and on a whole-genome run); run `validate-test --chrom chr22`. Regenerate
+  genome-wide with the driver below, and drop its `scope`.
 - `brute-force-simple/` — references for the two **default single-"n edits" web
   mode** cases (`cas9_sg1617_simple`, `cas12a_hbg_simple`): chr22, per-type caps
   wide open (mm=6/bDNA=2/bRNA=2) with a binding `--max-total-edits 3`, exactly the
-  default search slider. Validated locally (`validate-test` = 4/4). These are marked
-  `"heavy": true`: they build a bulge-2 (NGG_3/TTTV_3) index over the variant-enriched
-  genome, which OOMs a standard 16 GB hosted CI runner, so the CI job sets
-  `CRISPRME_SKIP_HEAVY=1` and runs only the light bulge-1 cases; run these two locally
-  (env unset) or on a larger runner. Their brute-force TSVs are committed for reproduction.
+  default search slider. These are marked `"heavy": true`: they build a bulge-2
+  (NGG_3/TTTV_3) index over the variant-enriched genome. They run by default, locally and
+  in CI: the whole set fits a 16 GiB, 4-CPU runner with no swap (measured peak 3.66 GB of
+  RAM). `CRISPRME_SKIP_HEAVY=1` leaves them out, an opt-out for very small machines.
+- `max-edits-5/` — references for the same two guides at **5 total edits**
+  (`cas9_sg1617_n5`, `cas12a_hbg_n5`, also `"heavy": true`): chr22, the same bulge-2
+  indexes, a binding `--max-total-edits 5`, with **381 and 92 sites**, 271 and 55 of them
+  with an alignment holding two bulges of one type, which the per-type cases (one of each)
+  do not search for. They are there
+  because the two cases above can hardly catch a lost site: `cas12a_hbg_simple`'s
+  reference is a header with no rows and `cas9_sg1617_simple`'s holds 3 rows at 2 sites,
+  so a search that lost its sites still passed them. One lost site fails these. The
+  folder is deliberately not named `brute-force-*`: the Bioconda recipe leaves those
+  folders out of its package (`validate.py` then downloads them from `reference_base_url`,
+  the main branch), where a reference that lands with a release is not there until that
+  release is merged. These ship in every install, Docker, source and Bioconda, and need
+  no network. The committed files came from the Rust generator run over 1 Mb pieces of the
+  chromosome overlapping by 200 nt, sorted by position. `generate_references.py --only
+  <name> --generator rust/target/release/brute_force_gen` on the whole enriched chr22 (about
+  1.6 h on one core each) gives the same rows, 1988 and 454 with 0 differences, in another
+  order, so with another md5.
 - `generate_brute_force.py` — the ground-truth generator (see credit below).
 - `generate_references.py` — registry-driven driver (regenerates any benchmark).
 

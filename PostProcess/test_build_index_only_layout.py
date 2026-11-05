@@ -1,0 +1,377 @@
+#!/usr/bin/env python3
+"""build-index-only refuses a genome folder it cannot index as a search reads it, and
+an index it built that holds no .bin (Gate B walk P5).
+
+index-genome indexes the ``*.fa`` files at the top of the genome folder only. A UCSC
+chromFa archive unpacked with its chroms/ folder (as the web Settings genome upload
+left one) gave an index with no .bin, which build-index-only put in place, and the web
+showed as done, and every search then refused; a FASTA file of several sequences gave
+an index of a genome every search refuses to use (genome_layout.py), and a FASTA file of
+one sequence named otherwise one whose off-targets every search found and then dropped
+(round 3 review, F2). Now the run ends with an ERROR that says what to do, before the
+engine runs, and a reference or variant index the engine wrote no .bin into is never
+put in place; nor is one with no .bin that an earlier run left taken for present
+(final review round 1, F2).
+
+These run the real crisprme.py build-index-only against the stub engine of
+test_build_index_only_atomic (which writes a .bin for each contig that holds a site,
+none for a contig of N alone), the way its own tests do.
+"""
+
+import os
+import subprocess
+import sys
+import unittest
+
+import test_build_index_only_atomic as bio
+
+setUpModule = bio.setUpModule
+tearDownModule = bio.tearDownModule
+LAYOUT = os.path.join(bio.HERE, "genome_layout.py")
+
+
+class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
+    def genome(self, *parts):
+        return self.path("Genomes", "hg38", *parts)
+
+    def assert_refused(self, rc, out, err, *says):
+        self.assertEqual(rc, 1, out + err)
+        for text in says:
+            self.assertIn(text, err)
+        self.assertTrue(err.startswith("Error: "), err)
+        self.assertEqual(self.calls(), [])  # the engine never ran
+        self.assertFalse(os.path.exists(self.path("genome_library")))
+        self.assertEqual(self.leftovers(), [])
+
+    def test_fasta_files_in_a_folder_of_the_genome(self):
+        # a UCSC hg38.chromFa.tar.gz unpacked as it is: chroms/chr1.fa ...
+        os.makedirs(self.genome("chroms"))
+        for name in ("chr1.fa", "chr2.fa"):
+            os.rename(self.genome(name), self.genome("chroms", name))
+        rc, out, err = self.run_bio(vcf=False)
+        self.assert_refused(rc, out, err, "holds no .fa file at its top",
+                            "(it holds chroms/chr1.fa, chroms/chr2.fa)",
+                            "move the .fa files up out of their folder")
+
+    def test_fasta_files_index_genome_does_not_read(self):
+        for label, rename in ((".fasta", lambda n: n[:-3] + ".fasta"),
+                              ("gzipped", lambda n: n + ".gz")):
+            with self.subTest(label):
+                self.fresh()
+                for name in ("chr1.fa", "chr2.fa"):
+                    os.rename(self.genome(name), self.genome(rename(name)))
+                rc, out, err = self.run_bio(vcf=False)
+                self.assert_refused(rc, out, err, "holds no .fa file at its top",
+                                    rename("chr1.fa"))
+
+    def test_fasta_file_of_several_sequences(self):
+        # a genome uploaded as one FASTA (the web Settings upload kept it so)
+        with open(self.genome("hg38.fa"), "w") as out:
+            for name in ("chr1.fa", "chr2.fa"):
+                with open(self.genome(name)) as fh:
+                    out.write(fh.read())
+                os.remove(self.genome(name))
+        rc, out, err = self.run_bio(vcf=False)
+        # and to remove an index built from it before: it holds the sites of chr2 under
+        # chr1's name, and a later run would take it as it is (final review round 1, F2)
+        self.assert_refused(rc, out, err, "hg38.fa: holds 2 sequences (chr1, chr2)",
+                            "python PostProcess/genome_layout.py --split",
+                            "\nThen remove each index built from the folder while it held "
+                            "that file (genome_library/*_hg38, genome_library/*_hg38+*, and "
+                            "the variant genomes Genomes/hg38+*)",
+                            "and run build-index-only again.",
+                            "remove this one there, with the indexes built on it")
+
+    def test_fasta_file_not_named_after_its_sequence(self):
+        # one sequence in a file named otherwise (the web Settings upload of walkone.fa
+        # holding >chr1 kept it so): the index was built, and every search of the folder
+        # found its off-targets and then dropped them all, a search taking each file for
+        # the sequence it is named after (round 3 review, F2)
+        misnamed, named = self.genome("hg38_chr2.fa"), self.genome("chr2.fa")
+        os.rename(named, misnamed)
+        rc, out, err = self.run_bio(vcf=False)
+        self.assert_refused(rc, out, err,
+                            f"{misnamed} holds the sequence chr2, but a search takes each "
+                            "FASTA file for the sequence it is named after (hg38_chr2), so "
+                            "every search of this folder finds the off-targets of chr2 and "
+                            "then drops them all.",
+                            f"(mv '{misnamed}' '{named}', or python PostProcess/genome_layout.py "
+                            f"--split {self.genome()}, which renames them all)",
+                            "remove this one there, with the indexes built on it")
+        # named after its sequence, the folder builds
+        os.rename(misnamed, named)
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
+                         ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
+
+    def test_fasta_header_of_more_than_its_id(self):
+        # NCBI, GENCODE, Ensembl headers and CRLF line ends: the index was built, named
+        # after the whole line, and every search of it lost results, often all with no
+        # error (round 5 review, F1). chr2 goes as it should; chr1 is refused.
+        with open(self.genome("chr1.fa")) as fh:
+            seq = fh.read().split("\n", 1)[1]
+        for label, header, sequence in (("NCBI", ">chr1 Homo sapiens chromosome 1, GRCh38\n", seq),
+                                        ("GENCODE", ">chr1 1\n", seq),
+                                        ("Ensembl", ">chr1 dna:chromosome chromosome:GRCh38:1\n", seq),
+                                        ("CRLF", ">chr1\r\n", seq.replace("\n", "\r\n"))):
+            with self.subTest(label):
+                self.fresh()
+                with open(self.genome("chr1.fa"), "wb") as fh:
+                    fh.write((header + sequence).encode())
+                rc, out, err = self.run_bio(vcf=False)
+                self.assert_refused(rc, out, err, "chr1.fa: its ",
+                                    "A header must be >id and nothing else",
+                                    f"python PostProcess/genome_layout.py --split {self.genome()}",
+                                    "Then remove each index built from the folder as it was "
+                                    "(genome_library/*_hg38, genome_library/*_hg38+*, and the "
+                                    "variant genomes Genomes/hg38+*)",
+                                    "remove this one there, with the indexes built on it")
+                # a search of it too, before the engine runs
+                rc, out, err = self.run_search()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("[ERROR] chr1.fa: its ", err)
+                self.assertIn(f"python PostProcess/genome_layout.py --split {self.genome()}", err)
+                self.assertNotIn("Launching job ", out)
+                self.assertEqual(self.calls(), [])
+                # written as the id, the folder builds, each .bin named after it
+                done = subprocess.run([sys.executable, LAYOUT, "--split", self.genome()],
+                                      capture_output=True, text=True)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                rc, out, err = self.run_bio(vcf=False)
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(err, "")
+                self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
+                                 ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
+
+    def test_fasta_whose_lines_end_in_cr_past_its_first_lines(self):
+        # LF for 100 lines, then CRLF: the check read two lines a file, so the index was
+        # built, with warnings on stderr, and every search of it found nothing (finB
+        # round 3 review). The build reads the genome whole anyway, and so looks for a CR
+        # in the whole of each file.
+        lines = [">chr1"] + [bio.GENOME["chr1"]] * 150
+        text = "".join(line + ("\n" if n < 100 else "\r\n") for n, line in enumerate(lines))
+        with open(self.genome("chr1.fa"), "wb") as fh:
+            fh.write(text.encode())
+        rc, out, err = self.run_bio(vcf=False)
+        self.assert_refused(rc, out, err, "Error: chr1.fa: its lines end in CR. A header must "
+                            "be >id and nothing else, on lines that end in LF",
+                            f"python PostProcess/genome_layout.py --split {self.genome()}\n",
+                            "Then remove each index built from the folder as it was "
+                            "(genome_library/*_hg38, genome_library/*_hg38+*, and the "
+                            "variant genomes Genomes/hg38+*)")
+        # written with no CR, the folder builds
+        done = subprocess.run([sys.executable, LAYOUT, "--split", self.genome()],
+                              capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertIn("Wrote chr1.fa's header as >id and its lines with no CR", done.stdout)
+        with open(self.genome("chr1.fa"), "rb") as fh:
+            self.assertEqual(fh.read(), text.replace("\r", "").encode())
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
+                         ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
+
+    def test_fasta_whose_only_cr_ends_the_file(self):
+        # a CR that only ends a file -- the CRLF of its last line, CRs after its last LF, the
+        # CRLF of the one line of sequence of a file of two. The index build takes a CR on a
+        # line that ends in LF for a base, and the variant enricher keeps every CR, so with a
+        # PAM in the last bases of the sequence the build wrote warnings on stderr at exit
+        # status 0, and a search of the index crashed (SIGSEGV) or reported other rows,
+        # through the real engine (integration round 2 review, F1). Each is refused, with
+        # the --split command, as a CR with more sequence after it is; written with no CR,
+        # the folder builds
+        lines = [">chr1"] + [bio.GENOME["chr1"]] * 150
+        plain = "".join(line + "\n" for line in lines)
+        one_line = ">chr1\n" + bio.GENOME["chr1"] * 150 + "\n"
+        before_last = "".join(line + ("\r\n" if n == len(lines) - 2 else "\n")
+                              for n, line in enumerate(lines))
+        for name, text in (("last line in CRLF", plain[:-1] + "\r\n"),
+                           ("a lone CR after the last LF", plain + "\r"),
+                           ("three CRs after the last LF", plain + "\r\r\r"),
+                           ("CRLF and an empty line in CRLF at the end", plain[:-1] + "\r\n\r\n"),
+                           ("two CRs and an LF at the end", plain[:-1] + "\r\r\n"),
+                           ("an empty line in CRLF at the end", plain + "\r\n"),
+                           ("one line of sequence, in CRLF", one_line[:-1] + "\r\n"),
+                           ("CRLF on the line before the last", before_last),
+                           ("an empty line in CRLF, then more sequence",
+                            plain + "\r\n" + bio.GENOME["chr1"] + "\n")):
+            with self.subTest(name):
+                self.fresh()
+                with open(self.genome("chr1.fa"), "wb") as fh:
+                    fh.write(text.encode())
+                rc, out, err = self.run_bio(vcf=False)
+                self.assert_refused(rc, out, err, "Error: chr1.fa: its lines end in CR. A header "
+                                    "must be >id and nothing else, on lines that end in LF",
+                                    f"python PostProcess/genome_layout.py --split {self.genome()}\n")
+                done = subprocess.run([sys.executable, LAYOUT, "--split", self.genome()],
+                                      capture_output=True, text=True)
+                self.assertEqual((done.returncode, done.stderr), (0, ""))
+                self.assertIn("Wrote chr1.fa's header as >id and its lines with no CR",
+                              done.stdout)
+                with open(self.genome("chr1.fa"), "rb") as fh:
+                    self.assertEqual(fh.read(), text.replace("\r", "").encode())
+                rc, out, err = self.run_bio(vcf=False)
+                self.assertEqual((rc, err), (0, ""), out)
+                self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF))
+                                        if f.endswith(".bin")),
+                                 ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
+        # a search's check reads two lines a file: the CR of the one line of sequence it
+        # refuses, before the engine runs
+        self.fresh()
+        with open(self.genome("chr1.fa"), "wb") as fh:
+            fh.write((one_line[:-1] + "\r\n").encode())
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("[ERROR] chr1.fa: its lines end in CR", err)
+        self.assertIn(f"python PostProcess/genome_layout.py --split {self.genome()}", err)
+        self.assertNotIn("Launching job ", out)
+        self.assertEqual(self.calls(), [])
+
+    def test_fasta_id_the_pipeline_cannot_take(self):
+        with open(self.genome("chr1.fa")) as fh:
+            seq = fh.read().split("\n", 1)[1]
+        os.remove(self.genome("chr1.fa"))
+        rid = "gi|49175990|ref|NC_000913.2|"
+        with open(self.genome(rid + ".fa"), "w") as fh:
+            fh.write(f">{rid}\n{seq}")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assert_refused(rc, out, err, f"sequence id {rid!r} holds '|', which the pipeline "
+                            "cannot take", "Rename the sequence in the FASTA header")
+
+    def test_fasta_id_that_starts_with_a_dash_or_a_dot(self):
+        # the index was built, and a search ended with exit status 0 and none of the
+        # sequence's off-targets: the post-analysis grep took -x for an option, and the
+        # search script lists the chromosomes as the folder's *.fa, which leaves out
+        # .x.fa (finB round 3 review)
+        for rid in ("-x", ".x"):
+            with self.subTest(rid):
+                self.fresh()
+                with open(self.genome("chr1.fa")) as fh:
+                    seq = fh.read().split("\n", 1)[1]
+                os.remove(self.genome("chr1.fa"))
+                with open(self.genome(rid + ".fa"), "w") as fh:
+                    fh.write(f">{rid}\n{seq}")
+                says = (f"{rid}.fa: sequence id {rid!r} starts with {rid[0]!r}, which the "
+                        "pipeline cannot take")
+                rc, out, err = self.run_bio(vcf=False)
+                self.assert_refused(rc, out, err, says, "Rename the sequence in the FASTA header")
+                rc, out, err = self.run_search()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("[ERROR] " + says, err)
+                self.assertNotIn("Launching job ", out)
+                rc, out, err = self.run_web_search()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("ERROR: " + says, err)
+                self.assertEqual(self.calls(), [])  # the engine never ran
+                # renamed, the folder builds
+                os.remove(self.genome(rid + ".fa"))
+                with open(self.genome("x.fa"), "w") as fh:
+                    fh.write(f">x\n{seq}")
+                rc, out, err = self.run_bio(vcf=False)
+                self.assertEqual((rc, err), (0, ""), out)
+                self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF))
+                                        if f.endswith(".bin")), ["NRG_chr2_1.bin", "NRG_x_1.bin"])
+
+    def test_fasta_ids_one_of_which_matches_the_other_as_a_shell_pattern(self):
+        # the search script took the first as the second, and with --thread 1 a search
+        # ended with exit status 0 and none of the first's off-targets; with more threads
+        # it failed (finB round 2 review)
+        def name(old, rid):
+            with open(self.genome(old + ".fa")) as fh:
+                seq = fh.read().split("\n", 1)[1]
+            os.remove(self.genome(old + ".fa"))
+            with open(self.genome(rid + ".fa"), "w") as fh:
+                fh.write(f">{rid}\n{seq}")
+
+        name("chr1", "HLA-X*03:01:01")
+        name("chr2", "HLA-X*01:03:01:01")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assert_refused(rc, out, err, "HLA-X*03:01:01.fa: its sequence id 'HLA-X*03:01:01', "
+                            "read as a shell pattern, matches HLA-X*01:03:01:01.fa. ",
+                            "Rename each such sequence in its FASTA header and its file after it")
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("[ERROR] HLA-X*03:01:01.fa: its sequence id 'HLA-X*03:01:01', read as a "
+                      "shell pattern, matches HLA-X*01:03:01:01.fa. ", err)
+        self.assertNotIn("Launching job ", out)
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("ERROR: HLA-X*03:01:01.fa: its sequence id 'HLA-X*03:01:01', read as a "
+                      "shell pattern, matches HLA-X*01:03:01:01.fa. ", err)
+        self.assertEqual(self.calls(), [])  # the engine never ran
+        # renamed with no '*', the folder builds; an id with one that matches nothing too
+        name("HLA-X*03:01:01", "HLA-X_03:01:01")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
+                         ["NRG_HLA-X*01:03:01:01_1.bin", "NRG_HLA-X_03:01:01_1.bin"])
+
+    def test_an_index_built_from_such_a_header_is_not_taken_for_present(self):
+        # the headers are written as >id since; the index keeps the old names: a run said
+        # 'Reference index already present', and every search of it went on losing results
+        os.makedirs(self.lib(bio.REF))
+        stale = "NRG_chr1 Homo sapiens chromosome 1_1.bin"
+        with open(os.path.join(self.lib(bio.REF), stale), "wb") as fh:
+            fh.write(b"\0" * 8)
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(err, f"Error: The index {self.lib(bio.REF)} holds {stale!r}: it was built "
+                         "from a FASTA header of more than >id, or with CR line ends, and every "
+                         f"search of it loses results. Remove it (rm -rf '{self.lib(bio.REF)}', or "
+                         "remove the index in the web Settings page) and run build-index-only "
+                         "again.\n")
+        self.assertEqual(self.calls(), [])
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"[ERROR] The index {self.lib(bio.REF)} holds", err)
+        self.assertNotIn("Launching job ", out)
+
+    def test_an_index_with_no_bin_is_not_put_in_place(self):
+        # no sequence holds a site (a contig of N alone): the engine writes no .bin
+        # and exits 0, and every search refuses an index with none
+        for name in ("chr1", "chr2"):
+            with open(self.genome(name + ".fa"), "w") as fh:
+                fh.write(f">{name}\n{'N' * 120}\n")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("Reference genome indexing failed: the engine exited 0 but wrote no "
+                      ".bin", err)
+        self.assertIn(f"nothing was put in place (expected {self.lib(bio.REF)})", err)
+        self.assertFalse(os.path.exists(self.lib(bio.REF)))
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_reference_index_with_no_bin_is_not_taken_for_present(self):
+        # one built from a folder with no .fa at its top before it was refused (an
+        # upload of a chromFa archive kept chroms/): the run said 'Reference index
+        # already present' and the web showed it done, though no search uses it
+        os.makedirs(self.lib(bio.REF))
+        with open(os.path.join(self.lib(bio.REF), ".pam_build"), "w") as fh:
+            fh.write("20bp-NRG-SpCas9.txt\n")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(err, f"Error: The reference index {self.lib(bio.REF)} holds no .bin "
+                         "file, as one built from a genome folder with no .fa file at its "
+                         "top does, and no search uses it: remove it (rm -rf "
+                         f"'{self.lib(bio.REF)}', or remove the index in the web Settings "
+                         "page) and run build-index-only again.\n")
+        self.assertNotIn("already present", out)
+        self.assertEqual(self.calls(), [])  # the engine never ran
+        self.assertEqual(os.listdir(self.lib(bio.REF)), [".pam_build"])
+        # removed, it is built
+        os.remove(os.path.join(self.lib(bio.REF), ".pam_build"))
+        os.rmdir(self.lib(bio.REF))
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(any(f.endswith(".bin") for f in os.listdir(self.lib(bio.REF))))
+
+    def test_a_genome_of_one_fasta_a_sequence_builds_as_before(self):
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(err, "")
+        self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
+                         ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
+
+
+if __name__ == "__main__":
+    unittest.main()

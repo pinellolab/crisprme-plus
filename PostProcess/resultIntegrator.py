@@ -902,10 +902,18 @@ for nline, line in enumerate(inCrispritzResults):
     # count_seed_ref, count_seed_alt, count_non_seed_ref, count_non_seed_alt
     seed_list = seed_processing(seed_ref, seed_alt, non_seed_ref, non_seed_alt)
 
-    saveDict["Seed_mismatches+bulges_REF_(fewest_mm+b)"] = str(seed_list[0])
-    saveDict["Seed_mismatches+bulges_ALT_(fewest_mm+b)"] = str(seed_list[1])
-    saveDict["Non_seed_mismatches+bulges_REF_(fewest_mm+b)"] = str(seed_list[2])
-    saveDict["Non_seed_mismatches+bulges_ALT_(fewest_mm+b)"] = str(seed_list[3])
+    saveDict["Seed_mismatches+bulges_REF_(fewest_mm+b)"] = str(
+        int(seed_list[0]) + dna_bulge_count_seed
+    )
+    saveDict["Seed_mismatches+bulges_ALT_(fewest_mm+b)"] = str(
+        int(seed_list[1]) + dna_bulge_count_seed
+    )
+    saveDict["Non_seed_mismatches+bulges_REF_(fewest_mm+b)"] = str(
+        int(seed_list[2]) + dna_bulge_count_non_seed
+    )
+    saveDict["Non_seed_mismatches+bulges_ALT_(fewest_mm+b)"] = str(
+        int(seed_list[3]) + dna_bulge_count_non_seed
+    )
 
     # count seed and non-seed for highest_CRISPR_BULGE
     if pam_at_start:

@@ -6,7 +6,11 @@ name: web e2e (playwright)
 # Chromium via Playwright asserting every routed page renders non-blank with the
 # navbar and no uncaught JS errors (test/web/test_web_e2e.py).
 #
-# Runs on web-affecting changes (and on demand). It builds the image from source
+# Runs on web-affecting changes (and on demand), on PostProcess/, which the pages
+# import and whose test modules the steps below run, and on the other files the pages
+# import or the tests only this job runs read. The docs and scripts that the in-image
+# step reads through test_complete_search_flags's scans are not listed: a change to
+# one starts unit-tests, which runs the same scans. It builds the image from source
 # because the app requires the PR's Dash-2.x code AND a Dash-2.x runtime — the
 # released bioconda image still ships Dash 1.x, so overlaying code onto it would
 # not exercise the migration.
@@ -21,6 +25,12 @@ on:
       - "crisprme.py"
       - "Dockerfile"
       - "test/web/**"
+      - "PostProcess/**"
+      # main_page.py imports seq_script/ and the Settings page download_hprc_assembly.py;
+      # test_main_page_assembly copies its PAM from PAMs/
+      - "seq_script/**"
+      - "download_hprc_assembly.py"
+      - "PAMs/**"
       - ".github/workflows/web-e2e.yml"
   workflow_dispatch:
 
@@ -62,13 +72,43 @@ jobs:
             -v "${GITHUB_WORKSPACE}/test/web:/t" \
             crisprme:web python -u /t/test_annotation_manager.py
 
-      # Email-notification config: write/read round-trip (password never echoed,
-      # kept on re-save), validation, 0600 perms, and send_mail resolving .email.json.
+      # build-index-only splits a single multi-chromosome .vcf.gz that has no .tbi (bgzip
+      # or plain gzip), with nothing on stderr and the dataset folder left readable, and
+      # refuses an unsorted one saying why. The real build-index-only in the image
+      # (CRISPRitz, tabix, bcftools).
+      - name: VCF auto-split without a .tbi
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/test/web:/t" \
+            crisprme:web python -u /t/test_build_index_vcf_autosplit.py
+
+      # A VCF dataset added in Settings is built and searchable: its sample list is
+      # written from the VCF header and passed to the build (the tiers per-sample reads),
+      # the search form offers a dataset by its reference-genome marker and labels one
+      # with no tiers genotyped, and Submit refuses a search whose sample list is
+      # missing. The Settings page's helpers and the real build-index-only in the image.
+      - name: Settings VCF datasets (sample list, search form, Submit)
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/test/web:/t" \
+            crisprme:web python -u /t/test_settings_vcf_datasets.py
+
+      # Email-notification config: write/read round-trip (password never echoed, kept on
+      # a re-save of the same account, asked again for another), validation, 0600 perms,
+      # and send_mail resolving .email.json.
       - name: Email-config unit tests
         run: |
           docker run --rm \
             -v "${GITHUB_WORKSPACE}/test/web:/t" \
             crisprme:web python -u /t/test_email_config.py
+
+      # Search-form, status-page and results-link web unit tests (a real Dash app import,
+      # as below): the search form's job reuse and bulge note, the status page, results
+      # links to a job without results, the results-page downloads and Risk Card plots.
+      - name: Search-form and results-link web unit tests
+        run: |
+          docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
+            python -m unittest test_web_search_reuse test_web_bulge_notes test_web_results_links -v
 
       # Results-page web unit tests (need a real Dash app import, so they run here, not in
       # the hermetic unit-tests job). Run via -m unittest from the baked-in PostProcess dir
@@ -78,6 +118,36 @@ jobs:
         run: |
           docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
             python -m unittest test_results_page_assembly test_results_summary_and_status -v
+
+      # The personal-assembly submit (pages/main_page.py submit_assembly_search_job), called
+      # the way Dash calls it: one "select an individual" warning when none is picked, the
+      # haplotypes' assembly names in the job's .Params.txt. A real Dash app import, as above.
+      - name: Personal-assembly submit web unit tests
+        run: |
+          docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
+            python -m unittest test_main_page_assembly -v
+
+      # The tests that skip in the hermetic unit-tests job, for want of what the image has:
+      # BEDOPS (test_assembly_annotate's closest-gene tests and test_post_process_tempdir, whose
+      # step there tests nothing), minimap2 and impg (test_assembly_reconcile's truth tests),
+      # crisprme.py's imports (test_complete_search_flags's behaviour tests), Dash and Biopython
+      # (the rest of test_assembly_annotate, which no other job names, test_app_settings' start
+      # of the web app, and test_web_shell_safety's pages, with bedtools, BEDOPS and zip), and
+      # the index resolver in the image. A skip here would be the same nothing, so the step
+      # fails on any skip but the two the image cannot help: no en_US locale, no ps (the
+      # unit-tests job runs that one).
+      - name: "Tests that need the image's tools (BEDOPS, minimap2, impg, crisprme.py's imports, Dash)"
+        run: |
+          set -o pipefail
+          docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
+            python -m unittest test_assembly_annotate test_assembly_reconcile \
+              test_complete_search_flags test_post_process_tempdir test_index_resolution \
+              test_app_settings test_web_shell_safety -v \
+            2>&1 | tee in-image-tests.log
+          if grep -E "skipped ['\"]" in-image-tests.log \
+              | grep -vE "en_US.UTF-8 is not installed|no ps here to compare"; then
+            echo "FAIL: a test that must run in the image skipped"; exit 1
+          fi
 
       - name: Start the web interface
         run: |
@@ -97,6 +167,18 @@ jobs:
             -e CRISPRME_WEB_URL=http://localhost:8090 \
             mcr.microsoft.com/playwright/python:v1.47.0-jammy \
             bash -c 'pip install -q playwright==1.47.0 && python /t/test_web_e2e.py'
+
+      # Settings uploads in a real browser: the VCF uploader sends the reference genome
+      # picked (the search form then offers the dataset, labelled genotyped), a BED
+      # naming no genome can be enabled and a same-content re-upload is added, and the
+      # 'Started' message is neutral and goes once its job has ended.
+      - name: Playwright Settings uploads (Chromium)
+        run: |
+          docker run --rm --network host \
+            -v "${GITHUB_WORKSPACE}/test/web:/t" \
+            -e CRISPRME_WEB_URL=http://localhost:8090 \
+            mcr.microsoft.com/playwright/python:v1.47.0-jammy \
+            bash -c 'pip install -q playwright==1.47.0 && python /t/test_settings_upload_e2e.py'
 
       - name: Web app logs on failure
         if: failure()

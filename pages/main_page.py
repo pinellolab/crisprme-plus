@@ -27,7 +27,10 @@ from .pages_utils import (
     get_available_PAM,
     get_available_CAS,
     index_max_bulges,
+    pam_motif,
     reference_bulge_capacity,
+    read_enabled_annotations,
+    cosmic_license_enabled,
     MAX_BULGES,
     variant_dataset_present,
     has_variant_index,
@@ -35,6 +38,8 @@ from .pages_utils import (
     variant_dataset_has_genotypes,
     variant_dataset_data_type,
     variant_dataset_sample_count,
+    samplesid_problem,
+    _vcf_folder_has_samples,
     build_active_annotation,
     get_pam_options,
     get_custom_VCF,
@@ -42,13 +47,18 @@ from .pages_utils import (
     get_available_liftover_files,
     installed_assemblies,
     LIFTOVER_DIR,
-    ASSEMBLIES_DIR,
     get_custom_annotations,
     sort_annotation,
     compress_file,
 )
+# the URL fragment a reused job's status page is opened with (the page says so)
+from .load_page import REUSED_HASH
+# the one plain address a notification goes to (the standard library only)
+from .send_mail import plain_address
 from app import (
     URL,
+    IPADDRESS,
+    WEBADDRESS,
     app,
     operators,
     current_working_directory,
@@ -70,13 +80,18 @@ from dash import dcc
 import collections
 import subprocess
 import filecmp
+import json
 import random
 import re
 import shlex
 import shutil
 import sys
 import string
+import threading
 import os
+
+# personal_assembly lives in PostProcess/, put on sys.path by pages_utils (imported above).
+import personal_assembly
 
 # memory_check lives in PostProcess/, put on sys.path by pages_utils (imported above).
 # Defensive fallback so the web form never fails to render if it is unavailable.
@@ -100,6 +115,72 @@ def _sanitize_job_name(job_name: str) -> str:
     ``(`` when the results directory is created.
     """
     return re.sub(r"[^A-Za-z0-9._-]+", "_", job_name).strip("._-")
+
+
+# A web job records what decides its results besides .Params.txt and the guides
+# (_reuse_key), so change_url reuses an earlier job only when that matches too.
+REUSE_KEY_FILE = ".reuse_key.json"
+
+
+def _crisprme_version() -> str:
+    """The CRISPRme version this app is, from the crisprme.py next to it."""
+    try:
+        with open(os.path.join(app_directory, "crisprme.py")) as fh:
+            for line in fh:
+                found = re.match(r'version\s*=\s*"([^"]+)"', line)
+                if found:
+                    return found.group(1)
+    except OSError:
+        pass
+    return "unknown"
+
+
+def _reuse_key(
+    genome: str,
+    annotation_name: str,
+    gencode_name: str,
+    search_mode: str,
+    full_report: Optional[List[str]],
+    job_name: str,
+) -> Dict[str, object]:
+    """What decides a web search's results that .Params.txt and the guides do not
+    record: the analysis mode, the full-report option, the annotations (the beds
+    enabled for the genome, the COSMIC licence state, and the size and time of the
+    assembled bed and gene file: .Params.txt names only the assembled file) and the
+    CRISPRme version. Plus the job name typed: a new name asks for a new job, which is
+    also how a user runs an identical search again."""
+    files = []
+    for name in (annotation_name, gencode_name):
+        path = os.path.join(current_working_directory, ANNOTATIONS_DIR, name)
+        if not os.path.isfile(path) and os.path.isfile(f"{path}.gz"):
+            path = f"{path}.gz"
+        try:
+            st = os.stat(path)
+            files.append(f"{os.path.basename(path)}:{st.st_size}:{int(st.st_mtime)}")
+        except OSError:
+            files.append(name)  # "vuoto.txt": no annotation
+    return {
+        "search_mode": (
+            "per-sample" if str(search_mode) in ("per-sample", "full") else "population-level"
+        ),
+        "report_full": bool(full_report and "full" in full_report),
+        "annotations": sorted(read_enabled_annotations(genome)),
+        "cosmic": cosmic_license_enabled(),
+        "annotation_files": files,
+        "job_name": job_name,
+        "crisprme_version": _crisprme_version(),
+    }
+
+
+def _same_reuse_key(job_dir: str, key: Dict[str, object]) -> bool:
+    """True when the earlier job in job_dir recorded this reuse key. A job with none
+    (made before 2.8.1, or not by this form) never matches: what it ran with is not
+    known."""
+    try:
+        with open(os.path.join(job_dir, REUSE_KEY_FILE)) as fh:
+            return json.load(fh) == key
+    except (OSError, ValueError):
+        return False
 
 
 def _resolve_vcf_folder(genome_selected: str, tok: str) -> str:
@@ -170,11 +251,38 @@ def _ensure_samplesid(genome_selected: str, vcf_folder: str) -> None:
                 if key not in seen:
                     seen.add(key)
                     rows.append(line.rstrip("\n"))
+    # through a hidden temporary file (this thread's) renamed into place: one that a
+    # full disk cut short would be taken for whole by every later search (the test above)
+    tmp = os.path.join(sdir, f".{os.path.basename(target)}.{os.getpid()}."
+                             f"{threading.get_ident()}.tmp")
     try:
-        with open(target, "w") as out:
+        with open(tmp, "w") as out:
             out.write("\n".join(rows) + "\n")
+        os.replace(tmp, target)
     except OSError:
         pass
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _samplesid_makeable(genome_selected: str, vcf_folder: str) -> bool:
+    """Whether _ensure_samplesid would make ``samplesIDs/<vcf_folder>.samplesID.txt``: it
+    is missing, and the lists of the datasets the merged dataset joins are all there. Its
+    test, which writes nothing: the bulge note asks it, and only Submit writes the list.
+    _ensure_samplesid keeps its own copy of the test: test_samplesid_emit runs that function
+    alone, from its source (crisprme_hf mirrors it too)."""
+    sdir = os.path.join(current_working_directory, "samplesIDs")
+    if os.path.isfile(os.path.join(sdir, f"{vcf_folder}.samplesID.txt")):
+        return False
+    gpref = genome_selected[:-4] if genome_selected.endswith("_ref") else genome_selected
+    dataset = vcf_folder[len(gpref) + 1:] if vcf_folder.startswith(gpref + "_") else vcf_folder
+    return "_" in dataset and all(
+        os.path.isfile(os.path.join(sdir, f"{gpref}_{c}.samplesID.txt"))
+        for c in dataset.split("_")
+    )
 
 
 # MAX_BULGES (the app-wide bulge ceiling; usable bulges = MAX_BULGES - 1) is single-
@@ -184,6 +292,10 @@ MAX_MMS = 7  # max allowed mismatches
 # mismatches, bulges and guides values
 AV_MISMATCHES = [{"label": i, "value": i} for i in range(MAX_MMS)]
 AV_BULGES = [{"label": i, "value": i} for i in range(MAX_BULGES)]
+# The Max edits slider's maximum as the layout gives it: the most mismatches and DNA and
+# RNA bulges of the layout's dropdowns (AV_MISMATCHES, AV_BULGES), added (6 + 2 + 2);
+# sync_max_edits_bound sets it to the mismatches and bulges selected once one of them changes
+MAX_EDITS_LAYOUT = (MAX_MMS - 1) + 2 * (MAX_BULGES - 1)
 AV_GUIDE_SEQUENCE = [{"label": i, "value": i} for i in range(15, 26)]
 # base editing options
 BE_NTS = [{"label": nt, "value": nt} for nt in DNA_ALPHABET]
@@ -285,11 +397,19 @@ def _pad_guides_for_pam(text_guides: str, pam_len: int, pam_begin: bool, guide_s
     already-padded or otherwise wrong-length guide (e.g. pasted from
     somewhere that already included the PAM placeholder) rather than
     silently double-padding it into a corrupt search.
+
+    So are lines holding a character not in VALID_CHARS (the nucleotide
+    codes but N), which `change_url` takes out of a guide: dropped here
+    rather than taken out, which would leave a guide of the wrong length. A
+    request can send any text, and the search runs a shell command holding
+    each guide of the file (process_summaries.py), where such characters ran
+    as commands.
     """
     lines = [
         line.strip().upper()
         for line in (text_guides or "").splitlines()
         if line.strip() and len(line.strip()) == guide_seqlen
+        and all(nt in VALID_CHARS for nt in line.strip())
     ]
     pad = "N" * pam_len
     if pam_begin:
@@ -312,20 +432,15 @@ def _complete_assembly_options() -> List[Dict]:
     ]
 
 
-def _assembly_genome_label(genome_dir: str) -> str:
+def _assembly_genome_label(genome_dir: str, haplotype: str) -> str:
     """Human-friendly label for a haplotype's genome dir, for the run's
-    .Params.txt display (read back by the results/report pages). In the bundle
-    layout ``Assemblies/<individual>/<hap>/genome`` the per-contig folder is
-    literally named ``genome``, so show ``<individual> (<hap>)`` instead; the
-    legacy ``Genomes/<name>_<hap>`` layout keeps showing the folder name."""
-    parts = os.path.normpath(genome_dir).split(os.sep)
-    if ASSEMBLIES_DIR in parts:
-        i = parts.index(ASSEMBLIES_DIR)
-        individual = parts[i + 1] if i + 1 < len(parts) else ""
-        hap = parts[i + 2] if i + 2 < len(parts) else ""
-        if individual and hap:
-            return f"{individual} ({hap})"
-    return os.path.basename(genome_dir.rstrip(os.sep))
+    .Params.txt display (read back by the results/report pages and History).
+    In the bundle layout ``Assemblies/<individual>/<hap>/genome`` the per-contig
+    folder is literally named ``genome``, so show the bundle's assembly name;
+    the legacy ``Genomes/<name>_<hap>`` layout keeps showing the folder name.
+    The same label assembly-search writes when it finishes
+    (``personal_assembly.haplotype_label``), so it does not change mid-job."""
+    return personal_assembly.haplotype_label(genome_dir, haplotype)
 
 
 # Directory convention: the job id IS the `--output` value passed to
@@ -418,10 +533,10 @@ def _run_assembly_search_job(cmd: str, combined_dir: str, note: str = "") -> Non
 def populate_assembly_fields_from_individual(individual: str) -> Tuple:
     """Auto-derives the 6 hidden genome/chain/chromAlias fields from the
     visible "Individual" picker, via the same `installed_assemblies()`
-    grouping Settings uses. `submit_assembly_search_job` below is otherwise
-    completely unchanged -- it still just reads these 6 State values, same
-    as when they were directly user-picked; only where the values come from
-    changed. Clearing the picker clears all 6 back to None.
+    grouping Settings uses. `submit_assembly_search_job` below reads these 6
+    State values, as when they were directly user-picked, and searches them
+    only when they are what this gives for the individual picked. Clearing
+    the picker clears all 6 back to None.
     """
     if not individual:
         return None, None, None, None, None, None
@@ -444,6 +559,44 @@ def populate_assembly_fields_from_individual(individual: str) -> Tuple:
         pat["chromalias_path"],
         mat["chromalias_path"],
     )
+
+
+def _form_number(value, low: int, high: int) -> Optional[int]:
+    """``value`` as a whole number from ``low`` to ``high``, the range a dropdown or slider
+    of the form offers, else None: a request can send a callback any value."""
+    if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        try:
+            value = int(value)
+        except ValueError:  # more digits than int() reads (sys.get_int_max_str_digits)
+            return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if low <= value <= high else None
+
+
+def _as_int(value, default: int) -> int:
+    """``int(value)``, or ``default`` for a value int() does not take."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _max_edits_ceiling(mms, dna, rna) -> int:
+    """The Max edits slider's maximum for these mismatches and DNA and RNA bulges, as
+    sync_max_edits_bound sets it at each change of one: their sum (one alignment can carry
+    all three), at least 1. A value that is not a number counts as the mismatch dropdown's
+    top, or as no bulges."""
+    return max(1, _as_int(mms, MAX_MMS - 1) + _as_int(dna, 0) + _as_int(rna, 0))
+
+
+def _max_edits_offered(mms, dna, rna) -> int:
+    """The most Max edits the slider offers with these mismatches and bulges: the maximum
+    the layout gives it (MAX_EDITS_LAYOUT) until a dropdown changes, then the one
+    sync_max_edits_bound gives it (_max_edits_ceiling), which passes the first where an
+    installed index deeper than the app's ceiling offers more bulges (_bulges_offered). A
+    Submit takes no more."""
+    return max(MAX_EDITS_LAYOUT, _max_edits_ceiling(mms, dna, rna))
 
 
 @app.callback(
@@ -473,6 +626,12 @@ def populate_assembly_fields_from_individual(individual: str) -> Tuple:
         State("dna", "value"),
         State("rna", "value"),
         State("job-name", "value"),
+        State("assembly-individual", "value"),
+        State("max-edits-slider", "value"),
+        State("advanced-thresholds-collapse", "is_open"),
+        # the bulge dropdowns' options follow these, with the PAM (limit_bulges_to_index)
+        State("available-genome", "value"),
+        State("variant-dataset", "value"),
     ],
     prevent_initial_call=True,
 )
@@ -490,25 +649,42 @@ def submit_assembly_search_job(
     dna: int,
     rna: int,
     job_name: str,
+    individual: str,
+    max_edits_val: int,
+    advanced_open: bool,
+    genome_selected: Optional[str] = None,
+    variant_choice: Optional[str] = None,
 ) -> Tuple:
     """Validates and launches a personal-assembly (paternal/maternal, no VCF)
     off-target search, submitted via `crisprme.py assembly-search`.
 
-    MVP scope: reuses the existing guide/PAM/mismatch/bulge form fields
-    (shared component ids with the complete-search form -- reading the same
-    `State` from two callbacks is fine in Dash), but does NOT yet replicate
-    `change_url`'s PAM-derived N-padding convenience for the guide textbox
+    MVP scope: reuses the existing guide/PAM/mismatch/bulge form fields and
+    the "Max edits" slider (shared component ids with the complete-search
+    form -- reading the same `State` from two callbacks is fine in Dash), but
+    does NOT yet replicate `change_url`'s PAM-derived N-padding convenience
+    for the guide textbox
     -- guides typed here get the same automatic PAM-length N-padding
     complete-search's own form applies (see `_pad_guides_for_pam` below),
     so there's no format difference between the two modes' guide boxes.
     These 6 State values are auto-derived from the visible "Individual"
     picker by `populate_assembly_fields_from_individual` above (component C
-    / Data Manager, built 2026-09-02) -- this function's own validation and
-    path-resolution logic is unchanged from when they were directly
-    user-picked dropdowns.
+    / Data Manager, built 2026-09-02), and are searched only when they are
+    what it derives for the individual picked; this function's path
+    resolution is unchanged from when they were directly user-picked
+    dropdowns.
     """
     if not n:
         raise PreventUpdate
+
+    # A request can send this callback any values: a path anywhere for each of the six
+    # fields, and any name of a file for the PAM. The search reads the folders and files
+    # they name, and takes their names into shell commands, so only the files the picker
+    # fills in for the individual picked, as it is installed now, are searched, with a PAM
+    # the form offers (as change_url runs only what the form offers).
+    picked = bool(individual) and (
+        genome_paternal, genome_maternal, chain_paternal, chain_maternal,
+        chromalias_paternal, chromalias_maternal,
+    ) == tuple(populate_assembly_fields_from_individual(individual))
 
     # All 6 fields arrive as cwd-RELATIVE paths, auto-derived from the
     # "Individual" picker by populate_assembly_fields_from_individual (which
@@ -544,21 +720,43 @@ def submit_assembly_search_job(
         missing.append("paternal chromAlias file")
     if not chromalias_maternal or not os.path.isfile(chromalias_maternal):
         missing.append("maternal chromAlias file")
+    if not picked:
+        # These six fields are filled from the Individual picker, so with none
+        # picked all six are empty, and listing them names fields the form does
+        # not show. Say what to do instead, once. (The same when they are not
+        # what it fills in for the one picked: one no longer installed, say.)
+        missing = ["select an individual on the Personal assembly tab"]
     # Parity with check_input's own validation of these same shared fields --
     # they carry dropdown defaults so this rarely fires in practice, but
     # there's no reason assembly-search's checklist should be less defensive
-    # than complete-search's for identical fields.
+    # than complete-search's for identical fields. Each is a whole number of the
+    # form's range (its dropdown's, and the Max edits slider's when it governs), checked
+    # before anything is written: they go into .Params.txt and the command, and a request
+    # can send any value, which went into .Params.txt as sent, a line break too, before
+    # int() refused it and left a job folder that never ran. The bulge dropdowns offer what
+    # the genome, PAM and variant dataset selected allow (limit_bulges_to_index), more than
+    # the app's ceiling with an installed index deeper than it, and the slider's maximum
+    # follows them (sync_max_edits_bound): Submit takes them as the form offers them.
+    mms = _form_number(mms, 0, MAX_MMS - 1)
+    bulges = _bulges_offered(*_offered(genome_selected, pam, variant_choice))
+    dna = _form_number(dna, 0, bulges)
+    rna = _form_number(rna, 0, bulges)
     if mms is None:
         missing.append("mismatches")
     if dna is None:
         missing.append("DNA bulges")
     if rna is None:
         missing.append("RNA bulges")
+    if not advanced_open and max_edits_val is not None:
+        max_edits_val = _form_number(max_edits_val, 1, _max_edits_offered(mms, dna, rna))
+        if max_edits_val is None:
+            missing.append("maximum edits (mismatches + bulges)")
     if not pam:
         missing.append("PAM")
         guide_lines = []
     else:
-        pam_parsed = _parse_pam(pam)
+        installed_pams = [p["value"] for p in get_available_PAM()]
+        pam_parsed = _parse_pam(pam) if pam in installed_pams else None
         if pam_parsed is None:
             missing.append("PAM (file unreadable)")
             guide_lines = []
@@ -608,8 +806,8 @@ def submit_assembly_search_job(
     # unmodified, since _combined lands as its own top-level Results/ entry.
     params_lines = [
         ("Genome_type", "assembly"),
-        ("Genome_paternal", _assembly_genome_label(genome_paternal_dir)),
-        ("Genome_maternal", _assembly_genome_label(genome_maternal_dir)),
+        ("Genome_paternal", _assembly_genome_label(genome_paternal_dir, "paternal")),
+        ("Genome_maternal", _assembly_genome_label(genome_maternal_dir, "maternal")),
         ("Chain_paternal", chain_paternal),
         ("Chain_maternal", chain_maternal),
         ("ChromAlias_paternal", chromalias_paternal),
@@ -664,6 +862,16 @@ def submit_assembly_search_job(
         _gc = _gc if os.path.isfile(_gc) else (f"{_gc}.gz" if os.path.isfile(f"{_gc}.gz") else None)
         if _gc:
             gene_annotation_args = ["--gene_annotation", shlex.quote(_gc)]
+    # The "Max edits" slider, under the reference tab's rule (change_url): with
+    # Advanced closed it is the total-edits cap, with it open the per-type caps
+    # govern (the slider is grayed out). assembly-search's own default cap is
+    # mm+bDNA+bRNA, so the flag is passed only when the slider is lower: a search
+    # left at the defaults (slider 6 = 4 + 1 + 1) runs exactly as before.
+    max_total_edits_args = []
+    if not advanced_open and max_edits_val is not None:
+        _cap = max(1, int(max_edits_val))
+        if _cap < int(mms) + int(dna) + int(rna):
+            max_total_edits_args = ["--max-total-edits", str(_cap)]
     cmd = " ".join(
         [
             shlex.quote(sys.executable),
@@ -697,6 +905,7 @@ def submit_assembly_search_job(
             str(int(dna)),
             "--bRNA",
             str(int(rna)),
+            *max_total_edits_args,
             "--merge",
             "3",
             "--output",
@@ -798,7 +1007,7 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
 
 # Job submission and results URL definition
 @app.callback(
-    [Output("url", "pathname"), Output("url", "search")],
+    [Output("url", "pathname"), Output("url", "search"), Output("url", "hash")],
     [Input("submit-job", "n_clicks")],
     [
         State("url", "href"),
@@ -845,7 +1054,7 @@ def change_url(
     advanced_open: bool,
     search_mode: str = "population-level",
     full_report: Optional[List[str]] = None,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, str]:
     """Launch the targets search and generates the input files for
     post-processing operations, and results visualization.
 
@@ -868,7 +1077,10 @@ def change_url(
     If the input parameters match those of an already processed search, the
     current job ID is modified to match that of the available analysis (even if
     completed/currently submitted/in queue). Update the email address associated
-    to the job and reset the 3 days availability of the results.
+    to the job and reset the 3 days availability of the results. The input matches
+    only when the analysis mode, the full-report option, the annotations, the
+    CRISPRme version and the job name do too (_reuse_key); the status page of a
+    reused job is opened with REUSED_HASH, so it says the search was not run again.
 
     The current policy of CRISPRme allows up to 2 jobs to run concurrently. The
     others are put in queue.
@@ -906,8 +1118,8 @@ def change_url(
 
     Returns
     -------
-    Tuple[str, str]
-        URL to retrieve CRISPRme analysis results
+    Tuple[str, str, str]
+        URL to retrieve CRISPRme analysis results (path, query, fragment)
     """
 
     if n is not None:
@@ -954,6 +1166,13 @@ def change_url(
             raise TypeError(f"Expected {str.__name__}, got {type(job_name).__name__}")
     if n is None:
         raise PreventUpdate  # do not update the page
+    # Submit fires this once check_input has passed the form, but a request can call it
+    # with any values, which name the folders and files the search reads and go into its
+    # command line (and its steps' shell commands): only what the form offers runs.
+    if not _launchable(genome_selected, pam, variant_choice, mms, dna, rna, max_edits_val,
+                       advanced_open):
+        raise PreventUpdate
+    mms = int(mms)
     # job start
     print("Launching JOB")
     # ---- Check input. If fails, give simple input
@@ -1004,6 +1223,7 @@ def change_url(
             id_len += 1  # increase ID length
             if id_len > JOBID_MAXLEN:  # reached maximum length
                 break
+    safe_job_name = ""
     if job_name and job_name != "None":
         assert isinstance(job_name, str)
         # Sanitize the user-supplied job name before it becomes a directory
@@ -1083,7 +1303,8 @@ def change_url(
                 handle_samples.write(f"{e}\n")
     except OSError as e:
         raise e
-    # manage email sending
+    # manage email sending: one plain address, as typed, and the link the server makes
+    # (_notification_entry)
     send_email = False
     if adv_opts is None:
         adv_opts = []
@@ -1091,13 +1312,7 @@ def change_url(
         send_email = True
         try:
             with open(os.path.join(result_dir, EMAIL_FILE), mode="w") as handle_mail:
-                handle_mail.write(f"{dest_email}\n")
-                handle_mail.write(
-                    f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
-                )
-                handle_mail.write(
-                    f"{datetime.utcnow().strftime('%m/%d/%Y, %H:%M:%S')}\n"
-                )
+                handle_mail.write(_notification_entry(dest_email, job_id))
         except OSError as e:
             raise e
     else:
@@ -1327,8 +1542,22 @@ def change_url(
             handle_params.write(f"BE_stop\t{be_stop}\n")
     except OSError as e:
         raise e
+    # What decides the results that .Params.txt and the guides do not record (the
+    # analysis mode, the report option, the annotations, the version) and the job
+    # name. Without it a Population-level request was sent to an earlier per-sample
+    # job of the same input (and the reverse), a new job name was dropped, and a
+    # changed annotation set still got the old annotations.
+    reuse_key = _reuse_key(
+        genome_selected, annotation_name, gencode_name, search_mode, full_report,
+        safe_job_name,
+    )
+    try:
+        with open(os.path.join(result_dir, REUSE_KEY_FILE), mode="w") as handle_key:
+            json.dump(reuse_key, handle_key, sort_keys=True)
+    except OSError as e:
+        raise e
     # ---- Check if input parameters (mms, bulges, pam, guides, genome) match
-    # those of previous searches
+    # those of previous searches (and their reuse key: see above)
     computed_results_dirs = [
         d
         for d in os.listdir(os.path.join(current_working_directory, RESULTS_DIR))
@@ -1347,6 +1576,8 @@ def change_url(
                     current_working_directory, RESULTS_DIR, res_dir, PARAMS_FILE
                 ),
                 os.path.join(result_dir, PARAMS_FILE),
+            ) and _same_reuse_key(
+                os.path.join(current_working_directory, RESULTS_DIR, res_dir), reuse_key
             ):
                 try:
                     # old job guides
@@ -1457,20 +1688,7 @@ def change_url(
                                         ),
                                         mode="w+",
                                     ) as handle_email:
-                                        handle_email.write(f"{dest_email}\n")
-                                        handle_email.write(
-                                            f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
-                                        )
-                                        handle_email.write(
-                                            "".join(
-                                                [
-                                                    datetime.utcnow().strftime(
-                                                        "%m/%d/%Y, %H:%M:%S"
-                                                    ),
-                                                    "\n",
-                                                ]
-                                            )
-                                        )
+                                        handle_email.write(_notification_entry(dest_email, res_dir))
                                 except OSError as e:
                                     raise e
                         elif send_email:
@@ -1495,20 +1713,7 @@ def change_url(
                                         mode="a+",
                                     ) as handle_email:
                                         handle_email.write("--OTHEREMAIL--")
-                                        handle_email.write(f"{dest_email}\n")
-                                        handle_email.write(
-                                            f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
-                                        )
-                                        handle_email.write(
-                                            "".join(
-                                                [
-                                                    datetime.utcnow().strftime(
-                                                        "%m/%d/%Y, %H:%M:%S"
-                                                    ),
-                                                    "\n",
-                                                ]
-                                            )
-                                        )
+                                        handle_email.write(_notification_entry(dest_email, res_dir))
                                 except OSError as e:
                                     raise e
                             else:
@@ -1522,20 +1727,7 @@ def change_url(
                                         ),
                                         mode="w+",
                                     ) as handle_email:
-                                        handle_email.write(f"{dest_email}\n")
-                                        handle_email.write(
-                                            f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
-                                        )
-                                        handle_email.write(
-                                            "".join(
-                                                [
-                                                    datetime.utcnow().strftime(
-                                                        "%m/%d/%Y, %H:%M:%S"
-                                                    ),
-                                                    "\n",
-                                                ]
-                                            )
-                                        )
+                                        handle_email.write(_notification_entry(dest_email, res_dir))
                                 except OSError as e:
                                     raise e
                         current_job_dir = os.path.join(
@@ -1545,7 +1737,7 @@ def change_url(
                         code = subprocess.call(cmd, shell=True)
                         if code != 0:
                             raise ValueError(f"An error occurred while running {cmd}")
-                        return "/load", f"?job={res_dir}"
+                        return "/load", f"?job={res_dir}", REUSED_HASH
                     else:
                         # log file not found
                         # we may have entered a job directory that was in queue
@@ -1577,20 +1769,8 @@ def change_url(
                                             mode="a+",
                                         ) as handle_email:
                                             handle_email.write("--OTHEREMAIL--")
-                                            handle_email.write(f"{dest_email}\n")
                                             handle_email.write(
-                                                f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
-                                            )
-                                            handle_email.write(
-                                                "".join(
-                                                    [
-                                                        datetime.utcnow().strftime(
-                                                            "%m/%d/%Y, %H:%M:%S"
-                                                        ),
-                                                        "\n",
-                                                    ]
-                                                )
-                                            )
+                                                _notification_entry(dest_email, res_dir))
                                     except OSError as e:
                                         raise e
                                 else:
@@ -1604,23 +1784,15 @@ def change_url(
                                             ),
                                             mode="w+",
                                         ) as handle_email:
-                                            handle_email.write(f"{dest_email}\n")
                                             handle_email.write(
-                                                f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
-                                            )
-                                            handle_email.write(
-                                                "".join(
-                                                    [
-                                                        datetime.utcnow().strftime(
-                                                            "%m/%d/%Y, %H:%M:%S"
-                                                        ),
-                                                        "\n",
-                                                    ]
-                                                )
-                                            )
+                                                _notification_entry(dest_email, res_dir))
                                     except OSError as e:
                                         raise e
-                            return ("/load", f"?job={res_dir}")
+                            # this job directory never runs: remove it, as above
+                            # (left behind, a later identical search could be sent
+                            # to it and wait for ever)
+                            shutil.rmtree(result_dir, ignore_errors=True)
+                            return ("/load", f"?job={res_dir}", REUSED_HASH)
     # merge default is 3 nt wide
     merge_default = 3
     print(
@@ -1710,10 +1882,128 @@ def change_url(
             _sm.write("per-sample" if fast_env == "0" else "population-level")
     except OSError:
         pass
-    cmd = f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} CRISPRME_REPORT_FULL={report_full_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
+    # and, as complete-search does, the variant datasets of the search without the
+    # dict-less tiers (.untiered_datasets), beside every one it names (.variant_datasets):
+    # the report says what their results carry, the allele frequencies of their classic
+    # dictionaries (an indel's, of its indel log), which CRISPRitz add-variants copied from
+    # their VCF, and what --per-sample gives there (the form offers it only with a genotype
+    # store).
+    # A sites-only one without them (its VCFs have no sample columns) is in neither: with
+    # no allele-frequency registry, its search reports none of its variants
+    # (samplesid_problem), and none of that holds of it
+    try:
+        with open(vcfs) as _lv:
+            _named = list(dict.fromkeys(
+                os.path.basename(os.path.normpath(_l.strip())) for _l in _lv
+                if _l.strip() and _l.strip() != "_"))
+        _dict_root = os.path.join(current_working_directory, "Dictionaries")
+        _searched, _untiered = [], []
+        for _vn in _named:
+            if any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
+                   for _tier in ("registry", "genotypes")):
+                _searched.append(_vn)
+            elif _vcf_folder_has_samples(
+                    os.path.join(current_working_directory, "VCFs", _vn)) is not False:
+                _searched.append(_vn)
+                _untiered.append(_vn)
+        if _untiered:
+            with open(os.path.join(result_dir, ".untiered_datasets"), "w") as _ud:
+                _ud.write("".join(f"{_vn}\n" for _vn in _untiered))
+            with open(os.path.join(result_dir, ".variant_datasets"), "w") as _vd:
+                _vd.write("".join(f"{_vn}\n" for _vn in _searched))
+    except OSError:
+        pass
+    # every argument quoted: the genome's and PAM's names in the paths as Settings took
+    # them (quoting leaves the rest as is). The 17th says whether the search sends its
+    # notification, to the address of its email.txt: not the address, which the search's
+    # log would show (it prints the argument), and its status page and link with it
+    args = [run_job_sh, genome, vcfs, guides_file, pam_file, annotation, samples_ids,
+            max_bulges, mms, dna, rna, merge_default, result_dir, postprocess, 4,
+            current_working_directory, gencode, EMAIL_FILE if send_email else "_", be_start,
+            be_stop, be_nt, sorting_criteria_scoring, sorting_criteria, False, "PASS,.", "_",
+            max_total_edits]
+    cmd = (
+        f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} "
+        f"CRISPRME_REPORT_FULL={report_full_env} "
+        + " ".join(shlex.quote(str(a)) for a in args)
+        + f" 1> {shlex.quote(log_verbose)} 2>{shlex.quote(log_error)}"
+    )
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
-    return ("/load", f"?job={job_id}")
+    return ("/load", f"?job={job_id}", "")
+
+
+def _notification_entry(address: str, job_id: str) -> str:
+    """The entry of email.txt (pages/send_mail.py) for the notification of the job
+    ``job_id`` to ``address``, one plain address (check_mail_address): the address, the link
+    of the job's status page and the date. The link is the server's own address, as the
+    status page shows it (index.change_page), with the job id the server gave the job: it
+    was the page's URL, which a request sets to anything, so the e-mail the server sent
+    linked where the request chose."""
+    base = WEBADDRESS if ONLINE else f"http://{IPADDRESS}"
+    date = datetime.utcnow().strftime("%m/%d/%Y, %H:%M:%S")
+    return f"{address}\n{base}/load?job={job_id}\n{date}\n"
+
+
+def _launchable(genome: Optional[str], pam: Optional[str], variant_choice: Optional[str],
+                mms, dna, rna, max_edits, advanced_open) -> bool:
+    """Whether change_url runs a search of these values: a genome and a PAM the form
+    offers (installed), "ref" or a variant dataset it offers for the genome, whole
+    numbers of mismatches and bulges, and, where the Max edits slider governs (Advanced
+    closed), no value or a whole number of the slider's range (_max_edits_offered).
+    change_url asks it before it makes the job folder: the Max edits value was converted
+    only after that, and one int() refused left a folder that never ran."""
+    if genome not in [g["value"] for g in get_available_genomes()]:
+        return False
+    if pam not in [p["value"] for p in get_available_PAM()]:
+        return False
+    if variant_choice not in (None, "", "ref") and variant_choice not in [
+        o["value"] for o in get_variant_dataset_options(genome)
+    ]:
+        return False
+    try:
+        if not all(int(v) >= 0 for v in (mms, dna, rna)):
+            return False
+    except (TypeError, ValueError):
+        return False
+    return (advanced_open or max_edits is None
+            or _form_number(max_edits, 1, _max_edits_offered(mms, dna, rna)) is not None)
+
+
+def _offered(genome: Optional[str], pam: Optional[str],
+             variant_choice: Optional[str]) -> Tuple:
+    """The genome, PAM and variant dataset of the search form as the callbacks that fill
+    in and check the form take them: each one only when the form offers it (a genome and
+    a PAM that are installed; "ref", or datasets the form offers for that genome), else
+    None. Their values come back from the browser, which a client can set to anything,
+    and they name the folders and files these callbacks read: an absolute path or '../'
+    reached outside the data folder, and what was there changed what they answered. So
+    they answer as for none, as change_url runs only what the form offers (_launchable)."""
+    if genome not in [g["value"] for g in get_available_genomes()]:
+        genome = None
+    if pam not in [p["value"] for p in get_available_PAM()]:
+        pam = None
+    panels = _selected_panels(variant_choice)
+    if panels and (genome is None or not set(panels) <= {
+            o["value"] for o in get_variant_dataset_options(genome)}):
+        variant_choice = None
+    return genome, pam, variant_choice
+
+
+def _not_installed(field: str, selected: Optional[str], installed: List[str], what: str,
+                   card: str) -> Optional[str]:
+    """The missing-input line for the search form's ``field`` (Genome, PAM) when
+    ``selected`` is not among the values ``installed``, or None: the field's name when
+    none is selected and one is installed, as before; else that no ``what`` is installed,
+    or that the one selected is not, and where to add one (the Settings card ``card``)."""
+    if selected in installed:
+        return None
+    if not installed:
+        return f"{field}: no {what} is installed. Add one in Settings ({card})."
+    if not selected:
+        return field
+    return (f"{field}: {selected} is not installed. Select an installed {what}, or add it "
+            f"in Settings ({card}).")
 
 
 # Check input presence
@@ -1816,18 +2106,25 @@ def check_input(
     be_stop_update = None
     update_style = False
     miss_input_list = []  # recover missing inputs
-    # display missing genome
-    if genome_selected is None or not bool(genome_selected):
+    # display missing genome and PAM: none selected, or one selected that is not
+    # installed (a fresh data folder has neither, and Load Example selects hg38 and
+    # 20bp-NRG-SpCas9 whatever is installed), with where to add one (_not_installed)
+    missing = _not_installed("Genome", genome_selected,
+                             [g["value"] for g in get_available_genomes()],
+                             "reference genome", "Add a reference genome")
+    if missing:
         genome_update = classname_red
         update_style = True
-        miss_input_list.append("Genome")
+        miss_input_list.append(missing)
     if genome_selected is None or not bool(genome_selected):
         genome_selected = "hg38_ref"
     genome_ref = genome_selected
-    if pam is None or not bool(pam):
+    pams = [p["value"] for p in get_available_PAM()]
+    missing = _not_installed("PAM", pam, pams, "PAM", "Define a nuclease / PAM")
+    if missing:
         pam_update = classname_red
         update_style = True
-        miss_input_list.append("PAM")
+        miss_input_list.append(missing)
     if mms is None:
         mms_update = classname_red
         update_style = True
@@ -1857,24 +2154,32 @@ def check_input(
             [len(g) == len(text_guides.split("\n")[0]) for g in text_guides.split("\n")]
         ):
             text_guides = select_same_len_guides(text_guides)
-    # check PAM
-    try:
-        with open(
-            os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
-        ) as handle_pam:
-            pam_char = handle_pam.readline()
-            index_pam_value = int(pam_char.split()[-1])
-            if index_pam_value < 0:
-                end_idx = index_pam_value * (-1)
-                pam_char = pam_char.split()[0][:end_idx]
-                pam_begin = True
-            else:
-                end_idx = index_pam_value
-                pam_char = pam_char.split()[0][(end_idx * (-1)) :]
-                pam_begin = False
-    except OSError as e:
-        raise e
-    if guide_type == "GS":
+    # check PAM (one not installed is said above, and not read: a request can send any
+    # value, which names the file read)
+    pam_char = None
+    if pam in pams:
+        try:
+            with open(
+                os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
+            ) as handle_pam:
+                pam_char = handle_pam.readline()
+                index_pam_value = int(pam_char.split()[-1])
+                if index_pam_value < 0:
+                    end_idx = index_pam_value * (-1)
+                    pam_char = pam_char.split()[0][:end_idx]
+                    pam_begin = True
+                else:
+                    end_idx = index_pam_value
+                    pam_char = pam_char.split()[0][(end_idx * (-1)) :]
+                    pam_begin = False
+        except OSError:
+            pass
+    if guide_type == "GS" and (pam_char is None or genome_update is not None):
+        # the guides of a genomic sequence are found with its PAM, and those of BED
+        # coordinates in the genome: with either missing (said above) they are not
+        # looked for
+        text_guides = "A" * len_guide_sequence
+    elif guide_type == "GS":
         # Extract sequence and create the guides
         guides = []
         for seqname_and_seq in text_guides.split(">"):
@@ -1925,9 +2230,20 @@ def check_input(
                     assert bool(seqname)
                     assert bool(seq_read)
                     assert bool(genome_ref)
-                    seq_read = extract_seq.extractSequence(
-                        seqname, seq_read, genome_ref.replace(" ", "_")
-                    )
+                    try:
+                        seq_read = extract_seq.extractSequence(
+                            seqname, seq_read, genome_ref.replace(" ", "_")
+                        )
+                    except (OSError, IndexError, subprocess.CalledProcessError):
+                        # bedtools getfasta finds no FASTA of that sequence in the genome
+                        # folder, or nothing at those coordinates
+                        miss_input_list.append(
+                            f"Cannot read {seq_read} from genome {genome_ref}: its folder "
+                            f"holds no FASTA of {line_split[0]}, or the coordinates are past "
+                            f"the end of {line_split[0]}"
+                        )
+                        guides = []  # reset guides
+                        break
                     guides.extend(
                         convert_pam.getGuides(
                             seq_read, pam_char, len_guide_sequence, pam_begin
@@ -1973,12 +2289,12 @@ def check_input(
                 "21bp, etc)"
             )
         )
-    # WEB-ONLY guard: never build a VARIANT/INDEL index on the fly (its source VCFs are
-    # not shipped dict-less, so it can't be rebuilt) -- but the REFERENCE index MAY be
-    # built from the shipped raw genome (the only index buildable without the source VCFs;
-    # the search shell already builds it under an mkdir lock). Block the web submit only
-    # when the requested bulge depth is UNreachable: unbuildable for the reference term
-    # AND uninstalled for every selected variant term.
+    # WEB-ONLY guard: a web search never builds a VARIANT/INDEL index deeper than the one
+    # installed (a dict-less install ships no source VCFs to rebuild it from; with them, a
+    # deeper one is built in Settings, ahead of time) -- but the REFERENCE index MAY be
+    # built from the installed raw genome (the search shell builds it under an mkdir
+    # lock). Block the web submit only when the requested bulge depth is UNreachable:
+    # unbuildable for the reference term or uninstalled for a selected variant term.
     #
     # This only withholds the browser launch (update_style=True -> submit-job returns None
     # below, so change_url never fires); the CLI complete-search build path in submit_job
@@ -1986,8 +2302,21 @@ def check_input(
     # exactly matching the CLI (bMax = max(bDNA, bRNA); index folder N = bMax+1) and the
     # shell scan (N >= bMax+1). reference_bulge_capacity / index_max_bulges return N-1, so
     # ">= max(dna, rna)" is precisely the shell's reachability test (incl. NNN-pamless +
-    # combined-dataset matching, and the buildable-reference relaxation).
-    if genome_selected and pam and dna is not None and rna is not None:
+    # combined-dataset matching, and the buildable-reference relaxation). Without a genome
+    # and a PAM selected and installed it is not run: what is missing is said above.
+    # Nor for a variant dataset the form does not offer for the genome (a request can send
+    # any value, which names the folders read below): it is said, as a genome or PAM that
+    # is not installed.
+    if (genome_update is None and variant_choice not in (None, "", "ref")
+            and _offered(genome_selected, None, variant_choice)[2] is None):
+        update_style = True
+        miss_input_list.append(
+            f"Variants: {variant_choice} is not installed for {genome_selected}. Select an "
+            "installed variant dataset, or add it in Settings (Add a VCF dataset)."
+        )
+        variant_choice = None
+    if (genome_selected and pam and genome_update is None and pam_update is None
+            and dna is not None and rna is not None):
         need = max(int(dna), int(rna))
         # REFERENCE term: buildable-aware (raw genome shipped -> reference index buildable).
         _ok = reference_bulge_capacity(genome_selected, pam) >= need
@@ -2003,13 +2332,26 @@ def check_input(
             update_style = True
             miss_input_list.append(
                 "No index can supply %d bulge(s) (DNA %s / RNA %s) for this "
-                "genome / PAM / variant selection. The reference index is built on the "
-                "fly from the installed raw genome, but a VARIANT index cannot be built "
-                "here (its source VCFs are not installed) — reduce the DNA/RNA bulges, or "
+                "genome / PAM / variant selection. A search builds a missing reference "
+                "index from the installed genome, but not a variant index deeper than "
+                "the installed one: reduce the DNA/RNA bulges, or "
                 "download/build a matching variant index first (Settings → Data manager, "
                 "or 'crisprme.py download --what index' / 'crisprme.py build-index-only')."
                 % (need, dna, rna)
             )
+    # A variant search reads each dataset's samplesIDs/<folder>.samplesID.txt only
+    # after the search and post-analysis, and fails there without it, and one of a
+    # dataset added as a single multi-chromosome VCF, with no variant index for this
+    # PAM, fails as it prepares the variant genome: refuse them now, with the words of
+    # the bulge note (_dataset_refusals). That index is looked for with the PAM's file,
+    # of an installed PAM only: one not installed is said above, and its value, which a
+    # request can set to anything, names the file read. With none the second is not said.
+    if genome_update is None and variant_choice not in (None, "", "ref"):
+        for _d in [v for v in str(variant_choice).split("+") if v]:
+            for _why in _dataset_refusals(genome_selected, pam if pam in pams else None,
+                                          _d):
+                update_style = True
+                miss_input_list.append(_why)
     miss_input = html.Div(
         [
             html.P("The following inputs are wrong or missing:"),
@@ -2101,8 +2443,8 @@ def is_email_valid(email: str) -> Dict[str, str]:
             raise TypeError(f"Expected {str.__name__}, got {type(email).__name__}")
     if email is None:
         raise PreventUpdate  # do not do anything
-    if ("@" in email) and (len(email.split("@")) == 2):
-        # mail address should be valid
+    if check_mail_address(email):
+        # one plain address: the one Submit sends the notification to
         return {"border": "1px solid #94f033", "outline": "0"}
     return {"border": "1px solid red"}
 
@@ -2265,6 +2607,7 @@ def change_variant_dataset_options(genome_value: str) -> List:
 
     if genome_value is not None and not isinstance(genome_value, str):
         raise TypeError(f"Expected {str.__name__}, got {type(genome_value).__name__}")
+    genome_value = _offered(genome_value, None, None)[0]  # an installed genome, or none
     options = get_variant_dataset_options(genome_value)
     # default to a variant-aware search, preferring a genotyped-PHASED panel (clean
     # real-haplotype default), then the richest installed panel — chosen dynamically
@@ -2285,6 +2628,7 @@ def change_variant_dataset_options(genome_value: str) -> List:
     [State("search-mode", "value")],
 )
 def update_search_mode_availability(dataset_value, genome_value, current_mode):
+    genome_value, _pam, dataset_value = _offered(genome_value, None, dataset_value)
     has_gt = variant_dataset_has_genotypes(genome_value, dataset_value)
     # tailor the label to what per-sample actually BUYS on THIS panel: a phased panel
     # yields CONFIRMED cis + named carriers; an unphased panel can name carriers but the
@@ -2333,78 +2677,325 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
 
 
 # Limit the DNA/RNA bulge options to the bulge depth a search can REACH here.
-# Bulge searches need a per-PAM TST index; 0-bulge searches run index-free, so 0 is
-# always available. The cap is the min of the REFERENCE term and the VARIANT term, but
-# the two terms are ASYMMETRIC:
+# Bulge searches need a per-PAM TST index. The cap is the min of the REFERENCE term
+# and the VARIANT term, but the two terms are ASYMMETRIC:
 #   * REFERENCE: reference_bulge_capacity -- an already-built reference index OR, when the
-#     raw genome Genomes/<genome>/ is shipped, the app ceiling (the reference index is
-#     buildable on demand from the raw genome, exactly as the search shell does under an
-#     mkdir lock). This is the fix for the dict-less bug: a variant HF tarball ships NO
-#     reference index, so the old index_max_bulges(...,None) returned 0 and forced the
-#     dropdown (and the DNA/RNA=2 defaults) to 0 even though the raw genome IS shipped and
-#     a bmax=2 reference index is buildable.
-#   * VARIANT: index_max_bulges(...,dataset) -- STRICTLY the installed variant index; a
-#     variant/indel index can NOT be built dict-less (its source VCFs are not shipped), so
-#     this term must never be relaxed to a buildable ceiling.
-# Mismatches are never index-limited, so they are left untouched.
+#     raw genome Genomes/<genome>/ is installed, the app ceiling: a web search that finds
+#     no reference index deep enough builds one from the raw genome first (the search
+#     shell does, under an mkdir lock), and later searches reuse it.
+#   * VARIANT: index_max_bulges(...,dataset) -- STRICTLY the installed variant index. A
+#     search does build what a panel lacks (it adds the variants from VCFs/<dataset>/ to
+#     the genome and indexes it), but at the bulge depth asked for, which this cap keeps
+#     at the installed depth: 0 with no variant index, so its first search only prepares
+#     a 0-bulge one. A deeper one is built in Settings (or downloaded), ahead of time.
+# Mismatches are never index-limited, so they are left untouched. A value the cap lowers
+# is remembered (bulge-cap-memory) and given back, with the Max edits it pulled down, once
+# the cap allows it again -- unless the user has changed it in between.
 @app.callback(
     [
         Output("dna", "options"),
         Output("rna", "options"),
         Output("dna", "value", allow_duplicate=True),
         Output("rna", "value", allow_duplicate=True),
-        Output("bulge-guard-note", "children"),
+        Output("max-edits-slider", "value", allow_duplicate=True),
+        Output("bulge-cap-memory", "data"),
     ],
     [
         Input("available-genome", "value"),
         Input("available-pam", "value"),
         Input("variant-dataset", "value"),
     ],
-    [State("dna", "value"), State("rna", "value")],
+    [
+        State("dna", "value"),
+        State("rna", "value"),
+        State("mms", "value"),
+        State("max-edits-slider", "value"),
+        State("bulge-cap-memory", "data"),
+    ],
     prevent_initial_call=True,
 )
-def limit_bulges_to_index(genome, pam, variant_choice, cur_dna, cur_rna):
-    if not genome or not pam:
-        return AV_BULGES, AV_BULGES, no_update, no_update, ""
-    # REFERENCE term: buildable-aware (raw genome shipped -> reference index buildable).
-    maxb = reference_bulge_capacity(genome, pam)
-    # Is the reference depth relying on an on-demand build (raw genome present but no
-    # reference index yet)? Then the first bulge search will build it once (and cache it).
-    ref_installed = index_max_bulges(genome, pam, None)
-    ref_needs_build = maxb > ref_installed
-    # scalar dropdown value -> list of datasets ("ref" -> none)
-    # ANY selected dataset (built-in OR a custom VCF registered via Settings) — not a
-    # hardcoded 1000G/HGDP whitelist, which previously skipped custom datasets and left
-    # their variant-index bulge ceiling unchecked (overstating the bulge dropdown).
-    selected = (
-        []
-        if variant_choice in (None, "", "ref")
-        else [v for v in str(variant_choice).split("+") if v]
-    )
-    # VARIANT term: strictly the SHIPPED variant index (never buildable dict-less).
-    for v in selected:  # a variant bulge search also needs the variant index
-        maxb = min(maxb, index_max_bulges(genome, pam, v))
+def limit_bulges_to_index(
+    genome, pam, variant_choice, cur_dna, cur_rna, mms=None, cur_edits=None, held=None
+):
+    genome, pam, variant_choice = _offered(genome, pam, variant_choice)
+    maxb = _bulges_offered(genome, pam, variant_choice)
     opts = [{"label": i, "value": i} for i in range(0, maxb + 1)]
+    if not genome or not pam:
+        return opts, opts, no_update, no_update, no_update, no_update
+    held = held or {}
+    # What the cap lowered last time, unless DNA/RNA no longer show what it set them to
+    # (the user picked other values since: theirs stand).
+    if held and held.get("set") != [cur_dna, cur_rna]:
+        held = {}
+    want_dna = held.get("dna", cur_dna)
+    want_rna = held.get("rna", cur_rna)
     # Only shrink a value that genuinely EXCEEDS the reachable cap. With the reference
-    # term now buildable-aware, the shipped DNA/RNA=2 defaults survive on a dict-less
-    # install (cap = min(ref_buildable=2, var=2) = 2) instead of being clobbered to 0.
-    dna_v = cur_dna if (isinstance(cur_dna, int) and cur_dna <= maxb) else maxb
-    rna_v = cur_rna if (isinstance(cur_rna, int) and cur_rna <= maxb) else maxb
-    if maxb == 0:
-        note = (
-            "No bulge index for this genome/PAM"
-            + (" + selected variant set" if selected else "")
-            + " yet, and no raw genome to build one — only a fast 0-bulge search is "
-            "available. Build/download an index in Settings to enable bulges."
-        )
-    else:
-        note = f"Up to {maxb} DNA/RNA bulge(s) available."
-        if ref_needs_build:
-            note += (
-                " The first bulge search will build the reference index once "
-                "(~20–35 min) from the installed raw genome, then reuse it."
+    # term buildable-aware, the DNA/RNA defaults survive on a dict-less install
+    # (cap = min(ref_buildable=2, var=2) = 2) instead of being clobbered to 0.
+    dna_v = want_dna if (isinstance(want_dna, int) and want_dna <= maxb) else maxb
+    rna_v = want_rna if (isinstance(want_rna, int) and want_rna <= maxb) else maxb
+    if (dna_v, rna_v) != (want_dna, want_rna):
+        if held.get("set") == [dna_v, rna_v]:
+            # Lowered to these values already, and remembered: the memory stands as it
+            # is. The browser runs this callback twice for one change (for the variant
+            # dataset, then for the PAM that update_pam_options writes back), and
+            # recomputing the memory in the second run, which can see Max edits not yet
+            # lowered, took that for a value the user had set and forgot the Max edits
+            # to give back.
+            return opts, opts, dna_v, rna_v, no_update, held
+        # lowered now: remember the values to give back, and the Max edits (unless the
+        # user has moved it since the cap last set it: then theirs stands). Max edits is
+        # set to that value, at most mismatches + bulges, with the bulges and the memory,
+        # as sync_max_edits_bound then does too: a later run sees all three as they are.
+        # A cap lifted only partly (a panel with a 1-bulge index after one with none)
+        # starts from the remembered value, not from the lower one the slider shows.
+        if held:
+            edits = held.get("edits") if cur_edits == held.get("edits_set") else None
+        else:
+            edits = cur_edits
+        try:
+            edits = int(edits) if edits is not None else None
+            edits_set = min(
+                int(cur_edits if edits is None else edits), max(1, int(mms) + dna_v + rna_v)
             )
-    return opts, opts, dna_v, rna_v, note
+        except (TypeError, ValueError):
+            edits = edits_set = None
+        memory = {
+            "dna": want_dna, "rna": want_rna, "set": [dna_v, rna_v],
+            "edits": edits, "edits_set": edits_set,
+        }
+        edits_v = no_update if edits_set is None else edits_set
+        return opts, opts, dna_v, rna_v, edits_v, memory
+    edits_v = no_update
+    if held and held.get("edits") is not None and cur_edits == held.get("edits_set"):
+        edits_v = held["edits"]  # given back with the bulges, if left where it was put
+    return opts, opts, dna_v, rna_v, edits_v, {}
+
+
+def _selected_panels(variant_choice) -> List[str]:
+    """Variant dropdown value -> its datasets ("ref" -> none). ANY selected dataset
+    (built-in OR a custom VCF registered via Settings), not a 1000G/HGDP whitelist."""
+    if variant_choice in (None, "", "ref"):
+        return []
+    return [v for v in str(variant_choice).split("+") if v]
+
+
+def _bulge_cap(genome: str, pam: str, variant_choice) -> int:
+    """The bulges a web search can reach here: the reference term (installed, or
+    buildable from the raw genome) and, for each selected panel, its installed index."""
+    maxb = reference_bulge_capacity(genome, pam)
+    for v in _selected_panels(variant_choice):
+        maxb = min(maxb, index_max_bulges(genome, pam, v))
+    return maxb
+
+
+def _bulges_offered(genome: Optional[str], pam: Optional[str], variant_choice) -> int:
+    """The most DNA and RNA bulges the form's dropdowns offer, from 0, for a genome, PAM and
+    variant dataset as _offered gives them: the bulges a web search can reach here
+    (_bulge_cap), more than the app's ceiling where an installed reference index is deeper
+    than it, or, with no genome or PAM, that ceiling (AV_BULGES). limit_bulges_to_index
+    fills the dropdowns with them, and the Personal assembly tab's Submit takes no other
+    count (submit_assembly_search_job)."""
+    if not genome or not pam:
+        return MAX_BULGES - 1
+    return _bulge_cap(genome, pam, variant_choice)
+
+
+def _index_installed(genome: str, pam: str, panel: Optional[str] = None) -> bool:
+    """Whether genome_library holds an index of the genome (+ variant panel) that
+    index_max_bulges counts for this PAM, a 0-bulge one included: index_max_bulges
+    reports 0 for that and for none alike. A search that finds none builds one."""
+    motif = pam_motif(pam)
+    if not motif or not genome:
+        return False
+    genome = genome.replace(" ", "_")
+    lib = os.path.join(current_working_directory, "genome_library")
+    want = f"{genome}_{panel}" if panel else ""
+    try:
+        names = os.listdir(lib)
+    except OSError:
+        return False
+    for d in names:
+        base, _, enriched = d.partition("+")
+        if enriched != want or d.endswith("_INDELS") or not base.endswith(f"_{genome}"):
+            continue
+        pam_name, sep, n_str = base[: -len(genome) - 1].partition("_")
+        if not sep or not n_str.isdigit():
+            continue
+        if pam_name == motif or (set(pam_name) == {"N"} and len(pam_name) == len(motif)):
+            if os.path.isdir(os.path.join(lib, d)):
+                return True
+    return False
+
+
+def _has_files(folder: str, suffixes: Tuple[str, ...]) -> bool:
+    try:
+        return any(f.endswith(suffixes) for f in os.listdir(folder))
+    except OSError:
+        return False
+
+
+def _sites_only_refusal(genome: str, panel: str) -> Optional[str]:
+    """samplesid_problem's message for the variant dataset ``panel`` when it is sites-only
+    (its VCFs have no sample columns) and has no sample list: Submit refuses every search
+    of it, and building its index does not change that. None for any other dataset."""
+    folder = _resolve_vcf_folder(genome.replace(" ", "_"), panel)
+    why = samplesid_problem(folder, panel)
+    if why and _vcf_folder_has_samples(
+            os.path.join(current_working_directory, "VCFs", folder)) is False:
+        return why
+    return None
+
+
+def _unsplit_vcf_refusal(genome: str, pam: str, panel: str) -> Optional[str]:
+    """Why a search of the variant dataset ``panel`` cannot run, though a 0-bulge one is
+    offered, or None. With no variant index for this PAM and no variant genome yet, the
+    search (submit_job_automated_new_multiple_vcfs.sh) prepares the variant genome from
+    the dataset's VCF folder with CRISPRitz add-variants, which takes each file's
+    chromosome from a '.chrN.' token in its name. A single multi-chromosome file has
+    none: the search fails as it begins ("cannot open Genomes/<genome>/.fa"). Only a
+    build of its index (build-index-only, as Settings runs it) splits it per chromosome;
+    this is that build's test (crisprme.py _ensure_per_chromosome_vcfs)."""
+    genome = genome.replace(" ", "_")
+    if _index_installed(genome, pam, panel):
+        return None
+    folder = _resolve_vcf_folder(genome, panel)
+    if os.path.isdir(os.path.join(current_working_directory, GENOMES_DIR,
+                                  f"{genome}+{folder}")):
+        return None  # the variant genome is there: the search does not read the VCFs
+    try:
+        vcfs = [f for f in os.listdir(os.path.join(current_working_directory, "VCFs", folder))
+                if f.endswith(".vcf.gz")]
+    except OSError:
+        return None
+    if not vcfs or all(any("chr" in tok for tok in f.split(".")) for f in vcfs):
+        return None
+    return (
+        f"No {panel} variant index for this PAM is installed yet, and the dataset's VCF is "
+        "a single multi-chromosome file, which a search cannot prepare the variant genome "
+        "from: the file is split per chromosome only when its index is built. Build its "
+        "index in Settings (Build an index locally) first, or remove the dataset in "
+        "Settings and add it again as one VCF file per chromosome (<name>.chrN.vcf.gz)."
+    )
+
+
+def _dataset_refusals(genome: str, pam: str, panel: str,
+                      make_list: bool = True) -> List[str]:
+    """What Submit says (check_input) of a search of the variant dataset ``panel``,
+    whatever the bulges, and so the bulge note too: that it has no sample list
+    (samplesid_problem), once the combined list a merged panel synthesizes is made
+    (_ensure_samplesid; the folder and that list are change_url's), and, unless it is
+    sites-only, which no build makes searchable (the first says so), that the search
+    cannot prepare its variant genome from a single multi-chromosome VCF
+    (_unsplit_vcf_refusal). [] when Submit does not refuse it. The note passes
+    ``make_list`` False: it writes nothing, and takes a list that Submit makes
+    (_samplesid_makeable) as made."""
+    genome = genome.replace(" ", "_")
+    folder = _resolve_vcf_folder(genome, panel)
+    if make_list:
+        _ensure_samplesid(genome, folder)
+    made = not make_list and _samplesid_makeable(genome, folder)
+    found = [] if made else [samplesid_problem(folder, panel)]
+    if pam and (made or not _sites_only_refusal(genome, panel)):
+        found.append(_unsplit_vcf_refusal(genome, pam, panel))
+    return [why for why in found if why]
+
+
+# The note under the Advanced bulge caps: how many bulges this genome, PAM and variant
+# panel allow, and what a search with the bulges selected builds first, if anything.
+@app.callback(
+    Output("bulge-guard-note", "children"),
+    [
+        Input("available-genome", "value"),
+        Input("available-pam", "value"),
+        Input("variant-dataset", "value"),
+        Input("dna", "value"),
+        Input("rna", "value"),
+    ],
+)
+def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
+    genome, pam, variant_choice = _offered(genome, pam, variant_choice)
+    if not genome or not pam:
+        return ""
+    # a dataset whose search Submit refuses whatever the bulges: the note says what Submit
+    # says (check_input), and offers no search of it and no build that would not help. It
+    # makes no sample list, which only Submit does
+    for panel in _selected_panels(variant_choice):
+        why = _dataset_refusals(genome, pam, panel, make_list=False)
+        if why:
+            return " ".join(why)
+    maxb = _bulge_cap(genome, pam, variant_choice)
+    ref_capacity = reference_bulge_capacity(genome, pam)
+    if maxb == 0 and ref_capacity == 0:
+        return (
+            "No index for this genome and PAM is installed, and the genome has no FASTA "
+            "files to build one from, so only a 0-bulge search is offered. Download or "
+            "build an index in Settings to search with bulges."
+        )
+    if maxb == 0:
+        # a selected variant panel has no index that supports bulges
+        panel = next(
+            v for v in _selected_panels(variant_choice)
+            if index_max_bulges(genome, pam, v) == 0
+        )
+        if _index_installed(genome, pam, panel):
+            note = (
+                f"The installed {panel} variant index for this PAM supports no bulges, "
+                "so only a 0-bulge search is offered."
+            )
+        elif _has_files(os.path.join(current_working_directory, "VCFs",
+                                     _resolve_vcf_folder(genome, panel)), (".vcf.gz",)) or (
+                _has_files(os.path.join(
+                    current_working_directory, GENOMES_DIR,
+                    f"{genome.replace(' ', '_')}+{_resolve_vcf_folder(genome, panel)}"),
+                    (".fa", ".fasta"))):
+            note = (
+                f"No {panel} variant index for this PAM is installed yet, so only a "
+                "0-bulge search is offered, and the first one prepares the variant "
+                "genome and a 0-bulge index of it, once (this can take hours on a full "
+                "genome)."
+            )
+        else:
+            # the search script refuses it (_refuse_no_variant_index), with what to do
+            note = (
+                f"No {panel} variant index for this PAM is installed, and neither the panel's "
+                "VCF files nor its enriched genome are here to build one: a search of it stops "
+                "and says what to do."
+            )
+        can_build = _has_files(
+            os.path.join(current_working_directory, GENOMES_DIR, genome.replace(" ", "_")),
+            (".fa", ".fasta"),
+        ) and _has_files(
+            os.path.join(current_working_directory, "VCFs", _resolve_vcf_folder(genome, panel)),
+            (".vcf.gz", ".vcf"),
+        )
+        if can_build:
+            note += (
+                " To search with bulges, build its index in Settings (Build an index "
+                "locally) first: the genome and the VCF files are installed."
+            )
+        else:
+            note += " To search with bulges, download a variant index for it in Settings."
+        return note
+    note = f"Up to {maxb} DNA/RNA bulge(s) available."
+    try:
+        need = max(int(dna or 0), int(rna or 0))
+    except (TypeError, ValueError):
+        need = 0
+    ref_installed = index_max_bulges(genome, pam, None)
+    if not _index_installed(genome, pam):
+        note += (
+            " No reference index for this PAM is installed, so the search first builds "
+            "one from the installed genome (once: about 20 to 35 minutes for a human "
+            "genome), then reuses it."
+        )
+    elif need > ref_installed:
+        note += (
+            f" The installed reference index supports {ref_installed} bulge(s), so a "
+            f"search with {need} first builds a deeper one from the installed genome "
+            "(once: about 20 to 35 minutes for a human genome), then reuses it."
+        )
+    return note
 
 
 @app.callback(
@@ -2793,21 +3384,21 @@ def index_page() -> html.Div:
                     dcc.Slider(
                         id="max-edits-slider",
                         min=1,
-                        # Max = mismatch ceiling (MAX_MMS - 1 = 6) + bulge ceiling
-                        # (MAX_BULGES - 1 = 2) = 8 -- the largest total-edit budget the app
-                        # supports (e.g. 6 mismatches + 2 bulges), computed rather than a magic
-                        # number. In simple mode this slider is the TOTAL-edit budget:
+                        # Max = MAX_EDITS_LAYOUT: mismatch ceiling (MAX_MMS - 1 = 6) + DNA
+                        # and RNA bulge ceilings (MAX_BULGES - 1 = 2 each) = 10, computed
+                        # rather than a magic number, until sync_max_edits_bound sets it to
+                        # the dropdowns' sum. In simple mode this slider is the TOTAL-edit budget:
                         # mismatches come from the Advanced dropdown default (4) and bulges are
                         # fixed at 1 DNA + 1 RNA (bounded by index depth), keeping the default
                         # path in the scorer's validated single-bulge domain. So the default
                         # (budget 6) resolves to up to 4 mismatches + 1 DNA + 1 RNA bulge; open
                         # Advanced for deeper per-type caps. Default 6 matches the CLI.
-                        max=(MAX_MMS - 1) + 2 * (MAX_BULGES - 1),
+                        max=MAX_EDITS_LAYOUT,
                         step=1,
                         value=6,
                         marks={
                             i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
-                            for i in range(1, (MAX_MMS - 1) + 2 * (MAX_BULGES - 1) + 1)
+                            for i in range(1, MAX_EDITS_LAYOUT + 1)
                         },
                         tooltip={"placement": "bottom", "always_visible": False},
                     ),
@@ -2976,6 +3567,8 @@ def index_page() -> html.Div:
                                 "margin-top": "6px",
                             },
                         ),
+                        # bulge values the index cap lowered (limit_bulges_to_index)
+                        dcc.Store(id="bulge-cap-memory", data={}),
                     ],
                     style={"margin-top": "8px"},
                 ),
@@ -3438,17 +4031,10 @@ def sync_max_edits_bound(mms, dna, rna, cur_val) -> Tuple:
     slider ceiling no longer under-reports the achievable total (which used to make
     in-budget results look like they exceeded the slider's max). The marks and the
     current value are kept within the new ceiling. Fires whenever an Advanced
-    dropdown changes. The layout seeds the static max (MAX_MMS-1 + 2*(MAX_BULGES-1))
-    for the default caps before this first fires."""
-    def _as_int(v, default):
-        try:
-            return int(v)
-        except (TypeError, ValueError):
-            return default
-    mm = _as_int(mms, MAX_MMS - 1)
-    bd = _as_int(dna, 0)
-    br = _as_int(rna, 0)
-    new_max = max(1, mm + bd + br)
+    dropdown changes. The layout seeds the static max (MAX_EDITS_LAYOUT) for the
+    default caps before this first fires. The ceiling is _max_edits_ceiling's, which
+    the Submits take the slider's range from (_max_edits_offered)."""
+    new_max = _max_edits_ceiling(mms, dna, rna)
     marks = {
         i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
         for i in range(1, new_max + 1)
@@ -3529,7 +4115,10 @@ def update_base_editing_dropdown(
 
 
 def check_mail_address(mail_address: str) -> bool:
-    """Check mail address consistency.
+    """Check mail address consistency: one plain address, name@domain (send_mail's
+    plain_address). Anything with an '@' was taken: a comma-separated list had one search
+    notify every address on it, and a line break, which a request can send, wrote the line
+    email.txt keeps the e-mail's link on.
 
     ...
 
@@ -3548,7 +4137,4 @@ def check_mail_address(mail_address: str) -> bool:
     assert mail_address is not None
     if not isinstance(mail_address, str):
         raise TypeError(f"Expected {str.__name__}, got {type(mail_address).__name__}")
-    mail_address_fields = mail_address.split("@")
-    if len(mail_address_fields) > 1 and bool(mail_address_fields[-1]):
-        return True
-    return False
+    return plain_address(mail_address)

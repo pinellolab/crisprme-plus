@@ -30,6 +30,7 @@ TODO: complete doc string with missing info --> read paper carefully
 """
 
 from .pages_utils import (
+    EMAIL_FILE,
     GUIDES_FILE,
     PAGE_SIZE,
     BARPLOT_LEN,
@@ -56,7 +57,9 @@ from .pages_utils import (
     split_filter_part,
     generate_table,
     generate_table_samples,
+    results_job_dir,
 )
+from .load_page import _failure_text
 from app import (
     app,
     cache,
@@ -98,6 +101,7 @@ from plotly.subplots import make_subplots
 from dash import dash_table
 import sqlite3
 import flask
+from werkzeug.security import safe_join
 import errno
 import re
 import os
@@ -168,6 +172,68 @@ def _plot_token(criterion: str) -> str:
     return str(criterion).replace("-", "_")
 
 
+def _result_not_ready(job_id: str) -> Optional[html.Div]:
+    """The page a results link shows when its job has no results to show, else None.
+
+    A results link (saved, emailed, typed) can name a job that does not exist, that
+    failed or was refused, that found nothing, or that has not finished. Opening one
+    failed on a results file it does not have with a server error and a blank page.
+    Say what happened instead, in the words of the job's status page, with a link to
+    that page. The job's state is read first, as the status page reads it
+    (load_page.refresh_search): a job that failed at its last steps (results
+    integration, plots, database), or is still in them, already has its integrated
+    results file, but not the other files the results pages read. Only a finished job
+    (its log says "Job Done" and its log_error.txt is empty, or set aside at the end)
+    with its integrated results is left to the results pages, as before. The job id is
+    the link's, which a client can set to any text: a job folder of Results/ is read
+    only for an id of the form the search form gives (results_job_dir)."""
+    job_directory = results_job_dir(job_id)
+    if job_directory is None:
+        return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
+    try:
+        with open(os.path.join(job_directory, "log.txt"), errors="replace") as fh:
+            log = fh.read()
+    except OSError:
+        log = ""
+    try:
+        failed = os.path.getsize(os.path.join(job_directory, "log_error.txt")) > 0
+    except OSError:  # none, or renamed log_error_no_check.txt when the job ended
+        failed = False
+    done = "Job\tDone" in log or "Job\nDone" in log
+    if done and not failed and glob(os.path.join(job_directory, "*integrated*")):
+        return None
+    if failed:
+        message, color = _failure_text(job_directory), "danger"
+    elif "No off-targets found" in log:
+        message, color = (
+            "Finished: no off-targets were found for the provided guide(s) with these "
+            "parameters, so there are no results to view.",
+            "info",
+        )
+    elif done:
+        message, color = (
+            "This search finished, but its results files are missing from its folder, "
+            "so there are no results to view.",
+            "danger",
+        )
+    else:
+        message, color = (
+            "This search has not finished yet, so there are no results to view. Its "
+            "status page shows how far it has got.",
+            "info",
+        )
+    return html.Div(
+        [
+            dbc.Alert(message, color=color),
+            dcc.Link(
+                "Open the status page of this search",
+                href=f"{URL}/load?job={job_id}",
+            ),
+        ],
+        style={"margin": "1%"},
+    )
+
+
 def result_page(job_id: str) -> html.Div:
     """Print the results page layout (guides table + images).
     The guides table contains the research profile found during
@@ -195,6 +261,10 @@ def result_page(job_id: str) -> html.Div:
     # check input function arguments
     if not isinstance(job_id, str):
         raise TypeError(f"Expected {str.__name__}, got {type(job_id).__name__}")
+    # no results to show (no such job, failed, refused, nothing found, unfinished)
+    not_ready = _result_not_ready(job_id)
+    if not_ready is not None:
+        return not_ready
     # start result page creation code
     value = job_id
     job_directory = os.path.join(current_working_directory, "Results", f"{job_id}")
@@ -637,9 +707,11 @@ def result_page(job_id: str) -> html.Div:
             )
         )
     )
-    # Explanation BELOW the table, consistent in message with the downloadable report's
-    # matrix caption: what a cell is, the origin split, the perfect-match cell, and that
-    # every site is counted once (one row carrying both alleles as columns).
+    # Explanation BELOW the table: what a cell is, the origin split, the perfect-match cell,
+    # and that every site is counted once (one row carrying both alleles as columns). The
+    # split is process_summaries.py's: a site whose reported alignment (for the filter
+    # criterion) is a variant one counts as VARIANT. The downloadable report's matrix
+    # splits on Not_found_in_REF instead, so its VARIANT total can be smaller.
     _cap_style = {
         "margin": "0 5% 0 5%",
         "fontSize": "1.02rem",
@@ -663,14 +735,19 @@ def result_page(job_id: str) -> html.Div:
                     [
                         "Each entry counts ",
                         html.Strong("distinct putative off-target sites"),
-                        ", grouped by mismatch count and bulge size and split by origin: ",
+                        ", grouped by mismatch count and bulge size and split by the origin "
+                        "of the alignment reported for the filter criterion selected below: ",
                         html.Strong("REFERENCE"),
-                        " — the target exists in the reference genome (even if a variant "
-                        "also alters it) — vs ",
+                        " — the reported alignment is the reference-genome one — vs ",
                         html.Strong("VARIANT"),
-                        " — the target exists only because a variant creates it (",
+                        " — the reported alignment is a variant one (",
+                        html.Code("REF/ALT_origin"),
+                        " alt): a variant either creates the site or changes a reference "
+                        "site, for example to fewer mismatches. The downloadable report "
+                        "counts as VARIANT only the sites that exist only because of a "
+                        "variant (",
                         html.Code("Not_found_in_REF"),
-                        ").",
+                        "), so its VARIANT total can be smaller.",
                     ],
                     style=_cap_style,
                 ),
@@ -2498,6 +2575,8 @@ def update_assembly_site_set_controls(site_set: str, search: str) -> Tuple:
     if not isinstance(site_set, str):
         raise PreventUpdate
     job_id = _job_id_from_search(search)
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     region_children = _assembly_region_filter_children(job_directory, site_set, "hg38")
     sort_options, sort_default = _SITE_SET_SORT_CONFIG.get(
@@ -2524,6 +2603,8 @@ def update_assembly_region_chrom_options(coord_space: str, site_set: str, search
     if coord_space not in _COORD_SPACE_COLS:
         raise PreventUpdate
     job_id = _job_id_from_search(search)
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     df, _ = _assembly_mappable_frame(job_directory)
     chrom_col, _ = _COORD_SPACE_COLS[coord_space]
@@ -2583,6 +2664,8 @@ def update_assembly_results_table(
     if not isinstance(site_set, str) or not isinstance(sort_col, str) or not isinstance(sort_order, str):
         raise PreventUpdate
     job_id = _job_id_from_search(search)
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     df, display_cols = _assembly_site_set_frame(job_directory, site_set)
     if df.empty:
@@ -2642,6 +2725,8 @@ def sendto_write_json(filter_criterion: str, search: str) -> None:
     if not isinstance(search, str):
         raise TypeError(f"Expected {str.__name__}, got {type(search).__name__}")
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     write_json(filter_criterion, job_id)
 
 
@@ -2687,6 +2772,8 @@ def download_link_sample(
     if n is None:
         raise PreventUpdate  # nothing to do
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     file_to_load = ".".join([file_to_load, "txt"])
     file_to_load = file_to_load.strip().split("/")[-1]
     # print(file_to_load)
@@ -2734,6 +2821,8 @@ def download_report(
     if n is None:
         raise PreventUpdate
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     file_to_load = file_to_load.split("/")[-1]
     if os.path.exists(
         os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)
@@ -2770,7 +2859,7 @@ def download_report(
     [Input("interval-sumbysample", "n_intervals")],
     [State("div-info-sumbysample-targets", "children"), State("url", "search")],
 )
-def download_link_sample(
+def download_link_sumbysample(  # a name of its own: as download_link_sample it hid the one above
     n: int, file_to_load: str, search: str
 ) -> Tuple[str, bool]:  # file to load = job_id.HG001.guide
     """Create the link to download CRISPRme results by sample table.
@@ -2798,14 +2887,28 @@ def download_link_sample(
     if n is None:
         raise PreventUpdate
     job_id = search.split("=")[-1]
+    job_directory = results_job_dir(job_id)  # the URL's: a job folder of Results/ only
+    if job_directory is None:
+        raise PreventUpdate
     file_to_load = ".".join([file_to_load, "zip"])
-    if os.path.exists(os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)):
+    # the page's name of the file (the link's guide and sample, or counts), which a
+    # client can set to any text: a file of the job's folder only, as the /Results/
+    # route serves one (safe_join); another is not there
+    zip_path = safe_join(job_directory, file_to_load)
+    if zip_path is not None and os.path.exists(zip_path):
         return (
             html.A(
                 "Download zip",
                 href=os.path.join(URL, RESULTS_DIR, job_id, file_to_load),
                 target="_blank",
             ),
+            True,
+        )
+    # Polled every 5 s: stop after 30 polls, as the Summary by Sample link does,
+    # instead of saying "Please wait" forever for a file that is not coming.
+    if n >= 30:
+        return (
+            "Download link unavailable (the file could not be generated).",
             True,
         )
     return "Generating download link, Please wait...", False
@@ -2848,14 +2951,28 @@ def downloadLinkGuide(
     if n is None:
         raise PreventUpdate
     job_id = search.split("=")[-1]
+    job_directory = results_job_dir(job_id)  # the URL's: a job folder of Results/ only
+    if job_directory is None:
+        raise PreventUpdate
     file_to_load = ".".join([file_to_load, "zip"])
-    if os.path.exists(os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)):
+    # the page's name of the file (the link's guide and sample, or counts), which a
+    # client can set to any text: a file of the job's folder only, as the /Results/
+    # route serves one (safe_join); another is not there
+    zip_path = safe_join(job_directory, file_to_load)
+    if zip_path is not None and os.path.exists(zip_path):
         return (
             html.A(
                 "Download zip",
                 href=os.path.join(URL, RESULTS_DIR, job_id, file_to_load),
                 target="_blank",
             ),
+            True,
+        )
+    # Polled every 5 s: stop after 30 polls, as the Summary by Sample link does,
+    # instead of saying "Please wait" forever for a file that is not coming.
+    if n >= 30:
+        return (
+            "Download link unavailable (the file could not be generated).",
             True,
         )
     return "Generating download link, Please wait...", False
@@ -2880,6 +2997,12 @@ def download_file(path: str) -> flask.Response:
 
     if not isinstance(path, str):
         raise TypeError(f"Expected {str.__name__}, got {type(path).__name__}")
+    # a job's email.txt holds the address its notification goes to, which only the
+    # search reads (pages/send_mail.py): anyone with the job's link read it here. The name
+    # the path leads to, normalised as send_from_directory normalises it, in any case (a
+    # data folder on a disk that ignores case opens the file by any)
+    if os.path.basename(os.path.normpath(path)).casefold() == EMAIL_FILE:
+        flask.abort(404)
     # print(current_working_directory)
     # print('test', path)
     return flask.send_from_directory(
@@ -2940,6 +3063,8 @@ def update_iupac_decomposition_table_cluster(
     if not isinstance(hash_term, str):
         raise TypeError(f"Expected {str.__name__}, got {type(hash_term).__name__}")
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     hash_term = hash_term.split("#")[1]
     guide = hash_term[: hash_term.find("-Pos-")]
     chr_pos = hash_term[(hash_term.find("-Pos-") + 5) :]
@@ -3058,6 +3183,8 @@ def update_table_cluster(
     if not isinstance(hash_term, str):
         raise TypeError(f"Expected {str.__name__}, got {type(hash_term).__name__}")
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     hash_term = hash_term.split("#")[1]
     guide = hash_term[: hash_term.find("-Pos-")]
@@ -3185,8 +3312,27 @@ def cluster_page(job_id: str, hash_term: str) -> html.Div:
     chr_pos = hash_term[(hash_term.find("-Pos-") + 5) :]
     chromosome = chr_pos.split("-")[0]
     position = chr_pos.split("-")[1]
-    if not os.path.isdir(os.path.join(current_working_directory, RESULTS_DIR, job_id)):
-        return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
+    # no results to show (no such job, failed, refused, nothing found, unfinished)
+    not_ready = _result_not_ready(job_id)
+    if not_ready is not None:
+        return not_ready
+    # The guide, chromosome and position are the link's (its #hash), which a client can
+    # set to any text, and the commands below run them through a shell: only a guide of
+    # the job, a position of digits and a chromosome name of characters a shell takes as
+    # they are (shlex.quote leaves them unquoted) are looked up.
+    try:
+        with open(
+            os.path.join(current_working_directory, RESULTS_DIR, job_id, GUIDES_FILE)
+        ) as handle_guides:
+            job_guides = handle_guides.read().split()
+    except OSError:
+        job_guides = []
+    if (
+        guide not in job_guides
+        or not re.fullmatch(r"[0-9]+", position)
+        or not re.fullmatch(r"[A-Za-z0-9_@%+=:,.]+", chromosome)
+    ):
+        return html.Div(dbc.Alert("The selected position does not exist", color="danger"))
     try:
         with open(
             os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)
@@ -3583,17 +3729,15 @@ def global_get_sample_targets(
     c = conn.cursor()
     filter_criterion = read_json(job_id)  # recover filter criterion selected
     query_cols = get_query_column(filter_criterion)
-    # query the db
+    # query the db (the guide and sample are the link's, which a client can set to any
+    # text: they are bound to the query, not written into it)
     result = pd.read_sql_query(
-        "SELECT * FROM final_table WHERE \"{}\"='{}' AND \"{}\" LIKE '%{}%' LIMIT {} OFFSET {}".format(
+        "SELECT * FROM final_table WHERE \"{}\"=? AND \"{}\" LIKE ? LIMIT ? OFFSET ?".format(
             GUIDE_COLUMN,
-            guide,
             query_cols["samples"],
-            sample,
-            PAGE_SIZE,
-            page * PAGE_SIZE,
         ),
         conn,
+        params=[guide, f"%{sample}%", PAGE_SIZE, page * PAGE_SIZE],
     )
     return result
 
@@ -3649,6 +3793,8 @@ def update_table_sample(
     if not isinstance(hash_term, str):
         raise TypeError(f"Expected {str.__name__}, got {type(hash_term).__name__}")
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     filter_criterion = read_json(job_id)  # recover filter criterion
     assert isinstance(filter_criterion, str)
     assert filter_criterion in FILTERING_CRITERIA
@@ -3688,14 +3834,13 @@ def update_table_sample(
         integrated_sample_personal_fname, sep="\t", na_rep="NA", index=False
     )
     # personal targets report ZIP
-    integrated_sample_personal_zip_fname = integrated_sample_personal_fname.replace(
-        "tsv", "zip"
+    integrated_sample_personal_zip_fname = (  # the extension only, as for the guide's
+        os.path.splitext(integrated_sample_personal_fname)[0] + ".zip"
     )
-    # zip operation, non blocking
-    cmd = f"zip -j {integrated_sample_personal_zip_fname} {integrated_sample_personal_fname} &"
-    code = subprocess.call(cmd, shell=True)
-    if code != 0:
-        raise ValueError(f'An error occurred while running "{cmd}"')
+    # zip operation, non blocking, with no shell: the guide and sample are the link's
+    subprocess.Popen(
+        ["zip", "-j", integrated_sample_personal_zip_fname, integrated_sample_personal_fname]
+    )
     columns_df = [
         {"name": i, "id": i, "hideable": True}
         for col, i in enumerate(sample_df.columns)
@@ -3732,8 +3877,10 @@ def sample_page(job_id: str, hash_term: str) -> html.Div:
         raise TypeError(f"Expected {str.__name__}, got {type(hash_term).__name__}")
     guide = hash_term[: hash_term.find("-Sample-")]
     sample = str(hash_term[(hash_term.rfind("-") + 1) :])
-    if not os.path.isdir(os.path.join(current_working_directory, RESULTS_DIR, job_id)):
-        return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
+    # no results to show (no such job, failed, refused, nothing found, unfinished)
+    not_ready = _result_not_ready(job_id)
+    if not_ready is not None:
+        return not_ready
     try:
         with open(
             os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)
@@ -4001,6 +4148,8 @@ def update_table_subset(
         raise TypeError(f"Expected {str.__name__}, got {type(hash_guide).__name__}")
     # recover job identifier
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     # recover the filtering criterion from drop-down bar
     filter_criterion = read_json(job_id)
     try:
@@ -4031,6 +4180,8 @@ def update_table_subset(
     guide = hash_guide[1 : hash_guide.find("new")]
     mms = hash_guide[-1:]
     bulge_s = hash_guide[-2:-1]
+    if not re.fullmatch(r"[0-9]", mms) or not re.fullmatch(r"[0-9]", bulge_s):
+        raise PreventUpdate  # (the link's: a digit each, as its table writes them)
     if "DNA" in hash_guide:
         bulge_t = "DNA"
     elif "RNA" in hash_guide:
@@ -4055,13 +4206,11 @@ def update_table_subset(
     )
     # save df to tsv with filtered data
     result.to_csv(targets_with_mm_bul, sep="\t", na_rep="NA", index=False)
-    # change name to zip file
-    targets_with_mm_bul_zip = targets_with_mm_bul.replace("tsv", "zip")
-    # zip operation, non blocking
-    cmd = f"zip -j {targets_with_mm_bul_zip} {targets_with_mm_bul} &"
-    code = subprocess.call(cmd, shell=True)
-    if code != 0:
-        raise ValueError(f"An error occurred while running {cmd}")
+    # change name to zip file (the extension only: a "tsv" elsewhere in the path, in
+    # a job name say, must stay, or the zip lands in a folder that does not exist)
+    targets_with_mm_bul_zip = os.path.splitext(targets_with_mm_bul)[0] + ".zip"
+    # zip operation, non blocking, with no shell: the guide and counts are the link's
+    subprocess.Popen(["zip", "-j", targets_with_mm_bul_zip, targets_with_mm_bul])
     columns_result = [
         {"name": i, "id": i, "hideable": True}
         for col, i in enumerate(result.columns.tolist())
@@ -4086,8 +4235,10 @@ def guidePagev3(job_id, hash):
     value = job_id
     print(job_id)
     print("------")
-    if not os.path.isdir(os.path.join(current_working_directory, "Results/", job_id)):
-        return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
+    # no results to show (no such job, failed, refused, nothing found, unfinished)
+    not_ready = _result_not_ready(job_id)
+    if not_ready is not None:
+        return not_ready
     with open(os.path.join(current_working_directory, "Results/", job_id, ".Params.txt")) as p:
         all_params = p.read()
         genome_type_f = (
@@ -4171,18 +4322,11 @@ def guidePagev3(job_id, hash):
     )
     # put_header = 'head -1 ' + job_directory + job_id + file_to_grep + ' > ' + guide_grep_result + ' ; '
 
+    # the table's targets file, as update_table_subset writes and zips it:
+    # Results/<job>/<job>.<bulge type>.<mm>.<bulge size>.<guide>.targets.zip
     final_list.append(
         html.Div(
-            f"{job_id}/"
-            + "."
-            + str(bulge_t)
-            + "."
-            + str(mms)
-            + "."
-            + str(bulge_s)
-            + "."
-            + guide
-            + ".targets",
+            f"{job_id}.{bulge_t}.{mms}.{bulge_s}.{guide}.targets",
             style={"display": "none"},
             id="div-info-sumbyguide-targets",
         )
@@ -4311,22 +4455,18 @@ def global_store_subset_no_ref(
     if filter_criterion not in FILTERING_CRITERIA:
         raise ValueError(f"Forbidden filtering criterion ({filter_criterion})")
     query_cols = get_query_column(filter_criterion)
-    # perform query on db
+    # perform query on db (the guide and counts are the link's, which a client can set
+    # to any text: they are bound to the query, not written into it)
     result = pd.read_sql_query(
-        'SELECT * FROM final_table WHERE "{}"=\'{}\' AND "{}"=\'{}\' AND "{}"={} AND "{}"={} AND "{}"<>\'NA\' LIMIT {} OFFSET {}'.format(
+        'SELECT * FROM final_table WHERE "{}"=? AND "{}"=? AND "{}"=? AND "{}"=? AND "{}"<>\'NA\' LIMIT ? OFFSET ?'.format(
             GUIDE_COLUMN,
-            guide,
             query_cols["bul_type"],
-            bulge_t,
             query_cols["bul"],
-            bulge_s,
             query_cols["mm"],
-            mms,
             query_cols["samples"],
-            PAGE_SIZE,
-            page * PAGE_SIZE,
         ),
         conn,
+        params=[guide, bulge_t, int(bulge_s), int(mms), PAGE_SIZE, page * PAGE_SIZE],
     )
     return result
 
@@ -4384,21 +4524,17 @@ def global_store_subset(
     if not filter_criterion in FILTERING_CRITERIA:
         raise ValueError(f"Forbidden filtering criterion ({filter_criterion})")
     query_cols = get_query_column(filter_criterion)
-    # perform query on db
+    # perform query on db (the guide and counts are the link's, which a client can set
+    # to any text: they are bound to the query, not written into it)
     result = pd.read_sql_query(
-        'SELECT * FROM final_table WHERE "{}"=\'{}\' AND "{}"=\'{}\' AND "{}"={} AND "{}"={} LIMIT {} OFFSET {}'.format(
+        'SELECT * FROM final_table WHERE "{}"=? AND "{}"=? AND "{}"=? AND "{}"=? LIMIT ? OFFSET ?'.format(
             GUIDE_COLUMN,
-            guide,
             query_cols["bul_type"],
-            bulge_t,
             query_cols["bul"],
-            bulge_s,
             query_cols["mm"],
-            mms,
-            PAGE_SIZE,
-            page * PAGE_SIZE,
         ),
         conn,
+        params=[guide, bulge_t, int(bulge_s), int(mms), PAGE_SIZE, page * PAGE_SIZE],
     )
     # add mismatches and bulges
     targets_with_mm_bul = os.path.join(
@@ -4451,6 +4587,8 @@ def load_distribution_populations(
     # get the guide
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     job_id = job_id.split("=")[-1]  # job identifier
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     try:
         with open(
             os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)
@@ -4658,6 +4796,8 @@ def update_table_general_profile(
         raise TypeError(f"Expected {str.__name__}, got {type(search).__name__}")
     # recover job identifier
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     try:
         with open(
             os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)
@@ -4856,10 +4996,9 @@ def update_table_general_profile(
     # zip integrated file
     integrated_to_zip = integrated_fname.replace("tsv", "zip")
     if not os.path.exists(integrated_to_zip):
-        cmd = f"zip -j {integrated_to_zip} {integrated_fname} &"
-        code = subprocess.call(cmd, shell=True)
-        if code != 0:
-            raise ValueError(f"An error occurred while running {cmd}")
+        # non blocking, with no shell: the file name holds the genome's name, as Settings
+        # took it
+        subprocess.Popen(["zip", "-j", integrated_to_zip, integrated_fname])
     # zip alt_merge results
     alt_merge_fname = glob(
         os.path.join(
@@ -4871,10 +5010,7 @@ def update_table_general_profile(
     # zip integrated file
     alt_merge_to_zip = alt_merge_fname.replace("tsv", "zip")
     if not os.path.exists(alt_merge_to_zip):
-        cmd = f"zip -j {alt_merge_to_zip} {alt_merge_fname} &"
-        code = subprocess.call(cmd, shell=True)
-        if code != 0:
-            raise ValueError(f"An error occurred while running {cmd}")
+        subprocess.Popen(["zip", "-j", alt_merge_to_zip, alt_merge_fname])
     # score checking
     if "NO SCORES" not in all_scores:
         try:
@@ -5051,8 +5187,12 @@ def filter_position_table(
     end = filter_q[2]
     if end == "None":
         raise PreventUpdate  # invalid stop
+    if not re.fullmatch(r"[0-9]+", start.strip()) or not re.fullmatch(r"[0-9]+", end.strip()):
+        raise PreventUpdate  # (a position is a whole number, compared as one)
     current_page = int(current_page.split("/")[0])
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     # recover the guide
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     # recover db file
@@ -5062,23 +5202,21 @@ def filter_position_table(
     # connect db with sqlite3
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    query = 'SELECT * FROM final_table WHERE "{}"=\'{}\' AND "{}">={} AND "{}"<={} AND "{}"=\'{}\''
+    query = 'SELECT * FROM final_table WHERE "{}"=? AND "{}">=? AND "{}"<=? AND "{}"=?'
     # recover filtering criterion
     filter_criterion = read_json(job_id)
     query_cols = get_query_column(filter_criterion)  # recover query columns
-    # query the db
+    # query the db (the guide, positions and chromosome are the form's and the table's,
+    # which a client can set to any text: they are bound to the query, not written into it)
     result = pd.read_sql_query(
         query.format(
             GUIDE_COLUMN,
-            guide,
             query_cols["start"],
-            start,
             query_cols["start"],
-            end,
             CHR_COLUMN,
-            chrom,
         ),
         conn,
+        params=[guide, int(start), int(end), chrom],
     )
     conn.commit()
     conn.close()  # close db connection
@@ -5304,6 +5442,8 @@ def filter_sample_table(
     btn_sample_section = [n, n_prev, n_next]
     # get job identifier
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     population_1000gp = associateSample.loadSampleAssociation(
         os.path.join(job_directory, SAMPLES_ID_FILE)
@@ -5554,6 +5694,8 @@ def update_sample_drop(pop: str, search: str) -> Tuple[List, None]:
     if pop is None or pop == "":
         return [], None  # no update required
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     pop_dict = associateSample.loadSampleAssociation(
         os.path.join(job_directory, SAMPLES_ID_FILE)
@@ -5595,6 +5737,8 @@ def update_population_drop(superpop: str, search: str) -> Tuple[Dict, None]:
     if superpop is None or superpop == "":
         raise PreventUpdate  # no update required
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     population_1000gp = associateSample.loadSampleAssociation(
         os.path.join(job_directory, SAMPLES_ID_FILE)
@@ -5700,6 +5844,8 @@ def update_images_tabs(
         raise PreventUpdate
     bulge = 0
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     # For a non-SpCas9 nuclease, CFD/CRISPR-Bulge are not computed, so the barplot + radar
@@ -5777,10 +5923,14 @@ def update_images_tabs(
         ),
     )
     # TODO: do not call python script, rather define functions
-    cmd = f"python {app_directory}/PostProcess/generate_img_radar_chart.py {guide} {job_directory}/.guide_dict_{guide}_{filter_criterion}.json {job_directory}/.motif_dict_{guide}_{filter_criterion}.json {mm} {bulge} TOTAL_{filter_criterion} {job_directory}/imgs/"
-    code = subprocess.call(cmd, shell=True)
+    # no shell: the guide (the table's data) and mm (the dropdown's) are the request's
+    cmd = ["python", f"{app_directory}/PostProcess/generate_img_radar_chart.py", guide,
+           f"{job_directory}/.guide_dict_{guide}_{filter_criterion}.json",
+           f"{job_directory}/.motif_dict_{guide}_{filter_criterion}.json", mm, str(bulge),
+           f"TOTAL_{filter_criterion}", f"{job_directory}/imgs/"]
+    code = subprocess.call(cmd)
     if code != 0:
-        raise ValueError(f'An error occurred while running "{cmd}"')
+        raise ValueError(f'An error occurred while running "{" ".join(cmd)}"')
     img_found = False  # look for radar chart image
     try:
         radar_src_encode_gencode = "data:image/png;base64,{}".format(
@@ -5910,6 +6060,8 @@ def generate_sample_card(
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     # recover job id
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     # directory holding the personal/private target plots for this job
     imgsdir = os.path.join(job_directory, "imgs")
@@ -5978,12 +6130,15 @@ def generate_sample_card(
             query_cols = get_query_column(filter_criterion)  # get query columns
             # recover colname for sample column and filtering/sorting criterion
             samples_cname, criterion_cname = query_cols["samples"], query_cols["sort"]
-            # define and perform sql database to retrieve sample targets
+            # define and perform sql database to retrieve sample targets (the guide is the
+            # table's and the sample's name a VCF's: bound to the query, not written into it)
             sqlquery = (
-                f"SELECT * FROM final_table WHERE \"{GUIDE_COLUMN}\"='{guide}' "
-                f"AND \"{samples_cname}\" LIKE '%{sample}%'"
+                f"SELECT * FROM final_table WHERE \"{GUIDE_COLUMN}\"=? "
+                f"AND \"{samples_cname}\" LIKE ?"
             )
-            targets_personal = pd.read_sql_query(sqlquery, conn)  # perform query
+            targets_personal = pd.read_sql_query(  # perform query
+                sqlquery, conn, params=[guide, f"%{sample}%"]
+            )
         except sqlite3.Error as e:
             raise sqlite3.Error(f"Database error ({db_path})") from e
         except KeyError as e:
@@ -6029,22 +6184,24 @@ def generate_sample_card(
             raise Exception(
                 "An unexpected error occurred while saving personal and integrated targets"
             ) from e
-        # compute sample's personal and private targets with lolliplots
-        crisprme_plots_personal = (
-            f"python {app_directory}/PostProcess/CRISPRme_plots_personal.py"
-        )
-        crisprme_plots_personal_cmd = (
-            f"{crisprme_plots_personal} {targets_personal_fname} {imgsdir}/"
-        )
+        # compute sample's personal and private targets with lolliplots (no shell: the
+        # guide is the table's data, and the sample's name is a VCF's, as uploaded)
+        crisprme_plots_personal = [
+            "python", f"{app_directory}/PostProcess/CRISPRme_plots_personal.py"
+        ]
         code = subprocess.call(
-            f"{crisprme_plots_personal_cmd} {guide}.{sample}.personal", shell=True
+            crisprme_plots_personal
+            + [targets_personal_fname, f"{imgsdir}/", f"{guide}.{sample}.personal"]
         )
         if code != 0:
             raise subprocess.SubprocessError(
                 f"Failed personal targets plot generation on sample {sample}"
             )
+        # the private plot is drawn from the private targets: it was drawn from the
+        # personal ones, so "Top 100 Private Targets" showed the personal plot again
         code = subprocess.call(
-            f"{crisprme_plots_personal_cmd} {guide}.{sample}.private", shell=True
+            crisprme_plots_personal
+            + [targets_private_fname, f"{imgsdir}/", f"{guide}.{sample}.private"]
         )
         if code != 0:
             raise subprocess.SubprocessError(
@@ -6056,9 +6213,7 @@ def generate_sample_card(
         os.path.basename(f"{os.path.splitext(targets_private_fname)[0]}.zip"),
     )
     if not os.path.isfile(targets_private_zip):
-        code = subprocess.call(
-            f"zip -j {targets_private_zip} {targets_private_fname}", shell=True
-        )
+        code = subprocess.call(["zip", "-j", targets_private_zip, targets_private_fname])
         if code != 0:
             raise subprocess.SubprocessError(
                 f"Failed to compress {targets_private_fname}"
@@ -6370,6 +6525,8 @@ def update_content_tab(
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     # recover job ID
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     # read parameters file
     try:
@@ -6521,9 +6678,12 @@ def update_content_tab(
         fl.append(
             html.Div(
                 [
+                    # the file the table above is read from: one per criterion
+                    # (<job>.summary_by_samples.<guide>_<criterion>.txt)
                     html.Div(
                         os.path.join(
-                            job_directory, f"{job_id}.summary_by_samples.{guide}"
+                            job_directory,
+                            f"{job_id}.summary_by_samples.{guide}_{filter_criterion}",
                         ),
                         style={"display": "none"},
                         id="div-info-summary_by_sample",
@@ -7178,8 +7338,19 @@ def update_content_tab(
         )
         _t1000_parts = []
         if _score_img is not None:
+            # The plot is the image the search drew when it ran: one drawn by an older
+            # CRISPRme (its jobs stay in Results/) left these sites out, unstarred.
             _t1000_parts += [
                 html.H5("Top 1000 candidate off-targets (ranked by score)"),
+                html.P(
+                    "Every site found is ranked, the perfect matches (0 mismatches and "
+                    "bulges) included: they are drawn as black stars. The on-target is "
+                    "one of them; any other one, in the reference or created by a "
+                    "variant, is an off-target as strong as the on-target. A plot drawn "
+                    "before CRISPRme 2.8.1 leaves out every site with 0 or 1 mismatches "
+                    "and bulges: run the search again to draw them.",
+                    style={"font-size": "1.05rem", "color": "#555"},
+                ),
                 _score_img,
             ]
         if _delta_img is not None:
@@ -7454,6 +7625,8 @@ def update_table(
         raise PreventUpdate  # do not do anything
     # recover job ID
     job_id = search.split("=")[-1]
+    if results_job_dir(job_id) is None:  # the URL's: a job folder of Results/ only
+        raise PreventUpdate
     # recover job directory
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     # recover guide
@@ -7520,6 +7693,11 @@ def update_table(
 
 # ------------------------------------------------------------------------------
 # Callbacks for querying part
+
+# The columns Custom Ranking groups by, first and second, as set_columns_options and
+# set_display_children offer them
+RANKING_ORDERS = ("Mismatches", "Bulges", "Mismatches+bulges", "CFD_score", "CFD_risk_score")
+RANKING_SECOND_ORDERS = ("Mismatches", "Bulges", "Mismatches+bulges", "CFD", "CFD_score")
 
 
 # Return the table with the query's result
@@ -7621,6 +7799,23 @@ def update_output(
         order_drop is None and thresh_drop is None and asc1 is None
     ):
         raise PreventUpdate  # do not do anything
+    # query_manager reads the job of the URL's search after "?job=": a job folder of
+    # Results/ only
+    if results_job_dir(url[5:]) is None:
+        raise PreventUpdate
+    # query_manager writes the columns and the order into its query (it binds the
+    # thresholds and the guide), and a client can send any: only what the form offers
+    if (
+        filter_target_value not in FILTERING_CRITERIA
+        or radio_order not in RANKING_ORDERS
+        or order_drop not in RANKING_SECOND_ORDERS + (None,)
+        or asc1 not in ("ASC", "DESC", None)
+        or any(
+            value is not None and not re.fullmatch(r"[0-9]+(\.[0-9]+)?", str(value))
+            for value in (thresh_drop, maxdrop)
+        )
+    ):
+        raise PreventUpdate
     # recover guide
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
     # target is the filter value to query on the db

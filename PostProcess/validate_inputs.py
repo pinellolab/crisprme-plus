@@ -25,12 +25,16 @@ import sys
 
 try:  # PostProcess/ on sys.path (crisprme.py, the pipeline) ...
     from genome_layout import (
+        describe_header_problems,
+        describe_index_problems,
         describe_problem,
         find_multi_record_fastas,
         find_name_mismatched_fastas,
     )
 except ImportError:  # ... or imported as PostProcess.validate_inputs (tests)
     from PostProcess.genome_layout import (
+        describe_header_problems,
+        describe_index_problems,
         describe_problem,
         find_multi_record_fastas,
         find_name_mismatched_fastas,
@@ -288,12 +292,12 @@ def check_genome_fasta(genomedir: str) -> Tuple[List[Issue], List[str]]:
         chrom_names.append(fname.rsplit(".", 1)[0])
         fpath = os.path.join(genomedir, fname)
         try:
-            with open(fpath, "r") as fin:
+            with open(fpath, "rb") as fin:  # (a description can be in any encoding)
                 first_char = fin.read(1)
         except OSError as e:
             issues.append(Issue(ERROR, f"{fname}: could not read file ({e})"))
             continue
-        if first_char != ">":
+        if first_char != b">":
             issues.append(
                 Issue(
                     ERROR,
@@ -304,12 +308,16 @@ def check_genome_fasta(genomedir: str) -> Tuple[List[Issue], List[str]]:
     # post-analysis) by file name, so a multi-sequence file makes the search run
     # and then silently drop every result. Fast check (first header vs file name;
     # see genome_layout.find_multi_record_fastas) so it is cheap on every search.
+    # And a header must be >id alone, on lines that end in LF: CRISPRitz names the
+    # chromosome after the whole line, and the search then loses results, often all
+    # of them with no error (genome_layout.describe_header_problems, two lines a file).
     try:
         multi = find_multi_record_fastas(genomedir)
         mismatched = find_name_mismatched_fastas(genomedir)
+        header_problems = describe_header_problems(genomedir, reported=multi)
     except OSError as e:
         issues.append(Issue(WARN, f"could not check the genome file layout ({e})"))
-        multi, mismatched = {}, {}
+        multi, mismatched, header_problems = {}, {}, []
     for fname, ids in multi.items():
         issues.append(Issue(ERROR, describe_problem(genomedir, fname, ids)))
     for fname, rid in mismatched.items():
@@ -323,6 +331,8 @@ def check_genome_fasta(genomedir: str) -> Tuple[List[Issue], List[str]]:
                 f"file after its sequence (e.g. {rid}.fa) or results may be dropped.",
             )
         )
+    for problem in header_problems:
+        issues.append(Issue(ERROR, problem))
     return issues, chrom_names
 
 
@@ -745,17 +755,22 @@ def check_guide_pam_consistency(guidefile: str, pamfile: str) -> List[Issue]:
     caught here, up front, with an exact fix, instead of crashing deep in the
     run.
 
-    Severity rationale: an ERROR is raised ONLY for guides strictly SHORTER
-    than the PAM motif's total length. That is precisely (and only) the case
-    that triggers the `IndexError` above -- a guide of the correct length (with
-    or without literal-PAM bases in the PAM positions) does not, and a guide
-    LONGER than the motif is left to `check_guide_file`'s length-consistency
-    check. This keeps the check from false-positiving on: correctly-padded 3'
-    guides (`...NNN`), correctly-padded 5' guides (`NNNN...`), the `--sequence`
-    extracted+padded guides, guides with a lowercase `n` or a literal PAM in
-    the PAM positions, short-form PAM files (motif == bare PAM, e.g. `NGG 3`)
-    whose guides are legitimately longer than the motif, and empty/malformed
-    PAM files (skipped entirely).
+    Severity rationale: an ERROR is raised for guides strictly SHORTER than
+    the PAM motif's total length, which triggers the `IndexError` above, and
+    for guides LONGER than it whose spacer does not fit the PAM file's: the
+    search keeps `spacer_len` bases of a guide and silently drops the rest
+    (searchTST: `line.substr(0, pamlen - pamlimit)`), and reports off-targets
+    of the shortened guide under the guide's name. Only a non-N base in that
+    window counts, as padding with extra N's drops nothing. A guide of the
+    correct length (with or without literal-PAM bases in the PAM positions)
+    is accepted: a bare longer spacer of exactly the motif's length cannot be
+    told from a spacer + literal PAM. This keeps the check from
+    false-positiving on: correctly-padded 3' guides (`...NNN`),
+    correctly-padded 5' guides (`NNNN...`), the `--sequence` extracted+padded
+    guides, guides with a lowercase `n` or a literal PAM in the PAM positions,
+    short-form PAM files (motif == bare PAM, e.g. `NGG 3`, no spacer to fit)
+    whose guides are longer than the motif, and empty/malformed PAM files
+    (skipped entirely).
 
     Args:
         guidefile: Path to the guide RNA file (the copied-verbatim
@@ -779,8 +794,27 @@ def check_guide_pam_consistency(guidefile: str, pamfile: str) -> List[Issue]:
         return []  # already reported by check_guide_file
     where = "prepend" if pam_begin else "append"
     fixed_hint = (("N" * pam_len) + "...") if pam_begin else ("..." + ("N" * pam_len))
+    spacer_len = total_len - pam_len
     issues: List[Issue] = []
     for guide in guides:
+        if len(guide) > total_len and spacer_len > 0:
+            # what the search does not keep of the guide: past the spacer, up to its PAM
+            # padding for a 3' PAM, and to its end for a 5' PAM
+            dropped = (guide[pam_len + spacer_len:] if pam_begin
+                       else guide[spacer_len:len(guide) - pam_len])
+            if dropped.strip("Nn"):
+                issues.append(
+                    Issue(
+                        ERROR,
+                        f"{fname}: guide '{guide}' is {len(guide)} nt but the PAM "
+                        f"'{os.path.basename(pamfile)}' expects a padded length of "
+                        f"{total_len} nt ({spacer_len} nt spacer + {pam_len} nt PAM). The "
+                        f"search would silently drop '{dropped}' from it and report "
+                        f"off-targets of the shortened guide. Fix: use a PAM file whose "
+                        f"spacer is {len(guide) - pam_len} nt, or shorten the guide.",
+                    )
+                )
+                continue
         if len(guide) < total_len:
             issues.append(
                 Issue(
@@ -884,7 +918,19 @@ def _read_samples_file(
         The union of column-0 sample IDs across all resolvable referenced
         association files. Empty if none could be resolved.
     """
-    sample_ids: List[str] = []
+    return [
+        sample
+        for samples in _read_samples_lists(samplesfile, current_working_directory)
+        for sample in samples
+    ]
+
+
+def _read_samples_lists(
+    samplesfile: str, current_working_directory: Optional[str] = None
+) -> List[List[str]]:
+    """The column-0 sample IDs of each association file that a `--samplesID`
+    config lists, one list per resolvable file (see `_read_samples_file`)."""
+    sample_lists: List[List[str]] = []
     config_dir = os.path.dirname(os.path.abspath(samplesfile))
     with open(samplesfile, "r") as fin:
         for line in fin:
@@ -903,8 +949,8 @@ def _read_samples_file(
                 # than treat the filename itself as a sample ID (that was the
                 # #112 false-positive). The pipeline reports a missing file.
                 continue
-            sample_ids.extend(_read_sample_ids_from_association_file(assoc_path))
-    return sample_ids
+            sample_lists.append(_read_sample_ids_from_association_file(assoc_path))
+    return sample_lists
 
 
 def check_samplesid_columns(
@@ -1023,8 +1069,24 @@ def check_samples_in_vcf_header(vcf_path: str, sample_ids: List[str]) -> List[Is
     ]
 
 
+def _vcf_header_samples(vcf_path: str) -> List[str]:
+    """The sample names on a VCF's #CHROM line: none for a sites-only VCF, or for
+    one that cannot be read (which check_vcf_content reports)."""
+    try:
+        with gzip.open(vcf_path, "rt") as fin:
+            for line in fin:
+                if "#CHROM" in line:
+                    return line.strip().split("\t")[9:]
+    except (OSError, EOFError, ValueError):
+        pass
+    return []
+
+
 def check_samplesid_overlisting(
-    vcf_files: List[str], sample_ids: List[str]
+    vcf_files: List[str],
+    sample_ids: List[str],
+    sample_lists: Optional[List[List[str]]] = None,
+    unseen_datasets: int = 0,
 ) -> List[Issue]:
     """Reject (ERROR) when --samplesID lists samples genotyped in NONE of the VCFs (#46).
 
@@ -1038,22 +1100,29 @@ def check_samplesid_overlisting(
     every VCF's #CHROM header keeps this correct for multi-dataset runs: a
     legitimately genotyped sample appears in some dataset's VCF, so only
     truly-absent samples are flagged.
+
+    A search can name datasets whose VCFs say nothing here: one downloaded as an
+    index, with no VCF folder, or a sites-only one, with no sample columns
+    (``unseen_datasets``, how many). The list of such a dataset names none of the
+    samples of the VCFs that are here, and was refused as all phantoms, though the
+    index it goes with is fine. So the lists are compared one by one
+    (``sample_lists``, the samples of each list file): up to that many lists none of
+    whose samples any VCF here genotypes are taken for those datasets' and left out.
+    A list that partly overlaps the VCFs still fails, on the samples they lack.
     """
     if not sample_ids or not vcf_files:
         return []
     genotyped = set()
     for vf in vcf_files:
-        try:
-            with gzip.open(vf, "rt") as fin:
-                for line in fin:
-                    if "#CHROM" in line:
-                        genotyped.update(line.strip().split("\t")[9:])
-                        break
-        except OSError:
-            continue  # header-read failures are reported by check_vcf_content
+        genotyped.update(_vcf_header_samples(vf))
     if not genotyped:
         return []
-    panel = set(sample_ids)
+    panel = set()
+    for samples in sample_lists if sample_lists is not None else [sample_ids]:
+        if unseen_datasets > 0 and samples and genotyped.isdisjoint(samples):
+            unseen_datasets -= 1
+            continue
+        panel.update(samples)
     phantom = sorted(panel - genotyped)
     if not phantom:
         return []
@@ -1125,13 +1194,24 @@ def run_lightweight(
         genome_issues,
         ok_message=f"Genome directory: {len(genome_chroms)} FASTA file(s), all start with '>'",
     )
+    if current_working_directory:
+        report.add(
+            [
+                Issue(ERROR, problem)
+                for problem in describe_index_problems(
+                    os.path.join(current_working_directory, "genome_library"),
+                    os.path.basename(os.path.normpath(genomedir)),
+                )
+            ]
+        )
 
     has_samplesfile = bool(samplesfile) and os.path.basename(samplesfile) != MOCK_FILENAME
-    sample_ids = (
-        _read_samples_file(samplesfile, current_working_directory)
+    sample_lists = (
+        _read_samples_lists(samplesfile, current_working_directory)
         if has_samplesfile
         else []
     )
+    sample_ids = [sample for samples in sample_lists for sample in samples]
 
     if has_samplesfile:
         report.add(
@@ -1140,6 +1220,7 @@ def run_lightweight(
         )
 
     all_vcf_files: List[str] = []
+    unseen_datasets = 0  # no VCF folder, or VCFs with no sample columns
     for vcf_dir in vcf_dataset_dirs:
         if not os.path.isdir(vcf_dir):
             # Batteries-included install: `download --what index` fetches a
@@ -1162,6 +1243,7 @@ def run_lightweight(
                     f"{dataset}: precomputed variant index + {kind} present; "
                     "source VCFs not required (batteries-included install)"
                 )
+                unseen_datasets += 1
                 continue
             report.add([Issue(ERROR, f"VCF dataset directory does not exist: {vcf_dir}")])
             continue
@@ -1176,6 +1258,8 @@ def run_lightweight(
                 [Issue(ERROR, f"No .vcf.gz files found in VCF dataset directory: {vcf_dir}")]
             )
             continue
+        if not any(_vcf_header_samples(vf) for vf in vcf_files):
+            unseen_datasets += 1
 
         chrom_issues, chrom_by_file = check_vcf_filename_chrom(vcf_files)
         report.add(
@@ -1201,7 +1285,9 @@ def run_lightweight(
 
     if has_samplesfile and sample_ids:
         report.add(
-            check_samplesid_overlisting(all_vcf_files, sample_ids),
+            check_samplesid_overlisting(
+                all_vcf_files, sample_ids, sample_lists, unseen_datasets
+            ),
             ok_message="--samplesID: no phantom samples (all genotyped in a VCF)",
         )
 

@@ -4,8 +4,10 @@
  * memory). This slices the chosen file into fixed-size chunks and POSTs them to
  * the Flask endpoint /settings/upload-chunk one at a time, so browser memory use
  * stays flat regardless of file size. Widgets are plain <div> elements with
- * class "crisprme-chunk-upload" and data-target (+ optional data-dataset-input);
- * a MutationObserver wires them up as Dash renders them into the SPA.
+ * class "crisprme-chunk-upload" and data-target (+ optional data-dataset-input,
+ * and data-genome-value: an element a Dash clientside callback keeps equal to the
+ * reference-genome dropdown's value, which a dcc.Dropdown holds in React state, not
+ * in the page); a MutationObserver wires them up as Dash renders them into the SPA.
  */
 (function () {
   var CHUNK = 8 * 1024 * 1024; // 8 MB per chunk
@@ -66,6 +68,7 @@
     var target = widget.dataset.target || "";
     var datasetInputId = widget.dataset.datasetInput || "";
     var genomeInputId = widget.dataset.genomeInput || "";
+    var genomeValueId = widget.dataset.genomeValue || "";
 
     var input = document.createElement("input");
     input.type = "file";
@@ -93,15 +96,15 @@
         if (di) dataset = di.value || "";
       }
       var genome = "";
-      if (genomeInputId) {
-        // dcc.Dropdown renders its value in a hidden input inside the container
+      var gv = genomeValueId ? document.getElementById(genomeValueId) : null;
+      if (gv) {
+        genome = (gv.textContent || "").trim();
+      } else if (genomeInputId) {
+        // no mirror element: the label Dash 2's dcc.Dropdown shows for its value
+        // (a genome's label is its name)
         var gc = document.getElementById(genomeInputId);
-        if (gc) {
-          var gi = gc.querySelector("input");
-          if (gi && gi.value) genome = gi.value;
-          var sv = gc.querySelector("[class*=singleValue]");
-          if (!genome && sv) genome = sv.textContent || "";
-        }
+        var sv = gc ? gc.querySelector(".Select-value-label") : null;
+        if (sv) genome = (sv.textContent || "").trim();
       }
       uploadFile(file, target, dataset, genome, prog, btn);
     });

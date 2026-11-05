@@ -79,7 +79,7 @@ def _serve_snapshot(sink_dir, samples_dir=None, fetch_log=None):
     assert exactly which patterns were requested (and that NONE were on the no-op
     path).
     """
-    def fake_snapshot(repo, allow_patterns, local_dir, token=None):
+    def fake_snapshot(repo, allow_patterns, local_dir, token=None, reporter=None, **_kw):
         if fetch_log is not None:
             fetch_log.extend(allow_patterns)
         for pat in allow_patterns:

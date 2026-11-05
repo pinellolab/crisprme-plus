@@ -16,16 +16,19 @@ import sys
 import os
 import json
 import gzip
+import re
 
-# personal_assembly lives in PostProcess/ (like assembly_reconcile), which
-# crisprme.py puts on sys.path at web-app boot. Insert it explicitly too so this
-# module-top import is robust regardless of import order.
+# personal_assembly lives in PostProcess/ (like assembly_reconcile). crisprme.py's
+# sys.path inserts never reach the web app (`crisprme.py web-interface` runs
+# index.py as a fresh subprocess), so app.py and this module each put PostProcess/
+# on sys.path from their own location, whatever the import order.
 _POSTPROCESS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "PostProcess"
 )
 if _POSTPROCESS_PATH not in sys.path:
     sys.path.insert(0, _POSTPROCESS_PATH)
 import personal_assembly  # noqa: E402
+import index_fit  # noqa: E402
 
 
 # Define DNA alphabet
@@ -402,6 +405,30 @@ def drop_columns(table: pd.DataFrame, filter_criterion: str) -> List[str]:
     return drops
 
 
+# The ids the search form gives its jobs (change_url: a random id after the sanitized job
+# name; an assembly search adds _paternal, _maternal and _combined). The pages of a job
+# take its id from the URL (/load?job=, /result?job=), which a client can set to anything,
+# so one that builds a path or a command from it checks it with results_job_dir first.
+# History lists a job named otherwise (a command-line search's --output may name it so)
+# and says why it does not open (history_page._job_link).
+_JOB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def results_job_dir(job_id) -> Optional[str]:
+    """``<cwd>/Results/<job_id>`` when that is a job folder and ``job_id`` has the form of
+    the search form's ids, else None: refuses a traversal (``../x``), an absolute path, a
+    name with any other character (a shell reads some), a non-string, and a folder whose
+    real path leaves Results/ (a link)."""
+    if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
+        return None
+    root = os.path.realpath(os.path.join(current_working_directory, RESULTS_DIR))
+    jobdir = os.path.join(current_working_directory, RESULTS_DIR, job_id)
+    real = os.path.realpath(jobdir)
+    if not os.path.isdir(jobdir) or real == root or os.path.commonpath([root, real]) != root:
+        return None
+    return jobdir
+
+
 def write_json(dropdown_value: str, job_id: str) -> None:
     """Write auxiliary file to keep track of filetring criterion
     when displaying tables in Summary by Mismatches and Bulges and
@@ -422,7 +449,10 @@ def write_json(dropdown_value: str, job_id: str) -> None:
     """
     if not isinstance(dropdown_value, str):
         raise TypeError(f"Expected {str.__name__}, got {type(dropdown_value).__name__}")
-    dropdown_json_file = os.path.join(current_working_directory, RESULTS_DIR, job_id, ".dropdown.json")
+    job_directory = results_job_dir(job_id)  # the URL's: a job folder of Results/ only
+    if job_directory is None:
+        raise FileNotFoundError(f"No job folder Results/{job_id}")
+    dropdown_json_file = os.path.join(job_directory, ".dropdown.json")
     try:
         handle = open(dropdown_json_file, mode="w")
         handle.write(f"{dropdown_value}")
@@ -448,7 +478,10 @@ def read_json(job_id: str) -> str:
     str
         Table filtering criterion
     """
-    dropdown_json_file = os.path.join(current_working_directory, RESULTS_DIR, job_id, ".dropdown.json")
+    job_directory = results_job_dir(job_id)  # the URL's: a job folder of Results/ only
+    if job_directory is None:
+        raise FileNotFoundError(f"No job folder Results/{job_id}")
+    dropdown_json_file = os.path.join(job_directory, ".dropdown.json")
     if not os.path.isfile(dropdown_json_file):
         raise FileNotFoundError(f"Unable to locate {dropdown_json_file}")
     try:
@@ -1098,6 +1131,15 @@ def get_available_PAM() -> List:
         for pam in pams_files
         if "tempPAM" not in pam
     ]
+    # PAM files of one motif and nuclease that differ in guide length (20bp- and
+    # 23bp-TTTV-Cas12a) would read the same: say the length, which picks another guide.
+    labels = [p["label"] for p in pams]
+    for p in pams:
+        if labels.count(p["label"]) > 1:
+            guide = index_fit.pam_file_spacer(
+                os.path.join(current_working_directory, PAMS_DIR, p["value"] + ".txt"))
+            if guide:
+                p["label"] = f"{p['label']} ({guide} nt)"
     return pams
 
 
@@ -1595,28 +1637,46 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     ``+<ref>_<vcf>`` folder submit_job resolves — so the combined value ``1000G_HGDP``
     matches its combined index while a single ``1000G`` query does not (the search would
     not either). Pamless (all-N) indexes of the same length also match (they serve any
-    PAM). Returns 0 if no matching index exists (only a 0-bulge, index-free search is
-    possible). A variant search also needs the variant index, so callers should take the
-    min with the reference result.
+    PAM). An index built for a guide shorter than this PAM file's serves fewer bulges, or
+    none (index_fit, as the search script takes it). Returns 0 if no matching index exists
+    (only a 0-bulge, index-free search is possible). A variant search also needs the
+    variant index, so callers should take the min with the reference result.
     """
     motif = pam_motif(pam_value)
     if not motif or not genome:
         return 0
+    guide = index_fit.pam_file_spacer(
+        os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt"))
     genome = genome.replace(" ", "_")
     lib = os.path.join(current_working_directory, "genome_library")
     if not os.path.isdir(lib):
         return 0
-    # Accept the exact PAM motif OR an all-N "pamless" index of the same length: a
-    # pamless index serves any same-length PAM (the requested PAM is enforced by the
-    # post-search PAM filter), exactly mirroring submit_job's "<pam>_* + NNN_*" scan.
-    pamless = "N" * len(motif)
-    prefixes = (f"{motif}_", f"{pamless}_")
+    # Accept the exact PAM motif OR an all-N "pamless" index of the SAME width. The
+    # search shell takes a wider all-N index only under --prune-pam, which the web
+    # never passes, so counting one here would offer bulges for an index the search
+    # will not use. Mirrors _resolve_index_dir in
+    # PostProcess/submit_job_automated_new_multiple_vcfs.sh -- the shell and this must
+    # not disagree about the same directory. The all-N test, rather than a fixed
+    # "N" * len(motif) prefix, keeps out a dedicated PAM that merely starts with N's
+    # (the shipped NNNRRT, SaCas9-KKH).
     base_suffix = f"_{genome}"  # base = "<motif>_<N>_<genome>"
+
+    def _pam_serves(pam: str) -> bool:
+        if pam == motif:
+            return True
+        return bool(pam) and set(pam) == {"N"} and len(pam) == len(motif)
     # A variant search needs an index whose enriched-genome name is EXACTLY
     # "<genome>_<dataset>" -- the same "+<ref>_<vcf>" folder submit_job resolves. So the
     # combined dropdown value "1000G_HGDP" matches "..._hg38_1000G_HGDP", and a single
     # "1000G" query does NOT resolve a combined-only index (the search wouldn't either).
     want_enriched = f"{genome}_{vcf}" if vcf else ""  # "" => reference-only (no "+")
+    # A dataset whose VCFs/ folder does not repeat the genome's name (one added in
+    # Settings, named like its card's example) is searched as that folder
+    # (main_page._resolve_vcf_folder), so its index is "...+<dataset>".
+    _vdir = os.path.join(current_working_directory, VCFS_DIR)
+    if vcf and not os.path.isdir(os.path.join(_vdir, want_enriched)) and os.path.isdir(
+            os.path.join(_vdir, vcf)):
+        want_enriched = vcf
     best = 0
     for d in os.listdir(lib):
         if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
@@ -1624,14 +1684,15 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
         base, _, enriched = d.partition("+")  # enriched="" for a reference index
         if enriched != want_enriched:
             continue
-        pfx = next((p for p in prefixes if base.startswith(p)), None)
-        if pfx is None or not base.endswith(base_suffix):
+        if not base.endswith(base_suffix):
             continue
-        n_str = base[len(pfx) : -len(base_suffix)]  # the "<N>"
-        if not n_str.isdigit():
+        stem = base[: -len(base_suffix)]
+        pam, sep, n_str = stem.partition("_")  # "<motif>" , "<N>"
+        if not sep or not n_str.isdigit() or not _pam_serves(pam):
             continue
-        best = max(best, int(n_str))
-    return max(0, best - 1)
+        best = max(best, index_fit.bulge_cap(
+            index_fit.built_guide_len(os.path.join(lib, d)), int(n_str), guide))
+    return best
 
 
 def reference_bulge_capacity(genome: str, pam_value: str) -> int:
@@ -1780,12 +1841,20 @@ def get_variant_dataset_options(genome: str) -> List:
         if variant_dataset_present(genome_norm, ds):
             options.append({"label": labels.get(ds, ds) + _pam_note(ds), "value": ds})
     # any additional installed dataset folder for this genome (e.g. a merged panel or
-    # a custom VCF registered via Settings), matched by the genome token in its name
+    # a custom VCF added in Settings): one whose reference-genome marker (written when
+    # it is added in Settings) names this genome; and one with no marker whose name
+    # holds the genome token, or that vcf_reference_genome otherwise finds this genome
+    # for (an enriched genome built from it)
     seen = {o["value"] for o in options}
     for ds in get_all_vcf_datasets():
         val = ds["value"] if isinstance(ds, dict) else ds
         core = val[len(genome_norm) + 1:] if val.startswith(genome_norm + "_") else val
-        if genome_norm and genome_norm in val and core not in seen:
+        ref = vcf_reference_genome(val)
+        if os.path.isfile(os.path.join(current_working_directory, VCFS_DIR, f".{val}.refgenome")):
+            ours = ref == genome_norm
+        else:
+            ours = genome_norm in val or ref == genome_norm
+        if genome_norm and ours and core not in seen:
             options.append({"label": core + _pam_note(core), "value": core})
             seen.add(core)
     # BATTERIES-INCLUDED: a prebuilt variant INDEX ships WITHOUT the raw VCFs folder
@@ -1854,7 +1923,46 @@ _DATA_TYPE_LABEL = {
     "genotyped-phased": "genotyped, phased",
     "hybrid": "genotyped, mixed phasing",
     "genotyped": "genotyped",  # inference fallback (phasing unknown)
+    # no tiers, but its VCFs genotype samples: not built yet, or built without its
+    # sample list, so per-sample analysis has nothing to read
+    "genotyped-unindexed": "genotyped, samples not indexed",
 }
+
+
+def _vcf_folder_has_samples(vdir: str) -> Optional[bool]:
+    """Whether the .vcf.gz files of the VCF folder ``vdir`` genotype samples: True when
+    the #CHROM header of one of them has sample columns, False when each one read has
+    none (a sites-only dataset), None when the folder holds no readable one."""
+    try:
+        files = sorted(f for f in os.listdir(vdir) if f.endswith(".vcf.gz"))
+    except OSError:
+        return None
+    found = None
+    for fname in files:
+        try:
+            with gzip.open(os.path.join(vdir, fname), "rt", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("#CHROM"):
+                        if len(line.rstrip("\r\n").split("\t")) > 9:
+                            return True
+                        found = False
+                        break
+                    if not line.startswith("##"):
+                        break
+        except Exception:  # noqa: BLE001 - unreadable: no claim
+            pass
+    return found
+
+
+def _vcf_dataset_has_samples(genome_norm: str, dnorm: str) -> bool:
+    """True when the VCF folder of a dataset (VCFs/<genome>_<dataset> or
+    VCFs/<dataset>) is there and the #CHROM header of one of its .vcf.gz has sample
+    columns."""
+    for folder in (f"{genome_norm}_{dnorm}", dnorm):
+        vdir = os.path.join(current_working_directory, VCFS_DIR, folder)
+        if os.path.isdir(vdir):
+            return bool(_vcf_folder_has_samples(vdir))
+    return False
 
 
 def variant_dataset_data_type(genome: str, dataset_value: str) -> Optional[str]:
@@ -1863,8 +1971,10 @@ def variant_dataset_data_type(genome: str, dataset_value: str) -> Optional[str]:
     one of ``sites-only`` / ``genotyped-unphased`` / ``genotyped-phased`` / ``hybrid``.
 
     Falls back to genotype-store presence when the manifest predates the flag (older
-    shipped indices, pre-backfill): ``genotyped`` when a store exists, else
-    ``sites-only``. Returns None for reference-only / unknown selections."""
+    shipped indices, pre-backfill): ``genotyped`` when a store exists; with neither,
+    ``genotyped-unindexed`` when the dataset's VCFs have sample columns (a dataset not
+    built yet, or built without its sample list), else ``sites-only``. Returns None
+    for reference-only / unknown selections."""
     if not dataset_value or dataset_value in ("ref", "reference", "none"):
         return None
     genome_norm = (genome or "").replace(" ", "_")
@@ -1883,7 +1993,53 @@ def variant_dataset_data_type(genome: str, dataset_value: str) -> Optional[str]:
         except (OSError, ValueError):
             pass
     # manifest flag absent (pre-Phase-2.1 / pre-backfill index): infer coarsely.
-    return "genotyped" if variant_dataset_has_genotypes(genome, dataset_value) else "sites-only"
+    if variant_dataset_has_genotypes(genome, dataset_value):
+        return "genotyped"
+    if _vcf_dataset_has_samples(genome_norm, dnorm):
+        return "genotyped-unindexed"
+    return "sites-only"
+
+
+def samplesid_problem(vcf_folder: str, dataset: str) -> Optional[str]:
+    """Why the search form refuses a variant search of VCF folder ``vcf_folder``
+    (the dropdown's ``dataset``): its sample list samplesIDs/<vcf_folder>.samplesID.txt
+    is missing. The search reads it only once the search and post-analysis are done,
+    and then fails. None when the list is there."""
+    if os.path.isfile(
+        os.path.join(current_working_directory, "samplesIDs", f"{vcf_folder}.samplesID.txt")
+    ):
+        return None
+    vdir = os.path.join(current_working_directory, VCFS_DIR, vcf_folder)
+    if _vcf_folder_has_samples(vdir) is False:
+        # no list comes from a VCF that names no sample, and no build makes the
+        # registry its variants need (docs/DESIGN_mega_index.md)
+        return (
+            f"The variant dataset '{dataset}' is sites-only: its VCFs have no sample "
+            f"columns, so it has no sample list (samplesIDs/{vcf_folder}.samplesID.txt), "
+            "and a search with it fails at its end without one. A search reports the "
+            "variants of a sites-only VCF only through a per-dataset allele-frequency "
+            "registry, as the shipped hg38_mega index has (docs/DESIGN_mega_index.md); "
+            "building its index does not make one. Search the reference genome, or a "
+            "VCF dataset with samples."
+        )
+    if os.path.isdir(vdir):
+        how = ("Build its variant index in Settings, which writes the list from the VCF "
+               "header, or add the file yourself")
+    else:
+        # an index with no VCF folder: one downloaded, or one built here from a VCF
+        # dataset since removed in Settings, which takes the list with it and leaves
+        # the index. Settings downloads no index that is installed, and `download --what
+        # index` skips a complete install (crisprme_hf.download_component looks for its
+        # folders, not for the list), so a downloaded one is removed first
+        how = ("If its index came from HuggingFace, remove the index in Settings and "
+               "download it again there, which installs the list; add the VCF dataset "
+               f"{vcf_folder} again in Settings, which writes the list from the VCF header; "
+               "or add the file yourself")
+    return (
+        f"No sample list for the variant dataset '{dataset}': a search with it reads "
+        f"samplesIDs/{vcf_folder}.samplesID.txt (one row per sample its VCFs genotype) "
+        f"and fails at its end without it. {how}, then submit again."
+    )
 
 
 def variant_dataset_sample_count(genome: str, dataset_value: str) -> int:
@@ -1989,10 +2145,16 @@ def get_pam_options(genome: str, variant_choice: Optional[str]) -> List:
                     if slen == ilen and same_orient and abs(spos) <= abs(ipos):
                         ok.add(pv)
             else:
-                # SPECIFIC index: serves exactly the PAM(s) whose motif matches (the
-                # index length matches that PAM by construction).
-                for pv in geom:
-                    if pam_motif(pv) == motif:
+                # SPECIFIC index: serves exactly the PAM(s) whose motif matches, of a guide
+                # its stored window fits with no bulge at least (index_fit: several PAM
+                # files of one motif can differ in guide length, and the index's name says
+                # nothing of which it was built for).
+                built = index_fit.built_guide_len(os.path.join(lib, d))
+                n_str = d.split("_")[1]
+                for pv, (slen, spos) in geom.items():
+                    if pam_motif(pv) == motif and (
+                            slen is None or not n_str.isdigit()
+                            or index_fit.fits(built, int(n_str), slen - abs(spos), 0, 0)):
                         ok.add(pv)
         per_dataset_ok.append(ok)
     usable = set.intersection(*per_dataset_ok) if per_dataset_ok else set()
@@ -2042,6 +2204,8 @@ def get_custom_annotations() -> List:
     return annotations
 
 
+# The annotation helpers below run their commands with no shell: the file names hold a
+# genome's name (.active.<genome>.bed), which a request sends, or Settings took as typed.
 def _sort_bed(fname: str, outfname: str) -> str:
     """Sorts a BED file and writes the sorted output to a new file.
 
@@ -2058,7 +2222,8 @@ def _sort_bed(fname: str, outfname: str) -> str:
     Raises:
         SystemExit: If sorting fails.
     """
-    code = subprocess.call(f"sort-bed {fname} > {outfname}", shell=True)
+    with open(outfname, "w") as out:
+        code = subprocess.call(["sort-bed", fname], stdout=out)
     if code != 0:
         raise subprocess.SubprocessError("Sorting BED file failed")
     assert os.path.isfile(outfname)
@@ -2094,7 +2259,7 @@ def compress_file(fname: str) -> str:
     # temporary or lock file cannot corrupt the shared annotation directory
     for cruft in (f"{plain_path}.tmp", f"{gz_path}.tmp", f"{gz_path}.tbi.lock"):
         if os.path.isfile(cruft):
-            subprocess.call(f"rm -f {cruft}", shell=True)
+            subprocess.call(["rm", "-f", cruft])
     # idempotent path: the plain file was already compressed by a previous run
     # (bgzip -f had removed it) - reuse the existing .gz instead of failing
     if not os.path.isfile(plain_path):
@@ -2105,7 +2270,7 @@ def compress_file(fname: str) -> str:
         )
     # non-destructive compression: keep the source file (-k) and overwrite any
     # stale .gz (-f) so re-submitting the same job is safe
-    code = subprocess.call(f"bgzip -k -f {plain_path}", shell=True)
+    code = subprocess.call(["bgzip", "-k", "-f", plain_path])
     if code != 0:
         raise subprocess.SubprocessError("Compressing and indexing file failed")
     assert os.path.isfile(gz_path)
@@ -2128,7 +2293,7 @@ def _mv_file(fname: str, outfname: str) -> str:
     Raises:
         SystemExit: If the move or rename operation fails.
     """
-    code = subprocess.call(f"mv {fname} {outfname}", shell=True)
+    code = subprocess.call(["mv", fname, outfname])
     if code != 0:
         raise subprocess.SubprocessError("Renaming file failed")
     assert os.path.isfile(outfname)
@@ -2170,9 +2335,9 @@ def sort_annotation(annotationfile: str) -> str:
     # clean up the intermediate sorted BED (compress_file keeps its source with
     # -k, so remove it here) to avoid leaving cruft in the shared annotation dir
     if os.path.isfile(annotationfile_sorted):
-        subprocess.call(f"rm -f {annotationfile_sorted}", shell=True)
+        subprocess.call(["rm", "-f", annotationfile_sorted])
     if decompressed_here and os.path.isfile(plain_path):
-        subprocess.call(f"rm {plain_path}", shell=True)
+        subprocess.call(["rm", plain_path])
     return result
 
 
@@ -2317,8 +2482,11 @@ def write_email_config(
     use_ssl: bool = True,
 ) -> Optional[str]:
     """Persist SMTP settings atomically. ``password=None`` keeps the previously
-    saved password (so re-saving other fields does not require re-typing it);
-    an empty string clears it. Returns None on success, else an error string."""
+    saved password (so saving again does not require re-typing it) when the host,
+    port, SSL setting and sender are those it was saved with, and is refused
+    otherwise: send_mail.py logs in to the saved host as the sender with it, and
+    a request can save any host. An empty string clears it. Returns None on
+    success, else an error string."""
     if not smtp_host or not str(smtp_host).strip():
         return "SMTP host is required."
     try:
@@ -2335,15 +2503,23 @@ def write_email_config(
                 existing_pw = json.load(fh).get("password", "") or ""
         except (json.JSONDecodeError, OSError):
             existing_pw = ""
-    if password is None:
-        password = existing_pw  # keep what was there
     cfg = {
         "smtp_host": str(smtp_host).strip(),
         "smtp_port": port,
         "use_ssl": bool(use_ssl),
         "sender": str(sender).strip(),
-        "password": password,
     }
+    if password is None:
+        # keep what was there, for the account it was saved for only: kept with another
+        # host, it was sent to that host at the next notification
+        saved = read_email_config()
+        if existing_pw and any(saved[key] != value for key, value in cfg.items()):
+            return (
+                "Type the app password again: a saved password is kept only while the "
+                "SMTP host, port, SSL setting and sender address stay as they were saved."
+            )
+        password = existing_pw
+    cfg["password"] = password
     tmp = path + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(cfg, fh, indent=2)
@@ -2411,7 +2587,7 @@ def _cosmic_mod():
     (PostProcess/cosmic_license.py). Returns the module, or None if unavailable
     (in which case COSMIC is treated as NOT licensed -- the safe default)."""
     try:
-        import cosmic_license as _c  # PostProcess is on sys.path via crisprme.py
+        import cosmic_license as _c  # PostProcess/ is on sys.path via the insert at the top
         return _c
     except Exception:
         try:
@@ -2515,7 +2691,8 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
 
 def _decompress_file(fname: str, outfname: str) -> str:
     """Decompresses a bgzipped file to a specified output file."""
-    code = subprocess.call(f"gunzip -k -c {fname} > {outfname}", shell=True)
+    with open(outfname, "wb") as out:
+        code = subprocess.call(["gunzip", "-k", "-c", fname], stdout=out)
     if code != 0:
         raise subprocess.SubprocessError("Decompressing annotation file failed")
     assert os.path.isfile(outfname)

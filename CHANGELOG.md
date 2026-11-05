@@ -11,7 +11,3510 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
-## [2.8.0] - 2026-10-23
+## [2.8.1] - 2026-11-05
+
+### Added
+- **`--prune-pam`: one index can serve many PAMs.** A *PAM-less* index stores the raw genomic flank
+  instead of a matched PAM, and `--prune-pam` applies the PAM you pass during the search, discarding
+  a leaf whose stored flank cannot match it. One index therefore answers any 3′ PAM no longer than
+  its flank, instead of one index per PAM. Verified genome-wide over HGDP + 1000 Genomes (4,091
+  samples, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index, an
+  8-nt-flank PAM-less index, and a dedicated NRG index produce **byte-identical**
+  reports: identical integrated results, 182,369 rows each (the dedicated arm ran on a fresh install
+  without the COSMIC licence, and matches once that empty column is set aside), and for NRR 386,012
+  rows each, over a dedicated index, both PAM-less indexes, and the 3-nt one searched without
+  `--prune-pam`. That was measured for one guide, which has no site at a contig's end: from a flank
+  wider than the PAM the build does not index a PAM at a contig's very end or start (on hg38, 549
+  NRG and 246 NGG sites, none on a primary chromosome; see Changed). Pruning changes only which
+  leaves are written out, never how a guide is aligned, so it cannot move an alignment or a score.
+  The cost is size, since nothing is excluded at build time: 110 GB against 28 GB for the HGDP +
+  1000 Genomes variant index. Requires `--index-path`, and is command-line only — the web interface
+  never passes the flag. The published PAM-less indexes store the flank on the 3′ side of the guide
+  and serve no 5′ PAM, so a Cas12a (`TTTV`) search needs a dedicated index. A shorter PAM off a
+  wider flank is served for a 3′ PAM only; a 5′ PAM needs an index built from a 5′ all-`N` PAM file
+  at exactly its width, which its `.pam_build` records (an all-`N` index without one is taken for a
+  3′ build at the published widths, 3 and 8: see Fixed), and the engine refuses any other width
+  pairing rather than mis-parsing the index. The `NNN_3` indexes are published alongside the
+  dedicated ones; a flank wider than 3 nt is not readable by earlier releases, so those live in a
+  separate repository. Needs a CRISPRitz build that supports `--prune-pam`. See [`METHODS.md`
+  §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering).
+- **A second dataset repo for wide-flank PAM-less indexes.** A PAM-less index with a 3-nt flank
+  stores a 3-nt PAM region, as a dedicated 3-nt PAM index does, so any release can read it and
+  `NNN_3` stays in `lucapinello/crisprme-data` (though a 2.8.0 search of the rebuilt `NNN_3`
+  archives can fail or report malformed rows: see Fixed). A wider flank cannot be read by a
+  release predating `--prune-pam`, so those are published to
+  `lucapinello/crisprme-data-general-index`, which older defaults never point at. `download` and
+  `publish-index` route on the flank width parsed from the index name — not on a
+  list of names, so it cannot be forgotten at publish time — `download` falls back to the default
+  repo when the routed one lacks the archive (and, if both lack it, says it looked in both), and the
+  catalog listing merges both repos, taking each name's row from the copy `download` would fetch, so
+  what is offered is what can be fetched. If the default repo cannot be read the catalog is empty,
+  as before, rather than offering only the slower wide-flank indexes. Dedicated-PAM and `NNN_3`
+  indexes are listed and downloaded from the default repo exactly as in 2.8.0, never looked up in
+  the new one. `--hf-repo` / `CRISPRME_HF_REPO` still override. `download` takes
+  an index's genotype companion and reference index from that index's own repo, so the new repo
+  carries its own copy of `genotypes_hg38_HGDP1kGP.tar.gz`, byte-identical to the main repo's.
+- **`indexes/SHA256SUMS` in both dataset repos**, written by `scripts/hf_sha256sums.py` from the
+  checksums the Hub already records (a Git LFS object is addressed by its SHA-256; the oids match
+  the independently computed `build-inputs/*.SHA256SUMS`), so, inside `indexes/`,
+  `sha256sum -c --ignore-missing SHA256SUMS` verifies a download without anyone re-hashing 400 GB
+  (`--ignore-missing` skips the archives you did not download; without it, a one-archive download
+  reports every other archive as `FAILED open or read` and exits 1). `--staged` folds in the
+  checksums of archives about to be uploaded; regenerating after the upload and diffing proves the
+  Hub holds exactly what was staged. It refuses to write an empty file, which would verify nothing
+  and read as a pass.
+
+- **Unrecognized `complete-search` flags are now rejected.** `complete-search` parses `sys.argv` by
+  hand, so a flag nothing reads was simply ignored: `--prune-pams` instead of `--prune-pam` ran a
+  genome-wide search with pruning quietly off, finished without complaint, and was detectable only by
+  diffing the results against a dedicated index. Unknown flags now fail up front, with a suggestion
+  for a near miss.
+- **Settings: configurable number of concurrent search jobs.** The web app ran at most 2 searches at
+  once (a hard-coded legacy limit); this is now adjustable from the Settings page (or the
+  `CRISPRME_MAX_CONCURRENT_JOBS` environment variable), clamped to `[1, 16]`. The **default stays a
+  conservative 2** — each genome-wide search is memory-heavy (~tens of GB of RAM) — so a laptop / the
+  public server is never accidentally oversubscribed; raise it only on a machine with enough RAM and
+  cores. Extra jobs beyond the limit simply queue. Applies on the next app restart. When
+  `CRISPRME_MAX_CONCURRENT_JOBS` is set it takes precedence: the Settings card says so and its input
+  is disabled, and a value that is not a whole number from 1 to 16 is ignored or clamped, with a
+  one-line warning at startup.
+- **Settings: Hugging Face download progress bar.** Index/annotation downloads now show percent,
+  size, ETA, and phase in the Settings page, backed by an env-gated progress file
+  (`CRISPRME_PROGRESS_FILE`); the progress path is a no-op when the variable is unset, so the CLI
+  happy path is byte-for-byte unchanged.
+
+### Changed
+- **CRISPRitz pin moved to v2.9.1**, the tag carrying `--prune-pam` plus eight engine fixes: a
+  genomic `N` in a stored PAM/flank region no longer drops the target; a non-`.bin` sidecar in the
+  index directory no longer crashes the search; a PAM/flank width mismatch is refused up front
+  instead of mis-parsing the leaf stream, and `buildTST`/`searchTST`/`searchBruteForce` now have
+  their exit status checked, so a crashed search can no longer be reported as an empty result; a
+  multiallelic site no longer compounds its indel alleles into one fake contig; the compiled C++
+  `enricher` no longer drops a SNP wherever an indel shares its position; `enricher.py` keeps the
+  real SNP at a multiallelic site whose ALTs include `*` (it left the base unchanged; the C++ port
+  already coded it); and `add-variants` now fails when an enricher fails, instead of exiting 0 with
+  that chromosome's enriched genome missing, which the index build would then have indexed as it
+  stood (the Python enricher, moreover, no longer needs a `python` on PATH, and no longer races
+  its sibling workers to create their shared output folder, which could lose a chromosome); and
+  `buildTST` skips a contig too short to hold one target, such as the header-only FASTA the
+  enricher writes for a chromosome with no indel, instead of crashing on it.
+  Applies to the Docker build (`crispritz_ref`) and `install_from_source.sh`
+  (`CRISPRITZ_REF`). The `*` case needs a multiallelic VCF, and every CRISPRme-supplied VCF is
+  split, so it moves no published index.
+  **No published index is affected** by the C++ enricher fix: the image built only the three search
+  binaries, so enrichment ran through `enricher.py`, confirmed by direct measurement on the
+  artifacts (chr22:10684299 carries a SNP and an indel as separate records; every enriched
+  `chr22.enriched.fa` on the build host holds the IUPAC `M` there, not a plain `C`). A **source**
+  install is the exception -- `install_from_source.sh` has installed the compiled binary for some
+  time, so an enriched genome produced that way before CRISPRitz 2.9.1 is missing the SNP at every
+  position that also carries an indel, and should be re-enriched.
+- **The compiled `enricher` is now installed in the image, making it the default enrichment path.**
+  It is built beside the three search binaries and copied to both places `crispritz.py`'s
+  `_enricher_command()` checks, matching what `install_from_source.sh` already did and removing a
+  silent divergence between the two install routes. Measured **1.82x** faster than `enricher.py`
+  through the real `add-variants` CLI on the FULL chr22 of HGDP + 1000 Genomes -- 1,998,332 records,
+  4,091 samples, 2.7 GB of output: 1,776 s vs 974 s -- on the stage that dominates a from-scratch
+  genome-wide build. Gated on CRISPRitz 2.9.1's byte-identity fixes, verified at that same scale:
+  all four enricher outputs match `enricher.py` hash for hash, as do the 17 synthetic cases of
+  `verify_enricher.sh`, the SNP+indel combinations among them. The same holds off Linux/amd64:
+  natively on macOS arm64 (Apple clang, libc++) the compiled port reproduces those full-chr22
+  hashes exactly, and so does `enricher.py` under pandas 3 (the recipe leaves pandas unpinned);
+  inside the arm64 image, the binary it ships reproduces them too.
+- **When a dedicated index for the PAM is installed beside a PAM-less one, the dedicated index is
+  now searched.** The index scans settle every choice by rule: the requested PAM first, then an
+  index built for this very guide length, then the smallest sufficient bulge budget, then the
+  narrowest PAM-less flank. 2.8.0 kept the smallest budget first, so with `NRG_4` and `NNN_3`
+  installed it searched `NNN_3`; 2.8.1 searches `NRG_4`,
+  which gives the same report faster (genome-wide, the search stage took 44-51 min on a dedicated
+  NRG index against 2 h 59 min on `NNN_3` under `--prune-pam`). No rule depends on glob order, so
+  the choice cannot depend on the shell's locale either, which matters now that PAM-less indexes
+  of two widths can sit side by side: `NNNNNNNN_3_hg38` globs before `NNN_3_hg38` under
+  `LC_ALL=C` and after it under `en_US.UTF-8`. `PostProcess/test_index_resolution.py` checks each
+  rule with the wrong candidate globbing first, and runs the whole shipped script against a stub
+  engine to check that each scan hands the search the index it picked.
+
+- **`build-index-only` makes a missing `--samplesID` impossible to miss.** Building a genotyped
+  variant index without `--samplesID` (or with no usable entries) skips the dict-less Tier-0
+  registry, so the index lacks fast post-analysis, the report's variant-count panel and the web's
+  data-type labels, and cannot be published. The one-line notice is now a red banner on stderr
+  that names the consequence and the fix (re-run with `--samplesID`). Behaviour is unchanged.
+
+- **Install docs: Bioconda and macOS.** The README and website said Bioconda installs the old 2.1.x
+  line; it has served CRISPRme+ (Python 3.11, Linux) since 2.7.9. The channel setup now uses
+  `conda config` (Mamba 2 rejects `mamba config --add`), and the install names its version
+  (`crisprme=2.8.1 python=3.11`), since an unpinned solve can silently fall back to a years-old
+  release; `scorer-env create` and `doctor` are part of it. macOS is Docker-only: Bioconda has no
+  macOS CRISPRitz, and the source build needs GCC (`buildTST` uses GCC's parallel-mode STL).
+
+- **Docs and help text now match what ships and what is on Hugging Face.** The raw source VCFs are
+  hosted (`vcfs/hg38_HGDP1kGP`, `vcfs/hg38_HPRC`, `vcfs/hg38_mega`, fetched with
+  `download --what vcf --dataset <name>`), although the README's `download` reference, six pages
+  under `docs/` and the error `--what vcf` gives for a missing dataset said they were not.
+  METHODS, the HGDP + 1000 Genomes methods page and the troubleshooting page described
+  population-level as the default analysis; they now describe the context-aware default the code
+  has applied since 2.8.0 (per-sample on a phased genotyped index such as the default one,
+  population-level otherwise), so on the default index it is `--population-level`, not leaving out
+  `--per-sample`, that gives the lighter screen. The index tables now name the NGG, NRR and
+  8-nt-flank PAM-less archives with their download sizes, all in GB (10⁹ bytes), and
+  `docs/INDEX_PROVENANCE.md` records both dataset repos as they stand after the 2026-10-30 upload
+  (the four replacements, `indexes/SHA256SUMS`). Help and warning texts that named unhosted
+  datasets or stale values are corrected too: `build-index-only --help` now uses `hg38_HGDP1kGP`,
+  `assembly-search --help` gives complete-search's `--max-total-edits` default as 6 (it said 4),
+  and the warning for the retired `--fast` no longer says it used to force per-sample.
+  The general-index card's search example now runs: it lacked `--index-path`, which `--prune-pam`
+  requires, and `--samplesID`, and named a `--vcf` file `download` does not write. The website and
+  the index pages say that a PAM-less index serves a shorter PAM only when it is a 3′ PAM (the
+  card listed Cas12a's `TTTV`), and the README, the index pages, METHODS and the
+  `complete-search --help` entry for `--prune-pam` that the published ones serve no 5′ PAM at any
+  width (they said an equal-width one worked). README §1.1.2 checks an install with
+  `crisprme.py --version` alone, and §3.1 shows the help with `crisprme.py --help`, since a bare
+  `crisprme.py` exits 1 and creates the CRISPRme folders where it runs.
+  `RESUME.md`, a scratch file committed by accident in 2.5.4, is gone from the tree, so the Docker
+  image no longer ships it.
+
+- **The web Settings page gives sizes in decimal GB, and `complete-search` prints its
+  analysis-mode banner only for a variant search.** Settings divided by 1024 while printing GB, so
+  every size it shows in GB now reads about 7% larger, as the docs and Hugging Face give it (GB =
+  10⁹ bytes): `NNN_3_hg38` goes from 66.6 to 71.5 GB, and the 50 GiB upload limit now reads
+  53.7 GB. A reference-only search printed the population-level banner, although it runs no
+  variant analysis; it now prints none. The per-sample banner says whether `--per-sample` or the
+  phased index's default chose it, and the population-level banner points at `METHODS.md` instead
+  of a design note removed in 2.6.0. Search results are unchanged.
+
+- **`--per-sample` on an index without the dict-less tiers now says what it reports.** An index
+  built without `--samplesID` has only the classic per-sample dictionaries, and no
+  `Dictionaries/registry_<vcf>/` or `genotypes_<vcf>/`. This covers the index that benchmark-mode
+  `complete-test` builds, and a build from the web Settings page before this release (which now
+  passes `--samplesID`: the entry on a search of a VCF dataset built there). On such an index,
+  `complete-search --per-sample` still promised "CONFIRMED cis phasing, named carrier samples and
+  exact joint AF", but wrote no phase-confirmation or SNP+SNP co-occurrence table. The banner now
+  says that this dataset's results name the carrier samples, with the `AF` of the classic per-sample
+  dictionaries (an indel's, of the index's indel log), which CRISPRitz `add-variants` copied from
+  the VCF, but have no CONFIRMED/PUTATIVE cis phasing, no SNP+SNP co-occurrence and no exact joint
+  AF. It also says to rebuild with `build-index-only --samplesID` or download a prebuilt index. The
+  banner of an index with the tiers, and every result, are unchanged. Covered by
+  `PostProcess/test_build_index_only_atomic.py`.
+- **`complete-test` now says when it ignores `--vcf_dataset`.** The benchmark mode, which
+  `--vcf_dataset` configures and `validate-test` checks, runs only with
+  `CRISPRME_ALLOW_ONDEMAND_BUILD=1` set. A Docker user who put the variables in front of `docker
+  run` set them on the host only, and `complete-test` silently ran the prebuilt-index smoke
+  instead. It now prints one line on stdout saying so, and that in Docker the variable goes with
+  `-e`. The run and its exit status are unchanged. Covered by `PostProcess/test_complete_test.py`.
+
+- **A search of a VCF dataset built in the web Settings page reads its dict-less tiers, so its
+  tables change.** A variant build in Settings now passes the dataset's sample list as `--samplesID`
+  when its VCFs have samples (see Fixed), so it also writes the dict-less tiers
+  (`Dictionaries/registry_<dataset>/` and `Dictionaries/genotypes_<dataset>/`). Searches of an index
+  built (or built again) in Settings now read them, as searches of a command-line `--samplesID`
+  build and of a downloaded index do, where they read the dataset's dictionaries before. On a phased
+  dataset a search now runs per-sample by default, as on the default index (*Population-level* on
+  the search form is the faster worst-possible screen), and a per-sample search names on each row
+  only the samples one of whose haplotypes carries all of the row's variants (of two samples with
+  the same two SNPs, one that carries both on one haplotype is named on the row of both SNPs, and
+  one that carries one on each haplotype is not, where a population-level search names both).
+  Measured on a phased 6-sample panel, with a population-level search of one index on its
+  dictionaries and then on its tiers, the tables change as follows: a SNP's allele frequency is
+  computed from the genotypes of the samples the list names, to six significant digits
+  (`0.333333`), where the dictionaries gave the `AF` that `add-variants` copied from the VCF
+  (`0.3333`), and an indel's is still the `AF` of the index's indel log; and `Other_motifs` counts
+  the alignments the tiers give at a site: one fewer at a site where the dictionaries also listed
+  the reference alignment as a variant one, for the carriers of a SNP that destroys its PAM. The row
+  of an indel and a SNP that one haplotype carries is the same on both, with the same carriers,
+  since this release's indel fix resolves it from the per-sample SNP dictionary too (the entry "An
+  indel off-target near a SNP was reported with SNP alleles its carriers do not have" under Fixed).
+  The result folder also holds the SNP + indel and SNP + SNP co-occurrence and phase-confirmation
+  tables, and the shareable report gives the dataset's SNP and indel counts and its SNP + indel cis
+  co-occurrences. A dataset built in Settings before this release has no tiers until its variant
+  index is built again there, and its searches read its dictionaries until then; their SNP + indel
+  rows change all the same, with that indel fix. Writing the tiers takes memory that a build without
+  them did not need: at panel scale ~150-180 GB a chromosome, by default up to 4 chromosomes at once
+  (~700 GB, `CRISPRME_TIER_WORKERS` sets how many). A build that runs out of it fails with a message
+  that says what to do (see Fixed).
+- **A genome uploaded in the web Settings page under the name of an installed genome replaces it,
+  and is refused while indexes built on a genome of that name are installed.** The upload went into
+  that genome's folder, beside the files already there (and so into the shared copy, when that
+  folder is a link to one). It is now built in a hidden folder and replaces the installed genome
+  only once whole; a link is replaced and the copy it points to left alone. It is refused, at its
+  first chunk, while indexes or variant genomes built on a genome of that name are installed
+  (`genome_library/<PAM>_<N>_<genome>[+<dataset>]`, `Genomes/<genome>+<dataset>`): every search
+  and build of the new genome would go on using them, with the sequences and positions of the one
+  they were built from. Remove them first (an index under *Remove installed data*, a
+  `Genomes/<genome>+<dataset>` folder from your data folder), or upload the genome under another
+  name; to add the very genome an installed index was built on, use *Download genome*, which this
+  does not refuse.
+
+- **The documented self-test now runs every benchmark, and it ends `6 passed, 0 failed, 0 skipped`.**
+  **Affected:** anyone who runs `complete-test`'s benchmark mode and `validate-test`, as README
+  §1.2, §1.3, §2.2.2, §2.2.3 and §3.2.1, `docs/DOCKER_QUICKSTART.md`, both commands' `--help`, the
+  installer's last line and `validate-benchmarks.yml` give them. All of these set
+  `CRISPRME_SKIP_HEAVY=1`, on the claim that the bulge-2 index builds need more than 16 GB of RAM,
+  so each left out 2 of its 4 benchmarks. That claim was wrong: the run peaks at 3.66 GB of RAM,
+  and it passes in a container held to 16 GiB, 4 CPUs and no swap. **What changes:** the commands
+  no longer set it, and CI no longer does, so every benchmark runs, and CI fails if one did not.
+  All six took about 25 minutes at 8 threads on an Apple Silicon Mac in testing, where the two
+  light ones took about 12. **What to do:** nothing. The variable stays as an opt-out for a very
+  small machine: `complete-test` says what it leaves out, and `validate-test` ends `2 passed, 0
+  failed, 4 skipped`. A folder that ran the old command has no output for the others:
+  `validate-test` there ends the same way, saying `complete-test targets not found`. Covered by
+  `PostProcess/test_validate_test.py`, `PostProcess/test_complete_test.py` and
+  `PostProcess/test_ci_workflows.py`.
+- **Two new benchmarks that one lost site fails, `cas9_sg1617_n5` and `cas12a_hbg_n5`.** The two
+  bulge-2 benchmarks could hardly catch a lost site: `cas12a_hbg_simple`'s brute-force reference is
+  a header with no rows, so that case compares empty with empty, and `cas9_sg1617_simple`'s holds 3
+  rows at 2 sites. The same guides at `--max-total-edits 5`, on the same indexes, have 381 and 92
+  sites on chr22, and CRISPRme matches brute force on them, on CRISPRitz 2.9.1 and on the 2.9.0 CI
+  overlays. No result was lost: this was a gap in the test's power. Their references are in
+  `test/benchmark/max-edits-5/`, which Docker, source and Bioconda installs all hold, so they need no
+  network. Covered by `PostProcess/test_validate_test.py`.
+- **CI runs what it says it runs** (contributors). `unit-tests.yml`'s job limit goes from 10 to 20
+  minutes: the hosted job took 523 s at the first release head of 2.8.1, and the steps have grown by
+  a quarter since, which predicted about 640 s, past the limit (GitHub has since run it in 14 min
+  50 s and 13 min 55 s on two release candidates). `web-e2e.yml` gets a step that runs, in the image, the tests that skip in the light
+  job for want of BEDOPS, minimap2, impg or Dash: `test_assembly_annotate`, which no workflow named,
+  the impg truth tests, the flag-gate behaviour tests, the `post_process.sh` test, whose own step in
+  the light job tested nothing, `test_index_resolution`, and the web app's start-up and shell-safety
+  tests (`test_app_settings`, `test_web_shell_safety`): 527 tests, about 100 s. It fails on any
+  skip but the two the image cannot help. `validate-benchmarks.yml`'s smoke step runs the real
+  Hugging Face download test, which no job ran. The path filters of `unit-tests` and `web-e2e` now
+  start, on a change to any file one of their tests reads, a job that runs that test, as found by
+  replaying each step with every file read logged: `unit-tests` lists every file its tests read,
+  and `web-e2e` every file read by the tests only it runs (the docs and scripts its in-image step
+  reads through `test_complete_search_flags`'s scans start `unit-tests`, which runs the same
+  scans). Before, a pull request that changed only `pages/`, `scripts/`, `docs/`, the README,
+  `test/benchmark/`, `test/data/`, `assets/`, or a script outside `PostProcess/` such as one in
+  `seq_script/`, did not start `unit-tests`, and one that changed only `PostProcess/`,
+  `seq_script/`, `PAMs/` or `download_hprc_assembly.py` did not start `web-e2e`. Covered by
+  `PostProcess/test_ci_workflows.py`, which `unit-tests.yml` runs.
+- **`docs/RELEASE_CHECKLIST.md` Gate B gives the local gate** (maintainers): the exact commands that
+  leave nothing skipped, on the release image, amd64 and arm64, with the three skips it allows
+  named. The six function-based test modules run as scripts there, since `python -m unittest` alone
+  reports `Ran 0 tests` and `OK` for them.
+
+- **`--prune-pam` from a flank wider than the PAM: what it cannot index is said, in the docs and
+  by the search.** The README, METHODS section 9, docs/PRECOMPUTED_INDEXES.md,
+  docs/DYNAMIC_PAM_INDEX_COMPAT.md, the general-index card in `docs/hf/` and `complete-search
+  --help` said a PAM-less index with `--prune-pam` gives a report identical to a dedicated index.
+  That was measured genome-wide for one guide, which has no site at a contig's end. The index
+  build scans for a PAM only where a whole flank of K bases fits, so with K > L a + strand PAM with
+  1 to K − L bases after it to the end of a contig, and a − strand PAM in the contig's first K − L
+  bases, are not indexed, and a − strand PAM exactly K − L bases from the start is reported on
+  the + strand at another position; K = L is unaffected. **Affected:** searches of the K = 8 index
+  for a 3-nt PAM (on hg38, 145 + 101 NGG and 308 + 241 NRG sites, about 7.5 × 10⁻⁷ of all, none on
+  a primary chromosome for those PAMs), new with K = 8 in 2.8.1. **What to do:** nothing for a
+  guide whose sites lie on primary chromosomes; for one near the end of an alt, random or unplaced
+  contig, use an index of the PAM's width or a dedicated one. The docs now say so with these
+  counts, and a search that reads a flank wider than its PAM prints one `NOTE` on stdout, also
+  written to the run's `Params.txt`. The engine is unchanged.
+- **The limits every index has at contig ends and `N` runs are documented.** METHODS section 9
+  and docs/PRECOMPUTED_INDEXES.md now say that an index of budget N cannot report a site whose
+  guide lies within N − 1 nt of a contig start, a contig end or an `N` run, which a search
+  without bulges reports from the FASTA (a variant search without bulges of a download reads the
+  variant index, so its SNP variant rows have the limit too), so that an index of a larger budget
+  is not a strict superset of a smaller one (for `NRG_3_hg38`, 1,050 NRG sites, 535 on primary
+  contigs; the exposure that matters is a guide whose own on-target sits at such a boundary);
+  that a − strand PAM at a contig's first base is reported on the + strand (11 NGG and 37 NRG
+  hg38 contigs); and that a + strand PAM on a contig's last bases is found by no search (8 NGG
+  and 31 NRG contigs), these last two only on alt, random or unplaced contigs. These are engine
+  limits, in 2.8.0 too; the engine and the published indexes are unchanged.
+- **A known limit, stated with its scale: at a split multi-allelic SNP site only the last record's
+  ALT is searched.** At a position with several biallelic SNP records only the last one's ALT
+  reaches the enriched genome and the stores, so an off-target that needs an earlier one is not
+  found, or is reported at a lower score, without its carriers (a VCF
+  line that lists several ALTs itself is coded with all of them). On the HGDP + 1000 Genomes
+  panel, 2,486,165 of its 127,666,429 SNP records (1.95 %), at 2,441,139 positions, are not coded
+  for this reason. Per guide (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample, genome-wide)
+  this leaves 3 to 7 sites whose true CFD puts them in the top-1000 out of it or understated
+  there, and at most one site reaching CFD >= 0.5 in the five guides tested (the README's, ACTGA,
+  TRAC, EMX1 and VEGFA site 3; the one is EMX1's chr17:12179615, 11 haplotypes, CFD 0.508), and 52
+  to 324 rows per guide (99 % of them at CFD < 0.1) name an individual who carries such an ALT,
+  read as the reference base, for a sequence they do not have. docs/INDEX_PROVENANCE.md and
+  METHODS section 2 give what was measured and how: on chr22, 45,837 of 1,757,775 SNP records
+  (2.6 %) are not the last at their position, 5,104 with AC ≥ 41 and 1,566 with AC ≥ 818, counted
+  in the normalized source VCF; and, read in the shipped enriched genome, registry, genotype store
+  and dictionary at six such positions, the earlier ALT is absent from each, up to AC = 8,179
+  (`rs807755` T>A at chr22:19142014, whose position the stores hold as T>G at AC = 1). This is not
+  new: 2.8.0 and every earlier release behave the same (the SNP dictionaries have always kept only
+  the last record of a position, and the enriched genome since CRISPRitz 2.6.0, 2021), and 2.8.1
+  does not change it. It will be fixed, with rebuilt indexes, in the next release.
+
+- **Release docs (maintainers): the CRISPRitz pin of the Bioconda recipe is bounded, and the
+  version sweep compares like with like.** `docs/RELEASING.md` and the `release-crisprme` skill
+  ask for `crispritz >=X,<Y`, below the next CRISPRitz that changes the index format or the
+  enricher: `>=2.9.1,<2.9.2` for 2.8.1, which reads index format 1, where the CRISPRitz planned as
+  2.9.2 writes format 2 and enriches multi-allelic sites another way. With a bare `>=` the solver
+  would install that engine beside 2.8.1, which cannot read the indexes it builds:
+  `build-index-only` fails, and a bulge search refuses such an index when it is reused. The
+  checklist's version sweep asked the Dockerfile's `crispritz_ref`
+  (v2.9.1) to read CRISPRme's version (2.8.1), which no correct release could pass; it now asks it
+  to equal `install_from_source.sh`'s `CRISPRITZ_REF` default, which
+  `PostProcess/test_install_from_source.py` checks. The release docs also said the Dockerfile
+  carries no CRISPRme version, while its header comment names the release, and
+  `scripts/prepare_release.py` bumps `crisprme.py` alone: a release that followed them would have
+  left the comment at the previous version, as it read 2.4.0 at every tag from v2.5.0 to v2.7.8.
+  The sweep now asks for it, `docs/RELEASING.md` and the skill bump it by hand with a command the
+  same test runs, and the test fails while the comment names another release than `crisprme.py`.
+- **`docs/RELEASE_CHECKLIST.md` Gate B runs the engine checks on the release's own CRISPRitz**
+  (maintainers). CI runs `test/index_flex/check_index_flex.py`, the SNP + indel oracle
+  (`test/indel_snp_oracle/run_oracle.sh`) and `scripts/check_alt_pam.py` on search results only
+  in `validate-benchmarks.yml`, with the branch overlaid on the published image: for 2.8.1 that is
+  2.8.0's, with CRISPRitz 2.9.0 where 2.8.1 ships 2.9.1. There index_flex passes both K = 8 cells
+  by refusing them, as on any engine without `--prune-pam`, and still prints `INDEX FLEX PASS`.
+  The local gate's step 4b runs the three on the release image, amd64 and arm64, and fails unless
+  both K = 8 cells read "same results as" (a dedicated index, and NRG), the oracle prints
+  `ORACLE PASS` and `check_alt_pam.py` passes step 4's tables. Trap T-42 in the checklist.
+  `PostProcess/test_ci_workflows.py` pins the step and its greps to what the checks print.
+
+- **In a population-level report an indel (or MNV) row's Observed cell reads `N carrier(s)`**, not
+  `N carriers (>=1 of K vars, poss. chimera)` as a multi-variant SNP row does, now that such a row
+  can name the SNP beside its indel: its carriers are resolved one by one, CONFIRMED where each is
+  placed on its phased haplotype and PUTATIVE where the phase is unknown (an unphased call, an MNV).
+  On an install without SNP genotypes (`download --what index --no-genotypes`) a SNP+indel row still
+  lists every carrier of the indel, with or without the SNP (PUTATIVE in `indel_snp_cooc.tsv`), as
+  in 2.8.0. The README and METHODS section 7 say so.
+
+- **A known limit, stated with its scale: a SNP row lists a carrier whose haplotype holding its SNPs
+  also carries an indel inside the target.** A SNP row's carriers are resolved from SNP genotypes
+  only, so an individual whose haplotype holding the row's SNPs also carries an indel inside the
+  target is still listed, though its own sequence there is the indel's (reported on the indel row
+  when it is in budget). On chr22 of the HGDP + 1000 Genomes panel (per sample, NRG, 4 mismatches +
+  1 DNA + 1 RNA bulge, five guides) this affects 2.2% of SNP row-blocks (990 of 45,921, 194 in the
+  integrated results), and 545 of them have no listed carrier that holds the sequence; with no
+  bulges, 12 row-blocks. It only over-lists, no site is lost, and 2.8.0 behaves the same. METHODS
+  sections 4 and 8 now say so; it is fixed in the next release.
+
+- **A known limit, stated with its scale: on an index without the dict-less tiers, a
+  `--per-sample` search can still report a dense window by its greedy worst-case alignment, whose
+  listed carriers need not carry every variant in it.** `--per-sample` reports an off-target only
+  when a real individual carries it, never a worst case put together from alleles that different
+  individuals carry (2.7.10), on the observed-haplotype path, which reads the dict-less tiers. An
+  index built without `--samplesID` (such as the one the benchmark `complete-test` builds, so the
+  one the README's self-test leaves) has only the classic per-sample dictionaries, and a
+  per-sample search of it takes the classic path, which still reports a window of more than
+  `CRISPRME_IUPAC_CAP` variants by its greedy worst-case alignment, flagged in
+  `High_variant_density_region`, with the carriers of any allele it takes. On the NGG index the
+  self-test builds (`NGG_2_hg38_chr22+hg38_1000G`, chr22 of the benchmark's phased 1000 Genomes
+  VCF), the README's guide with the `20bp-NGG-SpCas9` PAM, 4 mismatches, 1 DNA and 1 RNA bulge, at
+  the default `CRISPRME_IUPAC_CAP`, gives 5 such rows (chr22:22410074, 22687072, 22687116, 22698190
+  and 22888934, all on the - strand, 8 to 13 variants each, 4 mismatches and 2 bulges, CFD at most
+  0.001). They name 102 individuals as carriers 114 times, and each time the carrier lacks one of
+  its row's variants: 342 of the run's 56,730 SNP-row carrier listings (a row lists its carriers
+  once for each of its three alignments). After `build-index-only --samplesID` the same search
+  returns exactly those 5 rows fewer, and every carrier it lists has all of its row's variants on
+  one phased haplotype. The `complete-search` banner and the report's Search mode row say so, and
+  to rebuild the index with `build-index-only --samplesID` or use a prebuilt one, as the README and
+  METHODS section 5 do; the report's legend (its Observed entry) and the caption of its top-1000
+  tables, the `--per-sample` help, METHODS section 7 and `docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`
+  state the limit. When no dataset of the search has the tiers, such a row of two or more SNPs
+  reads `N carriers (>=1 of K vars, poss. chimera)` in the report's `Observed` column, as in a
+  population-level search; the report cannot tell which dataset a row comes from, so beside a
+  dataset with the tiers it still reads `N cis carriers`, and the legend and the caption say why.
+  Results are unchanged. Pre-existing: 2.8.0 behaves the same; it is fixed in the next release.
+  Covered by `PostProcess/test_build_index_only_atomic.py` (the banner) and
+  `PostProcess/test_generate_report.py` (the report).
+- **A known limit, stated with its scale: on a row of several variants, the rsID and
+  allele-frequency lists are not in the order of its variants.** The post-analysis writes a row's
+  variant, rsID and AF lists one to one, in the variants' order, and the merge of a cluster's rows
+  (`remove_contiguous_samples.get_best_targets`) sorts each of the three on its own, as text, and
+  keeps each value once. So in `integrated_results.tsv` and the alternative alignments the n-th
+  item of `Variant_rsID` or `Variant_MAF` need not belong to the n-th variant of
+  `Variant_info_genome`, and two variants of one frequency show it once. A `--per-sample` search
+  of the README's guide (`20bp-NGG-SpCas9` PAM, 4 mismatches, 1 DNA and 1 RNA bulge) on the
+  self-test's index rebuilt with `build-index-only --samplesID` lists chr22:16858220 with the
+  variants `chr22_16858239_C_G,chr22_16858242_G_T` and the frequencies `0.000981162,0.805338`,
+  where the first variant's is 0.805338 and the second's 0.000981162, and two of its seven
+  multi-variant rows give one frequency for two variants. On ACTGA (`ACTGAAATCTGTAAGCAGGC`, NRG,
+  4 mismatches + 1 DNA + 1 RNA bulge, per sample, genome-wide, on the HGDP + 1000 Genomes index),
+  953 of 1,967 rows of two or more SNPs and 118 of 293 rows of an indel and one or more SNPs list
+  their rsIDs in another order than their variants (in the highest-CFD columns). The report's MAF,
+  the lowest frequency of the list, does not change; the rsIDs its `Variant` column gives after the
+  variants, and the rsIDs and AFs of `observed_haplotypes.tsv` and of a site's haplotype table in
+  the report, come in the list's order. METHODS section 8 states the limit. Pre-existing: 2.8.0 and
+  every release since early 2022 behave so, the 2.1.x releases this changelog lists among them
+  (before 2.4.0 each list came in an arbitrary order); it will be fixed in the next release.
+  Covered by `PostProcess/test_generate_report.py`.
+- **A known limit, stated with its scale: an indel (and, on an index without the dict-less tiers, a
+  SNP) whose record has `AF` at another place in `INFO` than the VCF's first record has no allele
+  frequency.** CRISPRitz `add-variants`, which writes an index's indel log and classic per-sample
+  dictionaries, looks for the `AF` key in the VCF's first record only and reads every record's `AF`
+  at that place in `INFO`, so a record that has it elsewhere gets none: its indel has no frequency
+  on any index, nor its SNP on an index without the dict-less tiers (with them a SNP's frequency is
+  the registry's, which `add-variants` does not write), and the report's MAF leaves it out. A VCF
+  merged with `seq_script/merge_panels/merge_vcf_panels.sh` has such records, since a site of one
+  source has fewer keys before `AF` than a site of two: the retired `NRG_3_hg38+hg38_1000G2021_HGDP`
+  index, built from such a merge, has no `AF` for 14,567,429 of its 15,583,931 indels (224,981 of
+  the 232,384 of chr22). Of the shipped indexes only HPRC's chrY is affected, whose VCF has `AF` at
+  five places: its log has none for 91,950 of its 102,665 indels. The HGDP1kGP index and HPRC's
+  other chromosomes have an `AF` for each of their 17,192,381 and 12,000,599 indels, as the
+  self-test's 1000 Genomes index has for its 64,528 indels and 993,880 SNPs. The mega's VCF has no
+  `INFO/AF` at all, only `AF_<dataset>` and `AF_max`, so none of its 13,853,761 indels has one and
+  the MAF of a row of an indel alone is blank there; the `indel_af.tsv` companion gives their
+  per-dataset frequencies. The report's MAF note (and, for a dataset without the dict-less tiers,
+  its Search mode and Allele-frequency basis rows and its legend's MAF entry, as the
+  `complete-search` banners), the README's MAF column and `--per-sample` text, METHODS sections 3, 7
+  and 8, `docs/DESIGN_mega_index.md`, the gaps of `docs/INDEX_PROVENANCE.md` and the VCF
+  requirements of `docs/INPUT_FORMATS.md` (with a check) now say so, and the header of
+  `merge_vcf_panels.sh` and `seq_script/merge_panels/README.md`, which said that the enricher reads
+  the pooled `AF` by its exact key, and a comment of `merge_mega_sites.sh`, which said that the
+  plain `AF` it writes gives indels the global `AF_max`, say what the enricher does. Results are
+  unchanged. Pre-existing: 2.8.0 behaves the same; it will be fixed in the next CRISPRitz release
+  (HPRC's chrY log needs rebuilding with it). Covered by `PostProcess/test_generate_report.py` and
+  `PostProcess/test_build_index_only_atomic.py`.
+- **METHODS section 2 says what a sites-only panel's registry holds for carriers and
+  homozygotes.** It said that the carrier and homozygote counts of the mega index are reported as
+  Hardy–Weinberg expectations from the allele frequency, flagged as estimates, and
+  `docs/DESIGN_mega_index.md` and `seq_script/merge_panels/README.md` said so too. None is
+  estimated: `compile_registry_from_info_af` (`build_mega_registry.py`) stores 0 for both, beside
+  the exact allele frequencies, and marks the registry as aggregate (`aggregation` `info_af`, and
+  `aggregate_af_only` for each dataset), from which the population-summary companion gives them
+  as NA; the report shows no carrier or homozygote count from the registry, and the carrier
+  overlay of `targets-scoring` prints the stored 0. METHODS sections 2 and 7, the two docs and the
+  README's `targets-scoring` section now say so (the overlay gives each variant's carrier count
+  over the panel and each dataset's highest allele frequency, not a carrier count per dataset, as
+  the README said). The code is unchanged: it has stored 0 since the mega index came, in 2.5.2,
+  whose METHODS already said otherwise. Covered by `PostProcess/test_registry_from_info_af.py`.
+
+### Fixed
+- **One indel off-target could be reported on every chromosome, each time with that chromosome's real
+  rsID, allele frequency and carrier samples.** Every CRISPRitz targets file carries a `#` header, and
+  `post_analisi_indel.sh` copies the merged indel file's first line as the header of each
+  per-chromosome subset — it is the only stage that does so, which is why only the indel leg was
+  affected. Two filters read that header as a target and dropped it:
+  `pam_filter.py` guarded headers with a column count, but the CRISPRitz header has all 10 columns, so
+  its `DNA` column was taken for a PAM region and rejected; and the `--max-total-edits` cap compared
+  `$10` (`"Total"`) against the numeric cap as strings. With the header gone, `head -1` returned the
+  first *data* row, and that single row was prepended to all ~23 subsets. Nothing rejected it, because
+  every chromosome's fake genome starts at coordinate 0 with near-uniform windows, so the indel lookup
+  (keyed on the fake position alone) resolved it against whichever chromosome was running and overwrote
+  the `Chromosome` column with that one. One raw search row therefore became one correct plus N phantom
+  report rows, each indistinguishable from a genuine annotated variant off-target. Measured genome-wide
+  on `ACTGAAATCTGTAAGCAGGC` at NRG 4+1+1 over HGDP+1kGP: 8 phantom rows on a dedicated NRG index and 11
+  on a pamless index, against an identical justified core of indel rows; because the injected row is
+  whatever lands at line 1, the count varied with the index. `pam_filter.py` and the edits cap now keep
+  `#` lines, `post_analisi_indel.sh` prepends only an actual header, and the indel post-analysis rejects
+  and counts rows carrying another contig's label. The injected row also moved one legitimate row's
+  CRISPR-Bulge score by one unit in the last place: scoring runs in fixed-size batches, so an extra row
+  changes a batch's contents and with it the order of the reductions inside it. That score now agrees
+  across indices. The SNP leg was never affected. Covered by
+  `PostProcess/test_indel_header_injection.py`.
+- **A chromosome with SNPs but no indels no longer aborts the whole search** (a regression in this
+  release's CRISPRitz pin, caught before shipping). The enricher builds each chromosome's fake-indel
+  genome from the indels some sample carries, so a chromosome with none gets an empty genome;
+  `buildTST` cannot index it and leaves that `_INDELS` sub-index without a `.bin`, and CRISPRitz 2.9.1
+  -- rightly, for a broken index -- refuses to search such a directory. One SNP-only chromosome
+  therefore failed the entire run, reported as an SNP post-analysis failure, where 2.8.0 had silently
+  returned the correct answer: no indel off-target there. Reproduced through the real CLI on chr21
+  (23,235 SNPs, no indel) + chr22 (2,891 indels): 2.8.0 exits 0 with 284 rows, 2.8.1 without the fix
+  exits 1 with none. `pool_index_indels.py` no longer hands an empty fake genome to `buildTST`, and
+  `pool_search_indels.py` skips a chromosome whose indel log records no indel, tolerating the missing
+  part file for that chromosome only. With the fix the same run exits 0 with a report byte-identical
+  to 2.8.0's. An index that is empty although its log lists indels is still a failure, and still
+  reported as one. Covered by `PostProcess/test_indel_empty_chromosome.py`.
+- **`NRR_3_hg38+hg38_mega` is republished: the 2026-10-27 archive found no indel off-target at
+  all.** Measured in the archive itself (downloaded; SHA-256 equal to the Hub's): its `_INDELS` holds
+  24 sub-indexes and **0** `.bin` files, and its `log_indels_hg38_mega` logs are header-only. It was
+  indexed from a mega fake-indel genome that predates the sites-only fix (#191) -- every chromosome's
+  FASTA a bare header -- by a script that bypassed `seq_script/merge_panels/mega_build_indels.sh`;
+  `buildTST` crashed on each empty genome and nothing checked. Every NRR mega search therefore
+  reported reference and SNP off-targets only, and on 2.8.0 said nothing. It also damaged
+  `NRG_3_hg38+hg38_mega` in a shared working directory: an install replaces each `Dictionaries/`
+  directory, so it swapped NRG mega's 419 MB of indel logs for the empty ones, and NRG mega then lost
+  its indel off-targets too. The replacement's `_INDELS` is rebuilt with CRISPRitz 2.9.1 from the
+  2026-10-10 mega kit genome -- which reproduces the published NRG mega `_INDELS` byte-for-byte, 32 of
+  32 files -- giving 67 `.bin` across 24 sub-indexes, and its `Dictionaries/` + `samplesIDs/` are
+  taken from the published NRG mega archive, so both mega archives now install identical
+  dictionaries. Its SNP index is unchanged. Measured genome-wide (sites-only, 4+1+1): the published
+  archive gives **0** indel off-target rows on 2.8.0, the replacement 2,081,489 on 2.8.1; and on
+  each of the 24 indel sub-indexes, the replacement's NRR targets filtered to NRG equal the
+  published NRG mega's exactly (1,131,494). **If you downloaded `NRR_3_hg38+hg38_mega` before
+  2.8.1,** remove `genome_library/NRR_3_hg38+hg38_mega{,_INDELS}` and download it again; that also
+  restores NRG mega's indel logs where the two share a working directory. Every other published
+  variant archive was checked the same way and is complete. A new release gate (T-40) checks this in
+  the archive for every variant index.
+- **`NRR_3_hg38+hg38_HPRC` is republished so that it defaults to per-sample analysis, like
+  `NRG_3_hg38+hg38_HPRC`.** Its index is complete, but its registry was built before the
+  `data_type`/`phased` stamps were added, and `complete-search` picks the default mode from that stamp
+  (per-sample only on `genotyped-phased`). An NRR HPRC search therefore ran population-level --
+  no named carriers, no CONFIRMED cis phasing -- on a phased panel, without saying so, and installing
+  it next to NRG HPRC replaced NRG HPRC's stamped registry and changed its default too. The
+  replacement changes only `Dictionaries/`, taken from the published NRG HPRC archive; the registry
+  data itself is unchanged. Passing `--per-sample` explicitly was never affected.
+- **Both `NNN_3` archives are republished, rebuilt with the CRISPRitz 2.9.1 builder.** The archives
+  uploaded on 2026-10-25 predate the genomic-`N` flank fix, so they lack every target whose 3-nt
+  flank holds an assembly `N`. 2.8.1 never reports a target with an `N` inside its PAM (the
+  post-search PAM filter now drops it, and under `--prune-pam` the engine already does), so a 3-nt
+  PAM gives the same report on the old and the rebuilt archives: `NGG`, `NRG`, `NRR` and the
+  unconstrained `20bp-NNN-NO-PAM` alike. The 2026-10-25 `NNN_3_hg38+hg38_HGDP1kGP`, downloaded and
+  searched with NRG `--prune-pam`, reproduced the dedicated NRG report byte-for-byte genome-wide. A
+  shorter 3′ PAM under `--prune-pam`, such as `20bp-NG-SpCas9NG`, does change: the old archives miss
+  each site whose base just past the PAM is an `N` (at an assembly-gap edge, and in the indel index,
+  whose fake-indel genome has an `N` every ~56 bases), and the rebuilt ones report it, as a
+  dedicated index for that PAM does. On a synthetic genome with four gap-edge sites, an NG
+  `--prune-pam` search gave 1 row on an index from the old builder and 5 on one from the new
+  builder, byte-identical to a dedicated NG index. The rebuild uses the old build's own inputs and
+  changes the index only where the fix predicts: 1,222 of the reference index's 1,628 bins
+  (+145,540 B) and 1,221 of the variant index's (+106,849 B), on exactly the 66 contigs that contain
+  `N` and on none of the other 389; and the whole indel index, whose 23 contigs are cut by `N`
+  every ~56 bases by construction (222 bins become 245, +2.1 GB). Built independently on two nodes,
+  the reference index is byte-identical. Searched genome-wide by a 2.8.1 release candidate (NRG
+  `--prune-pam`, 4 mm + 1 DNA + 1 RNA bulge, per-sample), the rebuilt pair matches the gate's
+  report in every column but `Annotation_COSMIC`, which
+  differs only because that run used freshly downloaded annotations, where COSMIC stays off until
+  its licence is attested. The released 2.8.0, searching chr22, gives byte-identical reports on
+  the old and the new reference index, with NRG and with NNN, but only because no hit there has an
+  `N` in its PAM: use the rebuilt archives with 2.8.1 or later. 2.8.0 keeps the targets with an
+  `N` in their PAM that the rebuild adds (it has no `--prune-pam`, ignores the flag, and its
+  post-search PAM filter lets the `N` through), and what a search that reaches one does depends on
+  its CRISPRitz. On 2.9.1 it fails in post-analysis (`ValueError: substring not found`). On 2.9.0,
+  which 2.8.0's image and its `install_from_source.sh` build, the engine writes such a target cut
+  short at its `N`, so the search fails in post-analysis (`IndexError: string index out of range`)
+  or, with RNA bulges only, finishes and reports the target as a 0-mismatch, 0-bulge off-target
+  with a 21- or 22-nt protospacer+PAM. On the synthetic gap-edge genome, reference-only, an index
+  from the new builder made 2.8.0 exit 1 at 2 mismatches + 1 DNA + 1 RNA bulge, with NRG and with
+  NNN, on either engine (one from the old builder gave 2 and 3 rows); on 2.9.0 with
+  `--bDNA 0 --bRNA 1` it gave 4 NRG rows where the old builder's index gave 2, three of them such
+  short rows with CFD 0.259, one in place of a real 1-bulge alignment. Genome-wide, the NRR search
+  in the post-search PAM filter entry below meets 1 such reference target, 1 variant target and
+  93,820 indel targets. If you searched the rebuilt `NNN_3` with 2.8.0, run that search again with
+  2.8.1. The variant archive grows from 108.4 GB to 109.5 GB. Hugging Face has served the rebuilt
+  archives since 2026-10-30. With 2.8.1 there is nothing to do unless you downloaded `NNN_3`
+  before the replacement on 2026-10-30 and search it with `--prune-pam` and a PAM shorter than 3
+  nt; then remove `genome_library/NNN_3_hg38`, `genome_library/NNN_3_hg38+hg38_HGDP1kGP` and its
+  `_INDELS`, and download again (`download` skips an index that is already installed).
+- **A PAM of any length other than 3 could be handed the 3-nt PAM-less index.** The three scans
+  that pick an index (the reference scan, the variant scan and the precomputed-variant detection)
+  globbed the requested PAM and then a literal `NNN_*`, whatever the PAM's length, and kept the
+  smallest sufficient bulge budget. So with `NNN_3` installed (published since 2026-10-25) and no
+  dedicated index winning, a search with SaCas9's 6-nt `NNGRRT`, SpCas9-NG's `NG` or Cas12a's
+  `TTTV` ran on an index whose stored flank cannot serve it. Reproduced on the released 2.8.0 with a
+  synthetic genome holding three planted SaCas9 sites: with `NNN_2` installed the run reported
+  `Reference index present (NNN_2_synth)` and failed with `Error on reading the PAM, input char is
+  not an IUPAC nucleotide`, where an empty library builds `NNGRRT_2` and finds all three. 2.8.1,
+  in the same layout, builds `NNGRRT_2` and returns the same three rows. The scans now share one
+  resolver that takes a PAM-less stand-in only when its name is all `N` at the PAM's width (or,
+  under `--prune-pam` and for a 3′ PAM, wider) and it was built for the PAM's side of the guide
+  (next entry), so a dedicated PAM that merely begins with `N`s, such as the shipped `NNNRRT`, is
+  never taken for one either. Covered by `PostProcess/test_index_resolution.py`.
+- **A PAM-less index built for the other side of the guide could answer a search, which then found
+  nothing.** An all-`N` index stores its flank where the PAM file it was built from puts the PAM,
+  and the engine reads the flank on the side the search's PAM file names. The resolver above took
+  an all-`N` index of the PAM's width (or wider, with `--prune-pam` and a 3′ PAM) whichever side
+  it was built for, as 2.8.0's `NNN_*` glob did, and the search then reported no off-targets and
+  exited 0. On a synthetic genome with three planted sites, reference-only, 2 mismatches + 1 DNA +
+  1 RNA bulge, Cas12a's `TTTV` on an `NNNN_2` index built from an all-`N` 3′ PAM file returned
+  0 rows, with or without `--prune-pam` and with or without `--index-path`, where a dedicated
+  `TTTV_2` index finds the three; an 8-nt 5′ PAM on a 3′-built `NNNNNNNN_2`, and `NGG` on an
+  `NNN_2` or `NNNN_2` built from a 5′ all-`N` PAM file, returned 0 rows too. CRISPRme now reads
+  the side from the index's `.pam_build`, which `build-index-only` writes and, from this release,
+  so does a search that builds an all-`N` index; an index without one (built by a search before
+  2.8.1, or by `crispritz.py` itself) is taken for a 3′ build at the widths of the published ones,
+  3 and 8, and at any other width the search builds its dedicated index (the entry on an index
+  taken only for the side it was built for, below). With no index left for its side, a search
+  builds a dedicated one, as for any missing index, and under `--index-path` stops with
+  `no matching reference index`, naming the all-`N` index it did not take and why. Without
+  `--index-path`, the `TTTV` and `NGG` searches above now build the dedicated index and report its
+  3 rows, byte-identical to a search of it. A search whose PAM is itself all-`N` builds its index
+  under the name an all-`N` index of that width has, and searched one built for the other side
+  under that name as if it had built it: `20bp-NNN-NO-PAM` on an `NNN_2` built from a 5′ all-`N`
+  PAM file reported no off-targets and exited 0, where a 3′ build gives 4 rows. It now stops there
+  and says to move that index out of the way. A 3′ build serving a 3′ PAM, and a 5′ build serving
+  a 5′ PAM of its width, are chosen as before, one a search built included: on a synthetic genome
+  with three planted Cas12a sites, the 5′ `NNNN_2` a `27bp-NNNN-5p` search builds serves `TTTV`
+  with or without `--prune-pam` under `--index-path`, 3 rows, the dedicated `TTTV_2` index's. A 5′
+  all-`N` index that a search built before 2.8.1 records no side, so a 5′ search refuses it and
+  says so: run `build-index-only` with the PAM file it was built from, the same `--genome` and its
+  bulges, which finds it in place and records the side. `build-index-only` no longer records a PAM
+  file over an all-`N` index whose `.pam_build` names the other side, which, now that a search
+  reads that record, would make a search on its real side refuse it and one on the other side find
+  nothing; it stops and says to build in another working directory. No published index searched
+  with a shipped PAM file reached any of this (the shipped 5′ PAMs are 4 nt, and the published
+  PAM-less flanks are 3 and 8 nt, all built for the 3′ side). A PAM-less index you built yourself
+  could: if you searched one with a PAM on the other side, run that search again. Covered by
+  `PostProcess/test_index_resolution.py`, `PostProcess/test_bulge_cap.py` and
+  `PostProcess/test_build_index_only_atomic.py`.
+- **A PAM-less index searched without `--prune-pam` kept targets with a genomic `N` in their PAM,
+  and the search then crashed.** With `NNN_3` serving an NRR (or NRG) search and no `--prune-pam`,
+  the post-search PAM filter (`pam_filter.py`, in releases since 2.2.0) treated an `N` in a target's
+  PAM region as matching any base, so it kept targets a dedicated index never returns: CRISPRitz
+  stores a genomic `N` as a code that matches nothing, so neither a dedicated nor a `--prune-pam`
+  search reports one. Genome-wide, NRR, 4 mismatches + 1 + 1 bulge, HGDP+1kGP per-sample, the
+  filter kept 1 extra reference target, 1 extra variant target and 93,820 extra indel targets (an
+  assembly-gap edge, and the `N`s that separate the windows of the fake-indel genome), exactly the
+  targets with an `N` in their PAM region, and the SNP post-analysis then failed on the `N`
+  (`cluster.dict.py`: `ValueError: substring not found`, `ERROR: off-targets post-analysis (snps)
+  failed`). A reference-only search failed the same way, in its reference post-analysis (`ERROR:
+  off-targets post-analysis (reference) failed`). Only an index that stores such targets reaches
+  this: a PAM-less one from the CRISPRitz 2.9.1 builder, such as the republished `NNN_3` (above);
+  the old builder dropped them. A target's `N` now matches nothing, at every position of the PAM,
+  even an unconstrained one, so an unconstrained `20bp-NNN-NO-PAM` search on such an index, which
+  kept these targets and failed the same way, now drops them too. The filter is unchanged for
+  dedicated indexes and under `--prune-pam`, whose targets never carry an `N` there (it dropped 0
+  in every such arm). With `--prune-pam`, `NNN_3` and `NNNNNNNN_3` were already byte-identical to
+  a dedicated NRR index on that search: 386,012 rows, the alternative alignments and observed
+  haplotypes included. Covered by `PostProcess/test_indel_header_injection.py`.
+- **`complete-test` passed a flag that did not exist.** The brute-force benchmark command included
+  `--bmax`, which `complete-search` has never had — it recomputes bMax from the per-type budgets — so
+  the argument was discarded unread. Harmless until unknown flags started being rejected, which then
+  broke every benchmark. The flag allowlist was checked against the help text and against what the
+  parser reads, but not against the commands this repo builds, so a dead flag in a caller could only
+  surface by running the benchmarks; that gap is now a static test.
+- **The documented install self-test tested nothing, and `validate-test` then failed with a
+  traceback.** README §1.3, §3.2 and the installer's last line presented `crisprme.py complete-test
+  --chrom chr22` followed by `validate-test` as a self-test that downloads chr22 and compares with
+  the brute-force ground truth. That benchmark mode runs only with `CRISPRME_ALLOW_ONDEMAND_BUILD=1`
+  set (`--vcf_dataset` does not select it, whatever the help said). Without it, `complete-test`
+  looked for a prebuilt index, found none in a fresh folder and exited 0 having tested nothing,
+  and `validate-test` then stopped with two tracebacks (`FileNotFoundError: ... vcf.config.test.txt`,
+  then `OSError`). The README (§1.3, §2.2.2, §2.2.3, §3.2), both commands' `--help` and the
+  installer now give the commands CI runs:
+  `CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G`,
+  then `crisprme.py validate-test --chrom chr22`. Where that run has left nothing to check,
+  `validate-test` says so in one line, naming both commands for the chromosome it was asked to
+  check (the chr22 pair without `--chrom`) and saying that in Docker its variable goes with `-e`,
+  and exits 1; any failed validation now exits 1 without `crisprme.py`'s `OSError` traceback after
+  `validate.py`'s own report. A benchmark whose brute-force reference covers chr22 only (the
+  Cas12a one and the single-"n edits" ones) is now skipped on any other chromosome and on a
+  whole-genome run, saying `SKIPPED: its brute-force reference covers chr22 only`. It used to be
+  compared there, with every CRISPRme site off chr22 counted as extra: after the chr21 run that
+  line names, `validate-test --chrom chr21` reported `[cas12a_hbg] FAILED` (223 extra sites) where
+  it now ends `1 passed, 0 failed, 5 skipped`. Validation on chr22 is unchanged. In Docker, the
+  only route on macOS, the variable must be passed with `-e`: set in front of `docker run` it
+  stays on the host, and the run tests nothing. README §1.2 and `docs/DOCKER_QUICKSTART.md` now
+  give that form. Also in the README: §1.3 clones the `v2.8.1` tag rather than `main`, and §1.2
+  says the image is built from source (CRISPRitz v2.9.1 compiled in it) and gives its download and
+  on-disk sizes separately. Covered by `PostProcess/test_validate_test.py`.
+- **An index still being built could be selected as if it were finished.** A build takes
+  `<dir>.lock`, and `index-genome` then creates the index directory and writes one `.bin` per
+  chromosome, so for the whole build a half-written index is indistinguishable from a complete one
+  by name. A run starting in that
+  window printed `Reference index present` and searched a **partial** index — fewer off-targets, no
+  error, exit 0 — and did so even when a complete, sufficient index sat right beside it. The scan now
+  skips any candidate whose build lock is held, and any directory holding no `.bin` at all, and the
+  run waits for that build instead, under `--index-path` as well. A symlinked index directory, as a
+  library shared between working directories uses, still counts: the check follows the link. Index
+  choice on a finished library is unchanged.
+- **A build lock left by a run that died stopped every later run that needed the same build.** A run
+  that builds a shared output (an enriched genome, a genome index, an INDELS index) holds
+  `<output>.lock` while it writes it, and every other run that needs that output waits for the lock
+  to go. In 2.8.0 that wait had no end: a run killed mid-build (SIGKILL, an OOM kill, a container
+  stop, a reboot) left its lock behind, and a later run needing the same output waited on it
+  forever, or, for an index, took the partial one for finished (above). Each lock now holds an owner
+  record (host, PID namespace, PID, start time), refreshed every minute while the build runs. When
+  the owner is gone on this host (it died, is a zombie, or its PID now belongs to another process),
+  the next run takes the lock over and builds the output again from scratch; from another host or
+  container, where the PID cannot be checked, it does so once the record has gone 15 minutes without
+  a refresh. With `--index-path`, which never builds a reference index, the run stops instead with
+  an ERROR that names the partial index and the command that clears it. A build stopped on this host
+  (Ctrl-Z, `kill -STOP`, a SLURM suspend) is waited for however long. A run ended by Ctrl-C, a
+  SIGTERM (`scancel`, a SLURM time limit) or a hangup leaves its lock for that takeover rather than
+  releasing it, since a released lock would hand on a half-written output as finished. A build
+  stopped for 15 minutes or more where no other run can check it (in another container or on
+  another host) can lose its lock; resumed, it ends with an ERROR once its build step returns and
+  uses none of what it built, so a library shared across hosts or containers must not have a build
+  suspended that long. While it waits, a run notes in `log_verbose.txt` who holds the lock and what
+  to do. A lock with no record, as 2.8.0 takes, is never broken by age, since a 2.8.0 run may still
+  be building under it: the run waits and says every five minutes how to clear it. Covered by
+  `PostProcess/test_index_resolution.py`.
+- **The RAM thread guard sized a search served by a PAM-less index as if it were a dedicated one.**
+  It chose its memory model from the requested PAM, so an NRG bulge search served by an all-N index
+  (`NNN_3`, or a wider flank under `--prune-pam`) was sized as constrained (4 GB base, 0.8 GB per
+  thread) instead of PAM-less (12 GB base, 2.2 GB per thread), and could be given more threads than
+  the host's memory holds, and be OOM-killed. A bulge search is now sized by the index it actually
+  searches. So is a variant search with no bulges that lacks its whole enriched genome (a
+  download), which searches its variant index. Any other search with no bulges scans the genome
+  FASTA, opens no index, and is sized as before. Only the thread count changes, never the results.
+
+- **A downloaded variant index warned that its genotype store was missing right after installing
+  it.** The "no `genotypes_<vcf>.tar.gz` companion ... per-sample Samples degraded" note was written
+  as the `else:` of the shared-reference-index `try`/`except`, so it fired whenever *that* download
+  succeeded — an unrelated event. It was wrong in both directions: false on a complete download, and
+  silent when the companion really was absent but the reference index was already installed, so its
+  block never ran. The note now follows the companion fetch's own result, and distinguishes
+  "genuinely absent" from "the fetch errored" — the latter already reports itself, and calling it
+  absent would be wrong.
+
+- **A search that legitimately found nothing was reported as a failure.** Three places sized a
+  CRISPRitz targets file with `-s` or `wc -l` to decide whether the search had found anything. Those
+  are equivalent to counting data rows only while the file has no header — which was true only
+  because the filter bug above was stripping it. With the header correctly preserved, a zero-hit
+  search left a header-only file, the zero-hit short-circuit saw a non-empty file, and the run
+  aborted with "the search found 1 raw off-target(s) but none survived post-analysis". The two bugs
+  had been cancelling. All three sites now count non-header rows through one helper, which also
+  handles a file that has no header rather than blind-skipping its first line. Caught by the Cas12a
+  brute-force benchmark, whose chr22 result is genuinely empty.
+
+- **`complete-test --chrom chr22` searched the whole genome, and the source installer started on
+  macOS.** The README (§2.2.2, §3.2.1) and `complete-test --help` presented `complete-test --chrom
+  chr22` against a downloaded index as a quicker single-chromosome test, but the prebuilt-index
+  smoke never received `--chrom`: it searched every chromosome of the index's genome, so with
+  `NRG_3_hg38+hg38_HGDP1kGP` it was a genome-wide variant search, with the 64 GB or more of RAM
+  that §0 gives for one. On a two-chromosome genome it returned 10 rows on `chr22` and 10 on
+  `chrA`. The smoke now searches only the chromosome `--chrom` names. It runs the same search from
+  a per-run view of the working directory in which that chromosome is the only one: a hidden
+  `.crisprme-test-view-*` folder of symlinks to its FASTA, to its trees in every index the search
+  could pick, to its `fake<chrom>` INDELS sub-index, to its fake-indel genome and to its indel
+  log, so that the search does not load another chromosome's search or post-analysis data (the
+  dataset-wide tier folders are linked whole). For a variant index without an INDELS index (that
+  of a dataset without indels, or one whose build stopped before it), the search builds a
+  throwaway one for that chromosome inside the folder, or finds no indel there to index, and
+  leaves none in `genome_library`. Before it makes the folder, the smoke refuses each part of its
+  dataset that `build-index-only` has marked unfinished and `complete-search` would refuse (see
+  below), in one ERROR line that names its real path, with nothing searched and no
+  `Results/crisprme-test-out` left behind. Nothing is copied, and the folder is removed when the
+  run ends, on Ctrl-C, SIGTERM or SIGHUP too: a SIGTERM or SIGHUP sent to `complete_test.py` alone
+  is passed on to the search, which is waited for (and killed after 10 s) before the folder goes,
+  and a hangup that `nohup` ignores stays ignored, as without `--chrom`. Its rows are the
+  whole-genome smoke's rows on that chromosome, identical in every column, as checked on each
+  sequence of a synthetic genome with a phased variant index and on `chr22` with
+  `NRG_3_hg38+hg38_HGDP1kGP`, both searched per-sample, the default on such an index; the one file
+  it leaves out is the header-only `fake<chrom>_*.indel_snp_cooc.tsv` that the whole-genome run
+  writes for a chromosome with indels but no indel off-target, which holds no row. There
+  `--chrom chr22` took about 1.5 to 4 minutes and 5 GB of RAM at 16 threads, the whole genome 11
+  to 17 minutes and 44 to 50 GB. A chromosome holding no off-target of the example guide, such as
+  `chrM` with `NRG_3_hg38`, passes with an empty result, as the whole-genome test reports none
+  there either (complete-search then writes no `integrated_results.tsv`). A chromosome the genome
+  or the index does not have is refused before anything is searched, in one line naming those both
+  have, and `crisprme.py` exits 2 without a traceback. Without `--chrom`, or with `--chrom all`,
+  the smoke runs the search it always ran, and the benchmark mode is unchanged. The help, the
+  no-index hints and the README say so, and the README's "Full Genome Test" runs
+  `complete-test --thread 4`, since `complete-test` with no option only prints its help.
+  `install_from_source.sh` now stops at once on macOS with one line pointing to Docker (README
+  §1.2), instead of failing later on a solver or compiler error, and `environment.yml` and the
+  README's source-build entry say Linux only. Covered by `PostProcess/test_complete_test.py` and
+  `PostProcess/test_install_from_source.py`.
+
+- **`--prune-pam` could run with pruning silently off.** `crispritz.py` builds its search argv
+  explicitly from the options it recognizes, so a CRISPRitz build without `--prune-pam` does not
+  reject the flag — it drops it, and the search runs unpruned over the whole PAM-less index. The
+  post-search PAM filter still enforces the requested PAM, so the report came out right while the run
+  read an index many times larger than it needed. `complete-search` now checks that the installed
+  CRISPRitz can prune and fails with an explanation if not, rather than assuming it from the pin,
+  which is overridable through `CRISPRITZ_REF` or an engine already on `PATH`.
+
+- **"The error log is empty" checks passed after any job that ran to the end, whatever it had
+  written.** A job that runs to the end renames its `log_error.txt` to `log_error_no_check.txt`, so
+  a check of `log_error.txt` could no longer fail by then. CI's read-only-container smoke checked
+  only `log_error.txt`, and printed PASS on this release's candidate although the reference-only
+  search it runs had no report (`report.log`: a TypeError) and its error log held three lines. The
+  smoke now checks whichever of the two files exists and requires the job's `<job>_report.zip`; the
+  zero-hit check, whose job ends before the rename, checks the same way. `docs/DOCKER_QUICKSTART.md`
+  and the web interface guide now name `log_error_no_check.txt` where they tell you to check the
+  error log of a job that ran to the end, and say that a job still running, failed or with no
+  off-targets keeps `log_error.txt`. The rename itself is unchanged.
+
+- **The report manifest could stamp a hardcoded version.** The run manifest in the shareable report
+  fell back to a literal `"2.8.0"` when a run recorded no version. It now resolves the real version,
+  and reports `unknown` rather than a plausible-but-wrong number — this manifest is the IND
+  traceability record.
+
+- **The report manifest named the wrong search-engine version.** `crispritz_note` carried a hardcoded
+  `(CRISPRitz v2.8.3)`, a literal that outlived three CRISPRitz pins, so every shipped manifest named
+  an engine the install had never run. The manifest now carries a `crispritz_version` field resolved
+  from the `crispritz.py` on `PATH` — the engine that actually ran — and `null` when it cannot be
+  determined, with no version in the prose. The test that should have caught this was asserting the
+  stale literal; it now asserts the property instead.
+
+- **A search with no variant off-target never got its shareable report.** Every reference-only
+  search, and any search in which no row carries a variant haplotype, ended its report step with
+  `TypeError: cannot unpack non-iterable NoneType object` in `report.log`: no `<job>_report.zip`,
+  `Building shareable report FAILED (non-fatal)` in `log.txt`, the "shareable report generation
+  failed" WARNING in the error log, and `generate-report --result-dir` exiting 1 with the same
+  traceback, while the web results page kept waiting for a report that never came. The
+  observed-haplotypes companion returned a bare `None` when it found no variant haplotype to group,
+  where its docstring and every other exit return `(None, [], {})`, the three values the report
+  unpacks. It now returns those, and the report is built without the companion, as it already was
+  for a variant search with no multi-haplotype site. Search results never changed, and the report
+  of a search with variant rows is byte-identical. Present since 2.7.10. Covered by
+  `PostProcess/test_generate_report.py`.
+
+- **History page no longer crashes when a job is queued.** With every search slot busy, a queued
+  job's `log.txt` exists (a queue note is written to it) but has no `Job\tStart` line yet;
+  `read_job_info()` raised `StopIteration`, which aborted the entire History-table build — so running
+  and completed jobs could not be opened until the queued job started. `read_job_info()` now returns
+  `None` for a not-yet-started or missing log (the caller falls back to the `.Params.txt` mtime, the
+  same stand-in the assembly path uses), and the per-job summary loop is guarded so a single not-ready
+  or malformed job directory can never take down the whole table. (Reported by M. Tognon.)
+- **Index/annotation download install is atomic and always structurally verified.** A partial or
+  failed download never touches the final install location, and a failure surfaces a copy-paste log
+  plus a Retry action instead of a silent or corrupt state. Two genome/VCF download behaviours change
+  from 2.8.0, which wrote straight into `Genomes/<ref>` and `VCFs/<ds>`: a folder that is a symbolic
+  link (for example to a shared copy) is replaced by the downloaded copy, with a NOTE, and the shared
+  copy is left untouched; a folder that is a mount point (including a bind mount) is refused before
+  the download starts, saying what to do instead, so `download --what all` stops at that component.
+- **Every annotated search left its sorted annotations behind, about 1.7 GB each.**
+  `complete-search` and `assembly-search` sort each `--annotation` / `--gene_annotation` into a new
+  `crisprme_annot_*` folder in the working directory (`$CRISPRME_TMPDIR` if set), and
+  `--personal_annotation` into a `crisprme_pannot_*` one. Nothing removed them, and the pipeline's
+  last step gunzipped the plain `.bed` back into them: with the shipped annotations about 280 MB
+  plus 1.4 GB per search, and one benchmark-mode `complete-test` left four of them, 3.4 GB. They
+  are now removed once the command that made them is over, whether it succeeded or failed (an
+  input error, a failed pipeline), and never another job's; `--keep-intermediates` keeps them, as
+  its `complete-search --help` entry and the README now say. They are kept, as before, whenever
+  the pipeline may still be running on them: after a Ctrl-C, on which `crisprme.py` kills only
+  the `/bin/sh` it started the pipeline with (where `/bin/sh` is dash, as in the Docker and
+  Apptainer images, an interrupt sent to `crisprme.py` alone, such as `kill -INT <pid>`, leaves
+  the whole pipeline running to the end; where it is bash, as on RHEL-family hosts, that shell is
+  the pipeline's own, and the step then running finishes on its own), and after a signal that
+  killed the pipeline itself, whose workers may outlive it. Search results are unchanged. Covered
+  by `PostProcess/test_annotation_tmpdirs.py`.
+- **The default variant index could fail to download through Xet, and CRISPRme then gave up at
+  once.** On 2026-10-31, `download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP` failed three
+  times in a row over an hour, from two networks and with hf_xet 1.7.0 and 1.8.0, with `File
+  reconstruction error: CAS Client Error: Format error: I/O error: error decoding response body`
+  after 7 to 13 minutes each (the failure is on Hugging Face's side and intermittent: the same
+  file downloaded through Xet on 2026-10-18 and again later that evening). Fetched over plain
+  HTTPS instead (Hugging Face serves every Xet file through its xet-bridge as well), it arrived
+  whole: 27,703,992,074 bytes, SHA-256 `e7046dcd…`, as published. CRISPRme retried
+  only a rate limit (HTTP 429) or a server error (5xx), so the first failure ended the download with
+  that message and nothing else. Now an hf_xet transfer failure switches the download to plain
+  HTTPS for the rest of the run (slower, but independent of Xet) and retries; other transport
+  failures (a reset connection, a timeout, a body cut short in requests or httpx) are retried with
+  the same backoff; and once the retries run out the error says it is usually a flaky network and
+  to re-run the same command. HTTP answers a retry would only repeat (401, 403, 404) and local
+  errors such as a full disk still fail at once. A download that works through Xet is unchanged.
+- **Pipeline failure summaries are binary-safe.** `summarize_pipeline_failure()` now reads `log.txt`
+  and `log_error.txt` with `errors="replace"`, so a single non-UTF-8 byte in a tool's captured
+  stderr no longer raises `UnicodeDecodeError` and masks the real error.
+- **`--personal_annotation` together with `--annotation` stopped the search before it began.**
+  `complete-search` exited 1 with `cat: .../crisprme_annot_*/annotation.sorted.bed: No such file
+  or directory` and `Error: Concatenating files failed`, so a personal annotation could only be
+  used without `--annotation`. The personal intervals are added to the sorted `--annotation` as
+  plain text, and since 2.4.0 that sorted file is bgzipped in its temp folder, which removes the
+  plain copy the merge then looked for. The sorted annotation is now decompressed for the merge.
+  The search's tables equal those of the same search given, as its only `--annotation`, the two
+  files concatenated by hand with each personal name tagged `_personal`: the personal intervals
+  appear in `Annotation_personal`. `--annotation` alone and `--personal_annotation` alone are
+  unchanged. Covered by `PostProcess/test_annotation_tmpdirs.py`.
+- **A search without annotations wrote two `gzip` errors to its error log.** Every
+  `complete-search` run without `--annotation` or `--gene_annotation`, and every web search with no
+  annotation enabled, ended with `gzip: .../vuoto.txt: unknown suffix -- ignored` twice in
+  `log_error_no_check.txt`, so its error log was never empty although nothing had failed. The
+  pipeline's last step gunzips the annotation files back beside their `.gz`; it compared each
+  path with the bare name of the empty placeholder, `vuoto.txt`, which a path never equals, and so
+  gunzipped the placeholder too. It now compares the basename, as the annotation step already
+  does. The noise came after the last stage check, so no run failed because of it, and an
+  annotated search still gets its `.bed` back beside the `.gz`. Present since 2.2.0. Covered by
+  `PostProcess/test_index_resolution.py`.
+
+- **`scorer-env create` failed whenever conda was the env manager, so a Bioconda or source install
+  could not run a search.** The CRISPR-Bulge env was created with
+  `conda create -y -n cbulge python=3.10 -c conda-forge tensorflow-cpu=2.13 …`. conda parses the
+  package specs as one positional argument, so the specs after `-c` were rejected as "unrecognized
+  arguments" (conda 25.3 and 26.9 alike; mamba and micromamba accept either order). conda is the
+  manager whenever the env was activated with `conda activate` (it sets `CONDA_EXE`), which covers a
+  Bioconda install and `install_from_source.sh`: the scorer env was never created, and every
+  `complete-search` then refused to start (or ran CFD-only under `CRISPRME_SKIP_SCORER_ENV=1`; a
+  search started from the web interface ran CFD-only). The command now puts
+  every option before the package specs. The Docker image builds the env with micromamba and was not
+  affected. Found by installing `crisprme` 2.8.0 from Bioconda the way a new user would (fresh
+  Miniforge, conda 26.9.4); with the fix, `scorer-env create`, its compute self-test and real
+  searches all pass.
+- **An interrupted or failed `build-index-only` no longer leaves a partial index or enrichment that
+  later runs use.** Every later run, `build-index-only` and `complete-search` alike, takes an index
+  directory or an enriched genome that is there for a finished one. `build-index-only` ran the engine
+  straight into `genome_library/<PAM>_<N>_<genome>[+<vcf>[_INDELS]]`, and moved the enriched genome
+  into place before the rest of the enrichment, so a build that ended early (Ctrl-C, an OOM kill, a
+  container stop, an engine error) left a partial one that every later search used: a reference
+  build killed after `chr1` was searched without `chr2`, with fewer off-targets and no error, and a
+  run killed while it compressed the dictionaries left them half compressed beside a finished-looking
+  enriched genome. Each index is now built by the same command in a hidden directory of
+  `genome_library` and renamed into place once the command has succeeded. A rename within one
+  directory never crosses a mount point, so a `genome_library` mounted on its own (`docker -v`,
+  `apptainer --bind`) works as before, and the index takes `genome_library`'s setgid group and
+  default ACL, as one built in place does. The enrichment is staged the same way: its dictionaries
+  are compressed and its fake-indel genome gets its SNP codes (see below) before anything moves, and
+  each set of dictionaries is put together whole in a hidden directory of `Dictionaries` (with
+  `Dictionaries` mounted on its own, that copies them); then the fake-indel genomes, the enriched
+  genome and the dictionaries are renamed into place, the indel logs last, in moments, a Ctrl-C,
+  SIGTERM or SIGHUP meanwhile waiting for the last rename. The enriched genome goes in marked
+  unfinished (a hidden `.building` in it) until the rest is in place: `build-index-only` does not
+  take a marked one for finished, and a search refuses it and needs both sets of dictionaries, so
+  a run that ends before then, even by a SIGKILL between two renames, leaves nothing either uses: a
+  search refuses the dataset up front, and the next `build-index-only` enriches again. (The
+  dictionaries alone used to let a search start, which enriched the genome itself, failed on the
+  fake-indel genomes in its way and left its own dictionaries, uncompressed, which later runs kept.)
+  A compression that fails now fails the build and puts nothing in place: `pigz`'s exit status was
+  ignored, and a Python gzip (used without `pigz`) that failed ended the run with a traceback, the
+  enriched genome already in place. An index or an enrichment that another run finished meanwhile
+  is kept, with a line on stdout. Ctrl-C, SIGTERM and SIGHUP still end the run by that signal, once
+  it has removed its build directories; a second one meanwhile (Ctrl-C pressed twice) waits for
+  that. On success the files, their contents (the `.gz` files included), permissions, sidecars,
+  stdout lines and exit status are as before.
+- **`build-index-only` stops while a search holds the build lock of what it uses or builds.**
+  `complete-search` holds `<output>.lock` while it enriches a genome or builds an index, and never
+  uses an output whose lock is there. `build-index-only` looked at no lock: started while a search
+  built the variant index, it took the half-written index for present and exited 0; started while a
+  search enriched the genome, it moved its own enrichment into the places the search was writing.
+  Now, while such a lock sits beside the reference, variant or INDELS index or the enriched genome
+  that it would use or build, it neither uses nor builds that output: it ends with an ERROR on stderr
+  and exit status 1, which names the lock and its owner and says what to do: wait for that run to
+  finish, or, if no run is building it, remove the lock and what it guards and run `build-index-only`
+  again (not `complete-search`: an enrichment it makes as it takes a dead run's lock over has no SNP
+  codes on its fake-indel genome). In the web Settings page the build then shows as failed, with
+  that ERROR. The locks are checked before anything is built, before each step, and just before a
+  finished build or enrichment goes into place. With no lock there nothing changes, and
+  `build-index-only` takes no lock of its own.
+- **A chromosome whose INDELS index fails to build now fails the build.** `pool_index_indels.py`
+  ignored each chromosome's `index-genome` exit status, so a chromosome that failed (a `buildTST`
+  error, an OOM kill) left a partial `_INDELS` index, which `build-index-only` took for built. It now
+  prints `Indexing failed for INDELs in <chromosomes>` on stdout and exits 1, and `build-index-only`
+  puts no index in place. The search ignores this status, as it goes by the engine's stderr, and is
+  unchanged.
+- **`build-index-only` checks `--vcf` before it builds the reference index.** A `--vcf` that names no
+  dataset, or a listing that names more than one, failed only once the reference index had been
+  built; it now fails first, with the same message. A valid `--vcf` builds what it built before.
+- **The SNP overlay can no longer leave a fake-indel FASTA cut short** (since 2.5.0). Before it indexed
+  the fake-indel genome, `build-index-only` overlaid the SNP codes onto each
+  `Genomes/<genome>+<vcf>_INDELS/fake_<vcf>_<chr>/fake<chr>.fa`, rewriting it in place. A run stopped
+  in that write left the file empty or cut short, and the next run indexed it as a whole one (an empty
+  one as `No indels on <chr>`), so the INDELS index had no indel target past the cut, with no error;
+  a write that failed (a full disk) was a WARNING, and the same run indexed what was left. The
+  fake-indel genome of an enrichment the run makes is now overlaid before it goes into place (next
+  entry); one already in place (a `build-inputs` kit, a run of an earlier release) is still overlaid
+  in place, now as the run begins. Either way each FASTA is written in a hidden directory beside
+  the original and renamed over it, with the same contents, mode and owner (one in place none of
+  whose bases changes, as on a dataset this release enriched, is left as it is), and an overlay
+  that fails fails the build with an ERROR: nothing of an enrichment the run makes goes into
+  place, and no INDELS index is built. A FASTA that an earlier release cut short is not detected:
+  if a `build-index-only` run was stopped while it overlaid, remove
+  `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS`, `Genomes/<genome>+<vcf>` and
+  `Genomes/<genome>+<vcf>_INDELS`, then run `build-index-only` again, which enriches again, and do
+  not search with that dataset until it has finished.
+- **A `build-index-only --vcf` run stopped after the enrichment no longer leaves the INDELS index blind
+  to the SNPs beside an indel** (since 2.5.0). `build-index-only` added the SNP codes to the
+  fake-indel genome only just before it indexed it, after the tier emission, the indel genotype store
+  and the variant index, most of a long build. A run stopped in between (killed, or its variant index
+  failing) left the fake-indel genome in place without them, with the dictionaries that let a
+  `complete-search` start. That search built the missing INDELS index from it (a search adds no SNP
+  codes), and every later `build-index-only` printed `Indels index already present` and kept that
+  index: off-targets that need both an indel and a nearby SNP were missing or scored too low, with no
+  error. A search that built the INDELS index while `build-index-only` built the variant index made
+  the same one. With the real engine, a toy site that needs an insertion and an SNP 5 bp from it on
+  one haplotype came out, after a kill while the variant index was built, with 4 mismatches and 1
+  bulge, CFD 0.197 and one of its two rsIDs, instead of 3 and 1, CFD 0.281 and both, and was lost at
+  `--mm 3`. The SNP codes now go onto the fake-indel genome in the enrichment's hidden build
+  directory, before any of the enrichment is in place, so an INDELS index a search builds from it is
+  the one `build-index-only` builds. An enrichment already in place without them (a kit, a run of an
+  earlier release, a search's own) got them only at that point too, so a run stopped before it left
+  the same: it now gets them as the run begins, whenever its INDELS index is still to be built.
+  From just before the first FASTA that changes until the overlay ends, the fake-indel genome is
+  marked unfinished, as the tiers are (next entry), and a search that would build an INDELS index
+  from it (the variant index it searches has none yet) refuses it until a `build-index-only` run
+  has finished the codes. `complete-search` refuses it before it starts, unless the dataset has
+  another variant index that serves the search with its INDELS index in place: the search then
+  goes on, and if the variant index it picks has no INDELS index, it fails as it comes to build
+  one, before it builds anything (`CRISPRme run failed`, with that ERROR in its `log_error.txt`),
+  as a search launched from the web does (next entry). A search whose INDELS index is in place
+  does not read that genome, and the mark does not hold it up. A fake-indel genome none of whose
+  FASTAs changes, as when a second PAM or bulge budget is built on a dataset this release
+  enriched, is neither marked nor rewritten. If a search built, from that genome meanwhile, the
+  INDELS index of the PAM and bulge budget that the `build-index-only` run builds (one that got
+  past its check of the mark before the run set it), that index is removed once the overlay ends,
+  and built again; that search's own results come from it, with exit status 0, so run such a
+  search again once the `build-index-only` run has finished. One that a search built while the
+  overlay changed no FASTA, with no mark there, came from the FASTAs the run indexes, and is kept
+  (`Indels index already present`). An INDELS index of another PAM or bulge budget that a search
+  built that way is not removed: remove it (`genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS`) once
+  that run has finished, and the next search or `build-index-only` run with that PAM and budget
+  builds it again. With `CRISPRME_INDEL_SNP=0`, which puts no SNP code on, `build-index-only` does
+  not build an INDELS index from a fake-indel genome that a stopped run left marked: it stops with
+  an ERROR saying to run it again with the overlay on (the default). On success the files, their
+  contents, stdout lines (the overlay's still print just before the INDELS index is built) and
+  exit status are as before, but for a re-run on a fake-indel genome that carries its codes
+  already: its overlay changes no base and rewrites none of its FASTAs, and where its lines said
+  `0 SNP overlays` and `0 flank bases IUPAC-coded`, as if it had found nothing, they now say how
+  many bases were coded already.  If, with an earlier release, a `build-index-only --vcf` run
+  stopped after its enrichment and a `complete-search` with that dataset ran before
+  `build-index-only` was run again to the end, or a search built the dataset's INDELS index while
+  `build-index-only` ran, remove `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS` and run
+  `build-index-only` again: it first adds the codes to the fake-indel genome in place, then builds
+  the INDELS index anew.
+- **A `build-index-only --vcf` run stopped while it writes the dict-less tiers or the indel genotype
+  store no longer leaves a part of them that searches use as the whole.** Once its enrichment is in
+  place, `build-index-only` writes the dict-less tiers (`Dictionaries/registry_<vcf>/` and
+  `genotypes_<vcf>/`) and the phased indel genotype store (`Dictionaries/indel_genotypes_<vcf>/`)
+  there chromosome by chromosome, and a search reads them chromosome by chromosome. A run stopped
+  in between (the tiers take about 150-180 GB of RAM a chromosome at scale, so an OOM kill is
+  likely there) left the chromosomes written so far, and the next `complete-search` ran with them,
+  exit status 0 and no warning, falling back to the dictionaries for the other chromosomes: there
+  it reported no SNP+indel co-occurrence, and other columns differed. With the real engine, after a
+  kill with one chromosome's tiers still to write, a toy site there that needs an insertion and an
+  SNP was reported only by an alignment one base over, with 4 mismatches and 2 bulges, CFD 0.101
+  and one of its two rsIDs, instead of 3 and 1, CFD 0.281 and both, and another site's best
+  CRISPR-Bulge alignment came out from the reference, score 0.399, instead of from its variant,
+  score 1.0 with its rsID and carriers. A run stopped once its enrichment was in place, before it
+  began on them, left the same enrichment without them, which a search took for one built without
+  `--samplesID`. Each of them is now marked unfinished (a hidden `.building` directory in it,
+  holding the run's owner record) from before a fresh enrichment goes into place until it is
+  written, and every search ends with an ERROR while the mark is there. `complete-search` says, for
+  a run that has stopped, to run `build-index-only` again, which resumes them and removes the mark,
+  and for a run still writing them, to wait for it. A search launched from the web runs the
+  pipeline script itself, past those checks, and still used them as whole: it now fails with an
+  ERROR in its `log_error.txt` that names the unfinished part and says to let that run finish or run
+  `build-index-only` again to its end (for the tiers, with their `--samplesID`, or built again in
+  the web Settings page) or, for the tiers and the indel genotype store, to remove them to search
+  without them, and the results page shows it. The same goes for the enriched genome marked
+  unfinished, and for the fake-indel genome marked unfinished (above) when the search would build
+  its INDELS index from it. `complete-search` names each marked part by its real path, the one a
+  symlink there points to. `publish-index` refuses such an index too. On success the files, their
+  contents, stdout lines and exit status are as before. A chromosome whose tiers or indel
+  genotypes fail to be written is still skipped with a WARNING, but the mark now stays, as a line
+  after the step's summary says, since a search would take the part written for the whole: run
+  `build-index-only` again once the cause is fixed, which writes the rest, or remove them to
+  search without them. That run still builds the indexes, but now fails at its end with an ERROR
+  (exit status 1) that says so, as does a run that ends with a part of the dataset that another
+  run marked unfinished, such as the tiers that a run with `--samplesID` was stopped writing,
+  which a run without it (as a build from the web Settings page was before this release) does not
+  write: it exited 0, which the Settings page showed as done, while every search of the dataset
+  was refused. A full disk or quota, an I/O error or no memory left there, which every chromosome
+  after would hit too, ends the run with an ERROR, the mark kept: it was a WARNING, the step took
+  its mark away, and once space was freed a search used the part as whole (with the real engine, a
+  run that filled the disk in the indel genotype store failed later, at the variant index, and the
+  next `complete-search` exited 0 with that store on one or two of its three chromosomes, a site
+  losing one of its two rsIDs). So does a `.done` marker the disk could not take beside a whole
+  indel genotype store, which was left empty and taken for done for good. Downloaded indexes carry
+  no mark. A part that a run of an earlier release left has no mark and is not detected: if such a
+  run was stopped while it emitted the tiers or the indel genotype store, run `build-index-only`
+  again to its end before you search with that dataset.
+- **The build directories of killed runs are reclaimed.** A SIGKILL (an OOM kill, a container stop)
+  leaves the build directory, holding a partial index or enrichment as large as the finished one,
+  which nothing read or removed. Each build directory now holds an owner record (host, PID namespace,
+  PID and start time, as a search's build lock does), and each `build-index-only` run first removes
+  those whose owner is gone on this host and PID namespace (dead, a zombie, or its PID now another
+  process's), with a line on stdout for each, whatever it goes on to build: after a kill, the next run
+  is often a `complete-search`, which builds the missing index or enriches the genome itself. The SNP
+  overlay's hidden directories beside the fake-indel FASTAs of the run's dataset hold an owner record
+  too, and are removed the same way. One whose owner is running or stopped, or has no record, is left
+  alone, as is any directory `build-index-only` did not make. One made in another PID namespace or on
+  another host, whose owner cannot be checked from here (a web container's own, once it restarted),
+  is left too, with a line on stdout that says how to remove it. The enrichment's directory,
+  `Genomes/run_*` before, which the web genome list showed as a genome, is now hidden and reclaimed
+  the same way, as is the one in `Dictionaries` that its dictionaries are put together in; the
+  search's own `Genomes/run_*` directories are untouched.
+- **A full disk, inode table or file-count quota while `build-index-only` builds an index no longer
+  leaves that index in place, cut short or short of contigs or of their parts.** `buildTST`
+  (CRISPRitz 2.9.1 and earlier) does not check its writes, so on a full disk it left a `.bin` empty
+  or cut short and still exited 0. `build-index-only` put that index in place (`Index built`,
+  `Variant index ready`) and, when the rest of the run fitted, exited 0 with empty stderr; every
+  later run printed `already present` and kept it, and every search failed on it (`is not a valid
+  CRISPRitz index (.bin) file (numLeaves=65535)`, `invalid TST node count (numNodes=0)`, or a crash)
+  until its directory was removed by hand. Before an index goes into place, each `.bin` the engine
+  wrote is now checked against what it records of itself (its number of targets, of tree nodes, and
+  the target its tree ends with), the INDELS index's chromosome by chromosome; one that is not whole
+  ends the run with an ERROR that names it and says the disk may be full, nothing goes into place,
+  and the next run, once there is room, builds it again. A whole index goes into place as before;
+  the check reads each `.bin`'s targets, about half a second for every 5 million (one `.bin`), so a
+  few minutes for a genome-wide index. An index that a run of an earlier release put in place cut
+  short is not detected: if a search fails on an index with one of the messages above, remove its
+  directory and run `build-index-only` again. Nor does `buildTST` check that a `.bin` opened: with
+  the disk's inode table or a file-count quota full (as on many HPC file systems), it made no `.bin`
+  for what it had left to save, the contigs after the one it was on and that contig's later parts
+  (it saves a contig's targets 5 million a `.bin`, each hg38 autosome in several), wrote nothing for
+  them and exited 0, every `.bin` there whole, so that index went into place and every search lacked
+  the off-targets left out, with no error (with the real engine, a ten-contig genome built with a
+  few inodes free went into place with 0 to 9 of its 10 `.bin`, and a search found a site that is on
+  every contig on 3, 6 or 9 of them; a genome whose last contig takes two `.bin` went into place
+  with the first one, and a search lost the site in the second). Once the engine has ended,
+  `build-index-only` now reads each contig left without a `.bin` for a target by `buildTST`'s own
+  rule (its PAM on either strand, the window inside the contig, no N in it outside the PAM), checks
+  that each other contig has its parts from 1 to the last one's number, and, where that last part
+  holds 5 million targets, as each part but the last does, counts the contig's targets by the same
+  rule. A contig with no `.bin` that holds a target, one that lacks a part, or one that holds more
+  targets than its parts ends the run with an ERROR that names it, nothing goes into place, and the
+  next run, once there is room, builds it again. Only the FASTAs of contigs without a `.bin` or with
+  a full last part are read whole, up to the first that fails. Where it cannot read such a contig as
+  `buildTST` does (a byte that is no IUPAC base, CRLF line ends), it makes and removes a file in
+  each directory of the index, and a disk or quota that cannot take it fails the build the same way;
+  with room left, such a contig is not told from a whole one. A contig with no target gets no `.bin`
+  and its index goes into place, as before, as does a whole index whose build left the inode table
+  full. The indexes a search builds itself, on demand, are not checked, and CRISPRitz's own writes
+  are still unchecked.
+- **A full disk or a kill no longer leaves a samplesID list cut short for good.** A merged-panel
+  `build-index-only` (two or more datasets) ends by copying each dataset's samplesID list to
+  `samplesIDs/<genome>_<dataset>.samplesID.txt` and writing their union,
+  `samplesIDs/<vcf>.samplesID.txt`, which `download --what index` and a search launched from the web
+  also write when it is missing. Each was written in place, and every later run keeps one that is
+  there: one that a full disk or a kill cut short was kept for good, and every later search of that
+  dataset read it as the whole list, with no error, `build-index-only` exiting 0. Each is now
+  written to a hidden file beside it and renamed into place, whole or not at all, and a full disk or
+  quota, an I/O error or no memory left as `build-index-only` writes them ends the run with an
+  ERROR, for the next run to write them; any other failure there is still a WARNING. On success the
+  files and their contents are as before. A list that a run of an earlier release cut short is not
+  detected: if one stopped or failed as it wrote them, remove the lists it wrote and run
+  `build-index-only` again.
+
+- **A source install read SNP dictionaries about 45 times slower than the Docker image.**
+  `environment.yml` installed `ijson` without `yajl` and `cffi`, so ijson fell back to its
+  pure-Python parser where the image uses its C backend (`yajl2_cffi`). The dictionary-based variant
+  post-analysis (complete-test's benchmark mode, a search on an index built from your own VCFs) and
+  `build-index-only`'s Tier-0 registry compile stream those dictionaries: one pass over chr22's
+  1.55 GB dictionary took 189 s instead of 4 s, and the chr22 benchmark's SNP post-analysis about
+  200 s instead of 5 to 17 s. `environment.yml` now lists `yajl` and `cffi` beside `ijson`, as the
+  Dockerfile does; a linux-64 solve of it adds exactly `yajl`, `cffi` and `pycparser`. Results were
+  identical either way, and a search on a shipped prebuilt index reads no such dictionary. A
+  Bioconda install lacks the two packages too until its recipe adds them.
+
+- **A search with no samples no longer writes into the install's empty `vuoto.txt`.**
+  `complete-search` without `--samplesID` (a reference-only search, or a variant-aware one
+  without it) hands the pipeline the shared empty placeholder `PostProcess/vuoto.txt` as its
+  samples file. The pipeline added a newline to it as it started and removed it only at the
+  very end, so every such run that ended earlier left one more newline in it for good: a
+  search that found no off-targets, one that failed, or one stopped with Ctrl-C (measured
+  through the CLI: 0 bytes, then 4 after one failed run and three with no hits). A
+  personal-assembly search (`assembly-search`, which the web interface's Personal-assembly
+  tab runs) does a reference-only search per haplotype with the placeholder, so it was
+  affected the same way: 2 bytes after one that found nothing. Only a search from the web
+  search form uses a samples file of its own, and never touched the placeholder. This
+  happened on every install the run could write to: Docker (as root), source installs, and
+  Bioconda, where the file is a hard link into the conda package cache, so the stray bytes
+  also reached any env later created from that cache. A read-only install was never written.
+  No result changed. The pipeline skips blank lines in a samples file. Where the same file
+  stands in for a missing `--annotation`, it is recognised by its name; for a missing
+  `--gene_annotation`, its copy goes through `sort-bed`, which drops blank lines. So a search
+  run with stray newlines in the placeholder reports what it reports with the file empty.
+  Reference-only and variant-aware searches without `--samplesID` report exactly what they
+  reported before (every result file compared; the only differences are those between any
+  two runs: the plot PDFs' creation dates, the logs' dates, timings, chromosome order and
+  free memory, archive timestamps, and the report's dates and plot element ids). The
+  pipeline now leaves the placeholder alone. It tells the placeholder apart as that very
+  file, not by its name, so a `--samplesID` list of your own that is also called `vuoto.txt`
+  is read as before. An install that already has the extra newlines needs nothing; to empty
+  the file anyway, run `: > "$CONDA_PREFIX/opt/crisprme/PostProcess/vuoto.txt"`. Present in
+  2.8.0 too. Covered by `PostProcess/test_index_resolution.py`.
+- **`scorer-env check` no longer lists `pkg_resources=?`.** `pkg_resources` has no version of
+  its own, so a healthy scorer env showed `pkg_resources=?`, which read like a missing
+  package. It now shows the version of setuptools, which ships it (for example
+  `pkg_resources=80.10.2 (setuptools)`; CRISPR-Bulge needs setuptools below 81 for it), or
+  `ok` where no version can be read. The same value goes to `Annotations/.scorer_env.json`.
+  The status, the other versions and the compute self-test are unchanged. Covered by
+  `PostProcess/test_scorer_env.py`.
+- **`validate-test` no longer prints pandas `FutureWarning`s, and runs under pandas 3.** Each
+  benchmark it compared printed `FutureWarning: Series.__getitem__ treating keys as positions
+  is deprecated` (two in the documented chr22 self-test): the brute-force reference's columns
+  were read by position from rows labelled by column name. pandas 3 removes that fallback, and
+  there `validate-test` stopped with `KeyError: 0`; the shipped environments keep pandas below
+  3, so a released install saw only the warnings. The columns are now read by position
+  explicitly. The comparison, its report and its exit code are unchanged. Covered by
+  `PostProcess/test_validate_test.py`.
+- **A source install no longer leaves an untracked `Annotations/` folder in the checkout.**
+  `install_from_source.sh` runs `scorer-env create` and `scorer-env check` in the checkout,
+  and they save the scorer env's state to `Annotations/.scorer_env.json` there. The
+  checkout's `.gitignore` covered the other data folders a search creates in the folder it
+  runs in (`Genomes/`, `Results/`, `Dictionaries/`, `VCFs/`, `PAMs/`, `samplesIDs/`), but not
+  `Annotations/`, so `git status` showed it after every install. It is now ignored (the
+  top-level one only: `test/data/Annotations/` holds tracked test files). Nothing to do; the
+  file is a diagnostic record. Covered by `PostProcess/test_install_from_source.py`.
+- **The unit tests pass inside the shipped image.** The build-lock tests in
+  `test_index_resolution.py` listed processes with `ps`, which the image does not have (no
+  procps): run there, the module ended with 44 errors and 6 failures. They now read `/proc`,
+  as the pipeline's own lock code does (`ps` only where there is no `/proc`), and pass in the
+  image as on CI. `test_crispr_bulge_fidelity.py` changed to a developer's folder as it was
+  imported, so `python -m unittest test_crispr_bulge_fidelity` failed everywhere. It now skips,
+  saying why, where TensorFlow or its dataset is absent, and in the cbulge env with the
+  dataset it runs the fidelity check as before (exit 0 on a match); its docstring says how to
+  fetch the one dataset file it needs. Searches are not affected.
+
+- **The report of a reference-only search described a variant search.** A search with no variant
+  dataset (no `--vcf`, or "Reference only" on the web form) got a shareable report that gave the
+  reference index as its variant dataset (`Variant dataset(s): NGG_2_hg38`; `reference only` for a
+  search with no bulges), printed the population-level analysis note with its advice to re-run with
+  `--per-sample`, an allele-frequency basis "over the merged NGG_2_hg38 panel" and the criteria of a
+  variant search, and, from the one variant registry a default install has, that panel's size and
+  "The database contributes N SNPs and M indels, all searched." The MAF notes under the tables named
+  the same "merged NGG_2_hg38 union panel", and `data/run_manifest.json`, the IND traceability
+  record, carried the index name in `variant_datasets` and the registry's counts in `database`. Such
+  a report now says `none (reference genome only)` in the header and in the inputs card, whose only
+  other row is the search criteria against the reference genome; the MAF notes say that every MAF is
+  blank because no variant dataset was searched; and the manifest has `variant_datasets` and
+  `database` null. A search is taken as reference-only when its `.Params.txt` records
+  `Ref_comp False`, which the command line and the web both write exactly then (for a folder
+  without that key: when neither the results file name nor `Genome_idx` names a dataset), and never
+  when a row is variant-created. Affected: every reference-only search, from the command line, from
+  the web, and the per-haplotype searches of `assembly-search`, whose reports the combined report
+  bundles. The text dates from 2.4.0; 2.7.10 to 2.8.0 built no report for these searches at all, so
+  2.8.1 would have been the first release to show it again. To correct a report built earlier,
+  rebuild it with `crisprme.py generate-report --result-dir Results/<job>`. Search results are
+  unchanged, and the report of a variant search is byte-identical. Covered by
+  `PostProcess/test_generate_report.py`.
+
+- **A multi-guide report garbled its variant dataset, and a report could take another dataset's
+  registry.** A search with more than one guide names its results
+  `Multiple_spacers+<PAM>_<genome>+<dataset>_<mm>+<bulges>_integrated_results.tsv`, and the report
+  split that name at the `_` inside `Multiple_spacers`, so the dataset read `NGG+hg38+hg38+1000G`
+  instead of `1000G` in the header, the inputs card, the MAF notes and `run_manifest.json`. That
+  label matched no variant registry, so the panel size and variant counts were right only while a
+  single registry was installed; with more, the report dropped the SNP and indel counts and the
+  manifest's `database`, and counted the panel over every installed samplesID file
+  (`3,048 individuals (1000G n=2,548, hgdpx n=500)` for a search of a 2,548-sample 1000G panel).
+  Separately, the registry was the first whose name held every dataset token, so a search of
+  `hg38_hgdpx` installed beside a merged `hg38_1000G_hgdpx` was given the merged panel's size and
+  counts (3,048 individuals and 31,130 SNPs instead of 500 and 4,624). The report now reads the
+  multi-guide name as it reads a single-guide one, and takes the search's own registry,
+  `Dictionaries/registry_<dataset folder>`, before any match by name. Affected: every multi-guide
+  variant search (the label), and searches on an install with more than one registry (the counts).
+  Present since 2.4.0. To correct a report built earlier, rebuild it with
+  `crisprme.py generate-report --result-dir Results/<job>`. Search results are unchanged, and the
+  report of a single-guide search is byte-identical unless it had taken another dataset's registry.
+  Covered by `PostProcess/test_generate_report.py`.
+
+- **A failed `complete-test` now ends with one line, which names an error log only where one was
+  written.** It ended with `crisprme.py`'s own `OSError` traceback, which pointed to
+  `Results/crisprme-test-out/log_error.txt`: a search refused before it starts writes no log there,
+  and the benchmark mode writes one for each benchmark, in `Results/crisprme-test-out_<name>`. It
+  now ends with one line naming each error log, not empty, that this run's searches wrote
+  (`complete-test` refuses to start while a folder of an earlier run of its mode is there, and names
+  only that mode's: `Results/crisprme-test-out_<name>` in the benchmark mode,
+  `Results/crisprme-test-out` in the smoke), or else saying to see the messages above, and exits 1,
+  as before. Covered by `PostProcess/test_complete_test.py`.
+- **`targets-scoring --index-path` refuses a dict-less registry that `build-index-only` has not
+  finished writing.** The carrier overlay read `Dictionaries/registry_<vcf>` as it found it, also
+  while a `build-index-only` run was writing it chromosome by chromosome, or after one had stopped
+  partway, and for each chromosome not written yet it reported 0 overlapping variants, with no
+  warning. It now refuses a registry marked unfinished (see the dict-less tiers entry), as
+  `complete-search` and `publish-index` do: it stops with a one-line `Error:` saying to let that run
+  finish, or to run `build-index-only` again to its end with its `--samplesID`. A registry that a
+  run of an earlier release left partway carries no mark and is not detected. A missing registry is
+  now also reported in one line instead of a traceback. Output for a finished registry is
+  unchanged. Covered by `PostProcess/test_targets_scoring.py`.
+
+- **A personal-assembly search with bulges searched the maternal haplotype with the paternal
+  haplotype's index, and a second individual with the first one's.** `assembly-search` runs one
+  `complete-search` per haplotype, and `complete-search` names a genome, and the index it builds or
+  reuses (`genome_library/<PAM>_<N>_<name>`), after the genome folder's name. A bundle assembly
+  (fetched from HPRC, or imported in Settings) keeps each haplotype in
+  `Assemblies/<individual>/<haplotype>/genome`, so every haplotype of every individual was searched
+  as `genome`: the paternal search built `NRG_2_genome`, the maternal search logged `Reference index
+  present (NRG_2_genome)` and searched the paternal sequence, and the reconciliation then reported
+  each site as found on both haplotypes. Haplotype-private off-targets were missed without a
+  warning. Two `--genome-paternal` / `--genome-maternal` folders with the same name collided the
+  same way. Reproduced with the real CLI on a synthetic bundle (4 mismatches + 1 DNA + 1 RNA bulge,
+  the web default): the two haplotypes' result files were byte-identical, and at chr1:35000 the
+  maternal results showed the paternal 2-mismatch protospacer instead of the maternal 4-mismatch
+  one; a second individual whose paternal haplotype carries that 4-mismatch sequence also got the
+  2-mismatch one. Each haplotype is now searched through a link named after it and its folder,
+  `haplotype_genomes/<key>/<individual>_<haplotype>_<hash>` in the working directory, where `<hash>`
+  is 8 hex digits of the folder's path, so it builds and reuses its own index
+  (`NRG_2_HG01255_paternal_5aeb0fc6`, `NRG_2_HG01255_maternal_067bdb25`); a genome folder that is
+  not in a bundle is named after the folder plus the same hash. The hash keeps these names apart
+  from every genome in `Genomes/`: a bundle search never takes the index of a
+  `Genomes/<individual>_<haplotype>` folder of the same individual (the layout before 2.6.0, or a
+  custom upload), a search of that folder never takes the bundle's, and two bundles whose folder
+  names differ only in characters a file name cannot keep (`HG.002`, `HG_002`) get an index each.
+  The per-haplotype result files carry that name too
+  (`<guide>+NRG_HG01255_paternal_5aeb0fc6+__4+2_integrated_results.tsv` instead of
+  `<guide>+NRG_genome+__4+2_integrated_results.tsv`). Each index a haplotype search builds records
+  the genome folder it was built from and the names, sizes and modification times of that folder's
+  FASTA files (`.genome_source`, which CRISPRitz does not read), and a later search of that
+  haplotype rebuilds the index when they have changed: a FASTA file added, removed, resized or
+  modified at another time, as when an individual is deleted and imported again with other files. A
+  FASTA file replaced by other content of the same size and modification time is not noticed, nor is
+  a change made after a search that was killed before it ended (its container stopped, say): the
+  record is written when the search ends, and an index without one is used as it is, as an index of
+  a legacy `Genomes/<name>` folder built by an earlier CRISPRme, or downloaded, is used as before. A
+  haplotype result written by the colliding search is not reused by a later run with the same
+  `--output`: it is searched again. With the fix the paternal results are unchanged byte for byte
+  apart from the genome's name (in file names, `.Params.txt`, `.command_line.txt` and the
+  haplotype's own report: its `report.html`, `data/Params.txt` and `data/run_manifest.json`, also
+  bundled in the combined report), the maternal haplotype reports its own sites, and a legacy
+  `Genomes/<name>` pair (the layout before 2.6.0) runs exactly as before. Each haplotype's index is
+  the size of a reference index; Settings > Delete > Personal assembly removes the individual's
+  haplotype indexes and links with its folder, and its confirmation names those indexes and counts
+  their size. **Affected:** every `assembly-search` with
+  bulges on a bundle assembly since 2.6.0, from the web or the CLI. The haplotype whose search built
+  the shared index (usually the first paternal haplotype searched) has correct results; every other
+  haplotype searched with that index does not. **What to do:** run those searches again, and delete
+  the index `genome_library/<PAM>_<N>_genome` they left (e.g. `NRG_2_genome`: Settings > Delete >
+  `Index: NRG_2_genome`). `assembly-search` no longer uses it, but a `complete-search` with bulges
+  of a folder named `genome` still finds it by that name: such a search of one haplotype of a bundle
+  is refused while it is there (see below), and a search of any other folder named `genome` takes
+  it. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+- **A search without bulges of a genome folder outside `Genomes/` came back empty, or scanned
+  another genome.** The 0-bulge search reads the genome's FASTA files directly, and read them from
+  `Genomes/<name of the --genome folder>/` instead of the folder it was given. Without such a folder
+  the search engine reported `ERROR! /DATA/Genomes/<name>/ is not a directory.` but exited 0, and
+  the search ended with "The search completed successfully; the result set is empty". With one, that
+  folder was scanned in place of the given one (a `--genome other/hg38` whose chr1 carries a
+  2-mismatch site at chr1:35000 reported the 4-mismatch protospacer of `Genomes/hg38` there). On the
+  command line this hit `complete-search --genome <folder outside Genomes/>` with `--bDNA 0 --bRNA
+  0`, and the same search without bulge flags when the library has no index of that genome, since
+  the bulges then default to 0 (`complete-search --genome /data/mygenome --guide ... --pam ... --mm
+  4`). It also hit every personal-assembly search without bulges whose haplotypes are kept outside
+  `Genomes/`, as every bundle's are (`Assemblies/<individual>/<haplotype>/genome`): both haplotypes
+  came back empty, and the combined report then failed on the empty set (`TypeError`, see below), so
+  `assembly-search` exited 1; `--bDNA` and `--bRNA` are optional and default to 0, so this was the
+  documented minimal command (`assembly-search --assembly-individual <name> --guide ... --pam ...
+  --mm ...`). The search now scans the folder it is given: a copy of `Genomes/hg38` outside
+  `Genomes/` reports the same 9 sites as `Genomes/hg38`, and on the synthetic bundle each haplotype
+  reports its 9 sites. A search of a genome in `Genomes/`, which includes every search from the
+  web's Reference genome tab, scans the same folder as before; reference and variant search outputs
+  were compared byte for byte, with and without bulges. A search of such a folder with bulges takes
+  the index of its name, and is now refused when that index, or a folder of that name in `Genomes/`,
+  is another folder's (next entry). **Affected:** 0-bulge `complete-search` runs of a genome folder
+  outside `Genomes/` from the command line, and 0-bulge personal-assembly searches of haplotypes
+  outside `Genomes/` (every bundle assembly) from the CLI or the web. **What to do:** run them
+  again. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+- **A search with bulges of a genome folder outside `Genomes/` could search another folder's
+  sequence.** `complete-search` takes a genome's index (`genome_library/<PAM>_<N>_<name>`) and its
+  variant genomes (`Genomes/<name>+<dataset>`) by the genome folder's name alone, whatever folder
+  they were built from. With bulges, `--genome /data/projB/ref` took the index a search of
+  `/data/projA/ref` had built and reported projA's sites (at chr1:35000 of the synthetic bundle,
+  projA's 2-mismatch protospacer instead of projB's own 4-mismatch one), and `--genome other/hg38`
+  took the index of `Genomes/hg38` and reported its sites, as the same command without bulges did by
+  scanning `Genomes/hg38` itself (previous entry). Given no `--bDNA`/`--bRNA`, that search takes 1 +
+  1 bulges when `Genomes/hg38` is there, so the plain command was hit too. The other way round, a
+  search of `Genomes/<name>` took the index that a search of a folder of that name outside
+  `Genomes/` had built. `complete-search` now refuses a search with bulges, or with `--vcf`, of a
+  folder outside `Genomes/` whose name a folder in `Genomes/` has, and of any genome folder whose
+  name an index recorded from another folder carries, with a message naming the folder or index in
+  the way. The message says how to run the search again: with its `--bDNA`/`--bRNA` (given none, the
+  search of a renamed folder, or of one whose index was removed, may take no bulges and miss every
+  site that needs one), and, under `--index-path`, without it, since the pipeline builds no index
+  there (and so without `--prune-pam`, which needs `--index-path`). An index that
+  `complete-search` builds of a folder outside `Genomes/`, and one that `build-index-only` builds
+  (the entry on its record, below), records that folder and its FASTA files (`.genome_source`, as
+  a personal-assembly haplotype's index does), and is built again when those files change (not
+  under `--index-path`, which builds no index and takes it as it is). The record names a folder of
+  the machine that built the index, so `publish-index` leaves it out of the archive and `download`
+  drops it: a downloaded index records no folder. A search of a genome in `Genomes/` runs exactly
+  as before and its index records nothing; an index that records nothing (built by an earlier
+  CRISPRme, or downloaded) is taken as before, except by a search of one haplotype of a personal
+  assembly (next entry), and so are the indexes of a library given with `--index-path` other than
+  the working directory's `genome_library/`. The reference and variant search outputs of
+  `Genomes/hg38` were compared byte for byte, with and without bulges. Two cases are not caught:
+  two first searches of two such folders that start together (one of them searches the index the
+  other builds), and a search from the web's Reference genome tab, which runs the pipeline without
+  this check, of a `Genomes/<name>` added after a folder of that name outside `Genomes/` was
+  searched with bulges. **Affected:** `complete-search` runs from the command line, with bulges or
+  with `--vcf`, of a folder outside `Genomes/` named like a folder in `Genomes/` or like another
+  folder searched with bulges in the same working directory, and searches, from the CLI or the
+  web, of that `Genomes/` folder made after them. **What to do:** run them again, with a name of
+  its own for each folder and with the bulges they ran with (`--bDNA 1 --bRNA 1` for one with
+  bulges that gave none). An index built before 2.8.1 records no folder: where folders of one name
+  outside `Genomes/` were searched with bulges, remove the indexes of that name (Settings >
+  Delete > `Index: <PAM>_<N>_<name>`, or the folder `genome_library/<PAM>_<N>_<name>`), so that
+  each search builds its own. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+- **A search with bulges of one haplotype of a personal assembly could search another haplotype's
+  sequence.** Searched on its own, `complete-search --genome
+  Assemblies/<individual>/<haplotype>/genome` names the genome, and its index, after that folder,
+  `genome` for every haplotype of every bundle (first entry), so with bulges it took any
+  `genome_library/<PAM>_<N>_genome` there: the one an `assembly-search` with bulges had left, or one
+  that a search like this one of another haplotype had built. Given no `--bDNA`/`--bRNA`, the search
+  takes 1 + 1 bulges when such an index is there, so the plain command was hit too. Reproduced on
+  the synthetic bundle after an `assembly-search` of it: the maternal haplotype logged `Reference
+  index present (NRG_2_genome)` and reported the paternal 2-mismatch protospacer at chr1:35000
+  instead of its own 4-mismatch one. Such a search is now refused before it starts while an index of
+  that name that it would take records no genome folder, as one built before 2.8.1 does, or while
+  one records another folder (as any search is: previous entry). The message names the index and
+  says to search the individual with `assembly-search`, which searches each haplotype on an index of
+  its own, or to remove the index and run the search again, which then builds its own from the
+  haplotype's folder. For either it gives the search's `--bDNA`/`--bRNA`: `assembly-search` takes no
+  bulges by default, and, given none, the search of the haplotype may take none once the index is
+  removed (on the synthetic bundle it then reported 9 sites instead of 17). A search without bulges
+  and without `--vcf` is not refused: it scans the haplotype's folder (second entry).
+  `assembly-search` and searches of any other folder are not refused this way. **Affected:**
+  `complete-search` runs with bulges, from the command line, of one haplotype folder of a bundle, in
+  a data folder where another haplotype had been searched with bulges. **What to do:** run them
+  again with `assembly-search`, or delete the index (e.g. `NRG_2_genome`) and run them again, giving
+  the bulges they ran with (`--bDNA 1 --bRNA 1` for one that gave none; `assembly-search`'s default
+  is 0). Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+- **A genome in `Genomes/` that is a link to a folder of another name failed in the post-analysis.**
+  The pipeline resolved the link and named the genome after the link's target in one step and after
+  the link in another, so a search of `Genomes/hg38lnk` -> `../shared/GRCh38_copy` stopped with
+  `grep: .../crispritz_targets/GRCh38_copy_..._targets.txt: No such file or directory` and `ERROR:
+  off-targets post-analysis (reference) failed` (exit 1), with or without bulges. The web runs the
+  same pipeline on `Genomes/<name>`, so its searches of such a genome failed the same way. A link
+  named like its target (`Genomes/hg38` -> `/shared/genomes/hg38`) was not affected. The genome now
+  keeps the name of the folder the search is given (each personal-assembly haplotype is searched
+  through such a link, named after the haplotype). The linked genome's results equal those of the
+  same sequence in `Genomes/hg38`, apart from the genome's name in the file names. **Affected:**
+  every reference search (no `--vcf`) of such a link, from the CLI or the web. **What to do:** run
+  them again. A variant-aware search (`--vcf`) of such a link still fails, as before, at the
+  enrichment (`mv: cannot stat '.../SNPs_genome/hg38lnk_enriched/'`, then `ERROR: Genome enrichment
+  failed on <dataset>`): for it, name the link like its target folder, or put the folder itself in
+  `Genomes/`.
+- **A personal-assembly search stopped before its combined report when a haplotype had no
+  off-target.** When the guide had no off-target on one haplotype (or none there that lifted to
+  hg38), or none on either, `assembly-search` wrote the combined table and then failed with
+  `TypeError: cannot concatenate object of type '<class 'numpy.float64'>'` (exit 1); on the web the
+  job finished without a combined report. The combined table (`<job>_combined_hg38.tsv`) left out
+  the columns of a haplotype without off-targets, and the report reads both haplotypes' columns. The
+  table now always has both haplotypes' columns, blank for a haplotype without off-targets as on any
+  row found on one haplotype only, and the combined report is built (with no off-target on either
+  haplotype it says "No off-targets in this run."). A search with off-targets on both haplotypes
+  writes the same table and report as before (compared byte for byte, apart from generation times
+  and the random ids in the plots). **Affected:** such searches, from the CLI or the web, e.g.
+  `--mm 0` with a guide that matches one haplotype only. **What to do:** run them again for the
+  combined report. Covered by `PostProcess/test_assembly_reconcile.py`.
+- **A search could run on the index of another genome whose name ends in the searched genome's
+  name.** The pipeline picks an installed index by the genome's name,
+  `genome_library/<PAM>_<N>_<name>`, but the pattern it matched also took
+  `<PAM>_<N>_<prefix>_<name>`, the index of another genome: with `NRG_2_mini_hg38` installed, a
+  search of `hg38` with bulges used it instead of building `hg38`'s own, and used it ahead of an
+  installed `NRG_3_hg38` too, as the smaller bulge budget won; nothing in the output said so. The
+  same happened between two individuals of the `Genomes/<individual>_<haplotype>` layout (before
+  2.6.0) whose names end alike: reproduced with `assembly-search` of `X_WALK01` first, after which
+  both of `WALK01`'s haplotypes logged `Reference index present (NRG_2_X_WALK01_...)` and reported
+  `X_WALK01`'s sites. Only an index named for the genome itself is now taken. A library without two
+  such names picks the same index as before, and reference and variant search outputs were compared
+  byte for byte. **Affected:** searches with bulges, from the CLI or the web, of a genome `<name>`
+  while `genome_library/` held an index of a genome named `<prefix>_<name>` (`NRG_2_mini_hg38`
+  beside `hg38`; the legacy layout's `X_WALK01_*` beside `WALK01_*`). **What to do:** run them
+  again; for `assembly-search`, with a new `--output`, since a completed haplotype result of the
+  same `--output` is reused. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+- **Two searches that started together on a data folder without `genome_library/` could fail.** The
+  pipeline makes `Results/`, `Dictionaries/`, `Genomes/` and `genome_library/` when they are
+  missing, after checking for each; two runs that started at the same moment (two web jobs, or two
+  `docker run`s) both found `genome_library/` missing, and the second to make it stopped with
+  `mkdir: cannot create directory '/DATA/genome_library': File exists` and `ERROR: Genome enrichment
+  failed on _` (exit 1). `crisprme.py` makes `Genomes/`, `Results/` and its other folders the same
+  way, and could stop with `FileExistsError` there. A folder made meanwhile is now no error.
+  **Affected:** searches started together on a data folder without those folders, such as the first
+  ones before any index is downloaded or built there, from the CLI or the web. **What to do:** run
+  the one that failed again. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+- **The personal-assembly results header, History and combined report named both haplotypes
+  "genome".** The header and History showed `Paternal genome: genome | Maternal genome: genome`, and
+  the combined report (`report.html` in `<job>_combined_report.zip`) the same in its Paternal genome
+  and Maternal genome rows: the name of the folder every bundle haplotype is kept in, which
+  `assembly-search` wrote into the job's `.Params.txt` when it finished (the web form's own label
+  was overwritten). All three now show the bundle's assembly name (`assembly_name` in its
+  `metadata.json`; for an HPRC fetch, the HPRC assembly name), or `<individual>_<haplotype>` when
+  the bundle records none, from the CLI and the web alike; a legacy `Genomes/<name>` folder keeps
+  its name. Jobs that already finished keep the label they were written with.
+- **Submitting the Personal assembly tab with no individual selected listed six fields the form does
+  not show.** The warning listed "paternal genome", "maternal genome", the two chain files and the
+  two chromAlias files, which the Individual picker fills. It now says "select an individual on the
+  Personal assembly tab" once; any other missing input, such as the guide, is still listed.
+- **The Personal assembly tab ignored the "Maximum edits" slider.** The web form never passed it on,
+  so an assembly search always allowed mismatches + DNA + RNA bulges in total, whatever the slider
+  showed (with the slider at 3 and Advanced options closed, the results header said "Max total
+  edits: 6"). The slider now applies as on the Reference genome tab: with Advanced options closed it
+  caps the total edits (`assembly-search --max-total-edits`), with them open the per-type caps
+  govern. A search left at the defaults (slider 6 = 4 mismatches + 1 + 1 bulges) runs the same
+  command as before.
+
+- **The web form sent a search to an earlier job that was not the same search.** A submission
+  whose guides and `.Params.txt` matched an earlier job was not run: the earlier job was shown
+  instead. `.Params.txt` does not record the analysis mode, the full-report option or which
+  annotations are enabled (it names only the assembled `.active.<genome>.bed.gz`), so a
+  Population-level request was sent to an earlier per-sample job (and the reverse), a
+  full-report request to a slim one, and a search made after the annotations were changed in
+  Settings to a job with the old annotations; the job name typed was dropped, and nothing said
+  that the search had not run. In the walkthrough, a Population-level request named
+  `walk_popmode` opened the earlier job `walk_var_ps_...`, whose `.search_mode` is
+  `per-sample`. Each web job now records these, the CRISPRme version and the job name in
+  `.reuse_key.json`, and an earlier job is reused only when they match too. The status page of a
+  reused job says that the search was not run again, and that submitting it with another job
+  name runs it again. An identical resubmission is still reused; a job made before 2.8.1 has no
+  record and is never reused. Two smaller faults of the same code are gone: the notification
+  email of a reused job linked to the job folder that the reuse deletes, and a submission that
+  joined a queued identical search left a job folder that never ran, to which a later identical
+  submission could be sent. **Affected:** web searches only; the command line never reuses a
+  job. **What to do:** for a web job that may have been answered
+  by an earlier one, check its `.search_mode` and report against what you asked for, or submit
+  it again with another job name. Covered by `PostProcess/test_web_search_reuse.py`.
+- **The "Top 1000 candidate off-targets" plots and the Personal Risk Card "Top 100" plots left out
+  every site with 0 or 1 mismatches + bulges**, with nothing on the plot to say so: every
+  1-mismatch-or-bulge off-target and every perfect match, the on-target and any variant-created
+  perfect match among them, the strongest sites of all. In the walkthrough's variant search the CFD
+  plot showed 9 of the 18 sites found (the four perfect matches and the five 1-edit sites, CFD
+  0.077 to 1.0, were missing), and sample S1's card plot 1 of its 3 personal targets. They are
+  plotted now, the perfect matches marked with a black star and a legend entry, and the caption
+  above the plot on the Graphical Reports tab says so. A plot of a single site without a variant is
+  drawn too: it failed, and no later plot was drawn, so a search whose only off-target with 2 or
+  more mismatches + bulges was a reference one got no top-1000 plots (the error was discarded). The
+  card's "Top 100 Private Targets" plot was drawn from the personal targets, so it repeated the
+  personal plot; it is drawn from the private ones now (an empty plot for a sample with none).
+  **What changes:** the plot images a search writes to its `imgs/` folder
+  (`CRISPRme_{CFD,CRISPR_BULGE,fewest}_top_1000_log_for_main_text_<guide>` and
+  `CRISPRme_{CFD,CRISPR_BULGE}_top_1000_by_variant_effect_<guide>`, `.png` and `.pdf`), from the
+  web and from `complete-search`, as shown on the Graphical Reports tab, on the personal-assembly
+  results page and in the combined personal-assembly report; and the Personal Risk Card plots, on
+  the web and from `generate-personal-card`. Search results and every table are unchanged; the
+  shareable report draws its own plots and tables, and still leaves these sites out of them (next
+  entry). Plots made before this release stay as they are, and that caption, shown above them too,
+  says that a plot drawn before 2.8.1 leaves these sites out: run the search again for new ones (a
+  Risk Card made earlier shows its saved plots). Covered by `PostProcess/test_top_plots.py` and
+  `PostProcess/test_web_results_links.py`.
+- **The shareable report did not say that its top-1000 plots and tables leave out the sites with
+  0 or 1 mismatches + bulges.** Its Section 2 plots and its Section 6 tables, with their
+  downloads `top1000.tsv` and `top1000_crispr_bulge.tsv` (and the Section 5 tables of the
+  personal-assembly report, with `<name>_combined_top1000.tsv`), leave out the perfect matches
+  and the off-targets with 1 mismatch or bulge, as before, with nothing on the page to say so. In
+  the walkthrough's per-sample search that is 9 of its 18 sites: the four perfect matches and
+  the five 1-edit off-targets, CFD 0.077 to 0.636. Each of these views now has a caption that
+  says how many sites it leaves out and where they are: all in the recommended validation panel
+  (`panel_top100.tsv`), the perfect matches first, and the 1-edit off-targets also in
+  `mmb_le_1.tsv`. The tables and files themselves are unchanged. **Affected:** every report of a
+  search that found a perfect match or a 1-edit site, from the web, `complete-search`,
+  `generate-report` and `assembly-search`. **What to do:** take these sites from the validation
+  panel or `mmb_le_1.tsv`, not from the top-1000 files; for a report made before,
+  `crisprme.py generate-report --result-dir Results/<job>` writes one with the captions. Covered
+  by `PostProcess/test_top_plots.py`.
+- **The search form's bulge note and defaults did not match the installed indexes, and the docs
+  said the web interface never builds an index.** With the reference index installed and 1 bulge
+  selected, the note under Advanced options said that the first bulge search would build the
+  reference index; for a variant panel whose genome and VCF files are installed but that has no
+  index yet, it said there was "no raw genome to build one", although Settings can build it. That
+  panel set the DNA and RNA bulges to 0, and with them Max edits to 4, and choosing Reference only
+  again, or a panel with a 1-bulge index, did not give back 1, 1 and 6: a search submitted then ran
+  with at most 4 mismatches + bulges, unless the user noticed (in the walkthrough data, a search on
+  the panel `walk`, chosen after `walk2`, which has no index, found 15 of the 18 sites it finds
+  with `walk` chosen straight away). The note now compares the bulges selected with the installed
+  reference index and says when the search will build a deeper one first (a web search does, from
+  the installed genome, once). For a panel with no variant index it says that only a 0-bulge search
+  is offered and that the first one prepares the variant genome and a 0-bulge index (hours on a
+  full genome), and to build the index in Settings ("Build an index locally") when the genome and
+  VCF files are installed, or to download one otherwise. A search prepares the variant genome
+  from VCF files one per chromosome, and only a build of the index splits a single
+  multi-chromosome file, as the Settings card says: for a panel added as one such file (an upload
+  or a server folder) the note now says to build its index in Settings first, or to add the panel
+  again as one VCF file per chromosome, and Submit refuses its search with the same message. That
+  search was accepted and failed within seconds (`ERROR: cannot open .../Genomes/hg38/.fa`,
+  `Genome enrichment failed`), the status page saying only that the result encountered some
+  errors and to submit it again, which failed the same way (2.8.0 too). The DNA and RNA bulges
+  and the Max edits that the cap lowered come back as far as the cap allows them again, unless they were changed by
+  hand in between: 1, 1 and 6 by default, on Reference only and on a panel with a 1-bulge index
+  alike, also after several panels in a row. The web user guide, the Docker quickstart, the website
+  and the data setup guide now say what a web search builds (a missing reference index; for a panel
+  without a variant index, a 0-bulge one, from its VCF files one per chromosome), as does the
+  message of the submit check. Covered by
+  `PostProcess/test_web_bulge_notes.py` and `test/web/test_settings_vcf_datasets.py`.
+- **A results link to a job without results gave a server error and a blank page.**
+  `/result?job=<id>` for a job that does not exist, failed, was refused (an unfinished index),
+  found no off-target or has not finished failed on the missing results file (HTTP 500 and only the
+  navigation bar), and so did its Show Targets, sample and region pages. So did a job that failed
+  at its last steps (results integration, plots or database) or was still in them: it already has
+  its integrated results file, but not the other files these pages read. A link saved or emailed
+  earlier could land there. These pages now say which it is, in the words of the job's status page,
+  with a link to that page (a finished job whose results files were removed from its folder says
+  so); the pages of a finished job are unchanged. Covered by
+  `PostProcess/test_web_results_links.py` and `test/web/test_web_e2e.py`.
+- **Results-page downloads that never became ready.** The Summary by Sample tab looked for
+  `<job>.summary_by_samples.<guide>.txt`, but a search writes one file per criterion
+  (`..._CFD.txt`, `..._CRISPR-Bulge.txt`, `..._fewest.txt`), so after 30 s it said "Download link
+  unavailable"; it now links the file of the criterion selected, the one its table shows. The
+  Show Targets page of Summary by Mismatches/Bulges looked for
+  `Results/<job>/<job>/.<type>.<mm>.<size>.<guide>.targets.zip`, a path nothing writes, and said
+  "Generating download link, Please wait..." for as long as it was open; it now links
+  `Results/<job>/<job>.<type>.<mm>.<size>.<guide>.targets.zip`. Both Show Targets pages (a
+  guide's and a sample's) stop asking after 30 polls (2.5 minutes) and then say that the link is
+  unavailable, as Summary by Sample does. A job name containing `tsv` made the Show Targets zip
+  go to a folder that does not exist (`tsv` was replaced by `zip` in the whole path); only the
+  extension is replaced now. As before, a Show Targets download holds the rows of the table page
+  shown. Covered by `PostProcess/test_web_results_links.py`.
+- **The job status page held its View Results button twice** (two elements with the id
+  `view-results`, as on the personal-assembly status page); once now, where it was shown.
+  Covered by `PostProcess/test_web_results_links.py`.
+
+- **A VCF dataset added in the web Settings page can be searched from the browser, per sample too.**
+  A web variant search reads the dataset's sample list, `samplesIDs/<dataset>.samplesID.txt`, only
+  after the search and post-analysis. Nothing in Settings wrote one for a dataset added there, and
+  the Settings build passed no `--samplesID`, so a dataset added and built only in Settings ran its
+  whole search and then failed (`ERROR: samples IDs processing failed on dataset ...`), was
+  labelled `[sites-only (allele frequencies)]` on the search form, and could not run per-sample.
+  Adding a dataset in Settings (an upload, or a registered server folder), or building its variant
+  index there, now writes that list from the VCF headers when there is none, in the 4-column layout
+  of the shipped lists: exactly the samples the VCFs genotype (a command-line search refuses a list
+  that names a sample no VCF genotypes, #46, or that leaves out one they genotype), each with the
+  population, superpopulation and sex an installed sample list gives it (a downloaded panel's, or
+  yours; of the lists that give it a superpopulation, the last by file name), and with the dataset
+  as its population and `unknown` superpopulation and sex when no list gives it a superpopulation
+  (the shareable report reads every list for a sample's superpopulation, and a list that gave
+  `unknown` to a panel's samples turned them unknown in the reports of the panel's searches).
+  The list is written again when a file added to the dataset, or a build of its index, gives another
+  one (a file with other samples, a sample list installed or removed since), and it goes when the
+  dataset is removed in Settings. A list from anywhere else (one you wrote or edited, or a
+  download's) is never changed: the page tells its own by the SHA-256 it keeps of it in the hidden
+  `samplesIDs/.<dataset>.samplesID.sha256`. The Settings build passes the list, as a hidden one-line
+  listing, `samplesIDs/.<dataset>.samplesID.list`, so it also builds the dict-less tiers (which
+  searches of its index then read: see Changed): the dataset reads `[genotyped, phased]`
+  (`[genotyped, unphased]` for an unphased VCF) and per-sample analysis is available. It passes a
+  list only when it names samples the VCFs genotype: a sites-only dataset (no sample columns, as
+  the `hg38_mega` VCFs) is built without one, as before, so the per-dataset allele-frequency
+  registry put in place for it is left as it is. Removing the dataset in Settings removes the two
+  hidden files too. Checked in the browser on a phased 6-sample dataset uploaded and built only in
+  Settings, once per chromosome and once as a single multi-chromosome file named without the
+  genome: the per-sample search runs to its end and names the same carriers, with the same allele
+  frequencies, as the same panel built from the command line with `--samplesID`. Submit now refuses
+  a variant search whose sample list is missing, with a message that says how to get one, rather
+  than letting it fail at its end (for a sites-only dataset, which has no samples to list, it says
+  so, and that a search reports such a VCF's variants only through a per-dataset allele-frequency
+  registry, as the shipped `hg38_mega` index has; the note under the bulge options says the same of
+  such a dataset, an upload or the `hg38_mega` VCFs a Settings download installs, with or without
+  its index built in Settings, where 2.8.0's offered it a 0-bulge search and a build in Settings, or
+  the bulges of the index built; the web user guide says so, and that the published
+  `NRG_3_hg38+hg38_mega` index is the way to search the mega variants); and a genotyped dataset with no tiers yet reads
+  `[genotyped, samples not indexed]`, not sites-only.
+  **If you added a dataset in Settings,** build its variant index again there; to give its
+  samples' populations and sex (the tiers count a sample of unknown sex as diploid on chrX and
+  chrY), put your own list at `samplesIDs/<dataset>.samplesID.txt` first. A list put there, or
+  written there again, once the variant index is built reaches its tiers only after you remove
+  `Dictionaries/registry_<dataset>` and `Dictionaries/genotypes_<dataset>` from your data folder
+  and build the index again: until then a build leaves the tiers as they are, from the list they
+  were built with. A search takes its samples' populations and superpopulations from the list that
+  is there, and a SNP's allele frequency from the tiers, so on chrX and chrY that frequency counts
+  each sample by the sex the tiers were built with.
+- **The Settings VCF upload records the reference genome you pick, and the search form offers the
+  dataset for it.** The chunked uploader looked the genome up with selectors Dash 2's dropdown does
+  not have and sent none, so `VCFs/.<dataset>.refgenome` was never written; and the search form
+  offered only datasets whose name holds the genome's, so one named like the card's own example
+  (`my_pig_vcf`) never appeared, even once its variant index was built. The uploader now sends the
+  dropdown's value; an upload into a dataset with no recorded genome is refused until one is picked
+  (the card already said it is required); and the search form offers a dataset for the genome its
+  marker names, with the bulges its index supports. A dataset with no marker is offered by its name,
+  as before, and now also for the genome of an enriched genome built from it
+  (`Genomes/<genome>+<dataset>`).
+- **A genome uploaded in Settings is laid out as every search needs it.** A FASTA of several
+  sequences was stored as it was, so every search on it was refused with a command-line-only fix,
+  and a UCSC `chromFa.tar.gz` kept its `chroms/` folder and an archive of `.fasta` files their
+  names, so their index held no `.bin`; all were listed as installed. An upload is now laid out as
+  every search needs it: every FASTA of an archive goes to the top of the genome folder as a `.fa`
+  file (`chr1.fasta` as `chr1.fa`: an index is built from the `.fa` files only), a FASTA of several
+  sequences is split into one file per sequence, and a FASTA of one sequence is named after it: a
+  one-chromosome subset (`hg38_chr22.fa` holding `>chr22`) or a bacterial genome went in as
+  `<genome>.fa`, and as a search takes each file for the sequence it is named after, every search of
+  it found its off-targets and then dropped them all (`none survived post-analysis`), though its
+  index build said done. (A genome downloaded by Direct URL or from UCSC as one FASTA of one
+  sequence is named after it the same way, and `PostProcess/genome_layout.py --split` renames such a
+  file too.) Each header is written as `>id` (see the entry on those). Hidden files of an archive
+  are left out: the `._chr1.fa` that macOS `tar` adds beside `chr1.fa` (its file attributes) was
+  installed too, and every search read it as a chromosome and failed, though the build said done. An
+  archive with two FASTA files that would go in under one name (`chr1.fa` and `chr1.fasta`, or two
+  files of one sequence) is refused. (An upload under the name of an installed genome now replaces
+  it: see Changed.)
+  **A genome uploaded before** this fix that holds a multi-sequence FASTA, a `chroms/` folder,
+  `.fasta` files, `._` files or a FASTA not named after its one sequence: remove it in Settings with
+  the indexes built on it (*Remove installed data*), and any `Genomes/<genome>+<dataset>` variant
+  genome from your data folder, then upload it again. (An index built from a multi-sequence FASTA
+  holds the sites of every sequence under the name of the first: kept, it gave a chr2 off-target as
+  `chr1:37386` instead of `chr2:17381`.)
+- **`build-index-only` fails on a genome folder it cannot index, and never puts in place an index
+  with no `.bin`.** `index-genome` indexes the `.fa` files at the top of the genome folder only and
+  exits 0 with an empty index when there are none (a `chroms/` folder, `.fasta` names, gzipped
+  FASTAs); `build-index-only` put that index in place, and the Settings page showed the build as
+  done, though every search refuses an index with no `.bin`. It now ends with an ERROR (exit status
+  1) that says what to do: before it builds anything, for a folder with no `.fa` file at its top,
+  with a FASTA of several sequences (which every search refuses too; the message says to remove the
+  indexes built from the folder while it held that file), with a FASTA of one sequence not named
+  after it (`walkone.fa` holding `>chr1`, whose off-targets every search found and then dropped; the
+  message gives the `mv`, or `genome_layout.py --split`, which renames them all) or with a header of
+  more than `>id` (see the entry on those); and, putting nothing in place, when the engine writes no
+  `.bin` for the reference or the variant genome. A reference index with no `.bin` that an earlier
+  run left is no longer taken for present (the run said `Reference index already present` and the
+  Settings page showed the build done, though no search uses it): the run says to remove it. A
+  genome of one FASTA per sequence, each named after its sequence and with a header of `>id` (see
+  the entry on those), builds exactly as before.
+- **A single multi-chromosome `.vcf.gz` without its `.tbi` builds a variant index.** The
+  documented auto-split read the file by region through its index, so a file uploaded alone (the
+  Settings uploader takes one file at a time) failed with `Could not load .tbi index ...
+  Auto-splitting the VCF dataset into per-chromosome files failed`. A file with no `.tbi` or `.csi`
+  is now indexed first, in a scratch folder (a registered server folder is never written to); a
+  plain-gzip file, which tabix cannot index, is first recompressed there in bgzip format. What
+  tabix and bcftools print goes to stdout (a warning of theirs on stderr fails a pipeline stage),
+  and an unsorted file fails with their reason and the `bcftools sort` to run. The split folder now
+  gets the same permissions as any other folder made there, not the `0700` of the temporary folder
+  it came from. Per-chromosome datasets are not touched, as before.
+- **No false "Samples degraded ... Re-download this index" alert after a Settings variant build.**
+  The alert (new in this release) is meant for an index download whose genotype store did not
+  install, but it matched any `genotype store` text, so the line every variant build prints
+  (`[indel-snp] phased indel genotype store: ...`), and a publish's, raised it: wrong advice, as a
+  local build has nothing to re-download. It now matches the download's own notes only, and is
+  checked for `Download index` jobs only.
+- **The Settings page says when a stopped build left its build directory behind.** A `docker stop`
+  during a Settings build kills it before it can clean up, and each later container, with a new host
+  name, cannot tell whether that build still runs, so it leaves the hidden directory (which can be
+  as large as the finished index or enrichment), with a line on stdout that the page showed at most
+  in the full log of a failed build. When a Settings job ends, done or failed, the page now names
+  each such directory still there, with its size, and says to delete it once no other CRISPRme
+  container is building. The Docker quickstart and `docs/TROUBLESHOOTING.md` give the command.
+- **An annotation BED whose file name names no genome can be enabled; a second upload of the same
+  bytes is added.** The upload said "Enable it under 'Manage annotations'", but that card offered
+  only BEDs whose file name holds the genome's, so `walk_regions.bed` was offered for no genome. A
+  BED whose file name names no installed genome is now offered for every genome, to enable for the
+  one its coordinates are on; one that names an installed genome is still offered for that genome
+  only, and the card says so. The upload widget is emptied after each file, so a next file with the
+  same bytes (a copy under another name) is added, where nothing happened.
+- **Settings: the "Started — progress is shown in the Activity panel" note is no longer shown as an
+  error, and goes when its job ends;** the VCF card no longer lists "a URL" as a source it does not
+  offer, and says that a single multi-chromosome file's `.tbi` is optional and where the dataset's
+  sample list is; the web interface guide no longer says that custom VCFs and PAMs need the command
+  line and a server restart, nor that an annotation upload takes a `.bed.gz`.
+- **The shareable report's "By superpopulation" chart keeps a sample's superpopulation when a
+  sample list read after it gives none.** The report reads every list of `samplesIDs/` and took a
+  sample's superpopulation from the last list (by file name) that names it, so a list that gives
+  it as `unknown` or `NA` (one you wrote for your own dataset of some of a panel's samples, or one
+  the Settings page wrote before a panel naming them was installed) turned those samples unknown in
+  the reports of the panel's searches. A list that gives no superpopulation no longer replaces one
+  another list gives; where lists give two, the last one's is kept, as before.
+- **`Other_motifs` and the alternative alignments count and list each reference alignment once.**
+  The merge step of a search, which keeps each site's best alignment and lists the others as
+  alternative alignments, took a site's reference rows as they came, and two steps before it give it
+  the same alignment more than once: each variant dataset's post-analysis carries every row of the
+  one reference search, and on the dict-less tiers (searches of a `--samplesID` build, of a
+  downloaded index such as the default one, and of a variant index built in the web Settings page)
+  the post-analysis also gives the reference alignment of a variant window on the plus strand again.
+  So a search that read the tiers counted each reference alignment over a SNP twice in
+  `Other_motifs` (`444` where the dictionaries gave `222`), a search of two variant datasets counted
+  every reference alignment once per dataset (`491` where one dataset gave `245`), and a per-sample
+  search's file of alternative alignments listed each of them as many times, a copy of the site's
+  best alignment among them. On chr22 of the default index, a per-sample search gave 6152 rows for
+  its 4941 alternative alignments, and 280 of its 1940 sites a higher `Other_motifs` (280 of 2356 at
+  population level); on a 6-sample panel searched with a second dataset, 3779 rows for 1887. Each
+  reference alignment is now kept once. Rows equal in every column but `#Seq_in_cluster` and the two
+  score columns are one alignment: each dataset scores the rows itself, and CRISPR-Bulge can give
+  one alignment two values (`4.3390600000000004e-23` and `4.33904e-23`), of which the higher stays.
+  What changes is `Other_motifs` in the integrated table and on the results page, the
+  `#Seq_in_cluster` columns of the `bestMerge` table, the file of alternative alignments and the
+  `observed_haplotypes_raw` file made from it. The best alignment of each site, its scores, carriers
+  and allele frequencies are as before, `observed_haplotypes.tsv` and the report do not change, and
+  a search of one dataset on its dictionaries, or of the reference alone, is unchanged (a search
+  with a sites-only dataset changes further: see the entry on those). Run a search again for these
+  counts and lists.
+- **A search with a sites-only dataset lists each site once and loses none; a VCF with no `AF` keeps
+  a variant's best alignment.** The merge step of a search sorts each criterion's rows by guide,
+  chromosome, position and score before it makes one row of each site, and its sort counted columns
+  by blanks, so an empty column moved the later ones up. A row of a sites-only dataset (`hg38_mega`,
+  alone or beside another dataset, since 2.5.2) has an empty `Samples`, so it went by its rsID and
+  not its guide: such rows came before or after all the others, and the merge, which starts a new
+  site only when the position rises, took unrelated sites for one. A site was listed more than once;
+  a variant row was marked `Not_found_in_REF` (a `VARIANT` off-target in the report) though its site
+  has a reference row; a site could lose its row altogether; and in a per-sample search a row of
+  alternative alignments could pair the three criteria's alignments across sites, so
+  `observed_haplotypes.tsv` gave a site another site's variants. The sorts now read the
+  tab-separated columns, and a variant both datasets give is one row, with the genotyped dataset's
+  carriers and both allele frequencies. On chr22 (guide `CTAACAGTTGCTTTTATCACNNN`, 4 mismatches, 1+1
+  bulges), `hg38_mega` alone goes from 1621 rows to 1384, rows within 3 bp of another from 556 to 0,
+  `Not_found_in_REF` rows from 659 to 422, and it lists 50 sites it did not (the best at
+  chr22:50091459, CFD 0.022); the report's `REFERENCE` and `VARIANT` off-targets go from 766 and 659
+  to 962 and 422, and its CFD >= 0.05 net from 53 sites to 46. The default index with `hg38_mega`
+  goes at population level from 3015 rows to 2520 (within 3 bp 997 to 4, `Not_found_in_REF` 2053 to
+  1558, 21 sites more); per sample, with the next entry's fix, from 2406 rows to 2137 (671 to 2,
+  1444 to 1175, 73 sites more), and its rows of alternative alignments with the fewest or the
+  CRISPR-Bulge block more than 100 bp from the CFD block go from 28 and 27 to 0, and its haplotypes
+  with a variant more than 1 kb from their site from 26 to 0. A row with only its `AF` empty (a VCF
+  with no `AF`, which the input check warns about: every variant on the dictionaries, every indel on
+  the tiers; a record that has `AF` at another place in `INFO` than the VCF's first record, by the
+  known limit on the place of `AF` under Changed: its indel on any index, as are 91,950 of the
+  102,665 indels of HPRC's chrY, and its SNP on the dictionaries) stayed at its site but went by its
+  REF score, so the merge could keep a lower-scoring alignment of a variant: on a 6-sample panel
+  with no `AF`, the perfect match a deletion makes at chr2:10000 read CFD 0.9 with a bulge and now
+  reads 1.0 with none, and the report's perfect matches go from 3 to 4. A search whose rows have no
+  empty column (the default index alone, a VCF with `AF` at one place in `INFO` in every record, the
+  reference alone) sorts as before. **If you searched a sites-only dataset, a VCF with no `AF` or
+  one with `AF` at more than one place in `INFO` (such as HPRC's chrY, or a VCF merged with
+  `merge_vcf_panels.sh`),** run the search again.
+- **A sites-only dataset goes the population-level way in a per-sample search too, as the command
+  line said it did, and loses no multi-variant worst case there.** A sites-only dataset
+  (`hg38_mega`) has no genotypes for a per-sample search to resolve, and `complete-search` said that
+  `the population-level analysis runs instead`. It did not: the dataset's rows went through the
+  per-sample path, which joins two variants only through carriers they share, and it has none, so a
+  site that takes two variants together lost its row, and others scored lower, with no warning.
+  Installing the default index and `hg38_mega` lists both for a search
+  (`docs/PRECOMPUTED_INDEXES.md`), and the two then ran that way with no mode flag. Now each dataset
+  goes by its registry (its `data_type`, or for a registry that has none its aggregation): a
+  sites-only dataset's post-analysis is the population-level one whatever the search's mode.
+  `--per-sample` on sites-only datasets alone is the population-level analysis (the same files as
+  with no flag), with a WARNING on stdout. Beside a genotyped dataset, whose rows stay per-sample,
+  `complete-search` says which goes which way. With no mode flag a phased dataset beside a
+  sites-only one now runs per-sample whichever name sorts first; with the sites-only name first it
+  ran population-level. On chr22 (guide `CTAACAGTTGCTTTTATCACNNN`, 4 mismatches, 1+1 bulges),
+  `hg38_mega --per-sample` goes from 1318 rows to 1384, the table of `hg38_mega` with no flag,
+  byte for byte, and lists 63 sites it did not (with the TRAC guide `CTCTCAGCTGGTACACGGCA` beside
+  it, at 4 mismatches + 1 DNA + 1 RNA bulge, from 3,605 rows to the 3,801 of the run with no
+  flag, 3,802 with this release's indel-row fix as well; the other counts in this entry are
+  from before that fix); the default index with `hg38_mega`, per-sample as it runs with no
+  flag, goes from 2077 rows to 2137 (`Not_found_in_REF` 1115 to 1175, alternative alignments
+  5863 to 6226, `observed_haplotypes.tsv` 1556 rows to 1796). It lists 57 sites it did not and loses none, 14
+  sites score higher and none lower (chr22:34270481 from CFD 0.173 to 0.233, and chr22:22881199
+  reads 0.274 where chr22:22881195 read 0.262), and the report's CFD >= 0.05 and >= 0.2 tables
+  each gain one site. On a denser search of the two (chr19 and chr21, 5 mismatches, 2 DNA and 2
+  RNA bulges, guides CTAACAGTTGCTTTTATCAC and CTCTCAGCTGGTACACGGCA), 249 sites of `hg38_mega`
+  searched alone were not in its table (the best chr19:2433201, CFD 0.533) and 411 scored lower
+  there (chr19:388343, 0.503, read 0.114). Now each site that either dataset gives alone is in the
+  table with its CFD or a higher one, but for 29 with a CFD of at most 0.002 that the merge step
+  joins, as before, to a site within 3 bp on the other strand that scores at least as high. The
+  table goes from 49,193 rows to 49,452, and its sites with a CFD >= 0.05, >= 0.2 and >= 0.5 from
+  1,273, 138 and 5 to 1,316, 151 and 7. A sites-only dataset's rows have no carriers and read
+  `putative` in the report's Observed column (`observed` for one variant). A search with no
+  sites-only dataset, `hg38_mega` with no flag and any search at `--population-level` are
+  unchanged, byte for byte. **If you ran a per-sample search with a sites-only dataset,** run it
+  again. Covered by `PostProcess/test_sites_only_per_sample.py`.
+- **A command-line search of two datasets is no longer refused because only one has its VCFs on
+  disk.** The input check of `complete-search` compared the samples of all the `--samplesID` lists
+  with the VCFs on disk (#46). With `hg38_walk`'s VCFs there and `hg38_walkB` installed as an index,
+  it stopped with `--samplesID lists 3 sample(s) genotyped in no VCF (B4, B5, B6)`, and told you to
+  filter a list that was right; so too beside a sites-only dataset, on disk or not, whose VCFs have
+  no sample columns and whose list names `1000G2021` and `HGDP`. Each step that leads there is
+  documented (`download --what vcf` for one dataset, several indexes in one list, your own cohort
+  beside a dataset). Each list is now compared on its own: up to as many lists as the search names
+  such datasets, those that name no sample of the VCFs on disk, are left out. A list that names some
+  of them and others they lack still stops the search, with those others named; so does a list of no
+  dataset when every dataset's VCFs are there. Measured on a 6-sample panel, the search that was
+  refused gives the same table as with both datasets' VCFs on disk, and as with neither. A web
+  search does not run this check and is not affected. Covered by
+  `PostProcess/test_samplesid_overlisting.py`.
+- **A variant build that runs out of memory as it writes its tiers ends with a message, and no
+  longer hangs.** `build-index-only --samplesID`, and in this release every variant build in the web
+  Settings page, writes the dict-less tiers and the phased indel genotype store in forked workers,
+  one chromosome each. The pool they ran in did not see a worker die: when the OOM killer took one,
+  the run waited for good, at 0% CPU, with nothing on stdout or stderr. In Settings the build read
+  `running` for ever, with its buttons locked and every later job queued behind it, until the
+  container was restarted; the same build finished in 2.8.0, which wrote no tiers. A worker that
+  dies now sends the chromosomes left to one worker at a time, with a WARNING on stdout, and the
+  build goes on if they fit. If a worker dies then too, the run ends with exit status 1 and an ERROR
+  that says memory is the likely cause, names `CRISPRME_TIER_WORKERS` (`CRISPRME_INDELGT_WORKERS`
+  for the store), and says how to go without what it could not write; Settings shows the build as
+  failed with that message. A run with one worker, or of a dataset of one chromosome, which did not
+  hang but died at exit status 137 with no message, now ends with that ERROR too. What it could not
+  write stays marked unfinished, so a search refuses it, and the next run writes the rest; no
+  variant index is built by that run. To build with no tiers, remove them as the message says and
+  run `build-index-only` from the command line with no `--samplesID`: the Settings page has no way
+  to. No worker outlives a run that is killed outright either, one that waits for its next job looks
+  for the run every few seconds. Measured on a synthetic panel of 3000 samples and a SNP every 3 bp
+  on 3 x 50 kb: with a limit of 1.5 GB the Settings build reads `failed` with the message after 5 s,
+  and with 6 GB, where three workers at once are too many, the build finishes one chromosome at a
+  time. A build with memory enough writes the same files as before, byte for byte, and so does that
+  one.
+- **A genome whose FASTA headers carry a description, or whose lines end in CRLF, no longer indexes
+  as done and then loses every search's results.** CRISPRitz names a chromosome after the whole
+  header line, and the pipeline splits on blanks, so the FASTAs NCBI, GENCODE, Ensembl and GATK ship
+  went wrong, each in its own way, with the same sequence that gives 7 sites under a plain `>chr1`.
+  An NCBI `>NC_000913.3 Escherichia coli str. K-12 substr. MG1655, complete genome` or a GATK
+  header: exit status 0, `No off-targets found` (in the browser, `Finished: no off-targets were
+  found`). GENCODE `>chr1 1`: 7 sites, but with `chr1 1` for a chromosome and `NA` for every
+  annotation. Ensembl `>1 dna:chromosome ...`: the search fails at integration (`Start coordinate is
+  too large ... BEDOPS`). CRLF: 451 KB of warnings on stderr at exit status 0, and `No off-targets
+  found`. A variant build on `>chr1 1` failed with `Indels indexing failed`. An upload in Settings,
+  a Direct URL or UCSC download and `genome_layout.py --split` now write each header as `>id`, and
+  every line with no CR, also for a FASTA already named after its sequence; a file that needs none
+  of this is not touched. Each of those genomes then gives the sites and table of the same sequence
+  under a plain header, through the browser and the command line, and a variant build on one gives
+  the same table too. A folder left with such a file is refused before anything is built or
+  searched: `build-index-only`, `complete-search` and a web search end with an ERROR that gives the
+  `--split` command and says to remove the indexes built from the folder as it was (`--split` lists
+  them). A search looks for CR line ends in the first two lines of each file, and
+  `build-index-only`, which reads the whole genome anyway, in the whole file: one whose first 100
+  lines end in LF and the rest in CRLF built at exit status 0, with 402 KB of warnings on stderr,
+  and every search of that index found nothing (a search that built its own failed, on those
+  warnings); its build is refused now. So is a CR that only ends a file, on its last line or after
+  its last LF: the index build takes a CR on a line that ends in LF for a base, and the variant
+  enricher keeps every CR, so with a PAM in the last bases of a sequence the build wrote engine
+  warnings on stderr at exit status 0 (`The character () of the PAM is not part of the IUPAC
+  nucleotide nomenclature`), and a search of that index failed (`searchTST (index search) failed
+  (signal SIGSEGV)`) or reported other rows than the file with no CR (a variant search, from a lone
+  CR after the last LF that the reference build does not read: 19 rows for 18); an upload, a
+  download and `--split` write such a file with no CR. Such an index is refused as well, where its
+  `.bin` names show it: it holds the old names once the FASTA is written as it should be, and
+  every search of it went on losing results, and a build took it as present. An index built from a
+  FASTA with a clean header line and CRLF after it has `.bin` names that do not show it, so it is
+  not caught: remove it as the ERROR says. A sequence id that holds `|`, `;`, `'`, `"`, `$`, `(`,
+  `)`, `&`, `<`, `>`, a
+  backquote or `#` (`gi|49175990|ref|NC_000913.2|`, a PanSN `HG01255#1#CM086702.1`) is refused too:
+  a search of one failed in a shell command (`/bin/sh: Syntax error`), or, for `#`, with `none
+  survived post-analysis`. So is an id that starts with `-` or `.`: a search of `-x` or `.x` beside
+  `b` ended with exit status 0 and the off-targets of `b` alone, none of the 7 of the other, its
+  on-target among them (`grep` took `-x` for an option, and the search left out the hidden file
+  `.x.fa`). Such an id is refused by a build and a search, and by an upload, a download or `--split`
+  when they write its file (a FASTA of several sequences, one not named after its sequence, or one
+  whose header is more than `>id` or whose lines end in CR); a file already named after such an id,
+  with a plain header, goes in as it is (an upload of an archive leaves out a hidden file such as
+  `.x.fa`), and its build is refused. Measured character by character through the real command line,
+  `.`, `:`, `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~` and `!` work inside an id, and all of them
+  but `-` and `.` at its start, where `~` works only if no user of the machine has the name that
+  follows it (`~root`, and `~` alone, made a search fail in its post-analysis). So do `*`, `?` and
+  brackets in an id that matches, read as a shell pattern, no other name of its folder (see the next
+  entry) and no file of CRISPRme's `PostProcess` folder, where the post-analysis runs: `HLA-A*01:01`
+  and `KIR2DL1*001` worked, but `a*` matches `adjust_cols.py` there, and a search of it failed. A
+  file whose lines end in CR alone is refused by `--split`, which says to convert it, as its first
+  line holds the whole file. **If you have such a genome,** run `python PostProcess/genome_layout.py
+  --split <genome folder>`, remove the indexes it names, and build again, or remove it in Settings
+  and upload it again. A search of a genome of plain headers is unchanged. Covered by
+  `PostProcess/test_genome_layout.py` and `PostProcess/test_build_index_only_layout.py`.
+- **A genome folder in which a sequence id, read as a shell pattern, matches the name of another
+  sequence is refused; a search of it failed, or lost that sequence's off-targets.** The search
+  script and its post-analysis take each sequence's name into shell commands as it is, where an id
+  that holds `*`, `?` or `[` is a pattern that stands for every file name it matches. In a folder
+  where it matches the name of another sequence (`HLA-A*02:10` matches `HLA-A*24:02:10`, `c[12]`
+  matches `c1`, `seq?1` matches `seq01`), a search failed, at its start (`basename: extra operand`)
+  or in its post-analysis, whose steps for the two sequences removed, read or wrote each other's
+  files; or, depending on the names and on the order those steps ran in, it ended with exit status
+  0 and none of that sequence's off-targets: with `--thread 1`, all 7 rows of `HLA-X*03:01:01`
+  beside `HLA-X*01:03:01:01`, its on-target among them, and so for `c[12]` beside `c1` and `seq?1`
+  beside `seq01`. The HLA sequences of the GATK GRCh38 FASTA (`Homo_sapiens_assembly38.fasta`),
+  whose headers this release writes as `>id` (see the entry above), are such a folder: 10 of their
+  525 ids match others, and, downloaded by Direct URL, they indexed as done and every search of
+  them failed at its start. `build-index-only`, `complete-search` and a web search now refuse such
+  a folder before anything is built or searched (a build in the web Settings page reads `failed`),
+  with an ERROR that names the files whose ids match another's (10 at most) and says to rename
+  those sequences, header and file, with none of those characters, or to remove them. With those 10
+  renamed (`HLA-A_02:10`), the HLA sequences build and search, and the guide `CCAGGCAGTGACAGTGCCCA`
+  finds its perfect match in each of the 135 HLA-A sequences. An id that holds one of those
+  characters and matches no other name is taken as before (`HLA-X*03:01:01` beside
+  `HLA-Y_01:03:01:01` gives the same table), and a search of a genome with no such id is
+  unchanged. **If you have such a genome,** rename or remove the sequences the ERROR names, remove
+  the indexes built from the folder, and build again. Covered by `PostProcess/test_genome_layout.py`
+  and `PostProcess/test_build_index_only_layout.py`.
+- **A genome downloaded by Direct URL from an archive with two FASTA files of one name is refused;
+  one of them no longer replaces the other.** Each FASTA file of the archive went to the top of the
+  genome folder under its file name alone, so of `a/chr1.fa` and `b/chr1.fa` (the two haplotypes of
+  an assembly, say) one replaced the other, with exit status 0 and no message (the web Settings page
+  read `done`), and every search was of the one left. The download now stops with a message that
+  names the two files, and nothing is installed (the page reads `failed`): a genome installed under
+  that name is kept as it was. An upload in Settings refused such an archive already. An archive
+  with no two FASTA files of one name goes in as before, file for file. **If you downloaded such an
+  archive,** remove the genome it gave in Settings, with the indexes built on it, and install the
+  genomes it holds each under a name of its own. Covered by `PostProcess/test_genome_layout.py`.
+- **A genome download that is refused leaves the genome installed under its name as it was.** A
+  Direct URL or UCSC download removed the genome installed under its name before it laid out its
+  own files there (split a FASTA of several sequences, named a FASTA of one after it, wrote each
+  header as `>id`), so when that step refused it, no genome was left under the name: `crisprme.py
+  download --what genome --source url` of a `.fa.gz` holding `>-x`, or two sequences `>a`, over an
+  installed genome ended with exit status 1, its message, and no genome under that name (in 2.8.0,
+  the one of two sequences `>a` did the same). The download now lays out its files in its staging
+  folder, as an upload in Settings does, and puts them in place of the installed genome only once
+  that is done: one that is refused leaves it as it was (the web Settings page reads `failed`, with
+  the message). A download with a FASTA whose sequence would go in under the name of another file
+  of it (`all.fa` holding `>chr1`, beside `chr1.fa`), which ended in a Python traceback, now ends
+  with a message: `all.fa: cannot split -- chr1.fa already exists`. A download that is not refused
+  goes in as before, file for file. **If a refused download removed a genome,** install it again.
+  Covered by `PostProcess/test_genome_layout.py`.
+
+- **On a search that reads the dict-less tiers, the REF alignment of a SNP off-target marks its
+  mismatches again, and its REF seed and non-seed counts include them.** A search reads them on
+  every chromosome for which its variant index carries the per-sample genotype tier
+  (`Dictionaries/genotypes_<dataset>/`): the indexes on Hugging Face that ship it (the default
+  `NRG_3_hg38+hg38_HGDP1kGP` among them), every index built with `build-index-only --samplesID`,
+  and, in this release, every index built or built again in the web Settings page. A sites-only
+  index such as `hg38_mega`, an install downloaded with `--no-genotypes` and an index built
+  without `--samplesID` have no genotype tier and are not affected. On an affected search, an
+  off-target that SNPs create or change (a row of `alt` origin whose variants are SNPs) had its
+  `Aligned_protospacer+PAM_REF` written all in upper case, so `Seed_mismatches+bulges_REF` and
+  `Non_seed_mismatches+bulges_REF` left out the reference's mismatches and counted only the row's
+  bulges (in `fewest_mm+b` only its RNA bulges, see the next entry), in all three criteria
+  (`highest_CFD`, `fewest_mm+b`, `highest_CRISPR_BULGE`). A search of an index's dictionaries marks
+  them in lower case, as CRISPRme always has. The fewest mismatches and bulges plot
+  (`imgs/CRISPRme_fewest_top_1000_log_for_main_text_<guide>`, `.png` and `.pdf`, and the same plot
+  on a Personal Risk Card, in the web or from `generate-personal-card`) drew the reference point of
+  such an off-target at its bulge count, 0 for one without a bulge, so a variant that removes
+  mismatches looked like one that adds them. Per-sample searches have had this since 2.4.0,
+  population-level ones since 2.5.2. The counts of this entry and the next are of their fixes
+  alone, on the code before them: the fixes of the merge step and of indel rows in this release
+  change these searches too, the second with another count of indel rows. On the default index, a
+  per-sample search (guide ACTGAAATCTGTAAGCAGGC, 4 mismatches, 1 DNA and 1 RNA bulge) had 71,110
+  such rows of 189,949 for `highest_CFD` (68,348 for `fewest_mm+b`, 65,294 for
+  `highest_CRISPR_BULGE`); for example chr7:66994206 (-) read `ACTGAAATCTGTAAGCAGGTGGG` with REF
+  seed / non-seed 0 / 0 for its one mismatch. The tier path now writes these columns as the
+  dictionary path does: each protospacer base that differs from the guide in lower case
+  (`ACTGAAATCTGTAAGCAGGtGGG`, 1 / 0), except at a DNA-bulge column; the PAM stays in upper case.
+
+  The pipeline breaks ties between rows by their whole line, which includes this column, so two
+  more things change on these searches. First, rows that its sort holds as tied (on the CFD, then
+  on the fewest mismatches and bulges) can come out in another order among themselves. On the
+  per-sample search above, 5,124 of the 189,949 rows are at another place in the results and
+  otherwise the same (1,285 of 732,270 in the alternative alignments); 4,598 of 205,415 on a
+  population-level search of the same index (guide CTAACAGTTGCTTTTATCAC); and with guide
+  CTCTCAGCTGGTACACGGCA, 1,549 of 128,730 per-sample and 2,199 of 150,103 population-level. What
+  reads the rows in file order follows. The report's tables can list tied rows in another order
+  (`data/cfd_ge_0.05.tsv` on all four searches; `data/cfd_ge_0.20.tsv`, `data/mmb_le_4.tsv`,
+  `data/top1000.tsv` and `data/top1000_crispr_bulge.tsv` on some; `data/panel_top100.tsv` and
+  `data/crispr_bulge_gt_0.tsv` on a fifth, per-sample with guide GAGTCCGAGCAGAAGAAGAA; no row of them
+  changed), and so can `observed_haplotypes.tsv` (61 lines at another place on that fifth search,
+  where no site reports another row) and the perfect-match banner. Any top-1000 plot can draw tied
+  points in another order:
+  `imgs/CRISPRme_CFD_top_1000_by_variant_effect_<guide>` on all four,
+  `imgs/CRISPRme_CFD_top_1000_log_for_main_text_<guide>` and
+  `imgs/CRISPRme_CRISPR_BULGE_top_1000_*_<guide>` on some, and the report's figures from the same
+  rows. Where tied rows straddle the cut of 1000 of a list or plot, a by-variant-effect plot for
+  instance, which of them make the cut can change too; on these four searches every list and plot
+  kept its sites.
+
+  Second, where a row of SNPs and a row with an indel (alone or with a SNP) give the same alignment,
+  with the same start, score, mismatches and bulges and the same number of carriers, at least one,
+  the row of SNPs is now always the one reported and the other goes to the alternative alignments
+  (which a per-sample search lists). Such a tie used to fall to that whole-line sort: on the tier
+  path the upper-case REF of the row of SNPs put it first nearly every time, and with the marks back
+  the sample IDs would have decided. At the ties that did go to the row with the indel, the row of
+  SNPs now takes its place, with its own variant, rsID, allele frequency and carriers and, where the
+  two differ, PAM creation and REF and risk scores. That is 4 sites for `highest_CFD`, 4 for
+  `fewest_mm+b` and 3 for `highest_CRISPR_BULGE` on the per-sample search above, and one site for
+  all three criteria on each of the other three (with guide CTCTCAGCTGGTACACGGCA, chr13:110666221,
+  from a row without an rsID to rs534552989), none of them in a report table. It is also what a
+  search of the dictionaries reports at these sites, but for `fewest_mm+b` and
+  `highest_CRISPR_BULGE` at chr14:43078564. The counts made from the reported rows' carriers move by
+  one accordingly (`*.summary_by_samples.*`, `.<job>.PopulationDistribution_*`, on these searches one
+  population distribution plot, and the report's population figure), and at population level
+  `observed_haplotypes.tsv` can give other lines for such a site. On the dictionary path such a tie
+  is rare: none on chr21 and chr22 of the default index with these three guides, where no row moved.
+  The rows of a sites-only index have no carriers and keep the order they had. A search of the
+  reference alone gives the same results byte for byte but for the columns of the next entry, and so
+  does a search of an index without the tiers, except where a row of SNPs and a row with an indel tie
+  as described: in a search of two such datasets, one of which gives the SNPs and the other the
+  indels (47 of 1,837 rows on a panel with such ties planted), and, with the fix of indel rows in
+  this release, in any search of one.
+
+  The set of alignments reported (best and alternative), the scores and every other column are
+  otherwise unchanged. To correct results made before, run the search again (`generate-report` alone
+  reads the table as it is). Covered by `PostProcess/test_tier_ref_columns.py` and
+  `PostProcess/test_representative_tiebreak.py`.
+
+- **On a search with DNA bulges, the `fewest_mm+b` seed and non-seed counts include them, as those of
+  the other two criteria do.** `Seed_mismatches+bulges_REF_(fewest_mm+b)`,
+  `Non_seed_mismatches+bulges_REF_(fewest_mm+b)` and their two `_ALT_` columns left out a row's DNA
+  bulge, so seed + non-seed came short of `Mismatches+bulges_(fewest_mm+b)` by it, and the same
+  alignment read differently in this block and in `highest_CFD` and `highest_CRISPR_BULGE`. This
+  affects every search with `--bDNA` of 1 or more, of any index or of the reference alone, and the
+  haplotype tables of `assembly-search`, since at least 2.2.0. For example chr6:122734951 (+), spacer
+  `A-CTGAAATCTGTAAGCAGGCNNN`, read ALT seed / non-seed 1 / 3 in `highest_CFD` and 1 / 2 in
+  `fewest_mm+b`, for 4 mismatches and bulges; both now read 1 / 3. Such rows were 170,355 of 189,949
+  on the per-sample search of the entry above, 181,836 of 205,415 on the population-level one, and
+  114,865 of 128,730 and 133,747 of 150,103 with guide CTCTCAGCTGGTACACGGCA. Only these four columns
+  change, on those rows, in `*_integrated_results`, `*_all_results_with_alternative_alignments`,
+  `*_observed_haplotypes_raw`, the results database and what reads it (the web tables that list them,
+  such as Query Genomic Region with the fewest criterion selected, and a Personal Risk Card's
+  targets file); no plot or report table reads them. To correct results made before, run the search
+  again. Covered by `PostProcess/test_seed_counts_dna_bulge.py`.
+
+- **A search that reads the dict-less tiers no longer lists a minus-strand reference alignment with
+  the letters of the plus strand.** For a variant window on the minus strand the tier path also
+  wrote the window's reference alignment, from the plus-strand letters. They usually fail its
+  mismatch and PAM checks, and no row came of it, but on a near-palindromic guide they pass: a row
+  went out with strand `-`, those letters and the scores they get, and one more in `Other_motifs`.
+  The reference search holds the true alignment of such a window when it is within the search's
+  mismatches and bulges, so no row is written for a window on the minus strand now. Measured with
+  the fix of the merge step in this release and before that of indel rows, on the default index,
+  guide CTCTCAGCTGGTACACGGCA, 4 mismatches, 1 DNA and 1 RNA bulge, genome-wide: per sample, 5 of
+  309,218 rows of alternative alignments go (chr1:147073620, chr16:12583323, chr16:85966126,
+  chr6:5506134, chrX:150119503, none of them a site's best); `Other_motifs` goes down by one on
+  the 5 rows of those sites in the table and the database, of 128,730, and on 76 rows of
+  alternative alignments, one of which, at chr16:12583323, reads strand `+` for its CRISPR-Bulge
+  block, where it paired the wrong row (`*_observed_haplotypes_raw` follows); nothing else changes
+  in the table, in `observed_haplotypes.tsv` or in the tables of the report. At population level
+  `Other_motifs` goes down by one on the same 5 rows, of 150,103, and one row's CRISPR-Bulge score
+  moves in its last digit (chr16:1434667, `3.58341e-18` to `3.58338e-18`, as the scorer's batches
+  shift); nothing else changes. With more mismatches and bulges such a row can be a site's best,
+  and a site can have several. On chr19 and chr21 with 5 mismatches, 2 DNA and 2 RNA bulges, this
+  guide and CTAACAGTTGCTTTTATCAC, per sample, 6 of 46,829 sites reported one as their best:
+  chr19:28563886, with a CFD of 0.007, now reports a variant alignment with 0.006, and
+  chr19:44589953, chr19:50205996, chr21:14062304, chr21:36964620 and chr21:45983672, with a CFD of
+  0, now report a variant alignment and `Not_found_in_REF` `y`, as no reference alignment is left
+  at the site (chr21:45983672 on strand `+`). `Other_motifs` goes down at 20 sites, by 1 to 10; 58
+  of 316,189 rows of alternative alignments go, and at the sites that lost one the others pair
+  differently across the three criteria; and the CRISPR-Bulge scores of 24 rows move in their last
+  digit. At population level, with `hg38_mega` beside the default index, 5 sites change a best
+  alignment so (4 for `highest_CFD`), and a sixth reads `y` for `Not_found_in_REF`. A search of
+  the dictionaries, or of the reference alone, had no such row and is unchanged. Covered by
+  `PostProcess/test_tier_ref_columns.py`.
+
+- **A variant search no longer fails when a chromosome's indels hold no site of the PAM** (a
+  regression of this release's CRISPRitz pin, like the SNP-only chromosome above, with another
+  trigger). `build-index-only --vcf` builds one indel sub-index per chromosome from the short
+  windows around that chromosome's indels. When none of them holds a site of the PAM, `buildTST`
+  writes no `.bin` there, and CRISPRitz 2.9.1 refuses to search an index directory without one, as
+  it should for a broken one. The search therefore stopped with exit status 1, reported at
+  "Post-analysis SNPs" with `ERROR: no .bin index files found in '.../TTTV_2_fakechr3/'`, where
+  2.8.0 returned the correct report. **Affected:** variant indexes built for a PAM whose sites are
+  rare enough, on a dataset with few indels on some chromosome: the shipped Cas12a (TTTV, TTTN) and
+  SpCas9-VRER (NGCG) PAMs on a test genome whose chr3 carries a single deletion; NRG, NGG and
+  SaCas9 (NNGRRT) had a site there. The same failure followed a search that rebuilt a missing
+  INDELS index itself. `pool_index_indels.py` now writes `.no_targets` into such a sub-index, after
+  checking by `buildTST`'s own rule (the check build-index-only already makes) that no window holds
+  a target, and the search skips that chromosome as it skips one without indels. The record travels
+  with the index, so a copied or downloaded index needs nothing else. An index built before this
+  fix has no record: the search then checks the fake-indel genome the index was built from
+  (`Genomes/<genome>+<dataset>_INDELS/`) by the same rule, for the PAM the index was built with
+  (for a PAM-less index searched for another PAM, such as `NNN_2` serving NRG, the one its
+  `.pam_build` records), and skips the chromosome when no window holds a target, under
+  `complete-test --chrom` too. Otherwise (a window holds one, so the index is incomplete, or that
+  genome is not there) the search stops, at its "Off-targets search" stage, with an ERROR alone,
+  where it used to go on through the SNP post-analysis and fail at "Post-analysis SNPs" with the
+  engine's message. The ERROR says which, and how to rebuild the index, by what is there, with the
+  paths of the working directory, under `complete-test --chrom` too. With the dataset's VCFs in
+  `VCFs/<dataset>`: the command `rm -rf ... && crisprme.py build-index-only ...` with the PAM file
+  the index was built with (for a PAM-less index, a file of its PAM in `PAMs/` or beside the
+  search's PAM file) and, when the fake-indel genome is not there either, the download command for
+  a downloaded index. Where that command cannot run, the steps in words: with the fake-indel genome
+  there (no such VCFs, or no such PAM file), remove the INDELS index and run the search again,
+  which rebuilds it from that genome (after `complete-test --chrom`, run `complete-test` without
+  `--chrom` or a `complete-search`, as a run of one chromosome does not rebuild the index for later
+  runs); with neither those VCFs nor that genome, the download command for a downloaded index,
+  which removes only the INDELS index, so that a download that fails leaves the rest in place, and
+  for one you built, putting its VCFs back; with those VCFs but no such PAM file or fake-indel
+  genome, the PAM line to write into a PAM file for build-index-only. Measured through the real
+  CLI: the TTTV, TTTN and NGCG searches now exit 0, both on an index built with the fix and on one
+  built before it, and every result file is the same as that of the same code run on CRISPRitz
+  2.9.0's search engine, which has no such refusal (but for timestamps, and the engine version
+  `run_manifest.json` records), with bulges, and for TTTV without bulges; for TTTV the result
+  tables are also the same as 2.8.0's. A search with no off-target at all (NGCG without bulges
+  there) ends as on that engine, with `No off-targets found`, but its folder lacks the all-zero
+  CRISPRitz profile tables of the skipped chromosome (`crispritz_prof/fake<chrom>_*`). NRG, NGG and
+  NNGRRT searches, NNN searches and `--prune-pam` searches over 3- and 8-nt-flank PAM-less indexes
+  give byte-identical results to before, and the indexes build-index-only writes are the same file
+  for file, apart from the new record where a sub-index holds no target. `complete-test` on an
+  intact NRG index, with and without `--chrom`, gives the same files as before, but for what
+  differs between any two of its runs: under `--chrom`, the name of its per-run folder in
+  `.command_line.txt`, and at `--thread 2`, the row order of CRISPRitz's raw target files. Each
+  route the ERROR gives was followed as given, and led to the same result files as an intact index:
+  for an NRG index, and for NRG served by the 3- and 8-nt-flank PAM-less indexes, with a sub-index
+  missing or holding no `.bin`, with and without the fake-indel genome, and with and without the
+  VCF folder; and from `complete-test --chrom` for an NRG index, once its results folder is
+  removed, as it asks, but for those two differences. The download command and putting the VCFs
+  back were followed for an NRG index only, the download with its archive served from a local
+  folder, not from the hub. A run that succeeds does not reach the new stop. **No published index
+  is affected:** in the copies of the published indexes on the build machine, every indel sub-index
+  holds a `.bin`, except in the superseded `NRR_3_hg38+hg38_mega` archive (see its entry above),
+  whose own indel logs are empty, so a search skips those chromosomes as before. **What to do:**
+  nothing for an index built with 2.8.1, or for one built before whose fake-indel genome is still
+  in place; otherwise follow the ERROR. Covered by `PostProcess/test_indel_empty_chromosome.py`.
+- **A variant search with bulges no longer loses the indel off-targets of a chromosome whose indel
+  sub-index is missing** (in 2.8.0 too). Such a chromosome was searched in its fake-indel genome
+  without bulges, a fallback meant for searches without bulges: the run exited 0 with no message,
+  and the bulged indel off-targets of that chromosome were missing from the report. It happened in
+  two ways. (1) A search that rebuilt a missing INDELS index for a PAM-less index serving another
+  PAM (`NNN_<N>` serving NRG, or `NNNNNNNN_<N>` under `--prune-pam`) built it with the search's PAM
+  file, so it went into `<that PAM>_<N>_<genome>+<dataset>_INDELS` (for example
+  `NRG_2_..._INDELS/NNN_2_fake<chr>`), where the search does not look; every later such search did
+  the same. (2) An INDELS index copied in part. Measured through the real CLI on a test genome
+  (NRG, 4 mismatches, 1 DNA and 1 RNA bulge): way 1 lost 5 of the 2446 rows with alternative
+  alignments and 190 of the 191 indel+SNP co-occurrence rows of chr3 (2447 -> 2442 rows on 2.8.0),
+  way 2 lost 3 rows with alternative alignments (2446 -> 2443; 2446 -> 2444 on 2.8.0), and the
+  integrated results changed with both. Now (1) that rebuild uses the PAM the index was built with
+  (from its `.pam_build`, else of the search's guide length), and is byte-identical to the INDELS
+  index build-index-only builds, so the search's result files are those of an intact index; and (2)
+  a search with bulges stops at a chromosome whose indel log, or fake-indel genome, shows indels but
+  which has no sub-index, with an ERROR that says how to rebuild the INDELS index (as above), but
+  for a contig with an underscore in its name, which no build gives one (next entry). A search
+  without bulges still searches the fake-indel genome, and a chromosome without indels is skipped as
+  before. Normal runs are unchanged: a build gives every other chromosome with indels its sub-index,
+  as it does in each of the 50 INDELS indexes on the build machine that have their indel logs beside
+  them. **Affected:** searches with bulges through a PAM-less index serving another PAM whose INDELS
+  index was missing, and searches with an INDELS index copied in part. **What to do:** a job of an
+  earlier release was affected by (1) when it allowed bulges, its `log_verbose.txt` shows `Variant
+  index present (NNN_...)` (or `NNNNNNNN_...`) for another PAM, and its `log.txt` shows `Indexing
+  Indels` `Start` (its `log_verbose.txt` then has no `Indels index present` line; the `Indexing
+  INDELs in ...` lines tell nothing, as they may be missing from it): run it again with 2.8.1, and
+  remove what it left under the other PAM's name, the `NNN_<N>_fake<chr>` (or
+  `NNNNNNNN_<N>_fake<chr>`) directories in `genome_library/<that PAM>_<N>_<genome>+<dataset>_INDELS`,
+  with that directory when nothing else is in it. For (2), a search now says which index is
+  incomplete; once it is rebuilt, run again the searches made with it. Covered by
+  `PostProcess/test_indel_empty_chromosome.py`.
+- **A contig with an underscore in its name (`chrUn_KI270302v1`, `chr1_KI270706v1_random`) gets no
+  INDELS sub-index, so the indel off-targets there that need a bulge are not searched; a build now
+  says so.** This is so on every release, and `docs/INPUT_FORMATS.md` (section 6) does not list such
+  contigs as supported: `pool_index_indels.py` takes what follows the last underscore for the
+  chromosome, finds no fake-indel genome of that name, and indexes nothing. `build-index-only`, and
+  a search that rebuilds a missing INDELS index (in its `log_verbose.txt`), now print one line that
+  names the contigs with indels: `No INDELS sub-index for chrUn_KI270302v1: a contig with an
+  underscore in its name gets none, so a search does not find the indel off-targets there that need
+  a bulge`. Neither fails for want of that sub-index: `build-index-only` exits 0 (a dataset whose
+  only indels are on such contigs gets an INDELS index that holds no sub-index) and a search goes on,
+  as on 2.8.0. What a search then does there, measured through the real CLI on a test genome with a
+  carried deletion on the contig (NRG, 4 mismatches, 1 DNA and 1 RNA bulge), the same on 2.8.0: it
+  searches the contig's fake-indel genome without bulges, so a site that aligns with the guide only
+  through a bulge on the carried allele is missing from the report, with exit 0 and no message. An
+  indel off-target found there without a bulge stops the search at "Post-analysis INDELs", with
+  `ValueError: invalid literal for int() with base 10: 'KI270302v1'`. Where that fake-indel genome is
+  not there (an index copied without `Genomes/<genome>+<dataset>_INDELS/`), the search stops at
+  "Post-analysis SNPs", with `tail: cannot open ...`. Off-targets on the contig that carry none of
+  its variants are reported as usual, but one that carries one of its SNPs stops the search at
+  "Integrating results", with the same `ValueError`. A contig with SNPs only gets no such line, and a
+  search stops there only for such an off-target. So did 2.8.0, but when the contig's VCF file came
+  last of the dataset's by name (as on the test genome, which has no chrX), it stopped every search
+  of the dataset at "Post-analysis SNPs", with `sed: -e expression #1, char 2: expected \ after ...`.
+  **Affected:** variant datasets with indels on such contigs, or with SNPs there that an off-target
+  carries. No published index is: the indel logs of the 50 INDELS indexes on the build machine that
+  have them beside them name no such contig, nor do the dictionaries in their working directories.
+  **What to do:** to have such a contig's indels searched, and the off-targets that carry its SNPs
+  reported, rename it without the underscore in its FASTA (file and header), in the VCF of each
+  dataset with records on it (file and records) and in any annotation BED that names it. What was
+  built under the old name is then out of date, and build-index-only keeps what it finds: remove each
+  reference index of that genome (`genome_library/<PAM>_<N>_<genome>`) and what was built of each
+  such dataset (`rm -rf genome_library/<PAM>_<N>_<genome>+<dataset>
+  genome_library/<PAM>_<N>_<genome>+<dataset>_INDELS Genomes/<genome>+<dataset>
+  Genomes/<genome>+<dataset>_INDELS Dictionaries/dictionaries_<dataset>
+  Dictionaries/log_indels_<dataset> Dictionaries/registry_<dataset> Dictionaries/genotypes_<dataset>
+  Dictionaries/indel_genotypes_<dataset>`), then build them again with build-index-only, with
+  `--vcf` for each such dataset. A dataset without records on the contig needs nothing more.
+  Measured on the test genome, the contig renamed `chrUnKI270302v1`: it got its sub-index, the
+  search reported the bulged site and the off-target that carries its SNP, and the searches with that
+  dataset, with another without records on the contig and without `--vcf` gave the same result files
+  as on a build that named the contig so from the start (the other dataset's index keeps the old
+  name, which shows only in the name of one link under `.binview/` in its search folder). With
+  nothing removed, build-index-only kept everything (`... already present`) and the search stopped at
+  "Post-analysis SNPs", with `tail: cannot open ...`. With the reference index kept, the searches
+  without `--vcf` or with the other dataset missed the contig's off-targets, with exit 0; with the
+  dictionaries kept, the report counted the contig's SNPs twice; with the annotation BED unchanged,
+  the contig's off-targets got no annotation from it. Covered by
+  `PostProcess/test_indel_empty_chromosome.py`.
+
+- **Tests that failed where nothing was wrong** (contributors; no search or report changes).
+  `test_build_index_only_atomic`'s setgid test errored in any unprivileged Apptainer run, where
+  `os.getgroups()` gives 65534 for every group the user namespace does not map: it now skips there,
+  saying so. `test_generate_report.TestAssemblyExtraColumns` failed 3 of its tests when a combined
+  report had been built before it in the same process, as under `python -m unittest discover`: it
+  no longer depends on that. `test_complete_search_flags` and `test_post_process_tempdir` failed on
+  a read-only code directory such as a SIF: they now pass there, and the first no longer leaves the
+  data folders beside the code on a writable install.
+
+- **A 0-bulge variant search on a downloaded index no longer loses every SNP-path variant row.**
+  With `--bDNA 0 --bRNA 0` the variant search scanned `Genomes/<genome>+<dataset>/`, which a
+  download does not ship. The engine printed `ERROR! ... is not a directory.` on stdout and exited
+  0, so the run went on with the reference and indel rows alone, wrote a full report, and exited 0
+  with an empty error log. **Affected:** every such search of a downloaded index without the
+  enriched genome, on the CLI and in the web form's Advanced panel, in 2.8.0 and back to at least
+  2.3.3 (searches with bulges, and installs with the enriched genome, were right). **What to do:**
+  run those searches again. Measured on hg38 with the default index (TRAC guide, 4 mismatches, NRG,
+  per-sample): 483 rows before, 722 after, which for this guide is byte-identical to a scan of the
+  enriched genome. The 240 new sites are all variant sites, and one site listed before is now
+  reported 1 nt over, at a variant alignment that scores higher; sites found only in the variant
+  genome go from 80 to 319; sites at CFD >= 0.5 from 7 to 11, >= 0.2 from 33 to 50, >= 0.05 from
+  156 to 233; and 207 of the sites already listed change too (a variant alignment that scores
+  higher, or another motif counted). The search now takes the installed variant index when any
+  chromosome's enriched FASTA is missing, with the same `-var`, `--max-edits` and `--prune-pam` a
+  search with bulges passes; with the whole enriched genome in place it scans it, as before. The
+  index has the limit every index has at contig ends and `N` runs (below): for a site whose guide
+  lies within N − 1 nt of one (2 nt for the published indexes), the scan reports the variant
+  version and its carriers, and a search through the index only the reference version, from the
+  scan of the reference genome, when that is within the mismatches asked.
+- **A search the engine never ran now fails the run.** `crispritz.py` says what stops it before it
+  searches on stdout and exits 0, so a search that never ran passed for one that found nothing.
+  After each reference and variant search, the run now stops with an ERROR when the targets file is
+  missing. A search that finds nothing writes a file with its header alone, and still ends in an
+  empty result with exit 0.
+- **A search with bulges no longer ends empty when its library cannot be written to and lacks the
+  index it needs.** On a read-only mount, without write permission or with no inode left, the failed
+  lock read as "another run built it", so the search went on with a folder that is not there: the
+  engine said so on stdout and exited 0, and the run ended `No off-targets found ... completed
+  successfully` (web: "Finished: no off-targets were found"), or, with the reference index in place
+  and the variant index short, reported the reference and indel rows alone. **Affected:** every
+  such search, in 2.8.0 too. It now stops with one ERROR that names the index and the library and
+  says what to do, shown on the web job's banner. A library that holds the right index still serves
+  the search, byte-identically, and a 0-bulge search, which opens no index there, still runs.
+- **A guide that does not fit an index's stored window is no longer searched on it.** An index name
+  carries no guide length, and the engine searches any guide: past what the index stores, it
+  reports wrong alignments or loses sites at exit 0, or, on a site planted at a contig start, stops
+  with `Non-numeric start coordinate`. A 20-nt search at default flags builds `<PAM>_2`, and the next
+  23-nt search took it: on real chr22, 181 rows against 1003, the on-target no longer a perfect
+  match. On the web, the same, with no message. `build-index-only` with a 23-nt PAM file over a 20-nt
+  index said "already present" and rewrote `.pam_build` with the wrong geometry. **Affected:** a
+  search of a guide longer than its index was built for, in 2.8.0 too; every published index is
+  20-nt, so a 20-nt search is not (nothing changes for it), a 21-nt one at up to 1 bulge of each
+  type on an N=3 index is not, and any longer one is. **What to do:** run those searches again;
+  they build their own index, or say how to clear the way. The length comes from the index's own
+  `.bin` header, so no index needs rebuilding. An index a newer CRISPRitz built, in the format
+  CRISPRitz 2.9.2 and later write (index format 2, whose files open with a magic and the format
+  version), holds no length this release reads: a search that takes one, found or built with such a
+  CRISPRitz installed, stops with one ERROR that says what it is and what to do (use a CRISPRme that
+  reads index format 2, or install CRISPRitz 2.9.1 and build the index again), and so does
+  `build-index-only` with one in place that it would keep (the reference, the variant or the INDELS
+  index), or one the installed CRISPRitz writes. Measured through the real CLI with that CRISPRitz
+  built into the image, they had read its format version as the guide length ("built for a 2-nt
+  guide") and its magic as a leaf count ("not a tree ..., as when the disk fills up"); with
+  CRISPRitz 2.9.1 the same runs give the same tables. No 2.8.1 install pulls such a CRISPRitz:
+  the image and `install_from_source.sh` pin 2.9.1, and the Bioconda recipe `>=2.9.1,<2.9.2`. A search takes an index only where built + N >= guide +
+  bDNA + (1 if bRNA > 0), measured through the real CLI on 246 cells: every cell inside is
+  byte-identical to a dedicated index, every cell outside differs. When an index of the same name
+  is in the way it stops with one ERROR naming the index, both lengths and what to do; the index is
+  never removed. An index built for this very guide is now preferred to one that merely fits, so a
+  20-nt search beside a 23-nt `NGG_2` and a 20-nt `NGG_3` takes `NGG_3`. `build-index-only` stops
+  the same way, and leaves the record of an index built for another guide. The web form's bulge
+  caps and PAM list follow the same rule, and two PAM files that read the same show their guide
+  length ("Cas12a · TTTV (23 nt)").
+- **A guide longer than its PAM file's spacer is refused.** The search kept the spacer's length of
+  it and dropped the rest with no message: a 23-nt guide with `20bp-NGG` was searched without its
+  last 3 nt (2 rows against 35, and none at 0 bulges, at exit 0), under the full guide's name. The
+  pre-flight now says which bases would go and what to do. Padding with extra `N`s drops nothing
+  and stays accepted. CLI `--guide` only: the web form and `--sequence` never pass such a guide.
+- **A search that enriches a dataset itself no longer loses targets that need an indel and a SNP
+  beside it, and no longer keeps a blind INDELS index.** Only `build-index-only` put the SNP codes
+  on the fake-indel genome. A search that found the dataset's VCFs and no index for its PAM or
+  bulges (a download plus `--what vcf`, or a renamed genome folder), and the web's first 0-bulge
+  search of a dataset that has only its VCFs, enriched the genome without them, so a cis SNP+indel
+  site read 2 mismatches, CFD 0.096, listing a carrier that does not hold both, against 1 mismatch,
+  CFD 0.353 on a built index; the INDELS index stayed in the library, so every later run gave the
+  same, and `build-index-only` said "already present". Exit 0, no message. **Affected:** every such
+  search since 2.5.0. Now the search script overlays the codes before the fake-indel genome goes
+  into place, and again before it builds an INDELS index from one that is there, and writes the
+  phased indel genotype store where it enriches. Measured on the walk genome: the on-demand search
+  is byte-identical to a search of a built index, in all 41 result files. The first web search gets
+  the same row, carrier and scores (it needs the indel track's fix, in this release, to resolve the
+  codes without tiers); it has no registry, so its report says no co-occurrence table is written
+  rather than "unaffected", and the CLI warning says the same (a report made again from a copy of
+  the results away from the install, where that cannot be told, keeps "unaffected" for a
+  population-level run, as before). **What to do:** an INDELS index built by such a search stays
+  blind until it is rebuilt. Run `build-index-only` with the dataset's VCFs and
+  your PAM: it now codes a fake-indel genome it finds without codes, removes the INDELS indexes of
+  every PAM and budget of that dataset built before the codes, says which, and builds its own (a
+  later search rebuilds the others). A genotyped dataset with no `Dictionaries/indel_genotypes_<vcf>/`
+  (an index built before 2.5.0) now gets a `WARNING` that says so and what to run.
+- **A downloaded variant index asked for a PAM or bulge budget it does not hold now says so.**
+  The search tried to enrich a dataset with no VCFs, and failed in `mv: cannot stat ...` four times
+  and `Genome enrichment failed`, after a pre-flight that printed `[OK] ... precomputed variant index
+  ... present`, leaving empty folders; the web form promised that a first search would prepare the
+  genome, and its job ended "please remove it and try to submit again". This is likely the first
+  slip on the default index (searching `NRG_3_hg38+hg38_HGDP1kGP` with NGG), and on a K=8 index
+  without `--prune-pam`. **Affected:** a search with no index for its PAM or bulges and neither the
+  dataset's VCFs nor its enriched genome installed, in 2.8.0 too. It now stops before it does
+  anything, on the CLI before the pre-flight's `[OK]` and on the web job's banner, with one ERROR that
+  names the genome, dataset, PAM, bulges and guide length asked for, the variant indexes installed,
+  and what to do: search with the bulges an index of this PAM holds, `--prune-pam --index-path
+  genome_library` where a wider all-N index serves it, or `download` or `build-index-only` another
+  index. Web serving of a wider all-N index is not new here: the web still needs an all-N index of
+  exactly the PAM's width. An install with the enriched genome (the build-inputs kit) or the VCFs
+  still builds the index and is byte-identical to a dedicated one. The README no longer says a
+  PAM-less index must be searched from the CLI: only a wider one must.
+- **With no `--bDNA`/`--bRNA`, a search no longer becomes a 0-bulge search with no message.** The
+  default of 1 bulge of each type is capped by the indexes a search can reach, but that cap looked
+  only at the working directory's `genome_library/` and `Genomes/<name>`. A library at
+  `--index-path` (variant, K=8 with `--prune-pam`), or a `--genome` folder elsewhere (the
+  shared-mount recipe), gave a cap of 0, and the run was byte-identical to a 0-bulge search: 33 rows
+  against 38 with bulges, with a site that needs a bulge reported at a worse alignment or not at all
+  (2.8.0 too). **What to do:** run those searches again, or pass the bulges. The cap now reads
+  `--index-path` and the `--genome` folder given, so these searches take their 1 bulge, and where no
+  usable index holds bulges (K=8 without `--prune-pam`, an index of another PAM) a `WARNING` says
+  the search runs with none, and what to pass.
+- **`complete-test` works on any index you installed, and no longer breaks when the K=8 index sits
+  beside the default.** Its smoke wrote the example guide and a 3' PAM from the index's name, so on
+  a PAM wider than 3 nt it stopped with `guide ... is 23 nt but the PAM expects 28 ... Fix: append 8
+  'N'`, about a file it rewrites each run; it took the first name in sorted order, so
+  `NNNNNNNN_3_hg38` shadowed `NRG_3_hg38`, on the install `DOCKER_QUICKSTART` describes; and on a 5'
+  index it searched the wrong side, which under `--chrom` read `PASSED ... holds none of its
+  off-targets` with sites there. Each failed run also left a PAM file such as
+  `PAMs/20bp-TTTV-SpCas9.txt`, which the web then offered as a nuclease. **Affected:** the
+  documented self-test on a K=8, SaCas9, Cas12a or other non-SpCas9-class index, in 2.8.0 too; a
+  leftover `PAMs/20bp-<motif>-SpCas9.txt` of such a motif can be removed. It now takes a 3' index of
+  a 3-nt PAM first, and an all-N index wider than 3 nt last; searches a wider 3' all-N index for NRG
+  with `--prune-pam`, byte-identical to a dedicated NRG index (measured on the synthetic genome,
+  and on the published K=8 indexes on chr22); and searches any other for its own PAM, on the side
+  its `.pam_build` records (3' without one; for a dedicated index, what the PAM files of its motif
+  in `PAMs/` say), with the example guide padded for it. It writes nothing into `PAMs/`: it uses the
+  file there that holds the line it needs, or a hidden one for the run. With another nuclease's PAM
+  an empty result on the whole genome passes too, as it does on one chromosome. An index whose side
+  cannot be told stops in one line. Results on NGG, NRG, NNN and a 2-nt PAM are unchanged.
+- **A variant search on a genotyped index without `--samplesID` no longer ends in a `KeyError` after
+  the whole search.** The help marks the flag optional and the run warned "using an empty sample
+  set", a case meant for sites-only panels; on a genotyped index the rows name carriers, and
+  `process_summaries.py` looked each up in an empty table at "Creating images", then deleted the
+  results: 65 to 78 minutes on hg38 for a `KeyError`. An empty or a partial list on a folder with no
+  VCFs did the same, and so did `complete-test` with a sample list under another name (2.8.0 too).
+  **What to do:** run those searches again. Without the flag the search now uses
+  `samplesIDs/<dataset>.samplesID.txt` for each dataset that has one, which an index download
+  installs, and says so: every result file but its own list `.list_samplesID.txt` is byte-identical
+  to passing that list, in both analysis modes. With no such file the search still ends with the
+  same `integrated_results`, with empty by-sample and population tables, and the warning says so.
+  A carrier a partial list does not name has no row in those tables.
+- **`build-index-only` records the folder an index of a genome outside `Genomes/` holds, and a
+  Direct URL download no longer replaces a genome something is built on.** A search takes a
+  genome's index by the folder's name alone. `complete-search` records, in an index it builds of a
+  folder outside `Genomes/`, which folder it holds (`.genome_source`); `build-index-only` did not.
+  So after `build-index-only --genome projA/ref`, a search of another folder named `ref` reported
+  the results of `projA/ref`, byte for byte, at exit 0; `build-index-only` of a folder named like
+  one in `Genomes/` built that one's index from it, which every search of the `Genomes/` folder
+  then took; a recorded folder whose FASTA files had changed was "already present"; and the search
+  of a personal-assembly haplotype by its own path (`Assemblies/<individual>/<haplotype>/genome`)
+  was refused on the index `build-index-only` had just built for it, which it had said would be
+  reused. `download --what genome --source url`, the Settings page's Direct URL, put another
+  genome's FASTA files under an installed name and kept its indexes, which every search then used,
+  with the old genome's sequences and positions. **Affected:** `build-index-only` of a folder
+  outside `Genomes/` and a Direct URL download over a genome with an index, in 2.8.0 too; the
+  refused haplotype search is new in 2.8.1. **What to do:** a search run on such an index, or on a
+  genome downloaded over another, searched the other folder's sequence: remove that index and run
+  it again. `build-index-only` now records the folder, refuses one named like a folder in
+  `Genomes/` or like another folder an index records, and builds an index again when its folder's
+  FASTA files have changed (`Removing index ...`), as `complete-search` does, with the same
+  messages. Of a folder in `Genomes/` it records nothing, as before, so a downloaded index, and a
+  genome renamed together with its indexes, are served as before. A Direct URL download under the
+  name of a genome with an index or a variant genome installed is refused before anything is
+  fetched, by the rule a Settings upload has (remove them, or use another name), and the Settings
+  page says so at once. `--source ucsc` and the HuggingFace download give the same assembly by
+  name, and are not refused.
+- **A variant search reads the variant index at `--index-path`.** `--index-path` served the
+  reference index alone: the variant index and its INDELS index were looked for in the working
+  directory's `genome_library/` only, so a variant search of a complete library kept elsewhere
+  (a shared, read-only install) stopped with `mv: cannot stat` and `Genome enrichment failed`
+  when the dataset's VCFs were absent, and with them it enriched the genome and built a second
+  variant index in the working directory, which every later run there took, also when the one at
+  `--index-path` was newer. **Affected:** `complete-search --vcf --index-path <library>` of a
+  library other than the working directory's, in 2.8.0 too; the web passes no `--index-path`.
+  **What to do:** a variant index such a run built in the working directory can be removed. The
+  variant index, with its INDELS index beside it, is now read from the `--index-path` library first
+  and then from the working directory's, and the run says which library it read
+  (`Variant index library: ...` in `log_verbose.txt`). Measured on the synthetic genome: a library
+  elsewhere with no VCFs here, the same with the VCFs here, a K=8 library with `--prune-pam`, and
+  a stale index of the same name in the working directory are each byte-identical to the search
+  with that library in place, and build nothing. A search builds no index in an `--index-path`
+  library: a variant index there without its INDELS index stops the run with a message.
+  Dictionaries, sample lists and the genome are still read from the working directory, and a
+  search with the library in the working directory, with or without `--index-path`, is unchanged.
+- **A search refuses an index that lacks a chromosome's trees, instead of losing that
+  chromosome's sites.** A search took an index holding one `.bin` for a whole one: a partial copy,
+  a build that an earlier release left stopped between chromosomes, or an index of a genome folder
+  that gained a FASTA since, gave no row on the missing chromosome, at exit 0 and with no message,
+  on the CLI and the web, and `build-index-only` said "already present". Measured on the synthetic
+  genome: a reference index without chr2's tree gave 6 rows instead of 7, a variant index without
+  chr1's another result, and a FASTA added after the build was not searched. **Affected:** searches
+  of such an index, in 2.8.0 too; a stock install is not (every index on the lab's hg38 install, 32
+  reference and variant indexes of NRG, NGG, NRR, NNN and K=8, holds every tree). **What to do:**
+  nothing, unless a search now stops on an index: remove it and build it again, or download it
+  again, as the message says. Before it opens an index (with bulges, or for a variant search
+  without bulges and without the whole enriched genome), the search now checks that it holds the
+  trees of every FASTA of the genome folder, and a variant index those of every chromosome of its
+  dataset, and stops naming the FASTAs that lack them; `build-index-only` does the same before it
+  says "already present". A FASTA with no site of the index's PAM (all N, shorter than a window, no
+  PAM) has no tree in a healthy index and is not counted, by the engine's own rule for a site, and
+  neither is a variant chromosome the genome folder has no FASTA of. A gap in a chromosome's
+  numbered trees, and a full last tree of a chromosome that holds more sites, count as missing
+  trees too; a chromosome's last trees lost after a tree that is not full cannot be told from the
+  files. The check reads the first line of each FASTA, and a FASTA in full only where it has no
+  tree or a full last tree: under a second on hg38.
+- **An install without the genotype store runs the population-level analysis, rather than a
+  per-sample one that loses off-targets.** On a phased dataset the CLI chose the per-sample
+  analysis from the registry's data type alone, so after `download --what index --no-genotypes`,
+  or a download whose genotype store did not come, it ran per-sample with no genotypes to read:
+  it joined no two SNPs of one site, dropped the off-targets that only two SNPs of a sample
+  together reach, and still printed "CONFIRMED cis phasing + named carrier samples". `--per-sample`
+  did the same. Measured on the synthetic genome with a site whose PAM only two cis SNPs make (1
+  mismatch, CFD 0.6, carrier S4 on a full install): the no-store default reported it at a 2-mismatch
+  bulged alignment, CFD 0.095. **Affected:** CLI searches of such an install, in 2.8.0 too; the web
+  already offers population-level alone there. **What to do:** run them again, or install the store
+  (`download --what index` without `--no-genotypes`) for carriers. A dataset with a registry and
+  neither a genotype store with anything in it nor the classic per-sample dictionaries now runs
+  population-level, by default and under `--per-sample`, with one `WARNING` on stdout that names
+  the dataset and the download. On the synthetic genome the no-store default is then byte-identical
+  to its `--population-level` run and reports that site at 1 mismatch, CFD 0.6, with no carriers; it
+  lists the same sites, at the same CFD and with the same variants, as a full install's
+  `--population-level` run, and a row of SNPs names no carrier. Where an indel and a SNP make a site
+  together, its row names both and lists every carrier of the indel, S4 and S5, as no genotype says
+  which of them has the SNP too (PUTATIVE in the SNP+indel companion), where a full install lists S4
+  alone, whose haplotype holds both (CONFIRMED). A full install, and one with the classic
+  dictionaries, are unchanged. The download help, the README, docs/PRECOMPUTED_INDEXES.md and
+  docs/TROUBLESHOOTING.md say what such an install runs. A sites-only dataset, such as `hg38_mega`,
+  has no genotypes at all, and so no store to install: it is not one of these, and leaves the mode
+  of the datasets beside it as it is (a phased one stays per-sample); its own rows are the
+  population-level analysis's in any mode (the entry on sites-only datasets).
+- **An index is taken only for a search on the side of the guide it was built for, a dedicated
+  one too, and an all-N index that records no side is taken for a 3' PAM only at the published
+  widths.** 2.8.1 takes an all-N index of a 3' PAM's width, and one with no `.pam_build` for a 3'
+  build. A search before 2.8.1 records no side, so after a 5' all-N search (`23bp-NNNN-NO-PAM`,
+  which builds `NNNN_2_<genome>`) a 3' search of that width (`NGCG`) read the 5' index: on the
+  synthetic genome it found no site against 2 on a dedicated index, which 2.8.0 built. This is new
+  in 2.8.1. The side check also covered all-N indexes alone, while a dedicated index is named
+  after its PAM by PAM files of both sides (`N...NTTTV 4` and the 5' `TTTV-Cas12a` both build
+  `TTTV_<N>_<genome>`): a 5' TTTV search of a 3' build reported nothing, or a site that is in no
+  chromosome, at exit 0, as in 2.8.0, and `build-index-only` with the other side's file recorded
+  that side over it. **Affected:** a search beside an all-N index of a width other than 3 and 8
+  that a search before 2.8.1 built, and a search beside a dedicated index built from the other
+  side's PAM file; no published index and no shipped PAM file. **What to do:** run those searches
+  again. Now every index's recorded side must be the search's side, and a search records the side
+  of every index it builds, dedicated ones too (build-index-only always did). An all-N index with no
+  record serves a 3' PAM at widths 3 and 8 (the published `NNN_3` and the K=8 archive, which has
+  no `.pam_build`) or under the search PAM's own name, as before; at any other width the search
+  builds its dedicated index, as 2.8.0 did, and under `--index-path` it stops and says why. A
+  dedicated index with no record is used as before. Where the index of the build name is in the
+  way the search stops with a message, and `build-index-only` refuses another side's PAM file over
+  a recorded index, and a 3' file over an unrecorded all-N index of another width (a 5' file is
+  recorded, as the messages say to do). Measured on the synthetic genome: the NGCG search after the
+  5' NNNN search, and the 5' TTTV search beside a 3' `TTTV_2` and a 5' `TTTV_3`, now equal a
+  dedicated index; NRG on an unrecorded `NNN_3`, and on an unrecorded K=8 with `--prune-pam`, is
+  unchanged. A dedicated index built for the other side's PAM by a search before 2.8.1 records
+  nothing and cannot be told apart: remove it if you built one from such a PAM file.
+- **A search under `--prune-pam` warns of an all-N index built by CRISPRme 2.8.0 or earlier.**
+  CRISPRitz before 2.9.1 dropped every target whose stored PAM/flank region held an `N`. Searched
+  for a PAM narrower than its flank, which 2.8.1 newly allows, such an index misses the sites
+  whose flank holds an `N` past the bases the PAM covers, at exit 0 (the review measured 3 of 36
+  rows on its synthetic genome, and 2.6% of the indel rows on chr22, none above CFD 0.2; on 2.8.0
+  such an index could serve only an all-`N` search of its own width, where nothing is lost). The
+  index records nothing of the engine that built it, but its trees do: an index built since stores
+  an `N` in the flank of a target beside one, and no earlier build does. Measured on the lab's
+  hg38 indexes: the `NNN_3` variant and INDELS indexes of the 2.8.0 install hold none, and the
+  rebuilt `NNN_3`, the published K=8 and the final K=8 builds do. **Affected:** a K=8 or `NNN_3`
+  index you built or downloaded before 2.8.1 (the published replacements are not), searched with
+  `--prune-pam` for a narrower PAM. **What to do:** remove such an index and build it again, or
+  download it again; `build-index-only` keeps an index it finds in place. The search now reads the
+  trees of the index it takes when its flank is wider than the PAM (the smallest tree of a contig
+  whose sequence holds an `N`, and of the INDELS index the smallest one of several indel windows)
+  and prints a `WARNING` on stdout, also written to the run's `Params.txt`, when it finds no
+  `N`; it does not stop the search. An index of the PAM's width is not read, and nothing else
+  changes.
+- **A working folder the run cannot write to stops it in one line, not a traceback.** Run from a
+  read-only folder (a `:ro` mount, no write permission), `complete-search`, `assembly-search` and
+  `build-index-only` ended in a raw `OSError` traceback from creating `Genomes/`, the output
+  folder or `genome_library/`, and `crisprme.py` with no arguments printed one instead of its help.
+  **Affected:** those runs only, in 2.8.0 too; nothing was written or lost. They now stop with
+  `Error: cannot create <folder>: <reason>. Run CRISPRme from a working folder you can write to.`,
+  and the help prints. A read-only folder that already holds every CRISPRme folder, searched with
+  an `--output` elsewhere, runs as before.
+
+- **An indel off-target near a SNP was reported with SNP alleles its carriers do not have, and with
+  PAMs the search never matched.** Since 2.5.0 the build writes the IUPAC code of every SNP onto the
+  fake-indel genome the indel search runs on, and the search engine matches a code when any of its
+  alleles fits, so one raw indel target stands for every combination of the SNP alleles around the
+  indel. The indel post-analysis then turned each code into one base, column by column, without
+  looking at any genotype: the guide's own base when it was one of the code's alleles, otherwise the
+  code's first allele. A row therefore paired one individual's indel with SNP alleles that only
+  other individuals carry, scored as if real, under the indel's carriers: on the default HGDP + 1000
+  Genomes index, guide `ACTGAAATCTGTAAGCAGGC` (NRG, 4 mismatches + 1 DNA + 1 RNA bulge) reported
+  chr18:12386282 at CFD 0.708, fifth in the report's top-1000 table and 18th in the recommended
+  validation panel, as "1 cis carrier": NA19072, who is homozygous reference at the SNP the
+  displayed sequence uses (its only carrier, NA20541, does not carry the deletion); on NA19072's
+  real haplotype the site is 5 mismatches + 1 bulge, past the search's limit. Its mismatch counts
+  were understated the same way. And a code at a PAM position always read as its first allele: an R
+  (A/G) at NRG's last base was shown as A, a PAM the search never matched, with a CFD of about 0
+  (1,088 rows of that search's highest-CFD block). On 9,255 of its 13,622 highest-CFD indel rows no
+  listed carrier's real haplotype, built from the phased VCF, holds the reported sequence, mostly
+  for this reason (the next two entries and METHODS §8 cover the others). Each carrier haplotype of
+  the indel now gets its own allele at every code: the SNP alt it carries, else the reference base,
+  several alts on one VCF line each read against its own allele index. Haplotypes left with the same
+  sequence form one row that lists only their individuals and names the SNP alts they hold next to
+  the indel (`Variant_info`, rsID, MAF), with its mismatches recounted, its CFD, CRISPR-Bulge and
+  risk scores computed on that sequence, and its PAM creation flagged from it; a sequence whose PAM
+  does not satisfy the searched motif, or that is past `--mm` or `--max-total-edits` (now passed to
+  the indel post-analysis), is dropped, so a raw target no individual has gives no row. A row's
+  carriers stay on its sequence through the merge of a cluster's rows, which would otherwise add
+  those of another alignment of the site naming the same variants; so do those of a row of an
+  equal-length multi-base record (an MNV, such as AC>TG), which the search treats as an indel. An
+  individual whose genotypes cannot put an allele on the indel's haplotype (an unphased call, a
+  missing allele, no phased indel genotype, a haploid call against a diploid one; every carrier of
+  an MNV, which the phased indel genotype store leaves out) gets the strongest target its own
+  alleles allow, and is never listed for an allele it does not carry; with no genotypes at all (a
+  sites-only panel, `hg38_mega`), the row holds the strongest target the codes allow (its PAM
+  always one the motif allows) under the carriers the
+  indel log lists, as before. Both are PUTATIVE in the SNP+indel co-occurrence companion
+  (`*.indel_snp_cooc.tsv`), which now lists the SNP alts the indel post-analysis's rows require, a
+  SNP that creates the PAM included, with those rows' carriers (CONFIRMED when each was resolved on
+  its phased haplotype), and no longer a SNP set no carrier's haplotype holds. The companion is
+  written before the merge picks each cluster's alignments, one line per engine alignment, required
+  SNP set and phase (an alignment that needs no SNP writes no line), so a population-level run,
+  which writes no alternative alignments, can have lines with no row in its tables. A classic
+  dictionary install (an
+  index built without `--samplesID`, as the web Settings page built them before this release, so
+  with no Tier-1 genotype store) reads the genotypes from the per-sample SNP dictionary: there,
+  the codes used to stay in the rows unresolved, scoring CFD 0, so the real SNP+indel targets were
+  lost. With `CRISPRME_INDEL_SNP=0` at search time each code reads as the reference base, as on a
+  fake-indel genome built without the overlay. A target with no code (every target of a fake-indel
+  genome built without the overlay) that holds its indel, as the entry "An indel row could hold no
+  base of its indel" defines it, is not changed by this fix. **Affected:** every search since
+  2.5.0 on an index that carries the overlay, which every published variant index and every index
+  `build-index-only` builds do: from the web or the command line, per-sample and population-level
+  (the indel post-analysis does not depend on the mode), with any PAM. A search that enriched its
+  dataset on demand (`CRISPRME_ALLOW_ONDEMAND_BUILD=1`, as the benchmark mode of `complete-test`
+  does) built its fake-indel genome without the overlay, so no code reached its post-analysis
+  (since 2.8.1 it has the overlay: the entry on a search that enriches a dataset itself). Under a
+  PAM whose motif allows the base the misreading produced (NRR allows A at its last position) the
+  PAM stayed legal while the CFD collapsed, so nothing showed. Reference and SNP-only off-targets
+  are not affected, though a cluster whose indel candidate goes away shows its next best in the
+  results and its `Other_motifs` count changes. Measured on the search above, rerun genome-wide
+  with the fixes of this entry and the next two: its highest-CFD indel rows went from 13,622 to
+  5,047, of which 5,037 hold their sequence on a listed carrier's real haplotype, read literally
+  from the phased VCF, and every one of those spans its indel; the other 10 hold a SNP at a split
+  multi-allelic site, which the enriched genome and its dictionaries read as reference (METHODS
+  §8), as does one of the 103 carriers of one more row; no ALT row shows a PAM NRG does not allow
+  (3,581 over the table's three blocks before); chr18:12386282 is now the SNP row of its real
+  carrier, NA20541, at CFD 0.14, out of the top-1000 table and the panel; that table lost 66 indel
+  rows and gained 2 (chr5:170503088 and chr10:103001704), from 88 to 24, the recommended panel
+  went from 259 to 234 sites, the CFD >= 0.5 tier from 67 to 57, the CRISPR-Bulge sensitive tier
+  from 162 to 156 and the <= 2 mismatches + bulges tier from 9 to 7; the SNP+indel companion went
+  from 590 to 336 lines, all CONFIRMED and the same in both analysis modes; all 755,576 reference
+  and SNP-only candidates are unchanged, and so are the two perfect matches and the
+  multiple-perfect-match banner. HPRC is the only published index with MNVs (chr22: 9,079 of its
+  195,813 indel-search records); the search above on HPRC's chr22 lists 8 MNV row blocks per
+  block, and the MNV part of the merge fix changes none of their carriers. The search takes as
+  long as before and peaks at the same memory, its search stage's; an indel post-analysis worker
+  holds about 2% more. **What to do:** run such searches again; results of earlier releases are
+  corrected only by running the search again. Covered by
+  `PostProcess/test_indel_haplotype_resolution.py`, `PostProcess/test_indel_overlaid_rows.py`,
+  `PostProcess/test_representative_tiebreak.py`, the synthetic SNP+indel oracle through the real
+  CLI (`test/indel_snp_oracle`, run by `validate-benchmarks.yml`) and a release gate,
+  `scripts/check_alt_pam.py` (no ALT row may show a PAM the searched motif does not allow, and no
+  REF or ALT target of any block may hold an N, an assembly gap of the genome), run on the chr22
+  benchmark outputs.
+- **An individual whose haplotype carries a second indel that changes an indel off-target was
+  listed for the sequence of the first indel.** The fake-indel genome holds one indel per
+  window, so such a haplotype does not have the window's sequence; on the synthetic oracle a
+  sample carrying two deletions on one haplotype was listed on both windows' rows, for
+  sequences neither of its haplotypes has. Whether a carrier whose haplotype holds a second
+  indel inside the target has the row's sequence is read on its bases: the reference around the
+  target is written with every indel of the phased indel store the haplotype carries there and
+  its own SNP alleles, and the carrier is listed when the target's bases are on it at the
+  target's place, from the target's first base on or up to its last, through the indel (not in
+  a stretch that another of its variants lengthened, pushing the indel out of it). In a tandem
+  repeat a unit gained or lost at the target's edge leaves the bases as they are (the repeat
+  puts the same bases back), so such a carrier stays listed; one whose second indel changes
+  them does not, nor one whose bases cannot be read either way: each way meets an unphased or
+  missing SNP call, an unphased indel that does not itself change the target, or two of its
+  variants that overlap, two records of one base: two other indels
+  whose REFs share a base (any two at one position do, even a duplication and the deletion of
+  the same bases, which together would leave the reference), or a SNP on a base of the second
+  indel's REF. A reading from the first base on meets no variant upstream of it, one up to the
+  last base none downstream. A carrier whose second indel inside the target has an unphased
+  call cannot be tied to a haplotype and stays listed, PUTATIVE, as every carrier on an
+  unphased panel is, even when another, phased second indel on its indel haplotype changes
+  the target. Nor is one listed whose second indel, on the same phased slot,
+  overlaps the first at another position (one complex allele that the VCF splits into
+  overlapping records). A variant only on bases the indel deletes changes nothing. Another
+  allele at the indel's own position, an indel or a SNP, is an alternative to it (a haplotype
+  holding both would be one record), so a slot phased with both is a phasing artefact: on chr22
+  of the HGDP + 1000 Genomes panel, two indels at one position share a slot for 40,679 carrier
+  pairs against 2,463,324 on opposite slots, a SNP and an indel for 2,404 against 167,951. And
+  an unphased carrier of two overlapping records is a multi-allelic heterozygote, one allele
+  per haplotype. All of these stay listed. This needs the phased indel genotype store, which
+  the build writes with the SNP overlay; a row left with no carrier is dropped. Its own target,
+  which needs both indels, is still not searched (METHODS §8). On the search above, 693 targets
+  with no SNP code lost such carriers. On chr22 of that panel (per sample, five guides),
+  checked against haplotypes built from the phased VCF: of the 7,046 carrier listings the rule
+  takes off the integrated results' highest-CFD block (96 rows are left with none, and
+  dropped), 7,043 are of a haplotype that lacks the row's sequence within 40 bases of it, 2 of
+  one that has it a few bases away without the indel (a repeat's copy, a target of its own) and
+  1 of a slot with two overlapping records; no carrier left on an indel row lacks the row's
+  sequence because of a second indel.
+- **An indel row could hold no base of its indel.** The engine reports every target on a fake-indel
+  window, also one wholly in a flank, whose sequence is plain reference (or SNP) sequence that needs
+  no indel. The post-analysis computed a row's Start with no shift for the indel and kept the row when
+  that range met the indel's, so a target in the downstream flank of a deletion passed: a row with
+  the indel's name and carriers, at a coordinate the indel shifts, that could take the real row's
+  place in its cluster. On the search above, the top-1000 table showed at rank 628 chr1:69462019 as a
+  2-carrier off-target of a deletion and a SNP, hiding the SNP row chr1:69462021, chr1_69462039_A_G,
+  with its 3,459 carriers, so a common off-target read as a rare one (it is now at rank 588), and
+  at rank 983 chr8:28788278, the sequence of the reference row chr8:28788272 reported again 6 bp off.
+  A raw target now has to hold a base the ALT adds or replaces, or the two bases on either side of the
+  deleted ones; one wholly inside a long insertion does, and stays. **Affected:** every search with a
+  variant dataset that has indels, in every release, on any index, with or without the overlay and
+  with `CRISPRME_INDEL_SNP=0` too. No off-target goes with these rows: on the search above, each of the
+  1,566 distinct rows this removes has a reference or SNP row at its site that holds its sequence
+  (1,560) or names the same SNP alts (6). **What to do:** run such searches again. Covered by the
+  same tests.
+- **An indel off-target with an RNA bulge was reported one base early, and the reference sequence
+  shown for one with both bulge types was a base off.** For an indel row whose bulges are all RNA
+  bulges, the indel post-analysis took the search engine's cluster position for the row's start on
+  the + strand (on the - strand with a 5' PAM such as Cas12a's), so its `Start_coordinate` was one
+  base per RNA bulge before its first aligned base, where the reference and SNP rows of the same
+  alignment start, and its variant's position in `Variant_info_spacer+PAM` was off by as much. The
+  reference sequence of an indel row (`Aligned_protospacer+PAM_REF`) was read with one base too many
+  per RNA bulge and was given its gaps only on a row whose bulges are all RNA bulges: a row with an
+  RNA and a DNA bulge (`RNA,DNA`) showed it without the gap and one base too long, out of register
+  with the guide from the RNA bulge on, and with a 5' PAM an RNA-bulge row's lost its first PAM
+  base. The columns computed from it followed: the REF seed and non-seed mismatches + bulges,
+  `CFD_score_REF`, the CFD risk score, `PAM_creation`, and `CFD_score`, which is the higher of the
+  REF and ALT scores. Each indel row now starts at its first aligned base and shows as REF the
+  reference bases its target covers from there, gapped as its target. Its cluster position, which
+  the merge of a cluster's rows sorts and groups on, moves with its start: an RNA-bulge indel row on
+  the + strand no longer comes first among rows that tie exactly, and, as for SNP rows, the merge
+  lists once the alignments of a site that name the same variants with the same carriers (the best
+  of them: the next entry). Measured
+  on the search above, rerun genome-wide with this fix alone: before it, 238 of the 5,047 indel rows
+  of the highest-CFD block started one base early and 4,467 showed a REF sequence that is not the
+  reference at their start; now each of the 5,045 shows the reference at its start. On those rows
+  `CFD_score_REF` changed on 785 (`PAM_creation` no longer reads this REF: the entry "An indel
+  row was flagged as creating a PAM the reference already has"), and `CFD_score` went down on 218
+  and up on 16 (chrX:42118270, 0.149 -> 0.017: the old value was the misaligned REF's, so the row
+  left the report's CFD >= 0.05 table, as did 5 others). Four clusters now report the row of SNPs
+  that has the same sequence, CFD and carriers as their indel row, and two indel off-targets
+  that sat in a reference off-target's cluster because of their early start are rows of their own
+  (chr3:55057499, CFD 0.087, 20 cis carriers; chr16:12067029, CFD 0.069, 1). The alternative
+  alignments went from 722,564 to 722,347 rows, and 39 rows of the integrated results changed only
+  their `Other_motifs` count. The report's tiers keep their sites, some one base later, except for
+  those CFD >= 0.05 rows, the CFD >= 0.05 table gaining the two new rows and chr2:33157279 (whose
+  REF now scores 0.1), and one tie at the top-1000 table's cut-off (CFD 0.188), now broken the other
+  way. The SNP+indel companion keeps its 1,618 lines, one per alignment, the off-target start one
+  base later on those rows; counted once each, as in the first entry and in the report, it went
+  from 336 to 339 lines, all CONFIRMED, as some of those rows no longer share their line with
+  another alignment of their site. The same search of the README's example guide,
+  `CTAACAGTTGCTTTTATCAC` (the README search), keeps its 1,672 lines, 351 counted once each
+  before and 363 now.
+  Apart from `Other_motifs` counts and those four rows of SNPs, no reference or SNP-only row
+  changes, nor do the perfect matches and the banner. The search takes as long as before, with the
+  same peak memory. **Affected:** every search that allows RNA bulges (`--bRNA` 1 or more; the
+  recommended default allows one) with a variant dataset that has indels, in every release, with or
+  without the overlay and with `CRISPRME_INDEL_SNP=0` too; with a 5' PAM, every indel row with an
+  RNA bulge. **What to do:** run such searches again. Covered by
+  `PostProcess/test_indel_row_coordinates.py` (one and two RNA bulges, both bulge types, a DNA bulge
+  and none, on both strands, with an NRG and a TTTV PAM, with `CRISPRME_INDEL_SNP=0` too) and the
+  SNP+indel oracle, which now checks every indel row's REF sequence against the reference at its
+  start.
+- **Of the alignments of one site that name the same variants with the same carriers, the merge
+  reported the first it read, not the best.** The merge of a cluster's rows lists such alignments of
+  an indel row once and drops the others from both tables. It kept the first of them in the order
+  its input is sorted, where alignments tied on score and on mismatches + bulges come in text order
+  (an `RNA` alignment before an `RNA,DNA` one), so with the default `--sorting-criteria`
+  (mismatches + bulges, then mismatches) the alignment reported could have one mismatch more and one
+  bulge fewer than a dropped one, and in the fewest mismatches + bulges block another CFD. It now
+  keeps the best of them by the order that picks each block's representative; among alignments
+  that tie exactly there, the one that order's last tie-break puts first (the aligned sequence first
+  in text order), whatever order they came in. Measured on the search above, this fix against the
+  code before it: of its 182,367 integrated rows, 243 show another alignment of the same site,
+  variants and carriers. In the highest-CFD block that is 56 rows, 12 with one mismatch fewer and
+  one bulge more at the same CFD and 44 an alignment of equal rank; in the fewest mismatches +
+  bulges block 232, 94 with one mismatch fewer and one bulge more (47 at another CFD) and 138 of
+  equal rank (88 at another CFD, as that block's order does not look at CFD), and in 4 clusters the
+  better indel alignment now comes before the cluster's SNP row, which moves unchanged to the
+  alternative alignments; in the CRISPR-Bulge block 135 of equal rank. The alternative alignments
+  keep their 722,347 rows, 191 of them changed in the same ways. Against the run before the
+  previous entry's fix, no reported alignment has more mismatches: the 4 rows of the highest-CFD
+  block and 18 of the fewest block that fix had moved to the worse alignment show the one reported
+  before it again. The README search changes 323 of its 170,657 integrated rows the same way (of
+  the 3 + 15 rows that fix had made worse, 16 show the alignment of before and 2 one of equal rank
+  to it), and the search above at population level 241 of 211,830 (with no alternative alignments
+  there, the 5 SNP rows that give the fewest block to a better indel alignment leave it). The
+  report's tables keep their sites (one row of the <= 4 mismatches + bulges table now starts
+  elsewhere); no carrier, rsID, AF, row count, reference or SNP-only row changes, the SNP+indel
+  companion is the same, and the summaries and the raw observed-haplotypes sidecar follow the
+  tables. **Affected:** every search with a variant dataset that has indels, in every release, with
+  or without the overlay and with `CRISPRME_INDEL_SNP=0` too (until the previous entry's fix a +
+  strand indel row with RNA bulges had a cluster position of its own and did not meet the site's
+  other alignments). **What to do:** run such searches again.
+  Covered by `PostProcess/test_representative_tiebreak.py`.
+
+- **`--personal_annotation` reads a bgzip- or gzip-compressed BED, as its `--help` asked.** The
+  help said the file "must be compressed using bgzip", but since 2.2.0 the personal BED has been
+  read as plain text, so a bgzipped one reached the sort garbled and every search given one
+  stopped before it began, with or without `--annotation` (`No tabs/spaces found at line 1 ...
+  Error: Sorting BED file failed`, exit 1; the message never named compression). A compressed
+  file, told by its content and not its name, is now decompressed first, and a damaged one stops
+  the search with one line that says so. `--help` and `docs/INPUT_FORMATS.md` now say that a
+  plain, bgzipped or gzipped file works. Measured through the real CLI on a toy genome: a
+  bgzipped or gzipped personal BED, alone or with a plain or bgzipped `--annotation`, now gives
+  the plain BED's results byte for byte, where it stopped at exit 1; with a plain BED the results
+  are unchanged, byte for byte. Covered by `PostProcess/test_annotation_tmpdirs.py`.
+- **`complete-search --help` and the docs said a search without the CRISPR-Bulge scorer env
+  completes on CFD only.** Since 2.7.3 `complete-search` refuses to start while the `cbulge` env
+  or its weights are missing or broken, naming the fix (`crisprme.py scorer-env create`;
+  `crisprme.py scorer-env doctor` says what is wrong), and runs CFD-only, with the CRISPR-Bulge
+  columns at `-1`, only under `CRISPRME_SKIP_SCORER_ENV=1`, as README §1.1.2 says. The
+  `--compute-backend` help, its README entry, the README's scorer paragraph,
+  `docs/TROUBLESHOOTING.md` (which added "rather than failing") and METHODS now say so, and that
+  `targets-scoring` and a search started from the web interface do not check first: with the env
+  absent they complete CFD-only, with the CRISPR-Bulge column at `-1` and a banner in the log.
+  Nothing else changes. Covered by `PostProcess/test_complete_search_flags.py` (the help) and
+  `PostProcess/test_annotation_tmpdirs.py` (the refusal).
+- **The installers and the docs give the measured image and install sizes.** The one-line
+  installers said the engine image is ~800 MB: `docker pull pinellolab/crisprme:latest`
+  downloads 4.84 GB on amd64 (Windows, Intel Macs, most Linux hosts) and 1.81 GB on Apple
+  Silicon, summed from the registry manifests, and unpacks to ~7 GB or more. They now say a
+  ~5 GB download, ~1.8 GB on Apple Silicon. They also asked for a data folder with ~45 GB free,
+  which is the download; the README, the website, `docs/DATA_LAYOUT.md` and the Quickstart said
+  ~85 GB on disk and ~100 GB free, and `docs/TROUBLESHOOTING.md` ~3 + 40 + 50 GB. A default
+  variant-aware install (`download --what all`, then
+  `download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`) measures 97.9 GB, and peaks
+  around 103 GB while the genotype store unpacks beside its archive, so ~100 GB free was full
+  before the first result. Every one of them now says ~98 GB on disk and ~150 GB free, the
+  Quickstart's breakdown lists the indel genotype store and the indel logs (14 GB it left out),
+  and `install/README.md` names the figures to keep in sync. Covered by
+  `PostProcess/test_documented_sizes.py`, a new step of `unit-tests.yml`.
+- **The `lucapinello/crisprme-data` card said every index there works with older clients.** Its
+  overview said so, while the same card, `docs/INDEX_PROVENANCE.md` and this changelog say a
+  2.8.0 search of the rebuilt `NNN_3` archives fails or reports malformed rows. It now says any
+  release can read them and to use the rebuilt `NNN_3` archives with 2.8.1 or later. The live
+  card is corrected when the release uploads `docs/hf/crisprme-data_README.md`.
+- **`docs/DYNAMIC_PAM_INDEX_COMPAT.md` read as a description of 2.8.1.** The page, new in 2.8.1,
+  is the design written before `--prune-pam` was built, and described what does not ship: a
+  `complete-search` that adds `--prune-pam` itself when the PAM is narrower than the index, a web
+  PAM picker, an `index_meta.json` sidecar on every PAM-less index, and a `pinellolab` repository
+  for PAM-less indexes. A status note under its title now says what 2.8.1 does: the flag is
+  explicit, needs `--index-path` and is command-line only, and only `complete-test` passes it
+  itself, to search a 3′ all-N index wider than 3 nt such as the K = 8 one; an index serves only
+  its own PAM or, all-N, a narrower one; no `index_meta.json` is written or read (the PAM file
+  is recorded in a `.pam_build` by `build-index-only` and by a search that builds an index);
+  `NNN_3` is in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
+  `lucapinello/crisprme-data-general-index`. The sections that describe the rest are marked
+  planned, and its example of the engine's subset rule no longer has `NRG` serve `NGA`.
+
+- **History lists the jobs newest first again.** It sorted them by start time but read each row by
+  the place the job had in the `Results/` folder listing, so the table showed them in that order,
+  with the newest job anywhere in it. Each link opened the job named in its row. Since an upstream
+  change of 2025 (2.8.0 too). Covered by `PostProcess/test_history_page_assembly.py`.
+- **The caption under the results-page matrix said what VARIANT counts wrongly.** It said VARIANT
+  counts the sites that exist only because a variant creates them (`Not_found_in_REF`), and
+  REFERENCE the sites in the reference genome, even where a variant alters them. The matrix counts
+  as VARIANT every site whose alignment reported for the selected filter criterion is a variant one
+  (`REF/ALT_origin` alt): one a variant creates, and one a variant changes, for example to fewer
+  mismatches. The shareable report's matrix is the one that counts only the first, so its VARIANT
+  total can be smaller: on the walkthrough's per-sample search the page shows REFERENCE 12 /
+  VARIANT 6 (3 of the 4 perfect matches under VARIANT) and the report 17 / 1; on a genome-wide
+  HGDP + 1000 Genomes search (4 mismatches, 1 DNA and 1 RNA bulge), 105,217 / 84,732 against
+  116,092 / 73,857. The caption now says so. The counts, the Download General Table file and the
+  report are unchanged. Since 2.4.0. Covered by `PostProcess/test_web_results_links.py`.
+- **The shareable report's Search mode row named how the mode was chosen, and was often wrong.** It
+  read `Population-level (default)` in every population-level report and
+  `Per-sample (--per-sample)` in every per-sample one. Per-sample is the default on a genotyped +
+  phased index (such as the default HGDP + 1000 Genomes one), where population-level is the
+  `--population-level` opt-out, and a web search passes no flag. A search records only the mode
+  that ran, so the row now names that mode, `Population-level` or `Per-sample`, followed by the
+  same text as before. The same labels in 2.8.0. Search results are unchanged; to correct a report
+  built earlier, rebuild it with `crisprme.py generate-report --result-dir Results/<job>`. Covered
+  by `PostProcess/test_generate_report.py`.
+
+- **An indel row was flagged as creating a PAM the reference already has.** The reference bases the
+  `PAM_creation` test read for an indel row were its REF alignment's, read from the row's start; on
+  the + strand with a 3' PAM (on the - strand with a 5' one, such as Cas12a's) a deletion or an
+  insertion in the protospacer moves the PAM `len(REF) - len(ALT)` bases from there, so the test
+  read other bases, and a PAM the reference already has was flagged as created: on the WALK panel
+  the rows chr2:10000 (`rsW_J_del`) and chr3:20000 (`rsW_N_del` + `rsW_N14`) showed `PAM_creation`
+  TGG over a reference TGG, counted in the web's Summary by Mismatches/Bulges and Summary by Sample
+  (S2, S4, S6) and on the Personal Risk Card (S4 "PAM creation 2"). The test now reads the reference
+  bases the PAM sits on, through the indel; a PAM that holds an ALT base or spans a deletion's
+  junction keeps the REF alignment's bases, as before, and so does a PAM on the other side, which no
+  indel inside the target moves. **Affected:** indel rows of every variant search since
+  `PAM_creation` was first set on them (2.7.10, #94), in 2.8.0 too; only that column and the counts
+  built from it change (the report's `PAM_creation`, the summaries, the Personal Risk Card, the
+  web), not the detection, scores, carriers or ranking. Measured genome-wide on the default HGDP +
+  1000 Genomes index (per sample, 4 mismatches + 1 DNA + 1 RNA bulge), on the highest-CFD block: for
+  guide `ACTGAAATCTGTAAGCAGGC` (NRG) the flag is no longer set on 1,954 indel rows and is set on 1
+  more; rebuilt from the reference through each row's variants, every one of the 1,834 of them that
+  could be checked lies over a reference PAM and the one more over none; of the rows still
+  flagged that could be checked, 11 hold a PAM the reference lacks and 120 a PAM that holds a
+  base of the indel, flagged as before, and the other 55 (186 in all) have their PAM across the
+  indel's junction or inside a long insertion, also flagged as before. For the README's guide, `CTAACAGTTGCTTTTATCAC`, 2,655 no longer set (2,561
+  checked, all over a reference PAM; of the rows left that could be checked, 19 + 150), which on its report changes that column, and no
+  other, on 15 rows of the top-1000 table and 2 of the recommended panel; for TRAC,
+  `CTCTCAGCTGGTACACGGCA`, 1,124 no longer set and 1 more (1,047 checked; of the rows left that could be checked, 10 + 89); for
+  `ACTGAAATCTGTAAGCAGGC` on the NRR index, 2,761 and 2 more (2,585 checked; of the rows left that could be checked, 15 + 196). **What
+  to do:** run such searches again. Covered by `PostProcess/test_indel_pam_creation.py` (the WALK J
+  and N rows among them) and `PostProcess/test_indel_row_coordinates.py`.
+
+- **A web search refused for an index a newer CRISPRitz built now says why on its status and
+  results pages.** The search stops, as it should, with one ERROR (`<index> was built by a newer
+  CRISPRitz (... is in index format 2, ...): this CRISPRme reads index format 1 only ...`, and what
+  to do), but the job status page and its results link (`/load` and `/result`) knew only the other
+  refusals' ERRORs, and said "The selected result encountered some errors, please remove it and try
+  to submit again.": submitted again, the search was refused the same way, and the reason was shown
+  only under Show full log. They now say "The search was not run: " and the ERROR, as they do for
+  the other refusals. The search form gives no warning of such an index before Submit: which index
+  a search reads is decided by the search script, and the form would need its own copy of that
+  choice; after Submit, those pages say why. New in 2.8.1. Covered by
+  `PostProcess/test_results_summary_and_status.py` and `PostProcess/test_web_results_links.py`.
+- **The search form says before Submit that a variant dataset has no sample list, and how to get
+  one, whether its variant index was built in Settings or downloaded.** Removing a VCF dataset in
+  Settings takes the sample list the page wrote for it (`samplesIDs/<dataset>.samplesID.txt`) and
+  leaves its variant index, and the search form still offers the dataset if its name begins with
+  its genome's and an underscore (as `hg38_<name>`; one named otherwise is not offered until it is
+  added again). The note under the bulge options then offered its search, and
+  Submit refused it, saying to download its index again, which installs the list, or to add the
+  file yourself: an index built in Settings cannot be downloaded, and one downloaded is not
+  downloaded again while it is installed (Settings answers "already installed — nothing to
+  download", and `crisprme.py download --what index` skips a complete install whatever its list).
+  The note offered the search of any dataset Submit refuses for want of its list (one whose VCFs
+  name samples but which has no list yet, too). It now says what Submit says, as it does of a
+  sites-only dataset or of one added as a single multi-chromosome VCF file, and for a dataset
+  whose VCF folder is not there the message says, if its index came from HuggingFace, to remove
+  the index in Settings and download it again there, which installs the list; to add the VCF
+  dataset again in Settings under its name, which writes the list; or to add the file yourself. A
+  merged panel, whose list Submit makes from those of its datasets, is offered as before. New in
+  2.8.1. Covered by `PostProcess/test_web_bulge_notes.py`.
+- **Submit with a genome or PAM selected that is not installed says what is missing and where to
+  add it, instead of failing.** On a fresh data folder, which holds no genome or PAM until some
+  are added in Settings / Data Manager, Load Example selects `hg38` and `20bp-NRG-SpCas9`, and
+  Submit's input check opened `PAMs/20bp-NRG-SpCas9.txt` (the default one, too, with no PAM
+  selected), which is not there: the check failed with a server error (HTTP 500), no "Missing or
+  wrong input" dialog opened, and the page did nothing. It read the genome folder of a genomic
+  sequence given by BED coordinates the same way, so a genome not installed failed too, and so did
+  coordinates on a sequence whose FASTA the genome folder does not hold, or past the sequence's
+  end. The dialog now lists the genome and the PAM that are not installed, with where to add one
+  in Settings (Add a reference genome, Define a nuclease / PAM), and the BED coordinates it cannot
+  read; the bulge check, which needs both, waits for them. Pre-existing: 2.8.0 did the same.
+  Covered by `PostProcess/test_web_bulge_notes.py`.
+- **The web interface no longer prints a `BiopythonWarning` as it starts on a Bioconda install.**
+  A stray `site-packages/pyproject.toml`, which conda-forge's `dash-bootstrap-components` ships,
+  makes Biopython warn at import that it is imported from inside its source tree. `crisprme.py`
+  has filtered that warning since 2.7.10, but `web-interface` starts `index.py` in a new
+  interpreter, which inherits no filter and whose pages import Biopython. `index.py` now sets the
+  same filter before its first import. The Docker image and `install_from_source.sh` remove the
+  stray file, so they never showed it. Pre-existing. Covered by `PostProcess/test_app_settings.py`:
+  a check of `index.py`'s code, which runs everywhere, and its imports run as `web-interface` runs
+  them, with Biopython beside a stray `pyproject.toml`, which runs where the web stack and
+  Biopython are installed: in the image, where `web-e2e.yml` runs it with the other tests that
+  skip in the light job.
+
+- **A failed `complete-search` ends on its summary of the failure, with exit status 1 and no
+  Python traceback.** It printed where and why the run failed (`CRISPRme run failed.`, the stage,
+  the last lines of `log_error.txt`, the log's path), then raised an `OSError`, so every failed
+  search, the refusal of an index a newer CRISPRitz built among them, went on with `Traceback (most
+  recent call last): ...` and an `OSError` line that only repeated the log's path.
+  `assembly-search` added a traceback of its own when a haplotype's search failed; it now ends in
+  one line, `Error: Haplotype search failed for --output <name>! See <log> for details`, which the
+  web's assembly job reads as the job's failure, as it read the traceback. Exit statuses are
+  unchanged, and a failed search still removes its annotation temp folders. Pre-existing, in 2.8.0
+  too. Covered by `PostProcess/test_build_index_only_atomic.py`,
+  `PostProcess/test_annotation_tmpdirs.py` and `PostProcess/test_assembly_haplotype_genomes.py`.
+- **The documented self-test no longer reports a HuggingFace failure for files the data repo does
+  not host.** `CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py complete-test --chrom chr22
+  --vcf_dataset 1000G` always printed `HuggingFace fetch failed for
+  ALL.chr22.shapeit2_integrated_snvindels_v2a_27022019.GRCh38.phased.vcf.gz (404 Client Error ...
+  Entry Not Found for url ...); falling back to original source`, then downloaded the VCF from EBI
+  and passed. `complete-test` tries the Hugging Face data repo first for the chromosome's FASTA,
+  the VCFs and the sample lists it downloads (the annotations come from GitHub), and
+  `lucapinello/crisprme-data` holds no raw 1000 Genomes or HGDP VCF (its `vcfs/` holds the
+  source VCFs of the three shipped panels), nor `samplesIDs.HGDP.txt`, nor the unpacked FASTA of
+  any chromosome but chr22, so `--vcf_dataset HGDP` and `--chrom chr21` printed it too. A file the
+  Hub answers it does not hold is now said in one line on stdout, `<file> is not on HuggingFace
+  (lucapinello/crisprme-data); downloading it from its original source` (`from UCSC` for a
+  FASTA). Any other failure to fetch a file, such as no connection or a checksum that does not
+  match, is still a warning on stderr, word for word as before. What is downloaded, and from
+  where, is unchanged. Pre-existing, in 2.8.0 too. Covered by `PostProcess/test_complete_test.py`.
+- **`setup` no longer reports a HuggingFace failure for files the data repo does not host
+  either.** `crisprme.py setup`, which downloads the legacy database of the CRISPRme web server,
+  tries the Hugging Face data repo first for the chromosome's FASTA, the 1000 Genomes and HGDP
+  VCFs and the two sample lists, and printed `HuggingFace fetch failed for <file> (404 Client
+  Error ... Entry Not Found for url ...); falling back to original source` (`to UCSC` for a FASTA)
+  on stderr for each one the repo does not hold: every VCF, `samplesIDs.HGDP.txt` and the
+  unpacked FASTA of any chromosome but chr22, so `setup --chrom chr22` printed it three times,
+  and a whole-genome `setup` 47 times. It now says each in one line on stdout, as
+  `complete-test` does: `<file> is not on HuggingFace (lucapinello/crisprme-data); downloading it
+  from its original source` (`from UCSC` for a FASTA). Any other failure to fetch a file is still
+  a warning on stderr, word for word as before. What is downloaded, and from where, is unchanged.
+  The setup guide, `docs/crisprme_data_setup_051826.md`, said `setup` pulls the genome and the
+  variants from their original sources, a single chromosome's FASTA from UCSC, and the website and
+  `setup --help` that it downloads everything from them; all three now say `setup` takes two files
+  from the data repo, `chr22.fa` for `--chrom chr22` and `samplesIDs.1000G.txt`, and everything
+  else from UCSC, EBI, Sanger or GitHub. Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_setup_legacy_database.py`, a new step of `unit-tests.yml`.
+- **The `lucapinello/crisprme-data` card says what its `genomes/hg38/` holds, and lists its
+  `guides/`.** Its layout, kept from the live card, gave the folder as a per-chromosome FASTA
+  mirror, `chr1.fa … chrX.fa`. The repo holds one gzipped FASTA per hg38 sequence (`chr1.fa.gz` …
+  `chrY.fa.gz`, `chrM.fa.gz` and the alt, random and unplaced contigs: 455 files, which
+  `download --what genome` unpacks) and one unpacked FASTA, `chr22.fa`, which `complete-test` and
+  `setup` fetch as is. The layout also left out the repo's `guides/` folder, which holds
+  `sg1617.txt`, the example guide `CTAACAGTTGCTTTTATCACNNN` (no `download` fetches it), and the
+  card itself, `README.md`. The layout now lists all of these, as the repo's file list gave them on
+  2026-11-04. The live card is corrected when the release uploads
+  `docs/hf/crisprme-data_README.md`.
+- **`complete-test` run again over an earlier run's results names every folder in its way, and
+  exits 2.** It named only the first such folder in sorted order, so after a benchmark-mode run it
+  named `Results/crisprme-test-out_cas12a_hbg`, one of six, and a user who deleted it was stopped
+  five more times; it stopped the prebuilt-index smoke on those six folders too, though the smoke
+  writes only `crisprme-test-out`; and it exited 0, which a script or a CI step reads as a pass
+  though nothing ran. It now names, in one line, every folder there of the run's own mode (the
+  benchmark mode's `crisprme-test-out_<benchmark>`, the smoke's `crisprme-test-out`) and exits
+  with status 2 before it downloads or searches anything; `crisprme.py` passes the 2 on, as for a
+  refused `--chrom`. A folder of the other mode no longer stops a run, and the `CRISPRme complete
+  test encountered an error` line of a failed run names only its own mode's error logs. README
+  §2.2.2 says how to run a mode again. Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_complete_test.py`.
+- **A search's `log_verbose.txt` keeps every `Searching for INDELs in` and `Search ended for
+  INDELs in` line.** `pool_search_indels.py` printed them from its pool's workers without flushing
+  them, and leaving the pool terminates each worker it finds idle, with the lines it had not yet
+  written: a search's log missed 3 to 23 of them, a different number each run.
+  `pool_index_indels.py`, which builds a missing INDELS index for a search and for
+  `build-index-only`, lost its `Indexing INDELs in` lines the same way. Both flush them now; no
+  result changes. Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_indel_empty_chromosome.py`.
+- **A source install gets the web stack the Docker image and the Bioconda package run.**
+  `environment.yml`, which `install_from_source.sh` installs into and which says it mirrors the
+  Dockerfile's validated dependency set, left `flask`, `flask-caching`, `flask-compress` and
+  `werkzeug` unpinned, and `cachelib` out. The Dockerfile and the Bioconda recipe pin them (`flask`
+  3.1.3, `flask-caching` 2.4.1, `flask-compress` 1.24, `werkzeug` 3.1.8, `cachelib` 0.17.0), as
+  an unpinned `flask-caching` once drifted to a release that crashed the web app at import; solved
+  for linux-64 on 2026-11-03, the file took `flask-caching` 2.5.1, `flask-compress` 1.26 and
+  `werkzeug` 3.1.9. It now pins the five as the Dockerfile does, and a dry-run solve of it for
+  linux-64 gives the very builds of the release image. An environment created from the earlier
+  file keeps the versions it got: create it again to get these. Pre-existing, in 2.8.0 too.
+  Covered by `PostProcess/test_install_from_source.py`.
+
+- **The `--help` of `complete-search` and `assembly-search` no longer says an annotation BED must be
+  bgzip-compressed.** `--annotation` and `--gene_annotation` read a plain BED as well (both go
+  through `_sort_annotation`, which has always taken either); the help said bgzip was
+  required. `docs/DYNAMIC_PAM_INDEX_COMPAT.md` also no longer says that CRISPRme 2.8.0 can search
+  the published `NNN_3` with no update: it could search the first archive (2026-10-25), and a 2.8.0
+  search of the rebuilt one can fail or report malformed rows (see the `NNN_3` entry above).
+  Text only.
+
+- **Settings answers a personal-assembly bundle it refuses with the reason, as a refusal (HTTP
+  400).** The upload took each refusal of a bundle for a failure of the server: a `metadata.json`
+  naming a path outside the bundle and a FASTA file named with what a shell reads (both refused
+  since 2.8.1), and an archive packed otherwise, with more than one top folder, holding a link or
+  a device, or named after an assembly already installed, were answered HTTP 500 with
+  `finalize failed: ...`, which the browser logs as a failed request, while the upload answers its
+  other refusals 400 with the reason. The import now raises its own error for a bundle it refuses
+  (`personal_assembly.BundleError`, a `ValueError`), which the upload answers 400 with the reason
+  alone, shown on the page as before; any other failure is still answered 500. Pre-existing, since
+  2.6.0. Covered by `PostProcess/test_settings_progress.py`.
+- **`complete-search` refuses a PAM file it cannot read, and `--index-path` or
+  `--vcf-filter-pass-values` with no value, in one line, before it does anything.** A PAM file
+  named against the `<length>-<motif>-<CasName>.txt` convention (the nuclease's name is read from
+  it), one holding two motif lines or a first line that is not `<motif> <length>`, and
+  `--index-path` or `--vcf-filter-pass-values` given no value ended the search in a Python
+  traceback (a `ValueError` nothing caught), once `Results/<output>` was made, which stayed,
+  empty, and once the annotation was sorted (about 30 s with the shipped one). Each is now one
+  `Error: ...` line and exit 1, as the other input errors are, checked before the annotation is
+  read or any folder is made; an `--index-path` that names no folder, refused in one line before,
+  no longer leaves the output folder either. `docs/INPUT_FORMATS.md`, which said that a misnamed
+  PAM file fails with an `IndexError` and that a second line is silently ignored, says so.
+  Pre-existing, since 2.2.0. Covered by `PostProcess/test_complete_search_flags.py`.
+- **`complete-test` with nothing to search exits 2.** Its prebuilt-index smoke, which it runs
+  without `CRISPRME_ALLOW_ONDEMAND_BUILD` (as in Docker when the variable is written in front of
+  `docker run`, on the host), said how to download what was missing in a folder with no prebuilt
+  index, or with one whose genome is not there, and exited 0, which a script or a CI step reads
+  as a pass though nothing ran. It now exits with status 2, as when an earlier run's results are
+  in its way, having said the same, and `crisprme.py` passes the 2 on. README §1.2.2 and §2.2.2
+  and `docs/DOCKER_QUICKSTART.md` say so. Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_complete_test.py`.
+- **The report says what its ZIP and the result folder hold.** The default (slim) report said the
+  full list of variant-contributed sites "is written to `variant_created.tsv` in the result
+  directory (re-run with `--report-full` to bundle it into the archive)", but no run writes that
+  file: the tier goes into the ZIP only, and only under `--report-full`. Its Downloads note said
+  the bundled per-threshold subsets included the variant-created one, the methods note of its
+  panel that the complete raw integrated results were among the bundled downloads, and the legend
+  that the variants of a dense window were in the bundled `high_variant_density_regions.bed`: the
+  slim ZIP holds none of these, and the full one bundles the windows near the top-ranked sites, as
+  `high_variant_density_regions.bed.gz`. Each sentence now says what the slim ZIP holds, where the
+  rest is in the result folder (the variant-created sites are the integrated results' rows whose
+  `Not_found_in_REF` is `y`, a window's variants are in its `*high_variant_density_regions.bed`
+  files) and what `--report-full` adds; the full report names what it bundles; a search with no
+  variant-created site says it has none, and a wider CFD ≥ 0.05 net of no site is not called a
+  bundled download. On a slim and a full report of a population-level and of a per-sample search,
+  only these sentences change, and every other file of the ZIP is the same.
+  `generate-report --help`, which said `integrated_results.tsv.gz` is bundled by default, and
+  README §2.2.9 say what the slim ZIP holds too, and the website's example report
+  (`docs/example-report.html`, a slim 2.8.0 report, which said all four) gets the four sentences
+  as 2.8.1 renders them there, and nothing else. Pre-existing, since 2.7.10. Covered by
+  `PostProcess/test_generate_report.py`.
+- **A home that cannot be written in no longer makes every command print matplotlib's and
+  fontconfig's complaints.** With a home CRISPRme cannot write in (`apptainer run --no-home`, or
+  `--home` on a read-only folder; `docker run --read-only`), each command printed on stderr that
+  matplotlib had made a temporary folder (`... is not a writable directory`,
+  `Matplotlib created a temporary cache directory ...`), as `crisprme.py` imports it when it
+  starts, and `Fontconfig error: No writable cache directories`, from the `fc-list` that
+  matplotlib's font-cache build runs: 815 bytes with the release SIF on an HPC node with a
+  read-only home, 635 with no home, from `complete-search` and `generate-report` alike. A search's
+  steps write their stderr to its error log, and a step whose log is not empty fails, but they
+  printed nothing: matplotlib had passed its folder on to them (`MPLCONFIGDIR`), so a per-sample
+  and a population-level variant search of the synthetic genotyped dataset of the SNP+indel oracle
+  ran to the end there, their error logs empty (`docker run --read-only` makes `/tmp` read-only
+  too, and needs `--tmpfs /tmp` or `CRISPRME_TMPDIR`, as `docs/TROUBLESHOOTING.md` §1 now says).
+  `crisprme.py` now gives matplotlib a temporary folder of its own before any command runs (in
+  `CRISPRME_TMPDIR` when set, which it now applies before its imports too), removed when the command
+  exits (one killed by a signal leaves it); when the home's `~/.cache` cannot be written, that
+  folder is `XDG_CACHE_HOME` too, for fontconfig's cache and those of the other programs a command
+  runs, but `HF_HOME` stays `~/.cache/huggingface`, where `hf auth login` saves a login, so
+  `publish-index` still takes a login saved there and a download on a conda or source install still
+  sends it. With a writable home, or `MPLCONFIGDIR` set, nothing changes. Run the same way with this
+  change, the same searches and `generate-report` print nothing, with either home, and the searches'
+  error logs stay empty. `docs/TROUBLESHOOTING.md` §1 (what goes to the temporary folder, and what
+  stays) and the README's Apptainer note say so. Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_configure_tmpdir.py`.
+
+- **The report no longer says that a MAF of 1e-05 is a display floor.** The MAF note under the
+  top-1000 tables and the legend's MAF entry said that a variant whose source allele frequency is
+  0 is shown at a display floor of 1e-05 so that it renders on the log-scale plots, to be read as
+  "present, frequency effectively 0"; the README's MAF column and METHODS sections 7 and 8 said
+  so too. No release with these texts applied it: up to 2.3.3 `resultIntegrator.py` wrote 1e-05
+  for an allele frequency of 0, and since 2.4.0, the first release with them, it writes `NA` for
+  one that is 0 or missing, which the report leaves out of a row's MAF, the lowest frequency of
+  the row's variants, blank when none of them has one; a frequency below 1e-05 is shown as it is,
+  and the plots' log scale is their rank axis, a frequency only sizing a point. The note and the
+  legend now say so, in that one sentence of each, in every report (the combined report of
+  `assembly-search` too), as do the README, METHODS sections 7 and 8 and the website's example
+  report (`docs/example-report.html`, a 2.8.0 report, which gets the sentence as 2.8.1 renders it
+  there and nothing else). The rest of each report is unchanged, byte for byte, and no result
+  changes. Covered by `PostProcess/test_generate_report.py`.
+- **The report's MAF note no longer says that an indel's MAF is blank.** The note under the top-1000
+  tables gave an indel-derived variant as one whose MAF is blank, the frequency registry being
+  SNP-only. The registry is, but the indel post-analysis gives an indel the `AF` of the index's
+  indel log, which CRISPRitz `add-variants` copied from the VCF's `INFO/AF`, in either mode and
+  with or without the dict-less tiers, and the report shows it as it shows a SNP's frequency. In
+  the self-test panel's `--per-sample` report with the tiers (the README's guide, `20bp-NGG-SpCas9`
+  PAM, 4 mismatches, 1 DNA and 1 RNA bulge), the indel off-target at chr22:33985503 shows 3.00e-02
+  and the indel-and-SNP one at chr22:21052642 1.80e-01, and the 3 of its 184 variant rows whose MAF
+  is blank are indels whose `AF` reads 0 in the indel log (the VCF rounds it to two decimals); the
+  183 indel rows of the website's example report all show one. The note now says that an indel has
+  the `AF` of the index's indel log, and that its MAF is blank where the log gives that `AF` as 0,
+  or not at all, in every report (the combined report of `assembly-search` too). The log gives
+  none for a record that has `AF` at another place in `INFO` than the VCF's first record (the known
+  limit on the place of `AF` under Changed), nor for any indel of the mega index, whose VCF has no
+  `INFO/AF`. The README's MAF column, METHODS sections 3 and 7 and the example report
+  (`docs/example-report.html`, which gets the note as 2.8.1 renders it there) say so too. Nothing
+  else in a report changes, and no result changes. Pre-existing: the note has said so since 2.4.0,
+  which wrote it. Covered by `PostProcess/test_generate_report.py`.
+- **The report of a `--per-sample` search on an index without the dict-less tiers says what the
+  search reported.** On such an index (one built without `--samplesID`, such as the one the
+  benchmark `complete-test` builds), the report's Search mode row now says what
+  `complete-search`'s banner says: the carrier samples are named, with the `AF` of the classic
+  per-sample dictionaries (an indel's, of the index's indel log), which `add-variants` copied from
+  the VCF, and no CONFIRMED/PUTATIVE cis phasing, SNP+SNP co-occurrence or exact joint allele
+  frequency is reported, as they come from the tiers; a dense window can still be reported by its
+  greedy worst-case alignment (the known limit on an index without the dict-less tiers, under
+  Changed); and to get the tiers, rebuild the
+  index with `build-index-only --samplesID` or download a prebuilt one. The texts that made the same
+  claims elsewhere in the report now say what holds for those datasets: the Allele-frequency basis
+  row and the MAF note under the top-1000 tables (a SNP's frequency is the `AF` of those
+  dictionaries, not AC/AN, and one whose `AF` they give as 0, or not at all, has no frequency and is
+  blank), the legend's MAF entry (no joint allele frequency is computed, and a variant whose `AF`
+  the dictionaries or the indel log give as 0, or not at all, is left out of a row's minimum), the
+  legend's Observed entry and the caption of the top-1000 tables (a dense window's greedy alignment
+  lists the carriers of any of its variants, not its exact cis carriers). When no dataset of the
+  search has the tiers, the Observed cell of such an alignment (a row of two or more SNPs flagged in
+  `High_complexity_region`), in the report's tables and in every curated TSV that holds it, reads
+  `N carriers (>=1 of K vars, poss. chimera)`, as in a population-level search, and links its site's
+  other greedy alignments as "N other variant combinations". No column says which dataset a row
+  comes from, and two datasets can name the same samples, so in a search that also has a dataset
+  with the tiers, whose dense windows come as observed haplotypes flagged there too, every row keeps
+  its cell, and the legend and the caption say why. The report read `.search_mode` alone, so every
+  per-sample report said "Every per-sample haplotype is reported with CONFIRMED cis phasing, named
+  carrier samples and exact joint allele frequency", AC/AN over the genotyped panel, an exact joint
+  allele frequency and exact cis carriers. The self-test panel's search (the NGG index the README's
+  self-test builds, `NGG_2_hg38_chr22+hg38_1000G`; the README's guide with the `20bp-NGG-SpCas9`
+  PAM, 4 mismatches, 1 DNA and 1 RNA bulge) has no CONFIRMED line in any of its files; `Variant_MAF`
+  is NA on 154 of its 189 alt rows (3 of 184 with the tiers), those whose variants' AF reads 0 in
+  the VCF, which gives it to two decimals; four two-variant rows show the frequency of their
+  commoner variant (0.09 to 0.86: chr22:16858220 shows 8.10e-01, from `Variant_MAF` "NA,0.81") for a
+  haplotype that one to five individuals carry (9.81e-04 and 1.96e-04 with the tiers); and the 5
+  greedy rows read "16, 40, 22, 18 and 18 cis carriers", three of them with a link to "N other
+  observed haplotypes", though none of the 102 individuals they list (114 times) carries every
+  variant of a row that lists it. The report cannot tell from the results, nor from the install,
+  whose index can have the tiers by the time the report is built again, so `complete-search` now
+  records the datasets its banner names in the result folder (`.untiered_datasets`), beside every
+  dataset it searches (`.variant_datasets`), as it records `.search_mode`; a report built again from
+  an earlier search's folder keeps the old texts. With the tiers this change leaves the report as it
+  was, byte for byte (but for the order of tied rows, which the last entry below changes in every
+  report), and no result changes. The `--per-sample` texts of `complete-search`'s help and of the
+  README, the README's MAF column and METHODS sections 3 and 7 now say so too. The
+  observed-haplotypes callout of Section 5 and the header of `observed_haplotypes.tsv`, as in every
+  mode, and the download button of a greedy row's modal, which names the whole file, still call its
+  rows observed haplotypes. The web search form offers per-sample only on an index with a genotype
+  store, so a web search is never such a search. Pre-existing: the row has read so since 2.5.3,
+  the allele-frequency texts since 2.4.0, the legend's entries since 2.6.0, the caption since
+  2.7.10 and the Observed cell since 2.8.0. Covered by `PostProcess/test_generate_report.py` and
+  `PostProcess/test_build_index_only_atomic.py`.
+- **A population-level search on an index without the dict-less tiers says where its allele
+  frequencies come from, and what `--per-sample` gives there.** On such an index both modes read
+  the classic per-sample dictionaries, so a population-level search too reports each SNP with the
+  `AF` that `add-variants` copied into them from the VCF: on the self-test panel above, 198 of its
+  257 alt rows have a blank MAF. Its report said AC/AN over the panel all the same (the
+  Allele-frequency basis row, the MAF note, the legend's MAF entry), as these texts did whatever the
+  index. The Search mode row, as the banner, advised re-running with `--per-sample` for per-sample
+  carriers, CONFIRMED cis phasing and exact joint allele frequency; the legend said that
+  `--per-sample` computes the exact joint allele frequency and lists the exact cis carriers, and the
+  caption of the top-1000 tables that it resolves the true cis haplotypes and carriers. On such a
+  dataset `--per-sample` names the carriers only, with neither CONFIRMED cis phasing nor a joint
+  allele frequency, and can still report a dense window by its greedy worst-case alignment.
+  `complete-search` now records those datasets (`.untiered_datasets`, `.variant_datasets`) for any
+  variant search, per-sample (the entry above) or population-level, and the web search job, which
+  runs the search script itself, records them the same way. The population-level banner and the
+  report's Search mode row say, after their `--per-sample` advice, what `--per-sample` gives on
+  those datasets and how to get the tiers; the allele-frequency texts say what they say in a
+  per-sample report; the legend's MAF and Observed entries and the caption say what `--per-sample`
+  gives there. A sites-only dataset (one whose VCFs have no sample columns), to which a build
+  without `--samplesID` writes no tiers either, is not one of those datasets, in the records, the
+  banners or the report: with no carrier to name and no allele-frequency registry, its search
+  reports none of its variants, in either mode. With the tiers this change leaves the banner and the
+  report as they were, byte for byte (but for the order of tied rows, which the next entry changes
+  in every report). Pre-existing: the allele-frequency texts have read so since 2.4.0, the banner
+  and the Search mode row since 2.5.3, the legend's entries since 2.6.0 and the caption since 2.8.0.
+  Covered by `PostProcess/test_generate_report.py`, `PostProcess/test_build_index_only_atomic.py`
+  and `PostProcess/test_web_search_reuse.py`.
+- **Rows of one score keep the table's order in the report's ranked tables and plots, and in the
+  results page's plots.** The top-1000 by CRISPR-Bulge (`top1000_crispr_bulge.tsv` and its
+  table), the top-1000 by CFD (`top1000.tsv` and its table) and the Section-2 plots' top-N were
+  sorted with pandas' default sort, a quicksort, which is not stable: rows of exactly one score
+  (common: identical aligned pairs at different sites score the same, and an out-of-domain
+  CRISPR-Bulge score is -1) came out in an order that the whole table decided, so rows added
+  elsewhere renumbered them; between two runs, 8 to 99 rows of `top1000_crispr_bulge.tsv` changed
+  only their rank, each within an exact tie. These sorts are now stable, so tied rows keep the
+  order of `integrated_results.tsv`. The self-test panel's `--per-sample` searches without and
+  with the dict-less tiers (the searches above) differ by 5 rows (the known limit on an index
+  without the dict-less tiers, under Changed):
+  the 560 sites both reports hold came in another order at 282 places of
+  `top1000_crispr_bulge.tsv` and 250 of `top1000.tsv`, and now come in the same order. On the
+  search without the tiers, whose 565 rows hold 476 CRISPR-Bulge scores of -1 and 310 CFD scores
+  of 0, the two tables put 477 and 483 rows at another rank than before, each inside its tie. Only
+  the order of tied rows changes, and, where a tie spans the last row of a top-N, which of them it
+  holds; no score changes, and no row leaves its tie. The recommended panel, sorted on seven keys
+  at once (which pandas sorts stably), and the per-threshold tables, in the table's order, were
+  already so and are unchanged. The results page's plots sorted the same way: the top-1000 plots of
+  its Graphical Reports tab (by CFD, by CRISPR-Bulge, by fewest mismatches+bulges and by variant
+  effect) and the Personal Risk Card's top-100 plots. They sort stably too now, so the top-1000
+  plots put tied sites in the report's order: on the self-test panel's population-level search
+  their rows of more than one mismatch+bulge, the rows the report keeps, came in another order than
+  in the report's top-1000 tables at 547 (CFD) and 533 (CRISPR-Bulge) places, and now at none.
+  Pre-existing since 2.4.0 (the report) and 2.2.0 (the results page's plots). Covered by
+  `PostProcess/test_generate_report.py` and `PostProcess/test_top_plots.py`.
+
+### Security
+- **The web Settings page could be pointed outside `Settings/` and made to re-run a recorded
+  command.** Retry, Show-full-log and the job-progress refresh built a path from the job id the
+  browser sends back, so an id such as `../../x` reached outside `Settings/`, and Retry re-ran the
+  `cmd.json` it found there through the shell. The page now accepts only ids of the exact form it
+  issues and only directories inside `Settings/`, and Retry re-runs only a job its log shows as
+  failed, never a maintainer-only publish while maintainer mode is off.
+- **Genome archives are checked before they are extracted.** A genome `.tar.gz` uploaded in
+  Settings, or fetched by `download --what genome --source url` (the Settings "Direct URL" source),
+  was extracted with no check on its member names, so a crafted archive could write anywhere the app
+  can (as root in the Docker image), including a job folder that Retry would then run. Every member
+  is now checked first: an absolute or `..` path, a link, a device or a FIFO refuses the whole
+  archive and nothing is written. Real genome archives (UCSC hg38 and mm39 chromFa) are unaffected.
+
+- **The search form's genomic-sequence input passes nothing typed to a shell.** For a sequence
+  given by BED coordinates, the sequence's `>` header and the sequence name on the coordinates'
+  line went as typed into a shell command that ran `bedtools getfasta`: when Submit checked the
+  form, as the base-editing window list was filled at each change, and when the search was
+  launched. Characters a shell reads in either ran as commands, as the web app's user, which
+  matters wherever the web app is served to other people. The header named the BED file written
+  in the data folder, so a header holding a path wrote it elsewhere, and the index bedtools wrote
+  beside the genome's FASTA was removed afterwards, one that was there before as well. bedtools
+  now runs with no shell, on a BED file and a link to the FASTA in a private temporary folder,
+  where it writes the index too: the header names no file, the sequence name must be that of a
+  FASTA of the genome selected, and the genome an installed one. Pre-existing, in every earlier
+  release. Covered by `PostProcess/test_web_shell_safety.py`.
+- **Submit's launch of a search runs only what the form offers, and quotes each value it passes
+  on.** A request can call the launch with any values, past Submit's check of the form: the
+  genome, the PAM and the variant dataset name the folders and files the search reads, and the
+  genome, the e-mail address and the number of mismatches went as sent into the shell command
+  that starts the search, where characters a shell reads ran as commands. The launch now runs
+  only a genome and a PAM that are installed, "Reference only" or a variant dataset the form
+  offers for the genome, and whole numbers of mismatches and bulges, and it quotes each value of
+  that command, which is unchanged for the values the form sends. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
+- **A personal-assembly search takes only guides of the nucleotide codes a reference search keeps,
+  and only a PAM and files the form offers.** Submit on the search form's Personal assembly tab
+  wrote the guides of the PAM's length into the search's guide file as sent, upper-cased, and the
+  search passes each guide of that file to a shell command: characters a shell reads in a guide
+  ran as commands, as the web app's user, and a request can send that Submit any text. It now
+  leaves out a guide holding a character other than those the Reference genome tab's Submit keeps
+  of a guide (A, C, G, T and the IUPAC codes for two or three of them), as it leaves out one not
+  of the PAM's length, rather than search a shorter one. A guide of those letters is searched as
+  before; one holding an N is now left out too. That Submit searched, as sent, any PAM file and
+  any folders and files for the individual's, outside the data folder too, and the search takes
+  the PAM file's name, and that of a genome folder of `Genomes/`, into shell commands: it now
+  searches only a PAM the form offers, with the files of the individual picked, as installed.
+  Pre-existing, since 2.5.5. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The annotation a search applies is put together with no shell.** It is written as
+  `Annotations/.active.<genome>.bed.gz`, and the name of a genome folder, which Settings took as
+  typed and which can be put in `Genomes/` by hand, went into the commands that sort, compress,
+  move and remove it, run through a shell, where characters a shell reads ran as commands. They
+  now run with no shell. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **Settings refuses a name that CRISPRme would take into a shell command.** It took the name of
+  a genome (typed, or that of the file uploaded), of a VCF dataset and of a nuclease with any
+  character but a space, `+`, `/`, `\` and `..`, that of a file uploaded with any but `..`, and a
+  genome download's URL as typed. CRISPRme takes these names into shell commands as they are (a
+  search's post-analysis a genome's, a dataset's and a PAM file's, an index build a genome's and a
+  dataset's, a genome download its own and the name its URL ends in), where characters a shell
+  reads ran as commands, as the web app's user. Settings changes data in local mode only, which is
+  how CRISPRme runs by default. It now refuses, and says why, a name that holds a blank, a
+  character a sequence's name may not hold (`|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a
+  backquote or `#`), `*`, `?` or `[`, or that starts with `-` or `.`: any name it takes, the name
+  a URL ends in, and that of a file uploaded, but for a personal-assembly bundle, whose file's
+  name only says how it is packed. Pre-existing. Covered by
+  `PostProcess/test_settings_progress.py`.
+- **Remove result, on a search's status page, removes only that search's folder.** It removed the
+  folder the page's address named, through a shell: the job id there could run commands, or name
+  a folder elsewhere, outside the data folder too, which was removed. It now removes, with no
+  shell, only a folder of `Results/` whose id has the form the search form gives its jobs.
+  Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The results pages pass no value of a link or a table to a shell.** The guide, sample,
+  chromosome and position a results link names, the guide and number of mismatches the results
+  tables send back, a sample's name, as its VCF gives it, and the name of a search's results
+  file, which holds the genome's, went into the shell commands that zip a table for download,
+  draw the Graphical Reports and Personal Risk Card plots, and look up the targets at a
+  position, where characters a shell reads ran as commands. Those commands now run with no
+  shell, but for the look-up at a position, which now takes only a guide of the search, a
+  position in digits and a chromosome name of letters, digits and `_.:,+=@%` (for another it
+  says "The selected position does not exist"), and the results pages read only a folder of
+  `Results/` whose id has the form the search form gives its jobs. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py` and `PostProcess/test_web_results_links.py`.
+- **A job's status and results pages read, write and remove only that job's folders.** These
+  pages take the job id from their address, which a client can set to any text, in local mode
+  and on a website alike, and joined it as it was into the paths of the files they use: an id
+  holding a path reached a folder elsewhere, outside the data folder too. Remove result of a
+  personal-assembly search removed that folder, and the haplotype folders its `.Params.txt`
+  names, joined the same way; Show full log, and the status of a personal-assembly search, read
+  the log files there and showed them; the opening of a job's pages read its `.Params.txt`
+  there; and the results pages wrote the table filter they keep (`.dropdown.json`) there, and
+  their tables, sample and population lists and download links read the files there. Each now
+  takes only a folder of `Results/` whose id has the form the search form gives its jobs, as
+  Remove result of a search does (above), and otherwise changes nothing, shows no log, or says
+  that there is no such job. History, which lists every search of `Results/`, shows one named
+  otherwise (a command-line search's `--output` may be) with no link, and says why its pages do
+  not open and what to do (`docs/crisprme_web_interface_user_guide.md`). Pre-existing. Covered
+  by `PostProcess/test_web_shell_safety.py` and `PostProcess/test_history_page_assembly.py`.
+- **Remove result removes only a search its status page offers it for: one that failed.** A
+  search's status page offers Remove result once the search has failed, and a personal-assembly
+  search's offered it once it had failed or was reconciled, but the button's request, which a
+  client can send for any job, removed the search of the page's address whatever its state: a
+  finished, running or queued search, and, through a personal-assembly search's button, a
+  search of either kind. History lists every search in local mode, which is how CRISPRme runs by
+  default, and on a website a search's link names it. Each now removes only a search in a state
+  its page offers it for, and otherwise changes nothing, and a personal-assembly search's page
+  offers it, as a search's does, once the search has failed: not once it is reconciled, which
+  had anyone with a finished search's link remove it. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
+- **Remove installed data, in Settings, removes only an item it lists.** It took the item as a
+  request sent it, and a name of `..` named the data folder (or, through a folder of it that is a
+  link to other storage, the folder there that holds the link's target), and `.` or no name the
+  folder of every item of that kind: all of it was removed, every search's results with the data
+  folder. It now measures and removes only an item the card lists, and says another is not
+  found. Settings changes data in local mode only, which is how CRISPRme runs by default.
+  Pre-existing, since 2.2.0. Covered by `PostProcess/test_settings_progress.py`.
+- **A VCF upload in Settings goes only into a dataset uploaded or downloaded there, and takes a
+  dataset's own files only.** An upload into a dataset registered as a server folder was written
+  through the registration into that folder, under any file name, a new file or one replacing a
+  file there: a request could write any file into any folder the web app's user can write. A
+  registered folder is now read where it is and nothing is uploaded into it, and an upload takes
+  `.vcf.gz` files and their `.tbi` or `.csi` index only (`docs/SETTINGS_DATA_MANAGER.md`).
+  Pre-existing, since 2.2.0. Covered by `PostProcess/test_settings_progress.py`.
+- **Settings publishes no index; an index is published from the command line.** With a Hugging
+  Face token in the web app's environment (maintainer mode), Settings' Publish took any index
+  name, and `publish-index` archives the folder that name leads to, beside it, and uploads the
+  archive with that token to the shared repository, over a file of the same name there: a name
+  holding a path had any folder of the server archived and uploaded. Taking only an index its
+  list offers did not bound that, as a request has the list offer what it installs through the
+  page: a VCF dataset of any server folder registered, or of a VCF uploaded, and its index
+  built, whose archive holds the dataset's per-sample dictionaries and sample list. Settings now
+  publishes nothing, and Retry runs no publish an earlier version started; in maintainer mode
+  the page says to publish with `crisprme.py publish-index`, which is unchanged
+  (`docs/SETTINGS_DATA_MANAGER.md`). Pre-existing, since 2.2.0. Covered by
+  `PostProcess/test_settings_progress.py`.
+- **Settings builds an index only of a genome, PAM and VCF dataset its card offers.** "Build an
+  index locally" took them as a request sent them, and a path in one built an index of a folder
+  outside the data folder. Pre-existing, since 2.2.0. Covered by
+  `PostProcess/test_settings_progress.py`.
+- **A personal-assembly bundle names its own files only.** The genome folder, chain and
+  chromAlias file of each haplotype are paths its `metadata.json` gives, which an imported archive
+  brings, and they were taken as they were: a bundle naming files and folders outside its own
+  folder was imported, its individual offered as complete, and its search read them, its results
+  holding what it found there. Such a bundle is now refused, and one imported before is listed
+  as incomplete and not offered (`docs/crisprme_web_interface_user_guide.md`). Pre-existing,
+  since 2.6.0. Covered by `PostProcess/test_personal_assembly.py` and
+  `PostProcess/test_web_shell_safety.py`.
+- **Remove of a personal assembly in Settings removes that bundle's folder, and of a pairing of
+  the older layout its own markers only.** Settings listed a bundle under the individual its
+  `metadata.json` names, which an archive imported there brings: one naming another individual
+  took that one's place in the Individual picker and the Remove card, and one naming an
+  individual with no folder was removed as a pairing of the older layout, by the files named
+  after the assembly names the bundle gives, outside the data folder too. A bundle is now listed
+  under the name of its folder, as `assembly-search --assembly-individual` takes it, and only a
+  pairing of the older layout is removed as one (`docs/crisprme_web_interface_user_guide.md`).
+  Pre-existing, since 2.6.0. Covered by `PostProcess/test_personal_assembly.py` and
+  `PostProcess/test_settings_progress.py`.
+- **The search form reads only what it offers.** The callbacks that fill in and check the form
+  (the variant datasets offered for a genome, the analysis modes, the bulge options and the note
+  under them, and Submit's check) took the genome, PAM and variant dataset a request sends into
+  the paths of the folders and files they list and read: a path in them reached outside the data
+  folder, and what was there changed what they answered, in local mode and on a website alike.
+  They now answer for a value the form does not offer as for none, and Submit lists a variant
+  dataset that is not installed for the genome, as it does a genome or PAM that is not installed.
+  Submit's check of a dataset of one multi-chromosome VCF, new in 2.8.1, looks for its variant
+  index with the PAM file of an installed PAM only, too. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
+- **The indel steps of a search pass no chromosome name of a variant dataset to a shell.**
+  A search with bulges takes each chromosome name of a variant dataset, read from the CHROM
+  column of its VCFs (or from the per-chromosome indel logs named after it), into the shell
+  commands that search and merge the indel off-targets and run the indel post-analysis, where
+  characters a shell reads ran as commands, as the web app's user. A VCF dataset added in
+  Settings carries its own CHROM column, which this did not check, and Settings changes data
+  in local mode only, which is how CRISPRme runs by default. The indel search and its
+  post-analysis now refuse a chromosome name that holds a blank or a character a sequence's
+  name may not hold (the same characters Settings refuses in a name, above), and say so; a
+  real chromosome name holds none, so a normal dataset is searched as before. Pre-existing.
+  Covered by `PostProcess/test_indel_empty_chromosome.py`.
+- **The post-analysis of a search passes no FASTA file's name to a shell, and a personal-assembly
+  bundle brings only FASTA files named as a search can take them.** The post-analysis takes the
+  name of each FASTA file of the genome folder searched, as its chromosome's, into shell
+  commands as it is, where characters a shell reads ran as commands, as the web app's user. A
+  genome added in Settings has its files named after their sequences, whose names are checked,
+  but a personal-assembly bundle imported there brought its genome folders with the names its
+  archive gives, which were not, and Settings changes data in local mode only, which is how
+  CRISPRme runs by default. A bundle holding a FASTA file whose name holds a blank or a character
+  a sequence's name may not hold (`|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a backquote or
+  `#`) is now refused, and the import says why; the post-analysis refuses such a name too, and
+  says so, and runs its step for each chromosome with no shell. A chromosome's off-targets are
+  kept only from the file named after its sequence, whose name holds none of these, so a normal
+  genome or bundle is searched as before. That step also looked a chromosome's off-targets up
+  with its name as a shell word, where `*`, `?` and `[` (an HLA allele's name holds `*`) made a
+  pattern of the files of the folder it runs in, outside the data folder, which were then read:
+  it now looks the name up as it is. Pre-existing (bundles since 2.6.0). Covered by
+  `PostProcess/test_personal_assembly.py`, `PostProcess/test_settings_progress.py` and
+  `PostProcess/test_web_shell_safety.py`.
+- **The results pages' tables bind the values of a link, a table and a form to their queries of
+  a search's database.** The guide and sample of a results link, the guide and numbers of
+  mismatches and bulges of a Show Targets link, the chromosome and positions typed in Query
+  Genomic Regions, the guide of the summary table's row and a sample's name, as its VCF gives
+  it, went as they were into the SQL that reads a search's results, and Custom Ranking wrote the
+  columns it groups by, the order and the thresholds of its form into its SQL too: a quote in
+  such a value ended the text it was written in, and the rest was read as SQL, which could widen
+  the query, on the search's own database, or end it in an error. Each value is now bound to
+  the query; Custom Ranking takes only the columns, orders and thresholds its form offers, and
+  the positions of a region and the numbers of a link are whole numbers. A sample whose name
+  holds a quote, whose table and Personal Risk Card failed, now has them. Pre-existing. Covered
+  by `PostProcess/test_web_shell_safety.py`.
+- **Two download links of the results pages look only for a file of their search's folder.**
+  The Summary by Sample and Show Targets links offer their zip once it is there, under a name
+  the page gives, which a client can set to any text, and they looked for it wherever that name
+  led, outside the data folder too: whether a file was there showed in their answer, though
+  nothing was served (the download route serves files of `Results/` only). They now look only in
+  the search's folder, as that route would serve the file, and answer for any other name as for
+  a zip not made yet. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **A saved e-mail password goes only to the mail server it was saved for.** Settings' Email
+  notifications kept the saved password when a save named another server, port, SSL setting or
+  sender address with the password field empty, as the page shows it, and the notification a
+  search sends at its end logs in to the server saved, as the sender saved, with that password:
+  a request, which can save any server in local mode (how CRISPRme runs by default), had the
+  password sent to a server of its choosing. The password of `CRISPRME_SMTP_PSW` went the same
+  way to a server the settings named with no password of their own. A save that changes any of
+  the four now asks for the password again, and `CRISPRME_SMTP_PSW` is used with the default
+  server (`smtp.gmail.com`) only (`docs/crisprme_web_interface_user_guide.md`). Pre-existing,
+  since 2.2.0. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The archives the web app unpacks go in with safe modes, owned by the user unpacking
+  them.** A genome `.tar.gz` uploaded in Settings or fetched from its Direct URL, a
+  personal-assembly bundle, and a downloaded index, genotype store or build-inputs kit were
+  unpacked with the mode bits and the owner each member of the archive gives: a setuid or setgid
+  file, and, where the web app runs as root (the Docker image does), any owner the archive
+  names, went into the data folder, which `docker run -v` mounts from the host, where a setuid
+  file runs with its owner's rights. Each file now goes in with no setuid, setgid or sticky bit
+  and no write for others than its owner, owned by the user unpacking it (tarfile's `data`
+  filter, or the same done by hand on a Python before 3.11.4), and a member refused before (an
+  absolute or `..` path, a link, a device, a FIFO) is still refused. A zip archive keeps no mode
+  or owner when Python unpacks it, as before. Pre-existing. Covered by
+  `PostProcess/test_settings_progress.py`, `PostProcess/test_genome_layout.py`,
+  `PostProcess/test_personal_assembly.py` and `PostProcess/test_index_bundle.py`.
+- **A search's e-mail notification goes to the one address typed, and links to the job by the
+  server's own address.** Submit took any text holding an `@` as the address: a comma-separated
+  list had one search notify every address on it, through the mail account saved in Settings,
+  and a line break, which a request can send though the field holds one line, set the link of
+  the e-mail sent. That link was made of the page's address as the request gave it, which a
+  request sets to anything (and the one a browser gives lost its `//` there). Submit now takes
+  one plain address, as `name@example.org`: no list, display name, comment, blank or line break,
+  and no more than the 254 characters an address can have, counted before the address is read
+  (the field is checked at each change of it, and reading a much longer value, which a request
+  can send, took the server seconds). The field turns red for another one, and the search runs
+  without a notification, as with no address. The link is the address the job's status page
+  shows (in local mode `http://127.0.0.1:8080`) with the job's id. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
+- **A job's link no longer gives the e-mail address its search was submitted with.** The
+  `/Results/` route serves the files of a job's folder to anyone with the job's link, and in
+  local mode, which is how CRISPRme runs by default, History lists every job. It served
+  `email.txt`, which holds the address (and that of each search sent to the job as identical to
+  it), and the search printed the address into its log (`MAIL: <address>`, then `EMAIL SENT to
+  <address>`), which the status page's Show full log shows. The route now serves no `email.txt`,
+  the search is not passed the address (its log says `MAIL: email.txt` for a notification,
+  `MAIL: _` for none), and what the notification prints names no address, not even in a mail
+  server's refusal. Notifications are sent as before; the log of a search run by an earlier
+  version keeps its line. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The Personal assembly tab's Submit takes whole numbers of mismatches and bulges, as its form
+  offers them, before it writes anything.** It wrote the mismatches and bulges a request sends
+  into the new search's `.Params.txt` as they were, a line break too, and only then converted
+  them to numbers: a value that is not one left a job folder that never ran, listed as in queue,
+  which no page removes, one for each such request; and a number the form does not offer was
+  searched. It now takes 0 to 6 mismatches, the DNA and RNA bulges the dropdowns offer for the
+  genome, PAM and variant dataset selected (0 to 2, more where an installed reference index is
+  deeper, fewer where a variant dataset's index has fewer), and a Max edits of 1 to the
+  slider's maximum where that governs (10, or the mismatches and bulges added where that is
+  more), and otherwise says which is wrong, with nothing written. Pre-existing, since 2.5.5.
+  Covered by `PostProcess/test_web_shell_safety.py`.
+- **The Reference genome tab's Submit checks the Max edits value before it makes the job
+  folder.** With Advanced options closed, where the Max edits slider governs, Submit converted
+  the slider's value to a number only after it had made the job folder and written its first
+  files: a value that is not a number, which a request can send, left a job folder that never
+  ran, which History does not list, one for each such request. It now takes a whole number of
+  the slider's range there, as the Personal assembly tab's Submit does, and runs nothing for
+  another. Pre-existing, since 2.2.0. Covered by `PostProcess/test_web_shell_safety.py`.
+- **What stays as it is.** A search's results TSVs, and their zips, hold the values they report
+  as they are: an annotation label of a BED added in Settings, or a sample name or variant ID of
+  a VCF dataset added there, that starts with `=`, `+`, `-` or `@` is a cell a spreadsheet may
+  take for a formula. Escaping such cells would change the content of every TSV, so open them
+  as text in a spreadsheet when that matters. Two features of Settings, which changes data in
+  local mode only, are for whoever runs the server: Add a VCF dataset's "Register a server
+  folder" registers any folder the web app can read as a dataset, and Add a reference genome's
+  Direct URL has the server fetch any `http(s)` address. The online version of the web app
+  disables both, with every other change Settings makes.
+
+## [2.8.0] - 2026-10-24
 
 ### Added
 - **Reference-sequence score columns + aligned spacer in the curated tables.** The top-1000 tables and
@@ -1589,8 +5092,8 @@ engine, the default index, or the Docker/Bioconda toolchain.
 - Shareable report: publication-grade inline **vector SVG** figures.
 
 ### Changed
-- **Dict-less observed-haplotype enumerator** replaces the legacy 2^k IUPAC lattice
-  + greedy cap on the variant post-analysis path: every haplotype real individuals
+- **Dict-less observed-haplotype enumerator** replaces the legacy 2^k IUPAC lattice +
+  greedy cap on the variant post-analysis path: every haplotype real individuals
   carry is emitted (sensitivity-first, **no truncation**), and dense/hypervariable
   windows are logged to `high_variant_density_regions.bed` for visibility rather
   than dropped — resolving the phased multi-SNP haplotype under-report on the
@@ -2556,7 +6059,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.8.1...HEAD
+[2.8.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.8.1
 [2.8.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.8.0
 [2.7.10]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.10
 [2.7.9]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.9

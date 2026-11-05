@@ -158,7 +158,11 @@ for guide in guides:
                 seen_superpop = set()
                 seen_pop = set()
                 for sample in samples:
-                    if sample != "NO_SAMPLES" and sample != "" and sample != "NA":
+                    # a carrier the samples list does not name (no list given, or one
+                    # that lacks it) has no row in the by-sample and population tables
+                    # (crisprme.py _samples_list_for_search): the search itself is whole
+                    if (sample != "NO_SAMPLES" and sample != "" and sample != "NA"
+                            and sample in dict_samples):
                         dict_samples[sample][3] += 1
                         seen_pop.add(dict_samples[sample][1])
                         seen_superpop.add(dict_samples[sample][2])

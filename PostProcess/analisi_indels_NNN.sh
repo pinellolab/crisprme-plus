@@ -33,6 +33,9 @@ bRNA=$9
 guide_file=${10}
 pam_file=${11}
 output_folder=${12}
+# the search's cap on total edits (mismatches + bulges), -1 for none: a target
+# resolved per carrier haplotype is dropped past it as past --mm
+max_total_edits=${13:--1}
 
 touch $REFtargets.corrected  # initialize reference targets out fname
 
@@ -76,8 +79,17 @@ rm "$jobid.total.txt"
 #
 # The .CFDGraph.txt files can be summed to obtain the final CFD graph output.
 # -> Currently, this step is NOT required for this analysis, but the files SHOULD BE KEPT for consistency.
+# NOTE on the first argument: this read "$annotations", a variable this script
+# never sets, so it always expanded to the empty string. That is INERT, not a
+# bug: analisi_indels_NNN.py assigns argv[1] to `annotationFile` and never uses
+# it (its only other reference, the `open(annotationFile)` at :283, is commented
+# out) -- indel targets are annotated by a later stage. Measured on the
+# genome-wide 2.8.1 gate report: 13,622/13,622 indel-allele rows carry a closest
+# gene and 13,619 carry a functional annotation, the same rate as every other
+# row. Passing the real path removes a reviewer trap without changing behaviour:
+# the argument COUNT is unchanged either way, so nothing shifts position.
 ./analisi_indels_NNN.py \
-    "$annotations" \
+    "$annotationfile" \
     "$jobid.total.cluster.txt" \
     "$jobid" \
     "$dictionaries" \
@@ -85,7 +97,8 @@ rm "$jobid.total.txt"
     "$mm" \
     "$referencegenome" \
     "$guide_file" \
-    "$bDNA" "$bRNA" 
+    "$bDNA" "$bRNA" \
+    "$max_total_edits"
 rm "$jobid.total.cluster.txt"  # remove unnecessary files
 
 # sort and adjust processed targets 

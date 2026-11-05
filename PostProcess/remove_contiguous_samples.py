@@ -17,11 +17,12 @@ def _rep_tiebreak(x):
     alignments for the same cluster/carriers/CFD.
 
     This key is intrinsic to the row's own fields (aligned target DNA at col 2 -- unique
-    per alignment within a cluster -- plus the true genomic Position at col ``pos - 1``
-    as a secondary safety discriminator), never input order. Because it is consulted
-    only when all earlier key elements are exactly equal, it CANNOT reorder any cluster
-    whose best row is already unique: output stays byte-identical for those (~99.7%);
-    for the exactly-tied clusters it makes both paths converge on the same representative.
+    per alignment within a cluster, but for the 2.8.1 note below -- plus the true genomic
+    Position at col ``pos - 1`` as a secondary safety discriminator), never input order.
+    Because it is consulted only when all earlier key elements are exactly equal, it
+    CANNOT reorder any cluster whose best row is already unique: output stays byte-identical
+    for those (~99.7%); for the exactly-tied clusters it makes both paths converge on the
+    same representative.
 
     2.7.10: among rows that tie EXACTLY on CFD/severity/position, prefer the one carried
     by the MOST individuals ("highest CFD, ties -> most carriers"). This only ever
@@ -30,6 +31,19 @@ def _rep_tiebreak(x):
     the per-site ``observed_haplotypes`` companion lists every one regardless. The carrier
     count is read from the samples column (``true_guide - 2``); ref rows and empty/sentinel
     rosters count as 0, so this is inert for them and they fall through to the DNA/pos key.
+
+    2.8.1: aligned DNA is not quite unique within a cluster. A row of SNPs and a row with
+    an indel can give the same bases at the same position, and their aligned DNA is then
+    the same string (rarely on the dictionary path: on chr21 and chr22 of the default
+    index with three guides, no such tie). They fell through to
+    input order, which is the whole-line sort of the merge step, so the REF alignment's
+    letter case and then the sample IDs decided which row was reported. The last key
+    element settles it: the row of SNPs comes first. A variant token is
+    ``<contig>_<pos>_<ref>_<alt>``, split from the right because a contig name can hold
+    '_'; a REF or ALT longer than one base comes from the indel path. It is consulted only
+    after everything else ties, so no other choice of representative can change. It holds
+    among rows with carriers only: the rows of a sites-only index (mega) have none and
+    their REF alignment was never upper case, so their ties stay in the sort's order.
     """
     try:
         _samples = str(x[true_guide - 2])
@@ -39,8 +53,72 @@ def _rep_tiebreak(x):
         )
     except Exception:  # never let the tie-break break the sort
         _ncarriers = 0
-    # -_ncarriers => most carriers first; then the intrinsic deterministic discriminators.
-    return (-_ncarriers, str(x[2]), str(x[pos - 1]))
+    _has_indel = _ncarriers > 0 and any(
+        len(_var) == 4 and (len(_var[2]) > 1 or len(_var[3]) > 1)
+        for _var in (_tok.rsplit("_", 3) for _tok in str(x[snp_info]).split(","))
+    )
+    # -_ncarriers => most carriers first; then the intrinsic deterministic discriminators;
+    # False sorts first => a row of SNPs before a row with an indel.
+    return (-_ncarriers, str(x[2]), str(x[pos - 1]), _has_indel)
+
+
+def _merged_list(kept, other):
+    """One list column (samples, rsID, AF) of a variant row that two datasets give. A
+    sites-only dataset's row has no carriers and can have no allele frequency, which
+    adjust_cols.py leaves empty: it adds no empty item to the other dataset's list."""
+    return kept + "," + other if kept and other else kept or other
+
+
+def _holds_indel_token(variants):
+    """True iff a row's variant list (<contig>_<pos>_<ref>_<alt>,...) names a variant of
+    the indel path: a REF or ALT longer than one base. That is an indel, or a multi-base
+    record of equal length (an MNV, AC>TG), which CRISPRitz add-variants also puts in a
+    fake-indel window, so its rows are resolved per carrier like indel rows. A token is
+    split from the right because a contig name can hold '_'."""
+    for tok in variants.split(","):
+        p = tok.rsplit("_", 3)
+        if len(p) == 4 and (len(p[2]) > 1 or len(p[3]) > 1):
+            return True
+    return False
+
+
+def _merge_row(kept, ele, snp_info):
+    """Add a merged row's samples, rsIDs and AFs to the row that stays (_merged_list: a
+    sites-only dataset's empty lists add no empty item)."""
+    kept[true_guide - 2] = _merged_list(
+        kept[true_guide - 2], ele[true_guide - 2]
+    )  # true_guide - 2 points to samples column
+    kept[snp_info - 2] = _merged_list(
+        kept[snp_info - 2], ele[snp_info - 2]
+    )  # snp_info - 2 points to rsID column
+    kept[snp_info - 1] = _merged_list(
+        kept[snp_info - 1], ele[snp_info - 1]
+    )  # snp_info - 1 points to AF column
+
+
+def _fold_same_carriers(rows, fold_of, snp_info):
+    """Alignments of one site naming the same variants with the same carriers are one
+    entry, as for every other row: the first of them in ``rows``, which is sorted by the
+    file's own criterion, so the entry is the best by it. It takes the rsIDs and AFs of
+    the others. ``fold_of`` maps a row (by id) to its (position, variants, carriers);
+    other rows stay as they are. The carrier sets do not depend on the sort, so the
+    three files keep one row count per cluster and their alternative alignments stay
+    aligned line by line."""
+    kept = {}
+    out = []
+    for row in rows:
+        ident = fold_of.get(id(row))
+        if ident is None:
+            out.append(row)
+        elif ident in kept:
+            _merge_row(kept[ident], row, snp_info)
+        else:
+            kept[ident] = row
+            out.append(row)
+    for row in kept.values():
+        for col in (true_guide - 2, snp_info - 2, snp_info - 1):
+            row[col] = ",".join(sorted(set(row[col].split(","))))
+    return out
 
 
 def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
@@ -48,30 +126,48 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     if not cluster:
         return
     list_ref = []
+    seen_ref = set()
     dict_var = {}
     for ele in cluster:
         if ele[snp_info] == "n":
+            # list (and count in #Seq_in_cluster) each reference alignment once. The
+            # same alignment comes in more than once: every variant dataset's
+            # post-analysis carries all the rows of the one reference search, and on
+            # the dict-less tiers new_simple_analysis gives the reference alignment of
+            # each variant window on the plus strand again (_finalize_reference_entry).
+            # Copies are equal in every column but the count and the two scores: each
+            # dataset scores the rows itself, and CRISPR-Bulge can give one alignment
+            # two values. Keeping such a copy in that list alone would shift it against
+            # the other two, which the pipeline pastes by position (pr -m). The merge
+            # step's sort puts the higher score first, and the first copy is the one
+            # kept. A row that differs in any other column is another alignment and is
+            # kept.
+            ref_key = tuple(ele[: cfd - 1] + ele[cfd + 2 :])
+            if ref_key in seen_ref:
+                continue
+            seen_ref.add(ref_key)
             list_ref.append(ele)
         else:
             # merge samples of identical targets (coming from different VCF datasets)
-            if (ele[pos], ele[snp_info]) in dict_var.keys():
-                dict_var[(ele[pos], ele[snp_info])][0][true_guide - 2] = (
-                    dict_var[(ele[pos], ele[snp_info])][0][true_guide - 2]
-                    + ","
-                    + ele[true_guide - 2]
-                )  # true_guide - 2 points to samples column
-                dict_var[(ele[pos], ele[snp_info])][0][snp_info - 2] = (
-                    dict_var[(ele[pos], ele[snp_info])][0][snp_info - 2]
-                    + ","
-                    + ele[snp_info - 2]
-                )  # snp_info - 2 points to rsID column
-                dict_var[(ele[pos], ele[snp_info])][0][snp_info - 1] = (
-                    dict_var[(ele[pos], ele[snp_info])][0][snp_info - 1]
-                    + ","
-                    + ele[snp_info - 1]
-                )  # ttuesnp_info_guide - 2 points to AF column
+            key = (ele[pos], ele[snp_info])
+            # An indel row lists the carriers of its own sequence (each carrier haplotype
+            # resolved on its own, analisi_indels_NNN.py), and two alignments at one site
+            # can name the same variants with different carriers: an RNA-bulge alignment
+            # does not reach the base a SNP sits on, so it holds carriers of that SNP
+            # that the full alignment does not. So only rows with one sequence merge here.
+            if _holds_indel_token(ele[snp_info]):
+                key += (ele[2].upper(),)
+            if key in dict_var.keys():
+                _merge_row(dict_var[key][0], ele, snp_info)
             else:
-                dict_var[(ele[pos], ele[snp_info])] = [ele]
+                dict_var[key] = [ele]
+    # Alignments of one site naming the same variants with the same carriers are folded
+    # into one entry once the variant rows are sorted (_fold_same_carriers).
+    fold_of = {}
+    for key in dict_var.keys():
+        if len(key) == 3:
+            row = dict_var[key][0]
+            fold_of[id(row)] = (key[0], key[1], frozenset(row[true_guide - 2].split(",")))
 
     final_list_best_ref = list()
     var_only = False
@@ -435,6 +531,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         *_rep_tiebreak(x),
                     ),
                 )
+            final_list_best_var = _fold_same_carriers(final_list_best_var, fold_of, snp_info)
 
         if var_only:  # no ref found
             # count the residual targets in the list
@@ -710,6 +807,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         *_rep_tiebreak(x),
                     ),
                 )
+            final_list_best_var = _fold_same_carriers(final_list_best_var, fold_of, snp_info)
 
         if var_only:  # no ref found
             # count the residual targets in the list

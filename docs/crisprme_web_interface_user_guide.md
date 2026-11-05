@@ -71,15 +71,15 @@ legacy setup):
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (HGDP + 1000 Genomes, 4,091 samples, re-phased)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 ```
 
@@ -90,7 +90,8 @@ pre-downloaded `NRG_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
 search variant-aware. Sample-level analyses / named carriers / personal risk cards
 come from the **genotype store bundled with that index** (fetched by `download --what
 index` unless you pass `--no-genotypes`), not from raw VCFs — so a single index
-download covers both. The default repo does not host raw per-dataset VCFs.
+download covers both. (The default repo also hosts the source VCFs, `hg38_HGDP1kGP`,
+`hg38_HPRC` and `hg38_mega`, which you need only to build an index yourself.)
 
 ### 2b. Start the local server
 
@@ -100,7 +101,7 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.8.0 crisprme.py web-interface
+  pinellolab/crisprme:v2.8.1 crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
@@ -250,8 +251,10 @@ used by SpCas9) and 5′ PAMs (such as the TTTV PAM used by Cas12a). The PAM is 
 short DNA sequence adjacent to the protospacer that is essential for Cas protein
 binding.
 
-If your nuclease is not listed, create a custom PAM file as described in Section 5
-of the CLI guide and restart the server to make it available in the dropdown.
+If your nuclease is not listed, define it in **Settings → Define a nuclease / PAM**
+(name, guide length, motif and 3′/5′ end), or create a PAM file as described in
+Section 5 of the CLI guide. It is in the dropdown the next time you open the search
+page; no restart is needed.
 
 ### Step 2: Genome selection and threshold configuration
 
@@ -265,9 +268,24 @@ from UCSC, including the default hg38 build (with mitochondrial DNA), custom
 transcriptomes, non-human genomes, and cancer genome assemblies.
 
 When variant datasets have been prepared (for example, 1000 Genomes Phase 3 or
-HGDP), the interface presents the option to incorporate them into the search. Adding
-personal variants from private VCFs is supported in the local offline version via
-the CLI; it is not configurable from this form.
+HGDP), the interface presents the option to incorporate them into the search. To add
+your own VCFs in the local offline version, use **Settings → Add a VCF dataset**
+(upload them, register a folder on the server, or download a hosted dataset), picking
+the reference genome they are called against, then build their variant index there
+(*Add a precomputed index / build one*, with the dataset as *Variants*). The dataset
+is then offered here for that genome, with its sample list written from the VCF
+header when the VCF has sample columns (see
+[`SETTINGS_DATA_MANAGER.md`](SETTINGS_DATA_MANAGER.md)). A sites-only VCF (no sample
+columns, such as the hosted `hg38_mega` VCFs) is listed too, but **Submit** refuses a
+search of it, built here or not, and the note under the bulge options says why: a search
+reports its variants only through a per-dataset allele-frequency registry, which a build
+here does not make. To search the mega variants, download the published
+`NRG_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
+dataset whose sample list is missing too, and the note says so, with how to get one:
+removing a VCF dataset in Settings takes the list it wrote for it and leaves the variant
+index built from it, and the dataset stays listed here only if its name begins with the
+genome's and an underscore (as `hg38_<name>`); add the dataset again there, under the
+same name, to search that index again.
 
 > **RNA-targeting strategies:** For RNA-targeting Cas proteins, you can either
 > provide a custom transcriptome genome or use a variant-enriched genome. Be aware
@@ -294,10 +312,19 @@ In Advanced mode a candidate must satisfy **each** per-type cap **and** the over
 max-total-edits budget. Bulges can be consecutive (e.g., `NN--NN`) or interleaved
 (e.g., `NN-N-NN`).
 
-The web interface uses only precomputed indexes and will **not** build one on the
-fly — if you request a PAM/bulge/genome combination with no installed index it
-blocks and asks you to install one first (see the Docker Quickstart, "Installing
-more indexes"). The variant selector is a dropdown pre-set to the recommended
+Bulge searches need a genome index. If no installed **reference** index supports the
+bulges you ask for, the search first builds one from the installed genome (once: about
+20 to 35 minutes for hg38), and later searches reuse it. A **variant** panel offers only
+the bulges its installed variant index supports: with no variant index yet, only a
+0-bulge search, and the first one prepares the variant genome and a 0-bulge index of it
+(this can take hours on a full genome), if the panel's VCF files, one per chromosome, or its
+enriched genome are installed; without them the search stops and says what to do. A panel
+added as a single multi-chromosome VCF file is split per chromosome only when its index is
+built, so build that one first: until then **Submit** refuses its search. To search a panel with bulges, build its index
+first in **Settings**, under "Build an index locally" (the genome and the panel's VCF
+files must be installed), or download a prebuilt one (see the Docker Quickstart,
+"Installing more indexes"). The note under the bulge options in **Advanced options**
+says which of these applies. The variant selector is a dropdown pre-set to the recommended
 installed phased variant index (the **HGDP + 1000 Genomes** default if you downloaded it),
 with a **Reference only** option if you want a reference-genome search.
 
@@ -409,8 +436,11 @@ making it easier to locate a specific search in the Results listing.
 
 Once all required fields in Steps 1 and 2 are complete, click the **Submit** button
 at the bottom of the form. The interface validates the inputs and highlights any
-missing required fields in red. If validation passes, the job is queued and the
-interface navigates automatically to the Job Status page.
+missing required fields in red. A genome or PAM selected that is not installed (a fresh
+data folder has none, though **Load Example** selects `hg38` and `20bp-NRG-SpCas9`), or a
+variant dataset that is not installed for the genome, is listed too, with where to add one
+in **Settings**. If validation passes, the job is
+queued and the interface navigates automatically to the Job Status page.
 
 > **Important:** Do not close the browser tab while a job is running. Closing the
 > tab does not cancel the job (it continues in the server process), but the live
@@ -424,7 +454,7 @@ interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.8.0 crisprme.py web-interface
+>   pinellolab/crisprme:v2.8.1 crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme && crisprme.py web-interface)
 > ```
@@ -450,7 +480,14 @@ Two ways to provide the inputs:
   liftOver chains, and the chromAlias files, and registers them with the Data Manager.
 - **Bring your own bundle:** upload a single `.zip`/`.tar.gz` whose one top-level
   `<individual>/` folder holds the same structure and a valid `metadata.json` (see below);
-  CRISPRme extracts, validates, and registers it.
+  CRISPRme extracts, validates, and registers it under the name of that folder, which the
+  Individual picker, Settings and `--assembly-individual` use whatever individual
+  `metadata.json` names. The paths `metadata.json` gives are those of files and folders
+  inside `<individual>/`: a bundle naming one anywhere else is refused. A search takes the
+  name of each FASTA file of a haplotype's genome folder for its chromosome's, so name each
+  file after the sequence it holds (`chr1.fa` holding `>chr1`): a bundle holding a FASTA
+  file whose name holds a blank or any of `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`,
+  `>`, a backquote or `#` is refused, as CRISPRme takes that name into shell commands.
 
 **How an assembly is stored.** Each individual is one self-contained folder,
 `Assemblies/<individual>/`, holding both haplotypes and a single `metadata.json` that
@@ -511,12 +548,14 @@ every search. This keeps searches reproducible — the same enabled set is used 
 all jobs until you change it.
 
 **Add an annotation (BED).** Under *Add an annotation*, drag-and-drop or select a
-`.bed`/`.bed.gz` file. Each uploaded file is validated before it is accepted: it
+`.bed` file. Each uploaded file is validated before it is accepted: it
 must have at least four tab-separated columns (`chrom`, `start`, `end`, `label`),
 integer coordinates with `start ≤ end`, a whitespace-free label, and be under the
 size cap. Malformed files are rejected with an explanatory message and nothing is
 written. Name files with the genome assembly token (e.g. `myenhancers.hg38.bed`)
-so they are offered for the matching genome.
+so they are offered for the matching genome only; a file whose name names no
+installed genome is offered for every genome, and you enable it for the one its
+coordinates are on.
 
 **Enable / disable annotations.** Under *Manage annotations (enable / disable)*,
 pick a genome to see a checklist of the available tracks — the built-in
@@ -547,8 +586,12 @@ To have CRISPRme+ email you when a job finishes, configure a mail server once in
 
 Click **Save email settings**. The settings are stored locally in your data folder
 (`.email.json`, readable only by you; it holds the app password, so set it only on a
-machine you control). You can also configure the sender/password without the UI via
-the `CRISPRME_SMTP_SENDER` / `CRISPRME_SMTP_PSW` environment variables.
+machine you control). The password field stays empty once a password is saved: saving
+again with it empty keeps that password only while the host, port, SSL setting and sender
+address stay as they were saved, so type it again when you change any of them. You can
+also configure the sender/password without the UI via the `CRISPRME_SMTP_SENDER` /
+`CRISPRME_SMTP_PSW` environment variables; the password of `CRISPRME_SMTP_PSW` is used
+with `smtp.gmail.com` only, never with another host saved here.
 
 Once configured, tick **Notify me by email** on the search form and enter your
 address. Email is best-effort: if the mail server rejects the message the search
@@ -791,7 +834,9 @@ For the full scoring assumptions and limitations, see **METHODS §8**.
 This section covers issues specific to the local server environment and browser
 interaction. For problems with the CRISPRme search pipeline itself — such as
 unexpected output or missing results files — consult the `log_error.txt` file in
-the relevant results folder and refer to the
+the relevant results folder (`log_error_no_check.txt` once the job has run to the end,
+which renames it; a job that is still running, failed, or found no off-targets keeps
+`log_error.txt`) and refer to the
 [CRISPRme GitHub Issues page](https://github.com/pinellolab/crisprme-plus/issues).
 
 ---
@@ -834,8 +879,12 @@ variants.
 3. **Variant index not installed** — re-run
    `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA`
    (the recommended default panel).
-4. **Confirm success** — `Results/<name>/log_error.txt` is empty and
-   `*.integrated_results.tsv` is non-empty.
+4. **Confirm success** — `Results/<name>/log_error_no_check.txt` is empty and
+   `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its
+   `log_error.txt` to `log_error_no_check.txt`. A job that is still running, failed, or
+   found no off-targets keeps `log_error.txt`, so check whichever of the two exists. A job
+   that found no off-targets says `No off-targets found` in its `log.txt` and writes no
+   `*.integrated_results.tsv`.)
 
 ---
 
@@ -950,7 +999,14 @@ expires or you close the tab:
    `Cmd+Shift+R` (macOS).
 2. If the results folder still does not appear, confirm the search completed
    successfully by checking that `Results/<output-name>/` exists in your working
-   directory and that `log_error.txt` is empty.
+   directory and that its `log_error_no_check.txt` (the name `log_error.txt` takes
+   when a job runs to the end; a job that found no off-targets keeps `log_error.txt`)
+   is empty.
+3. A search run from the command line whose `--output` name holds a character other
+   than letters, digits, `.`, `_` and `-`, or does not begin with a letter or digit, is
+   listed in History with no link: the results pages open only a job named so (they
+   take the name from the page's address). Run the search again with such an
+   `--output` name to view it here; its files are in `Results/<output-name>/`.
 
 ---
 

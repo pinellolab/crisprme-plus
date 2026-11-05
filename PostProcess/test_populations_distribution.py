@@ -37,6 +37,7 @@ would hand a MagicMock to optional-import-fallback targets and break them) and
 exec the module source. numpy is present on CI and imported for real.
 """
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -248,6 +249,59 @@ class TestShellLoopBoundIsSearchBulgeBudget(unittest.TestCase):
     def test_loop_no_longer_uses_bmax(self):
         self.assertNotIn("seq 0 $(expr $mm + $bMax)", self.src,
                          "pop-dist loop must not use the index-depth bMax bound")
+
+
+class TheSummariesOfACarrierTheSamplesListDoesNotName(unittest.TestCase):
+    """A genotyped index names carriers whatever list the search was given. With no list,
+    an empty one or a partial one, process_summaries.py ended in a KeyError at 'Creating
+    images', after the whole search. It is run as the search script runs it: a write to
+    stderr fails that stage too."""
+
+    GUIDE = "CTAACAGTTGCTTTTATCACNNN"
+
+    def run_summaries(self, samples, listed):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with tempfile.TemporaryDirectory() as tmp:
+            row = ["X", self.GUIDE, "CTAACAGTTGCTTTTATCACTGG", "NA", "chr1", "100", "100", "+",
+                   "0", "0", "0", "NA", "NA", samples, "NA", self.GUIDE, "rs1", "0.1", "s1", "1",
+                   "1.0", "1.0"]
+            best = os.path.join(tmp, "best.txt")
+            with open(best, "w") as fh:
+                fh.write("\t".join(row) + "\n")
+            guides = os.path.join(tmp, "guides.txt")
+            with open(guides, "w") as fh:
+                fh.write(self.GUIDE + "\n")
+            ids = os.path.join(tmp, "samples.txt")
+            with open(ids, "w") as fh:
+                fh.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+                for sample in listed:
+                    fh.write(f"{sample}\tP1\tS1\tmale\n")
+            out = os.path.join(tmp, "job")
+            os.makedirs(out)
+            done = subprocess.run(
+                [sys.executable, os.path.join(here, "process_summaries.py"), best, guides, ids,
+                 "4", "1", "1", out, "var", "CFD"], capture_output=True, text=True)
+            table = os.path.join(out, f"job.summary_by_samples.{self.GUIDE}_CFD.txt")
+            tables = open(table).read() if os.path.exists(table) else None
+        return done, tables
+
+    def samples_in(self, tables):
+        """The samples with a row in the by-sample table, past its two header lines."""
+        return sorted(r.split("\t")[0] for r in tables.splitlines()[2:])
+
+    def test_with_an_empty_list(self):
+        done, tables = self.run_summaries("S1,S2", [])
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+
+    def test_with_a_partial_list_the_listed_carrier_is_counted(self):
+        done, tables = self.run_summaries("S1,S2", ["S1"])
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual(self.samples_in(tables), ["S1"])
+
+    def test_with_the_whole_list_each_is_counted(self):
+        done, tables = self.run_summaries("S1,S2", ["S1", "S2"])
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual(self.samples_in(tables), ["S1", "S2"])
 
 
 if __name__ == "__main__":

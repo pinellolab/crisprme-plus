@@ -2,12 +2,14 @@
 # ^ false positive: HF_HUB_DISABLE_IMPLICIT_TOKEN is a boolean flag (=1), not a
 #   secret — buildkit's lint only pattern-matches the substring "TOKEN" in the
 #   name. Skipping it keeps the build output clean.
-# CRISPRme+ 2.8.0 — Python 3.11 image, built FROM SOURCE.
+# CRISPRme+ 2.8.1 — Python 3.11 image, built FROM SOURCE.
 #
 # crispritz is compiled from source at a pinned GitHub tag (crispritz_ref) so the image
 # gets the exact, reproducible build we want -- including the latest fixes -- without
 # waiting on the Bioconda autobump lag. (Bioconda crispritz is for `conda install` users.)
-# v2.9.0 carries the add-variants .tbi/.csi enricher fix + the MGBOA relicense. crisprme
+# v2.9.1 carries --prune-pam (which this release documents, and which a build without it
+# would silently drop, running the search unpruned), the genomic-N flank fix, the non-.bin
+# index-dir crash fix, and the enricher multiallelic-indel fix. crisprme
 # is installed from this build context. The dependency
 # pins mirror the from-scratch Python-3.11 validation on ml007 (see PR #131):
 #   - numerical stack: MODERNIZED now that the legacy RandomForest scorer is retired.
@@ -15,7 +17,7 @@
 #     SOLELY because the vendored legacy-scorer + azimuth pickles needed that combo. CRISPR-Bulge (the
 #     replacement) runs in its own conda env (cbulge) and azimuth is gone, so: scikit-learn is DROPPED (nothing in the main
 #     env imports it), and numpy/scipy/pandas/matplotlib move to current maintained lines.
-#     CFD uses version-agnostic lookup pickles, so scoring is unaffected. numpy is capped
+#     CFD reads its own JSON lookup tables, so scoring is unaffected. numpy is capped
 #     < 2 on purpose: pysam/CRISPRitz C-extensions here are built against the numpy 1.x
 #     C-ABI; a numpy-2 ABI mismatch could silently corrupt results. numpy 2.x is a
 #     separately-validated fast-follow.
@@ -26,7 +28,7 @@ FROM mambaorg/micromamba
 
 LABEL org.opencontainers.image.authors="ManuelTgn, lucapinello"
 
-ARG crispritz_ref=v2.9.0
+ARG crispritz_ref=v2.9.1
 ENV SHELL=bash
 ENV PREFIX=/opt/conda
 # Quiet the noisy-but-harmless startup warnings so a clean copy-paste run shows no
@@ -71,7 +73,7 @@ RUN micromamba install -y -n base \
 
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 
-# ---- Build crispritz 2.9.0 from source and install into the env ------------
+# ---- Build crispritz 2.9.1 from source and install into the env ------------
 RUN git clone --depth 1 --branch ${crispritz_ref} \
         https://github.com/pinellolab/CRISPRitz.git /opt/crispritz-src \
     && cd /opt/crispritz-src \
@@ -90,10 +92,24 @@ RUN git clone --depth 1 --branch ${crispritz_ref} \
         sourceCode/CRISPRofiler/pre_computation.cpp \
         sourceCode/CRISPRofiler/reading.cpp \
         sourceCode/CRISPRofiler/analysis.cpp -o searchBruteForce \
+    # The enricher is the 4th binary. It carries no OpenMP pragmas (the -fopenmp
+    # here is inert for it) and links zlib, which this image already has. Until
+    # 2.8.1 the image built only the three search binaries, so crispritz.py's
+    # _enricher_command() fell back to enricher.py -- correct, but ~1.75x slower
+    # on the dominant stage of a from-scratch build. Installing it into BOTH
+    # places _enricher_command() looks (PATH, then beside the reference) makes the
+    # compiled port the default here, as it already is for install_from_source.sh.
+    # Safe to do only as of CRISPRitz 2.9.1, which fixed the port dropping a SNP
+    # wherever an indel shared its position; verify_enricher.sh now covers that
+    # shape and runs in CRISPRitz CI.
+    && g++ -std=c++11 -O3 \
+        sourceCode/Python_Scripts/Enrichment/enricher.cpp -o enricher -lz \
     && mkdir -p ${PREFIX}/opt/crispritz \
     && cp crispritz.py ${PREFIX}/bin/crispritz.py && chmod +x ${PREFIX}/bin/crispritz.py \
     && cp buildTST searchTST searchBruteForce ${PREFIX}/opt/crispritz/ \
     && cp -R sourceCode/Python_Scripts ${PREFIX}/opt/crispritz/ \
+    && cp enricher ${PREFIX}/bin/enricher && chmod +x ${PREFIX}/bin/enricher \
+    && cp enricher ${PREFIX}/opt/crispritz/Python_Scripts/Enrichment/enricher \
     && rm -rf /opt/crispritz-src
 
 # ---- Install crisprme from this build context (source) ---------------------
@@ -112,7 +128,7 @@ RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
     && rm -f ${PREFIX}/lib/python3.11/site-packages/pyproject.toml
 # The legacy RandomForest scorer was retired in favor of CRISPR-Bulge (its 276 MB model + its unzip step are
 # gone). The CRISPR-Bulge model is provisioned into its own conda env by scorer_env
-# (build_scorer_envs, below); CFD's tiny score pickles ship as plain files in PostProcess/.
+# (build_scorer_envs, below); CFD's JSON score tables ship as plain files in PostProcess/.
 
 # ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
 # Built in its OWN micromamba env so its TensorFlow/numpy pins never touch the

@@ -2,7 +2,7 @@
 Linda Lin
 1/15/2021
 
-Input: CRISPRme best file (top 1000 sites or more, without on-target)
+Input: CRISPRme best file (top 1000 sites or more; perfect matches are starred)
 Output: top OT plots for CRISPRme manuscript
 
 (Note: will get runtime warnings but all are fine to ignore)
@@ -28,9 +28,39 @@ warnings.filterwarnings("ignore")
 matplotlib.use("Agg")
 
 
+# Perfect matches (0 mismatches + bulges) are plotted like every other site and
+# also starred, as in CRISPRme_plots.py: a personal perfect match other than the
+# on-target -- one a variant of this sample creates, say -- is as strong a target.
+PERFECT_MATCH_LABEL = "Perfect match (0 mismatches+bulges)"
+
+
+def mark_perfect_matches(ax, df, mmb_col, y_col):
+    """Star the plotted sites with 0 mismatches+bulges at y_col (their best score,
+    or their edit count). Returns the legend handle, or None when there are none."""
+    perfect = pd.to_numeric(df[mmb_col], errors="coerce") == 0
+    if not perfect.any():
+        return None
+    ax.scatter(
+        df.loc[perfect, "index"],
+        pd.to_numeric(df.loc[perfect, y_col], errors="coerce"),
+        marker="*",
+        s=45,
+        c="black",
+        linewidths=0,
+        zorder=3,
+        clip_on=False,  # a perfect match often scores 1.0, on the top edge
+    )
+    return mlines.Line2D(
+        [], [], marker="*", linestyle="None", markersize=6, color="black",
+        label=PERFECT_MATCH_LABEL,
+    )
+
+
 def plot_with_MMvBUL(df, out_folder, guide):
-    # Remove targets ref with mm+bul<=1 for on-targets and on-targets variant-induced
-    df = df.loc[df["Mismatches+bulges_(fewest_mm+b)"] > 1]
+    # Every site is kept, the perfect matches and the 1-mismatch-or-bulge sites too:
+    # they were dropped here ("on-targets variant-induced") with nothing on the plot
+    # to say so. A copy, so the caller's table is not changed.
+    df = df.copy()
 
     # new col to store the scoring value for non-SpCas9 targets
     df["Mismatches+bulges_REF_(fewest_mm+b)"] = 0
@@ -58,8 +88,10 @@ def plot_with_MMvBUL(df, out_folder, guide):
                 index, "Mismatches+bulges_(fewest_mm+b)"
             ]
 
-    # sort in order to have highest REF mm+bul on top
-    df.sort_values("Mismatches+bulges_(fewest_mm+b)", ascending=True, inplace=True)
+    # sort in order to have highest REF mm+bul on top (stable, as CRISPRme_plots.filter_table:
+    # sites of one value keep the table's order)
+    df.sort_values("Mismatches+bulges_(fewest_mm+b)", ascending=True, inplace=True,
+                   kind="stable")
     # top1000 targets
     df = df.head(100)
     # Make index column that numbers the OTs starting from 1
@@ -157,7 +189,9 @@ def plot_with_MMvBUL(df, out_folder, guide):
     df.plot.scatter(
         x="index",
         y="Mismatches+bulges_ALT_(fewest_mm+b)",
-        s="plot_AF",
+        # no ALT point for a site without a variant: size 0 (a NaN size drew none
+        # either, but savefig failed on a plot whose only site had one)
+        s=df["plot_AF"].fillna(0),
         c=transparent_blue,
         zorder=2,
         edgecolors="black",
@@ -200,10 +234,14 @@ def plot_with_MMvBUL(df, out_folder, guide):
         plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
     )
 
+    # Perfect matches: starred at their (ALT) count, 0
+    star = mark_perfect_matches(
+        plt.gca(), df, "Mismatches+bulges_(fewest_mm+b)", "Mismatches+bulges_ALT_(fewest_mm+b)"
+    )
     # Color legend
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue])
+    plt.legend(handles=[red, blue] + ([star] if star else []))
 
     # Save
     plt.tight_layout()
@@ -212,10 +250,11 @@ def plot_with_MMvBUL(df, out_folder, guide):
 
 
 def plot_with_CRISPR_BULGE_score(df, out_folder, guide):
-    # Remove targets with mm+bul<=1 since they are probably on-target introduced by variants
-    df = df.loc[df["Mismatches+bulges_(highest_CRISPR_BULGE)"] > 1]
-    # sort values to have highest scored target on top
-    df.sort_values("CRISPR_BULGE_score_(highest_CRISPR_BULGE)", ascending=False, inplace=True)
+    # Every site is kept (see plot_with_MMvBUL); a copy, as sorting is in place
+    df = df.copy()
+    # sort values to have highest scored target on top (stable: see plot_with_MMvBUL)
+    df.sort_values("CRISPR_BULGE_score_(highest_CRISPR_BULGE)", ascending=False, inplace=True,
+                   kind="stable")
     # keep top1000 targets
     df = df.head(100)
     # Make index column that numbers the OTs starting from 1
@@ -311,7 +350,9 @@ def plot_with_CRISPR_BULGE_score(df, out_folder, guide):
     df.plot.scatter(
         x="index",
         y="CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)",
-        s="plot_AF",
+        # no ALT point for a site without a variant: size 0 (a NaN size drew none
+        # either, but savefig failed on a plot whose only site had one)
+        s=df["plot_AF"].fillna(0),
         c=transparent_blue,
         zorder=2,
         edgecolors="black",
@@ -353,10 +394,15 @@ def plot_with_CRISPR_BULGE_score(df, out_folder, guide):
         plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
     )
 
+    # Perfect matches: starred at their best score
+    star = mark_perfect_matches(
+        plt.gca(), df, "Mismatches+bulges_(highest_CRISPR_BULGE)",
+        "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+    )
     # Color legend
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue])
+    plt.legend(handles=[red, blue] + ([star] if star else []))
 
     # Save
     plt.tight_layout()
@@ -365,11 +411,11 @@ def plot_with_CRISPR_BULGE_score(df, out_folder, guide):
 
 
 def plot_with_CFD_score(df, out_folder, guide):
-    # Remove targets with mm+bul<=1 since they are probably on-target introduced by variants
-    df = df.loc[df["Mismatches+bulges_(highest_CFD)"] > 1]
+    # Every site is kept (see plot_with_MMvBUL); a copy, as sorting is in place
+    df = df.copy()
 
-    # sort values to have highest scored target on top
-    df.sort_values("CFD_score_(highest_CFD)", ascending=False, inplace=True)
+    # sort values to have highest scored target on top (stable: see plot_with_MMvBUL)
+    df.sort_values("CFD_score_(highest_CFD)", ascending=False, inplace=True, kind="stable")
     # keep top1000 targets
     df = df.head(100)
     # Make index column that numbers the OTs starting from 1
@@ -469,7 +515,9 @@ def plot_with_CFD_score(df, out_folder, guide):
     df.plot.scatter(
         x="index",
         y="CFD_score_ALT_(highest_CFD)",
-        s="plot_AF",
+        # no ALT point for a site without a variant: size 0 (a NaN size drew none
+        # either, but savefig failed on a plot whose only site had one)
+        s=df["plot_AF"].fillna(0),
         c=transparent_blue,
         zorder=2,
         edgecolors="black",
@@ -510,10 +558,14 @@ def plot_with_CFD_score(df, out_folder, guide):
         plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
     )
 
+    # Perfect matches: starred at their best score
+    star = mark_perfect_matches(
+        plt.gca(), df, "Mismatches+bulges_(highest_CFD)", "CFD_score_(highest_CFD)"
+    )
     # Color legend
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue])
+    plt.legend(handles=[red, blue] + ([star] if star else []))
 
     # Save
     plt.tight_layout()
@@ -521,15 +573,16 @@ def plot_with_CFD_score(df, out_folder, guide):
     plt.clf()
 
 
-# Read file
-df_guide = pd.read_csv(sys.argv[1], sep="\t", index_col=False, na_values=["n"])
-out_folder = sys.argv[2]
-guide = sys.argv[3]
+if __name__ == "__main__":
+    # Read file
+    df_guide = pd.read_csv(sys.argv[1], sep="\t", index_col=False, na_values=["n"])
+    out_folder = sys.argv[2]
+    guide = sys.argv[3]
 
-# for guide in df['Spacer+PAM'].unique():
-# reset df temp after every process to avoid memory problems
-# df_guide = df.loc[df["Spacer+PAM"] == guide]
-# takes df in input and produces the correlated plot, guide is used to save with correct name
-plot_with_CFD_score(df_guide, out_folder, guide)
-plot_with_CRISPR_BULGE_score(df_guide, out_folder, guide)
-plot_with_MMvBUL(df_guide, out_folder, guide)
+    # for guide in df['Spacer+PAM'].unique():
+    # reset df temp after every process to avoid memory problems
+    # df_guide = df.loc[df["Spacer+PAM"] == guide]
+    # takes df in input and produces the correlated plot, guide is used to save with correct name
+    plot_with_CFD_score(df_guide, out_folder, guide)
+    plot_with_CRISPR_BULGE_score(df_guide, out_folder, guide)
+    plot_with_MMvBUL(df_guide, out_folder, guide)

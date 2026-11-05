@@ -16,11 +16,55 @@ on:
     paths:
       - "crisprme.py"
       - "PostProcess/**"
-      # Only this one pages/ file, not pages/** -- it's the one this
-      # workflow's own tests cover (via AST-extraction, no Dash needed);
-      # the rest of pages/ is covered by web-e2e.yml instead.
-      - "pages/history_page.py"
-      - ".github/workflows/unit-tests.yml"
+      # This job's tests read these too, so a PR touching only them must still run it:
+      # pages/ (test_sanitize_job_name, test_bulge_cap and test_samplesid_emit read main_page.py,
+      # test_dash_output_props the folder, via AST-extraction, no Dash needed), scripts/
+      # (test_hf_sha256sums, generate_cfd_tables.py --check, test_check_alt_pam's release
+      # gate), PAMs/ (test_index_resolution),
+      # test/benchmark/ (test_validate_test, test_complete_test, test_ci_workflows), and the
+      # docs that test_complete_search_flags, test_install_from_source, test_hf_sha256sums,
+      # test_ci_workflows and test_markdown_wrap scan, the last with the changelog fragments of
+      # a release in the making (changelog/*.md, merged into CHANGELOG.md at its release),
+      # which test_changelog_fragments reads too.
+      - "pages/**"
+      - "scripts/**"
+      - "PAMs/**"
+      - "test/benchmark/**"
+      - "docs/**"
+      - "README.md"
+      - "METHODS.md"
+      - "CHANGELOG.md"
+      - "changelog/**"
+      # app.py sizes the search pool from app_settings at import time and index.py
+      # imports it; test_app_settings guards that, so a PR touching only these two
+      # must still run it.
+      - "app.py"
+      - "index.py"
+      # test_install_from_source runs the installer and checks that what it leaves in
+      # the checkout is ignored, so a PR touching only these two must still run it.
+      - "install_from_source.sh"
+      - ".gitignore"
+      # test_documented_sizes reads the one-line installers' README there too, and
+      # test_install_from_source compares the Dockerfile's CRISPRitz pin with the script's
+      # and its header comment with crisprme.py's version. It also reads the release skill
+      # (.claude/skills/release-crisprme/SKILL.md) and runs, as it runs RELEASING.md's, the
+      # skill's command that bumps that comment.
+      - "install/**"
+      - "Dockerfile"
+      - ".claude/**"
+      # test_ci_workflows reads all of them
+      - ".github/workflows/**"
+      # generate_report.py, which the report tests run, puts assets/'s logo and background
+      # into each report, and falls back to test/data/samplesIDs/ for the sample lists.
+      - "assets/**"
+      - "test/data/**"
+      # test_complete_search_flags reads every .py, .sh, .yml and .yaml file in the
+      # repository, seq_script/ and the paper's scripts too, for a complete-search command
+      # with a flag complete-search rejects.
+      - "**.py"
+      - "**.sh"
+      - "**.yml"
+      - "**.yaml"
   push:
     branches: [ "main", "python3.11", "2.2.0-dev" ]
   workflow_dispatch:
@@ -28,7 +72,8 @@ on:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The hosted job took 523 s at 2.8.1's first release head, and the steps have grown since.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -52,19 +97,42 @@ jobs:
         run: python -m pip install --upgrade pip requests numpy pandas matplotlib pysam pyliftover
 
       - name: Byte-compile the pipeline (syntax check)
-        # pages/history_page.py: syntax-only (py_compile doesn't execute
-        # imports), included here since test_history_page_assembly.py below
-        # exercises it via AST-extraction rather than a normal import (it
-        # needs a live Dash `app`, which this light CI doesn't set up).
-        run: python -m py_compile crisprme.py PostProcess/*.py pages/history_page.py
+        # pages/history_page.py + pages/settings_page.py: syntax-only (py_compile
+        # doesn't execute imports), included here since test_history_page_assembly.py
+        # and test_settings_progress.py below exercise them via AST-extraction rather
+        # than a normal import (they need a live Dash `app`, which this light CI
+        # doesn't set up).
+        run: python -m py_compile crisprme.py PostProcess/*.py pages/history_page.py pages/settings_page.py app.py
 
       - name: HuggingFace download/publish + index unit tests (network-free)
         working-directory: PostProcess
         run: python -m unittest test_crisprme_hf -v
 
+      - name: "Web Settings download progress + failure relay (2.8.1; AST-extracted, no Dash)"
+        # with the names Settings refuses, which CRISPRme takes into shell commands
+        working-directory: PostProcess
+        run: python -m unittest test_settings_progress -v
+
+      - name: "Text a web request sends runs no command (the genomic-sequence input's extraction here; the pages in web-e2e's image)"
+        # The web app took text a request sends into shell commands: the genomic-sequence
+        # input's header and sequence name, the search launch's arguments, Remove result's
+        # job id, the values of a results link or table (and those into the tables' database
+        # queries); and a personal-assembly search's guides, PAM and files into the search's.
+        # The checks of seq_script/extract_seq.py run here; its read of a sequence needs
+        # bedtools, and the pages' checks Dash, so web-e2e's in-image step runs the module
+        # whole, and fails on a skip.
+        working-directory: PostProcess
+        run: python -m unittest test_web_shell_safety -v
+
       - name: HF fallback contract (hf_fetch must raise so callers fall back)
         working-directory: PostProcess
         run: python -m unittest test_hf_downloads.TestHfFetchFallbackContract -v
+
+      - name: "Legacy setup: a file the data repo does not host is said in one line on stdout, not as a HuggingFace failure"
+        # `crisprme.py setup` printed the Hub's 404 for every VCF, samplesIDs.HGDP.txt and the
+        # FASTA of any chromosome but chr22 as a failure, then downloaded each from its source.
+        working-directory: PostProcess
+        run: python -m unittest test_setup_legacy_database -v
 
       - name: Variant-index bundle round-trip (dicts travel with the index)
         working-directory: PostProcess
@@ -99,6 +167,7 @@ jobs:
         run: python test_samplesid_overlisting.py
 
       - name: post_process.sh writes temps to output dir, not install dir
+        # Imports only here: its tests skip with no BEDOPS. web-e2e.yml runs them in the image.
         working-directory: PostProcess
         run: python -m unittest test_post_process_tempdir -v
 
@@ -134,11 +203,24 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_build_emit_tiers -v
 
+      - name: "The merge lists and counts each reference alignment once (the dict-less tiers give it again; each variant dataset gives it)"
+        working-directory: PostProcess
+        run: python -m unittest test_reference_rows_once -v
+
+      - name: "A sites-only dataset's rows stay at their sites in the merge step (the sorts read tab-separated columns; no empty item in a merged list)"
+        working-directory: PostProcess
+        run: python -m unittest test_merge_sites_only_rows -v
+
       - name: "Indel per-chrom subset regression (#172: fakechrom match)"
         working-directory: PostProcess
         run: python -m unittest test_indel_chrom_subset -v
 
-      - name: "Indel-path PAM creation (#94: writes PAM_gen index 10, not Var_uniq 11)"
+      - name: "Indel-path PAM creation (#94: writes PAM_gen index 10, not Var_uniq 11; the reference PAM is read through the indel)"
+        # Up to 2.8.0 the reference bases under an indel row's PAM were the REF alignment's,
+        # read from the row's start: on the + strand with a 3' PAM (the - strand with a 5'
+        # one) a deletion or an insertion in the protospacer moved them len(REF) - len(ALT)
+        # bases, and a PAM the reference already has was flagged as created (the WALK
+        # panel's chr2:10000 and chr3:20000 rows, pinned here).
         working-directory: PostProcess
         run: python -m unittest test_indel_pam_creation -v
 
@@ -154,6 +236,35 @@ jobs:
           python test_indel_genotypes.py
           python test_indel_snp_cis.py
           python test_indel_snp_bruteforce.py
+
+      - name: "Indel+SNP per-haplotype resolution (2.8.1: each carrier's own SNP alleles, never another sample's; the PAM over every IUPAC code; a second indel read on the carrier's bases; the real analisi_indels_NNN.py on a phased fixture) + the ALT-PAM release gate"
+        # Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid
+        # fake-indel genome column by column, without genotypes: one sample's indel
+        # was reported with SNP alleles only other samples carry, and an R at NRG's
+        # last PAM base was shown as A. test_indel_haplotype_resolution pins the
+        # resolver (indel_snp_cis.resolve_target) over every IUPAC code at every PAM
+        # position and on table-driven phased cases, and that a second indel inside the
+        # target takes a carrier off only when it changes the target's bases (real chr22
+        # shapes and the review's synthetic ones: a repeat unit gained or lost at the
+        # target's edge leaves them, a stretch another variant lengthened does not hold
+        # them through the indel, and two second indels whose REFs share a base leave
+        # the slot unread, in either order); test_indel_overlaid_rows runs
+        # the shipped analyzer on a fixture with the repo's own Tier-0 / Tier-1 /
+        # indel-store writers (pandas + numpy; intervaltree is stubbed when absent);
+        # test_check_alt_pam covers scripts/check_alt_pam.py (and its check that no
+        # reported target holds an N), which validate-benchmarks runs on the chr22
+        # outputs.
+        working-directory: PostProcess
+        run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows test_check_alt_pam -v
+
+      - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; both strands, PAM at either end)"
+        # Up to 2.8.0 analisi_indels_NNN.py took CRISPRitz's Cluster_Position for an
+        # RNA-bulge row on the + strand with a 3' PAM and on the - strand with a 5' PAM,
+        # one base before the first aligned base, and the REF text of an RNA,DNA row, and
+        # of a 5' PAM RNA-bulge row, was a base off. The shipped analyzer on planted
+        # alignments given as the engine reports them (pandas + numpy).
+        working-directory: PostProcess
+        run: python -m unittest test_indel_row_coordinates -v
 
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
@@ -183,6 +294,14 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_reference_row_downstream -v
 
+      - name: "Tier-path SNP rows mark the REF mismatches as the dictionary path does (per-sample + population-level)"
+        working-directory: PostProcess
+        run: python -m unittest test_tier_ref_columns -v
+
+      - name: "fewest_mm+b seed and non-seed counts include the DNA bulge, as the other two criteria do"
+        working-directory: PostProcess
+        run: python -m unittest test_seed_counts_dna_bulge -v
+
       - name: "Deterministic dedup ordering (#46: sample/rsID/AF/annotation lists sorted, not PYTHONHASHSEED-random)"
         working-directory: PostProcess
         run: python test_determinism.py
@@ -195,6 +314,15 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_risk_card -v
 
+      - name: "Top-1000 and Personal Risk Card plots draw every site (perfect matches starred, 1-edit sites kept, one site too); the report says what its top-1000 views leave out"
+        # CRISPRme_plots.py / CRISPRme_plots_personal.py dropped every site with
+        # mismatches+bulges <= 1, the on-target and any variant-created perfect match
+        # among them, with nothing on the plot to say so. The shareable report still
+        # leaves them out of its own top-1000 plots and tables, now with a caption.
+        # matplotlib + pandas only.
+        working-directory: PostProcess
+        run: python -m unittest test_top_plots -v
+
       - name: "Observed-haplotypes sidecar (make_oh_sidecar: alt-origin superset, byte-identical rows, safe degrade)"
         working-directory: PostProcess
         run: python -m unittest test_make_oh_sidecar -v
@@ -203,9 +331,9 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_report_scorer_label -v
 
-      - name: "Intermediate cleanup guard (default-on rm keeps finalized outputs + web drill-down source; env/cicd guards)"
+      - name: "Intermediate cleanup guard (default-on rm keeps finalized outputs + web drill-down source; env/cicd guards) + annotation temp folders removed after every search"
         working-directory: PostProcess
-        run: python -m unittest test_clean_intermediates -v
+        run: python -m unittest test_clean_intermediates test_annotation_tmpdirs -v
 
       - name: "Additional coverage (tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile / history-page assembly jobs)"
         # test_annotation: the retry / flock-fallback / BGZF-EOF-guard logic is mock-based
@@ -216,14 +344,27 @@ jobs:
           python -m unittest test_assembly_reconcile test_personal_assembly
           test_ensure_search_lists test_hvdr_greedy_cap test_registry_only_emit
           test_representative_tiebreak test_sanitize_job_name test_tier0_compaction
-          test_history_page_assembly test_annotation -v
+          test_history_page_assembly test_app_settings test_annotation -v
+
+      - name: "Assembly search: each haplotype is searched on its own sequence (own index name, index provenance, 0-bulge scan of the given folder)"
+        # A bundle keeps every haplotype in a folder named "genome", and complete-search
+        # names a genome's index after its folder: both haplotypes of every individual
+        # shared one index. assembly_search runs in-process with each haplotype's
+        # complete-search replaced by a stand-in that names, builds and reuses indexes
+        # as the pipeline does; the pipeline's own 0-bulge scan runs with a stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_assembly_haplotype_genomes -v
 
       - name: "Modular scorer env-manager + runner (env lifecycle/state + subprocess protocol; no TF)"
         # scorer_env: detect env manager, create-command shape, atomic state file,
         # health-check probe. scorer_runner: real stdin/stdout worker protocol against
         # a stdlib fake worker + graceful-degradation paths. Neither needs TensorFlow.
+        # test_crispr_bulge_fidelity, the CRISPR-Bulge fidelity gate, needs TensorFlow and
+        # the Refined_TrueOT dataset, so here it skips: what this checks is that it imports
+        # with no side effect (it once changed to a developer's folder at import, and failed),
+        # and that its dataset-fetch steps clone the commit scorer_env provisions.
         working-directory: PostProcess
-        run: python -m unittest test_scorer_env test_scorer_runner -v
+        run: python -m unittest test_scorer_env test_scorer_runner test_crispr_bulge_fidelity -v
 
       - name: "CFD clean-room bit-identity (golden fixture) + cosmic-license + info-af registry + synth-sites + change-headers + dash-output-props + complete-test wiring"
         # These stdlib-only suites previously ran in NO CI job. test_cfd_cleanroom_equiv is
@@ -236,9 +377,9 @@ jobs:
         working-directory: PostProcess
         run: >
           python -m unittest test_cfd_cleanroom_equiv test_cosmic_license
-          test_configure_tmpdir
+          test_configure_tmpdir test_install_from_source
           test_registry_from_info_af test_synth_sites_gt test_change_headers_bestmerge
-          test_dash_output_props test_complete_test -v
+          test_dash_output_props test_complete_test test_validate_test -v
 
       - name: "targets-scoring (score-a-list: CasOFFinder/TSV parsers, CFD slicing, CRISPR-Bulge null rules, carrier overlay vs synthetic registry)"
         # The score-a-list backend (crisprme.py targets-scoring). Hermetic: the
@@ -255,6 +396,102 @@ jobs:
 
       - name: "CFD score tables validation (JSON structure/counts/anchors; the committed tables are the source of truth)"
         run: python scripts/generate_cfd_tables.py --check
+
+      - name: "Index fit (which guide lengths an index answers; the search script says the same; an index a newer CRISPRitz built is refused, not misread)"
+        working-directory: PostProcess
+        run: python -m unittest test_index_fit -v
+
+      - name: "A search's own enrichment (SNP overlay of the fake-indel genome + phased indel genotype store)"
+        working-directory: PostProcess
+        run: python -m unittest test_search_indel_snp -v
+
+      - name: "Index coverage (an index lacking a chromosome's trees is refused, not searched)"
+        working-directory: PostProcess
+        run: python -m unittest test_index_coverage -v
+
+      - name: "Prune flank (an all-N index built before the N-flank fix, and a wider flank, are said)"
+        working-directory: PostProcess
+        run: python -m unittest test_prune_flank -v
+
+      - name: "Markdown wrap (no line of the README, METHODS, CHANGELOG, docs/ or a changelog fragment opens a '+' bullet)"
+        working-directory: PostProcess
+        run: python -m unittest test_markdown_wrap -v
+
+      - name: "Changelog fragments (a fragment's headings are the sections it is merged into; notes for the merge go before them)"
+        # changelog/docs3.md ended with "### Notes for the merge", which the merge took for text of
+        # its Changed block and put in CHANGELOG.md's [2.8.1], with no warning.
+        working-directory: PostProcess
+        run: python -m unittest test_changelog_fragments -v
+
+      - name: "Documented sizes (the installers, README, website, Quickstart, TROUBLESHOOTING and DATA_LAYOUT give the measured install and image sizes)"
+        # The installers said the image is ~800 MB (a 4.84 GB pull on amd64) and asked for ~45 GB
+        # free; the docs said ~85 GB on disk and ~100 GB free. A default install is 97.9 GB.
+        working-directory: PostProcess
+        run: python -m unittest test_documented_sizes -v
+
+      - name: "Indel report integrity (header injection) + complete-search flag gate + index resolution"
+        # The header-injection guards: a dropped CRISPRitz header made
+        # post_analisi_indel.sh prepend the merged file's first DATA row to every
+        # per-chromosome subset, so one search row was reported on ~23 chromosomes,
+        # each with that chromosome's real rsID/AF/carriers. Plus the unknown-flag
+        # rejector (a mistyped --prune-pams used to run genome-wide with pruning
+        # silently off), and the index resolver, whose choice must not depend on
+        # LC_COLLATE now that a second PAM-less flank width exists. Plus the
+        # indexes/SHA256SUMS writer (hermetic; it must never emit an empty file), and
+        # a chromosome with SNPs but no indels, which CRISPRitz 2.9.1's refusal of an
+        # index dir without a .bin turned into a whole-run abort. Plus legacy-index
+        # access: dedicated-PAM and NNN_3 indexes are still listed and downloaded from
+        # the default repo only, and the catalog offers each name's fetchable copy.
+        working-directory: PostProcess
+        run: >
+          python -m unittest test_indel_header_injection test_complete_search_flags
+          test_index_resolution test_index_repo_routing test_legacy_index_access
+          test_iupac_collapse_consistency test_hf_sha256sums
+          test_indel_empty_chromosome -v
+
+      - name: "build-index-only leaves no partial index or enriched genome, and stops at a search's build lock (and on an index in a newer CRISPRitz format)"
+        # A later run takes an index directory or an enriched genome that is there for
+        # a finished one. build-index-only builds each index in a hidden directory of
+        # genome_library and renames it into place once the engine has succeeded, and
+        # stages the enrichment (its dictionaries compressed) to move the enriched
+        # genome into place last, so a run that ends early (Ctrl-C, an OOM kill, a
+        # container stop, an engine error) leaves none; the SNP overlay rewrites each
+        # fake-indel FASTA whole or not at all, and the build directories of runs that
+        # are gone are reclaimed. While a search holds the build lock of an output it
+        # would use or build, it stops with an ERROR, as it, and a search, do on an index in
+        # the format CRISPRitz 2.9.2 and later write (index format 2), which this release does
+        # not read. The real crisprme.py,
+        # pool_index_indels.py and overlay_indel_snps.py run against a stub engine on
+        # PATH, and a successful build must leave the tree the code before the fix left.
+        working-directory: PostProcess
+        run: python -m unittest test_build_index_only_atomic -v
+
+      - name: "build-index-only refuses a genome folder it cannot index (no top-level .fa, a multi-sequence FASTA) and an index with no .bin"
+        # index-genome indexes the *.fa files at the top of the genome folder only: a
+        # UCSC chromFa archive unpacked with its chroms/ folder gave an index with no
+        # .bin, put in place as done, which every search refused. The real crisprme.py
+        # against test_build_index_only_atomic's stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_build_index_only_layout -v
+
+      - name: "CI and the documented self-test run what they say (job limit, path filters, in-image tests, every benchmark)"
+        # The workflows and the docs, read as text: a job that is cancelled, never starts, or
+        # skips what it is there to test passes for nothing.
+        working-directory: PostProcess
+        run: python -m unittest test_ci_workflows -v
+
+      - name: "build-index-only: a tier or indel-store worker that dies (an OOM kill) ends the run with a message, and does not hang it"
+        # A multiprocessing.Pool never sees a worker die: the web Settings job read
+        # running for ever. The real crisprme.py against the same stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_build_index_only_worker_death -v
+
+      - name: "A sites-only dataset's post-analysis is the population-level one, whatever the search's mode"
+        # A per-sample search lost its multi-variant worst cases. The real
+        # new_simple_analysis.py on a real sites-only registry, and the real crisprme.py
+        # complete-search against test_build_index_only_atomic's stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_sites_only_per_sample -v
 
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
         # resolve_backend degradation (requested accelerator absent -> CPU), pre-import

@@ -16,6 +16,18 @@ Attributes:
     app.layout (html.Div): The layout structure of the Dash application.
 """
 
+# dash-bootstrap-components' sdist drops a pyproject.toml directly into
+# site-packages/, which Biopython's Bio/__init__.py misreads as "importing from a
+# source tree" and warns about at import -- a harmless false positive (a Bioconda
+# install has it: conda-forge's package ships the file). crisprme.py silences it for
+# its own process, but `crisprme.py web-interface` runs this file in a new
+# interpreter, whose pages import Bio (seq_script/convert_pam.py): the same filter,
+# before anything is imported.
+import warnings as _warnings
+_warnings.filterwarnings(
+    "ignore", message=r".*importing Biopython from inside the source tree.*"
+)
+
 from app import URL, IPADDRESS, WEBADDRESS, ONLINE, current_working_directory, app, cache, pool_executor
 from pages import (
     main_page,
@@ -27,6 +39,7 @@ from pages import (
     contacts_page,
     settings_page,
 )
+from pages.pages_utils import results_job_dir
 
 from dash import Dash
 from dash import Input, Output, State
@@ -51,15 +64,11 @@ def _is_assembly_job(job_id: str) -> bool:
     .Params.txt (written by submit_assembly_search_job) -- same
     substring-check style refresh_search already uses for Ref_comp. Shared
     by both the /load and /result routes below so the check isn't
-    duplicated a third time."""
-    params_path = os.path.join(current_working_directory, "Results", job_id, ".Params.txt")
-    if not os.path.isfile(params_path):
-        return False
-    try:
-        with open(params_path) as params_handle:
-            return "Genome_type\tassembly" in params_handle.read()
-    except OSError:
-        return False
+    duplicated a third time. The id is the URL's: only a job folder of Results/
+    is read (results_job_dir). Remove result of a personal-assembly search
+    removes only a job this takes (load_page.is_assembly_folder)."""
+    job_dir = results_job_dir(job_id)
+    return job_dir is not None and load_page.is_assembly_folder(job_dir)
 CRISPRME_DIRS = [
     "Genomes",
     "Results",
@@ -158,10 +167,9 @@ def change_page(href: str, path: str, search: str, hash_guide: str) -> Tuple:
         if search and "job=" in search:
             job_id = search.split("job=")[-1].split("&")[0].strip()
         # a bare or malformed /load with no real job -> friendly empty state
-        # instead of a misleading "Job submitted" status page
-        if not job_id or not os.path.isdir(
-            os.path.join(current_working_directory, "Results", job_id)
-        ):
+        # instead of a misleading "Job submitted" status page (a job folder of
+        # Results/ only: '../' in the id reached any folder)
+        if results_job_dir(job_id) is None:
             return (load_page.load_page_no_job(), "/index")
         # define url to display on load page to check on job status
         # if online show the webaddress, show the ip address otherwise

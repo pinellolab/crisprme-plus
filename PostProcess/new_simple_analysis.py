@@ -327,6 +327,30 @@ def _aligned_mm(seq_prerevert, realTarget, guide_no_pam, revert):
     return mm
 
 
+def _ref_with_bulges(refSeq_final, realTarget, guide_no_pam):
+    """The REFERENCE alignment an alt row carries in its Reference column, built exactly
+    as the legacy (dictionary-path) block of iupac_decomposition builds it: the strand-
+    corrected reference window with realTarget's RNA-bulge gaps ('-') re-inserted, then
+    every protospacer base that differs from the guide lower-cased (a DNA-bulge column,
+    '-' in the guide, keeps its base as it is).
+
+    The lower case is load-bearing downstream: resultIntegrator counts the REF seed /
+    non-seed mismatches from it, and CRISPRme_plots / CRISPRme_plots_personal count the
+    REF mismatches from it. Only [pos_beg:pos_end] (the protospacer) is touched, so the
+    PAM bases stay upper case and the iupac_code_set lookups of the PAM-creation check
+    on this string keep working. CFD and CRISPR-Bulge upper-case their input, so the
+    scores do not depend on the case."""
+    ref = list(refSeq_final)
+    for pos, char in enumerate(realTarget):
+        if char == "-":
+            ref.insert(pos, "-")
+    for position_t, char_t in enumerate(ref[pos_beg:pos_end]):
+        if char_t.upper() != guide_no_pam[position_t]:
+            if guide_no_pam[position_t] != "-":
+                ref[pos_beg + position_t] = char_t.lower()
+    return "".join(ref)
+
+
 def _record_phase_confirmation(final_line, phase_state):
     """Record one dict-less variant off-target's identity + CONFIRMED/PUTATIVE flag
     for the ADDITIVE phase-confirmation companion TSV. PURE w.r.t. ``final_line``
@@ -487,9 +511,19 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
     variant haplotypes (``enumerate_observed_haplotypes`` never yields the empty set),
     so a candidate with NO productive / in-budget observed haplotype lost its entire
     locus -- both its reference AND its alt off-targets. This helper restores the
-    reference off-target for EVERY candidate, exactly as the SEPARATE reference-genome
-    CRISPRitz search would (a pure ``n`` / sentinel-``55`` reference row), so the
-    dict-less LOCUS coverage matches the stable reports.
+    reference off-target for a candidate on the plus strand, exactly as the SEPARATE
+    reference-genome CRISPRitz search would (a pure ``n`` / sentinel-``55`` reference
+    row), so the dict-less LOCUS coverage matches the stable reports.
+
+    A candidate on the minus strand gets no row: that search holds its alignment too
+    (TRAC guide, genome-wide: not one reference alignment of this path on the minus
+    strand is missing from it), and the merge step keeps one copy of an alignment. This
+    used to reverse-complement ``refSeq_prerevert``, which is strand-corrected already, so
+    it judged the plus-strand letters: they usually fail the gates below, but on a
+    near-palindromic guide they pass, and a row went out with strand ``-`` and those
+    letters (5 sites on TRAC), one more in ``Other_motifs``. With the right letters the
+    row is a copy for the merge to drop, whose CRISPR-Bulge score, of another batch, can
+    differ in its last digit from the reference search's and replace it (28 sites on TRAC).
 
     The row is a PURE reference alignment (no alt substituted). It carries the SAME
     column writes (2/7/9/10) and PAM check as ``_finalize_observed_entry``, but its
@@ -519,12 +553,12 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
     ``_collect_variant_off_target`` -- the reference is not a variant off-target, so it
     must never populate the phase-confirmation or population-summary companions.
     """
+    if revert:
+        return
+
     final_line = split.copy()
 
-    if revert:
-        seq_joined = reverse_complement_table("".join(refSeq_prerevert))
-    else:
-        seq_joined = "".join(refSeq_prerevert)
+    seq_joined = "".join(refSeq_prerevert)
     target_to_list = list(seq_joined)
     for pos, char in enumerate(realTarget):
         if char == "-":
@@ -674,11 +708,7 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     # CRISPRME_FAST_MODE); the observed/legacy enumeration below is untouched when OFF.
     if _FAST_MODE:
         refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
-        refSeq_with_bulges = list(refSeq_final)
-        for _p, _ch in enumerate(realTarget):
-            if _ch == "-":
-                refSeq_with_bulges.insert(_p, "-")
-        refSeq_with_bulges = "".join(refSeq_with_bulges)
+        refSeq_with_bulges = _ref_with_bulges(refSeq_final, realTarget, guide_no_pam)
         # reference off-target ONCE (LOCUS-COVERAGE FIX), identical to the non-fast path.
         _finalize_reference_entry(
             split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
@@ -812,13 +842,10 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
 
     # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block).
     refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
-    refSeq_with_bulges = list(refSeq_final)
-    for pos, char in enumerate(realTarget):
-        if char == "-":
-            refSeq_with_bulges.insert(pos, "-")
-    refSeq_with_bulges = "".join(refSeq_with_bulges)
+    refSeq_with_bulges = _ref_with_bulges(refSeq_final, realTarget, guide_no_pam)
 
-    # 3a) Emit the candidate's REFERENCE off-target ONCE (LOCUS-COVERAGE FIX). This is
+    # 3a) Emit the candidate's REFERENCE off-target ONCE (LOCUS-COVERAGE FIX; on the plus
+    #     strand: see the helper). This is
     #     emitted whether or not any observed variant haplotype survived, mirroring the
     #     legacy path (which always represents the reference via its alt rows' embedded
     #     refSeq). It is a pure reference alignment (no alt), origin=ref, in-budget/PAM
@@ -1987,6 +2014,18 @@ if registry_only_mode:
         f"with degraded (NA) Samples -- no genotype tier to resolve carriers"
         f"{' (aggregate info_af registry; sample-less dict ignored)' if _aggregate_registry else ''}."
     )
+# A sites-only dataset has no genotypes for a per-sample search to resolve: its rows are
+# the population-level path's whatever the search's mode (each dataset of a search has a
+# post-analysis of its own). On the enumeration of the per-sample path, which joins
+# variants only through shared carriers, it lost its multi-variant worst cases: whole
+# sites and higher scores, in a search beside a genotyped dataset, where the mode is
+# per-sample by default, too.
+if registry_only_mode and _twopass_emit is not None and (
+    _aggregate_registry or getattr(myreg, "manifest", {}).get("data_type") == "sites-only"
+):
+    if not _FAST_MODE:
+        print(f"Sites-only dataset on {current_chr}: population-level post-analysis.")
+    _FAST_MODE = True
 
 # check PAM position and relative coordinates on targets
 pam_at_beginning = False

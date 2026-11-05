@@ -836,8 +836,9 @@ def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
 # a per-dataset allele frequency (INFO/AF_<dataset>) and the site carries AF_max.
 # There are no genotypes to count, so this builder reads the pre-computed AFs
 # directly. AF is reproduced EXACTLY (to within 0.5/AN of the input); individual
-# carrier/hom counts do not exist for aggregate data, so they are 0 (the report
-# renders them N/A for aggregate_af_only groups -- never a fabricated estimate).
+# carrier/hom counts do not exist for aggregate data, so they are 0 (the
+# population-summary companion writes them as NA for aggregate_af_only groups, and
+# the report shows no such count -- never a fabricated estimate).
 def _af_only_counts(af, an_nominal, n_called):
     """Synthesize integer ``Counts`` for ONE aggregate (db, alt) record from a
     site-level allele frequency, with NO genotypes available.
@@ -852,9 +853,10 @@ def _af_only_counts(af, an_nominal, n_called):
 
     Aggregate data carries NO per-individual genotypes, so ``n_carrier`` / ``n_hom``
     are **0** -- they are NOT observed and are NOT modelled (the user chose AF-only;
-    the report renders them as N/A for ``aggregate_af_only`` groups rather than
-    showing a fabricated Hardy-Weinberg estimate). ``n_called`` carries the nominal
-    cohort size so the group is non-empty and AN is meaningful.
+    the population-summary companion writes them as NA for ``aggregate_af_only``
+    groups, and the report shows no carrier or homozygote count, rather than a
+    fabricated Hardy-Weinberg estimate). ``n_called`` carries the nominal cohort size
+    so the group is non-empty and AN is meaningful.
     """
     an_nominal = int(an_nominal)
     n_called = max(int(n_called), 0)

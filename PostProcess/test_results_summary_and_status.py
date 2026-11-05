@@ -31,6 +31,8 @@ sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app ob
 
 import pages.load_page as lp  # noqa: E402
 import pages.results_page as rp  # noqa: E402
+import index_fit  # noqa: E402
+from test_index_fit import _newer_index_error  # noqa: E402
 
 
 def _counts(rows):
@@ -120,6 +122,68 @@ class TestNoHitsStatus(unittest.TestCase):
         out = self._status("finished")
         self.assertEqual(out[0], {"visibility": "visible"})
         self.assertIn("result?job=finished", out[8])
+
+    def test_a_search_refused_for_an_unfinished_build_says_why(self):
+        # the search script refuses a dataset whose build-index-only run has not
+        # finished it: submitted again, the job fails the same way until it has
+        refused = ("/data/Genomes/hg38+rv is unfinished: a build-index-only run is "
+                   "writing it, or stopped before it was done. Let that run finish, or run "
+                   "build-index-only again to its end, then run this search again")
+        # (and how to finish the tiers or search without them)
+        tiers = ("/data/Dictionaries/registry_rv is unfinished: a build-index-only run is "
+                 "writing it, or stopped before it was done. Let that run finish, or run "
+                 "build-index-only again to its end with rv and its --samplesID (or build it "
+                 "again in the web Settings page, which passes the dataset's sample list), or "
+                 "remove it and /data/Dictionaries/genotypes_rv to search without them, then "
+                 "run this search again")
+        # (no index here serves the search, and this run cannot build one)
+        no_index = ("index 'NRG_2_hg38' is not installed, and this run cannot build it: "
+                    "nothing can be created in '/data/genome_library' (a read-only mount, no "
+                    "write permission, or a full disk). Make that folder writable, or install "
+                    "the index there, then run this search again")
+        # (an index in the way, built for a shorter guide)
+        short = ("NGG_2_hg38 was built for a 20-nt guide, and this search has a 23-nt guide "
+                 "with 1 DNA and 1 RNA bulge(s): it stores too few bases per site, so a search "
+                 "of it would report wrong alignments and lose off-targets. This search builds "
+                 "its index under that name: move it out of /data/genome_library, or run this "
+                 "search from another working directory")
+        # (no variant index serves it, nor VCFs or an enriched genome to build one)
+        no_variant = ("no variant index here serves this search (genome hg38, dataset ds, PAM "
+                      "NGG, 1 DNA and 1 RNA bulge(s), a 20-nt guide), and none can be built: "
+                      "neither its VCFs (VCFs/ds) nor its enriched genome (Genomes/hg38+ds) is "
+                      "installed. Variant indexes installed for ds: NRG_3_hg38+ds (up to 2 "
+                      "bulge(s) of each type)")
+        # (an index that lacks a chromosome's trees: index_coverage.py)
+        partial = ("index 'NRG_2_hg38' (/data/genome_library/NRG_2_hg38) lacks trees of FASTAs "
+                   "that hold sites of its PAM: chr2.fa (no tree): a search of it would lose "
+                   "them with no error. It is a partial copy, or a build stopped partway, or the "
+                   "genome folder has changed since it was built. Remove it (rm -rf "
+                   "'/data/genome_library/NRG_2_hg38') and run this search again, which builds "
+                   "it anew where it can, or download it again or build it with crisprme.py "
+                   "build-index-only")
+        # (an index a newer CRISPRitz built, in index format 2: the line the search script
+        # prints for it, and the text index_fit.py gives of it)
+        index = os.path.join(self.tmp, "genome_library", "NRG_2_hg38")
+        newer_err, newer = _newer_index_error(index), index_fit.newer_format_error(index)
+        for name, err, says in (
+                ("newer index", newer_err, f"The search was not run: {newer}."),
+                ("partial", f"ERROR: {partial}\n", f"The search was not run: {partial}."),
+                ("no variant", f"ERROR: {no_variant}\n", f"The search was not run: {no_variant}."),
+                ("refused", f"ERROR: {refused}\n", f"The search was not run: {refused}."),
+                ("refused tiers", f"ERROR: {tiers}\n", f"The search was not run: {tiers}."),
+                ("no index", f"ERROR: {no_index}\n", f"The search was not run: {no_index}."),
+                ("short index", f"ERROR: {short}\n", f"The search was not run: {short}."),
+                ("failed", "ERROR: Off-targets search Variant failed\n",
+                 "The selected result encountered some errors, please remove it and try "
+                 "to submit again.")):
+            with self.subTest(name=name):
+                d = self._job(name, "Job\tStart\tFri\n")
+                with open(os.path.join(d, "log_error.txt"), "w") as f:
+                    f.write(err)
+                out = self._status(name)
+                self.assertEqual(out[0], {"visibility": "hidden"})
+                self.assertEqual(out[9].children, says)
+                self.assertEqual(out[9].color, "danger")
 
 
 if __name__ == "__main__":

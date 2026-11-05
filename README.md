@@ -22,9 +22,10 @@ through an interactive web-based interface.
 ### ✨ Highlights
 
 - **Dictionary-less variant-aware search** — a compact allele-frequency registry + genotype store ship with the index, so variant off-target search (with allele frequencies, rsIDs, and per-dataset provenance) runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
-- **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
+- **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. Since 2.8.1 an indel row lists only the individuals whose own haplotype has its sequence; where the phase is unknown, those whose own alleles allow it (PUTATIVE); on an install without SNP genotypes (`download --what index --no-genotypes`), every carrier of the indel where a SNP makes the site with it (PUTATIVE). Split multi-allelic SNP sites are the exception ([§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)). ([methods](METHODS.md#snpindel-off-targets-each-carriers-own-haplotype))
 - **Complementary production indexes** — the **recommended default** is the phased **HGDP + 1000 Genomes** index (`NRG_3_hg38+hg38_HGDP1kGP`: 4,091 samples, jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout), with the **HPRC pangenome** and the sites-only five-source **mega** alternatives. All carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence — see the [index comparison table below](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) and [`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md). (Per-source retrieval recipes for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us are in [`paper/reproducibility/variant-datasets/`](paper/reproducibility/variant-datasets/).)
-- **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection, tractable on any panel) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the fast worst-case screen on a phased index; add **`--per-sample`** to force resolution on any index (it cannot name carriers on a sites-only index). This is a **genotype-resolution** dial, not a speed dial — for a single guide the two modes take about the same time; the resolution cost shows up only on dense/aggregate panels. The report states which mode was used. ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution))
+- **One index, many PAMs (`--prune-pam`)** — a **PAM-less** index stores the raw genomic flank instead of a fixed PAM, and the PAM you pass is applied during the search, so one index answers any 3′ PAM no longer than that flank (a 3-nt flank serves NRG, NGG, NAG, …). Measured genome-wide on HGDP + 1000 Genomes for one guide, a PAM-less index with `--prune-pam` returned a **byte-identical** report to a dedicated NRG index at both a 3-nt and an 8-nt flank. A flank wider than the PAM does not index a PAM at a contig's very end (+ strand) or start (− strand): on hg38 at an 8-nt flank, 145 + 101 NGG and 308 + 241 NRG sites, none on a primary chromosome; the search says so when it uses such a flank. The trade is size — the PAM-less variant index is 110 GB against 28 GB for `NRG_3_hg38+hg38_HGDP1kGP` — and pruning happens as results are emitted, so it is not *faster* than a dedicated index; it is worth it when you expect to search several PAMs over one genome. Command-line only: the web form never passes the flag. ([methods](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering))
+- **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection, tractable on any panel) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the fast worst-case screen on a phased index; add **`--per-sample`** to force resolution on any genotyped index (on a sites-only index, which has no genotypes, it runs the population-level analysis, with a warning). This is a **genotype-resolution** dial, not a speed dial — for a single guide the two modes take about the same time; the resolution cost shows up only on dense/aggregate panels. The report states which mode was used. ([methods](METHODS.md#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis))
 - **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in population-level runs (`--population-level` on a genotyped index, or the default on sites-only/unphased indexes), **on** in per-sample runs (the default on genotyped+phased indexes, or under `--per-sample`) — on **both the CLI and the web**; override on the CLI with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
 - **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, calibrated per-scorer risk card, precision-recall curves, **recommended validation panel**, annotated top hits, per-tier downloads, legend). The panel keys bulges on **CRISPR-Bulge at a principled sensitive threshold** — the **95%-recall operating point** on a 40-guide held-out benchmark (`CB ≥ 1.9×10⁻⁴`; selectable to 90 % / 95 % / 99 % recall via `CRISPRME_CB_RECALL_TARGET`) — plus a high-CFD rescue for no-/single-bulge sites and all perfect/near-perfect and functional / cancer-gene hits, so the shipped panel *is* the recommended default set. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
@@ -36,13 +37,13 @@ through an interactive web-based interface.
 
 Coming from the original CRISPRme? The baseline below is **CRISPRme 2.1.14** — the last
 stable release of the original [`pinellolab/CRISPRme`](https://github.com/pinellolab/CRISPRme)
-before CRISPRme+ (installable with `mamba install crisprme`). Here are the behavior deltas
+before CRISPRme+ (still on Bioconda as `crisprme=2.1.14`). Here are the behavior deltas
 that matter most:
 
 | Topic | CRISPRme 2.1.14 (last stable before CRISPRme+) | CRISPRme+ (now) | What to do |
 |---|---|---|---|
 | Off-target ML score | CFD + **CRISTA** | CFD + **CRISPR-Bulge** (OrensteinLab, *NAR* 2024; MIT — more accurate, esp. on bulges), run in a dedicated `cbulge` env | Nothing: `install_from_source.sh` / the Docker image provision it; or create it later with `crisprme.py scorer-env create` |
-| Analysis mode | single search, **always** per-sample genotype-resolved (named carriers; no mode flag) | **context-aware default** — per-sample on genotyped+phased panels (CONFIRMED cis + named carriers + exact joint AF), population-level on sites-only/unphased; **`--population-level`** opts out of per-sample, **`--per-sample`** forces it | Add `--per-sample` to reproduce the old per-sample output ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution)) |
+| Analysis mode | single search, **always** per-sample genotype-resolved (named carriers; no mode flag) | **context-aware default** — per-sample on genotyped+phased panels (CONFIRMED cis + named carriers + exact joint AF), population-level on sites-only/unphased; **`--population-level`** opts out of per-sample, **`--per-sample`** forces it | Add `--per-sample` to reproduce the old per-sample output ([methods](METHODS.md#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis)) |
 | SNP+SNP / SNP+indel co-occurrence | not detected | **detected + reported** — **CONFIRMED** (phasing proves cis) / **PUTATIVE**, with joint AF; on by default | Opt out with `CRISPRME_INDEL_SNP=0` ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration)) |
 | Alternative-alignments TSV | always written | **off in population-level runs, on in per-sample runs** (per the context-aware default; both CLI and web) | Force either way on the CLI with `--alt-alignments` / `--no-alt-alignments` ([methods](METHODS.md#7-shareable-off-target-assessment-report)) |
 | Variant datasets / default index | build-your-own from `--vcf` configs (e.g. 1000G + HGDP) | **precomputed, downloadable** indexes on HuggingFace; recommended default **`NRG_3_hg38+hg38_HGDP1kGP`** (phased HGDP + 1000 Genomes, 4,091 samples → CONFIRMED cis + named carriers), with `HPRC` / sites-only `mega` alternatives | `crisprme.py download --what index --index-name …` (Quickstart step 2) ([details](docs/PRECOMPUTED_INDEXES.md)) |
@@ -100,7 +101,7 @@ irm https://pinellolab.github.io/crisprme-plus/install.ps1 | iex
 Then open **CRISPRme** (Applications on macOS; Desktop / Start Menu on Windows) — a
 small window with three buttons: **Start**, **Update**, **Stop**. Click **Start**: the
 first time it downloads the reference + variant data automatically (~45 GB download, once;
-~85 GB on disk once installed — keep ~100 GB free; a reference-only setup is far smaller, ~25 GB), then
+~98 GB on disk once installed — keep ~150 GB free; a reference-only setup is far smaller, ~25 GB), then
 opens the web interface at http://localhost:8080; every Start after that is instant.
 (Memory: the **whole-genome *variant-aware* search** needs **~64 GB of RAM** — set that
 under Docker Desktop → Settings → Resources → Memory. **On Windows with the WSL 2 backend
@@ -161,14 +162,16 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 
 > **`:latest` vs a pinned tag.** These commands use `pinellolab/crisprme:latest` — the
 > auto-updating, GPU-capable default image. For a fully reproducible run, pin the exact
-> release instead, e.g. `pinellolab/crisprme:v2.8.0`.
+> release instead, e.g. `pinellolab/crisprme:v2.8.1`.
 
 > **On HPC with Apptainer/Singularity.** Use **`apptainer run`**, which invokes the image
 > entrypoint so `crisprme.py` is on `PATH`, binding your data dir to `/DATA` — e.g.
-> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.8.0 crisprme.py --version`
+> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.8.1 crisprme.py --version`
 > (add `crisprme.py web-interface` / `complete-search …` the same way). Note that
 > `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
-> `PATH` — prefer `apptainer run` (or prefix `bash -lc`).
+> `PATH` — prefer `apptainer run` (or prefix `bash -lc`). A home it cannot write in (`--no-home`,
+> or `--home` on a read-only folder) is fine: matplotlib's caches then go to a temporary folder
+> ([Troubleshooting](docs/TROUBLESHOOTING.md) §1).
 
 **The prebuilt SpCas9 (NRG = NAG+NGG) variant indexes.** All carry searchable
 indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever you need with
@@ -192,6 +195,68 @@ indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever yo
 > individual) with a min-AF bound and **no named carriers**; run it after a genotyped-index
 > run when you need maximal allele-frequency breadth. Grab the others any time from the web
 > **Settings** or by re-running the download with a different `--index-name`.
+
+Download sizes (GB = 10⁹ bytes): `NRG_3_hg38` 8.9 GB; `NRG_3_hg38+hg38_HGDP1kGP` 27.7 GB plus
+its 5.7 GB genotype store; `NRG_3_hg38+hg38_HPRC` 15.2 GB plus 0.6 GB; `NRG_3_hg38+hg38_mega`
+12.1 GB (sites-only, no genotype store). A variant index also fetches `NRG_3_hg38` if it is
+not installed yet.
+
+**Other PAMs.** Some of the same panels are also published for the NGG and NRR PAMs:
+
+| Index (`--index-name`) | PAM | Variants | Download |
+|---|---|---|---|
+| `NGG_3_hg38` | NGG | none (reference-only) | 3.7 GB |
+| `NGG_3_hg38+hg38_HGDP1kGP` | NGG | HGDP + 1000 Genomes | 21.5 GB |
+| `NRR_3_hg38` | NRR (NAA, NAG, NGA, NGG) | none (reference-only) | 20.1 GB |
+| `NRR_3_hg38+hg38_HGDP1kGP` | NRR | HGDP + 1000 Genomes | 42.9 GB |
+| `NRR_3_hg38+hg38_HPRC` | NRR | HPRC pangenome | 30.7 GB |
+| `NRR_3_hg38+hg38_mega` | NRR | mega (sites-only) | 25.2 GB |
+
+NGG cannot serve NAG off-targets, so NRG stays the recommended PAM for a safety screen.
+
+**One index for many PAMs.** Each index above is built for one PAM. A
+**PAM-less** index instead stores the raw genomic flank, and the PAM is applied during the
+search, so a single index answers any 3′ PAM no longer than that flank:
+
+```bash
+crisprme.py complete-search --prune-pam \
+  --index-path ./genome_library \
+  --pam ./PAMs/20bp-NRG-SpCas9.txt  ...   # or NGG, NAG, any 3′ PAM up to the flank width
+```
+
+| Index (`--index-name`) | Flank | Serves | Download |
+|---|---|---|---|
+| `NNN_3_hg38` | 3 nt | any 3-nt 3′ PAM, reference-only | 71 GB |
+| `NNN_3_hg38+hg38_HGDP1kGP` | 3 nt | any 3-nt 3′ PAM, with variants | 110 GB |
+| `NNNNNNNN_3_hg38` | 8 nt | any 3′ PAM up to 8 nt, reference-only | 82 GB |
+| `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 8 nt | the same, with variants | 123 GB |
+
+A 5′ PAM (Cas12a) needs a dedicated index, which `build-index-only` builds: these indexes
+store the flank on the 3′ side of the guide, so a 5′ search does not use them.
+
+An index also fixes how many bases it stores per site, from the guide length it was built
+for and its `N` (`NRG_3`: N = 3). Every published index was built for a 20-nt guide with
+N = 3, which also serves a 21-nt guide (the shipped SaCas9 PAM files) at up to 1 bulge of
+each type, byte-identically to an index built for it. A guide past that needs its own index:
+the search builds it, or says what to do when an index of the same name is in the way (rule:
+[methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+
+The two 8-nt-flank indexes live in a separate dataset repo,
+`lucapinello/crisprme-data-general-index`, because a release older than CRISPRme+ 2.8.1
+cannot read them; `download` fetches them from there by itself.
+
+A PAM-less index with `--prune-pam` gives the dedicated index's report for the same PAM: byte
+for byte from a flank of the PAM's width, and from a wider one but for the sites at a contig's
+very end or start that it does not index (on hg38 at an 8-nt flank, 145 + 101 NGG and 308 + 241
+NRG sites, none on a primary chromosome); a wider one must also have been built by CRISPRme 2.8.1,
+and the search warns of an older build (see
+[methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)). Two things to know:
+`--prune-pam` needs `--index-path` and is **command-line only** — the web interface never
+passes the flag, so it serves a PAM-less index only for a PAM of exactly its width (`NNN_3`
+for a 3-nt PAM), and a wider one must be searched from the CLI — and because nothing is
+excluded at build time these indexes are several times larger than a dedicated one — so choose
+one when you expect to search several PAMs over the same genome, and a dedicated index when you
+only ever need one.
 
 **Full step-by-step (with variants, more indexes, troubleshooting):
 [`docs/DOCKER_QUICKSTART.md`](docs/DOCKER_QUICKSTART.md).**
@@ -281,7 +346,7 @@ Memory scales with the search — pick your tier (measured figures):
 | Search | RAM | Disk |
 |---|---|---|
 | **Reference-only / single-chromosome** (toy or reference-genome runs) | **8–16 GB** | ~22 GB (reference-only install) |
-| **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`NRG_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~85 GB (full variant-aware install) |
+| **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`NRG_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~98 GB (full variant-aware install; keep ~150 GB free) |
 
 The variant-aware genome-wide search is the memory-heavy one: the CRISPRitz search
 process alone peaks around **68–75 GB** loading and traversing the variant index, so
@@ -291,28 +356,28 @@ front, see `docs/SCALABILITY_ANALYSIS.md`.
 
 ## 1 Installation
 
-> **Which version do I get?** For **CRISPRme+ (2.8.0, this release)** use **Docker**
-> (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above, or
-> §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
-> 2.8.0 line** — use it only if you specifically want the stable release. If in doubt,
-> use Docker.
+> **Which version do I get?** Every route below installs **CRISPRme+** on Python 3.11.
+> **Docker** (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above,
+> or §1.2) is the simplest: it runs on any OS and ships the CRISPR-Bulge scorer pre-built.
+> **Bioconda** (§1.1, Linux) has served CRISPRme+ since 2.7.9; a release reaches it shortly after
+> it is tagged, once its recipe update is merged. The original CRISPRme 2.1.x line is still on
+> Bioconda as `crisprme=2.1.14`. If in doubt, use Docker.
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.8.0)](#12-install-crisprme-via-docker)
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended)](#12-install-crisprme-via-docker)
 
-- [Install CRISPRme from source (§1.3)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.8.0) line on Python 3.11
+- [Install CRISPRme from source (§1.3; Linux)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.8.1) line on Python 3.11
 
-- [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
+- [Install CRISPRme via Conda/Mamba (Bioconda; Linux)](#11-install-crisprme-via-condamamba)
 
-### 1.1 Install CRISPRme via Conda/Mamba (stable 2.1.x line only)
+### 1.1 Install CRISPRme via Conda/Mamba
 ---
 
-Conda/Bioconda installs **only the stable 2.1.x line** (Python 3.8) — *not* the
-CRISPRme+ (2.8.x) line. Use this path only if you specifically want the stable
-release; for CRISPRme+ 2.8.0 use [source (§1.3)](#13-install-crisprme-from-source-without-bioconda)
-or [Docker](#12-install-crisprme-via-docker).
+Bioconda's `crisprme` package is CRISPRme+ (Python 3.11, Linux), and it installs CRISPRitz from
+Bioconda too. Always install it with an explicit version (§1.1.2). Bioconda has no macOS build
+of CRISPRitz, so on a Mac use [Docker](#12-install-crisprme-via-docker).
 
 This section is organized into three subsections to guide you through the installation 
 and maintenance of CRISPRme:
@@ -334,11 +399,10 @@ and maintenance of CRISPRme:
 #### 1.1.1 Installing Conda or Mamba
 ---
 
-Before installing CRISPRme, ensure you have either Conda or Mamba installed on 
-your machine. Based on recommendations from the Bioconda community, we highly 
-recommend using Mamba over Conda. Mamba is a faster, more efficient drop-in replacement 
-for Conda, leveraging a high-performance dependency solver and components 
-optimized in C++.
+Before installing CRISPRme, ensure you have Conda installed on your machine. We
+recommend [Miniforge](https://github.com/conda-forge/miniforge), which installs both `conda`
+and `mamba` and is set up for conda-forge (`conda` itself has used the fast libmamba solver
+by default since 23.10).
 
 **Step1: Install `Conda` or `Mamba`**
 
@@ -350,67 +414,70 @@ optimized in C++.
 
 **Step 2: Configure Bioconda Channels**
 
-Once `Mamba` is installed, configure it to use Bioconda and related channels by 
-running the following one-time setup commands:
+Configure the Bioconda and conda-forge channels by running the following one-time
+setup commands:
 ```bash
-mamba config --add channels bioconda
-mamba config --add channels conda-forge
-mamba config --set channel_priority strict
+conda config --add channels bioconda
+conda config --add channels conda-forge
+conda config --set channel_priority strict
 ```
-> **Note:** If you prefer to use `Conda`, replace `mamba` with `conda` in the 
-commands above. (Per current Bioconda guidance we do **not** add the `defaults`
-channel, and `conda-forge` is given the highest priority.)
+> **Note:** Use `conda config` here even if you use Mamba: Mamba 2 (shipped with current
+Miniforge) has no `config --add` and rejects these commands. Per current Bioconda guidance
+we do **not** add the `defaults` channel, and `conda-forge` is given the highest priority.
 
 By completing these steps, your system will be fully prepared for installing CRISPRme.
 
 #### 1.1.2 Installing CRISPRme
 ---
 
-> **CRISPRme+ runs on Python 3.11 and installs from source** — the build
-> compiles CRISPRitz 2.9.0 and installs both tools into a conda environment. A native
-> Bioconda package for the CRISPRme+ line is **in preparation**; until it lands, the Bioconda
-> `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** the
-> CRISPRme+ (2.8.x) line.
+Create a dedicated environment, naming the CRISPRme version and Python 3.11 explicitly, then
+set up the CRISPR-Bulge scorer, which runs in its own conda env (`cbulge`):
+```bash
+conda create -n crisprme crisprme=2.8.1 python=3.11
+conda activate crisprme
+crisprme.py scorer-env create    # CPU build; add --gpu for CUDA
+crisprme.py scorer-env doctor    # compute self-test: must report OK
+```
 
-To create the CRISPRme+ conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
-(`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),
-or use the **[Docker quickstart](docs/DOCKER_QUICKSTART.md)** for the fastest path.
+> **Always name the version.** Given a bare `crisprme`, the solver silently falls back to the
+> newest release it can satisfy, which can be years old: in testing, an unsolvable 2.8.0 resolved
+> to `crisprme 2.0.0` on Python 3.6. With an explicit version the install fails loudly instead. If
+> conda reports that nothing provides `crisprme=2.8.1`, the release has not reached Bioconda yet:
+> use [Docker](#12-install-crisprme-via-docker) or the
+> [source build](#13-install-crisprme-from-source-without-bioconda) until it does.
 
-Verify the installation:
+Every search scores off-targets with both CFD and CRISPR-Bulge, so `complete-search` refuses to
+start while the scorer env is missing or broken (`crisprme.py scorer-env doctor` says why), unless
+you opt into CFD-only scoring with `CRISPRME_SKIP_SCORER_ENV=1`.
+
+Verify the installation; it prints the installed version, `v2.8.1`:
 
 ```bash
 crisprme.py --version
-crisprme.py
 ```
+
+(A bare `crisprme.py` prints its list of commands, exits 1, and creates the CRISPRme folders,
+`Genomes/`, `Results/` and the rest, in the current directory.)
 
 #### 1.1.3 Updating CRISPRme
 ---
 
-> **Updating CRISPRme+ (2.8.0)?** Conda/Bioconda cannot update you to the CRISPRme+
-> line — update via the [source build (§1.3)](#13-install-crisprme-from-source-without-bioconda)
-> or [Docker](#12-install-crisprme-via-docker). The steps below update only the stable
-> 2.1.x Bioconda line.
-
-To update an existing **stable 2.1.x** installation using `Mamba` or `Conda`, follow
-the steps below:
+To update an existing Bioconda installation, follow the steps below:
 
 **Step 1: Check the Latest Version**
 
-Visit the CRISPRme README to identify the latest version of the tool.
+See the [releases page](https://github.com/pinellolab/crisprme-plus/releases) for the latest
+version of the tool.
 
 **Step 2: Update CRISPRme**
 
-Run the following command in your terminal, replacing <latest_version> with the 
-desired version number:
+Install it into the existing environment, replacing `<version>` with the version number:
 ```bash
-mamba install crisprme=<latest_version>
+conda install -n crisprme crisprme=<version>
+crisprme.py scorer-env doctor    # re-check the scorer env after an update
 ```
-
-This updates within the **stable 2.1.x** Bioconda line (latest is `crisprme=2.1.14`):
-```bash
-mamba install crisprme=2.1.14
-```
-If you're using `Conda`, replace `mamba` with `conda` in the commands above.
+The original CRISPRme 2.1.x line (Python 3.8; last release `crisprme=2.1.14`) cannot be
+updated in place to CRISPRme+: create a new environment as in §1.1.2.
 
 **Step 3: Verify the Update**
 
@@ -455,11 +522,11 @@ official Docker installation guide specific to your OS:
 
 The CRISPRme Docker image is now published as a multi-architecture image with a
 native `linux/arm64` build, so it runs **natively on Apple Silicon Macs with no
-emulation** (no Rosetta / QEMU, no "platform mismatch" warning). Both the
-`crispritz` dependency (native `linux-aarch64` bioconda build) and `crisprme`
-itself (a `noarch` package) install per-architecture without any source
-compilation. Docker automatically selects the correct architecture when you
-pull or run the image, so no special flags are required.
+emulation** (no Rosetta / QEMU, no "platform mismatch" warning). Each architecture's
+image is built from source: it compiles CRISPRitz v2.9.1 and installs CRISPRme+ from
+this repository, so it does not depend on the Bioconda packages. Docker automatically
+selects the correct architecture when you pull or run the image, so no special flags
+are required.
 
 **Docker Desktop memory allocation (important)**
 
@@ -531,7 +598,7 @@ included. `:latest` is the auto-updating default image; it runs on **CPU** out o
 box (fully supported — this is the default scoring path), and a **GPU can optionally
 accelerate the CRISPR-Bulge scorer** on an NVIDIA host (add `--gpus all` + `--compute-backend
 cuda`). For a fully reproducible setup pin the exact release instead, e.g.
-`docker pull pinellolab/crisprme:v2.8.0`.
+`docker pull pinellolab/crisprme:v2.8.1`.
 
 Once the download is complete, the CRISPRme Docker image will be ready for use. 
 To confirm the image is successfully installed, you can list all available Docker 
@@ -542,28 +609,57 @@ docker images
 
 Look for an entry similar to the following:
 ```
-REPOSITORY          TAG       IMAGE ID       CREATED        SIZE
-pinellolab/crisprme   latest    <image_id>     <timestamp>    ~5 GB (amd64; ~1.8 GB on Apple Silicon)
+REPOSITORY            TAG       IMAGE ID       CREATED        SIZE
+pinellolab/crisprme   latest    <image_id>     <timestamp>    ~7 GB on Apple Silicon (more on amd64)
 ```
+
+The pull downloads about 5 GB on amd64 and 1.8 GB on Apple Silicon (arm64). `docker images`
+shows what the image takes on disk once unpacked: about 7 GB on Apple Silicon, and more on
+amd64, whose CRISPR-Bulge scorer env carries the CUDA build of TensorFlow.
 
 You are now ready to run CRISPRme using Docker.
 
-### 1.3 Install CRISPRme from source (without Bioconda)
-
-Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from source — the recommended path until it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.9.0 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
-
-**Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
+**Smoke-test the image** with the brute-force benchmark CI runs (the same self-test as a
+[source install](#13-install-crisprme-from-source-without-bioconda), in its Docker form). In an
+empty folder:
 
 ```bash
-# 1. clone the repository (the CRISPRme+ development line lives on the main branch)
-git clone https://github.com/pinellolab/crisprme-plus.git
+mkdir crisprme_test && cd crisprme_test
+docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
+  -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
+```
+
+Pass the variable with `-e`, as above. Written in front of `docker run`
+(`CRISPRME_ALLOW_ONDEMAND_BUILD=1 docker run ...`) it is set on your machine only, never in
+the container, so `complete-test` looks for a prebuilt index, finds none, and exits with
+status 2, having tested nothing. The run took about 25 minutes at 8 threads on an Apple
+Silicon Mac in testing.
+
+### 1.3 Install CRISPRme from source (without Bioconda)
+
+Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from a checkout, for development or on a Linux system where you prefer not to use Bioconda. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.9.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+
+**Prerequisites:** Linux, `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
+
+> **macOS: use Docker (§1.2).** The source build is Linux-only. CRISPRitz's index builder
+> (`buildTST`) uses GCC's parallel-mode STL (`<parallel/algorithm>`), which the macOS
+> toolchain (Apple clang, or conda's clang with libc++) does not provide, and
+> `environment.yml` lists tools with no macOS build (e.g. `axel` on Apple Silicon). The
+> Docker image runs natively on Apple Silicon (`linux/arm64`).
+
+```bash
+# 1. clone the release (omit --branch for the development line on main)
+git clone --branch v2.8.1 https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
 # 2. create + activate the runtime environment (pinned deps from environment.yml)
 mamba env create -f environment.yml
 mamba activate crisprme
 
-# 3. build CRISPRitz 2.9.0 from source and install both tools into the env
+# 3. build CRISPRitz 2.9.1 from source and install both tools into the env
 bash install_from_source.sh
 
 # 4. verify (both tools are now on your PATH)
@@ -571,15 +667,18 @@ crisprme.py --version
 command -v crispritz.py
 ```
 
-The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then copies `crisprme.py`/`crispritz.py` into `$CONDA_PREFIX/bin` and their support trees into `$CONDA_PREFIX/opt/…`, and creates the dedicated `cbulge` conda env for the CRISPR-Bulge off-target scorer (set `CRISPRME_SKIP_SCORER_ENV=1` to defer it — create it later with `crisprme.py scorer-env create`). `CRISPRITZ_REF` defaults to the **v2.9.0** tag; override it with `CRISPRITZ_REF=<tag> bash install_from_source.sh` to build a different CRISPRitz revision.
+The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then copies `crisprme.py`/`crispritz.py` into `$CONDA_PREFIX/bin` and their support trees into `$CONDA_PREFIX/opt/…`, and creates the dedicated `cbulge` conda env for the CRISPR-Bulge off-target scorer (set `CRISPRME_SKIP_SCORER_ENV=1` to defer it — create it later with `crisprme.py scorer-env create`). `CRISPRITZ_REF` defaults to the **v2.9.1** tag; override it with `CRISPRITZ_REF=<tag> bash install_from_source.sh` to build a different CRISPRitz revision.
 
-**Smoke-test the install** (downloads a small chr22 dataset, runs the full pipeline, and compares against the committed ground truth):
+**Smoke-test the install** with the brute-force benchmark CI runs: `complete-test`'s benchmark mode downloads chromosome 22 with its 1000 Genomes variants, builds small test indexes and runs the full pipeline for every registered benchmark, and `validate-test` then compares the off-targets with the committed brute-force ground truth:
 
 ```bash
 mkdir crisprme_test && cd crisprme_test
-crisprme.py complete-test --chrom chr22 --thread 4
-crisprme.py validate-test --chrom chr22
+CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
+  crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
+crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
 ```
+
+`CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode: without it, `complete-test` runs the prebuilt-index smoke ([§2.2.2](#222-complete-test)), which needs an index you have downloaded and gives `validate-test` nothing to check. The run took 25 to 35 minutes at 8 threads in testing.
 
 Notes:
 - This is exactly the recipe the project `Dockerfile` automates — if you prefer full isolation, build the image instead (Section 1.2).
@@ -662,7 +761,7 @@ The directory organization required by CRISPRme is illustrated below:
 > To run it in **Docker**, prefix it with
 > `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:latest`
 > (add `-p 8080:8080` for `web-interface`; on an NVIDIA host add `--gpus all` to run the
-> CRISPR-Bulge scorer on the GPU). Pin `:v2.8.0` instead of `:latest` for reproducibility.
+> CRISPR-Bulge scorer on the GPU). Pin `:v2.8.1` instead of `:latest` for reproducibility.
 > From a **source / Conda** install, run it as-is inside the activated `crisprme`
 > environment.
 
@@ -801,7 +900,9 @@ its purpose and usage:
 - `--output` (*Required*)
   <br>Specifies the name of the output directory where all results from the 
   analysis will be saved. This directory will be created within the `Results` 
-  directory.
+  directory. The web interface opens the results of a search named with letters,
+  digits, `.`, `_` and `-` only, beginning with a letter or digit; its History
+  lists one named otherwise and says why it does not open it.
 
 - `--thread` (*Optional - Default: 8*)
   <br>Defines the number of CPU threads to use for parallel computation. 
@@ -815,7 +916,10 @@ its purpose and usage:
 
 - `--genome` (*Required*)
   <br>Path to the directory containing the reference genome in FASTA format. 
-  Each chromosome must be in a separate file (e.g., `chr1.fa`, `chr2.fa`, etc.). 
+  Each chromosome must be in a separate file named after it (e.g., `chr1.fa`, `chr2.fa`, 
+  etc.), whose header line is the name alone (`>chr1`). `python PostProcess/genome_layout.py 
+  --split <folder>` lays out a folder so, and a search or index build that finds otherwise 
+  says so. 
 
 - `--vcf` (*Optional*)
   <br>Path to text config file listing the directories containing VCF files to 
@@ -870,7 +974,9 @@ its purpose and usage:
 - `--samplesID` 
   <br>Path to a text config file listing sample identifiers (one per line)
   corresponding to VCF datasets. This enables sample-specific off-target 
-  analyses. Mandatory if `--vcf` is specified.
+  analyses. Optional: without it a variant search uses `samplesIDs/<dataset>.samplesID.txt`
+  for each dataset that has one (an index download installs it), and with none the search
+  still runs and names carriers, with empty by-sample and population tables.
 
 **Search and Merging Parameters**
 
@@ -881,8 +987,9 @@ its purpose and usage:
   <br>Maximum allowable DNA bulge size. If omitted (together with `--bRNA`), it defaults to
   **1** (one DNA bulge), bounded by the bulge depth the installed index supports — the
   recommended single-bulge default (the CRISPR-Bulge ML scorer's validated domain). Pass it
-  explicitly for a deeper search. If no bulge-capable index is installed the search stays
-  bulge-free.
+  explicitly for a deeper search. If no index the search can use holds bulges (in the working
+  directory's `genome_library/` or at `--index-path`; a reference index that can be built from
+  the `--genome` folder counts), the search stays bulge-free and prints a `WARNING` that says so.
 
 - `--bRNA` (*Optional*, default `1`)
   <br>Maximum allowable RNA bulge size. See `--bDNA` — defaults to one RNA bulge when neither
@@ -904,7 +1011,15 @@ its purpose and usage:
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP
   post-analysis. Reports each observed haplotype with CONFIRMED cis phasing, named carrier
-  samples, and exact joint allele frequency. On a genotyped+PHASED index (HGDP + 1000
+  samples, and exact joint allele frequency, which come from the index's dict-less tiers. On
+  an index without them (built without `--samplesID`, as the benchmark `complete-test`
+  builds its own) it names the carrier samples only, with the `AF` of the classic per-sample
+  dictionaries (an indel's, of the index's indel log), which CRISPRitz `add-variants` copied
+  from the VCF (see the MAF column below), and a dense window can still be reported by its
+  greedy worst-case alignment, whose listed carriers need not carry every variant in it;
+  `complete-search` and the report's Search mode row say so (a population-level search's
+  too, of what `--per-sample` gives there). Rebuild it with `build-index-only --samplesID`,
+  or use a prebuilt index. On a genotyped+PHASED index (HGDP + 1000
   Genomes (the default), or HPRC) this is already the context-aware default; on
   a sites-only index (`mega`) it cannot resolve carriers (no genotypes) and
   `complete-search` warns. Can be slow / intractable on dense or aggregate panels. To opt
@@ -916,8 +1031,11 @@ its purpose and usage:
 
 - `--compute-backend {cpu,cuda,metal}` (*Optional*)
   <br>ML-scorer compute device: `cpu` (default) | `cuda` (NVIDIA/Linux GPU) | `metal`
-  (Apple Silicon, self-tests and falls back to CPU); degrades to CFD-only if the cbulge
-  scorer env is absent. In Docker, the default `pinellolab/crisprme:latest` image is
+  (Apple Silicon, self-tests and falls back to CPU). `complete-search` refuses to start while
+  the cbulge scorer env or its weights are missing or broken: fix it with
+  `crisprme.py scorer-env create` (diagnose with `crisprme.py scorer-env doctor`), or set
+  `CRISPRME_SKIP_SCORER_ENV=1` to run CFD-only (the CRISPR-Bulge columns read `-1`). In Docker,
+  the default `pinellolab/crisprme:latest` image is
   GPU-capable — add `--gpus all` to `docker run` on an NVIDIA host and pass
   `--compute-backend cuda`; it falls back to CPU when no GPU is present. See
   [GPU acceleration](#2210-reference-index-and-data-distribution-commands) for details.
@@ -962,9 +1080,14 @@ its purpose and usage:
   <br>Keep the bulky pre-integration working files. By default, once the finalized
   `*.integrated_results.tsv` and the report are produced, `complete-search` removes the
   intermediate tables it no longer needs — the merged non-best `*.altMerge.txt`,
-  the raw `*_all_results_with_alternative_alignments.tsv` (the compressed `.zip` is kept),
-  and the per-chromosome `*.population_summary.tsv` — reclaiming on the order of ~15 GB on a
-  genome-wide run. **Always kept** (regardless of this flag): `*.integrated_results.tsv` and
+  the raw `*_all_results_with_alternative_alignments.tsv` and `*_observed_haplotypes_raw.tsv`
+  (the compressed `.zip` of each is kept), and the per-chromosome `*.population_summary.tsv` —
+  reclaiming on the order of ~15 GB on a genome-wide run. It also removes the sorted-annotation
+  temp folders it made, `crisprme_annot_*` (for `--annotation` / `--gene_annotation`) and
+  `crisprme_pannot_*` (for `--personal_annotation`), in `$CRISPRME_TMPDIR` if set, else the
+  working directory, once the run ends, even if it fails (a run stopped by Ctrl-C or a signal
+  leaves them, since the pipeline may still be reading them); this flag keeps them too.
+  **Always kept** (regardless of this flag): `*.integrated_results.tsv` and
   its `.zip`, the `*.bestMerge.txt` best-alignments table (the web results page greps it live
   for the per-position cluster drill-down, so it must persist for the job to stay browsable),
   the `*_report.zip`, the alternative-alignments `.zip`, the per-chromosome co-occurrence /
@@ -1022,10 +1145,17 @@ feature; both are bundled into the report ZIP):
 
 2a. `*.indel_snp_cooc.tsv`
 
-    - **Contents**: One row per off-target requiring **both** a nearby SNP **and** an
+    - **Contents**: Off-targets requiring **both** a nearby SNP **and** an
     indel in the same protospacer window — chrom, indel pos/ref/alt, off-target start,
     strand, SNP positions + rsIDs, phase (`CONFIRMED`/`PUTATIVE`), joint AF, cis-carrier
-    count, and carrier samples.
+    count, and carrier samples. The indel post-analysis writes the file before the merge
+    picks each cluster's alignments, one line per engine alignment, required SNP set
+    and phase (an alignment that needs no SNP writes no line). The SNPs are the alts
+    the alignment's rows require (the guide's own base at a protospacer position, or a
+    base that creates the PAM), and the carriers are those rows': individuals whose
+    own haplotype holds the indel and those SNP alts (PUTATIVE: phase unknown, or no
+    genotypes). A population-level run, which writes no alternative alignments, can
+    have lines with no row in its tables.
 
     - **Purpose**: Surfaces SNP+indel co-occurring off-targets, which the classic
     two-independent-passes search could not see.
@@ -1125,17 +1255,40 @@ populations.
 
 The **Complete Test** module verifies the correct installation and functionality 
 of CRISPRme by running the built-in example guide against a **prebuilt index that 
-you have already downloaded** (or built). It does **not** build an index or 
+you have already downloaded** (or built); its benchmark mode is described under *Two
+modes* below. By default it does **not** build an index or
 auto-download all the data for you: CRISPRme never auto-builds an index, so if no 
 prebuilt index is present, `complete-test` prints guidance to download one (e.g. 
 `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`) and 
-exits cleanly.
+exits with status 2, having run nothing.
 
 Once an index is available, `complete-test` runs the example search end-to-end 
 and produces the same set of outputs as Complete Search, confirming that the 
-installed tool works as expected. You can limit the test to a specific chromosome 
-(e.g., chromosome 22) with `--chrom`, significantly reducing runtime and resource 
-usage, or omit `--chrom` to run across the entire genome.
+installed tool works as expected. It searches the example guide (up to 2 mismatches
+plus one DNA and one RNA bulge) against a variant index in `genome_library/` (else a
+reference one), in the analysis mode Complete Search picks for that index (per-sample on a
+phased genotyped index such as `NRG_3_hg38+hg38_HGDP1kGP`). Of several it takes a 3′ index
+of a 3-nt PAM first (NGG, NRG, NRR), then `NNN`, then any other PAM, and an all-`N` index
+wider than 3 nt last. It searches each in its own geometry: an all-`N` index wider than 3 nt
+(the published `NNNNNNNN_3`) for NRG with `--prune-pam`, and any other for its own PAM, with
+the example guide padded for it, on the side of the guide its `.pam_build` records (the 3′
+side without one). With another nuclease's PAM the example guide may have no off-target in
+the genome, which passes as an empty result.
+
+With `--chrom` (e.g. `--chrom chr22`) it searches that chromosome only. It runs from a
+per-run view of the working directory in which that chromosome is the only one: a hidden
+`.crisprme-test-view-*` folder of symlinks, removed when the run ends. So its result
+tables hold exactly the off-targets the whole-genome test reports on that chromosome (the
+shareable report's top-1000 view then ranks that chromosome alone, so it can list sites the
+whole-genome report ranks below its top 1000), for a fraction of the cost: with `NRG_3_hg38+hg38_HGDP1kGP`, `--chrom chr22` peaked at about 5 GB of RAM
+and took about 1.5 to 4 minutes at 16 threads in testing. A chromosome that holds none of
+the example guide's off-targets, as `chrM` and most contigs of the reference-only
+`NRG_3_hg38` do, passes with an empty result, which Complete Search ends without an
+`integrated_results.tsv`. A chromosome that the genome or the index does not have is
+refused in one line naming those it has.
+Without `--chrom` it searches **every chromosome** of the index's genome; with a variant
+index such as `NRG_3_hg38+hg38_HGDP1kGP` that is a genome-wide variant search, which needs
+the memory given in [§0](#0-system-requirements) (64 GB or more).
 
 This module is suited for:
 
@@ -1150,11 +1303,15 @@ different system configurations (e.g., varying thread counts, datasets).
 (e.g. the default `NRG_3_hg38+hg38_HGDP1kGP`) searches correctly end-to-end.
 
 Usage Example for the Complete Test function (run after downloading a prebuilt
-index, e.g. `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`):
+index, e.g. `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`;
+with no option at all, `complete-test` prints its help):
   ```bash
   crisprme.py complete-test \
-    --chrom chr22
+    --chrom chr22 \
+    --thread 4
   ```
+
+Leave out `--chrom` to test the whole genome.
 
 ##### Input Arguments
 ---
@@ -1178,29 +1335,45 @@ function, including detailed explanations and default behaviors:
 **Input Data Parameters (*Optional*)**
 
 - `--chrom`
-  <br>Specifies the chromosome to be used in the CRISPRme test. The chromosome 
-  identifier must be prefixed with chr (e.g., chr22). When this argument is 
-  provided, the test will be limited to the specified chromosome, enabling 
-  faster execution for targeted validation. *Default behavior*: Run the test 
-  across the entire genome.
+  <br>Specifies the chromosome to test. The chromosome identifier must be prefixed
+  with chr (e.g., chr22). The prebuilt-index smoke searches only that chromosome of the
+  index's genome, and refuses one that the genome or the index does not have; the
+  benchmark mode (see *Two modes* below) downloads and tests that chromosome.
+  *Default behavior*: the entire genome.
 
-> **Note:** `complete-test` requires a prebuilt index to already be present.
+> **Note:** `complete-test`'s default smoke requires a prebuilt index to already be present.
 > CRISPRme never auto-builds an index; download one first with
 > `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`.
-> If no index is found, `complete-test` prints this guidance and exits cleanly.
+> If no index is found, `complete-test` prints this guidance and exits with status 2, having
+> run nothing; an index whose genome is not there gets the command that downloads the genome,
+> and status 2 too.
 
-> **Two modes.** With no `--vcf_dataset`, `complete-test` runs the **modern smoke** above —
-> the example guide against whichever prebuilt index you downloaded (recommended: the default
-> `NRG_3_hg38+hg38_HGDP1kGP`). There is also a **legacy build-from-raw** mode,
-> `complete-test --vcf_dataset {1000G|HGDP|1000G+HGDP}`, which downloads raw VCFs and builds a
-> small test index on the fly; it exists mainly to feed the brute-force `validate-test` gate
-> (see [§2.2.3](#223-validate-test)), which is supported only for a **1000 Genomes** run.
+> **Two modes.** By default `complete-test` runs the **prebuilt-index smoke** above — the
+> example guide against whichever prebuilt index you downloaded (recommended: the default
+> `NRG_3_hg38+hg38_HGDP1kGP`). With `CRISPRME_ALLOW_ONDEMAND_BUILD=1` set it runs the
+> **benchmark mode** instead: it downloads the chromosome and the raw `--vcf_dataset` VCFs
+> (`1000G` [default], `HGDP` or `1000G+HGDP`), builds small test indexes on the fly and runs every
+> registered benchmark. That is what the brute-force `validate-test`
+> ([§2.2.3](#223-off-target-sites-validation-test)) checks, for a **1000 Genomes** run only.
+> `--vcf_dataset` on its own does not select this mode. The self-test, as CI runs it:
+> ```bash
+> CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
+>   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G
+> crisprme.py validate-test --chrom chr22
+> ```
+> It fits in 16 GB of RAM (measured peak 3.66 GB). On a very small machine,
+> `CRISPRME_SKIP_HEAVY=1` on `complete-test` leaves out the bulge-2 benchmarks, and
+> `validate-test` then ends `2 passed, 0 failed, 4 skipped`.
 
 ##### Output Data Overview
 ---
 
 The results generated by the Complete Test function are saved in a subdirectory 
-within the Results directory, named `crisprme-test-out`.
+within the Results directory, named `crisprme-test-out` (the benchmark mode writes one
+`crisprme-test-out_<benchmark>` folder per benchmark). To run a mode again in the same
+folder, delete its folders first: `complete-test` names every one that is there in one line
+and exits with status 2, having run nothing. The smoke's folder does not stop the benchmark
+mode, nor the benchmark mode's folders the smoke.
 
 The output folder contains the same set of files produced by the 
 Complete Search functionality, including:
@@ -1216,9 +1389,10 @@ assessments of genetic variants on target metrics.
 For a detailed description of the contents of these files, please refer to the 
 corresponding subsection in [Complete Search](#221-complete-search).
 
-Finally, the off-target sites generated by the Complete Test workflow can be
+Finally, the off-target sites generated by the benchmark mode can be
 validated using the Off-Target Sites Validation Test functionality, which
-compares CRISPRme predictions against brute-force ground-truth results.
+compares CRISPRme predictions against brute-force ground-truth results (the
+prebuilt-index smoke leaves nothing for it to check).
 For additional details on this validation step, refer to the
 [Off-Target Sites Validation Test section](#223-off-target-sites-validation-test)
 in the documentation.
@@ -1238,7 +1412,11 @@ pipeline, particularly when working with large-scale population variant data.
 
 > ⚠️ **Important Requirements**
 >
-> * The `complete-test` functionality **must be executed beforehand**
+> * `complete-test` **must have been run beforehand, in its benchmark mode and in the same
+>   folder** (see [§2.2.2](#222-complete-test)):
+>   `CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G`.
+>   Anywhere else, including after the prebuilt-index smoke, `validate-test` finds nothing to
+>   check, says so in one line and exits 1
 > * Validation is **supported only** when `complete-test` was run using
 >   **1000 Genomes Project variant data**
 
@@ -1248,8 +1426,9 @@ Usage Example for the Off-Target Sites Validation Test function:
     --chrom chr22
   ```
 
-If no chromosome is specified, validation is performed across all chromosomes
-available from the prior `complete-test` execution.
+Give `validate-test` the same `--chrom` as the benchmark-mode `complete-test` run: the
+target reports it reads are named after it, so after a `--chrom chr22` run,
+`validate-test` without `--chrom` finds none and exits 1.
 
 ##### Input Arguments
 ---
@@ -1269,9 +1448,9 @@ Validation Test function, including their purpose and default behavior:
 **Validation Parameters**
 
 - `--chrom` (*Optional*)
-  <br>Restricts validation to a specific chromosome (e.g., chr22).
-  If not provided, validation is performed across all chromosomes processed
-  during the `complete-test` run.
+  <br>Restricts validation to a specific chromosome (e.g., chr22); use the
+  `--chrom` the benchmark-mode `complete-test` ran with. If not provided, the
+  whole-genome target reports of a `complete-test` run without `--chrom` are validated.
 
 ##### Output Data Overview
 ---
@@ -1754,10 +1933,11 @@ easily shareable off-target assessment report for a completed CRISPRme run. It
 produces a single ZIP (`<jobid>_report.zip`) in which **`report.html` is the only
 top-level file — open it** — while every bundled data file sits under a **`data/`**
 subfolder. `report.html` is fully offline (plots embedded as base64 PNGs, the
-top-1000 table + CSS inline, no external dependencies), and every filename it
-mentions links to its bundled file under `data/`. It is a portable digest of the
-full interactive website result, aimed at sharing off-target predictions (for
-example, to design a targeted-NGS / rhAMP-Seq confirmation panel).
+top-1000 table + CSS inline, no external dependencies), and every bundled file it
+mentions links to it under `data/` (one the ZIP does not hold, it says where it is).
+It is a portable digest of the full interactive website result, aimed at sharing
+off-target predictions (for example, to design a targeted-NGS / rhAMP-Seq
+confirmation panel).
 
 **The report is SLIM by default.** It bundles the human-facing layer — the
 top-1000 tables (both scorers), the ~100-site validation panel, the non-empty
@@ -1768,7 +1948,8 @@ layers — the complete `integrated_results.tsv` (gzipped), the raw SNP+SNP
 co-occurrence dump, the variant-created per-tier table, and the high-variant-density
 BED — are **omitted by default**; pass **`--report-full`** to additionally bundle
 them (gzipped) for a fully self-contained archive. The omitted data is never lost:
-it stays in the result folder (and `complete-search` keeps the per-chromosome
+it stays in the result folder, the variant-created sites as the rows of the integrated
+results whose `Not_found_in_REF` is `y` (and `complete-search` keeps the per-chromosome
 sidecars so `--report-full` can rebuild those bundles even after an intermediate
 cleanup). On the **web interface**, tick **"Include the full report"** under *Report
 options* on the submission page for the same effect.
@@ -1814,8 +1995,16 @@ is under `data/`). Reading top to bottom:
   | `observed` | A single variant with non-zero allele frequency — carried by ≥1 individual by definition, even where the carrier cannot be named | Any variant-aware run, incl. sites-only panels |
   | `putative` | A multi-variant combination whose cis co-occurrence cannot be confirmed | Any variant-aware run |
 
-  Under **`--per-sample`** the carrier list is the exact cis carriers, so `putative`
-  cleanly marks reconstructions no one actually carries. On a sites-only panel (e.g.
+  Under **`--per-sample`** the carrier list is the exact cis carriers (but for a dense
+  window's greedy alignment on an index without the dict-less tiers: see below), so `putative`
+  cleanly marks reconstructions no one actually carries. (In a population-level run a
+  multi-variant SNP list is the union of each variant's carriers, flagged
+  `(>=1 of K vars, poss. chimera)`; an indel (or MNV) row is resolved per carrier in
+  either mode and reads `N carrier(s)`: CONFIRMED where each carrier is placed on its
+  phased haplotype, PUTATIVE where the phase is unknown (an unphased call, an MNV). On an
+  install without SNP genotypes (`download --what index --no-genotypes`), a row an indel
+  and a SNP make together lists every carrier of the indel, with or without the SNP; its
+  phase is in `indel_snp_cooc.tsv`.) On a sites-only panel (e.g.
   `mega`) the panel tie-break is inert but the column is still shown (values `observed`
   / `putative`); it is dropped only for a reference-only run.
 - **`Gene_region` column** — where the off-target sits relative to the nearest
@@ -1823,9 +2012,25 @@ is under `data/`). Reading top to bottom:
   It is coherent with `Gene_distance_kb` — `intergenic` iff the distance is `> 0`.
   Present in the curated report table, all download TSVs, and the raw
   `integrated_results.tsv`.
-- **MAF column** — a value of **`1e-05` is a display floor** meaning "present but
-  frequency effectively 0" (used so a zero-frequency allele still renders on the
-  log-scale plots), **not** a measured frequency.
+- **MAF column** — the allele frequency of the variant behind a variant off-target; on a row of
+  several variants, the lowest of their frequencies. An indel's frequency is the `AF` of the
+  index's indel log, which CRISPRitz `add-variants` copied from the VCF's `INFO/AF` when the
+  index was built, as rounded there (the allele-frequency registry holds SNPs only). A variant
+  whose allele frequency is 0 or missing (e.g. an allele that no individual of the panel
+  carries) has no frequency: the row's minimum leaves it out, and the MAF is blank when no
+  variant of the row has one. No floor is applied, so a value below `1e-05` is the frequency
+  itself. On an index without the dict-less tiers (built without `--samplesID`, as the
+  benchmark `complete-test` builds its own) a SNP's frequency is the `AF` of the classic
+  per-sample dictionaries, which `add-variants` also copied from the VCF, as rounded there: the
+  self-test's 1000 Genomes VCF gives two decimals, so a rare variant reads 0, its MAF is blank,
+  and a multi-variant row's minimum leaves it out. The report of a search there says so, in
+  either mode ([methods](METHODS.md#3-allele-frequency-estimation)). `add-variants` looks for
+  `AF` in the VCF's first record only and reads every record's at that place in `INFO`, so a
+  record that has it elsewhere gets none: its indel has no frequency on any index, nor its SNP
+  on an index without the tiers. Of the shipped indexes this affects only HPRC's chrY; the
+  mega's VCF has no `INFO/AF` at all, so none of its indels has a frequency there, and the
+  report's `indel_af.tsv` gives their per-dataset ones (a known limit, to be fixed in the next
+  CRISPRitz release: [§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)).
 - **Key off-target table columns** — in the per-site table (and every download TSV):
   - **Chromosome / Position / Direction (`+`/`-`)** — where the off-target is and on which strand.
   - **crRNA vs DNA (aligned)** — the guide and the genomic sequence aligned; `-` marks a bulge.
@@ -1856,11 +2061,20 @@ is under `data/`). Reading top to bottom:
   representative per site (highest score, ties → most carriers); this companion is where you see the
   *full* set of real haplotypes a dense/multi-haplotype site contributes (it serves the CFD- and the
   CRISPR-Bulge-ranked views alike).
-- **`--per-sample` reports only off-targets a real individual carries.** In a high-variant-density
+- **`--per-sample` reports only off-targets a real individual carries, on an index with the dict-less
+  tiers.** In a high-variant-density
   window CRISPRme does **not** fabricate a synthetic cross-sample "worst-case" haplotype under
   `--per-sample`; it reports the real observed haplotypes (exact carriers) and flags the dense region in
   `high_variant_density_regions.bed`. A population-level run (`--population-level`, or the default on a
   sites-only/unphased index) still reports the conservative worst-case representative, as it should for a screen.
+  On an index without the tiers (one built without `--samplesID`, such as the one the benchmark
+  `complete-test` builds), a dense window can still be reported by its greedy worst-case alignment,
+  flagged in `High_variant_density_region`, whose listed carriers need not carry every variant in it
+  (when no dataset of the search has the tiers, the report's `Observed` column reads
+  `N carriers (>=1 of K vars, poss. chimera)` for such a row of two or more SNPs, as in a
+  population-level run; the report cannot tell which dataset a row comes from, so beside a dataset
+  with the tiers such a row still reads `N cis carriers`): rebuild the index with
+  `build-index-only --samplesID`, or use a prebuilt one.
 
 ##### Input Arguments
 ---
@@ -1910,9 +2124,9 @@ crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.tx
 
 To build a **different PAM** (NGG, NNGRRT, TTTN, …) on the shipped re-phased **HGDP+1kGP** or **mega** variant data — reusing the published enriched genome (fast) or the source VCFs — see [*Building a new-PAM index for a published dataset*](docs/PRECOMPUTED_INDEXES.md#building-a-new-pam-index-for-a-published-dataset-hgdp1kgp-mega).
 
-**`complete-search --index-path <dir>`** — reuse a prebuilt/staged index library instead of building one under the working directory. A missing matching index is a hard error (rather than a silent rebuild), which is what you want on a read-only shared mount.
+**`complete-search --index-path <dir>`** — reuse a prebuilt/staged index library instead of building one under the working directory. A missing matching reference index is a hard error (rather than a silent rebuild), which is what you want on a read-only shared mount. A variant index is read from that library first, with its `_INDELS` index beside it, then from the working directory's `genome_library/`; a search builds no index in that library. The dataset's `Dictionaries/`, `samplesIDs/` and `Genomes/` stay in the working directory (links are fine).
 
-**`download`** — fetch reference data from a HuggingFace dataset repository over HF's CDN (typically much faster than the FTP/UCSC sources). `--what` selects the component: `genome`, `annotations`, `pams`, `samples`, `index` (with `--index-name`), `assembly` (with `--sample <HPRC id>`), `vcf` (with `--dataset` — raw per-dataset VCFs, only if the repo hosts a `vcfs/<dataset>/` folder; the default repo ships the standard panels as prebuilt `index`es instead, so this is for custom/self-hosted repos), or `all` (genome + annotations + PAMs + samples; on hg38 `all` also fetches the default `NRG_3_hg38` reference index so a reference scan works with no on-demand build). For `--what index`, `--no-genotypes` skips the big separate Tier-1 genotype store; the Tier-0 registry it keeps still corrects allele frequencies and rsIDs, but **per-individual `Samples` and variant off-target rows require the genotype tier** — omit `--no-genotypes` for full dict-less variant-aware output. Default repo `lucapinello/crisprme-data`, overridable with `--hf-repo` or `CRISPRME_HF_REPO`:
+**`download`** — fetch reference data from a HuggingFace dataset repository over HF's CDN (typically much faster than the FTP/UCSC sources). `--what` selects the component: `genome`, `annotations`, `pams`, `samples`, `index` (with `--index-name`), `assembly` (with `--sample <HPRC id>`), `vcf` (with `--dataset` — the raw source VCFs of a variant panel, kept bgzipped under `VCFs/<dataset>/`; the default repo hosts `hg38_HGDP1kGP`, `hg38_HPRC` and `hg38_mega`, which you need only to build an index yourself), `build-inputs` (with `--dataset`: the pre-enriched genome kit that lets `build-index-only` skip enrichment for a new PAM; hosted for `hg38_HGDP1kGP` and `hg38_mega`), or `all` (genome + annotations + PAMs + samples; on hg38 `all` also fetches the default `NRG_3_hg38` reference index so a reference scan works with no on-demand build). For `--what index`, `--no-genotypes` skips the big separate Tier-1 genotype store; the Tier-0 registry it keeps still corrects allele frequencies and rsIDs, but **per-individual `Samples` and CONFIRMED cis phasing require the genotype tier**: without it a search runs the population-level analysis (each variant site's worst case, with no carriers but those of an indel, which the index itself holds), and `--per-sample` falls back to it with a warning — omit `--no-genotypes` for full dict-less variant-aware output. Default repo `lucapinello/crisprme-data`, overridable with `--hf-repo` or `CRISPRME_HF_REPO`:
 
 ```bash
 crisprme.py download --what all --path /data/crisprme
@@ -1935,7 +2149,7 @@ crisprme.py scorer-env create
 crisprme.py scorer-env doctor
 ```
 
-The ML off-target scorer is **CRISPR-Bulge** (Yaish & Orenstein, *NAR* 2024) — a TensorFlow 2.13.x GRU ensemble — running isolated in the `cbulge` env so its heavy pins never touch the main environment. **CFD remains the primary score**; if the `cbulge` env is absent the run completes **CFD-only** (the ML column reads `-1`/N/A). **GPU acceleration:** the default image `pinellolab/crisprme:latest` is GPU-capable — on an NVIDIA host add `--gpus all` to `docker run` and pass [`--compute-backend cuda`](#input-arguments) to run the CRISPR-Bulge scorer on the GPU; it falls back to CPU automatically when no GPU is present. The amd64 image bundles CUDA; arm64 (Apple Silicon) and Docker-on-Mac are always CPU. The clickable installers auto-add `--gpus all` when Docker exposes a GPU. GPU pays off on large/dense searches; a tiny single-guide run is often faster on CPU due to init overhead. The env is **architecture-aware and scores identically across CPUs**: it installs the same TensorFlow 2.13.1 per-arch — conda `tensorflow-cpu`/CUDA on x86-64, `tensorflow-macos` on Apple Silicon, and the PyPI `tensorflow==2.13.1` aarch64 wheel on Linux ARM (validated x86-64 vs aarch64 agreement to max |Δ| = 3.6e-7, zero threshold-band changes), so the multi-arch Docker image scores identically on both. On networks that block `conda.anaconda.org`, point the env solve at a mirror with `CONDA_CHANNEL_BASE=https://prefix.dev` (or `CRISPRME_CONDA_CHANNEL_BASE`; the Docker build accepts `--build-arg CONDA_CHANNEL_BASE=…`).
+The ML off-target scorer is **CRISPR-Bulge** (Yaish & Orenstein, *NAR* 2024) — a TensorFlow 2.13.x GRU ensemble — running isolated in the `cbulge` env so its heavy pins never touch the main environment. **CFD remains the primary score**. If the `cbulge` env or its weights are missing or broken, `complete-search` stops before it searches, naming the fix (`crisprme.py scorer-env create`), unless `CRISPRME_SKIP_SCORER_ENV=1` is set, which runs it **CFD-only**; `targets-scoring` and searches started from the web interface do not check first, and complete **CFD-only**. A CFD-only run has the CRISPR-Bulge column at `-1` and says so (a search in its `log_verbose.txt`, `targets-scoring` on stdout). **GPU acceleration:** the default image `pinellolab/crisprme:latest` is GPU-capable — on an NVIDIA host add `--gpus all` to `docker run` and pass [`--compute-backend cuda`](#input-arguments) to run the CRISPR-Bulge scorer on the GPU; it falls back to CPU automatically when no GPU is present. The amd64 image bundles CUDA; arm64 (Apple Silicon) and Docker-on-Mac are always CPU. The clickable installers auto-add `--gpus all` when Docker exposes a GPU. GPU pays off on large/dense searches; a tiny single-guide run is often faster on CPU due to init overhead. The env is **architecture-aware and scores identically across CPUs**: it installs the same TensorFlow 2.13.1 per-arch — conda `tensorflow-cpu`/CUDA on x86-64, `tensorflow-macos` on Apple Silicon, and the PyPI `tensorflow==2.13.1` aarch64 wheel on Linux ARM (validated x86-64 vs aarch64 agreement to max |Δ| = 3.6e-7, zero threshold-band changes), so the multi-arch Docker image scores identically on both. On networks that block `conda.anaconda.org`, point the env solve at a mirror with `CONDA_CHANNEL_BASE=https://prefix.dev` (or `CRISPRME_CONDA_CHANNEL_BASE`; the Docker build accepts `--build-arg CONDA_CHANNEL_BASE=…`).
 
 See the companion data-setup guide (`docs/crisprme_data_setup_051826.md`, Sections 2d and 3.5) for the end-to-end workflow.
 
@@ -1957,10 +2171,12 @@ position). CFD still cannot *rank* bulges; use the CRISPR-Bulge column for those
 (see `docs/offtarget_risk_summary_METHODS.md` §3).
 
 With `--index-path` pointing at an installed variant index, each site also gets a
-**variant carrier overlay**: the variants overlapping its protospacer+PAM window
-and, per population dataset, their allele frequency and carrier count — i.e. in how
-many individuals the site is polymorphic (read from the index's
-`Dictionaries/registry_<vcf>` tier).
+**variant carrier overlay**: the variants overlapping its protospacer+PAM window, each
+with its allele frequency and carrier count over the panel (how many individuals carry
+it), the highest frequency and carrier count among them, and the highest allele frequency
+in each population dataset (read from the index's `Dictionaries/registry_<vcf>` tier). A
+sites-only index (`mega`) has no genotypes: its registry stores 0 carriers, so the carrier
+count reads 0 there.
 
 Usage example (Cas-OFFinder output, with the carrier overlay):
 
@@ -2038,7 +2254,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.8.0`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.8.1`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**
@@ -2047,7 +2263,7 @@ To explore the functionalities and input parameters of CRISPRme, use the
 `--help` flag:
 
   ```bash
-  crisprme.py
+  crisprme.py --help
   ```
 
 The help menu provides detailed descriptions of CRISPRme's features and usage 
@@ -2075,23 +2291,27 @@ quicker, focused test on a single chromosome and a more detailed, exhaustive
 test across the entire genome:
 
 - **Single Chromosome Test**
-  <br>This test runs a search for potential off-targets on a single chromosome, 
-  such as chromosome 22, using a prebuilt variant-aware index you have already 
-  downloaded. This provides a fast way to check CRISPRme's ability to process 
-  variant data and identify off-targets for a specific chromosome.
+  <br>`complete-test --chrom chr22` against a prebuilt index you have downloaded,
+  which searches the example guide RNA on chromosome 22 only; or `complete-test`'s
+  benchmark mode, which downloads chromosome 22 with its 1000 Genomes variants, builds
+  small test indexes and runs the registered benchmarks, so that `validate-test` can
+  compare the off-targets with the committed brute-force ground truth. The benchmark
+  mode needs no prebuilt index, and it is what CI runs.
 
 - **Full Genome Test**
   <br>This test checks CRISPRme's ability to search for potential off-targets 
-  across the entire human genome using a prebuilt index. It runs a search using 
-  the example guide RNA, incorporating both Gencode and ENCODE annotations to 
-  ensure comprehensive results.
+  across the entire human genome using a prebuilt index you have downloaded: without
+  `--chrom`, the prebuilt-index smoke searches the example guide RNA over every
+  chromosome of the index's genome. With a variant index such as
+  `NRG_3_hg38+hg38_HGDP1kGP` it is a genome-wide variant search and needs the memory
+  given in [§0](#0-system-requirements) (64 GB or more).
 
-Upon successful completion of the Complete Test, users may optionally
-perform an additional off-target validation step using the
-Off-Target Sites Validation Test functionality. This step compares 
-CRISPRme-predicted off-targets against brute-force ground-truth alignments 
-derived from 1000 Genomes variant data, providing a rigorous correctness check 
-of the pipeline.
+After the benchmark mode's Single Chromosome Test, the Off-Target Sites Validation Test
+(`validate-test`) compares CRISPRme-predicted off-targets against brute-force
+ground-truth alignments derived from 1000 Genomes variant data, providing a
+rigorous correctness check of the pipeline. It applies to that test only: a test
+against a prebuilt index, on one chromosome or the whole genome, leaves it nothing to
+check.
 
 **Why Perform the Detailed Test?**
 
@@ -2110,36 +2330,46 @@ to handle large datasets and complex genetic analysis tasks.
 #### 3.2.1 Single Chromosome Test
 ---
 
-To run the quicker test on chromosome 22 against a prebuilt index you have
-already downloaded (e.g.
-`crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`),
-execute the following commands:
+To run the quicker test on chromosome 22 against a prebuilt index you have already
+downloaded (e.g. `NRG_3_hg38+hg38_HGDP1kGP`), execute the following command:
 
   ```bash
-  crisprme.py complete-test \
-    --chrom chr22
+  crisprme.py complete-test --chrom chr22 --thread 4
   ```
 
-After completion, off-target sites generated by this test can be validated using:
+It searches chromosome 22 alone and reports the off-targets the
+[Full Genome Test](#322-full-genome-test) reports there. With `NRG_3_hg38+hg38_HGDP1kGP`
+it peaked at about 5 GB of RAM and took about 1.5 to 4 minutes at 16 threads in testing.
+`validate-test` does not apply to it, as to any run of the prebuilt-index smoke.
+
+As CI runs it, the single-chromosome test is `complete-test`'s benchmark mode followed by
+`validate-test`: it downloads chromosome 22 with its 1000 Genomes variants, builds small
+test indexes, runs every registered benchmark, and `validate-test` compares the off-targets
+with the committed brute-force ground truth. Run it from an empty folder; it fits in 16 GB
+of RAM and took 25 to 35 minutes at 8 threads in testing:
 ```bash
-crisprme.py validate-test --chrom chr22
+CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
+  crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
+crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
 ```
 
 #### 3.2.2 Full Genome Test
 ---
 
 To run the detailed test across the entire genome against a prebuilt index you
-have already downloaded, execute the following commands:
+have already downloaded, execute the following command (with no option at all,
+`complete-test` prints its help instead). Without `--chrom` it searches every chromosome
+of the index's genome; with a variant index such as `NRG_3_hg38+hg38_HGDP1kGP` it is a
+genome-wide variant search, so give it the 64 GB or more of RAM that
+[§0](#0-system-requirements) gives for one:
 
   ```bash
-  crisprme.py complete-test
+  crisprme.py complete-test --thread 4
   ```
 
-Once the full genome test has completed, validation can be performed across all
-chromosomes using:
-```bash
-crisprme.py validate-test
-```
+`validate-test` does not apply to this test: it checks the benchmark mode's output only
+([§3.2.1](#321-single-chromosome-test)), so after this test it finds nothing to check,
+says so in one line and exits 1.
 
 ## 4 Citation
 If you use CRISPRme in your research, please cite our [paper](https://rdcu.be/c1GYQ):

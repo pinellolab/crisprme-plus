@@ -33,11 +33,14 @@ import subprocess
 import requests
 import hashlib
 import tarfile
+import tempfile
 import gzip
 import time
 import sys
 import os
 import shutil
+
+import safe_tar
 
 CRISPRME_DIRS = [
     "Genomes",
@@ -366,6 +369,23 @@ def hf_fetch(repo_filename: str, dest_path: str) -> str:
     return dest_path
 
 
+def hf_missing(error: Exception) -> bool:
+    """Whether ``error``, raised by ``hf_fetch``, is the Hub's answer that the dataset
+    repo holds no such file: one it does not host, such as the raw 1000 Genomes and
+    HGDP VCFs, which the caller then downloads from their original source as it
+    should. Any other error is a failure to fetch: no connection (with nothing cached,
+    huggingface_hub raises LocalEntryNotFoundError, a kind of EntryNotFoundError), no
+    huggingface_hub, a repo that is not there.
+    """
+    try:
+        from huggingface_hub.utils import EntryNotFoundError, LocalEntryNotFoundError
+    except ImportError:
+        return False
+    return isinstance(error, EntryNotFoundError) and not isinstance(
+        error, LocalEntryNotFoundError
+    )
+
+
 def remove(fname: str) -> None:
     """
     Remove a file or directory specified by the given path.
@@ -407,6 +427,33 @@ def rename(orig: str, newname: str) -> str:
     return newname
 
 
+def _unsafe_tar_member(tar: tarfile.TarFile, dest: str) -> Optional[str]:
+    """Why ``tar`` must not be extracted into ``dest``, else None.
+
+    Every member is checked before anything is written: an absolute name or any
+    ``..`` component, anything but a regular file or directory (a symlink or
+    hardlink member can redirect a later write out of dest), and any member whose
+    real path leaves dest. ``download --what genome --source url`` (the web
+    Settings "Direct URL" genome source) extracts an archive fetched from a URL
+    the client chose, so its member names are client data. The same checks as
+    its twin, pages/settings_page.py's genome-upload guard (change both);
+    tarfile's ``filter=`` is not relied on (absent before Python 3.11.4).
+    """
+    dest_real = os.path.realpath(dest)
+    for m in tar.getmembers():
+        if m.name.startswith("/") or ".." in m.name.split("/"):
+            return f"unsafe archive entry {m.name!r} (absolute or '..' path)"
+        if not (m.isreg() or m.isdir()):
+            return (
+                f"unsupported archive entry {m.name!r} "
+                "(only regular files and directories are allowed)"
+            )
+        target = os.path.realpath(os.path.join(dest, m.name))
+        if target != dest_real and not target.startswith(dest_real + os.sep):
+            return f"archive member escapes the extraction directory: {m.name!r}"
+    return None
+
+
 def untar(fname_tar_gz: str, dest: str, outdir: Optional[str] = "") -> str:
     """
     Decompress and extract the contents of a tar.gz file to the specified
@@ -428,7 +475,13 @@ def untar(fname_tar_gz: str, dest: str, outdir: Optional[str] = "") -> str:
     try:
         with gzip.open(fname_tar_gz, mode="rb") as fin:
             with tarfile.open(fileobj=fin, mode="r") as tar:  # type: ignore
-                tar.extractall(dest)
+                # vet every member first: a bad archive is refused before
+                # anything is extracted (a ValueError, not the IOError below);
+                # then each goes in with safe modes, owned by this user (safe_tar)
+                err = _unsafe_tar_member(tar, dest)
+                if err:
+                    raise ValueError(f"refusing {os.path.basename(fname_tar_gz)}: {err}")
+                safe_tar.extract(tar, dest)
     except IOError as e:
         raise IOError(f"An error occurred while decompressing {fname_tar_gz}") from e
     outdir = os.path.join(dest, outdir) if outdir else dest
@@ -492,7 +545,10 @@ def download_reference_genome(
     name and would silently drop every result (see ``genome_layout.py``).
     The download lands in a staging dir and is promoted only on success, so a
     failed/partial download never leaves a half-written, auto-discoverable
-    ``Genomes/<assembly>`` folder.
+    ``Genomes/<assembly>`` folder. It is laid out there too (split, named after
+    its sequences, headers written as ``>id``) and only then replaces a genome
+    installed under that name, as an upload does, so a download refused at any
+    step leaves that genome as it was.
 
     Parameters
     ----------
@@ -566,22 +622,49 @@ def download_reference_genome(
             raise RuntimeError(
                 f"No FASTA files found after downloading assembly '{assembly}'"
             )
-        if os.path.isdir(dest_dir):
-            shutil.rmtree(dest_dir, ignore_errors=True)
-        os.makedirs(dest_dir)
+        # each goes in under its file name alone: of two of one name (an assembly's
+        # hap1/chr1.fa and hap2/chr1.fa), the second replaced the first with no message.
+        # Refused before an installed genome of that name is touched, as an upload is.
+        seen = {}
         for fa in fastas:
-            shutil.move(fa, os.path.join(dest_dir, os.path.basename(fa)))
+            other = seen.setdefault(os.path.basename(fa), fa)
+            if other != fa:
+                raise RuntimeError(
+                    f"The download holds two FASTA files that would both go in as "
+                    f"{os.path.basename(fa)} ({os.path.relpath(other, staging)}, "
+                    f"{os.path.relpath(fa, staging)}), one replacing the other, so nothing "
+                    f"was installed. If they belong to two genomes (the two haplotypes of "
+                    f"an assembly, say), install each under a name of its own."
+                )
+        # Laid out in the staging folder, as an upload is (pages/settings_page.py), and
+        # only then put in place of a genome installed under the name: a download its
+        # layout refused (an id the pipeline cannot take, two sequences of one id) had
+        # removed that genome first, and left no genome under the name.
+        work = tempfile.mkdtemp(prefix=".install_", dir=staging)
+        built, old = os.path.join(work, "new"), os.path.join(work, "old")
+        os.makedirs(built)
+        for fa in fastas:
+            shutil.move(fa, os.path.join(built, os.path.basename(fa)))
         # CRISPRme identifies chromosomes by FASTA file name, one sequence per file
         # (see genome_layout.py). UCSC assemblies without a per-chromosome archive
         # (e.g. the pig susScr11) arrive as ONE multi-sequence .fa, which indexes and
         # searches fine but then silently yields an empty result -- split it now.
-        # On failure remove the half-built folder so it is never auto-discovered.
-        try:
-            from genome_layout import split_multi_record_fastas
+        from genome_layout import split_multi_record_fastas
 
-            split_multi_record_fastas(dest_dir)
+        try:
+            split_multi_record_fastas(built)
+        except FileExistsError as e:  # (a sequence that would go in as another file;
+            raise ValueError(str(e).replace(built + os.sep, "")) from None  # no stage path)
+        # the genome it replaces is moved aside (a link to a shared copy, as a link), and
+        # back if this one cannot go in; it goes with the staging folder
+        replaced = os.path.islink(dest_dir) or os.path.isdir(dest_dir)
+        try:
+            if replaced:
+                os.rename(dest_dir, old)
+            os.rename(built, dest_dir)
         except BaseException:
-            shutil.rmtree(dest_dir, ignore_errors=True)
+            if replaced and os.path.lexists(old) and not os.path.lexists(dest_dir):
+                os.rename(old, dest_dir)
             raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)

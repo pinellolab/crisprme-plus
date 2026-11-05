@@ -13,13 +13,41 @@ the bundled logs) is covered by the end-to-end search test.
 Runnable in the lightweight unit-tests CI: crisprme_hf imports huggingface_hub lazily,
 and these tests never touch HF (the snapshot fetch is monkeypatched to a local copy).
 """
+import contextlib
+import io
+import itertools
 import os
 import shutil
+import stat
 import tarfile
 import tempfile
 import unittest
+import warnings
+from unittest import mock
 
 import crisprme_hf as hf
+import safe_tar
+
+# the umasks an archive is unpacked under here: the Docker image's, and the one an HPC host
+# with a group per user gives (apptainer passes the host's in)
+UMASKS = (0o022, 0o002)
+
+
+@contextlib.contextmanager
+def _umask(mask):
+    """The process's umask set to ``mask`` for the block."""
+    old = os.umask(mask)
+    try:
+        yield
+    finally:
+        os.umask(old)
+
+
+def _unsafe(umask):
+    """The mode bits nothing unpacked under ``umask`` may have: setuid, setgid and sticky,
+    and write for the group or others but as far as ``umask`` allows it (tarfile's 'data'
+    filter leaves the mode of a folder it makes to the umask)."""
+    return 0o7000 | 0o022 & umask
 
 
 def _mklayout(root, index_name):
@@ -72,7 +100,7 @@ class TestIndexBundle(unittest.TestCase):
 
         workdir = tempfile.mkdtemp(prefix="bundle_dst_")
         try:
-            def fake_snapshot(repo, allow_patterns, local_dir, token=None):
+            def fake_snapshot(repo, allow_patterns, local_dir, token=None, reporter=None, **_kw):
                 dest = os.path.join(local_dir, "indexes")
                 os.makedirs(dest, exist_ok=True)
                 shutil.copy(tarball, os.path.join(dest, self.name + ".tar.gz"))
@@ -100,6 +128,115 @@ class TestIndexBundle(unittest.TestCase):
                              "Dictionaries leaked into genome_library/")
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
+
+
+class TestADownloadedArchiveGoesInWithSafeModes(unittest.TestCase):
+    """download_component unpacks a downloaded index, its genotype store and a build-inputs
+    kit into the data folder, which the web app's Settings download too: tarfile gave each
+    file the mode its member has, setuid and setgid too, and, run as root (as the Docker
+    image runs, on a data folder mounted from the host), the owner it names. Each goes in
+    with safe modes, owned by the user unpacking it."""
+
+    NAME = "NGG_2_hg38+hg38_1000G"
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="modes_")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.workdir = os.path.join(self.root, "data")
+        os.makedirs(self.workdir)
+        self.served = {}  # path in the repo -> the archive it is
+
+    def serve(self, remote, entries):
+        """The repo holds at ``remote`` a .tar.gz of ``entries``, (name, mode, payload)
+        tuples (payload None for a folder), each member owned by another user (1234)."""
+        path = os.path.join(self.root, os.path.basename(remote))
+        with tarfile.open(path, "w:gz") as tar:
+            for name, mode, payload in entries:
+                info = tarfile.TarInfo(name)
+                info.mode, info.uid, info.gid = mode, 1234, 1234
+                if payload is None:
+                    info.type = tarfile.DIRTYPE
+                    tar.addfile(info)
+                else:
+                    info.size = len(payload)
+                    tar.addfile(info, io.BytesIO(payload))
+        self.served[remote] = path
+
+    @contextlib.contextmanager
+    def as_root(self, fallback):
+        """download_component's fetches served from self.served (nothing else is reached),
+        as root, the owners tarfile sets recorded instead, as (path, uid, gid), in the list
+        yielded; ``fallback``: as on Python before 3.11.4, with no 'data' filter."""
+        def snapshot(repo, allow_patterns, local_dir, token=None, reporter=None, **_kw):
+            for pattern in allow_patterns:
+                if pattern in self.served:
+                    os.makedirs(os.path.dirname(os.path.join(local_dir, pattern)), exist_ok=True)
+                    shutil.copy(self.served[pattern], os.path.join(local_dir, pattern))
+            return local_dir
+
+        def no_hub():
+            raise ImportError("no huggingface_hub here")
+
+        owners = []
+        record = lambda path, uid, gid, *a, **kw: owners.append((path, uid, gid))  # noqa: E731
+        with mock.patch.object(hf, "_hf_snapshot", snapshot), \
+                mock.patch.object(hf, "_require_hf", no_hub), \
+                mock.patch("os.geteuid", return_value=0), \
+                mock.patch("os.chown", record), mock.patch("os.lchown", record), \
+                mock.patch.object(safe_tar, "_DATA_FILTER",
+                                  None if fallback else safe_tar._DATA_FILTER), \
+                warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)  # (3.12's, for no filter)
+            yield owners
+
+    def modes(self, folder):
+        """{path under folder: its mode bits} of each file and folder there."""
+        return {os.path.relpath(os.path.join(top, name), folder):
+                stat.S_IMODE(os.stat(os.path.join(top, name)).st_mode)
+                for top, dirs, files in os.walk(folder) for name in dirs + files}
+
+    def test_an_index_and_its_genotype_store(self):
+        self.serve(f"indexes/{self.NAME}.tar.gz", [
+            (self.NAME, 0o3777, None),
+            (f"{self.NAME}/TSTgenome.NGG.bin", 0o4755, b"x"),
+            (f"{self.NAME}_INDELS/NGG_2_fakechr22", 0o2666, b"x"),
+            ("Dictionaries/dictionaries_hg38_1000G/my_dict_chr22.json", 0o6644, b"{}")])
+        self.serve("indexes/genotypes_hg38_1000G.tar.gz", [
+            ("Dictionaries/genotypes_hg38_1000G/chr22.gt", 0o4755, b"gt")])
+        for fallback, umask in itertools.product((False, True), UMASKS):
+            with self.subTest(fallback=fallback, umask=f"{umask:04o}"), _umask(umask):
+                shutil.rmtree(self.workdir)
+                os.makedirs(self.workdir)
+                with self.as_root(fallback) as owners:
+                    hf.download_component("index", self.workdir, repo="local/test",
+                                          index_name=self.NAME, token="x")
+                library = os.path.join(self.workdir, "genome_library")
+                dicts = os.path.join(self.workdir, "Dictionaries")
+                self.assertEqual(
+                    (self.modes(os.path.join(library, self.NAME)),
+                     self.modes(os.path.join(library, f"{self.NAME}_INDELS")),
+                     self.modes(os.path.join(dicts, "dictionaries_hg38_1000G")),
+                     self.modes(os.path.join(dicts, "genotypes_hg38_1000G"))),
+                    ({"TSTgenome.NGG.bin": 0o755}, {"NGG_2_fakechr22": 0o644},
+                     {"my_dict_chr22.json": 0o644}, {"chr22.gt": 0o755}))
+                self.assertFalse(stat.S_IMODE(os.stat(os.path.join(library, self.NAME)).st_mode)
+                                 & _unsafe(umask))
+                self.assertEqual([o for o in owners if o[1:] != (-1, -1)], [])
+
+    def test_a_build_inputs_kit(self):
+        self.serve("build-inputs/X.tar.gz", [
+            ("hg38+hg38_X", 0o3777, None), ("hg38+hg38_X/chr22.enriched.fa", 0o4755, b">c\nA\n")])
+        for fallback, umask in itertools.product((False, True), UMASKS):
+            with self.subTest(fallback=fallback, umask=f"{umask:04o}"), _umask(umask):
+                shutil.rmtree(self.workdir)
+                os.makedirs(self.workdir)
+                with self.as_root(fallback) as owners:
+                    hf.download_component("build-inputs", self.workdir, repo="local/test",
+                                          dataset="X", token="x")
+                kit = os.path.join(self.workdir, "Genomes", "hg38+hg38_X")
+                self.assertEqual(self.modes(kit), {"chr22.enriched.fa": 0o755})
+                self.assertFalse(stat.S_IMODE(os.stat(kit).st_mode) & _unsafe(umask))
+                self.assertEqual([o for o in owners if o[1:] != (-1, -1)], [])
 
 
 if __name__ == "__main__":

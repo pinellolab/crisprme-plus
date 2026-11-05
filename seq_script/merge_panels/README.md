@@ -100,7 +100,7 @@ frequency and which dataset a variant came from).
 ## What the merge produces (provenance, per variant)
 | INFO field | Meaning |
 |---|---|
-| `AF` | **Pooled** allele frequency, recomputed as AC/AN across ALL merged samples (`bcftools +fill-tags`). This is what CRISPRme's enricher reports. |
+| `AF` | **Pooled** allele frequency, recomputed as AC/AN across ALL merged samples (`bcftools +fill-tags`). This is what CRISPRme's enricher reports, for a record whose `INFO` has `AF` where the VCF's first record has it: many of this merge's records do not (see the validation below). |
 | `AF_<SRC>` | Each source's **original** AF, verbatim; `.` where that source lacked the variant. |
 | `SRC` | Comma-list of sources containing the variant: `1000G,HGDP` (shared), `HGDP` (HGDP-unique), … Derived from which `AF_<SRC>` are present. |
 
@@ -144,7 +144,13 @@ resumable), assembles the panel `samplesID` (union), and calls
   `AF_1000G=0.02`, `AF_HGDP=0.030541` preserved.
 - **Enricher reads the pooled AF:** CRISPRitz #36's exact-key `AF` match selects
   `AF=0.024992`, correctly skipping the earlier `AF_1000G`/`AFR_AF` fields (the old
-  2-char-prefix match would have grabbed `AF_1000G`).
+  2-char-prefix match would have grabbed `AF_1000G`). But `add-variants` looks for the key in
+  the VCF's first record only and reads every record's `AF` at that place in `INFO`, and a
+  site of one source has fewer keys before `AF` than a site of two, so a record whose layout
+  differs from the first record's gets no `AF` in the index's indel log and dictionaries: the
+  retired `NRG_3_hg38+hg38_1000G2021_HGDP` index, built with this tooling, has none for
+  14,567,429 of its 15,583,931 indels (a known limit, METHODS section 8; its SNPs' frequencies
+  are the registry's AC/AN, from the genotypes).
 - **End-to-end:** the panel enriches hg38_chr22 and builds the pamless `NNN_3` index
   (+ INDELS) without error. [`e2e_afmerge.sh`]
 
@@ -229,7 +235,8 @@ routed to the fake-indel path, not annotated with AF in v1.
 - Registry: **51,174,004 SNPs** (+15.7M indels routed out, 23.5%); read-back exact —
   chr1:10147 C>G → gnomAD 0.004 / AoU 0.056 / global=`AF_max` 0.056; chrX:10072 G>T →
   HGDP 0.065 / TOPMed 0.075 / global=`AF_max` 0.075.
-- 13 unit tests: `PostProcess/test_registry_from_info_af.py`, `test_build_mega_registry.py`.
+- 20 unit tests: `PostProcess/test_registry_from_info_af.py` (13),
+  `test_build_mega_registry.py` (7).
 
 ### Reproduce
 ```bash
@@ -249,5 +256,6 @@ Then the hybrid index assembly (enrich via `build-index-only` **without**
 - **Indel per-dataset AF absent in v1** (SNP-only registry). Indel off-targets are
   still discovered via fake-indel contigs, just un-annotated. Fast-follow: a
   sites-only indel-AF store.
-- **Carrier/hom counts are HWE expectations** from AF (AF itself is exact) — the
-  registry taxonomy sets `aggregate_af_only: True` so the report can mark them.
+- **Carrier/hom counts are not estimated**: the registry stores 0 for both (AF itself is
+  exact), and its taxonomy sets `aggregate_af_only: True` (manifest `aggregation: "info_af"`),
+  so the population-summary companion renders them NA.

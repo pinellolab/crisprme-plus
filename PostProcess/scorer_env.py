@@ -68,6 +68,9 @@ SCORER_ENVS: Dict[str, dict] = {
         "probe_imports": [
             "tensorflow", "numpy", "pandas", "sklearn", "xgboost", "catboost", "pkg_resources",
         ],
+        # the package whose version the probe reports for a module with none of its own:
+        # pkg_resources ships with setuptools (pinned <81 for it)
+        "probe_versions_from": {"pkg_resources": "setuptools"},
     },
 }
 
@@ -294,9 +297,14 @@ def build_create_command(name: str, gpu: bool = False, variant: Optional[str] = 
         return None
     exe, _ = mgr
     variant = variant or _variant(gpu)
+    # Every option BEFORE the package specs: conda parses the specs as one positional, so
+    # specs split by `-c` make it reject the rest as "unrecognized arguments" (conda 25.x
+    # and 26.x) and `scorer-env create` failed wherever conda is the manager (CONDA_EXE is
+    # set by `conda activate`). mamba/micromamba accept either order.
     return (
-        [exe, "create", "-y", "-n", name, "python=" + spec["python"]]
+        [exe, "create", "-y", "-n", name]
         + _channel_args(spec)
+        + ["python=" + spec["python"]]
         + _conda_packages(spec, variant)
     )
 
@@ -437,18 +445,29 @@ def health_check(name: str = DEFAULT_ENV) -> dict:
     rec["env_python"] = py
 
     # import probe INSIDE the env (module list injected as a literal; no %-format
-    # collisions with the inner code)
+    # collisions with the inner code). A module with no __version__ of its own
+    # (pkg_resources) reports the version of the package that ships it, or "ok" -- it
+    # imported; the "?" it got before read like a missing package.
     probe = (
         "import json,sys\n"
         "mods=" + repr(list(spec["probe_imports"])) + "\n"
+        "dists=" + repr(dict(spec.get("probe_versions_from", {}))) + "\n"
         "vers={}\n"
         "bad=[]\n"
         "for m in mods:\n"
         "    try:\n"
         "        mod=__import__(m)\n"
-        "        vers[m]=getattr(mod,'__version__','?')\n"
+        "        vers[m]=getattr(mod,'__version__',None)\n"
         "    except Exception as e:\n"
         "        bad.append([m,str(e)])\n"
+        "        continue\n"
+        "    if vers[m] is None:\n"
+        "        try:\n"
+        "            from importlib.metadata import version\n"
+        "            d=dists.get(m,m)\n"
+        "            vers[m]=version(d)+('' if d==m else ' ('+d+')')\n"
+        "        except Exception:\n"
+        "            vers[m]='ok'\n"
         "pv='.'.join(str(x) for x in sys.version_info[:3])\n"
         "print(json.dumps({'py':pv,'vers':vers,'bad':bad}))\n"
     )

@@ -5,6 +5,11 @@ Structure of email.txt
     - Contact
     - link to CRISPRme job
     - Job submission date
+(an entry for each search sent to the job, separated by "--OTHEREMAIL--"). The search
+form writes it (pages/main_page.py change_url), each entry with one plain address
+(plain_address) and the link the server makes; the web app serves no email.txt
+(pages/results_page.py download_file), and what this prints, which goes into the
+search's log that its status page shows, names no recipient.
 
 Configuration (resolved in this order; first hit wins):
     1. <data_dir>/.email.json  -- written by Settings -> Email notifications
@@ -13,6 +18,8 @@ Configuration (resolved in this order; first hit wins):
        results folder passed on argv[1], i.e. <data_dir>/Results/<job>).
     2. Environment: CRISPRME_SMTP_PSW (password/app password) and
        CRISPRME_SMTP_SENDER (sender address); host/port default to gmail SSL.
+       CRISPRME_SMTP_PSW is never sent to another host the config file names
+       with no password of its own: no notification is sent then.
 
 Email notifications are OPTIONAL and best-effort: with no password configured,
 or if delivery fails, send_mail() no-ops gracefully (message to STDOUT only) so a
@@ -25,10 +32,12 @@ TODO: add run parameters to mail (job date + other params)
 """
 
 import os
+import re
 import sys
 import ssl
 import json
 import smtplib
+from email import policy
 from email.message import EmailMessage
 
 # default mail-server settings (used when neither the config file nor the
@@ -36,6 +45,41 @@ from email.message import EmailMessage
 _DEFAULT_HOST = "smtp.gmail.com"
 _DEFAULT_PORT = 465
 _DEFAULT_SENDER = "crisprme.job@gmail.com"
+
+# between the entries of email.txt: an address holding it is read as two entries
+_ENTRY_SEPARATOR = "--OTHEREMAIL--"
+# what makes an address list, a group, a display name or a comment of a To header
+_NOT_IN_A_PLAIN_ADDRESS = set(',;:<>()[]"\\')
+# the most characters an address can have: RFC 5321 gives a path 256 octets, with its < and >
+_LONGEST_ADDRESS = 254
+
+
+def plain_address(address) -> bool:
+    """Whether ``address`` is one plain e-mail address, name@domain, as the To header of a
+    notification reads it: no list, group, display name or comment, no blank or control
+    character, and not the separator of email.txt's entries. The search form takes no other
+    address for a notification (pages/main_page.py check_mail_address): with commas one
+    search notified several addresses, and a line break wrote the e-mail's link. A value
+    longer than an address can be is refused before anything reads it: the e-mail library
+    reads one in a time that grows with the square of its dots, and the address field is
+    checked at each change of it, which a request can send at any length."""
+    if (not isinstance(address, str) or len(address) > _LONGEST_ADDRESS
+            or _ENTRY_SEPARATOR in address
+            or address.count("@") != 1 or address.startswith("@") or address.endswith("@")
+            or any(c.isspace() or not c.isprintable() or c in _NOT_IN_A_PLAIN_ADDRESS
+                   for c in address)):
+        return False
+    try:
+        header = policy.default.header_factory("To", address)  # (EmailMessage's reading)
+    except Exception:  # an address the e-mail library cannot read
+        return False
+    return not header.defects and [a.addr_spec for a in header.addresses] == [address]
+
+
+def _without(text: str, address: str) -> str:
+    """``text``, an error of the mail server or the e-mail library, with ``address`` left
+    out: what this prints goes into the search's log, which its status page shows."""
+    return re.sub(re.escape(address), "<recipient>", text, flags=re.IGNORECASE)
 
 
 def _load_config(output_folder: str) -> dict:
@@ -54,6 +98,7 @@ def _load_config(output_folder: str) -> dict:
     # <output_folder> = <data_dir>/Results/<job>  ->  <data_dir>
     data_dir = os.path.dirname(os.path.dirname(os.path.abspath(output_folder.rstrip("/"))))
     config_path = os.path.join(data_dir, ".email.json")
+    file_password = False
     try:
         if os.path.isfile(config_path):
             with open(config_path) as fh:
@@ -69,8 +114,18 @@ def _load_config(output_folder: str) -> dict:
                     cfg["sender"] = str(filecfg["sender"])
                 if filecfg.get("password"):
                     cfg["password"] = str(filecfg["password"])
+                    file_password = True
     except Exception as exc:  # never let a bad config file fail the job
         print(f"Could not read email config ({config_path}): {exc}")
+    if cfg["password"] and not file_password and cfg["host"].lower() != _DEFAULT_HOST:
+        # CRISPRME_SMTP_PSW goes with the default host: never to a host the file names
+        # with no password of its own (Settings saves the host a request sends), which
+        # would receive it at login
+        print(
+            f"CRISPRME_SMTP_PSW is used with {_DEFAULT_HOST} only, not with "
+            f"{cfg['host']}: save that host's password in Settings -> Email notifications."
+        )
+        cfg["password"] = None
     return cfg
 
 
@@ -104,7 +159,7 @@ def send_mail() -> None:
         return
     try:
         with open(os.path.join(output_folder, "email.txt"), "r") as e:
-            all_content = e.read().strip().split("--OTHEREMAIL--")
+            all_content = e.read().strip().split(_ENTRY_SEPARATOR)
     except OSError as exc:
         print(f"No email recipients to notify ({exc}).")
         return
@@ -112,6 +167,9 @@ def send_mail() -> None:
     for em in all_content:
         em = em.strip().split("\n")
         if not em or not em[0]:
+            continue
+        if not plain_address(em[0]):  # (an email.txt an earlier version wrote)
+            print("Email notification skipped: its address is not one plain address.")
             continue
         try:
             msg = EmailMessage()
@@ -125,9 +183,9 @@ def send_mail() -> None:
                 + " to view the report."
             )
             _deliver(cfg, msg)
-            print(f"EMAIL SENT to {em[0]}")
+            print("EMAIL SENT")
         except Exception as exc:  # best-effort: log to stdout, keep going
-            print(f"Email notification to {em[0]} failed: {exc}")
+            print(f"Email notification failed: {_without(str(exc), em[0])}")
 
 
 def main():

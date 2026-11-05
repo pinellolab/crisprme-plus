@@ -93,7 +93,95 @@ indexes/
   NRG_3_hg38+hg38_HPRC.tar.gz                    # SpCas9 (NRG) HPRC pangenome variant index (232 phased assembly-derived genomes)
   genotypes_hg38_HPRC.tar.gz                          # SEPARATE Tier-1 genotype store companion for the HPRC index
   NRG_3_hg38+hg38_mega.tar.gz                    # SpCas9 (NRG) sites-only mega index (5 sources) — NO genotype companion (sites-only)
+  NNN_3_hg38.tar.gz                              # PAM-LESS reference index of hg38, 3-nt flank — serves ANY 3-nt 3′ PAM with `--prune-pam`
+  NNN_3_hg38+hg38_HGDP1kGP.tar.gz           # PAM-LESS variant-aware index (HGDP + 1000 Genomes, same variant data as the NRG one)
+  NGG_3_hg38.tar.gz                              # NGG-only reference index (NRG is the default; NGG cannot serve NAG off-targets)
+  NGG_3_hg38+hg38_HGDP1kGP.tar.gz           # NGG-only variant index
+  NRR_3_hg38.tar.gz                              # NRR reference index
+  NRR_3_hg38+hg38_{HGDP1kGP,HPRC,mega}.tar.gz    # NRR variant indexes
+  SHA256SUMS                                     # one SHA-256 per archive: `sha256sum -c --ignore-missing SHA256SUMS` inside indexes/
 ```
+
+The two 8-nt-flank PAM-less indexes are in a second repo,
+`lucapinello/crisprme-data-general-index` (see the flank-width note below), under the same
+`indexes/` layout:
+
+```
+indexes/
+  NNNNNNNN_3_hg38.tar.gz                         # PAM-LESS reference index of hg38, 8-nt flank
+  NNNNNNNN_3_hg38+hg38_HGDP1kGP.tar.gz           # PAM-LESS variant-aware index (HGDP + 1000 Genomes)
+  genotypes_hg38_HGDP1kGP.tar.gz                 # the same genotype companion as in the main repo (same SHA-256)
+  SHA256SUMS
+```
+
+Download sizes, as the Hugging Face API reports them (GB = 10⁹ bytes; the whole default repo
+is about 432 GB, so fetch single archives rather than the repo):
+
+| Archive | Repo | Download |
+|---|---|---|
+| `NRG_3_hg38` | default | 8.9 GB |
+| `NRG_3_hg38+hg38_HGDP1kGP` + `genotypes_hg38_HGDP1kGP` | default | 27.7 GB + 5.7 GB |
+| `NRG_3_hg38+hg38_HPRC` + `genotypes_hg38_HPRC` | default | 15.2 GB + 0.6 GB |
+| `NRG_3_hg38+hg38_mega` | default | 12.1 GB |
+| `NGG_3_hg38`, `NGG_3_hg38+hg38_HGDP1kGP` | default | 3.7 GB, 21.5 GB |
+| `NRR_3_hg38`, `+hg38_HGDP1kGP`, `+hg38_HPRC`, `+hg38_mega` | default | 20.1, 42.9, 30.7, 25.2 GB |
+| `NNN_3_hg38`, `NNN_3_hg38+hg38_HGDP1kGP` | default | 71.5 GB, 109.5 GB |
+| `NNNNNNNN_3_hg38`, `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | `crisprme-data-general-index` | 82.2 GB, 122.7 GB |
+
+**The PAM-less (`NNN_*`) indexes** store the raw genomic flank instead of a matched PAM,
+so one index answers any 3′ PAM no longer than that flank when the search passes
+`--prune-pam` (see [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+A 5′ PAM (Cas12a) needs a dedicated index: these indexes store the flank on the 3′ side of
+the guide, so a 5′ search does not use them.
+Every index here was built for a 20-nt guide, with N = 3. That also serves a 21-nt guide at up
+to 1 bulge of each type, byte-identically to an index built for it (so the shipped 21-nt SaCas9
+PAM files work on the 8-nt-flank indexes with `--prune-pam`); a longer guide needs its own
+index ([METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+They carry exactly the same variant data and `Dictionaries/` as the dedicated index for the
+same panel — those tiers are PAM-independent — and a `--prune-pam` run over one gives the
+dedicated index's report for that PAM: byte for byte from a flank of the PAM's width (`NNN_3`
+for NRG, verified genome-wide), and from a wider one (K = 8 for a 3-nt PAM) but for what it
+cannot index at a contig's very end and start: a + strand PAM with 1 to K − L nt after it to the
+end, and a − strand PAM in the first K − L nt, and one exactly K − L nt from the start is reported
+on the + strand at another position. On hg38 at K = 8 that is 145 + 101 NGG and 308 + 241 NRG
+sites, about 7.5 × 10⁻⁷ of all, none on a primary chromosome (whole-genome, K = 8 lost one row
+of 27,216 for a guide picked for its perfect match there, and one of 216,978 for VEGFA site 3);
+a search that reads a wider flank says so on stdout. A wider index must have been built by
+CRISPRme 2.8.1 (CRISPRitz 2.9.1), which keeps a target whose flank holds an `N`, as every
+archive published here was; the search warns of one built before. They are
+correspondingly larger, because nothing is excluded at build time: 71 GB for the reference
+index against 9 GB for `NRG_3_hg38`, and 110 GB against 28 GB for the HGDP + 1000 Genomes
+variant index. Choose one when you expect to search several PAMs over the same genome.
+
+**Limits of every index at contig ends and `N` runs** (dedicated or PAM-less, any flank; engine
+limits, [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)). An index of
+budget N cannot report a site whose guide lies within N − 1 nt of a contig start, a contig end or
+an `N` run, even a perfect match, which a search without bulges (a scan of the FASTA) does
+report; but a variant search without bulges on an install without its whole enriched genome (a
+download) searches the variant index, so its SNP variant rows have this limit too. So an index of
+a larger budget is not a strict superset of a smaller one. For `NRG_3_hg38` that is 546 + strand
+and 504 − strand sites (1,050 NRG sites in all, 535 on primary contigs), none within 4 mismatches
+of nine therapeutic guides checked: what matters is a guide whose own on-target sits at such a
+boundary, whose report then has no perfect match. A − strand PAM at a contig's first base is
+reported on the + strand (11 NGG and 37 NRG hg38 contigs), and a + strand PAM on a contig's last
+bases is found by no search (8 NGG and 31 NRG contigs): all alt, random or chrUn contigs, none a
+primary chromosome.
+
+> **Flank width and compatibility.** A 3-nt flank is readable by any CRISPRme version: the
+> stored geometry is the same as a dedicated 3-nt PAM index, which is why `NNN_3` ships in
+> this repo. (Use the rebuilt `NNN_3` archives, published on 2026-10-30, with 2.8.1 or later:
+> 2.8.0 keeps the targets with an `N` in their PAM that the rebuild adds, and a search that
+> reaches one fails or, with RNA bulges only on CRISPRitz 2.9.0, reports it as a malformed
+> 0-mismatch, 0-bulge row; see [`INDEX_PROVENANCE.md`](INDEX_PROVENANCE.md).) A **wider** flank is not — a release predating `--prune-pam` would mis-read it
+> — so those indexes live in a separate dataset repo,
+> **`lucapinello/crisprme-data-general-index`**, which older defaults never point at.
+> `download` and `publish-index` route by the flank width in the index name, so a wide-flank
+> index cannot be published to the default repo by accident, and the Settings catalog merges
+> both repos so what is listed is what can be fetched. An explicit `--hf-repo` or
+> `CRISPRME_HF_REPO` overrides the routing.
+
+> Per-archive provenance and validity, with the measurement behind each claim, is in
+> [`INDEX_PROVENANCE.md`](INDEX_PROVENANCE.md).
 
 Each variant index stamps its **`data_type`** (`sites-only` / `genotyped-unphased` /
 `genotyped-phased` / `hybrid`) and a `phased` flag in every `registry_<vcf>/reg_<chrom>.idx`
@@ -166,12 +254,14 @@ hand, so `publish-index` (below) ships a self-complete index.
 > is simply skipped (SNP+indel co-occurrence does not apply to an indel-free dataset).
 
 `--samplesID` is a listing file (one samplesID filename per line, resolved under
-`samplesIDs/`); a combined panel lists **both** the 1000G and HGDP files, e.g.:
+`samplesIDs/`). For `VCFs/hg38_HGDP1kGP` it names that panel's one samples file (the one
+`download --what samples` installs):
 
 ```
-hg38_1000G.samplesID.txt
-hg38_HGDP.samplesID.txt
+hg38_HGDP1kGP.samplesID.txt
 ```
+
+A panel merged from several datasets lists each dataset's file instead (next section).
 
 > **`--samplesID` is required for the dict-less / self-complete flow.** The
 > dicts still build without it, but you silently get a **dicts-only** index: no
@@ -256,8 +346,13 @@ crisprme.py download --what index \
   needed. (For a legacy index built before this bundling existed, download falls
   back to fetching the per-db lists from HF and synthesizing the combined file.)
 - The **Tier-1 genotype store** is fetched automatically. Add `--no-genotypes`
-  to skip the big companion: off-target **detection still works** via the Tier-0
-  registry, but per-sample `Samples` are degraded until the store is present.
+  to skip the big companion: a search then runs the **population-level** analysis
+  from the Tier-0 registry (each site's worst case, with no CONFIRMED cis phasing
+  and no carriers but those of an indel, which the indel logs of the main tarball
+  name; where a site needs a SNP too, its row lists every carrier of the indel)
+  until the store is present, and `--per-sample` falls back to it with a warning:
+  a per-sample analysis without genotypes would lose the off-targets that need two
+  SNPs of one sample together.
 - The **CLI search-list files** `list_vcf.txt` (the dataset, `hg38_HGDP1kGP`)
   and `list_samplesID.txt` (its combined samplesID) are written at the install
   root, so a CLI search works out of the box — the same lists the web form builds
@@ -275,14 +370,22 @@ crisprme.py complete-search \
 ```
 
 The search finds the prebuilt index (and its tiers + samplesIDs) and skips the
-build/enrichment entirely.
+build/enrichment entirely. The variant index and its `_INDELS` index are read from the
+`--index-path` library first, then from the working directory's `genome_library/`; the
+tiers (`Dictionaries/`), the sample lists (`samplesIDs/`) and the genome (`Genomes/`) are
+read from the working directory, so a library kept elsewhere needs those there (links
+are fine). A search builds no index in an `--index-path` library: a variant index found
+there without its `_INDELS` index beside it stops the search with a message.
 
 ## Building a new-PAM index for a published dataset (HGDP+1kGP, mega)
 
-The prebuilt indexes above are all **SpCas9 NRG**. To screen a **different nuclease / PAM**
-(SpCas9 **NGG**, SaCas9 **NNGRRT**, Cas12a **TTTN**, or any IUPAC motif) against the same
-re-phased **HGDP+1kGP** or sites-only **mega** variant data, you build that one index once and
-reuse it for every later search — you do **not** re-derive the variant data.
+The prebuilt indexes above cover the **NRG**, **NGG** and **NRR** PAMs (not each on every
+panel) plus the PAM-less `NNN_3` / `NNNNNNNN_3` indexes, which serve other PAMs through
+`--prune-pam`. To screen a **different nuclease / PAM** with a dedicated index (SaCas9
+**NNGRRT**, Cas12a **TTTN**, any IUPAC motif, or NGG on mega, the one of these two panels it
+is not published for) against the same re-phased **HGDP+1kGP** or sites-only **mega** variant data, you build
+that one index once and reuse it for every later search — you do **not** re-derive the
+variant data.
 
 ### What's reusable vs. what you rebuild
 
@@ -301,6 +404,12 @@ Only the genome index itself is PAM-specific; everything derived from the varian
 > **`build-inputs/<dataset>.tar.gz`** in the same repo (`lucapinello/crisprme-data`). Download it and you
 > skip straight to indexing the new PAM. If instead you want to **reproduce the kit** (or build one
 > for a **different VCF**), the full source-to-kit workflow is documented below.
+>
+> A search of the index itself needs no enriched genome, with no bulges either: a 0-bulge variant
+> search scans the enriched genome when every chromosome of it is in place, and otherwise searches
+> the installed variant index, with the same results but for a site whose guide lies within 2 nt
+> of a contig start or end or an `N` run (N − 1 for an index of budget N): only the scan finds
+> its variant version (see the limits of every index at contig ends and `N` runs, above).
 
 ### Prerequisites
 
@@ -526,10 +635,12 @@ itself is what `complete-search` consumes.
 - A published variant index is **self-complete**: the samplesID lists are
   bundled, so `download --what index` + search works without a separate
   `--what samples`. The genotype store is the only optional piece (skip it with
-  `--no-genotypes` for detection-only).
-- If `--index-path` is given but no matching index is found there,
+  `--no-genotypes` for a population-level install, with no carriers but those of an
+  indel).
+- If `--index-path` is given but no matching reference index is found there,
   `complete-search` fails fast with a clear message rather than silently
-  rebuilding — so a missing/wrong download is caught immediately.
+  rebuilding — so a missing/wrong download is caught immediately. A variant index
+  is looked for there first, then in the working directory's `genome_library/`.
 
 ## SNP+indel co-occurring off-targets (on by default)
 
@@ -541,26 +652,42 @@ classic two-independent-passes search could not see: SNPs on the IUPAC-enriched 
 indels on a fake-indel genome cut from the *plain* reference).
 
 To reproduce the classic two-independent-passes behavior, set `CRISPRME_INDEL_SNP=0`
-**before both the build and the search**. With the gate off, builds and searches are
-byte-identical to classic CRISPRme.
+**before both the build and the search**. With the gate off, builds are byte-identical to
+classic CRISPRme, and searches run its two independent passes with the fixes of 2.8.1 that
+apply to every search, so their results can differ from an earlier release's. Three of those
+fixes change indel rows (METHODS §4): a target that holds no base of its indel gives no row;
+an indel row with an RNA bulge starts at its first aligned base and shows as REF the reference
+its target covers from there, gapped as its target; and of the alignments of one site that name
+the same variants with the same carriers, the merge keeps the best by the order that picks each
+block's representative, not the first it reads (the `Other_motifs` counts of their clusters
+follow).
 
 ```bash
 # default (co-occurrence ON) — nothing to set:
 crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
     --bDNA 2 --bRNA 2 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesID.listing.txt --path ./
-# to opt out and reproduce classic CRISPRme (byte-identical), set the gate to 0 first:
+# to opt out and reproduce classic CRISPRme, set the gate to 0 first:
 #   export CRISPRME_INDEL_SNP=0   # before BOTH build and search
 ```
 
 With co-occurrence on, the build (a) compiles a per-chromosome **phased indel
 genotype store** (`Dictionaries/indel_genotypes_<vcf>/`) and (b) **overlays SNP IUPAC
 codes** onto the fake-indel genome flanks before indexing the `_INDELS` companion, so
-the indel search can match SNP+indel haplotypes. Post-analysis then emits, per
-co-occurring off-target, a **CONFIRMED-cis** call (all covered variants phased on one
-haplotype) or **PUTATIVE** (unphased / can't prove cis), with the per-sample carriers
-and the joint allele frequency (`AC_cis / AN` over the VCF-genotyped panel). On a
-sites-only panel it falls back to a PUTATIVE min-AF bound with no carriers (see
-METHODS §4/§8).
+the indel search can match SNP+indel haplotypes. Post-analysis resolves each indel
+target on its carriers' own haplotypes (each gets the SNP alleles it carries, so a row
+lists only the individuals that have its sequence, or, where the phase is unknown, those
+whose own alleles allow it, PUTATIVE, split multi-allelic SNP sites aside (METHODS §8);
+on an install without SNP genotypes, as after `download --what index --no-genotypes`,
+every carrier of the indel, PUTATIVE; a sequence no individual has is dropped; since
+2.8.1), then emits, per co-occurring
+off-target, a **CONFIRMED-cis** call (all covered variants phased on one haplotype) or
+**PUTATIVE** (unphased / can't prove cis), with the per-sample carriers and the joint
+allele frequency (`AC_cis / AN` over the VCF-genotyped panel). On a sites-only panel it
+falls back to a PUTATIVE min-AF bound with no carriers (see METHODS §4/§8). The indel
+genotype store keeps only records whose REF and ALT differ in length, so an equal-length
+multi-base record (an MNV, such as AC>TG), which the indel search covers too, has its
+carriers resolved with the phase unknown, PUTATIVE: the HGDP + 1000 Genomes index has
+none, HPRC's chr22 has 9,079 among its 195,813 indel-search records.
 
 > **Note.** With `mm` at its maximum, raise `--max-total-edits` (e.g. `--max-total-edits
 > 6`) so the extra alignment budget for the indel bulge isn't consumed by mismatches,

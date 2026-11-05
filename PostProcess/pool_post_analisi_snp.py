@@ -22,9 +22,37 @@ final_res_alt = sys.argv[12]
 ncpus = int(sys.argv[13])
 
 
+def _checked_chrom(chrom: str) -> str:
+    """``chrom`` back, unless its name holds a character a shell reads. Each name here
+    is that of a FASTA file of the genome folder, less its extension, and the scripts
+    post_analisi_snp.sh runs take it, unquoted, into commands they run through a shell
+    (in the names of the chromosome's files): a FASTA file named with such a character,
+    as a personal-assembly bundle may bring one, would run it. A chromosome's
+    off-targets are kept only from the FASTA file named after its sequence, and a
+    sequence's name holds none of these (genome_layout refuses one that does) nor a
+    blank, which split the name: a real chromosome's file holds none. Unlike its twins in
+    ``pool_search_indels.py`` and ``pool_post_analisi_indel.py``, which take a VCF's
+    CHROM, this leaves '*', '?' and '[' to genome_layout, which refuses a name that
+    matches another file of the folder: a shell expands such a name but runs nothing of
+    it, and an HLA allele's (HLA-A*01:01) is searched."""
+    from genome_layout import UNUSABLE_IN_ID
+
+    bad = next((c for c in chrom if c in UNUSABLE_IN_ID or c.isspace()), None)
+    if bad is not None:
+        raise ValueError(
+            f"chromosome name {chrom!r} holds {bad!r}, which CRISPRme cannot take into a "
+            f"shell command: name the FASTA file {chrom + '.fa'!r} of {ref_folder} after the "
+            f"sequence it holds"
+        )
+    return chrom
+
+
 def start_analysis(chrom):
-    cmd = f'./post_analisi_snp.sh "{output_folder}" "{ref_folder}" "{vcf_name}" "{guide_file}" "{mm}" "{bDNA}" "{bRNA}" {annotation_file} {pam_file} {dict_folder} {final_res} {final_res_alt} {chrom}'
-    code = subprocess.call(cmd, shell=True)
+    # (no shell: each value is one argument, as the search script passes it on)
+    code = subprocess.call([
+        "./post_analisi_snp.sh", output_folder, ref_folder, vcf_name, guide_file, mm, bDNA,
+        bRNA, annotation_file, pam_file, dict_folder, final_res, final_res_alt, chrom,
+    ])
     if code != 0:
         raise OSError(f"Post-analysis SNP failed on chromsomes {chrom}")
 
@@ -157,7 +185,7 @@ def memory_capped_workers(requested, n_tasks, dict_folder):
 
 
 chroms = [
-    os.path.splitext(os.path.basename(f))[0]
+    _checked_chrom(os.path.splitext(os.path.basename(f))[0])
     for f in os.listdir(ref_folder)
     if f.endswith(".fa") and not f.endswith(".fai")
 ]

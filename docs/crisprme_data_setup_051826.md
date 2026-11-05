@@ -20,15 +20,16 @@ and re-running one search command (Section 3). Information on how to include a n
 ### Configure Bioconda channels (one-time)
 
 ```bash
-mamba config --add channels bioconda
-mamba config --add channels conda-forge
-mamba config --set channel_priority strict
+# conda config even with Mamba: Mamba 2 (current Miniforge) has no `config --add`
+conda config --add channels bioconda
+conda config --add channels conda-forge
+conda config --set channel_priority strict
 ```
 
 ### Create and activate the environment
 
 ```bash
-# CRISPRme+ (2.8.0) is a Python 3.11 source build (Bioconda serves stable 2.1.x, py3.8):
+# CRISPRme+ (2.8.1) from source, Python 3.11 (or from Bioconda instead: README §1.1):
 git clone https://github.com/pinellolab/crisprme-plus.git && cd crisprme-plus
 mamba env create -f environment.yml   # env 'crisprme' (Python 3.11)
 mamba activate crisprme
@@ -99,7 +100,7 @@ You never have to merge these by hand — that is what "combine everything" mean
 
 ### 2d. Faster downloads via HuggingFace (optional)
 
-`setup` pulls the genome and variants from their original UCSC/FTP sources, which can be slow. When the data has been published to a HuggingFace dataset repository, you can instead fetch it over HF's CDN with the `download` command — typically much faster, and resumable:
+`setup` tries the HuggingFace data repo first for a single chromosome's FASTA, the VCFs and the two sample-ID files, but of these files the default repo holds only two: the unpacked chr22 FASTA, which `setup --chrom chr22` takes from it, and the 1000 Genomes sample-ID file. Everything else comes from its original source, which can be slow: the genome from UCSC (the whole assembly, or any single chromosome but chr22), the VCFs from the EBI and Sanger FTP servers, and the HGDP sample-ID file and the annotations from the CRISPRme GitHub repository. When the data has been published to a HuggingFace dataset repository, you can instead fetch it over HF's CDN with the `download` command — typically much faster, and resumable:
 
 ```bash
 # reference bundle in one shot: genome + annotations + PAMs + sample-ID files
@@ -110,7 +111,7 @@ crisprme.py download --what all --path "$CRISPRME_DIR"
 crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path "$CRISPRME_DIR"
 ```
 
-The default repository is `lucapinello/crisprme-data`; override it with `--hf-repo <org/name>` or the `CRISPRME_HF_REPO` environment variable. FASTA is decompressed automatically after download. The default repo hosts the reference bundle + prebuilt variant **indexes** (with their genotype stores) + the `build-inputs/` enrichment kits — **not** raw per-dataset VCFs for the standard panels; `download --what vcf --dataset <name>` works only against a repo that hosts a `vcfs/<dataset>/` folder (`--hf-repo`), otherwise build from raw VCFs you place under `VCFs/<dataset>/` yourself (the `setup` path above).
+The default repository is `lucapinello/crisprme-data`; override it with `--hf-repo <org/name>` or the `CRISPRME_HF_REPO` environment variable. FASTA is decompressed automatically after download. The default repo hosts the reference bundle + prebuilt variant **indexes** (with their genotype stores) + the `build-inputs/` enrichment kits (`hg38_HGDP1kGP`, `hg38_mega`) + the source VCFs of its three variant panels: `download --what vcf --dataset <name>` fetches `hg38_HGDP1kGP`, `hg38_HPRC` or `hg38_mega` into `VCFs/<name>/`. For any other dataset, place its VCFs under `VCFs/<dataset>/` yourself (the `setup` path above), or point `--hf-repo` at a repo that hosts a `vcfs/<dataset>/` folder.
 
 ---
 
@@ -119,7 +120,7 @@ The default repository is `lucapinello/crisprme-data`; override it with `--hf-re
 *This is the everyday workflow. Everything from here is fast and lightweight.*
 
 > **Before running any search**, ensure the CRISPRme environment is active: `mamba activate crisprme`
-> (the 2.8.0 source build creates env `crisprme`; Docker users skip activation).
+> (the 2.8.1 source build creates env `crisprme`; Docker users skip activation).
 
 ### 3a. Choose a PAM file
 
@@ -526,9 +527,9 @@ printf 'NNNNNNNNNNNNNNNNNNNNNGG 3\n' > PAMs/20bp-NGG-SpCas9.txt
 
 The 20 leading `N`s define the spacer length; `NGG` is the PAM; `3` is the PAM length in bp. For 5' PAM nucleases (e.g. Cas12a), the PAM bases come first and the position index is negative (e.g. `TTTV` + 20 `N`s with index `-4`). See `docs/INPUT_FORMATS.md` for the full PAM-file specification, including the filename convention (`<length>-<motif>-<Cas>.txt`) and the one-motif-per-file rule.
 
-> **Note (historical — bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`, and the default `NRG`) combined with bulges could trigger a crash (heap corruption, issue #105) in *older* CRISPRitz engines. The fix ships in the CRISPRitz engine CRISPRme+ pins (v2.9.0) on every install surface (Docker, source build, Bioconda `crispritz >=2.9.0`), so the crash **cannot occur** on a supported CRISPRme+ install and no runtime warning is emitted. If you deliberately run CRISPRme against an older, unpinned CRISPRitz and hit this, either add one base to make the motif even-length or reduce bulges to 0.
+> **Note (historical — bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`, and the default `NRG`) combined with bulges could trigger a crash (heap corruption, issue #105) in *older* CRISPRitz engines. The fix ships in the CRISPRitz engine CRISPRme+ pins (v2.9.1) on every install surface (Docker, source build, Bioconda `crispritz >=2.9.1,<2.9.2`), so the crash **cannot occur** on a supported CRISPRme+ install and no runtime warning is emitted. If you deliberately run CRISPRme against an older, unpinned CRISPRitz and hit this, either add one base to make the motif even-length or reduce bulges to 0.
 
-If a **reference** index for a new PAM does not yet exist, the command-line search builds it on demand from the shipped genome. A **variant-aware** index (a search with `--vcf`) is **never** built on the fly — build it once with `crisprme.py build-index-only` (see Section 3.5) and pass it via `--index-path`, or download a prebuilt one; otherwise the variant search stops with guidance to do so. (The **web interface** likewise asks you to install a matching index first.)
+If a **reference** index for a new PAM does not yet exist, the command-line search builds it on demand from the shipped genome. A **variant-aware** search (with `--vcf`) needs the dataset's dictionaries first: download a prebuilt index, or build it once with `crisprme.py build-index-only` (see Section 3.5); otherwise it stops with guidance to do so. With those in place, an index for another PAM or bulge budget that is not installed is built by the search from the dataset's VCFs (or its enriched genome, from the build-inputs kit); with neither here, the search stops and names the variant indexes installed. (The **web interface** offers a variant panel only the bulges its installed variant index supports: with none, only a 0-bulge search, whose first run prepares a 0-bulge index from the panel's VCF files, one per chromosome. Build the index first, in Settings under "Build an index locally", to search the panel with bulges, or at all for a panel added as a single multi-chromosome VCF file, which only that build splits per chromosome.)
 
 > **New PAM on a shipped variant dataset?** To build a different PAM against the released re-phased **HGDP+1kGP** or sites-only **mega** data without re-deriving the variants, use the published build inputs (a fast enriched-genome kit, or the source VCFs) — see [`docs/PRECOMPUTED_INDEXES.md` → *Building a new-PAM index for a published dataset*](PRECOMPUTED_INDEXES.md#building-a-new-pam-index-for-a-published-dataset-hgdp1kgp-mega).
 
@@ -627,7 +628,7 @@ All subsequent commands must be run from inside this working directory. CRISPRme
 
 **Full genome (default):** downloads the complete hg38 assembly from UCSC (~900 MB compressed) and unpacks it as one uncompressed FASTA per chromosome. The archive MD5 is verified before extraction to catch truncated downloads. Existing chromosomes that pass the integrity check are skipped on re-runs.
 
-**Single chromosome (`--chrom chrN`):** downloads only `chrN.fa.gz` from the UCSC per-chromosome endpoint and unpacks it to `Genomes/hg38_chrN/chrN.fa`. Use this for testing before committing to the full download.
+**Single chromosome (`--chrom chrN`):** downloads only that chromosome, to `Genomes/hg38_chrN/chrN.fa`. It tries the HuggingFace data repo first (see Section 2d), and the default repo holds the unpacked FASTA of chr22 only: `--chrom chr22` takes `chr22.fa` from it as is; for any other chromosome it downloads `chrN.fa.gz` from the UCSC per-chromosome endpoint and unpacks it. Use this for testing before committing to the full download.
 
 Expected result: `Genomes/hg38/` (full) or `Genomes/hg38_chrN/` (single-chrom) containing one `.fa` file per downloaded chromosome.
 

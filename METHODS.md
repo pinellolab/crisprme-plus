@@ -1,7 +1,7 @@
 # CRISPRme+ — Methods
 
 This document describes the methods introduced in **CRISPRme+** (the 2.3 through
-2.7.x line; current shipped release 2.8.0), intended as a self-contained technical reference and as source material
+2.8.x line; current shipped release 2.8.1), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
@@ -23,6 +23,7 @@ Sections:
 6. [Functional annotation of off-targets](#6-functional-annotation-of-off-targets)
 7. [Shareable off-target assessment report](#7-shareable-off-target-assessment-report)
 8. [Off-target scoring, assumptions and limitations](#8-off-target-scoring-assumptions-and-limitations)
+9. [PAM-less indexes and dynamic PAM filtering](#9-pam-less-indexes-and-dynamic-pam-filtering)
 
 Throughout, "protospacer window" means the genomic interval spanned by a
 candidate off-target's protospacer plus PAM (and any bulges), i.e. the interval
@@ -42,7 +43,7 @@ off-target site.
   conservative min-AF bound with no carriers). See §4 for the three-rung model.
 - **worst-possible representative** — a single per-window off-target row that
   upper-bounds the score/severity of every realizable haplotype in that window, emitted
-  by the default population-level analysis instead of enumerating each haplotype (§5).
+  by the population-level analysis instead of enumerating each haplotype (§5).
 
 **Analysis-mode decision rule.** The **default** (no flag) is **context-aware**:
 per-sample (CONFIRMED cis phasing + named carriers + exact joint AF) on a
@@ -53,7 +54,7 @@ with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-
 index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
 catalog name `NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
 jointly SHAPEIT5 re-phased — or `HPRC`. See
-[§5, Search-space control for high-variant-density regions](#population-level-analysis-default-and---per-sample-genotype-resolution).
+[§5, Search-space control for high-variant-density regions](#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis).
 
 ---
 
@@ -115,7 +116,7 @@ does millions of registry lookups (one per candidate off-target window, scattere
 chromosome), and measurement showed raw lookups are **~2× faster** than the compressed path
 even with a warm cache. All shipped indexes (the genotyped 1000 Genomes + HGDP and the
 sites-only mega) use this raw format, for consistency and lookup speed ("speed over space").
-The registry has shipped raw since 2.5.3 (still raw as of 2.8.0).
+The registry has shipped raw since 2.5.3 (still raw as of 2.8.1).
 
 **Optional `zlib` compression.** A block-compressed format is available for
 space-constrained storage. Each section is partitioned into 4,096-record blocks,
@@ -161,6 +162,32 @@ Each source VCF is normalized so that variant records are directly comparable:
   or any foreign alt index (`2`, …) is treated as a called non-carrier allele,
   and `.` is missing. This prevents a `1|2` genotype from being miscounted as
   two copies of alt `1`.
+
+  *Known limit (engine).* The enricher writes one IUPAC code a position and one
+  SNP entry a position, rebuilt from the reference base by each record, so at a
+  position with several biallelic SNP records only the **last** record's ALT is
+  searched: an earlier record's ALT is in neither the enriched genome nor the
+  dictionaries nor the Tier-0 registry nor the Tier-1 genotype store, and an
+  off-target that needs it is not found, or is reported at a lower score, without
+  its carriers (a VCF line that lists several ALTs itself is coded with all of them).
+  It is not new in 2.8.1: every release behaves the same (the SNP dictionaries have
+  always kept one record a position, the enriched genome since CRISPRitz 2.6.0).
+  On the HGDP + 1000 Genomes panel, 2,486,165 of its 127,666,429 SNP records
+  (1.95 %), at 2,441,139 positions, are not coded for this reason. Per guide (NRG, 4
+  mismatches + 1 DNA + 1 RNA bulge, per-sample, genome-wide) this leaves 3 to 7 sites
+  whose true CFD puts them in the top-1000 out of it or understated there, and at most
+  one site reaching CFD ≥ 0.5 in the five guides tested (the README's, ACTGA, TRAC,
+  EMX1 and VEGFA site 3; the one is EMX1's chr17:12179615, 11 haplotypes, CFD 0.508);
+  and 52 to 324 rows per guide (99 % of them at CFD < 0.1) name an individual who
+  carries such an ALT, read as the reference base, for a sequence they do not have.
+  On chr22, in the normalized source VCF: 45,837 of 1,757,775 SNP records (2.6 %), at
+  43,389 positions, are not the last at their position; 5,104 of them have AC ≥ 41
+  (AF ≥ 0.5 % of 8,182 haplotypes) and 1,566 AC ≥ 818 (about 10 %). Checked directly
+  at six such positions (the three with the highest AC on chr22, two at AC 82 and 257,
+  and chr20:12296886): each earlier ALT, up to AC = 8,179 (`rs807755` T>A at
+  chr22:19142014), is absent from the enriched genome's code and from all three
+  stores, and only the last record's ALT (AC 1 to 3) is held. It will be fixed, with
+  rebuilt indexes, in the next release.
 - **Consistent coordinates and contigs** (reference build, chromosome naming)
   across datasets.
 
@@ -254,12 +281,15 @@ database group with allele count `AC = round(AF · AN_nom)` and `AN = AN_nom` (t
 the source's nominal sample size — so the reported allele frequency reproduces the
 source AF exactly, to within `0.5/AN`, and the reported AN is the source's true
 cohort size), and the GLOBAL group carries `AF_max`. Per-individual carrier and
-homozygote counts do not exist for aggregate data, so they are reported as
-Hardy–Weinberg expectations from the allele frequency (the frequency itself is exact;
-carrier/hom are flagged as estimates). The Tier-0 registry stores SNPs only (single-base
-ref/alt); indels (~24 % of merged sites) are surfaced as off-targets through the
-fake-indel genome and **are** per-dataset frequency-annotated via a separate `indel_af`
-sidecar (per-dataset `AF_<dataset>` + `AF_max`), which the report reads for the mega panel.
+homozygote counts do not exist for aggregate data, and none is estimated: the registry
+stores 0 for both (the frequency itself is exact), and its manifest marks the panel as
+aggregate (`aggregation` `info_af`, and `aggregate_af_only` for each dataset), so the
+population-summary companion gives them as NA, not 0 (§7), while `targets-scoring`'s
+carrier overlay prints the stored 0 as the carrier count. The Tier-0 registry stores SNPs
+only (single-base ref/alt); indels (~24 % of merged sites) are surfaced as off-targets
+through the fake-indel genome and **are** per-dataset frequency-annotated via a separate
+`indel_af` sidecar (per-dataset `AF_<dataset>` + `AF_max`), which the report reads for the
+mega panel.
 
 The two modes are therefore complementary: the genotyped panel gives phased,
 cis-capable frequencies over a curated sample set; the mega gives one-scan,
@@ -307,10 +337,32 @@ genotyped-panel called-allele count rather than the alleles among carriers only.
 Homozygous carriers contribute 2 to AC; heterozygous carriers contribute 1 —
 so AF is a true allele frequency, not a carrier-individual frequency.
 
+The Tier-0 registry holds SNPs only. An indel has, in either mode, the `AF` of the
+index's indel log, which CRISPRitz `add-variants` copied from the VCF's `INFO/AF` when
+it built the index, as rounded there; one whose `AF` the log gives as 0, or not at all,
+has no frequency. The log holds none for a record whose `INFO` has `AF` at another place
+than the VCF's first record (a known limit of `add-variants`, §8), and none for any
+indel of the sites-only mega, whose VCF has no `INFO/AF` (only `AF_<dataset>` and
+`AF_max`, §2): a mega indel's per-dataset frequencies are in the `indel_af.tsv`
+companion.
+
 For a multi-variant haplotype off-target, the reported frequency is bounded by
 the **rarest** contributing allele (the haplotype can be no more frequent than
 its least-frequent variant), and the exact carriers of the haplotype (Section 4)
 give the tightest available estimate.
+
+An index without the dict-less tiers (one built without `--samplesID`, such as the one the
+benchmark `complete-test` builds) has no Tier-0 registry: a SNP has the `AF` of the classic
+per-sample dictionaries, which `add-variants` also copied from the VCF's `INFO/AF`, as
+rounded there, with the same limit as an indel's (§8). The benchmark's 1000 Genomes VCF
+gives two decimals, so a rare variant reads 0 and has no frequency, and a multi-variant
+row's minimum leaves it out. On the NGG index the README's self-test builds
+(`NGG_2_hg38_chr22+hg38_1000G`, Section 5's known limit), a `--per-sample` search of the
+README's guide with the `20bp-NGG-SpCas9` PAM, 4 mismatches, 1 DNA and 1 RNA bulge gives 154
+of its 189 variant rows a blank MAF (3 of 184 with the tiers), and four two-variant rows the
+frequency of their commoner variant (0.09 to 0.86) for a haplotype that one to five of the
+VCF's 2,548 individuals carry. The report of a search on such an index says so, in either
+mode; rebuild the index with `build-index-only --samplesID`, or use a prebuilt one.
 
 ---
 
@@ -342,7 +394,14 @@ haplotypes is bounded by ≈2×(number of carriers) rather than 2^*k*, so it is
 efficient, and each enumerated haplotype carries its **exact set of carriers**
 (which in turn yields its exact frequency, Section 3). Cross-individual chimeras
 — combinations assembled from variants carried by *different* people — are
-**excluded** by construction.
+**excluded** by construction. A SNP row's carriers are resolved from SNP genotypes
+only: an individual whose haplotype holding the row's SNPs also carries an indel
+inside the target is still listed, though its own sequence there is the indel's
+(reported on the indel row when it is in budget). On chr22 of the HGDP + 1000 Genomes
+panel, per sample, this affects 2.2% of SNP row-blocks (990 of 45,921, five guides),
+and 545 of them have no listed carrier that holds the sequence. It only over-lists, no
+site is lost, and 2.8.0 behaves the same; it is fixed in the next release (§8,
+residuals).
 
 ### Behavior by phasing status
 The confidence attached to an enumerated haplotype depends on the phasing of the
@@ -404,6 +463,116 @@ requires ≥2 nearby SNP alt alleles together; `snp_snp_cooc.tsv`) and **SNP+ind
 (`indel_snp_cooc.tsv`). On a genotyped panel both are emitted CONFIRMED/PUTATIVE with
 carriers; on a sites-only panel both fall to rung 3 (PUTATIVE, min-AF, no carriers) —
 so the co-occurrence signal is never silently dropped for lack of genotypes.
+
+### SNP+indel off-targets: each carrier's own haplotype
+Off-targets that need an indel are searched on the **fake-indel genome**: one short window
+per indel (25 bp of reference, the indel's ALT, then reference), onto which the build
+writes the IUPAC code of every SNP of the enriched genome. The search engine matches a code
+when **any** of its alleles fits the guide (or the PAM), so one raw indel target stands for
+every combination of the window's SNP alleles at once; only the genotypes say which of them
+exist. The indel post-analysis therefore resolves each such target **per carrier
+haplotype** (`indel_snp_cis.resolve_target`):
+
+- every haplotype that carries the indel gets **its own allele** at each code column — the
+  SNP alt it carries, else the reference base — and the haplotypes left with the same
+  sequence form **one reported row**, listing only their individuals and naming the SNP alts
+  they hold next to the indel (Variant info, rsID, MAF). A SNP with several alts on one VCF
+  line keeps its raw genotype under each alt (2|1 under A and under T), so each genotype is
+  first read against its own alt; where the genotypes cannot tell which index is which (every
+  carrier of two alts is 1|2) no slot can be tied to the alt and the carrier is resolved as an
+  unphased one;
+- a sequence whose PAM no longer satisfies the searched motif, or whose mismatches,
+  recounted on the concrete sequence, exceed `--mm` or `--max-total-edits`, is **dropped**:
+  a raw target that no individual carries gives no row;
+- an individual whose genotypes cannot put an allele on the indel's haplotype (an unphased
+  call, a missing allele, no phased indel genotype, a haploid call against a diploid one)
+  gets the **strongest target its own alleles allow** (the guide's base wherever it carries
+  it; elsewhere, and at the PAM jointly, the alleles that maximize CFD among those the motif
+  allows), PUTATIVE in the co-occurrence companion: it is never listed for an allele it
+  does not carry. The carriers of an equal-length multi-base record (an MNV, AC>TG), which
+  CRISPRitz puts in a fake-indel window as it does an indel, are always in this case: the
+  phased indel genotype store keeps only records whose REF and ALT differ in length. With
+  **no genotypes at all** (a sites-only panel such as `mega`) the row
+  holds that worst case over the code's alleles, keeps the carriers the indel log lists,
+  and its co-occurrence is rung 3 above (PUTATIVE, min-AF bound); with no SNP genotypes
+  (no Tier-1 store and no classic dictionaries, as after
+  `download --what index --no-genotypes`) the row is that worst case too, under every
+  carrier of the indel the log lists, PUTATIVE;
+- the fake-indel window holds **one indel**, so a haplotype that carries a second indel
+  inside the target may not have the window's sequence there, and whether it has is read on
+  its bases, not on the indel's position: the reference around the target is written out
+  with every indel of the phased store the haplotype carries there and its own SNP alleles,
+  and the haplotype is listed when the target's bases are on it at the target's place, from
+  the target's first base on or up to its last base, through the indel (not in a stretch
+  that another of its variants lengthened, pushing the indel out of it). In a tandem repeat
+  a unit gained or lost at the target's edge leaves the bases as they are (the repeat puts
+  the same bases back), so such a carrier keeps its row; one whose second indel changes the
+  bases is not listed for it, on any indel row (§8, residuals), nor one whose bases cannot
+  be read either way: each way meets an unphased or missing SNP call, an unphased indel
+  that does not itself change the target, or two of its variants that overlap, two records
+  of one base: two other indels whose REFs share a base (any two
+  at one position do, even a duplication and the deletion of the same bases, which together
+  would leave the reference), or a SNP on a base of the second indel's REF. A reading from
+  the target's first base on meets no variant upstream of that base, one up to its last base
+  none downstream of it. A second indel inserted right next to the indel's anchor base is
+  inside the target. A carrier whose second indel inside the target has an unphased call
+  cannot be tied to a haplotype, so it stays listed, PUTATIVE, as every carrier on an
+  unphased panel is; this holds even when another, phased second indel on its indel
+  haplotype changes the target, so such a carrier is listed for a row its indel haplotype
+  does not have (§8, residuals).
+  On the same phased slot, an indel overlapping the first at another position (one complex
+  allele the VCF splits into overlapping records; the window keeps the reference there)
+  takes the haplotype off the target's rows whatever its bases. A variant only on bases the
+  indel deletes is not in the window's sequence and changes nothing. Another allele at the
+  indel's own position, an indel or a SNP, is an alternative to it (a haplotype holding both
+  would be one record), so a slot phased with both is a phasing artefact. And an unphased
+  carrier of two overlapping records is a multi-allelic heterozygote, one allele per
+  haplotype. These three stay listed;
+- a target of the window that holds **no base of the indel** — none the ALT adds or replaces,
+  and not the two bases on either side of the deleted ones — lies wholly in a flank and gives
+  **no indel row**, with or without a code: its sequence is reference (or SNP) sequence, which
+  the reference and SNP searches report at its true coordinate for its true carriers, while
+  the indel shifts its coordinate on the window;
+- a classic dictionary install (no Tier-1 store, e.g. an index built without `--samplesID`)
+  reads the same genotypes from the per-sample SNP dictionary; with `CRISPRME_INDEL_SNP=0`
+  at search time every code reads as the reference base, as on a fake-indel genome built
+  without the overlay.
+
+The co-occurrence companion `indel_snp_cooc.tsv` lists the SNP alts the indel
+post-analysis's rows **require** — the guide's own base at a spacer column, or a base that
+creates the PAM where the reference does not — with those rows' carriers: CONFIRMED when
+every carrier was resolved exactly, PUTATIVE otherwise. It is written before the merge
+picks each cluster's alignments, one line per engine alignment, required SNP set and phase
+(an alignment that needs no SNP writes no line), so a line can name an alignment the merge
+did not keep: a population-level run, which writes no alternative alignments, can have
+lines with no row in its tables. The resolution does not depend on the analysis mode (§5).
+A target with no code (every target of a classic, non-overlaid
+fake-indel genome) that holds the indel needs no resolution: its sequence is the one the
+engine found. An indel row's carriers belong to its sequence: two alignments of one site can
+name the same variants with different carriers (an RNA-bulge alignment does not reach the base a
+SNP sits on, so it lists that SNP's carriers under the indel alone), and the merge of a
+cluster's rows, which otherwise keeps one row per position and variant list, keeps one per
+carrier set there, so that no carrier is added to a sequence it does not have; of the
+alignments with one carrier set it keeps the best by the order that picks each block's
+representative (the score first in the CFD and CRISPR-Bulge blocks, then
+`--sorting-criteria`). An MNV row is merged as an indel row is.
+
+An indel row is placed as the reference and SNP rows of the same alignment are: it starts at
+its target's first aligned base, the leftmost on either strand, carried from the window to
+the chromosome, and its REF alignment holds the reference bases the target covers from
+there, in the target's orientation and gapped as the target (an RNA bulge is a gap, so the
+REF covers one base fewer per RNA bulge). Up to 2.8.0 an indel row with only RNA bulges
+started one base per bulge early on the + strand (on the - strand with a 5' PAM), and the
+REF alignment of an indel row with both bulge types had no gap and one base too many.
+
+From 2.5.0 to 2.8.0 each code was instead read **column by column without genotypes** —
+the guide's base when it was an allele, else the code's first allele. That reported one
+individual's indel together with SNP alleles that only other individuals carry, scored as
+if real (on the default HGDP + 1000 Genomes index, a guide's report listed at its fifth
+highest CFD, 0.708, a site whose only listed carrier is homozygous reference at the SNP the
+displayed sequence uses), understated mismatch counts, and read an R at NRG's last PAM base
+as A (a PAM the search never matched; CFD ≈ 0). 2.8.1 fixes this; results of earlier
+releases are corrected only by running the search again.
 
 ### Locus completeness
 For every candidate window, CRISPRme+ additionally emits the **reference**
@@ -477,7 +646,32 @@ for every genotyped / legacy install (the genotyped path is already lossless via
 observed enumerator). Set `CRISPRME_LOSSLESS_DENSE=0` to opt out. A per-sample union on
 the genotyped path is intentionally *not* done — it would risk trans-as-cis phantoms.
 
-### Population-level analysis (default) and `--per-sample` genotype resolution
+Under `--per-sample` a capped window emits no greedy representative at all (since 2.7.10):
+the representative unions the carriers of alleles that different individuals carry, so it
+can be a haplotype no single one has, and the window is reported by its observed haplotypes,
+its reference row and its BED line. That is the observed-haplotype path, which reads the
+index's dict-less tiers. **Known limit:** an index without them (one built without
+`--samplesID`, such as the one the benchmark `complete-test` builds) goes the classic
+dictionary path, which still reports a capped window by its greedy worst-case alignment,
+flagged in `High_variant_density_region`, whose listed carriers (the carriers of any allele
+it takes) need not carry every variant in it. On the NGG index the README's self-test builds
+(`complete-test`'s benchmark mode: `NGG_2_hg38_chr22+hg38_1000G`, chr22 of the benchmark's
+phased 1000 Genomes VCF, built without `--samplesID`), the README's guide
+(`CTAACAGTTGCTTTTATCAC`) with the `20bp-NGG-SpCas9` PAM, 4 mismatches, 1 DNA and 1 RNA bulge,
+searched per sample at the default `CRISPRME_IUPAC_CAP`, gives 5 such rows (8 to 13 variants
+each, CFD at most 0.001). They name 102 individuals as carriers 114 times (some on more than
+one row), and each time the carrier lacks one of its row's variants: 342 of the run's 56,730
+SNP-row carrier listings (a row lists its carriers once for each of its three alignments).
+After `build-index-only --samplesID` the same search returns exactly those 5 rows fewer, and
+every carrier it lists has all of its row's variants on one phased haplotype. `complete-search` and
+the report say so (its Search mode row; and, when no dataset of the search has the tiers, such
+a row of two or more SNPs reads `N carriers (>=1 of K vars, poss. chimera)` in its `Observed`
+column, as in a population-level analysis, not `N cis carriers`: the report cannot tell which
+dataset a row comes from, so beside a dataset with the tiers such a row still reads
+`N cis carriers`, and its legend says why); rebuild the index with
+`build-index-only --samplesID`, or use a prebuilt one. It is fixed in the next release.
+
+### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
 The controls above bound any *single* window, but a **dense panel** (many merged
 sources) or a **sites-only aggregate panel** can present so many variant-dense windows
@@ -493,9 +687,9 @@ reference-only index it runs the two-pass population-level analysis by default (
 the whole post-analysis via the internal `CRISPRME_FAST_MODE` env var). **`--population-level`**
 forces the worst-possible screen (the opt-out from per-sample on a phased index); **`--per-sample`**
 forces the observed-haplotype enumeration (the two are mutually exclusive). The 2.5.4 two-pass
-population-level machinery is now the opt-out path. Instead of enumerating the 2ᵏ IUPAC haplotype
-lattice per window, the population-level analysis emits a small fixed set of
-**worst-possible representatives** per window:
+population-level machinery is now the opt-out path on a phased index and the default elsewhere.
+Instead of enumerating the 2ᵏ IUPAC haplotype lattice per window, the population-level analysis
+emits a small fixed set of **worst-possible representatives** per window:
 
 - **Pass 1 — score-free find.** The window's per-position IUPAC allele sets yield a
   **minimum-edit** representative whose edit distance `D` (the additive-per-column argmin)
@@ -509,70 +703,75 @@ lattice per window, the population-level analysis emits a small fixed set of
   *annotation* rather than a dependency, and rows are tagged **PUTATIVE** (a synthetic
   worst case, not an observed haplotype).
 
-The min-edit and max-CFD representatives are distinct because CFD is position-weighted
-(Section 8): the fewest-mismatch haplotype is often **not** the highest-scoring one, so
-both are emitted so the reported worst case is never understated. The population-level
-analysis is validated to be **lossless for locus detection and non-understating for the
-worst-case score** against the exact per-sample enumeration path on a real chr22
-1000G-2021+HGDP slice (0 CFD under-reports; it in fact surfaces *stronger* worst cases at
-182 loci that per-sample enumeration misses), and it emits ~1.9× fewer rows on that 1×
-slice, a factor that grows with density — turning the otherwise-intractable 4× panel into a
-tractable run. **The trade-off is that per-sample carriers, CONFIRMED cis phasing and exact joint
-allele frequency are not computed in the default mode** (rows are PUTATIVE worst cases); the
-launch-time message, the web **Analysis mode** control and the report's **Search mode** row
-all state this explicitly, so it is never silent. This yields a **two-tier workflow**: the
-default population-level analysis for routine, high-density, or aggregate-panel *screening*
-(and the only meaningful mode on sites-only panels), and `--per-sample` (byte-identical to
-the pre-2.5.3 enumeration path) for *confirmatory / pre-IND* runs on a genotyped panel where
-per-sample phased haplotype resolution is required. On sites-only (aggregate) panels there
-are no per-sample genotypes to recover — verified on the released **mega** index:
-`--per-sample` yields **zero CONFIRMED rows and no cis carriers** in either mode (there is no
-genotype store to enumerate), and the `indel_snp_cooc.tsv` / `indel_af.tsv` companions are
-**byte-identical** across modes. On a sites-only index `--per-sample` cannot resolve carriers
-(no genotypes), so the SNP post-analysis falls back to the registry-only worst-case emission —
-which emits *fewer* rows than the default two-pass population-level path (integrated 3,065 vs
-3,224 rows; SNP+SNP co-occurrence 4 vs 22 PUTATIVE rows), so the **default is the more complete
-screen** there. Because `--per-sample` buys nothing on a sites-only index (it changes the output
-without delivering carrier resolution), `complete-search` **warns** and the web form **disables**
-the per-sample option when a sites-only index is selected.
+The min-edit and max-CFD representatives are distinct because CFD is position-weighted (Section
+8): the fewest-mismatch haplotype is often **not** the highest-scoring one, so both are emitted
+so the reported worst case is never understated. The population-level analysis is validated to
+be **lossless for locus detection and non-understating for the worst-case score** against the
+exact per-sample enumeration path on a real chr22 1000G-2021+HGDP slice (0 CFD under-reports; it
+in fact surfaces *stronger* worst cases at 182 loci that per-sample enumeration misses), and it
+emits ~1.9× fewer rows on that 1× slice, a factor that grows with density — turning the
+otherwise-intractable 4× panel into a tractable run. **The trade-off is that per-sample
+carriers, CONFIRMED cis phasing and exact joint allele frequency are not computed in the
+population-level analysis** (rows are PUTATIVE worst cases); the launch-time message, the web
+**Analysis mode** control and the report's **Search mode** row all say which mode ran, so it is
+never silent. The default therefore follows the panel. On a genotyped+PHASED index (such as the
+default HGDP + 1000 Genomes one) it is per-sample, the phased haplotype resolution that
+*confirmatory / pre-IND* runs need, and `--population-level` is the fast *screen* for a very
+dense, high-edit or genome-wide search. On a sites-only, unphased, hybrid or reference-only
+index it is the population-level analysis (the only meaningful mode on sites-only panels), and
+`--per-sample` forces resolution on a genotyped one. On sites-only (aggregate) panels there are
+no per-sample genotypes to recover — verified on the released **mega** index: `--per-sample`
+yields **zero CONFIRMED rows and no cis carriers** in either mode (there is no genotype store to
+enumerate), and the `indel_snp_cooc.tsv` / `indel_af.tsv` companions are **byte-identical**
+across modes. A sites-only dataset has no genotypes for `--per-sample` to resolve, so as of 2.8.1
+its SNP post-analysis is the two-pass population-level one whatever the search's mode, dataset by
+dataset, from its registry's `data_type` (for a registry with none, its aggregation: an INFO-AF
+registry is sites-only): `--per-sample` on sites-only datasets alone **is** the
+population-level analysis, and `complete-search` **warns**; a phased dataset searched beside a
+sites-only one (per-sample by default) gives per-sample rows, the sites-only one population-level
+rows, and `complete-search` says so. (Before 2.8.1 such a dataset went through the per-sample path,
+whose emission joins variants only through the carriers they share, and it has none: it lost
+multi-variant worst cases, whole sites among them, with *fewer* rows than the population-level path:
+integrated 3,065 vs 3,224 rows, SNP+SNP co-occurrence 4 vs 22 PUTATIVE rows.) The web form
+**disables** the per-sample option when a sites-only index is selected.
 
 **Measured population-level vs `--per-sample` behavior (adversarially verified).** Running both
 modes on the then-released 1000 Genomes 2021 + HGDP genotyped index for one guide (identical
-guide/PAM/thresholds; only `--per-sample` differs) makes the trade concrete and confirms the
-guarantees hold end-to-end:
+guide/PAM/thresholds; only `--per-sample` differs; population-level was then the default on every
+index) makes the trade concrete and confirms the guarantees hold end-to-end:
 
 - *Detection is lossless at the **window** level.* Every off-target window `--per-sample`
-  reports is present in the default analysis; the default in fact reports **more** loci
+  reports is present in the population-level analysis, which in fact reports **more** loci
   (3,287 vs 3,103) because it emits worst-possible representatives. A small number of windows
   are anchored a few bases apart between the two modes — `--per-sample` anchors each *observed*
-  haplotype, the default anchors its worst-possible representative — so a strict
+  haplotype, population-level its worst-possible representative — so a strict
   coordinate-equality comparison flags them as "per-sample-only" (24 loci here, all 1–10 bp
-  shifts of a window the default did detect). Compared by cluster they match exactly and the
-  default is a strict superset. Losslessness is therefore a **window/cluster** property, not
-  byte-exact coordinate identity.
+  shifts of a window population-level did detect). Compared by cluster they match exactly and
+  population-level is a strict superset. Losslessness is therefore a **window/cluster** property,
+  not byte-exact coordinate identity.
 - *The worst-case CFD bound holds exactly.* Across all 3,079 shared loci, the population-level
   CFD is **≥** the per-sample CFD with **zero** violations; it is strictly higher only where it
   assumes worst-possible co-occurrence (e.g. CFD 0.354 vs 0.113 at a 3-SNP window), never lower.
-- *`--per-sample` corrects — and **tightens** — the carrier sets.* The default lists a PUTATIVE
-  **union** of every sample carrying *any* contributing variant in the worst-possible window;
-  `--per-sample` prunes to the actually-observed cis haplotype's carriers. Counterintuitively
-  `--per-sample` therefore names **fewer** samples (1,447 vs 1,642 distinct here), not more — the
-  default list deliberately over-includes non-cis carriers (a conservative screening bias). The
-  SNP+SNP co-occurrence companion is all-PUTATIVE by default (0 CONFIRMED) and gains **106
-  CONFIRMED phased-cis rows** with exact joint AF and single named carriers under `--per-sample`
-  (e.g. a locus that is a 175-carrier PUTATIVE union by default resolves to a single confirmed
-  carrier under `--per-sample`).
-- *On a **genotyped** index the default does not blank carriers.* The `NA`-carrier behavior is
-  specific to sites-only panels; a genotyped panel still surfaces dataset-level carriers in the
-  default analysis, so the real trade is **PUTATIVE-union vs CONFIRMED-exact-cis**, not
+- *`--per-sample` corrects — and **tightens** — the carrier sets.* Population-level lists a
+  PUTATIVE **union** of every sample carrying *any* contributing variant in the worst-possible
+  window; `--per-sample` prunes to the actually-observed cis haplotype's carriers.
+  Counterintuitively `--per-sample` therefore names **fewer** samples (1,447 vs 1,642 distinct
+  here), not more — the population-level list deliberately over-includes non-cis carriers (a
+  conservative screening bias). The SNP+SNP co-occurrence companion is all-PUTATIVE at
+  population level (0 CONFIRMED) and gains **106 CONFIRMED phased-cis rows** with exact joint AF
+  and single named carriers under `--per-sample` (e.g. a locus that is a 175-carrier PUTATIVE
+  union at population level resolves to a single confirmed carrier under `--per-sample`).
+- *On a **genotyped** index population-level does not blank carriers.* The `NA`-carrier behavior
+  is specific to sites-only panels; a genotyped panel still surfaces dataset-level carriers in the
+  population-level analysis, so the real trade is **PUTATIVE-union vs CONFIRMED-exact-cis**, not
   named-vs-`NA`.
 - *For a single guide the two modes take essentially the same wall time* (~13–14 min) — the
-  modes differ in genotype resolution, not intrinsic speed; the default's advantage materializes
-  only on the dense/aggregate-panel enumeration wall, not sparse single-guide runs.
+  modes differ in genotype resolution, not intrinsic speed; population-level's advantage
+  materializes only on the dense/aggregate-panel enumeration wall, not sparse single-guide runs.
 
 The measured numbers above, side by side (same guide/PAM/thresholds; only `--per-sample` differs):
 
-| Metric | Population-level (default) | `--per-sample` |
+| Metric | Population-level | `--per-sample` |
 |---|---|---|
 | **Genotyped index (1000G 2021 + HGDP), one guide** | | |
 | Off-target loci reported | 3,287 (superset; 3,079 shared) | 3,103 |
@@ -580,21 +779,21 @@ The measured numbers above, side by side (same guide/PAM/thresholds; only `--per
 | Distinct carrier samples named | 1,642 (PUTATIVE union, over-includes non-cis) | 1,447 (exact cis carriers) |
 | SNP+SNP co-occurrence CONFIRMED rows | 0 (all PUTATIVE) | **106** (phased cis, exact joint AF + named carrier) |
 | Single-guide wall time | ~13–14 min | ~13–14 min |
-| **Sites-only mega index** | | |
+| **Sites-only mega index, before 2.8.1** | | |
 | Integrated rows | **3,224** (more complete screen) | 3,065 (registry-only fallback) |
 | SNP+SNP co-occurrence PUTATIVE rows | **22** | 4 |
 | CONFIRMED rows / cis carriers | 0 / none (no genotype store) | 0 / none (no genotype store) |
 
-(On the sites-only mega, `--per-sample` cannot resolve carriers and emits *fewer* rows than the
-default, so the default is the more complete screen — which is why `complete-search` warns and the
-web form disables per-sample for a sites-only index.)
+(On the sites-only mega, `--per-sample` cannot resolve carriers and emitted *fewer* rows than the
+population-level analysis before 2.8.1. It now runs that analysis, whose rows are the left column's,
+and `complete-search` warns; the web form disables per-sample for a sites-only index.)
 
 **Scope of the analysis mode.** The mode toggles only the **SNP** post-analysis (`--per-sample`
-re-enables the 2^k IUPAC haplotype lattice / observed-haplotype enumeration that the default
-collapses). The **indel** post-analysis is single-threaded and ML-scoring-bound (CRISPR-Bulge), and is
-**unaffected by the mode** — a dense indel search pays the full indel cost regardless
-(parallelizing that path is a follow-up). Correspondingly, the `indel_snp_cooc.tsv` companion is
-**byte-identical** in both modes (§8).
+re-enables the 2^k IUPAC haplotype lattice / observed-haplotype enumeration that the
+population-level analysis collapses). The **indel** post-analysis is single-threaded and
+ML-scoring-bound (CRISPR-Bulge), and is **unaffected by the mode** — a dense indel search pays
+the full indel cost regardless (parallelizing that path is a follow-up). Correspondingly, the
+`indel_snp_cooc.tsv` companion is **byte-identical** in both modes (§8).
 
 ---
 
@@ -676,10 +875,11 @@ The report and all of its tables are built from the **best alignment per locus**
 (`bestMerge`). The exhaustive **alternative-alignments** file
 (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments at each
 locus) is a separate, optional artifact whose size grows combinatorially with the
-edit budget; it is emitted by mode — **off** for the default population-level
-analysis, **on** under `--per-sample` — with `--alt-alignments` / `--no-alt-alignments`
-to force either way. (`assembly-search` reconciles its two haplotypes from each
-per-haplotype `integrated_results.tsv` alone, so it does not require this file.)
+edit budget; it is emitted by mode — **off** for a population-level analysis, **on**
+for a per-sample one (the default on a phased genotyped index, or forced with
+`--per-sample`) — with `--alt-alignments` / `--no-alt-alignments` to force either way.
+(`assembly-search` reconciles its two haplotypes from each per-haplotype
+`integrated_results.tsv` alone, so it does not require this file.)
 Suppressing it does not change the report or any reported number.
 
 A guide with **more than one perfect genomic match** (0 mismatch, 0 bulge) has no
@@ -702,8 +902,16 @@ one real individual:
 
 On a genotyped index the carrier roster is
 populated in both analysis modes; under `--per-sample` it is pruned to the **exact
-cis carriers**, so `putative` cleanly marks reconstructions that no one actually
-carries — separating genuine haplotypes from worst-case combinations.
+cis carriers** (but for a dense window's greedy alignment on an index without the
+dict-less tiers, §5), so `putative` cleanly marks reconstructions that no one actually
+carries — separating genuine haplotypes from worst-case combinations. In a
+population-level analysis a multi-variant SNP roster is the union of each variant's
+carriers and reads `N carriers (>=1 of K vars, poss. chimera)`; an indel (or MNV) row's
+roster is resolved per carrier in both modes (§4), so it reads `N carrier(s)`: CONFIRMED
+where each carrier is placed on its phased haplotype, PUTATIVE where the phase is unknown
+(an unphased call, an MNV). On an install without SNP genotypes (`download --what index
+--no-genotypes`, §4), a row an indel and a SNP make together lists every carrier of the
+indel, with or without the SNP; its phase is in `indel_snp_cooc.tsv`.
 
 The
 recommended validation panel uses this to **prioritize observed sites** among
@@ -722,16 +930,21 @@ size and the number of SNPs and indels searched. These database counts are read
 from a build-time `Dictionaries/registry_<vcf>/variant_count.json` sidecar
 (`n_records` SNPs + `n_indels`) written when the dict-less index is built, so the
 report needs no VCF access at report time (e.g. the earlier 1000 Genomes + HGDP
-merge recorded 106,664,924 SNPs). Reported allele frequencies are AC/AN over the genotyped
-panel; a variant present in the panel but whose source allele frequency is exactly
-0 (e.g. a secondary allele of a multiallelic site) is shown at a **display floor of
-1×10⁻⁵** so it still renders on the log-scale plots — this is a plotting floor,
-read as "present, frequency effectively 0", not a measured frequency. For an
-**aggregate (sites-only) panel** (e.g. the all-source mega index, §2), only allele
-frequencies exist — there are no per-individual genotypes — so carrier and homozygote
-frequencies are rendered **NA** rather than fabricated, and a per-dataset **`indel_af.tsv`**
-companion carries indel allele frequencies by source alongside the SNP+indel co-occurrence
-table.
+merge recorded 106,664,924 SNPs). Reported SNP allele frequencies are AC/AN over the
+genotyped panel (on an index without the dict-less tiers, the `AF` of the classic per-sample
+dictionaries, §3, as the report of a search there says), and an indel's is the `AF` of the
+index's indel log; `add-variants` copied both from the VCF's `INFO/AF` (§3), and §8 gives
+when they hold none. A variant whose allele frequency is 0 or missing (e.g. an allele that
+no individual of the panel carries) has no frequency: `integrated_results.tsv` lists it as
+`NA`, and the report leaves it out of a row's MAF, the lowest frequency of the row's
+variants, which is blank when no variant of the row has one. No floor is applied: a
+frequency below 1×10⁻⁵ is reported as it is, and the plots, whose log scale is the site's
+rank, use a frequency only to size the points. For an **aggregate (sites-only) panel** (e.g.
+the all-source mega index, §2), only allele frequencies exist — there are no per-individual
+genotypes — so no carrier or homozygote count is estimated: the registry holds 0 for both
+(§2), which the population-summary companion (`*.population_summary.tsv`, kept with
+`--keep-intermediates`) gives as **NA**, and a per-dataset **`indel_af.tsv`** companion
+carries indel allele frequencies by source alongside the SNP+indel co-occurrence table.
 
 ## 8. Off-target scoring, assumptions and limitations
 
@@ -840,8 +1053,11 @@ Linux/Docker/GPU runs; **metal** (Apple Silicon) is guarded by a **load-time
 numerical self-test** — `tensorflow-metal` silently miscomputes this GRU kernel
 (collapsing every prediction to 1.0), so on detecting the miscompute the scorer
 transparently falls back to a CPU device context, producing **bit-identical**
-results. Missing env or weights degrade cleanly to a **CFD-only** run rather than
-failing the search. The released **amd64** Docker image bundles the CUDA
+results. With the env or its weights missing or broken, `complete-search` stops
+before the search, naming the fix, unless `CRISPRME_SKIP_SCORER_ENV=1` is set, which
+runs it **CFD-only**; `targets-scoring` and searches started from the web interface do
+not check first, and complete **CFD-only**. A CFD-only run has the CRISPR-Bulge score at
+`-1` and a banner saying so in its log. The released **amd64** Docker image bundles the CUDA
 TensorFlow build, so `docker run --gpus all ... --compute-backend cuda` runs
 CRISPR-Bulge on an NVIDIA GPU with transparent CPU fallback; the **arm64** image
 stays CPU.
@@ -860,7 +1076,7 @@ found x86-64 vs aarch64 scores agree to a maximum absolute difference of
 `CONDA_CHANNEL_BASE` / `CRISPRME_CONDA_CHANNEL_BASE` (the Docker build exposes a
 `CONDA_CHANNEL_BASE` build argument).
 
-**Worst-case scoring in the population-level analysis.** In the default population-level
+**Worst-case scoring in the population-level analysis.** In the population-level
 analysis (§5), each window is represented by worst-possible rows rather than every haplotype,
 so the *scores* attached to those rows are defined as worst cases over the window's allele
 combinations. The two scores earn different trust:
@@ -895,7 +1111,10 @@ post-analysis' cis phasing pass over the genotype tiers, which the mode does not
 on the complete genome-wide matrix (2021 panel, same guide, default vs `--per-sample`): the two
 `indel_snp_cooc.tsv` files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full
 per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
-carries the indel and SNP together — is preserved identically in both analysis modes.
+carries the indel and SNP together — is preserved identically in both analysis modes. Measured
+again with 2.8.1, whose companion holds only the SNPs the indel post-analysis's rows require, on
+the HGDP + 1000 Genomes index: the two modes give the same lines for each of two guides (339 and
+363 distinct lines, all CONFIRMED).
 
 **Two co-occurrence companions.** Alongside `indel_snp_cooc.tsv` (SNP+indel),
 `snp_snp_cooc.tsv` reports **SNP+SNP** co-occurrences — off-targets that require ≥2
@@ -923,24 +1142,85 @@ chromatin accessibility as a cutting determinant. **SNP+indel co-occurrence** is
 searched **by default** as of 2.5.0: the build overlays SNP IUPAC codes onto the
 fake-indel genome and compiles a phased indel genotype tier, and post-analysis reports
 off-targets that require **both** a nearby SNP **and** an indel in the same protospacer,
-tagged CONFIRMED-cis (phased) / PUTATIVE (unphased) with per-sample carriers and joint
-allele frequency. (The pre-2.5.0 behavior — two independent passes, SNPs on the
-IUPAC-enriched genome and indels on a plain-reference fake-indel genome — remains available
-by disabling the integration; classic dict builds are byte-identical.) One **residual**:
-the indel search materializes **one indel per fake contig**, so an off-target requiring
-**≥ 2 co-occurring cis indels within a single protospacer** is not generated as a candidate
-— a pre-existing single-indel-search property, independent of the analysis mode. This is a
-**low-frequency** case: raw multi-indel cis co-occurrence is dominated by STR/VNTR repeats
-(which off-target analysis should soft-mask), falling to **~1–2%** of indel loci after
+each resolved on its carriers' own haplotypes (§4; since 2.8.1) and tagged CONFIRMED-cis
+(phased) / PUTATIVE (unphased) with per-sample carriers and joint allele frequency. (The
+pre-2.5.0 behavior — two independent passes, SNPs on the IUPAC-enriched genome and indels
+on a plain-reference fake-indel genome — remains available by disabling the integration;
+classic dict builds are byte-identical, and searches run the two passes with the fixes of 2.8.1
+that apply to every search, so their results can differ from an earlier release's; three of
+those fixes change indel rows (§4): a target that holds no base of its indel gives no row, an
+indel row with an RNA bulge starts at its first aligned base with its REF gapped as its target,
+and of the alignments of one site that name the same variants with the same carriers the merge
+keeps the best, not the first it reads.) One **residual**: the indel search materializes
+**one indel per fake contig**, so an off-target requiring **≥ 2 co-occurring cis indels
+within a single protospacer** is not generated as a candidate — a pre-existing
+single-indel-search property, independent of the analysis mode; since 2.8.1 an individual
+whose haplotype carries such a second indel inside a target is not listed for that target
+when the second indel changes the target's bases, read on the haplotype's own bases (a
+repeat unit gained or lost at the target's edge leaves them, and the individual stays
+listed: §4), or when those bases cannot be read (an unphased or missing SNP call, an
+unphased indel that does not itself change them, or two of its variants that overlap: §4);
+a carrier whose second indel inside the target is unphased cannot be tied to a haplotype
+and stays listed, PUTATIVE, even when another, phased second indel on its indel haplotype
+changes the target, nor when, as one complex allele split into overlapping records,
+an indel overlaps it at another position. This residual is **low-frequency**: raw
+multi-indel cis co-occurrence is dominated by STR/VNTR repeats (which off-target analysis should
+soft-mask), falling to **~1–2%** of indel loci after
 repeat-masking and deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%**
 of indel off-targets — all at the edit-budget ceiling (the weakest, ≈0-CFD tier). Windows
 carrying ≥ 2 cis indels **can** be flag-all'd for conservative (lossless over-reporting)
 treatment — a design option the min-edit primitive supports (proven lossless in
-`test_twopass_lynchpin_counterexamples`), **not yet wired into the production indel search**. The `Max_total_edits` value is a
-**search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded
-alignments may exceed it (the report surfaces the observed maximum). A reported MAF
-of `1e-05` is a **display floor** for a source-AF of 0, not a measured frequency
-(§3, §7). These are computational predictions and are **not a substitute for
+`test_twopass_lynchpin_counterexamples`), **not yet wired into the production indel search**.
+Two SNP records at one position (a split multi-allelic site) keep only the last record's
+alt in the enriched genome and its dictionaries (a CRISPRitz `add-variants` property), so
+a carrier of an earlier record's alt is read as reference there, in the SNP and the indel
+post-analysis alike, however common that alt: on the HGDP + 1000 Genomes panel
+chr8:4174067 T>C (8,170 copies) is read as reference because T>G (1 copy) is the later
+record. That is 1.95 % of the panel's SNP records, whose effect §2 gives as measured; it
+will be fixed, with rebuilt indexes, in the next release. `add-variants` also looks for the
+`AF` key in the VCF's first record only, and reads every record's `AF` at that place in
+`INFO`: a record that has it at another place gets none, in the index's indel log and in its
+classic per-sample dictionaries. Its indel then has no frequency on any index (§3), nor its
+SNP on an index without the dict-less tiers (the registry, which gives a SNP's frequency with
+them, counts AC/AN from the genotypes, or on the mega reads each source's `AF_<dataset>` by
+its key), and the report's MAF leaves it out. A VCF merged with
+`seq_script/merge_panels/merge_vcf_panels.sh` has such records, since a site of one source has
+fewer keys before `AF` than a site of two: the retired `NRG_3_hg38+hg38_1000G2021_HGDP` index
+(1000 Genomes 2021 + HGDP, built from such a merge, retired in 2.7.8) has no `AF` for
+14,567,429 of its 15,583,931 indels (224,981 of the 232,384 of chr22). Of the shipped indexes only HPRC's chrY is affected,
+whose VCF has `AF` at five places in `INFO`, after one to five other keys: its log has none for
+91,950 of its 102,665 indels. The HGDP1kGP index and HPRC's other chromosomes have an `AF` for
+each of their 17,192,381 and 12,000,599 indels, as the self-test's 1000 Genomes index (chr22)
+has for its 64,528 indels and 993,880 SNPs; the mega's VCF has no `INFO/AF` at all (§2), so
+none of its 13,853,761 indels has one, and their per-dataset frequencies are in the
+`indel_af.tsv` companion. 2.8.0 behaves the same; it will be fixed in the next CRISPRitz
+release (HPRC's chrY log needs rebuilding with it). The phased indel genotype store
+leaves out equal-length multi-base records (MNVs), so their carriers are resolved with the
+phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
+among its 195,813 indel-search records. A SNP row's carriers are resolved from SNP genotypes
+only (§4): an individual whose haplotype holding the row's SNPs also carries an indel inside
+the target is still listed, though its own sequence there is the indel's (reported on the
+indel row when in budget). On chr22 of the HGDP + 1000 Genomes panel, per sample, this
+affects 2.2% of SNP row-blocks, and 545 have no carrier that holds the sequence. It only
+over-lists, 2.8.0 behaves the same, and it is fixed in the next release.
+On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists of the results
+tables are not in the order of its `Variant_info_genome`: the merge of a cluster's rows
+(`remove_contiguous_samples.py`) sorts the three lists each on its own, as text, and keeps
+each value once, so the n-th rsID or MAF need not be the n-th variant's, and two variants
+of one frequency show it once. On ACTGA (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per
+sample, genome-wide, HGDP + 1000 Genomes), 953 of 1,967 rows of two or more SNPs and 118 of
+293 rows of an indel and one or more SNPs list their rsIDs in another order than their
+variants (in the highest-CFD columns). The report's MAF, the lowest frequency of the list,
+does not depend on it; the rsIDs its `Variant` column gives after the variants, and the rsIDs
+and AFs of `observed_haplotypes.tsv` and of a site's haplotype table in the report, are in
+the list's order. 2.8.0 behaves the same, and it will be fixed in the next release.
+The `Max_total_edits` value is a
+**search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
+alignments may exceed it (the report surfaces the observed maximum), while an indel row,
+recounted on its carriers' own sequence, is dropped past it as past `--mm` (§4). No floor is
+applied to a MAF: a variant whose allele frequency is 0 or missing has none, which a
+multi-variant row's minimum leaves out, and a reported MAF below `1e-05` is the frequency
+itself (§3, §7). These are computational predictions and are **not a substitute for
 experimental off-target validation** (e.g. GUIDE-seq / CIRCLE-seq / targeted
 amplicon or rhAMP-Seq sequencing of the recommended panel).
 
@@ -957,8 +1237,9 @@ validate-test`. This is a one-time correctness check, not a per-search step:
 - **enAsCas12a (HBG1/HBG2 clinical guide, TTTV 5′ PAM)** on chr22 — **953
   off-targets**, matched against the brute-force reference.
 - The registered benchmarks pass end-to-end (`complete-test` → `validate-test`),
-  including the default single-`--max-total-edits` web-mode cases (4/4 locally);
-  `validate-test` exits non-zero on any mismatch, and the round-trip runs in CI.
+  including the single-`--max-total-edits` web-mode cases at 3 and at 5 total edits
+  (all six on chr22); `validate-test` exits non-zero on any mismatch, and the whole
+  round-trip runs in CI.
 - Separately, the high-variant-density greedy decomposition (§5) was validated as
   provably exact against brute-force argmin on **4,000/4,000 random cases** (both
   strands, with/without bulges), with PAM-creating-variant cases reproducing full
@@ -980,8 +1261,156 @@ assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 
 ---
 
+## 9. PAM-less indexes and dynamic PAM filtering
+
+A CRISPRitz index is built for one PAM. The PAM is matched against the genome at build
+time, only the surviving sites enter the ternary search tree, and the PAM region itself is
+stored as a flank beside each guide. One index therefore answers one PAM: searching NGG
+and NRG over the same genome means building and storing two indexes.
+
+A **PAM-less** index is built with an all-`N` PAM (`PAMs/20bp-NNN-NO-PAM.txt`), which
+constrains nothing, so every guide-length window enters the tree and the stored flank is
+the raw genomic sequence. `--prune-pam` then supplies the real PAM at search time and
+discards a leaf whose stored flank cannot match it — at the moment the leaf is reached,
+before it is written out.
+
+**Validity.** A search PAM of length *L* is served by a stored flank of width *K* when
+*L ≤ K* and the flank is on the PAM's side of the guide. The flank lies where the PAM file
+the index was built from puts the PAM (the 3′ side for `PAMs/20bp-NNN-NO-PAM.txt` and every
+published PAM-less index), and the engine reads it on the side the search's PAM file names,
+so a 5′ search of a 3′-built index finds nothing at all. A dedicated index is named after its
+PAM by PAM files of both sides alike (`N…NTTTV 4` and the 5′ Cas12a file both build
+`TTTV_<N>_<genome>`), and read on the wrong side it reports sites that are not there. CRISPRme
+therefore takes any index only for a PAM on the side recorded in its `.pam_build` (written by
+`build-index-only`, and by a search that builds an index). A dedicated index without one is used
+as before. A PAM-less index without one is taken for a 3′ build at the published widths, 3 and 8
+(the K = 8 archive has no `.pam_build`), or under the search PAM's own name, and at no other
+width: a search before 2.8.1 built one of any width from a 5′ PAM file and recorded nothing. A
+search builds its index under a name an index for the other side may already have, and stops
+rather than search that one; `build-index-only` does not record a PAM file over an index
+recorded for the other side, nor a 3′ one over an unrecorded PAM-less index of another width.
+The search PAM is
+widened to *K* with `N`s on the distal side (the end for a 3′ PAM, the front for a 5′ PAM),
+and a leaf is rejected when, at any position the real PAM covers, the stored and requested
+IUPAC codes share no nucleotide. Pad positions are not tested at all: they state no
+requirement, and a stored genomic `N` intersects nothing, so testing one would reject a
+target that a dedicated index of the real width keeps. At *L = K*, on the same side, the
+pad is empty and the geometry is exactly a dedicated index's.
+
+**Equivalence.** Pruning changes only which leaves are written out, never how a guide is
+aligned to the genome, so it cannot move an alignment or a score. Measured genome-wide
+over HGDP + 1000 Genomes (4,091 samples, guide `ACTGAAATCTGTAAGCAGGC`, NRG, 4 mismatches +
+1 DNA bulge + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index with `--prune-pam`, an
+8-nt-flank PAM-less index with `--prune-pam`, and a dedicated NRG index produce
+**byte-identical** reports: the integrated results are identical, 182,369 rows each (MD5
+`c76f3490` once the licence-gated COSMIC column, empty on the dedicated arm's fresh install, is
+set aside; the two PAM-less arms are identical with it, MD5 `c4586f7a`). The same holds for
+NRR: 386,012 rows each (MD5 `f810dd76`) over a dedicated index, both PAM-less indexes with
+`--prune-pam`, and the 3-nt one without it. That holds at *L = K*, and at *K > L* for a guide
+with no site at a contig's very end or start, as this one has none. The build scans a contig
+for a PAM only where a whole window of *K* bases fits, so with *K > L* a + strand PAM with 1 to
+*K − L* bases after it to the contig's end, and a − strand PAM in the contig's first *K − L*
+bases, are not indexed, and a − strand PAM exactly *K − L* bases from the start is reported on
+the + strand at another coordinate. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG
+sites (about 7.5 × 10⁻⁷ of all), none on a primary chromosome for those PAMs; in two
+whole-genome searches the 8-nt flank lost one row each against a dedicated index (27,215 of
+27,216 rows for a guide picked for its perfect match on `chr11_JH159136v1_alt`, and 216,977 of
+216,978 for VEGFA site 3 at 5 mismatches). A search that reads a flank wider than its PAM says
+so on stdout and in the run's `Params.txt`. N runs inside a contig are not affected by the
+width.
+
+**Genomic `N`.** This equivalence needs engine support, not just a filter. A genomic `N`
+is stored as a code that intersects nothing, so it fails a PAM match at every position; a
+PAM-less index of width *K* stores a wider flank than a dedicated index of a shorter PAM
+and so is more exposed to one. Three separate gates acted on that — the build-time PAM
+scan, the discard of any window containing an `N`, and the prune test itself — and the
+effect is concentrated on the synthetic indel genome, which is `N`-separated roughly every
+56 bases: a width-31 window admitted 34,690,315 start positions on one contig against a
+width-26 window's 41,454,105, so **16.3%** were invisible to a wider index. Real assembly
+`N` sits in megabase gaps where nothing matches, which is why reference and SNP searches
+were never affected. CRISPRitz now keeps a target whose stored PAM/flank region holds an
+`N` and lets the search PAM decide, exactly as a dedicated index does.
+
+An index built before CRISPRitz 2.9.1 (CRISPRme 2.8.0 and earlier) lacks every target whose
+flank holds an `N`, and searched with `--prune-pam` for a PAM narrower than its flank it misses
+the sites whose flank holds an `N` past the PAM (3 of 36 rows on a synthetic genome, 2.6 % of
+the indel rows on chr22). Its `.pam_build` has the same format, but its trees tell: one built
+since stores an `N` (a 0 nibble) in the flank of a target beside one, and no earlier build does.
+A search that reads such an index wider than its PAM warns on stdout (it reads the smallest
+tree of a contig whose sequence holds an `N`, and of the INDELS index one of several indel
+windows), and goes on.
+
+**Contig ends and N runs.** These limits hold for every index, dedicated or PAM-less, at any
+width. An index of budget *N* holds a window of the guide, the PAM and *N* more bases, and the
+build drops a window that holds an `N` or runs past the contig's start, so it cannot report a
+site whose guide lies within *N − 1* bases of a contig start, a contig end or an `N` run, even a
+perfect match; a search without bulges, which scans the FASTA, reports it. A variant search
+without bulges on an install without its whole enriched genome (a download) searches the variant
+index instead, so its SNP variant rows have this limit too: of such a site it reports the
+reference version, from the scan of the reference FASTA, when that is within the search's
+mismatches, and not the variant version or its carriers. So an index of a larger budget is not a
+strict superset of a smaller one: a search that asks for more bulges can return fewer such
+sites. For `NRG_3_hg38` that is 546 + strand and 504 − strand PAM sites over hg38's 1,580
+stretches between `N` runs; of the 1,050 such NRG sites (535 on primary contigs), none lies
+within 4 mismatches of the nine guides checked (TRAC, `ACTGAAATCTGTAAGCAGGC`, BCL11A sg1617,
+EMX1, HBG1, CCR5, VEGFA site 3, FANCF and HEK4), and 9 of 20,000 random 20-mers have one at up
+to 4 mismatches. The exposure that matters is a guide whose own on-target sits at such a
+boundary: its report then holds no perfect match. Two more engine limits at contig ends, as
+measured on hg38: a − strand PAM at a contig's first base is reported on the + strand at base
+*N* (11 NGG and 37 NRG contigs open so, all alt, random or chrUn contigs; the primary
+chromosomes open with `N`), and a + strand PAM on a contig's last bases is found by no search,
+indexed or not (8 NGG and 31 NRG contigs end so, none a primary chromosome, and no fake-indel
+contig, which all end in `N`). They need an engine change, and the indexes rebuilt with it.
+
+**Cost.** A PAM-less index is much larger, because no site is excluded at build time: the
+reference index is 71 GB against 9 GB for a dedicated NRG index, and the HGDP + 1000
+Genomes variant index 110 GB against 28 GB (download sizes, GB = 10⁹ bytes). Pruning
+happens at leaf time, so a PAM-less search is not faster than a dedicated one — the gain
+is that one index answers many PAMs.
+
+**Guide length.** An index name carries no guide length; each tree records the one it was
+built for, as the second int32 of its `.bin` (written by `buildTST` since 2019, whoever built
+the index). The engine reads that length only to offset coordinates and searches any guide it
+is given, so past what the tree stores it gives wrong alignments or loses targets, with exit 0.
+A search therefore takes an index only where
+
+    built + N >= guide + bDNA + (1 if bRNA > 0, else 0)
+
+with N the number in the index's name. We measured the rule with the real CLI against an index
+dedicated to each guide, on a synthetic genome with no site near a contig end or an N run: of
+246 cells (built 20, 22 or 23 nt; N 2 to 4; guide 20 to 24 nt; dedicated, all-`N`, and all-`N`
+under `--prune-pam`; up to 3 bulges), the 136 inside the rule are byte-identical to the
+dedicated index and the 110 outside it all differ, up to an empty result. Another 70 cells, of
+variant searches (SNP and indel rows, with no bulges too, through the index) and of a 5′ PAM,
+fall on the same side of the rule. So a published 20-nt N = 3 index serves a 21-nt guide at up
+to 1 bulge of each type, a 22-nt guide with one bulge of one type, a 23-nt guide with no bulge
+through the index, and no longer guide. An index built for this very guide is preferred to one
+that merely fits. With none that fits, a search builds its own under the name
+`<PAM>_<N>_<genome>`, or stops with an ERROR that names both lengths when an index of that
+name, built for another guide, is in the way; `build-index-only` does the same and leaves that
+index and its `.pam_build` as they are.
+A longer build serves a shorter guide, but, like any deeper index, it does not hold a site
+next to an N run or a contig end that a shallower one does.
+
+**Limits.** `--prune-pam` requires `--index-path` and is command-line only: the web
+interface never passes the flag. (Its PAM picker prefers a PAM whose geometry matches the
+installed index, but falls back to offering every PAM when none matches, so it does not
+itself prevent an unusable pairing: the search does not take an all-`N` index of another
+width without the flag, or one built for the other side, and when no index serves it and
+neither the dataset's VCFs nor its enriched genome are there to build one, it stops with an
+ERROR that names what was asked, the variant indexes installed and what to do.) A shorter PAM
+off a wider flank is supported for a 3′ PAM only; for a 5′ PAM the engine requires the flank width to equal the
+PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its
+`.pam_build` records (above). The published
+PAM-less indexes are 3′ builds, so they serve no 5′ PAM: a Cas12a search needs a dedicated
+index. A flank wider than
+3 nt is not readable by CRISPRme versions before this one, so those indexes are published
+in a separate repository rather than alongside the standard ones.
+
+---
+
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.7.x line (CRISPRme+ 2.8.0) (default SNP+indel co-occurrence, context-aware
+methods as of the 2.8.x line (CRISPRme+ 2.8.1) (default SNP+indel co-occurrence, context-aware
 analysis mode — per-sample on genotyped+PHASED indexes / population-level otherwise, with opt-out
 `--population-level` / forced `--per-sample`, and the CRISPR-Bulge ML off-target
 scorer in a dedicated conda environment with a `cpu|cuda|metal` compute backend); see the

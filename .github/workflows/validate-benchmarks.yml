@@ -20,8 +20,11 @@ on:
       - "PostProcess/**"
       - "test/benchmark/**"
       - "test/data/**"
+      - "test/indel_snp_oracle/**"
+      - "scripts/check_alt_pam.py"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
+      - "test/index_flex/**"
   # ALSO run on direct pushes to main that touch the pipeline. Releases here fast-forward
   # dev -> main (NOT via PRs), so the pull_request trigger above would MISS them — exactly
   # how the complete-test rewrite silently broke this brute-force gate until the weekly cron
@@ -32,8 +35,11 @@ on:
       - "PostProcess/**"
       - "test/benchmark/**"
       - "test/data/**"
+      - "test/indel_snp_oracle/**"
+      - "scripts/check_alt_pam.py"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
+      - "test/index_flex/**"
   # Weekly run so the benchmark gate also catches DATA-side drift (e.g. a change to
   # the HuggingFace reference data the complete-test downloads) that the code-path
   # PR filter above cannot see — this is how the sample-ID fast-path regression went
@@ -45,11 +51,10 @@ on:
 jobs:
   validate-benchmarks:
     runs-on: ubuntu-latest
-    # The hosted runner runs the LIGHT (bulge-1) benchmarks via CRISPRME_SKIP_HEAVY=1
-    # (passed into the container on the complete-test/validate-test steps). The "heavy"
-    # single-n cases build a bulge-2 index over the variant-enriched genome, which OOMs a
-    # 16GB runner (and is too slow under swap) -- they are validated locally / on a larger
-    # runner. 120 min is plenty for the light suite.
+    # Every registered benchmark runs here, the "heavy" single-n cases included: they build
+    # a bulge-2 index over the variant-enriched genome, which fits a 16 GiB, 4-CPU runner with
+    # no swap (measured in a container held to that size, arm64: complete-test 23 to 32 min,
+    # 3.64 GB of RAM at peak). 120 min is plenty.
     timeout-minutes: 120
     env:
       IMG: pinellolab/crisprme
@@ -72,8 +77,11 @@ jobs:
           echo "BRANCH_MOUNT=-v ${GITHUB_WORKSPACE}:/branch:ro" >> "$GITHUB_ENV"
 
       - name: Smoke — new subcommands dispatch + HF/index unit tests (full env)
+        # CRISPRME_RUN_HF_TESTS=1: the one test of a real Hugging Face download, which no other
+        # job can run (the unit-tests job has no huggingface_hub), and this one downloads from
+        # Hugging Face anyway.
         run: |
-          docker run --rm $BRANCH_MOUNT "$IMG" bash -c '
+          docker run --rm -e CRISPRME_RUN_HF_TESTS=1 $BRANCH_MOUNT "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
             cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
@@ -95,7 +103,7 @@ jobs:
             if ! echo "$cs" | grep -q -- "--max-total-edits"; then echo "FAIL: --max-total-edits missing"; exit 1; fi
             # HF + index unit tests inside the full env
             cd /opt/conda/opt/crisprme/PostProcess
-            python -m unittest test_crisprme_hf test_hf_downloads.TestHfFetchFallbackContract
+            python -m unittest test_crisprme_hf test_hf_downloads
             echo "smoke OK"
           '
 
@@ -120,10 +128,31 @@ jobs:
             if ! grep -qi "No off-targets found" Results/zh/log_verbose.txt; then
               echo "FAIL: empty-result message missing"; exit 1
             fi
-            if [ -s Results/zh/log_error.txt ]; then
-              echo "FAIL: log_error is non-empty"; cat Results/zh/log_error.txt; exit 1
+            # A zero-hit job ends before log_error.txt is renamed (and before the report),
+            # but check whichever log exists, as the read-only smoke below must.
+            err=Results/zh/log_error.txt
+            [ -e "$err" ] || err=Results/zh/log_error_no_check.txt
+            if [ ! -e "$err" ] || [ -s "$err" ]; then
+              echo "FAIL: $err is non-empty or missing"; cat "$err"; exit 1
             fi
             echo "zero-hit regression PASS"
+          '
+
+      - name: "Which index serves which search (synthetic phased genome, real CLI and engine)"
+        run: |
+          # The layouts people have: a download (no VCFs, no enriched genome), a library the
+          # run cannot write to, an index for another PAM, budget or guide length, a K=8 one.
+          # Each search is compared with one on an index dedicated to it, byte for byte, or
+          # must refuse clearly, because the engine answers what it cannot do on stdout with
+          # exit 0 (test/index_flex). Up to 2.8.0: a 0-bulge search of a download lost its
+          # SNP rows, a read-only library gave a clean empty result, a guide no index fits
+          # gave wrong rows, all at exit 0. In the container's own file system, so a folder's
+          # permissions hold. About 10 minutes on 2 threads.
+          docker run --rm $BRANCH_MOUNT "$IMG" bash -c '
+            set -e
+            cp /branch/crisprme.py /opt/conda/bin/crisprme.py
+            cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
+            python3 /branch/test/index_flex/check_index_flex.py /tmp/index_flex
           '
 
       - name: read-only-container smoke (reference-only search, code dir read-only)
@@ -150,19 +179,44 @@ jobs:
             chmod -R a-w /opt/conda/opt/crisprme
             crisprme.py complete-search --genome Genomes/synth --pam PAMs/20bp-NGG-SpCas9.txt \
               --guide guide.txt --mm 1 --bDNA 0 --bRNA 0 --output ro
-            if [ -s Results/ro/log_error.txt ]; then
-              echo "FAIL: log_error non-empty (read-only regression?)"; cat Results/ro/log_error.txt; exit 1
+            # A job that runs to the end renames log_error.txt to log_error_no_check.txt, so a
+            # check of log_error.txt alone passed whatever the job wrote: check whichever exists.
+            err=Results/ro/log_error.txt
+            [ -e "$err" ] || err=Results/ro/log_error_no_check.txt
+            if [ ! -e "$err" ] || [ -s "$err" ]; then
+              echo "FAIL: $err non-empty or missing (read-only regression?)"; cat "$err"; exit 1
             fi
             ls Results/ro/*integrated_results.tsv >/dev/null 2>&1 \
               || { echo "FAIL: no integrated_results (read-only regression)"; exit 1; }
+            ls Results/ro/*_report.zip >/dev/null 2>&1 \
+              || { echo "FAIL: no report zip (Results/ro/report.log:)"; cat Results/ro/report.log; exit 1; }
             echo "read-only-container smoke PASS"
+          '
+
+      - name: "SNP+indel per-haplotype oracle (synthetic phased genome + VCF, real CLI, per-sample and population-level)"
+        run: |
+          # A small reference with SpCas9 sites that need an indel, a SNP or both, in
+          # cis, in trans, unphased and as two indels on one haplotype; build-index-only
+          # then complete-search both ways, and every indel row is checked against each
+          # carrier's own haplotype built from the VCF (test/indel_snp_oracle): the PAM,
+          # the CFD of the row's alignment, its mismatches, that every listed carrier has
+          # the sequence, the planted sites' expected rows and the co-occurrence
+          # companion. Up to 2.8.0 the post-analysis read the overlay's IUPAC codes
+          # column by column without genotypes and failed it (TGA/AGA PAMs, phantom
+          # 0-edit targets, chimeras of two samples' variants). A few minutes.
+          mkdir -p orcwork
+          docker run --rm $BRANCH_MOUNT -v "${PWD}/orcwork:/W" "$IMG" bash -c '
+            set -e
+            cp /branch/crisprme.py /opt/conda/bin/crisprme.py
+            cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
+            bash /branch/test/indel_snp_oracle/run_oracle.sh /W/run /branch/test/indel_snp_oracle
           '
 
       - name: complete-test (chr22, 1000G) for all registered benchmarks
         run: |
           mkdir -p work
           n=0
-          until docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
+          until docker run --rm $BRANCH_MOUNT -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
                   set -e
                   cp /branch/crisprme.py /opt/conda/bin/crisprme.py
                   cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
@@ -178,15 +232,34 @@ jobs:
           done
 
       - name: validate-test (chr22) — assert all benchmarks match the ground truth
+        # validate-test exits 0 with a benchmark skipped, and a skipped one checked nothing:
+        # complete-test left it no output, say. So the step also asks for 0 skipped.
         run: |
-          docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
+          set -o pipefail
+          docker run --rm $BRANCH_MOUNT -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
             cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
             mkdir -p /opt/conda/opt/crisprme/test
             cp -rf /branch/test/* /opt/conda/opt/crisprme/test/
             crisprme.py validate-test --chrom chr22
-          '
+          ' 2>&1 | tee validate-test.log
+          if ! grep -q ", 0 failed, 0 skipped\.$" validate-test.log; then
+            echo "FAIL: a benchmark did not run"; exit 1
+          fi
+
+      - name: "ALT-PAM and no-N release gate on the chr22 outputs (no ALT row shows a PAM the search did not match, no reported target holds an N)"
+        run: |
+          # scripts/check_alt_pam.py: every ALT-origin block of every integrated results
+          # table must show a PAM that satisfies the searched motif (read from the run's
+          # Params.txt), with no IUPAC code left. Blind to a motif that allows the base a
+          # misreading produces (NRR's last position): the unit tests cover that. And no
+          # REF or ALT target of any block may hold an N, an assembly gap, which matches
+          # no guide and no PAM.
+          shopt -s nullglob
+          tables=(work/Results/crisprme-test-out_*/*integrated_results.tsv)
+          if [ "${#tables[@]}" -eq 0 ]; then echo "FAIL: no integrated results under work/Results"; exit 1; fi
+          python3 scripts/check_alt_pam.py "${tables[@]}"
 
       - name: Upload logs on failure
         if: failure()
@@ -195,4 +268,5 @@ jobs:
           name: crisprme-test-out-logs
           path: |
             work/Results/**/log_*.txt
+            orcwork/run/Results/**/log_*.txt
           if-no-files-found: ignore

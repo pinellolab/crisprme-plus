@@ -68,7 +68,7 @@ def score_window(guide, allele_sets, pam_set, mm_scores, pam_scores,
       allele_sets: per-position iterable of admissible DNA bases (Pass-1 decoded the
         enriched-IUPAC window; length ~G).
       pam_set: iterable of possible PAM strings at the window.
-      mm_scores/pam_scores: the shipped CFD pickles (twopass_cfd_exact.load_scores()).
+      mm_scores/pam_scores: the CFD lookup tables (twopass_cfd_exact.load_scores(), cfd_score's JSON tables).
       crispr_bulge_fn: optional callable(list_of_(guide,dna,pam)) -> list_of_scores. When
         None, CRISPR-Bulge is skipped (min-edit + CFD still returned).
 

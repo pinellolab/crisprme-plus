@@ -44,7 +44,8 @@ Report structure (top -> bottom)
    top site rsID-annotated), in up to FOUR panels: by CFD, by variant effect
    (CFD ALT-REF delta), by CRISPR-Bulge, and by variant effect (CRISPR-Bulge ALT-REF delta).
    The two CRISPR-Bulge panels appear only when CRISPR-Bulge was computed -> 4 panels with
-   CRISPR-Bulge, 2 without.
+   CRISPR-Bulge, 2 without. Sites with mm+b<=1 are not plotted; a caption says how many
+   and where they are (top_exclusion_note).
 3. SIMPLIFIED reference-vs-population plot (v1 single view).
 4. RECOMMENDED VALIDATION PANEL: the full threshold table (candidate counts at
    CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, variant-created counts) PLUS the
@@ -58,9 +59,9 @@ Report structure (top -> bottom)
    and each non-empty threshold tier are exported (curated columns) and linked.
 5. DOWNLOADS: full RAW integrated_results.tsv.gz + curated top1000.tsv +
    panel_top100.tsv + every non-empty per-tier curated TSV.
-6. SCROLLABLE TOP-1000 TABLE (by CFD desc, mm+b<=1 excluded) in the CURATED
-   columns, including the annotation columns (gene, distance, GENCODE, ENCODE,
-   DHS) and CRISPR-Bulge when computed.
+6. SCROLLABLE TOP-1000 TABLE (by CFD desc, mm+b<=1 excluded, as a caption above
+   it says) in the CURATED columns, including the annotation columns (gene,
+   distance, GENCODE, ENCODE, DHS) and CRISPR-Bulge when computed.
 7. ANNOTATION LEGEND: plain-language meaning of every annotation column value
    (GENCODE / DHS / ENCODE SCREEN v4 cCREs / COSMIC Cancer Gene Census).
 FOOTER (unnumbered): CRISPRme version + provenance stamp + fixed research-only
@@ -285,7 +286,7 @@ CURATED_COLUMNS = (
     ("REF/ALT_origin", "origin"),
     ("PAM_creation", "pam_creation"),
     ("Variant", "variant"),  # chrom;pos;ref;alt of the variant(s) creating THIS off-target (rsID companion)
-    ("Observed", "observed"),  # reference / N cis carriers (--per-sample) / N carriers (pop, 1 variant) / "N carriers (>=1 of K vars, poss. chimera)" (pop, multi-variant union) / observed / putative
+    ("Observed", "observed"),  # reference / N cis carriers (--per-sample) / N carriers (pop, 1 variant) / "N carriers (>=1 of K vars, poss. chimera)" (pop, multi-variant union; and a --per-sample _greedy_union row) / observed / putative
     ("MAF", "maf"),  # em-dash when blank
     ("Gene", "gene_name"),
     ("Gene_distance_kb", "gene_dist"),
@@ -315,17 +316,50 @@ _DROP_MAF = False
 # variants (the stacked combination may exist on no single haplotype), so we flag it.
 _PER_SAMPLE = False
 
+# Set True when a --per-sample search resolved its datasets without the dict-less tiers,
+# every one of them (meta["untiered_all"], from .untiered_datasets and .variant_datasets).
+# Their classic per-sample path still reports a window denser than CRISPRME_IUPAC_CAP by
+# its greedy worst-case alignment, flagged in High_complexity_region, whose roster is
+# every carrier of any allele it takes: such a row reads as it does in a population-level
+# report (_greedy_union). No column says which dataset a row comes from, and two datasets
+# can name the same samples, so in a search that also has a dataset with the tiers, whose
+# dense windows come as their observed haplotypes, flagged there too, no row reads so.
+_UNTIERED = False
 
-def _hap_label(n, head=False):
+
+def _greedy_union(row, cols):
+    """True for a row of a --per-sample report whose named roster can be the union of its
+    variants' carriers rather than its cis carriers: one flagged in High_complexity_region,
+    when no dataset of the search has the dict-less tiers (_UNTIERED), with >=2 variants
+    and no indel (an indel row is resolved per carrier haplotype in both modes). Its
+    Observed cell and its per-site link read as in a population-level report."""
+    if not (_PER_SAMPLE and _UNTIERED and "complex_region" in cols and "var_genome" in cols):
+        return False
+    variants = row.get(cols["var_genome"])
+    return (not _is_na(row.get(cols["complex_region"]))
+            and _count_variants(variants) >= 2 and not _has_indel(variants))
+
+
+def _hap_label(n, head=False, greedy=False):
     """Noun for the per-site distinct-combination rows (the "Observed"-cell modal).
     Under --per-sample these are genuinely resolved (phased) OBSERVED haplotypes; in the
     population-level default they are worst-case VARIANT COMBINATIONS enumerated from the
     observed variants (not phased, not confirmed on any one individual's haplotype).
-    ``head=True`` adds a worst-case qualifier to the population-level modal heading."""
-    if _PER_SAMPLE:
+    ``head=True`` adds a worst-case qualifier to the population-level modal heading.
+    ``greedy=True`` (the site of a _greedy_union row, whose other rows are the dense
+    window's other greedy alignments) gives the population-level noun under --per-sample."""
+    if _PER_SAMPLE and not greedy:
         return "observed haplotype" + ("" if n == 1 else "s")
     base = "variant combination" + ("" if n == 1 else "s")
     return (base + " (worst-case)") if head else base
+
+
+def _untiered_named(untiered):
+    """The datasets a search resolved without the dict-less tiers (meta["untiered"], from
+    .untiered_datasets), named as each text that qualifies a claim for them names them:
+    "<code>a</code>, which has no dict-less tiers" ("have" for two or more)."""
+    return (", ".join(f"<code>{_esc(d)}</code>" for d in untiered)
+            + f", which {'has' if len(untiered) == 1 else 'have'} no dict-less tiers")
 
 # Annotation curated kinds that are dropped when their source column is absent from
 # the run's TSV, so a run without a given annotation (legacy no-COSMIC bundle, a
@@ -539,6 +573,23 @@ def _count_variants(raw) -> int:
         if not _is_na(tok.strip()):
             n += 1
     return n
+
+
+def _has_indel(raw) -> bool:
+    """True iff a comma-joined variant field holds a variant of the indel path (a REF or
+    an ALT longer than one base: an indel, or a multi-base record of equal length, an
+    MNV, which CRISPRitz also puts in a fake-indel window), in any of the forms
+    _norm_one_variant reads or the ``chrom;pos;ref;alt`` form it returns."""
+    if _is_na(raw):
+        return False
+    for tok in str(raw).split(","):
+        tok = tok.strip()
+        coord = tok if tok.count(";") >= 3 else _norm_one_variant(tok)[0]
+        parts = coord.split(";") if coord else []
+        if len(parts) >= 4 and (len(parts[2].split()[0]) > 1
+                                or len(parts[3].split()[0]) > 1):
+            return True
+    return False
 
 
 def _norm_one_variant(tok):
@@ -847,14 +898,19 @@ def _curated_cell(kind, row, cols):
         n = _count_samples(_get("samples"))
         nvar = _count_variants(_get("var_genome")) if "var_genome" in cols else 0
         if n > 0:
-            if _PER_SAMPLE:
-                # --per-sample: the roster is the EXACT cis carriers (phased)
+            if _PER_SAMPLE and not _greedy_union(row, cols):
+                # --per-sample: the roster is the EXACT cis carriers (phased) -- but for
+                # a dense window's greedy alignment on a dataset without the dict-less
+                # tiers (_greedy_union), whose roster is the union below
                 return f"{n} cis carrier{'' if n == 1 else 's'}"
-            if nvar >= 2:
+            if nvar >= 2 and not _has_indel(_get("var_genome")):
                 # population-level, multi-variant window: the roster is the worst-case
                 # UNION of samples carrying >=1 of the combination's variants, NOT cis
                 # carriers -- the stacked combination may exist on no one haplotype
                 # (possible chimera). --per-sample resolves the true cis carriers.
+                # An indel row's roster is resolved per carrier haplotype in both modes
+                # (indel_snp_cis.resolve_target): the individuals that carry the indel
+                # with the row's SNP alts, so it falls through to "N carriers".
                 # Plain ASCII: this cell is shared by the HTML table AND the TSV downloads.
                 return f"{n} carrier{'' if n == 1 else 's'} (>=1 of {nvar} vars, poss. chimera)"
             # population-level, single variant: carriers of that one variant
@@ -1203,12 +1259,22 @@ def _normalize_genome(genome):
     return g
 
 
+# What a multi-guide search writes in place of <guide> in its results file names
+# (submit_job_automated_new_multiple_vcfs.sh). It is not a guide, and its own '_' is not
+# the separator between <guide>+<pam> and <ref>.
+MULTI_GUIDE_TOKEN = "Multiple_spacers"
+
+
 def _parse_results_filename(tsv_path):
     """Fallback summary from ``<guide>+<pam>_<ref>+<vcf>_<mm>+<bmax>_integrated_results.tsv``.
 
     e.g. CTCTCAGCTGGTACACGGCANNN+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv
       -> guide=CTCTCAGCTGGTACACGGCANNN, pam=NRG, genome=hg38,
-         datasets=1000G+HGDP, mm=6, bMax=3
+         datasets=1000G+HGDP, vcf=hg38_1000G_HGDP, mm=6, bMax=3
+
+    A multi-guide search names <guide> ``Multiple_spacers`` (no guide is decoded;
+    the guides are read from the table). ``vcf`` is the VCF folder name as the
+    pipeline wrote it, which also names the run's ``Dictionaries/registry_<vcf>``.
     """
     info = {}
     base = os.path.basename(tsv_path)
@@ -1220,10 +1286,15 @@ def _parse_results_filename(tsv_path):
         if base.endswith(suffix):
             base = base[: -len(suffix)]
             break
+    multi_guide = base.startswith(MULTI_GUIDE_TOKEN + "+")
+    if multi_guide:
+        base = base[len(MULTI_GUIDE_TOKEN) + 1:]  # <pam>_<ref>+<vcf>_<mm>+<bmax>
     # <guide>+<pam>_<ref>+<vcf>_<mm>+<bmax>
     try:
         guide_pam, rest = base.split("_", 1)
-        if "+" in guide_pam:
+        if multi_guide:
+            info["pam"] = guide_pam
+        elif "+" in guide_pam:
             info["guide"], info["pam"] = guide_pam.split("+", 1)
         else:
             info["guide"] = guide_pam
@@ -1246,7 +1317,8 @@ def _parse_results_filename(tsv_path):
             ]
             if vcf_tokens:
                 info["datasets"] = "+".join(vcf_tokens)
-            # else: leave datasets unset -> build_summary_meta -> "reference only"
+                info["vcf"] = vcf
+            # else: leave datasets unset (a reference-only search names the vcf "_")
         else:
             info["genome"] = _normalize_genome(genome_vcf)
         if "+" in mm_b:
@@ -1256,12 +1328,18 @@ def _parse_results_filename(tsv_path):
     return info
 
 
+# The "Variant dataset(s)" label of a reference-only search, which searched no variant
+# dataset (build_summary_meta then also sets meta["reference_only"]).
+REFERENCE_ONLY_DATASETS = "none (reference genome only)"
+
+
 def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     """Collect summary metadata used by the header card and matrix.
 
     Returns a dict with resolved guide list, nuclease, pam, genome, datasets, mm,
     bdna, brna, bmax, max_edits, date, version, and the canonical partition
-    counts (n_total, n_variant, n_reference, n_ontarget, n_offtarget).
+    counts (n_total, n_variant, n_reference, n_ontarget, n_offtarget), and
+    reference_only (True when the search used no variant dataset).
     """
     params = {}
     version = None
@@ -1286,11 +1364,14 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     # module-level active scorer that drives the column's display label + tier thresholds.
     _set_active_scorer(params.get("Scorer"))
 
-    # search mode marker written by complete-search
-    # (.search_mode = "population-level" | "per-sample"). The default is population-level;
-    # treat a missing marker as population-level (the default) so older result dirs still
-    # surface the correct caveat. Legacy 2.5.3 markers ("fast"/"full") are mapped for
-    # back-compat when rendering old result dirs.
+    # search mode marker written by complete-search and by the web form
+    # (.search_mode = "population-level" | "per-sample"): the mode that ran. Which mode is
+    # the default depends on the index (since 2.8.0 per-sample on a genotyped + phased one,
+    # population-level otherwise), and the marker does not say whether the mode was the
+    # default or asked for, so the report names the mode, not how it was chosen. A missing
+    # marker reads as population-level, so older result dirs still surface its caveat.
+    # Legacy 2.5.3 markers ("fast"/"full") are mapped for back-compat when rendering old
+    # result dirs.
     search_mode = "population-level"
     if result_dir:
         try:
@@ -1302,6 +1383,23 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
                     search_mode = "population-level"
         except OSError:
             pass
+    # the datasets a complete-search (or a web search job) resolved without the dict-less
+    # tiers, in either mode (.untiered_datasets, one per line; absent when every dataset has
+    # them, and for a run of an earlier release): its banner says what their results lack,
+    # and so does the Search mode row. Beside them, every dataset it searched
+    # (.variant_datasets): no column says which dataset a row comes from, so what holds of
+    # their rows alone is said of a row only when they are all of them (untiered_all,
+    # _greedy_union). (Neither names a sites-only dataset without the tiers, which gives
+    # no row.)
+    untiered, searched = [], []
+    if result_dir:
+        for _name, _into in ((".untiered_datasets", untiered),
+                             (".variant_datasets", searched)):
+            try:
+                with open(os.path.join(result_dir, _name)) as _udf:
+                    _into.extend(_l.strip() for _l in _udf if _l.strip())
+            except OSError:
+                pass
 
     fn = _parse_results_filename(tsv_path)
 
@@ -1319,11 +1417,32 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         or fn.get("genome")
         or ""
     ) or "n/a"
+
+    variant, reference, ontarget = partition_masks(df, cols)
+    n_total = len(df)
+    n_variant = int(variant.sum())
+    n_reference = int(reference.sum())
+    n_ontarget = int(ontarget.sum())
+    n_offtarget = n_total - n_ontarget
+
     datasets = fn.get("datasets")
-    if not datasets:
+    # A reference-only search (no --vcf; "reference only" on the web form) searched no
+    # variant dataset. Both .Params.txt writers (crisprme.py and the web) record
+    # Ref_comp False exactly then. A folder without that key falls back to the names:
+    # no dataset in the results file name and no "+<dataset>" in Genome_idx, whose
+    # reference index name (e.g. NGG_2_hg38) must not be read as a dataset. A run with
+    # a variant-created off-target is never reference-only.
+    ref_comp = str(params.get("Ref_comp", "")).strip()
+    if ref_comp:
+        reference_only = "False" in ref_comp
+    else:
+        reference_only = not datasets and "+" not in str(params.get("Genome_idx", ""))
+    reference_only = reference_only and n_variant == 0
+    if reference_only:
+        datasets = REFERENCE_ONLY_DATASETS
+    elif not datasets:
         idx = params.get("Genome_idx", "")
-        ref_comp = params.get("Ref_comp", "")
-        if "True" in str(ref_comp):
+        if "True" in ref_comp:
             datasets = "reference + variants"
         elif idx and idx != "None":
             datasets = idx
@@ -1343,13 +1462,6 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     bmax = params.get("Max_bulges") or fn.get("bmax") or "n/a"
     bmax_int = _int_or_none(bmax)
     max_edits = params.get("Max_total_edits") or "n/a"
-
-    variant, reference, ontarget = partition_masks(df, cols)
-    n_total = len(df)
-    n_variant = int(variant.sum())
-    n_reference = int(reference.sum())
-    n_ontarget = int(ontarget.sum())
-    n_offtarget = n_total - n_ontarget
 
     # observed max mismatches+bulges on the FEWEST-mm+b (score-neutral) alignment --
     # the basis the off-target matrix uses. A site can still exceed the search cap
@@ -1372,6 +1484,8 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "pam": pam,
         "genome": genome,
         "datasets": datasets,
+        # the VCF folder name the results file carries (None when it names no dataset)
+        "vcf_name": fn.get("vcf"),
         "mm": str(mm),
         "mm_int": mm_int,
         "bdna": bdna,
@@ -1388,6 +1502,10 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "n_offtarget": n_offtarget,
         "obs_max_mmb": obs_max_mmb,
         "search_mode": search_mode,
+        "untiered": untiered,
+        # True when every dataset the search names is one of them
+        "untiered_all": bool(untiered) and bool(searched) and set(searched) <= set(untiered),
+        "reference_only": reference_only,
     }
 
 
@@ -1397,9 +1515,11 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
 def build_mmb_matrix(df, cols, meta):
     """Off-targets binned by origin(REFERENCE/VARIANT) x bulge x mismatch.
 
-    Mirrors the web result-page top matrix: columns Total, 0MM..<mm>MM; rows
+    Laid out as the web result-page top matrix: columns Total, 0MM..<mm>MM; rows
     grouped REFERENCE then VARIANT, within each a row per bulge count 0..maxbulges.
-    Split by origin only (variant := Not_found_in_REF=="y"); PERFECT matches
+    Split by origin only (variant := Not_found_in_REF=="y", a site that exists only
+    because of a variant; the web page's VARIANT is every site whose reported alignment
+    is a variant one, so its VARIANT total can be larger); PERFECT matches
     (mm+b==0) are INCLUDED as putative off-targets in the 0MM/0B cell, because a
     guide's intended on-target cannot be told from a perfect-match off-target a
     priori. So REFERENCE + VARIANT matrix totals == the grand total of all sites.
@@ -1537,7 +1657,7 @@ def build_mmb_matrix(df, cols, meta):
 
 
 def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
-                           variant_count=None):
+                           variant_count=None, no_registry=False, n_variant=None):
     """'Analysis inputs & criteria' box (FDA off-target guidance VII.F.i / F.ii).
 
     States, in one place, the variant database(s), the variant inclusion policy
@@ -1547,11 +1667,27 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     Everything is read from the run's meta (no hardcoded database names).
     ``variant_created_name`` is the ACTUAL bundled filename (``.tsv`` or ``.tsv.gz``)
     so the link never breaks; when absent the name is shown as plain text.
+    ``n_variant`` (build_validation_panel's) is the number of variant-created off-targets,
+    0 when the search has none.
     ``dataset_counts`` (``{dataset: n_individuals}`` from the samplesID files) and
     ``variant_count`` (``{'n_records', 'databases'}`` from the Tier-0 registry) add
     the panel size + database SNP-variant count to the inclusion row when known
     (registry sample counts preferred -- they match the AC/AN denominator).
+    ``no_registry`` (_run_lacks_registry) says the run's index has no Tier-0 registry,
+    so that no SNP+indel co-occurrence table was written; a registry this report does
+    not find (results read away from their install) is not that.
+    A reference-only search (``meta["reference_only"]``) gets only the database row
+    ("none") and its search criteria against the reference genome.
     """
+    def _card(rows, caption=""):
+        body = "".join(f'<tr><td class="k">{k}</td><td>{v}</td></tr>' for k, v in rows)
+        return (
+            '<div class="inputs-card" style="margin-top:1em;padding:14px 18px;'
+            'background:#f7fafc;border:1px solid #cbd5e0;border-radius:10px">'
+            '<div class="matrix-title">Analysis inputs &amp; criteria</div>'
+            f'<table class="summary-table"><tbody>{body}</tbody></table>{caption}</div>'
+        )
+
     # bare <code>name</code>; _linkify_bundled_filenames makes every inline mention
     # of a bundled file (this one included) clickable in one uniform pass.
     vc_html = (
@@ -1559,37 +1695,109 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         if variant_created_name else "<code>variant_created.tsv</code>"
     )
     # variant_created_name is set only when the file is actually bundled (the slim
-    # default report skips the variant_created tier), so key the prose off it: don't
-    # claim the archive contains the file when it does not.
-    vc_note = (
-        f"the full list is bundled as {vc_html}."
-        if variant_created_name else
-        "the full list is written to <code>variant_created.tsv</code> in the result "
-        "directory (re-run with <code>--report-full</code> to bundle it into the archive)."
-    )
+    # default report skips the variant_created tier, and writes no such file anywhere,
+    # the result folder included), so key the prose off it: don't claim the archive or
+    # the result folder holds a file it does not. The sites are the integrated results'
+    # rows that only a variant makes (Not_found_in_REF), which the result folder holds.
+    if variant_created_name:
+        vc_note = f"the full list is bundled as {vc_html}."
+    elif n_variant == 0:
+        vc_note = "this search has none."
+    else:
+        vc_note = (
+            "the full list is in the integrated results in the result folder (its rows "
+            "whose <code>Not_found_in_REF</code> is <code>y</code>; <code>--report-full</code> "
+            "bundles them as <code>variant_created.tsv</code>, gzipped when large)."
+        )
     ds = meta.get("datasets", "n/a")
     mm = meta.get("mm", "n/a")
     bdna, brna = meta.get("bdna"), meta.get("brna")
     bulges = f"{bdna if bdna is not None else 'n/a'} / {brna if brna is not None else 'n/a'}"
     max_edits = meta.get("max_edits", "n/a")
-    if meta.get("search_mode") == "per-sample":
+    if meta.get("reference_only"):
+        # no variant database, analysis mode, panel or allele frequency to state, and
+        # no variant-contributed site: the criteria are the reference genome's alone
+        return _card([
+            ("Variant database(s)", _esc(REFERENCE_ONLY_DATASETS)),
+            ("Off-target search criteria",
+             f"Sites in the reference genome that differ from the guide by up to "
+             f"{_esc(mm)} mismatches and DNA/RNA bulges up to {_esc(bulges)} (max "
+             f"total edits {_esc(max_edits)})."),
+        ])
+    # The mode that ran, not how it was chosen: .search_mode does not record whether it was
+    # the index's default (per-sample on a genotyped + phased index) or asked for
+    # (--per-sample / --population-level, or the web form's choice).
+    # The datasets a search resolved without the dict-less tiers (.untiered_datasets): the
+    # Search mode and Allele-frequency basis rows say what complete-search's banner says of
+    # them, in either mode.
+    _ut = meta.get("untiered") or None
+    _one = bool(_ut) and len(_ut) == 1
+    if _ut and meta.get("search_mode") == "per-sample":
+        # their classic per-sample dictionaries name the carriers, each SNP with the AF that
+        # CRISPRitz add-variants copied into them from the VCF (an indel has the AF it copied
+        # into the indel log, as on any index), none for a record whose INFO has AF at
+        # another place than the VCF's first record (METHODS section 8; maf_footnote), and
+        # their post-analysis still reports a window denser than CRISPRME_IUPAC_CAP by its
+        # greedy worst-case alignment, listing the carriers of any of the variants it takes
         sm_note = (
-            "<strong>Per-sample</strong> (<code>--per-sample</code>) &mdash; per-sample genotypes "
+            "<strong>Per-sample</strong> &mdash; per-sample genotypes resolved into named "
+            "carrier samples only for " + _untiered_named(_ut) + " "
+            "(<code>Dictionaries/registry_&lt;vcf&gt;/</code> and "
+            "<code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample dictionaries: the "
+            "CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint "
+            "allele frequency come from those tiers, and none of them is reported for "
+            f"{'its' if _one else 'their'} variants, whose allele frequencies are the "
+            "<code>AF</code> of those dictionaries (an indel's, of the index's indel log), "
+            "which CRISPRitz <code>add-variants</code> copied from "
+            f"{'its VCF' if _one else 'their VCFs'}: a variant whose <code>AF</code> they give "
+            "as 0, or not at all, has no frequency. "
+            f"Where {'its' if _one else 'their'} variants are dense, a window can "
+            "still be reported by its greedy worst-case alignment, flagged in "
+            "<code>High_complexity_region</code> (<code>High_variant_density_region</code> in "
+            "the integrated results), whose listed carriers need not carry every variant in "
+            "it. To get the tiers, rebuild the index with <code>build-index-only "
+            "--samplesID</code>, or download a prebuilt one (<code>crisprme.py download --what "
+            "index --index-name NRG_3_hg38+hg38_HGDP1kGP</code>)."
+        )
+    elif meta.get("search_mode") == "per-sample":
+        sm_note = (
+            "<strong>Per-sample</strong> &mdash; per-sample genotypes "
             "resolved into observed haplotypes. Every per-sample haplotype is reported with "
             "CONFIRMED cis phasing, named carrier samples and exact joint allele frequency (the "
             "per-sample resolution genotyped panels are built for)."
         )
     else:
         sm_note = (
-            "<strong>Population-level</strong> (default) &mdash; the SNP off-target analysis "
+            "<strong>Population-level</strong> &mdash; the SNP off-target analysis "
             "reports one <em>worst-possible</em> representative per variant window instead of "
             "enumerating every per-sample haplotype. CFD is the <strong>exact worst case</strong>; "
             f"{scorer_label()} is a best-effort screen. <strong>Per-sample carriers, CONFIRMED cis phasing "
             "and exact joint allele frequency are NOT computed</strong> &mdash; re-run the search "
             "with <code>--per-sample</code> for that per-sample resolution on a genotyped panel "
-            "(recommended for clinical validation). For sites-only (aggregate) panels there are no "
+            "(recommended for clinical validation). " + (
+                # which --per-sample cannot give on a dataset without the tiers
+                "On " + _untiered_named(_ut) + " (<code>Dictionaries/registry_&lt;vcf&gt;/</code> "
+                "and <code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample "
+                "dictionaries, <code>--per-sample</code> names the carrier samples only: the "
+                "CONFIRMED/PUTATIVE cis phasing and the exact joint allele frequency come from "
+                f"those tiers, and in either mode {'its' if _one else 'their'} variants' allele "
+                "frequencies are the <code>AF</code> of those dictionaries (an indel's, of the "
+                "index's indel log), which CRISPRitz <code>add-variants</code> copied from "
+                f"{'its VCF' if _one else 'their VCFs'} (a variant whose <code>AF</code> they "
+                "give as 0, or not at all, has no frequency); "
+                f"where {'its' if _one else 'their'} "
+                "variants are dense, it can still report a window by its greedy worst-case "
+                "alignment, whose listed carriers need not carry every variant in it. To get the "
+                "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
+                "download a prebuilt one (<code>crisprme.py download --what index --index-name "
+                "NRG_3_hg38+hg38_HGDP1kGP</code>). " if _ut else ""
+            ) + "For sites-only (aggregate) panels there are no "
             "per-sample genotypes, so this loses nothing (<code>--per-sample</code> is a no-op "
-            "there). SNP+indel co-occurrence is unaffected by the analysis mode."
+            "there). " + (
+                "An off-target that needs an indel and a SNP beside it is reported in either mode, "
+                "but this index has no Tier-0 registry, so no SNP+indel co-occurrence table is "
+                "written." if no_registry else
+                "SNP+indel co-occurrence is unaffected by the analysis mode.")
         )
     rows = [
         ("Variant database(s)", _esc(ds)),
@@ -1602,8 +1810,15 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
          f"Combined-panel minor/alternate allele frequency over the merged "
          f"{_esc(ds)} panel: for genotyped databases this is AC/AN across the "
          f"panel; a frequency-only database contributes its reported population "
-         f"allele frequency directly. Per-dataset and per-superpopulation "
-         f"frequencies are available in the interactive website."),
+         f"allele frequency directly. "
+         + (f"For {_untiered_named(_ut)}, it is instead the <code>AF</code> of "
+            f"{'its' if _one else 'their'} classic per-sample dictionaries (an indel's, of the "
+            "index's indel log), which <code>add-variants</code> copied from "
+            f"{'its VCF' if _one else 'their VCFs'}, as rounded there (a rare variant can read "
+            "0). A variant whose <code>AF</code> they give as 0, or not at all, has no "
+            "frequency, and its MAF is then blank. " if _ut else "")
+         + "Per-dataset and per-superpopulation frequencies are available in the "
+         "interactive website."),
         ("Off-target search criteria",
          f"Sites where a variant increases homology to the guide by reducing "
          f"mismatches (up to {_esc(mm)}) and/or lowering gaps (DNA/RNA bulges up to "
@@ -1615,16 +1830,12 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         ("Variant-contributed sites",
          "Flagged by REF/ALT origin and <code>PAM_creation</code>; " + vc_note),
     ]
-    body = "".join(f'<tr><td class="k">{k}</td><td>{v}</td></tr>' for k, v in rows)
-    return (
-        '<div class="inputs-card" style="margin-top:1em;padding:14px 18px;'
-        'background:#f7fafc;border:1px solid #cbd5e0;border-radius:10px">'
-        '<div class="matrix-title">Analysis inputs &amp; criteria</div>'
-        f'<table class="summary-table"><tbody>{body}</tbody></table>'
+    return _card(
+        rows,
         '<p class="caption">Provided to support an off-target analysis accounting '
         "for human genetic variation. The scientific justification for the database "
         "choice, any allele-frequency threshold, and any population stratification "
-        "is the sponsor&rsquo;s to provide.</p></div>"
+        "is the sponsor&rsquo;s to provide.</p>",
     )
 
 
@@ -1883,6 +2094,11 @@ def _samplesid_dataset_label(basename):
     return None
 
 
+def _unknown_superpop(value):
+    """True for a SUPERPOPULATION_ID that names none (``unknown``, ``NA``, empty)."""
+    return _is_na(value) or str(value).strip().lower() in ("unknown", "n/a", "-")
+
+
 def load_sample_superpop(samplesid_dir, datasets_hint=""):
     """sample_id -> SUPERPOPULATION_ID, loaded from any samplesID files present.
 
@@ -1890,6 +2106,13 @@ def load_sample_superpop(samplesid_dir, datasets_hint=""):
     ``#SAMPLE_ID\\tPOPULATION_ID\\tSUPERPOPULATION_ID\\tSEX``). Returns an empty
     dict when no samplesID files are resolvable; the caller then falls back to
     per-dataset (1000G vs HGDP) provenance.
+
+    A sample several files name takes the superpopulation of the last one (by file
+    name), except that one which gives none (``unknown``, ``NA``) never replaces one
+    that does: the list the web Settings page writes for a VCF dataset added there
+    gives ``unknown`` to a sample no other list names, and a list read later that
+    shared samples with an installed panel turned them unknown in the report of
+    every search of that panel.
     """
     mapping = {}
     for path in _iter_samplesid_files(samplesid_dir):
@@ -1900,6 +2123,10 @@ def load_sample_superpop(samplesid_dir, datasets_hint=""):
                         continue  # header (either #-prefixed or a blank first line)
                     parts = line.rstrip("\n").split("\t")
                     if len(parts) >= 3 and parts[0] and parts[0].upper() != "SAMPLE_ID":
+                        known = mapping.get(parts[0])
+                        if (known is not None and not _unknown_superpop(known)
+                                and _unknown_superpop(parts[2])):
+                            continue
                         mapping[parts[0]] = parts[2]
         except OSError:
             continue
@@ -1974,9 +2201,11 @@ def _registry_variant_count(result_dir, meta):
     The registry ``sample_count`` is the GENOTYPED panel behind AC/AN (e.g. 3,477
     for 1000G+HGDP), which is authoritative over the samplesID-derived count (that
     can over-list individuals relative to the AC/AN denominator). ``n_records`` is
-    the search-usable SNP-variant count (indels / no-carrier records excluded)."""
+    the search-usable SNP-variant count (indels / no-carrier records excluded).
+    ``None`` for a reference-only search, which searched no registry: the single
+    installed one picked below must not be credited to it."""
     try:
-        if not result_dir:
+        if not result_dir or meta.get("reference_only"):
             return None
         dict_dir = None
         for cand in (
@@ -1993,14 +2222,23 @@ def _registry_variant_count(result_dir, meta):
                     if os.path.isdir(d)]
         if not reg_dirs:
             return None
-        # pick the registry whose name carries the run's dataset tokens
-        tokens = [t for t in str(meta.get("datasets", "")).replace("+", "_").split("_") if t]
+        # the run's own registry first: the pipeline names it after the VCF folder the
+        # results file name carries (Dictionaries/registry_<vcf>). The token match below
+        # takes the first registry whose name holds every token, which with more than one
+        # installed can be another dataset's (registry_hg38_1000G_HGDP for hg38_HGDP).
         chosen = None
-        for d in reg_dirs:
-            name = os.path.basename(d).lower()
-            if tokens and all(t.lower() in name for t in tokens):
-                chosen = d
-                break
+        vcf = meta.get("vcf_name")
+        if vcf and os.path.isdir(os.path.join(dict_dir, f"registry_{vcf}")):
+            chosen = os.path.join(dict_dir, f"registry_{vcf}")
+        else:
+            # pick the registry whose name carries the run's dataset tokens
+            tokens = [t for t in str(meta.get("datasets", "")).replace("+", "_").split("_")
+                      if t]
+            for d in reg_dirs:
+                name = os.path.basename(d).lower()
+                if tokens and all(t.lower() in name for t in tokens):
+                    chosen = d
+                    break
         if chosen is None:
             chosen = reg_dirs[0] if len(reg_dirs) == 1 else None
         if chosen is None:
@@ -2042,6 +2280,28 @@ def _registry_variant_count(result_dir, meta):
                 if total > 0 else None)
     except Exception:  # noqa: BLE001 - a count is optional; never break the report
         return None
+
+
+def _run_lacks_registry(result_dir, meta):
+    """Whether the run's index has no Tier-0 registry, so that its indel post-analysis
+    wrote no SNP+indel co-occurrence table: told from the run's results and the install
+    it ran in, never from a registry this report does not find. False when the result
+    folder holds a ``*indel_snp_cooc.tsv`` (the post-analysis writes one per chromosome,
+    its header at least, whenever the registry is there), and when the folder is not in
+    an install holding the run's indel map (``Dictionaries/log_indels_<vcf>`` beside
+    ``Results/``): a copy of the results read elsewhere, whose report then keeps the
+    neutral wording. True when that install holds no ``registry_<vcf>``."""
+    try:
+        vcf = meta.get("vcf_name")
+        if not result_dir or not vcf or meta.get("reference_only"):
+            return False
+        if glob.glob(os.path.join(result_dir, "*indel_snp_cooc.tsv")):
+            return False
+        dict_dir = os.path.join(result_dir, "..", "..", "Dictionaries")
+        return (os.path.isdir(os.path.join(dict_dir, f"log_indels_{vcf}"))
+                and not os.path.isdir(os.path.join(dict_dir, f"registry_{vcf}")))
+    except Exception:  # noqa: BLE001 - a sentence is optional; never break the report
+        return False
 
 
 def panel_and_variants_note(dataset_counts, variant_count=None):
@@ -2294,20 +2554,23 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
     panels = []
 
     # candidate frame: drop on-/near-on-target rows (mm+b<=1), same as the table
+    # (build_report says so under the plots: top_exclusion_note)
     base = df
     if "mmb" in cols:
         base = base[_to_int_series(base[cols["mmb"]]) > 1]
     n_shown = min(n, len(base))
 
+    # stable, as in select_top: tied rows keep the table's order, and a top-N that ends
+    # inside a tie keeps the tie's first rows
     def _score_sorted(score_col):
         s = _to_float_series(base[score_col]).fillna(-1.0)
-        return base.assign(_s=s).sort_values("_s", ascending=False).head(n)
+        return base.assign(_s=s).sort_values("_s", ascending=False, kind="stable").head(n)
 
     def _delta_sorted(alt_col, ref_col):
         delta = _to_float_series(base[alt_col]) - _to_float_series(base[ref_col])
         return (
             base.assign(_delta=delta)
-            .sort_values("_delta", ascending=False, na_position="last")
+            .sort_values("_delta", ascending=False, na_position="last", kind="stable")
             .head(n)
         )
 
@@ -2885,6 +3148,7 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=
 
 def render_validation_panel(
     vp, panel_tsv_name=None, tier_links=None, short_links=False, show_variant_row=True,
+    raw_bundled=True,
 ):
     """Section 4 HTML: full threshold table + hybrid panel + methods note + the
     per-tier download table.
@@ -2910,6 +3174,11 @@ def render_validation_panel(
     not a meaningful "0 found this run"; showing a permanently-empty row
     reads as a real category that just happens to be absent, which it
     is not.
+
+    ``raw_bundled`` (default True, as assembly-search's combined report bundles its
+    complete results): whether the complete raw results are bundled. complete-search's
+    slim report bundles them only under --report-full, and the methods note then says
+    they are in the result folder.
     """
     tier_links = tier_links or {}
 
@@ -3007,10 +3276,15 @@ def render_validation_panel(
             "the same floors and ranks as reference sites."
             if show_variant_row else ""
         )
-        + " The full threshold table above, "
-        "the per-threshold subset files, and the complete raw integrated results "
-        "(bundled downloads) let the panel be reviewed or expanded for any assay "
-        "budget."
+        + (
+            " The full threshold table above, the per-threshold subset files, and the "
+            "complete raw integrated results (bundled downloads) let the panel be reviewed "
+            "or expanded for any assay budget." if raw_bundled else
+            " The full threshold table above and the per-threshold subset files (bundled "
+            "downloads), with the complete raw integrated results in the result folder "
+            "(<code>--report-full</code> bundles them too), let the panel be reviewed or "
+            "expanded for any assay budget."
+        )
     )
     _panel_n = vp.get("panel_size", 0)
     _panel_dl_n = f"~{PANEL_CAP} sites" + (
@@ -3070,8 +3344,11 @@ def render_validation_panel(
         "real off-target. The CFD tiers below use the <strong>same cut points as the card</strong> "
         "(&ge; 0.5, &ge; 0.2); each gives the all-gaps count with the &le;1-gap calibrated subset "
         "(the card&rsquo;s domain) in parentheses, so the two sections reconcile at one threshold. "
-        f"A wider CFD &ge; {_wide_t} net ({_wide_n:,} sites) is included in the bundled "
-        "downloads. <strong>Recommended default panel:</strong> validate every "
+        + (f"A wider CFD &ge; {_wide_t} net ({_wide_n:,} sites) is included in the bundled "
+           "downloads. " if _wide_n else
+           # (an empty tier is not bundled)
+           f"A wider CFD &ge; {_wide_t} net holds no site here. ")
+        + "<strong>Recommended default panel:</strong> validate every "
         f"CRISPR-Bulge&ndash;flagged site ({cbop.sensitive_label_html()} &mdash; the sensitive "
         "operating point, the threshold that recovers ~95&#37; of validated off-targets on the "
         "40-guide held-out benchmark; higher recall is reachable but the list grows steeply), plus the "
@@ -3118,8 +3395,15 @@ def render_validation_panel(
 def select_top(df, cols, n=1000):
     """Top-N off-targets by CFD desc, dropping on-/near-on-target rows.
 
-    Filter mm+b > 1 to drop the on-target and near-on-target rows, matching
-    CRISPRme_plots.py:527-530 filter_table.
+    Filter mm+b > 1: the perfect matches (the on-target among them) and the 1-edit
+    off-targets are left out of the top-N table, its TSV and the Section-2 plots
+    (plot_scatter_panels), and the report says so under each (top_exclusion_note):
+    they are all in the validation panel. (CRISPRme_plots.py, the results page's
+    top-1000 plots, no longer filters them since 2.8.1.)
+
+    The sort is stable: rows of one score keep the table's order. pandas' default
+    (quicksort) is not: the order it gave tied rows depended on the whole column, so a
+    row added anywhere could renumber them.
     """
     work = df.copy()
     if "mmb" in cols:
@@ -3127,7 +3411,7 @@ def select_top(df, cols, n=1000):
     if "cfd" in cols:
         work = work.assign(
             _cfd=pd.to_numeric(work[cols["cfd"]], errors="coerce").fillna(-1.0)
-        ).sort_values("_cfd", ascending=False).drop(columns=["_cfd"])
+        ).sort_values("_cfd", ascending=False, kind="stable").drop(columns=["_cfd"])
     return work.head(n)
 
 
@@ -3135,9 +3419,9 @@ def select_top_crispr_bulge(df, cols, n=1000):
     """Top-N off-targets by CRISPR-Bulge desc (mm+b > 1), when CRISPR-Bulge is computed.
 
     Mirrors :func:`select_top` (same on-/near-on-target filter, same curated
-    columns) but ranks by the CRISPR-Bulge score instead of CFD. Returns an EMPTY frame
-    when CRISPR-Bulge is absent, so the caller renders the CRISPR-Bulge table only when it
-    exists.
+    columns, same stable sort) but ranks by the CRISPR-Bulge score instead of CFD.
+    Returns an EMPTY frame when CRISPR-Bulge is absent, so the caller renders the
+    CRISPR-Bulge table only when it exists.
     """
     if "crispr_bulge" not in cols:
         return df.iloc[0:0]
@@ -3146,8 +3430,55 @@ def select_top_crispr_bulge(df, cols, n=1000):
         work = work[_to_int_series(work[cols["mmb"]]) > 1]
     work = work.assign(
         _cr=pd.to_numeric(work[cols["crispr_bulge"]], errors="coerce").fillna(-1.0)
-    ).sort_values("_cr", ascending=False).drop(columns=["_cr"])
+    ).sort_values("_cr", ascending=False, kind="stable").drop(columns=["_cr"])
     return work.head(n)
+
+
+def top_exclusion_note(df, cols, view, panel_name=None, panel_section=4,
+                       mmb_le_1_name=None):
+    """Caption for a top-N view that leaves out the sites with 0 or 1 mismatches +
+    bulges (select_top, select_top_crispr_bulge, plot_scatter_panels): how many this
+    run has, and where they are. The validation panel holds every one of them (the
+    perfect matches first, the 1-edit sites among its hard-includes), and the mm+b
+    <= 1 tier file the 1-edit off-targets. ``view`` names what leaves them out
+    ("these plots"); ``panel_name`` / ``mmb_le_1_name`` are the bundled files (None
+    when not bundled). Empty when the run has no such site, as nothing is left out.
+    """
+    if "mmb" not in cols:
+        return ""
+    mmb = _to_int_series(df[cols["mmb"]])
+    n_perfect, n_one = int((mmb == 0).sum()), int((mmb == 1).sum())
+    if not (n_perfect or n_one):
+        return ""
+    found = []
+    if n_perfect:
+        found.append(f"{n_perfect:,} perfect match{'' if n_perfect == 1 else 'es'} "
+                     "(0 mismatches and bulges)")
+    if n_one:
+        found.append(f"{n_one:,} off-target{'' if n_one == 1 else 's'} with 1 "
+                     "mismatch or bulge")
+    note = (f"Not in {view}: the sites with 0 or 1 mismatches + bulges, here "
+            + " and ".join(found) + ".")
+    where = []
+    if panel_name:
+        total = n_perfect + n_one
+        where.append(
+            (f"All {total:,} are" if total > 1 else "It is")
+            + f" in the recommended validation panel (Section {panel_section}, "
+            f"<code>{_esc(panel_name)}</code>)"
+            + (f", the perfect match{'' if n_perfect == 1 else 'es'} first"
+               if n_perfect and n_one else "")
+        )
+    if n_one and mmb_le_1_name:
+        which = ("The one with 1 mismatch or bulge is" if n_one == 1
+                 else f"The {n_one:,} with 1 mismatch or bulge are")
+        if where:
+            which = which[0].lower() + which[1:]
+        where.append(
+            f"{which}{' also' if panel_name else ''} in <code>{_esc(mmb_le_1_name)}</code>")
+    if where:
+        note += " " + "; ".join(where) + "."
+    return f'<p class="caption">{note}</p>'
 
 
 def _esc(value):
@@ -3189,20 +3520,54 @@ def _linkify_bundled_filenames(html, names):
 
 # MAF footnote (report v2.4): explains every blank / em-dash MAF cell in the table
 # and the curated download files. The panel name is READ FROM THE RUN (meta
-# datasets), never hardcoded, so it stays correct for any variant database(s).
-def maf_footnote(datasets=None):
+# datasets), never hardcoded, so it stays correct for any variant database(s). A
+# reference-only search has no panel: every MAF is blank, and the note says why.
+# ``untiered``: the datasets a search resolved without the dict-less tiers, whose
+# SNP rows carry the AF of their classic per-sample dictionaries, not AC/AN, in either
+# mode. An AF the index holds is the one CRISPRitz add-variants copied from the VCF's
+# INFO/AF; add-variants looks for the AF key in the VCF's first record only and reads
+# every record's AF at that place in INFO, so a record that has it elsewhere gets none
+# (METHODS section 8): the note says "the index's", not "the VCF's".
+def maf_footnote(datasets=None, reference_only=False, untiered=None):
+    if reference_only:
+        return (
+            "MAF = minor/alternate allele frequency of the variant behind an off-target. "
+            "MAF blank (&mdash;) = reference off-target (no variant). This search used "
+            "the reference genome only, with no variant dataset, so every MAF is blank."
+        )
     ds = datasets or "the variant panel"
     return (
         "MAF = combined-panel minor/alternate allele frequency. "
-        "MAF blank (&mdash;) = reference off-target (no variant), an indel-derived "
-        "variant (the frequency registry is SNP-only), or a SNP not in the frequency "
-        "panel; for SNP variant off-targets the frequency is AC/AN over the genotyped "
-        f"panel &mdash; here the merged {ds} union panel (the combined global "
-        "AF), not a single ancestry. A variant present in the panel but whose "
-        "source allele frequency is 0 (e.g. a secondary allele of a multiallelic "
-        "site) is shown at a display floor of 1&times;10<sup>&minus;5</sup> so it "
-        "renders on log-scale plots &mdash; read it as &ldquo;present, frequency "
-        "effectively 0&rdquo;, not as a measured frequency of 10<sup>&minus;5</sup>."
+        "MAF blank (&mdash;) = reference off-target (no variant), a SNP not in the "
+        "frequency panel, or an indel whose <code>AF</code> the index's indel log gives "
+        "as 0, or not at all; for SNP variant off-targets the frequency is AC/AN over the "
+        f"genotyped panel &mdash; here the merged {ds} union panel (the combined global "
+        "AF), not a single ancestry. "
+        # as analisi_indels_NNN.py has done in every release: an indel row takes the AF of
+        # the index's indel log (final_result[16] = indel_data[3]), in either mode and with
+        # or without the tiers (the SNPs beside it take the registry's, else the
+        # dictionary's). The log holds no AF for any indel of the sites-only mega (its VCF
+        # has no INFO/AF), nor for one whose record has AF elsewhere in INFO than the
+        # VCF's first record
+        "An indel, which the SNP-only frequency registry does not hold, has the "
+        "<code>AF</code> of the index's indel log, which CRISPRitz "
+        "<code>add-variants</code> copied from the VCF's <code>INFO/AF</code>, as rounded "
+        "there. "
+        # as resultIntegrator and _min_maf have done since 2.4.0: an AF that is 0 or
+        # missing is NA, which the row's minimum leaves out, and a smaller AF is printed as
+        # it is (no floor; up to 2.3.3 the integrator wrote 1e-05 for an AF of 0)
+        "A variant whose allele frequency is 0 or missing (e.g. an allele that no "
+        "individual of the panel carries) has no frequency: it is left out of a row's "
+        "MAF, the lowest frequency of the row's variants, which is blank when none of "
+        "them has one. No floor is applied: a frequency below "
+        "1&times;10<sup>&minus;5</sup> is shown as it is."
+    ) + (
+        f" For {_untiered_named(untiered)}, a SNP's frequency is instead the <code>AF</code> "
+        f"of {'its' if len(untiered) == 1 else 'their'} classic per-sample dictionaries, "
+        "which <code>add-variants</code> also copied from "
+        f"{'its VCF' if len(untiered) == 1 else 'their VCFs'}, as rounded there: a SNP whose "
+        "<code>AF</code> they give as 0, or not at all, has no frequency, and its MAF is "
+        "blank." if untiered else ""
     )
 
 
@@ -3223,7 +3588,7 @@ def _oh_modal_cfd(hap):
         return float("-inf")
 
 
-def _oh_modal_html(mid, haps, download_name, omitted_note=""):
+def _oh_modal_html(mid, haps, download_name, omitted_note="", greedy=False):
     """Build the hidden per-site observed-haplotypes modal HTML.
 
     ``mid`` is the stable modal element id (also the ``data-oh`` target of the link
@@ -3231,7 +3596,8 @@ def _oh_modal_html(mid, haps, download_name, omitted_note=""):
     companion rows), ``download_name`` the bundled companion TSV filename. The modal
     lists EVERY observed haplotype at the site in a table (sorted by CFD desc) and
     carries a close button + a download link; the toggle JS lives in render_html.
-    Returns "" when there are no haplotypes.
+    Returns "" when there are no haplotypes. ``greedy``: the site of a _greedy_union
+    row, whose heading names them as the link does (_hap_label).
 
     When ``download_name`` is falsy (the full companion TSV was size-gated out of the
     slim bundle), the download button is omitted and ``omitted_note`` -- a short HTML
@@ -3273,7 +3639,7 @@ def _oh_modal_html(mid, haps, download_name, omitted_note=""):
         f'<div class="oh-modal-box">'
         f'<button class="oh-close" aria-label="Close">&times;</button>'
         f'<div class="oh-modal-head">{_esc(chrom)}:{_esc(start)} ({_esc(strand)}) '
-        f'&mdash; {len(ordered)} {_hap_label(len(ordered), head=True)}</div>'
+        f'&mdash; {len(ordered)} {_hap_label(len(ordered), head=True, greedy=greedy)}</div>'
         f'<div class="oh-modal-body"><table class="oh-table"><thead><tr>{th}</tr>'
         f'</thead><tbody>{"".join(trs)}</tbody></table></div>'
         f'{download_link}</div></div>'
@@ -3331,7 +3697,8 @@ def build_observed_haplotypes_modals_html(oh_modals):
 
 
 def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
-                     oh_modals=None, oh_download_name=None, oh_omitted_note=""):
+                     oh_modals=None, oh_download_name=None, oh_omitted_note="",
+                     reference_only=False, untiered=None):
     """Scrollable inline top-N table, sorted by CFD desc (opens offline).
 
     The ONLY interactivity is the per-site observed-haplotype modal: when ``site_map``
@@ -3348,7 +3715,9 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
     (Gene, Gene_distance_kb, GENCODE, ENCODE, DHS) and CRISPR-Bulge when computed. Cells
     come from ``build_curated_frame`` (values resolved by name; missing -> "-").
     The aligned protospacer+PAM cell is wrapped in <code>; the MAF em-dash keeps
-    its footnote. Extra columns don't break the scroll box / sticky header.
+    its footnote (``reference_only`` gives the footnote of a search with no variant
+    dataset; ``untiered``, the one of a search with datasets without the dict-less
+    tiers). Extra columns don't break the scroll box / sticky header.
     """
     curated = build_curated_frame(top_df, cols, has_crispr_bulge, start_rank=1)
     headers = list(curated.columns)
@@ -3391,13 +3760,17 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
                         n_other = len(haps) - 1
                         mid = "ohm-" + re.sub(r"[^0-9A-Za-z]+", "-",
                                               _key[0] + "-" + _key[1])
+                        # a dense window's greedy alignment (_greedy_union): the site's
+                        # other rows are its other greedy alignments, not observed
+                        # haplotypes
+                        greedy = _greedy_union(raw.iloc[i], cols)
                         cell += (
                             f' &middot; <a class="oh-open" href="#" data-oh="{mid}">'
-                            f'{n_other} other {_hap_label(n_other)}</a>'
+                            f'{n_other} other {_hap_label(n_other, greedy=greedy)}</a>'
                         )
                         if oh_modals is not None and mid not in oh_modals:
                             oh_modals[mid] = _oh_modal_html(
-                                mid, haps, oh_download_name, oh_omitted_note)
+                                mid, haps, oh_download_name, oh_omitted_note, greedy)
                 cells.append(cell)
             else:
                 cells.append(_esc(val))
@@ -3405,7 +3778,7 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
 
     footnote = ""
     if maf_missing_seen:
-        footnote = f'<p class="caption">{maf_footnote(datasets)}</p>'
+        footnote = f'<p class="caption">{maf_footnote(datasets, reference_only, untiered)}</p>'
 
     table = (
         '<div class="ottable-wrap"><table class="ottable">'
@@ -3650,8 +4023,7 @@ _ANNOTATION_LEGEND = [
      "THIS off-target; this column (e.g. <code>16 in window</code>) counts ALL variants "
      "spanning the surrounding window, so a row can legitimately show one variant while "
      "its window count is much larger. Such dense windows are reported greedily (one "
-     "representative alignment is shown; the full variant set for each window is in the "
-     "bundled <code>high_variant_density_regions.bed</code>)."),
+     "representative alignment is shown; {hvdr_where})."),
 ]
 
 
@@ -3735,18 +4107,61 @@ _SCORE_LEGEND = [
      "frequent than its rarest variant, and may be much rarer&nbsp;&mdash;&nbsp;or "
      "absent&nbsp;&mdash;&nbsp;if the variants do not lie on the same haplotype. Under "
      "<code>--per-sample</code> the EXACT joint (cis) allele frequency is computed from "
-     "the actual carriers instead. A value of <b>1&times;10<sup>&minus;5</sup></b> is a "
-     "display floor meaning &ldquo;present, frequency effectively&nbsp;0&rdquo;, not a "
-     "measured frequency."),
+     "the actual carriers instead. A variant whose allele frequency is 0 or missing has "
+     "none and is left out of the minimum, and the value is blank when no variant of the "
+     "off-target has one. No floor is applied: a frequency below "
+     "1&times;10<sup>&minus;5</sup> is shown as it is."),
     ("Aligned protospacer+PAM notation",
      "In the aligned-sequence column: <b>UPPERCASE</b> = a base matching the guide, "
      "<b>lowercase</b> = a mismatch, and a dash <code>-</code> = a bulge/gap."),
 ]
 
 
-def build_score_legend_html():
-    """Render the scores-&-columns legend (Section 7, always present)."""
+def build_score_legend_html(untiered=None):
+    """Render the scores-&-columns legend (Section 7, always present). ``untiered``: the
+    datasets a search resolved without the dict-less tiers, for which the Observed and MAF
+    entries say what holds instead of their --per-sample claims: in a --per-sample report
+    (_PER_SAMPLE) the Observed one as it holds when they are all of the search's datasets
+    (_UNTIERED) or when they are not, in a population-level one what --per-sample gives
+    there."""
     legend = list(_SCORE_LEGEND)
+    if untiered:
+        # what complete-search's banner says of them (and the Search mode row): a dense
+        # window's greedy worst-case alignment lists the carriers of any of its variants
+        # (and reads so when no dataset of the search has the tiers, _UNTIERED:
+        # _greedy_union), and each variant has the AF that CRISPRitz add-variants copied from
+        # the VCF into the classic dictionaries (an indel's, into the indel log), with no
+        # joint AF
+        named = _untiered_named(untiered)
+        extra = {
+            "Observed": (
+                f" On {named}, a dense window flagged in <code>High_complexity_region</code> "
+                "can be reported by its greedy worst-case alignment, which lists the carriers "
+                "of any of its variants rather than its exact cis carriers: they need not carry "
+                "every variant in it"
+            ) + (
+                ", so a row of two or more SNPs flagged there reads "
+                "<code>N&nbsp;carriers (&gt;=1 of K vars, poss. chimera)</code>, as in a "
+                "population-level search." if _UNTIERED else
+                ". This search's other datasets have dict-less tiers, and the report cannot "
+                "tell which dataset a row comes from, so a row of two or more SNPs flagged "
+                "there still reads <code>N&nbsp;cis carriers</code>, and can be such an "
+                "alignment.") if _PER_SAMPLE else (
+                f" On {named}, <code>--per-sample</code> can still report a dense window by its "
+                "greedy worst-case alignment, which lists the carriers of any of its variants "
+                "rather than its exact cis carriers."),
+            "MAF": (
+                f" For {named}, no joint allele frequency is computed"
+                + ("" if _PER_SAMPLE else " under <code>--per-sample</code> either")
+                + ", and each variant's frequency is the <code>AF</code> of "
+                f"{'its' if len(untiered) == 1 else 'their'} classic per-sample dictionaries (an "
+                "indel's, of the index's indel log), which CRISPRitz <code>add-variants</code> "
+                f"copied from {'its VCF' if len(untiered) == 1 else 'their VCFs'}, as rounded "
+                "there. One whose <code>AF</code> they give as 0, or not at all, is left out of "
+                "the minimum, so the value shown can be that of a far more common variant (it is "
+                "blank where none of them has a frequency)."),
+        }
+        legend = [(term, definition + extra.get(term, "")) for term, definition in legend]
     items = "".join(
         '<div class="legend-item"><div class="legend-term">%s</div>'
         '<div class="legend-def">%s</div></div>' % (term, definition)
@@ -3760,14 +4175,31 @@ def build_score_legend_html():
     )
 
 
-def build_annotation_legend_html(cols=None, df=None):
+def _hvdr_where(hvdr_bundle_name=None, hvdr_n_regions=0, report_full=False):
+    """Where the full variant set of each high-variant-density window is, as the legend
+    says it: in the per-chromosome beds of the result folder, and, for the windows near
+    the top-ranked sites, in the report's ``hvdr_bundle_name`` (--report-full bundles them
+    when there is such a window, ``hvdr_n_regions``)."""
+    where = ("the full variant set for each window is in the "
+             "<code>*high_variant_density_regions.bed</code> files of the result folder")
+    if hvdr_bundle_name:
+        return (f"{where}, and for the windows near the top-ranked sites in the bundled "
+                f"<code>{_esc(hvdr_bundle_name)}</code>")
+    if hvdr_n_regions and not report_full:
+        return (f"{where}, which <code>--report-full</code> bundles for the windows near the "
+                "top-ranked sites")
+    return where
+
+
+def build_annotation_legend_html(cols=None, df=None, hvdr_where=None):
     """Render the annotation legend (Section 7). Only include an entry when its
     backing annotation column is actually present in this run (and, when ``df`` is
     given, carries at least one real value), so a run WITHOUT a given annotation is
     never falsely documented (e.g. a legacy/no-COSMIC or non-human/custom-genome
     run must not print a COSMIC Cancer Gene Census glossary). Returns "" when no
     entry qualifies, so the caller omits the whole section. ``cols=None`` keeps the
-    legacy full legend (backward-compatible)."""
+    legacy full legend (backward-compatible). ``hvdr_where`` (_hvdr_where's, which it
+    defaults to) says where the variant set of a high-variant-density window is."""
     def _active(key):
         if cols is None:
             return True
@@ -3777,7 +4209,8 @@ def build_annotation_legend_html(cols=None, df=None):
             return bool(df[cols[key]].map(lambda v: not _is_na(v)).any())
         return True
 
-    entries = [(t, d) for (k, t, d) in _ANNOTATION_LEGEND if _active(k)]
+    entries = [(t, d.replace("{hvdr_where}", hvdr_where or _hvdr_where()))
+               for (k, t, d) in _ANNOTATION_LEGEND if _active(k)]
     if not entries:
         return ""
     items = "".join(
@@ -3936,8 +4369,14 @@ def render_html(
     indel_af_bundle_name=None, indel_af_n_rows=0,
     observed_haplotypes_bundle_name=None, observed_haplotypes_modals="",
     table_crispr_bulge_html="", inputs_criteria_html="", legend_html=None,
-    next_steps_html="",
+    next_steps_html="", plots_exclusion_note="", table_exclusion_note="", untiered=None,
+    n_variant=None,
 ):
+    # ``plots_exclusion_note`` / ``table_exclusion_note``: the top_exclusion_note
+    # captions of Section 2 and Section 6 (empty when nothing is left out).
+    # ``untiered``: the datasets a search resolved without the dict-less tiers, whose
+    # dense windows the Section-6 caption qualifies (or what --per-sample gives there).
+    # ``n_variant``: the number of variant-created off-targets (build_validation_panel).
     scatter_html = []
     for title, caption, uri in scatter_panels:
         scatter_html.append(
@@ -4099,6 +4538,21 @@ def render_html(
                 "<strong>&ldquo;N other observed haplotypes&rdquo;</strong> link in the "
                 "<code>Observed</code> column &mdash; click it to see every haplotype a "
                 "real individual carries at that site."
+            ) + (
+                f" On {_untiered_named(untiered)}, a site flagged in "
+                "<code>High_complexity_region</code> can be reported by its dense window's "
+                "greedy worst-case alignments instead, whose listed carriers need not carry "
+                "every variant in them" + (
+                    ": a row of two or more SNPs there reads "
+                    "<strong>&ldquo;N carriers (&gt;=1 of K vars, poss. chimera)&rdquo;</strong>, "
+                    "and its link <strong>&ldquo;N other variant combinations&rdquo;</strong>, "
+                    "as in a population-level search." if _UNTIERED else
+                    # (a search that also has a dataset with the tiers)
+                    ". This search's other datasets have dict-less tiers, and the report "
+                    "cannot tell which dataset a row comes from, so a row of two or more SNPs "
+                    "there still reads <strong>&ldquo;N cis carriers&rdquo;</strong>, and its "
+                    "link <strong>&ldquo;N other observed haplotypes&rdquo;</strong>, and can be "
+                    "such an alignment.") if untiered else ""
             )
         else:
             _oh_expl = (
@@ -4110,6 +4564,10 @@ def render_html(
                 "observed variants and are <strong>unphased</strong> (not confirmed on any "
                 "one individual&rsquo;s haplotype); run <code>--per-sample</code> to resolve "
                 "the true cis haplotypes and carriers."
+            ) + (
+                f" On {_untiered_named(untiered)}, <code>--per-sample</code> can still report "
+                "a dense window by its greedy worst-case alignments, whose listed carriers need "
+                "not carry every variant in them." if untiered else ""
             )
         observed_haplotypes_table_note = (
             f'<p class="caption">{_oh_expl}</p>'
@@ -4138,10 +4596,16 @@ def render_html(
         tier_download_html = (
             f'\n<p class="tier-downloads">{links}\n</p>'
         )
+        # the variant-created subset is bundled only under --report-full (tsv_gz_name, the
+        # raw dump's, is set then), and only when the search has such a site
+        vc_bundled = any(fname.startswith("variant_created.") for _label, fname in tier_downloads)
         tier_caption = (
-            " Per-threshold subsets (CFD and mismatch+bulge tiers, plus the "
-            "variant-created subset) are bundled as curated-column TSVs so the "
-            "panel can be expanded to any tier for review."
+            " Per-threshold subsets (CFD and mismatch+bulge tiers"
+            + (", plus the variant-created subset" if vc_bundled else "")
+            + ") are bundled as curated-column TSVs so the panel can be expanded to any "
+            "tier for review."
+            + (" <code>--report-full</code> adds the variant-created subset."
+               if n_variant and not vc_bundled and not tsv_gz_name else "")
         )
 
     logo_uri = _asset_data_uri("crisprme-logo.svg") or _asset_data_uri("crisprme-logo.png")
@@ -4202,6 +4666,7 @@ for human genetic variation</p>
 candidates. The same scatter is shown under multiple
 rankings so the highest-scoring sites and the highest-variant-effect sites are
 both foregrounded.</p>
+{plots_exclusion_note}
 {scatter_block}
 
 <h2>3. Reference vs population origin</h2>
@@ -4238,6 +4703,7 @@ run analyses against a <strong>custom personal genome assembly</strong>. Launch 
 locally with <code>crisprme.py web-interface</code>.</p>
 
 <h2>6. Top 1000 putative off-targets</h2>
+{table_exclusion_note}
 {observed_haplotypes_table_note}
 <h3 style="margin:0.6em 0 0.3em 0">Ranked by CFD score</h3>
 <p style="margin:0 0 0.5em"><a class="download" href="{_dl_href(top1000_name)}" download>&#11015; Download this table &mdash; top-1000 by CFD (curated TSV)</a></p>
@@ -4366,6 +4832,32 @@ def _package_version():
                         m = re.match(r'version\s*=\s*["\']([^"\']+)["\']', line)
                         if m:
                             return m.group(1)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _crispritz_version():
+    """Best-effort version of the search engine that actually ran, or None.
+
+    Read from the ``VERSION = "X"`` assignment in the ``crispritz.py`` on PATH --
+    the engine this install would invoke -- by parsing rather than executing, so
+    nothing can write to stderr (fatal to the enclosing stage) and the report
+    cannot be slowed by a subprocess. Returns None when the engine is not on PATH,
+    in which case the manifest names no version instead of guessing one.
+    """
+    try:
+        import re
+        import shutil
+
+        exe = shutil.which("crispritz.py")
+        if not exe:
+            return None
+        with open(exe, "r", errors="replace") as fh:
+            for line in fh:
+                m = re.match(r'VERSION\s*=\s*["\']([^"\']+)["\']', line)
+                if m:
+                    return m.group(1)
     except Exception:  # noqa: BLE001
         pass
     return None
@@ -4637,7 +5129,7 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                     })
 
         if not observations:
-            return None
+            return None, [], {}
 
         # ---- 3. group observations into SITES -------------------------------
         # group by (chrom, strand, spacer), sort by start, single-linkage cluster
@@ -4939,8 +5431,17 @@ def build_report(
     )
     # Under --per-sample a named carrier roster is the EXACT cis set; population-level
     # multi-variant rosters are a worst-case union (see the "Observed" cell labelling).
-    global _PER_SAMPLE
+    global _PER_SAMPLE, _UNTIERED
     _PER_SAMPLE = meta.get("search_mode") == "per-sample"
+    # but not on the datasets a search resolved without the dict-less tiers
+    # (.untiered_datasets), whose rows carry no more than the classic dictionaries give,
+    # in either mode: the texts that say otherwise, or what --per-sample gives, qualify it
+    # for them (the MAF footnote, the Section-6 caption, the legend; the Search mode and
+    # Allele-frequency basis rows read meta), and in a per-sample report of a search none
+    # of whose datasets has the tiers (untiered_all) a dense window's greedy alignment
+    # reads as in population-level (_greedy_union)
+    untiered = meta.get("untiered") or []
+    _UNTIERED = _PER_SAMPLE and bool(untiered) and bool(meta.get("untiered_all"))
     version = meta.get("version") or _package_version()
     has_crispr_bulge = crispr_bulge_computed(df, cols)
 
@@ -5068,7 +5569,8 @@ def build_report(
         for tier in vp.get("tiers", []):
             # variant_created is the bulky full-data tier (every variant-origin
             # off-target) -> bundle ONLY with report_full; its count still shows in
-            # the panel, just without a download link (stays in the result dir).
+            # the panel, just without a download link (its rows stay in the result
+            # dir's integrated results; no file of the tier is written there).
             if tier.get("key") == "variant_created" and not report_full:
                 continue
             sub = tier["df"]
@@ -5082,7 +5584,8 @@ def build_report(
             tier_downloads.append((label, fname))
 
         validation_html = render_validation_panel(
-            vp, panel_tsv_name=panel_top100_name, tier_links=tier_links
+            vp, panel_tsv_name=panel_top100_name, tier_links=tier_links,
+            raw_bundled=report_full,
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: validation panel unavailable: {exc}\n")
@@ -5172,6 +5675,7 @@ def build_report(
             site_map=observed_haplotypes_site_map, oh_modals=oh_modals,
             oh_download_name=observed_haplotypes_bundle_name,
             oh_omitted_note=observed_haplotypes_omitted_note,
+            reference_only=meta.get("reference_only", False), untiered=untiered,
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
@@ -5189,6 +5693,7 @@ def build_report(
                     site_map=observed_haplotypes_site_map, oh_modals=oh_modals,
                     oh_download_name=observed_haplotypes_bundle_name,
                     oh_omitted_note=observed_haplotypes_omitted_note,
+                    reference_only=meta.get("reference_only", False), untiered=untiered,
                 )
                 # (the CRISPR-Bulge top-1000 is surfaced in the Section-5 top-1000 row next
                 # to the CFD one by render_html, not appended to the per-tier list here.)
@@ -5441,6 +5946,8 @@ def build_report(
         meta, tier_links.get("variant_created"),
         dataset_counts=_ds_counts,
         variant_count=_reg_vc,
+        no_registry=_run_lacks_registry(result_dir, meta),
+        n_variant=vp.get("n_variant"),
     )
     # Assemble the per-site observed-haplotype modals (built as a side effect of the
     # top-1000 table renders) into a single backdrop + modal set + one self-contained
@@ -5451,6 +5958,20 @@ def build_report(
     # script, so the report stays self-contained)
     if risk_modal_html:
         observed_haplotypes_modals_html += risk_modal_html
+    # the Section-2 plots and the Section-6 tables leave out the sites with mm+b <= 1:
+    # say so under each, and where they are
+    _shown_tables = (
+        f"these tables or their downloads (<code>{_esc(top1000_name)}</code>, "
+        "<code>top1000_crispr_bulge.tsv</code>)"
+        if top_crispr_bulge_df is not None and len(top_crispr_bulge_df)
+        else f"this table or its download (<code>{_esc(top1000_name)}</code>)"
+    )
+    plots_exclusion_note = top_exclusion_note(
+        df, cols, "these plots", panel_top100_name, mmb_le_1_name=tier_links.get("mmb_1")
+    )
+    table_exclusion_note = top_exclusion_note(
+        df, cols, _shown_tables, panel_top100_name, mmb_le_1_name=tier_links.get("mmb_1")
+    )
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
         table_html, (tsv_gz_name if report_full else None), top1000_name, footer_html,
@@ -5472,12 +5993,18 @@ def build_report(
         next_steps_html=render_next_steps_box(vp),
         table_crispr_bulge_html=table_crispr_bulge_html,
         inputs_criteria_html=inputs_criteria_html,
+        plots_exclusion_note=plots_exclusion_note,
+        table_exclusion_note=table_exclusion_note,
+        untiered=untiered,
+        n_variant=vp.get("n_variant"),
         legend_html=(
             '<h3 style="margin:0.6em 0 0.3em">Scores &amp; columns</h3>'
-            + build_score_legend_html()
+            + build_score_legend_html(untiered)
             + (
                 '<h3 style="margin:1.2em 0 0.3em">Annotations</h3>' + _ann_legend
-                if (_ann_legend := build_annotation_legend_html(cols, df)) else ""
+                if (_ann_legend := build_annotation_legend_html(
+                    cols, df, _hvdr_where(hvdr_bundle_name, hvdr_n_regions, report_full)))
+                else ""
             )
         ),
     )
@@ -5564,14 +6091,19 @@ def build_report(
         # the ZIP is self-sufficient for re-execution. Never break the report on it.
         try:
             _manifest = {
-                "crisprme_version": meta.get("version") or "2.8.0",
-                "report_generator": "v" + (meta.get("version") or "2.8.0"),
+                # never a hardcoded release number: this manifest is the IND
+                # traceability record, so stamping a plausible-but-wrong version is
+                # worse than admitting the run did not record one.
+                "crisprme_version": meta.get("version") or _package_version() or "unknown",
+                "report_generator": "v" + (meta.get("version") or _package_version() or "unknown"),
                 "generated_date": meta.get("date"),
                 "guides": meta.get("guides"),
                 "nuclease": meta.get("nuclease"),
                 "pam": meta.get("pam"),
                 "genome": meta.get("genome"),
-                "variant_datasets": meta.get("datasets"),
+                # null for a reference-only search: it searched no variant dataset
+                "variant_datasets": (
+                    None if meta.get("reference_only") else meta.get("datasets")),
                 "search": {
                     "mismatches": meta.get("mm"),
                     "bulges_dna": meta.get("bdna"),
@@ -5591,9 +6123,14 @@ def build_report(
                 },
                 "database": _reg_vc,  # {n_records SNPs, n_indels, databases} or None
                 "source_integrated_results": os.path.basename(integrated_tsv),
+                # Resolved from the engine on PATH, never hardcoded: the literal
+                # "v2.8.3" here outlived three CRISPRitz pins and shipped a wrong
+                # engine version in every report manifest.
+                "crispritz_version": _crispritz_version(),
                 "crispritz_note": (
-                    "search-engine (CRISPRitz v2.8.3) version is recorded in the build. "
-                    "See Params.txt for the exact run parameters."
+                    "search-engine (CRISPRitz) version is resolved from the engine on "
+                    "PATH; null when it could not be determined. See Params.txt for "
+                    "the exact run parameters."
                 ),
             }
             _man_path = os.path.join(staging, "run_manifest.json")
@@ -7327,6 +7864,18 @@ def build_combined_report(
                         )
                     )
                 )
+    # select_top leaves out the sites with mm+b <= 1: say so, and where they are
+    top_exclusion_html = ""
+    if pooled_vp is not None:
+        _mmb_le_1_name = _tier_filename("mmb_1")
+        top_exclusion_html = top_exclusion_note(
+            _pooled_df, _pooled_cols,
+            ("these tables" if top1000_crispr_bulge_html else "this table")
+            + f" or the <code>{_esc(top_tsv_name)}</code> download",
+            PANEL_TOP100_NAME if PANEL_TOP100_NAME in _staged_by_arcname else None,
+            panel_section=3,
+            mmb_le_1_name=_mmb_le_1_name if _mmb_le_1_name in _staged_by_arcname else None,
+        )
 
     combined_html = f"""<!DOCTYPE html>
 <html lang="en"><head>
@@ -7412,6 +7961,7 @@ has interactive sorting/filtering by site category and genomic region (the
 (reconciled/hg38 + each haplotype's own non-mappable sites) -- not
 reconciled-only -- same pooled frame as the validation panel above, tagged
 with <code>Site_category</code>.</p>
+{top_exclusion_html}
 <h3 style="margin:0.6em 0 0.3em 0">Ranked by CFD score</h3>
 {top1000_html}
 {top1000_crispr_bulge_html}

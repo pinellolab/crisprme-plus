@@ -123,10 +123,19 @@ qfmt='%CHROM\t%POS\t%REF\t%ALT'; for n in "${names[@]}"; do qfmt="$qfmt\t%INFO/A
 tabix -s1 -b2 -e2 "$WORK/afmax.tab.gz"
 # Annotate BOTH AF_max AND a plain INFO/AF (= AF_max). The plain AF is the single
 # global frequency CRISPRitz `add-variants` embeds into the fake-indel contig
-# metadata, so INDEL off-targets carry the global AF_max through the existing path
-# with no post-analysis change (per-dataset indel AF comes from the separate
-# build_mega_indel_af.py sidecar). For SNPs the dict-less registry is authoritative,
-# so this plain AF only matters for indels / dict-based use.
+# metadata (the index's indel log) -- BUT add-variants looks for the AF key in the
+# VCF's FIRST record only, and reads every later record's AF at the same place in
+# INFO. Here AF comes after the site's AF_<src> keys and AF_max, and the number of
+# AF_<src> keys is the number of sources that hold the site, so only an indel whose
+# site has as many sources as the first record's gets the global AF_max through that
+# path; every other one gets NO AF in the log, and its MAF is blank (on an index
+# without the dict-less registry, a SNP's AF in the classic per-sample dictionaries
+# is read the same way). A known limit (METHODS section 8), to be fixed in the next
+# CRISPRitz release; the recipe below is unchanged, and the shipped mega's VCFs came
+# from mega_gw_merge.sh, which writes no plain AF at all. Per-dataset indel AF comes
+# from the separate build_mega_indel_af.py sidecar. For SNPs the dict-less registry
+# is authoritative (it reads each AF_<src> by its key), so this plain AF only
+# matters for indels / dict-based use.
 printf '##INFO=<ID=AF_max,Number=A,Type=Float,Description="Max per-dataset AF across the merged sources">\n##INFO=<ID=AF,Number=A,Type=Float,Description="Global allele frequency (= AF_max) for the enricher/fake-indel path">\n' > "$WORK/afmax.hdr"
 "$BCFTOOLS" annotate -a "$WORK/afmax.tab.gz" -h "$WORK/afmax.hdr" \
   -c CHROM,POS,REF,ALT,INFO/AF_max,INFO/AF "$WORK/mega.noafmax.vcf.gz" -Oz -o "$OUT"

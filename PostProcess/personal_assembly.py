@@ -48,6 +48,8 @@ import tarfile
 import zipfile
 from typing import Dict, List, Optional
 
+import safe_tar  # (PostProcess/, the standard library only)
+
 ASSEMBLIES_DIR = "Assemblies"       # top-level folder holding one dir per individual
 METADATA_NAME = "metadata.json"     # the single source of truth inside each individual dir
 BUNDLE_FORMAT = "crisprme-personal-assembly"
@@ -131,14 +133,30 @@ def write_haplotype(
 # ---------------------------------------------------------------------------
 # Resolution (metadata -> concrete, existence-checked paths)
 # ---------------------------------------------------------------------------
+def _inside(bundle_dir: str, rel) -> bool:
+    """Whether ``rel``, a path ``metadata.json`` gives, names a file or folder inside
+    the bundle folder ``bundle_dir`` once '..' and links are resolved. metadata.json is
+    the bundle's own content, a client's for an archive imported in Settings: an
+    absolute path or '../' in it named any file or folder of the server, which the
+    individual was then searched with."""
+    if not isinstance(rel, str):
+        return False
+    root = os.path.realpath(bundle_dir)
+    return os.path.commonpath([root, os.path.realpath(os.path.join(bundle_dir, rel))]) == root
+
+
 def _resolve_haplotype(cwd: str, individual: str, hap_meta: Dict) -> Optional[Dict]:
     """Turn one haplotype's relative metadata into cwd-relative, existence-checked
-    paths. Returns ``None`` if the metadata is missing required keys."""
+    paths. Returns ``None`` if the metadata is missing required keys, or names a file
+    or folder outside the individual's folder (a bundle imported before 2.8.1, whose
+    import did not check that)."""
     root = individual_dir(cwd, individual)
     genome_rel = hap_meta.get("genome_dir")
     chain_rel = hap_meta.get("chain")
     chromalias_rel = hap_meta.get("chromalias")
     if not (genome_rel and chain_rel and chromalias_rel):
+        return None
+    if not all(_inside(root, rel) for rel in (genome_rel, chain_rel, chromalias_rel)):
         return None
     genome_abs = os.path.join(root, genome_rel)
     chain_abs = os.path.join(root, chain_rel)
@@ -170,13 +188,19 @@ def resolve(cwd: str, individual: str) -> Optional[Dict]:
     """One individual's registration dict (bundle layout), or ``None`` if there
     is no ``metadata.json`` for it. Shape matches
     ``pages.pages_utils.installed_assemblies`` entries, with extra ``layout`` /
-    ``root`` / ``source`` / ``*_path`` fields."""
+    ``root`` / ``source`` / ``*_path`` fields. The individual is named after its
+    folder, as ``--assembly-individual`` and Settings' Remove take it, not after
+    metadata.json's ``individual``: that is the bundle's own content, a client's
+    for an archive imported in Settings, and naming another individual listed the
+    bundle in that one's place, or one with no folder, which Remove then took for
+    a pairing of the legacy layout, removing paths named after the bundle's
+    assembly names (outside the data folder too)."""
     meta = read_metadata(cwd, individual)
     if meta is None:
         return None
     haps = meta.get("haplotypes", {}) or {}
     out = {
-        "individual": meta.get("individual", os.path.basename(individual)),
+        "individual": os.path.basename(individual),
         "layout": "bundle",
         "root": os.path.relpath(individual_dir(cwd, individual), cwd),
         "source": meta.get("source"),
@@ -192,6 +216,65 @@ def resolve(cwd: str, individual: str) -> Optional[Dict]:
 
     out["complete"] = _complete(out["paternal"]) and _complete(out["maternal"])
     return out
+
+
+def bundle_haplotype(genome_dir: str, haplotype: Optional[str] = None) -> Optional[Dict]:
+    """The bundle haplotype whose genome folder is ``genome_dir``, found from the
+    folder alone, so it works for the explicit ``--genome-paternal`` /
+    ``--genome-maternal`` paths (the web passes those) as well as for
+    ``--assembly-individual``.
+
+    Looks for a bundle ``metadata.json`` in each folder above ``genome_dir`` (a
+    bundle may live outside this working directory's ``Assemblies/``) and returns
+    the haplotype whose ``genome_dir`` resolves to the same folder::
+
+        {"root": <bundle folder>, "folder": <its name>, "individual": ...,
+         "haplotype": "paternal"|"maternal", "assembly_name": ... or None}
+
+    When both haplotypes name that folder, ``haplotype`` wins. ``None`` when the
+    folder is no bundle haplotype's genome (a legacy ``Genomes/<name>`` folder, or
+    any other folder)."""
+    real = os.path.realpath(genome_dir)
+    level = os.path.dirname(real)
+    while True:
+        try:
+            with open(os.path.join(level, METADATA_NAME)) as fh:
+                meta = json.load(fh)
+        except (OSError, ValueError):
+            meta = None
+        if isinstance(meta, dict) and meta.get("format") == BUNDLE_FORMAT:
+            haps = meta.get("haplotypes") or {}
+            for hap in [haplotype] + [h for h in HAPLOTYPES if h != haplotype]:
+                hap_meta = haps.get(hap) if hap else None
+                rel = hap_meta.get("genome_dir") if isinstance(hap_meta, dict) else None
+                if rel and os.path.realpath(os.path.join(level, rel)) == real:
+                    return {
+                        "root": level,
+                        "folder": os.path.basename(level),
+                        "individual": meta.get("individual") or os.path.basename(level),
+                        "haplotype": hap,
+                        "assembly_name": hap_meta.get("assembly_name") or None,
+                    }
+        parent = os.path.dirname(level)
+        if parent == level:
+            return None
+        level = parent
+
+
+def haplotype_label(genome_dir: str, haplotype: Optional[str] = None) -> str:
+    """Display name of one haplotype's genome, for the ``Genome_paternal`` /
+    ``Genome_maternal`` lines of an assembly-search job's ``.Params.txt`` (the
+    results header and History show them): the bundle's ``assembly_name``
+    (``<individual>_<haplotype>`` when it records none), else the folder's own
+    name, as in the legacy ``Genomes/<name>_<hap>`` layout. A bundle keeps every
+    haplotype in a folder named ``genome``, so there the folder name says nothing."""
+    hap = bundle_haplotype(genome_dir, haplotype)
+    if hap is not None:
+        label = hap["assembly_name"] or f"{hap['individual']}_{hap['haplotype']}"
+    else:
+        label = os.path.basename(os.path.normpath(genome_dir))
+    # one field of a tab-separated file
+    return " ".join(str(label).split())
 
 
 def discover_bundles(cwd: str) -> List[Dict]:
@@ -221,10 +304,41 @@ def delete_target(cwd: str, individual: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Import a bring-your-own bundle archive (.zip / .tar.gz)
 # ---------------------------------------------------------------------------
+class BundleError(ValueError):
+    """A bundle archive refused, saying why: how it is packed, its members, the folder it
+    would go into, or what its ``metadata.json`` names. Settings' upload answers it as the
+    client's to fix (HTTP 400), and any other failure of an import as its own (500)."""
+
+
+def _unusable_fasta_name(genome_dir: str) -> Optional[str]:
+    """Why a FASTA file of the haplotype genome folder ``genome_dir`` cannot be
+    searched under its name, else ``None``. A search takes each ``.fa`` file's name,
+    less the extension, for its chromosome's, and its post-analysis takes that name
+    into shell commands as it is (pool_post_analisi_snp.py refuses one it cannot
+    take). A bundle brings its files named as its archive names them, a client's for
+    one imported in Settings: a name holding a character a shell reads ran it when the
+    individual was searched. Refused as in a sequence's name (genome_layout.py), and
+    so is any blank; a real chromosome's file, named after its sequence, holds none."""
+    from genome_layout import UNUSABLE_IN_ID
+
+    for fname in sorted(os.listdir(genome_dir)):
+        if not fname.endswith(".fa"):
+            continue
+        chrom = os.path.splitext(fname)[0]
+        if any(c in UNUSABLE_IN_ID or c.isspace() for c in chrom):
+            return (
+                f"holds {fname!r}: a FASTA file's name must not hold a blank or any of "
+                f"{' '.join(UNUSABLE_IN_ID)}, which a search takes into shell commands as "
+                f"the chromosome's; name each file after the sequence it holds"
+            )
+    return None
+
+
 def validate_bundle_dir(bundle_dir: str) -> Optional[str]:
     """Return an error string if ``bundle_dir`` is not a valid personal-assembly
-    bundle (has a parseable ``metadata.json`` of a supported version, and every
-    file it references exists), else ``None``."""
+    bundle (has a parseable ``metadata.json`` of a supported version, every file
+    it references exists, inside the bundle, and its FASTA files are named as a
+    search can take them), else ``None``."""
     mpath = os.path.join(bundle_dir, METADATA_NAME)
     try:
         with open(mpath) as fh:
@@ -249,9 +363,15 @@ def validate_bundle_dir(bundle_dir: str) -> Optional[str]:
         genome_rel, chain_rel, ca_rel = hm.get("genome_dir"), hm.get("chain"), hm.get("chromalias")
         if not (genome_rel and chain_rel and ca_rel):
             return f"{hap} entry is missing genome_dir/chain/chromalias"
+        for key, rel in (("genome_dir", genome_rel), ("chain", chain_rel), ("chromalias", ca_rel)):
+            if not _inside(bundle_dir, rel):
+                return f"{hap} {key} {rel!r} is not a path inside the bundle"
         gdir = os.path.join(bundle_dir, genome_rel)
         if not (os.path.isdir(gdir) and any(f.endswith(".fa") for f in os.listdir(gdir))):
             return f"{hap} genome dir {genome_rel!r} missing or has no .fa contigs"
+        unusable = _unusable_fasta_name(gdir)
+        if unusable:
+            return f"{hap} genome dir {genome_rel!r} {unusable}"
         if not os.path.isfile(os.path.join(bundle_dir, chain_rel)):
             return f"{hap} chain file {chain_rel!r} not found in the bundle"
         if not os.path.isfile(os.path.join(bundle_dir, ca_rel)):
@@ -295,8 +415,8 @@ def import_archive(archive_path: str, cwd: str) -> str:
     """Extract a personal-assembly bundle archive into ``Assemblies/`` and
     validate it. The archive must contain exactly one top-level ``<individual>/``
     directory holding the bundle structure + ``metadata.json``. Returns the
-    individual name on success; raises ``ValueError`` with a clear reason
-    otherwise (and leaves nothing half-extracted)."""
+    individual name on success; raises ``BundleError`` (a ``ValueError``) with a
+    clear reason otherwise (and leaves nothing half-extracted)."""
     assemblies_root = os.path.join(cwd, ASSEMBLIES_DIR)
     os.makedirs(assemblies_root, exist_ok=True)
 
@@ -309,19 +429,19 @@ def import_archive(archive_path: str, cwd: str) -> str:
         namer = lambda a: a.namelist()  # noqa: E731
         is_tar = False
     else:
-        raise ValueError("bundle must be a .zip or .tar.gz/.tgz archive")
+        raise BundleError("bundle must be a .zip or .tar.gz/.tgz archive")
 
     with opener() as arch:
         names = namer(arch)
         top = _safe_members_top_dir(names)
         if top is None:
-            raise ValueError(
+            raise BundleError(
                 "archive must contain exactly one top-level <individual>/ folder "
                 "and no absolute or '..' paths"
             )
         dest = os.path.join(assemblies_root, os.path.basename(top))
         if os.path.exists(dest):
-            raise ValueError(
+            raise BundleError(
                 f"an assembly named {os.path.basename(top)!r} already exists -- "
                 "delete it first or rename the bundle's top folder"
             )
@@ -338,7 +458,7 @@ def import_archive(archive_path: str, cwd: str) -> str:
             if is_tar:
                 for m in arch.getmembers():
                     if not (m.isreg() or m.isdir()):
-                        raise ValueError(
+                        raise BundleError(
                             f"unsupported archive entry {m.name!r} "
                             "(only regular files and directories are allowed)"
                         )
@@ -346,13 +466,18 @@ def import_archive(archive_path: str, cwd: str) -> str:
             for n in names:
                 target = os.path.realpath(os.path.join(staging, n))
                 if target != staging_real and not target.startswith(staging_real + os.sep):
-                    raise ValueError(f"archive member escapes the extraction directory: {n!r}")
-            # extract into staging/<top>/… then validate before publishing
-            arch.extractall(staging)
+                    raise BundleError(f"archive member escapes the extraction directory: {n!r}")
+            # extract into staging/<top>/… then validate before publishing: a tar
+            # archive's files with safe modes, owned by this user, not with the modes
+            # and owners it gives them (safe_tar); zipfile sets neither
+            if is_tar:
+                safe_tar.extract(arch, staging)
+            else:
+                arch.extractall(staging)
             extracted = os.path.join(staging, top)
             err = validate_bundle_dir(extracted)
             if err:
-                raise ValueError(f"invalid personal-assembly bundle: {err}")
+                raise BundleError(f"invalid personal-assembly bundle: {err}")
             os.replace(extracted, dest)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
