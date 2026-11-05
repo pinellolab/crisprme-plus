@@ -158,9 +158,11 @@ pam_char = pam_file.readline()
 ```
 
 (`crisprme.py`, in the `complete_search` PAM setup — a single `readline`.) So `complete-search`
-refuses, in one line (`Error: Only one PAM motif per file is supported; ...`, exit 1) and before
-it does anything, a PAM file holding a second non-empty line, and one whose first line is not
-`<motif> <length>`, rather than search line 1 alone.
+refuses a PAM file holding a second non-empty line, rather than search line 1 alone, in one line
+before it does anything (`Error: Only one PAM motif per file is supported; ...`, exit 1). It
+refuses one whose first line is not `<motif> <length>` the same way, with its own message
+(`Error: The PAM file '...' must hold the motif and the PAM's length on its first line, ...`,
+exit 1).
 
 To search **more than one PAM motif at once**, do not stack multiple lines.
 Instead, encode the alternatives as a **single IUPAC motif**. For example, to

@@ -40,10 +40,14 @@ warns and falls back to the default (`$TMPDIR`, else `/tmp`). You can also just 
 the standard `TMPDIR` — CRISPRME_TMPDIR takes precedence when both are set.
 
 A home CRISPRme cannot write in (Apptainer `--no-home`, or `--home` on a read-only folder;
-`docker run --read-only`) needs nothing more: matplotlib, and the fontconfig it runs to build
-its font cache, then keep their caches in a temporary folder there (`MPLCONFIGDIR`, and
-`XDG_CACHE_HOME` when `~/.cache` cannot be written), removed when the command ends. A
-`MPLCONFIGDIR` you set is used as it is.
+`docker run --read-only`) needs nothing more: matplotlib then keeps its configuration and font
+cache in a temporary folder there (`MPLCONFIGDIR`), removed when the command ends. When
+`~/.cache` cannot be written, that folder is `XDG_CACHE_HOME` too, so the caches kept under it
+go there as well (fontconfig's, written when matplotlib builds its font cache, and those of any
+other program a command runs), but not Hugging Face's folder: `HF_HOME` stays
+`~/.cache/huggingface`, so a login saved there with `hf auth login` is still found
+(`publish-index` takes it when given no token, and a download on a conda or source install
+sends it). A `MPLCONFIGDIR`, `XDG_CACHE_HOME` or `HF_HOME` you set is used as it is.
 
 ---
 

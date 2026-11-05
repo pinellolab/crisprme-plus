@@ -144,8 +144,11 @@ def _configure_mplconfigdir() -> None:
     ($MPLCONFIGDIR); a step's stderr is its error log, which fails the step when not empty.
     Then, with $MPLCONFIGDIR unset, $MPLCONFIGDIR is a temporary folder (in $CRISPRME_TMPDIR
     when set: _configure_tmpdir comes first), removed when crisprme.py exits, and so is
-    $XDG_CACHE_HOME, when unset, if the home's ~/.cache cannot be written either. A writable
-    home, or $MPLCONFIGDIR set, is left as it is.
+    $XDG_CACHE_HOME, when unset, if the home's ~/.cache cannot be written either; Hugging
+    Face's folder ($HF_HOME, $XDG_CACHE_HOME/huggingface when unset), where `hf auth login`
+    saves a login, then stays ~/.cache/huggingface, as the temporary $XDG_CACHE_HOME hid a
+    login saved there from publish-index and a download. A writable home, or $MPLCONFIGDIR
+    set, is left as it is.
     """
     if os.environ.get("MPLCONFIGDIR"):
         return
@@ -169,6 +172,7 @@ def _configure_mplconfigdir() -> None:
         return  # no temporary folder either: matplotlib says so itself
     os.environ["MPLCONFIGDIR"] = folder
     if not os.environ.get("XDG_CACHE_HOME") and not _can_write_folder(os.path.join(home, ".cache")):
+        os.environ.setdefault("HF_HOME", os.path.join(home, ".cache", "huggingface"))
         os.environ["XDG_CACHE_HOME"] = folder  # (fontconfig's cache, the font-cache build's)
     atexit.register(shutil.rmtree, folder, ignore_errors=True)
 

@@ -3078,12 +3078,15 @@ and the `release-crisprme` skill.
   and a population-level variant search of the synthetic genotyped dataset of the SNP+indel oracle
   ran to the end there, their error logs empty. `crisprme.py` now gives matplotlib a temporary
   folder of its own before any command runs (in `CRISPRME_TMPDIR` when set, which it now applies
-  before its imports too), and fontconfig too (`XDG_CACHE_HOME`) when the home's `~/.cache` cannot
-  be written, and removes it when the command ends; with a writable home, or `MPLCONFIGDIR` set,
-  nothing changes. Run the same way with this change, the same searches and `generate-report`
-  print nothing, with either home, and the searches' error logs stay empty.
-  `docs/TROUBLESHOOTING.md` §1 and the README's Apptainer note say so. Pre-existing, in 2.8.0 too.
-  Covered by `PostProcess/test_configure_tmpdir.py`.
+  before its imports too), removed when the command ends; when the home's `~/.cache` cannot be
+  written, that folder is `XDG_CACHE_HOME` too, for fontconfig's cache and those of the other
+  programs a command runs, but `HF_HOME` stays `~/.cache/huggingface`, where `hf auth login` saves
+  a login, so `publish-index` still takes a login saved there and a download on a conda or source
+  install still sends it. With a writable home, or `MPLCONFIGDIR` set, nothing changes. Run the
+  same way with this change, the same searches and `generate-report` print nothing, with either
+  home, and the searches' error logs stay empty. `docs/TROUBLESHOOTING.md` §1 (what goes to the
+  temporary folder, and what stays) and the README's Apptainer note say so. Pre-existing, in 2.8.0
+  too. Covered by `PostProcess/test_configure_tmpdir.py`.
 
 - **The report no longer says that a MAF of 1e-05 is a display floor.** The MAF note under the
   top-1000 tables and the legend's MAF entry said that a variant whose source allele frequency is

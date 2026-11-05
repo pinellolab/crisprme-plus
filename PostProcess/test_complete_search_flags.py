@@ -412,10 +412,11 @@ class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
     """A PAM file named against the <length>-<motif>-<CasName>.txt convention, one holding
     two motif lines or a first line that is not '<motif> <length>', and --index-path or
     --vcf-filter-pass-values with no value ended complete-search in a Python traceback (a
-    raw ValueError), all but the two motif lines' only once Results/<output> was made, which
-    stayed, empty, and the misnamed file only once the annotation was sorted (~30 s with the
-    shipped one). Each is one 'Error: ...' line and exit 1 now, as the other input errors,
-    checked before the annotation is read or anything is made."""
+    raw ValueError), only once Results/<output> was made, which stayed, empty, and the
+    annotation sorted (~30 s with the shipped one). Each is one 'Error: ...' line and exit 1
+    now, as the other input errors, checked before the annotation is read or anything is
+    made; docs/INPUT_FORMATS.md quotes what it says of each PAM file (it gave the two motif
+    lines' message for a first line that is not '<motif> <length>' too)."""
 
     GUIDE = "CTAACAGTTGCTTTTATCACNNN"
 
@@ -443,19 +444,31 @@ class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
              "guide.txt", "--pam", pam, "--mm", "4", "--output", "out", *flags],
             capture_output=True, text=True, cwd=self.wd, env=env)
 
-    def assertRefused(self, run, says):
+    def assertRefused(self, run, says, quoted_in=None):
         """Exit 1, with ``says`` the last line on stderr (a low-memory host's warning may
-        come first), no traceback, and no Results/out."""
+        come first), no traceback, and no Results/out; with ``quoted_in``, that line quoted
+        in that section of docs/INPUT_FORMATS.md, a '...' of the quote standing for any
+        text."""
         self.assertEqual(run.returncode, 1, run.stderr)
         self.assertNotIn("Traceback", run.stderr)
         self.assertEqual(run.stderr.splitlines()[-1:], [f"Error: {says}"], run.stderr)
         self.assertFalse(os.path.exists(os.path.join(self.wd, "Results", "out")))
+        if quoted_in is None:
+            return
+        with open(os.path.join(REPO, "docs", "INPUT_FORMATS.md"), encoding="utf-8") as fh:
+            section = re.search(rf"^## {quoted_in}\. .*?(?=^## |\Z)", fh.read(),
+                                re.M | re.S).group(0)
+        quotes = [" ".join(q.split()) for q in re.findall(r"`(Error: [^`]*)`", section)]
+        self.assertTrue(
+            any(re.fullmatch(".*".join(map(re.escape, q.split("..."))), f"Error: {says}")
+                for q in quotes),
+            f"docs/INPUT_FORMATS.md section {quoted_in} quotes {quotes}")
 
     def test_a_pam_file_named_against_the_convention(self):
         self.assertRefused(
             self.search(self.pam("mypam.txt")),
             "Invalid PAM filename 'mypam.txt': expected the '<length>-<motif>-<CasName>.txt' "
-            "convention (e.g. 20bp-NGG-SpCas9.txt).")
+            "convention (e.g. 20bp-NGG-SpCas9.txt).", quoted_in=3)
 
     def test_before_the_annotation_is_read(self):
         # the check of an annotation that is not there would refuse it first
@@ -472,7 +485,7 @@ class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
             f"Only one PAM motif per file is supported; the PAM file "
             f"'{os.path.join(os.path.realpath(self.wd), pam)}' contains more than one "
             f"non-empty line. Combine the motifs into a single IUPAC motif "
-            f"(e.g. NAG + NGG -> NRG).")
+            f"(e.g. NAG + NGG -> NRG).", quoted_in=4)
 
     def test_a_pam_file_whose_line_is_not_a_motif_and_a_length(self):
         pam = self.pam("20bp-NGG-SpCas9.txt", "NNNNNNNNNNNNNNNNNNNNNGG\n")
@@ -481,7 +494,7 @@ class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
             f"The PAM file '{os.path.join(os.path.realpath(self.wd), pam)}' must hold the "
             f"motif and the PAM's length on its first line, as in "
             f"'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' end of the "
-            f"guide).")
+            f"guide).", quoted_in=4)
 
     def test_a_flag_with_no_value(self):
         pam = self.pam("20bp-NGG-SpCas9.txt")
