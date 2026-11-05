@@ -3076,17 +3076,18 @@ and the `release-crisprme` skill.
   steps write their stderr to its error log, and a step whose log is not empty fails, but they
   printed nothing: matplotlib had passed its folder on to them (`MPLCONFIGDIR`), so a per-sample
   and a population-level variant search of the synthetic genotyped dataset of the SNP+indel oracle
-  ran to the end there, their error logs empty. `crisprme.py` now gives matplotlib a temporary
-  folder of its own before any command runs (in `CRISPRME_TMPDIR` when set, which it now applies
-  before its imports too), removed when the command exits (one killed by a signal leaves it);
-  when the home's `~/.cache` cannot be written, that folder is `XDG_CACHE_HOME` too, for
-  fontconfig's cache and those of the other programs a command runs, but `HF_HOME` stays
-  `~/.cache/huggingface`, where `hf auth login` saves a login, so `publish-index` still takes a
-  login saved there and a download on a conda or source install still sends it. With a writable
-  home, or `MPLCONFIGDIR` set, nothing changes. Run the same way with this change, the same searches
-  and `generate-report` print nothing, with either home, and the searches' error logs stay empty.
-  `docs/TROUBLESHOOTING.md` §1 (what goes to the temporary folder, and what stays) and the README's
-  Apptainer note say so. Pre-existing, in 2.8.0 too. Covered by
+  ran to the end there, their error logs empty (`docker run --read-only` makes `/tmp` read-only
+  too, and needs `--tmpfs /tmp` or `CRISPRME_TMPDIR`, as `docs/TROUBLESHOOTING.md` §1 now says).
+  `crisprme.py` now gives matplotlib a temporary folder of its own before any command runs (in
+  `CRISPRME_TMPDIR` when set, which it now applies before its imports too), removed when the command
+  exits (one killed by a signal leaves it); when the home's `~/.cache` cannot be written, that
+  folder is `XDG_CACHE_HOME` too, for fontconfig's cache and those of the other programs a command
+  runs, but `HF_HOME` stays `~/.cache/huggingface`, where `hf auth login` saves a login, so
+  `publish-index` still takes a login saved there and a download on a conda or source install still
+  sends it. With a writable home, or `MPLCONFIGDIR` set, nothing changes. Run the same way with this
+  change, the same searches and `generate-report` print nothing, with either home, and the searches'
+  error logs stay empty. `docs/TROUBLESHOOTING.md` §1 (what goes to the temporary folder, and what
+  stays) and the README's Apptainer note say so. Pre-existing, in 2.8.0 too. Covered by
   `PostProcess/test_configure_tmpdir.py`.
 
 - **The report no longer says that a MAF of 1e-05 is a display floor.** The MAF note under the

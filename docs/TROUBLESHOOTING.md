@@ -39,8 +39,8 @@ The directory is created if it does not exist. If it is not writable, CRISPRme
 warns and falls back to the default (`$TMPDIR`, else `/tmp`). You can also just set
 the standard `TMPDIR` — CRISPRME_TMPDIR takes precedence when both are set.
 
-A home CRISPRme cannot write in (Apptainer `--no-home`, or `--home` on a read-only folder;
-`docker run --read-only`) needs nothing more: matplotlib then keeps its configuration and font
+A home CRISPRme cannot write in (Apptainer `--no-home`, or `--home` on a read-only folder)
+needs nothing more: matplotlib then keeps its configuration and font
 cache in a temporary folder there (`MPLCONFIGDIR`), removed when the command exits (a command
 killed by a signal, such as `scancel` or a timeout, leaves it in the temporary folder). When
 `~/.cache` cannot be written, that folder is `XDG_CACHE_HOME` too, so the caches kept under it
@@ -49,6 +49,11 @@ other program a command runs), but not Hugging Face's folder: `HF_HOME` stays
 `~/.cache/huggingface`, so a login saved there with `hf auth login` is still found
 (`publish-index` takes it when given no token, and a download on a conda or source install
 sends it). A `MPLCONFIGDIR`, `XDG_CACHE_HOME` or `HF_HOME` you set is used as it is.
+
+`docker run --read-only` makes `/tmp` read-only as well, so it needs a writable temporary folder:
+add `--tmpfs /tmp`, or set `CRISPRME_TMPDIR` to a folder of the mounted data folder. Without one,
+a search still ends, but the CRISPR-Bulge scorer and the report have nowhere to write: CRISPR-Bulge
+scores read -1, no report zip is written, and only a WARNING in the search's error log says so.
 
 ---
 
