@@ -7,7 +7,9 @@ Pure stdlib (no pandas / dash), so it runs anywhere:
 
     python -m unittest PostProcess.test_personal_assembly -v
 """
+import contextlib
 import io
+import itertools
 import json
 import os
 import shutil
@@ -23,6 +25,27 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import personal_assembly as pa  # noqa: E402
 import safe_tar  # noqa: E402
+
+# the umasks a bundle is unpacked under here: the Docker image's, and the one an HPC host
+# with a group per user gives (apptainer passes the host's in)
+UMASKS = (0o022, 0o002)
+
+
+@contextlib.contextmanager
+def _umask(mask):
+    """The process's umask set to ``mask`` for the block."""
+    old = os.umask(mask)
+    try:
+        yield
+    finally:
+        os.umask(old)
+
+
+def _unsafe(umask):
+    """The mode bits nothing unpacked under ``umask`` may have: setuid, setgid and sticky,
+    and write for the group or others but as far as ``umask`` allows it (tarfile's 'data'
+    filter leaves the mode of a folder it makes to the umask, and zipfile every mode)."""
+    return 0o7000 | 0o022 & umask
 
 
 def _make_haplotype(cwd, individual, hap, acc, n_contigs=3):
@@ -250,10 +273,9 @@ class TestBundleImport(unittest.TestCase):
         arc = os.path.join(self.cwd, "modes.tar.gz")
         with tarfile.open(arc, "w:gz") as t:
             t.add(src, arcname="HG01255", filter=owned)
-        umask = os.umask(0)  # (the 'data' filter makes a folder with the mode umask gives)
-        os.umask(umask)
-        for fallback in (False, True):  # (True: Python before 3.11.4, with no 'data' filter)
-            with self.subTest(fallback=fallback):
+        # (fallback: Python before 3.11.4, with no 'data' filter)
+        for fallback, umask in itertools.product((False, True), UMASKS):
+            with self.subTest(fallback=fallback, umask=f"{umask:04o}"), _umask(umask):
                 dest = tempfile.mkdtemp()
                 self.addCleanup(shutil.rmtree, dest, ignore_errors=True)
                 owners = []
@@ -271,10 +293,12 @@ class TestBundleImport(unittest.TestCase):
                          for path in [root] + [os.path.join(top, name)
                                                for top, dirs, files in os.walk(root)
                                                for name in dirs + files]}
+                # (the 'data' filter makes a folder with the mode the umask gives)
                 self.assertEqual((modes.pop("."), modes.pop("paternal/genome/chr1.fa"),
                                   modes.pop("tool")),
                                  (0o755 if fallback else 0o777 & ~umask, 0o755, 0o755))
-                self.assertEqual({path: oct(m) for path, m in modes.items() if m & 0o7022}, {})
+                self.assertEqual(
+                    {path: oct(m) for path, m in modes.items() if m & _unsafe(umask)}, {})
                 self.assertEqual([o for o in owners if o[1:] != (-1, -1)], [])
 
     def test_a_zip_s_files_go_in_with_no_mode_of_the_archive_s(self):
@@ -289,14 +313,17 @@ class TestBundleImport(unittest.TestCase):
                     info.external_attr = (stat.S_IFREG | 0o4755) << 16
                     with open(full, "rb") as fh:
                         z.writestr(info, fh.read())
-        dest = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, dest, ignore_errors=True)
-        self.assertEqual(pa.import_archive(arc, dest), "HG01255")
-        self.assertTrue(pa.resolve(dest, "HG01255")["complete"])
-        root = pa.individual_dir(dest, "HG01255")
-        self.assertEqual([os.path.join(top, name) for top, _dirs, files in os.walk(root)
-                          for name in files
-                          if os.stat(os.path.join(top, name)).st_mode & 0o7022], [])
+        for umask in UMASKS:
+            with self.subTest(umask=f"{umask:04o}"), _umask(umask):
+                dest = tempfile.mkdtemp()
+                self.addCleanup(shutil.rmtree, dest, ignore_errors=True)
+                self.assertEqual(pa.import_archive(arc, dest), "HG01255")
+                self.assertTrue(pa.resolve(dest, "HG01255")["complete"])
+                root = pa.individual_dir(dest, "HG01255")
+                self.assertEqual([os.path.join(top, name)
+                                  for top, _dirs, files in os.walk(root) for name in files
+                                  if os.stat(os.path.join(top, name)).st_mode & _unsafe(umask)],
+                                 [])
 
 
 class TestBundlePathsStayInsideIt(unittest.TestCase):

@@ -15,6 +15,7 @@ and these tests never touch HF (the snapshot fetch is monkeypatched to a local c
 """
 import contextlib
 import io
+import itertools
 import os
 import shutil
 import stat
@@ -26,6 +27,27 @@ from unittest import mock
 
 import crisprme_hf as hf
 import safe_tar
+
+# the umasks an archive is unpacked under here: the Docker image's, and the one an HPC host
+# with a group per user gives (apptainer passes the host's in)
+UMASKS = (0o022, 0o002)
+
+
+@contextlib.contextmanager
+def _umask(mask):
+    """The process's umask set to ``mask`` for the block."""
+    old = os.umask(mask)
+    try:
+        yield
+    finally:
+        os.umask(old)
+
+
+def _unsafe(umask):
+    """The mode bits nothing unpacked under ``umask`` may have: setuid, setgid and sticky,
+    and write for the group or others but as far as ``umask`` allows it (tarfile's 'data'
+    filter leaves the mode of a folder it makes to the umask)."""
+    return 0o7000 | 0o022 & umask
 
 
 def _mklayout(root, index_name):
@@ -181,8 +203,8 @@ class TestADownloadedArchiveGoesInWithSafeModes(unittest.TestCase):
             ("Dictionaries/dictionaries_hg38_1000G/my_dict_chr22.json", 0o6644, b"{}")])
         self.serve("indexes/genotypes_hg38_1000G.tar.gz", [
             ("Dictionaries/genotypes_hg38_1000G/chr22.gt", 0o4755, b"gt")])
-        for fallback in (False, True):
-            with self.subTest(fallback=fallback):
+        for fallback, umask in itertools.product((False, True), UMASKS):
+            with self.subTest(fallback=fallback, umask=f"{umask:04o}"), _umask(umask):
                 shutil.rmtree(self.workdir)
                 os.makedirs(self.workdir)
                 with self.as_root(fallback) as owners:
@@ -198,14 +220,14 @@ class TestADownloadedArchiveGoesInWithSafeModes(unittest.TestCase):
                     ({"TSTgenome.NGG.bin": 0o755}, {"NGG_2_fakechr22": 0o644},
                      {"my_dict_chr22.json": 0o644}, {"chr22.gt": 0o755}))
                 self.assertFalse(stat.S_IMODE(os.stat(os.path.join(library, self.NAME)).st_mode)
-                                 & 0o7022)
+                                 & _unsafe(umask))
                 self.assertEqual([o for o in owners if o[1:] != (-1, -1)], [])
 
     def test_a_build_inputs_kit(self):
         self.serve("build-inputs/X.tar.gz", [
             ("hg38+hg38_X", 0o3777, None), ("hg38+hg38_X/chr22.enriched.fa", 0o4755, b">c\nA\n")])
-        for fallback in (False, True):
-            with self.subTest(fallback=fallback):
+        for fallback, umask in itertools.product((False, True), UMASKS):
+            with self.subTest(fallback=fallback, umask=f"{umask:04o}"), _umask(umask):
                 shutil.rmtree(self.workdir)
                 os.makedirs(self.workdir)
                 with self.as_root(fallback) as owners:
@@ -213,7 +235,7 @@ class TestADownloadedArchiveGoesInWithSafeModes(unittest.TestCase):
                                           dataset="X", token="x")
                 kit = os.path.join(self.workdir, "Genomes", "hg38+hg38_X")
                 self.assertEqual(self.modes(kit), {"chr22.enriched.fa": 0o755})
-                self.assertFalse(stat.S_IMODE(os.stat(kit).st_mode) & 0o7022)
+                self.assertFalse(stat.S_IMODE(os.stat(kit).st_mode) & _unsafe(umask))
                 self.assertEqual([o for o in owners if o[1:] != (-1, -1)], [])
 
 
