@@ -103,7 +103,8 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 
 Pass the variable with `-e`, as above: written in front of `docker run` it is set on your
 computer only, not in the container, so `complete-test` finds no prebuilt index and exits
-having tested nothing. `CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode.
+with status 2, having tested nothing. `CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark
+mode.
 
 ## 2. Make a folder to hold your data and results
 

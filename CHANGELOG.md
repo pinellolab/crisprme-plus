@@ -3015,6 +3015,74 @@ and the `release-crisprme` skill.
   search of the rebuilt one can fail or report malformed rows (see the `NNN_3` entry above).
   Text only.
 
+- **Settings answers a personal-assembly bundle it refuses with the reason, as a refusal (HTTP
+  400).** The upload took each refusal of a bundle for a failure of the server: a `metadata.json`
+  naming a path outside the bundle and a FASTA file named with what a shell reads (both refused
+  since 2.8.1), and an archive packed otherwise, with more than one top folder, holding a link or
+  a device, or named after an assembly already installed, were answered HTTP 500 with
+  `finalize failed: ...`, which the browser logs as a failed request, while the upload answers its
+  other refusals 400 with the reason. The import now raises its own error for a bundle it refuses
+  (`personal_assembly.BundleError`, a `ValueError`), which the upload answers 400 with the reason
+  alone, shown on the page as before; any other failure is still answered 500. Pre-existing, since
+  2.6.0. Covered by `PostProcess/test_settings_progress.py`.
+- **`complete-search` refuses a PAM file it cannot read, and `--index-path` or
+  `--vcf-filter-pass-values` with no value, in one line, before it does anything.** A PAM file
+  named against the `<length>-<motif>-<CasName>.txt` convention (the nuclease's name is read from
+  it), one holding two motif lines or a first line that is not `<motif> <length>`, and
+  `--index-path` or `--vcf-filter-pass-values` given no value ended the search in a Python
+  traceback (a `ValueError` nothing caught), once `Results/<output>` was made, which stayed,
+  empty, and once the annotation was sorted (about 30 s with the shipped one). Each is now one
+  `Error: ...` line and exit 1, as the other input errors are, checked before the annotation is
+  read or any folder is made; an `--index-path` that names no folder, refused in one line before,
+  no longer leaves the output folder either. `docs/INPUT_FORMATS.md`, which said that a misnamed
+  PAM file fails with an `IndexError` and that a second line is silently ignored, says so.
+  Pre-existing, since 2.2.0. Covered by `PostProcess/test_complete_search_flags.py`.
+- **`complete-test` with nothing to search exits 2.** Its prebuilt-index smoke, which it runs
+  without `CRISPRME_ALLOW_ONDEMAND_BUILD` (as in Docker when the variable is written in front of
+  `docker run`, on the host), said how to download what was missing in a folder with no prebuilt
+  index, or with one whose genome is not there, and exited 0, which a script or a CI step reads
+  as a pass though nothing ran. It now exits with status 2, as when an earlier run's results are
+  in its way, having said the same, and `crisprme.py` passes the 2 on. README §1.2.2 and §2.2.2
+  and `docs/DOCKER_QUICKSTART.md` say so. Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_complete_test.py`.
+- **The report says what its ZIP and the result folder hold.** The default (slim) report said the
+  full list of variant-contributed sites "is written to `variant_created.tsv` in the result
+  directory (re-run with `--report-full` to bundle it into the archive)", but no run writes that
+  file: the tier goes into the ZIP only, and only under `--report-full`. Its Downloads note said
+  the bundled per-threshold subsets included the variant-created one, the methods note of its
+  panel that the complete raw integrated results were among the bundled downloads, and the legend
+  that the variants of a dense window were in the bundled `high_variant_density_regions.bed`: the
+  slim ZIP holds none of these, and the full one bundles the windows near the top-ranked sites, as
+  `high_variant_density_regions.bed.gz`. Each sentence now says what the slim ZIP holds, where the
+  rest is in the result folder (the variant-created sites are the integrated results' rows whose
+  `Not_found_in_REF` is `y`, a window's variants are in its `*high_variant_density_regions.bed`
+  files) and what `--report-full` adds; the full report names what it bundles; a search with no
+  variant-created site says it has none, and a wider CFD ≥ 0.05 net of no site is not called a
+  bundled download. On a slim and a full report of a population-level and of a per-sample search,
+  only these sentences change, and every other file of the ZIP is the same.
+  `generate-report --help`, which said `integrated_results.tsv.gz` is bundled by default, and
+  README §2.2.9 say what the slim ZIP holds too. Pre-existing, since 2.7.10. Covered by
+  `PostProcess/test_generate_report.py`.
+- **A home that cannot be written in no longer makes every command print matplotlib's and
+  fontconfig's complaints.** With a home CRISPRme cannot write in (`apptainer run --no-home`, or
+  `--home` on a read-only folder; `docker run --read-only`), each command printed on stderr that
+  matplotlib had made a temporary folder (`... is not a writable directory`,
+  `Matplotlib created a temporary cache directory ...`), as `crisprme.py` imports it when it
+  starts, and `Fontconfig error: No writable cache directories`, from the `fc-list` that
+  matplotlib's font-cache build runs: 815 bytes with the release SIF on an HPC node with a
+  read-only home, 635 with no home, from `complete-search` and `generate-report` alike. A search's
+  steps write their stderr to its error log, and a step whose log is not empty fails, but they
+  printed nothing: matplotlib had passed its folder on to them (`MPLCONFIGDIR`), so a per-sample
+  and a population-level variant search of the synthetic genotyped dataset of the SNP+indel oracle
+  ran to the end there, their error logs empty. `crisprme.py` now gives matplotlib a temporary
+  folder of its own before any command runs (in `CRISPRME_TMPDIR` when set, which it now applies
+  before its imports too), and fontconfig too (`XDG_CACHE_HOME`) when the home's `~/.cache` cannot
+  be written, and removes it when the command ends; with a writable home, or `MPLCONFIGDIR` set,
+  nothing changes. Run the same way with this change, the same searches and `generate-report`
+  print nothing, with either home, and the searches' error logs stay empty.
+  `docs/TROUBLESHOOTING.md` §1 and the README's Apptainer note say so. Pre-existing, in 2.8.0 too.
+  Covered by `PostProcess/test_configure_tmpdir.py`.
+
 - **The report no longer says that a MAF of 1e-05 is a display floor.** The MAF note under the
   top-1000 tables and the legend's MAF entry said that a variant whose source allele frequency is
   0 is shown at a display floor of 1e-05 so that it renders on the log-scale plots, to be read as

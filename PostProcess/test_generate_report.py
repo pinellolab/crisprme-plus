@@ -532,6 +532,105 @@ class TestGenerateReport(unittest.TestCase):
         ).splitlines()[0].split("\t")
         self.assertIn("High_complexity_region", top_header)
 
+    def test_the_report_says_where_each_file_it_names_is(self):
+        """The slim report (the default) said the variant-created sites were 'written to
+        variant_created.tsv in the result directory', which no run writes (the tier is
+        staged into the zip only under --report-full), that the per-threshold subsets
+        bundled included the variant-created one, that the complete raw integrated results
+        were among the bundled downloads, and that a dense window's variants were in the
+        bundled high_variant_density_regions.bed, none of which the slim zip holds (and
+        the full one bundles the windows near the top-ranked sites, as .bed.gz). Each says
+        what the slim zip and the result folder hold, and what --report-full adds; the full
+        report names what it bundles, and every file a sentence calls bundled is."""
+        import re
+        rd = os.path.join(self.tmp, "where_run")
+        os.makedirs(rd)
+        tsv = os.path.join(rd, f"{_GUIDE}+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv")
+        with open(tsv, "w") as h:
+            h.write("\t".join(list(_HEADER) + ["High_variant_density_region"]) + "\n")
+            for i, row in enumerate(_ROWS):
+                h.write("\t".join(list(row) + ["high_variant_density (12 variants)"
+                                                if i == 0 else "NA"]) + "\n")
+        with open(os.path.join(rd, "job_chr3.high_variant_density_regions.bed"), "w") as h:
+            h.write("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
+                    "iupac_protospacer\n"
+                    "chr3\t190\t213\tGUIDE\t12\tHG00096,HG00097\tACGTNNNNACGTACGTACGTNGG\n")
+        said = {}
+        for mode in ("slim", "full"):
+            out_zip = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir,
+                                      out_zip=os.path.join(self.tmp, f"where_{mode}.zip"),
+                                      report_full=mode == "full")
+            with zipfile.ZipFile(out_zip) as zf:
+                names = set(zf.namelist())
+                html = zf.read("report.html").decode("utf-8")
+            said[mode] = html
+            # every file a sentence calls bundled is in the zip, and linked
+            for link, name in re.findall(r"bundled(?: as)? (<a [^>]*>)?<code>([^<]+)</code>",
+                                         html):
+                with self.subTest(mode=mode, name=name):
+                    self.assertTrue(link, f"{name} is called bundled and is not linked")
+                    self.assertIn(f"data/{name}", names)
+            with self.subTest(mode=mode):
+                self.assertEqual("data/variant_created.tsv" in names, mode == "full")
+        # no variant-created file in the result folder, whatever the report says
+        self.assertEqual([n for n in os.listdir(rd) if "variant_created" in n], [])
+        slim, full = said["slim"], said["full"]
+        for gone in ("written to <code>variant_created.tsv</code> in the result directory",
+                     "re-run with <code>--report-full</code> to bundle it into the archive",
+                     "plus the variant-created subset) are bundled",
+                     "the complete raw integrated results (bundled downloads)",
+                     "bundled <code>high_variant_density_regions.bed</code>"):
+            with self.subTest(slim_no_longer_says=gone):
+                self.assertNotIn(gone, slim)
+        for says in (
+                "the full list is in the integrated results in the result folder (its rows "
+                "whose <code>Not_found_in_REF</code> is <code>y</code>; "
+                "<code>--report-full</code> bundles them as <code>variant_created.tsv</code>, "
+                "gzipped when large).",
+                "The full threshold table above and the per-threshold subset files (bundled "
+                "downloads), with the complete raw integrated results in the result folder "
+                "(<code>--report-full</code> bundles them too), let the panel be reviewed or "
+                "expanded for any assay budget.",
+                "Per-threshold subsets (CFD and mismatch+bulge tiers) are bundled as "
+                "curated-column TSVs so the panel can be expanded to any tier for review. "
+                "<code>--report-full</code> adds the variant-created subset.",
+                "the full variant set for each window is in the "
+                "<code>*high_variant_density_regions.bed</code> files of the result folder, "
+                "which <code>--report-full</code> bundles for the windows near the top-ranked "
+                "sites)."):
+            with self.subTest(slim_says=says[:60]):
+                self.assertIn(says, slim)
+        for says in (
+                'the full list is bundled as <a href="data/variant_created.tsv" download>'
+                "<code>variant_created.tsv</code></a>.",
+                "The full threshold table above, the per-threshold subset files, and the "
+                "complete raw integrated results (bundled downloads) let the panel be "
+                "reviewed or expanded for any assay budget.",
+                "Per-threshold subsets (CFD and mismatch+bulge tiers, plus the variant-created "
+                "subset) are bundled as curated-column TSVs so the panel can be expanded to "
+                "any tier for review.</p>",
+                "the full variant set for each window is in the "
+                "<code>*high_variant_density_regions.bed</code> files of the result folder, "
+                "and for the windows near the top-ranked sites in the bundled "
+                '<a href="data/high_variant_density_regions.bed.gz" download>'
+                "<code>high_variant_density_regions.bed.gz</code></a>)."):
+            with self.subTest(full_says=says[:60]):
+                self.assertIn(says, full)
+        self.assertNotIn("adds the variant-created subset", full)
+
+    def test_a_wider_cfd_net_of_no_site_is_not_called_a_bundled_download(self):
+        # its tier, empty, is not bundled
+        import pandas as pd
+        df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
+        vp = gr.build_validation_panel(df, gr._resolve(df.columns, list(gr._COLS.keys())))
+        t, n = vp["cfd_wide_net"]
+        self.assertGreater(n, 0)
+        self.assertIn(f"A wider CFD &ge; {t} net ({n:,} sites) is included in the bundled "
+                      "downloads.", gr.render_validation_panel(vp))
+        html = gr.render_validation_panel(dict(vp, cfd_wide_net=(t, 0)))
+        self.assertIn(f"A wider CFD &ge; {t} net holds no site here.", html)
+        self.assertNotIn("is included in the bundled downloads", html)
+
     def test_indel_snp_cooc_bundled_and_surfaced(self):
         # a run with per-chromosome *.indel_snp_cooc.tsv sidecars: the report
         # merges them (single header), bundles the merged TSV, links it, and shows
@@ -1335,7 +1434,8 @@ class TestGenerateReport(unittest.TestCase):
         """The 'Variant-contributed sites' row must not claim variant_created.tsv is
         bundled when it is not (the slim default report skips that tier -> no
         variant_created_name). When bundled it says 'bundled as <name>'; when not, it
-        points to the result directory + --report-full."""
+        points to the integrated results in the result folder + --report-full (no
+        variant_created.tsv is written there), and with no such site it says so."""
         base = {"datasets": "1000G+HGDP", "mm": "6", "bdna": 2, "brna": 2,
                 "max_edits": "4", "search_mode": "population-level"}
         # a population-level run of an index with no registry has no co-occurrence table;
@@ -1350,15 +1450,25 @@ class TestGenerateReport(unittest.TestCase):
                                           variant_count={"n_records": 1, "databases": {}})):
             self.assertIn("SNP+indel co-occurrence is unaffected by the analysis mode", html_reg)
             self.assertNotIn("no Tier-0 registry", html_reg)
-        # slim (not bundled): no false "bundled as" claim
-        html_slim = gr.render_inputs_criteria({**base})
-        self.assertIn("written to <code>variant_created.tsv</code> in the result", html_slim)
-        self.assertIn("--report-full", html_slim)
-        self.assertNotIn("bundled as <code>variant_created.tsv</code>", html_slim)
+        # slim (not bundled): no false "bundled as" claim, nor one of a file in the result
+        # folder, which holds none
+        for html_slim in (gr.render_inputs_criteria({**base}),
+                          gr.render_inputs_criteria({**base}, n_variant=3)):
+            self.assertIn("the full list is in the integrated results in the result folder "
+                          "(its rows whose <code>Not_found_in_REF</code> is <code>y</code>; "
+                          "<code>--report-full</code> bundles them as "
+                          "<code>variant_created.tsv</code>, gzipped when large).", html_slim)
+            self.assertNotIn("bundled as <code>variant_created.tsv</code>", html_slim)
+            self.assertNotIn("written to <code>variant_created.tsv</code>", html_slim)
         # full (bundled): the "bundled as" claim is correct
-        html_full = gr.render_inputs_criteria({**base}, variant_created_name="variant_created.tsv")
+        html_full = gr.render_inputs_criteria({**base}, variant_created_name="variant_created.tsv",
+                                              n_variant=3)
         self.assertIn("bundled as <code>variant_created.tsv</code>", html_full)
-        self.assertNotIn("re-run with <code>--report-full</code>", html_full)
+        self.assertNotIn("<code>--report-full</code>", html_full)
+        # none: nothing to bundle, in either report
+        html_none = gr.render_inputs_criteria({**base}, n_variant=0)
+        self.assertIn("<code>PAM_creation</code>; this search has none.", html_none)
+        self.assertNotIn("variant_created.tsv", html_none)
 
     def test_search_mode_defaults_to_population_level_when_marker_absent(self):
         """A result dir with no .search_mode marker resolves to population-level (the

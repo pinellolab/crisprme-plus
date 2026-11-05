@@ -169,7 +169,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 > `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.8.1 crisprme.py --version`
 > (add `crisprme.py web-interface` / `complete-search …` the same way). Note that
 > `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
-> `PATH` — prefer `apptainer run` (or prefix `bash -lc`).
+> `PATH` — prefer `apptainer run` (or prefix `bash -lc`). A home it cannot write in (`--no-home`,
+> or `--home` on a read-only folder) is fine: matplotlib's caches then go to a temporary folder
+> ([Troubleshooting](docs/TROUBLESHOOTING.md) §1).
 
 **The prebuilt SpCas9 (NRG = NAG+NGG) variant indexes.** All carry searchable
 indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever you need with
@@ -632,8 +634,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 
 Pass the variable with `-e`, as above. Written in front of `docker run`
 (`CRISPRME_ALLOW_ONDEMAND_BUILD=1 docker run ...`) it is set on your machine only, never in
-the container, so `complete-test` looks for a prebuilt index, finds none, and exits 0 having
-tested nothing. The run took about 25 minutes at 8 threads on an Apple Silicon Mac in testing.
+the container, so `complete-test` looks for a prebuilt index, finds none, and exits with
+status 2, having tested nothing. The run took about 25 minutes at 8 threads on an Apple
+Silicon Mac in testing.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
@@ -1257,7 +1260,7 @@ modes* below. By default it does **not** build an index or
 auto-download all the data for you: CRISPRme never auto-builds an index, so if no 
 prebuilt index is present, `complete-test` prints guidance to download one (e.g. 
 `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`) and 
-exits cleanly.
+exits with status 2, having run nothing.
 
 Once an index is available, `complete-test` runs the example search end-to-end 
 and produces the same set of outputs as Complete Search, confirming that the 
@@ -1341,7 +1344,9 @@ function, including detailed explanations and default behaviors:
 > **Note:** `complete-test`'s default smoke requires a prebuilt index to already be present.
 > CRISPRme never auto-builds an index; download one first with
 > `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`.
-> If no index is found, `complete-test` prints this guidance and exits cleanly.
+> If no index is found, `complete-test` prints this guidance and exits with status 2, having
+> run nothing; an index whose genome is not there gets the command that downloads the genome,
+> and status 2 too.
 
 > **Two modes.** By default `complete-test` runs the **prebuilt-index smoke** above — the
 > example guide against whichever prebuilt index you downloaded (recommended: the default
@@ -1928,10 +1933,11 @@ easily shareable off-target assessment report for a completed CRISPRme run. It
 produces a single ZIP (`<jobid>_report.zip`) in which **`report.html` is the only
 top-level file — open it** — while every bundled data file sits under a **`data/`**
 subfolder. `report.html` is fully offline (plots embedded as base64 PNGs, the
-top-1000 table + CSS inline, no external dependencies), and every filename it
-mentions links to its bundled file under `data/`. It is a portable digest of the
-full interactive website result, aimed at sharing off-target predictions (for
-example, to design a targeted-NGS / rhAMP-Seq confirmation panel).
+top-1000 table + CSS inline, no external dependencies), and every bundled file it
+mentions links to it under `data/` (one the ZIP does not hold, it says where it is).
+It is a portable digest of the full interactive website result, aimed at sharing
+off-target predictions (for example, to design a targeted-NGS / rhAMP-Seq
+confirmation panel).
 
 **The report is SLIM by default.** It bundles the human-facing layer — the
 top-1000 tables (both scorers), the ~100-site validation panel, the non-empty
@@ -1942,7 +1948,8 @@ layers — the complete `integrated_results.tsv` (gzipped), the raw SNP+SNP
 co-occurrence dump, the variant-created per-tier table, and the high-variant-density
 BED — are **omitted by default**; pass **`--report-full`** to additionally bundle
 them (gzipped) for a fully self-contained archive. The omitted data is never lost:
-it stays in the result folder (and `complete-search` keeps the per-chromosome
+it stays in the result folder, the variant-created sites as the rows of the integrated
+results whose `Not_found_in_REF` is `y` (and `complete-search` keeps the per-chromosome
 sidecars so `--report-full` can rebuild those bundles even after an intermediate
 cleanup). On the **web interface**, tick **"Include the full report"** under *Report
 options* on the submission page for the same effect.

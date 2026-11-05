@@ -115,8 +115,9 @@ def require_prebuilt_index() -> str:
 
     CRISPRme does NOT build an index automatically -- the user decides to DOWNLOAD one
     (or build it). If no usable index (a genome_library/<name>/ dir with .bin shards) is
-    present in the working directory, print how to obtain one and stop cleanly (exit 0);
-    do not download test data or build anything.
+    present in the working directory, print how to obtain one and stop with exit 2, as the
+    re-run guard (check_output) does, since nothing ran; do not download test data or build
+    anything.
 
     Returns:
         The name of the first usable prebuilt index directory found.
@@ -141,7 +142,9 @@ def require_prebuilt_index() -> str:
             "then re-run:  crisprme.py complete-test --chrom chr22 --thread 4\n"
             "  (chromosome 22 only; without --chrom it searches every chromosome)\n"
         )
-        sys.exit(0)
+        # exit 2, not 0, which a script or a CI step read as a pass though nothing ran (as
+        # check_output's); crisprme.py passes it on
+        sys.exit(2)
     # prefer a variant index (name contains "+") so the smoke exercises the variant path,
     # then the common path (_smoke_rank): sorted order alone took NNNNNNNN_3 before NRG_3
     variant = [n for n in present if "+" in n]
@@ -1190,7 +1193,7 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool, chrom: str = "all") -> 
             "then re-run:  crisprme.py complete-test --chrom chr22 --thread 4\n"
             "  (chromosome 22 only; without --chrom it searches every chromosome)\n"
         )
-        sys.exit(0)
+        sys.exit(2)  # nothing ran (require_prebuilt_index)
     if chrom != "all":
         _require_chrom(chrom, genome_dir, ref, index_name)
     # the built-in example guide, in the index's geometry (_smoke_inputs)

@@ -1657,7 +1657,7 @@ def build_mmb_matrix(df, cols, meta):
 
 
 def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
-                           variant_count=None, no_registry=False):
+                           variant_count=None, no_registry=False, n_variant=None):
     """'Analysis inputs & criteria' box (FDA off-target guidance VII.F.i / F.ii).
 
     States, in one place, the variant database(s), the variant inclusion policy
@@ -1667,6 +1667,8 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     Everything is read from the run's meta (no hardcoded database names).
     ``variant_created_name`` is the ACTUAL bundled filename (``.tsv`` or ``.tsv.gz``)
     so the link never breaks; when absent the name is shown as plain text.
+    ``n_variant`` (build_validation_panel's) is the number of variant-created off-targets,
+    0 when the search has none.
     ``dataset_counts`` (``{dataset: n_individuals}`` from the samplesID files) and
     ``variant_count`` (``{'n_records', 'databases'}`` from the Tier-0 registry) add
     the panel size + database SNP-variant count to the inclusion row when known
@@ -1693,14 +1695,20 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         if variant_created_name else "<code>variant_created.tsv</code>"
     )
     # variant_created_name is set only when the file is actually bundled (the slim
-    # default report skips the variant_created tier), so key the prose off it: don't
-    # claim the archive contains the file when it does not.
-    vc_note = (
-        f"the full list is bundled as {vc_html}."
-        if variant_created_name else
-        "the full list is written to <code>variant_created.tsv</code> in the result "
-        "directory (re-run with <code>--report-full</code> to bundle it into the archive)."
-    )
+    # default report skips the variant_created tier, and writes no such file anywhere,
+    # the result folder included), so key the prose off it: don't claim the archive or
+    # the result folder holds a file it does not. The sites are the integrated results'
+    # rows that only a variant makes (Not_found_in_REF), which the result folder holds.
+    if variant_created_name:
+        vc_note = f"the full list is bundled as {vc_html}."
+    elif n_variant == 0:
+        vc_note = "this search has none."
+    else:
+        vc_note = (
+            "the full list is in the integrated results in the result folder (its rows "
+            "whose <code>Not_found_in_REF</code> is <code>y</code>; <code>--report-full</code> "
+            "bundles them as <code>variant_created.tsv</code>, gzipped when large)."
+        )
     ds = meta.get("datasets", "n/a")
     mm = meta.get("mm", "n/a")
     bdna, brna = meta.get("bdna"), meta.get("brna")
@@ -3140,6 +3148,7 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=
 
 def render_validation_panel(
     vp, panel_tsv_name=None, tier_links=None, short_links=False, show_variant_row=True,
+    raw_bundled=True,
 ):
     """Section 4 HTML: full threshold table + hybrid panel + methods note + the
     per-tier download table.
@@ -3165,6 +3174,11 @@ def render_validation_panel(
     not a meaningful "0 found this run"; showing a permanently-empty row
     reads as a real category that just happens to be absent, which it
     is not.
+
+    ``raw_bundled`` (default True, as assembly-search's combined report bundles its
+    complete results): whether the complete raw results are bundled. complete-search's
+    slim report bundles them only under --report-full, and the methods note then says
+    they are in the result folder.
     """
     tier_links = tier_links or {}
 
@@ -3262,10 +3276,15 @@ def render_validation_panel(
             "the same floors and ranks as reference sites."
             if show_variant_row else ""
         )
-        + " The full threshold table above, "
-        "the per-threshold subset files, and the complete raw integrated results "
-        "(bundled downloads) let the panel be reviewed or expanded for any assay "
-        "budget."
+        + (
+            " The full threshold table above, the per-threshold subset files, and the "
+            "complete raw integrated results (bundled downloads) let the panel be reviewed "
+            "or expanded for any assay budget." if raw_bundled else
+            " The full threshold table above and the per-threshold subset files (bundled "
+            "downloads), with the complete raw integrated results in the result folder "
+            "(<code>--report-full</code> bundles them too), let the panel be reviewed or "
+            "expanded for any assay budget."
+        )
     )
     _panel_n = vp.get("panel_size", 0)
     _panel_dl_n = f"~{PANEL_CAP} sites" + (
@@ -3325,8 +3344,11 @@ def render_validation_panel(
         "real off-target. The CFD tiers below use the <strong>same cut points as the card</strong> "
         "(&ge; 0.5, &ge; 0.2); each gives the all-gaps count with the &le;1-gap calibrated subset "
         "(the card&rsquo;s domain) in parentheses, so the two sections reconcile at one threshold. "
-        f"A wider CFD &ge; {_wide_t} net ({_wide_n:,} sites) is included in the bundled "
-        "downloads. <strong>Recommended default panel:</strong> validate every "
+        + (f"A wider CFD &ge; {_wide_t} net ({_wide_n:,} sites) is included in the bundled "
+           "downloads. " if _wide_n else
+           # (an empty tier is not bundled)
+           f"A wider CFD &ge; {_wide_t} net holds no site here. ")
+        + "<strong>Recommended default panel:</strong> validate every "
         f"CRISPR-Bulge&ndash;flagged site ({cbop.sensitive_label_html()} &mdash; the sensitive "
         "operating point, the threshold that recovers ~95&#37; of validated off-targets on the "
         "40-guide held-out benchmark; higher recall is reachable but the list grows steeply), plus the "
@@ -4001,8 +4023,7 @@ _ANNOTATION_LEGEND = [
      "THIS off-target; this column (e.g. <code>16 in window</code>) counts ALL variants "
      "spanning the surrounding window, so a row can legitimately show one variant while "
      "its window count is much larger. Such dense windows are reported greedily (one "
-     "representative alignment is shown; the full variant set for each window is in the "
-     "bundled <code>high_variant_density_regions.bed</code>)."),
+     "representative alignment is shown; {hvdr_where})."),
 ]
 
 
@@ -4154,14 +4175,31 @@ def build_score_legend_html(untiered=None):
     )
 
 
-def build_annotation_legend_html(cols=None, df=None):
+def _hvdr_where(hvdr_bundle_name=None, hvdr_n_regions=0, report_full=False):
+    """Where the full variant set of each high-variant-density window is, as the legend
+    says it: in the per-chromosome beds of the result folder, and, for the windows near
+    the top-ranked sites, in the report's ``hvdr_bundle_name`` (--report-full bundles them
+    when there is such a window, ``hvdr_n_regions``)."""
+    where = ("the full variant set for each window is in the "
+             "<code>*high_variant_density_regions.bed</code> files of the result folder")
+    if hvdr_bundle_name:
+        return (f"{where}, and for the windows near the top-ranked sites in the bundled "
+                f"<code>{_esc(hvdr_bundle_name)}</code>")
+    if hvdr_n_regions and not report_full:
+        return (f"{where}, which <code>--report-full</code> bundles for the windows near the "
+                "top-ranked sites")
+    return where
+
+
+def build_annotation_legend_html(cols=None, df=None, hvdr_where=None):
     """Render the annotation legend (Section 7). Only include an entry when its
     backing annotation column is actually present in this run (and, when ``df`` is
     given, carries at least one real value), so a run WITHOUT a given annotation is
     never falsely documented (e.g. a legacy/no-COSMIC or non-human/custom-genome
     run must not print a COSMIC Cancer Gene Census glossary). Returns "" when no
     entry qualifies, so the caller omits the whole section. ``cols=None`` keeps the
-    legacy full legend (backward-compatible)."""
+    legacy full legend (backward-compatible). ``hvdr_where`` (_hvdr_where's, which it
+    defaults to) says where the variant set of a high-variant-density window is."""
     def _active(key):
         if cols is None:
             return True
@@ -4171,7 +4209,8 @@ def build_annotation_legend_html(cols=None, df=None):
             return bool(df[cols[key]].map(lambda v: not _is_na(v)).any())
         return True
 
-    entries = [(t, d) for (k, t, d) in _ANNOTATION_LEGEND if _active(k)]
+    entries = [(t, d.replace("{hvdr_where}", hvdr_where or _hvdr_where()))
+               for (k, t, d) in _ANNOTATION_LEGEND if _active(k)]
     if not entries:
         return ""
     items = "".join(
@@ -4331,11 +4370,13 @@ def render_html(
     observed_haplotypes_bundle_name=None, observed_haplotypes_modals="",
     table_crispr_bulge_html="", inputs_criteria_html="", legend_html=None,
     next_steps_html="", plots_exclusion_note="", table_exclusion_note="", untiered=None,
+    n_variant=None,
 ):
     # ``plots_exclusion_note`` / ``table_exclusion_note``: the top_exclusion_note
     # captions of Section 2 and Section 6 (empty when nothing is left out).
     # ``untiered``: the datasets a search resolved without the dict-less tiers, whose
     # dense windows the Section-6 caption qualifies (or what --per-sample gives there).
+    # ``n_variant``: the number of variant-created off-targets (build_validation_panel).
     scatter_html = []
     for title, caption, uri in scatter_panels:
         scatter_html.append(
@@ -4555,10 +4596,16 @@ def render_html(
         tier_download_html = (
             f'\n<p class="tier-downloads">{links}\n</p>'
         )
+        # the variant-created subset is bundled only under --report-full (tsv_gz_name, the
+        # raw dump's, is set then), and only when the search has such a site
+        vc_bundled = any(fname.startswith("variant_created.") for _label, fname in tier_downloads)
         tier_caption = (
-            " Per-threshold subsets (CFD and mismatch+bulge tiers, plus the "
-            "variant-created subset) are bundled as curated-column TSVs so the "
-            "panel can be expanded to any tier for review."
+            " Per-threshold subsets (CFD and mismatch+bulge tiers"
+            + (", plus the variant-created subset" if vc_bundled else "")
+            + ") are bundled as curated-column TSVs so the panel can be expanded to any "
+            "tier for review."
+            + (" <code>--report-full</code> adds the variant-created subset."
+               if n_variant and not vc_bundled and not tsv_gz_name else "")
         )
 
     logo_uri = _asset_data_uri("crisprme-logo.svg") or _asset_data_uri("crisprme-logo.png")
@@ -5522,7 +5569,8 @@ def build_report(
         for tier in vp.get("tiers", []):
             # variant_created is the bulky full-data tier (every variant-origin
             # off-target) -> bundle ONLY with report_full; its count still shows in
-            # the panel, just without a download link (stays in the result dir).
+            # the panel, just without a download link (its rows stay in the result
+            # dir's integrated results; no file of the tier is written there).
             if tier.get("key") == "variant_created" and not report_full:
                 continue
             sub = tier["df"]
@@ -5536,7 +5584,8 @@ def build_report(
             tier_downloads.append((label, fname))
 
         validation_html = render_validation_panel(
-            vp, panel_tsv_name=panel_top100_name, tier_links=tier_links
+            vp, panel_tsv_name=panel_top100_name, tier_links=tier_links,
+            raw_bundled=report_full,
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: validation panel unavailable: {exc}\n")
@@ -5898,6 +5947,7 @@ def build_report(
         dataset_counts=_ds_counts,
         variant_count=_reg_vc,
         no_registry=_run_lacks_registry(result_dir, meta),
+        n_variant=vp.get("n_variant"),
     )
     # Assemble the per-site observed-haplotype modals (built as a side effect of the
     # top-1000 table renders) into a single backdrop + modal set + one self-contained
@@ -5946,12 +5996,15 @@ def build_report(
         plots_exclusion_note=plots_exclusion_note,
         table_exclusion_note=table_exclusion_note,
         untiered=untiered,
+        n_variant=vp.get("n_variant"),
         legend_html=(
             '<h3 style="margin:0.6em 0 0.3em">Scores &amp; columns</h3>'
             + build_score_legend_html(untiered)
             + (
                 '<h3 style="margin:1.2em 0 0.3em">Annotations</h3>' + _ann_legend
-                if (_ann_legend := build_annotation_legend_html(cols, df)) else ""
+                if (_ann_legend := build_annotation_legend_html(
+                    cols, df, _hvdr_where(hvdr_bundle_name, hvdr_n_regions, report_full)))
+                else ""
             )
         ),
     )

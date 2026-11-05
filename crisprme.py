@@ -88,6 +88,96 @@ except Exception:  # pragma: no cover - defensive; memory check is optional
     def warn_low_memory(*args, **kwargs):
         return None
 
+
+def _configure_tmpdir() -> None:
+    """Make ``$CRISPRME_TMPDIR`` the single knob for ALL temporary files, so a small
+    or full ``/tmp`` (common on HPC and inside containers, where ``/tmp`` is often a
+    tiny tmpfs) never breaks a run.
+
+    When ``$CRISPRME_TMPDIR`` is set, the directory is created if missing and, when
+    writable, exported as ``$TMPDIR`` -- which is honored by Python's ``tempfile`` AND
+    by the child processes the pipeline spawns (``sort-bed``, ``bcftools``, ``bgzip``,
+    the per-chromosome workers) -- and set as ``tempfile.tempdir``. Unset leaves the
+    standard behavior (``$TMPDIR`` or ``/tmp``). Invalid value -> warn and fall back.
+    """
+    d = os.environ.get("CRISPRME_TMPDIR")
+    if not d:
+        return
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    if os.path.isdir(d) and os.access(d, os.W_OK):
+        os.environ["TMPDIR"] = d
+        import tempfile
+        tempfile.tempdir = d
+    else:
+        sys.stderr.write(
+            f"WARNING: CRISPRME_TMPDIR={d!r} is not a writable directory; "
+            "falling back to the default temp location ($TMPDIR or /tmp)\n"
+        )
+
+
+def _can_write_folder(path: str) -> bool:
+    """Whether ``path`` is a folder this user can write in, or one it can make: the
+    nearest part of it that is there is a folder it can write in."""
+    while not os.path.lexists(path):
+        parent = os.path.dirname(path)
+        if parent == path:
+            return False
+        path = parent
+    return os.path.isdir(path) and os.access(path, os.W_OK | os.X_OK)
+
+
+def _configure_mplconfigdir() -> None:
+    """Give matplotlib a writable folder for its configuration and font cache when the
+    home cannot hold them, before any command runs (every step it starts inherits it).
+
+    matplotlib keeps them in ~/.config/matplotlib and ~/.cache/matplotlib ($XDG_CONFIG_HOME
+    and $XDG_CACHE_HOME; ~/.matplotlib on macOS). With a home it cannot write in (apptainer
+    --no-home, or --home on a read-only folder; docker --read-only), every command printed
+    on stderr that matplotlib had made a temporary folder ("... is not a writable directory",
+    "Matplotlib created a temporary cache directory ..."), as crisprme.py imports it (through
+    generate_report), and the fc-list its font-cache build runs printed "Fontconfig error: No
+    writable cache directories" ($XDG_CACHE_HOME/fontconfig is the one it can write). The
+    steps a command starts stayed silent only because matplotlib passes them its folder
+    ($MPLCONFIGDIR); a step's stderr is its error log, which fails the step when not empty.
+    Then, with $MPLCONFIGDIR unset, $MPLCONFIGDIR is a temporary folder (in $CRISPRME_TMPDIR
+    when set: _configure_tmpdir comes first), removed when crisprme.py exits, and so is
+    $XDG_CACHE_HOME, when unset, if the home's ~/.cache cannot be written either. A writable
+    home, or $MPLCONFIGDIR set, is left as it is.
+    """
+    if os.environ.get("MPLCONFIGDIR"):
+        return
+    home = os.path.expanduser("~")
+    if sys.platform.startswith(("linux", "freebsd")):
+        folders = [
+            os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"),
+                         "matplotlib"),
+            os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.join(home, ".cache"),
+                         "matplotlib"),
+        ]
+    else:
+        folders = [os.path.join(home, ".matplotlib")]
+    if all(_can_write_folder(folder) for folder in folders):
+        return
+    import atexit
+    import tempfile
+    try:
+        folder = tempfile.mkdtemp(prefix="crisprme-matplotlib-")
+    except OSError:
+        return  # no temporary folder either: matplotlib says so itself
+    os.environ["MPLCONFIGDIR"] = folder
+    if not os.environ.get("XDG_CACHE_HOME") and not _can_write_folder(os.path.join(home, ".cache")):
+        os.environ["XDG_CACHE_HOME"] = folder  # (fontconfig's cache, the font-cache build's)
+    atexit.register(shutil.rmtree, folder, ignore_errors=True)
+
+
+# Before any command runs, and before the PostProcess modules are imported: generate_report,
+# imported below, imports matplotlib, which finds its folders when it is imported.
+_configure_tmpdir()  # honor $CRISPRME_TMPDIR for all temp before any command runs
+_configure_mplconfigdir()  # a writable folder for matplotlib, when the home is not one
+
 sys.path.insert(0, script_path)
 from validate_inputs import run_lightweight, run_full, resolve_vcf_dataset_dirs, _vcf_header_samples  # noqa: E402
 from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside)
@@ -849,6 +939,98 @@ def _check_pam(args: List[str]) -> str:
         error("The file specified for --pam does not exist")
     return pamfile
 
+def _check_pam_file(pamfile: str) -> None:
+    """Refuses, in one line, a PAM file complete-search cannot read: one named against the
+    <length>-<motif>-<CasName>.txt convention (the nuclease's name is read from its name),
+    one holding more than one motif line (a single IUPAC motif per file is supported), and
+    one whose first line is not '<motif> <PAM length>'. complete-search checks it before
+    anything is done: these ended the search in a traceback, once the annotation was sorted
+    and the output folder made.
+
+    Args:
+        pamfile: Path to the PAM file, which exists (_check_pam).
+
+    Raises:
+        SystemExit: If the PAM file is one of these, or cannot be read.
+    """
+    name = os.path.basename(pamfile)
+    if len(name.split(".")[0].split("-")) < 3:
+        error(
+            f"Invalid PAM filename '{name}': expected the '<length>-<motif>-<CasName>.txt' "
+            "convention (e.g. 20bp-NGG-SpCas9.txt)."
+        )
+    try:
+        with open(pamfile) as fh:
+            line = fh.readline()
+            more = any(rest.strip() for rest in fh)
+    except (OSError, UnicodeDecodeError) as e:
+        error(f"cannot read the PAM file '{pamfile}': {e}")
+    if more:
+        error(
+            f"Only one PAM motif per file is supported; the PAM file '{pamfile}' contains "
+            "more than one non-empty line. Combine the motifs into a single IUPAC motif "
+            "(e.g. NAG + NGG -> NRG)."
+        )
+    try:
+        int(line.split(" ")[-1])
+    except ValueError:
+        error(
+            f"The PAM file '{pamfile}' must hold the motif and the PAM's length on its first "
+            "line, as in 'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' "
+            "end of the guide)."
+        )
+
+def _check_index_path(args: List[str]) -> str:
+    """Retrieves and validates the prebuilt reference-index library (--index-path) from
+    command-line arguments: an index made with build-index-only, or one downloaded ahead of
+    time, looked up there rather than built under the working directory (a missing index
+    is then a hard error downstream).
+
+    Args:
+        args: List of command-line arguments.
+
+    Returns:
+        The absolute path to the index library, or "_" without --index-path.
+
+    Raises:
+        SystemExit: If --index-path has no value, or names no folder.
+    """
+    if "--index-path" not in args:
+        return "_"
+    try:
+        index_path = args[args.index("--index-path") + 1]
+    except IndexError:
+        error("Missing input for --index-path")
+    if index_path.startswith("--"):
+        error("Please input a value for flag --index-path")
+    index_path = os.path.abspath(index_path)
+    if not os.path.isdir(index_path):
+        error(f"The index path {index_path} does not exist or is not a directory")
+    return index_path
+
+def _check_vcf_filter_pass_values(args: List[str]) -> str:
+    """Retrieves the VCF FILTER values a variant search treats as passing
+    (--vcf-filter-pass-values) from command-line arguments.
+
+    Args:
+        args: List of command-line arguments.
+
+    Returns:
+        The comma-separated values, "PASS,." (VCF spec 1.6.1) without the flag.
+
+    Raises:
+        SystemExit: If --vcf-filter-pass-values has no value.
+    """
+    if "--vcf-filter-pass-values" not in args:
+        return "PASS,."
+    try:
+        values = args[args.index("--vcf-filter-pass-values") + 1]
+    except IndexError:
+        error("Missing input for --vcf-filter-pass-values")
+    if values.startswith("--"):
+        error("Please input a value for flag --vcf-filter-pass-values")
+    return values
+
 def _check_be_window(args: List[str], be_window: bool) -> Tuple[int, int]:
     """Retrieves and validates the base editing window from command-line arguments.
 
@@ -1060,35 +1242,6 @@ def _writable_tmp_base() -> "Optional[str]":
         if cand and os.path.isdir(cand) and os.access(cand, os.W_OK):
             return cand
     return None
-
-
-def _configure_tmpdir() -> None:
-    """Make ``$CRISPRME_TMPDIR`` the single knob for ALL temporary files, so a small
-    or full ``/tmp`` (common on HPC and inside containers, where ``/tmp`` is often a
-    tiny tmpfs) never breaks a run.
-
-    When ``$CRISPRME_TMPDIR`` is set, the directory is created if missing and, when
-    writable, exported as ``$TMPDIR`` -- which is honored by Python's ``tempfile`` AND
-    by the child processes the pipeline spawns (``sort-bed``, ``bcftools``, ``bgzip``,
-    the per-chromosome workers) -- and set as ``tempfile.tempdir``. Unset leaves the
-    standard behavior (``$TMPDIR`` or ``/tmp``). Invalid value -> warn and fall back.
-    """
-    d = os.environ.get("CRISPRME_TMPDIR")
-    if not d:
-        return
-    try:
-        os.makedirs(d, exist_ok=True)
-    except OSError:
-        pass
-    if os.path.isdir(d) and os.access(d, os.W_OK):
-        os.environ["TMPDIR"] = d
-        import tempfile
-        tempfile.tempdir = d
-    else:
-        sys.stderr.write(
-            f"WARNING: CRISPRME_TMPDIR={d!r} is not a writable directory; "
-            "falling back to the default temp location ($TMPDIR or /tmp)\n"
-        )
 
 
 def _sort_annotation(annotationfile: str) -> str:
@@ -2458,6 +2611,10 @@ def complete_search() -> None:
     sequence_use = bool(sequence_file)  # use sequence file for guide
     assert sum([bool(guidefile), bool(sequence_file)]) == 1
     pamfile = _check_pam(args)  # pam file
+    _check_pam_file(pamfile)  # its name and its one motif line, read below
+    index_path = _check_index_path(args)  # prebuilt reference-index library, or "_"
+    # VCF FILTER values to treat as passing (default: "PASS,." per VCF spec §1.6.1)
+    vcf_filter_pass_values = _check_vcf_filter_pass_values(args)
     base_start, base_end = _check_be_window(args, "--be-window" in args)  # base editing window
     base_set = _check_be_base(args, "--be-base" in args)  # base editing bases
     annotationfile = _check_annotation(args, "--annotation" in args)  # annotation file
@@ -2477,15 +2634,6 @@ def complete_search() -> None:
     samples_taken = (_samples_list_for_search(vcfdir)
                      if variant and "--samplesID" not in args else [])
     thread = _check_threads(args, "--thread" in args)  # number of threads
-    # VCF FILTER values to treat as passing (default: "PASS,." per VCF spec §1.6.1)
-    vcf_filter_pass_values = "PASS,."
-    if "--vcf-filter-pass-values" in args:
-        try:
-            vcf_filter_pass_values = args[args.index("--vcf-filter-pass-values") + 1]
-            if vcf_filter_pass_values.startswith("--"):
-                raise ValueError("Please input a value for flag --vcf-filter-pass-values")
-        except IndexError as e:
-            raise ValueError("Missing input for --vcf-filter-pass-values") from e
     full_input_validate = "--full_input_validate" in args
 
     # Two analysis modes. POPULATION-LEVEL: the SNP variant post-analysis emits ONE
@@ -2714,22 +2862,6 @@ def complete_search() -> None:
                 f"ships it pre-built). To intentionally run CFD-only anyway, set CRISPRME_SKIP_SCORER_ENV=1."
             )
 
-    # optional prebuilt/staged reference-index library (--index-path). When
-    # given, the reference index is looked up here (e.g. an index made with
-    # build-index-only, or one downloaded ahead of time) rather than built under
-    # the working directory; a missing index becomes a hard error downstream.
-    index_path = "_"
-    if "--index-path" in args:
-        try:
-            index_path = args[args.index("--index-path") + 1]
-            if index_path.startswith("--"):
-                raise ValueError("Please input a value for flag --index-path")
-        except IndexError as e:
-            raise ValueError("Missing input for --index-path") from e
-        index_path = os.path.abspath(index_path)
-        if not os.path.isdir(index_path):
-            error(f"The index path {index_path} does not exist or is not a directory")
-
     # --prune-pam (opt-in): filter a PAM-less index (e.g. an all-N "NNN" index) down to
     # the motif given with --pam, applied at CRISPRitz leaf-emit as a skip-before-write
     # (one index serves many PAMs). It only *narrows* output -- it never changes a
@@ -2770,16 +2902,9 @@ def complete_search() -> None:
     pam_len = 0
     total_pam_len = 0
     with open(pamfile, "r") as pam_file:
+        # its one motif line (_check_pam_file refused a file holding more: only the
+        # first line is used, so a second motif would be silently ignored)
         pam_char = pam_file.readline()
-        # Only the first line is used, so a multi-line PAM file would silently
-        # ignore the extra motifs. Reject it with a clear error instead (FDA
-        # item): a single IUPAC motif per file is supported.
-        if any(line.strip() for line in pam_file):
-            raise ValueError(
-                "Only one PAM motif per file is supported; the PAM file "
-                f"'{pamfile}' contains more than one non-empty line. Combine "
-                "the motifs into a single IUPAC motif (e.g. NAG + NGG -> NRG)."
-            )
         total_pam_len = len(pam_char.split(" ")[0])
         index_pam_value = pam_char.split(" ")[-1]
         if int(pam_char.split(" ")[-1]) < 0:
@@ -2806,17 +2931,10 @@ def complete_search() -> None:
 
     genome_ref = os.path.basename(genomedir)
     annotation_name = os.path.basename(annotationfile)
-    # The nuclease name is parsed from the PAM filename, which must follow the
-    # <length>-<motif>-<CasName>.txt convention (e.g. 20bp-NGG-SpCas9.txt).
-    # Validate before indexing to avoid a cryptic IndexError (FDA item).
-    pam_name_fields = os.path.basename(pamfile).split(".")[0].split("-")
-    if len(pam_name_fields) < 3:
-        raise ValueError(
-            f"Invalid PAM filename '{os.path.basename(pamfile)}': expected the "
-            "'<length>-<motif>-<CasName>.txt' convention "
-            "(e.g. 20bp-NGG-SpCas9.txt)."
-        )
-    nuclease = pam_name_fields[2]
+    # The nuclease name is parsed from the PAM filename, which follows the
+    # <length>-<motif>-<CasName>.txt convention (e.g. 20bp-NGG-SpCas9.txt):
+    # _check_pam_file refused any other name before anything was done.
+    nuclease = os.path.basename(pamfile).split(".")[0].split("-")[2]
     # Treat --max-total-edits as the single "max edits" knob (mirroring the web slider):
     # when the user did NOT specify per-type bulges, default to ONE DNA + ONE RNA bulge
     # (bounded by the bulge depth a search can REACH here). We deliberately cap the derived
@@ -6589,9 +6707,10 @@ def print_help_generate_report() -> None:
         "shareable report for a completed CRISPRme run. It produces a single "
         "ZIP (<jobid>_report.zip) bundling report.html (offline, no external "
         "dependencies -- plots embedded as base64 PNG, the top-1000 off-target "
-        "table inline, CSS inline), integrated_results.tsv.gz (the full results "
-        "the HTML links to with a relative href), the top-1000 and top-100 "
-        "validation-panel tables, and the non-empty per-tier curated TSVs. It is "
+        "table inline, CSS inline), the top-1000 and top-100 validation-panel "
+        "tables, and the non-empty per-tier curated TSVs, which the HTML links to "
+        "with a relative href (with --report-full, the complete "
+        "integrated_results.tsv.gz too; below). It is "
         "a portable digest of the full interactive "
         "website result, aimed at sharing off-target predictions (e.g. to "
         "design a targeted-NGS / rhAMP-Seq confirmation panel).\n"
@@ -6613,10 +6732,11 @@ def print_help_generate_report() -> None:
         "exported tables (use when a run's allele frequencies are not yet "
         "finalized and a MAF column would mislead) [OPTIONAL]\n"
         "\t--report-full, also bundle the heavy full-data files (the complete raw "
-        "integrated_results.tsv.gz, the full snp_snp_cooc, variant_created, and the "
-        "high-variant-density regions, all gzipped) into the ZIP. Default OFF -> a "
-        "slim, shareable report; the heavy files always remain in the result "
-        "directory regardless [OPTIONAL]\n"
+        "integrated_results.tsv.gz, the full snp_snp_cooc and the high-variant-density "
+        "regions near the top-ranked sites, gzipped, and the variant_created table) into "
+        "the ZIP. Default OFF -> a slim, shareable report; their data remains in the "
+        "result directory regardless (the variant-created sites as rows of the "
+        "integrated results) [OPTIONAL]\n"
     )
     sys.exit(1)
 
@@ -6729,8 +6849,8 @@ def complete_test_crisprme():
 
     Raises:
         SystemExit: With status 1 if the CRISPRme test fails (2 for a --chrom the
-            genome or the index lacks, or the results of an earlier run in the way),
-            having said why on stderr.
+            genome or the index lacks, the results of an earlier run in the way, or no
+            prebuilt index, or no genome of it, to search), having said why on stderr.
     """
 
     warn_low_memory()  # non-fatal low-memory warning (Docker Desktop, etc.)
@@ -6788,8 +6908,9 @@ def complete_test_crisprme():
     )
     if code == 2:
         # complete_test.py refused --chrom, a chromosome the genome or the index lacks, or
-        # to run over the results of an earlier run, and said so in one line before
-        # searching; a traceback would only bury it
+        # to run over the results of an earlier run, or found no prebuilt index (or no
+        # genome of it) to search, and said so before searching; a traceback would only
+        # bury it
         sys.exit(2)
     if code != 0:
         # complete_test.py, or the search it ran, has said why above; a traceback would
@@ -7154,7 +7275,6 @@ def targets_scoring_cmd():
     print(f"targets-scoring: wrote {n} scored sites to {output}")
 
 
-_configure_tmpdir()  # honor $CRISPRME_TMPDIR for all temp before any command runs
 if len(sys.argv) < 2:
     check_crisprme_dirtree(strict=False)  # check crisprme directory tree structure
     crisprme_help()  # no arg? print help

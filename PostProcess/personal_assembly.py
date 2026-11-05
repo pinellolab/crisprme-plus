@@ -304,6 +304,12 @@ def delete_target(cwd: str, individual: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Import a bring-your-own bundle archive (.zip / .tar.gz)
 # ---------------------------------------------------------------------------
+class BundleError(ValueError):
+    """A bundle archive refused, saying why: how it is packed, its members, the folder it
+    would go into, or what its ``metadata.json`` names. Settings' upload answers it as the
+    client's to fix (HTTP 400), and any other failure of an import as its own (500)."""
+
+
 def _unusable_fasta_name(genome_dir: str) -> Optional[str]:
     """Why a FASTA file of the haplotype genome folder ``genome_dir`` cannot be
     searched under its name, else ``None``. A search takes each ``.fa`` file's name,
@@ -409,8 +415,8 @@ def import_archive(archive_path: str, cwd: str) -> str:
     """Extract a personal-assembly bundle archive into ``Assemblies/`` and
     validate it. The archive must contain exactly one top-level ``<individual>/``
     directory holding the bundle structure + ``metadata.json``. Returns the
-    individual name on success; raises ``ValueError`` with a clear reason
-    otherwise (and leaves nothing half-extracted)."""
+    individual name on success; raises ``BundleError`` (a ``ValueError``) with a
+    clear reason otherwise (and leaves nothing half-extracted)."""
     assemblies_root = os.path.join(cwd, ASSEMBLIES_DIR)
     os.makedirs(assemblies_root, exist_ok=True)
 
@@ -423,19 +429,19 @@ def import_archive(archive_path: str, cwd: str) -> str:
         namer = lambda a: a.namelist()  # noqa: E731
         is_tar = False
     else:
-        raise ValueError("bundle must be a .zip or .tar.gz/.tgz archive")
+        raise BundleError("bundle must be a .zip or .tar.gz/.tgz archive")
 
     with opener() as arch:
         names = namer(arch)
         top = _safe_members_top_dir(names)
         if top is None:
-            raise ValueError(
+            raise BundleError(
                 "archive must contain exactly one top-level <individual>/ folder "
                 "and no absolute or '..' paths"
             )
         dest = os.path.join(assemblies_root, os.path.basename(top))
         if os.path.exists(dest):
-            raise ValueError(
+            raise BundleError(
                 f"an assembly named {os.path.basename(top)!r} already exists -- "
                 "delete it first or rename the bundle's top folder"
             )
@@ -452,7 +458,7 @@ def import_archive(archive_path: str, cwd: str) -> str:
             if is_tar:
                 for m in arch.getmembers():
                     if not (m.isreg() or m.isdir()):
-                        raise ValueError(
+                        raise BundleError(
                             f"unsupported archive entry {m.name!r} "
                             "(only regular files and directories are allowed)"
                         )
@@ -460,7 +466,7 @@ def import_archive(archive_path: str, cwd: str) -> str:
             for n in names:
                 target = os.path.realpath(os.path.join(staging, n))
                 if target != staging_real and not target.startswith(staging_real + os.sep):
-                    raise ValueError(f"archive member escapes the extraction directory: {n!r}")
+                    raise BundleError(f"archive member escapes the extraction directory: {n!r}")
             # extract into staging/<top>/… then validate before publishing: a tar
             # archive's files with safe modes, owned by this user, not with the modes
             # and owners it gives them (safe_tar); zipfile sets neither
@@ -471,7 +477,7 @@ def import_archive(archive_path: str, cwd: str) -> str:
             extracted = os.path.join(staging, top)
             err = validate_bundle_dir(extracted)
             if err:
-                raise ValueError(f"invalid personal-assembly bundle: {err}")
+                raise BundleError(f"invalid personal-assembly bundle: {err}")
             os.replace(extracted, dest)
         finally:
             shutil.rmtree(staging, ignore_errors=True)

@@ -143,9 +143,9 @@ for example `20bp-NGG-SpCas9.txt` or `TTTV-20bp-Cas12a.txt`.
 **Important:** the three fields are cosmetic labels used for naming/reporting.
 The **file contents** (the motif and the signed length on line 1) are what
 actually drive the search. If your filename has fewer than three `-`-separated
-fields, the label parse will fail (`IndexError`); if the label is "wrong" but
-the contents are right, the search still runs correctly — only the reported
-nuclease label is affected.
+fields, `complete-search` refuses it in one line (`Error: Invalid PAM filename ...`,
+exit 1) before it does anything; if the label is "wrong" but the contents are right,
+the search still runs correctly — only the reported nuclease label is affected.
 
 ---
 
@@ -157,8 +157,10 @@ CRISPRme reads **only the first line** of the PAM file:
 pam_char = pam_file.readline()
 ```
 
-(`crisprme.py`, in the `complete_search` PAM setup — a single `readline`.) A PAM file with multiple lines will **silently** use
-only line 1 — the rest is ignored, with no warning.
+(`crisprme.py`, in the `complete_search` PAM setup — a single `readline`.) So `complete-search`
+refuses, in one line (`Error: Only one PAM motif per file is supported; ...`, exit 1) and before
+it does anything, a PAM file holding a second non-empty line, and one whose first line is not
+`<motif> <length>`, rather than search line 1 alone.
 
 To search **more than one PAM motif at once**, do not stack multiple lines.
 Instead, encode the alternatives as a **single IUPAC motif**. For example, to

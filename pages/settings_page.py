@@ -339,7 +339,8 @@ def _finalize_upload(
         # Assemblies/<individual>/ and validates before publishing).
         ext = next((s for s in (".tar.gz", ".tgz", ".zip") if name.endswith(s)), None)
         if ext is None:
-            raise ValueError("personal-assembly bundle must be a .zip or .tar.gz/.tgz archive")
+            raise personal_assembly.BundleError(
+                "personal-assembly bundle must be a .zip or .tar.gz/.tgz archive")
         scratch = part_path + ext  # import_archive picks zip vs tar by extension
         os.replace(part_path, scratch)
         try:
@@ -416,6 +417,10 @@ def _settings_upload_chunk():
         except Exception as e:
             if os.path.exists(part):
                 os.remove(part)
+            if isinstance(e, personal_assembly.BundleError):
+                # a bundle refused, saying why (its packing, its members, what its
+                # metadata.json names): the client's to fix, as the refusals above
+                return (str(e), 400)
             return (f"finalize failed: {e}", 500)
         return (f"complete:{result}", 200)
     return ("chunk received", 200)

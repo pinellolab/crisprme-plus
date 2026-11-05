@@ -1994,14 +1994,105 @@ class TestSettingsRefusesNamesAShellReads(unittest.TestCase):
                 continue
             with self.subTest(name=name):
                 body = bundle(f"{name}.fa")
-                said = lambda out: (self.assertEqual(out[1], 500), self.assertIn(
-                    f"invalid personal-assembly bundle: paternal genome dir 'paternal/genome' "
-                    f"holds {name + '.fa'!r}: a FASTA file's name must not hold a blank", out[0]))
+                # (as the client's to fix: TestARefusedBundleIsTheClientsToFix)
+                said = lambda out: (self.assertEqual(out[1], 400), self.assertTrue(
+                    out[0].startswith(
+                        f"invalid personal-assembly bundle: paternal genome dir "
+                        f"'paternal/genome' holds {name + '.fa'!r}: a FASTA file's name must "
+                        f"not hold a blank"), out[0]))
                 self.refused(lambda: self.upload("assembly-bundle", "HG01255.tar.gz", body), said)
         self.assertEqual(self.upload("assembly-bundle", "HG01255.tar.gz",
                                      bundle("chr2.fa", _FA2)), ("complete:HG01255", 200))
         self.assertEqual(sorted(os.listdir(os.path.join(
             self.cwd, "Assemblies", "HG01255", "paternal", "genome"))), ["chr1.fa", "chr2.fa"])
+
+
+class TestARefusedBundleIsTheClientsToFix(unittest.TestCase):
+    """The upload route and _finalize_upload, undecorated: a personal-assembly bundle the
+    import refuses (a metadata.json naming a path outside the bundle, a FASTA file named
+    with what a shell reads, an archive packed otherwise) was answered as a failure of the
+    server, HTTP 500 'finalize failed: ...', which the browser logs as one, though the
+    route answers its other refusals 400 with the reason. A bundle refused is answered 400
+    with the reason now, with nothing installed; a failure of the server is still 500."""
+
+    def setUp(self):
+        import personal_assembly  # (PostProcess/: a bundle upload's import)
+
+        self.cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cwd, ignore_errors=True)
+        for d in ("Genomes/hg38", "Settings/uploads"):
+            os.makedirs(os.path.join(self.cwd, d))
+        self.ns = _load_functions(
+            ["_unusable_in_shell", "_uploads_dir", "_finalize_upload", "_MAX_UPLOAD_BYTES",
+             "_fmt_size", "_settings_upload_chunk"],
+            current_working_directory=self.cwd,
+            shutil=shutil,
+            tarfile=tarfile,
+            safe_tar=safe_tar,
+            personal_assembly=personal_assembly,
+            ONLINE=False,
+        )
+
+    def bundle(self, genome_dir="paternal/genome", fasta="chr1.fa", top=("HG01255",)):
+        """A .tar.gz bundle of an individual's two haplotypes under each top folder in
+        ``top``: the paternal one's genome folder named ``genome_dir`` in metadata.json,
+        and holding ``fasta``."""
+        entries = []
+        for individual in top:
+            meta = {"format": "crisprme-personal-assembly", "format_version": 1,
+                    "individual": individual, "haplotypes": {
+                        hap: {"genome_dir": f"{hap}/genome", "chain": f"{hap}/x.chain",
+                              "chromalias": f"{hap}/x.chromAlias.txt"}
+                        for hap in ("paternal", "maternal")}}
+            meta["haplotypes"]["paternal"]["genome_dir"] = genome_dir
+            entries.append((f"{individual}/metadata.json", "file", json.dumps(meta).encode()))
+            for hap in ("paternal", "maternal"):
+                entries += [(f"{individual}/{hap}/genome/"
+                             f"{fasta if hap == 'paternal' else 'chr1.fa'}", "file", _FA1),
+                            (f"{individual}/{hap}/x.chain", "file", b"x\n"),
+                            (f"{individual}/{hap}/x.chromAlias.txt", "file", b"x\n")]
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        _write_tar_gz(os.path.join(folder, "bundle.tar.gz"), entries)
+        with open(os.path.join(folder, "bundle.tar.gz"), "rb") as fh:
+            return fh.read()
+
+    def upload(self, file_name, body):
+        self.ns["request"] = _Request("assembly-bundle", file_name, body)
+        return self.ns["_settings_upload_chunk"]()
+
+    def test_a_refused_bundle_is_answered_400_with_the_reason(self):
+        os.makedirs(os.path.join(self.cwd, "Assemblies", "HG00438"))  # (one installed)
+        for file_name, body, reason in (
+                ("HG01255.tar.gz", self.bundle(genome_dir="../../Genomes/hg38"),
+                 "invalid personal-assembly bundle: paternal genome_dir '../../Genomes/hg38' "
+                 "is not a path inside the bundle"),
+                ("HG01255.tar.gz", self.bundle(fasta="chr1;touch MARK.fa"),
+                 "invalid personal-assembly bundle: paternal genome dir 'paternal/genome' "
+                 "holds 'chr1;touch MARK.fa': a FASTA file's name must not hold a blank or "
+                 "any of "),
+                ("HG01255.rar", self.bundle(),
+                 "personal-assembly bundle must be a .zip or .tar.gz/.tgz archive"),
+                ("HG01255.tar.gz", self.bundle(top=("HG01255", "HG01256")),
+                 "archive must contain exactly one top-level <individual>/ folder"),
+                ("HG00438.tar.gz", self.bundle(top=("HG00438",)),
+                 "an assembly named 'HG00438' already exists -- delete it first")):
+            with self.subTest(reason=reason):
+                before = _tree(self.cwd)
+                text, status = self.upload(file_name, body)
+                self.assertEqual(status, 400, text)
+                self.assertTrue(text.startswith(reason), text)
+                self.assertEqual(_tree(self.cwd), before)  # (nor the upload's part)
+        # a bundle the import takes goes in as before
+        self.assertEqual(self.upload("HG01255.tar.gz", self.bundle()), ("complete:HG01255", 200))
+
+    def test_a_failure_of_the_server_is_still_500(self):
+        with open(os.path.join(self.cwd, "Assemblies"), "w") as fh:  # (no folder there)
+            fh.write("x")
+        text, status = self.upload("HG01255.tar.gz", self.bundle())
+        self.assertEqual(status, 500, text)
+        self.assertTrue(text.startswith("finalize failed: "), text)
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "Settings", "uploads")), [])
 
 
 # --- what a Settings dropdown offers --------------------------------------------------
@@ -2216,12 +2307,15 @@ class TestVcfUploadIntoARegisteredFolder(unittest.TestCase):
         for name in ("existing.vcf.gz", "notes.txt"):
             with open(os.path.join(self.server, name), "w") as fh:
                 fh.write("ORIGINAL\n")
+        import personal_assembly  # (the route tells a bundle refused from a failure)
+
         self.ns = _load_functions(
             ["_validate_name", "_unusable_in_shell", "_write_vcf_marker", "add_vcf",
              "_uploads_dir", "_vcf_upload_problem", "_finalize_upload", "_MAX_UPLOAD_BYTES",
              "_fmt_size", "_settings_upload_chunk"],
             current_working_directory=self.cwd,
             shutil=shutil,
+            personal_assembly=personal_assembly,
             ONLINE=False,
             PreventUpdate=_PreventUpdate,
             no_update=_NO_UPDATE,

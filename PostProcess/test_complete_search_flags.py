@@ -23,9 +23,11 @@ subprocess checks confirm the behaviour end to end; they need the module to be
 importable and are skipped otherwise.
 """
 
+import ast
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -65,14 +67,18 @@ def allowlist(lines):
 def global_flags(lines):
     """Flags read at MODULE scope off the full argv, so valid on every subcommand.
 
-    Scoped to the lines above the first `def` on purpose: further down,
+    Scoped to the module-level statements on purpose, a function's body left out:
     `input_args` is also how OTHER subcommands read their own flags, and those
-    are not valid for complete-search.
+    are not valid for complete-search. (The lines above the first `def` were
+    taken for them until crisprme.py defined, above its `--ci-cd-test`, the
+    functions it runs before its imports.)
     """
-    first_def = next((n for n, l in enumerate(lines) if l.startswith("def ")), len(lines))
+    src = "\n".join(lines)
     return {
         f
-        for line in lines[:first_def]
+        for node in ast.parse(src).body
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        for line in lines[node.lineno - 1:node.end_lineno]
         if "input_args" in line
         for f in FLAG_LITERAL.findall(line)
     }
@@ -399,6 +405,92 @@ class TestRejectionBehaviour(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("unrecognized complete-search flag", r.stderr)
         self.assertIn("--zzzzzzzz", r.stderr)
+
+
+@unittest.skipUnless(_importable(), "crisprme.py dependencies not installed")
+class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
+    """A PAM file named against the <length>-<motif>-<CasName>.txt convention, one holding
+    two motif lines or a first line that is not '<motif> <length>', and --index-path or
+    --vcf-filter-pass-values with no value ended complete-search in a Python traceback (a
+    raw ValueError), all but the two motif lines' only once Results/<output> was made, which
+    stayed, empty, and the misnamed file only once the annotation was sorted (~30 s with the
+    shipped one). Each is one 'Error: ...' line and exit 1 now, as the other input errors,
+    checked before the annotation is read or anything is made."""
+
+    GUIDE = "CTAACAGTTGCTTTTATCACNNN"
+
+    def setUp(self):
+        self.wd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.wd, ignore_errors=True)
+        os.makedirs(os.path.join(self.wd, "Genomes", "g"))
+        with open(os.path.join(self.wd, "Genomes", "g", "chr1.fa"), "w") as fh:
+            fh.write(">chr1\n" + "ACGT" * 30 + "\n")
+        with open(os.path.join(self.wd, "guide.txt"), "w") as fh:
+            fh.write(self.GUIDE + "\n")
+        os.makedirs(os.path.join(self.wd, "PAMs"))
+
+    def pam(self, name, text="NNNNNNNNNNNNNNNNNNNNNGG 3\n"):
+        with open(os.path.join(self.wd, "PAMs", name), "w") as fh:
+            fh.write(text)
+        return os.path.join("PAMs", name)
+
+    def search(self, pam, *flags):
+        """complete-search of the guide on Genomes/g into Results/out (no scorer env needed:
+        what is checked comes before it)."""
+        env = dict(os.environ, CRISPRME_SKIP_SCORER_ENV="1")
+        return subprocess.run(
+            [sys.executable, CRISPRME, "complete-search", "--genome", "Genomes/g", "--guide",
+             "guide.txt", "--pam", pam, "--mm", "4", "--output", "out", *flags],
+            capture_output=True, text=True, cwd=self.wd, env=env)
+
+    def assertRefused(self, run, says):
+        """Exit 1, with ``says`` the last line on stderr (a low-memory host's warning may
+        come first), no traceback, and no Results/out."""
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        self.assertEqual(run.stderr.splitlines()[-1:], [f"Error: {says}"], run.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.wd, "Results", "out")))
+
+    def test_a_pam_file_named_against_the_convention(self):
+        self.assertRefused(
+            self.search(self.pam("mypam.txt")),
+            "Invalid PAM filename 'mypam.txt': expected the '<length>-<motif>-<CasName>.txt' "
+            "convention (e.g. 20bp-NGG-SpCas9.txt).")
+
+    def test_before_the_annotation_is_read(self):
+        # the check of an annotation that is not there would refuse it first
+        self.assertRefused(
+            self.search(self.pam("mypam.txt"), "--annotation", "no_such_annotation.bed"),
+            "Invalid PAM filename 'mypam.txt': expected the '<length>-<motif>-<CasName>.txt' "
+            "convention (e.g. 20bp-NGG-SpCas9.txt).")
+
+    def test_a_pam_file_of_two_motif_lines(self):
+        pam = self.pam("20bp-NRG-SpCas9.txt",
+                       "NNNNNNNNNNNNNNNNNNNNNGG 3\nNNNNNNNNNNNNNNNNNNNNNAG 3\n")
+        self.assertRefused(
+            self.search(pam),
+            f"Only one PAM motif per file is supported; the PAM file "
+            f"'{os.path.join(os.path.realpath(self.wd), pam)}' contains more than one "
+            f"non-empty line. Combine the motifs into a single IUPAC motif "
+            f"(e.g. NAG + NGG -> NRG).")
+
+    def test_a_pam_file_whose_line_is_not_a_motif_and_a_length(self):
+        pam = self.pam("20bp-NGG-SpCas9.txt", "NNNNNNNNNNNNNNNNNNNNNGG\n")
+        self.assertRefused(
+            self.search(pam),
+            f"The PAM file '{os.path.join(os.path.realpath(self.wd), pam)}' must hold the "
+            f"motif and the PAM's length on its first line, as in "
+            f"'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' end of the "
+            f"guide).")
+
+    def test_a_flag_with_no_value(self):
+        pam = self.pam("20bp-NGG-SpCas9.txt")
+        for flag in ("--index-path", "--vcf-filter-pass-values"):
+            with self.subTest(flag=flag, given="last"):
+                self.assertRefused(self.search(pam, flag), f"Missing input for {flag}")
+            with self.subTest(flag=flag, given="before another flag"):
+                self.assertRefused(self.search(pam, flag, "--thread", "2"),
+                                   f"Please input a value for flag {flag}")
 
 
 if __name__ == "__main__":

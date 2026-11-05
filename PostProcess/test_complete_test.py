@@ -250,6 +250,51 @@ class AnEarlierRunInTheWayIsNamedWhole(unittest.TestCase):
         self.assertEqual(os.listdir("Genomes"), [])
 
 
+class NothingToSearchIsNoPass(unittest.TestCase):
+    """The prebuilt-index smoke (complete-test without CRISPRME_ALLOW_ONDEMAND_BUILD) in a
+    folder with no prebuilt index, or with one whose genome is not there, says how to get
+    it and exited 0, which a script or a CI step reads as a pass though nothing ran, as the
+    re-run guard beside it says (AnEarlierRunInTheWayIsNamedWhole). It exits 2 now, as
+    that guard does, having said the same and searched and downloaded nothing; crisprme.py
+    passes the 2 on (TheCliPassesTheRefusalOn)."""
+
+    SCRIPT = os.path.join(HERE, "complete_test.py")
+
+    def setUp(self):
+        self.wd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.wd)
+
+    def run_script(self):
+        env = {k: v for k, v in os.environ.items() if k != "CRISPRME_ALLOW_ONDEMAND_BUILD"}
+        return subprocess.run([sys.executable, self.SCRIPT, "chr22", "1000G", "4", "False"],
+                              cwd=self.wd, env=env, capture_output=True, text=True,
+                              timeout=120)
+
+    def assertNothingRan(self, res, says):
+        self.assertEqual(res.returncode, 2, res.stderr)
+        self.assertIn(says, res.stderr)
+        self.assertNotIn("Traceback", res.stderr)
+        for folder in ("Genomes", "Results", "VCFs"):
+            self.assertEqual(os.listdir(os.path.join(self.wd, folder)), [], folder)
+
+    def test_no_prebuilt_index(self):
+        self.assertNothingRan(
+            self.run_script(),
+            "No prebuilt index found for the complete-test (looked in "
+            f"{os.path.join(os.path.realpath(self.wd), 'genome_library')}).\n"
+            "CRISPRme does not build one automatically.\n\nDownload an index first, e.g.:")
+
+    def test_an_index_whose_genome_is_not_there(self):
+        index = os.path.join(self.wd, "genome_library", "NRG_3_hg38")
+        os.makedirs(index)
+        with open(os.path.join(index, "X_chr22_1.bin"), "wb") as fh:
+            fh.write(b"t")
+        self.assertNothingRan(
+            self.run_script(),
+            "The prebuilt index 'NRG_3_hg38' is present, but its reference genome "
+            "(Genomes/hg38) is not.")
+
+
 class WhatTheDataRepoDoesNotHostIsNoFailure(unittest.TestCase):
     """The documented self-test (CRISPRME_ALLOW_ONDEMAND_BUILD=1 complete-test --chrom chr22
     --vcf_dataset 1000G) always said 'HuggingFace fetch failed for

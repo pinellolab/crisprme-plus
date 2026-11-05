@@ -39,6 +39,12 @@ The directory is created if it does not exist. If it is not writable, CRISPRme
 warns and falls back to the default (`$TMPDIR`, else `/tmp`). You can also just set
 the standard `TMPDIR` — CRISPRME_TMPDIR takes precedence when both are set.
 
+A home CRISPRme cannot write in (Apptainer `--no-home`, or `--home` on a read-only folder;
+`docker run --read-only`) needs nothing more: matplotlib, and the fontconfig it runs to build
+its font cache, then keep their caches in a temporary folder there (`MPLCONFIGDIR`, and
+`XDG_CACHE_HOME` when `~/.cache` cannot be written), removed when the command ends. A
+`MPLCONFIGDIR` you set is used as it is.
+
 ---
 
 ## 2. A genome-wide search needs a lot of disk — plan for it
