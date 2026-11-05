@@ -27,6 +27,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import random
 import resource
 import shutil
@@ -3818,6 +3819,10 @@ class AFailedSearchEndsOnItsSummary(_Fixture):
             logged = [ln for ln in fh.read().splitlines() if ln.strip()]
         self.assertTrue(logged[-1].startswith(f"ERROR: {index} was built by a newer CRISPRitz"),
                         logged)
+        # (a host with less memory than CRISPRme recommends, as GitHub's runners have, gets
+        # memory_check's warning first)
+        err = re.sub(r"\AWARNING: CRISPRme detected only .*?and restart the container\.\n", "",
+                     err, flags=re.S)
         self.assertEqual(err, "\nCRISPRme run failed.\n  Failed during stage: Job\n"
                               "  Last lines of the error log:\n"
                               + "".join(f"      {ln}\n" for ln in logged[-15:])
