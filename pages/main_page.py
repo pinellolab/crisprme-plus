@@ -292,6 +292,10 @@ MAX_MMS = 7  # max allowed mismatches
 # mismatches, bulges and guides values
 AV_MISMATCHES = [{"label": i, "value": i} for i in range(MAX_MMS)]
 AV_BULGES = [{"label": i, "value": i} for i in range(MAX_BULGES)]
+# The Max edits slider's maximum as the layout gives it: the most mismatches and DNA and
+# RNA bulges of the layout's dropdowns (AV_MISMATCHES, AV_BULGES), added (6 + 2 + 2);
+# sync_max_edits_bound sets it to the mismatches and bulges selected once one of them changes
+MAX_EDITS_LAYOUT = (MAX_MMS - 1) + 2 * (MAX_BULGES - 1)
 AV_GUIDE_SEQUENCE = [{"label": i, "value": i} for i in range(15, 26)]
 # base editing options
 BE_NTS = [{"label": nt, "value": nt} for nt in DNA_ALPHABET]
@@ -567,6 +571,31 @@ def _form_number(value, low: int, high: int) -> Optional[int]:
     return value if low <= value <= high else None
 
 
+def _as_int(value, default: int) -> int:
+    """``int(value)``, or ``default`` for a value int() does not take."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _max_edits_ceiling(mms, dna, rna) -> int:
+    """The Max edits slider's maximum for these mismatches and DNA and RNA bulges, as
+    sync_max_edits_bound sets it at each change of one: their sum (one alignment can carry
+    all three), at least 1. A value that is not a number counts as the mismatch dropdown's
+    top, or as no bulges."""
+    return max(1, _as_int(mms, MAX_MMS - 1) + _as_int(dna, 0) + _as_int(rna, 0))
+
+
+def _max_edits_offered(mms, dna, rna) -> int:
+    """The most Max edits the slider offers with these mismatches and bulges: the maximum
+    the layout gives it (MAX_EDITS_LAYOUT) until a dropdown changes, then the one
+    sync_max_edits_bound gives it (_max_edits_ceiling), which passes the first where an
+    installed index deeper than the app's ceiling offers more bulges (_bulges_offered). A
+    Submit takes no more."""
+    return max(MAX_EDITS_LAYOUT, _max_edits_ceiling(mms, dna, rna))
+
+
 @app.callback(
     [
         Output("url", "pathname", allow_duplicate=True),
@@ -597,6 +626,9 @@ def _form_number(value, low: int, high: int) -> Optional[int]:
         State("assembly-individual", "value"),
         State("max-edits-slider", "value"),
         State("advanced-thresholds-collapse", "is_open"),
+        # the bulge dropdowns' options follow these, with the PAM (limit_bulges_to_index)
+        State("available-genome", "value"),
+        State("variant-dataset", "value"),
     ],
     prevent_initial_call=True,
 )
@@ -617,6 +649,8 @@ def submit_assembly_search_job(
     individual: str,
     max_edits_val: int,
     advanced_open: bool,
+    genome_selected: Optional[str] = None,
+    variant_choice: Optional[str] = None,
 ) -> Tuple:
     """Validates and launches a personal-assembly (paternal/maternal, no VCF)
     off-target search, submitted via `crisprme.py assembly-search`.
@@ -696,10 +730,14 @@ def submit_assembly_search_job(
     # form's range (its dropdown's, and the Max edits slider's when it governs), checked
     # before anything is written: they go into .Params.txt and the command, and a request
     # can send any value, which went into .Params.txt as sent, a line break too, before
-    # int() refused it and left a job folder that never ran.
+    # int() refused it and left a job folder that never ran. The bulge dropdowns offer what
+    # the genome, PAM and variant dataset selected allow (limit_bulges_to_index), more than
+    # the app's ceiling with an installed index deeper than it, and the slider's maximum
+    # follows them (sync_max_edits_bound): Submit takes them as the form offers them.
     mms = _form_number(mms, 0, MAX_MMS - 1)
-    dna = _form_number(dna, 0, MAX_BULGES - 1)
-    rna = _form_number(rna, 0, MAX_BULGES - 1)
+    bulges = _bulges_offered(*_offered(genome_selected, pam, variant_choice))
+    dna = _form_number(dna, 0, bulges)
+    rna = _form_number(rna, 0, bulges)
     if mms is None:
         missing.append("mismatches")
     if dna is None:
@@ -707,7 +745,7 @@ def submit_assembly_search_job(
     if rna is None:
         missing.append("RNA bulges")
     if not advanced_open and max_edits_val is not None:
-        max_edits_val = _form_number(max_edits_val, 1, (MAX_MMS - 1) + 2 * (MAX_BULGES - 1))
+        max_edits_val = _form_number(max_edits_val, 1, _max_edits_offered(mms, dna, rna))
         if max_edits_val is None:
             missing.append("maximum edits (mismatches + bulges)")
     if not pam:
@@ -2639,10 +2677,10 @@ def limit_bulges_to_index(
     genome, pam, variant_choice, cur_dna, cur_rna, mms=None, cur_edits=None, held=None
 ):
     genome, pam, variant_choice = _offered(genome, pam, variant_choice)
-    if not genome or not pam:
-        return AV_BULGES, AV_BULGES, no_update, no_update, no_update, no_update
-    maxb = _bulge_cap(genome, pam, variant_choice)
+    maxb = _bulges_offered(genome, pam, variant_choice)
     opts = [{"label": i, "value": i} for i in range(0, maxb + 1)]
+    if not genome or not pam:
+        return opts, opts, no_update, no_update, no_update, no_update
     held = held or {}
     # What the cap lowered last time, unless DNA/RNA no longer show what it set them to
     # (the user picked other values since: theirs stand).
@@ -2708,6 +2746,18 @@ def _bulge_cap(genome: str, pam: str, variant_choice) -> int:
     for v in _selected_panels(variant_choice):
         maxb = min(maxb, index_max_bulges(genome, pam, v))
     return maxb
+
+
+def _bulges_offered(genome: Optional[str], pam: Optional[str], variant_choice) -> int:
+    """The most DNA and RNA bulges the form's dropdowns offer, from 0, for a genome, PAM and
+    variant dataset as _offered gives them: the bulges a web search can reach here
+    (_bulge_cap), more than the app's ceiling where an installed reference index is deeper
+    than it, or, with no genome or PAM, that ceiling (AV_BULGES). limit_bulges_to_index
+    fills the dropdowns with them, and the Personal assembly tab's Submit takes no other
+    count (submit_assembly_search_job)."""
+    if not genome or not pam:
+        return MAX_BULGES - 1
+    return _bulge_cap(genome, pam, variant_choice)
 
 
 def _index_installed(genome: str, pam: str, panel: Optional[str] = None) -> bool:
@@ -3293,21 +3343,21 @@ def index_page() -> html.Div:
                     dcc.Slider(
                         id="max-edits-slider",
                         min=1,
-                        # Max = mismatch ceiling (MAX_MMS - 1 = 6) + bulge ceiling
-                        # (MAX_BULGES - 1 = 2) = 8 -- the largest total-edit budget the app
-                        # supports (e.g. 6 mismatches + 2 bulges), computed rather than a magic
-                        # number. In simple mode this slider is the TOTAL-edit budget:
+                        # Max = MAX_EDITS_LAYOUT: mismatch ceiling (MAX_MMS - 1 = 6) + DNA
+                        # and RNA bulge ceilings (MAX_BULGES - 1 = 2 each) = 10, computed
+                        # rather than a magic number, until sync_max_edits_bound sets it to
+                        # the dropdowns' sum. In simple mode this slider is the TOTAL-edit budget:
                         # mismatches come from the Advanced dropdown default (4) and bulges are
                         # fixed at 1 DNA + 1 RNA (bounded by index depth), keeping the default
                         # path in the scorer's validated single-bulge domain. So the default
                         # (budget 6) resolves to up to 4 mismatches + 1 DNA + 1 RNA bulge; open
                         # Advanced for deeper per-type caps. Default 6 matches the CLI.
-                        max=(MAX_MMS - 1) + 2 * (MAX_BULGES - 1),
+                        max=MAX_EDITS_LAYOUT,
                         step=1,
                         value=6,
                         marks={
                             i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
-                            for i in range(1, (MAX_MMS - 1) + 2 * (MAX_BULGES - 1) + 1)
+                            for i in range(1, MAX_EDITS_LAYOUT + 1)
                         },
                         tooltip={"placement": "bottom", "always_visible": False},
                     ),
@@ -3940,17 +3990,10 @@ def sync_max_edits_bound(mms, dna, rna, cur_val) -> Tuple:
     slider ceiling no longer under-reports the achievable total (which used to make
     in-budget results look like they exceeded the slider's max). The marks and the
     current value are kept within the new ceiling. Fires whenever an Advanced
-    dropdown changes. The layout seeds the static max (MAX_MMS-1 + 2*(MAX_BULGES-1))
-    for the default caps before this first fires."""
-    def _as_int(v, default):
-        try:
-            return int(v)
-        except (TypeError, ValueError):
-            return default
-    mm = _as_int(mms, MAX_MMS - 1)
-    bd = _as_int(dna, 0)
-    br = _as_int(rna, 0)
-    new_max = max(1, mm + bd + br)
+    dropdown changes. The layout seeds the static max (MAX_EDITS_LAYOUT) for the
+    default caps before this first fires. The ceiling is _max_edits_ceiling's, which
+    the Submits take the slider's range from (_max_edits_offered)."""
+    new_max = _max_edits_ceiling(mms, dna, rna)
     marks = {
         i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
         for i in range(1, new_max + 1)

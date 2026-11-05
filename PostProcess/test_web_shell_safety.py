@@ -79,8 +79,9 @@ refused before the e-mail library reads it, which takes a time growing with the 
 its dots. The address went into the search's command, which prints it into the search's
 log, and the /Results/ route served the job's email.txt: anyone with the job's link read it.
 And the Personal assembly tab's Submit wrote the counts it was sent into .Params.txt before
-int() refused one: it takes whole numbers of the form's ranges, before anything is
-written.
+int() refused one: it takes whole numbers of the form's ranges (the bulges the dropdowns
+offer for the genome, PAM and dataset selected, and the Max edits slider's maximum, which
+follows them), before anything is written.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -868,6 +869,64 @@ class TestAssemblySearchLaunch(_WebFolder):
                 self.assertEqual((params["Mismatches"], params["DNA"], params["RNA"]),
                                  (str(mms), str(dna), str(rna)))
                 shutil.rmtree(job)
+        self.assertNothingRun()
+
+    def test_bulges_and_max_edits_are_taken_as_the_form_offers_them(self):
+        # the bulge dropdowns offer what the genome, PAM and variant dataset selected allow
+        # (limit_bulges_to_index): 3 with an installed reference index deeper than the app's
+        # ceiling (N = 4, built for a 20-nt guide), and the slider's maximum follows them
+        # (sync_max_edits_bound), to 6 + 3 + 3. Submit took 0 to 2 bulges and a Max edits of
+        # 1 to 10, whatever they offered
+        index = os.path.join(self.data, "genome_library", "NRG_4_hg38")
+        os.makedirs(index)
+        with open(os.path.join(index, "chr1.bin"), "wb") as fh:  # (the header of a tree)
+            fh.write((1).to_bytes(4, sys.byteorder) + (20).to_bytes(4, sys.byteorder))
+        _vcf(os.path.join(self.data, "VCFs", "hg38_walk", "walk.chr1.vcf.gz"), True)  # no index
+        fields = mp.populate_assembly_fields_from_individual(self.IND)
+        edits = "maximum edits (mismatches + bulges)"
+
+        def offered(genome, variant):
+            return [o["value"] for o in
+                    mp.limit_bulges_to_index(genome, PAM, variant, 1, 1, 4, 6, {})[0]]
+
+        def submit(mms, dna, rna, cap, genome="hg38", variant="ref"):
+            """The lines of the warning, or the command and .Params.txt of the search run."""
+            result = mp.submit_assembly_search_job(
+                1, *fields, PAM, GUIDE[:-3], mms, dna, rna, None, self.IND, cap, False,
+                genome, variant)
+            if not self.pool.submit.call_count:
+                self.assertEqual(os.listdir(os.path.join(self.data, "Results")), [])
+                return [li.children for li in result[3].children]
+            cmd = self.pool.submit.call_args[0][1].split()
+            self.pool.reset_mock()
+            job = os.path.join(self.data, "Results", result[1].split("=", 1)[1])
+            with open(os.path.join(job, ".Params.txt")) as fh:
+                params = dict(row.rstrip("\n").split("\t")[1:] for row in fh)
+            shutil.rmtree(job)
+            return cmd[cmd.index("--bDNA"):cmd.index("--merge")], (params["DNA"], params["RNA"])
+
+        self.assertEqual(offered("hg38", "ref"), [0, 1, 2, 3])
+        self.assertEqual(mp.sync_max_edits_bound(6, 3, 3, 6)[0], 12)
+        self.assertEqual(submit(6, 3, 3, 12), (["--bDNA", "3", "--bRNA", "3"], ("3", "3")))
+        self.assertEqual(submit(6, 3, 3, 11), (
+            ["--bDNA", "3", "--bRNA", "3", "--max-total-edits", "11"], ("3", "3")))
+        for mms, dna, rna, cap, said in ((6, 4, 3, 9, ["DNA bulges"]),
+                                         (6, 3, 4, 9, ["RNA bulges"]),
+                                         (6, 3, 3, 13, [edits]), (4, 1, 1, 11, [edits])):
+            with self.subTest(mms=mms, dna=dna, rna=rna, cap=cap):
+                self.assertEqual(submit(mms, dna, rna, cap), said)
+        # a dataset whose index offers fewer: what they offer, as the search would
+        self.assertEqual(offered("hg38", "walk"), [0])
+        self.assertEqual(submit(4, 1, 0, 6, variant="walk"), ["DNA bulges"])
+        self.assertEqual(submit(4, 0, 0, 4, variant="walk"), (["--bDNA", "0", "--bRNA", "0"],
+                                                              ("0", "0")))
+        # a genome the form does not offer (none, or one outside): the app's ceiling, as
+        # the dropdowns offer then
+        for genome in (None, os.path.join(self.outside, "hg38")):
+            with self.subTest(genome=genome):
+                self.assertEqual(offered(genome, "ref"), [0, 1, 2])
+                self.assertEqual(submit(6, 3, 3, 12, genome=genome),
+                                 ["DNA bulges", "RNA bulges", edits])
         self.assertNothingRun()
 
 

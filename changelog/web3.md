@@ -318,9 +318,12 @@ and the Settings, personal-assembly, History and archive entries add tests to
   into the new search's `.Params.txt` as they were, a line break too, and only then converted
   them to numbers: a value that is not one left a job folder that never ran, listed as in queue,
   which no page removes, one for each such request; and a number the form does not offer was
-  searched. It now takes 0 to 6 mismatches and 0 to 2 DNA and RNA bulges, and a Max edits of 1
-  to 10 where that governs, and otherwise says which is wrong, with nothing written.
-  Pre-existing, since 2.5.5. Covered by `PostProcess/test_web_shell_safety.py`.
+  searched. It now takes 0 to 6 mismatches, the DNA and RNA bulges the dropdowns offer for the
+  genome, PAM and variant dataset selected (0 to 2, more where an installed reference index is
+  deeper, fewer where a variant dataset's index has fewer), and a Max edits of 1 to the
+  slider's maximum where that governs (10, or the mismatches and bulges added where that is
+  more), and otherwise says which is wrong, with nothing written. Pre-existing, since 2.5.5.
+  Covered by `PostProcess/test_web_shell_safety.py`.
 - **What stays as it is.** A search's results TSVs, and their zips, hold the values they report
   as they are: an annotation label of a BED added in Settings, or a sample name or variant ID of
   a VCF dataset added there, that starts with `=`, `+`, `-` or `@` is a cell a spreadsheet may
