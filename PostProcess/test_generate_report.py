@@ -634,8 +634,8 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_the_example_report_says_where_its_files_are(self):
         """The website's example report (docs/example-report.html, the slim report of a
-        --per-sample search with variant-created sites and with dense windows at 30 of its top
-        1000 sites) still said the four things the slim report no longer says
+        --per-sample search with variant-created sites) still said the four things the slim
+        report no longer says
         (test_the_report_says_where_each_file_it_names_is). It says what the slim report of
         such a search says now, sentence for sentence, and no shipped page says that a run
         writes variant_created.tsv into the result folder, or that a report bundles
@@ -659,7 +659,14 @@ class TestGenerateReport(unittest.TestCase):
             said = re.findall(where, slim)
             with self.subTest(where=where[:40]):
                 self.assertEqual(len(said), 1, said)
-                self.assertTrue(said[0] in example, "the example report does not say " + said[0])
+                forms = [said[0]]
+                if where.startswith("Such dense windows"):
+                    # a search with no dense window near its top sites, as the example's, has
+                    # nothing for --report-full to bundle and says only where the beds are
+                    forms.append("Such dense windows are reported greedily (one representative "
+                                 "alignment is shown; " + gr._hvdr_where() + ").</div>")
+                self.assertTrue(any(f in example for f in forms),
+                                "the example report does not say " + said[0])
         self.assertEqual([gone for gone in self._NO_REPORT_SAYS + self._ONLY_THE_FULL_REPORT_SAYS
                           if gone in example], [])
         pages = [os.path.join(repo, "README.md"), os.path.join(repo, "METHODS.md")]
