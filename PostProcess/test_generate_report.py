@@ -532,18 +532,22 @@ class TestGenerateReport(unittest.TestCase):
         ).splitlines()[0].split("\t")
         self.assertIn("High_complexity_region", top_header)
 
-    def test_the_report_says_where_each_file_it_names_is(self):
-        """The slim report (the default) said the variant-created sites were 'written to
-        variant_created.tsv in the result directory', which no run writes (the tier is
-        staged into the zip only under --report-full), that the per-threshold subsets
-        bundled included the variant-created one, that the complete raw integrated results
-        were among the bundled downloads, and that a dense window's variants were in the
-        bundled high_variant_density_regions.bed, none of which the slim zip holds (and
-        the full one bundles the windows near the top-ranked sites, as .bed.gz). Each says
-        what the slim zip and the result folder hold, and what --report-full adds; the full
-        report names what it bundles, and every file a sentence calls bundled is."""
-        import re
-        rd = os.path.join(self.tmp, "where_run")
+    # What the slim report said of files its zip does not hold, up to 2.8.0 (and the website's
+    # example report, a slim 2.8.0 report, until 2.8.1). No report says the first three now (no
+    # run writes variant_created.tsv into the result folder, and the full report bundles the
+    # windows near its top-ranked sites as .bed.gz); the full report says the last two, which
+    # are so of its zip.
+    _NO_REPORT_SAYS = ("written to <code>variant_created.tsv</code> in the result directory",
+                       "re-run with <code>--report-full</code> to bundle it into the archive",
+                       "bundled <code>high_variant_density_regions.bed</code>")
+    _ONLY_THE_FULL_REPORT_SAYS = ("plus the variant-created subset) are bundled",
+                                  "the complete raw integrated results (bundled downloads)")
+
+    def _dense_window_run(self, name):
+        """A result folder of the fixture's off-targets (three of them variant-created), with
+        a High_variant_density_region column and a per-chromosome
+        high_variant_density_regions.bed whose window holds a top-ranked site (chr3:200)."""
+        rd = os.path.join(self.tmp, name)
         os.makedirs(rd)
         tsv = os.path.join(rd, f"{_GUIDE}+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv")
         with open(tsv, "w") as h:
@@ -555,6 +559,20 @@ class TestGenerateReport(unittest.TestCase):
             h.write("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
                     "iupac_protospacer\n"
                     "chr3\t190\t213\tGUIDE\t12\tHG00096,HG00097\tACGTNNNNACGTACGTACGTNGG\n")
+        return rd
+
+    def test_the_report_says_where_each_file_it_names_is(self):
+        """The slim report (the default) said the variant-created sites were 'written to
+        variant_created.tsv in the result directory', which no run writes (the tier is
+        staged into the zip only under --report-full), that the per-threshold subsets
+        bundled included the variant-created one, that the complete raw integrated results
+        were among the bundled downloads, and that a dense window's variants were in the
+        bundled high_variant_density_regions.bed, none of which the slim zip holds (and
+        the full one bundles the windows near the top-ranked sites, as .bed.gz). Each says
+        what the slim zip and the result folder hold, and what --report-full adds; the full
+        report names what it bundles, and every file a sentence calls bundled is."""
+        import re
+        rd = self._dense_window_run("where_run")
         said = {}
         for mode in ("slim", "full"):
             out_zip = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir,
@@ -575,11 +593,7 @@ class TestGenerateReport(unittest.TestCase):
         # no variant-created file in the result folder, whatever the report says
         self.assertEqual([n for n in os.listdir(rd) if "variant_created" in n], [])
         slim, full = said["slim"], said["full"]
-        for gone in ("written to <code>variant_created.tsv</code> in the result directory",
-                     "re-run with <code>--report-full</code> to bundle it into the archive",
-                     "plus the variant-created subset) are bundled",
-                     "the complete raw integrated results (bundled downloads)",
-                     "bundled <code>high_variant_density_regions.bed</code>"):
+        for gone in self._NO_REPORT_SAYS + self._ONLY_THE_FULL_REPORT_SAYS:
             with self.subTest(slim_no_longer_says=gone):
                 self.assertNotIn(gone, slim)
         for says in (
@@ -617,6 +631,44 @@ class TestGenerateReport(unittest.TestCase):
             with self.subTest(full_says=says[:60]):
                 self.assertIn(says, full)
         self.assertNotIn("adds the variant-created subset", full)
+
+    def test_the_example_report_says_where_its_files_are(self):
+        """The website's example report (docs/example-report.html, the slim report of a
+        --per-sample search with variant-created sites and with dense windows at 30 of its top
+        1000 sites) still said the four things the slim report no longer says
+        (test_the_report_says_where_each_file_it_names_is). It says what the slim report of
+        such a search says now, sentence for sentence, and no shipped page says that a run
+        writes variant_created.tsv into the result folder, or that a report bundles
+        high_variant_density_regions.bed. (The changelog, whose entry quotes them, is not
+        read.)"""
+        import re
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        example = self._read(os.path.join(repo, "docs", "example-report.html"))
+        # (no assertIn/assertNotIn on the page: their message would print all of it)
+        self.assertFalse('href="data/integrated_results.tsv.gz"' in example)  # a slim report
+        out_zip = gr.build_report(result_dir=self._dense_window_run("example_run"),
+                                  samplesid_dir=self.sid_dir,
+                                  out_zip=os.path.join(self.tmp, "example_slim.zip"))
+        with zipfile.ZipFile(out_zip) as zf:
+            slim = zf.read("report.html").decode("utf-8")
+        # the inputs row, the panel's methods note, the Downloads note, the legend's entry
+        for where in (r'<td class="k">Variant-contributed sites</td><td>.*?</td>',
+                      r"The full threshold table above.*?for any assay budget\.",
+                      r"Per-threshold subsets \(.*?</p>",
+                      r"Such dense windows are reported greedily \(.*?</div>"):
+            said = re.findall(where, slim)
+            with self.subTest(where=where[:40]):
+                self.assertEqual(len(said), 1, said)
+                self.assertTrue(said[0] in example, "the example report does not say " + said[0])
+        self.assertEqual([gone for gone in self._NO_REPORT_SAYS + self._ONLY_THE_FULL_REPORT_SAYS
+                          if gone in example], [])
+        pages = [os.path.join(repo, "README.md"), os.path.join(repo, "METHODS.md")]
+        for root, _dirs, files in os.walk(os.path.join(repo, "docs")):
+            pages += [os.path.join(root, f) for f in sorted(files)
+                      if f.endswith((".md", ".html"))]
+        found = ["%s: %s" % (os.path.relpath(p, repo), gone) for p in pages
+                 for gone in self._NO_REPORT_SAYS if gone in self._read(p)]
+        self.assertEqual(found, [])
 
     def test_a_wider_cfd_net_of_no_site_is_not_called_a_bundled_download(self):
         # its tier, empty, is not bundled

@@ -3061,7 +3061,9 @@ and the `release-crisprme` skill.
   bundled download. On a slim and a full report of a population-level and of a per-sample search,
   only these sentences change, and every other file of the ZIP is the same.
   `generate-report --help`, which said `integrated_results.tsv.gz` is bundled by default, and
-  README §2.2.9 say what the slim ZIP holds too. Pre-existing, since 2.7.10. Covered by
+  README §2.2.9 say what the slim ZIP holds too, and the website's example report
+  (`docs/example-report.html`, a slim 2.8.0 report, which said all four) gets the four sentences
+  as 2.8.1 renders them there, and nothing else. Pre-existing, since 2.7.10. Covered by
   `PostProcess/test_generate_report.py`.
 - **A home that cannot be written in no longer makes every command print matplotlib's and
   fontconfig's complaints.** With a home CRISPRme cannot write in (`apptainer run --no-home`, or
