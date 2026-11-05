@@ -293,7 +293,7 @@ result columns** — they are not interchangeable:
   closest gene / genic context.
 
 Both accept either a plain `.bed` or a bgzipped `.bed.gz` file (the sort helper
-transparently handles both; see `_sort_annotation` in `crisprme.py`, line 822).
+transparently handles both; see `_sort_annotation` in `crisprme.py`).
 
 A third input, **`--personal_annotation`**, adds a BED of your own named intervals (fourth
 column = the name) to `--annotation`'s, or stands alone without it; its names show in the

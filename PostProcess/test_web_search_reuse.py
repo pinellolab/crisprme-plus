@@ -159,6 +159,7 @@ class TestDatasetsWithoutTheTiers(unittest.TestCase):
     script itself, now records them too."""
 
     setUp, submit, finish = TestSearchReuse.setUp, TestSearchReuse.submit, TestSearchReuse.finish
+    jobs = TestSearchReuse.jobs
 
     def records(self, url):
         """The job's .untiered_datasets and .variant_datasets (None: not written)."""
@@ -187,8 +188,10 @@ class TestDatasetsWithoutTheTiers(unittest.TestCase):
 
     def test_a_sites_only_dataset_without_the_tiers_is_not_recorded(self):
         # its VCFs have no sample columns: with no allele-frequency registry its search
-        # reports none of its variants, so the report says nothing of it, alone or beside a
-        # dataset whose VCFs have them, which is recorded
+        # reports none of its variants, so the report says nothing of it. The form offers one
+        # dataset at a time, and Submit runs only a dataset it offers, so a request for two
+        # ("gt+so") makes no job: the case beside a dataset whose VCFs have samples is
+        # complete-search's (test_build_index_only_atomic)
         os.makedirs(os.path.join(self.tmp, "samplesIDs"))
         head = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
         for name, columns, genotypes, listed in (
@@ -203,11 +206,13 @@ class TestDatasetsWithoutTheTiers(unittest.TestCase):
                 f.write(head + listed)
         self.assertEqual(self.records(self.submit(mode="population-level", variant="so")),
                          [None, None])
-        for variant in ("gt", "gt+so"):
-            with self.subTest(variant=variant):
-                self.assertEqual(self.records(self.submit(mode="population-level",
-                                                          variant=variant)),
-                                 ["hg38_gt\n", "hg38_gt\n"])
+        self.assertEqual(self.records(self.submit(mode="population-level", variant="gt")),
+                         ["hg38_gt\n", "hg38_gt\n"])
+        from dash.exceptions import PreventUpdate
+        before = self.jobs()
+        with self.assertRaises(PreventUpdate):
+            self.submit(mode="population-level", variant="gt+so")
+        self.assertEqual(self.jobs(), before)
 
 
 if __name__ == "__main__":

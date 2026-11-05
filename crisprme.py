@@ -5823,7 +5823,7 @@ def print_help_assembly_search() -> None:
         "default of 6 would otherwise drop every alignment with more "
         "edits whenever --mm/--bDNA/--bRNA allow more; set this explicitly to "
         "tighten it, e.g. for performance]\n"
-        "\t--annotation, an hg38 BED annotation file (bgzipped, fourth column = "
+        "\t--annotation, an hg38 BED annotation file (plain or bgzipped, fourth column = "
         "feature name -- e.g. Annotations/dhs+encode_screenv4+gencode+cosmic."
         "hg38.bed.gz) to annotate the reconciled sites with [OPTIONAL]. Adds an "
         "'Annotation' column to the combined results for every site with an hg38 "

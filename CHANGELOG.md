@@ -268,11 +268,12 @@ and the `release-crisprme` skill.
   network. Covered by `PostProcess/test_validate_test.py`.
 - **CI runs what it says it runs** (contributors). `unit-tests.yml`'s job limit goes from 10 to 20
   minutes: the hosted job took 523 s at the first release head of 2.8.1, and the steps have grown by
-  a quarter since, which predicts about 640 s, past the limit (a prediction: no job was run to
-  measure it). `web-e2e.yml` gets a step that runs, in the image, the tests that skip in the light
+  a quarter since, which predicted about 640 s, past the limit (GitHub has since run it in 14 min
+  50 s and 13 min 55 s on two release candidates). `web-e2e.yml` gets a step that runs, in the image, the tests that skip in the light
   job for want of BEDOPS, minimap2, impg or Dash: `test_assembly_annotate`, which no workflow named,
   the impg truth tests, the flag-gate behaviour tests, the `post_process.sh` test, whose own step in
-  the light job tested nothing, and `test_index_resolution` (440 tests, about 100 s). It fails on any
+  the light job tested nothing, `test_index_resolution`, and the web app's start-up and shell-safety
+  tests (`test_app_settings`, `test_web_shell_safety`): 527 tests, about 100 s. It fails on any
   skip but the two the image cannot help. `validate-benchmarks.yml`'s smoke step runs the real
   Hugging Face download test, which no job ran. The path filters of `unit-tests` and `web-e2e` now
   start, on a change to any file one of their tests reads, a job that runs that test, as found by
@@ -2307,8 +2308,8 @@ and the `release-crisprme` skill.
   index), or one the installed CRISPRitz writes. Measured through the real CLI with that CRISPRitz
   built into the image, they had read its format version as the guide length ("built for a 2-nt
   guide") and its magic as a leaf count ("not a tree ..., as when the disk fills up"); with
-  CRISPRitz 2.9.1 the same runs give the same tables. Only a Bioconda install can pull such a
-  CRISPRitz: the image and `install_from_source.sh` pin 2.9.1. A search takes an index only where built + N >= guide +
+  CRISPRitz 2.9.1 the same runs give the same tables. No 2.8.1 install pulls such a CRISPRitz:
+  the image and `install_from_source.sh` pin 2.9.1, and the Bioconda recipe `>=2.9.1,<2.9.2`. A search takes an index only where built + N >= guide +
   bDNA + (1 if bRNA > 0), measured through the real CLI on 246 cells: every cell inside is
   byte-identical to a dedicated index, every cell outside differs. When an index of the same name
   is in the way it stops with one ERROR naming the index, both lengths and what to do; the index is
@@ -3006,6 +3007,14 @@ and the `release-crisprme` skill.
   file keeps the versions it got: create it again to get these. Pre-existing, in 2.8.0 too.
   Covered by `PostProcess/test_install_from_source.py`.
 
+- **The `--help` of `complete-search` and `assembly-search` no longer says an annotation BED must be
+  bgzip-compressed.** `--annotation` and `--gene_annotation` read a plain BED as well (both go
+  through `_sort_annotation`, which has always taken either); the help said bgzip was
+  required. `docs/DYNAMIC_PAM_INDEX_COMPAT.md` also no longer says that CRISPRme 2.8.0 can search
+  the published `NNN_3` with no update: it could search the first archive (2026-10-25), and a 2.8.0
+  search of the rebuilt one can fail or report malformed rows (see the `NNN_3` entry above).
+  Text only.
+
 - **The report no longer says that a MAF of 1e-05 is a display floor.** The MAF note under the
   top-1000 tables and the legend's MAF entry said that a variant whose source allele frequency is
   0 is shown at a display floor of 1e-05 so that it renders on the log-scale plots, to be read as
@@ -3045,7 +3054,8 @@ and the `release-crisprme` skill.
   per-sample dictionaries (an indel's, of the index's indel log), which `add-variants` copied from
   the VCF, and no CONFIRMED/PUTATIVE cis phasing, SNP+SNP co-occurrence or exact joint allele
   frequency is reported, as they come from the tiers; a dense window can still be reported by its
-  greedy worst-case alignment (the known limit under Changed); and to get the tiers, rebuild the
+  greedy worst-case alignment (the known limit on an index without the dict-less tiers, under
+  Changed); and to get the tiers, rebuild the
   index with `build-index-only --samplesID` or download a prebuilt one. The texts that made the same
   claims elsewhere in the report now say what holds for those datasets: the Allele-frequency basis
   row and the MAF note under the top-1000 tables (a SNP's frequency is the `AF` of those
@@ -3123,7 +3133,8 @@ and the `release-crisprme` skill.
   elsewhere renumbered them; between two runs, 8 to 99 rows of `top1000_crispr_bulge.tsv` changed
   only their rank, each within an exact tie. These sorts are now stable, so tied rows keep the
   order of `integrated_results.tsv`. The self-test panel's `--per-sample` searches without and
-  with the dict-less tiers (the searches above) differ by 5 rows (the known limit under Changed):
+  with the dict-less tiers (the searches above) differ by 5 rows (the known limit on an index
+  without the dict-less tiers, under Changed):
   the 560 sites both reports hold came in another order at 282 places of
   `top1000_crispr_bulge.tsv` and 250 of `top1000.tsv`, and now come in the same order. On the
   search without the tiers, whose 565 rows hold 476 CRISPR-Bulge scores of -1 and 310 CFD scores
