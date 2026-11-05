@@ -41,7 +41,8 @@ the standard `TMPDIR` — CRISPRME_TMPDIR takes precedence when both are set.
 
 A home CRISPRme cannot write in (Apptainer `--no-home`, or `--home` on a read-only folder;
 `docker run --read-only`) needs nothing more: matplotlib then keeps its configuration and font
-cache in a temporary folder there (`MPLCONFIGDIR`), removed when the command ends. When
+cache in a temporary folder there (`MPLCONFIGDIR`), removed when the command exits (a command
+killed by a signal, such as `scancel` or a timeout, leaves it in the temporary folder). When
 `~/.cache` cannot be written, that folder is `XDG_CACHE_HOME` too, so the caches kept under it
 go there as well (fontconfig's, written when matplotlib builds its font cache, and those of any
 other program a command runs), but not Hugging Face's folder: `HF_HOME` stays
