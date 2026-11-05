@@ -565,7 +565,10 @@ def _form_number(value, low: int, high: int) -> Optional[int]:
     """``value`` as a whole number from ``low`` to ``high``, the range a dropdown or slider
     of the form offers, else None: a request can send a callback any value."""
     if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
-        value = int(value)
+        try:
+            value = int(value)
+        except ValueError:  # more digits than int() reads (sys.get_int_max_str_digits)
+            return None
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value if low <= value <= high else None
@@ -1166,7 +1169,8 @@ def change_url(
     # Submit fires this once check_input has passed the form, but a request can call it
     # with any values, which name the folders and files the search reads and go into its
     # command line (and its steps' shell commands): only what the form offers runs.
-    if not _launchable(genome_selected, pam, variant_choice, mms, dna, rna):
+    if not _launchable(genome_selected, pam, variant_choice, mms, dna, rna, max_edits_val,
+                       advanced_open):
         raise PreventUpdate
     mms = int(mms)
     # job start
@@ -1911,10 +1915,13 @@ def _notification_entry(address: str, job_id: str) -> str:
 
 
 def _launchable(genome: Optional[str], pam: Optional[str], variant_choice: Optional[str],
-                mms, dna, rna) -> bool:
+                mms, dna, rna, max_edits, advanced_open) -> bool:
     """Whether change_url runs a search of these values: a genome and a PAM the form
-    offers (installed), "ref" or a variant dataset it offers for the genome, and whole
-    numbers of mismatches and bulges."""
+    offers (installed), "ref" or a variant dataset it offers for the genome, whole
+    numbers of mismatches and bulges, and, where the Max edits slider governs (Advanced
+    closed), no value or a whole number of the slider's range (_max_edits_offered).
+    change_url asks it before it makes the job folder: the Max edits value was converted
+    only after that, and one int() refused left a folder that never ran."""
     if genome not in [g["value"] for g in get_available_genomes()]:
         return False
     if pam not in [p["value"] for p in get_available_PAM()]:
@@ -1924,9 +1931,12 @@ def _launchable(genome: Optional[str], pam: Optional[str], variant_choice: Optio
     ]:
         return False
     try:
-        return all(int(v) >= 0 for v in (mms, dna, rna))
+        if not all(int(v) >= 0 for v in (mms, dna, rna)):
+            return False
     except (TypeError, ValueError):
         return False
+    return (advanced_open or max_edits is None
+            or _form_number(max_edits, 1, _max_edits_offered(mms, dna, rna)) is not None)
 
 
 def _offered(genome: Optional[str], pam: Optional[str],

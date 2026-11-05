@@ -324,6 +324,13 @@ and the Settings, personal-assembly, History and archive entries add tests to
   slider's maximum where that governs (10, or the mismatches and bulges added where that is
   more), and otherwise says which is wrong, with nothing written. Pre-existing, since 2.5.5.
   Covered by `PostProcess/test_web_shell_safety.py`.
+- **The Reference genome tab's Submit checks the Max edits value before it makes the job
+  folder.** With Advanced options closed, where the Max edits slider governs, Submit converted
+  the slider's value to a number only after it had made the job folder and written its first
+  files: a value that is not a number, which a request can send, left a job folder that never
+  ran, which History does not list, one for each such request. It now takes a whole number of
+  the slider's range there, as the Personal assembly tab's Submit does, and runs nothing for
+  another. Pre-existing, since 2.2.0. Covered by `PostProcess/test_web_shell_safety.py`.
 - **What stays as it is.** A search's results TSVs, and their zips, hold the values they report
   as they are: an annotation label of a BED added in Settings, or a sample name or variant ID of
   a VCF dataset added there, that starts with `=`, `+`, `-` or `@` is a cell a spreadsheet may

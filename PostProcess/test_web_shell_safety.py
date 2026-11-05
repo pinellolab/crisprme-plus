@@ -81,7 +81,8 @@ log, and the /Results/ route served the job's email.txt: anyone with the job's l
 And the Personal assembly tab's Submit wrote the counts it was sent into .Params.txt before
 int() refused one: it takes whole numbers of the form's ranges (the bulges the dropdowns
 offer for the genome, PAM and dataset selected, and the Max edits slider's maximum, which
-follows them), before anything is written.
+follows them), before anything is written. The reference Submit made its job folder before
+int() refused the Max edits value: it checks that value first.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -477,6 +478,46 @@ class TestSearchLaunch(_WebFolder):
                 self.assertEqual(self.jobs(), [])
         self.assertNothingRun()
 
+    def test_max_edits_is_a_whole_number_of_the_slider_s_range_before_anything_is_written(self):
+        # with Advanced options closed the Max edits slider governs, and int() refused a
+        # value that is not a number only after the job folder and its files were made:
+        # each such request left a folder that never ran, which History does not list
+
+        def submit(cap, mms=4, dna=1, rna=1, name=None):
+            return mp.change_url(1, "http://127.0.0.1:8080/index", "hg38", "ref", PAM, "IP",
+                                 "CTAACAGTTGCTTTTATCAC", mms, dna, rna, "N", None, None, None,
+                                 [], None, name, cap, False, "population-level", [])
+
+        for cap in ("x", "6;touch${IFS}MARK_g;#", [6], {}, 6.5, True, 0, 11, "1" * 5000):
+            with self.subTest(cap=cap if len(str(cap)) < 30 else "5000 digits"):
+                with self.assertRaises(PreventUpdate):
+                    submit(cap)
+                self.assertEqual(self.pool.submit.call_count, 0)
+                self.assertEqual(self.jobs(), [])
+        self.assertNothingRun()
+        # the slider's values, as before, and to mismatches + bulges where an installed index
+        # deeper than the app's ceiling offers more bulges (N = 4, built for a 20-nt guide)
+        index = os.path.join(self.data, "genome_library", "NRG_4_hg38")
+        os.makedirs(index)
+        with open(os.path.join(index, "chr1.bin"), "wb") as fh:  # (the header of a tree)
+            fh.write((1).to_bytes(4, sys.byteorder) + (20).to_bytes(4, sys.byteorder))
+        for i, (cap, mms, dna, rna, total) in enumerate((
+                (1, 4, 1, 1, "1"), (10, 4, 1, 1, "10"), ("6", 4, 1, 1, "6"), (None, 4, 1, 1, "6"),
+                (12, 6, 3, 3, "12"))):
+            with self.subTest(cap=cap, mms=mms, dna=dna, rna=rna):
+                submit(cap, mms, dna, rna, name=f"cap{i}")  # (a name: not sent to the last)
+                self.assertEqual(self.pool.submit.call_count, 1)
+                fn, *args = self.pool.submit.call_args[0]
+                fn(*args, **self.pool.submit.call_args[1])
+                self.pool.reset_mock()
+                with open(os.path.join(self.app, "PostProcess", "args.txt")) as fh:
+                    self.assertEqual(fh.read().split("\n")[25], total)
+        jobs = self.jobs()
+        with self.assertRaises(PreventUpdate):
+            submit(13, 6, 3, 3, name="cap13")
+        self.assertEqual(self.jobs(), jobs)
+        self.assertNothingRun()
+
     @unittest.skipUnless(shutil.which("sort-bed") and shutil.which("bgzip"),
                          "BEDOPS sort-bed or bgzip not on PATH")
     def test_a_genome_named_with_a_command_runs_nothing(self):
@@ -847,9 +888,11 @@ class TestAssemblySearchLaunch(_WebFolder):
                 ("x", 1, 1, 6, ["mismatches"]), (line, 1, 1, 6, ["mismatches"]),
                 (7, 1, 1, 6, ["mismatches"]), (-1, 1, 1, 6, ["mismatches"]),
                 (2.5, 1, 1, 6, ["mismatches"]), (True, 1, 1, 6, ["mismatches"]),
+                ("1" * 5000, 1, 1, 6, ["mismatches"]),  # (more digits than int() reads)
                 (4, 3, 1, 6, ["DNA bulges"]), (4, 1, "1;x", 6, ["RNA bulges"]),
                 (4, 1, 1, "x", edits), (4, 1, 1, 0, edits), (4, 1, 1, 11, edits)):
-            with self.subTest(mms=mms, dna=dna, rna=rna, cap=cap):
+            with self.subTest(mms=mms if len(str(mms)) < 30 else "5000 digits", dna=dna,
+                              rna=rna, cap=cap):
                 result = mp.submit_assembly_search_job(
                     1, *fields, PAM, GUIDE[:-3], mms, dna, rna, None, self.IND, cap, False)
                 self.assertEqual([li.children for li in result[3].children], said)
