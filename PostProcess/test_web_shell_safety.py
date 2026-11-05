@@ -74,11 +74,13 @@ everywhere).
 And up to 2.8.0 Submit took any text with an '@' as the address of a search's notification
 and made the e-mail's link of the page's URL: a list had one search notify every address on
 it, a line break wrote the link, and the URL, which a request sets, chose it. It takes one
-plain address, and the link is the server's own. The address went into the search's command,
-which prints it into the search's log, and the /Results/ route served the job's email.txt:
-anyone with the job's link read it. And the Personal assembly tab's Submit wrote the counts
-it was sent into .Params.txt before int() refused one: it takes whole numbers of the form's
-ranges, before anything is written.
+plain address, and the link is the server's own; a value longer than an address can be is
+refused before the e-mail library reads it, which takes a time growing with the square of
+its dots. The address went into the search's command, which prints it into the search's
+log, and the /Results/ route served the job's email.txt: anyone with the job's link read it.
+And the Personal assembly tab's Submit wrote the counts it was sent into .Params.txt before
+int() refused one: it takes whole numbers of the form's ranges, before anything is
+written.
 
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
@@ -146,6 +148,8 @@ PAM = "20bp-NRG-SpCas9"
 SEQ = "T" * 10 + "CTAACAGTTGCTTTTATCACAGG" + "T" * 10
 GUIDE = "CTAACAGTTGCTTTTATCACNNN"
 CRITERIA = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
+# an e-mail address as long as one can be: 254 characters (RFC 5321)
+LONGEST_ADDRESS = "a" * 64 + "@" + ".".join(["b" * 63, "c" * 63, "d" * 57, "org"])
 
 
 class _Folder(unittest.TestCase):
@@ -404,7 +408,8 @@ class TestSearchLaunch(_WebFolder):
                                    "Someone <someone@example.org>",
                                    "someone@example.org\nhttp://phish.example/",
                                    "someone@example.org\r\nBcc: other@example.org",
-                                   "a@b;touch${IFS}MARK_a;#", "someone")):
+                                   "a@b;touch${IFS}MARK_a;#", "someone",
+                                   "a" + LONGEST_ADDRESS)):
             with self.subTest(email=email):
                 before = set(self.jobs())
                 # (a job name of its own: an identical search is sent to the earlier job)
@@ -420,6 +425,11 @@ class TestSearchLaunch(_WebFolder):
         with open(os.path.join(self.data, "Results", job, "email.txt")) as fh:
             self.assertEqual(fh.read().split("\n")[:2],
                              ["someone@example.org", f"http://127.0.0.1:8080/load?job={job}"])
+        _cmd, args = self.submit(email=LONGEST_ADDRESS, name="longest")
+        (job,) = [j for j in self.jobs() if j.startswith("longest_")]
+        self.assertEqual(args[16], "email.txt")
+        with open(os.path.join(self.data, "Results", job, "email.txt")) as fh:
+            self.assertEqual(fh.read().split("\n")[0], LONGEST_ADDRESS)
 
     def test_a_search_sent_to_an_identical_one_notifies_by_the_server_s_link_to_it(self):
         # Submit sends a search identical to a queued or finished one to that job, whose
@@ -438,8 +448,11 @@ class TestSearchLaunch(_WebFolder):
 
     def test_the_address_field_shows_red_for_an_address_submit_does_not_notify(self):
         red = {"border": "1px solid red"}
-        self.assertNotEqual(mp.is_email_valid("someone@example.org"), red)
-        for email in ("someone@example.org,c", "Someone <someone@example.org>", "someone@", ""):
+        for email in ("someone@example.org", LONGEST_ADDRESS):
+            with self.subTest(email=email):
+                self.assertNotEqual(mp.is_email_valid(email), red)
+        for email in ("someone@example.org,c", "Someone <someone@example.org>", "someone@", "",
+                      "a" + LONGEST_ADDRESS, "a." * 200 + "a@example.org"):
             with self.subTest(email=email):
                 self.assertEqual(mp.is_email_valid(email), red)
 
@@ -1793,6 +1806,23 @@ class TestSendMail(unittest.TestCase):
             with self.subTest(address=address):
                 self.assertFalse(send_mail.plain_address(address))
 
+    def test_a_value_longer_than_an_address_can_be_is_refused_before_it_is_read(self):
+        # the e-mail library reads an address in a time that grows with the square of its
+        # dots, and the address field is checked at each change of it: a request sending
+        # one of 400,000 characters kept the server busy for 10 s. An address is at most 254
+        # characters (RFC 5321)
+        self.assertEqual(len(LONGEST_ADDRESS), 254)
+        self.assertTrue(send_mail.plain_address(LONGEST_ADDRESS))
+        reads = MagicMock(side_effect=send_mail.policy.default.header_factory)
+        with patch.object(send_mail, "policy", MagicMock(default=MagicMock(header_factory=reads))):
+            for address in ("a" + LONGEST_ADDRESS, "a." * 2000 + "a@example.org",
+                            "a@" + "b." * 2000 + "org"):
+                with self.subTest(length=len(address)):
+                    self.assertFalse(send_mail.plain_address(address))
+            self.assertEqual(reads.call_count, 0)
+            self.assertTrue(send_mail.plain_address(LONGEST_ADDRESS))  # (read, as before)
+            self.assertEqual(reads.call_count, 1)
+
     def test_the_log_names_no_recipient(self):
         _logins, said = self.notify()
         self.assertEqual([to for to, _body in self.sent], ["someone@example.org"])
@@ -1810,14 +1840,16 @@ class TestSendMail(unittest.TestCase):
         self.assertNotIn("someone@example.org", said.lower())
 
     def test_an_entry_that_is_not_one_plain_address_is_not_sent(self):
-        # (as an earlier version wrote one, of any text with an '@')
+        # (as an earlier version wrote one, of any text with an '@', of any length too)
         with open(os.path.join(self.job, "email.txt"), "w") as fh:
             fh.write("someone@example.org,other@example.org\nhttp://phish.example/\n11/04/2026\n"
                      "--OTHEREMAIL--third@example.org\nhttp://127.0.0.1:8080/load?job=J\n"
-                     "11/04/2026\n")
+                     "11/04/2026\n--OTHEREMAIL--" + "a" * 300 + "@example.org\n"
+                     "http://127.0.0.1:8080/load?job=J\n11/04/2026\n")
         _logins, said = self.notify()
         self.assertEqual([to for to, _body in self.sent], ["third@example.org"])
-        self.assertIn("Email notification skipped: its address is not one plain address.", said)
+        self.assertEqual(said.count(
+            "Email notification skipped: its address is not one plain address."), 2)
         self.assertNotIn("example.org", said)
 
 

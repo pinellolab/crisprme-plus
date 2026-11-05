@@ -50,6 +50,8 @@ _DEFAULT_SENDER = "crisprme.job@gmail.com"
 _ENTRY_SEPARATOR = "--OTHEREMAIL--"
 # what makes an address list, a group, a display name or a comment of a To header
 _NOT_IN_A_PLAIN_ADDRESS = set(',;:<>()[]"\\')
+# the most characters an address can have: RFC 5321 gives a path 256 octets, with its < and >
+_LONGEST_ADDRESS = 254
 
 
 def plain_address(address) -> bool:
@@ -57,8 +59,12 @@ def plain_address(address) -> bool:
     notification reads it: no list, group, display name or comment, no blank or control
     character, and not the separator of email.txt's entries. The search form takes no other
     address for a notification (pages/main_page.py check_mail_address): with commas one
-    search notified several addresses, and a line break wrote the e-mail's link."""
-    if (not isinstance(address, str) or _ENTRY_SEPARATOR in address
+    search notified several addresses, and a line break wrote the e-mail's link. A value
+    longer than an address can be is refused before anything reads it: the e-mail library
+    reads one in a time that grows with the square of its dots, and the address field is
+    checked at each change of it, which a request can send at any length."""
+    if (not isinstance(address, str) or len(address) > _LONGEST_ADDRESS
+            or _ENTRY_SEPARATOR in address
             or address.count("@") != 1 or address.startswith("@") or address.endswith("@")
             or any(c.isspace() or not c.isprintable() or c in _NOT_IN_A_PLAIN_ADDRESS
                    for c in address)):

@@ -296,10 +296,12 @@ and the Settings, personal-assembly, History and archive entries add tests to
   and a line break, which a request can send though the field holds one line, set the link of
   the e-mail sent. That link was made of the page's address as the request gave it, which a
   request sets to anything (and the one a browser gives lost its `//` there). Submit now takes
-  one plain address, as `name@example.org`: no list, display name, comment, blank or line break.
-  The field turns red for another one, and the search runs without a notification, as with no
-  address. The link is the address the job's status page shows (in local mode
-  `http://127.0.0.1:8080`) with the job's id. Pre-existing. Covered by
+  one plain address, as `name@example.org`: no list, display name, comment, blank or line break,
+  and no more than the 254 characters an address can have, counted before the address is read
+  (the field is checked at each change of it, and reading a much longer value, which a request
+  can send, took the server seconds). The field turns red for another one, and the search runs
+  without a notification, as with no address. The link is the address the job's status page
+  shows (in local mode `http://127.0.0.1:8080`) with the job's id. Pre-existing. Covered by
   `PostProcess/test_web_shell_safety.py`.
 - **A job's link no longer gives the e-mail address its search was submitted with.** The
   `/Results/` route serves the files of a job's folder to anyone with the job's link, and in
