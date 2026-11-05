@@ -1,12 +1,41 @@
 <!-- text track: [2.8.1] entries for CHANGELOG.md, to be merged by the docs track. -->
 
-**For the merge, not for the changelog.** The third Fixed entry completes the Changed entry
-"`--per-sample` on an index without the dict-less tiers now says what it reports" (the banner,
-new in 2.8.1), and can go right after it instead. That banner now also gives the known limit of
-the first Changed entry below; what the entry says of the banner still holds. Three references
-name an entry by its place: the third Fixed entry's "the last entry below" and the fourth's "the
-next entry" are the entry on tied rows, the last of this fragment, and the fourth's "the entry
-above" is the third; keep them true where the entries land.
+**For the merge, not for the changelog: four notes.** Notes 1 to 3 change entries already in
+CHANGELOG.md's [2.8.1]: each gives the words to change and the words to put in their place, in
+double quotes (a line break in them is a space). `PostProcess/test_generate_report.py` makes
+these changes before it reads [2.8.1], and once the fragments are merged and gone, fails if they
+were not made.
+
+1. The third Fixed entry completes the Changed entry "`--per-sample` on an index without the
+   dict-less tiers now says what it reports" (the banner, new in 2.8.1), and can go right after
+   it instead. That banner now also gives the known limit of the first Changed entry below, and
+   says where its dataset's allele frequencies come from, as the third Changed entry below does:
+   in the entry on the banner, change "with the allele frequencies the VCF gives" to "with the
+   `AF` of the classic per-sample dictionaries (an indel's, of the index's indel log), which
+   CRISPRitz `add-variants` copied from the VCF". The rest of what that entry says of the banner
+   still holds.
+2. By the third Changed entry below, a VCF that has `AF` can also leave a row's `AF` empty, as
+   HPRC's chrY does. In the Fixed entry "A search with a sites-only dataset lists each site once
+   and loses none; a VCF with no `AF` keeps a variant's best alignment", which says how 2.8.0
+   sorted such a row, change "every variant on the dictionaries, every indel on the tiers)" to
+   "every variant on the dictionaries, every indel on the tiers; a record that has `AF` at
+   another place in `INFO` than the VCF's first record, by the known limit on the place of `AF`
+   under Changed: its indel on any index, as are 91,950 of the 102,665 indels of HPRC's chrY,
+   and its SNP on the dictionaries)", change "(the default index alone, any VCF with `AF`, the
+   reference alone)" to "(the default index alone, a VCF with `AF` at one place in `INFO` in
+   every record, the reference alone)", and change "**If you searched a sites-only dataset or a
+   VCF with no `AF`,**" to "**If you searched a sites-only dataset, a VCF with no `AF` or one
+   with `AF` at more than one place in `INFO` (such as HPRC's chrY, or a VCF merged with
+   `merge_vcf_panels.sh`),**".
+3. In the Changed entry "A search of a VCF dataset built in the web Settings page reads its
+   dict-less tiers, so its tables change", change "where the dictionaries gave the VCF's `AF`
+   (`0.3333`), and an indel's is still the VCF's" to "where the dictionaries gave the `AF` that
+   `add-variants` copied from the VCF (`0.3333`), and an indel's is still the `AF` of the
+   index's indel log", so that it names the `AF` the index holds, as the release now does (the
+   third Changed entry below).
+4. Three references name an entry by its place: the third Fixed entry's "the last entry below"
+   and the fourth's "the next entry" are the entry on tied rows, the last of this fragment, and
+   the fourth's "the entry above" is the third; keep them true where the entries land.
 
 ### Changed
 
@@ -60,32 +89,32 @@ above" is the third; keep them true where the entries land.
   every release since early 2022 behave so, the 2.1.x releases this changelog lists among them
   (before 2.4.0 each list came in an arbitrary order); it will be fixed in the next release.
   Covered by `PostProcess/test_generate_report.py`.
-- **A known limit, stated with its scale: a variant whose record has `AF` at another place in `INFO`
-  than the VCF's first record has no allele frequency.** CRISPRitz `add-variants`, which writes an
-  index's indel log and classic per-sample dictionaries, looks for the `AF` key in the VCF's first
-  record only and reads every record's `AF` at that place in `INFO`, so a record that has it
-  elsewhere gets none: its indel has no frequency on any index, nor its SNP on an index without the
-  dict-less tiers (with them a SNP's frequency is the registry's, which `add-variants` does not
-  write), and the report's MAF leaves it out. A VCF merged with
-  `seq_script/merge_panels/merge_vcf_panels.sh` has such records, since a site of one source has
-  fewer keys before `AF` than a site of two: the retired `NRG_3_hg38+hg38_1000G2021_HGDP` index,
-  built from such a merge, has no `AF` for 14,567,429 of its 15,583,931 indels (224,981 of the
-  232,384 of chr22). Of the shipped indexes only HPRC's chrY is affected, whose VCF has `AF` at five
-  places: its log has none for 91,950 of its 102,665 indels. The HGDP1kGP index and HPRC's other
-  chromosomes have an `AF` for each of their 17,192,381 and 12,000,599 indels, as the self-test's
-  1000 Genomes index has for its 64,528 indels and 993,880 SNPs. The mega's VCF has no `INFO/AF` at
-  all, only `AF_<dataset>` and `AF_max`, so none of its 13,853,761 indels has one and the MAF of a
-  row of an indel alone is blank there; the `indel_af.tsv` companion gives their per-dataset
-  frequencies. The report's MAF note (and, for a dataset without the dict-less tiers, its Search
-  mode and Allele-frequency basis rows and its legend's MAF entry, as the `complete-search`
-  banners), the README's MAF column and `--per-sample` text, METHODS sections 3, 7 and 8,
-  `docs/DESIGN_mega_index.md`, the gaps of `docs/INDEX_PROVENANCE.md` and the VCF requirements of
-  `docs/INPUT_FORMATS.md` (with a check) now say so, and the header of `merge_vcf_panels.sh` and
-  `seq_script/merge_panels/README.md`, which said that the enricher reads the pooled `AF` by its
-  exact key, and a comment of `merge_mega_sites.sh`, which said that the plain `AF` it writes gives
-  indels the global `AF_max`, say what the enricher does. Results are unchanged. Pre-existing: 2.8.0
-  behaves the same; it will be fixed in the next CRISPRitz release (HPRC's chrY log needs rebuilding
-  with it). Covered by `PostProcess/test_generate_report.py` and
+- **A known limit, stated with its scale: an indel (and, on an index without the dict-less tiers, a
+  SNP) whose record has `AF` at another place in `INFO` than the VCF's first record has no allele
+  frequency.** CRISPRitz `add-variants`, which writes an index's indel log and classic per-sample
+  dictionaries, looks for the `AF` key in the VCF's first record only and reads every record's `AF`
+  at that place in `INFO`, so a record that has it elsewhere gets none: its indel has no frequency
+  on any index, nor its SNP on an index without the dict-less tiers (with them a SNP's frequency is
+  the registry's, which `add-variants` does not write), and the report's MAF leaves it out. A VCF
+  merged with `seq_script/merge_panels/merge_vcf_panels.sh` has such records, since a site of one
+  source has fewer keys before `AF` than a site of two: the retired `NRG_3_hg38+hg38_1000G2021_HGDP`
+  index, built from such a merge, has no `AF` for 14,567,429 of its 15,583,931 indels (224,981 of
+  the 232,384 of chr22). Of the shipped indexes only HPRC's chrY is affected, whose VCF has `AF` at
+  five places: its log has none for 91,950 of its 102,665 indels. The HGDP1kGP index and HPRC's
+  other chromosomes have an `AF` for each of their 17,192,381 and 12,000,599 indels, as the
+  self-test's 1000 Genomes index has for its 64,528 indels and 993,880 SNPs. The mega's VCF has no
+  `INFO/AF` at all, only `AF_<dataset>` and `AF_max`, so none of its 13,853,761 indels has one and
+  the MAF of a row of an indel alone is blank there; the `indel_af.tsv` companion gives their
+  per-dataset frequencies. The report's MAF note (and, for a dataset without the dict-less tiers,
+  its Search mode and Allele-frequency basis rows and its legend's MAF entry, as the
+  `complete-search` banners), the README's MAF column and `--per-sample` text, METHODS sections 3, 7
+  and 8, `docs/DESIGN_mega_index.md`, the gaps of `docs/INDEX_PROVENANCE.md` and the VCF
+  requirements of `docs/INPUT_FORMATS.md` (with a check) now say so, and the header of
+  `merge_vcf_panels.sh` and `seq_script/merge_panels/README.md`, which said that the enricher reads
+  the pooled `AF` by its exact key, and a comment of `merge_mega_sites.sh`, which said that the
+  plain `AF` it writes gives indels the global `AF_max`, say what the enricher does. Results are
+  unchanged. Pre-existing: 2.8.0 behaves the same; it will be fixed in the next CRISPRitz release
+  (HPRC's chrY log needs rebuilding with it). Covered by `PostProcess/test_generate_report.py` and
   `PostProcess/test_build_index_only_atomic.py`.
 - **METHODS section 2 says what a sites-only panel's registry holds for carriers and
   homozygotes.** It said that the carrier and homozygote counts of the mega index are reported as

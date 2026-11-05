@@ -2125,8 +2125,8 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_no_shipped_page_calls_a_maf_of_1e05_a_display_floor(self):
         """The README's MAF column, METHODS sections 7 and 8 and the website's example report
-        said it too (test_the_maf_texts_say_what_the_integrator_writes). The changelog,
-        which is history, is not read."""
+        said it too (test_the_maf_texts_say_what_the_integrator_writes). The changelog and
+        its fragments, whose entries say what the texts said, are not read."""
         one_e_minus_5 = re.compile(r"1e-0?5\b|1&times;10<sup>&minus;5|1×10⁻⁵|10<sup>&minus;5")
 
         def floor_claims(text):
@@ -2259,7 +2259,8 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(report.count(said), 2)
         self.assertEqual(blank_indel_claims(report), [])
         # the README, METHODS and docs/ (md and html: the website's example report printed
-        # the note); the changelog, which is history, is not read
+        # the note); not the changelog and its fragments, whose entries say what the note
+        # said, and that the MAF of a row of an indel alone is blank on the mega
         repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         pages = [os.path.join(repo, "README.md"), os.path.join(repo, "METHODS.md")]
         for root, _dirs, files in os.walk(os.path.join(repo, "docs")):
@@ -2308,8 +2309,16 @@ class TestGenerateReport(unittest.TestCase):
         section 8, the README and the merge recipe state the limit, and
         docs/DESIGN_mega_index.md and merge_mega_sites.sh no longer say that a plain INFO/AF =
         AF_max reaches every indel (it reaches those laid out like the first record), nor that
-        the shipped mega's merge gives its indels AF_max. When CRISPRitz is fixed and the logs
-        rebuilt, this test changes with METHODS."""
+        the shipped mega's merge gives its indels AF_max. The release notes are read as the
+        merge will leave them, CHANGELOG.md's [2.8.1] with them, which is not history yet: its
+        entry on the --per-sample banner said that the results come "with the allele
+        frequencies the VCF gives", and a measured one that "the dictionaries gave the VCF's
+        AF"; its entry on the sort said that a search of "any VCF with AF" sorts as 2.8.0 did,
+        which sorted a row whose AF is empty by its REF score, and told no HPRC user to run the
+        search again; the text fragment's notes for the merge change the three. And the limit's
+        headline said that every variant of such a record has no frequency, a SNP too on an
+        index with the tiers. When CRISPRitz is fixed and the logs rebuilt, this test changes
+        with METHODS."""
         import glob
         import html as htmlmod
         import shutil
@@ -2411,19 +2420,81 @@ class TestGenerateReport(unittest.TestCase):
             self.assertIn("<code>hg38_1000G_HGDP</code>, which has no dict-less tiers", html)
             self.assertIn("copied from its VCF", html)
             self.assertEqual(vcf_af_claims(html), [], mode)
-        # the README, METHODS, docs/ (md and html: the website's example report prints the
-        # note) and the text fragments of the release in the making; not CHANGELOG.md, which
-        # is history
+        # the README, METHODS and docs/ (md and html: the website's example report prints the
+        # note), and the release notes in the making as the merge leaves them: each changelog
+        # fragment but its notes for the merge (its text before its first section, which the
+        # merge leaves out, and which quote the words they change), and CHANGELOG.md down to
+        # its newest release, the section the fragments are merged into, which is not history
+        # yet, with each change made that the notes ask of an entry there (change "..." to
+        # "...", a line break in them a space)
         repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         pages = [os.path.join(repo, "README.md"), os.path.join(repo, "METHODS.md")]
         for root, _dirs, files in os.walk(os.path.join(repo, "docs")):
             pages += [os.path.join(root, f) for f in sorted(files)
                       if f.endswith((".md", ".html"))]
-        pages += sorted(glob.glob(os.path.join(repo, "changelog", "*.md")))
         self.assertIn(os.path.join(repo, "docs", "example-report.html"), pages)
         found = ["%s:%d" % (os.path.relpath(p, repo), n) for p in pages
                  for n in vcf_af_claims(self._read(p))]
+        change = re.compile(r'\b[Cc]hange "([^"]+)" to "([^"]+)"')
+        self.assertEqual(change.findall(" ".join(
+            'in it, change "the AF the\n   VCF gives" to "the AF it holds"; and'.split())),
+            [("the AF the VCF gives", "the AF it holds")])
+        changes, entries = [], []
+        for p in sorted(glob.glob(os.path.join(repo, "changelog", "*.md"))):
+            # (a comment, which the merge drops, is blanked, and its lines kept, so that a
+            # number is the file's)
+            text = re.sub(r"<!--.*?-->", lambda m: "\n" * m.group(0).count("\n"),
+                          self._read(p), flags=re.S)
+            first = re.search(r"(?m)^### \w+[ \t]*$", text)
+            notes = text[:first.start() if first else len(text)]
+            changes += change.findall(" ".join(notes.split()))
+            entries.append("\n" * notes.count("\n") + text[len(notes):])
+            found += ["%s:%d" % (os.path.relpath(p, repo), n)
+                      for n in vcf_af_claims(entries[-1])]
+        log = self._read(os.path.join(repo, "CHANGELOG.md"))
+
+        def words(s):
+            """A pattern of the words of ``s``, any run of white space matching any run."""
+            return re.compile(r"\s+".join(map(re.escape, s.split())))
+
+        for old, new in changes:
+            if words(new).search(log):  # made
+                continue
+            # one place to make it (else the notes ask what the entry cannot take); as many
+            # of the new words' spaces as the old words had line breaks become line breaks,
+            # so that a number is the file's
+            self.assertEqual(len(words(old).findall(log)), 1, old)
+            log = words(old).sub(lambda m: new.replace(" ", "\n", m.group(0).count("\n")), log)
+        releases = [m.start() for m in re.finditer(r"(?m)^## \[\d", log)]
+        found += ["CHANGELOG.md:%d" % n for n in vcf_af_claims(log[:releases[1]])]
         self.assertEqual(found, [])
+        # the 2.8.1 entries those changes make, in the release notes as merged: the entry on
+        # the --per-sample banner says what the banner says; and 2.8.0 sorted a row whose AF
+        # is empty by its REF score, and a record that has AF at another place than the
+        # first record's leaves its indel's AF empty too, as it is for most of HPRC's chrY
+        # indels; and the limit's headline (with the tiers a SNP's frequency is the
+        # registry's, which add-variants does not write)
+        merged = " ".join("\n".join([log] + entries).split())
+        for said in (
+                "The banner now says that this dataset's results name the carrier samples, with "
+                "the `AF` of the classic per-sample dictionaries (an indel's, of the index's indel "
+                "log), which CRISPRitz `add-variants` copied from the VCF, but have no "
+                "CONFIRMED/PUTATIVE cis phasing",
+                "every indel on the tiers; a record that has `AF` at another place in `INFO` than "
+                "the VCF's first record, by the known limit on the place of `AF` under Changed: "
+                "its indel on any index, as are 91,950 of the 102,665 indels of HPRC's chrY, and "
+                "its SNP on the dictionaries) stayed at its site but went by its REF score",
+                "A search whose rows have no empty column (the default index alone, a VCF with "
+                "`AF` at one place in `INFO` in every record, the reference alone) sorts as "
+                "before.",
+                "**If you searched a sites-only dataset, a VCF with no `AF` or one with `AF` at "
+                "more than one place in `INFO` (such as HPRC's chrY, or a VCF merged with "
+                "`merge_vcf_panels.sh`),** run the search again.",
+                "**A known limit, stated with its scale: an indel (and, on an index without the "
+                "dict-less tiers, a SNP) whose record has `AF` at another place in `INFO` than the "
+                "VCF's first record has no allele frequency.**"):
+            self.assertIn(said, merged)
+        self.assertNotIn("any VCF with `AF`", merged)
         # the limit, where it is stated (the recipes' comments read without their "#")
         readme, methods, design, recipe, recipe_doc, formats, mega_recipe = (" ".join(re.sub(
             r"(?m)^[ \t]*#", " ", self._read(os.path.join(repo, *p))).split()) for p in (
