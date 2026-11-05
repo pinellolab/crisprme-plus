@@ -20,21 +20,23 @@ and the `release-crisprme` skill.
   its flank, instead of one index per PAM. Verified genome-wide over HGDP + 1000 Genomes (4,091
   samples, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index, an
   8-nt-flank PAM-less index, and a dedicated NRG index produce **byte-identical**
-  reports. <!-- {{EQUIVALENCE_NUMBERS}} --> That was measured for
-  one guide, which has no site at a contig's end: from a flank wider than the PAM the build does
-  not index a PAM at a contig's very end or start (on hg38, 549 NRG and 246 NGG sites, none on a
-  primary chromosome; see Changed). Pruning changes only which leaves are written out, never how a
-  guide is aligned, so it cannot move an alignment or a score. The cost is size, since nothing is
-  excluded at build time: 110 GB against 28 GB for the HGDP + 1000 Genomes variant index. Requires
-  `--index-path`, and is command-line only — the web interface never passes the flag. The
-  published PAM-less indexes store the flank on the 3′ side of the guide and serve no 5′ PAM, so a
-  Cas12a (`TTTV`) search needs a dedicated index. A shorter PAM off a wider flank is served for a
-  3′ PAM only; a 5′ PAM needs an index built from a 5′ all-`N` PAM file at exactly its width,
-  which its `.pam_build` records (an all-`N` index without one is taken for a 3′ build at the
-  published widths, 3 and 8: see Fixed), and the engine refuses any other width pairing rather
-  than mis-parsing the index. The `NNN_3` indexes are published alongside the dedicated ones; a
-  flank wider than 3 nt is not readable by earlier releases, so those live in a separate
-  repository. Needs a CRISPRitz build that supports `--prune-pam`. See [`METHODS.md`
+  reports: identical integrated results, 182,369 rows each (the dedicated arm ran on a fresh install
+  without the COSMIC licence, and matches once that empty column is set aside), and for NRR 386,012
+  rows each, over a dedicated index, both PAM-less indexes, and the 3-nt one searched without
+  `--prune-pam`. That was measured for one guide, which has no site at a contig's end: from a flank
+  wider than the PAM the build does not index a PAM at a contig's very end or start (on hg38, 549
+  NRG and 246 NGG sites, none on a primary chromosome; see Changed). Pruning changes only which
+  leaves are written out, never how a guide is aligned, so it cannot move an alignment or a score.
+  The cost is size, since nothing is excluded at build time: 110 GB against 28 GB for the HGDP +
+  1000 Genomes variant index. Requires `--index-path`, and is command-line only — the web interface
+  never passes the flag. The published PAM-less indexes store the flank on the 3′ side of the guide
+  and serve no 5′ PAM, so a Cas12a (`TTTV`) search needs a dedicated index. A shorter PAM off a
+  wider flank is served for a 3′ PAM only; a 5′ PAM needs an index built from a 5′ all-`N` PAM file
+  at exactly its width, which its `.pam_build` records (an all-`N` index without one is taken for a
+  3′ build at the published widths, 3 and 8: see Fixed), and the engine refuses any other width
+  pairing rather than mis-parsing the index. The `NNN_3` indexes are published alongside the
+  dedicated ones; a flank wider than 3 nt is not readable by earlier releases, so those live in a
+  separate repository. Needs a CRISPRitz build that supports `--prune-pam`. See [`METHODS.md`
   §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering).
 - **A second dataset repo for wide-flank PAM-less indexes.** A PAM-less index with a 3-nt flank
   stores a 3-nt PAM region, as a dedicated 3-nt PAM index does, so any release can read it and
@@ -186,10 +188,11 @@ and the `release-crisprme` skill.
   passes `--samplesID`: the entry on a search of a VCF dataset built there). On such an index,
   `complete-search --per-sample` still promised "CONFIRMED cis phasing, named carrier samples and
   exact joint AF", but wrote no phase-confirmation or SNP+SNP co-occurrence table. The banner now
-  says that this dataset's results name the carrier samples, with the allele frequencies the VCF
-  gives, but have no CONFIRMED/PUTATIVE cis phasing, no SNP+SNP co-occurrence and no exact joint
-  AF. It also says to rebuild with `build-index-only --samplesID` or download a prebuilt index.
-  The banner of an index with the tiers, and every result, are unchanged. Covered by
+  says that this dataset's results name the carrier samples, with the `AF` of the classic per-sample
+  dictionaries (an indel's, of the index's indel log), which CRISPRitz `add-variants` copied from
+  the VCF, but have no CONFIRMED/PUTATIVE cis phasing, no SNP+SNP co-occurrence and no exact joint
+  AF. It also says to rebuild with `build-index-only --samplesID` or download a prebuilt index. The
+  banner of an index with the tiers, and every result, are unchanged. Covered by
   `PostProcess/test_build_index_only_atomic.py`.
 - **`complete-test` now says when it ignores `--vcf_dataset`.** The benchmark mode, which
   `--vcf_dataset` configures and `validate-test` checks, runs only with
@@ -212,21 +215,21 @@ and the `release-crisprme` skill.
   Measured on a phased 6-sample panel, with a population-level search of one index on its
   dictionaries and then on its tiers, the tables change as follows: a SNP's allele frequency is
   computed from the genotypes of the samples the list names, to six significant digits
-  (`0.333333`), where the dictionaries gave the VCF's `AF` (`0.3333`), and an indel's is still the
-  VCF's; and `Other_motifs` counts the alignments the tiers give at a site: one fewer at a site
-  where the dictionaries also listed the reference alignment as a variant one, for the carriers of
-  a SNP that destroys its PAM. The row of an indel and a SNP that one haplotype carries is the same
-  on both, with the same carriers, since this release's indel fix resolves it from the per-sample
-  SNP dictionary too (the entry "An indel off-target near a SNP was reported with SNP alleles its
-  carriers do not have" under Fixed). The result folder also holds the SNP + indel and SNP + SNP
-  co-occurrence and phase-confirmation tables, and the shareable report gives the dataset's SNP and
-  indel counts and its SNP + indel cis co-occurrences. A dataset built in Settings before this
-  release has no tiers until its variant index is built again there, and its searches read its
-  dictionaries until then; their SNP + indel rows change all the same, with that indel fix. Writing
-  the tiers takes memory that
-  a build without them did not need: at panel scale ~150-180 GB a chromosome, by default up to 4
-  chromosomes at once (~700 GB, `CRISPRME_TIER_WORKERS` sets how many). A build that runs out of it
-  fails with a message that says what to do (see Fixed).
+  (`0.333333`), where the dictionaries gave the `AF` that `add-variants` copied from the VCF
+  (`0.3333`), and an indel's is still the `AF` of the index's indel log; and `Other_motifs` counts
+  the alignments the tiers give at a site: one fewer at a site where the dictionaries also listed
+  the reference alignment as a variant one, for the carriers of a SNP that destroys its PAM. The row
+  of an indel and a SNP that one haplotype carries is the same on both, with the same carriers,
+  since this release's indel fix resolves it from the per-sample SNP dictionary too (the entry "An
+  indel off-target near a SNP was reported with SNP alleles its carriers do not have" under Fixed).
+  The result folder also holds the SNP + indel and SNP + SNP co-occurrence and phase-confirmation
+  tables, and the shareable report gives the dataset's SNP and indel counts and its SNP + indel cis
+  co-occurrences. A dataset built in Settings before this release has no tiers until its variant
+  index is built again there, and its searches read its dictionaries until then; their SNP + indel
+  rows change all the same, with that indel fix. Writing the tiers takes memory that a build without
+  them did not need: at panel scale ~150-180 GB a chromosome, by default up to 4 chromosomes at once
+  (~700 GB, `CRISPRME_TIER_WORKERS` sets how many). A build that runs out of it fails with a message
+  that says what to do (see Fixed).
 - **A genome uploaded in the web Settings page under the name of an installed genome replaces it,
   and is refused while indexes built on a genome of that name are installed.** The upload went into
   that genome's folder, beside the files already there (and so into the shared copy, when that
@@ -377,6 +380,97 @@ and the `release-crisprme` skill.
   integrated results), and 545 of them have no listed carrier that holds the sequence; with no
   bulges, 12 row-blocks. It only over-lists, no site is lost, and 2.8.0 behaves the same. METHODS
   sections 4 and 8 now say so; it is fixed in the next release.
+
+- **A known limit, stated with its scale: on an index without the dict-less tiers, a
+  `--per-sample` search can still report a dense window by its greedy worst-case alignment, whose
+  listed carriers need not carry every variant in it.** `--per-sample` reports an off-target only
+  when a real individual carries it, never a worst case put together from alleles that different
+  individuals carry (2.7.10), on the observed-haplotype path, which reads the dict-less tiers. An
+  index built without `--samplesID` (such as the one the benchmark `complete-test` builds, so the
+  one the README's self-test leaves) has only the classic per-sample dictionaries, and a
+  per-sample search of it takes the classic path, which still reports a window of more than
+  `CRISPRME_IUPAC_CAP` variants by its greedy worst-case alignment, flagged in
+  `High_variant_density_region`, with the carriers of any allele it takes. On the NGG index the
+  self-test builds (`NGG_2_hg38_chr22+hg38_1000G`, chr22 of the benchmark's phased 1000 Genomes
+  VCF), the README's guide with the `20bp-NGG-SpCas9` PAM, 4 mismatches, 1 DNA and 1 RNA bulge, at
+  the default `CRISPRME_IUPAC_CAP`, gives 5 such rows (chr22:22410074, 22687072, 22687116, 22698190
+  and 22888934, all on the - strand, 8 to 13 variants each, 4 mismatches and 2 bulges, CFD at most
+  0.001). They name 102 individuals as carriers 114 times, and each time the carrier lacks one of
+  its row's variants: 342 of the run's 56,730 SNP-row carrier listings (a row lists its carriers
+  once for each of its three alignments). After `build-index-only --samplesID` the same search
+  returns exactly those 5 rows fewer, and every carrier it lists has all of its row's variants on
+  one phased haplotype. The `complete-search` banner and the report's Search mode row say so, and
+  to rebuild the index with `build-index-only --samplesID` or use a prebuilt one, as the README and
+  METHODS section 5 do; the report's legend (its Observed entry) and the caption of its top-1000
+  tables, the `--per-sample` help, METHODS section 7 and `docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`
+  state the limit. When no dataset of the search has the tiers, such a row of two or more SNPs
+  reads `N carriers (>=1 of K vars, poss. chimera)` in the report's `Observed` column, as in a
+  population-level search; the report cannot tell which dataset a row comes from, so beside a
+  dataset with the tiers it still reads `N cis carriers`, and the legend and the caption say why.
+  Results are unchanged. Pre-existing: 2.8.0 behaves the same; it is fixed in the next release.
+  Covered by `PostProcess/test_build_index_only_atomic.py` (the banner) and
+  `PostProcess/test_generate_report.py` (the report).
+- **A known limit, stated with its scale: on a row of several variants, the rsID and
+  allele-frequency lists are not in the order of its variants.** The post-analysis writes a row's
+  variant, rsID and AF lists one to one, in the variants' order, and the merge of a cluster's rows
+  (`remove_contiguous_samples.get_best_targets`) sorts each of the three on its own, as text, and
+  keeps each value once. So in `integrated_results.tsv` and the alternative alignments the n-th
+  item of `Variant_rsID` or `Variant_MAF` need not belong to the n-th variant of
+  `Variant_info_genome`, and two variants of one frequency show it once. A `--per-sample` search
+  of the README's guide (`20bp-NGG-SpCas9` PAM, 4 mismatches, 1 DNA and 1 RNA bulge) on the
+  self-test's index rebuilt with `build-index-only --samplesID` lists chr22:16858220 with the
+  variants `chr22_16858239_C_G,chr22_16858242_G_T` and the frequencies `0.000981162,0.805338`,
+  where the first variant's is 0.805338 and the second's 0.000981162, and two of its seven
+  multi-variant rows give one frequency for two variants. On ACTGA (`ACTGAAATCTGTAAGCAGGC`, NRG,
+  4 mismatches + 1 DNA + 1 RNA bulge, per sample, genome-wide, on the HGDP + 1000 Genomes index),
+  953 of 1,967 rows of two or more SNPs and 118 of 293 rows of an indel and one or more SNPs list
+  their rsIDs in another order than their variants (in the highest-CFD columns). The report's MAF,
+  the lowest frequency of the list, does not change; the rsIDs its `Variant` column gives after the
+  variants, and the rsIDs and AFs of `observed_haplotypes.tsv` and of a site's haplotype table in
+  the report, come in the list's order. METHODS section 8 states the limit. Pre-existing: 2.8.0 and
+  every release since early 2022 behave so, the 2.1.x releases this changelog lists among them
+  (before 2.4.0 each list came in an arbitrary order); it will be fixed in the next release.
+  Covered by `PostProcess/test_generate_report.py`.
+- **A known limit, stated with its scale: an indel (and, on an index without the dict-less tiers, a
+  SNP) whose record has `AF` at another place in `INFO` than the VCF's first record has no allele
+  frequency.** CRISPRitz `add-variants`, which writes an index's indel log and classic per-sample
+  dictionaries, looks for the `AF` key in the VCF's first record only and reads every record's `AF`
+  at that place in `INFO`, so a record that has it elsewhere gets none: its indel has no frequency
+  on any index, nor its SNP on an index without the dict-less tiers (with them a SNP's frequency is
+  the registry's, which `add-variants` does not write), and the report's MAF leaves it out. A VCF
+  merged with `seq_script/merge_panels/merge_vcf_panels.sh` has such records, since a site of one
+  source has fewer keys before `AF` than a site of two: the retired `NRG_3_hg38+hg38_1000G2021_HGDP`
+  index, built from such a merge, has no `AF` for 14,567,429 of its 15,583,931 indels (224,981 of
+  the 232,384 of chr22). Of the shipped indexes only HPRC's chrY is affected, whose VCF has `AF` at
+  five places: its log has none for 91,950 of its 102,665 indels. The HGDP1kGP index and HPRC's
+  other chromosomes have an `AF` for each of their 17,192,381 and 12,000,599 indels, as the
+  self-test's 1000 Genomes index has for its 64,528 indels and 993,880 SNPs. The mega's VCF has no
+  `INFO/AF` at all, only `AF_<dataset>` and `AF_max`, so none of its 13,853,761 indels has one and
+  the MAF of a row of an indel alone is blank there; the `indel_af.tsv` companion gives their
+  per-dataset frequencies. The report's MAF note (and, for a dataset without the dict-less tiers,
+  its Search mode and Allele-frequency basis rows and its legend's MAF entry, as the
+  `complete-search` banners), the README's MAF column and `--per-sample` text, METHODS sections 3, 7
+  and 8, `docs/DESIGN_mega_index.md`, the gaps of `docs/INDEX_PROVENANCE.md` and the VCF
+  requirements of `docs/INPUT_FORMATS.md` (with a check) now say so, and the header of
+  `merge_vcf_panels.sh` and `seq_script/merge_panels/README.md`, which said that the enricher reads
+  the pooled `AF` by its exact key, and a comment of `merge_mega_sites.sh`, which said that the
+  plain `AF` it writes gives indels the global `AF_max`, say what the enricher does. Results are
+  unchanged. Pre-existing: 2.8.0 behaves the same; it will be fixed in the next CRISPRitz release
+  (HPRC's chrY log needs rebuilding with it). Covered by `PostProcess/test_generate_report.py` and
+  `PostProcess/test_build_index_only_atomic.py`.
+- **METHODS section 2 says what a sites-only panel's registry holds for carriers and
+  homozygotes.** It said that the carrier and homozygote counts of the mega index are reported as
+  Hardy–Weinberg expectations from the allele frequency, flagged as estimates, and
+  `docs/DESIGN_mega_index.md` and `seq_script/merge_panels/README.md` said so too. None is
+  estimated: `compile_registry_from_info_af` (`build_mega_registry.py`) stores 0 for both, beside
+  the exact allele frequencies, and marks the registry as aggregate (`aggregation` `info_af`, and
+  `aggregate_af_only` for each dataset), from which the population-summary companion gives them
+  as NA; the report shows no carrier or homozygote count from the registry, and the carrier
+  overlay of `targets-scoring` prints the stored 0. METHODS sections 2 and 7, the two docs and the
+  README's `targets-scoring` section now say so (the overlay gives each variant's carrier count
+  over the panel and each dataset's highest allele frequency, not a carrier count per dataset, as
+  the README said). The code is unchanged: it has stored 0 since the mega index came, in 2.5.2,
+  whose METHODS already said otherwise. Covered by `PostProcess/test_registry_from_info_af.py`.
 
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
@@ -554,7 +648,7 @@ and the `release-crisprme` skill.
   kept these targets and failed the same way, now drops them too. The filter is unchanged for
   dedicated indexes and under `--prune-pam`, whose targets never carry an `N` there (it dropped 0
   in every such arm). With `--prune-pam`, `NNN_3` and `NNNNNNNN_3` were already byte-identical to
-  a dedicated NRR index on that search: 399,664 rows, the alternative alignments and observed
+  a dedicated NRR index on that search: 386,012 rows, the alternative alignments and observed
   haplotypes included. Covered by `PostProcess/test_indel_header_injection.py`.
 - **`complete-test` passed a flag that did not exist.** The brute-force benchmark command included
   `--bmax`, which `complete-search` has never had — it recomputes bMax from the per-type budgets — so
@@ -1166,9 +1260,10 @@ and the `release-crisprme` skill.
   `Results/crisprme-test-out/log_error.txt`: a search refused before it starts writes no log there,
   and the benchmark mode writes one for each benchmark, in `Results/crisprme-test-out_<name>`. It
   now ends with one line naming each error log, not empty, that this run's searches wrote
-  (`complete-test` refuses to start while a `Results/crisprme-test-out*` folder of an earlier run is
-  there), or else saying to see the messages above, and exits 1, as before. Covered by
-  `PostProcess/test_complete_test.py`.
+  (`complete-test` refuses to start while a folder of an earlier run of its mode is there, and names
+  only that mode's: `Results/crisprme-test-out_<name>` in the benchmark mode,
+  `Results/crisprme-test-out` in the smoke), or else saying to see the messages above, and exits 1,
+  as before. Covered by `PostProcess/test_complete_test.py`.
 - **`targets-scoring --index-path` refuses a dict-less registry that `build-index-only` has not
   finished writing.** The carrier overlay read `Dictionaries/registry_<vcf>` as it found it, also
   while a `build-index-only` run was writing it chromosome by chromosome, or after one had stopped
@@ -1696,12 +1791,16 @@ and the `release-crisprme` skill.
   CRISPR-Bulge block more than 100 bp from the CFD block go from 28 and 27 to 0, and its haplotypes
   with a variant more than 1 kb from their site from 26 to 0. A row with only its `AF` empty (a VCF
   with no `AF`, which the input check warns about: every variant on the dictionaries, every indel on
-  the tiers) stayed at its site but went by its REF score, so the merge could keep a lower-scoring
-  alignment of a variant: on a 6-sample panel with no `AF`, the perfect match a deletion makes at
-  chr2:10000 read CFD 0.9 with a bulge and now reads 1.0 with none, and the report's perfect matches
-  go from 3 to 4. A search whose rows have no empty column (the default index alone, any VCF with
-  `AF`, the reference alone) sorts as before. **If you searched a sites-only dataset or a VCF with
-  no `AF`,** run the search again.
+  the tiers; a record that has `AF` at another place in `INFO` than the VCF's first record, by the
+  known limit on the place of `AF` under Changed: its indel on any index, as are 91,950 of the
+  102,665 indels of HPRC's chrY, and its SNP on the dictionaries) stayed at its site but went by its
+  REF score, so the merge could keep a lower-scoring alignment of a variant: on a 6-sample panel
+  with no `AF`, the perfect match a deletion makes at chr2:10000 read CFD 0.9 with a bulge and now
+  reads 1.0 with none, and the report's perfect matches go from 3 to 4. A search whose rows have no
+  empty column (the default index alone, a VCF with `AF` at one place in `INFO` in every record, the
+  reference alone) sorts as before. **If you searched a sites-only dataset, a VCF with no `AF` or
+  one with `AF` at more than one place in `INFO` (such as HPRC's chrY, or a VCF merged with
+  `merge_vcf_panels.sh`),** run the search again.
 - **A sites-only dataset goes the population-level way in a per-sample search too, as the command
   line said it did, and loses no multi-variant worst case there.** A sites-only dataset
   (`hg38_mega`) has no genotypes for a per-sample search to resolve, and `complete-search` said that
@@ -2769,6 +2868,278 @@ and the `release-crisprme` skill.
   to do:** run such searches again. Covered by `PostProcess/test_indel_pam_creation.py` (the WALK J
   and N rows among them) and `PostProcess/test_indel_row_coordinates.py`.
 
+- **A web search refused for an index a newer CRISPRitz built now says why on its status and
+  results pages.** The search stops, as it should, with one ERROR (`<index> was built by a newer
+  CRISPRitz (... is in index format 2, ...): this CRISPRme reads index format 1 only ...`, and what
+  to do), but the job status page and its results link (`/load` and `/result`) knew only the other
+  refusals' ERRORs, and said "The selected result encountered some errors, please remove it and try
+  to submit again.": submitted again, the search was refused the same way, and the reason was shown
+  only under Show full log. They now say "The search was not run: " and the ERROR, as they do for
+  the other refusals. The search form gives no warning of such an index before Submit: which index
+  a search reads is decided by the search script, and the form would need its own copy of that
+  choice; after Submit, those pages say why. New in 2.8.1. Covered by
+  `PostProcess/test_results_summary_and_status.py` and `PostProcess/test_web_results_links.py`.
+- **The search form says before Submit that a variant dataset has no sample list, and how to get
+  one, whether its variant index was built in Settings or downloaded.** Removing a VCF dataset in
+  Settings takes the sample list the page wrote for it (`samplesIDs/<dataset>.samplesID.txt`) and
+  leaves its variant index, and the search form still offers the dataset if its name begins with
+  its genome's and an underscore (as `hg38_<name>`; one named otherwise is not offered until it is
+  added again). The note under the bulge options then offered its search, and
+  Submit refused it, saying to download its index again, which installs the list, or to add the
+  file yourself: an index built in Settings cannot be downloaded, and one downloaded is not
+  downloaded again while it is installed (Settings answers "already installed — nothing to
+  download", and `crisprme.py download --what index` skips a complete install whatever its list).
+  The note offered the search of any dataset Submit refuses for want of its list (one whose VCFs
+  name samples but which has no list yet, too). It now says what Submit says, as it does of a
+  sites-only dataset or of one added as a single multi-chromosome VCF file, and for a dataset
+  whose VCF folder is not there the message says, if its index came from HuggingFace, to remove
+  the index in Settings and download it again there, which installs the list; to add the VCF
+  dataset again in Settings under its name, which writes the list; or to add the file yourself. A
+  merged panel, whose list Submit makes from those of its datasets, is offered as before. New in
+  2.8.1. Covered by `PostProcess/test_web_bulge_notes.py`.
+- **Submit with a genome or PAM selected that is not installed says what is missing and where to
+  add it, instead of failing.** On a fresh data folder, which holds no genome or PAM until some
+  are added in Settings / Data Manager, Load Example selects `hg38` and `20bp-NRG-SpCas9`, and
+  Submit's input check opened `PAMs/20bp-NRG-SpCas9.txt` (the default one, too, with no PAM
+  selected), which is not there: the check failed with a server error (HTTP 500), no "Missing or
+  wrong input" dialog opened, and the page did nothing. It read the genome folder of a genomic
+  sequence given by BED coordinates the same way, so a genome not installed failed too, and so did
+  coordinates on a sequence whose FASTA the genome folder does not hold, or past the sequence's
+  end. The dialog now lists the genome and the PAM that are not installed, with where to add one
+  in Settings (Add a reference genome, Define a nuclease / PAM), and the BED coordinates it cannot
+  read; the bulge check, which needs both, waits for them. Pre-existing: 2.8.0 did the same.
+  Covered by `PostProcess/test_web_bulge_notes.py`.
+- **The web interface no longer prints a `BiopythonWarning` as it starts on a Bioconda install.**
+  A stray `site-packages/pyproject.toml`, which conda-forge's `dash-bootstrap-components` ships,
+  makes Biopython warn at import that it is imported from inside its source tree. `crisprme.py`
+  has filtered that warning since 2.7.10, but `web-interface` starts `index.py` in a new
+  interpreter, which inherits no filter and whose pages import Biopython. `index.py` now sets the
+  same filter before its first import. The Docker image and `install_from_source.sh` remove the
+  stray file, so they never showed it. Pre-existing. Covered by `PostProcess/test_app_settings.py`:
+  a check of `index.py`'s code, which runs everywhere, and its imports run as `web-interface` runs
+  them, with Biopython beside a stray `pyproject.toml`, which runs where the web stack and
+  Biopython are installed: in the image, where `web-e2e.yml` runs it with the other tests that
+  skip in the light job.
+
+- **A failed `complete-search` ends on its summary of the failure, with exit status 1 and no
+  Python traceback.** It printed where and why the run failed (`CRISPRme run failed.`, the stage,
+  the last lines of `log_error.txt`, the log's path), then raised an `OSError`, so every failed
+  search, the refusal of an index a newer CRISPRitz built among them, went on with `Traceback (most
+  recent call last): ...` and an `OSError` line that only repeated the log's path.
+  `assembly-search` added a traceback of its own when a haplotype's search failed; it now ends in
+  one line, `Error: Haplotype search failed for --output <name>! See <log> for details`, which the
+  web's assembly job reads as the job's failure, as it read the traceback. Exit statuses are
+  unchanged, and a failed search still removes its annotation temp folders. Pre-existing, in 2.8.0
+  too. Covered by `PostProcess/test_build_index_only_atomic.py`,
+  `PostProcess/test_annotation_tmpdirs.py` and `PostProcess/test_assembly_haplotype_genomes.py`.
+- **The documented self-test no longer reports a HuggingFace failure for files the data repo does
+  not host.** `CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py complete-test --chrom chr22
+  --vcf_dataset 1000G` always printed `HuggingFace fetch failed for
+  ALL.chr22.shapeit2_integrated_snvindels_v2a_27022019.GRCh38.phased.vcf.gz (404 Client Error ...
+  Entry Not Found for url ...); falling back to original source`, then downloaded the VCF from EBI
+  and passed. `complete-test` tries the Hugging Face data repo first for the chromosome's FASTA,
+  the VCFs and the sample lists it downloads (the annotations come from GitHub), and
+  `lucapinello/crisprme-data` holds no raw 1000 Genomes or HGDP VCF (its `vcfs/` holds the
+  source VCFs of the three shipped panels), nor `samplesIDs.HGDP.txt`, nor the unpacked FASTA of
+  any chromosome but chr22, so `--vcf_dataset HGDP` and `--chrom chr21` printed it too. A file the
+  Hub answers it does not hold is now said in one line on stdout, `<file> is not on HuggingFace
+  (lucapinello/crisprme-data); downloading it from its original source` (`from UCSC` for a
+  FASTA). Any other failure to fetch a file, such as no connection or a checksum that does not
+  match, is still a warning on stderr, word for word as before. What is downloaded, and from
+  where, is unchanged. Pre-existing, in 2.8.0 too. Covered by `PostProcess/test_complete_test.py`.
+- **`setup` no longer reports a HuggingFace failure for files the data repo does not host
+  either.** `crisprme.py setup`, which downloads the legacy database of the CRISPRme web server,
+  tries the Hugging Face data repo first for the chromosome's FASTA, the 1000 Genomes and HGDP
+  VCFs and the two sample lists, and printed `HuggingFace fetch failed for <file> (404 Client
+  Error ... Entry Not Found for url ...); falling back to original source` (`to UCSC` for a FASTA)
+  on stderr for each one the repo does not hold: every VCF, `samplesIDs.HGDP.txt` and the
+  unpacked FASTA of any chromosome but chr22, so `setup --chrom chr22` printed it three times,
+  and a whole-genome `setup` 47 times. It now says each in one line on stdout, as
+  `complete-test` does: `<file> is not on HuggingFace (lucapinello/crisprme-data); downloading it
+  from its original source` (`from UCSC` for a FASTA). Any other failure to fetch a file is still
+  a warning on stderr, word for word as before. What is downloaded, and from where, is unchanged.
+  The setup guide, `docs/crisprme_data_setup_051826.md`, said `setup` pulls the genome and the
+  variants from their original sources, a single chromosome's FASTA from UCSC, and the website and
+  `setup --help` that it downloads everything from them; all three now say `setup` takes two files
+  from the data repo, `chr22.fa` for `--chrom chr22` and `samplesIDs.1000G.txt`, and everything
+  else from UCSC, EBI, Sanger or GitHub. Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_setup_legacy_database.py`, a new step of `unit-tests.yml`.
+- **The `lucapinello/crisprme-data` card says what its `genomes/hg38/` holds, and lists its
+  `guides/`.** Its layout, kept from the live card, gave the folder as a per-chromosome FASTA
+  mirror, `chr1.fa … chrX.fa`. The repo holds one gzipped FASTA per hg38 sequence (`chr1.fa.gz` …
+  `chrY.fa.gz`, `chrM.fa.gz` and the alt, random and unplaced contigs: 455 files, which
+  `download --what genome` unpacks) and one unpacked FASTA, `chr22.fa`, which `complete-test` and
+  `setup` fetch as is. The layout also left out the repo's `guides/` folder, which holds
+  `sg1617.txt`, the example guide `CTAACAGTTGCTTTTATCACNNN` (no `download` fetches it), and the
+  card itself, `README.md`. The layout now lists all of these, as the repo's file list gave them on
+  2026-11-04. The live card is corrected when the release uploads
+  `docs/hf/crisprme-data_README.md`.
+- **`complete-test` run again over an earlier run's results names every folder in its way, and
+  exits 2.** It named only the first such folder in sorted order, so after a benchmark-mode run it
+  named `Results/crisprme-test-out_cas12a_hbg`, one of six, and a user who deleted it was stopped
+  five more times; it stopped the prebuilt-index smoke on those six folders too, though the smoke
+  writes only `crisprme-test-out`; and it exited 0, which a script or a CI step reads as a pass
+  though nothing ran. It now names, in one line, every folder there of the run's own mode (the
+  benchmark mode's `crisprme-test-out_<benchmark>`, the smoke's `crisprme-test-out`) and exits
+  with status 2 before it downloads or searches anything; `crisprme.py` passes the 2 on, as for a
+  refused `--chrom`. A folder of the other mode no longer stops a run, and the `CRISPRme complete
+  test encountered an error` line of a failed run names only its own mode's error logs. README
+  §2.2.2 says how to run a mode again. Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_complete_test.py`.
+- **A search's `log_verbose.txt` keeps every `Searching for INDELs in` and `Search ended for
+  INDELs in` line.** `pool_search_indels.py` printed them from its pool's workers without flushing
+  them, and leaving the pool terminates each worker it finds idle, with the lines it had not yet
+  written: a search's log missed 3 to 23 of them, a different number each run.
+  `pool_index_indels.py`, which builds a missing INDELS index for a search and for
+  `build-index-only`, lost its `Indexing INDELs in` lines the same way. Both flush them now; no
+  result changes. Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_indel_empty_chromosome.py`.
+- **A source install gets the web stack the Docker image and the Bioconda package run.**
+  `environment.yml`, which `install_from_source.sh` installs into and which says it mirrors the
+  Dockerfile's validated dependency set, left `flask`, `flask-caching`, `flask-compress` and
+  `werkzeug` unpinned, and `cachelib` out. The Dockerfile and the Bioconda recipe pin them (`flask`
+  3.1.3, `flask-caching` 2.4.1, `flask-compress` 1.24, `werkzeug` 3.1.8, `cachelib` 0.17.0), as
+  an unpinned `flask-caching` once drifted to a release that crashed the web app at import; solved
+  for linux-64 on 2026-11-03, the file took `flask-caching` 2.5.1, `flask-compress` 1.26 and
+  `werkzeug` 3.1.9. It now pins the five as the Dockerfile does, and a dry-run solve of it for
+  linux-64 gives the very builds of the release image. An environment created from the earlier
+  file keeps the versions it got: create it again to get these. Pre-existing, in 2.8.0 too.
+  Covered by `PostProcess/test_install_from_source.py`.
+
+- **The report no longer says that a MAF of 1e-05 is a display floor.** The MAF note under the
+  top-1000 tables and the legend's MAF entry said that a variant whose source allele frequency is
+  0 is shown at a display floor of 1e-05 so that it renders on the log-scale plots, to be read as
+  "present, frequency effectively 0"; the README's MAF column and METHODS sections 7 and 8 said
+  so too. No release with these texts applied it: up to 2.3.3 `resultIntegrator.py` wrote 1e-05
+  for an allele frequency of 0, and since 2.4.0, the first release with them, it writes `NA` for
+  one that is 0 or missing, which the report leaves out of a row's MAF, the lowest frequency of
+  the row's variants, blank when none of them has one; a frequency below 1e-05 is shown as it is,
+  and the plots' log scale is their rank axis, a frequency only sizing a point. The note and the
+  legend now say so, in that one sentence of each, in every report (the combined report of
+  `assembly-search` too), as do the README, METHODS sections 7 and 8 and the website's example
+  report (`docs/example-report.html`, a 2.8.0 report, which gets the sentence as 2.8.1 renders it
+  there and nothing else). The rest of each report is unchanged, byte for byte, and no result
+  changes. Covered by `PostProcess/test_generate_report.py`.
+- **The report's MAF note no longer says that an indel's MAF is blank.** The note under the top-1000
+  tables gave an indel-derived variant as one whose MAF is blank, the frequency registry being
+  SNP-only. The registry is, but the indel post-analysis gives an indel the `AF` of the index's
+  indel log, which CRISPRitz `add-variants` copied from the VCF's `INFO/AF`, in either mode and
+  with or without the dict-less tiers, and the report shows it as it shows a SNP's frequency. In
+  the self-test panel's `--per-sample` report with the tiers (the README's guide, `20bp-NGG-SpCas9`
+  PAM, 4 mismatches, 1 DNA and 1 RNA bulge), the indel off-target at chr22:33985503 shows 3.00e-02
+  and the indel-and-SNP one at chr22:21052642 1.80e-01, and the 3 of its 184 variant rows whose MAF
+  is blank are indels whose `AF` reads 0 in the indel log (the VCF rounds it to two decimals); the
+  183 indel rows of the website's example report all show one. The note now says that an indel has
+  the `AF` of the index's indel log, and that its MAF is blank where the log gives that `AF` as 0,
+  or not at all, in every report (the combined report of `assembly-search` too). The log gives
+  none for a record that has `AF` at another place in `INFO` than the VCF's first record (the known
+  limit on the place of `AF` under Changed), nor for any indel of the mega index, whose VCF has no
+  `INFO/AF`. The README's MAF column, METHODS sections 3 and 7 and the example report
+  (`docs/example-report.html`, which gets the note as 2.8.1 renders it there) say so too. Nothing
+  else in a report changes, and no result changes. Pre-existing: the note has said so since 2.4.0,
+  which wrote it. Covered by `PostProcess/test_generate_report.py`.
+- **The report of a `--per-sample` search on an index without the dict-less tiers says what the
+  search reported.** On such an index (one built without `--samplesID`, such as the one the
+  benchmark `complete-test` builds), the report's Search mode row now says what
+  `complete-search`'s banner says: the carrier samples are named, with the `AF` of the classic
+  per-sample dictionaries (an indel's, of the index's indel log), which `add-variants` copied from
+  the VCF, and no CONFIRMED/PUTATIVE cis phasing, SNP+SNP co-occurrence or exact joint allele
+  frequency is reported, as they come from the tiers; a dense window can still be reported by its
+  greedy worst-case alignment (the known limit under Changed); and to get the tiers, rebuild the
+  index with `build-index-only --samplesID` or download a prebuilt one. The texts that made the same
+  claims elsewhere in the report now say what holds for those datasets: the Allele-frequency basis
+  row and the MAF note under the top-1000 tables (a SNP's frequency is the `AF` of those
+  dictionaries, not AC/AN, and one whose `AF` they give as 0, or not at all, has no frequency and is
+  blank), the legend's MAF entry (no joint allele frequency is computed, and a variant whose `AF`
+  the dictionaries or the indel log give as 0, or not at all, is left out of a row's minimum), the
+  legend's Observed entry and the caption of the top-1000 tables (a dense window's greedy alignment
+  lists the carriers of any of its variants, not its exact cis carriers). When no dataset of the
+  search has the tiers, the Observed cell of such an alignment (a row of two or more SNPs flagged in
+  `High_complexity_region`), in the report's tables and in every curated TSV that holds it, reads
+  `N carriers (>=1 of K vars, poss. chimera)`, as in a population-level search, and links its site's
+  other greedy alignments as "N other variant combinations". No column says which dataset a row
+  comes from, and two datasets can name the same samples, so in a search that also has a dataset
+  with the tiers, whose dense windows come as observed haplotypes flagged there too, every row keeps
+  its cell, and the legend and the caption say why. The report read `.search_mode` alone, so every
+  per-sample report said "Every per-sample haplotype is reported with CONFIRMED cis phasing, named
+  carrier samples and exact joint allele frequency", AC/AN over the genotyped panel, an exact joint
+  allele frequency and exact cis carriers. The self-test panel's search (the NGG index the README's
+  self-test builds, `NGG_2_hg38_chr22+hg38_1000G`; the README's guide with the `20bp-NGG-SpCas9`
+  PAM, 4 mismatches, 1 DNA and 1 RNA bulge) has no CONFIRMED line in any of its files; `Variant_MAF`
+  is NA on 154 of its 189 alt rows (3 of 184 with the tiers), those whose variants' AF reads 0 in
+  the VCF, which gives it to two decimals; four two-variant rows show the frequency of their
+  commoner variant (0.09 to 0.86: chr22:16858220 shows 8.10e-01, from `Variant_MAF` "NA,0.81") for a
+  haplotype that one to five individuals carry (9.81e-04 and 1.96e-04 with the tiers); and the 5
+  greedy rows read "16, 40, 22, 18 and 18 cis carriers", three of them with a link to "N other
+  observed haplotypes", though none of the 102 individuals they list (114 times) carries every
+  variant of a row that lists it. The report cannot tell from the results, nor from the install,
+  whose index can have the tiers by the time the report is built again, so `complete-search` now
+  records the datasets its banner names in the result folder (`.untiered_datasets`), beside every
+  dataset it searches (`.variant_datasets`), as it records `.search_mode`; a report built again from
+  an earlier search's folder keeps the old texts. With the tiers this change leaves the report as it
+  was, byte for byte (but for the order of tied rows, which the last entry below changes in every
+  report), and no result changes. The `--per-sample` texts of `complete-search`'s help and of the
+  README, the README's MAF column and METHODS sections 3 and 7 now say so too. The
+  observed-haplotypes callout of Section 5 and the header of `observed_haplotypes.tsv`, as in every
+  mode, and the download button of a greedy row's modal, which names the whole file, still call its
+  rows observed haplotypes. The web search form offers per-sample only on an index with a genotype
+  store, so a web search is never such a search. Pre-existing: the row has read so since 2.5.3,
+  the allele-frequency texts since 2.4.0, the legend's entries since 2.6.0, the caption since
+  2.7.10 and the Observed cell since 2.8.0. Covered by `PostProcess/test_generate_report.py` and
+  `PostProcess/test_build_index_only_atomic.py`.
+- **A population-level search on an index without the dict-less tiers says where its allele
+  frequencies come from, and what `--per-sample` gives there.** On such an index both modes read
+  the classic per-sample dictionaries, so a population-level search too reports each SNP with the
+  `AF` that `add-variants` copied into them from the VCF: on the self-test panel above, 198 of its
+  257 alt rows have a blank MAF. Its report said AC/AN over the panel all the same (the
+  Allele-frequency basis row, the MAF note, the legend's MAF entry), as these texts did whatever the
+  index. The Search mode row, as the banner, advised re-running with `--per-sample` for per-sample
+  carriers, CONFIRMED cis phasing and exact joint allele frequency; the legend said that
+  `--per-sample` computes the exact joint allele frequency and lists the exact cis carriers, and the
+  caption of the top-1000 tables that it resolves the true cis haplotypes and carriers. On such a
+  dataset `--per-sample` names the carriers only, with neither CONFIRMED cis phasing nor a joint
+  allele frequency, and can still report a dense window by its greedy worst-case alignment.
+  `complete-search` now records those datasets (`.untiered_datasets`, `.variant_datasets`) for any
+  variant search, per-sample (the entry above) or population-level, and the web search job, which
+  runs the search script itself, records them the same way. The population-level banner and the
+  report's Search mode row say, after their `--per-sample` advice, what `--per-sample` gives on
+  those datasets and how to get the tiers; the allele-frequency texts say what they say in a
+  per-sample report; the legend's MAF and Observed entries and the caption say what `--per-sample`
+  gives there. A sites-only dataset (one whose VCFs have no sample columns), to which a build
+  without `--samplesID` writes no tiers either, is not one of those datasets, in the records, the
+  banners or the report: with no carrier to name and no allele-frequency registry, its search
+  reports none of its variants, in either mode. With the tiers this change leaves the banner and the
+  report as they were, byte for byte (but for the order of tied rows, which the next entry changes
+  in every report). Pre-existing: the allele-frequency texts have read so since 2.4.0, the banner
+  and the Search mode row since 2.5.3, the legend's entries since 2.6.0 and the caption since 2.8.0.
+  Covered by `PostProcess/test_generate_report.py`, `PostProcess/test_build_index_only_atomic.py`
+  and `PostProcess/test_web_search_reuse.py`.
+- **Rows of one score keep the table's order in the report's ranked tables and plots, and in the
+  results page's plots.** The top-1000 by CRISPR-Bulge (`top1000_crispr_bulge.tsv` and its
+  table), the top-1000 by CFD (`top1000.tsv` and its table) and the Section-2 plots' top-N were
+  sorted with pandas' default sort, a quicksort, which is not stable: rows of exactly one score
+  (common: identical aligned pairs at different sites score the same, and an out-of-domain
+  CRISPR-Bulge score is -1) came out in an order that the whole table decided, so rows added
+  elsewhere renumbered them; between two runs, 8 to 99 rows of `top1000_crispr_bulge.tsv` changed
+  only their rank, each within an exact tie. These sorts are now stable, so tied rows keep the
+  order of `integrated_results.tsv`. The self-test panel's `--per-sample` searches without and
+  with the dict-less tiers (the searches above) differ by 5 rows (the known limit under Changed):
+  the 560 sites both reports hold came in another order at 282 places of
+  `top1000_crispr_bulge.tsv` and 250 of `top1000.tsv`, and now come in the same order. On the
+  search without the tiers, whose 565 rows hold 476 CRISPR-Bulge scores of -1 and 310 CFD scores
+  of 0, the two tables put 477 and 483 rows at another rank than before, each inside its tie. Only
+  the order of tied rows changes, and, where a tie spans the last row of a top-N, which of them it
+  holds; no score changes, and no row leaves its tie. The recommended panel, sorted on seven keys
+  at once (which pandas sorts stably), and the per-threshold tables, in the table's order, were
+  already so and are unchanged. The results page's plots sorted the same way: the top-1000 plots of
+  its Graphical Reports tab (by CFD, by CRISPR-Bulge, by fewest mismatches+bulges and by variant
+  effect) and the Personal Risk Card's top-100 plots. They sort stably too now, so the top-1000
+  plots put tied sites in the report's order: on the self-test panel's population-level search
+  their rows of more than one mismatch+bulge, the rows the report keeps, came in another order than
+  in the report's top-1000 tables at 547 (CFD) and 533 (CRISPR-Bulge) places, and now at none.
+  Pre-existing since 2.4.0 (the report) and 2.2.0 (the results page's plots). Covered by
+  `PostProcess/test_generate_report.py` and `PostProcess/test_top_plots.py`.
+
 ### Security
 - **The web Settings page could be pointed outside `Settings/` and made to re-run a recorded
   command.** Retry, Show-full-log and the job-progress refresh built a path from the job id the
@@ -2782,6 +3153,280 @@ and the `release-crisprme` skill.
   can (as root in the Docker image), including a job folder that Retry would then run. Every member
   is now checked first: an absolute or `..` path, a link, a device or a FIFO refuses the whole
   archive and nothing is written. Real genome archives (UCSC hg38 and mm39 chromFa) are unaffected.
+
+- **The search form's genomic-sequence input passes nothing typed to a shell.** For a sequence
+  given by BED coordinates, the sequence's `>` header and the sequence name on the coordinates'
+  line went as typed into a shell command that ran `bedtools getfasta`: when Submit checked the
+  form, as the base-editing window list was filled at each change, and when the search was
+  launched. Characters a shell reads in either ran as commands, as the web app's user, which
+  matters wherever the web app is served to other people. The header named the BED file written
+  in the data folder, so a header holding a path wrote it elsewhere, and the index bedtools wrote
+  beside the genome's FASTA was removed afterwards, one that was there before as well. bedtools
+  now runs with no shell, on a BED file and a link to the FASTA in a private temporary folder,
+  where it writes the index too: the header names no file, the sequence name must be that of a
+  FASTA of the genome selected, and the genome an installed one. Pre-existing, in every earlier
+  release. Covered by `PostProcess/test_web_shell_safety.py`.
+- **Submit's launch of a search runs only what the form offers, and quotes each value it passes
+  on.** A request can call the launch with any values, past Submit's check of the form: the
+  genome, the PAM and the variant dataset name the folders and files the search reads, and the
+  genome, the e-mail address and the number of mismatches went as sent into the shell command
+  that starts the search, where characters a shell reads ran as commands. The launch now runs
+  only a genome and a PAM that are installed, "Reference only" or a variant dataset the form
+  offers for the genome, and whole numbers of mismatches and bulges, and it quotes each value of
+  that command, which is unchanged for the values the form sends. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
+- **A personal-assembly search takes only guides of the nucleotide codes a reference search keeps,
+  and only a PAM and files the form offers.** Submit on the search form's Personal assembly tab
+  wrote the guides of the PAM's length into the search's guide file as sent, upper-cased, and the
+  search passes each guide of that file to a shell command: characters a shell reads in a guide
+  ran as commands, as the web app's user, and a request can send that Submit any text. It now
+  leaves out a guide holding a character other than those the Reference genome tab's Submit keeps
+  of a guide (A, C, G, T and the IUPAC codes for two or three of them), as it leaves out one not
+  of the PAM's length, rather than search a shorter one. A guide of those letters is searched as
+  before; one holding an N is now left out too. That Submit searched, as sent, any PAM file and
+  any folders and files for the individual's, outside the data folder too, and the search takes
+  the PAM file's name, and that of a genome folder of `Genomes/`, into shell commands: it now
+  searches only a PAM the form offers, with the files of the individual picked, as installed.
+  Pre-existing, since 2.5.5. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The annotation a search applies is put together with no shell.** It is written as
+  `Annotations/.active.<genome>.bed.gz`, and the name of a genome folder, which Settings took as
+  typed and which can be put in `Genomes/` by hand, went into the commands that sort, compress,
+  move and remove it, run through a shell, where characters a shell reads ran as commands. They
+  now run with no shell. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **Settings refuses a name that CRISPRme would take into a shell command.** It took the name of
+  a genome (typed, or that of the file uploaded), of a VCF dataset and of a nuclease with any
+  character but a space, `+`, `/`, `\` and `..`, that of a file uploaded with any but `..`, and a
+  genome download's URL as typed. CRISPRme takes these names into shell commands as they are (a
+  search's post-analysis a genome's, a dataset's and a PAM file's, an index build a genome's and a
+  dataset's, a genome download its own and the name its URL ends in), where characters a shell
+  reads ran as commands, as the web app's user. Settings changes data in local mode only, which is
+  how CRISPRme runs by default. It now refuses, and says why, a name that holds a blank, a
+  character a sequence's name may not hold (`|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a
+  backquote or `#`), `*`, `?` or `[`, or that starts with `-` or `.`: any name it takes, the name
+  a URL ends in, and that of a file uploaded, but for a personal-assembly bundle, whose file's
+  name only says how it is packed. Pre-existing. Covered by
+  `PostProcess/test_settings_progress.py`.
+- **Remove result, on a search's status page, removes only that search's folder.** It removed the
+  folder the page's address named, through a shell: the job id there could run commands, or name
+  a folder elsewhere, outside the data folder too, which was removed. It now removes, with no
+  shell, only a folder of `Results/` whose id has the form the search form gives its jobs.
+  Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The results pages pass no value of a link or a table to a shell.** The guide, sample,
+  chromosome and position a results link names, the guide and number of mismatches the results
+  tables send back, a sample's name, as its VCF gives it, and the name of a search's results
+  file, which holds the genome's, went into the shell commands that zip a table for download,
+  draw the Graphical Reports and Personal Risk Card plots, and look up the targets at a
+  position, where characters a shell reads ran as commands. Those commands now run with no
+  shell, but for the look-up at a position, which now takes only a guide of the search, a
+  position in digits and a chromosome name of letters, digits and `_.:,+=@%` (for another it
+  says "The selected position does not exist"), and the results pages read only a folder of
+  `Results/` whose id has the form the search form gives its jobs. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py` and `PostProcess/test_web_results_links.py`.
+- **A job's status and results pages read, write and remove only that job's folders.** These
+  pages take the job id from their address, which a client can set to any text, in local mode
+  and on a website alike, and joined it as it was into the paths of the files they use: an id
+  holding a path reached a folder elsewhere, outside the data folder too. Remove result of a
+  personal-assembly search removed that folder, and the haplotype folders its `.Params.txt`
+  names, joined the same way; Show full log, and the status of a personal-assembly search, read
+  the log files there and showed them; the opening of a job's pages read its `.Params.txt`
+  there; and the results pages wrote the table filter they keep (`.dropdown.json`) there, and
+  their tables, sample and population lists and download links read the files there. Each now
+  takes only a folder of `Results/` whose id has the form the search form gives its jobs, as
+  Remove result of a search does (above), and otherwise changes nothing, shows no log, or says
+  that there is no such job. History, which lists every search of `Results/`, shows one named
+  otherwise (a command-line search's `--output` may be) with no link, and says why its pages do
+  not open and what to do (`docs/crisprme_web_interface_user_guide.md`). Pre-existing. Covered
+  by `PostProcess/test_web_shell_safety.py` and `PostProcess/test_history_page_assembly.py`.
+- **Remove result removes only a search its status page offers it for: one that failed.** A
+  search's status page offers Remove result once the search has failed, and a personal-assembly
+  search's offered it once it had failed or was reconciled, but the button's request, which a
+  client can send for any job, removed the search of the page's address whatever its state: a
+  finished, running or queued search, and, through a personal-assembly search's button, a
+  search of either kind. History lists every search in local mode, which is how CRISPRme runs by
+  default, and on a website a search's link names it. Each now removes only a search in a state
+  its page offers it for, and otherwise changes nothing, and a personal-assembly search's page
+  offers it, as a search's does, once the search has failed: not once it is reconciled, which
+  had anyone with a finished search's link remove it. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
+- **Remove installed data, in Settings, removes only an item it lists.** It took the item as a
+  request sent it, and a name of `..` named the data folder (or, through a folder of it that is a
+  link to other storage, the folder there that holds the link's target), and `.` or no name the
+  folder of every item of that kind: all of it was removed, every search's results with the data
+  folder. It now measures and removes only an item the card lists, and says another is not
+  found. Settings changes data in local mode only, which is how CRISPRme runs by default.
+  Pre-existing, since 2.2.0. Covered by `PostProcess/test_settings_progress.py`.
+- **A VCF upload in Settings goes only into a dataset uploaded or downloaded there, and takes a
+  dataset's own files only.** An upload into a dataset registered as a server folder was written
+  through the registration into that folder, under any file name, a new file or one replacing a
+  file there: a request could write any file into any folder the web app's user can write. A
+  registered folder is now read where it is and nothing is uploaded into it, and an upload takes
+  `.vcf.gz` files and their `.tbi` or `.csi` index only (`docs/SETTINGS_DATA_MANAGER.md`).
+  Pre-existing, since 2.2.0. Covered by `PostProcess/test_settings_progress.py`.
+- **Settings publishes no index; an index is published from the command line.** With a Hugging
+  Face token in the web app's environment (maintainer mode), Settings' Publish took any index
+  name, and `publish-index` archives the folder that name leads to, beside it, and uploads the
+  archive with that token to the shared repository, over a file of the same name there: a name
+  holding a path had any folder of the server archived and uploaded. Taking only an index its
+  list offers did not bound that, as a request has the list offer what it installs through the
+  page: a VCF dataset of any server folder registered, or of a VCF uploaded, and its index
+  built, whose archive holds the dataset's per-sample dictionaries and sample list. Settings now
+  publishes nothing, and Retry runs no publish an earlier version started; in maintainer mode
+  the page says to publish with `crisprme.py publish-index`, which is unchanged
+  (`docs/SETTINGS_DATA_MANAGER.md`). Pre-existing, since 2.2.0. Covered by
+  `PostProcess/test_settings_progress.py`.
+- **Settings builds an index only of a genome, PAM and VCF dataset its card offers.** "Build an
+  index locally" took them as a request sent them, and a path in one built an index of a folder
+  outside the data folder. Pre-existing, since 2.2.0. Covered by
+  `PostProcess/test_settings_progress.py`.
+- **A personal-assembly bundle names its own files only.** The genome folder, chain and
+  chromAlias file of each haplotype are paths its `metadata.json` gives, which an imported archive
+  brings, and they were taken as they were: a bundle naming files and folders outside its own
+  folder was imported, its individual offered as complete, and its search read them, its results
+  holding what it found there. Such a bundle is now refused, and one imported before is listed
+  as incomplete and not offered (`docs/crisprme_web_interface_user_guide.md`). Pre-existing,
+  since 2.6.0. Covered by `PostProcess/test_personal_assembly.py` and
+  `PostProcess/test_web_shell_safety.py`.
+- **Remove of a personal assembly in Settings removes that bundle's folder, and of a pairing of
+  the older layout its own markers only.** Settings listed a bundle under the individual its
+  `metadata.json` names, which an archive imported there brings: one naming another individual
+  took that one's place in the Individual picker and the Remove card, and one naming an
+  individual with no folder was removed as a pairing of the older layout, by the files named
+  after the assembly names the bundle gives, outside the data folder too. A bundle is now listed
+  under the name of its folder, as `assembly-search --assembly-individual` takes it, and only a
+  pairing of the older layout is removed as one (`docs/crisprme_web_interface_user_guide.md`).
+  Pre-existing, since 2.6.0. Covered by `PostProcess/test_personal_assembly.py` and
+  `PostProcess/test_settings_progress.py`.
+- **The search form reads only what it offers.** The callbacks that fill in and check the form
+  (the variant datasets offered for a genome, the analysis modes, the bulge options and the note
+  under them, and Submit's check) took the genome, PAM and variant dataset a request sends into
+  the paths of the folders and files they list and read: a path in them reached outside the data
+  folder, and what was there changed what they answered, in local mode and on a website alike.
+  They now answer for a value the form does not offer as for none, and Submit lists a variant
+  dataset that is not installed for the genome, as it does a genome or PAM that is not installed.
+  Submit's check of a dataset of one multi-chromosome VCF, new in 2.8.1, looks for its variant
+  index with the PAM file of an installed PAM only, too. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
+- **The indel steps of a search pass no chromosome name of a variant dataset to a shell.**
+  A search with bulges takes each chromosome name of a variant dataset, read from the CHROM
+  column of its VCFs (or from the per-chromosome indel logs named after it), into the shell
+  commands that search and merge the indel off-targets and run the indel post-analysis, where
+  characters a shell reads ran as commands, as the web app's user. A VCF dataset added in
+  Settings carries its own CHROM column, which this did not check, and Settings changes data
+  in local mode only, which is how CRISPRme runs by default. The indel search and its
+  post-analysis now refuse a chromosome name that holds a blank or a character a sequence's
+  name may not hold (the same characters Settings refuses in a name, above), and say so; a
+  real chromosome name holds none, so a normal dataset is searched as before. Pre-existing.
+  Covered by `PostProcess/test_indel_empty_chromosome.py`.
+- **The post-analysis of a search passes no FASTA file's name to a shell, and a personal-assembly
+  bundle brings only FASTA files named as a search can take them.** The post-analysis takes the
+  name of each FASTA file of the genome folder searched, as its chromosome's, into shell
+  commands as it is, where characters a shell reads ran as commands, as the web app's user. A
+  genome added in Settings has its files named after their sequences, whose names are checked,
+  but a personal-assembly bundle imported there brought its genome folders with the names its
+  archive gives, which were not, and Settings changes data in local mode only, which is how
+  CRISPRme runs by default. A bundle holding a FASTA file whose name holds a blank or a character
+  a sequence's name may not hold (`|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a backquote or
+  `#`) is now refused, and the import says why; the post-analysis refuses such a name too, and
+  says so, and runs its step for each chromosome with no shell. A chromosome's off-targets are
+  kept only from the file named after its sequence, whose name holds none of these, so a normal
+  genome or bundle is searched as before. That step also looked a chromosome's off-targets up
+  with its name as a shell word, where `*`, `?` and `[` (an HLA allele's name holds `*`) made a
+  pattern of the files of the folder it runs in, outside the data folder, which were then read:
+  it now looks the name up as it is. Pre-existing (bundles since 2.6.0). Covered by
+  `PostProcess/test_personal_assembly.py`, `PostProcess/test_settings_progress.py` and
+  `PostProcess/test_web_shell_safety.py`.
+- **The results pages' tables bind the values of a link, a table and a form to their queries of
+  a search's database.** The guide and sample of a results link, the guide and numbers of
+  mismatches and bulges of a Show Targets link, the chromosome and positions typed in Query
+  Genomic Regions, the guide of the summary table's row and a sample's name, as its VCF gives
+  it, went as they were into the SQL that reads a search's results, and Custom Ranking wrote the
+  columns it groups by, the order and the thresholds of its form into its SQL too: a quote in
+  such a value ended the text it was written in, and the rest was read as SQL, which could widen
+  the query, on the search's own database, or end it in an error. Each value is now bound to
+  the query; Custom Ranking takes only the columns, orders and thresholds its form offers, and
+  the positions of a region and the numbers of a link are whole numbers. A sample whose name
+  holds a quote, whose table and Personal Risk Card failed, now has them. Pre-existing. Covered
+  by `PostProcess/test_web_shell_safety.py`.
+- **Two download links of the results pages look only for a file of their search's folder.**
+  The Summary by Sample and Show Targets links offer their zip once it is there, under a name
+  the page gives, which a client can set to any text, and they looked for it wherever that name
+  led, outside the data folder too: whether a file was there showed in their answer, though
+  nothing was served (the download route serves files of `Results/` only). They now look only in
+  the search's folder, as that route would serve the file, and answer for any other name as for
+  a zip not made yet. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **A saved e-mail password goes only to the mail server it was saved for.** Settings' Email
+  notifications kept the saved password when a save named another server, port, SSL setting or
+  sender address with the password field empty, as the page shows it, and the notification a
+  search sends at its end logs in to the server saved, as the sender saved, with that password:
+  a request, which can save any server in local mode (how CRISPRme runs by default), had the
+  password sent to a server of its choosing. The password of `CRISPRME_SMTP_PSW` went the same
+  way to a server the settings named with no password of their own. A save that changes any of
+  the four now asks for the password again, and `CRISPRME_SMTP_PSW` is used with the default
+  server (`smtp.gmail.com`) only (`docs/crisprme_web_interface_user_guide.md`). Pre-existing,
+  since 2.2.0. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The archives the web app unpacks go in with safe modes, owned by the user unpacking
+  them.** A genome `.tar.gz` uploaded in Settings or fetched from its Direct URL, a
+  personal-assembly bundle, and a downloaded index, genotype store or build-inputs kit were
+  unpacked with the mode bits and the owner each member of the archive gives: a setuid or setgid
+  file, and, where the web app runs as root (the Docker image does), any owner the archive
+  names, went into the data folder, which `docker run -v` mounts from the host, where a setuid
+  file runs with its owner's rights. Each file now goes in with no setuid, setgid or sticky bit
+  and no write for others than its owner, owned by the user unpacking it (tarfile's `data`
+  filter, or the same done by hand on a Python before 3.11.4), and a member refused before (an
+  absolute or `..` path, a link, a device, a FIFO) is still refused. A zip archive keeps no mode
+  or owner when Python unpacks it, as before. Pre-existing. Covered by
+  `PostProcess/test_settings_progress.py`, `PostProcess/test_genome_layout.py`,
+  `PostProcess/test_personal_assembly.py` and `PostProcess/test_index_bundle.py`.
+- **A search's e-mail notification goes to the one address typed, and links to the job by the
+  server's own address.** Submit took any text holding an `@` as the address: a comma-separated
+  list had one search notify every address on it, through the mail account saved in Settings,
+  and a line break, which a request can send though the field holds one line, set the link of
+  the e-mail sent. That link was made of the page's address as the request gave it, which a
+  request sets to anything (and the one a browser gives lost its `//` there). Submit now takes
+  one plain address, as `name@example.org`: no list, display name, comment, blank or line break,
+  and no more than the 254 characters an address can have, counted before the address is read
+  (the field is checked at each change of it, and reading a much longer value, which a request
+  can send, took the server seconds). The field turns red for another one, and the search runs
+  without a notification, as with no address. The link is the address the job's status page
+  shows (in local mode `http://127.0.0.1:8080`) with the job's id. Pre-existing. Covered by
+  `PostProcess/test_web_shell_safety.py`.
+- **A job's link no longer gives the e-mail address its search was submitted with.** The
+  `/Results/` route serves the files of a job's folder to anyone with the job's link, and in
+  local mode, which is how CRISPRme runs by default, History lists every job. It served
+  `email.txt`, which holds the address (and that of each search sent to the job as identical to
+  it), and the search printed the address into its log (`MAIL: <address>`, then `EMAIL SENT to
+  <address>`), which the status page's Show full log shows. The route now serves no `email.txt`,
+  the search is not passed the address (its log says `MAIL: email.txt` for a notification,
+  `MAIL: _` for none), and what the notification prints names no address, not even in a mail
+  server's refusal. Notifications are sent as before; the log of a search run by an earlier
+  version keeps its line. Pre-existing. Covered by `PostProcess/test_web_shell_safety.py`.
+- **The Personal assembly tab's Submit takes whole numbers of mismatches and bulges, as its form
+  offers them, before it writes anything.** It wrote the mismatches and bulges a request sends
+  into the new search's `.Params.txt` as they were, a line break too, and only then converted
+  them to numbers: a value that is not one left a job folder that never ran, listed as in queue,
+  which no page removes, one for each such request; and a number the form does not offer was
+  searched. It now takes 0 to 6 mismatches, the DNA and RNA bulges the dropdowns offer for the
+  genome, PAM and variant dataset selected (0 to 2, more where an installed reference index is
+  deeper, fewer where a variant dataset's index has fewer), and a Max edits of 1 to the
+  slider's maximum where that governs (10, or the mismatches and bulges added where that is
+  more), and otherwise says which is wrong, with nothing written. Pre-existing, since 2.5.5.
+  Covered by `PostProcess/test_web_shell_safety.py`.
+- **The Reference genome tab's Submit checks the Max edits value before it makes the job
+  folder.** With Advanced options closed, where the Max edits slider governs, Submit converted
+  the slider's value to a number only after it had made the job folder and written its first
+  files: a value that is not a number, which a request can send, left a job folder that never
+  ran, which History does not list, one for each such request. It now takes a whole number of
+  the slider's range there, as the Personal assembly tab's Submit does, and runs nothing for
+  another. Pre-existing, since 2.2.0. Covered by `PostProcess/test_web_shell_safety.py`.
+- **What stays as it is.** A search's results TSVs, and their zips, hold the values they report
+  as they are: an annotation label of a BED added in Settings, or a sample name or variant ID of
+  a VCF dataset added there, that starts with `=`, `+`, `-` or `@` is a cell a spreadsheet may
+  take for a formula. Escaping such cells would change the content of every TSV, so open them
+  as text in a spreadsheet when that matters. Two features of Settings, which changes data in
+  local mode only, are for whoever runs the server: Add a VCF dataset's "Register a server
+  folder" registers any folder the web app can read as a dataset, and Add a reference genome's
+  Direct URL has the server fetch any `http(s)` address. The online version of the web app
+  disables both, with every other change Settings makes.
 
 ## [2.8.0] - 2026-10-23
 

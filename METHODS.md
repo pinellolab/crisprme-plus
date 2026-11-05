@@ -1302,18 +1302,22 @@ aligned to the genome, so it cannot move an alignment or a score. Measured genom
 over HGDP + 1000 Genomes (4,091 samples, guide `ACTGAAATCTGTAAGCAGGC`, NRG, 4 mismatches +
 1 DNA bulge + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index with `--prune-pam`, an
 8-nt-flank PAM-less index with `--prune-pam`, and a dedicated NRG index produce
-**byte-identical** reports. <!-- {{EQUIVALENCE_NUMBERS}} --> That holds at *L = K*, and at
-*K > L* for a guide with no site at a contig's very end or start, as this one has none. The
-build scans a contig for a PAM only where a whole
-window of *K* bases fits, so with *K > L* a + strand PAM with 1 to *K − L* bases after it to the
-contig's end, and a − strand PAM in the contig's first *K − L* bases, are not indexed, and a −
-strand PAM exactly *K − L* bases from the start is reported on the + strand at another
-coordinate. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites (about 7.5 × 10⁻⁷
-of all), none on a primary chromosome for those PAMs; in two whole-genome searches the 8-nt
-flank lost one row each against a dedicated index (27,215 of 27,216 rows for a guide picked for
-its perfect match on `chr11_JH159136v1_alt`, and 216,977 of 216,978 for VEGFA site 3 at 5
-mismatches). A search that reads a flank wider than its PAM says so on stdout and in the run's
-`Params.txt`. N runs inside a contig are not affected by the width.
+**byte-identical** reports: the integrated results are identical, 182,369 rows each (MD5
+`c76f3490` once the licence-gated COSMIC column, empty on the dedicated arm's fresh install, is
+set aside; the two PAM-less arms are identical with it, MD5 `c4586f7a`). The same holds for
+NRR: 386,012 rows each (MD5 `f810dd76`) over a dedicated index, both PAM-less indexes with
+`--prune-pam`, and the 3-nt one without it. That holds at *L = K*, and at *K > L* for a guide
+with no site at a contig's very end or start, as this one has none. The build scans a contig
+for a PAM only where a whole window of *K* bases fits, so with *K > L* a + strand PAM with 1 to
+*K − L* bases after it to the contig's end, and a − strand PAM in the contig's first *K − L*
+bases, are not indexed, and a − strand PAM exactly *K − L* bases from the start is reported on
+the + strand at another coordinate. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG
+sites (about 7.5 × 10⁻⁷ of all), none on a primary chromosome for those PAMs; in two
+whole-genome searches the 8-nt flank lost one row each against a dedicated index (27,215 of
+27,216 rows for a guide picked for its perfect match on `chr11_JH159136v1_alt`, and 216,977 of
+216,978 for VEGFA site 3 at 5 mismatches). A search that reads a flank wider than its PAM says
+so on stdout and in the run's `Params.txt`. N runs inside a contig are not affected by the
+width.
 
 **Genomic `N`.** This equivalence needs engine support, not just a filter. A genomic `N`
 is stored as a code that intersects nothing, so it fails a PAM match at every position; a
