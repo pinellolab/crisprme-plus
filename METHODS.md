@@ -633,8 +633,8 @@ complementary controls:
   matches nearly any guide somewhere: it is as uninformative as a gap, yet the engine
   reports it, as every column admits the guide's base. Such a window is listed in the
   BED below whatever `CRISPRME_IUPAC_CAP` is, and the report's `High_complexity_region`
-  column gives its count (`24 in window (2^24.0 sequences)`). Among the NRG windows of
-  chr22 the reference genome has none, the variant genome of HGDP + 1000 Genomes
+  column gives its count (`24 in window (2^24.0 sequences)`). Among the indexable NRG windows
+  of chr22 the reference genome has none, the variant genome of HGDP + 1000 Genomes
   published with CRISPRitz 2.9.1 has 1,223 (the worst 2^23.00), and one coding every
   allele of a split site with the four-base rule 3,780 (1,076 of them at 2³⁰ or more; the
   worst 2^36.45, at chr22:22,888,423 in IGL). The threshold, 2²⁰, is a judgment call

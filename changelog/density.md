@@ -1,6 +1,6 @@
 <!-- density track: [2.9.0] entries for CHANGELOG.md, to be merged by the docs track. -->
 
-**For the merge, not for the changelog: two notes.**
+**For the merge, not for the changelog: three notes.**
 
 1. The entries name `Q`, which the variant genome writes at a four-allele position from CRISPRitz
    2.10.0 (the engine track), and the dense threshold, 2^20 sequences, which the fifth-symbol
@@ -12,6 +12,17 @@
    The known limit the Changed entry names (a dense window's greedy alignment on an index without
    the dict-less tiers, under `--per-sample`) is to be fixed in this release by the carrier-gate
    track; if it is, drop that clause.
+3. With CRISPRitz 2.10.0 (the engine track's 25ee50c, every allele coded, `Q` at all 2,448
+   four-allele positions of chr22, uncapped), the search of the five guides on chr22 of HGDP + 1000
+   Genomes (NRG, 4 mismatches + 1 DNA + 1 RNA bulge) reports 4,372,248 rows where the 2.9.1 genome
+   gave 206,883, and 4,201,268 of them (96.1%; 375,834 of its 462,663 windows) lie in a window of
+   2^20 sequences or more (the worst 2^46.34, a bulged window). The dense flag thus marks nearly
+   all of what the fifth symbol adds, and a post-analysis would have that many rows to resolve:
+   the "stricter density cap" of the fifth-symbol decision (an enricher-side cap on `Q`, or the
+   engine's `--max-iupac`) is what bounds them; this track's cap and `--max-degeneracy` bound what
+   one window gives, not how many windows there are. Measured with this track's
+   `window_density.py` on the engine track's `idx_mm4b11.targets.txt`, on ml008. This CRISPRme
+   (2.8.1's reader) refuses the 2.10.0 indexes (format 2), so no CRISPRme run of them is here.
 
 ### Added
 
@@ -27,13 +38,14 @@
   integrated results' `High_variant_density_region` note does (`2^24.00 sequences`). The report's
   inputs card says how many rows lie in such a window, and `complete-search` says per chromosome
   how many windows were over `CRISPRME_IUPAC_CAP` and how many dense (stdout, `log_verbose.txt`).
-  Among the NRG windows of chr22, the reference genome has none, the variant genome of HGDP + 1000
-  Genomes published with CRISPRitz 2.9.1 has 1,223 (the worst 2^23.00), and one coding every
-  allele of a split site 3,780 (the worst 2^36.45, at chr22:22,888,423 in the IGL locus). On the
-  published index, the README guide's search of chr22 lists 565 windows over the cap, 381 of them
-  dense (the worst 2^24.00), and 164 of the population-level report's 2,198 rows lie in one (1 of
-  the per-sample report's 1,574). The threshold is one constant, `window_density.DENSE_WINDOW_BITS`;
-  see [`METHODS.md` §5](METHODS.md#5-search-space-control-for-high-variant-density-regions).
+  Among the indexable NRG windows of chr22, the reference genome has none, the variant genome of
+  HGDP + 1000 Genomes published with CRISPRitz 2.9.1 has 1,223 (the worst 2^23.00), and one coding
+  every allele of a split site 3,780 (the worst 2^36.45, at chr22:22,888,423 in the IGL locus). On
+  the published index, the README guide's search of chr22 lists 565 windows over the cap, 381 of
+  them dense (the worst 2^24.00), and 164 of the population-level report's 2,198 rows lie in one
+  (1 of the per-sample report's 1,574). The threshold is one constant,
+  `window_density.DENSE_WINDOW_BITS`; see
+  [`METHODS.md` §5](METHODS.md#5-search-space-control-for-high-variant-density-regions).
 - **A row whose window holds a four-allele position says so.** Where the reference base and three
   ALTs cover A, C, G and T, the variant genome writes `Q`, which matches any base (`N` stays an
   assembly gap). The post-analysis lists the four-allele positions of the windows the search
