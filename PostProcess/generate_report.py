@@ -118,7 +118,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from utils import gene_region_class  # noqa: E402  # shared with resultIntegrator + web
 import cb_operating_point as cbop  # noqa: E402  # CRISPR-Bulge sensitive operating point (single source of truth)
-import window_density as wdens  # noqa: E402  # the dense-window threshold (single source of truth)
+import window_density as wdens  # noqa: E402  # the hyperdense threshold (single source of truth)
 
 # report-generator version -- bumped here, stamped in the footer provenance line.
 REPORT_GENERATOR_VERSION = "2.4"
@@ -297,7 +297,7 @@ CURATED_COLUMNS = (
     ("DHS", "dhs"),
     ("COSMIC_cancer_gene", "cosmic"),  # Cancer Gene Census tier/role; "-" when none
     ("IntOGen_cancer_driver", "intogen"),  # IntOGen (CC0) cancer-driver gene; "-" when none
-    ("High_complexity_region", "complex_region"),  # TOTAL variants in the surrounding window (NOT this row's variant), its sequences when dense, its four-allele positions
+    ("High_complexity_region", "complex_region"),  # TOTAL variants in the surrounding window (NOT this row's variant), its sequences when hyperdense, its four-allele positions
 )
 # value used when a curated column's source is missing / blank
 CURATED_MISSING = "-"
@@ -329,8 +329,9 @@ _UNTIERED = False
 
 
 def _dense_note(value):
-    """True when a High_variant_density_region value flags a dense window (a four-allele
-    position alone flags none)."""
+    """True when a High_variant_density_region value flags a window the high-variant-density
+    BED lists: a dense one (over CRISPRME_IUPAC_CAP), or a hyperdense one whatever the cap (a
+    four-allele position alone flags none)."""
     return not _is_na(value) and str(value).strip().startswith("high_variant_density")
 
 
@@ -870,7 +871,7 @@ def _curated_cell(kind, row, cols):
         # TOTAL variants in the surrounding protospacer window (NOT this row's
         # variant) -- rendered "N in window" so it can't be misread as the
         # per-target Variant count -- with the sequences the window spells when it is
-        # dense, and its four-allele positions. Full note + IUPAC live in
+        # hyperdense, and its four-allele positions. Full note + IUPAC live in
         # integrated_results.tsv and the bundled regions BED.
         v = _get("complex_region")
         if _is_na(v):
@@ -929,26 +930,26 @@ def _curated_cell(kind, row, cols):
 
 
 def _density_counts(df, cols):
-    """The rows in a window spelling 2^DENSE_WINDOW_BITS sequences or more, and those in one
+    """The rows in a hyperdense window (2^HYPERDENSE_BITS sequences or more), and those in one
     holding a four-allele position (High_variant_density_region), for the inputs card."""
-    n_dense = n_four_allele = 0
+    n_hyperdense = n_four_allele = 0
     if "complex_region" in cols and cols["complex_region"] in df.columns:
         for v in df[cols["complex_region"]]:
             if _is_na(v):
                 continue
             cell = _density_cell(str(v))
             if " sequences)" in cell:
-                n_dense += 1
+                n_hyperdense += 1
             if "four-allele" in cell:
                 n_four_allele += 1
-    return n_dense, n_four_allele
+    return n_hyperdense, n_four_allele
 
 
 def _density_cell(note):
     """The High_complexity_region cell of a High_variant_density_region note: "N in window"
-    for a dense window, with "(2^F sequences)" when it spells 2^DENSE_WINDOW_BITS or more,
-    and "K four-allele position(s)" when it holds any. Plain ASCII: the cell is shared by the
-    HTML table AND the TSV downloads."""
+    for a dense window, with "(2^F sequences)" when it is hyperdense (2^HYPERDENSE_BITS
+    sequences or more), and "K four-allele position(s)" when it holds any. Plain ASCII: the
+    cell is shared by the HTML table AND the TSV downloads."""
     parts = []
     if _dense_note(note):
         head = note.split(")", 1)[0]
@@ -956,7 +957,7 @@ def _density_cell(note):
         f = re.search(r"2\^([0-9.]+) sequences", head)
         if n:
             cell = f"{n.group(1)} in window"
-            if f and float(f.group(1)) >= wdens.DENSE_WINDOW_BITS:
+            if f and float(f.group(1)) >= wdens.HYPERDENSE_BITS:
                 cell += f" (2^{float(f.group(1)):.1f} sequences)"
             parts.append(cell)
         else:
@@ -1519,7 +1520,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         if len(_mm):
             obs_max_mmb = int(_mm.max())
 
-    n_dense_rows, n_four_allele_rows = _density_counts(df, cols)
+    n_hyperdense_rows, n_four_allele_rows = _density_counts(df, cols)
 
     return {
         "guides": guides,
@@ -1552,7 +1553,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "reference_only": reference_only,
         # complete-search's --max-degeneracy (.Params.txt "Max_degeneracy"; absent when off)
         "max_degeneracy": params.get("Max_degeneracy"),
-        "n_dense_rows": n_dense_rows,
+        "n_hyperdense_rows": n_hyperdense_rows,
         "n_four_allele_rows": n_four_allele_rows,
     }
 
@@ -1879,11 +1880,11 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         ("Variant-contributed sites",
          "Flagged by REF/ALT origin and <code>PAM_creation</code>; " + vc_note),
     ]
-    if meta.get("n_dense_rows") or meta.get("n_four_allele_rows"):
-        rows.append(("Dense and four-allele windows",
-                     _dense_windows_note(meta.get("n_dense_rows") or 0,
-                                         meta.get("n_four_allele_rows") or 0,
-                                         meta.get("search_mode") == "per-sample")))
+    if meta.get("n_hyperdense_rows") or meta.get("n_four_allele_rows"):
+        rows.append(("Hyperdense and four-allele windows",
+                     _hyperdense_windows_note(meta.get("n_hyperdense_rows") or 0,
+                                              meta.get("n_four_allele_rows") or 0,
+                                              meta.get("search_mode") == "per-sample")))
     return _card(
         rows,
         '<p class="caption">Provided to support an off-target analysis accounting '
@@ -1910,17 +1911,17 @@ def _degeneracy_note(max_degeneracy):
     )
 
 
-def _dense_windows_note(n_dense, n_four_allele, per_sample=False):
-    """The inputs card's note on the rows in a dense window (2^DENSE_WINDOW_BITS sequences
+def _hyperdense_windows_note(n_hyperdense, n_four_allele, per_sample=False):
+    """The inputs card's note on the rows in a hyperdense window (2^HYPERDENSE_BITS sequences
     or more) and in one holding a four-allele position. A population-level row there is a
     worst-case alignment, which such a window makes of alleles that seldom go together; a
     per-sample row names the individuals who carry it (``per_sample``)."""
     said = []
-    if n_dense:
+    if n_hyperdense:
         said.append(
-            f"{n_dense:,} reported off-target{'' if n_dense == 1 else 's'} "
-            f"lie{'s' if n_dense == 1 else ''} in a window spelling "
-            f"2<sup>{wdens.DENSE_WINDOW_BITS}</sup> sequences or more (each two-allele column "
+            f"{n_hyperdense:,} reported off-target{'' if n_hyperdense == 1 else 's'} "
+            f"lie{'s' if n_hyperdense == 1 else ''} in a hyperdense window, one spelling "
+            f"2<sup>{wdens.HYPERDENSE_BITS}</sup> sequences or more (each two-allele column "
             "doubles the count, a three-allele one triples it, a four-allele one quadruples "
             "it): such a window matches nearly any guide somewhere"
             + ("." if per_sample else
@@ -4123,12 +4124,12 @@ _ANNOTATION_LEGEND = [
      "more sequences than <code>CRISPRME_IUPAC_CAP</code> allows (2<sup>"
      + str(wdens.DEFAULT_IUPAC_CAP) + "</sup> by default: each two-allele column doubles "
      "the count, a three-allele one triples it, a four-allele one quadruples it). One "
-     "spelling 2<sup>" + str(wdens.DENSE_WINDOW_BITS) + "</sup> or more is flagged whatever "
-     "that cap is, with the count (e.g. <code>24 in window (2^24.0 sequences)</code>): it "
-     "matches nearly any guide somewhere, so a worst-case alignment there seldom exists in "
-     "any one genome. <code>1 four-allele position</code>: the window holds a position where "
-     "all four bases are observed alleles, which the variant genome writes <code>Q</code> "
-     "(an <code>N</code> is an assembly gap and matches nothing)."),
+     "spelling 2<sup>" + str(wdens.HYPERDENSE_BITS) + "</sup> or more is hyperdense, and is "
+     "flagged whatever that cap is, with the count (e.g. <code>24 in window (2^24.0 "
+     "sequences)</code>): it matches nearly any guide somewhere, so a worst-case alignment "
+     "there seldom exists in any one genome. <code>1 four-allele position</code>: the window "
+     "holds a position where all four bases are observed alleles, which the variant genome "
+     "writes <code>Q</code> (an <code>N</code> is an assembly gap and matches nothing)."),
 ]
 
 

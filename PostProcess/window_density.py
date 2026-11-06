@@ -9,10 +9,11 @@ no sequence to a window.
 
 F, a window's bits: log2 of the number of sequences its letters spell, the product of the
 bases each letter stands for (1 for A, C, G, T and N, 2 for R, Y, S, W, K and M, 3 for B, D,
-H and V, 4 for Q). The post-analysis reports a window of more than 2^CRISPRME_IUPAC_CAP
-sequences by its greedy worst-case alignment instead of every combination of its alleles,
-and flags a window of 2^DENSE_WINDOW_BITS sequences or more, which matches nearly any guide
-somewhere, whatever CRISPRME_IUPAC_CAP is.
+H and V, 4 for Q). A window of more than 2^CRISPRME_IUPAC_CAP sequences is dense, as the
+report and the docs have called it since 2.8.1: the post-analysis reports it by its greedy
+worst-case alignment instead of every combination of its alleles. One of 2^HYPERDENSE_BITS
+sequences or more is hyperdense: it matches nearly any guide somewhere, and is flagged
+whatever CRISPRME_IUPAC_CAP is.
 
 D, the ambiguous columns an alignment rests on: those where the reference base would not fit
 (a mismatch against the guide, or a base the PAM does not admit) and the alignment's base
@@ -24,9 +25,9 @@ import), so it is unit-tested alone, as twopass_emit is.
 
 import math
 
-# A window spelling 2^DENSE_WINDOW_BITS sequences or more is flagged dense. The one place to
-# tune it: new_simple_analysis.py and generate_report.py read it here.
-DENSE_WINDOW_BITS = 20
+# A window spelling 2^HYPERDENSE_BITS sequences or more is flagged hyperdense. The one place
+# to tune it: new_simple_analysis.py and generate_report.py read it here.
+HYPERDENSE_BITS = 20
 
 # CRISPRME_IUPAC_CAP's default, in bits: above 2^10 sequences the dictionary path reports a
 # window by its greedy worst-case alignment. That is ten two-allele columns, which the cap
@@ -68,9 +69,9 @@ def over_cap(n_sequences, cap_bits):
     return cap_bits >= 0 and n_sequences > (1 << cap_bits)
 
 
-def dense(n_sequences):
-    """True when a window spells 2^DENSE_WINDOW_BITS sequences or more."""
-    return n_sequences >= (1 << DENSE_WINDOW_BITS)
+def hyperdense(n_sequences):
+    """True when a window spells 2^HYPERDENSE_BITS sequences or more."""
+    return n_sequences >= (1 << HYPERDENSE_BITS)
 
 
 def four_allele_offsets(window):

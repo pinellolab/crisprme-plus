@@ -8,12 +8,12 @@ of positions could see: a three-allele column was one position, as a two-allele 
   * CRISPRME_IUPAC_CAP counts bits (log2 of the sequences a window spells): a window of
     seven three-allele columns (2^11.09 sequences) is over the default 10, though it holds
     seven positions;
-  * a window spelling 2^DENSE_WINDOW_BITS sequences or more is listed in the
-    high-variant-density BED whatever the cap, and the BED gives each window's bits and
-    four-allele positions;
+  * a window over the cap is dense, as since 2.8.1; one spelling 2^HYPERDENSE_BITS
+    sequences or more is hyperdense, and is listed in the high-variant-density BED whatever
+    the cap, and the BED gives each window's bits and four-allele positions;
   * the four-allele positions of the reported windows go to <out>.four_allele_positions.bed,
     and resultIntegrator flags a row whose window holds one in High_variant_density_region,
-    which the report shows in High_complexity_region, with a dense window's sequences;
+    which the report shows in High_complexity_region, with a hyperdense window's sequences;
   * complete-search's --max-degeneracy K: a worst-case alignment is cut back to rest on at
     most K ambiguous columns, and any other row resting on more is withheld, unless its
     carriers hold its variants together on one phased haplotype.
@@ -85,11 +85,11 @@ class TheSequencesAWindowSpells(unittest.TestCase):
     def test_a_negative_cap_is_none(self):
         self.assertFalse(wd.over_cap(wd.sequences("Q" * 23), -1))
 
-    def test_dense_from_two_to_the_twenty(self):
-        self.assertEqual(wd.DENSE_WINDOW_BITS, 20)
-        self.assertTrue(wd.dense(wd.sequences("R" * 20)))
-        self.assertFalse(wd.dense(wd.sequences("R" * 19)))
-        self.assertTrue(wd.dense(wd.sequences("Q" * 10)))
+    def test_hyperdense_from_two_to_the_twenty(self):
+        self.assertEqual(wd.HYPERDENSE_BITS, 20)
+        self.assertTrue(wd.hyperdense(wd.sequences("R" * 20)))
+        self.assertFalse(wd.hyperdense(wd.sequences("R" * 19)))
+        self.assertTrue(wd.hyperdense(wd.sequences("Q" * 10)))
 
     def test_four_allele_offsets(self):
         self.assertEqual(wd.four_allele_offsets("ACQTqG-R"), [2, 4])
@@ -304,7 +304,8 @@ class TheCapCountsBits(_PostAnalysis):
             [["chrT", str(self.start), str(self.start + 23), CRRNA, "7", "S1,S2",
               self.window, "11.09", "0"]])
         self.assertIn("High-variant-density windows of chrT: 1 spell more than 2^10 "
-                      "sequences (CRISPRME_IUPAC_CAP), 0 spell 2^20 or more (dense)", said)
+                      "sequences (dense: over CRISPRME_IUPAC_CAP), 0 spell 2^20 or more "
+                      "(hyperdense)", said)
         self.assertTrue(rows)
         # a cap of 12 bits holds them
         _rows, said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE="0", CRISPRME_IUPAC_CAP="12")
@@ -312,8 +313,8 @@ class TheCapCountsBits(_PostAnalysis):
         self.assertNotIn("High-variant-density windows", said)
 
 
-class ADenseWindow(_PostAnalysis):
-    """Twenty two-allele columns and a four-allele PAM column: 2^22 sequences."""
+class AHyperdenseWindow(_PostAnalysis):
+    """Twenty two-allele columns and a four-allele PAM column: 2^22 sequences, hyperdense."""
 
     def setUp(self):
         super().setUp()
@@ -331,8 +332,8 @@ class ADenseWindow(_PostAnalysis):
         _rows, said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE="1")
         self.assertEqual(hvdr[1:], [["chrT", str(self.start), str(self.start + 23), CRRNA,
                                      "20", ".", self.window, "22.00", "1"]])
-        self.assertIn("1 spell more than 2^10 sequences (CRISPRME_IUPAC_CAP), 1 spell 2^20 "
-                      "or more (dense)", said)
+        self.assertIn("1 spell more than 2^10 sequences (dense: over CRISPRME_IUPAC_CAP), 1 "
+                      "spell 2^20 or more (hyperdense)", said)
 
     def test_whatever_the_cap(self):
         for cap in ("-1", "30"):
@@ -340,7 +341,7 @@ class ADenseWindow(_PostAnalysis):
                 _rows, said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE="1",
                                                      CRISPRME_IUPAC_CAP=cap)
                 self.assertEqual([line[7] for line in hvdr[1:]], ["22.00"])
-                self.assertIn("1 spell 2^20 or more (dense)", said)
+                self.assertIn("1 spell 2^20 or more (hyperdense)", said)
 
 
 class TheFourAllelePositions(_PostAnalysis):
@@ -610,36 +611,43 @@ class TheReport(unittest.TestCase):
         self.assertTrue(gr._greedy_union(row, self.COLS))
 
     def test_the_inputs_card_counts_the_rows_and_says_the_cap(self):
-        dense = self.NOTE % ("24", ", 2^24.00 sequences")
+        hyperdense = self.NOTE % ("24", ", 2^24.00 sequences")
         df = pd.DataFrame({"High_variant_density_region": [
-            dense, dense + "; four_allele_positions=chrT:1021", "four_allele_positions=chrT:5",
+            hyperdense, hyperdense + "; four_allele_positions=chrT:1021",
+            "four_allele_positions=chrT:5",
             self.NOTE % ("12", ""), "NA"]})
         self.assertEqual(gr._density_counts(df, self.COLS), (2, 2))
         base = {"datasets": "HGDP1kGP", "mm": "4", "bdna": 1, "brna": 1, "max_edits": "6",
                 "search_mode": "population-level"}
-        html = gr.render_inputs_criteria({**base, "n_dense_rows": 2, "n_four_allele_rows": 1,
-                                          "max_degeneracy": "2"})
-        self.assertIn("Dense and four-allele windows", html)
-        self.assertIn("2 reported off-targets lie in a window spelling 2<sup>20</sup> "
-                      "sequences or more", html)
+        html = gr.render_inputs_criteria({**base, "n_hyperdense_rows": 2,
+                                          "n_four_allele_rows": 1, "max_degeneracy": "2"})
+        self.assertIn("Hyperdense and four-allele windows", html)
+        self.assertIn("2 reported off-targets lie in a hyperdense window, one spelling "
+                      "2<sup>20</sup> sequences or more", html)
         self.assertIn("1 reported off-target lies in a window holding a four-allele "
                       "position", html)
         self.assertIn("Each SNP variant row rests on at most 2 ambiguous columns "
                       "(<code>--max-degeneracy 2</code>)", html)
         self.assertIn("seldom exists in any one genome", html)
         plain = gr.render_inputs_criteria(base)
-        self.assertNotIn("Dense and four-allele windows", plain)
+        self.assertNotIn("Hyperdense and four-allele windows", plain)
         self.assertNotIn("--max-degeneracy", plain)
         # a per-sample row there names the individuals who carry it: no worst case to doubt
         per_sample = gr.render_inputs_criteria({**base, "search_mode": "per-sample",
-                                                "n_dense_rows": 1})
-        self.assertIn("1 reported off-target lies in a window spelling 2<sup>20</sup> "
-                      "sequences or more", per_sample)
+                                                "n_hyperdense_rows": 1})
+        self.assertIn("1 reported off-target lies in a hyperdense window, one spelling "
+                      "2<sup>20</sup> sequences or more", per_sample)
         self.assertNotIn("seldom exists in any one genome", per_sample)
 
     def test_the_legend_says_both(self):
+        """One word each: a window is dense over CRISPRME_IUPAC_CAP, as since 2.8.1, and
+        hyperdense at 2^HYPERDENSE_BITS sequences or more, flagged whatever the cap."""
         legend = gr.build_annotation_legend_html()
-        self.assertIn("2<sup>20</sup> or more is flagged whatever that cap is", legend)
+        self.assertIn("A window is dense when it spells more sequences than "
+                      "<code>CRISPRME_IUPAC_CAP</code> allows (2<sup>10</sup> by default",
+                      legend)
+        self.assertIn("2<sup>20</sup> or more is hyperdense, and is flagged whatever that cap "
+                      "is", legend)
         self.assertIn("<code>1 four-allele position</code>", legend)
 
 

@@ -32,8 +32,8 @@ except Exception:  # module absent in an old deploy -> no genotype tier
 # isolation). This module has no hard dependency on tier0_registry, so its import
 # cannot break the legacy path either.
 import simple_analysis_registry as _sar
-# The ambiguity budget: how many sequences a window spells (its bits), the dense flag, and the
-# ambiguous columns an alignment rests on. Pure and stdlib-only, like _sar.
+# The ambiguity budget: how many sequences a window spells (its bits), the hyperdense flag,
+# and the ambiguous columns an alignment rests on. Pure and stdlib-only, like _sar.
 import window_density as _wd
 # Position-aware CFD bulge penalty (2.8.0). Core dependency; if a very old deploy lacks
 # it, fall back to a trivial pass-through so scoring never breaks (bulges then revert to
@@ -153,10 +153,10 @@ registry_only_mode = False
 MAX_DEGENERACY = int(os.environ.get("CRISPRME_MAX_DEGENERACY", "-1") or "-1")
 _degeneracy_counts = {"cut": 0, "withheld": 0}
 # The windows the high-variant-density BED lists, by (start, end, guide): over
-# CRISPRME_IUPAC_CAP, and dense (window_density.DENSE_WINDOW_BITS). And the four-allele
+# CRISPRME_IUPAC_CAP, and hyperdense (window_density.HYPERDENSE_BITS). And the four-allele
 # positions (Q) of the windows the search reported, 0-based, for
 # <out>.four_allele_positions.bed. Counted and written at the end.
-_hvdr_windows = {"over_cap": set(), "dense": set()}
+_hvdr_windows = {"over_cap": set(), "hyperdense": set()}
 _four_allele_positions = set()
 
 
@@ -385,7 +385,7 @@ def _aligned_target(seq_prerevert, realTarget, revert):
 
 def _log_dense_window(split, replaceTarget, n_variants, samples, n_seq):
     """One line of <out>.high_variant_density_regions.bed for a window spelling more than
-    2^CRISPRME_IUPAC_CAP sequences, or 2^DENSE_WINDOW_BITS or more (the caller checks which):
+    2^CRISPRME_IUPAC_CAP sequences, or 2^HYPERDENSE_BITS or more (the caller checks which):
     its span, guide, variant columns, carriers, full IUPAC protospacer (every variant column
     as its code, so a user can see all its alleles and dig into its other alignments;
     resultIntegrator puts it in the High_variant_density_region column), its bits (log2 of
@@ -396,8 +396,8 @@ def _log_dense_window(split, replaceTarget, n_variants, samples, n_seq):
         key = (start, start + len(replaceTarget), split[1].replace("-", ""))
         if _wd.over_cap(n_seq, IUPAC_CAP):
             _hvdr_windows["over_cap"].add(key)
-        if _wd.dense(n_seq):
-            _hvdr_windows["dense"].add(key)
+        if _wd.hyperdense(n_seq):
+            _hvdr_windows["hyperdense"].add(key)
         hvdr_bed.write(
             "%s\t%d\t%d\t%s\t%d\t%s\t%s\t%.2f\t%d\n"
             % (split[3], key[0], key[1], key[2], n_variants,
@@ -469,12 +469,12 @@ def _write_density_notes():
                 fh.write("%s\t%d\t%d\n" % (current_chr, p, p + 1))
         print(f"Four-allele positions (Q: every base is an observed allele there) in the "
               f"windows of {current_chr}: {len(_four_allele_positions)}")
-    if _hvdr_windows["over_cap"] or _hvdr_windows["dense"]:
+    if _hvdr_windows["over_cap"] or _hvdr_windows["hyperdense"]:
         over = (f"{len(_hvdr_windows['over_cap'])} spell more than 2^{IUPAC_CAP} sequences "
-                f"(CRISPRME_IUPAC_CAP), " if IUPAC_CAP >= 0 else "")
+                f"(dense: over CRISPRME_IUPAC_CAP), " if IUPAC_CAP >= 0 else "")
         print(f"High-variant-density windows of {current_chr}: {over}"
-              f"{len(_hvdr_windows['dense'])} spell 2^{_wd.DENSE_WINDOW_BITS} or more "
-              f"(dense); listed in {os.path.basename(outputFile)}"
+              f"{len(_hvdr_windows['hyperdense'])} spell 2^{_wd.HYPERDENSE_BITS} or more "
+              f"(hyperdense); listed in {os.path.basename(outputFile)}"
               f".high_variant_density_regions.bed")
     if MAX_DEGENERACY >= 0:
         print(f"--max-degeneracy {MAX_DEGENERACY} on {current_chr}: "
@@ -831,8 +831,8 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
 
     if not positions:
         return
-    # the sequences the window spells: over 2^CRISPRME_IUPAC_CAP, or dense, it is listed in
-    # the high-variant-density BED below
+    # the sequences the window spells: over 2^CRISPRME_IUPAC_CAP, or hyperdense, it is listed
+    # in the high-variant-density BED below
     _n_seq = _wd.sequences(replaceTarget)
 
     # --- 2.5.1 FAST MODE: worst-POSSIBLE representative, NO haplotype enumeration ------
@@ -968,8 +968,9 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                     revert, "".join(_cfd_rep["seq"]), sorted(_cfd_rep["carriers"]),
                     _cfd_rep["info"], _obshap.PUTATIVE, cluster_to_save,
                 )
-        # visibility: still log genuinely-dense windows to the shared BED (as the cap does)
-        if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.dense(_n_seq):
+        # visibility: still log dense windows to the shared BED (as the cap does), and
+        # hyperdense ones whatever the cap
+        if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.hyperdense(_n_seq):
             _log_dense_window(split, replaceTarget, len(positions), _window_carriers, _n_seq)
         return
     # --- end fast mode ----------------------------------------------------------------
@@ -1023,7 +1024,7 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     # without fabricating a carrier-less worst case. The conservative worst-case rep
     # remains the correct behavior for POPULATION-LEVEL mode (the _FAST_MODE early-return
     # path above), which is unchanged.
-    if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.dense(_n_seq):
+    if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.hyperdense(_n_seq):
         _samples = set()
         for _h in haplotypes:
             _samples |= _h.carriers
@@ -1131,8 +1132,8 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
         # Log only GENUINELY-dense windows to the BED (in fast mode ``capped`` is forced for
         # every window, but the high-variant-density BED must still list only the
         # hypervariable ones -- byte-identical to the non-fast BED contents): over the cap,
-        # or dense whatever the cap is.
-        if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.dense(_n_seq):
+        # or hyperdense whatever the cap is.
+        if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.hyperdense(_n_seq):
             _samples = set()
             for _cnt in totalDict:
                 for _v in totalDict[_cnt][0].values():
@@ -2085,7 +2086,7 @@ crispr_bulge_best.write(header + "\tCFD\n")  # Write header
 # R/Y/S/W/K/M, 3 for each of B/D/H/V, 4 for each Q), and the dictionary path would enumerate
 # as many combinations of its alleles. Above 2^CRISPRME_IUPAC_CAP it reports the window by its
 # greedy worst-case alignment instead; every path lists such a window, and any spelling
-# 2^DENSE_WINDOW_BITS sequences or more whatever the cap, in this BED (with its bits and its
+# 2^HYPERDENSE_BITS sequences or more whatever the cap, in this BED (with its bits and its
 # four-allele positions), so a real off-target risk is still surfaced without the
 # combinatorial blow-up. Up to 2.8.1 the cap counted ambiguous positions: the same number
 # where each holds one ALT. -1 disables it.
