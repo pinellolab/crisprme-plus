@@ -7,7 +7,11 @@ generate`), builds the indexes and dictionaries with `build-index-only`, runs
 whose variant list holds an indel or an MNV (`oracle.py check`) against each sample's two
 haplotypes built from the VCF, and the carriers of every per-sample SNP-only row ("SNP rows"
 below), and runs the ALT-PAM and no-N release gate
-(`scripts/check_alt_pam.py`) on both results. It exits non-zero on any failure; CI runs it
+(`scripts/check_alt_pam.py`) on both results. It then runs the independent real-data
+indel check (`scripts/check_indel_rows.py`, which shares no code with `oracle.py` or
+CRISPRme) on both results, soundness and completeness; the population-level run, which
+writes no alternative alignments, is checked per locus, and the planted two-indel sites
+come out as non-gating `limit-two-indels` lines. It exits non-zero on any failure; CI runs it
 in `validate-benchmarks.yml`, with both profiles: SpCas9 (3' PAM NRG, the sites below) and
 `cas12a` (5' PAM TTTV, the C sites further below).
 

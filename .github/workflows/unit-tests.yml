@@ -302,12 +302,18 @@ jobs:
         # chr22 genome, so an indel row's coordinate, aligned strings, REF text,
         # variants, carriers and the alternative-alignment table are never checked
         # against an independent truth on real data. These tests build a reference, a
-        # phased VCF and rows by hand, assert a right row raises nothing, and assert
-        # that each corruption of it is caught: the start shifted by 1 and by an
-        # insertion's offset (the 2.8.1 defect), one target base changed, a carrier
-        # swapped for a non-carrier, a named variant dropped, a cross-haplotype SNP
-        # added, and a phantom of the shape reported at chr22:22322768 on 2.8.0.
-        # Stdlib only -- the checker imports no CRISPRme module, and neither do they.
+        # phased VCF (plain gzip, and BGZF with a tabix index written by the test) and
+        # rows by hand, assert a right row raises nothing gating, and assert that each
+        # corruption of it is caught: the start shifted by 1 and by an insertion's offset
+        # (the 2.8.1 defect), one target base changed, the aligned spacer rewritten, a
+        # carrier swapped, added or dropped (also when the same target sits elsewhere),
+        # a named variant dropped, a cross-haplotype SNP, a phantom of the shape reported
+        # at chr22:22322768 on 2.8.0, and an MNV row and an unphased row with a phantom
+        # base. CRISPRme's documented limits (a split multi-allelic site, two indels in
+        # one target, a complex allele, a phasing artefact, a repeat unit at the
+        # target's edge) must come out under their own non-gating class, and the driver
+        # must never pass silently (a chromosome no VCF covers, one FASTA of several
+        # contigs). Stdlib only -- the checker imports no CRISPRme module, nor do they.
         working-directory: PostProcess
         run: python -m unittest test_check_indel_rows -v
 

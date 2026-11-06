@@ -57,7 +57,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 
 #### The local gate: nothing stays skipped
 
-Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. So step 4b runs here, on the release's own engine, the three engine checks CI runs only on that published image: `test/index_flex/check_index_flex.py`, `test/indel_snp_oracle/run_oracle.sh` and `scripts/check_alt_pam.py`. It needs Docker, git-lfs, and network to Docker Hub, Hugging Face, EBI, GitHub, MCR, PyPI (step 5) and the Debian package mirror (step 2). 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them. Step 4b adds about 16 min on the Mac (index_flex 14, the oracle under 2) and 30 to 40 min on a busy amd64 node (index_flex 28 to 37, the oracle 3); its index_flex and oracle need nothing from step 4 and can run beside it. Step 4c, the independent real-data indel check, needs a chr22 HGDP + 1000 Genomes install and the genome-wide per-sample runs of the README guide and TRAC; the two chr22 searches are about 5 min each on 8 threads, the four chr22 checks about 2.5 h (soundness seconds, completeness about 70 min per mode), and genome-wide soundness about 40 min per guide.
+Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. So step 4b runs here, on the release's own engine, the three engine checks CI runs only on that published image: `test/index_flex/check_index_flex.py`, `test/indel_snp_oracle/run_oracle.sh` and `scripts/check_alt_pam.py`. It needs Docker, git-lfs, and network to Docker Hub, Hugging Face, EBI, GitHub, MCR, PyPI (step 5) and the Debian package mirror (step 2). 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them. Step 4b adds about 16 min on the Mac (index_flex 14, the oracle under 2) and 30 to 40 min on a busy amd64 node (index_flex 28 to 37, the oracle 3); its index_flex and oracle need nothing from step 4 and can run beside it. Step 4c, the independent real-data indel check, needs a chr22 HGDP + 1000 Genomes install and the genome-wide per-sample runs of the README guide and TRAC; the two chr22 searches are about 5 min each on 8 threads, the four chr22 checks a few minutes in all with `--jobs 24` (soundness 10 to 15 s; completeness of the whole chromosome 100 to 180 s depending on the node's load, about 40 CPU-minutes), and genome-wide soundness under 2 min per guide with `--jobs 24` once the VCFs have a `.tbi` (each unindexed VCF is first read once into an in-memory index).
 
 **Three skips are allowed, and only these**, each run elsewhere in the gate: `no TensorFlow here` (`test_crispr_bulge_fidelity`, the CRISPR-Bulge fidelity gate, runs in its own env in step 3), `en_US.UTF-8 is not installed` (`test_index_resolution`'s locale tests, step 2) and `no ps here to compare` (`test_index_resolution`, runs in the `unit-tests` job, whose runner has `ps`).
 
@@ -119,7 +119,8 @@ python3 "$SRC/scripts/check_alt_pam.py" "$GATE"/heavy/Results/crisprme-test-out_
 #     builds each sample's haplotypes from the VCF itself and aligns with its own exhaustive
 #     aligner; it imports no CRISPRme module and needs only Python's standard library.
 #     $D22 is a chr22-only HGDP + 1000 Genomes install (Genomes/hg38, VCFs/hg38_HGDP1kGP,
-#     genome_library, Dictionaries), $VCF its chr22 VCF with a .tbi beside it.
+#     genome_library, Dictionaries), $VCF its chr22 VCF (a .tbi beside it makes reads seeks;
+#     without one the VCF is read once into an in-memory index, nothing is written).
 #     Run the README guide, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, in BOTH modes first:
 for mode in per-sample population-level; do
   docker run --rm -v "$D22:/DATA" -w /DATA "$IMG" crisprme.py complete-search --genome Genomes/hg38 \
@@ -127,24 +128,37 @@ for mode in per-sample population-level; do
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
     --gene_annotation Annotations/gencode.protein_coding.bed.gz --index-path genome_library \
     --mm 4 --bDNA 1 --bRNA 1 --thread 8 --output "gate_${mode}" --"$mode"
+  #   soundness (every indel/MNV row real) and completeness (no real indel off-target
+  #   missed: per sample on the per-sample run; per locus on the population-level run,
+  #   which keeps one row per cluster -- the checker reads that from Results/*/.alt_mode)
   for check in soundness completeness; do
     python3 "$SRC/scripts/check_indel_rows.py" --results "$D22/Results/gate_${mode}" \
       --reference "$D22/Genomes/hg38" --vcf "$VCF" --pam "$D22/PAMs/20bp-NRG-SpCas9.txt" \
-      --mm 4 --bDNA 1 --bRNA 1 --max-total-edits 6 --chrom chr22 --mode "$check" \
-      --out "$GATE/indelrows_${mode}_${check}.tsv" || echo GATE_FAILED
+      --guide "$D22/guide.txt" --mm 4 --bDNA 1 --bRNA 1 --max-total-edits 6 --chrom chr22 \
+      --mode "$check" --jobs 24 --out "$GATE/indelrows_${mode}_${check}.tsv" || echo GATE_FAILED
   done
 done
-#     Genome-wide SOUNDNESS on the README guide and on TRAC (per-sample; the genome-wide
-#     completeness pass is hours and is not a release gate -- chr22 above covers it):
-for g in readme trac; do
-  python3 "$SRC/scripts/check_indel_rows.py" --results "$GW/$g" --reference "$GW/Genomes/hg38" \
-    --vcf-dir "$GW/VCFs/hg38_HGDP1kGP" --pam "$GW/PAMs/20bp-NRG-SpCas9.txt" \
-    --mm 4 --bDNA 1 --bRNA 1 --max-total-edits 6 --mode soundness \
-    --out "$GATE/indelrows_gw_$g.tsv" || echo GATE_FAILED
+#     Genome-wide SOUNDNESS of the README guide and of TRAC: $GW is a genome-wide HGDP + 1000
+#     Genomes install whose Results/readme and Results/trac are the release's per-sample
+#     searches of guide.txt (README) and guide_trac.txt (TRAC), NRG, 4 + 1 + 1. --vcf-dir
+#     is the panel's VCF folder; give it a .tbi per VCF (in a folder you can write: link
+#     the VCFs there and run `tabix -p vcf`), or let the checker index each one in memory
+#     (one decompression of the file, about 28 GB for this panel).
+for g in readme:guide.txt trac:guide_trac.txt; do
+  python3 "$SRC/scripts/check_indel_rows.py" --results "$GW/Results/${g%%:*}" \
+    --reference "$GW/Genomes/hg38" --vcf-dir "$GW/VCFs/hg38_HGDP1kGP" \
+    --pam "$GW/PAMs/20bp-NRG-SpCas9.txt" --guide "$GW/${g#*:}" --mm 4 --bDNA 1 --bRNA 1 \
+    --max-total-edits 6 --mode soundness --jobs 24 --out "$GATE/indelrows_gw_${g%%:*}.tsv" \
+    || echo GATE_FAILED
 done
-#     Every one of these must print "0 finding(s), 0 gating" (exit 0). A non-gating line
-#     (a documented 2.8.1 limit: limit-two-indels, limit-unphased-carrier,
-#     limit-contig-end) is counted in the summary and does not fail the gate; read it.
+#     The gate is the exit status: 0 gating findings. Non-gating lines are documented
+#     CRISPRme limits (limit-last-alt-wins, limit-two-indels, limit-complex-allele,
+#     limit-putative-carrier, limit-contig-end), each listed with its sample and target:
+#     read them, and say in the release notes if a class grew. A known upstream defect can
+#     be listed with --known (class, chrom, start, strand, variants, samples, reason): it
+#     turns non-gating as known-defect, and a listed one that stops showing is reported as
+#     known-not-seen. Genome-wide COMPLETENESS (about 70 CPU-hours per guide: 82 min on
+#     48 processes of a busy node) is not a release gate; chr22 above stands for it.
 
 # 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.
 docker run -d --rm --name gate-web -p 8090:8080 "$IMG" crisprme.py web-interface
@@ -182,7 +196,8 @@ apptainer exec --bind "$PWD" --pwd "$PWD" sb /usr/local/bin/_entrypoint.sh bash 
 grep -q "^ORACLE PASS" gate/oracle.log || echo GATE_FAILED
 apptainer exec --bind "$PWD" sb /usr/local/bin/_entrypoint.sh python3 /opt/conda/opt/crisprme/scripts/check_alt_pam.py "$PWD"/gate/heavy/Results/crisprme-test-out_*/*integrated_results.tsv || echo GATE_FAILED
 # step 4c: the same commands as above, with `apptainer run --bind ... sb crisprme.py complete-search`
-# for the two searches. check_indel_rows.py itself needs only the host's python3 (stdlib only).
+# for the two searches. check_indel_rows.py itself needs only the host's python3 (stdlib only);
+# --jobs N splits it over N processes.
 ```
 
 ### C. Release mechanics (at/after tag)

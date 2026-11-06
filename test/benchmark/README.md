@@ -82,15 +82,23 @@ It does **not** check:
 
 **`scripts/check_indel_rows.py` is the check for that part**, on real data: it builds
 each sample's two haplotypes itself from the VCF the search read, keeps its own map from
-haplotype offsets to reference coordinates, aligns with its own exhaustive
-dynamic-programming aligner, and then checks every indel/MNV row block of the integrated
-results and of the alternative alignments (soundness), and demands every in-budget
-alignment on a carrier's haplotype that holds a base of an indel (completeness). It
-imports no CRISPRme module. `test/indel_snp_oracle/run_oracle.sh` runs it beside
+haplotype offsets to reference coordinates and aligns with its own exhaustive
+dynamic-programming aligner (it imports no CRISPRme module, only Python's standard
+library). **Soundness**: every indel/MNV row block of the integrated results and of the
+alternative alignments must be the given guide aligned to the reference with exactly its
+named variants, from its reported start, and its carriers must be the panel samples whose
+haplotypes hold it -- with CRISPRme's documented exceptions (METHODS section 4: a phasing
+artefact, a complex allele split into overlapping records, a repeat unit at the target's
+edge, the PUTATIVE rule, the last record of a split multi-allelic site) listed as limits,
+never as failures. **Completeness**: every in-budget alignment on a carrier's haplotype
+that holds a base of an indel or MNV must be reported for that carrier, or merged by the
+documented key (Cluster Position, variant list, carrier set); a run that writes no
+alternative alignments -- a population-level run, or `complete-test`'s `--ci-cd-test`
+runs -- is checked per locus. `test/indel_snp_oracle/run_oracle.sh` runs it beside
 `oracle.py check`, `validate-benchmarks.yml` runs it on the chr22 self-test output after
-`validate-test`, and `docs/RELEASE_CHECKLIST.md` makes it a release gate on a real
-HGDP + 1000 Genomes chr22 search. Its unit and mutation tests are
-`PostProcess/test_check_indel_rows.py`.
+`validate-test`, and `docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a
+real HGDP + 1000 Genomes chr22 search in both modes and genome-wide. Its unit and mutation
+tests are `PostProcess/test_check_indel_rows.py`.
 
 ## Reproducible generation pipeline
 ```bash

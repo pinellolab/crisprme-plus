@@ -274,38 +274,42 @@ jobs:
         # two haplotypes itself from the self-test's 1000 Genomes VCF, keeps its own map
         # from haplotype offsets to reference coordinates, and aligns with its own
         # exhaustive DP aligner -- it imports no CRISPRme module and runs on the runner,
-        # stdlib only, no image. On v2.8.1 it flags the 2 cas9_sg1617 rows whose first
-        # aligned base is one an insertion adds; with that fixed it passes every
-        # benchmark. Soundness on each benchmark, then completeness on a 4 Mb slice
-        # (the whole chromosome is hours; the release gate runs that on a real panel).
+        # stdlib only, no image. Soundness on each benchmark with its own budget
+        # (test/benchmark/benchmarks.json), then completeness of cas9_sg1617 on the
+        # whole of chr22 (about 5 min on 4 processes). complete-test runs with
+        # --ci-cd-test, which writes no alternative alignments (.alt_mode =
+        # no-alt-alignments), so completeness is checked per locus here; the per-sample
+        # completeness gate is the release checklist's step 4c on a real panel, and the
+        # SNP+indel oracle above. Non-gating limit lines (documented CRISPRme limits)
+        # are printed and uploaded on failure; any gating line fails the step.
         run: |
           set -euo pipefail
           ref=work/Genomes/hg38_chr22
           vcf=$(ls work/VCFs/hg38_1000G/*.vcf.gz | head -1)
           [ -d "$ref" ] && [ -n "$vcf" ] || { echo "FAIL: no self-test genome/VCF"; exit 1; }
-          # name:PAM:mm:bDNA:bRNA:max-total-edits, from test/benchmark/benchmarks.json
-          for spec in cas9_sg1617:20bp-NGG-SpCas9.txt:4:1:1:6 \
-                      cas12a_hbg:TTTV-20bp-Cas12a.txt:4:1:1:6 \
-                      cas9_sg1617_n5:20bp-NGG-SpCas9.txt:6:2:2:5 \
-                      cas12a_hbg_n5:TTTV-20bp-Cas12a.txt:6:2:2:5 \
-                      cas9_sg1617_simple:20bp-NGG-SpCas9.txt:6:2:2:3 \
-                      cas12a_hbg_simple:TTTV-20bp-Cas12a.txt:6:2:2:3; do
-            IFS=: read -r name pam mm bd br mt <<< "$spec"
+          # name:PAM:mm:bDNA:bRNA:max-total-edits:guide file, from test/benchmark/benchmarks.json
+          for spec in cas9_sg1617:20bp-NGG-SpCas9.txt:4:1:1:6:sg1617_test_guide.txt \
+                      cas12a_hbg:TTTV-20bp-Cas12a.txt:4:1:1:6:hbg_cas12a_test_guide.txt \
+                      cas9_sg1617_n5:20bp-NGG-SpCas9.txt:6:2:2:5:sg1617_test_guide.txt \
+                      cas12a_hbg_n5:TTTV-20bp-Cas12a.txt:6:2:2:5:hbg_cas12a_test_guide.txt \
+                      cas9_sg1617_simple:20bp-NGG-SpCas9.txt:6:2:2:3:sg1617_test_guide.txt \
+                      cas12a_hbg_simple:TTTV-20bp-Cas12a.txt:6:2:2:3:hbg_cas12a_test_guide.txt; do
+            IFS=: read -r name pam mm bd br mt gf <<< "$spec"
             d=work/Results/crisprme-test-out_$name
             ls "$d"/*integrated_results.tsv >/dev/null 2>&1 || {
-              echo "[$name] no integrated results (not run here); skipped"; continue; }
+              echo "[$name] no integrated results table (no row in budget); nothing to check"; continue; }
             echo "=== check_indel_rows $name ($mm/$bd/$br, cap $mt)"
             python3 scripts/check_indel_rows.py --results "$d" --reference "$ref" \
-              --vcf "$vcf" --pam "work/PAMs/$pam" --mm "$mm" --bDNA "$bd" --bRNA "$br" \
-              --max-total-edits "$mt" --chrom chr22 --mode soundness \
+              --vcf "$vcf" --pam "work/PAMs/$pam" --guide "work/$gf" --mm "$mm" --bDNA "$bd" \
+              --bRNA "$br" --max-total-edits "$mt" --chrom chr22 --mode soundness \
               --out "check_indel_rows_$name.tsv"
           done
-          echo "=== check_indel_rows completeness (cas9_sg1617, chr22:10.5-20.5 Mb)"
+          echo "=== check_indel_rows completeness (cas9_sg1617, chr22)"
           python3 scripts/check_indel_rows.py \
             --results work/Results/crisprme-test-out_cas9_sg1617 --reference "$ref" \
-            --vcf "$vcf" --pam work/PAMs/20bp-NGG-SpCas9.txt --mm 4 --bDNA 1 --bRNA 1 \
-            --max-total-edits 6 --region chr22:10500000-20500000 --mode completeness \
-            --out check_indel_rows_completeness.tsv
+            --vcf "$vcf" --pam work/PAMs/20bp-NGG-SpCas9.txt --guide work/sg1617_test_guide.txt \
+            --mm 4 --bDNA 1 --bRNA 1 --max-total-edits 6 --chrom chr22 --mode completeness \
+            --jobs 4 --out check_indel_rows_completeness.tsv
 
       - name: Upload the indel-check findings on failure
         if: failure()
