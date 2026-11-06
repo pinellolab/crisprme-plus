@@ -117,3 +117,27 @@ every stage: sites N and N2.) Nor an MNV carrier heterozygous for a SNP its targ
 covers: the phased indel genotype store holds only records whose REF and ALT differ in
 length, so an MNV's phase is unknown to the post-analysis, and such a carrier gets the
 strongest target its own alleles allow, PUTATIVE, as an unphased carrier does (site U).
+
+## SNP rows (2.8.2, `snp_rows.py`)
+
+A SNP row's carriers came from SNP genotypes alone, so up to 2.8.1 it listed a carrier whose
+haplotype holding its SNPs also holds an indel inside the target, though that haplotype does
+not have the row's sequence. In the per-sample results, every SNP-only row (no indel or MNV
+named) is now checked as the indel rows are: a phased carrier it lists must have its sequence
+on a haplotype holding every SNP it names, the target's first base at the row's start, and an
+unphased one must carry every SNP it names. (A row naming two alts of one position, which no
+haplotype holds, is counted and not checked: site N2's lone `2|1` carrier of an alt on a
+multi-allelic VCF line is read by the SNP path as carrying the other alt too, a defect of its
+own.) Sites Y1-Y4 sit at 17000-17900 and use samples S70-S78 (the reference is 18.5 kb, the
+panel 78 samples):
+
+| Site | Planted | Expected (per sample) |
+|---|---|---|
+| Y1 | a SNP target (a C>A SNP makes it perfect) and a 2-bp insertion inside it: in cis (S70), in trans (S71), the insertion homozygous (S72), the SNP alone (S73), both unphased (S74) | S71, S73, S74 on the CFD-1 SNP row; S70, S72 on no SNP row |
+| Y2 | Y1's geometry, the SNP phased and the insertion unphased (S75) | S75 on the CFD-1 SNP row, PUTATIVE |
+| Y3 | Y1's SNP, the PAM TGG followed by a G, and on S76's SNP slot a 1-bp deletion in that G run | S76 on the CFD-1 SNP row (the run puts the G back) |
+| Y4 | a minus-strand SNP target whose SNP is in cis with a 2-bp insertion inside it on every haplotype (S77, S78) | no SNP row lists them |
+
+On d7a6fff the check fails 62 times: the SNP-only alignments of sites D, F, M, N, Q, R, J, Z3,
+Y1, Y3 and Y4 list the indel's cis carriers (57 row blocks), S70, S72, S77 and S78 are on a SNP
+row, and Y2's row is CONFIRMED; on v2.8.1, 89 times (with the 27 start failures above).

@@ -29,6 +29,9 @@
           one of its haplotypes, at the reported site, spanning the indel the row
           names, with every named variant on that haplotype; an unphased one carries
           every allele the row names;
+      in the per-sample results, every SNP-only row's carriers have its target at its
+      start (snp_rows.py: a carrier whose haplotype holding its SNPs also holds an indel
+      inside the target has not);
       then the planted sites' expectations (who has which target, at what CFD, under
       which variants, on how many rows), and the SNP+indel co-occurrence companion's
       CONFIRMED lines (their carriers hold the indel and the named SNP alts on one
@@ -55,7 +58,7 @@ import zipfile
 G = "ACTGAAATCTGTAAGCAGGC"  # the guide
 COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 CODES = set("RYSWKMBDHVryswkmbdhv")
-NSAMPLES = 63
+NSAMPLES = 78
 MOTIF_BASES = {"A": "A", "C": "C", "G": "G", "T": "T", "R": "AG", "Y": "CT", "S": "CG",
                "W": "AT", "K": "GT", "M": "AC", "B": "CGT", "D": "AGT", "H": "ACT",
                "V": "ACG", "N": "ACGT"}
@@ -72,12 +75,20 @@ def other(b, avoid=()):
     raise ValueError(b)
 
 
+def _snp_rows():
+    """snp_rows.py beside this file (sites Y1-Y4 and the per-sample SNP-row check); run
+    with -I, the script's folder is not on sys.path."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import snp_rows
+    return snp_rows
+
+
 # --------------------------------------------------------------------------- #
 # generate
 # --------------------------------------------------------------------------- #
 def generate(wd):
     random.seed(7)
-    length = 17000
+    length = 18500
     seq = [random.choice("ACGT") for _ in range(length)]
     variants = []  # dicts: site, kind, pos1, ref, alt, gts{sample: 'a|b'}
     samples = ["S%02d" % i for i in range(1, NSAMPLES + 1)]
@@ -372,6 +383,9 @@ def generate(wd):
     var("V", "del", v0 + 14, G[9] + "C", G[9], {"S53": "0|1"})
     var("V", "ins", v0 + 5, "A", "ACA", {"S53": "0|1"})
     expect["V"] = {"perfect": ["S53"]}
+
+    # Y1-Y4: SNP targets with an indel inside on some haplotypes (snp_rows.py)
+    _snp_rows().plant(put, var, expect, seq, G, rc)
 
     # Z (+), Z2 (-), Z3 (+): a target whose first base (the leftmost, forward strand) is
     # one an insertion adds: the insertion holds the target's 5' end (on - its PAM side).
@@ -930,6 +944,9 @@ def check(wd, pp, result_dirs):
         for t in tables:
             rows.extend(indel_rows(t))
         print("oracle: %s: %d indel row blocks" % (name, len(rows)))
+        if per_sample:  # every SNP-only row's carriers have its target (snp_rows.py)
+            _snp_rows().check(name, rd, tables, truth, expect, fail, alt_rows,
+                              _is_indel_token, rc)
         snp_only = [f for t in glob.glob(os.path.join(rd, "*integrated_results.tsv"))
                     for f in alt_rows(t)
                     if not any(_is_indel_token(x) for x in f["var"].split(","))]
