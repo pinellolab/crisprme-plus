@@ -93,6 +93,16 @@ off-targets", and the merge of ``remove_contiguous_samples.py``).
   strongest target its own alleles allow, and is checked as carrying every allele the row
   names rather than on one haplotype.
 
+KNOWN LIMITS OF THIS CHECKER (they can make it over-report; chase a finding before
+believing it). It does not model two documented CRISPRme behaviours: a slot carrying two
+records at one position (one complex allele the VCF split into overlapping records, a
+phasing artefact -- this builds the haplotype from the first of them and CRISPRme keeps
+such a carrier on each window), and a second indel whose bases a tandem repeat puts back
+unchanged (CRISPRme keeps the carrier and does not name the record; this asks for every
+record that changes the span to be named). On the synthetic oracle those are its sites P
+and W. A real genotyped panel without MNVs -- the HGDP + 1000 Genomes index has none --
+does not exercise the MNV path.
+
 OUTPUT. A TSV of every failing row with its reason class and evidence, a per-class
 summary on stdout, and exit status 1 on any gating failure. Documented limits of 2.8.1
 are counted and listed as their own classes and never gate. SNP-only rows of a per-sample
@@ -980,6 +990,13 @@ def check_row(row, win, args, rep, pam_motif, pam_len, pam_5prime, cluster_index
                     "%s is not a record of the VCF (forward strand)" % t)
             bad = True
     samples = [s for s in row["samples"].split(",") if s and s not in ("NA", "n")]
+    # An equal-length multi-base record (an MNV, AC>TG) is searched in a fake-indel
+    # window as an indel is, but the phased indel genotype store keeps only records whose
+    # REF and ALT differ in length, so CRISPRme cannot place an MNV on a haplotype: every
+    # carrier of such a row is resolved as an unphased one and listed for the strongest
+    # target its own alleles allow (METHODS section 4, and section 8 under residuals).
+    # Check those carriers by that documented rule, not on one haplotype.
+    mnv_row = any(len(r) == len(a) and len(r) > 1 for _p, r, a in named)
     if not samples:
         rep.add(gating, "no-carrier-listed", row, "the row lists no carrier")
         return
@@ -994,6 +1011,20 @@ def check_row(row, win, args, rep, pam_motif, pam_len, pam_5prime, cluster_index
         if hit:
             carrier_ok.append((s, hit))
             placed = True
+    # A carrier whose calls there are unphased has no haplotype to place the row on:
+    # CRISPRme lists it for the strongest target its own alleles allow (the documented
+    # PUTATIVE rule), so the row is checked allele by allele below, not on a haplotype.
+    unphased_row = all(not win.phased(s) for s in samples)
+    if not placed and (mnv_row or unphased_row):
+        # Neither an MNV row nor a row whose carriers are all unphased can be placed on a
+        # haplotype: CRISPRme itself cannot, and lists the strongest target the carrier's
+        # own alleles allow (the documented PUTATIVE rule). The allele-by-allele check
+        # below is the one that applies; the haplotype checks (the named variants' span
+        # and the missing carriers) do not, so carrier_ok stays empty.
+        rep.add(False, "putative-row-not-placed", row,
+                "an MNV row or a row of unphased carriers: checked allele by allele, "
+                "not on a haplotype (CRISPRme's PUTATIVE rule)")
+        placed = True
     if not placed:
         starts = set()
         for s in samples[:40]:
@@ -1007,7 +1038,7 @@ def check_row(row, win, args, rep, pam_motif, pam_len, pam_5prime, cluster_index
     #    carrier has the target at the reported start, every carrier fails for that one
     #    reason and the per-carrier lines would only restate it.
     for s in (samples if placed else ()):
-        if win.phased(s):
+        if win.phased(s) and not mnv_row and not unphased_row:
             if not any(c == s for c, _h in carrier_ok):
                 if find_on_sample(win, s, probe, row["start"], lo, hi, None):
                     rep.add(gating, "carrier-without-variants", row,
@@ -1038,7 +1069,7 @@ def check_row(row, win, args, rep, pam_motif, pam_len, pam_5prime, cluster_index
                             "%s_%d_%s_%s changes no base of the target (%d..%d)"
                             % (row["chrom"], p, r, a, flo, fhi))
                     bad = True
-            keys = win.slot_alleles(s, h) or []
+            keys = [] if (mnv_row or unphased_row) else (win.slot_alleles(s, h) or [])
             for p, r, a in keys:
                 if (p, r, a) in named:
                     continue
@@ -1059,6 +1090,8 @@ def check_row(row, win, args, rep, pam_motif, pam_len, pam_5prime, cluster_index
         for p, r, a in named:
             if len(r) > 1 or len(a) > 1:
                 pool |= set(win.carry.get((p, r, a), ()))
+        if mnv_row or unphased_row:
+            pool = set()  # such a row's carriers are not resolved per haplotype
         missing = []
         for s in sorted(pool):
             if s in listed or not win.phased(s):
