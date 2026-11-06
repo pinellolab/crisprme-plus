@@ -16,10 +16,10 @@ JSON line where the plan cites one, as FV :335).
 search with no bulges reads no index); IDX-19; IDX-21; IDX-22; cli5 D7; OF-11; OF-12; OF-13; FR :98;
 FR :125; FR :89 and :189 (the base-editing window's HTTP 500s); FR :278; FR :286; FV :328 (the
 Settings build form's genome list); FV :335; F2 (the web's bulge-cap side rule); RV1-F5; RV4-1;
-RV4-3; M1; M2; M3; CI-1; WEB-9 and the bundle that is no archive; C11/P7; C16; C19; C20; emptyidx
-F6, F7 (with the genome-layout refusal's banner) and F8; suite P4; skips D7; P15.3; install P6;
-install P10 (the Hub's warning, git's advice); install P9 (pigz); R2-F2; R4-4 (the unused index of
-an assembly search with no bulges); R6B RV1-6, RV2-5, RV3-4 and RV3-6; LP
+RV4-3; M1; M2; M3; CI-1; WEB-9 and the bundle that is no archive; C11/P7; C14; C16; C19; C20;
+emptyidx F6, F7 (with the genome-layout refusal's banner) and F8; suite P4; skips D7; P15.3; install
+P6; install P10 (the Hub's warning, git's advice); install P9 (pigz); R2-F2; R4-4 (the unused index
+of an assembly search with no bulges); R6B RV1-6, RV2-5, RV3-4 and RV3-6; LP
 unterminated-last-line-dropped; M6; wset N1 and N2; wsearch N8; RV3-D; secfu RV1-N1; the chunked
 uploader's grey refusals and the search with no temporary folder (the final confirmation of 2.8.1);
 setup's exit status, progress lines and URLs (FR2 cli a, c, e); FR :725 (complete-test's chromosomes
@@ -61,14 +61,15 @@ gate track).
   its manual fix); the genome-folder name collisions of plan 4.3; source installs enriched before
   CRISPRitz 2.9.1 (documented, re-enrich); FV :180 (the Hub's cache keeps a copy in $HOME: it spares
   a re-download, and TROUBLESHOOTING says HF_HOME moves it); the dash interrupt of plan 4.4 (a
-  signal to crisprme.py alone; c3's signal design, and the image now stops by SIGINT);
-  `targets-scoring` and web searches without the scorer env (documented in 2.8.1: refusing, as
-  complete-search does, or warning on the web form is the scoring track's call); a variant search of
-  a `Genomes/` link of another name (which name a variant genome takes, the link's or its target's,
-  with installs holding either); R6B RV1-5 (a partial `--samplesID` list drops carriers: "owner's
-  call"), dash-alone-id ("none needed"), f4-wrong-list-named ("owner call"), renamed-ids-stale-index
-  and refused-download-drops-installed-genome ("for the owner to decide"); R4-4's hashed haplotype
-  index names in Settings and History (each haplotype's own index, named so since 2.8.1: showing the
+  signal to crisprme.py alone) and c3's signal nits (a process-scan race, SIGHUP to the caller's
+  group, two signals): c3's signal design (the image now stops by SIGINT); `targets-scoring` and web
+  searches without the scorer env (documented in 2.8.1: refusing, as complete-search does, or
+  warning on the web form is the scoring track's call); a variant search of a `Genomes/` link of
+  another name (which name a variant genome takes, the link's or its target's, with installs holding
+  either); R6B RV1-5 (a partial `--samplesID` list drops carriers: "owner's call"), dash-alone-id
+  ("none needed"), f4-wrong-list-named ("owner call"), renamed-ids-stale-index and
+  refused-download-drops-installed-genome ("for the owner to decide"); R4-4's hashed haplotype index
+  names in Settings and History (each haplotype's own index, named so since 2.8.1: showing the
   individual's name needs a record of it, the web track's); the results pages that open only
   job-id-form folders and the region page's refused chromosome ids (by design, the security round 2
   decisions b and c); setup re-downloading the annotations, with the setup guide's A2e (rv2-3: which
@@ -102,14 +103,16 @@ all have an indel: their branches, to forward-port); the CRISPRitz items of plan
 tell a dataset with no indels from a broken INDELS index, the emptyidx area); FV :342's wording of
 the web's labels and notes (the web and report tracks' texts).
 
-*Left: not reproduced, or nothing to change.* t31 P4 (VirtioFS: not reproduced on 38a7c4e); the
-bulge note counting a merged panel's list as made (FR2: only a failed write at Submit, which then
-says why, parts them); the older list's code comments (no behaviour); bio11.2 (a flake recorded with
-no detail); the T-31 flock trigger (flock works on Docker Desktop and on Linux; no ENOTTY host to
-test on); the conda-build warnings of install P10 (the Bioconda recipe's, not this repository's);
-R6B cr-past-first-lines (build-index-only reads each file whole and refuses it since 2.8.1; a search
-that builds its own index checks two lines a file, and reading every file whole on each search,
-seconds on hg38, is the owner's trade to weigh).
+*Left: not reproduced, or nothing to change.* C18 (the FutureWarning: found fixed, above); C17 (a
+banner) and the older list's validate-test hint and scope (no detail kept in the sources: the list
+names them alone); t31 P4 (VirtioFS: not reproduced on 38a7c4e); the bulge note counting a merged
+panel's list as made (FR2: only a failed write at Submit, which then says why, parts them); the
+older list's code comments (no behaviour); bio11.2 (a flake recorded with no detail); the T-31 flock
+trigger (flock works on Docker Desktop and on Linux; no ENOTTY host to test on); the conda-build
+warnings of install P10 (the Bioconda recipe's, not this repository's); R6B cr-past-first-lines
+(build-index-only reads each file whole and refuses it since 2.8.1; a search that builds its own
+index checks two lines a file, and reading every file whole on each search, seconds on hg38, is the
+owner's trade to weigh).
 
 *Left: tests and CI.* Suite P5 (tests that import the web app write `PostProcess/Cache/`, the app's
 cache folder relative to the working directory, ignored by git: moving it is the web track's call);
@@ -530,3 +533,6 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   index the library held (IDX-17 c): it says that the index is there, that a search reads the
   dataset's dictionaries, sample list and VCF folder from the working directory, and to run the
   search from the folder that holds them.
+- **`crisprme.py` with no argument makes no folder.** It prints the help, and made the seven
+  folders of a data folder (`Annotations/`, `Dictionaries/`, `Genomes/`, `PAMs/`, `Results/`,
+  `VCFs/`, `samplesIDs/`) wherever one ran it to read it (C14).

@@ -7627,8 +7627,9 @@ def targets_scoring_cmd():
 
 
 if len(sys.argv) < 2:
-    check_crisprme_dirtree(strict=False)  # check crisprme directory tree structure
-    crisprme_help()  # no arg? print help
+    # no arg? print help, and make no data folder: it made the seven of a data folder
+    # (Genomes/, Results/, ...) wherever one ran it to read the help (C14)
+    crisprme_help()
 elif sys.argv[1] == "complete-search":  # run complete search
     _run_and_remove_annotation_tmpdirs(complete_search)
 elif sys.argv[1] == "complete-test":  # run complete test

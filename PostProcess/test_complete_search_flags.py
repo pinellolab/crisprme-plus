@@ -506,6 +506,20 @@ class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
                                    f"Please input a value for flag {flag}")
 
 
+@unittest.skipUnless(_importable(), "crisprme.py dependencies not installed")
+class TestTheHelpMakesNoFolder(unittest.TestCase):
+    """crisprme.py with no argument prints the help, and made the seven folders of a data
+    folder (Annotations/, Dictionaries/, Genomes/, PAMs/, Results/, VCFs/, samplesIDs/)
+    wherever one ran it to read it (C14)."""
+
+    def test_no_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = subprocess.run([sys.executable, CRISPRME], cwd=tmp, capture_output=True,
+                                 text=True, timeout=120)
+            self.assertIn("complete-search", run.stdout + run.stderr)
+            self.assertEqual(os.listdir(tmp), [])
+
+
 @unittest.skipUnless(_importable() and shutil.which("crispritz.py"),
                      "runs complete-search, which needs the image's engine")
 class TestACtrlCEndsInOneLine(unittest.TestCase):
