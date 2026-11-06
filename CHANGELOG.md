@@ -11,6 +11,35 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **An indel row whose first base is one an insertion adds is placed at the insertion**
+  (every release with the fake-indel genome; both modes, any PAM).
+  - The engine reports where the target's first aligned base (the leftmost, on either strand)
+    is on the indel's haplotype. A base an insertion adds has no reference coordinate, and the
+    row took the haplotype's: 1 to len(ALT) − len(REF) bases past the insertion's anchor. Its
+    REF alignment, `CFD_score_REF` and REF seed counts were read there, from reference bases the
+    target does not hold, and `Variant_info_spacer+PAM` put the insertion, before the row's
+    start, at position 1 (on the − strand, at the last).
+  - Such a row now starts at the insertion's anchor (its VCF POS), its REF is read from there,
+    and its insertion is at position 1 of `Variant_info_spacer+PAM` as computed. Alignments that
+    start on the bases of one insertion now share the anchor, and the merge treats them as
+    alignments of one site. `PAM_creation` is unchanged where the PAM sits on reference bases
+    (read through the insertion); a PAM made of bases the insertion adds still takes the REF
+    alignment's, which now starts at the anchor.
+  - README guide, HGDP + 1000 Genomes, NRG, 4 mismatches + 1 + 1 (2.8.1 code): genome-wide,
+    per-sample, 229 highest-CFD rows (233 rows in any block) of 170,660 started so, a median of
+    8 and up to 229 bases past the anchor, 95 of them on a tandem duplication; none at CFD ≥ 0.2
+    (highest 0.155); and 151 of 468,715 alternative alignments. Population-level: 232 rows.
+    chr22 alone: 4 rows; 3 move to their anchor and one joins the reference row of its site
+    (1,574 → 1,573 rows; that row's `Other_motifs` goes 2 → 3), every other row unchanged. The self-test (`complete-test --chrom chr22
+    --vcf_dataset 1000G`, `cas9_sg1617`): 2 of 632 rows move, the other 630 are unchanged.
+  - Found from a 2.8.0 alternative alignment at chr22:22322768, the 7th base of
+    G>GCAATCATTAT at 22322762. That row also paired the insertion's only carrier with five SNP
+    alleles other individuals carry, which 2.8.1 already fixed: the row is gone.
+  - The SNP+indel oracle (`test/indel_snp_oracle`) checks every indel row's start against its
+    carriers' haplotypes and plants three such sites (Z, Z2, Z3): v2.8.1 fails it at 27 row
+    blocks.
+
 ## [2.8.1] - 2026-11-05
 
 ### Added

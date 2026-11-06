@@ -564,6 +564,13 @@ there, in the target's orientation and gapped as the target (an RNA bulge is a g
 REF covers one base fewer per RNA bulge). Up to 2.8.0 an indel row with only RNA bulges
 started one base per bulge early on the + strand (on the - strand with a 5' PAM), and the
 REF alignment of an indel row with both bulge types had no gap and one base too many.
+A first base that an insertion adds has no reference coordinate: such a row starts at the
+reference base the inserted bases follow, the insertion's anchor (its VCF POS, 1-based), as
+the VCF writes the insertion, and its REF alignment is read from there; its insertion is then
+at position 1 of `Variant_info_spacer+PAM` (on the - strand, at the last). Up to 2.8.1 such a
+row started at that base's place on the haplotype, 1 to len(ALT) - len(REF) bases past the
+anchor: its start and its REF alignment pointed at reference bases the target does not hold,
+and `Variant_info_spacer+PAM` put its insertion, before that start, at position 1.
 
 From 2.5.0 to 2.8.0 each code was instead read **column by column without genotypes** —
 the guide's base when it was an allele, else the code's first allele. That reported one

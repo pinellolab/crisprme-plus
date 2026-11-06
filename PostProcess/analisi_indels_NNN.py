@@ -1386,7 +1386,7 @@ def _report_overlaid():
               % (_ovl_stats["unmapped"], current_chr), flush=True)
 
 
-def _reference_pam(final_result, ref_aligned):
+def _reference_pam(final_result, ref_aligned, hap_start=None):
     """The reference bases under an indel row's PAM, in the target's orientation, for
     telling whether the row's indel created its PAM: the bases the PAM sits on, read
     through the indel (final_result[17]'s first token). A PAM past the indel on the
@@ -1397,14 +1397,17 @@ def _reference_pam(final_result, ref_aligned):
     flagged as created. A PAM that holds an ALT base or spans a deletion's junction has
     no reference bases of its own, nor does one with a bulge in it: those keep the REF
     alignment's, as before. So does a PAM on the other side, which no indel inside the
-    target moves."""
+    target moves. ``hap_start`` is the target's first base on the haplotype carrying the
+    indel (the window's real start plus its offset there); it is the row's start except
+    for a row starting on a base an insertion adds, which starts at the insertion's
+    anchor (indel_snp_cis.reference_start). None: the row's start."""
     window = ref_aligned[pam_begin:pam_end].upper()
     if len(window) != len(pam) or "-" in final_result[2][pam_begin:pam_end]:
         return window
     try:
         tok = final_result[17].split(",")[0].split("_")
         ipos, iref, ialt = int(tok[-3]), tok[-2], tok[-1]
-        start = int(final_result[4])
+        start = int(final_result[4]) if hap_start is None else int(hap_start)
     except (IndexError, ValueError):
         return window
     k = len(pam)
@@ -1424,9 +1427,10 @@ def _reference_pam(final_result, ref_aligned):
     return (ref if final_result[6] == "+" else reverse_complement_table(ref)).upper()
 
 
-def _queue_row(final_result):
+def _queue_row(final_result, hap_start=None):
     """Reference alignment, PAM creation and the scoring sentinels for one indel
-    row, then queue it for scoring."""
+    row, then queue it for scoring. ``hap_start``: the target's first base on the
+    haplotype carrying the indel (_reference_pam), None when it is the row's start."""
     ref_aligned = alignRefFromVar(final_result)
     # PAM creation on the INDEL path. Mirrors the SNP path's predicate in
     # new_simple_analysis.py: if ANY reference base in the PAM window is
@@ -1457,7 +1461,7 @@ def _queue_row(final_result):
     # removes the false-positive class outright rather than relying on that.
     # The reference bases are those the PAM sits on, read through the indel
     # (_reference_pam), not the REF alignment's, which is read from the row's start.
-    ref_pam = _reference_pam(final_result, ref_aligned)
+    ref_pam = _reference_pam(final_result, ref_aligned, hap_start)
     if len(ref_pam) == len(pam) and all(c in iupac_code_set for c in ref_pam):
         for pos_pam, pam_char in enumerate(ref_pam):
             if not iupac_code_set[pam[pos_pam]] & iupac_code_set[pam_char]:
@@ -1572,10 +1576,16 @@ for line in inResult:
     # bulges on one strand: + with a 3' PAM, - with a 5' PAM)
     fake_start_target = int(line[4]) - int(indel_data[5])
 
-    # correct start with real chr spatial info and length of the target
-    true_start_target = (
-        int(indel_data[0].split("_")[1].split("-")[0]) + fake_start_target
-    )
+    # carried to the chromosome: the window's real start plus that offset is the
+    # target's place on the haplotype carrying the indel, which is its reference
+    # coordinate unless its first base is one an insertion adds; such a row starts at
+    # the base the insertion follows, its anchor (indel_snp_cis.reference_start). Up to
+    # 2.8.1 it started at the haplotype's coordinate, 1 to len(ALT) - len(REF) bases
+    # past the anchor, and its REF text was read there.
+    _ipos, _iref, _ialt, _istart = _indel_window(indel_data)
+    hap_start_target = _istart + fake_start_target
+    true_start_target = _isc.reference_start(
+        fake_start_target, _ipos, _istart, _iref, _ialt)
     # the cluster position keeps CRISPRitz's offset from the Position, as on the SNP path
     diff_pos_clus = int(line[4]) - int(line[5])
     # real_start
@@ -1614,7 +1624,7 @@ for line in inResult:
     _amb = _isc.ambiguous_columns(line[2])
     for _row in (_overlaid_rows(line, final_result, indel_data, _amb) if _amb
                  else _second_indel_rows(line, final_result, indel_data)):
-        _queue_row(_row)
+        _queue_row(_row, hap_start_target)
 
     if len(cluster_to_save) >= 100000:
         # after reading 100k lines from file and creating the cluster, start processing it

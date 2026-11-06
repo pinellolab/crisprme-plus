@@ -458,6 +458,42 @@ def holds_indel(first, last, indel_pos1, indel_start, ref, alt):
     return first < added_from and last >= added_from  # the bases either side of a deletion
 
 
+def reference_start(offset, indel_pos1, indel_start, ref, alt):
+    """The 0-based reference coordinate an indel row starts at when its first aligned
+    base (the leftmost, on either strand) is at ``offset`` of a fake-indel window whose
+    real 0-based start is ``indel_start``.
+
+    The window is the reference up to the indel, its ALT, then the reference past its
+    REF, so ``indel_start + offset`` is the base's place on the haplotype that carries
+    the indel. That is its reference coordinate for a flank base before the indel, for
+    a base REF and ALT share at the start (the anchor) and for an ALT base standing in
+    a REF base's place (an MNV's, or a base an indel replaces). A base an insertion
+    adds has no reference coordinate: there, the haplotype's coordinate is a base of
+    the reference 1 to len(ALT) - len(REF) bases past the insertion's anchor, which the
+    target does not hold. The row starts instead at the reference base the added bases
+    follow (a normalized insertion's anchor: its VCF POS, 1-based), the place
+    target_ref_span already counts as the target's. A base past the change (a shared
+    tail, the downstream flank) is the reference base it is, len(REF) - len(ALT) on.
+
+    Up to 2.8.1 every row was placed at ``indel_start + offset``, so a row whose first
+    base is one an insertion adds started past the insertion, its REF text was read
+    there, and its Variant_info_spacer+PAM put the insertion, before its start, at
+    position 1 (the - strand: the last)."""
+    alt_at = indel_pos1 - 1 - indel_start
+    k = offset - alt_at
+    c = kept_bases(ref, alt)
+    t = shared_tail(ref, alt)
+    if k < 0 or len(ref) == len(alt) or k < c:
+        return indel_start + offset  # a flank base, an MNV's, or a base REF and ALT share
+    if k >= len(alt) - t:
+        return indel_start + offset - len(alt) + len(ref)  # past the change
+    j = k - c  # a base of the ALT's changed middle
+    if j < len(ref) - c - t:
+        return indel_start + offset  # it stands in the place of the REF base it replaces
+    # a base the ALT adds: the place of the last REF base before it
+    return indel_pos1 - 2 + len(ref) - t
+
+
 # ---------------------------------------------------------------------------
 # A second indel inside a target, read on the sequence (2.8.1)
 # ---------------------------------------------------------------------------

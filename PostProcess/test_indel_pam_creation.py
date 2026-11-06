@@ -54,7 +54,7 @@ def _block():
         src = fh.read()
     a = src.index("def _reference_pam(")
     func = src[a:src.index("\ndef _queue_row(", a)]
-    start = src.index("    ref_pam = _reference_pam(final_result, ref_aligned)")
+    start = src.index("    ref_pam = _reference_pam(final_result, ref_aligned, hap_start)")
     end = src.index("    final_result.append(ref_aligned)", start)
     body = src[start:end]
     # dedent one level: the block lives inside _queue_row
@@ -77,7 +77,7 @@ def _row(alt_target, token="chr1_100_A_AT", start=100, strand="+"):
 
 
 def _ns(final_result, ref_aligned, pam="NRG", pam_begin=-3, pam_end=None, genome=None,
-        five=False):
+        five=False, hap_start=None):
     if genome is None:
         # the row's insertion at 100 puts the PAM of a 23-nt target one base past the
         # REF alignment's: give the reference the window's PAM there too
@@ -85,7 +85,7 @@ def _ns(final_result, ref_aligned, pam="NRG", pam_begin=-3, pam_end=None, genome
     ns = {"iupac_code_set": IUPAC, "final_result": final_result,
           "ref_aligned": ref_aligned, "pam": pam, "pam_begin": pam_begin,
           "pam_end": pam_end, "pam_at_beginning": five, "genomeStr": genome,
-          "reverse_complement_table": _revcomp}
+          "reverse_complement_table": _revcomp, "hap_start": hap_start}
     exec(compile(_block(), "<pam_creation>", "exec"), ns)
     return ns
 
@@ -234,6 +234,28 @@ class IndelPamCreation(unittest.TestCase):
         row = _row(g + "TGG", token, 50)
         ns = _ns(row, g.lower() + "TAA", genome=genome)
         self.assertEqual(ns["_reference_pam"](row, g.lower() + "TAA"), "TAA")
+        self.assertEqual(ns["final_result"][PAM_GEN], "TGG")
+
+    def test_a_row_starting_on_an_inserted_base_reads_its_pam_from_the_haplotype(self):
+        """+ strand: the target's first six bases are the last six an insertion adds
+        (TTCAT + the guide's first six), so the row starts at the insertion's anchor
+        (indel_snp_cis.reference_start), not where the target's first base is on the
+        haplotype. Its PAM, past the insertion, sits on the reference's TGG, found from
+        that haplotype place (hap_start); read from the row's start it would be the
+        guide's TAT, six bases before it, and the PAM would be flagged as created."""
+        g = self.GUIDE
+        x = "GATTACAGATTACA"
+        genome = "N" * 50 + x + g[6:] + "TGG" + "N" * 20
+        anchor = 50 + len(x) - 1  # 0-based
+        token = "chr1_%d_%s_%s" % (anchor + 1, x[-1], x[-1] + "TTCAT" + g[:6])
+        ref_aligned = genome[anchor:anchor + 23].lower()
+        row = _row(g + "TGG", token, anchor)
+        hap = anchor + 1 + 5  # the 6th added base, g[0]
+        ns = _ns(row, ref_aligned, genome=genome, hap_start=hap)
+        self.assertEqual(ns["_reference_pam"](row, ref_aligned, hap), "TGG")
+        self.assertEqual(ns["final_result"][PAM_GEN], "n")
+        self.assertEqual(ns["_reference_pam"](row, ref_aligned), g[14:17])  # the old reading
+        ns = _ns(_row(g + "TGG", token, anchor), ref_aligned, genome=genome)
         self.assertEqual(ns["final_result"][PAM_GEN], "TGG")
 
     def test_source_targets_index_10_not_11(self):

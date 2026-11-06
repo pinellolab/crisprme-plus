@@ -323,6 +323,54 @@ def test_putative_row_stays_indel_only():
     assert final_result[15] == "rs_i" and final_result[16] == "0.01"
 
 
+# --- where an indel row starts (reference_start). A window starts at W (0-based, the
+# log's real start); its REF is at offset 25, the indel's POS (1-based) at W + 26.
+W = 1000
+
+
+def _start(offset, ref, alt):
+    return isc.reference_start(offset, W + 26, W, ref, alt)
+
+
+def test_reference_start_flank_and_anchor_are_their_own_place():
+    for ref, alt in (("G", "GCAATCATTAT"), ("AGCAGCT", "A"), ("AC", "TG")):
+        assert _start(3, ref, alt) == W + 3      # left flank
+        assert _start(25, ref, alt) == W + 25    # the anchor (an MNV's first base)
+
+
+def test_reference_start_on_an_added_base_is_the_insertions_anchor():
+    # chr22:22322762 G>GCAATCATTAT (HGDP1kGP): a target starting at the 7th added base
+    # was placed 6 bases past the POS, at its haplotype place, before 2.8.2
+    for k in range(1, 11):
+        assert _start(25 + k, "G", "GCAATCATTAT") == W + 25
+    assert _start(25 + 11, "G", "GCAATCATTAT") == W + 26     # past it: the reference
+
+
+def test_reference_start_deletion_and_mnv_unchanged():
+    assert _start(26, "AGCAGCT", "A") == W + 26 + 6           # past a deletion
+    assert _start(26, "AC", "TG") == W + 26                   # an MNV, base for base
+    assert _start(26, "ATTT", "AG") == W + 26                 # a base standing for REF's
+
+
+def test_reference_start_complex_and_unnormalized_insertions():
+    # AT>ACCC: the first C stands in T's place, the others follow it
+    assert [_start(25 + k, "AT", "ACCC") for k in range(5)] == [
+        W + 25, W + 26, W + 26, W + 26, W + 27]
+    # ATG>ATCCG (a shared tail G): the CC follow T, the tail is the reference's G
+    assert [_start(25 + k, "ATG", "ATCCG") for k in range(6)] == [
+        W + 25, W + 26, W + 26, W + 26, W + 27, W + 28]
+
+
+def test_reference_start_agrees_with_offset_to_real_on_reference_bases():
+    # wherever the window's base has a reference position, the row starts there
+    for ref, alt in (("G", "GCAATCATTAT"), ("AGCAGCT", "A"), ("AC", "TG")):
+        n = 25 + len(alt) + 27
+        for off in range(n):
+            real = isc.map_fake_offset_to_real(off, W, len(ref), len(alt))
+            if real is not None:
+                assert _start(off, ref, alt) == real, (ref, alt, off)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
