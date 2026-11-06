@@ -16,12 +16,16 @@ that holds more targets than one window gives does too.
 A tree (.bin) is int numLeaves and int len_guide_used, then each target: int guideIndex, its
 flank in ceil(K/2) bytes, two bases a byte, high nibble first (for odd K the last byte's high
 nibble is padding, always 0, and its low nibble the last base), then '0', or '_' and an int;
-then the tree itself (crispritz_bins has the whole layout).
+then the tree itself (crispritz_bins has the whole layout). That is index format 1; an index
+of format 2 (CRISPRitz 2.10.0 and later, whose trees open with a header) was built since the
+fix, whatever its flanks hold.
 """
 
 import os
 import re
 import struct
+
+import index_fit
 
 # More targets than one fake-indel window gives (both strands of its 2 x ~25 bases and the
 # indel's, short in every published dataset): a tree that holds more spans several windows, and
@@ -99,6 +103,8 @@ def built_before_n_fix(index_dir, genome_dir):
     holds one there; None where no such contig tells."""
     pam = os.path.basename(os.path.normpath(index_dir)).split("_")[0]
     trees = _bins(index_dir, pam)
+    if trees and index_fit.bin_format(trees[0][1]) == 2:
+        return False
     parts = {}
     for _size, _path, contig, part in trees:
         parts[contig] = max(parts.get(contig, 0), part)
@@ -122,6 +128,8 @@ def indels_built_before_n_fix(indels_dir):
         folder = os.path.join(indels_dir, sub)
         if os.path.isdir(folder):
             trees += _bins(folder, sub.split("_")[0])
+    if trees and index_fit.bin_format(sorted(trees)[0][1]) == 2:
+        return False
     for _size, path, _contig, _part in sorted(trees):
         try:
             with open(path, "rb") as fh:

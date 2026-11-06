@@ -754,10 +754,27 @@ while read vcf_f; do
 	# <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM). An index without one -- built by a
 	# search before 2.8.1, by crispritz.py itself, or downloaded (the published K=8
 	# archive has none) -- is taken for a 3' build, as every published one is
-	# (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. Silent on stderr, which is
+	# (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. An index of format 2 (CRISPRitz
+	# 2.10.0 and later) records the side itself, in the header of its .bin files (bit 0 of
+	# the flags: the PAM at the 5' end), which is then read first. Silent on stderr, which is
 	# fatal to the stage.
 	_index_side() {
-		local _line=
+		local _line= _bin _f
+		_bin=$(find -L "$1" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)
+		if [ -n "$_bin" ]; then
+			_f=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
+			if [ "${_f//[[:space:]]/}" = 435a49fe ]; then
+				_f=$(od -An -t d4 -j12 -N4 "$_bin" 2>/dev/null)
+				_f=${_f//[[:space:]]/}
+				case "$_f" in
+				'' | *[!0-9]*) ;;
+				*)
+					if [ $((_f & 1)) -eq 1 ]; then echo 5; else echo 3; fi
+					return 0
+					;;
+				esac
+			fi
+		fi
 		if [ -f "$1/.pam_build" ]; then
 			{ read -r _line <"$1/.pam_build"; } 2>/dev/null
 			_line=${_line%$'\r'}
@@ -776,30 +793,57 @@ while read vcf_f; do
 	# The guide length index $1 was built for, on stdout: the second int32 of any .bin of
 	# it (len_guide_used, which buildTST has written since 2019, whoever built the index;
 	# its .pam_build, which build-index-only used to rewrite over any index it found, may
-	# say another), or nothing where it cannot tell: in an index a newer CRISPRitz built
-	# (_index_format) that int32 is the format version. Silent on stderr.
+	# say another), or, in index format 2 (CRISPRitz 2.10.0 and later: the magic, then the
+	# version, the header's length and the flags), the header's guide_len; nothing where it
+	# cannot tell, as in a format newer than this CRISPRme reads (_unreadable_bin), whose
+	# second int32 is its version. Silent on stderr.
 	_index_guide_len() {
 		local _bin _g
 		_bin=$(find -L "$1" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)
 		[ -n "$_bin" ] || return 0
 		_g=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
-		[ "${_g//[[:space:]]/}" != 435a49fe ] || return 0
-		_g=$(od -An -t d4 -j4 -N4 "$_bin" 2>/dev/null)
+		if [ "${_g//[[:space:]]/}" = 435a49fe ]; then
+			_g=$(od -An -t d4 -j4 -N4 "$_bin" 2>/dev/null)
+			[ "${_g//[[:space:]]/}" = 2 ] || return 0
+			_g=$(od -An -t d4 -j16 -N4 "$_bin" 2>/dev/null)
+		else
+			_g=$(od -An -t d4 -j4 -N4 "$_bin" 2>/dev/null)
+		fi
 		_g=${_g//[[:space:]]/}
 		case "$_g" in '' | 0 | *[!0-9]*) return 0 ;; esac
 		printf '%s' "$_g"
 	}
 
+	# The newest index format the installed CRISPRitz reads, and the one its buildTST
+	# writes, on stdout: the INDEX_FORMAT of its crispritz.py, which CRISPRitz states from
+	# 2.10.0; 1 for one that states none (up to 2.9.1, format 1 only); 2, the newest this
+	# CRISPRme reads, where no crispritz.py on PATH can be read to tell. Read from the file,
+	# not run (PostProcess/index_fit.py engine_index_format, the same rule). Silent on stderr.
+	_engine_index_format() {
+		local _exe _f
+		_exe=$(command -v crispritz.py 2>/dev/null)
+		if [ -z "$_exe" ] || ! [ -r "$_exe" ]; then
+			echo 2
+			return 0
+		fi
+		_f=$(sed -n 's/^INDEX_FORMAT[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$_exe" 2>/dev/null)
+		_f=${_f%%$'\n'*}
+		echo "${_f:-1}"
+	}
+	engine_index_format=$(_engine_index_format)
+
 	# "<format><TAB><file>" on stdout for the first .bin of index $1, or of a folder in it
-	# (an INDELS index holds one a chromosome), in an index format newer than 1; nothing
-	# where there is none. CRISPRitz 2.9.2 and later open an index file with the magic
-	# "CZI" 0xFE and then the format version as an int32 (index format 2: CRISPRitz's
-	# docs/INDEX_FORMAT.md); up to 2.9.1 a file opens with its leaf count, and that format
-	# is the only one this CRISPRme reads (PostProcess/index_fit.py newer_bin, the same
-	# rule). The first .bin of each folder is read: one build writes a folder whole.
-	# Silent on stderr.
-	_index_format() {
-		local _bin _head _v _seen=
+	# (an INDELS index holds one a chromosome), in an index format this install does not
+	# search: newer than the installed CRISPRitz reads (_engine_index_format), or than this
+	# CRISPRme reads (formats 1 and 2); nothing where there is none. CRISPRitz 2.10.0 and
+	# later open an index file with the magic "CZI" 0xFE and then the format version as an
+	# int32 (index format 2: CRISPRitz's docs/INDEX_FORMAT.md); up to 2.9.1 a file opens with
+	# its leaf count (format 1). PostProcess/index_fit.py unreadable_bin says the same. The
+	# first .bin of each folder is read: one build writes a folder whole. Silent on stderr.
+	_unreadable_bin() {
+		local _bin _head _v _seen= _max
+		_max=${engine_index_format:-$(_engine_index_format)}
+		[ "$_max" -le 2 ] 2>/dev/null || _max=2
 		while IFS= read -r -d '' _bin; do
 			case "|$_seen|" in *"|${_bin%/*}|"*) continue ;; esac
 			_seen="$_seen|${_bin%/*}"
@@ -807,24 +851,46 @@ while read vcf_f; do
 			[ "${_head//[[:space:]]/}" = 435a49fe ] || continue
 			_v=$(od -An -t d4 -j4 -N4 "$_bin" 2>/dev/null)
 			_v=${_v//[[:space:]]/}
+			case "$_v" in '' | *[!0-9]*) ;; *) [ "$_v" -gt "$_max" ] || continue ;; esac
 			printf '%s\t%s' "${_v:-?}" "$_bin"
 			return 0
 		done < <(find -L "$1" -maxdepth 2 -name '*.bin' -print0 2>/dev/null | sort -z 2>/dev/null)
 		return 0
 	}
 
-	# Stop, with one ERROR, before the search reads index $1 when a newer CRISPRitz built
-	# it (_index_format): this CRISPRme would read its format version as the guide length
-	# it was built for (a format-2 index as one for a 2-nt guide) and its magic as a leaf
-	# count. Called where the search takes an index, whether it found it or built it.
-	_refuse_newer_index() {
-		local _f _v _bin
-		_f=$(_index_format "$1")
-		[ -n "$_f" ] || return 0
+	# Stop, with one ERROR, before the search reads index $1 when it is in an index format
+	# this install does not search (_unreadable_bin), naming its format and what reads it
+	# (PostProcess/index_fit.py unreadable_format_error, the same words): this CRISPRme
+	# would read a newer format's version as the guide length it was built for, and
+	# CRISPRitz 2.9.1 refuses an index of format 2, and 2.9.0 aborts on one. Of an index it
+	# searches that is in format 1 while the installed CRISPRitz writes format 2, say on
+	# stdout that it lacks the sites at contig ends and N runs that one rebuilt holds.
+	# Called where the search takes an index, whether it found it or built it.
+	_check_index_format() {
+		local _f _v _bin _e _n
+		_f=$(_unreadable_bin "$1")
+		if [ -z "$_f" ]; then
+			[ "${engine_index_format:-$(_engine_index_format)}" -ge 2 ] 2>/dev/null || return 0
+			_bin=$(find -L "$1" -maxdepth 2 -name '*.bin' -print -quit 2>/dev/null)
+			[ -n "$_bin" ] || return 0
+			_f=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
+			[ "${_f//[[:space:]]/}" != 435a49fe ] || return 0
+			printf "NOTE: %s is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks the sites whose guide lies within a few bases of a contig end or an N run, which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). Build it again with crisprme.py build-index-only, or download it again, to search them.\n" \
+				"$(basename "$1")"
+			return 0
+		fi
 		_v=${_f%%$'\t'*}
 		_bin=${_f#*$'\t'}
-		printf "ERROR: %s was built by a newer CRISPRitz (%s is in index format %s, which CRISPRitz 2.9.2 and later write): this CRISPRme reads index format 1 only (CRISPRitz up to 2.9.1), and needs a newer release to search it. Use a CRISPRme that reads index format %s, or install CRISPRitz 2.9.1 and build the index again, with %s moved out of the way first\n" \
-			"$1" "${_bin#"$1"/}" "$_v" "$_v" "$1" >&2
+		if ! [ "$_v" -le 2 ] 2>/dev/null; then
+			printf "ERROR: %s was built by a newer CRISPRitz (%s is in index format %s): this CRISPRme reads index formats 1 and 2 (which CRISPRitz writes up to 2.9.1 and from 2.10.0), and needs a newer release to search it. Use a CRISPRme that reads index format %s, or build the index again with the CRISPRitz installed here, with %s moved out of the way first\n" \
+				"$1" "${_bin#"$1"/}" "$_v" "$_v" "$1" >&2
+			exit 1
+		fi
+		_e=$(sed -n "s/^VERSION[[:space:]]*=[[:space:]]*[\"']\([^\"']*\)[\"'].*/\1/p" "$(command -v crispritz.py)" 2>/dev/null)
+		_e=${_e%%$'\n'*}
+		_n=${engine_index_format:-$(_engine_index_format)}
+		printf "ERROR: %s was built by a newer CRISPRitz (%s is in index format %s, which CRISPRitz 2.10.0 and later write) than the one installed here%s, which reads index format %s only. Install the CRISPRitz this CRISPRme installs with (2.10.0 or later; the Docker image, install_from_source.sh and the Bioconda package carry it), or build the index again with the CRISPRitz installed here, with %s moved out of the way first\n" \
+			"$1" "${_bin#"$1"/}" "$_v" "${_e:+, CRISPRitz $_e}" "$_n" "$1" >&2
 		exit 1
 	}
 
@@ -837,9 +903,9 @@ while read vcf_f; do
 	# Inside it the results are byte-identical to a dedicated index, outside it they differ.
 	# An index whose length cannot be read, or a PAM file with no spacer, fits, as before. A
 	# reference search with no bulges scans the FASTA and opens no index, so any fits it; a
-	# variant one reads the index of its indels, at least. An index a newer CRISPRitz built
-	# holds no length this CRISPRme reads (_index_guide_len): it is not judged here, and
-	# the search stops on it where it takes it (_refuse_newer_index), with one ERROR.
+	# variant one reads the index of its indels, at least. An index in a format newer than
+	# this CRISPRme reads holds no length it reads (_index_guide_len): it is not judged here,
+	# and the search stops on it where it takes it (_check_index_format), with one ERROR.
 	_index_fits_guide() {
 		local _g _b=${1##*/} _guide=$(( ${#fullseqpam} - ${pos#-} ))
 		[ "${#fullseqpam}" -gt 0 ] && [ "$_guide" -gt 0 ] || return 0
@@ -861,6 +927,8 @@ while read vcf_f; do
 	# An index named <PAM>_<N>_<suffix> was built with -bMax N and so supports searches
 	# up to N-1 bulges of each type: any N >= bMax serves whose guide length fits this
 	# search (_index_fits_guide). Among those, in order:
+	#   0. one in an index format this install searches, ahead of one it would stop on
+	#      (_unreadable_bin: an index built by a newer CRISPRitz than the one installed);
 	#   1. the requested PAM itself, ahead of any PAM-less index -- it needs neither
 	#      N-padding nor the post-search PAM filter to be right;
 	#   2. an index built for this very guide length, ahead of one that fits only;
@@ -875,8 +943,8 @@ while read vcf_f; do
 	# An index must also have been built for a PAM on the search PAM's side (below).
 	_resolve_index_dir() {
 		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4" _any_side="$5"
-		local _d _b _pam _n _exact _better _side _rec _len _g
-		local _best="" _best_n="" _best_pam_len="" _best_exact="" _best_len=""
+		local _d _b _pam _n _exact _better _side _rec _len _g _read
+		local _best="" _best_n="" _best_pam_len="" _best_exact="" _best_len="" _best_read=""
 		for _d in "$_lib"/*_*_"$_suffix"; do
 			[ -d "$_d" ] || continue
 			case "$_d" in *_INDELS) continue ;; esac
@@ -961,9 +1029,14 @@ while read vcf_f; do
 			_len=1
 			_g=$(_index_guide_len "$_d")
 			[ -z "$_g" ] || [ "$_g" = "$(( ${#fullseqpam} - ${pos#-} ))" ] || _len=0
+			# in a format this install searches, rather than one it stops on
+			_read=1
+			[ -z "$(_unreadable_bin "$_d")" ] || _read=0
 			_better=0
 			if [ -z "$_best" ]; then
 				_better=1
+			elif [ "$_read" -ne "$_best_read" ]; then
+				[ "$_read" -lt "$_best_read" ] || _better=1
 			elif [ "$_exact" -gt "$_best_exact" ]; then
 				_better=1
 			elif [ "$_exact" -eq "$_best_exact" ]; then
@@ -978,7 +1051,7 @@ while read vcf_f; do
 				fi
 			fi
 			if [ "$_better" = 1 ]; then
-				_best="$_d"; _best_n="$_n"; _best_pam_len=${#_pam}; _best_exact="$_exact"; _best_len="$_len"
+				_best="$_d"; _best_n="$_n"; _best_pam_len=${#_pam}; _best_exact="$_exact"; _best_len="$_len"; _best_read="$_read"
 			fi
 		done
 		[ -n "$_best" ] && printf '%s\n' "$_best"
@@ -986,11 +1059,14 @@ while read vcf_f; do
 
 	# Record on index $1, which this run has just built, the side of the guide its PAM
 	# file puts the PAM, as build-index-only does: without it, _index_side takes a 5' build
-	# for a 3' one, and a dedicated index has no side a search of the other side could be
-	# refused by. Silent on stderr.
+	# of format 1 for a 3' one, and a dedicated index has no side a search of the other side
+	# could be refused by. And what the index holds -- its index format, build PAM, side,
+	# flank and guide length (PostProcess/index_fit.py write_index_meta) -- as build-index-only
+	# records it: a record it cannot write is said on stdout. Silent on stderr.
 	_record_index_side() {
 		[ -d "$1" ] || return 0
 		{ printf '%s %s %s\n' "${pam_name%.*}" "${#fullseqpam}" "$pos" >"$1/.pam_build"; } 2>/dev/null
+		python "$starting_dir/index_fit.py" meta "$1" "$pam_file" 2>/dev/null
 		return 0
 	}
 
@@ -1460,7 +1536,7 @@ while read vcf_f; do
 	# sites with exit 0: stop instead (index_coverage.py, which takes a FASTA with no site of
 	# the PAM for one that has no tree). Only a search with bulges opens this index.
 	if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then
-		_refuse_newer_index "$idx_ref"
+		_check_index_format "$idx_ref"
 		python "$starting_dir/index_coverage.py" "$idx_ref" "$pos" "$ref_folder" || exit 1
 	fi
 	# END STEP 2.1 Reference genome indexing
@@ -1513,7 +1589,7 @@ while read vcf_f; do
 		# ... nor a variant index lacking a chromosome of its dataset (the reference FASTA of
 		# that name tells where it has sites), wherever the search opens it
 		if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ] || ! _enriched_genome_whole; then
-			_refuse_newer_index "$idx_var"
+			_check_index_format "$idx_var"
 		fi
 		if [ "${#array_fake_chroms[@]}" -gt 0 ] \
 			&& { [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ] || ! _enriched_genome_whole; }; then
@@ -1610,7 +1686,7 @@ while read vcf_f; do
 			fi
 			exit 1
 		fi
-		_refuse_newer_index "$indels_index_dir"
+		_check_index_format "$indels_index_dir"
 		# END STEP 2.3 - indels indexing
 	fi
 

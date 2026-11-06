@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Which guide lengths an index answers (index_fit.py), and that the search script, which
-has its own copy of the rule in bash, says the same in every measured cell. An index a
-newer CRISPRitz wrote (index format 2, CRISPRitz 2.9.2 and later: the magic "CZI" 0xFE,
-then the format version) holds no guide length this release reads: neither reads its
-version as one (a format-2 index read as built for a 2-nt guide, and refused as too short
-for any search), and the search script stops on it with one ERROR."""
+has its own copy of the rule in bash, says the same in every measured cell. An index of
+format 2 (CRISPRitz 2.10.0 and later: the magic "CZI" 0xFE, then the format version, and the
+guide length in its header) is read where the installed CRISPRitz reads it: its guide length
+from its header, never its version read as one (CRISPRme 2.8.1 refused every such index); where
+the installed CRISPRitz cannot (2.9.1), the search script stops on it with one ERROR that names
+both, as index_fit does (test_index_format2 has the rest)."""
 
+import atexit
 import os
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -45,14 +48,36 @@ def _bin2(folder, guide=20, version=2, name="NGG_chr1_1.bin"):
                  + struct.pack("=ii", 7, guide) + b"\0" * 8 + b"CZI\xfe")
 
 
-def _newer_index_error(index):
-    """What the search script prints on stderr, which a web job keeps in its log_error.txt,
-    when it stops on ``index``, made here in index format 2 (_bin2): its own
-    _refuse_newer_index, run on it."""
+def _old_engine(folder=None):
+    """A PATH that puts first a crispritz.py of CRISPRitz 2.9.1, which states no INDEX_FORMAT
+    (it reads index format 1 only), in ``folder`` (a temporary one of its own by default)."""
+    if folder is None:
+        folder = tempfile.mkdtemp(prefix="old_engine_")
+        atexit.register(shutil.rmtree, folder, True)
+    os.makedirs(folder, exist_ok=True)
+    stub = os.path.join(folder, "crispritz.py")
+    with open(stub, "w") as fh:
+        fh.write('#!/usr/bin/env python3\nVERSION = "2.9.1"\n')
+    os.chmod(stub, 0o755)
+    return folder + os.pathsep + os.environ.get("PATH", "")
+
+
+def _newer_index_refusal(index):
+    """(what the search script prints on stderr, which a web job keeps in its log_error.txt,
+    when it stops on ``index``, made here in index format 2 (_bin2), with CRISPRitz 2.9.1
+    installed: its own _check_index_format, run on it; and index_fit's text of it)."""
     _bin2(index)
-    script = _functions("_index_format", "_refuse_newer_index") + '\n_refuse_newer_index "$1"\n'
-    return subprocess.run(["bash", "-c", script, "bash", index], capture_output=True,
-                          text=True).stderr
+    path = _old_engine()
+    script = (_functions("_engine_index_format", "_unreadable_bin", "_check_index_format")
+              + '\n_check_index_format "$1"\n')
+    err = subprocess.run(["bash", "-c", script, "bash", index], capture_output=True, text=True,
+                         env=dict(os.environ, PATH=path)).stderr
+    saved = os.environ.get("PATH", "")
+    os.environ["PATH"] = path
+    try:
+        return err, index_fit.unreadable_format_error(index)
+    finally:
+        os.environ["PATH"] = saved
 
 
 class TheHeaderOfAnIndex(unittest.TestCase):
@@ -77,36 +102,44 @@ class TheHeaderOfAnIndex(unittest.TestCase):
             _bin(tmp, 20)
             self.assertEqual(index_fit.built_guide_len(tmp), 20)
 
-    def test_a_newer_index_format_is_said_not_misread(self):
-        """bytes 4..7 of a format-2 .bin are its version, 2: never a guide length."""
+    def test_a_format_2_index_is_read_and_refused_only_by_an_older_crispritz(self):
+        """bytes 4..7 of a format-2 .bin are its version, 2: never a guide length, which its
+        header holds. CRISPRitz 2.9.1 does not read the index: it is refused there, naming
+        both; with no crispritz.py on PATH to tell, it is not."""
         with tempfile.TemporaryDirectory() as tmp:
             index = os.path.join(tmp, "NGG_2_hg38")
-            _bin2(index)
-            self.assertIsNone(index_fit.built_guide_len(index))
-            self.assertTrue(index_fit.fits(index_fit.built_guide_len(index), 2, 20, 1, 1))
+            _bin2(index, guide=21)
+            self.assertEqual(index_fit.built_guide_len(index), 21)
             self.assertEqual(index_fit.bin_format(os.path.join(index, "NGG_chr1_1.bin")), 2)
-            self.assertEqual(index_fit.newer_bin(index),
+            saved = os.environ.get("PATH", "")
+            self.addCleanup(os.environ.__setitem__, "PATH", saved)
+            os.environ["PATH"] = os.path.join(tmp, "no_engine")
+            self.assertIsNone(index_fit.unreadable_format_error(index))
+            os.environ["PATH"] = _old_engine(os.path.join(tmp, "old"))
+            self.assertEqual(index_fit.unreadable_bin(index),
                              (os.path.join(index, "NGG_chr1_1.bin"), 2))
-            msg = index_fit.newer_format_error(index)
+            msg = index_fit.unreadable_format_error(index)
             self.assertEqual(msg, (
                 f"{index} was built by a newer CRISPRitz (NGG_chr1_1.bin is in index format 2, "
-                f"which CRISPRitz 2.9.2 and later write): this CRISPRme reads index format 1 "
-                f"only (CRISPRitz up to 2.9.1), and needs a newer release to search it. Use a "
-                f"CRISPRme that reads index format 2, or install CRISPRitz 2.9.1 and build the "
-                f"index again, with {index} moved out of the way first"))
+                f"which CRISPRitz 2.10.0 and later write) than the one installed here, "
+                f"CRISPRitz 2.9.1, which reads index format 1 only. Install the CRISPRitz this "
+                f"CRISPRme installs with (2.10.0 or later; the Docker image, "
+                f"install_from_source.sh and the Bioconda package carry it), or build the index "
+                f"again with the CRISPRitz installed here, with {index} moved out of the way "
+                f"first"))
             # an INDELS index holds one folder a chromosome
             indels = os.path.join(tmp, "NGG_2_hg38+ds_INDELS")
             os.makedirs(os.path.join(indels, "NGG_2_fakechr1"))
             _bin(os.path.join(indels, "NGG_2_fakechr1"), 20)
             _bin2(os.path.join(indels, "NGG_2_fakechr2"), name="NGG_fakechr2_1.bin")
-            self.assertEqual(index_fit.newer_bin(indels)[1], 2)
+            self.assertEqual(index_fit.unreadable_bin(indels)[1], 2)
             # a format-1 index, or none, is not refused
             plain = os.path.join(tmp, "NGG_3_hg38")
             os.makedirs(plain)
             _bin(plain, 20)
             self.assertEqual(index_fit.bin_format(os.path.join(plain, "NGG_chr1_1.bin")), 1)
-            self.assertIsNone(index_fit.newer_format_error(plain))
-            self.assertIsNone(index_fit.newer_format_error(os.path.join(tmp, "none")))
+            self.assertIsNone(index_fit.unreadable_format_error(plain))
+            self.assertIsNone(index_fit.unreadable_format_error(os.path.join(tmp, "none")))
 
 
 class ThePamFile(unittest.TestCase):
@@ -147,8 +180,8 @@ class TheScriptSaysTheSame(unittest.TestCase):
     """The bash copy of the rule, on an index folder, over a grid wider than the cells
     measured."""
 
-    HELPERS = _functions("_index_guide_len", "_index_fits_guide", "_index_format",
-                         "_refuse_newer_index")
+    HELPERS = _functions("_engine_index_format", "_index_guide_len", "_index_fits_guide",
+                         "_unreadable_bin", "_check_index_format")
 
     def script_says(self, folder, n, guide, bdna, brna):
         script = (f"pos=3\nfullseqpam={'N' * (guide + 3)}\nbDNA={bdna}\nbRNA={brna}\n"
@@ -175,24 +208,27 @@ class TheScriptSaysTheSame(unittest.TestCase):
     def run_helpers(self, folder, call):
         script = f"pos=3\nfullseqpam={'N' * 23}\nbDNA=1\nbRNA=1\n{self.HELPERS}\n{call}\n"
         return subprocess.run(["bash", "-c", script, "bash", folder], capture_output=True,
-                              text=True)
+                              text=True, env=dict(os.environ, PATH=_old_engine()))
 
-    def test_a_newer_index_format_is_not_read_as_a_guide_length(self):
-        """Up to this fix the script read a format-2 index as built for a 2-nt guide: it
+    def test_a_format_2_index_s_guide_length_is_read_not_its_version(self):
+        """Up to 2.8.1 the script read a format-2 index as built for a 2-nt guide (it
         stopped a search with 'NGG_2_hg38 was built for a 2-nt guide, and this search has a
-        20-nt guide with 1 DNA and 1 RNA bulge(s)...'."""
+        20-nt guide with 1 DNA and 1 RNA bulge(s)...'), then refused every such index: it
+        reads the header's guide length, and stops on the index only where the installed
+        CRISPRitz cannot read it, as index_fit says."""
         with tempfile.TemporaryDirectory() as tmp:
             index = os.path.join(tmp, "NGG_2_hg38")
-            _bin2(index)
+            _bin2(index, guide=19)
             out = self.run_helpers(index, '_index_guide_len "$1"')
-            self.assertEqual((out.returncode, out.stdout, out.stderr), (0, "", ""))
+            self.assertEqual((out.returncode, out.stdout, out.stderr), (0, "19", ""))
             out = self.run_helpers(index, '_index_fits_guide "$1" 2')
-            self.assertEqual((out.returncode, out.stdout, out.stderr), (0, "", ""))
-            out = self.run_helpers(index, '_refuse_newer_index "$1"; echo "went on"')
+            self.assertEqual((out.returncode, out.stdout, out.stderr), (1, "", ""))
+            err, msg = _newer_index_refusal(index)
+            out = self.run_helpers(index, '_check_index_format "$1"; echo "went on"')
             self.assertEqual(out.returncode, 1)
             self.assertEqual(out.stdout, "")
-            self.assertEqual(out.stderr, index_fit.newer_format_error(index).replace(
-                f"{index} was", f"ERROR: {index} was", 1) + "\n")
+            self.assertEqual(out.stderr, f"ERROR: {msg}\n")
+            self.assertEqual(err, out.stderr)
 
     def test_an_indels_index_with_a_newer_chromosome_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -200,7 +236,7 @@ class TheScriptSaysTheSame(unittest.TestCase):
             os.makedirs(os.path.join(indels, "NGG_2_fakechr1"))
             _bin(os.path.join(indels, "NGG_2_fakechr1"), 20)
             _bin2(os.path.join(indels, "NGG_2_fakechr2"), name="NGG_fakechr2_1.bin")
-            out = self.run_helpers(indels, '_refuse_newer_index "$1"')
+            out = self.run_helpers(indels, '_check_index_format "$1"')
             self.assertEqual(out.returncode, 1)
             self.assertIn("NGG_2_fakechr2/NGG_fakechr2_1.bin is in index format 2", out.stderr)
             self.assertEqual(out.stderr.count("ERROR: "), 1)
@@ -210,7 +246,7 @@ class TheScriptSaysTheSame(unittest.TestCase):
             index = os.path.join(tmp, "NGG_2_hg38")
             os.makedirs(index)
             _bin(index, 20)
-            out = self.run_helpers(index, '_refuse_newer_index "$1"; echo "went on"')
+            out = self.run_helpers(index, '_check_index_format "$1"; echo "went on"')
             self.assertEqual((out.returncode, out.stdout, out.stderr), (0, "went on\n", ""))
 
 

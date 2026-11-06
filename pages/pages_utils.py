@@ -1603,6 +1603,14 @@ def index_build_pam(index_dir: str) -> "tuple":
         return parts[0], int(parts[1]), int(parts[2])
     except (OSError, ValueError, IndexError):
         pass
+    # no sidecar, but an index of format 2 (CRISPRitz 2.10.0 and later): the header of its
+    # .bin files records the geometry it was built for (index_fit)
+    five_prime = index_fit.built_five_prime(index_dir)
+    if five_prime is not None:
+        width = len(os.path.basename(index_dir).split("_")[0])
+        guide = index_fit.built_guide_len(index_dir)
+        if guide:
+            return None, guide + width, -width if five_prime else width
     # no sidecar (e.g. an index built by the search pipeline, which doesn't write
     # one): recover the geometry from an installed PAM whose motif matches this
     # index's motif — correct for ANY shipped PAM including 5' Cas12a and 21bp

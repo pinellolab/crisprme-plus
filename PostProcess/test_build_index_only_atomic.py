@@ -63,8 +63,9 @@ target (the whole sequence), and none for a contig of N alone; one whose step's 
 holds $STUB_CUT it cuts to $STUB_CUT_TO bytes (half by default), and one whose key
 holds $STUB_NO_BIN it does not write, and still exits 0, as buildTST does on a full
 disk, or with the disk's inode table full; one whose key holds $STUB_FORMAT2 it writes
-in index format 2, as CRISPRitz 2.9.2 and later do (a header with the magic "CZI" 0xFE
-and the format version, then the body, then the magic again). add-variants pads the fake
+in index format 2, as CRISPRitz 2.10.0 and later do (a header with the magic "CZI" 0xFE
+and the format version, then the body, then the magic again), though this crispritz.py
+states no INDEX_FORMAT, as CRISPRitz 2.9.1's states none. add-variants pads the fake
 contig of chromosome $STUB_BIG_FAKE with a megabase of N (and this stub lifts any
 file-size limit of its own), and with $STUB_GZ_BLOCKED leaves a directory where the
 last dictionary's .gz would go.
@@ -381,6 +382,7 @@ if os.environ.get("STUB_PROBE_FULL"):
 
 if os.environ.get("STUB_TARGETS_A_TREE"):
     import importlib.util, sys
+    sys.path.append(os.path.dirname(os.environ["STUB_BINS"]))  # (its import of index_fit)
     _spec = importlib.util.spec_from_file_location("crispritz_bins", os.environ["STUB_BINS"])
     _bins = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_bins)
@@ -873,18 +875,21 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
                     self.assertEqual(self.bins(name), whole)
 
     def test_a_build_in_a_newer_index_format_is_not_put_in_place(self):
-        """A CRISPRitz newer than this release reads (2.9.2 and later) writes index format
-        2, whose first int32 is a magic, negative as a leaf count: the build was said to be
-        cut short, 'as when the disk fills up'. It is said to be in a format this release
-        does not read, and nothing goes into place (PKG-1)."""
+        """A CRISPRitz whose programs write index format 2, whose first int32 is a magic,
+        negative as a leaf count, while its crispritz.py states it reads format 1 only (no
+        INDEX_FORMAT, as 2.9.1's): the build was said to be cut short, 'as when the disk fills
+        up'. It is said to be in a format the installed CRISPRitz does not read, and nothing
+        goes into place (PKG-1). (A CRISPRitz that states format 2 has its index taken:
+        test_index_format2.)"""
         for name, (vcf, chr2, whole) in WHOLE.items():
             with self.subTest(index=name):
                 self.fresh()
                 rc, out, err = self.run_bio(vcf=vcf, STUB_FORMAT2=chr2)
                 self.assertEqual(rc, 1, out + err)
                 self.assertIn(f" indexing failed: the installed CRISPRitz wrote {whole[1]} in "
-                              f"index format 2, which CRISPRitz 2.9.2 and later write: this "
-                              f"CRISPRme reads index format 1 only (CRISPRitz up to 2.9.1). ",
+                              f"index format 2, and its crispritz.py says it reads index "
+                              f"format 1 only (its INDEX_FORMAT): its programs and its "
+                              f"crispritz.py come from two releases. Install CRISPRitz again: ",
                               err)
                 self.assertIn(f"nothing was put in place (expected {self.lib(name)})\n", err)
                 self.assertNotIn("not a tree", err)
@@ -892,10 +897,11 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
                 self.assertEqual(self.leftovers(), [])
 
     def test_an_index_a_newer_crispritz_built_is_refused_where_it_is_taken(self):
-        """An index of format 2 in place (one a newer CRISPRitz built, or downloaded for a
-        newer release): build-index-only kept it ('already present'), and a search read
-        its format version as the guide length it was built for, and refused it as 'built
-        for a 2-nt guide'. Each now stops with one ERROR that says what it is (PKG-1). So
+        """An index of format 2 in place (one a newer CRISPRitz than the installed one, which
+        reads format 1 only, built, or downloaded for a newer release): build-index-only
+        kept it ('already present'), and a search read its format version as the guide
+        length it was built for, and refused it as 'built for a 2-nt guide'. Each now stops
+        with one ERROR that says what it is and what the installed CRISPRitz reads (PKG-1). So
         does build-index-only on an INDELS index of format 2, which it kept ('Indels index
         already present') and ended done, though every search refuses it: one is left there
         by a search that built it with such a CRISPRitz, beside the reference and variant
@@ -918,7 +924,8 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
                 self.assertEqual(err.count("Error: "), 1, err)
                 self.assertTrue(err.startswith(
                     f"Error: {index} was built by a newer CRISPRitz ({first} is in index format "
-                    f"2, which CRISPRitz 2.9.2 and later write): "), err)
+                    f"2, which CRISPRitz 2.10.0 and later write) than the one installed here, "
+                    f"which reads index format 1 only. "), err)
                 self.assertNotIn(f"{kept[name]} already present", out)
                 self.assertNotIn("Variant index ready", out)
                 with open(os.path.join(index, first), "rb") as fh:  # (left as it is)
@@ -3111,6 +3118,7 @@ BEFORE = {
             "dir  genome_library/",
             "dir  genome_library/NRG_2_hg38/",
             "4983ff2823805684  genome_library/NRG_2_hg38/.display_label",
+            "d9f701cbadb490ab  genome_library/NRG_2_hg38/.index_meta.json",
             "425fad713f395627  genome_library/NRG_2_hg38/.pam_build",
             "d66362e6e632d716  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
             "dd9cec0f0c518aaa  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
@@ -3173,15 +3181,19 @@ BEFORE = {
             "dir  genome_library/",
             "dir  genome_library/NRG_2_hg38+ds/",
             "4983ff2823805684  genome_library/NRG_2_hg38+ds/.display_label",
+            "d9f701cbadb490ab  genome_library/NRG_2_hg38+ds/.index_meta.json",
             "425fad713f395627  genome_library/NRG_2_hg38+ds/.pam_build",
             "1ee8d75c82560b81  genome_library/NRG_2_hg38+ds/NRG_chr1_1.bin",
             "b27b5953fb0c4677  genome_library/NRG_2_hg38+ds/NRG_chr2_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
+            "d9f701cbadb490ab  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/.index_meta.json",
             "13a14310b8ce8302  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/",
+            "d9f701cbadb490ab  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/.index_meta.json",
             "103c77c7195d36be  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
             "dir  genome_library/NRG_2_hg38/",
+            "d9f701cbadb490ab  genome_library/NRG_2_hg38/.index_meta.json",
             "425fad713f395627  genome_library/NRG_2_hg38/.pam_build",
             "d66362e6e632d716  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
             "dd9cec0f0c518aaa  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
@@ -3261,15 +3273,19 @@ BEFORE = {
             "dir  genome_library/",
             "dir  genome_library/NRG_2_hg38+ds/",
             "4983ff2823805684  genome_library/NRG_2_hg38+ds/.display_label",
+            "d9f701cbadb490ab  genome_library/NRG_2_hg38+ds/.index_meta.json",
             "425fad713f395627  genome_library/NRG_2_hg38+ds/.pam_build",
             "1ee8d75c82560b81  genome_library/NRG_2_hg38+ds/NRG_chr1_1.bin",
             "b27b5953fb0c4677  genome_library/NRG_2_hg38+ds/NRG_chr2_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
+            "d9f701cbadb490ab  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/.index_meta.json",
             "13a14310b8ce8302  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/",
+            "d9f701cbadb490ab  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/.index_meta.json",
             "103c77c7195d36be  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
             "dir  genome_library/NRG_2_hg38/",
+            "d9f701cbadb490ab  genome_library/NRG_2_hg38/.index_meta.json",
             "425fad713f395627  genome_library/NRG_2_hg38/.pam_build",
             "d66362e6e632d716  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
             "dd9cec0f0c518aaa  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
@@ -3830,6 +3846,11 @@ class AFailedSearchEndsOnItsSummary(_Fixture):
         self.assertNotIn("Traceback", out)
 
 
+def _crisprme_version():
+    with open(CRISPRME) as fh:
+        return re.search(r'^version = "([^"]+)"', fh.read(), re.M).group(1)
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix."""
@@ -3837,7 +3858,9 @@ class SameTreeAsBefore(_Fixture):
     maxDiff = None
 
     def describe(self, rc, out, err):
-        normalize = ((self.work, "<W>"), (self.root, "<R>"), (REPO, "<REPO>"))
+        # (and the CRISPRme version an index records it was built by: .index_meta.json)
+        normalize = ((self.work, "<W>"), (self.root, "<R>"), (REPO, "<REPO>"),
+                     (f'"crisprme": "{_crisprme_version()}"', '"crisprme": "<V>"'))
 
         def lines(text):
             for path, label in normalize:

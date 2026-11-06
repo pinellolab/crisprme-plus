@@ -362,6 +362,26 @@ def _rebuild(raw_fakechrom, fasta):
               f"and --genome '{_outside_view(ref_folder)}' {rest}{again}")
 
 
+def _other_sub_indexes_format(sub):
+    """The index format of the .bin files of the other sub-indexes of the INDELS index
+    ``sub`` is a sub-index of (the newest, of the first that holds one), or None where none
+    holds a .bin: index-genome builds them all in one run, with one CRISPRitz."""
+    import index_fit
+
+    parent, own = os.path.split(os.path.normpath(sub))
+    try:
+        others = sorted(os.listdir(parent))
+    except OSError:
+        return None
+    for other in others:
+        if other != own and os.path.isdir(os.path.join(parent, other)):
+            formats = [f for f in index_fit.bin_formats(os.path.join(parent, other))
+                       if f is not None]
+            if formats:
+                return max(formats)
+    return None
+
+
 def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
     """``(True, why)`` when ``chrom``'s sub-index, which holds no .bin, holds no target
     either, so no indel off-target is the answer there; else ``(False, error)``, an
@@ -372,8 +392,10 @@ def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
     tells, read by buildTST's own rule (crispritz_bins, as build-index-only checks a
     build): when no contig of it holds a target of the index's own PAM (the search's,
     or the one a PAM-less index standing in for it was built with: _own_pam), a build
-    holds no .bin. Anything else may be a broken or partial build, and the search must
-    not pass it off as an empty result.
+    holds no .bin. The rule is that of the index format the sub-index was built in, which
+    it records (index_fit.write_index_meta), else that of the other sub-indexes' .bin
+    files, else that of format 2 (crispritz_bins.index_format). Anything else may be a
+    broken or partial build, and the search must not pass it off as an empty result.
     """
     if os.path.isfile(os.path.join(indexed_fakechrom, NO_TARGETS)):
         return True, (f"No {true_pam} target in the indels of {chrom}: skipping its indel "
@@ -397,7 +419,8 @@ def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
                     with open(built_with, "w") as fh:
                         fh.write(own[0] + "\n")
                 missing, unread = crispritz_bins.missing_bins(
-                    indexed_fakechrom, raw_fakechrom, built_with, int(bMax))
+                    indexed_fakechrom, raw_fakechrom, built_with, int(bMax),
+                    _other_sub_indexes_format(indexed_fakechrom))
             if not missing and not unread:
                 return True, (f"No {true_pam} target in the indels of {chrom}: skipping its "
                               f"indel search (its index holds no .bin, and {raw_fakechrom} "

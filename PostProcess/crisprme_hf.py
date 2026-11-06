@@ -47,6 +47,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import safe_tar  # (PostProcess/: each archive is unpacked with safe modes, owned by this user)
+import index_fit  # (PostProcess/: the index format of an index, and whether this install reads it)
 
 # Default HuggingFace dataset repo. Overridable per-invocation with --hf-repo or
 # the CRISPRME_HF_REPO environment variable (e.g. switch to a pinellolab org
@@ -1750,9 +1751,11 @@ def download_component(
                     mf = tf.extractfile("manifest.json")
                     if mf is not None:
                         meta = json.load(mf)
+                        fmt = meta.get("index_format")
                         sys.stderr.write(
                             f"Downloaded index {index_name} "
-                            f"(built {meta.get('created_at', 'unknown')})\n"
+                            f"(built {meta.get('created_at', 'unknown')}"
+                            + (f", index format {fmt}" if fmt else "") + ")\n"
                         )
                         label = meta.get("display_label")
                 except (KeyError, json.JSONDecodeError):
@@ -1813,6 +1816,15 @@ def download_component(
                     os.rename(dst, backup)  # move any existing index aside (same FS)
                 os.rename(src, dst)  # move the new one into place (atomic, same FS)
                 shutil.rmtree(backup, ignore_errors=True)
+            # an index in an index format the CRISPRitz installed here does not read (built
+            # by a newer one) is installed all the same, but every search refuses it, with
+            # these words: say so now, on STDOUT, rather than after a search is set up
+            for sub in (install_name, install_name + "_INDELS"):
+                _why = index_fit.unreadable_format_error(os.path.join(local_dir, sub))
+                if _why:
+                    sys.stdout.write(f"WARNING: {_why}. It is installed, and every search "
+                                     f"refuses it until then.\n")
+                    break
             # a variant index bundles its per-sample dictionaries (see publish_index):
             # install them into <workdir>/Dictionaries/ so the variant search finds
             # them without the source VCFs (same atomic swap as the index dirs above).
@@ -2239,6 +2251,22 @@ def publish_index(
     # #141 design): PAM / bulge / genome parsed from the folder name
     # <PAM>_<bMax+1>_<ref>, plus a UTC timestamp.
     manifest = {"name": index_name, "created_at": datetime.now(timezone.utc).isoformat()}
+    # the index format its .bin files are in (1: CRISPRitz up to 2.9.1; 2: 2.10.0 and later,
+    # which CRISPRme 2.8.1 refuses and 2.8.0 aborts on), and what it records it holds
+    # (index_fit.write_index_meta): what an archive card states of it. An index whose files
+    # differ in format was put together from two builds, and is not published.
+    formats = sorted(f for f in index_fit.bin_formats(index_dir) if f is not None)
+    if len(formats) > 1:
+        raise ValueError(
+            f"{index_dir} holds .bin files of index formats "
+            f"{' and '.join(map(str, formats))}: it was put together from two builds. Build "
+            f"it again with build-index-only, then publish it."
+        )
+    if formats:
+        manifest["index_format"] = formats[0]
+    index_meta = index_fit.read_index_meta(index_dir)
+    if index_meta:
+        manifest["index_meta"] = index_meta
     parts = index_name.rsplit("_", 2)
     if len(parts) == 3:
         manifest["pam"], manifest["index_bmax"], manifest["genome"] = (

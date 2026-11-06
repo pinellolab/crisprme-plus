@@ -397,9 +397,19 @@ jobs:
       - name: "CFD score tables validation (JSON structure/counts/anchors; the committed tables are the source of truth)"
         run: python scripts/generate_cfd_tables.py --check
 
-      - name: "Index fit (which guide lengths an index answers; the search script says the same; an index a newer CRISPRitz built is refused, not misread)"
+      - name: "Index fit (which guide lengths an index answers; the search script says the same; an index the installed CRISPRitz cannot read is refused, not misread)"
         working-directory: PostProcess
         run: python -m unittest test_index_fit -v
+
+      - name: "Index format 2 (CRISPRitz 2.10.0's indexes: whole-tree check, site rule by the index's own format, an empty index's record, the scan's preference, .index_meta.json)"
+        # CRISPRme 2.8.1 called every format-2 .bin "not a tree", applied format 1's site rule
+        # to any index (passing a lost .bin off as a contig with no target), read no guide
+        # length from one, and refused every such index. The trees are made as buildTST 2.10.0
+        # writes them and the site rule is checked against buildTST's own loops (ported);
+        # test/index_format2/check_real_engine.py checks both against the real engine, which
+        # this job does not have (run it in an image with the engine under test).
+        working-directory: PostProcess
+        run: python -m unittest test_index_format2 -v
 
       - name: "A search's own enrichment (SNP overlay of the fake-indel genome + phased indel genotype store)"
         working-directory: PostProcess
@@ -449,7 +459,7 @@ jobs:
           test_iupac_collapse_consistency test_hf_sha256sums
           test_indel_empty_chromosome -v
 
-      - name: "build-index-only leaves no partial index or enriched genome, and stops at a search's build lock (and on an index in a newer CRISPRitz format)"
+      - name: "build-index-only leaves no partial index or enriched genome, and stops at a search's build lock (and on an index in a format the installed CRISPRitz does not read)"
         # A later run takes an index directory or an enriched genome that is there for
         # a finished one. build-index-only builds each index in a hidden directory of
         # genome_library and renames it into place once the engine has succeeded, and
@@ -459,8 +469,8 @@ jobs:
         # fake-indel FASTA whole or not at all, and the build directories of runs that
         # are gone are reclaimed. While a search holds the build lock of an output it
         # would use or build, it stops with an ERROR, as it, and a search, do on an index in
-        # the format CRISPRitz 2.9.2 and later write (index format 2), which this release does
-        # not read. The real crisprme.py,
+        # an index format the installed CRISPRitz does not read (format 2, which CRISPRitz
+        # 2.10.0 and later write, under 2.9.1). The real crisprme.py,
         # pool_index_indels.py and overlay_indel_snps.py run against a stub engine on
         # PATH, and a successful build must leave the tree the code before the fix left.
         working-directory: PostProcess

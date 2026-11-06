@@ -69,6 +69,7 @@ import gzip
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -252,7 +253,10 @@ class SearchSide(_Fixture):
             d = os.path.join(idx, f"{true_pam}_3_fake{chrom}")
             os.makedirs(d)
             if has_bin:
-                open(os.path.join(d, f"{true_pam}_fake{chrom}_0.bin"), "w").close()
+                # (the head of a tree of index format 1, as the releases these tests stand
+                # for built: an empty sub-index is read by the rule of its siblings' format)
+                with open(os.path.join(d, f"{true_pam}_fake{chrom}_0.bin"), "wb") as fh:
+                    fh.write(struct.pack("=ii", 1, 20))
             if chrom in records:
                 with open(os.path.join(d, NO_TARGETS), "w") as fh:
                     fh.write("built, 0 targets\n")
@@ -899,7 +903,10 @@ class IndexSide(_Fixture):
                 self.assertEqual(res.stderr, "")
                 self.assertEqual(indexed, ["chrA", "chrB"])
                 self.assertEqual(self.recorded(), ["chrB"])
-                self.assertEqual(os.listdir(self.sub("chrB")), [NO_TARGETS])
+                # (with the record of what the sub-index holds, its index format among it,
+                # which a sub-index with no .bin records nowhere else: test_index_format2)
+                self.assertEqual(sorted(os.listdir(self.sub("chrB"))),
+                                 [".index_meta.json", NO_TARGETS])
                 with open(os.path.join(self.sub("chrB"), NO_TARGETS)) as fh:
                     self.assertEqual(fh.read(), (
                         "built, 0 targets: no window of fake_ds_chrB holds a target of pam.txt "
@@ -921,7 +928,7 @@ class IndexSide(_Fixture):
                                  "chrB": f">fakechrB\n{WITH_NRG}\n"}, STUB_NO_BIN="fakechrB")
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(self.recorded(), [])
-        self.assertEqual(os.listdir(self.sub("chrB")), [])
+        self.assertEqual(os.listdir(self.sub("chrB")), [".index_meta.json"])  # (its format)
         self.assertNotIn("target in the indels", res.stdout)
 
     def test_no_record_for_a_genome_read_otherwise_than_buildtst_reads_it(self):

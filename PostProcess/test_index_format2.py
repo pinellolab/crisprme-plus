@@ -1,0 +1,962 @@
+#!/usr/bin/env python3
+"""CRISPRme reads index format 2, the format CRISPRitz writes from 2.10.0.
+
+An index of format 2 (CRISPRitz's docs/INDEX_FORMAT.md) opens with a header -- the magic
+"CZI" 0xFE, the format version, the header's length, the flags, the guide length, the PAM
+length, the max bulges and the PAM -- and ends with the magic again; each target carries a
+flags byte where format 1 has a '0' or '_' marker; and it holds sites format 1 cannot: those
+whose guide lies within a few bases of a contig end or an N run (the pad may run off the
+contig or into an N), a PAM ending on a contig's last base, and, PAM-less, a flank partly off
+the contig. CRISPRme 2.8.1 read none of it:
+
+* crispritz_bins.bin_problem called every format-2 .bin "not a tree (numLeaves=-28747197)",
+  and _leaves returned the magic, so the full-part check never ran;
+* holds_target, count_targets and missing_bins applied the site rule of format 1 to any
+  index, which on a format-2 index passes a lost .bin off as a contig with no target; the
+  rule must be that of the format the index was built in, read from its own headers, not
+  from the installed CRISPRitz; an index with no .bin records its format;
+* index_fit read no guide length from a format-2 index, index_coverage checked nothing on
+  one, and every search refused one ("this CRISPRme reads index format 1 only"); a format-2
+  index must be refused only where the installed CRISPRitz cannot read it (2.9.1), naming
+  both, and an index scan must prefer one it can read over one it would stop on;
+* each index records what it holds (.index_meta.json: index format, build PAM, side, flank,
+  guide length).
+
+The trees here are made as buildTST 2.10.0 makes them (save_tst2, a port of saveTST), and the
+site rule is checked against buildTST's own loops (buildtst2_targets, a port of
+searchPAMonGenome and finishLeaf). test/index_format2/check_real_engine.py checks both
+against the real engine, where one is installed (not in this job: run it locally).
+
+Stdlib only.
+"""
+
+import json
+import os
+import random
+import shutil
+import stat
+import struct
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import crispritz_bins  # noqa: E402
+import index_coverage  # noqa: E402
+import index_fit  # noqa: E402
+import prune_flank  # noqa: E402
+
+MAGIC = b"CZI\xfe"
+# the four bits a tree or a flank gives a base (writePair, saveTST); Q is 1111 in a flank
+CODE = dict(zip("ACGTRYSWKMBDHVNQ", (1, 2, 4, 8, 5, 10, 6, 9, 12, 3, 14, 13, 11, 7, 0, 15)))
+
+
+def save_tst2(targets, pam, guide_len=20, max_bulges=2, at_start=False, q=False):
+    """A .bin of index format 2 as buildTST 2.10.0 writes one (insall, insert, saveTST and
+    serialize in CRISPRitz's mainParallel.cpp, ported): ``targets`` are (window start,
+    sequence, flank, leaf flags), sorted by sequence, all sequences of one length; the flags
+    are PAM_LEFT 0x40 | FLANK_OFF 0x20 | pad_valid, HAS_NEXT being added here. ``q``: the
+    file is flagged as holding the four-allele symbol Q."""
+    nodes, nexts = [], [0] * len(targets)  # a node: [base, lokid, hikid, eqkid]
+
+    def insert(seq, i):
+        k, p = 0, 0
+        while nodes:
+            node = nodes[p]
+            if seq[k] == node[0]:
+                k += 1
+                if k == len(seq):
+                    nexts[i], node[3] = node[3], -(i + 1)
+                    return
+                if not node[3]:
+                    node[3] = len(nodes)
+                    break
+                p = node[3]
+            else:
+                kid = 1 if seq[k] < node[0] else 2
+                if not node[kid]:
+                    node[kid] = len(nodes)
+                    break
+                p = node[kid]
+        while True:
+            nodes.append([seq[k], 0, 0, 0])
+            k += 1
+            if k == len(seq):
+                nodes[-1][3] = -(i + 1)
+                return
+            nodes[-1][3] = len(nodes)
+
+    def insall(lo, hi):
+        if hi >= lo:
+            mid = lo + (hi - lo) // 2
+            insert(targets[mid][1], mid)
+            insall(lo, mid - 1)
+            insall(mid + 1, hi)
+
+    insall(0, len(targets) - 1)
+    flags = (1 if at_start else 0) | (2 if set(pam) == {"N"} else 0) | (4 if q else 0)
+    out = bytearray(MAGIC + struct.pack("=6i", 2, 28 + len(pam), flags, guide_len, len(pam),
+                                        max_bulges) + pam.encode())
+    out += struct.pack("=ii", len(targets), guide_len)
+    for i, (ws, _, flank, lflags) in enumerate(targets):
+        out += struct.pack("=i", ws)
+        nibble, k = 0, 0
+        for j, base in enumerate(flank):
+            nibble, k = nibble + CODE[base], k + 1
+            if j == len(flank) - 1 or k == 2:
+                out.append(nibble)
+                nibble, k = 0, 0
+            if k == 1:
+                nibble <<= 4
+        out.append(lflags | (0x80 if nexts[i] else 0))
+        if nexts[i]:
+            out += struct.pack("=i", nexts[i])
+    out += struct.pack("=i", len(nodes))
+    pair, first = ["0", "0"], [True]
+    code = dict(CODE, **{"0": 0, "_": 15})
+
+    def put(base):
+        pair[0 if first[0] else 1] = base
+        if base == "_" or not first[0]:
+            out.append(0xF0 if pair[0] == "_" else code[pair[0]] << 4 | code[pair[1]])
+            first[0] = True
+        else:
+            first[0] = False
+
+    def serialize(p):
+        base, lo, hi, eq = nodes[p]
+        put(base)
+        serialize(lo) if lo > 0 else put("0")
+        serialize(hi) if hi > 0 else put("0")
+        if eq > 0:
+            serialize(eq)
+        else:
+            put("_")
+            out.extend(struct.pack("=i", eq))
+
+    serialize(0)
+    return bytes(out + MAGIC)
+
+
+def one_target_bin(path, pam, guide_len=20, max_bulges=2, at_start=False, fmt=2, leaves=1):
+    """A whole .bin of one target (or of ``leaves`` alike), in index format ``fmt``."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if fmt == 2:
+        data = save_tst2([(5, "ACGT", pam.replace("N", "A"), 0x02)] * leaves, pam, guide_len,
+                         max_bulges, at_start)
+    else:
+        data = struct.pack("=ii", leaves, guide_len) + b"\0" * 8
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return path
+
+
+def revcomp_pam(pam):
+    return pam.translate(crispritz_bins._REVERSE)[::-1]
+
+
+def buildtst2_targets(seq, pam, pam_len, at_start):
+    """The number of targets buildTST keeps in contig seq in index format 2:
+    searchPAMonGenome (pamGenerator.cpp), then siteWindow and finishLeaf (mainParallel.cpp)
+    of CRISPRitz 2.10.0, loop for loop, as slow as they are."""
+    k, n = len(pam), len(seq)
+    g = pam_len - k
+    if g < 1 or k < 1 or n < g + 1:
+        return 0
+    right_ok = lambda nt: g <= nt <= n - 1  # noqa: E731 - as the engine's lambdas
+    left_ok = lambda nt: nt + k - 1 >= 0 and nt + k + g <= n  # noqa: E731
+    sites = []
+    plus = [crispritz_bins._PAM_BITS[b] for b in pam]
+    if all(b == 15 for b in plus):
+        for nt in range(-(k - 1), n):
+            for shape in (("R", "L") if not at_start else ("L", "R")):
+                if (right_ok if shape == "R" else left_ok)(nt):
+                    sites.append((shape, nt))
+    else:
+        if n < k:
+            return 0
+        genome = [crispritz_bins._BITS.get(b, 0) for b in seq]
+        minus = [crispritz_bins._PAM_BITS[b] for b in revcomp_pam(pam)]
+        for nt in range(0, n - k + 1):
+            fp = all(genome[nt + j] & plus[j] for j in range(k))
+            fn = all(genome[nt + j] & minus[j] for j in range(k))
+            if not at_start:
+                sites += [("R", nt)] * (fp and right_ok(nt)) + [("L", nt)] * (fn and left_ok(nt))
+            else:
+                sites += [("L", nt)] * (fp and left_ok(nt)) + [("R", nt)] * (fn and right_ok(nt))
+    kept = 0
+    for shape, nt in sites:
+        start = nt - g if shape == "R" else nt + k
+        guide = "".join(seq[p] if 0 <= p < n else "N" for p in range(start, start + g))
+        kept += "N" not in guide
+    return kept
+
+
+def stub_engine(folder, version="2.10.0", index_format=2):
+    """A crispritz.py on a PATH folder of its own that says ``version`` and, unless None,
+    INDEX_FORMAT ``index_format``, as the real one does (CRISPRitz 2.9.1 states none)."""
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "crispritz.py")
+    with open(path, "w") as fh:
+        fh.write("#!/usr/bin/env python3\n# stub\n")
+        fh.write(f'VERSION = "{version}"\n')
+        if index_format is not None:
+            fh.write(f"INDEX_FORMAT = {index_format}\n")
+        fh.write("import sys\nsys.exit(0)\n")
+    os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return folder
+
+
+class _Engine(unittest.TestCase):
+    """A temporary folder, and an installed CRISPRitz of a given index format on PATH."""
+
+    def setUp(self):
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="fmt2_"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.addCleanup(os.environ.__setitem__, "PATH", os.environ.get("PATH", ""))
+
+    def engine(self, index_format=2, version=None):
+        """Put on PATH a CRISPRitz whose crispritz.py states ``index_format`` (None: none,
+        as 2.9.1's), or none at all with ``index_format`` False."""
+        path = [p for p in os.environ.get("PATH", "").split(os.pathsep)
+                if not p.startswith(os.path.join(self.tmp, "engine"))]
+        if index_format is not False:
+            folder = os.path.join(self.tmp, "engine%s" % len(os.listdir(self.tmp)))
+            stub_engine(folder, version or ("2.9.1" if index_format is None else "2.10.0"),
+                        index_format)
+            path.insert(0, folder)
+        os.environ["PATH"] = os.pathsep.join(path)
+        return os.environ["PATH"]
+
+
+class TheFormat2TreeIsTold(unittest.TestCase):
+    """bin_problem on trees as buildTST 2.10.0 saves them: of many targets, some of one
+    sequence, with shared starts and IUPAC bases, for PAMs of odd and even length, dedicated
+    and PAM-less, 3' and 5'. Each is whole, and each cut of it, at every length, is not."""
+
+    def test_every_cut_of_a_whole_format_2_tree_is_told_apart(self):
+        rng = random.Random(29)
+        tmp = tempfile.mkdtemp(prefix="fmt2_bins_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for pam, n, at_start in (("NRG", 40, False), ("TTTV", 25, True), ("NNNNNNNN", 3, False),
+                                 ("NGG", 2, False), ("NNNN", 9, True), ("NGG", 1, False)):
+            with self.subTest(pam=pam, targets=n):
+                seqs = ["".join(rng.choice("ACGTACGTRY") for _ in range(6)) for _ in range(n)]
+                seqs += seqs[: n // 4]
+                pamless = set(pam) == {"N"}
+                targets = sorted(((rng.randrange(-30, 1 << 20), s,
+                                   "".join(rng.choice("ACGTN") for _ in pam),
+                                   rng.choice((0, 0x40)) | rng.randrange(0, 3)
+                                   | (0x20 if pamless and rng.random() < 0.3 else 0))
+                                  for s in seqs), key=lambda t: t[1])
+                data = save_tst2(targets, pam, 6, 2, at_start)
+                path = os.path.join(tmp, f"{pam}_chr1_1.bin")
+                with open(path, "wb") as fh:
+                    fh.write(data)
+                self.assertIsNone(crispritz_bins.bin_problem(path))
+                self.assertEqual(crispritz_bins._leaves(path), len(targets))
+                for size in range(len(data)):
+                    with open(path, "wb") as fh:
+                        fh.write(data[:size])
+                    self.assertIsNotNone(crispritz_bins.bin_problem(path), size)
+
+    def test_what_searchtst_refuses_or_buildtst_never_writes_is_told(self):
+        tmp = tempfile.mkdtemp(prefix="fmt2_bad_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        good = [(3, "ACGTAC", "AGG", 0x02), (9, "ACGTTT", "TGG", 0x41)]
+        path = os.path.join(tmp, "NGG_chr1_1.bin")
+
+        def told(data, name=path):
+            with open(name, "wb") as fh:
+                fh.write(data)
+            return crispritz_bins.bin_problem(name)
+
+        self.assertIsNone(told(save_tst2(good, "NGG")))
+        # the four-allele flag (bit 2) is one CRISPRitz 2.10.0 writes; bit 3 is none
+        self.assertIsNone(told(save_tst2(good, "NGG", q=True)))
+        flagged = bytearray(save_tst2(good, "NGG"))
+        flagged[12] |= 8
+        self.assertIn("malformed index header", told(bytes(flagged)))
+        # more pad bases than the max bulges, and a flank off the contig of a dedicated PAM
+        self.assertEqual(told(save_tst2([(3, "ACGTAC", "AGG", 0x03)] + good[1:], "NGG")),
+                         "corrupt (target 0 of 2)")
+        self.assertEqual(told(save_tst2([good[0], (9, "ACGTTT", "TGG", 0x21)], "NGG")),
+                         "corrupt (target 1 of 2)")
+        self.assertIsNone(told(save_tst2([(3, "ACGTAC", "NNN", 0x22)], "NNN"),
+                               os.path.join(tmp, "NNN_chr1_1.bin")))
+        # a header PAM other than the file name's
+        self.assertIn("is named for 'NRG'", told(save_tst2(good, "NGG"),
+                                                 os.path.join(tmp, "NRG_chr1_1.bin")))
+        # a format newer than 2
+        newer = bytearray(save_tst2(good, "NGG"))
+        newer[4:8] = struct.pack("=i", 3)
+        self.assertIn("index format 3", told(bytes(newer)))
+
+    def test_a_format_1_tree_is_read_as_before(self):
+        """(the format-1 checks are TheIndexCheckTellsAWholeTreeFromOneCutShort's, in
+        test_build_index_only_atomic: here, that _leaves still reads its first int)"""
+        tmp = tempfile.mkdtemp(prefix="fmt1_bins_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = one_target_bin(os.path.join(tmp, "NGG_chr1_1.bin"), "NGG", fmt=1, leaves=7)
+        self.assertEqual(crispritz_bins._leaves(path), 7)
+
+
+class TheSiteRuleIsThatOfTheIndexsFormat(unittest.TestCase):
+    """holds_target and count_targets by the rule of format 2 agree with buildTST 2.10.0's
+    loops (buildtst2_targets) on random contigs of every kind (N runs, IUPAC codes, Q, sites
+    at either end and beside N runs) and the shipped PAMs, 3' and 5', PAM-less among them; and
+    a contig whose only site is one format 1 cannot hold is told apart."""
+
+    PAMS = ("NNNNNNNNNNNNNNNNNNNNNRG 3", "NNNNNNNNNNNNNNNNNNNNNGG 3", "NNNNNNNNNNNNNNNNNNNNNNN 3",
+            "TTTVNNNNNNNNNNNNNNNNNNNNNNN -4", "NNNNNNNNNNNNNNNNNNNNNNNGRRT 6",
+            "NNNNNNNNNNNNNNNNNNNNNNNNNNN -4", "NNNNNNNNNNNNNNNNNNNNNNNNNNNN 8")
+
+    def test_it_agrees_with_buildtst_2_10_on_random_contigs(self):
+        r = random.Random(13)
+        self.addCleanup(setattr, crispritz_bins, "_CHUNK", crispritz_bins._CHUNK)
+        held = 0
+        for case in range(3000):
+            motif, limit = r.choice(self.PAMS).split()
+            limit = int(limit)
+            pam = motif[:-limit] if limit < 0 else motif[-limit:]
+            bulges = r.randint(0, 3)
+            n = r.choice((r.randint(0, 40), r.randint(20, 60), r.randint(40, 300)))
+            mix = r.choice(("ACGT", "ACGT" * 6 + "N", "ACGTN", "ACGTNNNNRYSWKMBDHV",
+                            "ACGTNRYSWKMBDHVQ", "ACGTQ"))
+            seq = "".join(r.choice(mix) for _ in range(n))
+            if n > 10 and r.random() < 0.3:
+                a = r.randrange(n)
+                seq = seq[:a] + "N" * min(n - a, r.randint(1, 30)) + seq[a + 30:]
+            crispritz_bins._CHUNK = r.choice((1, 3, 1 << 20))
+            want = buildtst2_targets(seq, pam, len(motif), limit < 0)
+            held += want > 0
+            self.assertEqual(crispritz_bins.count_targets(seq, pam, len(motif), limit < 0,
+                                                          bulges, 2), want,
+                             (seq, motif, limit))
+            self.assertEqual(crispritz_bins.holds_target(seq, pam, len(motif), limit < 0, bulges,
+                                                         2), want > 0, (seq, motif, limit))
+        self.assertGreater(held, 600)
+        self.assertLess(held, 2600)
+
+    def test_a_site_only_format_2_holds(self):
+        """INDEX_FORMAT section 8's two contigs one target long: a + strand NGG site whose
+        PAM ends on the last base and whose pad runs off the start, and a - strand one whose
+        pad runs off the end. Format 1 holds neither, format 2 both; the bulges change
+        nothing in format 2."""
+        guide = "CTAACAGTTGCTTTTATCAC"
+        for seq in (guide + "TGG", "CCA" + guide):
+            for bulges in (0, 1, 2):
+                self.assertFalse(crispritz_bins.holds_target(seq, "NGG", 23, False, max(bulges, 1)))
+                self.assertTrue(crispritz_bins.holds_target(seq, "NGG", 23, False, bulges, 2))
+                self.assertEqual(crispritz_bins.count_targets(seq, "NGG", 23, False, bulges, 2), 1)
+        # next to an N run, and a guide holding an N, which no format keeps
+        self.assertTrue(crispritz_bins.holds_target("N" * 5 + guide + "TGG", "NGG", 23, False, 2, 2))
+        self.assertFalse(crispritz_bins.holds_target("N" + guide[1:] + "TGG", "NGG", 23, False, 0, 2))
+        # PAM-less: a window is kept when the flank base next to its guide is on the contig
+        # (one more base, a window on each strand), the rest of the flank may be off it
+        self.assertEqual(crispritz_bins.count_targets(guide, "NNN", 23, False, 2, 2), 0)
+        self.assertEqual(crispritz_bins.count_targets(guide + "A", "NNN", 23, False, 2, 2), 2)
+        self.assertEqual(crispritz_bins.count_targets("A" + guide + "A", "NNN", 23, False, 2, 2), 4)
+
+    def test_q_is_any_base(self):
+        guide = "CTAACAGTTGCTTTTATCAC"
+        self.assertTrue(crispritz_bins.holds_target("Q" + guide[1:] + "TQG", "NGG", 23, False, 0, 2))
+        self.assertEqual(crispritz_bins.count_targets("QQQ", "NGG", 3, False, 0, 2), None)
+
+
+class MissingBinsReadsTheIndexsOwnFormat(_Engine):
+    """missing_bins applies the site rule of the format the index was built in: from its own
+    .bin files, whatever CRISPRitz is installed; for a folder with none, from its record,
+    else from what its caller names (the format of the engine that has just built it, or of
+    the index's other sub-indexes), else format 2's."""
+
+    GUIDE = "CTAACAGTTGCTTTTATCAC"
+
+    def genome(self, contigs):
+        folder = os.path.join(self.tmp, "g")
+        os.makedirs(folder, exist_ok=True)
+        for name, seq in contigs.items():
+            with open(os.path.join(folder, f"{name}.fa"), "w") as fh:
+                fh.write(f">{name}\n{seq}\n")
+        pam = os.path.join(self.tmp, "pam.txt")
+        with open(pam, "w") as fh:
+            fh.write("NNNNNNNNNNNNNNNNNNNNNGG 3\n")
+        return folder, pam
+
+    def test_a_lost_bin_of_a_site_only_format_2_holds_is_found(self):
+        """chrE is one target long (a site at its end): a format-2 build holds it, a
+        format-1 build has no site there. With its .bin lost from a format-2 index, the
+        format-1 rule (2.8.1's) finds nothing missing; the index's own rule does, whichever
+        CRISPRitz is installed."""
+        genome, pam = self.genome({"chrA": "ACGT" * 10 + self.GUIDE + "AGG" + "ACGT" * 10,
+                                   "chrE": self.GUIDE + "TGG"})
+        index = os.path.join(self.tmp, "NGG_2_g")
+        one_target_bin(os.path.join(index, "NGG_chrA_1.bin"), "NGG")
+        for engine in (2, None, False):
+            with self.subTest(engine=engine):
+                self.engine(engine)
+                self.assertEqual(crispritz_bins.missing_bins(index, genome, pam, 2),
+                                 ([("chrE.fa", "chrE", 0, None)], []))
+        # a format-1 index of the same genome, whole (chrE has no site in format 1)
+        old = os.path.join(self.tmp, "NGG_2_old")
+        one_target_bin(os.path.join(old, "NGG_chrA_1.bin"), "NGG", fmt=1)
+        for engine in (2, None):
+            with self.subTest(engine=engine, index="format 1"):
+                self.engine(engine)
+                self.assertEqual(crispritz_bins.missing_bins(old, genome, pam, 2), ([], []))
+
+    def test_a_folder_with_no_bin_takes_its_record_then_its_callers_format(self):
+        genome, pam = self.genome({"chrE": self.GUIDE + "TGG"})
+        empty = os.path.join(self.tmp, "NGG_2_fakechrE")
+        os.makedirs(empty)
+        lost = ([("chrE.fa", "chrE", 0, None)], [])
+        self.assertEqual(crispritz_bins.missing_bins(empty, genome, pam, 2), lost)  # format 2's
+        self.assertEqual(crispritz_bins.missing_bins(empty, genome, pam, 2, 1), ([], []))
+        self.assertEqual(crispritz_bins.missing_bins(empty, genome, pam, 2, 2), lost)
+        for recorded, want in ((1, ([], [])), (2, lost)):
+            with open(os.path.join(empty, index_fit.INDEX_META), "w") as fh:
+                json.dump({"index_format": recorded}, fh)
+            # (the record wins over the caller's format)
+            self.assertEqual(crispritz_bins.missing_bins(empty, genome, pam, 2, 3 - recorded), want)
+
+    def test_a_full_last_part_of_format_2_is_counted(self):
+        """_leaves reads numLeaves after a format-2 header, so a contig whose last part is
+        full is counted (here a tree of buildTST holds 1 target)."""
+        genome, pam = self.genome({"chrA": self.GUIDE + "TGG" + "A" * 5 + "CCA" + self.GUIDE})
+        index = os.path.join(self.tmp, "NGG_2_g")
+        one_target_bin(os.path.join(index, "NGG_chrA_1.bin"), "NGG")
+        self.addCleanup(setattr, crispritz_bins, "TARGETS_A_TREE", crispritz_bins.TARGETS_A_TREE)
+        crispritz_bins.TARGETS_A_TREE = 1
+        self.assertEqual(crispritz_bins.missing_bins(index, genome, pam, 2),
+                         ([("chrA.fa", "chrA", 1, 2)], []))
+
+
+def _functions(*names):
+    """Those functions of the shipped search script, verbatim, as top-level functions."""
+    with open(os.path.join(HERE, "submit_job_automated_new_multiple_vcfs.sh")) as fh:
+        text = fh.read()
+    out = []
+    for name in names:
+        start = text.index(f"\t{name}() {{")
+        end = text.index("\n\t}\n", start) + len("\n\t}\n")
+        out.append("\n".join(line[1:] if line.startswith("\t") else line
+                             for line in text[start:end].splitlines()))
+    return "\n".join(out)
+
+
+def _shell():
+    """The search script's functions these tests run."""
+    return _functions("_engine_index_format", "_unreadable_bin", "_check_index_format",
+                      "_index_guide_len", "_index_side", "_index_fits_guide", "_resolve_index_dir")
+
+
+class _Index(_Engine):
+    def index(self, name, fmt=2, guide=20, at_start=False, contigs=("chr1",), mb=None):
+        """An index folder ``name`` (<PAM>_<N>_<genome>), each contig a whole .bin of one
+        target, in index format ``fmt``."""
+        pam, n = name.split("_")[:2]
+        folder = os.path.join(self.tmp, "lib", name)
+        for c in contigs:
+            one_target_bin(os.path.join(folder, f"{pam}_{c}_1.bin"), pam, guide,
+                           int(n) if mb is None else mb, at_start, fmt)
+        return folder
+
+    def shell(self, call, folder="", pam_line="NNNNNNNNNNNNNNNNNNNNNGG 3", bulges=(1, 1),
+              prune=0):
+        """``call`` run after the search script's functions, with its variables for a PAM
+        file of ``pam_line`` and these bulges, on the PATH the test set."""
+        seq, pos = pam_line.split()
+        script = (f"pos={pos}\nfullseqpam={seq}\nbDNA={bulges[0]}\nbRNA={bulges[1]}\n"
+                  f"prune_pam={prune}\n{_shell()}\n{call}\n")
+        return subprocess.run(["bash", "-c", script, "bash", folder], capture_output=True,
+                              text=True, env=dict(os.environ))
+
+
+class TheInstalledEngineSaysWhatItReads(_Engine):
+    """index_fit reads the index format the installed CRISPRitz reads from its crispritz.py
+    (INDEX_FORMAT, which CRISPRitz states from 2.10.0; 2.9.1 states none and reads format 1
+    only), and the search script reads the same."""
+
+    def test_from_its_crispritz_py(self):
+        for stated, version, fmt, readable in ((2, "2.10.0", 2, (1, 2)), (None, "2.9.1", 1, (1,)),
+                                               (False, None, None, (1, 2))):
+            with self.subTest(stated=stated):
+                self.engine(stated)
+                self.assertEqual(index_fit.engine_index_format(), fmt)
+                self.assertEqual(index_fit.engine_version(), version)
+                self.assertEqual(index_fit.readable_formats(), readable)
+                out = subprocess.run(["bash", "-c", f"{_shell()}\n_engine_index_format"],
+                                     capture_output=True, text=True, env=dict(os.environ))
+                self.assertEqual((out.stdout, out.stderr), (f"{fmt or 2}\n", ""))
+
+
+class AFormat2IndexIsReadNotRefused(_Index):
+    """A format-2 index is read: its guide length and its side from its header. It is
+    refused only where the installed CRISPRitz cannot read it, naming both; one of a format
+    newer than this CRISPRme reads, always. The search script says the same."""
+
+    def test_its_guide_length_and_side_come_from_its_header(self):
+        self.engine(2)
+        for guide, at_start in ((20, False), (21, False), (23, True)):
+            with self.subTest(guide=guide, at_start=at_start):
+                folder = self.index(f"{'TTTV' if at_start else 'NGG'}_2_g{guide}", guide=guide,
+                                    at_start=at_start)
+                self.assertEqual(index_fit.built_guide_len(folder), guide)
+                self.assertEqual(index_fit.built_five_prime(folder), at_start)
+                out = self.shell('_index_guide_len "$1"; echo; _index_side "$1"; echo "$?"', folder)
+                self.assertEqual((out.stdout, out.stderr),
+                                 (f"{guide}\n{5 if at_start else 3}\n0\n", ""))
+        old = self.index("NGG_2_old", fmt=1, guide=21)
+        self.assertEqual(index_fit.built_guide_len(old), 21)
+        self.assertIsNone(index_fit.built_five_prime(old))  # (format 1 records no side)
+        out = self.shell('_index_guide_len "$1"; echo; _index_side "$1"; echo "$?"', old)
+        self.assertEqual(out.stdout, "21\n3\n1\n")
+
+    def test_it_is_refused_only_where_the_installed_crispritz_cannot_read_it(self):
+        folder = self.index("NGG_2_g")
+        self.engine(2)
+        self.assertIsNone(index_fit.unreadable_format_error(folder))
+        out = self.shell('_check_index_format "$1"; echo went on', folder)
+        self.assertEqual((out.returncode, out.stdout, out.stderr), (0, "went on\n", ""))
+        self.engine(None)  # CRISPRitz 2.9.1
+        msg = index_fit.unreadable_format_error(folder)
+        self.assertEqual(msg, (
+            f"{folder} was built by a newer CRISPRitz (NGG_chr1_1.bin is in index format 2, "
+            f"which CRISPRitz 2.10.0 and later write) than the one installed here, CRISPRitz "
+            f"2.9.1, which reads index format 1 only. Install the CRISPRitz this CRISPRme "
+            f"installs with (2.10.0 or later; the Docker image, install_from_source.sh and the "
+            f"Bioconda package carry it), or build the index again with the CRISPRitz installed "
+            f"here, with {folder} moved out of the way first"))
+        out = self.shell('_check_index_format "$1"; echo went on', folder)
+        self.assertEqual((out.returncode, out.stdout, out.stderr), (1, "", f"ERROR: {msg}\n"))
+        # an INDELS index, one folder a chromosome
+        indels = os.path.join(self.tmp, "lib", "NGG_2_g+ds_INDELS")
+        one_target_bin(os.path.join(indels, "NGG_2_fakechr1", "NGG_fakechr1_1.bin"), "NGG", fmt=1)
+        one_target_bin(os.path.join(indels, "NGG_2_fakechr2", "NGG_fakechr2_1.bin"), "NGG")
+        self.assertIn("NGG_2_fakechr2/NGG_fakechr2_1.bin is in index format 2",
+                      index_fit.unreadable_format_error(indels))
+        out = self.shell('_check_index_format "$1"', indels)
+        self.assertEqual(out.stderr.count("ERROR: "), 1)
+        self.assertIn("NGG_2_fakechr2/NGG_fakechr2_1.bin is in index format 2", out.stderr)
+
+    def test_a_format_newer_than_this_crisprme_reads_is_always_refused(self):
+        folder = self.index("NGG_2_g")
+        path = os.path.join(folder, "NGG_chr1_1.bin")
+        with open(path, "r+b") as fh:
+            fh.seek(4)
+            fh.write(struct.pack("=i", 3))
+        for engine in (2, False):
+            with self.subTest(engine=engine):
+                self.engine(engine)
+                msg = index_fit.unreadable_format_error(folder)
+                self.assertEqual(msg, (
+                    f"{folder} was built by a newer CRISPRitz (NGG_chr1_1.bin is in index format "
+                    f"3): this CRISPRme reads index formats 1 and 2 (which CRISPRitz writes up to "
+                    f"2.9.1 and from 2.10.0), and needs a newer release to search it. Use a "
+                    f"CRISPRme that reads index format 3, or build the index again with the "
+                    f"CRISPRitz installed here, with {folder} moved out of the way first"))
+                out = self.shell('_check_index_format "$1"', folder)
+                self.assertEqual((out.returncode, out.stderr), (1, f"ERROR: {msg}\n"))
+                self.assertIsNone(index_fit.built_guide_len(folder))
+
+    def test_a_format_1_index_is_searched_with_a_note_once_the_engine_writes_format_2(self):
+        old = self.index("NGG_2_g", fmt=1)
+        self.engine(None)
+        out = self.shell('_check_index_format "$1"; echo went on', old)
+        self.assertEqual((out.returncode, out.stdout, out.stderr), (0, "went on\n", ""))
+        self.engine(2)
+        out = self.shell('_check_index_format "$1"; echo went on', old)
+        self.assertEqual((out.returncode, out.stderr), (0, ""))
+        self.assertEqual(out.stdout, (
+            "NOTE: NGG_2_g is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks "
+            "the sites whose guide lies within a few bases of a contig end or an N run, which an "
+            "index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). Build it again "
+            "with crisprme.py build-index-only, or download it again, to search them.\n"
+            "went on\n"))
+
+
+def _load_crisprme():
+    """crisprme.py's definitions, as test_bulge_cap loads them."""
+    import test_bulge_cap
+    return test_bulge_cap.crisprme
+
+
+class TheScanPrefersAnIndexTheEngineReads(_Index):
+    """PKG1-scan-takes-format2: of a library holding a format-2 NGG_2_toy and a format-1
+    NGG_3_toy, a 1/1 search took NGG_2_toy (the smaller N), which the installed CRISPRitz 2.9.1
+    cannot read, and stopped on it, where NGG_3_toy served. The search script's scan and
+    complete-search's (crisprme._index_the_search_takes) now take an index the installed
+    CRISPRitz reads first, and the one they would stop on only where no other serves."""
+
+    def test_the_search_script_and_complete_search_agree(self):
+        new = self.index("NGG_2_toy")
+        old = self.index("NGG_3_toy", fmt=1)
+        lib = os.path.dirname(new)
+        crisprme = _load_crisprme()
+        for engine, want in ((None, old), (2, new)):
+            with self.subTest(engine=engine):
+                self.engine(engine)
+                out = self.shell(f'_resolve_index_dir "$1" NGG toy 2', lib)
+                self.assertEqual((out.stdout, out.stderr), (want + "\n", ""))
+                self.assertEqual(crisprme._index_the_search_takes(
+                    [lib], "NGG", "toy", 2, False, True, 20, 1, 1, False), want)
+        shutil.rmtree(old)
+        self.engine(None)  # (the only one: taken, and the search stops on it)
+        self.assertEqual(self.shell(f'_resolve_index_dir "$1" NGG toy 2', lib).stdout, new + "\n")
+        self.assertEqual(crisprme._index_the_search_takes(
+            [lib], "NGG", "toy", 2, False, True, 20, 1, 1, False), new)
+
+
+class EachIndexRecordsWhatItHolds(_Index):
+    """An index records what it holds in .index_meta.json -- its index format, build PAM,
+    side, flank and guide length, max bulges -- each read from its own headers where they
+    hold it, else, for an index this run has just built, from its PAM file and the installed
+    CRISPRitz; an index with no .bin records its format nowhere else."""
+
+    def pam_file(self, line):
+        path = os.path.join(self.tmp, "pam.txt")
+        with open(path, "w") as fh:
+            fh.write(line + "\n")
+        return path
+
+    def test_a_format_2_index_records_its_header(self):
+        self.engine(2)
+        folder = self.index("TTTV_3_g", guide=23, at_start=True, contigs=("chr1", "chr2"))
+        # (a PAM file of another geometry does not overrule the header)
+        self.assertIsNone(index_fit.write_index_meta(
+            folder, self.pam_file("NNNNNNNNNNNNNNNNNNNNNNGG 3"), built=True))
+        self.assertEqual(os.listdir(folder).count(".index_meta.json"), 1)
+        self.assertEqual(index_fit.read_index_meta(folder), {
+            "index_format": 2, "build_pam": "TTTV", "side": "5'", "flank_len": 4,
+            "guide_len": 23, "max_bulges": 3, "pamless": False, "four_allele": False,
+            "built_by": {"crispritz": "2.10.0", "crisprme": crisprme_version()}})
+
+    def test_a_format_1_index_found_in_place_records_what_it_holds(self):
+        self.engine(2)
+        folder = self.index("NGG_2_g", fmt=1, guide=21)
+        self.assertIsNone(index_fit.write_index_meta(folder, self.pam_file("N" * 20 + "NGG 3")))
+        self.assertEqual(index_fit.read_index_meta(folder), {
+            "index_format": 1, "build_pam": "NGG", "flank_len": 3, "guide_len": 21,
+            "max_bulges": 2, "pamless": False, "four_allele": False})
+        # its side only where its .pam_build records it (format 1 stores none)
+        other = self.index("NNNN_2_h", fmt=1)
+        with open(os.path.join(other, ".pam_build"), "w") as fh:
+            fh.write("20bp-NNNN-x 24 -4\n")
+        index_fit.write_index_meta(other)
+        self.assertEqual(index_fit.read_index_meta(other)["side"], "5'")
+        self.assertTrue(index_fit.read_index_meta(other)["pamless"])
+
+    def test_one_with_no_bin_records_the_format_of_the_engine_that_built_it(self):
+        empty = os.path.join(self.tmp, "lib", "NGG_2_fakechr9")
+        os.makedirs(empty)
+        pam = self.pam_file("N" * 20 + "NGG 3")
+        self.assertIsNone(index_fit.write_index_meta(empty, pam))  # (found so: nothing to say)
+        self.assertIsNone(index_fit.read_index_meta(empty))
+        for engine, fmt in ((2, 2), (None, 1)):
+            with self.subTest(engine=engine):
+                self.engine(engine)
+                self.assertIsNone(index_fit.write_index_meta(empty, pam, built=True))
+                meta = index_fit.read_index_meta(empty)
+                self.assertEqual((meta["index_format"], meta["build_pam"], meta["side"],
+                                  meta["guide_len"], meta["max_bulges"]), (fmt, "NGG", "3'", 20, 2))
+                self.assertEqual(index_fit.recorded_format(empty), fmt)
+                self.assertEqual(crispritz_bins.index_format(empty), fmt)
+
+    def test_a_record_is_kept_by_a_run_that_did_not_build_the_index(self):
+        self.engine(2)
+        folder = self.index("NGG_2_g")
+        index_fit.write_index_meta(folder, built=True)
+        with open(os.path.join(folder, index_fit.INDEX_META)) as fh:
+            before = fh.read()
+        index_fit.write_index_meta(folder)
+        with open(os.path.join(folder, index_fit.INDEX_META)) as fh:
+            self.assertEqual(fh.read(), before)
+        self.assertIn("built_by", json.loads(before))
+
+    def test_the_record_is_a_dot_file_and_the_search_script_writes_it(self):
+        """crispritz.py search refuses an index folder that holds any other file but a .bin,
+        unless its name starts with a dot (CRISPRitz 2.9.1 and 2.10.0: an ERROR on stdout,
+        no targets file, exit 0), so the record is a dot file, as .pam_build is. The search
+        script records an index it builds (_record_index_side) through index_fit's command."""
+        self.assertTrue(index_fit.INDEX_META.startswith("."))
+        self.engine(2)
+        folder = self.index("NGG_2_g")
+        out = subprocess.run([sys.executable, os.path.join(HERE, "index_fit.py"), "meta", folder,
+                              self.pam_file("N" * 20 + "NGG 3")], capture_output=True, text=True)
+        self.assertEqual((out.returncode, out.stdout, out.stderr), (0, "", ""))
+        self.assertEqual(index_fit.read_index_meta(folder)["index_format"], 2)
+        self.assertIn('python "$starting_dir/index_fit.py" meta "$1" "$pam_file"',
+                      _functions("_record_index_side"))
+
+
+def crisprme_version():
+    with open(os.path.join(os.path.dirname(HERE), "crisprme.py")) as fh:
+        for line in fh:
+            if line.startswith("version = "):
+                return line.split('"')[1]
+
+
+class TheCoverageCheckReadsFormat2(_Index):
+    """index_coverage, which the search script runs on an index before it searches it and
+    build-index-only on one it finds in place, checked nothing on a format-2 index (it read
+    no guide length from it): it applies the rule of the index's format now, reads its side
+    from its header, and refuses a folder of two formats."""
+
+    GUIDE = "CTAACAGTTGCTTTTATCAC"
+
+    def genome(self):
+        folder = os.path.join(self.tmp, "Genomes", "g")
+        os.makedirs(folder)
+        for name, seq in (("chrA", "ACGT" * 10 + self.GUIDE + "AGG" + "ACGT" * 10),
+                          ("chrE", self.GUIDE + "TGG")):
+            with open(os.path.join(folder, f"{name}.fa"), "w") as fh:
+                fh.write(f">{name}\n{seq}\n")
+        return folder
+
+    def test_a_lost_tree_of_a_contig_only_format_2_holds_a_site_of(self):
+        genome = self.genome()
+        new = self.index("NGG_2_g", contigs=("chrA",))
+        self.assertEqual(index_coverage.problems(new, genome), [("chrE.fa", "no tree")])
+        old = self.index("NGG_2_h", fmt=1, contigs=("chrA",))  # (whole: chrE has no site)
+        self.assertEqual(index_coverage.problems(old, genome), [])
+
+    def test_its_side_is_its_headers(self):
+        """A 5' index of TTTV that records no side in a .pam_build: chrF holds a site of it,
+        read on the 5' side its header says, where a search's 3' PAM file would read none."""
+        genome = self.genome()
+        with open(os.path.join(genome, "chrF.fa"), "w") as fh:
+            fh.write(f">chrF\nTTTA{self.GUIDE}ACGT\n")
+        five = self.index("TTTV_2_five", contigs=("chrA",), at_start=True)
+        self.assertEqual(index_coverage.problems(five, genome, five_prime_search=False),
+                         [("chrF.fa", "no tree")])
+        self.assertFalse(crispritz_bins.holds_target(f"TTTA{self.GUIDE}ACGT", "TTTV", 24, False,
+                                                     2, 2))
+
+    def test_a_folder_of_two_formats_is_refused(self):
+        genome = self.genome()
+        mixed = self.index("NGG_2_g", contigs=("chrA",))
+        one_target_bin(os.path.join(mixed, "NGG_chrE_1.bin"), "NGG", fmt=1)
+        found = index_coverage.problems(mixed, genome)
+        self.assertEqual(found, [("", "holds trees of index formats 1 and 2, which no build "
+                                      "writes together: it was put together from two builds")])
+        self.assertEqual(index_coverage.message(mixed, found, "build it again."), (
+            f"index 'NGG_2_g' ({mixed}) holds trees of index formats 1 and 2, which no build "
+            f"writes together: it was put together from two builds: a tree of format 1 lacks "
+            f"the sites at contig ends and N runs that one of format 2 holds, and either build "
+            f"may lack trees of the other's FASTAs. Remove it (rm -rf '{mixed}') and build it "
+            f"again."))
+
+
+class AWideFlankOfFormat2NeedsNoWarning(_Index):
+    """A PAM-less index of format 2 was built since CRISPRitz kept a target whose flank
+    holds an N, and holds the PAMs within K - L nt of a contig end (B4): complete-search says
+    neither of it under --prune-pam, as it does of one of format 1."""
+
+    def test_no_note_and_no_warning(self):
+        genome = os.path.join(self.tmp, "Genomes", "g")
+        os.makedirs(genome)
+        with open(os.path.join(genome, "chr1.fa"), "w") as fh:
+            fh.write(">chr1\n" + "ACGT" * 20 + "N" * 30 + "ACGT" * 20 + "\n")
+        k8 = self.index("NNNNNNNN_3_g")
+        self.assertIs(prune_flank.built_before_n_fix(k8, genome), False)
+        indels = os.path.join(self.tmp, "lib", "NNNNNNNN_3_g+ds_INDELS")
+        one_target_bin(os.path.join(indels, "NNNNNNNN_3_fakechr1", "NNNNNNNN_fakechr1_1.bin"),
+                       "NNNNNNNN")
+        self.assertIs(prune_flank.indels_built_before_n_fix(indels), False)
+        crisprme = _load_crisprme()
+        self.assertEqual(crisprme._wider_flank_notes([k8], "NRG", genome), [])
+        old = self.index("NNNNNNNN_3_h", fmt=1)
+        notes = crisprme._wider_flank_notes([k8, old], "NRG", genome)
+        self.assertTrue(notes[0].startswith("NOTE [complete-search]: --prune-pam serves the 3-nt "
+                                            "PAM NRG from NNNNNNNN_3_h"), notes)
+        self.assertIn("nor has one built by CRISPRitz 2.10.0 or later (index format 2)", notes[0])
+
+
+import test_indel_empty_chromosome as empty  # noqa: E402  (its stub engine and harnesses)
+
+
+class AnEmptySubIndexRecordsItsFormat(empty._Fixture):
+    """pool_index_indels.py records a sub-index buildTST built with no target, by buildTST's
+    own rule: the rule of the format the installed CRISPRitz writes (the one that has just
+    built it), and the sub-index records that format, the only record of it there is. With
+    CRISPRitz 2.10.0 a fake-indel contig whose only site lies at its end holds a target: its
+    .bin missing is a lost one, not a build with no target (2.8.1 recorded it as one, by the
+    rule of format 1, and every search then skipped the chromosome's indels)."""
+
+    run_index = empty.IndexSide.run_index
+    sub = empty.IndexSide.sub
+    top = empty.IndexSide.top
+    recorded = empty.IndexSide.recorded
+    tearDown_dirs = empty.IndexSide.tearDown_dirs
+    # a fake-indel contig whose only NRG site's guide starts at its first base (its pad
+    # off the contig): a site of format 2, none of format 1
+    EDGE = "CTAACAGTTGCTTTTATCAC" + "AGG"
+
+    def engine_states(self, index_format):
+        """The stub engine's crispritz.py states INDEX_FORMAT ``index_format`` (None: none, as
+        CRISPRitz 2.9.1's)."""
+        shebang, _, rest = empty.STUB.partition("\n")
+        with open(os.path.join(self.bin, "crispritz.py"), "w") as fh:
+            fh.write(f"{shebang}\n" + (f"INDEX_FORMAT = {index_format}\n" if index_format else "")
+                     + rest)
+
+    def meta(self, chrom):
+        with open(os.path.join(self.sub(chrom), index_fit.INDEX_META)) as fh:
+            return json.load(fh)
+
+    def test_a_build_with_no_target_records_the_format_of_its_engine(self):
+        for fmt in (2, None):
+            with self.subTest(engine=fmt):
+                self.tearDown_dirs()
+                self.engine_states(fmt)
+                res, _ = self.run_index({"chrA": f">fakechrA\n{empty.WITH_NRG}\n",
+                                         "chrB": f">fakechrB\n{empty.NO_NRG}\n"},
+                                        STUB_NO_BIN="fakechrB")
+                self.assertEqual((res.returncode, res.stderr), (0, ""))
+                self.assertEqual(self.recorded(), ["chrB"])
+                self.assertEqual(sorted(os.listdir(self.sub("chrB"))),
+                                 [index_fit.INDEX_META, empty.NO_TARGETS])
+                self.assertEqual(self.meta("chrB")["index_format"], fmt if fmt == 2 else 1)
+                self.assertEqual((self.meta("chrB")["build_pam"], self.meta("chrB")["side"],
+                                  self.meta("chrB")["guide_len"]), ("NRG", "3'", 20))
+
+    def test_a_lost_bin_of_a_contig_only_format_2_holds_a_site_of_is_not_recorded(self):
+        self.engine_states(2)
+        res, _ = self.run_index({"chrA": f">fakechrA\n{empty.WITH_NRG}\n",
+                                 "chrB": f">fakechrB\n{self.EDGE}\n"}, STUB_NO_BIN="fakechrB")
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.recorded(), [])
+        self.assertNotIn("target in the indels", res.stdout)
+        # with CRISPRitz 2.9.1, which writes format 1, that contig holds no target
+        self.tearDown_dirs()
+        self.engine_states(None)
+        res, _ = self.run_index({"chrA": f">fakechrA\n{empty.WITH_NRG}\n",
+                                 "chrB": f">fakechrB\n{self.EDGE}\n"}, STUB_NO_BIN="fakechrB")
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.recorded(), ["chrB"])
+        self.assertEqual(self.meta("chrB")["index_format"], 1)
+
+
+@unittest.skipUnless(empty._gnu_sed(), "pool_search_indels.py merges with GNU `sed -i`, as the "
+                                       "pipeline image does")
+class ASearchReadsAnEmptySubIndexByItsFormat(empty._Fixture):
+    """pool_search_indels.py, on a sub-index with no .bin and no record of a build with no
+    target (one an earlier release built), reads its fake-indel genome by the rule of the
+    format the sub-index records, else that of the INDELS index's other sub-indexes, else
+    format 2's: a contig whose only site format 2 holds is a lost .bin in an index of
+    format 2, and none in one of format 1."""
+
+    run_search = empty.SearchSide.run_search
+    searched = empty.SearchSide.searched
+    fake = empty.SearchSide.fake
+    LOGS = {"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"], "chrB": ["chrB\t\trs2\t0.2\tC>CG\t5\tACGT"]}
+
+    def sibling(self, fmt):
+        """chrA's sub-index, holding a whole .bin of index format ``fmt``."""
+        one_target_bin(os.path.join(self.tmp, "work", "genome_library", "NRG_3_ref+ds_INDELS",
+                                    "NRG_3_fakechrA", "NRG_fakechrA_1.bin"), "NRG",
+                       max_bulges=3, fmt=fmt)
+
+    def test_by_the_format_of_the_other_sub_indexes(self):
+        for fmt, refused in ((1, False), (2, True)):
+            with self.subTest(sibling=fmt):
+                shutil.rmtree(os.path.join(self.tmp, "work"), ignore_errors=True)
+                shutil.rmtree(os.path.join(self.tmp, "out"), ignore_errors=True)
+                self.sibling(fmt)
+                res, _ = self.run_search(self.LOGS, {"chrB": False},
+                                         fakes={"chrB": AnEmptySubIndexRecordsItsFormat.EDGE})
+                if refused:
+                    self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+                    self.assertIn(f"{self.fake('chrB')}/fakechrB.fa holds a target of NRG: the "
+                                  f"index is incomplete", res.stderr)
+                else:
+                    self.assertEqual((res.returncode, res.stderr), (0, ""))
+                    self.assertIn("No NRG target in the indels of chrB: skipping its indel "
+                                  "search", res.stdout)
+
+    def test_by_its_own_record(self):
+        self.sibling(2)
+        sub = os.path.join(self.tmp, "work", "genome_library", "NRG_3_ref+ds_INDELS",
+                           "NRG_3_fakechrB")
+        os.makedirs(sub)
+        with open(os.path.join(sub, index_fit.INDEX_META), "w") as fh:
+            json.dump({"index_format": 1}, fh)
+        res, _ = self.run_search(self.LOGS, {}, fakes={"chrB": AnEmptySubIndexRecordsItsFormat.EDGE})
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertIn("No NRG target in the indels of chrB: skipping its indel search", res.stdout)
+
+
+import test_build_index_only_atomic as atomic  # noqa: E402  (its stub engine and fixture)
+
+# The stub engine of test_build_index_only_atomic, as CRISPRitz 2.10.0: its crispritz.py
+# states VERSION 2.10.0 and INDEX_FORMAT 2, and index-genome writes each .bin in index
+# format 2 (its one target's flags byte, where format 1 has its '0', holds the whole pad).
+STUB_2_10 = atomic.STUB_ENGINE.replace("\n", '\nVERSION = "2.10.0"\nINDEX_FORMAT = 2\n', 1).replace(
+    '''def note(line):''', '''def tst2(pam, guide, seq, nb):
+    """tst's .bin in index format 2: the header, then the body with the target's flags
+    byte in place of its '0', then the magic again."""
+    one, k = tst(pam, guide, seq), (len(pam) + 1) // 2
+    head = b"CZI\\xfe" + struct.pack("=6i", 2, 28 + len(pam), 2 if set(pam) == {"N"} else 0,
+                                    int(guide), len(pam), int(nb)) + pam.encode()
+    return head + one[:12 + k] + bytes([min(int(nb), 31)]) + one[13 + k:] + b"CZI\\xfe"
+
+
+def note(line):''', 1).replace(
+    '''        data = tst(pam, len(motif) - abs(size), seq)
+''', '''        data = tst2(pam, len(motif) - abs(size), seq, nb)
+''', 1)
+
+
+class BuildIndexOnlyTakesFormat2(atomic._Fixture):
+    """build-index-only with a CRISPRitz that writes index format 2 and says so: 2.8.1 refused
+    each index it built ("this CRISPRme reads index format 1 only"). The reference, variant
+    and INDELS indexes now go into place, each recording what it holds, and a search takes
+    them."""
+
+    @classmethod
+    def setUpClass(cls):
+        atomic.setUpModule()  # (its stub Bio package, which crisprme.py imports)
+        cls.addClassCleanup(atomic.tearDownModule)
+
+    def fresh(self):
+        super().fresh()
+        path = os.path.join(self.bin, "crispritz.py")
+        with open(path, "w") as fh:
+            fh.write(STUB_2_10.replace("#!PYTHON", "#!" + sys.executable, 1))
+        os.chmod(path, 0o755)
+
+    def test_its_indexes_go_into_place_and_record_their_format(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(err, "")
+        for name in (atomic.REF, atomic.VAR, atomic.INDELS):
+            bins = self.bins(name)
+            self.assertTrue(bins, name)
+            for b in bins:
+                path = os.path.join(self.lib(name), b)
+                self.assertEqual(index_fit.bin_format(path), 2, path)
+                self.assertIsNone(crispritz_bins.bin_problem(path), path)
+            folders = sorted({os.path.dirname(os.path.join(self.lib(name), b)) for b in bins})
+            for folder in folders:
+                meta = index_fit.read_index_meta(folder)
+                self.assertEqual({k: meta[k] for k in ("index_format", "build_pam", "side",
+                                                       "flank_len", "guide_len", "max_bulges")},
+                                 {"index_format": 2, "build_pam": "NRG", "side": "3'",
+                                  "flank_len": 3, "guide_len": 20, "max_bulges": 2}, folder)
+                self.assertEqual(meta["built_by"],
+                                 {"crispritz": "2.10.0", "crisprme": crisprme_version()})
+        # a search takes them: it stops at the stub's search, past every check of an index
+        rc, out, err = self.run_search()
+        with open(self.path("Results", "search", "log_error.txt")) as fh:
+            log = fh.read()
+        self.assertNotIn("was built by a newer CRISPRitz", log)
+        self.assertIn("stub crispritz.py: no search here", log)
+        # and a run that finds them in place keeps them, and their records
+        before = {n: index_fit.read_index_meta(self.lib(n)) for n in (atomic.REF, atomic.VAR)}
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("Reference index already present", out)
+        self.assertEqual({n: index_fit.read_index_meta(self.lib(n)) for n in before}, before)

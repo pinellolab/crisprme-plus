@@ -2086,9 +2086,13 @@ MAX_BULGES = 3
 
 
 def _built_three_prime(index_dir: str) -> bool:
-    """Whether index ``index_dir`` was built for a 3' PAM, as its .pam_build records
-    ("<name> <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM); one without it is taken for a
-    3' build, as the search shell's _index_side does."""
+    """Whether index ``index_dir`` was built for a 3' PAM, as the header of its .bin files
+    records (index format 2), else as its .pam_build records ("<name> <seq_len> <pam_pos>",
+    pam_pos < 0 for a 5' PAM); one without either is taken for a 3' build, as the search
+    shell's _index_side does."""
+    five_prime = index_fit.built_five_prime(index_dir)
+    if five_prime is not None:
+        return not five_prime
     try:
         with open(os.path.join(index_dir, ".pam_build")) as fh:
             return not int(fh.readline().split()[-1]) < 0
@@ -2097,8 +2101,12 @@ def _built_three_prime(index_dir: str) -> bool:
 
 
 def _recorded_three_prime(index_dir: str) -> "Optional[bool]":
-    """Whether index ``index_dir`` was built for a 3' PAM, as its .pam_build records it
-    ("<name> <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM); None without a usable one."""
+    """Whether index ``index_dir`` was built for a 3' PAM, as the header of its .bin files
+    records it (index format 2), else as its .pam_build does ("<name> <seq_len> <pam_pos>",
+    pam_pos < 0 for a 5' PAM); None without a usable one."""
+    five_prime = index_fit.built_five_prime(index_dir)
+    if five_prime is not None:
+        return not five_prime
     try:
         with open(os.path.join(index_dir, ".pam_build")) as fh:
             pos = int(fh.readline().split()[-1])
@@ -2322,8 +2330,10 @@ def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int,
                             variant: bool) -> "Optional[str]":
     """The index the search script's _resolve_index_dir takes for this search from the first
     of ``libs`` that holds one (the variant index is read from two: _variant_libraries), or
-    None: of <PAM>_<N>_<suffix> with N >= ``want``, the search's PAM ahead of an all-N one,
-    then one built for this very guide, then the smallest N, then the narrowest flank; an
+    None: of <PAM>_<N>_<suffix> with N >= ``want``, one in an index format this install
+    searches ahead of one it stops on (index_fit.unreadable_bin), then the search's PAM ahead
+    of an all-N one, then one built for this very guide, then the smallest N, then the
+    narrowest flank; an
     all-N one of the PAM's width, or wider under --prune-pam for a 3' PAM; of the search's
     side (_side_serves); not locked, with a .bin; and fitting the guide (index_fit; any
     fits a reference search with no bulges, which opens none). Best-effort: None on error."""
@@ -2351,7 +2361,8 @@ def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int,
                         (variant or bdna or brna)
                         and not index_fit.fits(built, int(n), guide_len, bdna, brna)):
                     continue
-                key = (exact, int(not built or built == guide_len), -int(n), -len(pam))
+                key = (int(index_fit.unreadable_bin(index) is None), exact,
+                       int(not built or built == guide_len), -int(n), -len(pam))
                 if best_key is None or key > best_key:
                     best, best_key = index, key
             if best:
@@ -2364,15 +2375,16 @@ def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int,
 def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[str]:
     """What a search under --prune-pam should say of the all-N indexes ``indexes`` it reads,
     whose stored flank is wider than the PAM ``motif`` (the others: nothing), one line each:
-    the sites such a flank cannot index (METHODS section 9), and, for an index built before
-    the engine kept a target whose flank holds an N (prune_flank), the sites it misses."""
+    the sites such a flank cannot index in index format 1 (METHODS section 9; format 2, which
+    CRISPRitz writes from 2.10.0, holds them), and, for an index built before the engine kept
+    a target whose flank holds an N (prune_flank), the sites it misses."""
     notes, seen = [], set()
     for index in indexes:
         pam = os.path.basename(index).split("_")[0]
         if not index or not pam or set(pam) != {"N"} or len(pam) <= len(motif) or index in seen:
             continue
         seen.add(index)
-        if not notes:
+        if not notes and 1 in index_fit.bin_formats(index):
             d = len(pam) - len(motif)
             notes.append(
                 f"NOTE [complete-search]: --prune-pam serves the {len(motif)}-nt PAM {motif} from "
@@ -2380,7 +2392,8 @@ def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[s
                 f"with 1 to {d} nt after it to the end of a contig, and a - strand PAM in the first "
                 f"{d} nt of a contig, are not indexed, and one {d} nt from the start is reported on "
                 f"the + strand at another position (METHODS section 9). An index whose flank is "
-                f"the PAM's width, or a dedicated one, has no such limit.")
+                f"the PAM's width, or a dedicated one, has no such limit, nor has one built by "
+                f"CRISPRitz 2.10.0 or later (index format 2).")
         try:
             if os.path.basename(index).count("+"):
                 before = prune_flank.indels_built_before_n_fix(index + "_INDELS") \
@@ -3791,6 +3804,18 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
         sys.stderr.write(f"Warning: could not write index PAM provenance: {exc}\n")
 
 
+def _write_index_meta(index_dir: str, pamfile: str) -> None:
+    """Records what index ``index_dir`` holds (index_fit.write_index_meta) where it has no
+    record yet: an index found in place, built before CRISPRme recorded it, or by
+    crispritz.py itself, or downloaded. A build records it as it builds (_build_index_dir);
+    of one found in place only what it holds itself is recorded. A record that cannot be
+    written is said on stdout, and the run goes on."""
+    if os.path.isdir(index_dir):
+        why = index_fit.write_index_meta(index_dir, pamfile)
+        if why:
+            print(f"Note: {why}", flush=True)
+
+
 def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
     """Stops build-index-only when ``index_dir``, an index already in place, was built for
     the other side of the guide from ``pamfile``, as its ``.pam_build`` records it.
@@ -3841,11 +3866,12 @@ def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
         )
 
 
-def _refuse_newer_build(index_dir: str) -> None:
-    """Stops build-index-only when ``index_dir`` is an index in place that a newer CRISPRitz
-    built (index_fit.newer_format_error): this CRISPRme does not read it, and every search
-    refuses it, so it is not kept as "already present". Never removed here."""
-    newer = index_fit.newer_format_error(index_dir) if os.path.isdir(index_dir) else None
+def _refuse_unreadable_build(index_dir: str) -> None:
+    """Stops build-index-only when ``index_dir`` is an index in place in an index format this
+    install does not search (index_fit.unreadable_format_error: built by a newer CRISPRitz
+    than this CRISPRme, or than the installed CRISPRitz, reads): every search refuses it, so
+    it is not kept as "already present". Never removed here."""
+    newer = index_fit.unreadable_format_error(index_dir) if os.path.isdir(index_dir) else None
     if newer:
         error(newer + ".")
 
@@ -3857,10 +3883,10 @@ def _refuse_short_build(index_dir: str, pamfile: str, bdna: int, brna: int) -> N
     said "already present" and recorded ``pamfile`` on it (_write_pam_build), which left a
     record that contradicts the index and a search of it that reports wrong alignments.
     The index ``pamfile`` asks for has the same name, so it needs another working
-    directory, or this one moved out of the way: never removed here. Nor is one a newer
-    CRISPRitz built kept (_refuse_newer_build): this CRISPRme does not read it.
+    directory, or this one moved out of the way: never removed here. Nor is one in an index
+    format this install does not search kept (_refuse_unreadable_build).
     """
-    _refuse_newer_build(index_dir)
+    _refuse_unreadable_build(index_dir)
     built = index_fit.built_guide_len(index_dir)
     guide = index_fit.pam_file_spacer(pamfile)
     n = int(os.path.basename(index_dir).split("_")[1])
@@ -4533,18 +4559,22 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
     takes genome_library's setgid group and default ACL, as one built in place
     does. Every path ``cmd`` names is absolute, so it resolves from there.
     ``failure`` is the error for a command that fails, or that exits 0 but leaves a
-    .bin that is not whole (crispritz_bins: buildTST does not check its writes, so a
-    full disk leaves one empty or cut short), or one in an index format this CRISPRme
-    does not read (index_fit.newer_bin: a CRISPRitz newer than 2.9.1 wrote it). buildTST does not check that a .bin
-    opened either: with the disk's inode table or a file-count quota full, it
-    writes none for the contigs left, or for the parts left of a contig it writes
-    in several, and still exits 0. So the run fails the same way when a contig that
-    holds a target has no .bin, or lacks a part (crispritz_bins.missing_bins), and,
+    .bin that is not whole (crispritz_bins: buildTST up to CRISPRitz 2.9.1 does not
+    check its writes, so a full disk leaves one empty or cut short), or one in an index
+    format this install does not search (index_fit.unreadable_bin). buildTST does not
+    check that a .bin opened either: with the disk's inode table or a file-count quota
+    full, it writes none for the contigs left, or for the parts left of a contig it
+    writes in several, and still exits 0. So the run fails the same way when a contig
+    that holds a target has no .bin, or lacks a part (crispritz_bins.missing_bins, by the
+    rule of the index format the engine wrote: a folder with no .bin, by that of the
+    format the installed engine writes), and,
     where such a contig is one missing_bins cannot read as buildTST does, when a
     directory of the index cannot take a file more once the command has ended:
     ``indexed`` is ``(pam_file, max_bulges, [(genome_dir, subdir)...])``, what ``cmd``
-    indexes, each genome into ``subdir`` of the index (None: no contig read). If a
-    search holds the index's build lock by then, the run stops
+    indexes, each genome into ``subdir`` of the index (None: no contig read). Each of
+    those directories gets the record of what it holds (index_fit.write_index_meta)
+    before the index goes into place. If a search holds the index's build lock by then,
+    the run stops
     (_refuse_locked_build); if another run has put the index in place meanwhile,
     that one is kept and this build discarded. With ``need_bin`` (the index of a
     genome, not of the fake-indel contigs, which may hold no site), it fails too
@@ -4566,14 +4596,22 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
         code = subprocess.call(cmd, cwd=tmp, **kwargs)
         if code != 0 or not os.path.isdir(built):
             error(f"{failure} (expected {final})")
-        newer = index_fit.newer_bin(built)
-        if newer:
+        unread = index_fit.unreadable_bin(built)
+        if unread:
+            wrote = (f"{failure}: the installed CRISPRitz wrote "
+                     f"{os.path.relpath(unread[0], built)} in index format {unread[1]}")
+            if unread[1] not in index_fit.READ_FORMATS:
+                error(
+                    f"{wrote}, which this CRISPRme does not read (it reads index formats 1 "
+                    f"and 2). Install the CRISPRitz this CRISPRme installs with, or use a "
+                    f"CRISPRme that reads index format {unread[1]}: nothing was put in place "
+                    f"(expected {final})"
+                )
             error(
-                f"{failure}: the installed CRISPRitz wrote {os.path.relpath(newer[0], built)} "
-                f"in index format {newer[1]}, which CRISPRitz 2.9.2 and later write: this "
-                f"CRISPRme reads index format 1 only (CRISPRitz up to 2.9.1). Install "
-                f"CRISPRitz 2.9.1, or use a CRISPRme that reads index format {newer[1]}: "
-                f"nothing was put in place (expected {final})"
+                f"{wrote}, and its crispritz.py says it reads index format "
+                f"{index_fit.engine_index_format()} only (its INDEX_FORMAT): its programs and "
+                f"its crispritz.py come from two releases. Install CRISPRitz again: nothing "
+                f"was put in place (expected {final})"
             )
         cut = crispritz_bins.incomplete_bins(built)
         if cut:
@@ -4585,7 +4623,8 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
         unread = indexed is None
         for genome_dir, subdir in indexed[2] if indexed else []:
             missing, cannot = crispritz_bins.missing_bins(
-                os.path.join(built, subdir), genome_dir, indexed[0], indexed[1])
+                os.path.join(built, subdir), genome_dir, indexed[0], indexed[1],
+                index_fit.engine_index_format())
             if missing:
                 fasta, contig, written, wanted = missing[0]
                 fasta = os.path.join(genome_dir, fasta)
@@ -4618,6 +4657,15 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
                     )
                 continue
             os.remove(probe)
+        # what each index holds, recorded in it before it goes into place: of an INDELS
+        # index, in each chromosome's sub-index, those with no .bin among them, whose
+        # record is the only one of the format they were built in
+        for _genome_dir, subdir in indexed[2] if indexed else []:
+            if os.path.isdir(os.path.join(built, subdir)):
+                why = index_fit.write_index_meta(os.path.join(built, subdir), indexed[0],
+                                                 built=True)
+                if why:
+                    print(f"Note: {why}", flush=True)
         _refuse_locked_build(final)
         if not os.path.isdir(final):
             try:
@@ -4795,6 +4843,7 @@ def build_index_only() -> None:
             if record_source:  # the folder it holds, as complete-search records it
                 stamp_index_source(workdir, genomedir, idx_folder)
     _write_pam_build(idx_folder, pamfile)
+    _write_index_meta(idx_folder, pamfile)
     if not vcf_given:
         _write_display_label(idx_folder, display_name)
         print(
@@ -5622,13 +5671,15 @@ def build_index_only() -> None:
                     and "_" not in _fk[len(f"fake_{vcf_name}_"):]]),
             )
     else:
-        # nor one a newer CRISPRitz built, as the reference and variant indexes are not
-        # (_refuse_short_build): a search that builds the INDELS index with one refuses it
-        # and leaves it, beside indexes of format 1. It is looked at here, where it is
-        # kept: one built while the SNP codes went on was removed above, to be built again.
-        _refuse_newer_build(indels_idx)
+        # nor one in an index format this install does not search, as the reference and
+        # variant indexes are not (_refuse_short_build): a search that builds the INDELS
+        # index with a newer CRISPRitz refuses it and leaves it, beside indexes of an older
+        # format. It is looked at here, where it is kept: one built while the SNP codes went
+        # on was removed above, to be built again.
+        _refuse_unreadable_build(indels_idx)
         print(f"Indels index already present: {indels_idx}", flush=True)
     _write_pam_build(snp_idx, pamfile)
+    _write_index_meta(snp_idx, pamfile)
     _write_display_label(snp_idx, display_name)
     # ADDITIVE: emit the combined samplesIDs/<vcf_name>.samplesID.txt for a MERGED
     # panel so a user who BUILDS + PUBLISHES their own merged index is self-complete

@@ -31,7 +31,8 @@ ncpus = sys.argv[7]
 # Cas12a's TTTV): buildTST writes no .bin, rightly, and CRISPRitz 2.9.1 refuses to
 # search an index directory without one, as it does a broken or partial build. This
 # file tells the two apart. index-genome removes the directory it rebuilds, record
-# and all, and crispritz.py search passes over a dot file.
+# and all, and crispritz.py search passes over a dot file. (Each sub-index also records
+# what it holds, its index format among it: index_fit.write_index_meta, _record_index.)
 NO_TARGETS = ".no_targets"
 
 
@@ -110,31 +111,38 @@ def _own_pam():
     return ("N" * guide + true_pam if n > 0 else true_pam + "N" * guide) + f" {n}", name
 
 
+def _sub_index(chrom):
+    """Where index-genome writes ``chrom``'s sub-index: its outer directory takes the PAM
+    of the PAM file, the sub-index the name given."""
+    return os.path.join(
+        "genome_library",
+        f"{_index_pam(build_pam)}_{bMax}_{ref_name}+{vcf_name}_INDELS",
+        f"{true_pam}_{bMax}_fake{chrom}",
+    )
+
+
 def _record_no_targets(chrom, fake_dir):
     """After index-genome has built ``chrom``'s sub-index: when it holds no .bin and
     no contig of the fake-indel genome holds a target, by buildTST's own rule (the
-    crispritz_bins check build-index-only makes), write NO_TARGETS into it. Nothing is
-    written for a sub-index with a .bin, nor for one whose genome holds a target (the
-    engine left out its .bin, as with the disk's inode table full: build-index-only
-    fails on it) or is read otherwise than buildTST reads it: a search refuses such a
-    sub-index. Returns the status of this step: 1 when the record could not be
-    written."""
+    crispritz_bins check build-index-only makes, by the rule of the index format the
+    installed CRISPRitz writes, the one that has just built it), write NO_TARGETS into
+    it. Nothing is written for a sub-index with a .bin, nor for one whose genome holds a
+    target (the engine left out its .bin, as with the disk's inode table full:
+    build-index-only fails on it) or is read otherwise than buildTST reads it: a search
+    refuses such a sub-index. Returns the status of this step: 1 when the record could
+    not be written."""
     try:
         import crispritz_bins
+        import index_fit
 
-        # where index-genome writes it: its outer directory takes the PAM of the PAM
-        # file, the sub-index the name given
-        sub = os.path.join(
-            "genome_library",
-            f"{_index_pam(build_pam)}_{bMax}_{ref_name}+{vcf_name}_INDELS",
-            f"{true_pam}_{bMax}_fake{chrom}",
-        )
+        sub = _sub_index(chrom)
         if any(f.endswith(".bin") for f in os.listdir(sub)):
             return 0
         # (index-genome indexes each .fa there, and none is not "no target")
         if not any(f.strip().split(".")[-1] == "fa" for f in os.listdir(fake_dir)):
             return 0
-        missing, unread = crispritz_bins.missing_bins(sub, fake_dir, build_pam, int(bMax))
+        missing, unread = crispritz_bins.missing_bins(sub, fake_dir, build_pam, int(bMax),
+                                                      index_fit.engine_index_format())
     except (ImportError, OSError, ValueError, IndexError):
         return 0
     if missing or unread:
@@ -188,8 +196,27 @@ def index_indels(chrom):
     )  # {indels_folder}/fake_{vcf_name}_{chrom}
     if not status:
         status = _record_no_targets(chrom, fake_dir)
+    if not status:
+        _record_index(chrom)
     print("Indexing ended for INDELs in", chrom, flush=True)
     return status
+
+
+def _record_index(chrom):
+    """Record in ``chrom``'s sub-index, which index-genome has just built, what it holds
+    (index_fit.write_index_meta): its index format among it, which a sub-index with no .bin
+    records nowhere else. A record that cannot be written is said on stdout."""
+    sub = _sub_index(chrom)
+    if not os.path.isdir(sub):
+        return
+    try:
+        import index_fit
+
+        why = index_fit.write_index_meta(sub, build_pam, built=True)
+    except (ImportError, OSError) as exc:
+        why = str(exc)
+    if why:
+        print(f"Indexing INDELs in {chrom}: {why}", flush=True)
 
 
 chrs = []

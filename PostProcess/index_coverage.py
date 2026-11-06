@@ -11,7 +11,8 @@ it finds "already present".
 
 buildTST writes no tree for a contig that holds no site of the PAM (all N, shorter than one
 window, no PAM), so a FASTA without a tree is missing only where it holds a site, by
-buildTST's own rule (crispritz_bins.holds_target); a contig with more sites than one tree
+buildTST's own rule (crispritz_bins.holds_target, by the rule of the index format the index
+was built in, as its trees' headers say); a contig with more sites than one tree
 takes several, ``<PAM>_<contig>_<1..n>.bin``, every one but the last full, so a gap in
 those numbers, or a full last tree of a contig that holds more, is a lost tree too
 (crispritz_bins.missing_bins reads a build the same way). The losing of a contig's last
@@ -39,10 +40,20 @@ import crispritz_bins
 import index_fit
 
 
+# How problems says that an index holds trees of more than one index format: index-genome
+# removes a folder before it builds into it, so no build leaves one, and docs/INDEX_FORMAT.md
+# (section 8) has such a folder rebuilt.
+_MIXED = "holds trees of index formats"
+
+
 def _five_prime(index_dir, five_prime_search):
-    """Whether ``index_dir`` was built for a 5' PAM: as its .pam_build records ("<name>
-    <seq_len> <pam_pos>"), else as the search's PAM file (``five_prime_search``) for a
-    dedicated index, and 3' for an all-N one (as the search script takes them)."""
+    """Whether ``index_dir`` was built for a 5' PAM: as the header of its trees records
+    (index format 2), else as its .pam_build records ("<name> <seq_len> <pam_pos>"), else as
+    the search's PAM file (``five_prime_search``) for a dedicated index, and 3' for an all-N
+    one (as the search script takes them)."""
+    side = index_fit.built_five_prime(index_dir)
+    if side is not None:
+        return side
     try:
         with open(os.path.join(index_dir, ".pam_build")) as fh:
             return int(fh.readline().split()[-1]) < 0
@@ -81,6 +92,11 @@ def problems(index_dir, genome_dir, five_prime_search=False, chroms=None):
     if not parts and others:
         return [("", f"its trees are named for {', '.join(sorted(others))}, not {pam}: the "
                      f"folder was renamed")]
+    formats = sorted(f for f in index_fit.bin_formats(index_dir) if f is not None)
+    if len(formats) > 1:
+        return [("", f"{_MIXED} {' and '.join(map(str, formats))}, which no build writes "
+                     f"together: it was put together from two builds")]
+    fmt = crispritz_bins.index_format(index_dir)
     if chroms is None:
         fastas = sorted(f for f in os.listdir(genome_dir) if f.strip().split(".")[-1] == "fa")
     else:
@@ -106,10 +122,12 @@ def problems(index_dir, genome_dir, five_prime_search=False, chroms=None):
         if contig is None:
             continue
         if not have:
-            if crispritz_bins.holds_target(contig[1], pam, guide + len(pam), at_start, int(n)):
+            if crispritz_bins.holds_target(contig[1], pam, guide + len(pam), at_start, int(n),
+                                           fmt):
                 found.append((fasta, "no tree"))
             continue
-        count = crispritz_bins.count_targets(contig[1], pam, guide + len(pam), at_start, int(n))
+        count = crispritz_bins.count_targets(contig[1], pam, guide + len(pam), at_start, int(n),
+                                             fmt)
         if count is not None and count > len(have) * crispritz_bins.TARGETS_A_TREE:
             found.append((fasta, f"trees after {max(have)} (its last tree is full, and it holds "
                                  f"{count} sites)"))
@@ -131,13 +149,19 @@ def vcf_chroms(vcf_dir):
 def message(index_dir, found, rerun):
     """The ERROR for index ``index_dir`` lacking ``found`` (``problems``), saying how to get
     it whole; ``rerun`` says what to run again once it is removed."""
+    name = os.path.basename(os.path.normpath(index_dir))
+    if found and not found[0][0] and found[0][1].startswith(_MIXED):
+        return (f"index '{name}' ({index_dir}) {found[0][1]}: a tree of format 1 lacks the "
+                f"sites at contig ends and N runs that one of format 2 holds, and either build "
+                f"may lack trees of the other's FASTAs. Remove it (rm -rf '{index_dir}') and "
+                f"{rerun}")
     if found and not found[0][0]:
         what = found[0][1]
     else:
         what = "lacks trees of FASTAs that hold sites of its PAM: " + "; ".join(
             f"{f} ({why})" for f, why in found[:6]) + (
             f"; and {len(found) - 6} more" if len(found) > 6 else "")
-    return (f"index '{os.path.basename(os.path.normpath(index_dir))}' ({index_dir}) {what}: a "
+    return (f"index '{name}' ({index_dir}) {what}: a "
             f"search of it would lose them with no error. It is a partial copy, or a build "
             f"stopped partway, or the genome folder has changed since it was built. Remove it "
             f"(rm -rf '{index_dir}') and {rerun}")
