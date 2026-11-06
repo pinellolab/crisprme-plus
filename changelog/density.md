@@ -40,7 +40,10 @@
    and readers tracks: what the post-analysis costs per raw row on a 2.10.0 index, not measured here
    (this CRISPRme, 2.8.1's reader, refuses the 2.10.0 indexes, format 2), and the measurement's
    advice that the dense path read the observed haplotypes once per window, not once per row,
-   which is not built here.
+   which is not built here. A scratch merge of this branch with the alleles track (91d6469) and the
+   format track (76d8451), never pushed, ran CRISPRitz 2.10.0 on a small genome holding twelve
+   four-allele positions in each of two windows of the README guide (ml003): both paths, both
+   modes, list them at 2^24 and 2^25 sequences, `n_variants` 12 and 13, `four_allele` 12.
 
 ### Added
 
