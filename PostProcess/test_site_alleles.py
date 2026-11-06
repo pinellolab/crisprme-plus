@@ -395,7 +395,7 @@ class _SnpPostAnalysis(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
     def analyse(self, ref, windows, values, tiers=True, keep_dict=False, mode="0",
-                mms=4, sites_only_vcf=None):
+                mms=4, sites_only_vcf=None, genotypes=True):
         fasta = os.path.join(self.tmp, "chrT.fa")
         with open(fasta, "w") as fh:
             fh.write(">chrT\n" + FLANK + ref + FLANK + "\n")
@@ -406,6 +406,8 @@ class _SnpPostAnalysis(unittest.TestCase):
             dict_path = os.path.join(ddir, "dictionaries_ds", "my_dict_chrT.json")
         elif tiers:
             dict_path = _build_tiers(self.tmp, values, keep_dict)
+            if not genotypes:  # the registry alone, as `download --no-genotypes` leaves it
+                shutil.rmtree(os.path.join(self.tmp, "Dictionaries", "genotypes_ds"))
         else:
             ddir = os.path.join(self.tmp, "Dictionaries", "dictionaries_ds")
             os.makedirs(ddir)
@@ -583,6 +585,21 @@ class TheFourAlleleCodeThroughThePostAnalysis(_SnpPostAnalysis):
         for r in rows:
             self.assertNotIn("_%d_" % _pos1(5), r[SNP], r)
         self.assertIn(("chrT_%d_A_G" % _pos1(9),), self.variant_rows(rows))
+
+    def test_a_window_whose_only_column_admits_none(self):
+        """The same Q, the window's only variant column, on the registry alone (no
+        dictionary, no Tier-1 store), where a row needs no carrier: population-level, the
+        post-analysis stopped (IndexError) on the entry naming no variant."""
+        values = {_pos1(5): [("C", "A", "rsA", "0.2", {"S": "1|0"}),
+                             ("C", "T", "rsT", "0.1", {"V": "1|1"})]}
+        ref = _site(c5="C")
+        for mode in ("0", "1"):
+            with self.subTest(mode=mode):
+                self.tmp = tempfile.mkdtemp(prefix="sa_q3_")
+                self.addCleanup(shutil.rmtree, self.tmp, True)
+                rows, _comp = self.analyse(ref, [_window(ref, {5: "Q"})], values,
+                                           mode=mode, genotypes=False)
+                self.assertEqual(self.variant_rows(rows), {})
 
 
 class TheDictionaryPathReadsTheColumn(_SnpPostAnalysis):

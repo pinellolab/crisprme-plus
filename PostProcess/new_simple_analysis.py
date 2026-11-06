@@ -1151,9 +1151,14 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                     if any_v is not None:
                         greedy_info = list(any_v[2])
                         greedy_samples = set(any_v[1])
-                totalDict[count][0] = {
-                    ("greedy", 0): [greedy_seq, greedy_samples, greedy_info]
-                }
+                # No column of the window admitted an alt (each code a neighbouring
+                # position's, #139): no variant row, as without the cap. On a
+                # registry-only install, where a row needs no carrier, an entry naming no
+                # variant stopped the post-analysis (IndexError below).
+                totalDict[count][0] = (
+                    {("greedy", 0): [greedy_seq, greedy_samples, greedy_info]}
+                    if greedy_info else {}
+                )
                 # WORST-CASE CFD representative (mirrors the observed fast path,
                 # new_simple_analysis.py:700). The min-mismatch greedy above does NOT
                 # maximize CFD (CFD is a position-WEIGHTED product -- a seed mismatch
