@@ -24,7 +24,8 @@ and the `release-crisprme` skill.
     site of a reference or SNP row that starts near the anchor. README guide, HGDP + 1000
     Genomes: chr22:21052642 (−) of 2.8.1, a CFD-0 alignment of T>TCACC at 21052640, 4 bases
     from the reference row at 21052638 (−), is now 21052639, one of that row's alternative
-    alignments, and the reference row's `Other_motifs` goes 2 → 3.
+    alignments, and the reference row's `Other_motifs` goes 2 → 3 (2 again with the SNP-row fix
+    below, which takes off that site's SNP-only alternative alignment).
   - Within a site, the alignments that name the same variants with the same carriers are one
     entry, the best: one target's alignments with different bulges, as on every row. The merge
     compares indel rows there at their cluster position on the haplotype carrying the indel,
@@ -50,9 +51,10 @@ and the `release-crisprme` skill.
     such a second copy in the README search per-sample, 1 of 228 rows population-level and 22
     of 444 (251 and 193) with the TRAC guide per-sample, all at CFD 0.004 or less; per-sample,
     every other one is still listed, as a row or an alternative alignment.
-  - The same search on chr22, released 2.8.1 image against 2.8.2: per-sample, 1,574 → 1,573
-    integrated rows and 3,756 → 3,757 alternative alignments (21052642 joins 21052638's site;
-    that site's two alternative alignments go 1 → 2 and the moved row, now one of them, loses
+  - The same search on chr22, released 2.8.1 image against 2.8.2 without the SNP-row fix (the
+    last entry below, which gives the counts with it): per-sample, 1,574 → 1,573 integrated
+    rows and 3,756 → 3,757 alternative alignments (21052642 joins 21052638's site; that site's
+    two alternative alignments go 1 → 2 and the moved row, now one of them, loses
     `Not_found_in_REF`, its site having a reference row); population-level, 2,198 → 2,197 rows
     (a population-level run writes no alternative alignments). NRR, per-sample: 3,987 → 3,985
     and 11,581 → 11,583, 21052642 and 33175772 (+), now 33175769, joining the reference rows'
@@ -69,12 +71,12 @@ and the `release-crisprme` skill.
     `data/observed_haplotypes.tsv`) and the plots, and the companions that give a row's start
     (`offtarget_start`): the SNP+indel co-occurrence companion (`*.indel_snp_cooc.tsv`) and, on
     a sites-only (mega) index, the per-dataset indel frequency companion (`*.indel_af.tsv`).
-    NRG per-sample: the 1,292 samples listed on 21052642 count one target and one created PAM
-    fewer (the row joined 21052638's site, and its PAM is not created, below), and the other
-    2,799 samples one target fewer in their population or super-population. The co-occurrence
-    companions and `observed_haplotypes.tsv` of the chr22 searches above are unchanged; in the
-    SNP+indel oracle the 197 co-occurrence lines of Z3, which starts inside an insertion, go
-    from 15702, 15703 and 15704 to 15699.
+    NRG per-sample, without the SNP-row fix: the 1,292 samples listed on 21052642 count one
+    target and one created PAM fewer (the row joined 21052638's site, and its PAM is not
+    created, below), and the other 2,799 samples one target fewer in their population or
+    super-population. The co-occurrence companions and `observed_haplotypes.tsv` of the chr22
+    searches above are unchanged; in the SNP+indel oracle the 197 co-occurrence lines of Z3,
+    which starts inside an insertion, go from 15702, 15703 and 15704 to 15699.
 
 ### Fixed
 - **An indel row whose first base is one an insertion adds is placed at the insertion**
@@ -101,11 +103,12 @@ and the `release-crisprme` skill.
     21052642 joining 21052638's site (above); NRR, per-sample, 11 (8 integrated rows and 3
     alternative alignments, among them 44115947 (+), which now starts at 44115944 or 44115946,
     the anchors of two long insertions it lies in). Every other row is unchanged but for the
-    columns the other fixes and the merge above change, and a gene distance that moves with a
-    start. The self-test (`complete-test --chrom chr22 --vcf_dataset 1000G`, then
-    `validate-test`: 6 passed, 0 failed, 0 skipped): in `cas9_sg1617` 2 of 632 rows move
-    (21052642 → 21052639, whose SNP goes 24 → 22, and 17434488 → 17434485); its other 630 rows
-    and the other benchmarks' tables are unchanged.
+    columns the other fixes and the merge above change, a gene distance that moves with a
+    start, and the SNP rows and carriers the SNP-row fix below takes off. The self-test
+    (`complete-test --chrom chr22 --vcf_dataset 1000G`, then `validate-test`: 6 passed, 0
+    failed, 0 skipped): in `cas9_sg1617` 2 of 632 rows move (21052642 → 21052639, whose SNP
+    goes 24 → 22, and 17434488 → 17434485); its other 630 rows and the other benchmarks'
+    tables are unchanged.
   - Found from a 2.8.0 alternative alignment at chr22:22322768, the 7th base of
     G>GCAATCATTAT at 22322762. That row also paired the insertion's only carrier with four SNP
     alleles other individuals carry, which 2.8.1 already fixed: the row is gone.
@@ -206,26 +209,41 @@ and the `release-crisprme` skill.
     junction at or past the target's edge), nor when it inserts before the first base or after
     the last. Whether the bases change is read on the haplotype's own bases: a repeat unit gained
     or lost at the target's edge leaves them, and the carrier stays. A phased carrier is decided
-    by its haplotype (an indel on the other haplotype takes nothing off); one homozygous for the
-    indel leaves the row; one whose indel call is unphased cannot be tied to a haplotype and
-    stays, PUTATIVE. An indel at the position of a SNP the row names is another allele of that
-    base, a phasing artefact, and takes no carrier off. A row left with no carrier is not
-    reported. Population-level searches are unchanged (their rows are worst-case composites).
+    by its haplotype (an indel on the other haplotype takes nothing off); one homozygous for an
+    indel that changes the bases leaves the row; one whose indel call is unphased cannot be tied
+    to a haplotype and stays, PUTATIVE. An indel at the position of a SNP the row names is
+    another allele of that base, a phasing artefact, and takes no carrier off. A row left with
+    no carrier is not reported. Population-level searches are unchanged (their rows are
+    worst-case composites), and so is a search with `CRISPRME_INDEL_SNP=0`, the opt-out of the
+    SNP+indel co-occurrence: it does not read the store, and its SNP rows list their carriers
+    as 2.8.1's do.
   - README guide, HGDP + 1000 Genomes, NRG, 4 mismatches + 1 + 1, per-sample (2.8.1 output,
     checked against haplotypes rebuilt from the phased VCF): genome-wide, 280 of 65,184
     highest-CFD SNP rows of the integrated results listed such carriers (28,700 listings,
     13,525 of them carriers homozygous for the indel), and 208 had no other carrier (none at
-    CFD ≥ 0.2, highest 0.112); 210 of 39,752 alternative alignments (24,145 listings), 152 with no other
-    carrier. TRAC guide: 157 of 49,841 rows (30,340 listings), 97 with no other carrier (highest
-    CFD 0.049). chr22 alone: 3 rows and 7 alternative alignments. After the fix, checked the same
-    way genome-wide: none, but for 2 listings whose indel sits at the position of the row's SNP
-    (a phasing artefact, kept as at an indel row's own position).
+    CFD ≥ 0.2, highest 0.112); 210 of 39,752 alternative alignments (24,145 listings), 152 with
+    no other carrier. TRAC guide: 157 of 49,841 rows (30,340 listings), 97 with no other carrier
+    (highest CFD 0.049). chr22 alone: 3 rows and 7 alternative alignments. After the fix,
+    checked the same way genome-wide: none, but for 2 listings whose indel sits at the position
+    of the row's SNP (a phasing artefact, kept as at an indel row's own position).
+  - The same search on chr22, released 2.8.1 image against 2.8.2, per-sample: 1,574 → 1,570
+    integrated rows and 3,756 → 3,753 alternative alignments (without this fix, 1,573 and
+    3,757). This fix takes off the rows at 26806221 (−), 27144006 (+) and 30569221 (−), and the
+    alternative alignments at 21052638 (−), 27795808 (−), 42848613 (−) and 44756100 (+), whose
+    `Other_motifs` go down by one; none of their listed carriers has the target. At 21052638 it
+    is 2, as in 2.8.1, not the 3 it is without this fix: 21052639 (the row 2.8.1 placed at
+    21052642, now at its insertion's anchor) takes the place of the SNP-only alignment of
+    21052641 G>A. One row (24441929 (+)) and 3 alternative alignments list fewer carriers. The
+    summaries by guide and by sample, `observed_haplotypes` and `phase_confirmation` follow;
+    the dense-window BED and the co-occurrence tables are unchanged.
   - Cost (per-sample searches only): the SNP post-analysis reads the indels of the store near
-    each chromosome's SNP targets (839,234 of its 17.2 million genome-wide, 3 to 40 s a
+    each chromosome's SNP targets (839,234 of its 17.2 million genome-wide, 3 to 46 s a
     chromosome, in parallel) and reads a carrier's bases only where it holds one that changes a
-    target, once per case. Genome-wide, run beside 2.8.1 on one host: the SNP post-analysis took
-    9 min 11 s (2.8.1: 9 min 32 s), its largest worker 2.03 GB (1.83 GB; a median of +0.1 GB a
-    chromosome); chr22: 43 s (37 to 38 s).
+    target, once per case. Genome-wide, side by side on one host, the SNP post-analysis took
+    14 min 21 s against 13 min 42 s without this fix (+5%), less than the spread between runs
+    on that host (9 min 11 s with this fix and 9 min 32 s for 2.8.1 at other times); its
+    largest worker 2.03 GB (1.83 GB; a median of +0.1 GB a chromosome); chr22: 43 s (37 to
+    38 s).
   - Covered by `PostProcess/test_snp_row_indel_carriers.py` and the SNP+indel oracle, which now
     checks every per-sample SNP row's carriers against their haplotypes and plants sites Y1-Y4
     (cis, trans, homozygous, unphased, a G run at the target's edge, an always-cis SNP): d7a6fff

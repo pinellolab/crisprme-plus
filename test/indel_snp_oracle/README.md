@@ -1,11 +1,12 @@
 # SNP+indel oracle (synthetic, real CLI)
 
 `run_oracle.sh <empty work dir> [<oracle dir>] [cas12a]` runs inside a CRISPRme image. It
-generates a 17 kb reference chromosome and a phased VCF of 63 samples (`oracle.py
+generates an 18.5 kb reference chromosome and a phased VCF of 78 samples (`oracle.py
 generate`), builds the indexes and dictionaries with `build-index-only`, runs
 `complete-search` with `--per-sample` and with `--population-level`, then checks every row
 whose variant list holds an indel or an MNV (`oracle.py check`) against each sample's two
-haplotypes built from the VCF, and runs the ALT-PAM and no-N release gate
+haplotypes built from the VCF, and the carriers of every per-sample SNP-only row ("SNP rows"
+below), and runs the ALT-PAM and no-N release gate
 (`scripts/check_alt_pam.py`) on both results. It exits non-zero on any failure; CI runs it
 in `validate-benchmarks.yml`, with both profiles: SpCas9 (3' PAM NRG, the sites below) and
 `cas12a` (5' PAM TTTV, the C sites further below).

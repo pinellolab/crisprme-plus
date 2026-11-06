@@ -10,7 +10,8 @@ the row, read on the phased indel genotype store as the 2.8.1 rule reads an inde
 second indel:
 
   * phased: decided by the haplotype (cis: off the row; trans: stays);
-  * homozygous for the indel: on every haplotype, off the row;
+  * homozygous for an indel that changes the target's bases: on every haplotype, off
+    the row;
   * an unphased heterozygous indel (or SNP) call: stays, PUTATIVE;
   * an indel leaving the target's bases as they are (a repeat unit at the target's
     edge) or whose deleted bases all lie outside it (its junction at the edge), or an
@@ -18,7 +19,8 @@ second indel:
   * an indel at the position of a SNP the row names: another allele of that base, a
     phasing artefact, stays;
   * a row left with no carrier is not reported;
-  * population-level: unchanged.
+  * population-level, and CRISPRME_INDEL_SNP=0 (the opt-out of the SNP+indel
+    co-occurrence): the store is not read, unchanged.
 
 Covered here on both per-sample paths (the observed-haplotype path of the dict-less
 tiers and the dictionary path), through the AST harness of test_phased_haplotype, plus
@@ -29,12 +31,15 @@ Run with:
     cd PostProcess && python3 -m unittest test_snp_row_indel_carriers -v
 """
 
+import ast
+import contextlib
 import gzip
 import io
 import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 PP = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PP)
@@ -411,6 +416,68 @@ class RunTimeWiring(unittest.TestCase):
             _write_store(store, [(_edge_del(), {"S1": "1|0"})])  # changes nothing
             st = ns["_SnpRowIndels"](store, spans, 500)
             self.assertEqual(ns["_snp_indel_frame_keys"](st, spans, "chrT"), set())
+
+
+class OptOutGate(unittest.TestCase):
+    """_read_snp_row_indels, which the run calls before the dictionary: it reads the store
+    in a per-sample search only. CRISPRME_INDEL_SNP=0, the opt-out of the SNP+indel
+    co-occurrence, turns this off too (None: no SNP row loses a carrier, as in 2.8.1), as
+    does a population-level search. The function sits past the harness's cut (it runs in
+    the module body), so it is taken from the source by name."""
+
+    def _reader(self, fast):
+        src = os.path.join(PP, "new_simple_analysis.py")
+        with open(src) as fh:
+            tree = ast.parse(fh.read())
+        node = [n for n in tree.body
+                if isinstance(n, ast.FunctionDef) and n.name == "_read_snp_row_indels"]
+        self.assertEqual(len(node), 1)
+        ns = _load_pure_functions({})
+        exec(compile(ast.Module(body=node, type_ignores=[]), src, "exec"), ns)
+        ns.update(current_chr="chrT", _FAST_MODE=fast)
+        return ns["_read_snp_row_indels"]
+
+    def _read(self, env, fast=False):
+        with tempfile.TemporaryDirectory() as d:
+            dicts = os.path.join(d, "Dictionaries", "dictionaries_hg38_X")
+            store = os.path.join(d, "Dictionaries", "indel_genotypes_hg38_X")
+            os.makedirs(dicts)
+            os.makedirs(store)
+            _write_store(os.path.join(store, "gt_indel_chrT.tsv.gz"),
+                         [(_ins_inside(), {"S1": "1|0"})])
+            argv = ["new_simple_analysis.py", "chrT.fa",
+                    os.path.join(dicts, "my_dict_chrT.json")]
+            keys = set()
+            with mock.patch.dict(os.environ, env, clear=False), \
+                    mock.patch.object(sys, "argv", argv), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                if "CRISPRME_INDEL_SNP" not in env:
+                    os.environ.pop("CRISPRME_INDEL_SNP", None)
+                got = self._reader(fast)([(LO, HI)], keys)
+            return got, keys
+
+    def test_read_by_default(self):
+        got, keys = self._read({})
+        self.assertIsNotNone(got)
+        self.assertEqual(len(got), 1)
+        self.assertTrue(keys)  # the frame around the target the insertion changes
+
+    def test_on_values(self):
+        for value in ("1", "true", "True", "yes"):
+            with self.subTest(CRISPRME_INDEL_SNP=value):
+                self.assertIsNotNone(self._read({"CRISPRME_INDEL_SNP": value})[0])
+
+    def test_opt_out_turns_it_off(self):
+        for value in ("0", "false", "no", ""):
+            with self.subTest(CRISPRME_INDEL_SNP=value):
+                got, keys = self._read({"CRISPRME_INDEL_SNP": value})
+                self.assertIsNone(got)
+                self.assertEqual(keys, set())
+
+    def test_population_level_does_not_read_it(self):
+        got, keys = self._read({}, fast=True)
+        self.assertIsNone(got)
+        self.assertEqual(keys, set())
 
 
 class Constants(unittest.TestCase):

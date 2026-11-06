@@ -412,15 +412,18 @@ store the indel post-analysis reads (§4, SNP+indel), as an indel row's second i
   haplotype whose indel pushes a named SNP out of the stretch, or deletes its base, has its
   target thanks to the indel, not the SNP;
 - a phased carrier is decided by its haplotype: one whose indel is on the other haplotype
-  stays. One homozygous for the indel holds it on every haplotype and leaves the row.
+  stays. One homozygous for an indel that changes the bases holds it on every haplotype and
+  leaves the row (one homozygous for an indel that leaves them as they are stays, as above).
   Otherwise one whose indel call or SNP call is unphased cannot be tied to a haplotype and
-  stays, PUTATIVE, as every carrier on an unphased panel is. An indel at the position of a SNP the
-  row names is another allele of that base (a VCF writes a haplotype holding both as one
-  record), so a haplotype phased with both is a phasing artefact, and it stays; a
+  stays, PUTATIVE, as every carrier on an unphased panel is. An indel at the position of a
+  SNP the row names is another allele of that base (a VCF writes a haplotype holding both as
+  one record), so a haplotype phased with both is a phasing artefact, and it stays; a
   haplotype whose bases cannot be read (an indel there whose slot is unknown, two records
   of one base) leaves the row;
 - a row left with no carrier is not reported. The population-level analysis (§5) is
-  unchanged: its rows are worst-case composites.
+  unchanged: its rows are worst-case composites. With `CRISPRME_INDEL_SNP=0`, the opt-out of
+  the SNP+indel co-occurrence, the store is not read, and a SNP row lists its carriers as up
+  to 2.8.1.
 
 On chr22 of the HGDP + 1000 Genomes panel, the README guide, NRG, 4 mismatches + 1 + 1, per
 sample, up to 2.8.1 3 of 628 highest-CFD SNP rows of the integrated results and 7 of 399 of
@@ -1337,11 +1340,12 @@ leaves out equal-length multi-base records (MNVs), so their carriers are resolve
 phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
 among its 195,813 indel-search records. Since 2.8.2 a per-sample SNP row does not list a
 carrier whose haplotype holding its SNPs also holds an indel that changes the target's bases
-(§4); up to 2.8.1 it did. What remains: an MNV inside the target, which the phased indel
-store does not hold (the HGDP + 1000 Genomes index has none); a carrier whose indel call is
-unphased, which stays listed, PUTATIVE; a dense window reported by its greedy worst case on
-an index without the dict-less tiers (§5), whose carriers need not carry every variant in it;
-and the population-level analysis, whose rows are worst-case composites.
+(§4); up to 2.8.1 it did, and so it does with `CRISPRME_INDEL_SNP=0`. What remains: an MNV
+inside the target, which the phased indel store does not hold (the HGDP + 1000 Genomes index
+has none); a carrier whose indel call is unphased, which stays listed, PUTATIVE; a dense
+window reported by its greedy worst case on an index without the dict-less tiers (§5), whose
+carriers need not carry every variant in it; and the population-level analysis, whose rows
+are worst-case composites.
 On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists of the results
 tables are not in the order of its `Variant_info_genome`: the merge of a cluster's rows
 (`remove_contiguous_samples.py`) sorts the three lists each on its own, as text, and keeps

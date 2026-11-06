@@ -3,7 +3,8 @@
 #   run_oracle.sh <empty work dir> [<oracle dir>] [cas12a]
 # generates the synthetic phased genome + VCF (oracle.py generate), builds its
 # indexes and dictionaries with build-index-only, runs complete-search per-sample and
-# population-level, then checks every indel row against the per-haplotype truth
+# population-level, then checks every indel row, and the carriers of every per-sample
+# SNP-only row, against the per-haplotype truth
 # (oracle.py check) and the ALT-PAM and no-N release gate (scripts/check_alt_pam.py).
 # The default profile plants SpCas9 sites (3' PAM NRG); "cas12a" plants Cas12a sites
 # (5' PAM TTTV) whose first base is one an insertion adds.
