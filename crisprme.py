@@ -4596,7 +4596,7 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
         code = subprocess.call(cmd, cwd=tmp, **kwargs)
         if code != 0 or not os.path.isdir(built):
             error(f"{failure} (expected {final})")
-        unread = index_fit.unreadable_bin(built)
+        unread = index_fit.unreadable_bin(built, every=True)
         if unread:
             wrote = (f"{failure}: the installed CRISPRitz wrote "
                      f"{os.path.relpath(unread[0], built)} in index format {unread[1]}")
