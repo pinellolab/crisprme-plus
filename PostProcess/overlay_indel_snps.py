@@ -29,9 +29,11 @@ import shutil
 import stat
 import tempfile
 
-# The 15 non-ACGT / non-N IUPAC ambiguity codes the enricher writes for SNPs. A
-# base is "SNP-carrying" in the enriched genome iff it is one of these.
-_IUPAC_AMBIG = set("RYSWKMBDHVryswkmbdhv")
+# The non-ACGT / non-N codes the enricher writes for SNPs: the IUPAC ambiguity codes, and
+# Q at a position whose reference base and SNP ALTs hold all four bases (CRISPRitz
+# 2.10.0; N is a gap, never written for a variant). A base is "SNP-carrying" in the
+# enriched genome iff it is one of these.
+_IUPAC_AMBIG = set("RYSWKMBDHVQryswkmbdhvq")
 
 # The enricher's fixed left-flank width (enricher.py:302, start_position = POS-26,
 # indel applied at sub_fasta[25:]).

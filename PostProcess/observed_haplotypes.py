@@ -38,18 +38,22 @@ individual carries) are EXCLUDED by construction: a variant-set key only exists 
 real sample produced exactly it. The output size is therefore bounded by the number of
 DISTINCT observed sets -- at most ~ploidy * n_carriers -- NOT 2^k.
 
-MULTIALLELIC ALT-INDEX RESOLUTION (blocker fix)
------------------------------------------------
-The tiers store one biallelic (pos, alt) record per alt, but the round-tripped GT
-strings may carry a FOREIGN alt index at a multiallelic site (e.g. a carrier of altB
-whose stored genotype is ``"1|2"``). ``population_summary.parse_haplotypes`` alone
-would test slot tokens against the implicit ``"1"`` and DROP altB's real haplotype.
-We resolve, PER (pos, alt) record, which GT token denotes THAT alt from the record's
-own carrier genotypes (``_alt_index_for_record``): every carrier of an (pos, alt)
-record carries that alt, so the alt's token is the non-``"0"``/non-``"."`` value the
-record's carriers share. Under the default ``bcftools norm -m-`` biallelic pipeline
-this is always ``"1"`` (unchanged); at an unsplit multiallelic site it is correctly
-``"2"`` etc., so altB's haplotype is enumerated instead of dropped.
+MULTIALLELIC POSITIONS (CRISPRitz 2.10.0 codes every ALT of a split site)
+-------------------------------------------------------------------------
+The tiers store one (pos, alt) record per alt, and a position can hold two or three of
+them. The caller hands each column's genotypes already read against each alt's own
+allele index (``site_alleles.per_alt_entries``: "1" holds that alt, also for a record
+that listed several ALTs on one VCF line, whose raw "1|2" becomes "1|0" under the first
+alt and "0|1" under the second), so ``alt_index`` is "1" there. Two rules keep a set to
+one alt per column:
+  * a phased sample whose slot holds two alts of one column (split records phased one
+    by one: 672 sample-positions on chr22 of HGDP + 1000 Genomes, e.g. NA18869 0|1 under
+    G and 0|1 under T at chr22:10,661,629) is no haplotype there: it takes the PUTATIVE
+    branch, as an unphased sample does, and is a carrier of {G} and of {T};
+  * the PUTATIVE branch's combinations, the union fallback above ``max_putative``
+    included, take at most one alt of a column.
+The phase label is per set, so a set such a sample shares reads PUTATIVE for all its
+carriers.
 
 STDLIB ONLY. ``population_summary`` is imported for ``parse_haplotypes`` /
 ``_token_is_alt`` ONLY (one source of truth for allele-slot math); that import is
@@ -99,35 +103,6 @@ class ObservedHaplotype(object):
                    self.phase_state))
 
 
-def _alt_index_for_record(carrier_gts, parse_haplotypes, ploidy):
-    """Resolve which GT token denotes THIS (pos, alt) record's alt.
-
-    Every carrier of an (pos, alt) record carries that alt, so the alt's token is the
-    non-ref ("0") / non-missing (".") value the record's carriers share. Under the
-    default ``bcftools norm -m-`` biallelic pipeline this is always "1"; at an unsplit
-    multiallelic site (e.g. a carrier with genotype "1|2" listed under altB) it is the
-    foreign index "2" -- so altB's carriers are attached to the correct slot instead
-    of dropped.
-
-    ``carrier_gts`` is an iterable of genotype strings for this record's carriers.
-    Returns the resolved alt-index token (str), defaulting to "1" when nothing more
-    specific is observed (empty record, or only ref/missing tokens -- neither should
-    happen for a real carrier list, but we never raise on the hot path).
-    """
-    seen = {}
-    for gt in carrier_gts:
-        for tok in parse_haplotypes(gt, ploidy):
-            if tok == "0" or tok == ".":
-                continue
-            seen[tok] = seen.get(tok, 0) + 1
-    if not seen:
-        return "1"
-    # The alt token is the one shared by (ideally all) carriers. If a site is unsplit
-    # multiallelic AND two records' carriers overlap, pick the most frequent non-ref
-    # token -- deterministic and correct for the common (single foreign index) case.
-    return max(seen.items(), key=lambda kv: (kv[1], kv[0]))[0]
-
-
 def _gt_is_phased(gt):
     """True iff a genotype string is PHASED (uses '|'), False if unphased ('/') or
     haploid / single-token (no separator -> treat as unconfirmed-phase, PUTATIVE)."""
@@ -159,8 +134,10 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
     Returns dict[sample_id -> list of (frozenset[(pos_c, alt)], phase_state)].
     Each sample contributes:
       * one CONFIRMED set per non-empty haplotype slot when ALL its covered columns
-        are phased AND share a phase set;
-      * else ONE PUTATIVE set = every (pos_c, alt) it carries on any slot.
+        are phased AND share a phase set AND no slot holds two alts of one column;
+      * else PUTATIVE sets: every combination of the variants it carries that takes
+        at most one alt of a column (above ``max_putative`` variants, the union of
+        everything it carries, one per choice of alt at a column holding two).
     """
     # 1) Gather, per sample, its (pos_c, alt, slot-tokens, phased?, ps) at each column
     #    it carries. We key alts by (pos_c, alt) so a multiallelic column with two alts
@@ -197,6 +174,7 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
         real_ps = set(p for p in ps_ids if p is not None)
         mixed_ps = (len(real_ps) > 1) or (len(real_ps) >= 1 and None in ps_ids)
 
+        slots = None
         if all_phased and not mixed_ps:
             # CONFIRMED: group alts by haplotype slot. A slot h carries (pos_c, alt)
             # iff this sample's token on slot h at that column equals the alt's index.
@@ -206,6 +184,14 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
                 for h, tok in enumerate(toks):
                     if tok == e["alt_index"]:
                         slots.setdefault(h, set()).add((e["pos_c"], e["alt"]))
+            # A slot holding two alts of one column is no haplotype (its split records
+            # were phased one by one): the sample is PUTATIVE in this window, as the
+            # indel path's resolve_carriers reads such a slot.
+            for vset in slots.values():
+                if len(set(pos_c for pos_c, _alt in vset)) < len(vset):
+                    slots = None
+                    break
+        if slots is not None:
             sets = []
             seen_keys = set()
             for h, vset in slots.items():
@@ -234,18 +220,31 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
             # GUARD: a sample carrying more than ``max_putative`` variants in the window
             # falls back to the union (the 2^k blow-up is confined to that one sample; a
             # dense window is already surfaced to the high-variant-density BED upstream).
+            # A haplotype holds one allele of a position, so no candidate takes two alts
+            # of one column (a 1/2 heterozygote, or a phased slot holding two): the
+            # combinations choose, per column, nothing or one of the alts carried there,
+            # and the union is one per choice of alt at a column holding two.
             carried = sorted(set(
                 (e["pos_c"], e["alt"]) for e in entries
                 if any(tok == e["alt_index"] for tok in e["toks"])
             ))
             if carried:
+                by_col = {}
+                for pos_c, alt in carried:
+                    by_col.setdefault(pos_c, []).append(alt)
+                cols = sorted(by_col)
                 if max_putative >= 0 and len(carried) > max_putative:
-                    out[sid] = [(frozenset(carried), PUTATIVE)]
+                    out[sid] = [
+                        (frozenset(zip(cols, choice)), PUTATIVE)
+                        for choice in itertools.product(*(by_col[c] for c in cols))
+                    ]
                 else:
                     out[sid] = [
-                        (frozenset(combo), PUTATIVE)
-                        for r in range(1, len(carried) + 1)
-                        for combo in itertools.combinations(carried, r)
+                        (frozenset((c, a) for c, a in zip(cols, choice)
+                                   if a is not None), PUTATIVE)
+                        for choice in itertools.product(
+                            *([None] + by_col[c] for c in cols))
+                        if any(a is not None for a in choice)
                     ]
     return out
 

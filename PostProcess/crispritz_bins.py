@@ -109,8 +109,11 @@ def incomplete_bins(directory):
 # The four bits buildTST gives a base of the genome (genome_bit_conversion, in
 # CRISPRitz's pamGenerator.cpp; N 0000) and of the PAM (pam_bit_conversion; N 1111):
 # a genome base matches a PAM base when their bits meet, so a genome N matches none.
+# Q, the code CRISPRitz 2.10.0 writes at a position whose reference base and SNP ALTs
+# hold all four bases, is 1111 in the genome: it meets every PAM base. A PAM holds no Q.
 _BITS = dict(zip("ACGTRYSWKMBDHV", (1, 2, 4, 8, 5, 10, 6, 9, 12, 3, 14, 13, 11, 7)))
 _PAM_BITS = dict(_BITS, N=15)
+_BITS["Q"] = 15
 _REVERSE = str.maketrans("ACGTRYMKHDBV", "TGCAYRKMDHVB")  # reversenuc, less the reversal
 # buildTST's TARG_IN_GROUP: it saves a contig's targets, sorted, this many a tree,
 # <PAM>_<contig>_1.bin to _<n>.bin, n their count over this, rounded up
@@ -247,7 +250,7 @@ def _read_contig(fasta):
     # (getline's last line, with no \n after it, is not taken; nor is the empty
     # string after a last \n)
     head, body = lines[0], b"".join(lines[1:-1]).upper()
-    if not head.startswith(b">") or body.translate(None, b"ACGTNRYSWKMBDHV"):
+    if not head.startswith(b">") or body.translate(None, b"ACGTNRYSWKMBDHVQ"):
         return None
     return head[1:].decode("utf-8", "surrogateescape"), body.decode("ascii")
 

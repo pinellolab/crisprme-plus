@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Tests for build_mega_registry -- the sites-only merged-VCF -> registry driver.
 
-Covers the INFO AF parser (per-dataset AF_<ds>, AF_max skipped, multiallelic-comma
-guard, non-positive AF drop) and build() end to end (synthetic gzip VCF -> registry
--> RegistryReader round-trip). STDLIB only.
+Covers the INFO AF parser (per-dataset AF_<ds>, AF_max skipped, a comma list read per
+ALT, non-positive AF drop) and build() end to end (synthetic gzip VCF -> registry
+-> RegistryReader round-trip; a record listing several ALTs read one ALT at a time).
+STDLIB only.
 """
 import gzip
 import os
@@ -67,8 +68,12 @@ class TestBuildEndToEnd(unittest.TestCase):
              "AF_AoU=0.004;AF_max=0.004"),
             ("chr22", 999, ".", "G", "A",     # no rsID; comma-AF -> float() drops
              "AF_HGDP=0.01,0.02"),
-            ("chr22", 1200, ".", "G", "A,T",  # comma-ALT guard -> whole row skipped
+            ("chr22", 1200, ".", "G", "A,T",  # two ALTs, one AF -> neither has its own
              "AF_HGDP=0.5"),
+            ("chr22", 1300, "rs7;rs8", "G", "A,T",  # two ALTs: each its AF and its ID
+             "AF_HGDP=0.5,0.25;AF_gnomAD=.,0.01;AF_max=0.5,0.25"),
+            ("chr22", 1400, "rs11", "G", "C,GT",  # a SNP and an indel on one line
+             "AF_HGDP=0.2,0.3"),
             ("chr22", 2000, "rs9", "T", "TA",  # insertion -> counted as indel, not
              "AF_gnomAD=0.03;AF_max=0.03"),    #   in the SNP registry
             ("chr22", 3000, "rs10", "c", "t",  # lowercase SNP -> uppercased, counted
@@ -77,13 +82,28 @@ class TestBuildEndToEnd(unittest.TestCase):
 
         manifest, binp, idxp, stats = bmr.build(vcf, "chr22", d)
         self.assertEqual(manifest["aggregation"], "info_af")
-        # full accounting: 4 SNPs (3 upper + 1 lowercase), 1 indel, 1 multiallelic
-        # (the A,T ALT), 1 no-AF (the comma-AF at 999). Nothing silently dropped.
-        self.assertEqual(stats["snps"], 4)
-        self.assertEqual(stats["indels"], 1)
-        self.assertEqual(stats["multiallelic"], 1)
-        self.assertEqual(stats["no_af"], 1)
+        # full accounting, per ALT: 7 SNPs (3 upper + 1 lowercase + the two of 1300 +
+        # the C of 1400), 2 indels (2000, the GT of 1400), 3 no-AF (the comma-AF at 999,
+        # both ALTs of 1200); 3 records listed several ALTs. Nothing silently dropped.
+        self.assertEqual(stats["snps"], 7)
+        self.assertEqual(stats["indels"], 2)
+        self.assertEqual(stats["multiallelic"], 3)
+        self.assertEqual(stats["no_af"], 3)
         reader = RegistryReader(binp, idxp)
+
+        # a record listing several ALTs: each ALT its own AF (the k-th of each list)
+        # and its own ID (one per ALT in the ID column); it was skipped whole
+        self.assertEqual(reader.alts_at(1300), ["A", "T"])
+        ga, gt = reader.lookup(1300, "A"), reader.lookup(1300, "T")
+        self.assertLessEqual(abs(ga[db_group_id("HGDP")].allele_freq() - 0.5), 1e-3)
+        self.assertNotIn(db_group_id("gnomAD"), ga)
+        self.assertLessEqual(abs(gt[db_group_id("HGDP")].allele_freq() - 0.25), 1e-3)
+        self.assertLessEqual(abs(gt[db_group_id("gnomAD")].allele_freq() - 0.01), 1e-3)
+        self.assertEqual((reader.rsid(1300, "A"), reader.rsid(1300, "T")), ("rs7", "rs8"))
+        self.assertEqual(reader.alts_at(1400), ["C"])
+        self.assertLessEqual(
+            abs(reader.lookup(1400, "C")[db_group_id("HGDP")].allele_freq() - 0.2), 1e-3)
+        self.assertEqual(reader.rsid(1400, "C"), "rs11")
 
         # the lowercase SNP (c>t) is in the registry, uppercased to (C>T)
         self.assertIn(db_group_id("gnomAD"), reader.lookup(3000, "T"))
@@ -104,8 +124,9 @@ class TestBuildEndToEnd(unittest.TestCase):
         # pos 999 has a comma-AF (malformed for biallelic) -> the float() drops it,
         # leaving no AF -> record absent.
         self.assertIsNone(reader.lookup(999, "A"))
-        # pos 1200 ALT "A,T" -> comma guard skips the whole record.
+        # pos 1200 ALT "A,T" with one AF value: no ALT has an AF of its own.
         self.assertIsNone(reader.lookup(1200, "A"))
+        self.assertIsNone(reader.lookup(1200, "T"))
         # pos 2000 T>TA is an indel -> not in the SNP registry.
         self.assertIsNone(reader.lookup(2000, "TA"))
 

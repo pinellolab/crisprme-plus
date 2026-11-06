@@ -16,17 +16,45 @@ The 5-tuple contract (see new_simple_analysis.py ~158) is:
   * snp_info_list : "<chrom>_<pos1based>_<ref>_<alt>"
 
 STDLIB ONLY. ``tier0_registry`` is passed in (never imported here) so this module
-has no hard dependency and cannot break the legacy path.
+has no hard dependency and cannot break the legacy path. ``site_alleles`` (stdlib, pure)
+reads one position's genotypes against each ALT's own allele index.
+
+Every rsID comes back with a ',' inside it written ';' (a VCF ID "rs1;rs2", which
+CRISPRitz writes "rs1,rs2" in the dictionary): a row of several variants joins their
+rsIDs with ',', one item per variant, and the merge of a cluster's rows keeps the
+variant, rsID and AF lists aligned by that count (remove_contiguous_samples.py).
 """
 
 from __future__ import annotations
 
+import site_alleles
+
+
+def _one_id(rsid):
+    """One variant's rsID as one item of a ','-joined list: a ',' inside it reads ';'
+    (the VCF's own separator of two IDs)."""
+    return rsid.replace(",", ";") if "," in rsid else rsid
+
+
+def _samples_map(samples):
+    """{sample: genotype} of one entry's "sampleID:genotype" tokens (a token without a
+    genotype keeps an empty one)."""
+    out = {}
+    for tok in samples:
+        sid, _sep, gt = tok.partition(":")
+        out[sid] = site_alleles.merge_gt(out[sid], gt) if sid in out else gt
+    return out
+
 
 def legacy_5tuple_from_entry(entry, chrom, chr_pos):
-    """The EXACT legacy dict-entry decode: turn one raw dict value ('$'-joined
-    per-ALT entries) into the 5-tuple. Verbatim lift of the original
-    ``retrieveFromDict`` hit-branch body -- byte-identical so the no-registry path
-    is unchanged (including its IndexError on a malformed entry)."""
+    """The legacy dict-entry decode: turn one raw dict value ('$'-joined per-ALT
+    entries) into the 5-tuple. The decode is the original ``retrieveFromDict``
+    hit-branch body (including its IndexError on a malformed entry). Then each
+    carrier's genotype is read against its own ALT's allele index, and two entries of
+    one REF>ALT become one with their carriers merged (``site_alleles.read_records``):
+    a record that lists several ALTs on one VCF line keeps its raw 1|2 under each ALT,
+    which the haplotype seeds read as the ALT on both slots. A position of split or
+    biallelic records that repeats no REF>ALT comes back as decoded."""
     multi_entry = entry.split("$")
     snp_list = []
     sample_list = []
@@ -51,6 +79,21 @@ def legacy_5tuple_from_entry(entry, chrom, chr_pos):
             + "_"
             + split_entry[1].split(",")[1]
         )
+    rsID_list = [_one_id(r) for r in rsID_list]
+    refs = [info.rsplit("_", 2)[1] for info in snp_info_list]
+    records = [(ref, alt, rs, af, _samples_map(samples))
+               for ref, alt, rs, af, samples in zip(refs, snp_list, rsID_list, AF_list,
+                                                    sample_list)]
+    got = site_alleles.read_records(records)
+    if got is records:
+        return snp_list, sample_list, rsID_list, AF_list, snp_info_list
+    snp_list, sample_list, rsID_list, AF_list, snp_info_list = [], [], [], [], []
+    for ref, alt, rs, af, carriers in got:
+        snp_list.append(alt)
+        sample_list.append(sorted("%s:%s" % (s, g) for s, g in carriers.items()))
+        rsID_list.append(_one_id(rs))
+        AF_list.append(af)
+        snp_info_list.append(chrom + "_" + str(chr_pos + 1) + "_" + ref + "_" + alt)
     return snp_list, sample_list, rsID_list, AF_list, snp_info_list
 
 
@@ -213,6 +256,7 @@ def retrieve_5tuple(reader, entry, chrom, chr_pos, global_group_id="global",
         rsid = reader.rsid(pos1, alt)
         if rsid is None:
             rsid = "."
+        rsid = _one_id(rsid)
         ref = reader.ref(pos1, alt) or "N"
         snp_list.append(alt)
         rsID_list.append(rsid)

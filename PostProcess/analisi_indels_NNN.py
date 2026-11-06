@@ -246,6 +246,8 @@ iupac_code_set = {
     "d": {"A", "G", "T"},
     "h": {"A", "C", "T"},
     "v": {"A", "C", "G"},
+    "Q": {"A", "C", "G", "T"},
+    "q": {"A", "C", "G", "T"},
     "A": {"A"},
     "T": {"T"},
     "C": {"C"},
@@ -618,6 +620,8 @@ iupac_code = {
     "d": ("A", "G", "T"),
     "h": ("A", "C", "T"),
     "v": ("A", "C", "G"),
+    "Q": ("A", "C", "G", "T"),
+    "q": ("A", "C", "G", "T"),
     "N": ("A", "T", "C", "G"),
 }
 
@@ -629,11 +633,11 @@ iupac_code = {
 
 # Whole-genome IUPAC -> first-listed-allele map (fast str.translate), applied to
 # genomeStr once at load. Mirrors iupac_code's first entry: R->A Y->C S->G W->A K->G
-# M->A B->C D->A H->A V->A. 'N' is absent, so it survives for the existing N-guard.
+# M->A B->C D->A H->A V->A Q->A. 'N' is absent, so it survives for the existing N-guard.
 # genomeStr is the PLAIN reference chromosome (post_analisi_indel.sh passes
 # <ref>/<chrom>.fa), which holds no IUPAC code, so this is a no-op kept as a guard.
 _IUPAC_FIRST_ALLELE_TAB = str.maketrans(
-    "RYSWKMBDHVryswkmbdhv", "ACGAGACAAAacgagacaaa"
+    "RYSWKMBDHVQryswkmbdhvq", "ACGAGACAAAAacgagacaaaa"
 )
 
 

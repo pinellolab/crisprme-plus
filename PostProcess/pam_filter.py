@@ -18,6 +18,8 @@ allele: CRISPRitz stores it as a code that intersects no base, so a dedicated or
 genome). Such a target is dropped here too, at every position of the PAM, even
 an unconstrained one; otherwise a PAM-less index searched without --prune-pam
 reports targets, and N-bearing sequences, that the dedicated index never would.
+A Q is the code of a variant position whose reference base and SNP ALTs hold all
+four bases (CRISPRitz 2.10.0): it is every base, as it is to the engine (1111).
 
 Usage: pam_filter.py <targets.txt> <pam_file>   (edits the targets file in place)
 """
@@ -31,8 +33,9 @@ _IUPAC = {
     "K": set("GT"), "M": set("AC"), "B": set("CGT"), "D": set("AGT"),
     "H": set("ACT"), "V": set("ACG"), "N": set("ACGT"),
 }
-# A target's own bases: the same, except that a genomic N matches nothing.
-_TARGET_IUPAC = dict(_IUPAC, N=set())
+# A target's own bases: the same, except that a genomic N matches nothing and a Q (four
+# alleles) is every base.
+_TARGET_IUPAC = dict(_IUPAC, N=set(), Q=set("ACGT"))
 
 
 def _pam_can_match(target_pam: str, requested_pam: str) -> bool:

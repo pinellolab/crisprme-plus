@@ -39,9 +39,12 @@ DEFAULT_DATASET_META = {
 }
 
 
-def _parse_info_afs(info, datasets):
-    """Extract {dataset -> AF_float} from a VCF INFO string. AF_max is skipped
-    (the registry recomputes the global from the per-dataset AFs)."""
+def _parse_info_afs(info, datasets, k=0, n_alts=1):
+    """Extract {dataset -> AF_float} of ALT ``k`` (of ``n_alts``) from a VCF INFO
+    string. AF_max is skipped (the registry recomputes the global from the
+    per-dataset AFs). A record listing several ALTs gives one AF per ALT, in their
+    order (Number=A); a list of another length, or a list on a record of one ALT,
+    gives that dataset no AF."""
     afs = {}
     for kv in info.split(";"):
         eq = kv.find("=")
@@ -53,8 +56,11 @@ def _parse_info_afs(info, datasets):
         ds = key[3:]
         if ds not in datasets:
             continue
+        values = kv[eq + 1:].split(",")
+        if len(values) != n_alts:
+            continue
         try:
-            val = float(kv[eq + 1:])
+            val = float(values[k])
         except ValueError:
             continue
         # Accept only a real frequency in (0, 1]. This rejects a comma-list
@@ -67,15 +73,29 @@ def _parse_info_afs(info, datasets):
     return afs
 
 
+def _alt_ids(vid, n_alts):
+    """The ID of each ALT of a record: one each when the ID column lists one per ALT
+    (';'-separated, in the ALTs' order), else the whole column for every ALT (one ID
+    covering the site, or IDs that cannot be told apart); '' for none."""
+    if not vid or vid == ".":
+        return [""] * n_alts
+    ids = vid.split(";")
+    if n_alts > 1 and len(ids) == n_alts:
+        return ["" if i == "." else i for i in ids]
+    return [vid] * n_alts
+
+
 def iter_vcf_af_records(path, datasets, chrom=None, stats=None):
-    """Yield ``(pos, ref, alt, rsid, af_by_dataset)`` for each biallelic record of
-    a sites-only merged VCF. Records must be biallelic (the merge splits with
-    ``bcftools norm -m -any``); a multiallelic ALT is skipped defensively.
+    """Yield ``(pos, ref, alt, rsid, af_by_dataset)`` for each ALT of each record of
+    a sites-only merged VCF. The merge splits with ``bcftools norm -m -any``; a record
+    that lists several ALTs on one line is read one ALT at a time, each with its own
+    AF (the k-th of each ``AF_<label>`` list) and ID (``_alt_ids``).
 
     ``datasets`` is the set of dataset labels to read (the INFO ``AF_<label>``
     fields). ``chrom`` (optional) restricts to one contig. ``stats`` (optional dict)
-    accumulates drop counts so nothing is silently discarded: ``multiallelic`` (an
-    un-split comma ALT) and ``no_af`` (no parseable AF for any known dataset).
+    counts what is read and dropped, so nothing is silently discarded:
+    ``multiallelic`` (records listing several ALTs, each read per ALT) and ``no_af``
+    (an ALT with no parseable AF for any known dataset).
     """
     opener = gzip.open if path.endswith(".gz") else open
     with opener(path, "rt") as fh:
@@ -88,17 +108,17 @@ def iter_vcf_af_records(path, datasets, chrom=None, stats=None):
             c, pos, vid, ref, alt, _qual, _filt, info = f[:8]
             if chrom is not None and c != chrom:
                 continue
-            if "," in alt:  # not split to biallelic -- skip (should not happen)
-                if stats is not None:
-                    stats["multiallelic"] = stats.get("multiallelic", 0) + 1
-                continue
-            afs = _parse_info_afs(info, datasets)
-            if not afs:  # no parseable AF for any known dataset at this site
-                if stats is not None:
-                    stats["no_af"] = stats.get("no_af", 0) + 1
-                continue
-            rsid = vid if (vid and vid != ".") else ""
-            yield (int(pos), ref, alt, rsid, afs)
+            alts = alt.split(",")
+            if len(alts) > 1 and stats is not None:
+                stats["multiallelic"] = stats.get("multiallelic", 0) + 1
+            ids = _alt_ids(vid, len(alts))
+            for k, one in enumerate(alts):
+                afs = _parse_info_afs(info, datasets, k, len(alts))
+                if not afs:  # no parseable AF for any known dataset at this allele
+                    if stats is not None:
+                        stats["no_af"] = stats.get("no_af", 0) + 1
+                    continue
+                yield (int(pos), ref, one, ids[k], afs)
 
 
 def build(vcf, chrom, out_dir, dataset_meta=None, compress=False):
@@ -111,8 +131,9 @@ def build(vcf, chrom, out_dir, dataset_meta=None, compress=False):
     AF is a follow-up path (the mega ships SNP AF first).
 
     Returns ``(manifest, bin_path, idx_path, stats)`` where ``stats`` accounts for
-    EVERY input record: ``snps`` (compiled), ``indels`` (routed to fake-indel path),
-    ``multiallelic`` (un-split comma ALT), ``no_af`` (no parseable AF).
+    EVERY input ALT: ``snps`` (compiled), ``indels`` (routed to fake-indel path),
+    ``no_af`` (no parseable AF); ``multiallelic`` counts the records that list several
+    ALTs on one line (each ALT counted in one of the other three).
     """
     dataset_meta = dataset_meta or DEFAULT_DATASET_META
     datasets = set(dataset_meta)
@@ -163,7 +184,7 @@ def main(argv=None):
                                         dataset_meta=meta, compress=args.compress)
     sys.stderr.write(
         "mega registry %s: %d SNP records compiled | %d indels -> fake-indel path"
-        " | %d multiallelic skipped | %d no-AF skipped | %d datasets | "
+        " | %d records of several ALTs read per ALT | %d no-AF skipped | %d datasets | "
         "aggregation=%s -> %s\n"
         % (args.chrom, stats["snps"], stats["indels"], stats["multiallelic"],
            stats["no_af"], len(meta), manifest["aggregation"], binp))

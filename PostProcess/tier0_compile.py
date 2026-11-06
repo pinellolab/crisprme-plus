@@ -33,6 +33,7 @@ from __future__ import annotations
 import gzip
 import json
 
+import site_alleles
 import tier0_registry as t0
 
 # Optional streaming JSON parser. If present we stream the (huge, genome-wide)
@@ -210,7 +211,11 @@ def parse_entry(entry):
                 sid, gt = tok.split(":", 1)
             else:
                 sid, gt = tok, ""
-            carrier_gts[sid.strip()] = gt.strip()
+            sid, gt = sid.strip(), gt.strip()
+            # a sample listed twice (two records of this allele in one entry): a slot
+            # carries the allele if either says so
+            carrier_gts[sid] = (site_alleles.merge_gt(carrier_gts[sid], gt)
+                                if sid in carrier_gts else gt)
     return ref, alt, rsid, carrier_gts
 
 
@@ -245,7 +250,11 @@ def iter_dict_records(dict_path, chrom):
 
 
 def _emit_key(key, value, prefix):
-    """Yield parsed records for one dict key/value ('$'-joined entries)."""
+    """Yield parsed records for one dict key/value ('$'-joined entries): one per
+    REF>ALT, each genotype read against that ALT's own allele index, two records of
+    one REF>ALT merged (``site_alleles.read_records``). A record that lists several ALTs
+    on one VCF line keeps its raw genotype (1|2) under each ALT; read as it is, the
+    second ALT's carriers counted as reference and its haplotypes were lost."""
     if not key.startswith(prefix):
         return
     try:
@@ -254,11 +263,14 @@ def _emit_key(key, value, prefix):
         return
     if not value:
         return
+    records = []
     for entry in str(value).split("$"):
         parsed = parse_entry(entry)
         if parsed is None:
             continue
         ref, alt, rsid, carrier_gts = parsed
+        records.append((ref, alt, rsid, None, carrier_gts))
+    for ref, alt, rsid, _af, carrier_gts in site_alleles.read_records(records):
         yield pos, ref, alt, rsid, carrier_gts
 
 
@@ -280,6 +292,9 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
       out_bin, out_idx: output registry binary + json manifest paths.
       alt_index: the genotype token denoting each record's alt (default "1", the
         bcftools norm -m- biallelic convention). Passed through to the aggregator.
+        ``iter_dict_records`` reads every genotype against its own record's allele
+        index first, a record listing several ALTs on one line included, so "1" is
+        right for every record it yields.
       subpop_field: "superpopulation" (Phase-1 default) or "population".
 
     SNP-first: Phase 1 supports single-character alts only. Non-SNP alts (multi-
