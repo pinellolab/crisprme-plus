@@ -310,14 +310,16 @@ def _column_alleles(code, ref_base, alts, chr_pos=None):
     codes), and none elsewhere. An ALT that no sample carries counts, as CRISPRitz
     codes it: the dictionary lists it, and the Tier-0 registry, which holds no record
     of it, lists the 0-based ``chr_pos`` as such a position itself
-    (``RegistryReader.four_base``). Never invents a carrier -- only removes a
-    target-inconsistent alt."""
+    (``RegistryReader.four_base``). Q is the four bases, as every other code is the
+    bases it names: an ALT that is no base (the '*' of a spanning deletion, which the
+    dictionary of CRISPRitz 2.10.0 lists) is no allele of it. Never invents a carrier
+    -- only removes a target-inconsistent alt."""
     if code in ("Q", "q"):
         held = {str(ref_base).upper()} | {a.upper() for a in alts}
         if {"A", "C", "G", "T"} <= held or (
                 myreg is not None and chr_pos is not None
                 and myreg.four_base(chr_pos + 1)):
-            return set(alts)
+            return {a for a in alts if a in iupac_code_set[code]}
         return set()
     allowed = iupac_code_set.get(code)
     if allowed is None:

@@ -18,7 +18,7 @@ gap). The readers of CRISPRme had to change with it:
   * the SNP+SNP companion compares positions, not variant tokens;
   * the dictionary path keeps only the ALTs the target's own column holds, as the
     observed path does (#139), and a Q column admits its position's ALTs only where they
-    and the reference hold all four bases;
+    and the reference hold all four bases, and of them only the bases (a '*' is none);
   * Q in every reader of variant codes (pam_filter, the SNP overlay of the fake-indel
     genome, the indel path's resolver, the site rule of crispritz_bins, twopass_find,
     the cluster sort);
@@ -617,6 +617,24 @@ class TheFourAlleleCodeThroughThePostAnalysis(_SnpPostAnalysis):
                     else:
                         self.assertEqual(set(got[(a5, g9)][SAMPLES_COL].split(",")),
                                          {"S", "V"})
+
+    def test_an_alt_that_is_no_base(self):
+        """The dictionary of CRISPRitz 2.10.0 lists a one-character ALT that is no base,
+        such as the '*' of a spanning deletion (a GATK joint call's). The Q column
+        admitted it with the position's ALTs: a row of X, '*' in its DNA column, CFD 0
+        (every other code's column drops it). The tiers hold no such ALT."""
+        values = {_pos1(5): self.VALUES[_pos1(5)] + [("C", "*", "rsS", "0.1", {"X": "0|1"})]}
+        for mode in ("0", "1"):
+            for tiers, keep_dict in ((True, True), (False, False)):
+                with self.subTest(mode=mode, tiers=tiers, keep_dict=keep_dict):
+                    self.tmp = tempfile.mkdtemp(prefix="sa_qstar_")
+                    self.addCleanup(shutil.rmtree, self.tmp, True)
+                    rows, _comp = self.analyse(self.REF, [_window(self.REF, {5: "Q"})],
+                                               values, tiers=tiers, keep_dict=keep_dict,
+                                               mode=mode)
+                    self.assertFalse([r for r in rows if "*" in r[DNA] + r[SNP]], rows)
+                    if mode == "0":
+                        self._check(rows)
 
     def test_a_q_column_at_a_position_of_three_bases_admits_none(self):
         """#139 at a Q column: Q permits every base, so it cannot tell its position's

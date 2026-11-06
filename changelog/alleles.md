@@ -35,10 +35,13 @@ own ID where the ID column lists one per ALT, change those three.
   codes: at a bulge boundary, where the target's column can be read against a neighbouring position
   (#139), a Q column admits that position's ALTs only where they and its reference base hold all
   four bases, an ALT that no sample carries counted, as CRISPRitz codes it (a sites-only dataset's
-  admits every ALT its registry lists, as each of its columns does: see Fixed). The dictionary lists
-  such an ALT; the Tier-0 registry holds no record of it, and lists the positions of four bases in
-  its manifest (`four_base_positions`), so that the tiers alone, the layout of every published
-  index, read such a position as the dictionary does. Checked through the real CLI on an HPRC kit
+  admits every ALT its registry lists, as each of its columns does: see Fixed), and of them only
+  the bases: an ALT that is no base, such as the `*` of a spanning deletion (in a GATK joint call),
+  which the dictionary of CRISPRitz 2.10.0 lists, is no allele of a Q, as of any other code (with
+  the dictionary, a row substituted it, `*` in its DNA column). The dictionary lists such an ALT;
+  the Tier-0 registry holds no record of it, and lists the positions of four bases in its manifest
+  (`four_base_positions`), so that the tiers alone, the layout of every published index, read such
+  a position as the dictionary does. Checked through the real CLI on an HPRC kit
   (hg38 chr22:1-17,950,000 and the normalised HPRC records up to 17,949,000; TAGGGAAGTTAGGGAGGTTA,
   NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per sample): of its 17 positions of four bases,
   chr22:17,877,081 holds T>A (8 copies), T>C (none) and T>G (46). On the tiers alone no row named
