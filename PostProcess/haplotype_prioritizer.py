@@ -318,25 +318,33 @@ class IndelIndex(object):
             k += 1
 
 
-def breaking_indels(index, lo, hi, snps, own=()):
-    """{sample: genotype} of each indel of ``index`` that changes the reference bases
-    lo..hi (0-based, inclusive) of a haplotype carrying it (indel_snp_cis.changes_span),
-    but those of ``own`` and those a slot cannot hold with the SNPs ``snps`` ([(pos, REF,
-    ALT)]): an indel at a SNP's own position, or one whose REF covers it, is another allele
-    of that base, and a slot phased with both is a phasing artefact."""
+def changing_indels(index, lo, hi):
+    """[(POS, REF, ALT, {sample: genotype})] of each indel of ``index`` that changes the
+    reference bases lo..hi (0-based, inclusive) of a haplotype carrying it
+    (indel_snp_cis.changes_span): a target's, once for all its haplotypes."""
     out = []
     if index is None:
         return out
-    snp_pos = {p for p, _r, _a in snps}
     for p, r, a in index.near(lo, hi):
-        if (p, r, a) in own:
-            continue
-        if any(p <= q <= p + len(r) - 1 for q in snp_pos):
-            continue
-        if not isc.changes_span(p, r, a, lo, hi):
-            continue
-        out.append(index.carriers(p, r, a))
+        if isc.changes_span(p, r, a, lo, hi):
+            out.append((p, r, a, index.carriers(p, r, a)))
     return out
+
+
+def not_at(changing, snp_pos, own=()):
+    """{sample: genotype} of each of ``changing`` (changing_indels) a slot can hold with the
+    SNPs at ``snp_pos`` (1-based): not one of ``own``, and neither at a SNP's position nor
+    over it, as such an indel is another allele of that base (a slot phased with both is a
+    phasing artefact)."""
+    return [g for p, r, a, g in changing
+            if (p, r, a) not in own and not any(p <= q <= p + len(r) - 1 for q in snp_pos)]
+
+
+def breaking_indels(index, lo, hi, snps, own=()):
+    """{sample: genotype} of each indel of ``index`` that changes the reference bases
+    lo..hi (0-based, inclusive) of a haplotype carrying it, but those of ``own`` and those a
+    slot cannot hold with the SNPs ``snps`` ([(pos, REF, ALT)]): not_at."""
+    return not_at(changing_indels(index, lo, hi), {p for p, _r, _a in snps}, own)
 
 
 class PanelChrom(object):

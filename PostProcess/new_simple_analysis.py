@@ -626,14 +626,13 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
     cluster_to_save.append(final_line)
 
 
-def _breakers_for(start, n_bases, snp_pos):
-    """{sample: genotype} of each indel of the phased indel store that changes the bases
-    start..start+n_bases-1 (0-based) of a SNP target, but one a slot cannot hold with its
-    SNPs (at one of them, or over it: a phasing artefact); [] without the store."""
+def _window_indels(start, n_bases):
+    """The indels of the phased indel store that change the bases start..start+n_bases-1
+    (0-based) of a SNP target, with their carriers (haplotype_prioritizer.changing_indels);
+    [] without the store."""
     if myindels is None or n_bases <= 0:
         return []
-    return _hp.breaking_indels(myindels, start, start + n_bases - 1,
-                               [(p, "", "") for p in snp_pos])
+    return _hp.changing_indels(myindels, start, start + n_bases - 1)
 
 
 def _drop_indel_slots(haplotypes, positions, start, n_bases):
@@ -644,10 +643,13 @@ def _drop_indel_slots(haplotypes, positions, start, n_bases):
     call is unphased; a haplotype left with no carrier gives no row (2.8.1 documented
     these rows; 990 of 45,921 SNP row-blocks on chr22 of the HGDP + 1000 Genomes panel
     named such a carrier)."""
+    window = _window_indels(start, n_bases)
+    if not window:
+        return haplotypes
     out = []
     for hap in haplotypes:
-        breakers = _breakers_for(start, n_bases,
-                                 [start + pc + 1 for pc, _a in hap.variant_set])
+        # (an indel at one of its SNPs, or over one, is another allele of that base)
+        breakers = _hp.not_at(window, {start + pc + 1 for pc, _a in hap.variant_set})
         if not breakers:
             out.append(hap)
             continue
@@ -677,16 +679,15 @@ def _drop_indel_slots(haplotypes, positions, start, n_bases):
     return out
 
 
-def _drop_indel_slots_dict(entries, slot, start, n_bases):
+def _drop_indel_slots_dict(entries, slot, start, window):
     """The phased classic-dictionary path's counterpart of _drop_indel_slots: ``entries``
     {key: [seq, samples, info]} of one haplotype slot (key = (pos_c, base, ...)), each
-    less the samples whose indel on that slot changes the target's bases (an unphased
-    indel call takes none off)."""
+    less the samples whose indel on that slot changes the target's bases (``window``:
+    _window_indels; an unphased indel call takes none off)."""
     for key, value in entries.items():
         if not value[1] or key[0] in ("greedy", "greedy_cfd", "lossless_hap"):
             continue
-        breakers = _breakers_for(start, n_bases,
-                                 [start + pc + 1 for pc in key[0::2]])
+        breakers = _hp.not_at(window, {start + pc + 1 for pc in key[0::2]})
         if not breakers:
             continue
         drop = set()
@@ -1386,9 +1387,11 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
 
             # a per-sample slot whose indel changes the target's bases does not have it
             if haplotype_check and not capped and myindels is not None:
-                for lvl in totalDict[count]:
-                    _drop_indel_slots_dict(totalDict[count][lvl], count, int(split[4]),
-                                           len(refSeq))
+                _window = _window_indels(int(split[4]), len(refSeq))
+                if _window:
+                    for lvl in totalDict[count]:
+                        _drop_indel_slots_dict(totalDict[count][lvl], count, int(split[4]),
+                                               _window)
 
             refSeq_with_bulges = list(refSeq)
             for pos, char in enumerate(realTarget):
