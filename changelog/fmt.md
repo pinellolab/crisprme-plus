@@ -25,16 +25,20 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
    `feat/engine-boundaries` c286bf8 writes format 2 and no Q (the engine's boundary fixes alone);
    `feat/2.10.0` 25ee50c and a8e52ef are CRISPRitz 2.10.0 before its tag, with Q (a8e52ef's
    `buildTST`, `searchTST`, `searchBruteForce` and `enricher` are 25ee50c's, byte for byte; its
-   `add-variants` takes only the `.fa` and `.fasta` files of the genome folder). None ran on the
-   tag: Gate B step 4b of `docs/RELEASE_CHECKLIST.md` runs `check_real_engine.py` and
+   `add-variants` takes only the `.fa` and `.fasta` files of the genome folder); `feat/2.10.0`
+   8bda5bb, the engine lane's build of the last runs, has a8e52ef's binaries, byte for byte. None
+   ran on the tag: Gate B step 4b of `docs/RELEASE_CHECKLIST.md` runs `check_real_engine.py` and
    `check_boundary_rows.py` on the release's own engine.
 3. [2.8.1]'s entries that say CRISPRme 2.8.1 refuses an index of format 2 ("the CRISPRitz planned
    as 2.9.2", "index format 1 only") stay as they are: they say what 2.8.1 does.
-4. The note of an index of format 1 says to build it again, not to download it again: `download`
-   fetches `lucapinello/crisprme-data`, whose archives are all of format 1, and no track points it
-   yet at the rebuilt archives' own location (decision C2). Once one does, the note
-   (`_check_index_format` in the search script, `test_index_format2`) and its entry under Changed
-   can say to download the index again from there.
+4. The note of an index of format 1 says how to build it again where the install can, and never
+   to download it again: `download` fetches `lucapinello/crisprme-data`, whose archives are all of
+   format 1, and no track points it yet at the rebuilt archives' own location (decision C2). Of a
+   variant or INDELS index the install cannot build again from what it holds (a download holds
+   neither the dataset's VCFs nor its enriched genome), it says what building it again takes and
+   that the dataset's archives rebuilt in index format 2 hold the sites, and gives no command to
+   install them. Once a track points `download` at that location, the note (`_how_built_again` in
+   the search script, `test_index_format2`) and its entry under Changed can give that command.
 
 ### Added
 - **CRISPRme reads index format 2, the format CRISPRitz writes from 2.10.0.** An index of format
@@ -105,25 +109,67 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
   (PKG1-scan-takes-format2); it took the format-1 one before 2.8.1, misreading the other. The
   search script's scan and complete-search's now rank an index the installed CRISPRitz reads
   first, and take the other only where none serves.
-- **A search of an index of format 1 by CRISPRitz 2.10.0 says what it lacks, and how to build it
-  again.** On stdout, once for each index it takes (a variant search with bulges takes three: the
-  reference, variant and INDELS indexes): `NOTE: <index> is in index format 1 (built by CRISPRitz
-  2.9.1 or earlier): it lacks the sites whose guide lies within a few bases of a contig end or an
-  N run, which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). To search
-  them, move <path> out of the way and build it again with crisprme.py build-index-only (which
-  keeps an index it finds in place).` On hg38 chr22 (the guides and samples above), the install
-  CRISPRme 2.8.1 built with CRISPRitz 2.9.1, searched per-sample with CRISPRitz 2.10.0
-  (`feat/2.10.0` a8e52ef), gives 2.8.1's 10,942 rows byte for byte, and the three notes;
-  `build-index-only` alone keeps the three indexes, every `.bin` unchanged; with each moved out of
-  the way as its note says, it builds all three in format 2 from the variant genome in place, and
-  the per-sample and reference searches give the 10,943 and 9,211 rows of format 2 above, byte for
-  byte, with no note and nothing on stderr. `test_index_format2` does the same through
-  `build-index-only` and the search script on stub engines. The note `--prune-pam` gives of a
-  flank wider than its PAM, and the warning of a flank built before CRISPRitz kept an `N` in it,
-  are given of an index of format 1 only.
+- **A search of an index of format 1 by CRISPRitz 2.10.0 says what it lacks, and how those sites
+  are searched.** On stdout, once for each index it takes (a variant search with bulges takes
+  three: the reference, variant and INDELS indexes): `NOTE: <index> is in index format 1 (built by
+  CRISPRitz 2.9.1 or earlier): it lacks the sites whose guide lies within a few bases of a contig
+  end or an N run, which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9).` It
+  goes on `To search them, move <path> out of the way and build it again with crisprme.py
+  build-index-only (which keeps an index it finds in place)` only where the install builds the
+  index again from what it holds: a reference index from the genome folder, and a variant or INDELS
+  index from the dataset's enriched genome or fake-indel genome in place (`, from
+  Genomes/<ref>+<vcf>.`) with its VCFs, which `build-index-only` takes too. Elsewhere it says what
+  building it again takes that the install does not hold -- the dataset's VCFs; its enriched
+  genome, without which the whole dataset is enriched again from the VCFs first; or its fake-indel
+  genome -- and that `Where <vcf> is published, its archives rebuilt in index format 2 hold them`.
+  An install of downloaded indexes (`download --what index`, the README's Quickstart) holds neither
+  VCFs nor an enriched genome: the note had its variant and INDELS indexes moved out of the way
+  too, and `build-index-only` then stopped on the dataset (`Error: VCF folder 'hg38_HGDP1kGP' ...
+  not found under .../VCFs/`, exit 1). With CRISPRitz 2.10.0 (`feat/2.10.0` 8bda5bb), genome-wide
+  on a mirror of such an install of `NRG_3_hg38+hg38_HGDP1kGP` (one guide, NRG, 4 mismatches + 1
+  DNA + 1 RNA bulge, per-sample), the search's notes are those three: the reference index's says to
+  move it and build it again, and those of the variant and INDELS indexes that `building it again
+  with crisprme.py build-index-only takes the dataset's VCFs (VCFs/hg38_HGDP1kGP), which this
+  install does not hold`, as `build-index-only` of the dataset says (exit 1, `Error: VCF folder
+  'hg38_HGDP1kGP' from .../list_vcf.txt not found under .../VCFs/`). On hg38 chr22 (the guides and
+  samples above), the install CRISPRme 2.8.1 built with CRISPRitz 2.9.1, laid out as a download (no
+  VCFs, no enriched genome, no per-sample dictionaries), gives 2.8.1's 10,942 rows byte for byte
+  and the three notes; `build-index-only` of the dataset stops as its notes say (exit 1, every
+  `.bin` unchanged); with the reference index moved out of the way as its note says,
+  `build-index-only` builds it in format 2, and the per-sample search gives the 10,943 rows of
+  format 2 above, byte for byte (the row more, the perfect match at chr22:11,118,987, is a
+  reference site), with the other two notes, and the reference search the 9,211, with none. The
+  same install as built (its VCFs and enriched genomes in place): the notes of its variant and
+  INDELS indexes say to build them again from `Genomes/hg38+hg38_hgdp300` and
+  `Genomes/hg38+hg38_hgdp300_INDELS`; `build-index-only` alone keeps the three indexes, every
+  `.bin` unchanged; with each moved out of the way as its note says, it builds all three in format
+  2, and the per-sample and reference searches give the same 10,943 and 9,211 rows, with no note.
+  With its VCFs and no enriched genome, those two notes say that building them again takes the
+  enriched genome, or else the VCFs, from which the whole dataset is enriched again first. Each of
+  these searches ends with exit 0 and nothing on stderr. `test_index_format2` does the same through
+  `build-index-only` and the search script on stub engines. The note `--prune-pam` gives of a flank
+  wider than its PAM, and the warning of a flank built before CRISPRitz kept an `N` in it, are
+  given of an index of format 1 only.
 - **The side of an index of format 2 is the one its header records.** The search script,
-  complete-search, complete-test, the coverage check and the web read it there before
-  `.pam_build`, which an index built by `crispritz.py` itself, or downloaded, may lack.
+  complete-search, complete-test, the coverage check, `build-index-only` and the web read it there
+  before `.pam_build`, which an index built by `crispritz.py` itself, or downloaded, may lack.
+  `build-index-only` read `.pam_build` alone: over a 5′ PAM-less index of format 2 that had none,
+  it took the shipped 3′ `PAMs/20bp-NNN-NO-PAM.txt`, said the index was already present and
+  recorded that file on it, whose 3′ geometry the web then read, and a 3′ search refused the index
+  as a 5′ build "(as its .pam_build records)", which recorded 3′; and it refused a 3′ index of
+  flank 4 that had none, given a 3′ PAM file of that flank, as "a PAM-less index that records no
+  side of the guide". It now refuses a PAM file of the other side than the header's, saying the
+  header records it, and records one of its side; the web takes the index's geometry from its
+  header, and the PAM name of `.pam_build` only where that record's geometry is the header's; and a
+  search that refuses an index for its side says which of the two it read. With CRISPRitz 2.10.0
+  (`feat/2.10.0` 8bda5bb) on a genome of three contigs: of a 5′ PAM-less index that `crispritz.py
+  index-genome` built, `build-index-only` with the shipped 3′ PAM file stops (exit 1: `Error: ...
+  is already there, a PAM-less index for a PAM on the 5' side of the guide (as the header of its
+  .bin files records), and ... puts the PAM on the 3' side. ...`) and writes nothing, the web reads
+  `(None, 23, -3)` of the index, and a 3′ search stops, saying the header records that side; with a
+  5′ PAM file, `build-index-only` records that file, the web reads its name and the 5′ geometry,
+  and a 5′ search of the index ends with exit 0 and nothing on stderr. Of a 3′ index of flank 4,
+  `build-index-only` with a 3′ PAM file of that flank keeps it (exit 0) and records that file.
 - **The second-indel check of an indel row reads no base beyond its chromosome.** The haplotype
   window `_breaking_slots` writes around an indel target ran past the chromosome's ends by up to
   the target's length and the indels' (the positions it read from the dictionary were clamped at
