@@ -352,14 +352,17 @@ def convert_vcf(
 
 
 # What --multiallelic makes of a position's records, and how CRISPRme reads it (stdout).
+# bcftools norm -m+ is -m+both: a position's SNP records become one line, its indel
+# records another. The genotypes are this converter's, unphased (GT).
 MULTIALLELIC_NOTE = (
-    "NOTE: --multiallelic joins the records of each position into one line listing "
-    "every ALT (bcftools norm -m+), SNPs and indels together, so a sample carrying two "
-    "of them gets a genotype such as 1|2. CRISPRme reads each ALT of such a line with "
-    "its own carriers, each genotype against that ALT's own allele index; where the "
-    "genotypes cannot tell which ALT a carrier holds on a haplotype slot, the carrier "
-    "is resolved without phase (PUTATIVE). Without --multiallelic each record keeps one "
-    "ALT, as the published panels are built."
+    "NOTE: --multiallelic joins the SNP records of each position into one line listing "
+    "their ALTs, and its indel records into another (bcftools norm -m+). The genotypes "
+    "the converter writes are unphased (0/1 for a population with the ALT), so a "
+    "population with two joined ALTs gets one such as 1/2. CRISPRme reads each ALT of "
+    "such a line with its own carriers, each genotype against that ALT's own allele "
+    "index, without phase, and gives each ALT the line's first ID (rs1 of rs1;rs2), as "
+    "CRISPRitz add-variants writes it. Without --multiallelic each record keeps one ALT "
+    "and its own ID, as the published panels are built."
 )
 
 

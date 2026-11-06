@@ -1214,6 +1214,15 @@ ACTGA (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per sample, genome-wide, HGDP + 
 953 of 1,967 rows of two or more SNPs and 118 of 293 rows of an indel and one or more SNPs
 listed their rsIDs in another order than their variants. The report's MAF, the lowest
 frequency of the list, did not depend on it.
+Every ALT of a VCF line that lists several ALTs is given the line's first ID: CRISPRitz
+`add-variants` writes it for each ALT of the line, in the per-sample dictionary and in the
+indel log, so where the ID column lists one ID per ALT (`rs1;rs2`, as `bcftools norm -m+` and
+`gnomAD-converter --multiallelic` join them) the rows of the second and later ALTs give the
+first's (`rs1`), and no reader of the dictionary can recover the others. A record of a VCF
+split with `bcftools norm -m -any` keeps the line's whole ID column, which CRISPRme gives its
+ALT as one item (`rs1;rs2`); the published panels are split, and the sites-only (mega)
+registry builder reads one ID per ALT. The input validator says so where it finds such a
+line (in each VCF's first 1,000 records on every run, anywhere with `--full_input_validate`).
 The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
 alignments may exceed it (the report surfaces the observed maximum), while an indel row,

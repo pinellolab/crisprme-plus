@@ -563,8 +563,11 @@ def _multi_alt_issue(fname: str, count: int, example: str, scanned: Optional[int
         "each ALT's own allele index (1|0 under the first, 0|1 under the second); "
         "where the genotypes cannot tell which index an ALT is (every carrier of "
         "two ALTs is 1|2), its carriers are resolved without phase (PUTATIVE). "
-        "A VCF split with `bcftools norm -m -any`, as the published panels are "
-        "built, gives each ALT a record of its own",
+        "Each ALT of such a line is given the line's first ID, as CRISPRitz "
+        "add-variants writes it: where the ID column lists one per ALT (rs1;rs2), "
+        "the rows of the second ALT name the first's (rs1). A VCF split with "
+        "`bcftools norm -m -any`, as the published panels are built, gives each "
+        "ALT a record of its own, holding the line's whole ID column",
     )
 
 

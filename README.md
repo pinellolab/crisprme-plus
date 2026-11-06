@@ -1622,13 +1622,14 @@ Converter function, including detailed explanations and default behaviors:
   a `PASS` value in the FILTER field.
 
 - `--multiallelic` (*Optional*)
-  <br>Merges the records of one genomic position into a single line listing
-  every ALT (`bcftools norm -m+`), SNPs and indels together, so a sample
-  carrying two of them gets a genotype such as `1|2`. CRISPRme reads each ALT of
-  such a line with its own carriers; where the genotypes cannot tell which ALT a
-  carrier holds on a haplotype slot, the carrier is resolved without phase
-  (PUTATIVE). *Default behavior*: Keeps one ALT per record, as the published
-  panels are built (recommended).
+  <br>Joins the SNP records of one genomic position into a single line listing
+  their ALTs, and its indel records into another (`bcftools norm -m+`). The
+  converter writes unphased genotypes, so a population with two joined ALTs gets
+  one such as `1/2`. CRISPRme reads each ALT of such a line with its own
+  carriers, without phase, and gives each ALT the line's first ID (`rs1` of
+  `rs1;rs2`, as CRISPRitz `add-variants` writes it). *Default behavior*: Keeps
+  one ALT per record, with its own ID, as the published panels are built
+  (recommended).
 
 ##### Output Data Overview
 ---
@@ -1663,8 +1664,8 @@ are details about the generated data:
 
 - **Allele Representation**
   <br>By default, the converter preserves biallelic representation, creating one 
-  row per variant. If the `--multiallelic` flag is used, the variants of one
-  position, SNPs and indels together, are merged into one multiallelic entry.
+  row per variant. If the `--multiallelic` flag is used, the SNPs of one
+  position are merged into one multiallelic entry, and its indels into another.
 
 - **Compatible Structure**
   <br>The output files are structured to align with CRISPRme's population-aware 

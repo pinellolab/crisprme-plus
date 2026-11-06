@@ -14,9 +14,12 @@ paths / already-parsed data, so each check gets its own ``TestCase`` with a
 "clean" case and the specific failure mode(s) it exists to catch (see
 ``validate_inputs_plan.md`` at the repo root for the rationale behind each
 check). Fixtures are built on the fly under ``tempfile.TemporaryDirectory()``
-so the suite is fully self-contained and leaves nothing behind.
+so the suite is fully self-contained and leaves nothing behind. The last class
+checks what ``gnomAD-converter --multiallelic`` says of the lines it writes, the other
+text that tells a user what CRISPRme makes of a VCF line listing several ALTs.
 """
 
+import ast
 import contextlib
 import gzip
 import io
@@ -25,6 +28,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1203,6 +1207,20 @@ class TestCheckVcfFullScan(unittest.TestCase):
             self.assertIn("read against each ALT's own allele index", issues[0].message)
             self.assertIn("PUTATIVE", issues[0].message)
 
+    def test_a_line_of_several_alts_warns_of_its_ids(self):
+        # CRISPRitz add-variants writes a line's first ID for each of its ALTs (in the
+        # dictionary and the indel log): the rows of rs2's ALT name rs1. The warning
+        # said nothing of it.
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [vcf_record(pos=1000, vid="rs1;rs2", ref="A", alt="C,G",
+                                  info="AF=0.1,0.05", samples=("1|2",))]
+            issues = self._scan(tmp, records)
+            self.assertEqual(len(issues), 1)
+            self.assertIn("Each ALT of such a line is given the line's first ID",
+                          issues[0].message)
+            self.assertIn("the rows of the second ALT name the first's (rs1)",
+                          issues[0].message)
+
     def test_a_line_of_ten_alts_warns_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             alleles = ["C", "G", "T", "C", "G", "T", "C", "G", "T", "C"]  # 10 alleles
@@ -1492,6 +1510,69 @@ class TestSamplesIDColumns(unittest.TestCase):
         report = vi.ValidationReport("t")
         report.add(vi.check_samplesid_columns(config, cwd), ok_message="ok")
         self.assertFalse(report.has_errors())  # WARN only, run proceeds
+
+
+
+# ===========================================================================
+# gnomAD-converter --multiallelic: what it says it writes
+# ===========================================================================
+
+class TestGnomadConverterMultiallelicNote(unittest.TestCase):
+    """--multiallelic said, on stdout, in its help and in the README, that it joins a
+    position's SNPs and indels into one line, with genotypes such as 1|2. bcftools norm
+    -m+ is -m+both: a position's SNP records become one line and its indel records
+    another; and the converter writes unphased genotypes only (GT), so a joined one is
+    such as 1/2 (bcftools 1.24 on A>C, A>T and A>AT at one position: A C,T with 2/1, and
+    A AT apart)."""
+
+    @classmethod
+    def setUpClass(cls):
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)  # the converter imports utils as a sibling
+        import convert_gnomAD_vcfs
+        cls.cg = convert_gnomAD_vcfs
+        root = os.path.dirname(here)
+        with open(os.path.join(root, "crisprme.py")) as fh:
+            tree = ast.parse(fh.read())
+        helper = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                      and n.name == "print_help_gnomad_converter")
+        cls.help = next(n.value for n in ast.walk(helper) if isinstance(n, ast.Constant)
+                        and isinstance(n.value, str) and "--multiallelic" in n.value)
+        with open(os.path.join(root, "README.md")) as fh:
+            readme = fh.read()
+        start = readme.index("- `--multiallelic` (*Optional*)")
+        cls.readme = readme[start:readme.index("\n\n", start)]
+
+    def test_the_join_is_bcftools_norm_m_plus(self):
+        calls = []
+        run = self.cg.subprocess.call
+
+        def call(cmd, **kwargs):
+            if not cmd.startswith(self.cg.BCFTOOLSNORM):
+                return run(cmd, **kwargs)  # utils.remove's rm of the input
+            calls.append(cmd)
+            write_text(cmd.split(" -o ", 1)[1].split()[0], "x")
+            return 0
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "gnomad.chr1.vcf.gz")
+            write_text(src, "x")
+            with mock.patch.object(self.cg.subprocess, "call", call):
+                self.cg.bcftools_merge(src, True)
+        self.assertIn(" -m+ ", calls[0])  # -m+both, not -m+any
+        self.assertEqual([g for g in self.cg.GT if "|" in g], [])  # unphased only
+
+    def test_each_text_says_what_the_join_writes(self):
+        for name, text in (("stdout", self.cg.MULTIALLELIC_NOTE), ("help", self.help),
+                           ("README", self.readme)):
+            with self.subTest(text=name):
+                flat = " ".join(text.split())
+                self.assertNotIn("1|2", flat)
+                self.assertNotIn("SNPs and indels together", flat)
+                self.assertIn("indel records into another", flat)
+                self.assertIn("1/2", flat)
+                self.assertIn("first ID", flat)
 
 
 if __name__ == "__main__":
