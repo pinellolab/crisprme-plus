@@ -112,15 +112,16 @@ own ID where the ID column lists one per ALT, change those three.
   first ALT on both its slots. The allele index of an ALT is
   now the token all its carriers share, narrowed by what the position's other ALTs need; where the
   genotypes cannot tell (every carrier of two ALTs is `1|2`), the carrier holds one copy on an
-  unknown slot and is resolved without phase (PUTATIVE). The Tier-1 store holds each ALT's
-  genotypes read so (`1|0` and `0|1` for a `1|2`), and a store of an earlier release is read the
-  same way. The sites-only (mega) registry builder and its indel AF companion read such a line one
-  ALT at a time, each with its own AF and, where the ID column lists one per ALT, its own ID; they
-  skipped it whole (the dictionary gives each ALT the line's first ID: see the known limit under
-  Changed). A position of split or biallelic records reads as before. These lines come
-  from HF's raw HPRC `vcfwave` VCFs (33,993 on chr22), the 2019 HGDP data `complete-test` uses, and
-  `gnomAD-converter --multiallelic`. Covered by `PostProcess/test_site_alleles.py` and
-  `PostProcess/test_build_mega_registry.py`.
+  unknown slot and is resolved without phase (PUTATIVE); the population summary of a phased panel
+  decides it without phase too (it read the unknown slot as slot 0, a cis copy of the row of each
+  ALT of the line). The Tier-1 store holds each ALT's genotypes read so (`1|0` and `0|1` for a
+  `1|2`), and a store of an earlier release is read the same way. The sites-only (mega) registry
+  builder and its indel AF companion read such a line one ALT at a time, each with its own AF and,
+  where the ID column lists one per ALT, its own ID; they skipped it whole (the dictionary gives
+  each ALT the line's first ID: see the known limit under Changed). A position of split or biallelic
+  records reads as before. These lines come from HF's raw HPRC `vcfwave` VCFs (33,993 on chr22), the
+  2019 HGDP data `complete-test` uses, and `gnomAD-converter --multiallelic`. Covered by
+  `PostProcess/test_site_alleles.py` and `PostProcess/test_build_mega_registry.py`.
 - **A haplotype slot holding two ALTs of one position is no haplotype: the sample is PUTATIVE
   there, a carrier of each ALT's row, and no row names two ALTs of one position (decision B4).**
   With every ALT of a split site in the dictionary, a panel's split records phased one by one put
@@ -128,12 +129,13 @@ own ID where the ID column lists one per ALT, change those three.
   analysis made it one CONFIRMED haplotype holding both, a row naming two alleles at one position
   (chr22:10,661,629 G and T for NA18869, CONFIRMED in 190 alignments), and listed the sample under
   neither ALT's row. The PUTATIVE branch now takes at most one ALT of a position in each
-  combination, the union above `CRISPRME_IUPAC_CAP` included (one union per choice of ALT); the
-  population summary decides such a carrier without phase; the SNP+SNP co-occurrence companion
-  counts positions, not variants, so two ALTs of one position are no co-occurrence; and a
-  sites-only dataset's co-located union takes one ALT of a position (one union per choice, at
-  most 16 a window). The phase label is per row, so a row such a sample shares reads PUTATIVE for
-  all its carriers. Covered by `PostProcess/test_observed_haplotypes.py` and
+  combination, the union above `CRISPRME_IUPAC_CAP` included (one union per choice of ALT). The
+  population summary decides such a carrier without phase, as it now decides a carrier whose
+  genotype at a variant of the row is unphased; the SNP+SNP co-occurrence companion counts
+  positions, not variants, so two ALTs of one position are no co-occurrence; and a sites-only
+  dataset's co-located union takes one ALT of a position (one union per choice, at most 16 a
+  window). The phase label is per row, so a row such a sample shares reads PUTATIVE for all its
+  carriers. Covered by `PostProcess/test_observed_haplotypes.py` and
   `PostProcess/test_site_alleles.py`.
 - **The dictionary path keeps only the ALTs a target's own column holds, as the observed path does
   (#139); a sites-only dataset substitutes every ALT its registry lists, as up to 2.8.1.** The

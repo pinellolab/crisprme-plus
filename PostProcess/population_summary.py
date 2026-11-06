@@ -608,7 +608,12 @@ def summarize(pos_alts, tier0_reader, gt_reader, axis, ploidy_of, phased,
 
         gts = [pair_carriers[i][sid] for i in range(k)]
 
-        if phased and not any(sid in stacked[i] for i in range(k)):
+        # Decided with phase only where every genotype of the carrier is phased and none
+        # of its slots holds two alts of one position: an unphased one ('/': a 1/0 whose
+        # slot the genotypes of a line of several ALTs cannot tell, or the merge of a
+        # phased and an unphased record of one REF>ALT) gives no slot order.
+        if phased and not any(sid in stacked[i] for i in range(k)) \
+                and not any(site_alleles.gt_tokens(g)[1] == "unphased" for g in gts):
             ac_haps, is_carrier, is_hom = _phased_decide(gts, ploidy, alt_index)
         else:
             ac_haps, is_carrier, is_hom = _unphased_decide(gts, ploidy, alt_index)

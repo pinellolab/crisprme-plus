@@ -14,7 +14,8 @@ gap). The readers of CRISPRme had to change with it:
     the Tier-1 compile of the whole chromosome;
   * observed_haplotypes: a phased slot holding two ALTs of one position is no haplotype
     (PUTATIVE), and no combination takes two ALTs of one position;
-  * population_summary decides a carrier with two ALTs on one slot without phase;
+  * population_summary decides a carrier with two ALTs on one slot, or an unphased
+    genotype, without phase;
   * the SNP+SNP companion compares positions, not variant tokens;
   * the dictionary path keeps only the ALTs the target's own column holds, as the
     observed path does (#139), and a Q column admits its position's ALTs only where they
@@ -350,6 +351,47 @@ class ThePopulationSummaryOfTwoAltsOnASlot(unittest.TestCase):
                     tier0_compile.ploidy_of_for_chrom("chrT"), phased=True)
                 g = summary.groups[tier0_registry.GLOBAL_GROUP_ID]
                 self.assertEqual((g.n_carrier, g.allele_count), (1, 1))
+
+    def test_a_carrier_of_an_unphased_genotype(self):
+        """A carrier whose genotype at a variant of the row is unphased ('/') is decided
+        without phase: its slot order is no phase. A phased store holds such a genotype
+        for a line C>A,T whose only carrier S is 1|2 (which of S's slots holds A, the
+        genotypes cannot tell: 1/0 under A and under T) and for the merge of a phased and
+        an unphased record of one REF>ALT. With G at column 9 on S's slot 0, A + G and
+        T + G were each one cis copy, though A and T cannot both be on slot 0; and S was
+        no carrier of the merged G + C, slot 0 against slot 1."""
+        p5, p9 = _pos1(5), _pos1(9)
+        cases = (
+            ({p5: [("C", "A", "rs1", "0.1", {"S": "1|2"}),
+                   ("C", "T", "rs1", "0.1", {"S": "1|2"})],
+              p9: [("A", "G", "rs9", "0.1", {"S": "1|0"})]},
+             ([(p5, "A"), (p9, "G")], [(p5, "T"), (p9, "G")])),
+            ({p5: [("C", "G", "rs1", "0.1", {"S": "1|0"}),
+                   ("C", "G", "rs2", "0.1", {"S": "0/1"})],
+              p9: [("A", "C", "rs9", "0.1", {"S": "0|1"})]},
+             ([(p5, "G"), (p9, "C")],)),
+        )
+        for values, combinations in cases:
+            tmp = tempfile.mkdtemp(prefix="sa_popun_")
+            self.addCleanup(shutil.rmtree, tmp, True)
+            _build_tiers(tmp, values, keep_dict=False)
+            d = os.path.join(tmp, "Dictionaries")
+            reg = tier0_registry.RegistryReader(
+                os.path.join(d, "registry_ds", "reg_chrT.bin"),
+                os.path.join(d, "registry_ds", "reg_chrT.idx"))
+            gt = tier1_genotypes.GenotypeReader(
+                os.path.join(d, "genotypes_ds", "gt_chrT.bin"),
+                os.path.join(d, "genotypes_ds", "gt_chrT.idx"))
+            self.addCleanup(reg.close)
+            self.addCleanup(gt.close)
+            for pos_alts in combinations:
+                with self.subTest(pos_alts=pos_alts):
+                    summary = population_summary.summarize(
+                        pos_alts, reg, gt, gt._axis,
+                        tier0_compile.ploidy_of_for_chrom("chrT"), phased=True)
+                    g = summary.groups.get(tier0_registry.GLOBAL_GROUP_ID)
+                    # a carrier, with no haplotype count
+                    self.assertEqual((g.n_carrier, g.allele_count) if g else None, (1, 0))
 
 
 # --------------------------------------------------------------------------- #
