@@ -648,15 +648,18 @@ def _drop_indel_slots(haplotypes, positions, start, n_bases):
         return haplotypes
     out = []
     for hap in haplotypes:
-        # (an indel at one of its SNPs, or over one, is another allele of that base; one
-        # that leaves the target's bases, a repeat unit, takes no slot off)
-        breakers = _hp.breakers_of(window, {start + pc + 1: alt for pc, alt in hap.variant_set},
-                                   start, start + n_bases - 1, _ref_bases)
+        # only the indels some carrier of the haplotype has, and of those (an indel at one of
+        # its SNPs, or over one, is another allele of that base; one that leaves the target's
+        # bases, a repeat unit, takes no slot off) the ones that take the target off
+        carried = [w for w in window if not hap.carriers.isdisjoint(w[3])]
+        breakers = _hp.breakers_of(carried, {start + pc + 1: alt for pc, alt in hap.variant_set},
+                                   start, start + n_bases - 1, _ref_bases) if carried else []
         if not breakers:
             out.append(hap)
             continue
-        keep = set()
-        for sid in hap.carriers:
+        # a carrier with none of them keeps the haplotype as it is
+        keep = hap.carriers.difference(*breakers)
+        for sid in hap.carriers - keep:
             mine, others = [], []
             for col in positions:
                 for i, alt in enumerate(col["alts"]):
@@ -695,8 +698,11 @@ def _drop_indel_slots_dict(entries, slot, start, n_bases, window):
     for key, value in entries.items():
         if not value[1] or key[0] in ("greedy", "greedy_cfd", "lossless_hap"):
             continue
-        breakers = _hp.breakers_of(window, {start + pc + 1: b for pc, b in zip(key[0::2],
-                                                                            key[1::2])},
+        carried = [w for w in window if not value[1].isdisjoint(w[3])]
+        if not carried:
+            continue
+        breakers = _hp.breakers_of(carried, {start + pc + 1: b for pc, b in zip(key[0::2],
+                                                                             key[1::2])},
                                    start, start + n_bases - 1, _ref_bases)
         if not breakers:
             continue
