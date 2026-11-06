@@ -256,6 +256,181 @@ class TestClassify(unittest.TestCase):
         self.assertEqual((ver.tier, ver.panel), ("A", "hg38_P1"))
 
 
+class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
+    """A row's worst case takes every allele that matches the guide best, and some of them
+    leave its CFD as it is (an allele at the PAM's N base, a mismatch for a mismatch the
+    CFD table scores alike). A haplotype carrying the rest alone has the row's off-target
+    at the row's score, so the row is tier A, not C1 (RV2-1)."""
+
+    # a 20-nt spacer + NGG, the alignment CFD is defined for; the ALT protospacer takes a
+    # mismatch at spacer position 3 (103) and the PAM's N base (121), which CFD never reads
+    GUIDE = "CTAACAGTTGCTTTTATCACNNN"
+    REF = "CTAACAGTTGCTTTTATCACAGG"
+    ALT = "CTTACAGTTGCTTTTATCACGGG"
+    # a second guide whose position 7 scores dC and dT alike: both alleles leave the CFD
+    GUIDE_TIE = "CTAACAATTGCTTTTATCACNNN"
+    ALT_TIE = "CTAACACTTGCTTTTATCACGGG"  # REF has T at 107, the ALT C, scored the same
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gate_score_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.dicts = os.path.join(self.tmp, "Dictionaries")
+
+    def panel(self, snps, indels=()):
+        build_panel(self.dicts, snps, indels)
+        p = hp.PanelChrom(PANEL, self.dicts, CHROM)
+        self.addCleanup(p.close)
+        return p
+
+    def alignment(self, guide=GUIDE, aligned=ALT, strand="+", start=100, cfd=None):
+        return hp.Alignment(1, hp.BLOCKS[0], guide, start, strand, guide, aligned, 3,
+                            (), "NA", cfd)
+
+    def test_the_columns_of_a_variant_on_either_strand(self):
+        plus = hp.variant_columns(100, self.ALT, "+",
+                                  [v(103, "A", "T"), v(121, "A", "G")])
+        self.assertEqual(plus, [(2, "A"), (20, "A")])
+        # a minus-strand alignment is the reverse complement, its first column the last base
+        minus = hp.variant_columns(100, self.ALT, "-",
+                                   [v(121, "T", "A"), v(103, "T", "C")])
+        self.assertEqual(minus, [(2, "A"), (20, "A")])
+        # an allele the alignment does not take, and one outside it
+        self.assertIsNone(hp.variant_columns(100, self.ALT, "+", [v(103, "A", "C")]))
+        self.assertIsNone(hp.variant_columns(100, self.ALT, "+", [v(130, "A", "G")]))
+
+    def test_which_variants_the_cfd_needs(self):
+        placed = hp.variant_columns(100, self.ALT, "+", [v(103, "A", "T"), v(121, "A", "G")])
+        self.assertEqual(hp.scoring_variants(self.GUIDE, self.ALT, placed), [0])
+        # the row's own CFD must be the one the gate reads, or it says nothing
+        self.assertEqual(hp.scoring_variants(self.GUIDE, self.ALT, placed, shown=0.706), [0])
+        self.assertIsNone(hp.scoring_variants(self.GUIDE, self.ALT, placed, shown=0.5))
+        # another geometry (a 4-base PAM) is not CFD's
+        self.assertIsNone(hp.alignment_cfd(self.GUIDE, self.ALT, pam_len=4))
+
+    def test_a_haplotype_with_the_scoring_variant_alone_is_tier_a(self):
+        p = self.panel([(103, "A", "T", {"S00": "1|0", "S01": "0|1"}),
+                        (121, "A", "G", {"S02": "1|0"})])
+        variants = [v(103, "A", "T"), v(121, "A", "G")]
+        # without the alignment the gate sees only that no haplotype carries both
+        self.assertEqual(hp.classify(variants, [p]).tier, "C1")
+        ver = hp.classify(variants, [p], alignment=self.alignment())
+        self.assertEqual((ver.tier, ver.state, ver.haplotypes), ("A", hp.SAME_SCORE, 2))
+        self.assertEqual(ver.samples, ("S00", "S01"))
+        self.assertEqual(ver.kept, (f"{CHROM}_103_A_T",))
+        self.assertEqual(ver.label(), "the same CFD on 2 of 40 hg38_TESTPANEL haplotypes, "
+                                      f"which carry {CHROM}_103_A_T: the other variant does "
+                                      "not change it")
+
+    def test_a_scoring_variant_nobody_carries_with_the_others_stays_c1(self):
+        # the variant the score needs is in the panel, but on no haplotype that holds the
+        # target: an indel of the store takes the target's bases off the one slot carrying it
+        p = self.panel([(103, "A", "T", {"S00": "1|0"}), (121, "A", "G", {"S02": "1|0"})],
+                       indels=[(110, "GTT", "G", {"S00": "1|0"})])
+        variants = [v(103, "A", "T"), v(121, "A", "G")]
+        ver = hp.classify(variants, [p], span=(100, 122), alignment=self.alignment())
+        self.assertEqual(ver.tier, "C1")
+        self.assertNotIn(ver.state, hp.SAME_SCORE_STATES)
+        # the same panel without that indel: the slot holds the target, so the row is A
+        no_indel = hp.classify(variants, [p], alignment=self.alignment())
+        self.assertEqual((no_indel.tier, no_indel.state), ("A", hp.SAME_SCORE))
+
+    def test_every_variant_scored_alike_reads_as_the_reference(self):
+        p = self.panel([(107, "T", "C", {"S00": "1|0"}), (121, "A", "G", {"S02": "1|0"})])
+        ver = hp.classify([v(107, "T", "C"), v(121, "A", "G")], [p],
+                          alignment=self.alignment(self.GUIDE_TIE, self.ALT_TIE))
+        self.assertEqual((ver.tier, ver.state), ("A", hp.SAME_SCORE_REF))
+        self.assertEqual(ver.label(), "the same CFD as the reference here: none of the 2 "
+                                      "variants changes it")
+
+    def test_an_allele_that_makes_a_column_match_the_guide_is_needed(self):
+        """An allele can leave the CFD as it is and still be needed: at position 1 the CFD
+        table scores a mismatch 1.0, but without the allele the alignment has one mismatch
+        more than the row reports, which the search's budget need not allow -- the row's
+        off-target at the row's score is the one with it."""
+        guide = "ATAACAGTTGCTTTTATCACNNN"
+        alt = "ATAACAGTTGCTTTTATCACGGG"  # column 1 matches the guide; the reference has T
+        placed = hp.variant_columns(100, alt, "+", [v(101, "T", "A"), v(121, "A", "G")])
+        self.assertEqual(hp.alignment_cfd(guide, alt),
+                         hp.alignment_cfd(guide, "T" + alt[1:]))
+        self.assertEqual(hp.scoring_variants(guide, alt, placed), [0])
+        p = self.panel([(101, "T", "A", {"S00": "1|0"}), (121, "A", "G", {"S02": "1|0"})])
+        ver = hp.classify([v(101, "T", "A"), v(121, "A", "G")], [p],
+                          alignment=self.alignment(guide, alt))
+        self.assertEqual((ver.tier, ver.state, ver.kept),
+                         ("A", hp.SAME_SCORE, (f"{CHROM}_101_T_A",)))
+
+    def test_another_allele_in_the_window_that_changes_the_score_takes_the_slot(self):
+        """A haplotype has the row's off-target at the row's score only if it holds nothing
+        else inside the alignment that changes it: the slot carrying the variant the score
+        needs also carries another allele of the panel there, so the row stays C1."""
+        p = self.panel([(103, "A", "T", {"S00": "1|0"}), (121, "A", "G", {"S02": "1|0"}),
+                        (110, "T", "A", {"S00": "1|0"})])
+        ver = hp.classify([v(103, "A", "T"), v(121, "A", "G")], [p],
+                          alignment=self.alignment())
+        self.assertEqual(ver.tier, "C1")
+        # on the other slot of that sample it takes nothing off
+        other = self.panel([(103, "A", "T", {"S00": "1|0"}), (121, "A", "G", {"S02": "1|0"}),
+                            (110, "T", "A", {"S00": "0|1"})])
+        kept = hp.classify([v(103, "A", "T"), v(121, "A", "G")], [other],
+                           alignment=self.alignment())
+        self.assertEqual((kept.tier, kept.state), ("A", hp.SAME_SCORE))
+
+    def test_a_combination_every_variant_of_which_scores_stays_c1(self):
+        # both alleles are in the spacer and change the CFD: no haplotype has the row's score
+        p = self.panel([(103, "A", "T", {"S00": "1|0"}), (105, "T", "G", {"S02": "1|0"})])
+        alt = "CTTAGAGTTGCTTTTATCACAGG"
+        ver = hp.classify([v(103, "A", "T"), v(105, "T", "G")], [p],
+                          alignment=self.alignment(aligned=alt))
+        self.assertEqual(ver.tier, "C1")
+
+    def test_the_search_writes_the_tier_and_the_scoring_variants(self):
+        """The command the pipeline runs: the companion says which variants the CFD needs,
+        and the sidecar counts the rows a haplotype reaches the CFD of."""
+        build_panel(self.dicts, [(103, "A", "T", {"S00": "1|0", "S01": "0|1"}),
+                                 (105, "T", "G", {"S02": "1|0"}),
+                                 (121, "A", "G", {"S03": "1|0"})])
+        out = os.path.join(self.tmp, "Results", "job")
+        os.makedirs(out)
+        vcfs = os.path.join(self.tmp, "list_vcf.txt")
+        with open(vcfs, "w") as fh:
+            fh.write(f"VCFs/{PANEL}\n")
+        results = os.path.join(out, "G+NRG_hg38+" + PANEL + "_4+2_integrated_results.tsv")
+        same = dict(crrna=self.GUIDE, pam="GGG")
+        write_results(results, [
+            # 1: the PAM's N base does not change the CFD, so the haplotypes carrying the
+            # other allele alone have the row's off-target at its score
+            {"Spacer+PAM": self.GUIDE, "Chromosome": CHROM,
+             **block("highest_CFD", 100, "+", self.ALT, "alt",
+                     f"{CHROM}_103_A_T,{CHROM}_121_A_G", "0.05,0.05", **same),
+             **block("fewest_mm+b", 100, "+", self.ALT, "ref", "NA", **same),
+             **block("highest_CRISPR_BULGE", 100, "+", self.ALT, "ref", "NA", **same)},
+            # 2: both alleles change it, and no haplotype carries them together
+            {"Spacer+PAM": self.GUIDE, "Chromosome": CHROM,
+             **block("highest_CFD", 100, "+", "CTTAGAGTTGCTTTTATCACAGG", "alt",
+                     f"{CHROM}_103_A_T,{CHROM}_105_T_G", "0.05,0.05",
+                     crrna=self.GUIDE, pam="AGG"),
+             **block("fewest_mm+b", 100, "+", self.ALT, "ref", "NA", **same),
+             **block("highest_CRISPR_BULGE", 100, "+", self.ALT, "ref", "NA", **same)},
+        ])
+        done = subprocess.run(
+            [sys.executable, os.path.join(HERE, "haplotype_prioritizer.py"),
+             "--results", results, "--dictionaries", self.dicts, "--vcf-list", vcfs,
+             "--mode", "population-level"], capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertIn("A 1 (1 of them on a haplotype that reaches the row's CFD without "
+                      "every variant)", done.stdout)
+        with open(hp.companion_path(results)) as fh:
+            body = [ln.rstrip("\n").split("\t") for ln in fh if not ln.startswith("#")]
+        tier, state = (hp.COMPANION_COLUMNS.index(c) for c in ("Tier", "State"))
+        scoring = hp.COMPANION_COLUMNS.index("Scoring_variants")
+        self.assertEqual([(r[0], r[tier], r[state], r[scoring]) for r in body],
+                         [("1", "A", hp.SAME_SCORE, f"{CHROM}_103_A_T"),
+                          ("2", "C1", hp.TOO_RARE, "-")])
+        with open(os.path.join(out, hp.META_NAME)) as fh:
+            self.assertEqual(json.load(fh)["counts"],
+                             {"A": 1, "C1": 1, hp.SAME_SCORE_COUNT: 1})
+
+
 def write_results(path, rows):
     """An integrated results table with the columns the gate reads (and a filler)."""
     cols = ["Spacer+PAM", "Chromosome"]
@@ -268,11 +443,18 @@ def write_results(path, rows):
             fh.write("\t".join(r.get(c, "NA") for c in cols) + "\n")
 
 
-def block(name, start, strand, aligned, origin, variants, maf="NA"):
-    return {f"Start_coordinate_({name})": str(start), f"Strand_({name})": strand,
+def block(name, start, strand, aligned, origin, variants, maf="NA", crrna=None, pam=None):
+    """One alignment's columns; ``crrna`` and ``pam`` (the aligned spacer+PAM and the PAM)
+    where the test wants the gate to read the alignment's CFD."""
+    cols = {f"Start_coordinate_({name})": str(start), f"Strand_({name})": strand,
             f"Aligned_protospacer+PAM_ALT_({name})": aligned,
             f"REF/ALT_origin_({name})": origin,
             f"Variant_info_genome_({name})": variants, f"Variant_MAF_({name})": maf}
+    if crrna is not None:
+        cols[f"Aligned_spacer+PAM_({name})"] = crrna
+    if pam is not None:
+        cols[f"PAM_({name})"] = pam
+    return cols
 
 
 class TestGateCommand(unittest.TestCase):
@@ -410,7 +592,8 @@ class TestTheFrequencyBoundOfASitesOnlyRow(unittest.TestCase):
         with open(hp.companion_path(self.results)) as fh:
             body = [ln.rstrip("\n").split("\t") for ln in fh if not ln.startswith("#")]
         self.assertEqual([(r[1], r[7]) for r in body], [("highest_CFD", "C2")])
-        self.assertEqual(body[0][-1], "not checked: 2 of 2 variants not in hg38_HGDP1kGP; "
+        label = hp.COMPANION_COLUMNS.index("Label")
+        self.assertEqual(body[0][label], "not checked: 2 of 2 variants not in hg38_HGDP1kGP; "
                                       "frequency product 1.0e-03, rarest 2.0e-02 "
                                       "(within the 1e-06 / 0.001 bound)")
 
@@ -562,6 +745,68 @@ class TestReportRanksByTheGate(unittest.TestCase):
         # the off-target set is the search's: the bundled table is the source file
         self.assertEqual(files["data/integrated_results.tsv.gz"].encode(), source)
         self.assertIn("data/carrier_gate.tsv.gz", files)
+
+    def test_a_one_variant_row_the_gate_demoted_reads_its_label_and_the_legend_has_it(self):
+        """A row of one variant every carrying haplotype of which has an indel in the
+        target is C1: its Observed cell gives the gate's label, in place of its carriers,
+        and the report's legend and the inputs card say so (RV2-3)."""
+        build_panel(self.dicts, [
+            (1010, "A", "G", {"S00": "1|0", "S01": "1|0"}),
+            (1015, "C", "T", {"S00": "1|0", "S01": "1|0", "S02": "0|1"}),
+            (2010, "G", "A", {s: "1|0" for s in SAMPLES}),
+            (2015, "T", "C", {s: "0|1" for s in SAMPLES}),
+            (3010, "A", "C", {"S04": "1|0"}),
+            (4010, "C", "G", {"S05": "0|1"}),
+            (7010, "C", "T", {"S06": "1|0"}),
+        ], indels=[(7015, "GTT", "G", {"S06": "1|0"})])
+        with open(self.results, "a") as fh:
+            self.write_row(fh, "7000", "3", "0.45", "0.35", "alt", f"{CHROM}_7010_C_T")
+        self.gate()
+        files = self.report()
+        demoted = files["data/unobserved_worst_case.tsv"]
+        head = demoted.splitlines()[0].split("\t")
+        pos, obs = head.index("Position"), head.index("Observed")
+        rows = {ln.split("\t")[pos]: ln.split("\t")[obs] for ln in demoted.splitlines()[1:]}
+        self.assertEqual(rows["7000"],
+                         f"the 1 {PANEL} haplotype carrying it has an indel in the target")
+        html = files["report.html"]
+        self.assertIn("A row of one variant reads its carriers, unless every haplotype "
+                      "carrying it has an indel that takes the target's bases off it",
+                      html)
+        self.assertIn("the tier of a row the gate checked &mdash; a row of two or more "
+                      "variants, and a row of one whose every carrying haplotype has an "
+                      "indel in the target", html)
+
+    def test_the_plots_of_section_2_rank_what_their_tables_do(self):
+        """Panels (c) and (d) of Section 2 rank by CRISPR-Bulge score, as the CRISPR-Bulge
+        table does, so the plot and the table show the same sites: a row whose highest-CFD
+        alignment is C1, and whose highest-CRISPR-Bulge alignment is not, stays in both."""
+        import generate_report as gr
+        from unittest import mock
+        with open(self.results, "a") as fh:
+            self.write_row(fh, "6000", "3", "0.70", "0.70", "alt",
+                           f"{CHROM}_2010_G_A,{CHROM}_2015_T_C",
+                           cb_variants=f"{CHROM}_4010_C_G")
+        self.gate()
+        seen = []
+
+        def record(sub, *args, **kwargs):
+            seen.append(list(sub["Start_coordinate_(highest_CFD)"]))
+            return "data:,"
+
+        with mock.patch.object(gr, "_cfd_style_scatter", record):
+            files = self.report()
+        self.assertEqual(len(seen), 4)  # (a) CFD, (b) CFD delta, (c) and (d) CRISPR-Bulge
+        by_cfd, _delta, by_cb, by_cb_delta = seen
+        self.assertNotIn("6000", by_cfd)
+        self.assertIn("6000", by_cb)
+        self.assertIn("6000", self.positions(files["data/top1000_crispr_bulge.tsv"]))
+        self.assertNotIn("6000", self.positions(files["data/top1000.tsv"]))
+        # each plot shows the sites of the table ranked by the same score
+        self.assertEqual(sorted(by_cfd), sorted(self.positions(files["data/top1000.tsv"])))
+        for plot in (by_cb, by_cb_delta):
+            self.assertEqual(sorted(plot),
+                             sorted(self.positions(files["data/top1000_crispr_bulge.tsv"])))
 
     def section4(self, files):
         """The validation panel's totals, its threshold files and run_manifest.json's

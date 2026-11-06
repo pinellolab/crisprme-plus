@@ -12,9 +12,15 @@ the row) in a phased genotype store -- a genotyped dataset's own (Dictionaries/g
 for the SNPs, indel_genotypes_<vcf>/ for the indels), the phased HGDP + 1000 Genomes store for
 a sites-only dataset (the genotype oracle, opt-in) -- and gives the alignment a tier:
 
-  A   two or more variants that one phased haplotype of the panel carries together. States:
-      "one haplotype" when a single haplotype does, "phase not known" when only samples whose
-      genotypes do not say which haplotype holds which variant carry them all;
+  A   two or more variants that one phased haplotype of the panel carries together, or that
+      a haplotype reaches the alignment's CFD without: a variant the alignment takes which
+      leaves its CFD as it is (an allele at the PAM's N base, a mismatch for a mismatch the
+      table scores alike) is not needed for the row's score, so a haplotype carrying the
+      rest has the row's off-target at the row's score. States: "one haplotype" when a
+      single haplotype carries them all, "phase not known" when only samples whose genotypes
+      do not say which haplotype holds which variant carry them all, "same score" (with
+      "same score, phase not known" and "same score as the reference") when a haplotype
+      reaches the alignment's CFD without every variant;
   B   one variant: the panel or the dataset's allele frequency says that some individual
       carries it. It cannot be a combination nobody carries, which is all B says;
   C1  two or more variants, each one in the panel, that no haplotype of it carries together.
@@ -54,8 +60,10 @@ import json
 import math
 import os
 import sys
+from collections import namedtuple
 
 import build_mega_indel_af as bia
+import bulge_cfd_penalty as bcp
 import indel_snp_cis as isc
 import population_summary as ps
 import tier0_compile as t0c
@@ -65,6 +73,12 @@ import tier1_genotypes as t1
 TIER_A, TIER_B, TIER_C1, TIER_C2 = "A", "B", "C1", "C2"
 ONE_HAPLOTYPE = "one haplotype"
 PHASE_NOT_KNOWN = "phase not known"
+SAME_SCORE = "same score"
+SAME_SCORE_PHASE = "same score, phase not known"
+SAME_SCORE_REF = "same score as the reference"
+SAME_SCORE_STATES = (SAME_SCORE, SAME_SCORE_PHASE, SAME_SCORE_REF)
+# the counts of the sidecar hold the tiers, and this key the A rows of a "same score" state
+SAME_SCORE_COUNT = "A_same_score"
 TOO_RARE = "too rare to tell"
 INDEL_IN_TARGET = "indel in the target"
 NOT_IN_PANEL = "not in the panel"
@@ -82,16 +96,30 @@ ORACLE_PANEL = "hg38_HGDP1kGP"
 
 # the integrated results' three alignments of a row, by the suffix of their columns
 BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
-_BLOCK_COLUMNS = ("Start_coordinate", "Strand", "Aligned_protospacer+PAM_ALT",
-                  "REF/ALT_origin", "Variant_info_genome", "Variant_MAF")
+_BLOCK_COLUMNS = ("Start_coordinate", "Strand", "Aligned_spacer+PAM",
+                  "Aligned_protospacer+PAM_ALT", "PAM", "REF/ALT_origin",
+                  "Variant_info_genome", "Variant_MAF")
+
+# the alignment CFD is defined for: a 20-nt spacer and a 3-base 3' PAM (cfd_score)
+SPACER_PAM_LEN = 23
+CFD_PAM_LEN = 3
+# the integrated results report a CFD of three decimals, so two alignments whose CFDs are
+# within half of the last digit have the CFD the row reports
+CFD_SHOWN = 5e-4
+# a minus-strand alignment is written on the other strand, base by base
+COMPLEMENT = {"A": "T", "C": "G", "G": "C", "T": "A"}
 
 COMPANION_SUFFIX = "_carrier_gate.tsv"
 META_NAME = ".carrier_gate.json"
 COMPANION_COLUMNS = (
     "Row", "Block", "Spacer+PAM", "Chromosome", "Start", "Strand", "Variants", "Tier",
     "State", "Panel", "Panel_haplotypes", "Haplotypes", "Samples", "Expected",
-    "AF_product", "AF_min", "Label",
+    "AF_product", "AF_min", "Label", "Scoring_variants",
 )
+
+# one alignment of a row of the integrated results, as the gate reads it
+Alignment = namedtuple(
+    "Alignment", "row block guide start strand crrna aligned pam_len variants maf cfd")
 
 
 # --------------------------------------------------------------------------- #
@@ -131,6 +159,112 @@ def target_span(start, aligned):
     if n <= 0:
         return None
     return int(start), int(start) + n - 1
+
+
+# --------------------------------------------------------------------------- #
+# Which variants of an alignment its score needs
+# --------------------------------------------------------------------------- #
+def alignment_cfd(crrna, aligned, pam_len=CFD_PAM_LEN):
+    """The CFD of one alignment, from its aligned spacer+PAM and protospacer+PAM
+    (bulge_cfd_penalty, as the search scores a row), or None where CFD is not defined: a
+    spacer or a PAM of another length, or two strings that do not align."""
+    if (pam_len != CFD_PAM_LEN or len(crrna) != len(aligned)
+            or len(crrna) - crrna.count("-") != SPACER_PAM_LEN):
+        return None
+    return bcp.cfd_score_bulge_aware(crrna.upper(), aligned.upper(), pam_len=pam_len)
+
+
+def variant_columns(start, aligned, strand, variants):
+    """[(column, reference base)] of each variant of a SNP-only alignment in its aligned
+    protospacer+PAM, read as target_span reads it (every character but an RNA-bulge gap is
+    a genome base, the leftmost first; a minus-strand alignment is the reverse complement).
+    None when a variant falls outside the alignment or the alignment does not take its
+    allele there."""
+    cols = [i for i, ch in enumerate(aligned) if ch != "-"]
+    out = []
+    for _chrom, pos, ref, alt in variants:
+        off = (pos - 1) - int(start)
+        if not (0 <= off < len(cols)):
+            return None
+        i = cols[len(cols) - 1 - off] if strand == "-" else cols[off]
+        if strand == "-":
+            ref, alt = COMPLEMENT.get(ref, ref), COMPLEMENT.get(alt, alt)
+        if aligned[i] != alt:
+            return None
+        out.append((i, ref))
+    return out
+
+
+def same_cfd(one, other):
+    """Whether two alignments have the CFD the results report of them (CFD_SHOWN)."""
+    return one is not None and other is not None and abs(one - other) <= CFD_SHOWN
+
+
+def matches(guide_base, base):
+    """Whether a column of an alignment matches the guide: its base, or the N of a PAM
+    the guide's side writes as N, which any base matches."""
+    return guide_base == "N" or guide_base == base
+
+
+def scoring_variants(crrna, aligned, placed, pam_len=CFD_PAM_LEN, shown=None):
+    """The indexes of the variants of an alignment its score needs: those whose allele,
+    taken back to the reference base (``placed``: variant_columns), change the CFD the row
+    reports, or turn a column that matches the guide into one that does not, or the other
+    way round (the row's mismatches are the alignment's, and one more would be another
+    alignment, outside the search's budget). The others leave the row's score and its
+    mismatches as they are -- an allele at the PAM's N base, a mismatch for a mismatch the
+    table scores alike -- so a haplotype carrying the rest alone has the row's off-target at
+    the row's score. Every index when they change the CFD together (the PAM's
+    factor is read over its bases at once), and None when the gate cannot read the
+    alignment's CFD, or ``shown`` (the row's CFD) is not the CFD it reads."""
+    whole = alignment_cfd(crrna, aligned, pam_len)
+    if not whole:  # another geometry, or a score of 0 that no allele can lower
+        return None
+    if shown is not None and abs(round(whole, 3) - shown) > CFD_SHOWN:
+        return None
+    keep = [k for k, (col, ref) in enumerate(placed)
+            if not same_cfd(alignment_cfd(crrna, aligned[:col] + ref + aligned[col + 1:],
+                                          pam_len), whole)
+            or matches(crrna[col], ref) != matches(crrna[col], aligned[col])]
+    if len(keep) == len(placed):
+        return keep
+    rest = list(aligned)
+    for k, (col, ref) in enumerate(placed):
+        if k not in keep:
+            rest[col] = ref
+    if not same_cfd(alignment_cfd(crrna, "".join(rest), pam_len), whole):
+        return list(range(len(placed)))
+    return keep
+
+
+def score_breakers(panel, alignment, variants):
+    """{sample: genotype} of each allele of the panel inside the alignment, other than the
+    ones the row takes, that changes the CFD the row reports or the alignment's
+    mismatches: a slot holding one does not have the row's off-target at the row's score,
+    however the row's own variants sit on it."""
+    aligned = alignment.aligned.upper()
+    whole = alignment_cfd(alignment.crrna, aligned, alignment.pam_len)
+    if whole is None:
+        return []
+    minus = alignment.strand == "-"
+    cols = [i for i, ch in enumerate(aligned) if ch != "-"]
+    own = {(v[1], v[3]) for v in variants}
+    out = []
+    for off, col in enumerate(cols):
+        pos = int(alignment.start) + (len(cols) - 1 - off if minus else off) + 1
+        for alt, gts in panel.alleles_at(pos).items():
+            if (pos, alt) in own or len(alt) != 1:
+                continue
+            base = COMPLEMENT.get(alt, alt) if minus else alt
+            if base == aligned[col]:
+                continue
+            if (not same_cfd(alignment_cfd(alignment.crrna,
+                                           aligned[:col] + base + aligned[col + 1:],
+                                           alignment.pam_len), whole)
+                    or matches(alignment.crrna[col], base)
+                    != matches(alignment.crrna[col], aligned[col])):
+                out.append(gts)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -473,6 +607,13 @@ class PanelChrom(object):
             return None
         return self.indels.carriers(pos, ref, alt)
 
+    def alleles_at(self, pos):
+        """{ALT: {sample: genotype}} of the panel's SNP alleles at ``pos``."""
+        if self.gt is None:
+            return {}
+        site, _refs = self._snp_site(pos)
+        return site
+
     def rivals(self, v):
         """{sample: genotype} of each other allele at the variant's position: the other ALTs
         of a SNP site, and the indels that start there."""
@@ -521,15 +662,16 @@ class Verdict(object):
     """The tier of one alignment: ``tier`` (A, B, C1, C2), ``state`` (its sub-state or
     ""), the panel that decided it and its haplotypes (``panel_haplotypes``), the haplotypes
     that hold the variants together (``haplotypes``), the samples to name (``samples``),
-    ``expected`` (E), the frequency bound's ``af_product`` / ``af_min`` and ``missing``,
-    the number of variants no panel holds."""
+    ``expected`` (E), the frequency bound's ``af_product`` / ``af_min``, ``missing``,
+    the number of variants no panel holds, and ``kept``, the variants the alignment's CFD
+    needs where a haplotype reaches it without every one of them (scoring_variants)."""
 
     __slots__ = ("tier", "state", "panel", "panel_haplotypes", "haplotypes", "samples",
-                 "expected", "af_product", "af_min", "missing", "n_variants")
+                 "expected", "af_product", "af_min", "missing", "n_variants", "kept")
 
     def __init__(self, tier, state="", panel=None, panel_haplotypes=0, haplotypes=None,
                  samples=(), expected=None, af_product=None, af_min=None, missing=0,
-                 n_variants=0):
+                 n_variants=0, kept=()):
         self.tier = tier
         self.state = state
         self.panel = panel
@@ -541,11 +683,26 @@ class Verdict(object):
         self.af_min = af_min
         self.missing = missing
         self.n_variants = n_variants
+        self.kept = tuple(kept)
 
     def label(self):
         """The factual text the report shows (ASCII: it goes into the TSV downloads too)."""
         hap_of = f"{self.panel_haplotypes:,} {self.panel} haplotypes"
         if self.tier == TIER_A:
+            if self.state in SAME_SCORE_STATES:
+                rest = self.n_variants - len(self.kept)
+                others = (f"the other variant does not change it" if rest == 1
+                          else f"the other {rest} variants do not change it")
+                if self.state == SAME_SCORE_REF:
+                    return (f"the same CFD as the reference here: none of the "
+                            f"{self.n_variants} variants changes it")
+                carried = " and ".join(self.kept)
+                if self.state == SAME_SCORE_PHASE:
+                    n = len(self.samples)
+                    return (f"the same CFD in {n} {self.panel} sample{'' if n == 1 else 's'} "
+                            f"carrying {carried}, phase not known: {others}")
+                return (f"the same CFD on {self.haplotypes:,} of {hap_of}, which carry "
+                        f"{carried}: {others}")
             if self.state == PHASE_NOT_KNOWN:
                 n = len(self.samples)
                 return (f"carried together by {n} {self.panel} sample{'' if n == 1 else 's'}"
@@ -576,29 +733,14 @@ class Verdict(object):
         return text
 
 
-def classify(variants, panels, span=None, min_expected=MIN_EXPECTED, af_of=None):
-    """The tier of one alignment's variants against the panels (PanelChrom).
-
-    ``span`` (lo, hi): the target's reference bases, for an alignment of SNPs only: a slot
-    that holds them with an indel changing those bases does not hold the target. ``af_of``:
-    the dataset's frequency of a variant (its registry; an indel's, its indel frequencies),
-    or None, for the frequency bound of a multi-variant alignment. A variant is in a panel when the panel holds its POS, REF and
-    ALT; the panels are the stores a search reads (a row does not say which dataset it comes
-    from): the first with evidence decides, the one with the most haplotypes holding the
-    variants together for A, the most expected for C1."""
-    k = len(variants)
-    if k == 0:
-        return None
+def panel_support(variants, panels, span=None, quick_single=False, also=None):
+    """([(panel, genotypes, haplotypes, cis, unknown, carrying)] of each panel that holds
+    every variant (support), the fewest variants a panel misses, and -- with
+    ``quick_single`` -- the first panel holding a single variant with nothing in the target
+    to take a slot off it, whose slots need not be read). ``also(panel)``: more alleles
+    that take a slot off the set (score_breakers)."""
+    full, missing, quick = [], len(variants), None
     snps_only = all(is_snp(v) for v in variants)
-    afs = None
-    if k >= 2 and af_of is not None:
-        afs = [af_of(v) for v in variants]
-        if any(a is None for a in afs):
-            afs = None
-    af_product = math.prod(afs) if afs else None
-    af_min = min(afs) if afs else None
-    pos = variants[0][1]
-    full, missing = [], k
     for panel in panels:
         gts = [panel.carriers(v) for v in variants]
         absent = sum(1 for g in gts if not g)
@@ -610,15 +752,91 @@ def classify(variants, panels, span=None, min_expected=MIN_EXPECTED, af_of=None)
             breakers = breaking_indels(panel.indels, span[0], span[1],
                                        [(v[1], v[2], v[3]) for v in variants],
                                        seq_at=panel.seq_at)
-        if k == 1 and not breakers:
-            # one variant, and nothing in the target to take a slot off it
-            return Verdict(TIER_B, panel=panel.name, panel_haplotypes=panel.haplotypes(pos),
-                           haplotypes=None, n_variants=1)
+        if also is not None:
+            breakers = breakers + also(panel)
+        if quick_single and len(variants) == 1 and not breakers:
+            quick = panel
+            break
         rivals = []
         for v in variants:
             rivals.extend(panel.rivals(v))
         haps, cis, unknown, carrying = support(gts, breakers, rivals)
         full.append((panel, gts, haps, cis, unknown, carrying))
+    return full, missing, quick
+
+
+def _token(v):
+    return "{0}_{1}_{2}_{3}".format(*v)
+
+
+def same_score_verdict(variants, panels, span, alignment):
+    """The verdict of an alignment whose CFD a real haplotype reaches without every
+    variant it takes (tier A, states "same score", "same score, phase not known", "same
+    score as the reference"), or None: no such haplotype, every variant changes the CFD,
+    or the gate cannot read it (``alignment``: an Alignment, or None)."""
+    if alignment is None or len(variants) < 2 or not all(is_snp(v) for v in variants):
+        return None
+    placed = variant_columns(alignment.start, alignment.aligned.upper(), alignment.strand,
+                             variants)
+    if placed is None:
+        return None
+    keep = scoring_variants(alignment.crrna, alignment.aligned.upper(), placed,
+                            alignment.pam_len, alignment.cfd)
+    if keep is None or len(keep) == len(variants):
+        return None
+    pos = variants[0][1]
+    sub = [variants[k] for k in keep]
+    if not sub:
+        # the reference sequence scores the same here, so every haplotype has the row's
+        # off-target at the row's score
+        panel = max(panels, key=lambda p: p.haplotypes(pos))
+        return Verdict(TIER_A, SAME_SCORE_REF, panel.name, panel.haplotypes(pos),
+                       n_variants=len(variants))
+    full, _missing, _quick = panel_support(
+        sub, panels, span, also=lambda p: score_breakers(p, alignment, variants))
+    if not full:
+        return None
+    panel, _gts, haps, cis, unknown, _carrying = max(full, key=lambda f: (f[2], len(f[4])))
+    kept = [_token(v) for v in sub]
+    if haps:
+        return Verdict(TIER_A, SAME_SCORE, panel.name, panel.haplotypes(pos), haps,
+                       sorted(cis), n_variants=len(variants), kept=kept)
+    if unknown:
+        return Verdict(TIER_A, SAME_SCORE_PHASE, panel.name, panel.haplotypes(pos), 0,
+                       sorted(unknown), n_variants=len(variants), kept=kept)
+    return None
+
+
+def classify(variants, panels, span=None, min_expected=MIN_EXPECTED, af_of=None,
+             alignment=None):
+    """The tier of one alignment's variants against the panels (PanelChrom).
+
+    ``span`` (lo, hi): the target's reference bases, for an alignment of SNPs only: a slot
+    that holds them with an indel changing those bases does not hold the target. ``af_of``:
+    the dataset's frequency of a variant (its registry; an indel's, its indel frequencies),
+    or None, for the frequency bound of a multi-variant alignment. ``alignment``: the row's
+    Alignment, for a combination no haplotype carries: where a haplotype reaches the
+    alignment's CFD without every variant the tier is A, not C1 (same_score_verdict), as
+    the row's score is one a real haplotype has. A variant is in a panel when the panel
+    holds its POS, REF and ALT; the panels are the stores a search reads (a row does not
+    say which dataset it comes from): the first with evidence decides, the one with the
+    most haplotypes holding the variants together for A, the most expected for C1."""
+    k = len(variants)
+    if k == 0:
+        return None
+    afs = None
+    if k >= 2 and af_of is not None:
+        afs = [af_of(v) for v in variants]
+        if any(a is None for a in afs):
+            afs = None
+    af_product = math.prod(afs) if afs else None
+    af_min = min(afs) if afs else None
+    pos = variants[0][1]
+    full, missing, quick = panel_support(variants, panels, span, quick_single=True)
+    if quick is not None:
+        # one variant, and nothing in the target to take a slot off it
+        return Verdict(TIER_B, panel=quick.name, panel_haplotypes=quick.haplotypes(pos),
+                       haplotypes=None, n_variants=1)
     if not full:
         if k == 1:
             return Verdict(TIER_B, NOT_IN_PANEL, n_variants=1)
@@ -639,6 +857,9 @@ def classify(variants, panels, span=None, min_expected=MIN_EXPECTED, af_of=None)
                            n_variants=k)
         return Verdict(TIER_A, PHASE_NOT_KNOWN, panel.name, hap_total, 0, sorted(unknown),
                        None, af_product, af_min, n_variants=k)
+    same = same_score_verdict(variants, panels, span, alignment)
+    if same is not None:
+        return same
     panel, gts, _h, _c, _u, carrying = max(full, key=lambda f: f[5])
     if carrying:
         # haplotypes carry them (together), each with an indel that changes the target
@@ -656,8 +877,9 @@ def classify(variants, panels, span=None, min_expected=MIN_EXPECTED, af_of=None)
 # The gate over a search's integrated results
 # --------------------------------------------------------------------------- #
 def _read_rows(results):
-    """{chromosome: [(row, block, guide, start, strand, aligned, variants, maf)]} of every
-    alignment of the integrated results that uses a variant (row: its 1-based data line)."""
+    """{chromosome: [Alignment]} of every alignment of the integrated results that uses a
+    variant (row: its 1-based data line; cfd: the CFD the row shows, where the alignment
+    has one -- the ranking by CRISPR-Bulge score has no CFD column)."""
     by_chrom = {}
     with open(results) as fh:
         header = fh.readline().rstrip("\n").split("\t")
@@ -666,19 +888,27 @@ def _read_rows(results):
         cols = []
         for block in BLOCKS:
             try:
-                cols.append((block, [ix[f"{c}_({block})"] for c in _BLOCK_COLUMNS]))
+                cols.append((block, [ix[f"{c}_({block})"] for c in _BLOCK_COLUMNS],
+                             ix.get(f"CFD_score_({block})")))
             except KeyError:
                 continue
         for row, line in enumerate(fh, start=1):
             f = line.rstrip("\n").split("\t")
-            for block, (si, sti, ai, oi, vi, mi) in cols:
+            for block, (si, sti, ci_, ai, pi, oi, vi, mi), fi in cols:
                 if vi >= len(f) or str(f[oi]).strip().lower() != "alt":
                     continue
                 variants = parse_variants(f[vi])
                 if not variants:
                     continue
-                by_chrom.setdefault(f[ci], []).append(
-                    (row, block, f[gi], f[si], f[sti], f[ai], variants, f[mi]))
+                cfd = None
+                if fi is not None and fi < len(f):
+                    try:
+                        cfd = float(f[fi])
+                    except ValueError:
+                        cfd = None
+                by_chrom.setdefault(f[ci], []).append(Alignment(
+                    row, block, f[gi], f[si], f[sti], f[ci_].upper(), f[ai],
+                    len(f[pi].strip()), variants, f[mi], cfd))
     return by_chrom
 
 
@@ -702,11 +932,11 @@ def _gate_chromosome(job):
             ref = "".join(ln.strip() for ln in fh if not ln.startswith(">")).upper()
         seq_at = lambda a, b, _s=ref: _s[max(a, 0):max(b, 0)]  # noqa: E731
     wanted = set()
-    for _row, _block, _guide, start, _strand, aligned, variants, _maf in rows:
-        wanted.update(v[1] - 1 for v in variants)
-        if all(is_snp(v) for v in variants):
+    for aln in rows:
+        wanted.update(v[1] - 1 for v in aln.variants)
+        if all(is_snp(v) for v in aln.variants):
             try:
-                span = target_span(start, aligned)
+                span = target_span(aln.start, aln.aligned)
             except ValueError:
                 span = None
             if span is not None:
@@ -726,7 +956,7 @@ def _gate_chromosome(job):
 
     # an indel's, of a sites-only dataset's indel frequencies (build_mega_indel_af: AF_max,
     # as its registry gives for a SNP); a genotyped dataset's rows carry theirs (MAF)
-    at_indels = {v[1] for row in rows for v in row[6] if not is_snp(v)}
+    at_indels = {v[1] for aln in rows for v in aln.variants if not is_snp(v)}
     indel_afs = []
     for name in datasets:
         path = os.path.join(dictionaries, f"indel_af_{name}", f"indel_af_{chrom}.tsv.gz")
@@ -750,20 +980,23 @@ def _gate_chromosome(job):
         return None
 
     lines, counts, cache = [], {}, {}
-    for row, block, guide, start, strand, aligned, variants, maf in rows:
+    for aln in rows:
+        variants = aln.variants
         span = None
         if all(is_snp(v) for v in variants):
             try:
-                span = target_span(start, aligned)
+                span = target_span(aln.start, aln.aligned)
             except ValueError:
                 span = None
-        key = (tuple(variants), span)
+        # the alignment decides the tier too (same_score_verdict), so two rows share a
+        # verdict only when they take the same alleles over the same aligned bases
+        key = (tuple(variants), span, aln.crrna, aln.aligned, aln.cfd)
         verdict = cache.get(key)
         if verdict is None:
             if panels:
-                fallback = _maf_values(maf)
+                fallback = _maf_values(aln.maf)
                 bound = af_of if registries or indel_afs else None
-                verdict = classify(variants, panels, span, min_expected, bound)
+                verdict = classify(variants, panels, span, min_expected, bound, aln)
                 if verdict.af_product is None and len(variants) >= 2 \
                         and len(fallback) == len(variants):
                     verdict.af_product = math.prod(fallback)
@@ -773,11 +1006,13 @@ def _gate_chromosome(job):
                                   NOT_IN_PANEL if len(variants) == 1 else "",
                                   missing=len(variants), n_variants=len(variants))
             cache[key] = verdict
-        if block == BLOCKS[0]:
+        if aln.block == BLOCKS[0]:
             counts[verdict.tier] = counts.get(verdict.tier, 0) + 1
-        lines.append((row, BLOCKS.index(block), "\t".join((
-            str(row), block, guide, chrom, str(start), strand,
-            ",".join(f"{c}_{p}_{r}_{a}" for c, p, r, a in variants),
+            if verdict.state in SAME_SCORE_STATES:
+                counts[SAME_SCORE_COUNT] = counts.get(SAME_SCORE_COUNT, 0) + 1
+        lines.append((aln.row, BLOCKS.index(aln.block), "\t".join((
+            str(aln.row), aln.block, aln.guide, chrom, str(aln.start), aln.strand,
+            ",".join(_token(v) for v in variants),
             verdict.tier, verdict.state or "-", verdict.panel or "-",
             str(verdict.panel_haplotypes or "NA"),
             "NA" if verdict.haplotypes is None else str(verdict.haplotypes),
@@ -785,7 +1020,7 @@ def _gate_chromosome(job):
             "NA" if verdict.expected is None else "%.4g" % verdict.expected,
             "NA" if verdict.af_product is None else "%.4g" % verdict.af_product,
             "NA" if verdict.af_min is None else "%.4g" % verdict.af_min,
-            verdict.label(),
+            verdict.label(), ",".join(verdict.kept) or "-",
         ))))
     facts = {p.name: {"samples": p.samples(), "haplotypes": p.haplotypes(1) or 2 * p.samples(),
                       "role": p.role, "indels": p.indels is not None,
@@ -835,7 +1070,9 @@ def run_gate(results, out_path, dictionaries, panel_specs, datasets,
         out.write(
             "# CRISPRme carrier gate. One line per alignment of a row of the integrated results\n"
             "# that uses a variant (Row: the row's line, header excluded; Block: which alignment).\n"
-            "# Tier A: two or more variants one phased haplotype of the panel carries together.\n"
+            "# Tier A: two or more variants one phased haplotype of the panel carries together,\n"
+            "# or that a haplotype reaches the alignment's CFD without (Scoring_variants: those\n"
+            "# its CFD needs, which that haplotype carries; the others leave the CFD as it is).\n"
             "# Tier B: one variant. Tier C1: two or more variants, each in the panel, that no\n"
             "# haplotype of it carries together (or a variant whose every carrying haplotype has\n"
             "# an indel in the target): the report ranks these after every other row. Tier C2:\n"
@@ -990,11 +1227,13 @@ def main(argv=None):
             meta["panels"].append(fact)
         named = ", ".join(f"{p['name']} ({p.get('samples', 0):,} samples)"
                           for p in meta["panels"])
+        same = counts.get(SAME_SCORE_COUNT, 0)
         print(f"Carrier gate: the rows' variant combinations checked against the phased "
-              f"genotypes of {named}: A {counts.get(TIER_A, 0):,}, B {counts.get(TIER_B, 0):,}, "
-              f"C1 {counts.get(TIER_C1, 0):,} (ranked after the others), C2 "
-              f"{counts.get(TIER_C2, 0):,} (by the highest-CFD alignment of each row); "
-              f"{os.path.basename(out)}", flush=True)
+              f"genotypes of {named}: A {counts.get(TIER_A, 0):,} ({same:,} of them on a "
+              f"haplotype that reaches the row's CFD without every variant), B "
+              f"{counts.get(TIER_B, 0):,}, C1 {counts.get(TIER_C1, 0):,} (ranked after the "
+              f"others), C2 {counts.get(TIER_C2, 0):,} (by the highest-CFD alignment of each "
+              f"row); {os.path.basename(out)}", flush=True)
         mism = sum(p.get("ref_mismatches", 0) for p in meta["panels"])
         if mism:
             print(f"Carrier gate: {mism:,} variant lookup(s) found the panel's REF different "

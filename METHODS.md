@@ -835,11 +835,30 @@ the search without it (`--no-prioritize-observed`).
     States: `one haplotype` when a single one does; `phase not known` when only samples whose
     genotypes cannot say which haplotype holds which variant carry them all (an unphased
     call, or two ALTs of one position on one slot, the PUTATIVE rule).
+
+    **A also where a haplotype reaches the alignment's CFD without every variant.** The
+    worst case takes the best-matching allele in every column, and some of those alleles
+    leave the CFD exactly as it is: one at the PAM's `N` base, which the score never reads,
+    or a mismatch for a mismatch the CFD table scores alike. The gate scores the alignment
+    from its aligned spacer+PAM and protospacer+PAM (`bulge_cfd_penalty`, as the search
+    scores a row), takes each allele in turn back to its reference base, and keeps the
+    variants that change the CFD; if a phased haplotype carries those, it has the row's
+    off-target at the row's score, and the row is A (states `same score`, `same score, phase
+    not known`, and `same score as the reference` where no variant changes the CFD), with
+    the variants the score needs in the companion's `Scoring_variants` column and in the
+    label. Were it C1 the whole site would leave the top views, though a named individual
+    carries an off-target there with the row's score. Checked only where the gate reads the
+    alignment's CFD: a 20-nt spacer with a 3-base 3' PAM, the row's own CFD where the
+    alignment has one (the ranking by CRISPR-Bulge score has no CFD column), every variant a
+    SNP inside the alignment, and the alleles the alignment takes. A CRISPR-Bulge score is
+    not recomputed (the model is not run again), so the CFD decides for all three
+    alignments.
   - **B**: one variant. The panel, or the frequency the dataset gives it, says that some
     individual carries it, so it cannot be a combination nobody carries; that is all B says
     (call quality is another question).
   - **C1**: two or more variants, each in the panel, that none of its haplotypes carries
-    together; or variants (one or more) every phased haplotype carrying which also holds an
+    together and none of which reaches the alignment's CFD without (above); or variants (one
+    or more, a single one too) every phased haplotype carrying which also holds an
     indel that changes the target (state `indel in the target`). A zero means something only where
     some were expected: E, the panel haplotypes expected to carry the variants together if
     they were independent (the panel's haplotypes times the product of the variants' panel
@@ -858,18 +877,26 @@ the search without it (`--no-prioritize-observed`).
   haplotypes that carry them together and their samples, E, the frequency product and
   rarest frequency, and the label), and `.carrier_gate.json` (how the gate ran, its panels
   with their samples by superpopulation, and its tiers by each row's highest-CFD alignment).
-- **Report.** A row whose highest-CFD alignment is C1 leaves the top-1000 tables, the plots of
-  Section 2, the validation panel and the risk card, and is listed in a table of its own after
-  the top-1000, by CFD, with all of them in `unobserved_worst_case.tsv`; a row whose highest
-  CRISPR-Bulge alignment is C1 leaves the ranking by CRISPR-Bulge score. The summary matrix,
-  the validation panel's totals (its off-targets, perfect matches and variant-created
-  off-targets, beside a row that counts the C1 rows), `run_manifest.json` and the
-  population plot count every row; the panel's thresholds leave the C1 rows out as the risk
-  card does (its CRISPR-Bulge thresholds, as the card's CRISPR-Bulge bands, the rows whose
-  highest CRISPR-Bulge alignment is C1). The `Observed` column of a row of two or more
-  variants gives its tier's factual label (`together on N of H <panel> haplotypes`,
-  `not together on any of H <panel> haplotypes (expected E)`, `not checked: K of N variants
-  not in <panel>`), with no "chimera" word, and the inputs card has a **Carrier gate** row:
+- **Report.** A C1 row is ranked after every other row in the views ranked by the score of
+  the alignment that is C1. A row whose highest-CFD alignment is C1 leaves the top-1000 by
+  CFD, panels (a) and (b) of Section 2, the validation panel's CFD thresholds and the risk
+  card's CFD bands, and is listed in a table of its own after the top-1000, by CFD, with all
+  of them in `unobserved_worst_case.tsv`; a row whose highest CRISPR-Bulge alignment is C1
+  leaves the top-1000 by CRISPR-Bulge score, panels (c) and (d), the panel's CRISPR-Bulge
+  thresholds and the card's CRISPR-Bulge bands. The two alignments of a row need not be the
+  same one, so a row of the demoted table can keep its place in the views ranked by
+  CRISPR-Bulge score, and the other way round. The summary matrix, the validation panel's
+  totals (its off-targets, perfect matches and variant-created off-targets, beside a row
+  that counts the C1 rows), `run_manifest.json` and the population plot count every row. A
+  demoted site can still have a real off-target there with fewer of the variants and a lower
+  score, which a `--per-sample` search of a genotyped panel reports as its own row. The
+  `Observed` column of a row the gate checked gives its tier's factual label (`together on N
+  of H <panel> haplotypes`, `the same CFD on N of H <panel> haplotypes, which carry
+  <variants>`, `not together on any of H <panel> haplotypes (expected E)`, `not checked: K
+  of N variants not in <panel>`), with no "chimera" word; a row of one variant reads its
+  carriers as before, unless every haplotype carrying it has an indel in the target, when it
+  reads that label (`all N <panel> haplotypes carrying it have an indel in the target`) and
+  is demoted with the others. The inputs card has a **Carrier gate** row:
   the panels, the counts by tier, and the panel's samples by superpopulation (on HGDP +
   1000 Genomes: AFR 986, AMR 549, CSA 782, EAS 816, EUR 771, MID 157, OCE 30), as a
   haplotype found only in an ancestry with few samples there can be missing from it. The
@@ -986,9 +1013,13 @@ cis carriers**, so `putative` cleanly marks reconstructions that no one actually
 carries — separating genuine haplotypes from worst-case combinations. In a
 population-level analysis a multi-variant SNP roster is the union of each variant's
 carriers; where the carrier gate ran (§5) the cell gives the row's tier instead (`together
-on N of H <panel> haplotypes`, `not together on any of H <panel> haplotypes (expected E)`,
+on N of H <panel> haplotypes`, `the same CFD on N of H <panel> haplotypes, which carry
+<variants>`, `not together on any of H <panel> haplotypes (expected E)`,
 `not checked: K of N variants not in <panel>`), and without it the cell reads `N carriers
-(>=1 of K vars, poss. chimera)`; an indel (or MNV) row's
+(>=1 of K vars, poss. chimera)`. A row of one variant reads its carriers either way, unless
+the gate found that every haplotype carrying it has an indel that takes the target's bases
+off it (`all N <panel> haplotypes carrying it have an indel in the target`, C1); an indel
+(or MNV) row's
 roster is resolved per carrier in both modes (§4), so it reads `N carrier(s)`: CONFIRMED
 where each carrier is placed on its phased haplotype, PUTATIVE where the phase is unknown
 (an unphased call, an MNV). On an install without SNP genotypes (`download --what index

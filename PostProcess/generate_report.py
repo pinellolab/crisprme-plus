@@ -432,21 +432,34 @@ def render_gate_row(gate):
     status = gate.get("status")
     if status == "run" and gate.get("used"):
         c = gate.get("counts") or {}
+        same = int(c.get("A_same_score", 0))
         text = (
             "Each row's variant combination was checked against the phased genotypes of "
             + _gate_panels(gate) + ". By each row's highest-CFD alignment: "
             f"<strong>A</strong> {int(c.get('A', 0)):,} (two or more variants that one phased "
-            f"haplotype of the panel carries together), <strong>B</strong> "
+            "haplotype of the panel carries together"
+            + (f", {same:,} of them on a haplotype that reaches the row's CFD without every "
+               "variant: the others leave it as it is, so they are not needed for the "
+               "row's score" if same else "")
+            + f"), <strong>B</strong> "
             f"{int(c.get('B', 0)):,} (one variant), <strong>C1</strong> {int(c.get('C1', 0)):,} "
             "(two or more variants, each in the panel, that none of its haplotypes carries "
-            "together; or variants, a single one too, every haplotype carrying which has an "
-            f"indel in the target), <strong>C2</strong> {int(c.get('C2', 0)):,} (a variant not "
-            "in the panel, which then cannot say). C1 rows are ranked after every other row: "
-            "they are left out of the top-1000 tables, the plots of Section 2, the validation "
-            "panel and the risk card (the panel's totals count them), and listed in a table of "
+            "together and none reaches the row's CFD without; or variants, a single one too, "
+            f"every haplotype carrying which has an indel in the target), <strong>C2</strong> "
+            f"{int(c.get('C2', 0)):,} (a variant not "
+            "in the panel, which then cannot say). A C1 row is ranked after every other row "
+            "in the views ranked by the score of the alignment that is C1: a row whose "
+            "highest-CFD alignment is C1 is left out of the top-1000 by CFD, panels (a) and "
+            "(b) of Section 2, the validation panel's CFD thresholds and the risk card's CFD "
+            "bands; a row whose highest-CRISPR-Bulge alignment is C1 is left out of the "
+            "top-1000 by CRISPR-Bulge score, panels (c) and (d), the panel's CRISPR-Bulge "
+            "thresholds and the card's CRISPR-Bulge bands (so a row can be in one ranking and "
+            "not the other). The panel's totals count them, and they are listed in a table of "
             "their own after the top-1000 (Section 6). "
             "A, B and C2 rows keep their place; the <code>Observed</code> column gives the "
-            "tier of a row of two or more variants. A zero says little where fewer than "
+            "tier of a row the gate checked &mdash; a row of two or more variants, and a row "
+            "of one whose every carrying haplotype has an indel in the target. A zero says "
+            f"little where fewer than "
             f"{float(gate.get('min_expected', 3)):g} panel haplotypes were expected to carry "
             "the variants together if they were independent (&ldquo;too rare to tell&rdquo;). "
             "The gate changes no row: the integrated results are those of the search."
@@ -488,7 +501,8 @@ def render_unobserved_section(gate, n_demoted, n_cb_only, table_html, download_n
     if not n_demoted:
         return (head + '<p class="caption">No row of the CFD ranking is in this tier. '
                 f"{n_cb_only:,} row{' is' if n_cb_only == 1 else 's are'} left out of the "
-                "ranking by CRISPR-Bulge score: its highest-scoring alignment there combines "
+                "views ranked by CRISPR-Bulge score (its table and panels (c) and (d) of "
+                "Section 2): its highest-scoring alignment there combines "
                 "variants none of the panel's haplotypes carries together.</p>\n")
     dl = (f'<p style="margin:0 0 0.5em"><a class="download" href="{_dl_href(download_name)}" '
           f"download>&#11015; Download all {n_demoted:,} (curated TSV)</a></p>\n"
@@ -496,7 +510,7 @@ def render_unobserved_section(gate, n_demoted, n_cb_only, table_html, download_n
     shown = (f"the first {n_shown:,} by CFD are shown" if n_shown < n_demoted
              else "sorted by CFD")
     cb = (f" {n_cb_only:,} more row{' keeps its' if n_cb_only == 1 else 's keep their'} place "
-          "by CFD, but the ranking by CRISPR-Bulge score leaves "
+          "by CFD, but the views ranked by CRISPR-Bulge score leave "
           f"{'it' if n_cb_only == 1 else 'them'} out: the highest-scoring alignment there "
           "combines variants none of the panel's haplotypes carries together."
           if n_cb_only else "")
@@ -508,11 +522,17 @@ def render_unobserved_section(gate, n_demoted, n_cb_only, table_html, download_n
         head
         + f'<p class="caption">{n_demoted:,} row{"" if n_demoted == 1 else "s"} ({shown}): '
         "each takes, at its highest-CFD alignment, variants that each occur in the panel "
-        "but that none of its haplotypes carries together (or variants, a single one too, "
+        "but that none of its haplotypes carries together, none of them reaching the row's "
+        "CFD without every variant (or variants, a single one too, "
         "every haplotype carrying which has an indel in the target), so no individual of the "
-        "panel has its sequence. They are the search's worst cases that the panel does not "
-        "show: left out of the top-1000 tables, the validation panel and the risk card (the "
-        "panel's totals count them), and kept here and in the integrated results. The "
+        "panel has its sequence at this score. They are the search's worst cases that the "
+        "panel does not show: left out of the views ranked by CFD (the top-1000 by CFD, "
+        "panels (a) and (b) of Section 2, the validation panel's CFD thresholds and the risk "
+        "card's CFD bands; the panel's totals count them), and kept here and in the "
+        "integrated results. A row of this table whose highest-CRISPR-Bulge alignment is not "
+        "C1 keeps its place in the views ranked by that score. The site itself can still "
+        "have a real off-target with fewer of the variants and a lower score, which a "
+        "<code>--per-sample</code> search of a genotyped panel reports as its own row. The "
         "<code>Observed</code> column says what the panel "
         "shows, and how many haplotypes were expected to carry the variants together if "
         "they were independent: where few were (&ldquo;too rare to tell&rdquo;), the zero "
@@ -1099,8 +1119,10 @@ def _curated_cell(kind, row, cols):
             return "reference"
         n = _count_samples(_get("samples"))
         nvar = _count_variants(_get("var_genome")) if "var_genome" in cols else 0
-        # the carrier gate's label of a multi-variant row (tiers A, C1, C2), but for a
-        # per-sample row, whose named carriers are its cis carriers already
+        # the carrier gate's label of a row it checked (tiers A, C1, C2: a row of two or
+        # more variants, and a row of one every haplotype carrying which has an indel in
+        # the target), but for a per-sample row, whose named carriers are its cis carriers
+        # already
         tier = row.get("_gate_cfd_tier")
         if tier in ("A", "C1", "C2") and not (_PER_SAMPLE and n > 0):
             return str(row.get("_gate_cfd_label"))
@@ -2753,7 +2775,7 @@ def _num_ok(tok):
         return False
 
 
-def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
+def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None):
     """Produce the key graphical-report scatter panels (section 2).
 
     Returns a list of (title, caption, data_uri). Panels:
@@ -2763,26 +2785,38 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
       (d) top-N by CRISPR-Bulge DELTA = ALT - REF    -- only when include_crispr_bulge is True
     So: CRISPR-Bulge computed -> 4 panels; CRISPR-Bulge absent -> 2 panels. Every panel is
     guarded; a failing panel yields a placeholder URI (never aborts).
+
+    ``df_cb`` (default ``df``) is the frame the CRISPR-Bulge panels rank, as the
+    CRISPR-Bulge table ranks its own: the carrier gate leaves a row out of the ranking by
+    a score when the alignment that score belongs to is C1, and the two alignments of a
+    row need not be the same one.
     """
     panels = []
 
-    # candidate frame: drop on-/near-on-target rows (mm+b<=1), same as the table
+    # candidate frames: drop on-/near-on-target rows (mm+b<=1), same as the tables
     # (build_report says so under the plots: top_exclusion_note)
-    base = df
-    if "mmb" in cols:
-        base = base[_to_int_series(base[cols["mmb"]]) > 1]
+    def _candidates(frame):
+        if "mmb" in cols:
+            return frame[_to_int_series(frame[cols["mmb"]]) > 1]
+        return frame
+
+    base = _candidates(df)
+    base_cb = _candidates(df if df_cb is None else df_cb)
     n_shown = min(n, len(base))
+    n_shown_cb = min(n, len(base_cb))
 
     # stable, as in select_top: tied rows keep the table's order, and a top-N that ends
     # inside a tie keeps the tie's first rows
-    def _score_sorted(score_col):
-        s = _to_float_series(base[score_col]).fillna(-1.0)
-        return base.assign(_s=s).sort_values("_s", ascending=False, kind="stable").head(n)
+    def _score_sorted(score_col, frame=None):
+        frame = base if frame is None else frame
+        s = _to_float_series(frame[score_col]).fillna(-1.0)
+        return frame.assign(_s=s).sort_values("_s", ascending=False, kind="stable").head(n)
 
-    def _delta_sorted(alt_col, ref_col):
-        delta = _to_float_series(base[alt_col]) - _to_float_series(base[ref_col])
+    def _delta_sorted(alt_col, ref_col, frame=None):
+        frame = base if frame is None else frame
+        delta = _to_float_series(frame[alt_col]) - _to_float_series(frame[ref_col])
         return (
-            base.assign(_delta=delta)
+            frame.assign(_delta=delta)
             .sort_values("_delta", ascending=False, na_position="last", kind="stable")
             .head(n)
         )
@@ -2847,9 +2881,9 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
         _sl = scorer_label()
         try:
             uri = _cfd_style_scatter(
-                _score_sorted(cr_score), cr_score, cr_ref, cr_alt,
+                _score_sorted(cr_score, base_cb), cr_score, cr_ref, cr_alt,
                 xlabel=f"Candidate off-target site (ranked by {_sl})",
-                title=f"Top {n_shown} candidates by {_sl} score",
+                title=f"Top {n_shown_cb} candidates by {_sl} score",
                 score_name=_sl,
                 maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
             )
@@ -2867,9 +2901,9 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
         if "crispr_bulge_ref" in cols and "crispr_bulge_alt" in cols:
             try:
                 uri = _cfd_style_scatter(
-                    _delta_sorted(cr_alt, cr_ref), cr_score, cr_ref, cr_alt,
+                    _delta_sorted(cr_alt, cr_ref, base_cb), cr_score, cr_ref, cr_alt,
                     xlabel="Candidate off-target site (ranked by variant effect ALT-REF)",
-                    title=f"Top {n_shown} by variant-induced {_sl} increase (ALT-REF)",
+                    title=f"Top {n_shown_cb} by variant-induced {_sl} increase (ALT-REF)",
                     score_name=_sl,
                     maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
                 )
@@ -4440,17 +4474,24 @@ def build_score_legend_html(untiered=None, gate=None):
         }
         legend = [(term, definition + extra.get(term, "")) for term, definition in legend]
     if gate and gate.get("used"):
-        # the labels the carrier gate gives a row of two or more variants (render_gate_row)
+        # the labels the carrier gate gives the rows it checked (render_gate_row)
         legend = [(term, definition + (
             " Where the carrier gate ran (Section 1), a row of two or more variants reads "
             "its tier: <code>together on N of H &lt;panel&gt; haplotypes</code> (A; "
             "<code>carried together by N &lt;panel&gt; samples, phase not known</code> when "
-            "only unphased calls show it), <code>not together on any of H &lt;panel&gt; "
-            "haplotypes</code> (C1, with the number expected if the variants were "
-            "independent; such a row is ranked after every other one, in its own table), "
-            "<code>not checked: K of N variants not in &lt;panel&gt;</code> (C2, with the "
-            "product of the variants' frequencies and the rarest, the 1e-06 / 0.001 bound "
-            "shown as information only). The carriers a population-level row lists are "
+            "only unphased calls show it; <code>the same CFD on N of H &lt;panel&gt; "
+            "haplotypes, which carry &lt;variants&gt;</code>, or <code>the same CFD as the "
+            "reference here</code>, when a haplotype reaches the row's CFD without every "
+            "variant, the others leaving it as it is), <code>not together on any of H "
+            "&lt;panel&gt; haplotypes</code> (C1, with the number expected if the variants "
+            "were independent; such a row is ranked after every other one, in its own "
+            "table), <code>not checked: K of N variants not in &lt;panel&gt;</code> (C2, "
+            "with the product of the variants' frequencies and the rarest, the 1e-06 / "
+            "0.001 bound shown as information only). A row of one variant reads its "
+            "carriers, unless every haplotype carrying it has an indel that takes the "
+            "target's bases off it (<code>all N &lt;panel&gt; haplotypes carrying it have "
+            "an indel in the target</code>: C1, ranked after every other row as well). The "
+            "carriers a population-level row lists are "
             "those of any of its variants; the panel's haplotypes are its individuals', not "
             "the patient's." if term == "Observed" else ""))
             for term, definition in legend]
@@ -5870,7 +5911,7 @@ def build_report(
     # ---- SECTION 2: scatter panels -----------------------------------------
     try:
         scatter_panels = plot_scatter_panels(
-            ranked, cols, n=top_n, include_crispr_bulge=has_crispr_bulge
+            ranked, cols, n=top_n, include_crispr_bulge=has_crispr_bulge, df_cb=ranked_cb
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: scatter panels unavailable: {exc}\n")
@@ -6557,6 +6598,8 @@ def build_report(
                     "used": gate.get("used"),
                     "panels": [p.get("name") for p in gate.get("panels") or []],
                     "min_expected": gate.get("min_expected"),
+                    # the tiers by each row's highest-CFD alignment, and A_same_score, the
+                    # A rows a haplotype reaches the row's CFD on without every variant
                     "tiers": gate.get("counts"),
                 } if gate else None),
                 "source_integrated_results": os.path.basename(integrated_tsv),

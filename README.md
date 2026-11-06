@@ -1036,14 +1036,22 @@ its purpose and usage:
   them, so two or more of them can sit on no one haplotype. By default the search checks each
   row's variants against the dataset's own phased genotypes (and its phased indel genotypes)
   and writes their tier to `..._carrier_gate.tsv`: **A** (two or more variants one phased
-  haplotype carries together), **B** (one variant), **C1** (two or more variants, each in the
-  panel, that no haplotype of it carries together; or variants, a single one too, every
+  haplotype carries together, or that reach the row's CFD without the variants that do not
+  change it — an allele at the PAM's `N` base, a mismatch for a mismatch scored alike),
+  **B** (one variant), **C1** (two or more variants, each in the
+  panel, that no haplotype of it carries together and none reaches the row's CFD without; or
+  variants, a single one too, every
   haplotype carrying which has an indel in the target), **C2** (a variant not in the panel:
-  it cannot say). The report ranks C1 rows after every other row: they leave the top-1000
-  tables, the plots, the validation panel and the risk card for a table of their own after
+  it cannot say). The report ranks a C1 row after every other row in the views ranked by the
+  score of the alignment that is C1: a row whose highest-CFD alignment is C1 leaves the
+  top-1000 by CFD, the CFD plots, the validation panel and the risk card's CFD bands, and one
+  whose highest-CRISPR-Bulge alignment is C1 leaves the views ranked by that score, for a
+  table of their own after
   the top-1000 (the panel's totals, as the summary matrix, count every row), and stay in the
   integrated results, which the gate does not change. A, B and C2 rows keep their
-  place, and the `Observed` column gives the tier's factual label. `--no-prioritize-observed`
+  place, and the `Observed` column gives the tier's factual label (a row of one variant reads
+  its carriers, unless every haplotype carrying it has an indel in the target).
+  `--no-prioritize-observed`
   turns the gate off. `--prioritize-observed` checks a **sites-only** dataset's rows (the
   `mega` panel) against the phased HGDP + 1000 Genomes genotypes (the genotype oracle: see
   `download --what genotype-oracle`; an installed `NRG_3_hg38+hg38_HGDP1kGP` index brings it
@@ -2023,8 +2031,11 @@ is under `data/`). Reading top to bottom:
   cleanly marks reconstructions no one actually carries. (In a population-level run a
   multi-variant SNP list is the union of each variant's carriers; where the carrier gate ran
   (`--no-prioritize-observed` above) the column gives its tier instead: `together on N of H
-  <panel> haplotypes`, `not together on any of H <panel> haplotypes (expected E)`, `not
-  checked: K of N variants not in <panel>`; without it, `(>=1 of K vars, poss. chimera)`.
+  <panel> haplotypes`, `the same CFD on N of H <panel> haplotypes, which carry <variants>`,
+  `not together on any of H <panel> haplotypes (expected E)`, `not
+  checked: K of N variants not in <panel>`; without it, `(>=1 of K vars, poss. chimera)`. A
+  row of one variant reads its carriers, unless the gate found that every haplotype carrying
+  it has an indel in the target, which it says.
   An indel (or MNV) row is resolved per carrier in
   either mode and reads `N carrier(s)`: CONFIRMED where each carrier is placed on its
   phased haplotype, PUTATIVE where the phase is unknown (an unphased call, an MNV). On an
