@@ -308,9 +308,19 @@ sources. A registry compiled from a genotyped panel's dictionaries also lists, i
 manifest (`four_base_positions`), the positions whose reference base and SNP ALTs hold all
 four bases, an ALT that no sample carries counted: CRISPRitz 2.10.0 codes such a position Q,
 any base, and codes an ALT that no sample carries as any other, but the registry holds no
-record of such an ALT (it has no group). The SNP post-analysis reads a Q column's ALTs only at
-such a position (a Q at a bulge boundary can be a neighbouring position's), so on an index
-with the tiers alone it takes the position from this list.
+record of such an ALT (it has no group). The SNP post-analysis of a genotyped panel keeps, at a
+target's column, only the ALTs the column's code holds: its dictionary and the tiers compiled
+from it list what the enrichment coded, so an ALT the code does not hold is another
+position's. It reads a Q column's ALTs only at such a position (a Q at a bulge boundary can be
+a neighbouring position's), so on an index with the tiers alone it takes the position from
+this list. A sites-only registry is read from its VCF, every record of it, and lists ALTs the
+enrichment never coded: on an index built by CRISPRitz 2.9.1 or earlier, which codes the last
+PASS record of a split site alone (Homogenization, above), the site's earlier records, and on
+any index non-PASS records. Each is the panel's own allele at its own position, so the
+post-analysis of a sites-only dataset substitutes every ALT its registry lists at a variant
+column, whatever the column's code, a Q included, as up to 2.8.1. A target that only such an
+ALT brings within the search's budget is still not found on such an index; a mega index
+rebuilt by CRISPRitz 2.10.0 codes every PASS ALT.
 
 ### Re-indexing for a different PAM
 
