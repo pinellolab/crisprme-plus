@@ -5,6 +5,7 @@ import operator
 from posixpath import expanduser
 from intervaltree import IntervalTree
 from utils import gene_region_class
+import bisect
 import sys
 import time
 import glob
@@ -326,10 +327,11 @@ for count, line in enumerate(inEmpiricalResults):
 # can be flagged when it lands in a dense window. In such a window the greedy
 # worst-case alignment is what gets reported and ADDITIONAL haplotype alignments may
 # exist -- the bed carries the region span, variant count, carriers and the FULL IUPAC
-# protospacer, surfaced verbatim so an interested user can dig into the other alignments.
+# protospacer, surfaced verbatim so an interested user can dig into the other alignments,
+# and (2.9.0) the window's bits: log2 of the sequences it spells.
 hvdr_by_chrom = {}
+_hvdr_folder = os.path.dirname(outFile_name) or "."
 try:
-    _hvdr_folder = os.path.dirname(outFile_name) or "."
     for _bed in glob.glob(
         os.path.join(_hvdr_folder, "*high_variant_density_regions.bed")
     ):
@@ -342,12 +344,31 @@ try:
             _chrom, _s, _e = _f[0], int(_f[1]), int(_f[2])
             _nvar = _f[4]
             _iupac = _f[6] if len(_f) > 6 else ""
+            _bits = _f[7] if len(_f) > 7 else ""
             hvdr_by_chrom.setdefault(_chrom, IntervalTree())[_s - 1 : _e + 1] = (
                 _nvar,
                 _iupac,
+                _bits,
             )
 except Exception as _hvdr_err:  # never break integration on a bad/missing bed
     print("high-variant-density BED join skipped:", _hvdr_err)
+
+# Four-allele positions (2.9.0): <out>.four_allele_positions.bed, 0-based, lists each
+# position of the windows the search reported where the variant genome writes Q (the
+# reference base and three ALTs cover A, C, G and T). A row whose window holds one is
+# flagged in the same column as a dense window.
+four_allele_by_chrom = {}
+try:
+    for _bed in glob.glob(os.path.join(_hvdr_folder, "*four_allele_positions.bed")):
+        for _ln in open(_bed):
+            if _ln.startswith("#") or not _ln.strip():
+                continue
+            _f = _ln.rstrip("\n").split("\t")
+            four_allele_by_chrom.setdefault(_f[0], set()).add(int(_f[1]))
+    four_allele_by_chrom = {c: sorted(p) for c, p in four_allele_by_chrom.items()}
+except Exception as _fa_err:  # never break integration on a bad/missing bed
+    four_allele_by_chrom = {}
+    print("four-allele positions BED join skipped:", _fa_err)
 
 
 def _hvdr_note(chrom, pos):
@@ -357,14 +378,32 @@ def _hvdr_note(chrom, pos):
     hits = tree[pos]
     if not hits:
         return "NA"
-    nvar, iupac = sorted(hits)[0].data
+    nvar, iupac, bits = sorted(hits)[0].data
     note = (
-        "high_variant_density (%s variants): a greedy worst-case alignment is "
-        "reported here; additional haplotype alignments may exist" % nvar
+        "high_variant_density (%s variants%s): a greedy worst-case alignment is "
+        "reported here; additional haplotype alignments may exist"
+        % (nvar, ", 2^%s sequences" % bits if bits else "")
     )
     if iupac:
         note += "; full_IUPAC=%s" % iupac
     return note
+
+
+def _four_allele_note(chrom, start, aligned):
+    """The four-allele positions (1-based) in the window of a row starting at ``start``
+    (0-based) whose aligned target is ``aligned``, as "four_allele_positions=chr:pos,...";
+    "" when it holds none."""
+    positions = four_allele_by_chrom.get(chrom)
+    if not positions:
+        return ""
+    end = start + len(aligned.replace("-", ""))
+    first = bisect.bisect_left(positions, start)
+    last = bisect.bisect_left(positions, end)
+    if first == last:
+        return ""
+    return "four_allele_positions=" + ",".join(
+        "%s:%d" % (chrom, p + 1) for p in positions[first:last]
+    )
 
 
 # writing header in file
@@ -1170,13 +1209,23 @@ for nline, line in enumerate(inCrispritzResults):
             saveDict["Susceptible_to_TBE"] = "y"
 
     # #144: flag this off-target if it lands in a high-variant-density window
-    # (chrom=target[4], highest-CFD start=target[5]); "NA" otherwise.
+    # (chrom=target[4], highest-CFD start=target[5]); "NA" otherwise. And (2.9.0) if its
+    # window (the highest-CFD alignment's, target[2]) holds a four-allele position.
     try:
         saveDict["High_variant_density_region"] = _hvdr_note(
             str(target[4]), int(target[5])
         )
     except (ValueError, IndexError):
         saveDict["High_variant_density_region"] = "NA"
+    try:
+        _fa_note = _four_allele_note(str(target[4]), int(target[5]), str(target[2]))
+    except (ValueError, IndexError):
+        _fa_note = ""
+    if _fa_note:
+        saveDict["High_variant_density_region"] = (
+            _fa_note if saveDict["High_variant_density_region"] == "NA"
+            else saveDict["High_variant_density_region"] + "; " + _fa_note
+        )
 
     # derive the single-class gene region from the finalized GENCODE feature-set +
     # protein-coding gene distance (shared helper => identical to the report/web).
