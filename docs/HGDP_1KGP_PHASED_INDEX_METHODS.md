@@ -532,7 +532,10 @@ sequence and every indel carrier.
 
 ### 9c. The dense-window APPROXIMATION (the greedy cap) + FLAGS + DEFAULT behaviour
 Enumerating the lattice is 2^k in the number of co-located variants, so extreme-density windows are
-**capped**: `capped = _FAST_MODE OR (CRISPRME_IUPAC_CAP ≥ 0 AND #variants > CRISPRME_IUPAC_CAP)`.
+**capped**: `capped = _FAST_MODE OR (CRISPRME_IUPAC_CAP ≥ 0 AND sequences > 2^CRISPRME_IUPAC_CAP)`,
+where a window's sequences are the product of the bases its letters stand for (2 for a two-allele
+column, 3 for a three-allele one, 4 for a four-allele `Q`; a count of variant columns up to 2.8.1,
+the same on a window of two-allele columns), and the default cap is 10 (METHODS.md §5).
 
 - **Population-level** (`CRISPRME_FAST_MODE=1`; `--population-level`, and the default on a
   sites-only / unphased / hybrid / reference-only index): **every** multi-variant window emits ONE
@@ -555,7 +558,8 @@ Enumerating the lattice is 2^k in the number of co-located variants, so extreme-
   window by its greedy worst-case alignment, whose listed carriers need not carry every variant in it
   (METHODS.md §5).
 - Every capped window is still logged to **`<out>.high_variant_density_regions.bed`** so approximated
-  regions are visible, never silent; the reference off-target row keeps the locus in the table.
+  regions are visible, never silent; the reference off-target row keeps the locus in the table. So is
+  every window of 2^20 sequences or more, whatever the cap.
 - The **`observed_haplotypes.tsv`** report companion lists, for every multi-haplotype site, EACH real
   observed haplotype with its variant set, both scores (CFD + CRISPR-Bulge), carriers and AF — so the
   full per-sample set a dense site contributes is visible, not just the per-cluster representative.

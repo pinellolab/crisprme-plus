@@ -610,23 +610,73 @@ complementary controls:
   variant-density combinatorial explosion. (`assembly-search` instead defaults it to
   the full `mm+bDNA+bRNA` budget — a resolved diploid genome has no IUPAC-variant
   lattice, so it needs no variant-density cap.)
-- **High-variant-density cap.** Windows exceeding a configurable variant-count
-  threshold (`CRISPRME_IUPAC_CAP`) fall back to a bounded procedure instead of full
-  2ᵏ enumeration, so a single pathological window cannot dominate runtime or memory.
-  Crucially, the bounded procedure still emits a **greedy minimum-mismatch
-  representative** for the window — at each variant column it takes the allele that
-  most lowers the mismatch count, which (mismatches being additive per column) is the
-  exact argmin over all 2ᵏ combinations, i.e. the window's worst-case off-target.
+- **High-variant-density cap.** Windows spelling more sequences than a configurable
+  budget, 2 to the power `CRISPRME_IUPAC_CAP` (default 2¹⁰), fall back to a bounded
+  procedure instead of full enumeration, so a single pathological window cannot dominate
+  runtime or memory. The number of sequences a window spells is the product, over its
+  columns, of the bases each letter of the variant genome stands for: 2 for a two-allele
+  column (R, Y, S, W, K, M), 3 for a three-allele one (B, D, H, V), 4 for a four-allele one
+  (`Q`), and 1 for a base or an `N` (an assembly gap, which matches nothing). Its log₂ is
+  the window's bits, F. Up to 2.8.1 the cap counted a window's ambiguous columns: the same
+  number for a window of two-allele columns, but blind to the 1.58 bits of a three-allele
+  column and the 2 of a four-allele one, which coding every allele of a split multi-allelic
+  site makes common, above all in the immunoglobulin loci (on a chr20 + chr22 install of
+  HGDP + 1000 Genomes coded so, 81% of the variant search's raw targets came from the IGL
+  locus, chr22:22.00-22.95 Mb). Crucially, the bounded procedure still emits a **greedy
+  minimum-mismatch representative** for the window — at each variant column it takes the
+  allele that most lowers the mismatch count, which (mismatches being additive per column)
+  is the exact argmin over all 2ᵏ combinations, i.e. the window's worst-case off-target.
   So a capped window **always surfaces at least one off-target row**; the cap trades
   exhaustive per-haplotype enumeration for a single conservative representative, never
   the whole region.
-- **Density reporting + transparency.** Every window that triggers the cap is written
-  to a `high_variant_density_regions.bed` sidecar (region span, variant count,
-  carriers, and the full IUPAC protospacer), and each affected off-target carries a
+- **Dense windows, flagged whatever the cap.** A window spelling 2²⁰ sequences or more
+  matches nearly any guide somewhere: it is as uninformative as a gap, yet the engine
+  reports it, as every column admits the guide's base. Such a window is listed in the
+  BED below whatever `CRISPRME_IUPAC_CAP` is, and the report's `High_complexity_region`
+  column gives its count (`24 in window (2^24.0 sequences)`). Among the NRG windows of
+  chr22 the reference genome has none, the variant genome of HGDP + 1000 Genomes
+  published with CRISPRitz 2.9.1 has 1,223 (the worst 2^23.00), and one coding every
+  allele of a split site with the four-base rule 3,780 (1,076 of them at 2³⁰ or more; the
+  worst 2^36.45, at chr22:22,888,423 in IGL). The threshold, 2²⁰, is a judgment call
+  (`window_density.DENSE_WINDOW_BITS`, the one constant to tune).
+- **Four-allele positions.** Where the reference base and three ALTs cover A, C, G and T,
+  the variant genome writes `Q` (CRISPRitz 2.10.0), which matches any base; `N` stays an
+  assembly gap. The post-analysis lists the four-allele positions of the windows the
+  search reported in `<out>.four_allele_positions.bed`, and `High_variant_density_region`
+  names them on the row whose window holds one (`four_allele_positions=chr:pos`, 1-based;
+  the report: `1 four-allele position`).
+- **Density reporting + transparency.** Every window over the cap, and every dense one, is
+  written to a `high_variant_density_regions.bed` sidecar (region span, variant count,
+  carriers, the full IUPAC protospacer, and, since 2.9.0, its bits and its number of
+  four-allele positions), and each affected off-target carries a
   `High_variant_density_region` column in `integrated_results.tsv` noting that a
   greedy worst-case alignment is reported and additional haplotype alignments may
-  exist, with the full IUPAC sequence so a user can dig into them. Nothing is silently
-  truncated — the bound, the representative, and the alternatives are all auditable.
+  exist, with the window's sequences and the full IUPAC sequence so a user can dig into
+  them. Nothing is silently truncated — the bound, the representative, and the
+  alternatives are all auditable. `complete-search` says per chromosome how many windows
+  were over the cap and how many dense (stdout, `log_verbose.txt`).
+- **The ambiguous columns an alignment rests on, D, and `--max-degeneracy`.** D counts the
+  columns of a reported alignment where the reference base would not fit (a mismatch
+  against the guide, or a base the PAM does not admit) and the row's allele does. Few
+  alignments resting on two or more are carried by anyone: on chr22 of HGDP + 1000 Genomes
+  (the published 2.9.1 variant genome; five guides, NRG, 4 mismatches + 1 DNA + 1 RNA
+  bulge), a real phased haplotype carries 96.8% of the alignments with D = 1 (44,315 of
+  45,789), 5.6% with D = 2 (1,091 of 19,561), 1.1% with D = 3 (78 of 7,369) and 0.02% with
+  D of 4 or more (10 of 59,208). `complete-search --max-degeneracy K` (off by default)
+  caps D for the SNP rows: a worst-case alignment (population-level, or a dense window's
+  greedy one) is cut back to the strongest resting on at most K columns (a valid PAM
+  first, then the fewest mismatches or the highest CFD), and any other row resting on more
+  is left out, unless its carriers hold its variants together on one phased haplotype
+  (a CONFIRMED observed haplotype, or a phased dictionary's combination); the reference
+  row keeps the locus. It is a precision knob, not a gate: an alignment resting on two
+  columns is rare but real for some. `complete-search` says per chromosome how many were
+  cut back and how many left out, and the report states the cap. An indel row is resolved
+  per carrier haplotype (§4) and is not cut. On chr22 of the published index, the README
+  guide's population-level search (4 mismatches + 1 DNA + 1 RNA bulge) reports 2,198 rows;
+  681 of its 1,257 SNP variant rows rest on two or more columns, the second-highest by CFD
+  (0.299, in IGL) on eleven. With `--max-degeneracy 1` it reports 1,573: the 634 sites only
+  such alignments reach go, and 49 of the 100 sites with the highest CFD leave the top 100.
+  Its per-sample search changes no row, its multi-variant rows being CONFIRMED haplotypes.
 
 Together these keep genome-wide variant search tractable while making any bound
 that was applied explicit and reviewable, and guaranteeing no region is dropped.

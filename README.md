@@ -1003,10 +1003,23 @@ its purpose and usage:
   required: set it to `mm + bDNA + bRNA` (the sum of the per-type caps) to keep every
   requested-depth alignment; **negative values are rejected**. (This is a different
   knob from the `CRISPRME_IUPAC_CAP` environment variable, where `-1` disables the
-  per-window greedy IUPAC cap — see the high-variant-density section below.)
+  per-window greedy IUPAC cap: a window spelling more than 2 to the power
+  `CRISPRME_IUPAC_CAP` sequences, 2¹⁰ by default, is reported by its greedy worst-case
+  alignment; see METHODS.md §5.)
   <br>NOTE: for a **variant-created** off-target you must also pass `--vcf` (or use a
   precomputed variant index); a reference-only search will not surface it regardless of
   this value.
+
+- `--max-degeneracy` (*Optional*, off by default)
+  <br>The most ambiguous columns a reported SNP variant row may rest on: columns of the
+  variant genome where the reference base would be a mismatch, or break the PAM, and the
+  row's allele fits. Rows resting on two or more are rarely carried by anyone (on chr22 of
+  HGDP + 1000 Genomes a real phased haplotype carries 5.6% of the alignments resting on two,
+  0.02% of those resting on four or more; METHODS.md §5). A worst-case alignment
+  (population-level, or a dense window's) is cut back to the strongest within the cap; any
+  other row resting on more is left out, unless its carriers hold its variants together on
+  one phased haplotype. `complete-search` says per chromosome how many were cut back and
+  left out, and the report states the cap. Variant searches only.
 
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP
