@@ -342,9 +342,33 @@ class TestSubmitCheckAndBaseEditing(_WebFolder):
             with self.subTest(text=text):
                 options, _ = mp.update_base_editing_dropdown(text, "GS", "hg38")
                 self.assertEqual([o["value"] for o in options], list(range(1, len(SEQ) + 1)))
+        # (a chromosome with no FASTA: the window offers nothing, as for any line Submit then
+        # refuses, where it was an HTTP 500 of the callback: FR :89, :189)
+        none = [{"label": "", "value": ""}]
         for text in (">s\nchr1$(touch${IFS}MARK_d) 0 43", ">../outside/x\nchrZ 0 43"):
-            with self.subTest(text=text), self.assertRaises(FileNotFoundError):
-                mp.update_base_editing_dropdown(text, "GS", "hg38")
+            with self.subTest(text=text):
+                self.assertEqual(mp.update_base_editing_dropdown(text, "GS", "hg38"),
+                                 (none, none))
+        self.assertNothingRun()
+
+
+@NEEDS_DASH
+class TestTheBaseEditingWindowOfBedLines(_WebFolder):
+    """The base-editing window's options, which the form recomputes at each change of the
+    guides: for BED lines it raised on no genome selected (a fresh data folder after Load
+    Example), on a chromosome with no FASTA and on coordinates past its end, each an HTTP 500
+    and a console error in the browser (FR :89, :189). It offers nothing for them, as for
+    any line Submit then refuses, saying why."""
+
+    def test_no_window_and_no_error(self):
+        none = [{"label": "", "value": ""}]
+        for text, genome in ((">s\nchr1 0 43", None), (">s\nchrZ 0 43", "hg38"),
+                             (">s\nchr1 100000 100060", "hg38"), (">s\nchr1 0", "hg38")):
+            with self.subTest(text=text, genome=genome):
+                self.assertEqual(mp.update_base_editing_dropdown(text, "GS", genome),
+                                 (none, none))
+        options, _ = mp.update_base_editing_dropdown(">s\nchr1 0 43", "GS", "hg38")
+        self.assertEqual([o["value"] for o in options], list(range(1, len(SEQ) + 1)))
         self.assertNothingRun()
 
 

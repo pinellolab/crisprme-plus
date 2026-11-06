@@ -397,3 +397,9 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   next complete-test stopped on it, "Complete-test already run once", until the user removed it
   (R2-F2). An empty folder holds no earlier run's results, and complete-search takes one: only
   a folder with something in it stops complete-test now.
+- **The base-editing window of BED lines answers no server error.** The form recomputes the
+  window's options at each change of the guides, and for genomic coordinates it raised with no
+  genome selected (a fresh data folder after Load Example), on a chromosome the genome has no
+  FASTA of, on coordinates past its end and on a line short of its three fields: each an HTTP 500
+  and a callback error in the browser's console (FR :89, :189). It offers no window for them, as
+  for any line Submit then refuses, saying why.
