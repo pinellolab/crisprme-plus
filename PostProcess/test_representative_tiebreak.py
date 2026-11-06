@@ -381,8 +381,9 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
             self._row(self.X, "1.000", 0, "S23", rsid="rs1", af="0.1"),
             self._row(self.X, "1.000", 0, "T01", rsid=".", af="0.2")])
         self.assertEqual(best[0][13], "S23,T01")
+        # each rsID beside its AF ("." is T01's, 0.2): (rsID, AF) pairs, by variant
         self.assertEqual(best[0][16], ".,rs1")
-        self.assertEqual(best[0][17], "0.1,0.2")
+        self.assertEqual(best[0][17], "0.2,0.1")
         self.assertEqual(alt, [])
 
     def test_folded_alignments_still_add_their_rsid_and_af(self):
@@ -391,7 +392,7 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
             self._row(self.X, "1.000", 0, "S23", rsid="rs1", af="0.1"),
             self._row(self.RNA, "0.900", 1, "S23", rsid=".", af="0.2")])
         self.assertEqual((best[0][DNA_COL], best[0][16], best[0][17]),
-                         (self.X, ".,rs1", "0.1,0.2"))
+                         (self.X, ".,rs1", "0.2,0.1"))
         self.assertEqual(alt, [])
 
     def test_snp_only_rows_merge_as_before(self):
@@ -448,7 +449,7 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
                                  (want[0], want[DNA_COL], want[8], want[9]),
                                  (criteria, sort_order))
                 self.assertEqual((best[0][13], best[0][16], best[0][17]),
-                                 ("S1,S2,S3", ".,rs1", "0.1,0.2"), (criteria, sort_order))
+                                 ("S1,S2,S3", ".,rs1", "0.2,0.1"), (criteria, sort_order))
                 self.assertEqual(alt, [], (criteria, sort_order))
                 self.assertEqual(best[0][19], "0")
 

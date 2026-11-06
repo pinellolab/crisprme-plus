@@ -1204,16 +1204,16 @@ indel row when in budget). On chr22 of the HGDP + 1000 Genomes panel, per sample
 affects 2.2% of SNP row-blocks, and 545 have no carrier that holds the sequence. It only
 over-lists, 2.8.0 behaves the same, and it is fixed in the next release.
 On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists of the results
-tables are not in the order of its `Variant_info_genome`: the merge of a cluster's rows
-(`remove_contiguous_samples.py`) sorts the three lists each on its own, as text, and keeps
-each value once, so the n-th rsID or MAF need not be the n-th variant's, and two variants
-of one frequency show it once. On ACTGA (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per
-sample, genome-wide, HGDP + 1000 Genomes), 953 of 1,967 rows of two or more SNPs and 118 of
-293 rows of an indel and one or more SNPs list their rsIDs in another order than their
-variants (in the highest-CFD columns). The report's MAF, the lowest frequency of the list,
-does not depend on it; the rsIDs its `Variant` column gives after the variants, and the rsIDs
-and AFs of `observed_haplotypes.tsv` and of a site's haplotype table in the report, are in
-the list's order. 2.8.0 behaves the same, and it will be fixed in the next release.
+tables are in the order of its `Variant_info_genome`, one rsID and one AF a variant, and two
+variants of one frequency give it each: the merge of a cluster's rows
+(`remove_contiguous_samples.py`) keeps each variant with its own rsID and AF. A variant that
+two datasets of a search give with two rsIDs or frequencies lists both pairs, one after the
+other; an rsID field holding two IDs (a VCF ID `rs1;rs2`) reads `rs1;rs2`, one item. Up to
+2.8.1 the merge sorted the three lists each on its own, as text, and kept each value once: on
+ACTGA (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per sample, genome-wide, HGDP + 1000 Genomes)
+953 of 1,967 rows of two or more SNPs and 118 of 293 rows of an indel and one or more SNPs
+listed their rsIDs in another order than their variants. The report's MAF, the lowest
+frequency of the list, did not depend on it.
 The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
 alignments may exceed it (the report surfaces the observed maximum), while an indel row,

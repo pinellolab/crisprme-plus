@@ -22,11 +22,12 @@ gap). The readers of CRISPRme had to change with it:
   * Q in every reader of variant codes (pam_filter, the SNP overlay of the fake-indel
     genome, the indel path's resolver, the site rule of crispritz_bins, twopass_find,
     the cluster sort);
+  * the merge of a cluster's rows keeps each rsID and AF in the place of its variant;
   * the sites-only (mega) registry reads a line listing several ALTs one ALT at a time.
 
 The SNP post-analysis is the real new_simple_analysis.py, run as the pipeline runs it,
 on tiers and dictionaries the repository's own compilers build from dictionary values
-written as CRISPRitz writes them.
+written as CRISPRitz writes them; the merge is the real remove_contiguous_samples.py.
 
 Run with:
     cd PostProcess && python3 -m unittest test_site_alleles -v
@@ -594,6 +595,76 @@ class TheSitesOnlyUnionTakesOneAltAColumn(_SnpPostAnalysis):
         got = self.variant_rows(rows)
         self.assertIn(("chrT_%d_C_A" % p5, "chrT_%d_A_G" % p9), got)
         self.assertIn(("chrT_%d_C_T" % p5, "chrT_%d_A_G" % p9), got)
+
+
+# --------------------------------------------------------------------------- #
+# The merge of a cluster's rows: the real remove_contiguous_samples.py
+# --------------------------------------------------------------------------- #
+class TheRsidAndAfListsFollowTheVariants(unittest.TestCase):
+    """The merge sorted the variant, rsID and AF lists each on its own, as text, and
+    kept each value once (the README guide's chr22:16858220 listed AF 0.000981162 for
+    the variant of 0.805338 and the reverse; ACTGA had 953 of 1,967 multi-SNP rows out
+    of order)."""
+
+    HEAD = ("#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\t"
+            "Mismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\t"
+            "Real_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster").split("\t")
+
+    def _row(self, samples, rsids, afs, snps, cfd="0.9"):
+        v = {"#Bulge_type": "X", "crRNA": CRRNA, "DNA": "CTAACAGTTGCaTTTATCACTGG",
+             "Chromosome": "chr22", "Position": "16858220", "Cluster_Position": "16858220",
+             "Direction": "+", "Mismatches": "1", "Bulge_Size": "0", "Total": "1",
+             "PAM_gen": "n", "Var_uniq": "y", "Samples": samples, "Annotation_Type": "n",
+             "Real_Guide": CRRNA, "rsID": rsids, "AF": afs, "SNP": snps,
+             "Reference": SITE, "CFD_ref": "0.1", "CFD": cfd, "#Seq_in_cluster": "0"}
+        return "\t".join(v[c] for c in self.HEAD)
+
+    def _merge(self, rows):
+        d = tempfile.mkdtemp(prefix="sa_merge_")
+        self.addCleanup(shutil.rmtree, d, True)
+        path = os.path.join(d, "x.bestCFD.txt")
+        with open(path, "w") as fh:
+            fh.write("\t".join(self.HEAD) + "\n" + "".join(r + "\n" for r in rows))
+        subprocess.run([sys.executable, "adjust_cols.py", path], cwd=HERE, check=True,
+                       capture_output=True, text=True)
+        done = subprocess.run(
+            [sys.executable, "remove_contiguous_samples.py", path, path + ".trimmed", "3",
+             "5", "7", "11", "16", "19", "21", "score", "mm+bulges"],
+            cwd=HERE, capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        with open(path + ".trimmed") as fh:
+            best = [ln.rstrip("\n").split("\t") for ln in fh][1:]
+        self.assertEqual(len(best), 1)
+        # after adjust_cols.py: Samples 13, rsID 16, AF 17, SNP 18
+        return best[0][16], best[0][17], best[0][18]
+
+    def test_one_row(self):
+        snps = "chr22_16858239_C_G,chr22_16858242_G_T"
+        self.assertEqual(self._merge([self._row("S1", "rs9,rs1", "0.805338,0.000981162",
+                                                snps)]),
+                         ("rs9,rs1", "0.805338,0.000981162", snps))
+
+    def test_two_variants_of_one_frequency_keep_it_each(self):
+        snps = "chr22_16858239_C_G,chr22_16858242_G_T"
+        self.assertEqual(self._merge([self._row("S1", "rs9,.", "0.5,0.5", snps)]),
+                         ("rs9,.", "0.5,0.5", snps))
+
+    def test_the_row_two_datasets_give(self):
+        """Each dataset's rsID and AF stay on the row, by variant: (rsID, AF) pairs."""
+        snps = "chr22_16858239_C_G,chr22_16858242_G_T"
+        rsids, afs, got = self._merge([
+            self._row("S1", "rs9,rs1", "0.805338,0.000981162", snps),
+            self._row("S2", "rs9,.", "0.7,0.002", snps)])
+        self.assertEqual((rsids, afs, got),
+                         ("rs9,rs9,.,rs1", "0.7,0.805338,0.002,0.000981162", snps))
+        self.assertEqual(self._merge([self._row("S1", "rs9,rs1", "0.8,0.001", snps),
+                                      self._row("S2", "rs9,rs1", "0.8,0.001", snps)]),
+                         ("rs9,rs1", "0.8,0.001", snps))
+
+    def test_an_rsid_holding_two_ids(self):
+        snps = "chr22_16858239_C_G,chr22_16858242_G_T"
+        self.assertEqual(self._merge([self._row("S1", "rs9;rs8,rs1", "0.8,0.001", snps)]),
+                         ("rs9;rs8,rs1", "0.8,0.001", snps))
 
 
 # --------------------------------------------------------------------------- #

@@ -702,10 +702,12 @@ with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, 
         splitted = entry.strip().split("\t")
         fake_pos = splitted[5].strip().split(",")  # inizio,fine del fakechr
         # start       end fakechr          #pos_vera,samples,rsID,MAF,INDELinfo,start_fake,ref_seq
+        # (an rsID holding ',' -- a VCF ID "rs1;rs2", which CRISPRitz writes "rs1,rs2" --
+        # reads ';', so a row's rsID list keeps one item per variant)
         INDELS_tree[int(fake_pos[0]) : int(fake_pos[1])] = [
             splitted[0],
             splitted[1],
-            splitted[2],
+            splitted[2].replace(",", ";"),
             splitted[3],
             splitted[4],
             int(fake_pos[0]),
@@ -895,9 +897,10 @@ def _snp_record(pos1):
 
 def _snp_name(pos1, alt):
     """(rsID, MAF) of a SNP alt, formatted as the SNP path writes them: the
-    registry's, else the per-sample dictionary's, else ('.', '0')."""
+    registry's, else the per-sample dictionary's, else ('.', '0'); a ',' inside the
+    rsID (two IDs) reads ';', as on the SNP path."""
     if _reg is not None:
-        rs = _reg.rsid(pos1, alt) or "."
+        rs = (_reg.rsid(pos1, alt) or ".").replace(",", ";")
         try:
             grp = _reg.lookup(pos1, alt)
             af = grp["global"].allele_freq() if grp and "global" in grp else 0.0
@@ -907,6 +910,7 @@ def _snp_name(pos1, alt):
     if _dict_snps is not None:
         for (_r, a, rs, af, _c) in _dict_snps.get(pos1, ()):
             if a == alt:
+                rs = rs.replace(",", ";")
                 try:
                     return rs, "%.6g" % float(af)
                 except ValueError:
