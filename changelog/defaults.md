@@ -56,7 +56,8 @@ and change `PostProcess/test_documented_sizes.py` and every surface it reads tog
   `NRR` index, give the same results as a dedicated index of the PAM. On chr22 with HGDP + 1000
   Genomes (two guides, 4 mismatches + 1 + 1 bulge, per-sample, 16 threads), an `NGG` search that
   the `NRR` index alone served, pruned by itself, wrote the same 2,023 rows, byte for byte, as one
-  of the dedicated `NGG` index, in 397 s against 295 s, at 9.6 GB peak memory against 2.6 GB.
+  of the dedicated `NGG` index, in 397 s against 295 s, at 9.6 GB peak memory against 2.6 GB
+  (CRISPRitz 2.9.1); with CRISPRitz 2.10.0 both wrote those rows again.
 - **A search prunes by itself.** When no installed index serves a search unpruned and one serves it
   pruned (a dedicated index of a PAM that holds the search's, or an all-`N` one wider than the PAM),
   the search prunes, as if `--prune-pam` was given, and says so first: on the console (`NOTE
