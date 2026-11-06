@@ -27,6 +27,7 @@ try:  # PostProcess/ on sys.path (crisprme.py, the pipeline) ...
     from genome_layout import (
         describe_header_problems,
         describe_index_problems,
+        describe_name_problems,
         describe_problem,
         find_multi_record_fastas,
         find_name_mismatched_fastas,
@@ -35,6 +36,7 @@ except ImportError:  # ... or imported as PostProcess.validate_inputs (tests)
     from PostProcess.genome_layout import (
         describe_header_problems,
         describe_index_problems,
+        describe_name_problems,
         describe_problem,
         find_multi_record_fastas,
         find_name_mismatched_fastas,
@@ -320,8 +322,13 @@ def check_genome_fasta(genomedir: str) -> Tuple[List[Issue], List[str]]:
         multi, mismatched, header_problems = {}, {}, []
     for fname, ids in multi.items():
         issues.append(Issue(ERROR, describe_problem(genomedir, fname, ids)))
+    # a .fa file of one sequence named otherwise: the search drops all that sequence's
+    # off-targets, and its own check (genome_layout.py) refuses it, as here (M1); a .fasta
+    # one, which no search reads, is only named
+    for problem in describe_name_problems(genomedir, reported=multi):
+        issues.append(Issue(ERROR, problem))
     for fname, rid in mismatched.items():
-        if fname in multi:
+        if fname in multi or fname.split(".")[-1] == "fa":
             continue  # already reported, with the fix
         issues.append(
             Issue(

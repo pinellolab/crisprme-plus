@@ -3954,22 +3954,6 @@ def sample_page(job_id: str, hash_term: str) -> html.Div:
         0
     ]  # take the first element
     assert isinstance(integrated_fname, str)
-    file_to_grep = os.path.join(
-        current_working_directory,
-        RESULTS_DIR,
-        job_id,
-        f"{job_id}.bestMerge.txt.integrated_results.tsv",
-    )
-    sample_grep_result = os.path.join(
-        current_working_directory, RESULTS_DIR, job_id, f"{job_id}.{sample}.{guide}.txt"
-    )
-    integrated_sample_personal = os.path.join(
-        current_working_directory,
-        RESULTS_DIR,
-        job_id,
-        f"{job_id}.{sample}.{guide}.personal_targets.tsv",
-    )
-    integrated_sample_personal_zip = integrated_sample_personal.replace("tsv", "zip")
     final_list.append(
         html.Div(
             f"{job_id}.{sample}.{guide}.personal_targets",

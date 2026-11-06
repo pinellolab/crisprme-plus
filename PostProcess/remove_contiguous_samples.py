@@ -53,10 +53,8 @@ def _rep_tiebreak(x):
         )
     except Exception:  # never let the tie-break break the sort
         _ncarriers = 0
-    _has_indel = _ncarriers > 0 and any(
-        len(_var) == 4 and (len(_var[2]) > 1 or len(_var[3]) > 1)
-        for _var in (_tok.rsplit("_", 3) for _tok in str(x[snp_info]).split(","))
-    )
+    # (what an indel token is, as the merge's carrier resolution reads it: RV3-D)
+    _has_indel = _ncarriers > 0 and _holds_indel_token(str(x[snp_info]))
     # -_ncarriers => most carriers first; then the intrinsic deterministic discriminators;
     # False sorts first => a row of SNPs before a row with an indel.
     return (-_ncarriers, str(x[2]), str(x[pos - 1]), _has_indel)

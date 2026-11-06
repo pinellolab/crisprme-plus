@@ -442,6 +442,27 @@ class TestRefusedDatasets(_Install):
         launch.assert_called_once_with(
             ["download", "--what", "index", "--index-name", name], "Download index")
 
+    def test_a_merged_panel_missing_the_list_of_one_of_its_datasets(self):
+        # Submit makes a merged panel's list from its datasets' lists; with one of them
+        # missing, the advice said to add the VCF dataset hg38_1000G_HGDP again in
+        # Settings, a dataset never added (FR :98): it names the list that is missing
+        self.index("NRG_2_hg38+hg38_1000G_HGDP")
+        self.sample_list("1000G")
+        note = self.note("1000G_HGDP", 1, 1)
+        self.assertEqual(note, (
+            "No sample list for the variant dataset '1000G_HGDP': a search with it reads "
+            "samplesIDs/hg38_1000G_HGDP.samplesID.txt (one row per sample its VCFs genotype), "
+            "which Submit makes from the lists of the datasets it merges "
+            "(samplesIDs/hg38_1000G.samplesID.txt, samplesIDs/hg38_HGDP.samplesID.txt), and "
+            "samplesIDs/hg38_HGDP.samplesID.txt is missing. If its index came from "
+            "HuggingFace, remove the index in Settings and download it again there, which "
+            "installs the lists; or add the missing file yourself, then submit again."))
+        self.assertEqual(self.submit("1000G_HGDP", 1, 1), (False, [note]))
+        self.assertNotIn("add the VCF dataset hg38_1000G_HGDP", note)
+        # with that list, Submit makes the panel's
+        self.sample_list("HGDP")
+        self.assertTrue(self.submit("1000G_HGDP", 1, 1)[0])
+
     def test_the_note_writes_no_sample_list(self):
         # Submit (check_input, then change_url) makes a merged panel's list from those of its
         # datasets. The note made it too, drawn as the page loads with the panel selected,

@@ -422,6 +422,32 @@ def describe_header_problems(genomedir: str, deep: bool = False, reported=()) ->
     return errors
 
 
+def describe_name_problems(genomedir: str, reported=()) -> List[str]:
+    """The error, with its fix, for the ``.fa`` files of ``genomedir`` that hold one
+    sequence and are named otherwise (walkone.fa holding >chr1), but those in
+    ``reported``: a search takes each file for the sequence it is named after, so it finds
+    that sequence's off-targets and drops them all. One message, whatever the number of
+    files. The search, which runs this module's check first, ran its whole course for none,
+    then said to run the check, which passed such a file (M1)."""
+    misnamed = {f: rid for f, rid in find_name_mismatched_fastas(genomedir).items()
+                if f.split(".")[-1] == "fa" and f not in reported}
+    if not misnamed:
+        return []
+    genome = os.path.basename(os.path.normpath(genomedir))
+    fname, rid = next(iter(misnamed.items()))
+    more = f" ({len(misnamed) - 1} more file(s) here too)" if len(misnamed) > 1 else ""
+    return [
+        f"{fname}: holds the sequence {rid} and is named otherwise{more}. CRISPRme reads a "
+        f"sequence from the file named after it ({rid}.fa), so a search of this folder finds "
+        f"that sequence's off-targets and then drops them all, with no error. Name each file "
+        f"after its sequence with:\n"
+        f"    python PostProcess/genome_layout.py --split {genomedir}\n"
+        f"An index built from the folder as it was is named after the sequence, and serves "
+        f"once the files are renamed. (A genome uploaded from the web Settings page is named "
+        f"this way: remove this one there, with the indexes built on it, and upload it again.)"
+    ]
+
+
 def _indexes_of(library: str, genome: str) -> List[str]:
     """The folders of the genome library named as an index of ``genome``:
     ``<PAM>_<N>_<genome>``, or ``<PAM>_<N>_<genome>+<dataset>`` of a variant one."""
@@ -497,6 +523,7 @@ def main(argv: List[str]) -> int:
                 print(f"NOTE: in {library}, built on this genome: {', '.join(built)}")
         return 0
     header_problems = describe_header_problems(genomedir, deep, problems)
+    header_problems += describe_name_problems(genomedir, problems)
     header_problems += describe_index_problems(library, genome)
     if not problems and not header_problems:
         return 0

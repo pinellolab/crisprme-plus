@@ -72,7 +72,10 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   The refusals that told a user to run again with `--prune-pam --index-path` now say, where the
   engine cannot prune, that an index serves the search pruned and the installed CRISPRitz cannot do
   it; the advice to run without `--index-path` no longer says to drop `--prune-pam` too.
-- `PostProcess/pool_search_indels.py` drops `_index_pam`, a helper nothing called (emptyidx F8).
+- `PostProcess/pool_search_indels.py` drops `_index_pam`, a helper nothing called (emptyidx F8);
+  the results page's sample tab no longer computes paths it never reads (wsearch N8); and
+  `remove_contiguous_samples.py` reads a variant token as an indel's in one place, for the
+  representative's tie-break and the carrier resolution alike (RV3-D).
 
 ### Added
 
@@ -346,3 +349,21 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   open <genome>/<name>.fa` and "Genome enrichment (add-variants) failed", the split one after
   splitting the dataset in place (wset N2). Each is one ERROR that says why and what to do, and
   the dataset is left as it was.
+- **The Settings uploader shows a refusal in red.** An upload refused (`Error: ...`), one that
+  failed, and "Choose a file first." were grey, as the progress and the success are, so a
+  refusal read as if all were well (final confirmation of 2.8.1); they take the red of the
+  Settings cards' messages.
+- **The advice for a merged panel's missing sample list names the list that is missing.** Submit
+  makes a merged panel's list (`hg38_1000G_HGDP`'s) from the lists of the datasets it merges;
+  with one of them missing, and no VCF folder of the panel, the note and Submit said to add the
+  VCF dataset `hg38_1000G_HGDP` again in Settings, a dataset never added (FR :98). They name the
+  missing list (`samplesIDs/hg38_HGDP.samplesID.txt`), and how to get it.
+- **A genome folder holding a FASTA file of one sequence named otherwise is refused before the
+  search.** A search takes each file for the sequence it is named after, so it found the
+  off-targets of `walkone.fa` holding `>chr1`, dropped them all, and ended saying that none
+  survived post-analysis and to check the folder with `genome_layout.py`, whose check, which
+  the search runs first, passed the file; complete-search's input check only warned that
+  results "may be dropped" (M1). The check, the search that runs it first (a web search too)
+  and the input check now refuse such a `.fa` file, saying to name it after its sequence with
+  `genome_layout.py --split`, as build-index-only already did; a `.fasta` file, which no
+  search reads, is still only named.

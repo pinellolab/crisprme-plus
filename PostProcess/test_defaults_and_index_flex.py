@@ -1242,6 +1242,38 @@ class EachMergeTakesItsOwnSortingCriteria(unittest.TestCase):
         self.assertIn('sorting_criteria = "mm+bulges,mm"', page)
 
 
+class TheSamplePageComputesNoPathItDoesNotRead(unittest.TestCase):
+    """The results page's sample tab computed the zip of the sample's personal targets, which
+    its download link takes from the name in div-info-sumbysample-targets, and two paths of
+    files it no longer reads, and used none of them (wsearch N8)."""
+
+    def test_every_local_it_writes_is_read(self):
+        src = (_REPO / "pages" / "results_page.py").read_text()
+        page = next(n for n in ast.parse(src).body
+                    if isinstance(n, ast.FunctionDef) and n.name == "sample_page")
+        written = {n.id for n in ast.walk(page)
+                   if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+        read = {n.id for n in ast.walk(page)
+                if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Store)}
+        # (genome_type: its job-type check of the parameters, kept as it was)
+        self.assertEqual(written - read - {"genome_type"}, set())
+
+
+class TheMergeHasOneDefinitionOfAnIndelToken(unittest.TestCase):
+    """remove_contiguous_samples.py read a variant token as an indel's in two places, the
+    representative's tie-break and the carrier resolution, each with its own code (RV3-D):
+    the tie-break asks the carrier resolution's _holds_indel_token."""
+
+    def test_the_tie_break_asks_the_one_helper(self):
+        src = (_HERE / "remove_contiguous_samples.py").read_text()
+        functions = {n.name: n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef)}
+        tie_break = functions["_rep_tiebreak"]
+        calls = {n.func.id for n in ast.walk(tie_break)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        self.assertIn("_holds_indel_token", calls)
+        self.assertNotIn("rsplit", ast.get_source_segment(src, tie_break))
+
+
 class PoolSearchIndelsKeepsNoDeadHelper(unittest.TestCase):
     """pool_search_indels.py kept _index_pam, which nothing called (emptyidx F8)."""
 

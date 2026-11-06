@@ -2237,6 +2237,23 @@ def samplesid_problem(vcf_folder: str, dataset: str) -> Optional[str]:
             "building its index does not make one. Search the reference genome, or a "
             "VCF dataset with samples."
         )
+    # a merged panel's list (1000G_HGDP's) is the union of its datasets' (hg38_1000G's and
+    # hg38_HGDP's), which Submit makes when they are all there: one of them is what is
+    # missing, and no dataset of the panel's name was ever added (FR :98)
+    prefix = vcf_folder[: -len(dataset) - 1] if vcf_folder.endswith(f"_{dataset}") else ""
+    parts = [os.path.join("samplesIDs", f"{prefix}_{part}.samplesID.txt")
+             for part in dataset.split("_")] if prefix and "_" in dataset else []
+    missing = [p for p in parts if not os.path.isfile(os.path.join(current_working_directory, p))]
+    if not os.path.isdir(vdir) and parts and len(missing) < len(parts):
+        return (
+            f"No sample list for the variant dataset '{dataset}': a search with it reads "
+            f"samplesIDs/{vcf_folder}.samplesID.txt (one row per sample its VCFs genotype), "
+            f"which Submit makes from the lists of the datasets it merges ({', '.join(parts)}), "
+            f"and {' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} missing. If its "
+            "index came from HuggingFace, remove the index in Settings and download it again "
+            "there, which installs the lists; or add the missing file yourself, then submit "
+            "again."
+        )
     if os.path.isdir(vdir):
         how = ("Build its variant index in Settings, which writes the list from the VCF "
                "header, or add the file yourself")
