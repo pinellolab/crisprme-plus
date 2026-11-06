@@ -99,6 +99,25 @@ class TestSearchReuse(unittest.TestCase):
         self.assertIn("not run again", note.children)
         self.assertEqual(lp.show_reused_search_note(""), "")
 
+    def test_the_reused_job_s_log_keeps_its_lines_and_takes_today_s_date(self):
+        # a reuse wrote the log back without its last line, the report's (the search
+        # writes it after "Job Done"), and with a second "Job Done" with no line end
+        first = self.finish(self.submit())
+        log = os.path.join(self.tmp, "Results", first, "log.txt")
+        lines = ["Job\tStart\tFri", "Creating database\tEnd\tFri", "Job\tDone\tFri",
+                 "Building shareable report\tStart\tFri", "Building shareable report\tEnd\tFri"]
+        with open(log, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        self.assertEqual(self.submit()[1], f"?job={first}")
+        with open(log) as f:
+            again = f.read()
+        self.assertTrue(again.endswith("\n"))
+        again = again.split("\n")[:-1]
+        self.assertEqual(len(again), len(lines))
+        self.assertEqual([l for i, l in enumerate(again) if i != 2], lines[:2] + lines[3:])
+        self.assertTrue(again[2].startswith("Job\tDone\t"))
+        self.assertNotEqual(again[2], "Job\tDone\tFri")  # (today's date)
+
     def test_each_difference_runs_a_new_search(self):
         first = self.finish(self.submit())
         for label, kwargs in (

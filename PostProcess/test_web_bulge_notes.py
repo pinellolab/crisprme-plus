@@ -757,6 +757,76 @@ class TestThePamPickerOfAPamLessIndex(_Install):
 
 
 @_NEEDS_DASH
+class TestAnIndexOnlyDatasetIsOfferedAsItIs(_Install):
+    """A variant dataset installed as an index alone (a download, or one whose VCF dataset was
+    removed in Settings) is offered from its index's name: an index of another genome, of a
+    dataset named after this one, was offered too (FR :278), each underscore of the
+    dataset's name showed as " + ", as for a merged panel of two datasets (FR :286), and the
+    PAM of an index named in the 2.9.0 form as its name's first field ("20-NRR")."""
+
+    def test_under_its_own_genome_and_by_its_name(self):
+        for name in ("NRG_2_hg19+hg38_other", "NRG_2_hg38+hg38_my_vcf",
+                     "20-NRR_3_hg38+hg38_named"):  # (and the 2.9.0 form of the name)
+            self.index(name)
+        offered = {o["value"]: o["label"] for o in pu.get_variant_dataset_options("hg38")}
+        self.assertNotIn("other", offered)
+        self.assertEqual(offered["my_vcf"].split(" ")[0], "my_vcf")
+        self.assertEqual(offered["named"].split(" ")[0], "named")
+        self.assertIn(" — PAM(s): NRR ", offered["named"])
+        self.assertEqual(offered["shipped"].split(" ")[0], "shipped")
+
+
+@_NEEDS_DASH
+class TestTheSettingsBuildFormPairsADatasetWithItsGenome(_Install):
+    """Settings' Build an index locally offered every genome for a VCF dataset whose genome
+    Settings recorded when it was added (VCFs/.<dataset>.refgenome), as the search form
+    does not: a build of the dataset on another genome ended in the enricher's crash
+    (std::out_of_range, SIGABRT; FV :328). It offers that genome alone, and refuses the
+    pair, saying so."""
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.tmp, "Genomes", "walkdesc"))
+        open(os.path.join(self.tmp, "Genomes", "walkdesc", "chr3.fa"), "w").close()
+        with open(os.path.join(self.tmp, "VCFs", ".hg38_walk.refgenome"), "w") as fh:
+            fh.write("hg38")
+        self.launch = patch.object(sp, "launch_settings_job").start()
+        self.addCleanup(patch.stopall)
+
+    def test_the_genome_offered(self):
+        options, value = sp.build_genomes_of_dataset("hg38_walk", "walkdesc")
+        self.assertEqual(([o["value"] for o in options], value), (["hg38"], "hg38"))
+        # reference only, or a dataset with no record: every genome, the selection kept
+        for vcf in ("", "hg38_fresh"):
+            with self.subTest(vcf=vcf):
+                options, value = sp.build_genomes_of_dataset(vcf, "walkdesc")
+                self.assertEqual((sorted(o["value"] for o in options), value),
+                                 (["hg38", "walkdesc"], "walkdesc"))
+        # a record of a genome not installed: every genome, and the build says why not
+        with open(os.path.join(self.tmp, "VCFs", ".hg38_zero.refgenome"), "w") as fh:
+            fh.write("mm39")
+        options, _value = sp.build_genomes_of_dataset("hg38_zero", None)
+        self.assertEqual(sorted(o["value"] for o in options), ["hg38", "walkdesc"])
+
+    def test_the_build_of_another_genome_is_refused(self):
+        said = sp.build_index(1, "walkdesc", PAM, 1, 1, "hg38_walk", None)[2]
+        self.assertEqual(said, "hg38_walk is a VCF dataset of hg38, as recorded when it was "
+                               "added: build its index on hg38.")
+        with open(os.path.join(self.tmp, "VCFs", ".hg38_zero.refgenome"), "w") as fh:
+            fh.write("mm39")
+        said = sp.build_index(1, "hg38", PAM, 1, 1, "hg38_zero", None)[2]
+        self.assertIn("build its index on mm39, which is not installed", said)
+        self.assertEqual(self.launch.call_count, 0)
+        # its own genome, and a dataset with no record, as before
+        for genome, vcf in (("hg38", "hg38_walk"), ("walkdesc", "hg38_fresh")):
+            with self.subTest(genome=genome, vcf=vcf):
+                sp.build_index(1, genome, PAM, 1, 1, vcf, None)
+                argv = self.launch.call_args[0][0]
+                self.assertEqual(argv[argv.index("--genome") + 1],
+                                 os.path.join(self.tmp, "Genomes", genome))
+
+
+@_NEEDS_DASH
 class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
     """Submit with a genome or PAM selected that is not installed, or none installed: on the
     data folder the web app starts with (index.check_directories: its folders, all empty),

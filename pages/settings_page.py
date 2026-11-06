@@ -31,6 +31,7 @@ from .pages_utils import (
     get_available_PAM,
     get_available_CAS,
     get_all_vcf_datasets,
+    vcf_reference_genome,
     get_custom_annotations,
     get_available_liftover_files,
     installed_assemblies,
@@ -2715,6 +2716,35 @@ def add_index_hf(n, name):
     return _start(launch_settings_job(argv, "Download index"))
 
 
+def _dataset_genome(vcf: Optional[str]) -> Optional[str]:
+    """The genome VCF dataset ``vcf`` belongs to, as Settings recorded it when the dataset
+    was added (VCFs/.<dataset>.refgenome, read by vcf_reference_genome), or None without
+    a record: the search form pairs such a dataset with that genome alone."""
+    if not vcf or not os.path.isfile(
+            os.path.join(current_working_directory, "VCFs", f".{vcf}.refgenome")):
+        return None
+    return vcf_reference_genome(vcf)
+
+
+@app.callback(
+    [Output("index-build-genome", "options"), Output("index-build-genome", "value")],
+    [Input("index-build-vcf", "value")],
+    [State("index-build-genome", "value")],
+    prevent_initial_call=True,
+)
+def build_genomes_of_dataset(vcf, genome):
+    """The genomes the build form offers: every one installed, but for a VCF dataset whose
+    genome Settings recorded (_dataset_genome) that genome alone, selected, as the search
+    form pairs them. It offered every genome, and a build of the dataset on another ended
+    in the enricher's crash (FV :328)."""
+    genomes = get_available_genomes()
+    own = _dataset_genome(vcf)
+    mine = [g for g in genomes if g["value"].replace(" ", "_") == own]
+    if mine:
+        return mine, mine[0]["value"]
+    return genomes, genome if genome in [g["value"] for g in genomes] else None
+
+
 @app.callback(
     [
         Output("settings-active-job", "data", allow_duplicate=True),
@@ -2742,6 +2772,15 @@ def build_index(n, genome, pam, bdna, brna, vcf, display_name):
         return no_update, no_update, "Select an installed genome and PAM."
     if vcf and vcf not in [v["value"] for v in get_all_vcf_datasets()]:
         return no_update, no_update, "Select an installed VCF dataset, or reference only."
+    own = _dataset_genome(vcf)
+    if own and own != genome.replace(" ", "_"):
+        # its VCFs are in another genome's coordinates: the enricher stopped on the first
+        # position past a chromosome's end (std::out_of_range, SIGABRT)
+        installed = own in [g["value"].replace(" ", "_") for g in get_available_genomes()]
+        return no_update, no_update, (
+            f"{vcf} is a VCF dataset of {own}, as recorded when it was added: build its "
+            f"index on {own}" + ("." if installed else f", which is not installed (add it "
+                                                      "under Reference genomes first)."))
     if int(bdna or 0) == 0 and int(brna or 0) == 0:
         # build-index-only no-ops for zero bulges; tell the user up front rather
         # than launching a job that reports "done" without producing an index.

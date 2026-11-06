@@ -299,3 +299,25 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   (by `int()` and an `assert`) only after the job folder and its files were made, so each such
   request left a folder that never ran, as a Max edits value did before 2.8.1 (secfu RV1-N1). The
   values are checked with the others, first.
+- **The Personal assembly tab offers every PAM installed and the app's bulges, whatever the
+  Reference tab's genome and variant dataset.** Its PAM list, its bulge options and the note
+  under them followed the hidden dropdowns of the Reference tab (OF-11): with a VCF dataset
+  selected there that had no index, it offered 0 bulges only, with a note about that dataset's
+  index, and with an NRG variant index, NRG alone, though an assembly search indexes each
+  haplotype itself; its Submit took the same counts. It offers every installed PAM and 0 to 2
+  bulges of each type, its note says what its search builds, and the PAM picker of a PAM-less
+  index is not shown there.
+- **Settings' Build an index locally pairs a VCF dataset with its genome.** It offered every
+  genome for a dataset whose genome Settings recorded when the dataset was added, and a build of
+  the dataset on another genome ended in the enricher's crash (`std::out_of_range`, SIGABRT;
+  FV :328). Choosing such a dataset selects its genome, the one the form then offers, and a
+  build of the dataset on another is refused, naming its genome.
+- **A job an identical search is sent to keeps its log.** Submit gave the finished job's "Job
+  Done" line today's date (its results are kept 3 days from it) by writing the log back
+  without its last line, the report's, and with a second "Job Done" and no line end
+  (FV :335); it changes the date of that line alone.
+- **The search form offers a variant dataset installed as an index alone under its own genome,
+  and by its name.** It read the dataset off the index's name without the genome before the
+  `+`, so an index of another genome, of a dataset named after this one, was offered too
+  (FR :278), and it showed each underscore of the dataset's name as " + ", as for a merged
+  panel of two datasets (`my + vcf` for `hg38_my_vcf`; FR :286).

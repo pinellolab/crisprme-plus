@@ -638,9 +638,6 @@ def _max_edits_offered(mms, dna, rna) -> int:
         State("assembly-individual", "value"),
         State("max-edits-slider", "value"),
         State("advanced-thresholds-collapse", "is_open"),
-        # the bulge dropdowns' options follow these, with the PAM (limit_bulges_to_index)
-        State("available-genome", "value"),
-        State("variant-dataset", "value"),
     ],
     prevent_initial_call=True,
 )
@@ -661,8 +658,6 @@ def submit_assembly_search_job(
     individual: str,
     max_edits_val: int,
     advanced_open: bool,
-    genome_selected: Optional[str] = None,
-    variant_choice: Optional[str] = None,
 ) -> Tuple:
     """Validates and launches a personal-assembly (paternal/maternal, no VCF)
     off-target search, submitted via `crisprme.py assembly-search`.
@@ -742,14 +737,13 @@ def submit_assembly_search_job(
     # form's range (its dropdown's, and the Max edits slider's when it governs), checked
     # before anything is written: they go into .Params.txt and the command, and a request
     # can send any value, which went into .Params.txt as sent, a line break too, before
-    # int() refused it and left a job folder that never ran. The bulge dropdowns offer what
-    # the genome, PAM and variant dataset selected allow (limit_bulges_to_index), more than
-    # the app's ceiling with an installed index deeper than it, and the slider's maximum
-    # follows them (sync_max_edits_bound): Submit takes them as the form offers them.
+    # int() refused it and left a job folder that never ran. The bulge dropdowns offer, on
+    # this tab, the app's ceiling, whatever the Reference tab's genome and variant dataset
+    # (limit_bulges_to_index, ASSEMBLY_BULGES), and the slider's maximum follows them
+    # (sync_max_edits_bound): Submit takes them as the form offers them.
     mms = _form_number(mms, 0, MAX_MMS - 1)
-    bulges = _bulges_offered(*_offered(genome_selected, pam, variant_choice))
-    dna = _form_number(dna, 0, bulges)
-    rna = _form_number(rna, 0, bulges)
+    dna = _form_number(dna, 0, ASSEMBLY_BULGES)
+    rna = _form_number(rna, 0, ASSEMBLY_BULGES)
     if mms is None:
         missing.append("mismatches")
     if dna is None:
@@ -1627,10 +1621,9 @@ def change_url(
                                     LOG_FILE,
                                 )
                             ) as handle_log:
-                                log_data = handle_log.read().strip()
+                                log_data = handle_log.read()
                                 if "Job\tDone" in log_data:
                                     adj_date = True
-                                    log_data = log_data.split("\n")
                                     date_new = subprocess.Popen(
                                         ["echo $(date)"],
                                         stdout=subprocess.PIPE,
@@ -1638,10 +1631,15 @@ def change_url(
                                         shell=True,
                                     )
                                     out, err = date_new.communicate()
-                                    log_to_write = "\n".join(log_data[:-1])
-                                    date_write = str(
-                                        f"{log_to_write}\nJob\tDone\t"
-                                        f"{out.decode('UTF-8').strip()}"
+                                    # its "Job Done" line takes today's date (the results
+                                    # are kept 3 days from it), and every other line stays
+                                    # as it is: it dropped the last line, the report's,
+                                    # which comes after it, and added a second "Job Done"
+                                    # with no line end (FV :335)
+                                    date_write = "".join(
+                                        f"Job\tDone\t{out.decode('UTF-8').strip()}\n"
+                                        if line.startswith("Job\tDone") else line
+                                        for line in log_data.splitlines(keepends=True)
                                     )
                         except OSError as e:
                             raise e
@@ -2738,15 +2736,18 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
         State("max-edits-slider", "value"),
         State("bulge-cap-memory", "data"),
     ],
+    [Input("genome-mode-tabs", "active_tab")],
     prevent_initial_call=True,
 )
 def limit_bulges_to_index(
-    genome, pam, variant_choice, cur_dna, cur_rna, mms=None, cur_edits=None, held=None
+    genome, pam, variant_choice, cur_dna, cur_rna, mms=None, cur_edits=None, held=None,
+    active_tab=None,
 ):
     genome, pam, variant_choice = _offered(genome, pam, variant_choice)
-    maxb = _bulges_offered(genome, pam, variant_choice)
+    assembly = active_tab == ASSEMBLY_TAB
+    maxb = ASSEMBLY_BULGES if assembly else _bulges_offered(genome, pam, variant_choice)
     opts = [{"label": i, "value": i} for i in range(0, maxb + 1)]
-    if not genome or not pam:
+    if not pam or not (genome or assembly):
         return opts, opts, no_update, no_update, no_update, no_update
     held = held or {}
     # What the cap lowered last time, unless DNA/RNA no longer show what it set them to
@@ -2820,11 +2821,20 @@ def _bulges_offered(genome: Optional[str], pam: Optional[str], variant_choice) -
     variant dataset as _offered gives them: the bulges a web search can reach here
     (_bulge_cap), more than the app's ceiling where an installed reference index is deeper
     than it, or, with no genome or PAM, that ceiling (AV_BULGES). limit_bulges_to_index
-    fills the dropdowns with them, and the Personal assembly tab's Submit takes no other
-    count (submit_assembly_search_job)."""
+    fills the dropdowns of the Reference tab with them (the Personal assembly tab's offer
+    ASSEMBLY_BULGES)."""
     if not genome or not pam:
         return MAX_BULGES - 1
     return _bulge_cap(genome, pam, variant_choice)
+
+
+# The Personal assembly tab of the search form (genome-mode-tabs). Its search indexes each
+# haplotype of the individual itself, the first time, with the PAM and bulges selected
+# (assembly-search), so it offers every PAM installed and the app's bulge ceiling, whatever
+# the Reference tab's genome and variant dataset: they limited it, from the hidden
+# dropdowns of that tab (OF-11).
+ASSEMBLY_TAB = "tab-personal-assembly"
+ASSEMBLY_BULGES = MAX_BULGES - 1
 
 
 def _index_installed(genome: str, pam: str, panel: Optional[str] = None) -> bool:
@@ -2937,10 +2947,15 @@ def _dataset_refusals(genome: str, pam: str, panel: str,
         Input("variant-dataset", "value"),
         Input("dna", "value"),
         Input("rna", "value"),
+        Input("genome-mode-tabs", "active_tab"),
     ],
 )
-def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
+def update_bulge_note(genome, pam, variant_choice, dna, rna, active_tab=None) -> str:
     genome, pam, variant_choice = _offered(genome, pam, variant_choice)
+    if active_tab == ASSEMBLY_TAB:
+        return (f"Up to {ASSEMBLY_BULGES} DNA/RNA bulge(s) available. A personal-assembly "
+                "search indexes each haplotype of the individual for the PAM and bulges "
+                "selected the first time, then reuses those indexes.") if pam else ""
     if not genome or not pam:
         return ""
     # a dataset whose search Submit refuses whatever the bulges: the note says what Submit
@@ -3031,14 +3046,16 @@ def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
     ],
     [Input("available-genome", "value"), Input("variant-dataset", "value")],
     [State("available-pam", "value")],
+    [Input("genome-mode-tabs", "active_tab")],
     prevent_initial_call=True,
 )
-def update_pam_options(genome, variant_choice, current_pam):
+def update_pam_options(genome, variant_choice, current_pam, active_tab=None):
     """Restrict the PAM list to what is searchable for the current genome + variant
     selection: all PAMs for a reference-only search, but only PAMs with a variant
     index (pamless NNN counts for all) when a variant dataset is included. Keeps the
-    current PAM if it is still valid, else falls back to a sensible default."""
-    options = get_pam_options(genome, variant_choice)
+    current PAM if it is still valid, else falls back to a sensible default. On the
+    Personal assembly tab, every PAM, as for a reference-only search (ASSEMBLY_TAB)."""
+    options = get_pam_options(genome, "ref" if active_tab == ASSEMBLY_TAB else variant_choice)
     valid = {o["value"] for o in options}
     if current_pam in valid:
         value = current_pam
@@ -3055,14 +3072,18 @@ def update_pam_options(genome, variant_choice, current_pam):
         Output("pamless-picker-note", "children"),
         Output("pamless-preset", "options"),
     ],
-    [Input("available-genome", "value"), Input("variant-dataset", "value")],
+    [Input("available-genome", "value"), Input("variant-dataset", "value"),
+     Input("genome-mode-tabs", "active_tab")],
 )
-def update_pamless_picker(genome, variant_choice):
+def update_pamless_picker(genome, variant_choice, active_tab=None):
     """Show the PAM picker of a PAM-less index when one is installed for the genome (for a
     variant search, the dataset) selected, with what it serves, and its enzyme presets:
-    those it cannot serve are disabled, with the reason (pamless_presets). Hidden otherwise:
-    the PAM list above is then all there is."""
+    those it cannot serve are disabled, with the reason (pamless_presets). Hidden otherwise,
+    and on the Personal assembly tab, whose search indexes the haplotypes: the PAM list
+    above is then all there is."""
     hidden = {"display": "none", "width": "300px"}
+    if active_tab == ASSEMBLY_TAB:
+        return hidden, "", []
     geometry = pamless_index_geometry(genome, variant_choice)
     if not geometry:
         return hidden, "", []

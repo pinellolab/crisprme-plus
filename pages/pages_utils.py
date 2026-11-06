@@ -2029,7 +2029,8 @@ def get_variant_dataset_options(genome: str) -> List:
                 continue
             if not any(d.endswith(s) for s in suffixes):
                 continue
-            motif = d.split("_")[0]
+            # (in either form of the name: "20-NRR" was taken for the PAM of 20-NRR_3_...)
+            motif = index_fit.index_pam(d)
             pam_name, _ilen, _ipos = index_build_pam(os.path.join(lib, d))
             tag = pam_name or motif
             if motif == "N" * len(motif):
@@ -2077,13 +2078,18 @@ def get_variant_dataset_options(genome: str) -> List:
         for d in sorted(os.listdir(lib)):
             if d.endswith("_INDELS") or not os.path.isdir(os.path.join(lib, d)):
                 continue
-            _, _, enriched = d.partition("+")  # enriched = "<genome>_<dataset[s]>"
-            if not enriched.startswith(f"{genome_norm}_"):
+            # <PAM>_<N>_<genome>+<enriched>, enriched = "<genome>_<dataset>", in either form
+            # of the name: an index of this genome alone (an index of another genome, of a
+            # dataset named after this one, was offered here: FR :278)
+            parsed = index_fit.parse_index_name(d)
+            indexed, _, enriched = (parsed[2] if parsed else "").partition("+")
+            if indexed != genome_norm or not enriched.startswith(f"{genome_norm}_"):
                 continue
-            core = enriched[len(genome_norm) + 1:]  # dataset token(s), e.g. "1000G_HGDP"
+            core = enriched[len(genome_norm) + 1:]  # the dataset, e.g. "HGDP1kGP"
             if core and core not in seen:
-                label = core.replace("_", " + ")  # "1000G_HGDP" -> "1000G + HGDP"
-                options.append({"label": label + _pam_note(core), "value": core})
+                # (named as its VCF folder names it: an underscore of the name showed as
+                # " + ", as for a merged panel of two datasets, FR :286)
+                options.append({"label": core + _pam_note(core), "value": core})
                 seen.add(core)
     # tag each variant option with its index data_type (Phase 2.2) so the user sees
     # sites-only vs genotyped(-phased) at a glance (read from the registry manifest,

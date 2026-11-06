@@ -949,11 +949,13 @@ class TestAssemblySearchLaunch(_WebFolder):
         self.assertNothingRun()
 
     def test_bulges_and_max_edits_are_taken_as_the_form_offers_them(self):
-        # the bulge dropdowns offer what the genome, PAM and variant dataset selected allow
-        # (limit_bulges_to_index): 3 with an installed reference index deeper than the app's
-        # ceiling (N = 4, built for a 20-nt guide), and the slider's maximum follows them
-        # (sync_max_edits_bound), to 6 + 3 + 3. Submit took 0 to 2 bulges and a Max edits of
-        # 1 to 10, whatever they offered
+        # the bulge dropdowns of this tab offer the app's ceiling, 0 to 2 (limit_bulges_to_index
+        # on the Personal assembly tab: its search indexes each haplotype itself), and the
+        # slider's maximum follows them (sync_max_edits_bound), to 6 + 2 + 2. Submit took 0
+        # to 2 bulges and a Max edits of 1 to 10, whatever they offered; then what the
+        # Reference tab's hidden genome and variant dataset allowed (OF-11): 3 with an
+        # installed reference index deeper than the ceiling, none with a dataset that has no
+        # variant index
         index = os.path.join(self.data, "genome_library", "NRG_4_hg38")
         os.makedirs(index)
         with open(os.path.join(index, "chr1.bin"), "wb") as fh:  # (the header of a tree)
@@ -962,15 +964,14 @@ class TestAssemblySearchLaunch(_WebFolder):
         fields = mp.populate_assembly_fields_from_individual(self.IND)
         edits = "maximum edits (mismatches + bulges)"
 
-        def offered(genome, variant):
+        def offered(genome, variant, tab=mp.ASSEMBLY_TAB):
             return [o["value"] for o in
-                    mp.limit_bulges_to_index(genome, PAM, variant, 1, 1, 4, 6, {})[0]]
+                    mp.limit_bulges_to_index(genome, PAM, variant, 1, 1, 4, 6, {}, tab)[0]]
 
-        def submit(mms, dna, rna, cap, genome="hg38", variant="ref"):
+        def submit(mms, dna, rna, cap):
             """The lines of the warning, or the command and .Params.txt of the search run."""
             result = mp.submit_assembly_search_job(
-                1, *fields, PAM, GUIDE[:-3], mms, dna, rna, None, self.IND, cap, False,
-                genome, variant)
+                1, *fields, PAM, GUIDE[:-3], mms, dna, rna, None, self.IND, cap, False)
             if not self.pool.submit.call_count:
                 self.assertEqual(os.listdir(os.path.join(self.data, "Results")), [])
                 return [li.children for li in result[3].children]
@@ -982,28 +983,52 @@ class TestAssemblySearchLaunch(_WebFolder):
             shutil.rmtree(job)
             return cmd[cmd.index("--bDNA"):cmd.index("--merge")], (params["DNA"], params["RNA"])
 
-        self.assertEqual(offered("hg38", "ref"), [0, 1, 2, 3])
-        self.assertEqual(mp.sync_max_edits_bound(6, 3, 3, 6)[0], 12)
-        self.assertEqual(submit(6, 3, 3, 12), (["--bDNA", "3", "--bRNA", "3"], ("3", "3")))
-        self.assertEqual(submit(6, 3, 3, 11), (
-            ["--bDNA", "3", "--bRNA", "3", "--max-total-edits", "11"], ("3", "3")))
-        for mms, dna, rna, cap, said in ((6, 4, 3, 9, ["DNA bulges"]),
-                                         (6, 3, 4, 9, ["RNA bulges"]),
-                                         (6, 3, 3, 13, [edits]), (4, 1, 1, 11, [edits])):
+        # the Reference tab's own offer, as before
+        self.assertEqual(offered("hg38", "ref", "tab-reference-genome"), [0, 1, 2, 3])
+        self.assertEqual(offered("hg38", "walk", "tab-reference-genome"), [0])
+        # this tab's, whatever the Reference tab's genome and dataset, none or one outside
+        for genome, variant in (("hg38", "ref"), ("hg38", "walk"), (None, "ref"),
+                                (os.path.join(self.outside, "hg38"), "ref")):
+            with self.subTest(genome=genome, variant=variant):
+                self.assertEqual(offered(genome, variant), [0, 1, 2])
+        self.assertEqual(mp.sync_max_edits_bound(6, 2, 2, 6)[0], 10)
+        self.assertEqual(submit(6, 2, 2, 10), (["--bDNA", "2", "--bRNA", "2"], ("2", "2")))
+        self.assertEqual(submit(6, 2, 2, 9), (
+            ["--bDNA", "2", "--bRNA", "2", "--max-total-edits", "9"], ("2", "2")))
+        self.assertEqual(submit(4, 1, 0, 5), (["--bDNA", "1", "--bRNA", "0"], ("1", "0")))
+        for mms, dna, rna, cap, said in ((6, 3, 3, 12, ["DNA bulges", "RNA bulges", edits]),
+                                         (6, 3, 2, 9, ["DNA bulges"]),
+                                         (6, 2, 3, 9, ["RNA bulges"]),
+                                         (6, 2, 2, 11, [edits]), (4, 1, 1, 11, [edits])):
             with self.subTest(mms=mms, dna=dna, rna=rna, cap=cap):
                 self.assertEqual(submit(mms, dna, rna, cap), said)
-        # a dataset whose index offers fewer: what they offer, as the search would
-        self.assertEqual(offered("hg38", "walk"), [0])
-        self.assertEqual(submit(4, 1, 0, 6, variant="walk"), ["DNA bulges"])
-        self.assertEqual(submit(4, 0, 0, 4, variant="walk"), (["--bDNA", "0", "--bRNA", "0"],
-                                                              ("0", "0")))
-        # a genome the form does not offer (none, or one outside): the app's ceiling, as
-        # the dropdowns offer then
-        for genome in (None, os.path.join(self.outside, "hg38")):
-            with self.subTest(genome=genome):
-                self.assertEqual(offered(genome, "ref"), [0, 1, 2])
-                self.assertEqual(submit(6, 3, 3, 12, genome=genome),
-                                 ["DNA bulges", "RNA bulges", edits])
+        self.assertNothingRun()
+
+    def test_the_tab_offers_every_pam_and_says_what_its_search_builds(self):
+        # the PAM list and the bulge note of the Personal assembly tab followed the
+        # Reference tab's variant dataset (OF-11): with an NRG variant index of walk
+        # selected there, only the PAMs it serves were offered (NRG; NGA, a VQR PAM, not),
+        # and the note spoke of walk's index
+        with open(os.path.join(self.data, "PAMs", "20bp-NGA-SpCas9VQR.txt"), "w") as fh:
+            fh.write("N" * 20 + "NGA 3\n")
+        _vcf(os.path.join(self.data, "VCFs", "hg38_walk", "walk.chr1.vcf.gz"), True)
+        os.makedirs(os.path.join(self.data, "genome_library", "NRG_2_hg38+hg38_walk"))
+        every = sorted(p["value"] for p in mp.get_available_PAM())
+        self.assertEqual(len(every), 2)
+        on_reference = mp.update_pam_options("hg38", "walk", PAM, "tab-reference-genome")
+        self.assertEqual([o["value"] for o in on_reference[0]], [PAM])
+        options, value = mp.update_pam_options("hg38", "walk", PAM, mp.ASSEMBLY_TAB)
+        self.assertEqual((sorted(o["value"] for o in options), value), (every, PAM))
+        self.assertEqual(mp.update_bulge_note("hg38", PAM, "walk", 1, 1, mp.ASSEMBLY_TAB),
+                         "Up to 2 DNA/RNA bulge(s) available. A personal-assembly search "
+                         "indexes each haplotype of the individual for the PAM and bulges "
+                         "selected the first time, then reuses those indexes.")
+        self.assertNotIn("walk", mp.update_bulge_note(None, PAM, "walk", 1, 1, mp.ASSEMBLY_TAB))
+        os.makedirs(os.path.join(self.data, "genome_library", "NNNNNNNN_3_hg38"))
+        self.assertEqual(mp.update_pamless_picker("hg38", "ref", mp.ASSEMBLY_TAB)[0]["display"],
+                         "none")
+        self.assertEqual(mp.update_pamless_picker("hg38", "ref", "tab-reference-genome")[0][
+            "display"], "block")
         self.assertNothingRun()
 
 
