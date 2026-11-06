@@ -148,10 +148,10 @@ class TestBulgeNote(_Install):
         self.assertIn("download a variant index for it in Settings", note)
 
     def test_panel_with_no_index_for_this_pam_and_nothing_to_build_one(self):
-        # a wider PAM-less index and no VCF files: the search script refuses it, so the note
-        # does not promise that a first search prepares anything
+        # an index of a PAM that does not hold NRG (NGG), and no VCF files: the search script
+        # refuses it, so the note does not promise that a first search prepares anything
         self.index("NRG_2_hg38")
-        self.index("NNNNNNNN_3_hg38+hg38_k8")
+        self.index("NGG_3_hg38+hg38_k8")
         self.sample_list("k8")
         note = self.note("k8", 0, 0)
         self.assertNotIn("prepares", note)
@@ -160,11 +160,32 @@ class TestBulgeNote(_Install):
 
     def test_panel_with_its_enriched_genome_can_still_build_one(self):
         self.index("NRG_2_hg38")
-        self.index("NNNNNNNN_3_hg38+hg38_k8")
+        self.index("NGG_3_hg38+hg38_k8")
         self.sample_list("k8")
         os.makedirs(os.path.join(self.tmp, "Genomes", "hg38+hg38_k8"))
         open(os.path.join(self.tmp, "Genomes", "hg38+hg38_k8", "chr1.enriched.fa"), "w").close()
         self.assertIn("the first one prepares", self.note("k8", 0, 0))
+
+    def test_a_panel_the_search_prunes_an_index_of_offers_its_bulges(self):
+        # a wider PAM-less index, or a dedicated one of a PAM that holds NRG (NRR): the
+        # search prunes it to NRG by itself since 2.9.0, from the web too, so the panel
+        # offers the bulges of that index (it offered none, and said none was installed)
+        self.index("NRG_2_hg38")
+        for name in ("NNNNNNNN_3_hg38+hg38_k8", "NRR_3_hg38+hg38_nrr"):
+            panel = name.rpartition("_")[2]
+            with self.subTest(index=name):
+                self.index(name)
+                self.sample_list(panel)
+                note = self.note(panel, 2, 2)
+                self.assertIn("Up to 2 DNA/RNA bulge(s) available.", note)
+                self.assertNotIn("No ", note)
+        # one built for the 5' side does not serve a 3' PAM
+        self.index("NNNN_3_hg38+hg38_five")
+        with open(os.path.join(self.tmp, "genome_library", "NNNN_3_hg38+hg38_five",
+                               ".pam_build"), "w") as fh:
+            fh.write("NNNN-20bp-X 24 -4\n")
+        self.sample_list("five")
+        self.assertIn("variant index for this PAM", self.note("five", 0, 0))
 
     def test_no_index_and_no_genome_files(self):
         os.remove(os.path.join(self.tmp, "Genomes", "hg38", "chr1.fa"))
@@ -679,7 +700,9 @@ class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
 
     def test_load_example_then_submit_on_a_fresh_data_folder(self):
         guide, pam, genome, variant, mms, dna, rna = mp.load_example_data(1)[:7]
-        self.assertEqual((genome, pam), ("hg38", PAM))
+        # nothing installed: the default names (NRR since 2.9.0)
+        self.assertEqual((genome, pam), ("hg38", mp.DEFAULT_PAM))
+        self.assertEqual(mp.DEFAULT_PAM, "20bp-NRR-SpCas9")
         # the PAM dropdown, which offers nothing, can lose the value Load Example set
         for chosen in (pam, None):
             with self.subTest(pam=chosen):

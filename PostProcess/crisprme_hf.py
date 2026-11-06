@@ -95,6 +95,28 @@ _COMPONENT_LOCALDIR = {
 }
 
 
+# The PAM file of the default PAM (SpCas9 NRR since CRISPRme 2.9.0), which the README's
+# commands and the web form's default use. It ships with CRISPRme, in PAMs/ beside
+# PostProcess/, and a download of the pams component installs it when the data repo's
+# pams/ does not hold it (_install_default_pam): at 2.9.0's release that held the NGG, NNN
+# and NRG files only.
+DEFAULT_PAM_FILE = "20bp-NRR-SpCas9.txt"
+_SHIPPED_PAMS = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "PAMs")
+
+
+def _install_default_pam(local_dir: str) -> Optional[str]:
+    """Copies the shipped default PAM file (DEFAULT_PAM_FILE) into ``local_dir``, the
+    working directory's PAMs/, unless one of that name is there. Returns the file it
+    wrote, or None."""
+    src = os.path.join(_SHIPPED_PAMS, DEFAULT_PAM_FILE)
+    dest = os.path.join(local_dir, DEFAULT_PAM_FILE)
+    if os.path.exists(dest) or not os.path.isfile(src):
+        return None
+    shutil.copyfile(src, dest)
+    return dest
+
+
 # Publish-only markers a build may embed in the REF segment of an index dir name
 # (<pam>_<N>_<ref>[+<vcf>]). They are NOT part of the search convention
 # (ref segment == genome-folder basename), so download must strip them from the
@@ -1505,7 +1527,7 @@ def download_component(
                 f"source VCFs of its prebuilt variant indexes as the datasets "
                 f"hg38_HGDP1kGP, hg38_HPRC and hg38_mega (e.g. --what vcf --dataset "
                 f"hg38_HGDP1kGP). A variant-aware search does not need them:  crisprme.py "
-                f"download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP  (the "
+                f"download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP  (the "
                 f"genotype store it ships covers carriers and per-sample output). To build "
                 f"an index from other VCFs, place them under VCFs/{dataset}/ yourself, or "
                 f"use --hf-repo to point at a repo that hosts '{remote_prefix}/{dataset}/'."
@@ -2015,6 +2037,9 @@ def download_component(
         if component == "annotations" and moved.endswith(".gz") and not moved.endswith(".bed.gz"):
             decompress_gz(moved)
     shutil.rmtree(staging, ignore_errors=True)
+    if component == "pams" and _install_default_pam(local_dir):
+        print(f"Installed the default PAM file {DEFAULT_PAM_FILE}, which CRISPRme ships "
+              f"and {repo} does not host, -> {local_dir}", flush=True)
     return local_dir
 
 

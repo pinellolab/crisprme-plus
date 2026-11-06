@@ -15,6 +15,8 @@ submit_job_automated_new_multiple_vcfs.sh.)
 
 import os
 
+import index_fit
+
 
 def indel_snp_on() -> bool:
     """Whether the SNP+indel co-occurrence is on (CRISPRME_INDEL_SNP, on unless set to
@@ -29,14 +31,10 @@ def is_marked(directory: str) -> bool:
 
 def _pam_serves(pam: str, motif: str, prune: bool, three_prime: bool) -> bool:
     """Whether an index built for PAM ``pam`` serves a search for PAM ``motif``: the
-    motif itself, or an all-N PAM of its width, or -- under --prune-pam, for a 3' PAM
-    only -- a wider all-N one (the search script's _resolve_index_dir, and
-    crisprme.py's _installed_index_bulge_cap)."""
-    if pam == motif:
-        return True
-    if not pam or set(pam) != {"N"}:
-        return False
-    return len(pam) == len(motif) or (prune and three_prime and len(pam) > len(motif))
+    motif itself, or an all-N PAM of its width, or -- under --prune-pam -- a dedicated
+    PAM that holds it, or, for a 3' PAM only, a wider all-N one (index_fit.pam_serves:
+    the search script's _resolve_index_dir, and crisprme.py's _installed_index_bulge_cap)."""
+    return index_fit.pam_serves(pam, motif, prune, three_prime) is not None
 
 
 def indels_index_in_place(library: str, dataset: str, motif: str, n_want: int,

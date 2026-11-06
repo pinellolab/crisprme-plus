@@ -430,16 +430,17 @@ class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
                         self.assertIn('echo "ORACLE PASS"', oracle)
 
     def test_its_index_flex_grep_fails_an_engine_without_prune_pam(self):
-        # that engine's run passes every cell, the two K=8 ones by refusing, saying so
+        # that engine's run passes every cell, the three K=8 ones by refusing, saying so (a
+        # search with no --prune-pam prunes by itself where the engine can, since 2.9.0)
         flex = read(REPO / "test/index_flex/check_index_flex.py")
         refused = re.findall(r'say\(\s*"((?:K=8|complete-test on K=8)[^"]*engine without[^"]*)"',
                              flex)
-        self.assertEqual(len(refused), 2, refused)
+        self.assertEqual(len(refused), 3, refused)
         line = next(ln for ln in self.gate_blocks()[0].splitlines()
                     if ln.startswith('grep -q "^INDEX FLEX PASS"'))
         log_old = "".join(f"PASS  {cell}\n" for cell in refused) + "INDEX FLEX PASS\n"
         log_new = ("PASS  K=8 with --prune-pam: same results as a dedicated index\n"
-                   "PASS  complete-test on K=8: same results as on NRG, and no PAM file left\n"
+                   "PASS  complete-test on K=8: same results as on NRR, and no PAM file left\n"
                    "INDEX FLEX PASS\n")
         for log, said in ((log_old, "GATE_FAILED"), (log_new, ""),
                           (log_new.replace("INDEX FLEX PASS", "1 cell(s) failed"), "GATE_FAILED")):

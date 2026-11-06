@@ -975,10 +975,13 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
     example_variant = _preferred_variant(
         [o["value"] for o in get_variant_dataset_options("hg38")], "hg38"
     )
-    # Pick the installed default PAM dynamically (prefer NRG SpCas9) so the
+    # Pick the installed default PAM dynamically (prefer NRR SpCas9) so the
     # example never selects a PAM that isn't installed -- e.g. an NGG-only
-    # install. Falls back to the canonical NRG SpCas9 name.
-    example_pam = _default_pam(_default_cas()) or "20bp-NRG-SpCas9"
+    # install -- and the installed genome the same way (hg38 first). Falls back to
+    # the default names, which on a data folder with neither installed Submit says
+    # are missing, and where to add them (check_input).
+    example_pam = _default_pam(_default_cas()) or DEFAULT_PAM
+    example_genome = _default_genome() or "hg38"
     example_guide = "CTAACAGTTGCTTTTATCAC"  # 20 nt
     # window options span 1..guide_len (ints), matching update_base_editing_dropdown
     be_window_options = [
@@ -986,8 +989,8 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
     ]
     return [
         example_guide,  # guide to use
-        "20bp-NRG-SpCas9",  # PAM/enzyme to use
-        "hg38",  # ref genome to use
+        example_pam,  # PAM/enzyme to use (installed, chosen dynamically)
+        example_genome,  # ref genome to use (installed, chosen dynamically)
         example_variant,  # variant dataset (installed panel, chosen dynamically)
         4,  # MM (int, to match the dropdown option values)
         1,  # DNA bulges
@@ -1179,7 +1182,7 @@ def change_url(
     if (genome_selected is None) or (not genome_selected):
         genome_selected = "hg38_ref"  # use hg38 by default
     if (pam is None) or (not pam):
-        pam = "20bp-NRG-SpCas9"  # use Cas9 PAM
+        pam = DEFAULT_PAM  # use Cas9 PAM
         guide_seqlen = 20  # set guide length to 20
     else:
         for c in pam.split("-"):
@@ -2108,7 +2111,7 @@ def check_input(
     miss_input_list = []  # recover missing inputs
     # display missing genome and PAM: none selected, or one selected that is not
     # installed (a fresh data folder has neither, and Load Example selects hg38 and
-    # 20bp-NRG-SpCas9 whatever is installed), with where to add one (_not_installed)
+    # its default PAM when none is installed), with where to add one (_not_installed)
     missing = _not_installed("Genome", genome_selected,
                              [g["value"] for g in get_available_genomes()],
                              "reference genome", "Add a reference genome")
@@ -2138,7 +2141,7 @@ def check_input(
         update_style = True
         miss_input_list.append("Bulge RNA size")
     if pam is None or not bool(pam):
-        pam = "20bp-NRG-SpCas9"
+        pam = DEFAULT_PAM
         len_guide_sequence = 20
     else:
         for e in pam.split("-"):
@@ -2952,8 +2955,8 @@ def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
             note = (
                 f"No {panel} variant index for this PAM is installed yet, so only a "
                 "0-bulge search is offered, and the first one prepares the variant "
-                "genome and a 0-bulge index of it, once (this can take hours on a full "
-                "genome)."
+                "genome and the index of its indels, once (this can take hours on a full "
+                "genome): a search with no bulges scans the variant genome itself."
             )
         else:
             # the search script refuses it (_refuse_no_variant_index), with what to do
@@ -3029,6 +3032,12 @@ def _default_genome() -> Optional[str]:
     return "hg38" if "hg38" in gs else (gs[0] if gs else None)
 
 
+# The PAM the search form selects by default, when it is installed (_default_pam), and
+# the one it falls back to when none is selected: SpCas9 NRR since CRISPRme 2.9.0 (NRG
+# before).
+DEFAULT_PAM = "20bp-NRR-SpCas9"
+
+
 def _default_cas() -> Optional[str]:
     """Default nuclease: SpCas9 if installed, else the first available."""
     cs = [c["value"] for c in get_available_CAS()]
@@ -3036,9 +3045,11 @@ def _default_cas() -> Optional[str]:
 
 
 def _default_pam(cas: Optional[str]) -> Optional[str]:
-    """Default PAM for a nuclease: prefer an NRG PAM (NAG+NGG, the broad SpCas9
-    default that surfaces variant-created NAG off-targets), else fall back to the
-    canonical NGG, else the first available PAM for that Cas."""
+    """Default PAM for a nuclease: prefer an NRR PAM (NAA, NAG, NGA and NGG, the
+    default since CRISPRme 2.9.0: the broad SpCas9 screen recommended for an IND
+    package, which also surfaces variant-created NAG and NGA off-targets), else an NRG
+    PAM (NAG+NGG, the default before), else the canonical NGG, else the first available
+    PAM for that Cas."""
     if not cas:
         return None
     pams = [
@@ -3048,12 +3059,10 @@ def _default_pam(cas: Optional[str]) -> Optional[str]:
     ]
     if not pams:
         return None
-    for p in pams:  # prefer NRG (the new default)
-        if "-NRG-" in p:
-            return p
-    for p in pams:  # else the canonical NGG
-        if "-NGG-" in p:
-            return p
+    for motif in ("-NRR-", "-NRG-", "-NGG-"):  # the default first, then the earlier ones
+        for p in pams:
+            if motif in p:
+                return p
     return pams[0]
 
 
@@ -3075,7 +3084,7 @@ def index_page() -> html.Div:
 
     # begin main page construction
     final_list = []
-    # smart defaults, based on what is actually installed: hg38 + SpCas9/NRG +
+    # smart defaults, based on what is actually installed: hg38 + SpCas9/NRR +
     # 1000G variants + the standard 4/1/1 thresholds, so a non-expert can submit
     # a sensible search without configuring everything from scratch.
     _def_genome = _default_genome()

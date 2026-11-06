@@ -2693,7 +2693,7 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                     "High_variant_density_region, whose listed carriers need not carry every "
                     "variant in it. To get the tiers, rebuild the index with build-index-only "
                     "--samplesID, or download a prebuilt one (crisprme.py download --what index "
-                    "--index-name NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
+                    "--index-name NRR_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
                     "dense panels; pass --population-level for the fast worst-case screen.\n", out)
                 # (and no frequency "the VCF gives": a variant has the AF that add-variants
                 # copied, none where its record has AF at another place in INFO than the
@@ -2717,7 +2717,7 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
             "its greedy worst-case alignment, whose listed carriers need not carry every variant "
             "in it. To get the tiers, rebuild the index with build-index-only --samplesID, or "
             "download a prebuilt one (crisprme.py download --what index --index-name "
-            "NRG_3_hg38+hg38_HGDP1kGP). "), out)
+            "NRR_3_hg38+hg38_HGDP1kGP). "), out)
         self.assertNotIn("the VCF gives", out)
         self.assertEqual(self.recorded(), "ds\n")
         self.assertEqual(self.recorded(".variant_datasets"), "ds\n")

@@ -1,20 +1,22 @@
 # Dynamic-PAM pam-less indexes — design & backward-compatibility contract
 
-> **Status: pre-implementation design (2026-10-24), not a description of CRISPRme+ 2.8.1.**
-> What 2.8.1 ships: `--prune-pam` is explicit and needs `--index-path`; `complete-search` never
-> adds it for you (only `complete-test` passes it itself, to search a 3′ all-N index wider than
-> 3 nt, such as the published `NNNNNNNN_3`, for NRG). It is command-line only (the web
-> interface never passes it) and serves a 3′ PAM only. CRISPRme uses an index only if its PAM
-> is the search PAM or all-N: an all-N flank as wide as the PAM (`NNN_3` for a 3-nt PAM)
-> serves without the flag, narrowed by the post-search PAM filter; a wider flank
-> (`NNNNNNNN_3`) serves only under `--prune-pam`; a dedicated index of another PAM is refused,
-> even one whose PAM holds the search PAM (an `NRG` index does not serve an `NGG` search). No
-> `index_meta.json` sidecar is written or read. The nearest record is `.pam_build`, the PAM
-> file an index was built from, which `build-index-only` writes into a reference or variant
-> index, and a search into one it builds (the published 8-nt-flank archives have none).
-> `NNN_3` is published in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
+> **Status: pre-implementation design (2026-10-24), not a description of CRISPRme+ 2.9.0.**
+> What 2.9.0 ships: a search takes an index whose PAM is the search PAM, or all-N, or -- under
+> `--prune-pam` -- a dedicated index of a PAM that holds the search PAM at every position (an
+> `NRR` index serves NGG, NAG, NGA, NAA and NRG; an `NRG` one NGG and NAG; `NGA` is not inside
+> `NRG`). An all-N flank as wide as the PAM (`NNN_3` for a 3-nt PAM) serves without the flag,
+> narrowed by the post-search PAM filter; a wider flank (`NNNNNNNN_3`), for a 3′ PAM only, and
+> a dedicated index of a broader PAM serve only pruned. `--prune-pam` no longer needs
+> `--index-path`, and a search passes it by itself, and says so first, whenever no installed
+> index serves it unpruned and one serves it pruned: on the command line and from the web
+> interface, which launches the search script with pruning off. The run's parameters and its
+> report name the index that served the search. No `index_meta.json` sidecar is written or
+> read. The nearest record is `.pam_build`, the PAM file an index was built from, which
+> `build-index-only` writes into a reference or variant index, and a search into one it
+> builds (the published 8-nt-flank archives have none). `NNN_3` is published in
+> `lucapinello/crisprme-data` and the 8-nt-flank indexes in
 > `lucapinello/crisprme-data-general-index`. The parts below marked *planned* are not in
-> 2.8.1. What ships is described in
+> 2.9.0. What ships is described in
 > [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering) and the README.
 
 Design contract for the CRISPRitz "on-the-fly PAM filter" + CRISPRme's consumption of it.
@@ -32,8 +34,8 @@ builds.
 - **Validity rule:** a search PAM is valid for an index iff `L ≤ K` **and** at every position
   `search_bit[i] & build_bit[i] == search_bit[i]` (IUPAC subset). So an `NRG` index serves
   {NGG, NAG, NRG}; an all-N flank-K index serves any 3′ PAM ≤ K. You can only *narrow*.
-  (This is the engine's rule. CRISPRme 2.8.1 narrows only an all-N index: see the status
-  note above.)
+  (This is the engine's rule. CRISPRme 2.8.1 narrowed only an all-N index; 2.9.0 narrows a
+  dedicated one too, of a PAM as long as the search's: see the status note above.)
 - **Size cost (measured, 2×):** the flank is 4-bit nibble-packed → `+2 bytes/leaf` for 3→8,
   i.e. **~+9%** (ref index ~134 GB → ~146 GB). Linear, not multiplicative.
 - **Measured:** NNN+`--prune-pam NGG` == a dedicated NGG index, identical loci (chr22 cross-check,

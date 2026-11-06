@@ -52,7 +52,8 @@ index, lossless for detection) otherwise (sites-only/unphased/hybrid/reference-o
 Force the fast population-level mode with **`--population-level`**; force resolution
 with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-only
 index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
-catalog name `NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
+catalog name `NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.9.0; NRG
+before): 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
 jointly SHAPEIT5 re-phased — or `HPRC`. See
 [§5, Search-space control for high-variant-density regions](#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis).
 
@@ -221,7 +222,9 @@ The merge above is the **genotyped, cis-capable** mode (`merge_vcf_panels.sh` /
 feeds the genotype-counting Tier-0 registry. It is correct only when *every* merged
 source is genotyped, and it is what enables indel+SNP cis reconstruction.
 
-The **default** shipped index, **`NRG_3_hg38+hg38_HGDP1kGP`**, is built in this genotyped mode
+The **default** shipped index, **`NRR_3_hg38+hg38_HGDP1kGP`** (the SpCas9 NRR PAM's, the
+default since 2.9.0; the NRG and NGG indexes of the panel are built from the same data), is
+built in this genotyped mode
 from the gnomAD **v3.1.2 HGDP+1kGP** jointly-called callset (GRCh38; 4,091 samples = 925 HGDP +
 3,166 1000 Genomes), which CRISPRme+ **re-phases with SHAPEIT5** (`phase_common` scaffold +
 `phase_rare`). Re-phasing deliberately **keeps singletons** — the public `phased_haplotypes_v2`
@@ -1297,6 +1300,27 @@ requirement, and a stored genomic `N` intersects nothing, so testing one would r
 target that a dedicated index of the real width keeps. At *L = K*, on the same side, the
 pad is empty and the geometry is exactly a dedicated index's.
 
+**A dedicated index of a broader PAM.** A dedicated index stores, as its flank, the concrete
+bases of every site of its own PAM, so it holds every site of a PAM its own holds at each
+position: an NRR index those of NGG, NAG, NGA, NAA and NRG; an NRG index those of NGG and
+NAG. `--prune-pam` narrows it to the search PAM the same way (the two are as long, so there is
+no pad), and since 2.9.0 CRISPRme takes such an index for a search, under `--prune-pam`, as
+it takes a PAM-less one: the search PAM's own index first, then a dedicated one of a PAM that
+holds it (of two, the narrower PAM, NRG before NRR for NGG), then a PAM-less one. Of the
+PAM-less ones, the narrowest flank, as before. The side rule above applies to it as to a
+PAM-less index: a record, or else a 3′ build at the published widths.
+
+**Pruning by itself.** Since 2.9.0 a search prunes, as if `--prune-pam` was given, whenever
+no installed index serves it unpruned and one of these does: a wider all-`N` one, or a
+dedicated one of a PAM that holds the search's. It says so first, on the console and in its
+log ("searching with --prune-pam, as if it was given"), and the run's parameters
+(`Prune_pam auto`) and the report's summary say which index served it. Before, the search
+stopped for want of a variant index (and said to pass the flag), or built a reference index of
+its PAM from the genome: hours on hg38. Where an index serves the search unpruned (the PAM's
+own, or an all-`N` one of its width), the search runs as before, unpruned; pass `--prune-pam`
+to prune it anyway. A search with no bulges opens no reference index, so it neither prunes
+nor builds one (below).
+
 **Equivalence.** Pruning changes only which leaves are written out, never how a guide is
 aligned to the genome, so it cannot move an alignment or a score. Measured genome-wide
 over HGDP + 1000 Genomes (4,091 samples, guide `ACTGAAATCTGTAAGCAGGC`, NRG, 4 mismatches +
@@ -1344,7 +1368,9 @@ windows), and goes on.
 width. An index of budget *N* holds a window of the guide, the PAM and *N* more bases, and the
 build drops a window that holds an `N` or runs past the contig's start, so it cannot report a
 site whose guide lies within *N − 1* bases of a contig start, a contig end or an `N` run, even a
-perfect match; a search without bulges, which scans the FASTA, reports it. A variant search
+perfect match; a search without bulges, which scans the FASTA, reports it (and, since 2.9.0,
+neither looks for nor builds a reference index, nor a variant index where the whole enriched
+genome is there to scan: it built `<PAM>_1_<genome>`, which nothing read). A variant search
 without bulges on an install without its whole enriched genome (a download) searches the variant
 index instead, so its SNP variant rows have this limit too: of such a site it reports the
 reference version, from the scan of the reference FASTA, when that is within the search's
@@ -1392,8 +1418,8 @@ index and its `.pam_build` as they are.
 A longer build serves a shorter guide, but, like any deeper index, it does not hold a site
 next to an N run or a contig end that a shallower one does.
 
-**Limits.** `--prune-pam` requires `--index-path` and is command-line only: the web
-interface never passes the flag. (Its PAM picker prefers a PAM whose geometry matches the
+**Limits.** The web interface never passes `--prune-pam` itself; its searches prune by
+themselves as above. (Before 2.9.0 the flag also required `--index-path`.) (Its PAM picker prefers a PAM whose geometry matches the
 installed index, but falls back to offering every PAM when none matches, so it does not
 itself prevent an unusable pairing: the search does not take an all-`N` index of another
 width without the flag, or one built for the other side, and when no index serves it and

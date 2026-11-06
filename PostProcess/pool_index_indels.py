@@ -82,7 +82,8 @@ def _own_pam():
     not record it). Else None.
 
     That variant index is then a PAM-less one standing in for the search's PAM (NNN_3
-    serving NRG, or NNNNNNNN_3 under --prune-pam, as complete-search resolves one), and
+    serving NRG, or NNNNNNNN_3 under --prune-pam, as complete-search resolves one), or
+    under --prune-pam a dedicated one of a PAM that holds it (NRR_3 serving NGG), and
     the search builds its INDELS index, when it is missing, with the PAM file of the
     search. index-genome names an index by the PAM of its PAM file, so that build went
     into <search PAM>_<N>_<ref>+<vcf>_INDELS, where the search does not look: finding no
@@ -224,7 +225,9 @@ if own:
             shutil.rmtree(own_dir, ignore_errors=True)
         sys.exit(1)
     build_pam_arg = shlex.quote(build_pam)
-    print(f"The variant index {true_pam}_{bMax}_{ref_name}+{vcf_name} is PAM-less and stands in "
+    # (a PAM-less one, or a dedicated one of a PAM that holds the search's: NRR for NGG)
+    _what = "PAM-less" if set(true_pam) == {"N"} else f"of the PAM {true_pam}"
+    print(f"The variant index {true_pam}_{bMax}_{ref_name}+{vcf_name} is {_what} and stands in "
           f"for {_index_pam(pam_file)}: indexing the INDELs with its own PAM ({own[0]}"
           + (f", as {own[1]}" if own[1] else "") + ")", flush=True)
 

@@ -109,17 +109,19 @@ prune_pam_flag=""
 # CRISPRme pins a CRISPRitz version that supports this, but the pin is
 # overridable (CRISPRITZ_REF / an engine already on PATH), so check rather than
 # assume. Grep the installed script instead of comparing versions: it is the
-# thing that would drop the flag.
-if [ "$prune_pam" = "1" ]; then
+# thing that would drop the flag. (A search that turns pruning on by itself, below, does
+# not where the engine cannot: it takes its index as it did before.)
+_engine_prunes() {
 	_cz_path=$(command -v crispritz.py 2>/dev/null)
-	if [ -n "$_cz_path" ] && ! grep -q -- "--prune-pam" "$_cz_path" 2>/dev/null; then
-		printf "ERROR: --prune-pam was requested, but the installed CRISPRitz does not support it\n" >&2
-		printf "       (%s has no --prune-pam handling, so the flag would be dropped and the\n" "$_cz_path" >&2
-		printf "       search would run unpruned over the whole PAM-less index).\n" >&2
-		printf "       Install a CRISPRitz build with --prune-pam, or drop the flag and use a\n" >&2
-		printf "       dedicated index for this PAM.\n" >&2
-		exit 1
-	fi
+	[ -z "$_cz_path" ] || grep -q -- "--prune-pam" "$_cz_path" 2>/dev/null
+}
+if [ "$prune_pam" = "1" ] && ! _engine_prunes; then
+	printf "ERROR: --prune-pam was requested, but the installed CRISPRitz does not support it\n" >&2
+	printf "       (%s has no --prune-pam handling, so the flag would be dropped and the\n" "$_cz_path" >&2
+	printf "       search would run unpruned over the whole PAM-less index).\n" >&2
+	printf "       Install a CRISPRitz build with --prune-pam, or drop the flag and use a\n" >&2
+	printf "       dedicated index for this PAM.\n" >&2
+	exit 1
 fi
 
 # Whether to emit the alternative-alignments (altMerge / all_results_with_alternative_alignments)
@@ -851,6 +853,47 @@ while read vcf_f; do
 		[ "$((_g + $2))" -ge "$((_guide + ${bDNA:-0} + (${bRNA:-0} > 0)))" ]
 	}
 
+	# Into variable $2, the bases IUPAC code $1 stands for as a 4-bit mask (A 1, C 2, G 4,
+	# T 8; N 15), or 0 for anything else.
+	_iupac_mask() {
+		local _m=0
+		case "$1" in
+			A) _m=1 ;; C) _m=2 ;; G) _m=4 ;; T) _m=8 ;; R) _m=5 ;; Y) _m=10 ;; S) _m=6 ;;
+			W) _m=9 ;; K) _m=12 ;; M) _m=3 ;; B) _m=14 ;; D) _m=13 ;; H) _m=11 ;; V) _m=7 ;;
+			N) _m=15 ;;
+		esac
+		printf -v "$2" '%s' "$_m"
+	}
+
+	# 0 when PAM $1, of a dedicated index, holds PAM $2: the two are as long, and at each
+	# position every base $2 stands for $1 stands for too (NRR holds NGG, NAG, NRG and NGA;
+	# NRG holds NGG and NAG). An index of $1 then stores every site of $2, and the engine
+	# prunes it to them at leaf time under --prune-pam, as it does an all-N index.
+	_pam_holds() {
+		local _i _x _y
+		[ -n "$2" ] && [ "${#1}" -eq "${#2}" ] || return 1
+		for ((_i = 0; _i < ${#1}; _i++)); do
+			_iupac_mask "${1:_i:1}" _x
+			_iupac_mask "${2:_i:1}" _y
+			[ "$_y" -gt 0 ] && [ $((_x & _y)) -eq "$_y" ] || return 1
+		done
+		return 0
+	}
+
+	# 0 when PAM $1 stands for fewer sequences than PAM $2 (IUPAC codes, of one length),
+	# or for as many and sorts before it: of two dedicated indexes that hold the search's
+	# PAM, the narrower stores fewer sites (NRG before NRR, for NGG). A rule, not glob order.
+	_pam_narrower() {
+		local _i _m _a=1 _b=1
+		for ((_i = 0; _i < ${#1}; _i++)); do
+			_iupac_mask "${1:_i:1}" _m
+			_a=$((_a * ((_m & 1) + (_m >> 1 & 1) + (_m >> 2 & 1) + (_m >> 3 & 1))))
+			_iupac_mask "${2:_i:1}" _m
+			_b=$((_b * ((_m & 1) + (_m >> 1 & 1) + (_m >> 2 & 1) + (_m >> 3 & 1))))
+		done
+		[ "$_a" -lt "$_b" ] || { [ "$_a" -eq "$_b" ] && [[ "$1" < "$2" ]]; }
+	}
+
 	# Pick which installed index serves this search.
 	#   $1 library dir   $2 requested PAM   $3 name suffix (<ref> or <ref>+<vcf>)
 	#   $4 requested bMax
@@ -861,11 +904,14 @@ while read vcf_f; do
 	# An index named <PAM>_<N>_<suffix> was built with -bMax N and so supports searches
 	# up to N-1 bulges of each type: any N >= bMax serves whose guide length fits this
 	# search (_index_fits_guide). Among those, in order:
-	#   1. the requested PAM itself, ahead of any PAM-less index -- it needs neither
-	#      N-padding nor the post-search PAM filter to be right;
+	#   1. the requested PAM itself, ahead of any other -- it needs neither N-padding nor
+	#      the post-search PAM filter to be right; then, under --prune-pam, a dedicated
+	#      index of a PAM that holds it (_pam_holds: NRR_3 for an NGG search), whose
+	#      sites are a few of a PAM-less one's; then a PAM-less one;
 	#   2. an index built for this very guide length, ahead of one that fits only;
 	#   3. the smallest sufficient N, so a tighter index beats a wider one;
-	#   4. the narrowest PAM-less flank, so --prune-pam pads as little as possible.
+	#   4. the narrowest PAM-less flank, so --prune-pam pads as little as possible; of two
+	#      dedicated indexes of PAMs that hold the search's, the narrower (_pam_narrower).
 	# Every tie is settled by a rule, because glob order is not one: it follows
 	# LC_COLLATE, and NNNNNNNN_3_hg38 sorts BEFORE NNN_3_hg38 under LC_ALL=C (as inside
 	# the container) but after it under en_US.UTF-8. Leaving the choice to the glob
@@ -876,7 +922,7 @@ while read vcf_f; do
 	_resolve_index_dir() {
 		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4" _any_side="$5"
 		local _d _b _pam _n _exact _better _side _rec _len _g
-		local _best="" _best_n="" _best_pam_len="" _best_exact="" _best_len=""
+		local _best="" _best_n="" _best_pam_len="" _best_exact="" _best_len="" _best_pam=""
 		for _d in "$_lib"/*_*_"$_suffix"; do
 			[ -d "$_d" ] || continue
 			case "$_d" in *_INDELS) continue ;; esac
@@ -912,6 +958,12 @@ while read vcf_f; do
 			[ "${_b#"${_pam}_${_n}_"}" = "$_suffix" ] || continue
 			[ "$_n" -ge "$_want" ] || continue
 			if [ "$_pam" = "$_pam_want" ]; then
+				_exact=2
+			elif [ -n "${_pam//N/}" ] && [ "${prune_pam:-0}" = "1" ] \
+				&& _pam_holds "$_pam" "$_pam_want"; then
+				# a dedicated index of a PAM that holds this one, as long: under --prune-pam
+				# the engine writes out only its sites of this PAM. Without it the search
+				# would report the other PAM's sites too, so it serves only pruned.
 				_exact=1
 			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ] \
 				&& [ "${#_pam}" -eq "${#_pam_want}" ]; then
@@ -942,10 +994,13 @@ while read vcf_f; do
 			# (the K=8 archive has no .pam_build), or under the search PAM's own name, as
 			# 2.8.0 took it; at any other width a search before 2.8.1 may have built it
 			# from a 5' PAM file, and the search builds its dedicated index instead.
+			# A dedicated index of another PAM (_exact 1) serves a search of its own side
+			# only, as an all-N one does: a record, or else a 3' build of 3 nt, as every
+			# published one is.
 			if [ -z "$_any_side" ]; then
 				_rec=0
 				_side=$(_index_side "$_d") || _rec=1
-				if [ "$_rec" = 0 ] || [ -z "${_pam//N/}" ]; then
+				if [ "$_rec" = 0 ] || [ -z "${_pam//N/}" ] || [ "$_exact" = 1 ]; then
 					if [ "${pos:-1}" -gt 0 ]; then
 						[ "$_side" = 3 ] || continue
 						if [ "$_rec" = 1 ] && [ "$_pam" != "$_pam_want" ]; then
@@ -974,11 +1029,15 @@ while read vcf_f; do
 						_better=1
 					elif [ "$_n" -eq "$_best_n" ] && [ "${#_pam}" -lt "$_best_pam_len" ]; then
 						_better=1
+					elif [ "$_n" -eq "$_best_n" ] && [ "$_exact" = 1 ] \
+						&& _pam_narrower "$_pam" "$_best_pam"; then
+						_better=1
 					fi
 				fi
 			fi
 			if [ "$_better" = 1 ]; then
 				_best="$_d"; _best_n="$_n"; _best_pam_len=${#_pam}; _best_exact="$_exact"; _best_len="$_len"
+				_best_pam=$_pam
 			fi
 		done
 		[ -n "$_best" ] && printf '%s\n' "$_best"
@@ -992,6 +1051,26 @@ while read vcf_f; do
 		[ -d "$1" ] || return 0
 		{ printf '%s %s %s\n' "${pam_name%.*}" "${#fullseqpam}" "$pos" >"$1/.pam_build"; } 2>/dev/null
 		return 0
+	}
+
+	# What index $1 is, on stdout, for the run's parameters file (_record_indexes): its name
+	# and library, the PAM it was built for and on which side of the guide, the guide its
+	# trees were built for, the bulges it holds, and how the search narrows it to this PAM
+	# when it is another's. Silent on stderr.
+	_index_record() {
+		local _b=${1##*/} _p _n _g
+		_p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
+		_g=$(_index_guide_len "$1")
+		printf "%s (in %s): built for the PAM %s on the %s' side of %s, with up to %s bulge(s) of each type" \
+			"$_b" "$(dirname "$1")" "$_p" "$(_index_side "$1")" \
+			"${_g:+a $_g-nt guide}${_g:-a guide of a length it does not record}" "$((_n - 1))"
+		if [ "$_p" != "$true_pam" ]; then
+			if [ "${prune_pam:-0}" = 1 ]; then
+				printf ", pruned to %s at leaf time (--prune-pam)" "$true_pam"
+			else
+				printf ", its targets filtered to %s after the search" "$true_pam"
+			fi
+		fi
 	}
 
 	# Say on stderr why index $1 cannot serve this search, when it was built for the other
@@ -1107,10 +1186,9 @@ while read vcf_f; do
 				_todo="Its dictionaries are not installed (Dictionaries/registry_${vcf_name} or dictionaries_${vcf_name}, and log_indels_${vcf_name}): download the index again. "
 				break
 			elif [ "${prune_pam:-0}" != 1 ]; then
+				# (a search prunes by itself where the engine can: here it cannot)
 				_wider=$(prune_pam=1; _resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")
-				_at=genome_library
-				[ "$_lib" -ef "$_home" ] || _at=$_lib
-				[ -z "$_wider" ] || { _todo="${_wider##*/} can serve it from the command line: run this search again with --prune-pam --index-path $_at. "; break; }
+				[ -z "$_wider" ] || { _todo="${_wider##*/} serves it pruned to this PAM at leaf time (--prune-pam), which the installed CRISPRitz cannot do: install a CRISPRitz build that supports --prune-pam (CRISPRme pins one). "; break; }
 			fi
 		done
 		# (the indexes published are of N = 3)
@@ -1173,6 +1251,41 @@ while read vcf_f; do
 		done
 		return 0
 	}
+
+	# --prune-pam on its own. An index of another PAM serves this search only pruned to its
+	# PAM at leaf time (_resolve_index_dir): a PAM-less one wider than the PAM (the general
+	# K=8 index), and a dedicated one of a PAM that holds it (NRR_3 for an NGG search).
+	# When no installed index serves the search without pruning and one of those does, it
+	# prunes, as under --prune-pam, and says so first: it stopped for want of an index, or
+	# built one (hours on hg38). The variant index of each dataset, which only the
+	# dataset's VCFs build, and the reference one for a search with bulges, which opens
+	# it: decided once, for every dataset, as the first is searched. The web launches this
+	# script with pruning off, so a web search does the same (complete-search says so on
+	# its console, crisprme.py _prune_on_its_own, the same rule).
+	if [ -z "$_prune_decided" ] && [ "${prune_pam:-0}" != 1 ] && _engine_prunes; then
+		_pruned=
+		_this_vcf=$vcf_name
+		while read -r _v; do
+			[ -n "$_v" ] && [ "$_v" != "_" ] || continue
+			vcf_name=$(basename "$_v")
+			if [ -z "$(_variant_index)" ]; then
+				_pruned=$(prune_pam=1; _variant_index)
+				[ -z "$_pruned" ] || break
+			fi
+		done <"$vcf_list"
+		vcf_name=$_this_vcf
+		if [ -z "$_pruned" ] && { [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; } \
+			&& [ -z "$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")" ]; then
+			_pruned=$(prune_pam=1; _resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
+		fi
+		if [ -n "$_pruned" ]; then
+			prune_pam=1
+			prune_pam_flag="--prune-pam"
+			_pruned_here=1  # (the parameters file says so, below)
+			echo "NOTE: no installed index serves PAM $true_pam unpruned, and ${_pruned##*/} serves it pruned to it at leaf time: searching with --prune-pam, as if it was given"
+		fi
+	fi
+	_prune_decided=1
 
 	# ensure that fundamental folders are available (-p: a run that started
 	# together may make one between the test and the mkdir, and the "File exists"
@@ -1363,17 +1476,24 @@ while read vcf_f; do
 	# therefore serves any search with max(bDNA,bRNA)<=2, which is why a
 	# batteries-included index is reused instead of triggering a rebuild.
 	idx_folder1="${ref_lib}/${true_pam}_${bMax}_${ref_name}"  # exact-N name, used only for the auto-build path below
-	idx_ref=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
+	# A search with no bulges scans the genome's FASTA files (STEP 3) and opens no
+	# reference index: it neither looks for one nor builds one, with --index-path or
+	# without. It built <PAM>_1_<genome>, which nothing read (hours on hg38), and under
+	# --index-path stopped on a library that held none.
+	_no_bulges=0
+	[ "$bDNA" -eq 0 ] && [ "$bRNA" -eq 0 ] && _no_bulges=1
+	idx_ref=
+	[ "$_no_bulges" = 1 ] || idx_ref=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
 	# The scan skips an index whose build lock is there, and --index-path never builds
 	# one -- but another run may be building in that library (the working one, as
 	# usual). Wait for a lock whose owner is alive or cannot be checked, as a run that
 	# builds does, and look again. A dead or abandoned owner's lock guards a partial
 	# index, which the error below names. Only the lock of an index that could serve
 	# this search counts, by _resolve_index_dir's rule: a sufficient budget, and the
-	# requested PAM or an all-N one of its width -- or wider, under --prune-pam with a
-	# 3' PAM.
+	# requested PAM or an all-N one of its width -- or, under --prune-pam, a dedicated
+	# one of a PAM that holds it, or an all-N one wider, with a 3' PAM.
 	_dead_locks=()
-	while [ -z "$idx_ref" ] && [ "$index_path" != "_" ] && [ -n "$index_path" ]; do
+	while [ "$_no_bulges" = 0 ] && [ -z "$idx_ref" ] && [ "$index_path" != "_" ] && [ -n "$index_path" ]; do
 		_dead_locks=() _held=
 		for _l in "$ref_lib"/*_*_"$ref_name".lock; do
 			[ -d "$_l" ] || continue
@@ -1381,7 +1501,8 @@ while read vcf_f; do
 			case "$_n" in '' | *[!0-9]*) continue ;; esac
 			[ "${_b#"${_p}_${_n}_"}" = "$ref_name" ] || continue  # another genome's (see _resolve_index_dir)
 			[ "$_n" -ge "$bMax" ] || continue
-			if [ "$_p" != "$true_pam" ]; then
+			if [ "$_p" != "$true_pam" ] && ! { [ -n "${_p//N/}" ] \
+				&& [ "${prune_pam:-0}" = "1" ] && _pam_holds "$_p" "$true_pam"; }; then
 				{ [ -n "$_p" ] && [ -z "${_p//N/}" ]; } || continue
 				[ "${#_p}" -eq "${#true_pam}" ] || { [ "${#_p}" -gt "${#true_pam}" ] \
 					&& [ "${prune_pam:-0}" = "1" ] && [ "${pos:-1}" -gt 0 ]; } || continue
@@ -1400,7 +1521,11 @@ while read vcf_f; do
 	done
 
 	# use the existing (sufficient) index if the scan found one
-	if [ -n "$idx_ref" ]; then
+	if [ "$_no_bulges" = 1 ]; then
+		echo "No reference index needed: a search with no bulges scans the genome"
+		# (the step is done: the web's progress reads this line)
+		echo -e 'Index-genome Reference\tEnd\t'$(date) >>"$log"
+	elif [ -n "$idx_ref" ]; then
 		echo "Reference index present ($(basename "$idx_ref"))"
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>"$log"
 	elif [ "$index_path" != "_" ] && [ -n "$index_path" ]; then
@@ -1479,6 +1604,14 @@ while read vcf_f; do
 			echo "Variant index present ($(basename "$idx_var"))"
 			[ "$(dirname "$idx_var")" -ef "$basedir" ] || echo "Variant index library: $(dirname "$idx_var")"
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
+		elif [ "$_no_bulges" = 1 ] && _enriched_genome_whole; then
+			# ... nor a variant one, when the variant genome is here whole to scan. Its
+			# INDELS index, which the indel search reads at any bulges, keeps the name
+			# of the one a search builds (<PAM>_<N>_<genome>+<dataset>_INDELS), and is
+			# built below from the fake-indel genome when it is not there.
+			echo "No variant index needed: a search with no bulges scans the variant genome"
+			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
+			idx_var="$idx_folder1"
 		else
 			# no index found, compute it; use mkdir lock to prevent concurrent builds
 			# (a dead run's half-written directory is rebuilt whole, as for the reference)
@@ -1619,6 +1752,36 @@ while read vcf_f; do
 		exit 1
 	fi
 	# END STEP 2 - genome indexing
+
+	# Which index answers the search, in the run's parameters file, as the indexes this
+	# run took: the report's summary names them. Genome_idx there says what was asked for,
+	# which another index may serve (NNNNNNNN_3 for an NGG_2 that is not there), or none,
+	# for a search with no bulges. The reference once, then each dataset's.
+	_params=
+	for _pf in "$output_folder/Params.txt" "$output_folder/.Params.txt"; do
+		[ -f "$_pf" ] && { _params=$_pf; break; }
+	done
+	if [ -n "$_params" ]; then
+		{
+			if [ -z "$_indexes_recorded" ]; then
+				if [ "$_no_bulges" = 1 ]; then
+					printf "Reference_index\tnone: a search with no bulges scans the genome\n"
+				else
+					printf "Reference_index\t%s\n" "$(_index_record "$idx_ref")"
+				fi
+				[ "$_pruned_here" != 1 ] || printf "Prune_pam\tauto\n"
+			fi
+			if [ "$vcf_name" != "_" ]; then
+				if [ -d "$idx_var" ]; then
+					printf "Variant_index:%s\t%s" "$vcf_name" "$(_index_record "$idx_var")"
+				else
+					printf "Variant_index:%s\tnone: a search with no bulges scans the variant genome" "$vcf_name"
+				fi
+				printf "; its indels: %s\n" "$(basename "$indels_index_dir")"
+			fi
+		} >>"$_params" 2>/dev/null
+		_indexes_recorded=1
+	fi
 
 	# --- RAM safety guard on the search thread count ---------------------------
 	# A CRISPRitz search holds ~per-thread alignment state in RAM; a pamless

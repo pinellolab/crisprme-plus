@@ -107,7 +107,7 @@ the default on a genotyped + phased index (HGDP + 1000 Genomes, HPRC), and `--pe
 forces it on any other genotyped one.
 
 - `--per-sample` requires a **genotyped** index. It no-ops (with a warning) on a
-  sites-only index such as `NRG_3_hg38+hg38_mega`.
+  sites-only index such as `NRR_3_hg38+hg38_mega`.
 - Named carriers / personal risk cards come from the **genotype store** bundled with
   the index (`download --what index`, unless you pass `--no-genotypes`). Without it
   (and without the classic per-sample dictionaries) a search runs population-level,
@@ -147,7 +147,8 @@ due to initialization overhead.
 - **Get everything a reference scan needs:** `crisprme.py download --what all` fetches
   the genome, annotations, PAMs, sample lists, and the default reference index.
 - **Add a variant-aware index:** `crisprme.py download --what index --index-name
-  NRG_3_hg38+hg38_HGDP1kGP` (the recommended phased HGDP + 1000 Genomes default).
+  NRR_3_hg38+hg38_HGDP1kGP` (the recommended phased HGDP + 1000 Genomes default, of the
+  default SpCas9 NRR PAM).
 - The public repository ships **prebuilt indexes** that already encode the variants, so
   you do not need the VCFs to search the shipped datasets. It also hosts their source
   VCFs (`hg38_HGDP1kGP`, `hg38_HPRC`, `hg38_mega`), for building an index yourself:
@@ -208,10 +209,10 @@ from your data folder.
 Each of these names the index and what to do; none of them removes anything.
 
 - **`no variant index here serves this search (...)`.** The dataset's indexes are for another PAM or
-  fewer bulges, or need `--prune-pam`, and neither its VCFs nor its enriched genome are here to build
-  one. A download holds its own index only: `NRG_3_hg38+hg38_HGDP1kGP` searches NRG (and, with a
-  20-nt guide, up to 2 bulges of each type). Search with what the message lists, or install another
-  index ([Precomputed indexes](PRECOMPUTED_INDEXES.md)).
+  fewer bulges, and neither its VCFs nor its enriched genome are here to build one. A download holds
+  its own index only: `NRR_3_hg38+hg38_HGDP1kGP` searches NRR, and the PAMs NRR holds (NGG, NAG,
+  NGA, NRG), pruned to them (and, with a 20-nt guide, up to 2 bulges of each type). Search with what
+  the message lists, or install another index ([Precomputed indexes](PRECOMPUTED_INDEXES.md)).
 - **`index '...' is not installed, and this run cannot build it`.** The library is on a read-only
   mount, has no write permission or is full, and lacks the index this PAM and these bulges need. Make
   it writable, or run `build-index-only` where it is, or search with no bulges, which opens no index.

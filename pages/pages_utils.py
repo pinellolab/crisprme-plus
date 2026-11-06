@@ -1637,34 +1637,39 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     ``+<ref>_<vcf>`` folder submit_job resolves — so the combined value ``1000G_HGDP``
     matches its combined index while a single ``1000G`` query does not (the search would
     not either). Pamless (all-N) indexes of the same length also match (they serve any
-    PAM). An index built for a guide shorter than this PAM file's serves fewer bulges, or
-    none (index_fit, as the search script takes it). Returns 0 if no matching index exists
-    (only a 0-bulge, index-free search is possible). A variant search also needs the
-    variant index, so callers should take the min with the reference result.
+    PAM), and so do those the search prunes to the PAM by itself: a wider all-N one for a
+    3' PAM, and a dedicated one of a PAM that holds it (NRR for NGG). Each serves only a
+    PAM on the side of the guide it was built for (_index_side_serves). An index built for
+    a guide shorter than this PAM file's serves fewer bulges, or none (index_fit, as the
+    search script takes it). Returns 0 if no matching index exists (only a 0-bulge,
+    index-free search is possible). A variant search also needs the variant index, so
+    callers should take the min with the reference result.
     """
     motif = pam_motif(pam_value)
     if not motif or not genome:
         return 0
+    _len, _pos = pam_geometry(pam_value)
+    three_prime = not (_pos is not None and _pos < 0)
     guide = index_fit.pam_file_spacer(
         os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt"))
     genome = genome.replace(" ", "_")
     lib = os.path.join(current_working_directory, "genome_library")
     if not os.path.isdir(lib):
         return 0
-    # Accept the exact PAM motif OR an all-N "pamless" index of the SAME width. The
-    # search shell takes a wider all-N index only under --prune-pam, which the web
-    # never passes, so counting one here would offer bulges for an index the search
-    # will not use. Mirrors _resolve_index_dir in
+    # Accept the exact PAM motif, an all-N "pamless" index of the SAME width, and those
+    # the search shell takes only under --prune-pam -- a wider all-N one for a 3' PAM, a
+    # dedicated one of a PAM that holds the motif (index_fit.pam_serves): the web never
+    # passes the flag, and the shell prunes by itself when only such an index serves.
+    # Mirrors _resolve_index_dir in
     # PostProcess/submit_job_automated_new_multiple_vcfs.sh -- the shell and this must
     # not disagree about the same directory. The all-N test, rather than a fixed
     # "N" * len(motif) prefix, keeps out a dedicated PAM that merely starts with N's
     # (the shipped NNNRRT, SaCas9-KKH).
     base_suffix = f"_{genome}"  # base = "<motif>_<N>_<genome>"
 
-    def _pam_serves(pam: str) -> bool:
-        if pam == motif:
-            return True
-        return bool(pam) and set(pam) == {"N"} and len(pam) == len(motif)
+    def _pam_serves(pam: str, index_dir: str) -> bool:
+        return (index_fit.pam_serves(pam, motif, True, three_prime) is not None
+                and _index_side_serves(index_dir, pam, motif, three_prime))
     # A variant search needs an index whose enriched-genome name is EXACTLY
     # "<genome>_<dataset>" -- the same "+<ref>_<vcf>" folder submit_job resolves. So the
     # combined dropdown value "1000G_HGDP" matches "..._hg38_1000G_HGDP", and a single
@@ -1688,11 +1693,31 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
             continue
         stem = base[: -len(base_suffix)]
         pam, sep, n_str = stem.partition("_")  # "<motif>" , "<N>"
-        if not sep or not n_str.isdigit() or not _pam_serves(pam):
+        if not sep or not n_str.isdigit() or not _pam_serves(pam, os.path.join(lib, d)):
             continue
         best = max(best, index_fit.bulge_cap(
             index_fit.built_guide_len(os.path.join(lib, d)), int(n_str), guide))
     return best
+
+
+def _index_side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) -> bool:
+    """Whether index ``index_dir``, of PAM ``pam``, was built for the side of the guide
+    where a search for ``motif`` (a 3' PAM with ``three_prime``) puts its PAM, as the
+    search script's _resolve_index_dir takes it: as its .pam_build records (pam_pos < 0
+    for a 5' PAM); without one, any side for a dedicated index of the motif, and 3' for any
+    other at the published widths, 3 and 8, or an all-N one of the motif's own name (a
+    search before 2.8.1 built one of another width from a 5' PAM file with no record).
+    crisprme.py's _side_serves, the same rule."""
+    try:
+        with open(os.path.join(index_dir, ".pam_build")) as fh:
+            recorded = int(fh.readline().split()[-1])
+    except (OSError, ValueError, IndexError):
+        recorded = 0
+    if recorded:
+        return (recorded > 0) == three_prime
+    if pam == motif and (not pam or set(pam) != {"N"}):
+        return True
+    return three_prime and (pam == motif or len(pam) in (3, 8))
 
 
 def reference_bulge_capacity(genome: str, pam_value: str) -> int:
@@ -2103,7 +2128,10 @@ def get_pam_options(genome: str, variant_choice: Optional[str]) -> List:
     dataset is included, a variant search needs a variant index for that PAM, so the
     list is restricted to PAMs that actually have one for genome+dataset -- except a
     pamless ``NNN`` variant index, which serves every PAM (the requested PAM is
-    enforced by the post-search filter), so its presence unlocks all PAMs again.
+    enforced by the post-search filter), so its presence unlocks all PAMs again, and
+    a wider one every 3' PAM of its guide length, and a dedicated one every PAM its
+    PAM holds (NGG, NAG, NRG and NGA on an NRR index): the search prunes those to the
+    PAM by itself (_resolve_index_dir, index_fit.pam_serves).
     """
     all_pams = get_available_PAM()
     if variant_choice in (None, "", "ref"):
@@ -2134,26 +2162,35 @@ def get_pam_options(genome: str, variant_choice: Optional[str]) -> List:
             if motif == "N" * len(motif):
                 # PAMLESS index: it serves any PAM SEQUENCE, but only of the SAME
                 # geometry it was built for — a k-mer index cannot search a longer
-                # (or 5' vs 3') PAM. So unlock only PAMs whose total length and
-                # orientation match, and whose PAM window fits (|pos| <= the index
-                # window). Geometry comes from the index's .pam_build sidecar.
+                # (or 5' vs 3') PAM. So unlock only PAMs whose guide length and
+                # orientation match, and whose PAM window fits: as wide as the index's,
+                # or, for a 3' PAM, narrower (the search prunes the flank to it).
+                # Geometry comes from the index's .pam_build sidecar.
                 _name, ilen, ipos = index_build_pam(os.path.join(lib, d))
                 for pv, (slen, spos) in geom.items():
                     if slen is None:
                         continue
                     same_orient = (spos < 0) == (ipos < 0)
-                    if slen == ilen and same_orient and abs(spos) <= abs(ipos):
+                    if same_orient and slen - abs(spos) == ilen - abs(ipos) and (
+                            abs(spos) == abs(ipos) or (spos > 0 and spos < ipos)):
                         ok.add(pv)
             else:
                 # SPECIFIC index: serves exactly the PAM(s) whose motif matches, of a guide
                 # its stored window fits with no bulge at least (index_fit: several PAM
                 # files of one motif can differ in guide length, and the index's name says
                 # nothing of which it was built for).
+                # A dedicated index of a PAM that holds this one (NRR for NGG) serves it
+                # too, pruned, on the side of the guide it was built for.
                 built = index_fit.built_guide_len(os.path.join(lib, d))
                 n_str = d.split("_")[1]
                 for pv, (slen, spos) in geom.items():
-                    if pam_motif(pv) == motif and (
-                            slen is None or not n_str.isdigit()
+                    pv_motif = pam_motif(pv)
+                    if pv_motif != motif and not (
+                            index_fit.pam_holds(motif, pv_motif) and slen is not None
+                            and _index_side_serves(os.path.join(lib, d), motif, pv_motif,
+                                                   spos > 0)):
+                        continue
+                    if (slen is None or not n_str.isdigit()
                             or index_fit.fits(built, int(n_str), slen - abs(spos), 0, 0)):
                         ok.add(pv)
         per_dataset_ok.append(ok)

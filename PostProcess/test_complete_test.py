@@ -632,13 +632,14 @@ class WhatTheSmokeSearchesWith(_SmokeDir):
         shipped = os.listdir(os.path.join(os.path.dirname(HERE), "PAMs"))
         self.assertEqual(sorted(os.listdir(os.path.join(self.wd, "PAMs"))), sorted(shipped))
 
-    def test_the_published_wider_pam_less_index_is_searched_for_nrg_with_prune(self):
-        # it has no .pam_build, as the published archives have none
+    def test_the_published_wider_pam_less_index_is_searched_for_nrr_with_prune(self):
+        # it has no .pam_build, as the published archives have none; NRR is the default
+        # PAM (it was NRG before 2.9.0)
         line, seq, search, prune, five, pam = self.inputs("NNNNNNNN_3_hg38")
-        self.assertEqual(line, "N" * 20 + "NRG 3")
+        self.assertEqual(line, "N" * 20 + "NRR 3")
         self.assertEqual(seq, "CTAACAGTTGCTTTTATCACNNN")
-        self.assertEqual((search, prune, five), ("NRG", " --prune-pam", False))
-        self.assertEqual(pam, os.path.join(self.wd, "PAMs", "20bp-NRG-SpCas9.txt"))
+        self.assertEqual((search, prune, five), ("NRR", " --prune-pam", False))
+        self.assertEqual(pam, os.path.join(self.wd, "PAMs", "20bp-NRR-SpCas9.txt"))
         self.assertNoPamWritten()
 
     def test_a_3_nt_index_keeps_the_shipped_file_and_the_guide(self):
@@ -708,9 +709,10 @@ class WhatTheSmokeSearchesWith(_SmokeDir):
         self.assertEqual(len(stderr.getvalue().splitlines()), 1)
 
     def test_a_shorter_3_nt_index_with_no_record_is_taken_for_3_prime(self):
-        # NRR_3_hg38 has none, and the shipped PAM files hold no NRR
-        line, _, _, _, five, _ = self.inputs("NRR_3_hg38")
-        self.assertEqual((line, five), ("N" * 20 + "NRR 3", False))
+        # NAA_3_hg38 has none, and no shipped PAM file holds NAA (NRR stood in here until
+        # its file shipped, with 2.9.0)
+        line, _, _, _, five, _ = self.inputs("NAA_3_hg38")
+        self.assertEqual((line, five), ("N" * 20 + "NAA 3", False))
         self.assertNoPamWritten()
 
     def test_an_index_built_for_a_shorter_guide_gets_the_guide_it_fits(self):

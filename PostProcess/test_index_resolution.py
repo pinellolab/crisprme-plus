@@ -1158,10 +1158,14 @@ class EveryScanInTheShippedScript(_ShippedScript):
         self.assertServedBy(self.run_pipeline(prune=1), "NNN_3", prune=1)
         self.assertServedBy(self.run_pipeline(prune=0), "NNN_3", prune=0)
 
-    def test_a_wide_flank_alone_is_used_only_under_prune(self):
+    def test_a_wide_flank_alone_is_searched_pruned(self):
+        # without --prune-pam the search prunes by itself (2.9.0): it stopped for want of
+        # a variant index, and said to pass the flag
         self.install("NNNNNNNN_3")
         self.assertServedBy(self.run_pipeline(prune=1), "NNNNNNNN_3", prune=1)
-        self.assertNoVariantIndex(self.run_pipeline(prune=0))
+        run = self.run_pipeline(prune=0)
+        self.assertServedBy(run, "NNNNNNNN_3", prune=1)
+        self.assertIn("searching with --prune-pam, as if it was given", run.stdout)
 
     def test_a_dedicated_index_at_a_larger_budget_beats_a_tighter_stand_in(self):
         self.install("NRG_4", "NNN_3")
@@ -3671,22 +3675,29 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
         self.assertEqual(run.calls, [])
         return run
 
+    def engine_cannot_prune(self):
+        """The stub engine as a CRISPRitz without --prune-pam: its source never names it."""
+        (self.root / "bin" / "crispritz.py").write_text(
+            _STUB_ENGINE.replace("--prune-pam", "the flag"))
+
     def assertNothingMade(self):
         self.assertEqual(sorted(p.name for p in (self.home / "Genomes").iterdir()), ["hg38"])
         self.assertEqual(sorted(p.name for p in (self.home / "Dictionaries").iterdir()),
                          [f"log_indels_{self.VCF}", f"registry_{self.VCF}"])
 
     def test_it_names_what_was_asked_what_is_installed_and_what_to_do(self):
-        self.install("NRG_3")
-        run = self.refused(pam="20bp-NGG-SpCas9")
+        # (an NGG index, which does not hold NRG: an NRG one holds NGG, and serves it
+        # pruned, ADedicatedIndexServesAPamItHolds in test_defaults_and_index_flex)
+        self.install("NGG_3")
+        run = self.refused()
         self.assertEqual(
             run.stderr.splitlines()[0],
             "ERROR: no variant index here serves this search (genome hg38, dataset "
-            f"{self.VCF}, PAM NGG, 1 DNA and 1 RNA bulge(s), a 20-nt guide), and none can be "
+            f"{self.VCF}, PAM NRG, 1 DNA and 1 RNA bulge(s), a 20-nt guide), and none can be "
             f"built: neither its VCFs (VCFs/{self.VCF}) nor its enriched genome (Genomes/hg38+"
-            f"{self.VCF}) is installed. Variant indexes installed for {self.VCF}: NRG_3_hg38+"
+            f"{self.VCF}) is installed. Variant indexes installed for {self.VCF}: NGG_3_hg38+"
             f"{self.VCF} (up to 2 bulge(s) of each type). To install one: crisprme.py download "
-            f"--what index --index-name NGG_3_hg38+{self.VCF} if it is published, or crisprme.py "
+            f"--what index --index-name NRG_3_hg38+{self.VCF} if it is published, or crisprme.py "
             "build-index-only with the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)")
         self.assertEqual(len(run.stderr.splitlines()), 1, run.stderr)
         self.assertNothingMade()
@@ -3697,11 +3708,14 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
         self.assertIn(f"NRG_2_hg38+{self.VCF} holds this PAM with up to 1 bulge(s) of each type: "
                       "search with no more.", run.stderr)
 
-    def test_a_wider_pam_less_index_is_named_with_the_flags_it_needs(self):
+    def test_a_wider_pam_less_index_is_named_where_the_engine_cannot_prune(self):
+        # (where it can, the search prunes by itself: EveryScanInTheShippedScript)
+        self.engine_cannot_prune()
         self.install("NNNNNNNN_3")
         run = self.refused()
-        self.assertIn(f"NNNNNNNN_3_hg38+{self.VCF} can serve it from the command line: run this "
-                      "search again with --prune-pam --index-path genome_library.", run.stderr)
+        self.assertIn(f"NNNNNNNN_3_hg38+{self.VCF} serves it pruned to this PAM at leaf time "
+                      "(--prune-pam), which the installed CRISPRitz cannot do: install a "
+                      "CRISPRitz build that supports --prune-pam (CRISPRme pins one).", run.stderr)
 
     def test_not_one_that_would_not_serve_it(self):
         # too shallow for the budget, or built for the other side
@@ -3725,9 +3739,9 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
 
     def test_under_index_path_it_names_the_variant_indexes_there(self):
         # (a variant index at --index-path serves the search: EveryScanInTheShippedScript)
-        self.install("NRG_3", library=self.root / "shared")
-        run = self.refused(pam="20bp-NGG-SpCas9", index_path=self.root / "shared")
-        self.assertIn(f"Variant indexes installed for {self.VCF}: NRG_3_hg38+{self.VCF} ",
+        self.install("NGG_3", library=self.root / "shared")
+        run = self.refused(index_path=self.root / "shared")
+        self.assertIn(f"Variant indexes installed for {self.VCF}: NGG_3_hg38+{self.VCF} ",
                       run.stderr)
         self.assertNotIn("supplies the reference index only", run.stderr)
 
@@ -3740,25 +3754,24 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
 
     def test_the_enriched_genome_alone_can_build_it(self):
         # the build-inputs kit: no VCFs, and an index for another PAM builds from it
-        self.install("NRG_3")
+        self.install("NGG_3")
         folder = self.home / "Genomes" / f"hg38+{self.VCF}"
         folder.mkdir()
         (folder / "chr1.enriched.fa").write_text(">chr1\nACGT\n")
-        run = self.run_pipeline(pam="20bp-NGG-SpCas9", env={"STUB_BUILD_WRITES": "1"})
+        run = self.run_pipeline(env={"STUB_BUILD_WRITES": "1"})
         self.assertNotIn("no variant index here", run.stderr)
         self.assertIn(f"hg38+{self.VCF}", [c[1] for c in run.builds])
 
     def test_vcfs_alone_can_build_it(self):
-        self.install("NRG_3")
-        run = self.run_pipeline(pam="20bp-NGG-SpCas9", env={"STUB_ENRICH": "1", "STUB_BUILD_WRITES": "1"})
+        self.install("NGG_3")
+        run = self.run_pipeline(env={"STUB_ENRICH": "1", "STUB_BUILD_WRITES": "1"})
         self.assertNotIn("no variant index here", run.stderr)
         self.assertTrue(run.enriched)
 
     def test_an_empty_vcf_folder_is_no_vcfs(self):
-        self.install("NRG_3")
+        self.install("NGG_3")
         (self.home / "VCFs" / self.VCF).mkdir(parents=True)
-        self.assertIn("no variant index here serves this search",
-                      self.refused(pam="20bp-NGG-SpCas9").stderr)
+        self.assertIn("no variant index here serves this search", self.refused().stderr)
 
     def test_a_reference_search_is_not_held_to_it(self):
         run = self.run_pipeline(variant=False, env={"STUB_BUILD_WRITES": "1"})

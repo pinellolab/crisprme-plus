@@ -27,7 +27,7 @@ Because it is a normal host directory, you have full read/write access to it at 
 │  ├─ Dictionaries/     variant registry + per-sample genotype tiers      (companions to the variant indexes)
 │  ├─ samplesIDs/       sample-ID lists for the variant panels
 │  ├─ Annotations/      functional + cancer annotations (DHS, ENCODE SCREEN, GENCODE, IntOGen, COSMIC)
-│  ├─ PAMs/             nuclease PAM definitions (NGG, NRG, NNGRRT, …)
+│  ├─ PAMs/             nuclease PAM definitions (NRR, the default; NGG, NRG, NNGRRT, …)
 │  ├─ Assemblies/       personal / HPRC diploid assemblies, one folder per individual   download --what assembly
 │  ├─ LiftoverFiles/    chain + chromAlias files used to reconcile a personal assembly to GRCh38
 │  ├─ haplotype_genomes/     one link per personal-assembly haplotype, named after it      made by assembly-search

@@ -449,6 +449,14 @@ jobs:
           test_iupac_collapse_consistency test_hf_sha256sums
           test_indel_empty_chromosome -v
 
+      - name: "The default PAM and index are NRR, and which index serves a search (2.9.0)"
+        # The NRR PAM file ships and a download of the PAM files installs it, the web form
+        # and its Load Example select it (pages/main_page.py, AST-extracted, no Dash), and
+        # the advice names its index. A search with no bulges builds no index: the shipped
+        # search script against test_index_resolution's stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_defaults_and_index_flex -v
+
       - name: "build-index-only leaves no partial index or enriched genome, and stops at a search's build lock (and on an index in a newer CRISPRitz format)"
         # A later run takes an index directory or an enriched genome that is there for
         # a finished one. build-index-only builds each index in a hidden directory of

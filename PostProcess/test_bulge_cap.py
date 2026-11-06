@@ -433,9 +433,12 @@ class TestPreflightNoVariantIndex(unittest.TestCase):
         self.assertIn("up to 1 bulge(s) of each type: search with no more",
                       self.check(b=(2, 2)))
 
-    def test_a_wider_pam_less_index_is_named_with_its_flags(self):
+    def test_a_wider_pam_less_index_is_named_with_what_it_needs(self):
+        # (said where a search does not prune by itself: an engine that cannot)
         self.index(f"NNNNNNNN_3_{_REF}+{self.DS}")
-        self.assertIn("--prune-pam --index-path genome_library", self.check())
+        self.assertIn(f"NNNNNNNN_3_{_REF}+{self.DS} serves it pruned to this PAM at leaf time "
+                      "(--prune-pam), which the installed CRISPRitz cannot do: install a "
+                      "CRISPRitz build that supports --prune-pam", self.check())
 
     def test_a_variant_index_at_index_path_serves(self):
         # the search script reads one there first, then in genome_library/ (OF-5)
@@ -451,10 +454,11 @@ class TestPreflightNoVariantIndex(unittest.TestCase):
                       said)
         self.assertNotIn("supplies the reference index only", said)
 
-    def test_a_wider_pam_less_index_at_index_path_is_named_with_that_library(self):
+    def test_a_wider_pam_less_index_at_index_path_is_named_too(self):
         shared = os.path.join(self.root, "shared")
         self.index(f"NNNNNNNN_3_{_REF}+{self.DS}", library="shared")
-        self.assertIn(f"--prune-pam --index-path {shared}.", self.check(path=shared))
+        self.assertIn(f"NNNNNNNN_3_{_REF}+{self.DS} serves it pruned to this PAM",
+                      self.check(path=shared))
 
     def test_an_index_that_serves_goes_on(self):
         self.index(f"NGG_2_{_REF}+{self.DS}", guide=20)
@@ -530,13 +534,16 @@ class TestWebReferenceBulgeCapacity(unittest.TestCase):
         var = pages_utils.index_max_bulges(_REF, _PAM_VALUE, _DATASET)
         self.assertEqual(min(ref, var), 2)
 
-    def test_only_an_equal_width_pamless_index_counts(self):
-        """The web never passes --prune-pam, so the search shell never takes a WIDER
-        all-N index for it; the slider must not offer bulges on the strength of one."""
+    def test_a_wider_pamless_index_counts_for_a_3_prime_pam(self):
+        """The web never passes --prune-pam, and the search shell prunes by itself when
+        only a WIDER all-N index serves (since 2.9.0): it counts for a 3' PAM, as an
+        all-N one of the PAM's width does, and never for a 5' one."""
         _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
+        _mkfile(os.path.join(self.root, "PAMs", "TTTV-20bp-X.txt"), "TTTV" + "N" * 20 + " -4\n")
         _mkfile(os.path.join(self.root, "genome_library", f"NNNNNNNN_3_{_REF}",
                              "TSTgenome.NNNNNNNN.bin"))
-        self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 0)
+        self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 2)
+        self.assertEqual(pages_utils.index_max_bulges(_REF, "TTTV-20bp-X", None), 0)
         _mkfile(os.path.join(self.root, "genome_library", f"NNN_3_{_REF}",
                              "TSTgenome.NNN.bin"))
         self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 2)

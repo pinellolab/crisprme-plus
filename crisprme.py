@@ -600,11 +600,14 @@ def print_help_complete_search() -> None:
         "working directory's genome_library; its dictionaries and sample lists stay "
         "in the working directory [OPTIONAL]\n"
         "\t--prune-pam, serve the search from a PAM-less all-N index (e.g. an "
-        "'NNNNNNNN' index) by filtering it at search time to the PAM given in "
-        "--pam, so one flexible index answers any 3' PAM up to its flank width. "
-        "A 5' PAM (Cas12a) needs an index built for a 5' PAM of its width, such "
-        "as a dedicated one: the published PAM-less indexes store the flank on "
-        "the 3' side. Requires --index-path. From a flank as wide as the PAM the "
+        "'NNNNNNNN' index), or a dedicated index of a PAM that holds the one given in "
+        "--pam (NRR for NGG, NAG, NRG or NGA; NRG for NGG or NAG), by filtering it at "
+        "search time to that PAM, so one flexible index answers any 3' PAM up to its "
+        "flank width. A 5' PAM (Cas12a) needs an index built for a 5' PAM of its width, "
+        "such as a dedicated one: the published PAM-less indexes store the flank on "
+        "the 3' side. A search prunes by itself when no installed index serves it "
+        "otherwise, and says so first: the flag is needed only to prune an all-N "
+        "index as wide as the PAM, which serves unpruned too. From a flank as wide as the PAM the "
         "result is identical to a dedicated index built for that PAM; from a "
         "wider one, a + strand PAM with 1 to (flank - PAM) nt after it to the end "
         "of a contig, and a - strand PAM in as many first nt of a contig, are not "
@@ -2111,13 +2114,14 @@ def _side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) -> boo
     """Whether index ``index_dir``, of PAM ``pam``, was built for the side of the guide where
     a search for ``motif`` (a 3' PAM with ``three_prime``) puts its PAM, as the search
     script's _resolve_index_dir takes it: as its .pam_build records; without one, any side
-    for a dedicated index, and 3' for an all-N one, at the published widths, 3 and 8, or
-    under the search PAM's own name only (a search before 2.8.1 built one of another width
-    from a 5' PAM file with no record)."""
+    for a dedicated index of the search's PAM, and 3' for an all-N one, or a dedicated one
+    of a PAM that holds the search's (index_fit.pam_holds), at the published widths, 3 and
+    8, or an all-N one under the search PAM's own name (a search before 2.8.1 built one of
+    another width from a 5' PAM file with no record)."""
     recorded = _recorded_three_prime(index_dir)
     if recorded is not None:
         return recorded == three_prime
-    if not pam or set(pam) != {"N"}:
+    if pam == motif and (not pam or set(pam) != {"N"}):
         return True
     return three_prime and (pam == motif or len(pam) in (3, 8))
 
@@ -2134,7 +2138,10 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
     covers alignments that start with a gap). A pamless all-N index of the same length
     serves any PAM on the side it was built for (its ``.pam_build``; 3' without one); a
     wider one serves only under ``prune`` (--prune-pam) and only a 3' PAM
-    (``three_prime``), exactly as the search shell decides. ``guide_len`` is the search's
+    (``three_prime``), and so does a dedicated index of a PAM that holds the motif
+    (index_fit.pam_serves), exactly as the search shell decides. A search prunes by itself
+    when only such an index serves it (_prune_on_its_own), so complete-search passes
+    ``prune`` for the bulges it can reach. ``guide_len`` is the search's
     guide length: an index built for a shorter guide serves it with fewer bulges, or none
     (index_fit). ``index_path`` is the search's --index-path, a library looked at beside
     the working directory's; ``genomedir`` its --genome folder, wherever it is, whose FASTA
@@ -2163,13 +2170,14 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         if not motif or not genome:
             return 0
         # A directory is <PAM>_<N>_<genome>. It serves this search when its PAM is
-        # the requested motif, or is all-N of the same width, or -- under --prune-pam
-        # and for a 3' PAM only -- all-N and wider: a stored flank of width K serves a
-        # shorter 3' PAM by N-padding it, and the engine refuses a shorter 5' PAM.
+        # the requested motif, or is all-N of the same width, or -- under --prune-pam --
+        # a dedicated PAM that holds the motif, or, for a 3' PAM only, all-N and wider: a
+        # stored flank of width K serves a shorter 3' PAM by N-padding it, and the engine
+        # refuses a shorter 5' PAM (index_fit.pam_serves).
         # An index serves only a PAM on the side it was built for, which its .pam_build
         # records ("<name> <seq_len> <pam_pos>", pam_pos < 0 for 5'); without one, a
-        # dedicated index any, and an all-N one a 3' PAM at widths 3 and 8 or of its own
-        # name (_side_serves).
+        # dedicated index of the motif any, and another a 3' PAM at widths 3 and 8, or an
+        # all-N one of its own name (_side_serves).
         # These are the search shell's rules (_resolve_index_dir in
         # PostProcess/submit_job_automated_new_multiple_vcfs.sh); the two must not
         # disagree about the same directory, or the derived default bulges come from
@@ -2177,14 +2185,8 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         suffix = f"_{genome}"
 
         def _pam_serves(pam: str, index_dir: str) -> bool:
-            if not _side_serves(index_dir, pam, motif, three_prime):
-                return False
-            if pam == motif:
-                return True
-            if not pam or set(pam) != {"N"}:
-                return False
-            return len(pam) == len(motif) or (
-                prune and three_prime and len(pam) > len(motif))
+            return (index_fit.pam_serves(pam, motif, prune, three_prime) is not None
+                    and _side_serves(index_dir, pam, motif, three_prime))
 
         def _scan(want_plus: bool) -> int:
             best = 0
@@ -2238,16 +2240,14 @@ def _index_serves_search(index: str, genome: str, motif: str, want: int, prune: 
     """Whether the pipeline's _resolve_index_dir (submit_job_automated_new_multiple_vcfs.sh)
     could take the index folder named `index`, locked or not, for a search of `genome`
     with the PAM `motif` that needs `want` (its bulges + 1): `<PAM>_<N>_<genome>` with N
-    at least `want`, and a PAM that is the motif, or all-N of its width, or all-N and
-    wider under --prune-pam for a 3' PAM."""
+    at least `want`, and a PAM that is the motif, or all-N of its width, or under
+    --prune-pam a dedicated PAM that holds the motif, or all-N and wider for a 3' PAM
+    (index_fit.pam_serves)."""
     pam, _, rest = index.partition("_")
     n, _, name = rest.partition("_")
     if name != genome or not n.isdigit() or int(n) < want:
         return False
-    if pam == motif:
-        return True
-    return bool(pam) and set(pam) == {"N"} and (
-        len(pam) == len(motif) or (prune and three_prime and len(pam) > len(motif)))
+    return index_fit.pam_serves(pam, motif, prune, three_prime) is not None
 
 
 def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna: int, brna: int,
@@ -2300,12 +2300,12 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
             if pam == motif and 1 < int(n) < want:
                 fewer = (f"{name} holds this PAM with up to {int(n) - 1} bulge(s) of each type: "
                          f"search with no more. ")
+        # (a search prunes by itself where the engine can: _prune_on_its_own)
         served = [] if prune else [index for index in indexes if _serves(index, True)]
         if served:
-            at = os.path.dirname(served[0])
-            at = "genome_library" if at == libs[-1] else at
-            wider = (f"{os.path.basename(served[0])} can serve it from the command line: run "
-                     f"this search again with --prune-pam --index-path {at}. ")
+            wider = (f"{os.path.basename(served[0])} serves it pruned to this PAM at leaf time "
+                     f"(--prune-pam), which the installed CRISPRitz cannot do: install a "
+                     f"CRISPRitz build that supports --prune-pam (CRISPRme pins one). ")
         error(
             f"no variant index here serves this search (genome {genome}, dataset {vcf}, PAM "
             f"{motif}, {bdna} DNA and {brna} RNA bulge(s), a {guide_len}-nt guide), and none can "
@@ -2322,11 +2322,14 @@ def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int,
                             variant: bool) -> "Optional[str]":
     """The index the search script's _resolve_index_dir takes for this search from the first
     of ``libs`` that holds one (the variant index is read from two: _variant_libraries), or
-    None: of <PAM>_<N>_<suffix> with N >= ``want``, the search's PAM ahead of an all-N one,
-    then one built for this very guide, then the smallest N, then the narrowest flank; an
-    all-N one of the PAM's width, or wider under --prune-pam for a 3' PAM; of the search's
-    side (_side_serves); not locked, with a .bin; and fitting the guide (index_fit; any
-    fits a reference search with no bulges, which opens none). Best-effort: None on error."""
+    None: of <PAM>_<N>_<suffix> with N >= ``want``, the search's PAM ahead of a dedicated
+    one of a PAM that holds it, ahead of an all-N one (index_fit.pam_serves), then one built
+    for this very guide, then the smallest N, then the narrowest flank, then the narrowest
+    PAM, then the PAM that sorts first (index_fit.pam_breadth); the dedicated one
+    under --prune-pam, an all-N one of the PAM's width, or wider under --prune-pam for a 3'
+    PAM; of the search's side (_side_serves); not locked, with a .bin; and fitting the
+    guide (index_fit; any fits a reference search with no bulges, which opens none).
+    Best-effort: None on error."""
     try:
         for lib in libs:
             best, best_key = None, None
@@ -2338,26 +2341,67 @@ def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int,
                         or not os.path.isdir(index) or os.path.isdir(index + ".lock")
                         or not any(f.endswith(".bin") for f in _listdir(index))):
                     continue
-                all_n = bool(pam) and set(pam) == {"N"}
-                if pam == motif:
-                    exact = 1
-                elif all_n and (len(pam) == len(motif)
-                                or (prune and three_prime and len(pam) > len(motif))):
-                    exact = 0
-                else:
+                exact = index_fit.pam_serves(pam, motif, prune, three_prime)
+                if exact is None:
                     continue
                 built = index_fit.built_guide_len(index)
                 if not _side_serves(index, pam, motif, three_prime) or (
                         (variant or bdna or brna)
                         and not index_fit.fits(built, int(n), guide_len, bdna, brna)):
                     continue
-                key = (exact, int(not built or built == guide_len), -int(n), -len(pam))
-                if best_key is None or key > best_key:
+                key = (-exact, -int(not built or built == guide_len), int(n), len(pam),
+                       index_fit.pam_breadth(pam), pam)
+                if best_key is None or key < best_key:
                     best, best_key = index, key
             if best:
                 return best
     except Exception:
         return None
+    return None
+
+
+def _engine_prunes() -> bool:
+    """Whether the installed CRISPRitz takes --prune-pam, as the search script tells it
+    (_engine_prunes there): crispritz.py drops a flag it does not know, so its source must
+    name it. True where no crispritz.py is on PATH: the search then says what is wrong."""
+    engine = shutil.which("crispritz.py")
+    if not engine:
+        return True
+    try:
+        with open(engine, errors="replace") as fh:
+            return "--prune-pam" in fh.read()
+    except OSError:
+        return True
+
+
+def _prune_on_its_own(index_path: str, genome: str, vcf_dirs: List[str], motif: str,
+                      want: int, three_prime: bool, guide_len: int, bdna: int,
+                      brna: int) -> "Optional[str]":
+    """The index for which a search prunes by itself, as if --prune-pam was given, or None:
+    the search script prunes when no installed index serves it without pruning and one
+    does pruned (a dedicated index of a PAM that holds the search's, or a wider all-N one;
+    index_fit.pam_serves), and says so in its log ("searching with --prune-pam, as if it
+    was given"). A variant index of each dataset first, which only the dataset's VCFs
+    build; then the reference index, which a search with bulges opens, from --index-path
+    or else the working directory's genome_library. Not where the engine cannot prune."""
+    if not _engine_prunes():
+        return None
+    takes = []
+    for vdir in vcf_dirs:
+        dataset = f"{genome}+{os.path.basename(os.path.normpath(vdir))}"
+        takes.append((_variant_libraries(index_path), dataset, True))
+    if bdna or brna:
+        ref_lib = (index_path if index_path != "_"
+                   else os.path.join(current_working_directory, "genome_library"))
+        takes.append(([ref_lib], genome, False))
+    for libs, suffix, variant in takes:
+        if _index_the_search_takes(libs, motif, suffix, want, False, three_prime, guide_len,
+                                   bdna, brna, variant):
+            continue
+        pruned = _index_the_search_takes(libs, motif, suffix, want, True, three_prime,
+                                         guide_len, bdna, brna, variant)
+        if pruned:
+            return pruned
     return None
 
 
@@ -2463,9 +2507,7 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     the installed indexes of the folder's name allow, or Genomes/<name>/ when it can
     build one from it (_installed_index_bulge_cap), so once such an index is removed, or
     the folder renamed, the same command may run with none. Under --index-path it says
-    to run without it: the pipeline builds no index there. Under --prune-pam it says to
-    run without that too: complete-search refuses --prune-pam without --index-path, and
-    the index the search then builds is for the PAM itself, which pruning leaves as it is.
+    to run without it: the pipeline builds no index there.
 
     Args:
         genomedir: The --genome folder, as an absolute path.
@@ -2500,7 +2542,7 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     brna = bulges if brna is None else brna
     rerun = "run this search again"
     if index_path != "_":
-        rerun += " without --index-path" + (" and --prune-pam (which needs it)" if prune else "")
+        rerun += " without --index-path"
     note = ""
     if command:
         rerun = f"run {command} again"
@@ -2866,23 +2908,18 @@ def complete_search() -> None:
                 f"ships it pre-built). To intentionally run CFD-only anyway, set CRISPRME_SKIP_SCORER_ENV=1."
             )
 
-    # --prune-pam (opt-in): filter a PAM-less index (e.g. an all-N "NNN" index) down to
-    # the motif given with --pam, applied at CRISPRitz leaf-emit as a skip-before-write
-    # (one index serves many PAMs). It only *narrows* output -- it never changes a
-    # dedicated-index result -- so it is OFF by default and the normal search path is
-    # byte-identical without it. A dedicated index for --pam, when installed, is still
-    # the one searched, and pruning it is a no-op. Requires a prebuilt --index-path and
-    # a CRISPRitz build that supports --prune-pam. Against the stored flank width K, a
-    # PAM of length L > K is refused, a shorter 3' PAM is N-padded to K, and a shorter
-    # 5' PAM off a wider flank is refused.
+    # --prune-pam: filter a PAM-less index (e.g. an all-N "NNN" index), or a dedicated
+    # one of a PAM that holds the motif given with --pam (NRR for NGG), down to that motif,
+    # applied at CRISPRitz leaf-emit as a skip-before-write (one index serves many PAMs).
+    # It only *narrows* output -- it never changes a dedicated-index result. A dedicated
+    # index for --pam, when installed, is still the one searched, and pruning it is a
+    # no-op. Needs a CRISPRitz build that supports --prune-pam. Against the stored flank
+    # width K, a PAM of length L > K is refused, a shorter 3' PAM is N-padded to K, and a
+    # shorter 5' PAM off a wider flank is refused. A search prunes by itself when only
+    # such an index serves it (_prune_on_its_own, below), so the flag is needed only to
+    # prune where an index serves unpruned too (an all-N one of the PAM's width).
+    # (Before 2.9.0 it needed --index-path, and a search did not prune by itself.)
     prune_pam = "--prune-pam" in args
-    if prune_pam and index_path == "_":
-        error(
-            "--prune-pam requires --index-path (the prebuilt reference-index library). "
-            "Wherever a dedicated index for the --pam motif is installed it is used as-is "
-            "and pruning it is a no-op; otherwise a PAM-less (all-N) index is filtered "
-            "down to that motif."
-        )
 
     # cap on TOTAL edits per alignment (--max-total-edits, issue #107): prevents
     # combined-edit alignments (e.g. 6mm+2+2 bulges = 10) from bloating the
@@ -2929,8 +2966,8 @@ def complete_search() -> None:
     # 2.8.1 Bioconda recipe pins crispritz >=2.9.1,<2.9.2). The lower bound moves with each
     # release, so this says ">=" and not an exact version.
     # No supported install can therefore run a vulnerable engine, so the old runtime
-    # warning here was removed: it fired on the DEFAULT PAM (NRG is odd-length and
-    # carries the partially-degenerate "R"), crying wolf on essentially every default
+    # warning here was removed: it fired on the DEFAULT PAM (then NRG, now NRR: odd-length,
+    # with the partially-degenerate "R"), crying wolf on essentially every default
     # search about a crash that cannot occur on the shipped stack.
 
     genome_ref = os.path.basename(genomedir)
@@ -2953,8 +2990,9 @@ def complete_search() -> None:
     _SIMPLE_BULGE_CAP = 1
     _no_bulges_reached = False
     if not _bdna_given and not _brna_given and max_total_edits > 0:
+        # (an index that serves only pruned counts: the search then prunes by itself)
         _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant,
-                                              prune=prune_pam, three_prime=not pam_begin,
+                                              prune=_engine_prunes(), three_prime=not pam_begin,
                                               guide_len=total_pam_len - pam_len,
                                               index_path=index_path, genomedir=genomedir)
         _derived = min(max_total_edits, _idx_cap, _SIMPLE_BULGE_CAP)
@@ -2968,6 +3006,25 @@ def complete_search() -> None:
             )
         else:
             _no_bulges_reached = True
+    # The search prunes by itself, as if --prune-pam was given, when only an index that
+    # needs it serves it (_prune_on_its_own; the search script decides the same, for a web
+    # search too): said here first, and recorded in the run's Params.txt.
+    prune_auto = None
+    if not prune_pam:
+        prune_auto = _prune_on_its_own(
+            index_path, genome_ref,
+            resolve_vcf_dataset_dirs(vcfdir, current_working_directory) if variant else [],
+            pam_char, max(bDNA, bRNA) + 1, not pam_begin, total_pam_len - pam_len, bDNA, bRNA)
+    if prune_auto:
+        prune_pam = True
+        print(
+            f"NOTE [complete-search]: no installed index serves PAM {pam_char} unpruned, and "
+            f"{os.path.basename(prune_auto)} ({os.path.dirname(prune_auto)}) serves it pruned "
+            f"to it at leaf time: searching with --prune-pam, as if it was given. A dedicated "
+            f"{pam_char} index is searched faster: build one with build-index-only, or "
+            f"download a published one.",
+            flush=True,
+        )
     if variant:
         _refuse_no_variant_index(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
@@ -2979,8 +3036,7 @@ def complete_search() -> None:
             f"WARNING [complete-search]: no --bDNA/--bRNA given, and no index this search can "
             f"use holds bulges for PAM {pam_char} on {genome_ref}: searching with NO bulges, so "
             f"bulged off-targets are not reported. Pass --bDNA/--bRNA explicitly (a search builds "
-            f"an index it can build), or, for a wider PAM-less index, add --prune-pam "
-            f"--index-path.",
+            f"an index it can build).",
             flush=True,
         )
     # [max-total-edits] Surface the silent combined-edit prune (issue #107): when the
@@ -3014,7 +3070,11 @@ def complete_search() -> None:
     if prune_pam:
         _three = not pam_begin
         _guide = total_pam_len - pam_len
-        _taken = [_index_the_search_takes([index_path], pam_char, genome_ref, bMax + 1, True,
+        # (the reference index from --index-path, or else from the working directory's
+        # library, as the search script takes it)
+        _ref_lib = (index_path if index_path != "_"
+                    else os.path.join(current_working_directory, "genome_library"))
+        _taken = [_index_the_search_takes([_ref_lib], pam_char, genome_ref, bMax + 1, True,
                                           _three, _guide, bDNA, bRNA, False)] if bMax else []
         if variant:
             for _vdir in resolve_vcf_dataset_dirs(vcfdir, current_working_directory):
@@ -3094,6 +3154,8 @@ def complete_search() -> None:
             )
         if prune_notes:  # (a single physical line, as Pruning_note)
             p.write("Prune_pam_note\t" + " ".join(prune_notes) + "\n")
+        if prune_pam:  # given, or taken by the search itself (the report says which)
+            p.write("Prune_pam\t" + ("auto" if prune_auto else "given") + "\n")
         p.write("Annotation\t" + str(annotation_name) + "\n")
         p.write("Nuclease\t" + str(nuclease) + "\n")
         # p.write('Gecko\t' + str(gecko_comp) + '\n')
@@ -3268,7 +3330,7 @@ def complete_search() -> None:
                 "index. Build or download the index FIRST, then re-run complete-search:\n\n"
                 "  download a prebuilt index (recommended):\n"
                 "    crisprme.py download --what index --index-name "
-                "NRG_3_hg38+hg38_HGDP1kGP --path .\n"
+                "NRR_3_hg38+hg38_HGDP1kGP --path .\n"
                 "    (recommended default: phased HGDP + 1000 Genomes, 4,091 samples, "
                 "CONFIRMED carriers)\n\n"
                 "  or build it locally (source VCFs required):\n"
@@ -3385,7 +3447,7 @@ def complete_search() -> None:
                f"dense, it can still report a window by its greedy worst-case alignment, whose "
                f"listed carriers need not carry every variant in it. To get the tiers, rebuild "
                f"the index with build-index-only --samplesID, or download a prebuilt one "
-               f"(crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP). "
+               f"(crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP). "
                if _untiered else "")
             + "SNP+indel co-occurrence is UNCHANGED "
             "(the indel cis-phasing pass is unaffected). See METHODS.md, 'Context-aware analysis mode'."
@@ -3409,7 +3471,7 @@ def complete_search() -> None:
                 f"High_variant_density_region, whose listed carriers need not carry every "
                 f"variant in it. To get the tiers, rebuild the index with build-index-only "
                 f"--samplesID, or download a prebuilt one (crisprme.py download --what index "
-                f"--index-name NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
+                f"--index-name NRR_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
                 f"dense panels; pass --population-level for the fast worst-case screen."
             )
         else:
@@ -5707,9 +5769,10 @@ def print_help_download() -> None:
         "enrichment and only indexes (fast / new-PAM path; kits exist for a subset of datasets) "
         "[REQUIRED for --what vcf/build-inputs]\n"
         "\t--index-name, precomputed index directory name for --what index "
-        "(e.g. the reference index NRG_3_hg38, the recommended variant-aware default "
-        "NRG_3_hg38+hg38_HGDP1kGP (phased HGDP + 1000 Genomes, 4,091 samples), or "
-        "NRG_3_hg38+hg38_HPRC / NRG_3_hg38+hg38_mega) "
+        "(e.g. the reference index NRR_3_hg38, the recommended variant-aware default "
+        "NRR_3_hg38+hg38_HGDP1kGP (SpCas9 NRR, the default PAM; phased HGDP + 1000 "
+        "Genomes, 4,091 samples), or NRR_3_hg38+hg38_HPRC / NRR_3_hg38+hg38_mega; the "
+        "NRG and NGG ones too, e.g. NRG_3_hg38+hg38_HGDP1kGP) "
         "[REQUIRED for --what index]\n"
         "\t--sample, HPRC individual id for --what assembly (e.g. HG01255) -- fetches "
         "both haplotypes' genome + chain + chromAlias into Assemblies/<sample>/, the "
@@ -5732,9 +5795,9 @@ def print_help_download() -> None:
     sys.exit(1)
 
 
-# Default REFERENCE index published on HF for hg38 (the default NRG PAM, bMax 3);
+# Default REFERENCE index published on HF for hg38 (the default NRR PAM, bMax 3);
 # fetched by ``download --what all`` so a simple reference scan works out of the box.
-DEFAULT_REFERENCE_INDEX_HG38 = "NRG_3_hg38"
+DEFAULT_REFERENCE_INDEX_HG38 = "NRR_3_hg38"
 
 
 def download_data() -> None:
@@ -6826,7 +6889,7 @@ def print_help_complete_test():
         "prebuilt-index smoke searches only that chromosome of the index's genome, and "
         "refuses one the genome or the index lacks, naming those it has; with all it "
         "searches every chromosome, which with a variant index such as "
-        "NRG_3_hg38+hg38_HGDP1kGP is a genome-wide variant search needing 64 GB+ of "
+        "NRR_3_hg38+hg38_HGDP1kGP is a genome-wide variant search needing 64 GB+ of "
         "RAM. The benchmark mode downloads and tests that chromosome\n"
         "\t--vcf_dataset, variant dataset for the LEGACY build-from-source test "
         "(the benchmark mode: it builds small test indexes from raw VCFs for "
@@ -6836,7 +6899,7 @@ def print_help_complete_test():
         "shipped re-phased HGDP1kGP default and NOT the retired "
         "NRG_3_hg38+hg38_1000G2021_HGDP index [default: 1000G]. Without "
         "CRISPRME_ALLOW_ONDEMAND_BUILD, complete-test instead runs the example guide against "
-        "whichever index you downloaded (recommended: NRG_3_hg38+hg38_HGDP1kGP) -- "
+        "whichever index you downloaded (recommended: NRR_3_hg38+hg38_HGDP1kGP) -- "
         "the prebuilt-index smoke test. The self-test, as CI runs it: "
         "CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py complete-test "
         "--chrom chr22 --vcf_dataset 1000G, then crisprme.py validate-test --chrom chr22.\n"
@@ -7018,7 +7081,7 @@ def print_help_setup_database_test() -> None:
         "NOTE: for most users the FASTER modern path is\n"
         "  crisprme.py download --what all\n"
         "(fetches the reference genome + annotations over HuggingFace's CDN), then\n"
-        "  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP\n"
+        "  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP\n"
         "for the recommended default variant index. 'setup' is the legacy "
         "from-scratch download (hundreds of GB) retained for advanced / offline "
         "builds. It takes only two files from the HuggingFace data repo "

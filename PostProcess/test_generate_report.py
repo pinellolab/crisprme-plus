@@ -1091,7 +1091,7 @@ class TestGenerateReport(unittest.TestCase):
             "carriers need not carry every variant in it. To get the tiers, rebuild the index "
             "with <code>build-index-only --samplesID</code>, or download a prebuilt one "
             "(<code>crisprme.py download --what index --index-name "
-            "NRG_3_hg38+hg38_HGDP1kGP</code>).")
+            "NRR_3_hg38+hg38_HGDP1kGP</code>).")
         two = row({**base, "untiered": ["hg38_1000G", "hg38_<x>"]})
         for said in ("named carrier samples only for <code>hg38_1000G</code>, "
                      "<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
@@ -1285,7 +1285,7 @@ class TestGenerateReport(unittest.TestCase):
             "need not carry every variant in it. To get the "
             "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
             "download a prebuilt one (<code>crisprme.py download --what index --index-name "
-            "NRG_3_hg38+hg38_HGDP1kGP</code>). ")))
+            "NRR_3_hg38+hg38_HGDP1kGP</code>). ")))
         plural = cell({**base, "untiered": two}, "Search mode")
         for said in ("<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
                      "in either mode their variants' allele frequencies",

@@ -124,3 +124,54 @@ def bulge_cap(built, n, guide):
     if built and guide:
         cap = min(cap, built + n - guide - 1)
     return max(cap, 0)
+
+
+# The bases each IUPAC code stands for (pam_filter.py's table).
+_IUPAC_BASES = {
+    "A": "A", "C": "C", "G": "G", "T": "T", "R": "AG", "Y": "CT", "S": "CG", "W": "AT",
+    "K": "GT", "M": "AC", "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG", "N": "ACGT",
+}
+
+
+def pam_holds(index_pam, motif):
+    """Whether PAM ``index_pam``, of a dedicated index, holds PAM ``motif``: the two are as
+    long, and at each position every base ``motif`` stands for ``index_pam`` stands for too
+    (NRR holds NGG, NAG, NRG and NGA; NRG holds NGG and NAG). Such an index stores every
+    site of ``motif``, and under --prune-pam the engine writes out only those, at leaf time,
+    as it does an all-N index's (the search script's _pam_holds, the same rule)."""
+    if not motif or len(index_pam) != len(motif):
+        return False
+    try:
+        return all(set(_IUPAC_BASES[m]) <= set(_IUPAC_BASES[b])
+                   for m, b in zip(motif, index_pam))
+    except KeyError:  # a letter that is no IUPAC code
+        return False
+
+
+def pam_serves(index_pam, motif, prune, three_prime):
+    """How an index built for PAM ``index_pam`` serves a search for PAM ``motif``, as the
+    search script's _resolve_index_dir ranks it (its _exact), with which this must not
+    disagree: 2 as its own PAM; 1, under --prune-pam, as a dedicated index of a PAM that
+    holds it (pam_holds); 0 as an all-N one of its width, or, under --prune-pam and for a
+    3' PAM, wider (a front pad would land inside a 5' PAM); None not at all. The side of
+    the guide the index was built for is checked apart."""
+    if index_pam == motif:
+        return 2
+    if not index_pam:
+        return None
+    if set(index_pam) != {"N"}:
+        return 1 if prune and pam_holds(index_pam, motif) else None
+    if len(index_pam) == len(motif) or (prune and three_prime and len(index_pam) > len(motif)):
+        return 0
+    return None
+
+
+def pam_breadth(pam):
+    """How many sequences PAM ``pam`` stands for (NRR 4, NRG 2, NGG 1): of two dedicated
+    indexes of PAMs that hold a search's, the search takes the narrower, which stores fewer
+    sites, and of two as broad the one whose PAM sorts first (the search script's
+    _pam_narrower)."""
+    breadth = 1
+    for code in pam:
+        breadth *= len(_IUPAC_BASES.get(code, ""))
+    return breadth

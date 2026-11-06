@@ -27,7 +27,9 @@ import sys
 G = "CTAACAGTTGCTTTTATCAC"
 PAMS = {
     "20bp-NRG-SpCas9.txt": "N" * 20 + "NRG 3\n",
+    "20bp-NRR-SpCas9.txt": "N" * 20 + "NRR 3\n",
     "20bp-NGG-SpCas9.txt": "N" * 20 + "NGG 3\n",
+    "20bp-NGA-SpCas9VQR.txt": "N" * 20 + "NGA 3\n",
     "21bp-NGG-X.txt": "N" * 21 + "NGG 3\n",
     "23bp-NGG-X.txt": "N" * 23 + "NGG 3\n",
     "20bp-NNNNNNNN-NO-PAM.txt": "N" * 28 + " 8\n",
@@ -258,6 +260,7 @@ def main(root):
     seed = os.path.join(root, "seed")
     make_seed(seed)
     nrg2 = build(root, seed, "NRG_2", "20bp-NRG-SpCas9.txt", 1)
+    nrr2 = build(root, seed, "NRR_2", "20bp-NRR-SpCas9.txt", 1)
     ngg2 = build(root, seed, "NGG_2", "20bp-NGG-SpCas9.txt", 1)
     k8 = build(root, seed, "K8_3", "20bp-NNNNNNNN-NO-PAM.txt", 2)
     g21 = build(root, seed, "g21_N2", "21bp-NGG-X.txt", 1, variant=False)
@@ -300,18 +303,41 @@ def main(root):
         rc != 0 and "no variant index here serves this search" in out and left == []
         and rc2 == 0 and identical(table(w, "o"), b11), f"left {left}: " + (out + out2)[-800:])
 
-    # another PAM or budget than the download holds: one clear ERROR, and nothing made
+    # another PAM or budget than the download holds: one clear ERROR, and nothing made (NGA,
+    # which NRG does not hold)
     w = as_download(copy_of(root, nrg2, "download_other_pam"))
     before = sorted(os.listdir(os.path.join(w, "Genomes")))
-    rc, out = search(w, "o", pam="20bp-NGG-SpCas9.txt")
+    rc, out = search(w, "o", pam="20bp-NGA-SpCas9VQR.txt")
     say("another PAM: refused, naming the PAM and the indexes there",
-        rc != 0 and "no variant index here serves this search" in out and "PAM NGG" in out
+        rc != 0 and "no variant index here serves this search" in out and "PAM NGA" in out
         and "NRG_2_gx+gx_ds" in out and "cannot stat" not in out and "[OK] gx_ds:" not in out, out[-800:])
     say("another PAM: nothing made", sorted(os.listdir(os.path.join(w, "Genomes"))) == before)
+    # a PAM the download's own holds (NGG in NRG, NGG and NRG in NRR): pruned to it by
+    # itself, as a dedicated index of that PAM answers it (2.9.0)
+    ngg_truth = copy_of(root, ngg2, "truth_ngg")
+    search(ngg_truth, "b11", pam="20bp-NGG-SpCas9.txt")
+    for index, pam, truth in ((nrg2, "20bp-NGG-SpCas9.txt", table(ngg_truth, "b11")),
+                              (nrr2, "20bp-NGG-SpCas9.txt", table(ngg_truth, "b11")),
+                              (nrr2, "20bp-NRG-SpCas9.txt", b11)):
+        w = as_download(copy_of(root, index, f"download_{os.path.basename(index)}_{pam[5:8]}"))
+        rc, out = search(w, "o", pam=pam)
+        cell = f"{pam[5:8]} on a {os.path.basename(index)} download"
+        if engine_prunes():
+            say(f"{cell}: pruned by itself, same results as a dedicated index",
+                rc == 0 and "searching with --prune-pam, as if it was given" in out
+                and identical(table(w, "o"), truth), out[-600:])
+        else:
+            say(f"{cell} on an engine without --prune-pam: refused, saying what it needs",
+                rc != 0 and "which the installed CRISPRitz cannot do" in out, out[-800:])
     w = as_download(copy_of(root, k8, "download_k8"))
     rc, out = search(w, "o")
-    say("K=8 without --prune-pam: refused, naming the flags",
-        rc != 0 and "--prune-pam --index-path genome_library" in out, out[-800:])
+    if engine_prunes():
+        say("K=8 without --prune-pam: pruned by itself, same results as a dedicated index",
+            rc == 0 and "searching with --prune-pam, as if it was given" in out
+            and identical(table(w, "o"), b11), out[-600:])
+    else:
+        say("K=8 without --prune-pam on an engine without it: refused, saying what it needs",
+            rc != 0 and "which the installed CRISPRitz cannot do" in out, out[-800:])
     rc, out = search(w, "o2", extra=("--prune-pam", "--index-path", "genome_library"))
     if engine_prunes():
         say("K=8 with --prune-pam: same results as a dedicated index",
@@ -319,6 +345,10 @@ def main(root):
     else:
         say("K=8 with --prune-pam on an engine without it: refused, saying so", rc != 0
             and "does not support it" in result_log(w, "o2"), out[-600:])
+    rc, out = search(w, "o3", extra=("--prune-pam",))
+    if engine_prunes():
+        say("K=8 with --prune-pam and no --index-path: same results as a dedicated index",
+            rc == 0 and identical(table(w, "o3"), b11), out[-600:])
 
     # a search that enriches a dataset itself codes the fake-indel genome
     w = copy_of(root, ngg2, "on_demand")
@@ -363,15 +393,16 @@ def main(root):
     rc, out = search(w, "o", guide="g23.txt", pam="20bp-NGG-SpCas9.txt", variant=False)
     say("a guide longer than its PAM file's spacer: refused", rc != 0 and "silently drop" in out, out[-600:])
 
-    # complete-test on a K=8 index, alone and beside the default
+    # complete-test on a K=8 index, alone and beside the default; on K=8 it searches the
+    # default PAM, NRR (NRG before 2.9.0)
     w = as_download(copy_of(root, k8, "complete_test_k8"))
     pams = sorted(os.listdir(os.path.join(w, "PAMs")))
     rc, out = cli(w, "complete-test", "--thread", THREADS)
     k8_table = table(w, "crisprme-test-out")
-    n = as_download(copy_of(root, nrg2, "complete_test_nrg"))
+    n = as_download(copy_of(root, nrr2, "complete_test_nrr"))
     rc2, out2 = cli(n, "complete-test", "--thread", THREADS)
     if engine_prunes():
-        say("complete-test on K=8: same results as on NRG, and no PAM file left",
+        say("complete-test on K=8: same results as on NRR, and no PAM file left",
             rc == 0 and rc2 == 0 and identical(k8_table, table(n, "crisprme-test-out"))
             and sorted(os.listdir(os.path.join(w, "PAMs"))) == pams, out[-800:])
     else:

@@ -82,7 +82,7 @@ crisprme.py download --what genome --ref susScr11 --source ucsc
 
 ### Add an index (or build one)
 Bulge-enabled searches need a genome **index**.
-- **Download** a ready-made index from HuggingFace by name (e.g. `NRG_3_hg38`).
+- **Download** a ready-made index from HuggingFace by name (e.g. `NRR_3_hg38`, of the default PAM).
 - **Build locally** from an installed genome + PAM + bulge counts.
 - **Pre-build a variant-aware index**: pick a VCF dataset in the build panel and
   CRISPRme enriches the genome with the variants and indexes it ahead of time, so
@@ -94,7 +94,7 @@ Bulge-enabled searches need a genome **index**.
   combined samplesID list): per-sample analysis and the dataset's data type on the
   search form need them, and the index is self-complete for fast post-analysis. (CLI
   equivalent:
-  `crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs.config.txt`.)
+  `crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs.config.txt`.)
   The tiers take memory: at panel scale ~150-180 GB a chromosome, by default up to 4
   chromosomes at once (`CRISPRME_TIER_WORKERS` in the container's environment sets how
   many). A worker that runs out sends the chromosomes left to one at a time. If one dies

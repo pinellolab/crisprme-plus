@@ -1477,6 +1477,18 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         if len(_mm):
             obs_max_mmb = int(_mm.max())
 
+    # The indexes the search took (the search script records them in the parameters file
+    # since 2.9.0): which answered it, and how, where Genome_idx says what was asked for,
+    # which another index may have served, or none. A run of an earlier release has none.
+    indexes = []
+    if params.get("Reference_index"):
+        indexes.append(("Reference index searched", params["Reference_index"]))
+    for key in sorted(k for k in params if k.startswith("Variant_index:")):
+        indexes.append((f"Variant index searched ({key.split(':', 1)[1]})", params[key]))
+    if params.get("Prune_pam") == "auto":
+        indexes.append(("PAM pruning", "--prune-pam, which the search took by itself: no "
+                                       "installed index served this PAM unpruned"))
+
     return {
         "guides": guides,
         "guide_display": ", ".join(guides) if guides else "n/a",
@@ -1484,6 +1496,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "pam": pam,
         "genome": genome,
         "datasets": datasets,
+        "indexes": indexes,
         # the VCF folder name the results file carries (None when it names no dataset)
         "vcf_name": fn.get("vcf"),
         "mm": str(mm),
@@ -1757,7 +1770,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
             "the integrated results), whose listed carriers need not carry every variant in "
             "it. To get the tiers, rebuild the index with <code>build-index-only "
             "--samplesID</code>, or download a prebuilt one (<code>crisprme.py download --what "
-            "index --index-name NRG_3_hg38+hg38_HGDP1kGP</code>)."
+            "index --index-name NRR_3_hg38+hg38_HGDP1kGP</code>)."
         )
     elif meta.get("search_mode") == "per-sample":
         sm_note = (
@@ -1790,7 +1803,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
                 "alignment, whose listed carriers need not carry every variant in it. To get the "
                 "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
                 "download a prebuilt one (<code>crisprme.py download --what index --index-name "
-                "NRG_3_hg38+hg38_HGDP1kGP</code>). " if _ut else ""
+                "NRR_3_hg38+hg38_HGDP1kGP</code>). " if _ut else ""
             ) + "For sites-only (aggregate) panels there are no "
             "per-sample genotypes, so this loses nothing (<code>--per-sample</code> is a no-op "
             "there). " + (
@@ -1910,7 +1923,7 @@ def render_summary_and_matrix(meta, spec_score, matrix, spec_score_cb=None):
         ("Mismatches", meta["mm"]),
         ("Bulges (DNA / RNA)", bulge_disp),
         ("Max total edits", _me_display),
-    ]
+    ] + list(meta.get("indexes") or [])
     # The legacy aggregated specificity score (100/(100+Σ)) is replaced by the
     # top-of-report OFF-TARGET RISK card (risk_card.py, calibrated per-scorer expected
     # counts). spec_score / spec_score_cb remain in the signature for compatibility but

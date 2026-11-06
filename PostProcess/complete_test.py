@@ -136,9 +136,9 @@ def require_prebuilt_index() -> str:
             f"\nNo prebuilt index found for the complete-test (looked in {lib}).\n"
             "CRISPRme does not build one automatically.\n\n"
             "Download an index first, e.g.:\n"
-            "  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP\n"
-            "  (the recommended default: phased HGDP + 1000 Genomes, 4,091 samples;\n"
-            "   or --index-name NRG_3_hg38 for a reference-only scan)\n\n"
+            "  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP\n"
+            "  (the recommended default: SpCas9 NRR, phased HGDP + 1000 Genomes, 4,091\n"
+            "   samples; or --index-name NRR_3_hg38 for a reference-only scan)\n\n"
             "then re-run:  crisprme.py complete-test --chrom chr22 --thread 4\n"
             "  (chromosome 22 only; without --chrom it searches every chromosome)\n"
         )
@@ -1133,7 +1133,8 @@ def _smoke_inputs(index_name: str, token: str):
     file, the PAM it searches, the search's extra flag, whether that PAM is on the 5' side).
 
     An all-N index wider than 3 nt on the 3' side (the published NNNNNNNN_3) is searched
-    for NRG with --prune-pam, its documented use, which scores the example. Any other is
+    for NRR, the default PAM, with --prune-pam, its documented use, which scores the
+    example. Any other is
     searched for its own PAM, on its own side: a 20-nt spacer (fewer on an index built for
     a shorter guide), which any longer build serves, with the example guide padded for
     that PAM. Exits 2, in one line, for an index whose side cannot be told (a search of
@@ -1147,8 +1148,8 @@ def _smoke_inputs(index_name: str, token: str):
         )
         sys.exit(2)
     if not five_prime and set(token) == {"N"} and len(token) > 3:
-        pam = _smoke_pam_file("N" * 20 + "NRG 3", "20bp-NRG-SpCas9.txt")
-        return pam, write_sg1617_guidefile(), "NRG", " --prune-pam", False
+        pam = _smoke_pam_file("N" * 20 + "NRR 3", "20bp-NRR-SpCas9.txt")
+        return pam, write_sg1617_guidefile(), "NRR", " --prune-pam", False
     built = index_fit.built_guide_len(os.path.join(os.getcwd(), "genome_library", index_name))
     spacer = min(20, built or 20)
     width = len(token)
@@ -1211,7 +1212,7 @@ def _search_in_smoke(index_name, pam_token, ref, is_variant, genome_dir, pam, gu
                      prune_arg, five_prime, threads, debug, chrom) -> None:
     """The smoke's complete-search, and what it left, for _run_prebuilt_index_smoke."""
     # A variant index searches its variants, in complete-search's context-aware default
-    # mode: per-sample on a phased genotyped index such as NRG_3_hg38+hg38_HGDP1kGP,
+    # mode: per-sample on a phased genotyped index such as NRR_3_hg38+hg38_HGDP1kGP,
     # population-level otherwise.
     # `download --what index` writes list_vcf.txt / list_samplesID.txt; a build/DATA dir
     # may instead use vcf_list.txt / samples_list.txt -- accept either.
