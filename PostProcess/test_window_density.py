@@ -19,17 +19,20 @@ of positions could see: a three-allele column was one position, as a two-allele 
   * complete-search's --max-degeneracy K: a worst-case alignment (the min-mismatch one, and
     a scored run's worst-case CFD one) is cut back to rest on at most K ambiguous columns,
     and any other row resting on more is withheld, unless its carriers hold its variants
-    together on one phased haplotype.
+    together on one phased haplotype; the search it launches runs with K, and its report
+    states it.
 
 The real new_simple_analysis.py, resultIntegrator.py and crisprme.py run on hand-built inputs
-(the tier path's observed haplotypes through test_phased_haplotype's harness), and the
-report's functions on hand-built rows.
+(the tier path's observed haplotypes through test_phased_haplotype's harness, crisprme.py's
+search through test_build_index_only_atomic's stub engine), the report's functions on
+hand-built rows, and generate_report.py, as the search script runs it, on resultIntegrator's.
 
 Run with:
     cd PostProcess && python3 -m unittest test_window_density -v
 """
 
 import csv
+import gzip
 import io
 import json
 import os
@@ -38,6 +41,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
+from unittest import mock
 
 import pandas as pd
 
@@ -781,6 +786,52 @@ class TheIntegratedRow(unittest.TestCase):
             "high_variant_density (21 variants, 2^21.00 sequences); "
             "full_IUPAC=RRRRRRRRRRRRRRRRRRRRRGG")
 
+    def test_the_run_s_report(self):
+        """The report the search script builds next (generate_report.py --result-dir, with
+        --report-full) of a run with --max-degeneracy 1, in either mode, from the result folder
+        as it is then: these integrated results, the post-analysis's BEDs of 2.9.0, and the
+        Params.txt complete-search wrote. It states the cap, counts the rows in a hyperdense
+        window and in one holding a four-allele position, and bundles the windows under the
+        BEDs' own header."""
+        rd = tempfile.mkdtemp(prefix="window_density_report_")
+        self.addCleanup(shutil.rmtree, rd, True)
+        shutil.copy(os.path.join(self.d, "job.bestMerge.txt.integrated_results.tsv"),
+                    os.path.join(rd, CRRNA + "+NRG_hg38+hg38_ds_4+2_integrated_results.tsv"))
+        bed = "job_chrT.high_variant_density_regions.bed"
+        for name in (bed, "job_chrT.four_allele_positions.bed"):
+            shutil.copy(os.path.join(self.d, name), rd)
+        with open(os.path.join(rd, bed)) as fh:
+            header = fh.readline()
+        with open(os.path.join(rd, "Params.txt"), "w") as fh:
+            fh.write("Genome_selected\thg38\nGenome_ref\thg38\nGenome_idx\tNRG_2_hg38+hg38_ds\n"
+                     "Pam\tNRG\nMax_bulges\t2\nMismatches\t4\nDNA\t1\nRNA\t1\n"
+                     "Max_total_edits\t6\nMax_degeneracy\t1\nNuclease\tSpCas9\n"
+                     "Ref_comp\tTrue\n")
+        for mode in ("population-level", "per-sample"):
+            with self.subTest(mode=mode):
+                with open(os.path.join(rd, ".search_mode"), "w") as fh:
+                    fh.write(mode + "\n")
+                res = subprocess.run(
+                    [sys.executable, os.path.join(HERE, "generate_report.py"), "--result-dir",
+                     rd, "--report-full"], cwd=HERE, capture_output=True, text=True)
+                self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+                with zipfile.ZipFile(os.path.join(rd, os.path.basename(rd) + "_report.zip")) as zf:
+                    html = zf.read("report.html").decode("utf-8")
+                    bundled = gzip.decompress(
+                        zf.read("data/high_variant_density_regions.bed.gz")).decode()
+                # (no assertIn on the page: its message would print all of it)
+                said = ("A SNP variant row rests on at most 1 ambiguous column (<code>"
+                        "--max-degeneracy 1</code>) unless its carriers hold its variants "
+                        "together on one phased haplotype.",
+                        '<td class="k">Hyperdense and four-allele windows</td>',
+                        "2 reported off-targets lie in a hyperdense window",
+                        "2 reported off-targets lie in a window holding a four-allele position")
+                self.assertEqual([s for s in said if s not in html], [])
+                lines = bundled.splitlines(True)
+                self.assertEqual(lines[0], header)
+                self.assertEqual({len(line.split("\t")) for line in lines}, {10})
+                self.assertEqual(len(lines), 3)
+
 
 class TheReport(unittest.TestCase):
     NOTE = ("high_variant_density (%s variants%s): a greedy worst-case alignment is reported "
@@ -905,22 +956,64 @@ class TheReport(unittest.TestCase):
         self.assertIn("<code>1 four-allele position</code>", legend)
 
 
+# test_build_index_only_atomic's stub engine, behind a crispritz.py that first notes the
+# CRISPRME_MAX_DEGENERACY of the environment it runs in: the search script's, which the
+# post-analysis the script runs next (pool_post_analisi_snp.py, new_simple_analysis.py) inherits
+ENGINE_NOTING_THE_CAP = r'''#!PYTHON
+import os, sys
+
+with open(os.environ["STUB_LOG"] + ".max_degeneracy", "a") as fh:
+    fh.write("%s %s\n" % (sys.argv[1], os.environ.get("CRISPRME_MAX_DEGENERACY")))
+stub = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crispritz_stub.py")
+os.execv(sys.executable, [sys.executable, stub] + sys.argv[1:])
+'''
+
+
 class TheCommandLine(bio._Fixture):
     """complete-search --max-degeneracy, as a user runs it, against
-    test_build_index_only_atomic's stub engine, up to the search it launches."""
+    test_build_index_only_atomic's stub engine, up to the search it launches, whose engine
+    notes the CRISPRME_MAX_DEGENERACY it runs with."""
+
+    def setUp(self):
+        super().setUp()
+        engine = os.path.join(self.bin, "crispritz.py")
+        os.rename(engine, os.path.join(self.bin, "crispritz_stub.py"))
+        with open(engine, "w") as fh:
+            fh.write(ENGINE_NOTING_THE_CAP.replace("#!PYTHON", "#!" + sys.executable, 1))
+        os.chmod(engine, 0o755)
 
     def params(self):
         with open(self.path("Results", "search", "Params.txt")) as fh:
             return dict(line.rstrip("\n").split("\t", 1) for line in fh if "\t" in line)
 
+    def search(self, *options, **environ):
+        """complete-search with options, from a shell that holds environ; the
+        CRISPRME_MAX_DEGENERACY of each engine search it ran."""
+        notes = self.log + ".max_degeneracy"
+        if os.path.exists(notes):
+            os.remove(notes)
+        start = self.start
+        with mock.patch.object(self, "start", lambda **kw: start(**kw, **environ)):
+            _rc, out, err = self.run_search(*options)
+        self.assertIn("Launching job ", out, out + err)
+        with open(notes) as fh:
+            return [line.split()[1] for line in fh if line.split()[0] == "search"]
+
     def test_it_is_written_to_the_run_s_params(self):
         self.run_bio()
-        rc, out, err = self.run_search("--max-degeneracy", "2")
-        self.assertIn("Launching job ", out, out + err)
+        self.search("--max-degeneracy", "2")
         self.assertEqual(self.params().get("Max_degeneracy"), "2")
-        rc, out, err = self.run_search()
-        self.assertIn("Launching job ", out, out + err)
+        self.search()
         self.assertNotIn("Max_degeneracy", self.params())
+
+    def test_the_search_runs_with_it(self):
+        """The post-analysis reads the cap from CRISPRME_MAX_DEGENERACY, which crisprme.py sets
+        for the search script it launches (Params.txt only tells the report); a search without
+        the option runs with -1, no cap, whatever the user's shell holds, as its Params.txt
+        then states no cap."""
+        self.run_bio()
+        self.assertEqual(set(self.search("--max-degeneracy", "2")), {"2"})
+        self.assertEqual(set(self.search(CRISPRME_MAX_DEGENERACY="1")), {"-1"})
 
     def test_it_takes_a_count(self):
         for value, said in (("-1", "--max-degeneracy must be a non-negative integer"),
