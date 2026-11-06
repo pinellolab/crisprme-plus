@@ -4602,7 +4602,8 @@ def _end_cleanly(cleanup, handlers: dict) -> None:
 
 def _with_cleanup(run, cleanup):
     """Returns ``run()``, and calls ``cleanup()`` on every way out but SIGKILL:
-    success, failure, an exception, Ctrl-C, SIGTERM (scancel, docker stop) and
+    success, failure, an exception, Ctrl-C (and docker stop: the image's STOPSIGNAL), SIGTERM
+    (scancel, a container run with another stop signal) and
     SIGHUP. Those two are handled for that while ``run`` runs only, and the run
     still ends by the signal; one this run ignores (nohup) stays ignored. A signal
     that comes during the cleanup waits for its end, then ends the run
@@ -6868,11 +6869,13 @@ def print_help_web_interface():
     # functionality description
     sys.stderr.write(
         "This function starts a local server to use the web interface.\n"
-        "Open your browser at http://127.0.0.1:8080\n"
+        "Open your browser at http://127.0.0.1:8080 (or at the port --port gives)\n"
     )
     # options
     sys.stderr.write(
         "Options:\n"
+        "\t--port, the port the server listens on [default: 8080]: another, where 8080 is "
+        "taken (a shared node, a second server)\n"
         "\t--debug, debug mode\n"
     )
     sys.exit(1)
@@ -6885,6 +6888,15 @@ def web_interface():
     # resolve index.py relative to this script's location
     # regardless of conda/source install layout
     index_script = os.path.join(corrected_web_path, "index.py")
+    # --port: the server listened on 8080 alone, so where another holds it (a shared node)
+    # an Apptainer or source install could not start it; Docker remaps it with -p (C19)
+    port = "8080"
+    if "--port" in args:
+        at = args.index("--port") + 1
+        port = args[at] if at < len(args) else ""
+        if not (port.isdigit() and 1 <= int(port) <= 65535):
+            error("--port takes the number of a port, from 1 to 65535, as in --port 8090")
+        os.environ["CRISPRME_PORT"] = port  # (the server's app reads it: app.PORTLOCAL)
     if not os.path.isfile(index_script):
         sys.stderr.write(
             f"Error: Cannot find index.py at {index_script}\n"
@@ -6899,7 +6911,7 @@ def web_interface():
             "Check above for traceback. Common causes:\n"
             "  - Missing dependencies: pip install dash flask flask-caching "
             "dash-bootstrap-components\n"
-            "  - Port 8080 already in use: lsof -i :8080\n"
+            f"  - Port {port} already in use: lsof -i :{port} (or --port <another>)\n"
         )
         sys.exit(e.returncode)
     except FileNotFoundError:

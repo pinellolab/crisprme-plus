@@ -976,6 +976,18 @@ class TheSourceEnvironmentHasWhatTheImageHas(unittest.TestCase):
                 self.assertIn(package, listed)
 
 
+class TheImageIsBuiltOnAPinnedBase(unittest.TestCase):
+    """The Dockerfile built on `FROM mambaorg/micromamba`, whatever image was latest that day
+    (C20): it names the tag and the digest of the one 2.8.1's image was built on."""
+
+    def test_the_base_has_a_tag_and_a_digest(self):
+        import re
+        froms = [line for line in (_REPO / "Dockerfile").read_text().splitlines()
+                 if line.startswith("FROM ")]
+        self.assertEqual(len(froms), 1)
+        self.assertRegex(froms[0], r"^FROM mambaorg/micromamba:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$")
+
+
 class ASelfTestOfASourceInstallSaysNoNoise(unittest.TestCase):
     """Messages a source or Bioconda install printed that the image does not (install P10):
     the Hub's "You are sending unauthenticated requests to the HF Hub" on every anonymous

@@ -24,7 +24,10 @@
 #   - matplotlib-base ceiling dropped (was < 3.9); numpy >= 1.26 satisfies mpl >= 3.9.
 #   - Dash 2.x web stack (dash >= 2.14 bundles the old dash-core/html/renderer/
 #     table sub-packages, so those are intentionally dropped)
-FROM mambaorg/micromamba
+# The base image, by its tag and its digest: unpinned, a build took whatever micromamba
+# image was latest that day (C20). 2.10.0 (Debian 13) is the one 2.8.1's image was built on;
+# a newer one is a change of its own, made here.
+FROM mambaorg/micromamba:2.10.0@sha256:e1476182cd40eb1f7c0cfae4adec9bfd78f3d7f05c61368306abfdc8939c1198
 
 LABEL org.opencontainers.image.authors="ManuelTgn, lucapinello"
 
@@ -167,4 +170,9 @@ import scorer_env; ok, rep = scorer_env.build_all(gpu=('${BACKEND}'=='gpu')); \
     fi
 
 WORKDIR /root
+# `docker stop` stops a container the way Ctrl-C does: crisprme.py, its first process,
+# handles SIGINT (the web interface stops its server and exits; a search or a build ends as
+# its Ctrl-C does), and SIGTERM, which nothing in it handled, cost the 10 s wait of a stop
+# and then a SIGKILL (exit 137; C16)
+STOPSIGNAL SIGINT
 CMD ["crisprme.py"]

@@ -425,7 +425,9 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 ```
 
 **Opening the interface from your own computer (SSH tunnel).** The server listens on
-port 8080 on whatever machine runs it, so from your laptop:
+port 8080 on whatever machine runs it (where another program holds 8080, as on a shared
+node, add `--port 8090`, or any free port, to `crisprme.py web-interface`, and use that
+port below), so from your laptop:
 
 ```bash
 # CRISPRme running on the login node you SSH into:

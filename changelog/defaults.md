@@ -367,3 +367,15 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   and the input check now refuse such a `.fa` file, saying to name it after its sequence with
   `genome_layout.py --split`, as build-index-only already did; a `.fasta` file, which no
   search reads, is still only named.
+- **`crisprme.py web-interface --port <N>` serves on another port.** The server listened on
+  8080 alone, so where another program held it, as on a shared node, an Apptainer or source
+  install could not start it (Docker maps another with `-p`; C19). Its start message, and the
+  link of a notification e-mail, name the port.
+- **`docker stop` stops a CRISPRme container at once.** Its first process, crisprme.py, had no
+  handler for the SIGTERM a stop sends, so `docker stop` waited its 10 s and killed the
+  container (exit 137; C16): the image's stop signal is SIGINT, which crisprme.py takes as a
+  Ctrl-C (the web interface stops its server and exits 0). Measured with the 2.8.1 image, run
+  with each signal: 10.2 s against 0.5 s.
+- **The Docker image is built on a pinned base.** `FROM mambaorg/micromamba` took whatever image
+  was latest the day of the build (C20); the Dockerfile names the tag and the digest of the one
+  2.8.1's image was built on (micromamba 2.10.0, Debian 13).

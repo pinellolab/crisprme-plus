@@ -243,8 +243,10 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py web-interface</code></pre>
         <p>
           The server listens on port <strong>8080 of the machine that runs it</strong>, which
-          must be free there. Apptainer shares the host network, so unlike Docker there is no
-          <code>-p</code> mapping to set. Working directly on that machine, open
+          must be free there: where it is not, add <code>--port 8090</code> (any free port)
+          to <code>crisprme.py web-interface</code>, and use that port below. Apptainer shares
+          the host network, so unlike Docker there is no <code>-p</code> mapping to set.
+          Working directly on that machine, open
           <strong>http://127.0.0.1:8080</strong> in a browser tab.
         </p>
         <p>
