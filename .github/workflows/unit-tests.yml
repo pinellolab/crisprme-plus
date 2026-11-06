@@ -257,14 +257,26 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows test_check_alt_pam -v
 
-      - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; both strands, PAM at either end)"
+      - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; 2.8.2: a row whose first base is one an insertion adds starts at the insertion's anchor, its PAM_gen by the inserted-PAM rules; both strands, PAM at either end)"
         # Up to 2.8.0 analisi_indels_NNN.py took CRISPRitz's Cluster_Position for an
         # RNA-bulge row on the + strand with a 3' PAM and on the - strand with a 5' PAM,
         # one base before the first aligned base, and the REF text of an RNA,DNA row, and
-        # of a 5' PAM RNA-bulge row, was a base off. The shipped analyzer on planted
-        # alignments given as the engine reports them (pandas + numpy).
+        # of a 5' PAM RNA-bulge row, was a base off. Up to 2.8.1 a row whose first base is
+        # one an insertion adds started at that base's place on the haplotype, and a PAM
+        # holding inserted bases was judged on the REF text read from the row's start. The
+        # shipped analyzer on planted alignments given as the engine reports them (pandas +
+        # numpy).
         working-directory: PostProcess
         run: python -m unittest test_indel_row_coordinates -v
+
+      - name: "Indel row Variant_info_spacer+PAM (2.8.2: each variant counted along the target on the haplotype carrying the indel, as a SNP row counts it on the reference)"
+        # Up to 2.8.1 resultIntegrator counted an indel row's variants along the reference: a
+        # SNP past an insertion was len(ALT) - len(REF) bases short (long on the - strand), one
+        # past a deletion as many long, and on a row starting on a base an insertion adds
+        # (placed at the insertion's anchor since 2.8.2) short again by the inserted bases its
+        # target holds. The REAL integrator on bestMerge rows of both strands (GNU cut).
+        working-directory: PostProcess
+        run: python -m unittest test_indel_variant_positions -v
 
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess

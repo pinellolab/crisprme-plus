@@ -124,11 +124,68 @@ class _Planted(object):
         return rows
 
 
+# Targets whose first base (the leftmost, forward) is one an insertion adds (2.8.2):
+# (strand, the target as shown, how many of its leftmost forward bases the insertion
+# adds, the added bases before them, the reference base before the anchor). The row
+# starts at the insertion's anchor; its PAM is reference bases, wholly inserted bases,
+# or partly inserted ones, whose reference PAM is the one beside the protospacer: there,
+# the base before the anchor decides whether the reference holds the motif.
+INSIDE = {
+    "3p": [
+        ("+", G20 + "TGG", 6, "TTCAT", None),          # the PAM on the reference: TGG
+        ("-", G20 + "TGG", 9, "GA", None),             # the PAM wholly inserted
+        ("-", G20 + "AGG", 2, "GT", "C"),              # partly: CTT beside it, AAG on -
+        ("-", G20 + "AGG", 2, "GT", "A"),              # partly: ATT, AAT on -: created
+    ],
+    "5p": [
+        ("+", "TTTA" + G23, 6, "GA", None),            # the PAM wholly inserted
+        ("+", "TTTC" + G23, 2, "G", "T"),              # partly: TTTC beside the spacer
+        ("+", "TTTC" + G23, 2, "G", "G"),              # partly: GTTC: created
+        ("-", "TTTG" + G23, 3, "CA", None),            # the PAM on the reference: TTTG
+    ],
+}
+
+
+class _PlantedInsertions(object):
+    """One PAM side's targets that start on a base an insertion adds (INSIDE): the
+    reference, the insertions, their fake-indel windows and engine rows."""
+
+    def __init__(self, side):
+        rng = random.Random(2820)
+        self.side = side
+        seq = [rng.choice("ACGT") for _ in range(3000 + 600 * len(INSIDE[side]))]
+        self.sites = []
+        start0 = 1000
+        for strand, shown, m, head, before in INSIDE[side]:
+            fwd = shown if strand == "+" else rc(shown)
+            anchor = start0 - 1  # 0-based
+            if before is not None:
+                seq[anchor - 1] = before
+            seq[anchor] = "T"
+            for i, c in enumerate(fwd[m:]):
+                seq[start0 + i] = c
+            self.sites.append(dict(
+                strand=strand, shown=shown, fwd=fwd, m=m, anchor=anchor, pos1=start0,
+                ref="T", alt="T" + head + fwd[:m], first_off=25 + 1 + len(head),
+                sample="S%02d" % (len(self.sites) + 1)))
+            start0 += 600
+        self.ref = "".join(seq)
+
+    windows = _Planted.windows
+
+    def engine_rows(self, windows, starts):
+        crrna = PAMS[self.side][1]
+        return [["X", crrna, s["shown"], "fake" + CHROM, str(f0 + s["first_off"]),
+                 str(f0 + s["first_off"]), s["strand"], "0", "0", "0"]
+                for (s, _w0, _win), f0 in zip(windows, starts)]
+
+
 class RowCoordinates(unittest.TestCase):
-    def run_side(self, side, gate="1"):
+    def analyze(self, p, side, gate="1"):
+        """The SHIPPED analyzer on planted sites ``p`` (their reference, fake-indel
+        windows and engine rows): {output suffix: {indel token: row columns}}."""
         tmp = tempfile.mkdtemp(prefix="indel_row_coordinates_")
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        p = _Planted(side)
         windows = p.windows()
         fake, starts = [], []
         for _s, _w0, win in windows:
@@ -196,6 +253,11 @@ class RowCoordinates(unittest.TestCase):
                     c = line.rstrip("\n").split("\t")
                     got.setdefault(suffix, {})[c[17]] = c
         self.assertEqual(sorted(len(v) for v in got.values()), [len(p.sites)] * 3)
+        return got
+
+    def run_side(self, side, gate="1"):
+        p = _Planted(side)
+        got = self.analyze(p, side, gate)
         for s in p.sites:
             token = "%s_%d_%s_%s" % (CHROM, s["pos1"], s["ref"], s["alt"])
             n_rna, n_dna = s["dna"].count("-"), s["crrna"].count("-")
@@ -226,6 +288,65 @@ class RowCoordinates(unittest.TestCase):
                 created = any(b not in BASES[m] for b, m in zip(ref_pam, motif))
                 self.assertEqual(c[10], s["dna"][cut] if created else "n", where + ": PAM_gen")
                 self.assertEqual(c[12], s["sample"], where)
+
+    def run_inside(self, side, gate="1"):
+        """A target whose first base is one an insertion adds starts at the insertion's
+        anchor (its VCF POS), its REF text the reference from there, and its PAM_gen is
+        the ALT's PAM when the PAM is wholly inserted bases, or, partly inserted, when the
+        reference PAM beside the protospacer lacks the motif; a PAM on reference bases
+        is read through the insertion. Up to 2.8.1 such a row started at the first base's
+        place on the haplotype, past the anchor, and its PAM_gen read the REF text's
+        window from there."""
+        p = _PlantedInsertions(side)
+        got = self.analyze(p, side, gate)
+        cut, motif = MOTIF[side]
+        kp = len(motif)
+        for s in p.sites:
+            token = "%s_%d_%s_%s" % (CHROM, s["pos1"], s["ref"], s["alt"])
+            n, m, a = len(s["fwd"]), s["m"], s["anchor"]
+            ref = p.ref[a:a + n]
+            ref = ref if s["strand"] == "+" else rc(ref)
+            # the PAM's forward indices on the target, and the reference PAM
+            right = (s["strand"] == "+") == (side == "3p")
+            idx = list(range(n - kp, n)) if right else list(range(kp))
+            inserted = [i < m for i in idx]
+            refpos = lambda i: a + 1 + i - m  # a forward reference base of the target
+            if all(inserted):
+                ref_pam = None
+            elif any(inserted):
+                sp = n - kp - 1 if right else kp  # the protospacer's base by the PAM
+                if sp < m:
+                    ref_pam = None
+                else:
+                    lo = refpos(sp) + 1 if right else refpos(sp) - kp
+                    ref_pam = p.ref[lo:lo + kp]
+            else:
+                ref_pam = p.ref[refpos(idx[0]):refpos(idx[-1]) + 1]
+            if ref_pam is not None and s["strand"] == "-":
+                ref_pam = rc(ref_pam)
+            created = ref_pam is None or any(b not in BASES[x] for b, x in zip(ref_pam, motif))
+            for suffix, by_token in got.items():
+                c = by_token[token]
+                where = "%s inside %s(%s) m=%d %s" % (side, suffix, s["strand"], m, c[2])
+                self.assertEqual(int(c[4]), a, where + ": Start_coordinate (the anchor)")
+                self.assertEqual(int(c[5]), a, where + ": Cluster_Position")
+                self.assertEqual(c[18].upper(), ref, where + ": REF text")
+                self.assertEqual(c[10], s["shown"][cut] if created else "n", where + ": PAM_gen")
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_rows_starting_inside_an_insertion_three_prime_pam(self):
+        self.run_inside("3p")
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_rows_starting_inside_an_insertion_five_prime_pam(self):
+        """Cas12a (TTTV): on the + strand the PAM, at the target's 5' end, is the first
+        base; on the - strand the protospacer's 3' end."""
+        self.run_inside("5p")
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_rows_starting_inside_an_insertion_gate_off(self):
+        self.run_inside("3p", gate="0")
+        self.run_inside("5p", gate="0")
 
     @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
     def test_three_prime_pam(self):

@@ -495,6 +495,122 @@ def reference_start(offset, indel_pos1, indel_start, ref, alt):
 
 
 # ---------------------------------------------------------------------------
+# Counting along an indel row's target (2.8.2)
+# ---------------------------------------------------------------------------
+# A SNP row's target is reference bases, and Variant_info_spacer+PAM numbers each of
+# its variants by its distance from the row's start along the reference
+# (resultIntegrator). An indel row's target is bases of the haplotype carrying its
+# indel: an insertion's bases are in it, a deletion's are not. Its variants are
+# numbered the same way along that haplotype: from the target's first base on it to
+# each variant's base on it. Up to 2.8.1 they were numbered along the reference, so a
+# variant past the indel was off by len(ALT) - len(REF), and on a row starting on a
+# base an insertion adds (placed at the insertion's anchor since 2.8.2) by as many bases
+# again as the target does not hold of the insertion.
+
+
+def haplotype_place(pos1, indel_pos1, ref, alt):
+    """The place (1-based), on a haplotype carrying the indel (VCF POS ``indel_pos1``,
+    ``ref``, ``alt``), of the reference base at ``pos1`` (1-based): its own before the
+    bases the indel changes and on the bases REF and ALT share at the start,
+    len(ALT) - len(REF) on past them (the bases they share at the end included). A base
+    the indel deletes or replaces is on no haplotype carrying it: None."""
+    a = indel_pos1 - 1
+    q = pos1 - 1
+    if q < a + kept_bases(ref, alt):
+        return pos1
+    if q >= a + len(ref) - shared_tail(ref, alt):
+        return pos1 + len(alt) - len(ref)
+    return None
+
+
+def haplotype_base_kind(h, indel_pos1, ref, alt):
+    """("ref", p) for the base at place ``h`` (0-based) of a haplotype carrying the indel
+    when it is reference position p (a flank base, a base REF and ALT share at either
+    end); ("alt", p) for an ALT base standing in the place of the REF base p it replaces
+    (an MNV's, a complex record's); ("added", None) for a base the ALT adds, which has no
+    reference position."""
+    a = indel_pos1 - 1
+    c = kept_bases(ref, alt)
+    t = shared_tail(ref, alt)
+    if h < a + c:
+        return "ref", h
+    if h >= a + len(alt) - t:
+        return "ref", h - len(alt) + len(ref)
+    if h - a - c < len(ref) - c - t:
+        return "alt", h
+    return "added", None
+
+
+def row_first_base(strand, start, alt_aligned, ref_aligned, indel, snps=()):
+    """The place (0-based) of an indel row's first aligned base (the leftmost, on either
+    strand) on the haplotype carrying its indel ``indel`` (VCF POS, REF, ALT) and its SNP
+    alts ``snps`` [(POS, REF, ALT)], from what the row shows: its Start_coordinate
+    ``start``, its aligned ALT (the target) and its aligned REF, which holds the reference
+    bases from ``start`` on, as many as the target holds (alignRefFromVar).
+
+    That place is ``start`` unless the first base is one the indel adds: such a row
+    starts at the base the added bases follow (reference_start), and its first base is
+    the k-th added base, k >= 1, at ``start`` + k. The row does not say k, and the bases
+    do: the target is the haplotype's bases from its first base on, and the haplotype
+    from ``start`` on is the REF text's first base when it is a reference one, the ALT's
+    bases, then the REF text's bases past the indel, with the SNP alts the row names. The
+    smallest k at which they are the target's is taken: two places can hold the same
+    target only in a repeat the target lies wholly in, where they hold the same bases (the
+    smaller is the base itself on a row starting on a reference base). None of them,
+    which a row the post-analysis wrote never gives: ``start``."""
+    ipos, iref, ialt = indel
+    if len(ialt) <= len(iref) or start != ipos - 2 + len(iref) - shared_tail(iref, ialt):
+        return start  # no base added, or the row starts before the added bases' anchor
+    target = alt_aligned.replace("-", "").upper()
+    refb = ref_aligned.replace("-", "").upper()
+    if not target or len(refb) != len(target):
+        return start
+    if strand == "-":
+        target, refb = _revcomp(target), _revcomp(refb)
+    n, more = len(target), len(ialt) - len(iref)
+    hap = []
+    for h in range(start, start + n + more):
+        kind, p = haplotype_base_kind(h, ipos, iref, ialt)
+        if kind == "ref":
+            hap.append(refb[p - start] if 0 <= p - start < n else "?")
+        else:
+            hap.append(ialt[h - ipos + 1].upper())
+    for pos1, _r, alt in snps:
+        at = haplotype_place(pos1, ipos, iref, ialt)
+        if at is not None and 0 <= at - 1 - start < len(hap):
+            hap[at - 1 - start] = alt.upper()
+    hap = "".join(hap)
+    for k in range(more + 1):
+        if hap[k:k + n] == target:
+            return start + k
+    return start
+
+
+def variant_places(strand, start, alt_aligned, ref_aligned, tokens):
+    """(place of the row's first base, [place of each variant's POS base]) on the
+    haplotype carrying the row's indel, for the Variant_info_spacer+PAM numbering:
+    ``tokens`` are the row's variants [(POS, REF, ALT)], forward strand, as
+    Variant_info_genome names them, the indel's first. A row whose variants have no indel
+    (a SNP row, an MNV row: no base added or lost) has the reference's: (``start``, their
+    POS). An indel's own POS base, its anchor, is before the bases it changes, so it keeps
+    its place; a SNP past the indel is len(ALT) - len(REF) on (haplotype_place); and the
+    first base is row_first_base's."""
+    indel = next((tk for tk in tokens if len(tk[1]) != len(tk[2])), None)
+    if indel is None:
+        return start, [tk[0] for tk in tokens]
+    snps = [tk for tk in tokens if tk is not indel]
+    places = [indel[0] if tk is indel else
+              (haplotype_place(tk[0], *indel) or tk[0]) for tk in tokens]
+    first = row_first_base(strand, start, alt_aligned, ref_aligned, indel, snps) if snps \
+        else start
+    return first, places
+
+
+def _revcomp(seq):
+    return seq.translate(_COMP)[::-1]
+
+
+# ---------------------------------------------------------------------------
 # A second indel inside a target, read on the sequence (2.8.1)
 # ---------------------------------------------------------------------------
 # The fake-indel window holds one indel, so a carrier whose haplotype also holds a

@@ -5,6 +5,7 @@ import operator
 from posixpath import expanduser
 from intervaltree import IntervalTree
 from utils import gene_region_class
+import indel_snp_cis as _isc
 import sys
 import time
 import glob
@@ -152,6 +153,52 @@ def createBedforMultiAlternative(variantList, samples):
         haplotype += int(allele1[count]) + int(allele2[count])
     # return to save the haplo freq divided by the number of alleles in 1000G (i.e. 2548samples*2alleles)
     return float(haplotype) / 5096
+
+
+def variant_info_spacer_pam(variants, strand, start, aligned_spacer, alt, ref):
+    """Variant_info_spacer+PAM of one block: each variant of ``variants`` (its
+    Variant_info_genome, chrom_POS_REF_ALT tokens, forward strand) numbered along the
+    target, written in the target's orientation.
+
+    A variant's number is the distance from the row's start to its POS base, the row's
+    first aligned base being 1: on the + strand from the left, POS - start; on the -
+    strand from the right, len(aligned spacer) + 1 - (POS - start), less for a deletion
+    the bases it deletes, its REF and ALT reverse-complemented. A variant before the
+    start (an insertion whose added bases the target starts on) is 1 on the + strand,
+    the last on the - strand.
+
+    On an indel row the distance is counted along the haplotype carrying the indel, which
+    holds the bases an insertion adds and not those a deletion removes
+    (indel_snp_cis.variant_places): from the target's first base there, which on a row
+    starting on an added base is past the row's start, the insertion's anchor, to each
+    variant's base there, which past the indel is len(ALT) - len(REF) on. Up to 2.8.1 it
+    was counted along the reference."""
+    if str(variants) == "NA":
+        return ["NA"]
+    toks = []
+    for elem in str(variants).strip().split(","):
+        split = elem.strip().rsplit("_", 3)
+        toks.append((int(split[1]), split[2], split[3]))
+    first, places = _isc.variant_places(strand, int(start), alt, ref, toks)
+    out = []
+    for (_pos, vref, valt), place in zip(toks, places):
+        if "+" in str(strand):
+            var_pos = place - first
+            if var_pos < 1:
+                var_pos = 1
+            out.append(str(var_pos) + vref + ">" + valt)
+            continue
+        correction = len(vref) - len(valt) if len(valt) < len(vref) else 0
+        var_pos = place - first
+        if var_pos < 1:
+            var_pos = len(aligned_spacer)
+        else:
+            # counted from the end of the sequence, which is reverse-complemented
+            var_pos = abs(place - first - 1 - len(aligned_spacer) + correction)
+        out.append(str(var_pos)
+                   + "".join(reversed([rev_comp(b) for b in vref])) + ">"
+                   + "".join(reversed([rev_comp(b) for b in valt])))
+    return out
 
 
 print("READING INPUT FILES")
@@ -456,135 +503,14 @@ for nline, line in enumerate(inCrispritzResults):
         if _annot_dist_val != 0:
             saveDict["Annotation_GENCODE"] = "intergenic"
 
-    variantList = ["NA"]
-    if str(target[18]) != "NA":  # check if target has variants reported (CFD)
-        variantList = str(target[18]).strip().split(",")
-        # generate variant nucleotide reverse complemented always in positive strand
-        for count, elem in enumerate(variantList):
-            split = str(elem).strip().split("_")
-            split_one_len = len(split[2])
-            split_second_len = len(split[3])
-            correction = 0
-            if "+" in str(target[7]):  # strand
-                # var pos is equal to pos_of_variant-real_position
-                var_pos = int(split[1]) - int(target[5])  # real_position
-                if var_pos < 1:
-                    var_pos = 1
-                variantList[count] = str(var_pos) + str(split[2]) + ">" + str(split[3])
-            else:
-                firstcomp = ""
-                secondcomp = ""
-                var_pos = int(split[1]) - int(target[5])
-                if var_pos < 1:
-                    var_pos = len(target[1])
-                else:
-                    # if var pos non negative, count the position in reverse strand so starting from end of the sequence that is been reversed complemented
-                    if split_second_len < split_one_len:
-                        correction = split_one_len - split_second_len
-                    var_pos = abs(
-                        int(split[1]) - int(target[5]) - 1 - len(target[1]) + correction
-                    )
-                for piece in str(split[2]):
-                    firstcomp += rev_comp(piece)
-                for piece in str(split[3]):
-                    secondcomp += rev_comp(piece)
-                variantList[count] = (
-                    str(var_pos)
-                    + "".join(reversed(firstcomp))
-                    + ">"
-                    + "".join(reversed(secondcomp))
-                )
-    variantList_highest_cfd = variantList
-
-    variantList = ["NA"]
-    if str(target[42]) != "NA":  # check if target has variants reported (MMBUL)
-        variantList = str(target[42]).strip().split(",")
-        var_pos = []
-        # generate variant position corrected to be in the positive strand
-        for count, elem in enumerate(variantList):
-            split = str(elem).strip().split("_")
-            split_one_len = len(split[2])
-            split_second_len = len(split[3])
-            correction = 0
-            if "+" in str(target[31]):
-                # var pos is equal to pos_of_variant-real_position
-                var_pos = int(split[1]) - int(target[29])
-                if var_pos < 1:
-                    var_pos = 1
-                variantList[count] = str(var_pos) + str(split[2]) + ">" + str(split[3])
-            else:
-                firstcomp = ""
-                secondcomp = ""
-                var_pos = int(split[1]) - int(target[29])
-                if var_pos < 1:
-                    var_pos = len(target[25])  # aligned_sgRNA
-                else:
-                    # if var pos non negative, count the position in reverse strand so starting from end of the sequence that is been reversed complemented
-                    if split_second_len < split_one_len:
-                        correction = split_one_len - split_second_len
-                    var_pos = abs(
-                        int(split[1])
-                        - int(target[29])
-                        - 1
-                        - len(target[25])
-                        + correction
-                    )
-                for piece in str(split[2]):
-                    firstcomp += rev_comp(piece)
-                for piece in str(split[3]):
-                    secondcomp += rev_comp(piece)
-                variantList[count] = (
-                    str(var_pos)
-                    + "".join(reversed(firstcomp))
-                    + ">"
-                    + "".join(reversed(secondcomp))
-                )
-    variantList_fewest_mm_b = variantList
-
-    variantList = ["NA"]
-    if str(target[66]) != "NA":  # check if target has variants reported (CRISPR-Bulge)
-        variantList = str(target[66]).strip().split(",")
-        var_pos = []
-        # generate variant position corrected to be in the positive strand
-        for count, elem in enumerate(variantList):
-            split = str(elem).strip().split("_")
-            split_one_len = len(split[2])
-            split_second_len = len(split[3])
-            correction = 0
-            if "+" in str(target[55]):
-                # var pos is equal to pos_of_variant-real_position
-                var_pos = int(split[1]) - int(target[53])
-                if var_pos < 1:
-                    var_pos = 1
-                variantList[count] = str(var_pos) + str(split[2]) + ">" + str(split[3])
-            else:
-                firstcomp = ""
-                secondcomp = ""
-                var_pos = int(split[1]) - int(target[53])
-                if var_pos < 1:
-                    var_pos = len(target[49])  # aligned_sgRNA
-                else:
-                    # if var pos non negative, count the position in reverse strand so starting from end of the sequence that is been reversed complemented
-                    if split_second_len < split_one_len:
-                        correction = split_one_len - split_second_len
-                    var_pos = abs(
-                        int(split[1])
-                        - int(target[53])
-                        - 1
-                        - len(target[49])
-                        + correction
-                    )
-                for piece in str(split[2]):
-                    firstcomp += rev_comp(piece)
-                for piece in str(split[3]):
-                    secondcomp += rev_comp(piece)
-                variantList[count] = (
-                    str(var_pos)
-                    + "".join(reversed(firstcomp))
-                    + ">"
-                    + "".join(reversed(secondcomp))
-                )
-    variantList_highest_crispr_bulge = variantList
+    # each block's Variant_info_spacer+PAM, numbered along its target: on an indel row,
+    # along the haplotype carrying the indel (variant_info_spacer_pam)
+    variantList_highest_cfd = variant_info_spacer_pam(
+        target[18], target[7], target[5], target[1], target[2], target[3])
+    variantList_fewest_mm_b = variant_info_spacer_pam(
+        target[42], target[31], target[29], target[25], target[26], target[27])
+    variantList_highest_crispr_bulge = variant_info_spacer_pam(
+        target[66], target[55], target[53], target[49], target[50], target[51])
 
     saveDict["Spacer+PAM"] = str(target[15])
     saveDict["Strand_(highest_CFD)"] = str(target[7])

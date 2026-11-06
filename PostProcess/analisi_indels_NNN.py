@@ -1388,19 +1388,36 @@ def _report_overlaid():
 
 def _reference_pam(final_result, ref_aligned, hap_start=None):
     """The reference bases under an indel row's PAM, in the target's orientation, for
-    telling whether the row's indel created its PAM: the bases the PAM sits on, read
-    through the indel (final_result[17]'s first token). A PAM past the indel on the
-    target -- on the + strand for a 3' PAM, on the - strand for a 5' one -- sits
-    len(REF) - len(ALT) bases from where the row's REF alignment, read from the row's
-    start, puts it (alignRefFromVar), so up to 2.8.0 a deletion or an insertion in the
-    protospacer read the wrong bases there, and a PAM the reference already has was
-    flagged as created. A PAM that holds an ALT base or spans a deletion's junction has
-    no reference bases of its own, nor does one with a bulge in it: those keep the REF
-    alignment's, as before. So does a PAM on the other side, which no indel inside the
-    target moves. ``hap_start`` is the target's first base on the haplotype carrying the
-    indel (the window's real start plus its offset there); it is the row's start except
-    for a row starting on a base an insertion adds, which starts at the insertion's
-    anchor (indel_snp_cis.reference_start). None: the row's start."""
+    telling whether the row's indel created its PAM, or None when the PAM has none: the
+    indel (final_result[17]'s first token) created it.
+
+    * A PAM on reference bases only: the bases it sits on, read through the indel. A PAM
+      past the indel on the target -- on the + strand for a 3' PAM, on the - strand for
+      a 5' one -- sits len(REF) - len(ALT) bases from where the row's REF alignment, read
+      from the row's start, puts it (alignRefFromVar), so up to 2.8.0 a deletion or an
+      insertion in the protospacer read the wrong bases there, and a PAM the reference
+      already has was flagged as created.
+    * A PAM made wholly of bases an insertion adds has no reference bases at all: None
+      (since 2.8.2; up to 2.8.1 the REF alignment's bases were read, from the row's start).
+    * A PAM holding some bases an insertion adds: the reference PAM next to the target's
+      protospacer, the reference bases beside the protospacer's base that touches the PAM,
+      on the PAM's side (that base and the protospacer are reference bases, the inserted
+      ones being in the PAM). So the question is whether the reference holds a valid PAM
+      there, at the PAM's own place beside that protospacer. When that base too is one the
+      insertion adds (the insertion holds the protospacer's end and the PAM's start), the
+      PAM has no place on the reference: None. Up to 2.8.1 the REF alignment's bases were
+      read: from the row's start, so on the - strand with a 3' PAM (the + strand with a 5'
+      one), where the start is the PAM's far end, they were shifted by the PAM's inserted
+      bases, and since 2.8.2 such a row starting on an added base would read from the
+      insertion's anchor, a base its target does not hold.
+    * A PAM that spans a deletion's junction, holds an ALT base standing in a REF base's
+      place (an MNV's) or the bases REF and ALT share, or has a bulge in it keeps the REF
+      alignment's bases, as before.
+
+    ``hap_start`` is the target's first base on the haplotype carrying the indel (the
+    window's real start plus its offset there); it is the row's start except for a row
+    starting on a base an insertion adds, which starts at the insertion's anchor
+    (indel_snp_cis.reference_start). None: the row's start."""
     window = ref_aligned[pam_begin:pam_end].upper()
     if len(window) != len(pam) or "-" in final_result[2][pam_begin:pam_end]:
         return window
@@ -1412,7 +1429,24 @@ def _reference_pam(final_result, ref_aligned, hap_start=None):
         return window
     k = len(pam)
     n = len(final_result[2].replace("-", ""))
-    first = start + n - k if (final_result[6] == "+") != pam_at_beginning else start
+    # the PAM is at the target's right end, forward strand: + with a 3' PAM, - with a 5'
+    right = (final_result[6] == "+") != pam_at_beginning
+    first = start + n - k if right else start
+    kinds = [_isc.haplotype_base_kind(w, ipos, iref, ialt) for w in range(first, first + k)]
+    added = sum(1 for kind, _p in kinds if kind == "added")
+    if added == k:
+        return None  # wholly inserted: the insertion created it
+    if added:
+        # the protospacer's base that touches the PAM, and the reference PAM beside it
+        kind, p = _isc.haplotype_base_kind(first - 1 if right else first + k,
+                                            ipos, iref, ialt)
+        if kind == "added":
+            return None  # the insertion holds the protospacer's end and the PAM's start
+        lo = p + 1 if right else p - k
+        if not 0 <= lo <= lo + k <= len(genomeStr):
+            return window
+        ref = genomeStr[lo:lo + k]
+        return (ref if final_result[6] == "+" else reverse_complement_table(ref)).upper()
     reals = []
     for w in range(first, first + k):  # a base's place on the haplotype -> the reference
         if w < ipos - 1:
@@ -1461,8 +1495,12 @@ def _queue_row(final_result, hap_start=None):
     # removes the false-positive class outright rather than relying on that.
     # The reference bases are those the PAM sits on, read through the indel
     # (_reference_pam), not the REF alignment's, which is read from the row's start.
+    # A PAM with no reference bases (one an insertion made, _reference_pam's None) was
+    # created by the insertion, and is written as the SNP path writes a created PAM.
     ref_pam = _reference_pam(final_result, ref_aligned, hap_start)
-    if len(ref_pam) == len(pam) and all(c in iupac_code_set for c in ref_pam):
+    if ref_pam is None:
+        final_result[10] = final_result[2][pam_begin:pam_end].upper()
+    elif len(ref_pam) == len(pam) and all(c in iupac_code_set for c in ref_pam):
         for pos_pam, pam_char in enumerate(ref_pam):
             if not iupac_code_set[pam[pos_pam]] & iupac_code_set[pam_char]:
                 final_result[10] = final_result[2][pam_begin:pam_end].upper()

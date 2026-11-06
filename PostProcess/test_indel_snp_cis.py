@@ -371,6 +371,106 @@ def test_reference_start_agrees_with_offset_to_real_on_reference_bases():
                 assert _start(off, ref, alt) == real, (ref, alt, off)
 
 
+# --- counting along an indel row's target (variant_places, 2.8.2): a variant's place on
+# the haplotype carrying the indel, and the row's first base there.
+
+
+def _rc(s):
+    return s.translate(str.maketrans("ACGT", "TGCA"))[::-1]
+
+
+def test_haplotype_place_before_and_past_the_indel():
+    # an insertion of 4 at POS 101 (anchor 0-based 100): a base past it is 4 on
+    assert isc.haplotype_place(90, 101, "T", "TCACC") == 90
+    assert isc.haplotype_place(101, 101, "T", "TCACC") == 101      # its own anchor
+    assert isc.haplotype_place(102, 101, "T", "TCACC") == 106
+    # a deletion of 3: a base past it is 3 back, a deleted one is on no haplotype
+    assert isc.haplotype_place(105, 101, "TCAC", "T") == 102
+    assert isc.haplotype_place(102, 101, "TCAC", "T") is None
+    # an MNV: base for base; an unnormalized record's shared tail moves with the change
+    assert isc.haplotype_place(102, 101, "AC", "TG") is None
+    assert isc.haplotype_place(103, 101, "AC", "TG") == 103
+    assert isc.haplotype_place(104, 101, "ATG", "ATCCG") == 106
+    assert isc.haplotype_place(103, 101, "ATG", "ATCCG") == 105    # the tail G
+
+
+def test_haplotype_base_kind():
+    # T>TCACC at POS 101: the anchor (100) is a reference base, 101..104 added, then the
+    # reference from 101 on
+    kinds = [isc.haplotype_base_kind(h, 101, "T", "TCACC") for h in range(99, 107)]
+    assert kinds == [("ref", 99), ("ref", 100), ("added", None), ("added", None),
+                     ("added", None), ("added", None), ("ref", 101), ("ref", 102)]
+    # AT>ACCC: the first C stands in T's place, the other two are added
+    assert [isc.haplotype_base_kind(h, 101, "AT", "ACCC")[0] for h in range(100, 105)] == [
+        "ref", "alt", "added", "added", "ref"]
+    # a deletion and an MNV add nothing
+    assert isc.haplotype_base_kind(101, 101, "TCAC", "T") == ("ref", 104)
+    assert isc.haplotype_base_kind(101, 101, "AC", "TG") == ("alt", 101)
+
+
+def test_row_first_base_on_an_inserted_base():
+    """The oracle's Z3 geometry: TAAG + the guide's first six bases inserted after the
+    anchor T (0-based 99); the target (the guide + TGG) starts at the 4th added base, so
+    the row starts at the anchor and its first base is 4 on, at 103."""
+    g = "ACTGAAATCTGTAAGCAGGC"
+    ins = "AAG" + g[:6]
+    ref = "N" * 99 + "T" + g[6:12] + "C" + g[13:] + "TGG" + "GGGGGG"
+    snp = (100 + 7, "C", g[12])  # the reference C at 0-based 106, the guide's base in cis
+    assert ref[106] == "C" and g[12] != "C"
+    alt = g + "TGG"
+    ref_aligned = ref[99:99 + 23].lower()
+    toks = [(100, "T", "T" + ins), snp]
+    first, places = isc.variant_places("+", 99, alt, ref_aligned, toks)
+    assert first == 103 and places == [100, 107 + 9]
+    assert [max(1, p - first) for p in places] == [1, 13]   # the SNP is the 13th base
+    # with no SNP named the first base does not matter: the reference's
+    assert isc.variant_places("+", 99, alt, ref_aligned, toks[:1]) == (99, [100])
+
+
+def test_row_first_base_minus_strand_chr22():
+    """chr22:21052639 (-), HGDP + 1000 Genomes, README guide: T>TCACC at 21052640 and
+    G>A at 21052641 (in LD); the target's leftmost base is the 3rd added base."""
+    toks = [(21052640, "T", "TCACC"), (21052641, "G", "A")]
+    first, places = isc.variant_places(
+        "-", 21052639, "C-AACAGTGaGCaTgTgTCACTGG", "C-cAacagTgagcaTgtgtcaCCA", toks)
+    assert first == 21052642 and places == [21052640, 21052645]
+    # resultIntegrator's - strand number: len(aligned spacer) + 1 - distance
+    assert abs(places[1] - first - 1 - len("CTAACAGT-TGCTTTTATCACNNN")) == 22
+
+
+def test_row_first_base_reference_start_and_ambiguity():
+    # a row starting on the anchor itself: the anchor's own place
+    toks = [(101, "T", "TCA"), (103, "G", "C")]
+    ref = "N" * 100 + "T" + "AGGTTACCAGTACCAGTTAGGACCTA"
+    hap = "T" + "CA" + "AC" + ref[103:]     # the anchor, CA added, A, the SNP's C ...
+    alt = hap[:23]
+    assert isc.row_first_base("+", 100, alt, ref[100:123], toks[0], toks[1:]) == 100
+    # the 2nd added base: one on
+    assert isc.row_first_base("+", 100, hap[2:25], ref[100:123], toks[0], toks[1:]) == 102
+    # a run the target lies wholly in reads the same bases from several places: the
+    # smallest is taken (the anchor's own base here)
+    run = "N" * 100 + "A" * 40
+    assert isc.row_first_base("+", 100, "A" * 23, run[100:123], (101, "A", "AAA"),
+                              [(110, "A", "A")]) == 100
+    # bases the row's target is not: its start
+    assert isc.row_first_base("+", 100, "G" * 23, ref[100:123], toks[0], toks[1:]) == 100
+    # rows that start before the anchor, deletions, MNVs: the start
+    assert isc.row_first_base("+", 90, alt, ref[90:113], toks[0], toks[1:]) == 90
+    assert isc.row_first_base("+", 100, alt, ref[100:123], (101, "TAG", "T"), ()) == 100
+    assert isc.row_first_base("+", 100, alt, ref[100:123], (101, "TA", "GC"), ()) == 100
+
+
+def test_variant_places_snps_past_a_deletion_and_snp_rows():
+    # a SNP past a 3-base deletion is 3 back; one before it keeps its place
+    toks = [(101, "TCAC", "T"), (95, "A", "G"), (110, "C", "T")]
+    assert isc.variant_places("+", 90, "X", "X", toks) == (90, [101, 95, 107])
+    # SNP rows and MNV rows: the reference's
+    assert isc.variant_places("+", 90, "X", "X", [(95, "A", "G"), (99, "C", "T")]) == (
+        90, [95, 99])
+    assert isc.variant_places("-", 90, "X", "X", [(101, "AC", "TG"), (110, "C", "T")]) == (
+        90, [101, 110])
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
