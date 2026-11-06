@@ -328,7 +328,9 @@ for count, line in enumerate(inEmpiricalResults):
 # worst-case alignment is what gets reported and ADDITIONAL haplotype alignments may
 # exist -- the bed carries the region span, variant count, carriers and the FULL IUPAC
 # protospacer, surfaced verbatim so an interested user can dig into the other alignments,
-# and (2.9.0) the window's bits: log2 of the sequences it spells.
+# and (2.9.0) the window's bits: log2 of the sequences it spells. A hyperdense window is
+# listed whatever CRISPRME_IUPAC_CAP is; one that was not capped (its alignments a per-sample
+# search enumerated within the cap: capped 0) is noted without the greedy worst case.
 hvdr_by_chrom = {}
 _hvdr_folder = os.path.dirname(outFile_name) or "."
 try:
@@ -345,10 +347,13 @@ try:
             _nvar = _f[4]
             _iupac = _f[6] if len(_f) > 6 else ""
             _bits = _f[7] if len(_f) > 7 else ""
+            # a BED of 2.8.1 lists capped windows only
+            _capped = _f[9] != "0" if len(_f) > 9 else True
             hvdr_by_chrom.setdefault(_chrom, IntervalTree())[_s - 1 : _e + 1] = (
                 _nvar,
                 _iupac,
                 _bits,
+                _capped,
             )
 except Exception as _hvdr_err:  # never break integration on a bad/missing bed
     print("high-variant-density BED join skipped:", _hvdr_err)
@@ -378,12 +383,15 @@ def _hvdr_note(chrom, pos):
     hits = tree[pos]
     if not hits:
         return "NA"
-    nvar, iupac, bits = sorted(hits)[0].data
-    note = (
-        "high_variant_density (%s variants%s): a greedy worst-case alignment is "
-        "reported here; additional haplotype alignments may exist"
-        % (nvar, ", 2^%s sequences" % bits if bits else "")
+    nvar, iupac, bits, capped = sorted(hits)[0].data
+    note = "high_variant_density (%s variants%s)" % (
+        nvar, ", 2^%s sequences" % bits if bits else ""
     )
+    if capped:
+        note += (
+            ": a greedy worst-case alignment is reported here; additional haplotype "
+            "alignments may exist"
+        )
     if iupac:
         note += "; full_IUPAC=%s" % iupac
     return note

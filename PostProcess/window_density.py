@@ -74,6 +74,12 @@ def hyperdense(n_sequences):
     return n_sequences >= (1 << HYPERDENSE_BITS)
 
 
+def variant_columns(window):
+    """How many columns of ``window`` are variant positions: letters standing for two bases
+    or more, a four-allele position (Q) among them."""
+    return sum(1 for c in window if _WIDTH.get(c, 1) > 1)
+
+
 def four_allele_offsets(window):
     """The offsets of the four-allele positions (Q) of ``window``."""
     return [i for i, c in enumerate(window) if c in "Qq"]

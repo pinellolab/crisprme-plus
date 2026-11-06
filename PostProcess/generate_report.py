@@ -335,17 +335,24 @@ def _dense_note(value):
     return not _is_na(value) and str(value).strip().startswith("high_variant_density")
 
 
+def _greedy_note(value):
+    """True when a High_variant_density_region value says its window is reported by a greedy
+    worst-case alignment: a capped window's (resultIntegrator), not a hyperdense one whose
+    alignments a per-sample search enumerated within CRISPRME_IUPAC_CAP."""
+    return _dense_note(value) and "greedy worst-case alignment" in str(value)
+
+
 def _greedy_union(row, cols):
     """True for a row of a --per-sample report whose named roster can be the union of its
     variants' carriers rather than its cis carriers: one flagged in High_complexity_region
-    as a dense window, when no dataset of the search has the dict-less tiers (_UNTIERED),
-    with >=2 variants and no indel (an indel row is resolved per carrier haplotype in both
-    modes). Its Observed cell and its per-site link read as in a population-level
-    report."""
+    as a capped dense window (_greedy_note), when no dataset of the search has the
+    dict-less tiers (_UNTIERED), with >=2 variants and no indel (an indel row is resolved
+    per carrier haplotype in both modes). Its Observed cell and its per-site link read as in
+    a population-level report."""
     if not (_PER_SAMPLE and _UNTIERED and "complex_region" in cols and "var_genome" in cols):
         return False
     variants = row.get(cols["var_genome"])
-    return (_dense_note(row.get(cols["complex_region"]))
+    return (_greedy_note(row.get(cols["complex_region"]))
             and _count_variants(variants) >= 2 and not _has_indel(variants))
 
 
