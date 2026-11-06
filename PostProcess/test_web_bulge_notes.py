@@ -442,6 +442,18 @@ class TestRefusedDatasets(_Install):
         launch.assert_called_once_with(
             ["download", "--what", "index", "--index-name", name], "Download index")
 
+    def test_a_dataset_with_a_vcf_that_cannot_be_read(self):
+        # one unreadable .vcf.gz: a Settings build writes no list, yet the note and Submit
+        # said to build its index in Settings, "which writes the list" (M6)
+        self.dataset("broken", ["broken.chr1.vcf.gz"], sample_list=False)
+        with open(os.path.join(self.tmp, "VCFs", "hg38_broken", "broken.chr2.vcf.gz"), "wb") as fh:
+            fh.write(b"not gzip")
+        note = self.note("broken")
+        self.assertIn("Its VCF file broken.chr2.vcf.gz has no readable header (a file cut "
+                      "short, or no VCF), so no build can write the list from it", note)
+        self.assertNotIn("Build its variant index in Settings", note)
+        self.assertEqual(self.submit("broken"), (False, [note]))
+
     def test_a_merged_panel_missing_the_list_of_one_of_its_datasets(self):
         # Submit makes a merged panel's list from its datasets' lists; with one of them
         # missing, the advice said to add the VCF dataset hg38_1000G_HGDP again in

@@ -2169,6 +2169,29 @@ def _vcf_folder_has_samples(vdir: str) -> Optional[bool]:
     return found
 
 
+def _unreadable_vcf(vdir: str) -> Optional[str]:
+    """The first .vcf.gz file of the VCF folder ``vdir`` with no readable #CHROM header (not
+    gzip, cut short, or no VCF), from which Settings writes no sample list
+    (settings_page._vcf_header_samples, the same rule), or None."""
+    try:
+        files = sorted(f for f in os.listdir(vdir) if f.endswith(".vcf.gz"))
+    except OSError:
+        return None
+    for fname in files:
+        try:
+            with gzip.open(os.path.join(vdir, fname), "rt", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("#CHROM"):
+                        break
+                    if not line.startswith("##"):
+                        return fname
+                else:
+                    return fname
+        except Exception:  # noqa: BLE001 - not gzip, cut short, unreadable
+            return fname
+    return None
+
+
 def _vcf_dataset_has_samples(genome_norm: str, dnorm: str) -> bool:
     """True when the VCF folder of a dataset (VCFs/<genome>_<dataset> or
     VCFs/<dataset>) is there and the #CHROM header of one of its .vcf.gz has sample
@@ -2254,7 +2277,14 @@ def samplesid_problem(vcf_folder: str, dataset: str) -> Optional[str]:
             "there, which installs the lists; or add the missing file yourself, then submit "
             "again."
         )
-    if os.path.isdir(vdir):
+    unreadable = _unreadable_vcf(vdir) if os.path.isdir(vdir) else None
+    if unreadable:
+        # a Settings build writes the list from every VCF's header, and writes none when
+        # one has no readable header (M6): the advice to build it led nowhere
+        how = (f"Its VCF file {unreadable} has no readable header (a file cut short, or no "
+               "VCF), so no build can write the list from it: remove the dataset in Settings "
+               "and add it again with that file whole, or add the list yourself")
+    elif os.path.isdir(vdir):
         how = ("Build its variant index in Settings, which writes the list from the VCF "
                "header, or add the file yourself")
     else:
