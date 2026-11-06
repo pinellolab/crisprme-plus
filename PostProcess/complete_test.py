@@ -291,9 +291,18 @@ def download_genome_data(chrom: str, dest: str) -> str:
         # (repo/file missing, no network, huggingface_hub absent) fall back to
         # the original UCSC source transparently. A file the repo does not hold
         # is no failure: one line on stdout says where it comes from instead
+        # The repo holds every chromosome gzipped (genomes/hg38/<chrom>.fa.gz) and chr22
+        # unpacked too: a chromosome but chr22 came from UCSC (FR :725)
         try:
-            hf_fetch(f"genomes/hg38/{chrom}.fa", chromfa)
-            sys.stderr.write(f"Fetched {chrom}.fa from HuggingFace ({HF_DATA_REPO})\n")
+            try:
+                hf_fetch(f"genomes/hg38/{chrom}.fa", chromfa)
+                sys.stderr.write(f"Fetched {chrom}.fa from HuggingFace ({HF_DATA_REPO})\n")
+            except Exception as unpacked:  # noqa: BLE001
+                if not hf_missing(unpacked):
+                    raise
+                hf_fetch(f"genomes/hg38/{chrom}.fa.gz", f"{chromfa}.gz")
+                gunzip(f"{chromfa}.gz", chromfa)  # (which removes the .gz)
+                sys.stderr.write(f"Fetched {chrom}.fa.gz from HuggingFace ({HF_DATA_REPO})\n")
             assert os.path.isfile(chromfa)
             return os.path.abspath(genome_dir)
         except Exception as e:

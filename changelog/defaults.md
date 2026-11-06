@@ -403,3 +403,8 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   FASTA of, on coordinates past its end and on a line short of its three fields: each an HTTP 500
   and a callback error in the browser's console (FR :89, :189). It offers no window for them, as
   for any line Submit then refuses, saying why.
+- **`complete-test --chrom` fetches a chromosome but chr22 from Hugging Face too.** The data repo
+  holds every hg38 chromosome gzipped (`genomes/hg38/<chrom>.fa.gz`) and chr22 unpacked as well,
+  and complete-test asked for the unpacked file alone, so every other chromosome came from UCSC
+  (FR :725). It takes the gzipped one from the Hub when the unpacked one is not there, and UCSC
+  stays its source when neither is: chr21 came from the Hub, 47,644,190 bytes, as from UCSC.

@@ -428,6 +428,40 @@ class WhatTheDataRepoDoesNotHostIsNoFailure(unittest.TestCase):
         self.assertEqual(err, "Downloading fasta file for chromosome(s) chr21\n")
         self.assertEqual(fetched, [f"{ct.HG38URL}/chromosomes/chr21.fa.gz"])
 
+    def test_another_chromosome_comes_gzipped_from_the_hub(self):
+        # the repo holds every chromosome as genomes/hg38/<chrom>.fa.gz, and chr22 unpacked
+        # too: a chromosome but chr22 came from UCSC (FR :725)
+        os.makedirs("Genomes")
+        asked, written = [], {}
+
+        def hf_fetch(name, dest):
+            asked.append(name)
+            if not name.endswith(".gz"):
+                raise self.missing
+            with open(dest, "w") as fh:
+                fh.write("gz")
+
+        def gunzip(gz, out):  # (utils.gunzip's: it removes the .gz)
+            with open(gz) as fh:
+                written[out] = fh.read()
+            os.remove(gz)
+            open(out, "w").close()
+            return out
+
+        fetched, out, err = [], io.StringIO(), io.StringIO()
+        with mock.patch.object(ct, "hf_fetch", hf_fetch), \
+             mock.patch.object(ct, "gunzip", gunzip), \
+             mock.patch.object(ct, "download", lambda *a, **k: fetched.append(k)), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            folder = ct.download_genome_data("chr21", "Genomes")
+        self.assertEqual(asked, ["genomes/hg38/chr21.fa", "genomes/hg38/chr21.fa.gz"])
+        self.assertEqual((fetched, out.getvalue()), ([], ""))
+        self.assertEqual(err.getvalue(), "Downloading fasta file for chromosome(s) chr21\n"
+                                         f"Fetched chr21.fa.gz from HuggingFace "
+                                         f"({ct.HF_DATA_REPO})\n")
+        self.assertEqual(os.listdir(folder), ["chr21.fa"])
+        self.assertEqual(written, {os.path.join("Genomes", "hg38_chr21", "chr21.fa"): "gz"})
+
     def test_a_failure_to_fetch_is_still_said(self):
         os.makedirs("VCFs")
         for hf_error, md5s, why in ((self.offline, (), self.offline),
