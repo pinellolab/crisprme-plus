@@ -3584,10 +3584,10 @@ def render_validation_panel(
     _cb_gate = bool(vp.get("crispr_bulge_counts"))
     if vp.get("n_gate_demoted"):
         _variant_rows += (
-            "<tr><td>Ranked after every other row by the carrier gate (tier C1: at the "
-            "highest-CFD alignment, variants no haplotype of the panel carries together; "
-            "their table follows the top-1000, in Section 6): counted above, left out of the "
-            "CFD and edit-distance thresholds, the panel and the risk card"
+            "<tr><td>Ranked after every other row by the carrier gate (tier C1: no haplotype "
+            "of the panel has the sequence of the row's highest-CFD alignment; their table "
+            "follows the top-1000, in Section 6): counted above, left out of the CFD and "
+            "edit-distance thresholds, the panel and the risk card"
             + ("&rsquo;s CFD bands" if _cb_gate else "")
             + f"</td><td class='num'>{vp['n_gate_demoted']:,}</td></tr>")
     if vp.get("n_gate_demoted_cb") and _cb_gate:

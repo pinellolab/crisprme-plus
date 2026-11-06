@@ -608,11 +608,11 @@ class TestReportRanksByTheGate(unittest.TestCase):
                                     "crispr_bulge_ge_0.20.tsv": ["1000", "3000", "4000"],
                                     "variant_created.tsv": tiers["variant_created.tsv"]})
         html = files["report.html"]
-        self.assertIn("Ranked after every other row by the carrier gate (tier C1: at the "
-                      "highest-CFD alignment, variants no haplotype of the panel carries "
-                      "together; their table follows the top-1000, in Section 6): counted "
-                      "above, left out of the CFD and edit-distance thresholds, the panel and "
-                      "the risk card&rsquo;s CFD bands</td><td class='num'>1</td>", html)
+        self.assertIn("Ranked after every other row by the carrier gate (tier C1: no haplotype "
+                      "of the panel has the sequence of the row's highest-CFD alignment; their "
+                      "table follows the top-1000, in Section 6): counted above, left out of the "
+                      "CFD and edit-distance thresholds, the panel and the risk card&rsquo;s CFD "
+                      "bands</td><td class='num'>1</td>", html)
         self.assertIn("&hellip; at the highest-CRISPR-Bulge alignment: left out of the "
                       "CRISPR-Bulge thresholds and the risk card&rsquo;s CRISPR-Bulge "
                       "bands</td><td class='num'>2</td>", html)
