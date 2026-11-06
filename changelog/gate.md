@@ -65,8 +65,8 @@ population-level run of the README guide).
   threshold (default 3; 0 turns it off). A per-sample search, whose rows name their cis carriers,
   needs none; a dataset with the classic dictionaries alone has no phased store to read, and the
   search and the report say so. On the genome-wide population-level search of the README guide
-  (HGDP + 1000 Genomes, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, 198,826 rows) the gate took 31 s
-  in the search (35 s and 1.6 GB on 12 threads alone) and gave, by each row's highest-CFD
+  (HGDP + 1000 Genomes, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, 198,826 rows) the gate took 32 s
+  in the search (39 s and 1.6 GB on 24 threads alone) and gave, by each row's highest-CFD
   alignment, A 4,155 (690 `one haplotype`, 1 `phase not known`, 2,574 `same score`, none `same
   score as the reference`), B 55,191, C1 40,231 (246 where 3 or more haplotypes were expected,
   39,781
@@ -165,7 +165,13 @@ population-level run of the README guide).
   so his calls in a window are now read as that one haplotype (not as every subset of them, as an
   unphased sample's are) and an indel of his that changes the target takes him off the row,
   whatever else that haplotype holds. On the genome-wide per-sample search of the README guide
-  (HGDP + 1000 Genomes, NRG, 4 + 1 + 1) that leaves PSX_ROWS. On chr22 of the HGDP + 1000 Genomes
+  (HGDP + 1000 Genomes, NRG, 4 + 1 + 1) the three chrX alignments whose listed carriers were all
+  such males -- chrX:47797248(+) (1), chrX:51049628(-) (5) and chrX:87556768(+) (772) -- have no
+  carrier left and their rows are gone, 13 other chrX rows list 1,460 carrier listings fewer, and
+  of the 31 chrX rows that left 5 are replaced by another alignment of their row, so the search
+  returns 170,469 rows against the 170,495 of the same search with the fix on phased calls alone.
+  The gate run over its results (`--mode per-sample --prioritize-observed on`) then finds no C1
+  row, where it found those three. On chr22 of the HGDP + 1000 Genomes
   panel (five guides, NRG, 4 + 1 + 1,
   per sample), of the 22,628 SNP alignments of 2.8.1's 20,751 rows, 132 left their row (32,227
   carrier listings): 127 have no carrier left, and 5 keep 8 of their carriers but, tied with
