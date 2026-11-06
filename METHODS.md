@@ -399,10 +399,13 @@ index's phased indel genotypes (`Dictionaries/indel_genotypes_<vcf>/`): an indiv
 only phased haplotypes holding the row's SNPs (and no other SNP of the window) also hold an
 indel that changes the bases the target covers is not listed, as its own sequence there is
 the indel's (reported on the indel row when it is in budget), and a row left with no carrier
-is not reported. An indel at one of the row's SNPs, or over one, is another allele of that
-base, so a slot phased with both is a phasing artefact and keeps the carrier; so does an
-unphased call of the SNP or of the indel. The same holds on the classic per-sample
-dictionaries. Up to 2.8.1 such a carrier was listed: on chr22 of the HGDP + 1000 Genomes
+is not reported. The haplotype is read on the reference, with the row's SNP alleles and the
+indel, from the target's first base on and up to its last, as the indel rows read a second
+indel (below): an indel that leaves the target's bases where they were (a tandem repeat's
+unit gained or lost, where the repeat runs on past the target) takes no carrier off. An indel
+at one of the row's SNPs, or over one, is another allele of that base, so a slot phased with
+both is a phasing artefact and keeps the carrier; so does an unphased call of the SNP or of
+the indel. The same holds on the classic per-sample dictionaries. Up to 2.8.1 such a carrier was listed: on chr22 of the HGDP + 1000 Genomes
 panel, per sample, 2.2% of SNP row-blocks (990 of 45,921, five guides) named one, and 545
 of them had no listed carrier that holds the sequence.
 
@@ -822,8 +825,8 @@ the search without it (`--no-prioritize-observed`).
 - **Tiers**, for each of a row's three alignments (highest CFD, fewest mismatches + bulges,
   highest CRISPR-Bulge):
   - **A**: two or more variants that one phased haplotype of the panel carries together — on
-    one slot of a phased sample, with no indel of the store on that slot that changes the
-    target's bases (as for the per-sample rows, §4). States: `one haplotype` when a single
+    one slot of a phased sample, with no indel of the store on that slot that takes the
+    target's bases off it (as for the per-sample rows, §4, read on the search's reference). States: `one haplotype` when a single
     one does; `phase not known` when only samples whose genotypes cannot say which haplotype
     holds which variant carry them all (an unphased call, or two ALTs of one position on one
     slot, the PUTATIVE rule).
