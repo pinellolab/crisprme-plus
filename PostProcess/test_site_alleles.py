@@ -224,6 +224,33 @@ class TwoRecordsOfOneRefAlt(unittest.TestCase):
         self.assertEqual((t.AC, t.n_carrier_indiv), (5, 3))
 
 
+class TheRegistryListsTheFourBasePositions(unittest.TestCase):
+    """CRISPRitz 2.10.0 codes every PASS SNP ALT, one no sample carries too, and writes Q
+    where they and the reference base hold all four bases. The registry holds no record
+    of an ALT nobody carries (it has no group), so ``alts_at`` gave such a position three
+    bases, and a reader of its Q column could not tell it from a neighbour's."""
+
+    def test_an_alt_no_sample_carries_counts(self):
+        tmp = tempfile.mkdtemp(prefix="sa_four_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        p5, p9 = _pos1(5), _pos1(9)
+        _build_tiers(tmp, {
+            p5: [("C", "A", "rsA", "0.2", {"S": "1|0"}),
+                 ("C", "G", "rsG", "0", {}),
+                 ("C", "T", "rsT", "0.1", {"V": "1|1"})],
+            p9: [("A", "C", "rsC", "0.1", {"S": "1|0"}),
+                 ("A", "G", "rsG2", "0", {})]}, keep_dict=False)
+        d = os.path.join(tmp, "Dictionaries", "registry_ds")
+        reg = tier0_registry.RegistryReader(os.path.join(d, "reg_chrT.bin"),
+                                            os.path.join(d, "reg_chrT.idx"))
+        self.addCleanup(reg.close)
+        self.assertEqual(reg.alts_at(p5), ["A", "T"])  # no record of G, as before
+        self.assertTrue(reg.four_base(p5))
+        self.assertFalse(reg.four_base(p9))  # A, C and G
+        self.assertFalse(reg.four_base(p5 + 1))
+        self.assertEqual(reg.manifest["four_base_positions"], [p5])
+
+
 class TheDictionaryDecode(unittest.TestCase):
     def test_a_line_of_several_alts_and_a_repeated_allele(self):
         entry = _dict_value([("C", "A", "rs1", "0.25", {"S": "1|2", "X": "1|0"}),
@@ -510,6 +537,38 @@ class TheFourAlleleCodeThroughThePostAnalysis(_SnpPostAnalysis):
                                    mode="1")
         got = self.variant_rows(rows)
         self.assertIn(("chrT_%d_C_A" % _pos1(5),), got)
+
+    def test_an_alt_no_sample_carries(self):
+        """Column 5 holds C (reference), A (S), G (a PASS record nobody carries) and T (V):
+        CRISPRitz codes G all the same, so the window holds Q. The Tier-0 registry holds no
+        record of G, and on the tiers alone (the published layout) the position read three
+        bases: the Q column admitted no alt, and S and V were listed for column 9's G on a
+        haplotype holding the reference C at column 5 (HPRC chr22:17,877,081 T>A, 8
+        copies, T>C none, T>G 46: no row of A or G there, and G's carriers listed on
+        haplotypes holding T). Every layout and mode now reads it as the dictionary does."""
+        ref = _site(c5="C", c9="A")
+        values = {_pos1(5): [("C", "A", "rsA", "0.2", {"S": "1|0"}),
+                             ("C", "G", "rsG", "0", {}),
+                             ("C", "T", "rsT", "0.1", {"V": "1|1"})],
+                  _pos1(9): [("A", "G", "rs9", "0.1", {"S": "1|0", "V": "1|0"})]}
+        a5, t5 = "chrT_%d_C_A" % _pos1(5), "chrT_%d_C_T" % _pos1(5)
+        g9 = "chrT_%d_A_G" % _pos1(9)
+        for mode in ("0", "1"):
+            for tiers, keep_dict in ((True, False), (True, True), (False, False)):
+                with self.subTest(mode=mode, tiers=tiers, keep_dict=keep_dict):
+                    self.tmp = tempfile.mkdtemp(prefix="sa_q0_")
+                    self.addCleanup(shutil.rmtree, self.tmp, True)
+                    rows, _comp = self.analyse(ref, [_window(ref, {5: "Q", 9: "R"})],
+                                               values, tiers=tiers, keep_dict=keep_dict,
+                                               mode=mode)
+                    got = self.variant_rows(rows)
+                    self.assertNotIn((g9,), got)  # no carrier holds C at column 5 with G
+                    if mode == "0":
+                        self.assertEqual({k: got[k][SAMPLES_COL] for k in got},
+                                         {(a5, g9): "S", (t5, g9): "V", (t5,): "V"})
+                    else:
+                        self.assertEqual(set(got[(a5, g9)][SAMPLES_COL].split(",")),
+                                         {"S", "V"})
 
     def test_a_q_column_at_a_position_of_three_bases_admits_none(self):
         """#139 at a Q column: Q permits every base, so it cannot tell its position's

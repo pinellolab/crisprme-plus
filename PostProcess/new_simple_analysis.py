@@ -289,7 +289,7 @@ def _collect_variant_off_target(final_line):
     _variant_off_targets.append(rec)
 
 
-def _column_alleles(code, ref_base, alts):
+def _column_alleles(code, ref_base, alts, chr_pos=None):
     """The alts of a position that the target's own column ``code`` stands for (#139).
 
     The genotype sources return EVERY alt at a genomic position, but the column encodes
@@ -300,11 +300,18 @@ def _column_alleles(code, ref_base, alts):
     permits the alt, i.e. every non-bulge column). A Q permits every base, so it says
     nothing about which position it codes: its alts are kept only where the position
     is one whose reference base and alts hold all four bases (the only position Q
-    codes), and none elsewhere. Never invents a carrier -- only removes a
+    codes), and none elsewhere. An ALT that no sample carries counts, as CRISPRitz
+    codes it: the dictionary lists it, and the Tier-0 registry, which holds no record
+    of it, lists the 0-based ``chr_pos`` as such a position itself
+    (``RegistryReader.four_base``). Never invents a carrier -- only removes a
     target-inconsistent alt."""
     if code in ("Q", "q"):
         held = {str(ref_base).upper()} | {a.upper() for a in alts}
-        return set(alts) if {"A", "C", "G", "T"} <= held else set()
+        if {"A", "C", "G", "T"} <= held or (
+                myreg is not None and chr_pos is not None
+                and myreg.four_base(chr_pos + 1)):
+            return set(alts)
+        return set()
     allowed = iupac_code_set.get(code)
     if allowed is None:
         return set(alts)
@@ -710,7 +717,7 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
             gt_maps.append((elem, gt_map))
         gt_maps = _site.per_alt_entries(gt_maps)
         # #139: only the alts the target's own column stands for (_column_alleles).
-        _admitted = _column_alleles(c, refSeq[pos_c], snpToReplace)
+        _admitted = _column_alleles(c, refSeq[pos_c], snpToReplace, pos_c + int(split[4]))
         alts, carrier_gts, alt_index, info, ps = [], [], [], [], None
         for i, elem in enumerate(snpToReplace):
             if elem not in _admitted:
@@ -986,7 +993,8 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
             # for, so the two paths agree (the dictionary lists every alt of the
             # position, and an alt the column does not hold is no allele of this
             # off-target)
-            _admitted = _column_alleles(c, refSeq[pos_c], snpToReplace)
+            _admitted = _column_alleles(c, refSeq[pos_c], snpToReplace,
+                                        pos_c + int(split[4]))
             for i, elem in enumerate(snpToReplace):
                 if elem not in _admitted:
                     continue
