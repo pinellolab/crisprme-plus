@@ -65,19 +65,33 @@ def read_index_header(path):
     before it reads its leaves is made here, in the same order. A format-1 file has no
     end marker, so one cut short after its first 8 bytes is not seen here.
 
-    CRISPRitz's own reader (crispritz.py read_index_header, which index-info runs), with
-    the header flags of the CRISPRitz this CRISPRme installs (_FLAGS_KNOWN); the test of
-    this module checks the two return the same for the same files."""
+    CRISPRitz's own reader (crispritz.py read_index_header, which index-info runs), as
+    CRISPRitz 2.10.0 has it, with the header flags it knows (_FLAGS_KNOWN): the test of
+    this module, and test/index_format2/check_real_engine.py against the installed
+    CRISPRitz, check the two return the same for the same files."""
 
     def refused(info, why):
         info["error"] = why
         return info
 
+    def damaged(info, header_len, width, size):
+        # a leaf record takes at least 4 + ceil(K/2) + 1 bytes (window start, flank
+        # nibbles, marker or flags byte), so a leaf count the file cannot hold is damage
+        need = header_len + 12 + info["num_leaves"] * (4 + (width + 1) // 2 + 1)
+        if need > size:
+            return refused(info, "damaged: its %d leaves need at least %d bytes, the file holds %d"
+                           % (info["num_leaves"], need, size))
+        return info
+
+    # the PAM the file is named for, <PAM>_<contig>_<part>.bin: searchTST reads every
+    # .bin of a directory at the width of that PAM
+    named = os.fsencode(os.path.basename(path)).split(b"_", 1)[0]
     try:
         fh = open(path, "rb")
     except OSError as exc:
         return refused({"format": None}, "cannot be opened (%s)" % exc.strerror)
     with fh:
+        size = os.fstat(fh.fileno()).st_size
         head = fh.read(28)
         if head[:4] != CZI_MAGIC:
             # format 1 (CRISPRitz <= 2.9.1): no header, the file opens with numLeaves
@@ -88,7 +102,7 @@ def read_index_header(path):
             info = {"format": 1, "num_leaves": leaves, "guide_len": guide}
             if leaves <= 0:
                 return refused(info, "not a valid CRISPRitz index (.bin) file (numLeaves=%d)" % leaves)
-            return info
+            return damaged(info, 0, len(named), size)
         if len(head) < 28:
             return refused({"format": None}, "cut-short index header")
         version, header_len, flags, guide, pam_len, mb = struct.unpack("=6i", head[4:28])
@@ -96,12 +110,11 @@ def read_index_header(path):
             "format": version if version >= 2 else None,
             "pam_at_start": bool(flags & FLAG_PAM_AT_START),
             "pamless": bool(flags & FLAG_PAMLESS),
+            "four_allele": bool(flags & FLAG_FOUR_ALLELE),
             "guide_len": guide,
             "pam_len": pam_len,
             "max_bulges": mb,
         }
-        if flags & FLAG_FOUR_ALLELE:
-            info["four_allele"] = True
         if version > 2:
             return refused(info, "index format %d, newer than this CRISPRitz reads (formats 1 and "
                                  "2): update CRISPRitz, or rebuild the index with this one" % version)
@@ -129,13 +142,12 @@ def read_index_header(path):
         return refused(info, "malformed index: its header gives guide length %d, its body %d"
                        % (guide, body_guide))
     # searchTST reads a format-2 file only if its header PAM is its name's prefix
-    named = os.fsencode(os.path.basename(path)).split(b"_", 1)[0]
     if pam != named:
         return refused(info, "holds the PAM/flank region '%s' but is named for '%s'"
                        % (info["pam"], os.fsdecode(named)))
     if leaves <= 0:
         return refused(info, "not a valid CRISPRitz index (.bin) file (numLeaves=%d)" % leaves)
-    return info
+    return damaged(info, header_len, pam_len, size)
 
 
 def bin_format(path):
@@ -257,6 +269,18 @@ def _first_bin_header(index_dir):
     return None
 
 
+# What read_index_header says of a format-2 file whose header it could not read; any other
+# refusal leaves the header's build parameters read (searchTST then refuses the file, as it
+# does a format-1 file whose leaves are cut short, whose guide length is read all the same)
+_HEADER_UNREAD = ("cut-short index header", "malformed index header", "index format ")
+
+
+def _readable_header(info):
+    """Whether ``info`` (read_index_header) holds the build parameters of a header read."""
+    return (info is not None and info.get("format") in READ_FORMATS
+            and not info.get("error", "").startswith(_HEADER_UNREAD))
+
+
 def built_guide_len(index_dir):
     """The guide length ``index_dir`` was built for, from the header of a .bin of it: in
     format 1 the second int32, in the byte order of the machine that reads it, as the engine
@@ -264,9 +288,7 @@ def built_guide_len(index_dir):
     too short, or one in an index format this CRISPRme does not read (unreadable_bin), whose
     second int32 is its format version."""
     info = _first_bin_header(index_dir)
-    if info is None or info.get("format") not in READ_FORMATS:
-        return None
-    if info["format"] != 1 and "error" in info:
+    if not _readable_header(info):
         return None
     built = info.get("guide_len")
     return built if built and built > 0 else None
@@ -277,7 +299,7 @@ def built_five_prime(index_dir):
     its .bin files records it (format 2); None where it records no side (format 1 holds none:
     the index's .pam_build may) or cannot be read."""
     info = _first_bin_header(index_dir)
-    if info is None or info.get("format") != 2 or "error" in info:
+    if not _readable_header(info) or info["format"] != 2:
         return None
     return info["pam_at_start"]
 

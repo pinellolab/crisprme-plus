@@ -20,7 +20,10 @@ NNGRRT, the 5' TTTV, and PAM-less K = 3, 4 (5') and 8), each indexed at max bulg
   crispritz_bins.count_targets by the rule of the index's format (index_format, from its own
   headers), and a contig has a .bin exactly where holds_target says it holds a target;
 * index_fit.read_index_header returns, for every .bin, what crispritz.py index-info does
-  (format 2 only: CRISPRitz 2.9.1 has no index-info);
+  (format 2 only: CRISPRitz 2.9.1 has no index-info), and for files damaged in one way each
+  (cut in its header, a format version of 3, a flag bit it does not know, another header length,
+  another guide length in its body, named for another PAM, no leaf, more leaves than it holds,
+  no end magic);
 * index_fit.write_index_meta records the format and build parameters the headers hold.
 
 Exits non-zero on any failure.
@@ -76,6 +79,47 @@ def contigs(r, n, q):
             seq[a:a + len(site) + 2] = list("N" + site + "N")
         out[f"c{i}"] = "".join(seq[:size])
     return out
+
+
+def damaged_ones(work, index, name, cell):
+    """read_index_header against index-info on copies of the format-2 file ``name`` of
+    ``index``, each damaged in one way, each alone in a folder (index-info reads folders)."""
+    import struct
+
+    with open(os.path.join(index, name), "rb") as fh:
+        data = fh.read()
+    pam = name.split("_", 1)[0]
+    header_len = 28 + len(pam)
+
+    def put(at, value):
+        return data[:at] + struct.pack("=i", value) + data[at + 4:]
+
+    cases = {
+        "cut in its header": (name, data[:20]),
+        "format 3": (name, put(4, 3)),
+        "flag bit 8": (name, put(12, struct.unpack_from("=i", data, 12)[0] | 8)),
+        "header length": (name, put(8, header_len + 1)),
+        "body guide length": (name, put(header_len + 4, struct.unpack_from("=i", data, 16)[0] + 1)),
+        "another PAM's name": ("A" + name, data),
+        "no leaf": (name, put(header_len, 0)),
+        "more leaves than it holds": (name, put(header_len, 1 << 24)),
+        "no end magic": (name, data[:-4]),
+    }
+    wrong = []
+    for why, (file_name, damaged) in cases.items():
+        folder = os.path.join(work, "damaged", why.replace(" ", "_"))
+        shutil.rmtree(folder, ignore_errors=True)
+        os.makedirs(folder)
+        with open(os.path.join(folder, file_name), "wb") as fh:
+            fh.write(damaged)
+        info = subprocess.run(["crispritz.py", "index-info", folder], capture_output=True,
+                              text=True)
+        theirs = json.loads(info.stdout)["files"][file_name] if info.stdout.strip() else None
+        ours = index_fit.read_index_header(os.path.join(folder, file_name))
+        if ours != theirs or "error" not in ours:
+            wrong.append((why, ours, theirs))
+    say(cell + " read_index_header refuses a damaged file as index-info does", not wrong,
+        str(wrong[:2]))
 
 
 def main(argv):
@@ -159,6 +203,8 @@ def main(argv):
                 ours = {b: index_fit.read_index_header(os.path.join(index, b)) for b in bins}
                 say(cell + " read_index_header is index-info's", ours == theirs,
                     str([(b, ours[b], theirs.get(b)) for b in bins if ours[b] != theirs.get(b)][:2]))
+            if engine_format == 2 and bins:
+                damaged_ones(work, index, bins[0], cell)
             why = index_fit.write_index_meta(index, pam_file, built=True)
             meta = index_fit.read_index_meta(index) or {}
             want = {"index_format": fmt, "build_pam": pam, "side": "5'" if limit < 0 else "3'",

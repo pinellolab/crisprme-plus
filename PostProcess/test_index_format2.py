@@ -295,6 +295,49 @@ class TheFormat2TreeIsTold(unittest.TestCase):
         newer[4:8] = struct.pack("=i", 3)
         self.assertIn("index format 3", told(bytes(newer)))
 
+    def test_the_header_reader_refuses_what_crispritz_2_10_refuses(self):
+        """index_fit.read_index_header is CRISPRitz 2.10.0's own (crispritz.py index-info):
+        the same refusal, in its words, of a file damaged in one way each, and of a good one
+        the same build parameters, the four-allele flag among them
+        (test/index_format2/check_real_engine.py compares the two on the real engine)."""
+        tmp = tempfile.mkdtemp(prefix="fmt2_reader_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        data = save_tst2([(3, "ACGTAC", "AGG", 0x02), (9, "ACGTTT", "TGG", 0x41)], "NGG", 6, 2,
+                         q=True)
+
+        def read(blob, name="NGG_chr1_1.bin"):
+            with open(os.path.join(tmp, name), "wb") as fh:
+                fh.write(blob)
+            return index_fit.read_index_header(os.path.join(tmp, name))
+
+        def put(at, value):
+            return data[:at] + struct.pack("=i", value) + data[at + 4:]
+
+        self.assertEqual(read(data), {
+            "format": 2, "pam_at_start": False, "pamless": False, "four_allele": True,
+            "guide_len": 6, "pam_len": 3, "max_bulges": 2, "pam": "NGG", "complete": True,
+            "num_leaves": 2})
+        for blob, name, why in (
+                (data[:20], "NGG_chr1_1.bin", "cut-short index header"),
+                (put(4, 3), "NGG_chr1_1.bin", "index format 3, newer than this CRISPRitz reads"),
+                (put(12, 12), "NGG_chr1_1.bin", "malformed index header (version 2, flags 12,"),
+                (put(8, 32), "NGG_chr1_1.bin", "malformed index header (version 2, flags 4, "
+                                               "PAM length 3, header length 32,"),
+                (put(35, 7), "NGG_chr1_1.bin", "malformed index: its header gives guide length "
+                                               "6, its body 7"),
+                (data, "NRG_chr1_1.bin", "holds the PAM/flank region 'NGG' but is named for 'NRG'"),
+                (put(31, 0), "NGG_chr1_1.bin", "not a valid CRISPRitz index (.bin) file "
+                                               "(numLeaves=0)"),
+                (put(31, 1 << 24), "NGG_chr1_1.bin", "damaged: its 16777216 leaves need at least "),
+                (data[:-4], "NGG_chr1_1.bin", "cut short: it does not end in the end-of-index "
+                                              "marker")):
+            with self.subTest(why=why):
+                self.assertTrue(read(blob, name).get("error", "").startswith(why),
+                                read(blob, name))
+        # format 1: a leaf count the file cannot hold is damage too
+        self.assertTrue(read(struct.pack("=ii", 7, 20) + bytes(8)).get("error", "").startswith(
+            "damaged: its 7 leaves need at least 61 bytes, the file holds 16"))
+
     def test_a_format_1_tree_is_read_as_before(self):
         """(the format-1 checks are TheIndexCheckTellsAWholeTreeFromOneCutShort's, in
         test_build_index_only_atomic: here, that _leaves still reads its first int)"""
