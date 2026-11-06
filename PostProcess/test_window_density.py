@@ -626,8 +626,9 @@ class TheReport(unittest.TestCase):
                       "2<sup>20</sup> sequences or more", html)
         self.assertIn("1 reported off-target lies in a window holding a four-allele "
                       "position", html)
-        self.assertIn("Each SNP variant row rests on at most 2 ambiguous columns "
-                      "(<code>--max-degeneracy 2</code>)", html)
+        self.assertIn("A SNP variant row rests on at most 2 ambiguous columns "
+                      "(<code>--max-degeneracy 2</code>) unless its carriers hold its variants "
+                      "together on one phased haplotype.", html)
         self.assertIn("seldom exists in any one genome", html)
         plain = gr.render_inputs_criteria(base)
         self.assertNotIn("Hyperdense and four-allele windows", plain)
@@ -638,6 +639,26 @@ class TheReport(unittest.TestCase):
         self.assertIn("1 reported off-target lies in a hyperdense window, one spelling "
                       "2<sup>20</sup> sequences or more", per_sample)
         self.assertNotIn("seldom exists in any one genome", per_sample)
+
+    def test_the_cap_is_stated_with_its_exception(self):
+        """--max-degeneracy keeps a row whose carriers hold its variants together on one
+        phased haplotype whatever the columns it rests on (a per-sample report's CONFIRMED
+        row: MaxDegeneracy.test_a_phased_haplotype_keeps_its_row keeps one resting on 3 under
+        a cap of 1). The search criteria state the cap with that exception in the same
+        sentence, never as a bound every SNP variant row keeps."""
+        base = {"datasets": "HGDP1kGP", "mm": "4", "bdna": 1, "brna": 1, "max_edits": "6",
+                "max_degeneracy": "1"}
+        for mode in ("per-sample", "population-level"):
+            with self.subTest(mode=mode):
+                html = gr.render_inputs_criteria({**base, "search_mode": mode})
+                at = html.index("rests on at most 1 ambiguous column")
+                sentence = html[html.rfind(". ", 0, at) + 2:html.index(". ", at) + 1]
+                self.assertEqual(
+                    sentence,
+                    "A SNP variant row rests on at most 1 ambiguous column (<code>"
+                    "--max-degeneracy 1</code>) unless its carriers hold its variants "
+                    "together on one phased haplotype.")
+                self.assertNotIn("Each SNP variant row", html)
 
     def test_the_legend_says_both(self):
         """One word each: a window is dense over CRISPRME_IUPAC_CAP, as since 2.8.1, and

@@ -624,12 +624,12 @@ def print_help_complete_search() -> None:
         "REF-based mismatches+bulges reported in the results can exceed the cap "
         "(reference off-targets are always <= the cap) [OPTIONAL]\n"
         "\t--max-degeneracy, the most ambiguous columns a reported SNP variant row may "
-        "rest on: columns of the variant genome where the reference base would be a "
-        "mismatch, or break the PAM, and the row's allele fits. A worst-case alignment "
-        "(population-level, or a dense window's) is cut back to the strongest within it; "
-        "any other row resting on more is left out, unless its carriers hold its variants "
-        "together on one phased haplotype. Rows resting on 2 or more such columns are "
-        "rarely carried by anyone. Variant searches only; off by default [OPTIONAL]\n"
+        "rest on, unless its carriers hold its variants together on one phased haplotype: "
+        "columns of the variant genome where the reference base would be a mismatch, or "
+        "break the PAM, and the row's allele fits. A worst-case alignment (population-level, "
+        "or a dense window's) is cut back to the strongest within it; any other row resting "
+        "on more without such carriers is left out. Rows resting on 2 or more such columns "
+        "are rarely carried by anyone. Variant searches only; off by default [OPTIONAL]\n"
         "\t--full_input_validate, also run a full per-VCF-record scan (chromosome "
         "coverage, AF/FILTER consistency, POS bounds, multiallelic/breakend/"
         "duplicate/phasing survey) before launching the search; slower than the "
@@ -2908,8 +2908,9 @@ def complete_search() -> None:
             error("Please provide a non-negative integer for --max-total-edits")
         if max_total_edits < 0:
             error("--max-total-edits must be a non-negative integer")
-    # the most ambiguous columns a reported SNP variant row may rest on (--max-degeneracy;
-    # -1, the default, is no cap). new_simple_analysis.py reads it from
+    # the most ambiguous columns a reported SNP variant row may rest on unless its carriers
+    # hold its variants together on one phased haplotype (--max-degeneracy; -1, the
+    # default, is no cap). new_simple_analysis.py reads it from
     # CRISPRME_MAX_DEGENERACY, inherited by the post-analysis like CRISPRME_FAST_MODE.
     max_degeneracy = -1
     if "--max-degeneracy" in args:

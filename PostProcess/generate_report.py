@@ -1896,18 +1896,20 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
 
 def _degeneracy_note(max_degeneracy):
     """What complete-search's --max-degeneracy (.Params.txt "Max_degeneracy") did, for the
-    search-criteria row: "" when it was not given."""
+    search-criteria row: "" when it was not given. A row whose carriers hold its variants
+    together on one phased haplotype (a per-sample report's CONFIRMED row) is kept whatever
+    the columns it rests on, so the cap is stated with that exception."""
     try:
         k = int(str(max_degeneracy).strip())
     except (TypeError, ValueError):
         return ""
     return (
-        f" Each SNP variant row rests on at most {k} ambiguous column"
-        f"{'' if k == 1 else 's'} (<code>--max-degeneracy {k}</code>): columns of the variant "
-        "genome where the reference base would be a mismatch, or break the PAM, and the "
-        "row&rsquo;s allele fits. A worst-case alignment was cut back to the strongest within "
-        "that, and any other row resting on more was left out, unless its carriers hold its "
-        "variants together on one phased haplotype."
+        f" A SNP variant row rests on at most {k} ambiguous column{'' if k == 1 else 's'} "
+        f"(<code>--max-degeneracy {k}</code>) unless its carriers hold its variants together "
+        "on one phased haplotype. An ambiguous column is one of the variant genome where the "
+        "reference base would be a mismatch, or break the PAM, and the row&rsquo;s allele "
+        "fits. A worst-case alignment was cut back to the strongest within that, and any other "
+        "row resting on more without such carriers was left out."
     )
 
 

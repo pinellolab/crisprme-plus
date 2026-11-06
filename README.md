@@ -1011,15 +1011,16 @@ its purpose and usage:
   this value.
 
 - `--max-degeneracy` (*Optional*, off by default)
-  <br>The most ambiguous columns a reported SNP variant row may rest on: columns of the
-  variant genome where the reference base would be a mismatch, or break the PAM, and the
-  row's allele fits. Rows resting on two or more are rarely carried by anyone (on chr22 of
+  <br>The most ambiguous columns a reported SNP variant row may rest on, unless its
+  carriers hold its variants together on one phased haplotype: columns of the variant
+  genome where the reference base would be a mismatch, or break the PAM, and the row's
+  allele fits. Rows resting on two or more are rarely carried by anyone (on chr22 of
   HGDP + 1000 Genomes a real phased haplotype carries 5.6% of the alignments resting on two,
   0.02% of those resting on four or more; METHODS.md §5). A worst-case alignment
   (population-level, or a dense window's) is cut back to the strongest within the cap; any
-  other row resting on more is left out, unless its carriers hold its variants together on
-  one phased haplotype. `complete-search` says per chromosome how many were cut back and
-  left out, and the report states the cap. Variant searches only.
+  other row resting on more without such carriers is left out. `complete-search` says per
+  chromosome how many were cut back and left out, and the report states the cap. Variant
+  searches only.
 
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP
