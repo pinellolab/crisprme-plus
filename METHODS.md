@@ -627,13 +627,15 @@ complementary controls:
   bounded procedure still emits a **greedy minimum-mismatch representative** for the
   window — at each variant column it takes the allele that most lowers the mismatch count,
   which (mismatches being additive per column) is the exact argmin over all 2ᵏ
-  combinations, i.e. the window's worst-case off-target. So a capped window **always
-  surfaces at least one off-target row**; the cap trades exhaustive per-haplotype
-  enumeration for a single conservative representative, never the whole region.
+  combinations, i.e. the window's worst-case off-target. So a capped window **surfaces at
+  least one off-target row**, unless `--max-degeneracy` (below) cuts that representative
+  back past the search's limits; the cap trades exhaustive per-haplotype enumeration for a
+  single conservative representative, never the whole region.
 - **Hyperdense windows, flagged whatever the cap.** A window spelling 2²⁰ sequences or
   more is hyperdense: it matches nearly any guide somewhere, as uninformative as a gap, yet
   the engine reports it, as every column admits the guide's base. Such a window is listed
-  in the BED below whatever `CRISPRME_IUPAC_CAP` is, and the report's
+  in the BED below whatever `CRISPRME_IUPAC_CAP` is, read from its own letters (so a window
+  whose only variant letters are four-allele positions is listed too), and the report's
   `High_complexity_region` column gives its count (`24 in window (2^24.0 sequences)`).
   Among the indexable NRG windows of chr22 (holding no `N`, their letters able to spell NRG
   on either strand) the reference genome has none, the variant genome of HGDP + 1000
@@ -641,7 +643,11 @@ complementary controls:
   CRISPRitz 2.10.0 writes from the same VCF, every allele coded (`Q` at its 2,448
   four-allele positions), 5,103 (2,266 of them at 2³⁰ or more; the worst 2^44.75, at
   chr22:22,881,189 in IGL). The threshold, 2²⁰, is a judgment call
-  (`window_density.HYPERDENSE_BITS`, the one constant to tune).
+  (`window_density.HYPERDENSE_BITS`, the one constant to tune). At the default cap every
+  hyperdense window is dense as well. Within a cap raised to its bits, or with
+  `CRISPRME_IUPAC_CAP=-1`, a `--per-sample` search enumerates its combinations as any other
+  window's, so its rows are its carriers' own haplotypes: its BED line says it was not
+  capped, and its rows are noted without a greedy worst case.
 - **Four-allele positions.** Where the reference base and three ALTs cover A, C, G and T,
   the variant genome writes `Q` (CRISPRitz 2.10.0), which matches any base; `N` stays an
   assembly gap. The post-analysis lists the four-allele positions of the windows the
@@ -649,13 +655,15 @@ complementary controls:
   names them on the row whose window holds one (`four_allele_positions=chr:pos`, 1-based;
   the report: `1 four-allele position`).
 - **Density reporting + transparency.** Every dense window, and every hyperdense one, is
-  written to a `high_variant_density_regions.bed` sidecar (region span, variant count,
-  carriers, the full IUPAC protospacer, and, since 2.9.0, its bits and its number of
-  four-allele positions), and each affected off-target carries a
-  `High_variant_density_region` column in `integrated_results.tsv` noting that a
+  written to a `high_variant_density_regions.bed` sidecar (region span; variant count,
+  every variant column of the window, a four-allele one too; carriers; the full IUPAC
+  protospacer; and, since 2.9.0, its bits, its number of four-allele positions, and
+  whether it was capped, over the cap or in a population-level search), and each
+  affected off-target carries a `High_variant_density_region` column in
+  `integrated_results.tsv` giving the window's variant count and sequences and the full
+  IUPAC sequence so a user can dig into them, and, for a capped window, noting that a
   greedy worst-case alignment is reported and additional haplotype alignments may
-  exist, with the window's sequences and the full IUPAC sequence so a user can dig into
-  them. Nothing is silently truncated — the bound, the representative, and the
+  exist. Nothing is silently truncated — the bound, the representative, and the
   alternatives are all auditable. `complete-search` says per chromosome how many windows
   were dense and how many hyperdense (stdout, `log_verbose.txt`).
 - **The ambiguous columns an alignment rests on, D, and `--max-degeneracy`.** D counts the
@@ -670,19 +678,24 @@ complementary controls:
   greedy one) is cut back to the strongest resting on at most K columns (a valid PAM
   first, then the fewest mismatches or the highest CFD), and any other row resting on more
   is left out, unless its carriers hold its variants together on one phased haplotype
-  (a CONFIRMED observed haplotype, or a phased dictionary's combination); the reference
-  row keeps the locus. It is a precision knob, not a gate: an alignment resting on two
-  columns is rare but real for some. `complete-search` says per chromosome how many were
-  cut back and how many left out, and the report states the cap. An indel row is resolved
-  per carrier haplotype (§4) and is not cut. On chr22 of the published index, the README
+  (a CONFIRMED observed haplotype, or a phased dictionary's combination). The reference
+  row keeps the locus where the reference alignment is within the search's limits; a site
+  that only such alignments reach goes, and a capped window can be left with no row. It
+  is a precision knob, not a gate: an alignment resting on two columns is rare but real
+  for some. `complete-search` says per chromosome how many were cut back and how many left
+  out, and the report states the cap. An indel row is resolved per carrier haplotype (§4)
+  and is not cut. On chr22 of the published index, the README
   guide's population-level search (4 mismatches + 1 DNA + 1 RNA bulge) reports 2,198 rows;
   681 of its 1,257 SNP variant rows rest on two or more columns, the second-highest by CFD
-  (0.299, in IGL) on eleven. With `--max-degeneracy 1` it reports 1,573: the 634 sites only
-  such alignments reach go, and 49 of the 100 sites with the highest CFD leave the top 100.
-  Its per-sample search changes no row, its multi-variant rows being CONFIRMED haplotypes.
+  (0.299, in IGL) on eleven. With `--max-degeneracy 1` it reports 1,573: 625 sites go, those
+  only such alignments reach (9 more move by 1 or 2 nt, to where their cut-back alignment
+  starts), the rows lying in a dense window fall from 281 to 2, and 47 to 49 of the 100
+  sites with the highest CFD leave the top 100, as the ties at the 100th CFD fall. Its
+  per-sample search changes no row, its multi-variant rows being CONFIRMED haplotypes.
 
 Together these keep genome-wide variant search tractable while making any bound
-that was applied explicit and reviewable, and guaranteeing no region is dropped.
+that was applied explicit and reviewable, and, unless `--max-degeneracy` is given,
+guaranteeing no region is dropped.
 
 On a **genotyped** panel the observed-haplotype enumerator (§4) already emits every
 carried multi-variant haplotype exactly, so the greedy representative is only a
