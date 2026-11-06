@@ -161,6 +161,20 @@ def _build_tiers(root, values, keep_dict):
     return dict_path
 
 
+def _store_of_2_8_1(root, values):
+    """Rewrite the Tier-1 store ``_build_tiers`` made under ``root`` as CRISPRme 2.8.1
+    compiled it: each dictionary entry's carriers with their genotypes as written (a line
+    of several ALTs keeps its raw 1|2 under each of its ALTs), not read per ALT."""
+    d = os.path.join(root, "Dictionaries", "genotypes_ds")
+    paths = (os.path.join(d, "gt_chrT.bin"), os.path.join(d, "gt_chrT.idx"))
+    reader = tier1_genotypes.GenotypeReader(*paths)
+    axis = reader._axis
+    reader.close()
+    tier1_genotypes.compile_genotypes(
+        [(p, alt, dict(carriers), ref) for p, entries in values.items()
+         for ref, alt, _rsid, _af, carriers in entries if carriers], axis, *paths)
+
+
 class TheTiersOfALineOfSeveralAlts(unittest.TestCase):
     """A VCF line C>A,T: S is 1|2, X 1|0, Y 2|2. The registry counted every allele of a
     carrier against "1", so T's carriers, written 2, were reference (registry AC 2
@@ -307,6 +321,36 @@ class ThePopulationSummaryOfTwoAltsOnASlot(unittest.TestCase):
         g = summary.groups[tier0_registry.GLOBAL_GROUP_ID]
         self.assertEqual((g.n_carrier, g.allele_count), (2, 1))
 
+    def test_a_store_of_an_earlier_release(self):
+        """A line C>A,T at column 5 (S 1|2: T on slot 1) and A>G at column 9 (S 0|1), in a
+        Tier-1 store compiled by 2.8.1, which keeps the raw 1|2 under A and T: the row T + G
+        is S's haplotype 1, one cis copy, as in the store this release compiles."""
+        p5, p9 = _pos1(5), _pos1(9)
+        values = {p5: [("C", "A", "rs1", "0.1", {"S": "1|2", "X": "1|0"}),
+                       ("C", "T", "rs1", "0.1", {"S": "1|2", "Y": "2|2"})],
+                  p9: [("A", "G", "rs9", "0.1", {"S": "0|1"})]}
+        for old_store in (False, True):
+            with self.subTest(store_of_2_8_1=old_store):
+                tmp = tempfile.mkdtemp(prefix="sa_pop281_")
+                self.addCleanup(shutil.rmtree, tmp, True)
+                _build_tiers(tmp, values, keep_dict=False)
+                if old_store:
+                    _store_of_2_8_1(tmp, values)
+                d = os.path.join(tmp, "Dictionaries")
+                reg = tier0_registry.RegistryReader(
+                    os.path.join(d, "registry_ds", "reg_chrT.bin"),
+                    os.path.join(d, "registry_ds", "reg_chrT.idx"))
+                gt = tier1_genotypes.GenotypeReader(
+                    os.path.join(d, "genotypes_ds", "gt_chrT.bin"),
+                    os.path.join(d, "genotypes_ds", "gt_chrT.idx"))
+                self.addCleanup(reg.close)
+                self.addCleanup(gt.close)
+                summary = population_summary.summarize(
+                    [(p5, "T"), (p9, "G")], reg, gt, gt._axis,
+                    tier0_compile.ploidy_of_for_chrom("chrT"), phased=True)
+                g = summary.groups[tier0_registry.GLOBAL_GROUP_ID]
+                self.assertEqual((g.n_carrier, g.allele_count), (1, 1))
+
 
 # --------------------------------------------------------------------------- #
 # Q in the readers of variant codes
@@ -395,7 +439,7 @@ class _SnpPostAnalysis(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
     def analyse(self, ref, windows, values, tiers=True, keep_dict=False, mode="0",
-                mms=4, sites_only_vcf=None, genotypes=True):
+                mms=4, sites_only_vcf=None, genotypes=True, store_of_2_8_1=False):
         fasta = os.path.join(self.tmp, "chrT.fa")
         with open(fasta, "w") as fh:
             fh.write(">chrT\n" + FLANK + ref + FLANK + "\n")
@@ -406,6 +450,8 @@ class _SnpPostAnalysis(unittest.TestCase):
             dict_path = os.path.join(ddir, "dictionaries_ds", "my_dict_chrT.json")
         elif tiers:
             dict_path = _build_tiers(self.tmp, values, keep_dict)
+            if store_of_2_8_1:
+                _store_of_2_8_1(self.tmp, values)
             if not genotypes:  # the registry alone, as `download --no-genotypes` leaves it
                 shutil.rmtree(os.path.join(self.tmp, "Dictionaries", "genotypes_ds"))
         else:
@@ -659,6 +705,16 @@ class ALineOfSeveralAltsThroughThePostAnalysis(_SnpPostAnalysis):
         self.assertEqual(got[(t, g)][AF].split(",")[0], "%.6g" % (3 / 16.0))
         phases = {row["SNP"]: row["Phase_Confirmation"] for row in comp["phase_confirmation"]}
         self.assertEqual(phases[t + "," + g], "CONFIRMED")
+
+    def test_on_a_store_of_an_earlier_release(self):
+        """A Tier-1 store compiled by 2.8.1 holds the raw 1|2 under each ALT of the line:
+        the observed path reads it per ALT, as the store this release compiles."""
+        rows, comp = self.analyse(self.REF, [_window(self.REF, {5: "H", 9: "R"})],
+                                  self.VALUES, store_of_2_8_1=True)
+        self._check(rows)
+        phases = {row["SNP"]: row["Phase_Confirmation"] for row in comp["phase_confirmation"]}
+        self.assertEqual(phases["chrT_%d_C_T,chrT_%d_A_G" % (_pos1(5), _pos1(9))],
+                         "CONFIRMED")
 
 
 def _mega_vcf(path, records):
