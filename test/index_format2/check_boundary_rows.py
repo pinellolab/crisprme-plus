@@ -12,13 +12,17 @@ the genome, a variant dictionary or the indel log around a row must hold at thos
 no index of format 1 ever returned. This builds a synthetic genome planted with such sites --
 perfect, mismatched and bulged, on both strands, with SNPs and indels near them, phased over six
 samples -- and runs complete-search on it (reference, and variant per-sample and
-population-level, 4 mismatches and 1 + 1 bulges; NGG, and the 5' TTTV), with the CRISPRitz on
+population-level, 4 mismatches and 1 + 1 bulges; NGG, and the 5' TTTV; and NGG under --prune-pam
+off a PAM-less index of an 8-nt flank, in a working directory of its own), with the CRISPRitz on
 PATH. It checks that every run ends well with nothing on stderr, and that every row of the
 integrated results is the genome's own bases at its coordinates: a reference row its reference
 bases, a variant row its reference bases but at its variants' positions (each a variant of the
-dataset), an indel row a target within its chromosome. Run inside an image with the tree under
-test in place, once with each engine; --compare then checks that the format-2 results hold
-every format-1 row, and that each row more lies at a boundary.
+dataset), an indel row a target within its chromosome. The --prune-pam search off the 8-nt
+flank must give the rows of the dedicated NGG index (format 2; format 1 misses the PAMs within 5
+nt of a contig end, IDX-4). Run inside an image with the tree under test in place, once with each
+engine; --compare then checks that the format-2 results hold every format-1 row that is its
+genome's bases (format 1 reports a minus-strand PAM at a contig's first base on the plus strand,
+IDX-14), and that each row more lies at a boundary.
 
 Exits non-zero on any failure.
 """
@@ -141,7 +145,8 @@ def make(work):
             fh.write(f"{s}\tP1\tS1\tmale\n")
     os.makedirs(os.path.join(work, "PAMs"))
     for name, line in (("20bp-NGG-SpCas9.txt", "N" * 20 + "NGG 3\n"),
-                       ("20bp-TTTV-Cas12a.txt", "TTTV" + "N" * 20 + " -4\n")):
+                       ("20bp-TTTV-Cas12a.txt", "TTTV" + "N" * 20 + " -4\n"),
+                       ("20bp-NNNNNNNN-NO-PAM.txt", "N" * 28 + " 8\n")):
         with open(os.path.join(work, "PAMs", name), "w") as fh:
             fh.write(line)
     for name, text in (("list_vcf.txt", "bx_ds\n"), ("list_samplesID.txt", "bx_ds.samplesID.txt\n"),
@@ -178,10 +183,10 @@ def table(work, output):
     return head, [dict(zip(head, ln.split("\t"))) for ln in lines[1:] if ln]
 
 
-def check_rows(seqs, recs, output, rows):
-    """Every row of a run is its chromosome's bases at its coordinates (REF), or those but at
-    the positions of its variants (ALT), each a variant of the dataset; an indel row lies within
-    its chromosome."""
+def wrong_rows(seqs, recs, rows):
+    """The rows of a run, as (block, chromosome, start, strand, target, why), that are not
+    their chromosome's bases at their coordinates (REF), or those but at the positions of their
+    variants (ALT), each a variant of the dataset; or, an indel row, not within its chromosome."""
     snps = {(c, p): (ref, alt) for c, p, ref, alt, _g in recs if len(ref) == len(alt) == 1}
     bad = []
     for row in rows:
@@ -217,6 +222,11 @@ def check_rows(seqs, recs, output, rows):
                         continue
                 bad.append((block, chrom, start, strand, target, f"base {i}: {a} vs {genomic[i]}"))
                 break
+    return bad
+
+
+def check_rows(seqs, recs, output, rows):
+    bad = wrong_rows(seqs, recs, rows)
     say(f"{output}: every row is its genome's bases ({len(rows)} rows)", not bad, str(bad[:4]))
 
 
@@ -243,6 +253,32 @@ def run(work):
             f"rc {code}: {(log_error or err)[-1500:]}")
         _head, rows = table(work, output)
         check_rows(seqs, recs, output, rows)
+    # NGG under --prune-pam off a PAM-less index of an 8-nt flank, the only index of a working
+    # directory of its own: the dedicated index's rows (format 2)
+    k8 = os.path.join(work, "k8")
+    os.makedirs(k8)
+    make(k8)
+    code, out, err = cli(k8, "build-index-only", "--genome", "Genomes/bx", "--pam",
+                         "PAMs/20bp-NNNNNNNN-NO-PAM.txt", "--bDNA", "1", "--bRNA", "1",
+                         "--thread", "2")
+    say("build-index-only of the 8-nt flank: ends well, nothing on stderr", code == 0 and not err,
+        f"rc {code}: {err[-1500:]}")
+    code, out, err = cli(k8, "complete-search", "--genome", "Genomes/bx", "--guide", "g20.txt",
+                         "--pam", "PAMs/20bp-NGG-SpCas9.txt", "--mm", "4", "--bDNA", "1", "--bRNA",
+                         "1", "--output", "ref_ngg_k8", "--thread", "2", "--prune-pam",
+                         "--index-path", "genome_library")
+    log_error = ""
+    if os.path.isfile(os.path.join(k8, "Results", "ref_ngg_k8", "log_error.txt")):
+        with open(os.path.join(k8, "Results", "ref_ngg_k8", "log_error.txt")) as fh:
+            log_error = fh.read()
+    say("ref_ngg_k8: ends well, nothing on stderr", code == 0 and not log_error.strip(),
+        f"rc {code}: {(log_error or err)[-1500:]}")
+    _head, rows = table(k8, "ref_ngg_k8")
+    check_rows(seqs, recs, "ref_ngg_k8", rows)
+    _head, dedicated = table(work, "ref_ngg")
+    pruned, own = {key(r) for r in rows}, {key(r) for r in dedicated}
+    say(f"ref_ngg_k8: the rows of the dedicated index ({len(pruned)} / {len(own)})", pruned == own,
+        f"only pruned {sorted(pruned - own)[:3]}, only dedicated {sorted(own - pruned)[:3]}")
 
 
 def key(row):
@@ -259,12 +295,18 @@ def boundary_distance(seq, start, length):
 
 
 def compare(one, two):
-    seqs, _recs = genome()
+    seqs, recs = genome()
     for output in SEARCHES:
         _h1, rows1 = table(one, output)
         _h2, rows2 = table(two, output)
-        k1, k2 = {key(r) for r in rows1}, {key(r) for r in rows2}
-        say(f"{output}: format 2 holds every format-1 row ({len(k1)} / {len(k2)})", k1 <= k2,
+        # (format 1 reports a minus-strand PAM at a contig's first base on the plus strand,
+        # at the max bulges: not its genome's bases, and not a row of format 2)
+        wrong = {(c, str(st), sd) for _b, c, st, sd, _t, _w in wrong_rows(seqs, recs, rows1)}
+        k1 = {key(r) for r in rows1 if (r["Chromosome"], r["Start_coordinate_(highest_CFD)"],
+                                        r["Strand_(highest_CFD)"]) not in wrong}
+        k2 = {key(r) for r in rows2}
+        say(f"{output}: format 2 holds every format-1 row that is its genome's bases "
+            f"({len(k1)} / {len(k2)}; {len(rows1) - len(k1)} not)", k1 <= k2,
             str(sorted(k1 - k2)[:4]))
         more = [r for r in rows2 if key(r) not in k1]
         far = []

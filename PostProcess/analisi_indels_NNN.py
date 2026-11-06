@@ -840,7 +840,7 @@ def _overlaid_positions(path):
                 if keys:
                     lo, hi = _frame(_isc.window_offsets(ln[2], int(ln[4]), int(idata[5])),
                                     span, _iref, _ialt, keys)
-                    out.update(range(max(lo, 0) + 1, hi + 2))
+                    out.update(range(lo + 1, hi + 2))
     return out
 
 
@@ -1038,10 +1038,12 @@ def _frame(offsets, span, iref, ialt, keys):
     """The reference positions (0-based, inclusive) _breaking_slots writes a slot's bases
     over: the target's span (target_ref_span) and, on either side, the target's length
     (window_offsets ``offsets``), the window's REF or ALT, whichever is longer, and the
-    bases the second indels ``keys`` add or delete."""
+    bases the second indels ``keys`` add or delete -- within the chromosome: a target of an
+    index of format 2 (CRISPRitz 2.10.0) may end on the chromosome's last base or start on
+    its first, and no base lies beyond them for a slot to hold."""
     margin = (offsets[1] - offsets[0] + 1 + max(len(iref), len(ialt))
               + sum(abs(len(r) - len(a)) for (_p, r, a) in keys))
-    return span[0] - margin, span[1] + margin
+    return max(span[0] - margin, 0), min(span[1] + margin, len(genomeStr) - 1)
 
 
 def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
