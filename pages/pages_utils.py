@@ -1916,6 +1916,19 @@ def variant_dataset_has_genotypes(genome: str, dataset_value: str) -> bool:
     return False
 
 
+def genotype_oracle_installed() -> bool:
+    """True when the phased HGDP + 1000 Genomes genotypes a sites-only panel's rows are
+    checked against are installed (the carrier gate's oracle: Dictionaries/
+    genotypes_hg38_HGDP1kGP/, or the folder CRISPRME_GENOTYPE_TIER names)."""
+    try:
+        import haplotype_prioritizer
+    except Exception:  # noqa: BLE001 - an install without it has no gate
+        return False
+    return haplotype_prioritizer.find_oracle(
+        os.path.join(current_working_directory, "Dictionaries"),
+        os.environ.get("CRISPRME_GENOTYPE_TIER") or None) is not None
+
+
 # Friendly labels for the registry manifest's ``data_type`` (Phase 2.1).
 _DATA_TYPE_LABEL = {
     "sites-only": "sites-only (allele frequencies)",

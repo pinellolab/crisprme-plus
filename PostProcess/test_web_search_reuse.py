@@ -64,12 +64,13 @@ class TestSearchReuse(unittest.TestCase):
         self.addCleanup(p.stop)
         pu.write_enabled_annotations("hg38", ["a.hg38.bed"])
 
-    def submit(self, *, mode="per-sample", full=False, name=None, variant="ref"):
+    def submit(self, *, mode="per-sample", full=False, name=None, variant="ref",
+               gate=False):
         """One click on Submit, as the form sends it (Advanced options open)."""
         return mp.change_url(
             1, "http://127.0.0.1:8080/index", "hg38", variant, "20bp-NRG-SpCas9", "IP",
             GUIDE, 4, 1, 1, "N", None, None, None, [], None, name, 6, True,
-            mode, ["full"] if full else [],
+            mode, ["full"] if full else [], ["on"] if gate else [],
         )
 
     def finish(self, url):
@@ -110,6 +111,22 @@ class TestSearchReuse(unittest.TestCase):
                 # ... and an identical one of THAT is reused
                 self.assertEqual(self.submit(**kwargs), ("/load", f"?job={job}", lp.REUSED_HASH))
         self.assertEqual(self.pool.submit.call_count, 4)
+
+    def test_the_carrier_gate_check_box_reaches_the_search_and_is_a_difference(self):
+        """The check box that asks the carrier gate to check a sites-only panel's rows
+        against the phased HGDP + 1000 Genomes genotypes (complete-search
+        --prioritize-observed) goes to the search as CRISPRME_PRIORITIZE_OBSERVED, and a job
+        run with it is not reused for one without it (nor the reverse)."""
+        first = self.finish(self.submit())
+        self.assertIn(" CRISPRME_PRIORITIZE_OBSERVED=auto ", self.pool.submit.call_args[0][1])
+        url = self.submit(gate=True)
+        self.assertNotEqual(url[1], f"?job={first}")
+        self.assertIn(" CRISPRME_PRIORITIZE_OBSERVED=on ", self.pool.submit.call_args[0][1])
+        job = self.finish(url)
+        with open(os.path.join(self.tmp, "Results", job, mp.REUSE_KEY_FILE)) as f:
+            self.assertTrue(json.load(f)["prioritize_observed"])
+        self.assertEqual(self.submit(gate=True), ("/load", f"?job={job}", lp.REUSED_HASH))
+        self.assertEqual(self.submit(), ("/load", f"?job={first}", lp.REUSED_HASH))
 
     def test_annotation_change_runs_a_new_search(self):
         first = self.finish(self.submit())

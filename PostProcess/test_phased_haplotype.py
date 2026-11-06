@@ -277,18 +277,20 @@ class PhasedTransDoesNotCombine(unittest.TestCase):
         )
 
 
-class GreedyCapPathUnaffected(unittest.TestCase):
-    """The >IUPAC_CAP greedy high-variant-density path (single level-0
-    representative per haplotype, no combination, no peel) must be unaffected: it
-    already reports one 0mm target and the fix's Phase B is guarded by
-    ``not capped``."""
+class DenseWindowOverCap(unittest.TestCase):
+    """A per-sample window denser than IUPAC_CAP on the dictionary: up to 2.8.1 it took
+    the greedy high-variant-density path (one level-0 representative per haplotype, no
+    combination, no peel); since 2.9.0 it is enumerated as the haplotypes its carriers
+    have, as on the dict-less tiers (the greedy representative listed the carriers of any
+    of its alleles). Here S carries the four SNPs on one slot: one 0mm row, S's, beside the
+    window's reference row."""
 
-    def test_greedy_over_cap(self):
-        # N=4 with cap=2 -> countIUPAC (4) > cap (2) -> greedy branch.
-        rows = _decompose(4, phased=True, cap=2)
-        self.assertEqual(len(rows), 1, "greedy path must emit exactly one row")
+    def test_dense_window_over_cap(self):
+        # N=4 with cap=2 -> countIUPAC (4) > cap (2)
+        rows = [r for r in _decompose(4, phased=True, cap=2) if r[12] != "n"]
+        self.assertEqual(len(rows), 1, "the dense window must give exactly one variant row")
         row = rows[0]
-        self.assertEqual(int(row[7]), 0, "greedy representative must be the 0mm haplotype")
+        self.assertEqual(int(row[7]), 0, "the row must be the 0mm haplotype S carries")
         self.assertEqual(_n_snps_in_row(row), 4)
         self.assertEqual(row[12], "S")
 

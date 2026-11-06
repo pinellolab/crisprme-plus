@@ -186,6 +186,7 @@ sys.path.insert(0, script_path)
 from validate_inputs import run_lightweight, run_full, resolve_vcf_dataset_dirs, _vcf_header_samples  # noqa: E402
 from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside)
     download_component,
+    download_genotype_oracle,
     publish_index,
     resolve_repo,
     synthesize_combined_samplesid,
@@ -632,9 +633,8 @@ def print_help_complete_search() -> None:
         "cis phasing + named carrier samples + exact joint AF (the resolution the genotyped "
         "indexes are built for). Requires a genotyped index (no-op with a warning on "
         "sites-only panels); on one without the dict-less tiers (built without --samplesID) "
-        "it names the carrier samples only, and a dense window can still be reported by its "
-        "greedy worst-case alignment, whose listed carriers need not carry every variant in "
-        "it. Slower, and can be intractable on dense panels (measured 49h+ "
+        "it names the carrier samples only. Slower, and can be intractable on dense panels "
+        "(measured 49h+ "
         "without completing on a 4x-density panel) [OPTIONAL]\n"
         "\t--population-level, force the fast population-level analysis: one worst-possible "
         "PUTATIVE representative per variant window, exact worst-case CFD, dataset-level "
@@ -645,6 +645,23 @@ def print_help_complete_search() -> None:
         "a genotyped + PHASED index [e.g. the HGDP+1000G default: CONFIRMED cis + named "
         "carriers], POPULATION-LEVEL otherwise [sites-only / unphased / hybrid / "
         "reference-only]. --per-sample / --population-level override it.)\n"
+        "\t--prioritize-observed, check the variant combinations of a sites-only dataset's "
+        "rows (e.g. the mega panel's) against the phased HGDP + 1000 Genomes genotypes (the "
+        "genotype oracle: crisprme.py download --what genotype-oracle), as the carrier gate "
+        "below does for a genotyped dataset. Without the oracle installed the rows are "
+        "reported unchecked, and the search says so [OPTIONAL]\n"
+        "\t--no-prioritize-observed, turn the carrier gate off. By default a population-level "
+        "search of a genotyped dataset checks each row's variant combination against the "
+        "dataset's own phased genotypes (and indel genotypes): a combination of two or more "
+        "variants that no haplotype carries is ranked after every other row of the report, "
+        "in a table of its own after the top-1000, out of the validation panel and the risk "
+        "card; a single variant, or a combination a haplotype carries, keeps its place. The "
+        "gate changes no row of the results: it writes *_carrier_gate.tsv beside them "
+        "[OPTIONAL]\n"
+        "\t--gate-min-expected, the number of panel haplotypes expected to carry a "
+        "combination if its variants were independent, below which the carrier gate says "
+        "that none carrying it is 'too rare to tell' (it is ranked after the others all "
+        "the same). Default 3; 0 turns the distinction off [OPTIONAL]\n"
         "\t--alt-alignments / --no-alt-alignments, emit (or skip) the exhaustive "
         "alternative-alignments file (*_all_results_with_alternative_alignments.tsv = the "
         "non-best alignments per locus). Default follows the mode: OFF for a "
@@ -765,6 +782,7 @@ _COMPLETE_SEARCH_FLAGS = frozenset(
         "--personal_annotation", "--population-level", "--prune-pam",
         "--report-full", "--samplesID", "--sequence", "--sorting-criteria",
         "--sorting-criteria-scoring", "--thread", "--vcf",
+        "--prioritize-observed", "--no-prioritize-observed", "--gate-min-expected",
         # accepted, deliberately not advertised in the help
         "--help",
         "--vcf-filter-pass-values",
@@ -775,6 +793,19 @@ _COMPLETE_SEARCH_FLAGS = frozenset(
         "--fast", "--full",
     }
 )
+
+
+def _check_gate_min_expected(args: List[str]) -> float:
+    """--gate-min-expected's value (default 3): a number >= 0."""
+    if "--gate-min-expected" not in args:
+        return 3.0
+    try:
+        value = float(args[args.index("--gate-min-expected") + 1])
+    except (IndexError, ValueError):
+        error("--gate-min-expected needs a number >= 0, e.g. --gate-min-expected 3")
+    if not value >= 0 or value == float("inf"):
+        error("--gate-min-expected needs a number >= 0, e.g. --gate-min-expected 3")
+    return value
 
 
 def _check_unknown_flags(args: List[str]) -> None:
@@ -2755,6 +2786,45 @@ def complete_search() -> None:
             flush=True,
         )
 
+    # The carrier gate (haplotype_prioritizer.py, which the search runs on its integrated
+    # results before the report): a population-level row of a genotyped dataset is checked
+    # against the dataset's phased genotypes by default, a sites-only dataset's rows against
+    # the phased HGDP + 1000 Genomes genotypes on request (--prioritize-observed), and the
+    # report ranks a combination no haplotype carries after every other row. It changes no
+    # row. Passed to the pipeline through the environment, as the mode is.
+    if "--prioritize-observed" in args and "--no-prioritize-observed" in args:
+        error("--prioritize-observed and --no-prioritize-observed are mutually exclusive")
+    gate_setting = ("on" if "--prioritize-observed" in args
+                    else "off" if "--no-prioritize-observed" in args else "auto")
+    os.environ["CRISPRME_PRIORITIZE_OBSERVED"] = gate_setting
+    os.environ["CRISPRME_GATE_MIN_EXPECTED"] = f"{_check_gate_min_expected(args):g}"
+    if variant:
+        import haplotype_prioritizer as _hp
+
+        _gate_status, _gate_panels = _hp.plan_panels(
+            os.path.join(current_working_directory, "Dictionaries"),
+            list(dict.fromkeys(_named)), "per-sample" if per_sample else "population-level",
+            gate_setting, os.environ.get("CRISPRME_GENOTYPE_TIER") or None)
+        if _gate_status == "run":
+            print(
+                f"[complete-search] Carrier gate: each row's variant combination is checked "
+                f"against the phased genotypes of "
+                f"{', '.join(_n for _n, _r, _role in _gate_panels)}; the report ranks a "
+                f"combination no haplotype carries after every other row (a table of its "
+                f"own after the top-1000), and drops none. --no-prioritize-observed turns "
+                f"it off.",
+                flush=True,
+            )
+        elif _gate_status == "no-oracle":
+            print(
+                f"WARNING [complete-search]: --prioritize-observed: the phased "
+                f"{_hp.ORACLE_PANEL} genotypes the sites-only rows are checked against are "
+                f"not installed (Dictionaries/genotypes_{_hp.ORACLE_PANEL}/, or the folder "
+                f"CRISPRME_GENOTYPE_TIER names), so the rows are reported unchecked. Install "
+                f"them with: crisprme.py download --what genotype-oracle",
+                flush=True,
+            )
+
     # ALTERNATIVE-ALIGNMENT output (the altMerge / *_all_results_with_alternative_alignments.tsv
     # dump = the NON-best alignments per locus cluster). It grows combinatorially with the edit
     # budget and its post-analysis (sort + resultIntegrator on the altMerge file) is the single
@@ -3340,9 +3410,9 @@ def complete_search() -> None:
     # the AF that CRISPRitz add-variants copied into them from the VCF (in either mode; an
     # indel has the AF it copied into the indel log, as on any index; none for a record
     # whose INFO has AF at another place than the VCF's first record: METHODS section 8),
-    # and no more. Their per-sample post-analysis still reports a window denser than
-    # CRISPRME_IUPAC_CAP by its greedy worst-case alignment, listing the carriers of any of
-    # the variants it takes (new_simple_analysis.py). (each dataset once: a --vcf list may
+    # and no more. (Since 2.9.0 their per-sample post-analysis gives a window denser than
+    # CRISPRME_IUPAC_CAP as the haplotypes its carriers have, as on the tiers, no longer by
+    # a greedy alignment: new_simple_analysis.py.) (each dataset once: a --vcf list may
     # name one twice) A sites-only dataset without them (its VCFs have no sample columns)
     # is in neither list: its dictionaries name no carrier, and a search reports a
     # sites-only VCF's variants only with a registry's allele frequencies
@@ -3380,10 +3450,8 @@ def complete_search() -> None:
                f"and in either mode {'its' if _one else 'their'} variants' allele frequencies "
                f"are the AF of those dictionaries (an indel's, of the index's indel log), which "
                f"CRISPRitz add-variants copied from {'its VCF' if _one else 'their VCFs'} (a "
-               f"variant whose AF they give as 0, or not at all, has no frequency); "
-               f"where {'its' if _one else 'their'} variants are "
-               f"dense, it can still report a window by its greedy worst-case alignment, whose "
-               f"listed carriers need not carry every variant in it. To get the tiers, rebuild "
+               f"variant whose AF they give as 0, or not at all, has no frequency). "
+               f"To get the tiers, rebuild "
                f"the index with build-index-only --samplesID, or download a prebuilt one "
                f"(crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP). "
                if _untiered else "")
@@ -3404,10 +3472,7 @@ def complete_search() -> None:
                 f"those dictionaries (an indel's, of the index's indel log), which CRISPRitz "
                 f"add-variants copied from {'its VCF' if _one else 'their VCFs'}: a variant whose "
                 f"AF they give as 0, or not at all, has no frequency. "
-                f"Where {'its' if _one else 'their'} variants are dense, a "
-                f"window can still be reported by its greedy worst-case alignment, flagged in "
-                f"High_variant_density_region, whose listed carriers need not carry every "
-                f"variant in it. To get the tiers, rebuild the index with build-index-only "
+                f"To get the tiers, rebuild the index with build-index-only "
                 f"--samplesID, or download a prebuilt one (crisprme.py download --what index "
                 f"--index-name NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
                 f"dense panels; pass --population-level for the fast worst-case screen."
@@ -5695,9 +5760,12 @@ def print_help_download() -> None:
     sys.stderr.write(
         "Options:\n"
         "\t--what, component to fetch: genome | annotations | pams | samples | "
-        "vcf | build-inputs | index | assembly | all (all = genome+annotations+pams+samples, "
-        "plus the default hg38 reference index so a reference scan works out of the box) "
-        "[REQUIRED]\n"
+        "vcf | build-inputs | index | assembly | genotype-oracle | all (all = "
+        "genome+annotations+pams+samples, plus the default hg38 reference index so a "
+        "reference scan works out of the box; genotype-oracle = the phased genotypes and "
+        "indel genotypes of a panel, by default HGDP + 1000 Genomes, into Dictionaries/, "
+        "which complete-search --prioritize-observed checks a sites-only dataset's rows "
+        "against; an installed index of the panel already brings them) [REQUIRED]\n"
         "\t--ref, reference genome name for --what genome/index [default: hg38]\n"
         "\t--dataset, variant dataset name for --what vcf / build-inputs (the SOURCE VCFs "
         "that built a shipped index, e.g. hg38_HGDP1kGP, hg38_HPRC, "
@@ -5711,6 +5779,8 @@ def print_help_download() -> None:
         "NRG_3_hg38+hg38_HGDP1kGP (phased HGDP + 1000 Genomes, 4,091 samples), or "
         "NRG_3_hg38+hg38_HPRC / NRG_3_hg38+hg38_mega) "
         "[REQUIRED for --what index]\n"
+        "\t--panel, for --what genotype-oracle: the phased panel [default: HGDP1kGP, "
+        "i.e. hg38_HGDP1kGP] [OPTIONAL]\n"
         "\t--sample, HPRC individual id for --what assembly (e.g. HG01255) -- fetches "
         "both haplotypes' genome + chain + chromAlias into Assemblies/<sample>/, the "
         "CLI equivalent of the web Data Manager's 'Fetch from HPRC' "
@@ -5793,6 +5863,21 @@ def download_data() -> None:
     # specific, so they are requested explicitly). On hg38 it ALSO fetches the
     # default-PAM REFERENCE index (below) so a simple reference-genome scan works
     # out of the box.
+    # The genotype oracle: the phased HGDP + 1000 Genomes genotypes (and indel genotypes)
+    # the carrier gate checks a sites-only dataset's rows against (complete-search
+    # --prioritize-observed), without the panel's index. (Not one archive, so handled
+    # before the component loop.)
+    if what == "genotype-oracle":
+        panel = args[args.index("--panel") + 1] if "--panel" in args else "HGDP1kGP"
+        if not panel.startswith(f"{ref}_"):
+            panel = f"{ref}_{panel}"
+        try:
+            dests = download_genotype_oracle(workdir, repo=repo, panel=panel)
+        except (ValueError, ImportError, RuntimeError) as e:
+            error(str(e))
+        for dest in dests:
+            print(f"Genotype oracle: {dest}", flush=True)
+        return
     if what == "all":
         components = ["genome", "annotations", "pams", "samples"]
     else:

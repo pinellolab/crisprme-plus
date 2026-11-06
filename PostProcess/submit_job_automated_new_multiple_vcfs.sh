@@ -2409,6 +2409,35 @@ else
 fi
 echo -e "JOB END"
 
+# STEP 8a0 - carrier gate (BEFORE the report). A population-level row takes, per variant
+# window, the alleles that match the guide best, and lists every carrier of any of them: two
+# or more of them can sit on no one haplotype. haplotype_prioritizer.py reads each row's
+# variants in a phased genotype store (the dataset's own, for a population-level search of a
+# genotyped dataset; the phased HGDP + 1000 Genomes store for a sites-only one, only with
+# --prioritize-observed, CRISPRME_PRIORITIZE_OBSERVED=on) and writes their tiers to
+# *_carrier_gate.tsv, which the report ranks by. It changes no row. A failure leaves the
+# completed run as it is (issue #143): the report then ranks the rows unchecked.
+results_tsv=$(ls "${output_folder}"/*_integrated_results.tsv 2>/dev/null | head -1)
+if [ -n "${results_tsv}" ] && [ "$(head -c 1 "$vcf_list")" != "_" ]; then
+	echo -e 'Carrier gate\tStart\t'$(date) >>$log
+	_gate_mode="per-sample"
+	if [ "${CRISPRME_FAST_MODE:-0}" = "1" ]; then
+		_gate_mode="population-level"
+	fi
+	if python "$starting_dir/haplotype_prioritizer.py" --results "${results_tsv}" \
+		--dictionaries "$current_working_directory/Dictionaries" --vcf-list "$vcf_list" \
+		--mode "$_gate_mode" --prioritize-observed "${CRISPRME_PRIORITIZE_OBSERVED:-auto}" \
+		--oracle "${CRISPRME_GENOTYPE_TIER:-}" --min-expected "${CRISPRME_GATE_MIN_EXPECTED:-3}" \
+		--threads "$ncpus"; then
+		echo -e 'Carrier gate\tEnd\t'$(date) >>$log
+	else
+		rm -f "${results_tsv%_integrated_results.tsv}_carrier_gate.tsv" "${output_folder}/.carrier_gate.json"
+		printf "WARNING: the carrier gate failed — results are PRESERVED (issue #143); the report ranks the rows unchecked\n" >&2
+		echo -e 'Carrier gate\tFAILED (non-fatal)\t'$(date) >>$log
+	fi
+fi
+# END STEP 8a0
+
 # STEP 8a - observed-haplotypes sidecar (additive; BEFORE the report).
 # Pre-reduce the (30+ GB) alt-alignments table into *_observed_haplotypes_raw.tsv --
 # only the alt-origin rows, a strict SUPERSET of what the report's observed-haplotypes

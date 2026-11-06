@@ -1489,6 +1489,45 @@ class TestGenerateReport(unittest.TestCase):
         for name in tsvs:
             self.assertEqual(unknown[name], tiered[name], name)
 
+    def test_a_search_since_2_9_0_has_no_greedy_row(self):
+        """Since 2.9.0 a per-sample search gives a window denser than CRISPRME_IUPAC_CAP on
+        the classic dictionaries as the haplotypes its carriers have, as on the dict-less
+        tiers (new_simple_analysis.py), and its pipeline writes the carrier gate's sidecar
+        (.carrier_gate.json), whatever the gate did. So in its report the flagged two-SNP row
+        of a search without the tiers reads "2 cis carriers", and no text says that a dense
+        window can be reported by a greedy alignment."""
+        rd = os.path.join(self.tmp, "Results", "job")
+        os.makedirs(rd)
+        dense = ("high_variant_density (12 variants): a greedy worst-case alignment is "
+                 "reported here; additional haplotype alignments may exist")
+        with open(self.tsv) as src:
+            lines = src.read().splitlines()
+        with open(os.path.join(rd, os.path.basename(self.tsv)), "w") as dst:
+            for i, line in enumerate(lines):
+                fields = line.split("\t")
+                flag = ("High_variant_density_region" if i == 0
+                        else dense if fields[1] in ("chr5", "chr7") else "NA")
+                dst.write("\t".join(fields + [flag]) + "\n")
+        for name, text in ((".search_mode", "per-sample"),
+                           (".untiered_datasets", "hg38_1000G_HGDP\n"),
+                           (".variant_datasets", "hg38_1000G_HGDP\n"),
+                           (".carrier_gate.json", '{"status": "per-sample"}')):
+            with open(os.path.join(rd, name), "w") as h:
+                h.write(text)
+        out = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir,
+                              out_zip=os.path.join(self.tmp, "since290_report.zip"))
+        with zipfile.ZipFile(out) as zf:
+            files = {n: zf.read(n).decode("utf-8") for n in zf.namelist()
+                     if n.endswith((".html", ".tsv"))}
+        top = [line.split("\t") for line in files["data/top1000.tsv"].splitlines()]
+        observed = top[0].index("Observed")
+        self.assertEqual({r[observed] for r in top[1:] if r[1] in ("chr5", "chr7")},
+                         {"2 cis carriers"})
+        html = files["report.html"]
+        self.assertNotIn("poss. chimera", html)
+        self.assertNotIn("greedy worst-case alignment", html.split("<h2>2.", 1)[0])
+        self.assertIn("named carrier samples only for", html)
+
     def test_variant_contributed_prose_tracks_whether_file_is_bundled(self):
         """The 'Variant-contributed sites' row must not claim variant_created.tsv is
         bundled when it is not (the slim default report skips that tier -> no

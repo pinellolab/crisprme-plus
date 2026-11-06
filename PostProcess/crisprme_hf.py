@@ -1234,6 +1234,7 @@ def _fetch_genotypes_companion(
     remote_prefix: str,
     token: Optional[str] = None,
     reporter: Optional["_ProgressReporter"] = None,
+    store: str = "genotypes",
 ) -> bool:
     """Fetch + extract the SEPARATE Tier-1 ``genotypes_<vcf>.tar.gz`` companion
     into ``<workdir>/Dictionaries/`` so ``genotypes_<vcf>/`` lands as a sibling of
@@ -1243,10 +1244,11 @@ def _fetch_genotypes_companion(
     such companion (a registry-only / detection-only publish). Absence is NOT an
     error: the search falls back gracefully (degraded Samples). Uses the same
     atomic-swap staging as the main index install; all diagnostics go to STDOUT
-    (stderr is fatal downstream)."""
-    remote_name = f"genotypes_{vcf_name}.tar.gz"
+    (stderr is fatal downstream). ``store`` "indel_genotypes" fetches the phased indel
+    genotype store (indel_genotypes_<vcf>.tar.gz) the same way."""
+    remote_name = f"{store}_{vcf_name}.tar.gz"
     patterns = [f"{remote_prefix}/{remote_name}"]
-    staging = os.path.join(workdir, ".hf_stage_genotypes")
+    staging = os.path.join(workdir, f".hf_stage_{store}")
     shutil.rmtree(staging, ignore_errors=True)
     _hf_snapshot(repo, patterns, staging, token, reporter=reporter)
     gt_tarball = os.path.join(staging, remote_prefix, remote_name)
@@ -1255,7 +1257,7 @@ def _fetch_genotypes_companion(
         return False
     dst_dicts_root = os.path.join(workdir, "Dictionaries")
     os.makedirs(dst_dicts_root, exist_ok=True)
-    extract_tmp = os.path.join(dst_dicts_root, f".extract_genotypes_{vcf_name}")
+    extract_tmp = os.path.join(dst_dicts_root, f".extract_{store}_{vcf_name}")
     shutil.rmtree(extract_tmp, ignore_errors=True)
     os.makedirs(extract_tmp)
     try:
@@ -1286,6 +1288,51 @@ def _fetch_genotypes_companion(
     finally:
         shutil.rmtree(extract_tmp, ignore_errors=True)
         shutil.rmtree(staging, ignore_errors=True)
+
+
+# The phased panel a sites-only search's rows are checked against (the carrier gate,
+# haplotype_prioritizer.py: complete-search --prioritize-observed).
+GENOTYPE_ORACLE_PANEL = "hg38_HGDP1kGP"
+
+
+def download_genotype_oracle(
+    workdir: str,
+    repo: Optional[str] = None,
+    panel: str = GENOTYPE_ORACLE_PANEL,
+    token: Optional[str] = None,
+) -> List[str]:
+    """Install the genotype oracle: the phased genotypes of ``panel`` (genotypes_<panel>/)
+    and its phased indel genotypes (indel_genotypes_<panel>/) under
+    ``<workdir>/Dictionaries/``, where the carrier gate looks for them. A store already
+    there (an installed index of the panel brings both) is kept and not fetched again; an
+    indel store the repository does not host is said in one line on stdout, and the gate
+    then reads the SNP genotypes alone. Neither the panel's index nor its registry is
+    needed. Returns the folders installed or kept; raises ValueError when the repository
+    hosts no genotypes of the panel and none are installed."""
+    repo = resolve_repo(repo)
+    dicts = os.path.join(workdir, "Dictionaries")
+    out = []
+    for store, required in (("genotypes", True), ("indel_genotypes", False)):
+        dest = os.path.join(dicts, f"{store}_{panel}")
+        if os.path.isdir(dest) and os.listdir(dest):
+            sys.stdout.write(f"{store}_{panel}/ is installed already ({dest}): kept\n")
+            out.append(dest)
+            continue
+        if _fetch_genotypes_companion(repo, workdir, panel, _COMPONENT_PREFIXES["index"],
+                                      token, store=store):
+            out.append(dest)
+        elif required:
+            raise ValueError(
+                f"The HuggingFace repo '{repo}' has no phased genotypes of {panel} "
+                f"({_COMPONENT_PREFIXES['index']}/genotypes_{panel}.tar.gz). Check "
+                f"--panel, or install the panel's index (download --what index --index-name "
+                f"NRG_3_hg38+{panel}), which brings them.")
+        else:
+            sys.stdout.write(
+                f"The repo has no phased indel genotypes of {panel} "
+                f"({store}_{panel}.tar.gz): the carrier gate reads its SNP genotypes "
+                f"alone, so an indel inside a target takes no carrier off.\n")
+    return out
 
 
 def _derive_perdb_datasets(vcf_name: str, ref: str = "hg38") -> List[str]:
@@ -2405,4 +2452,24 @@ def publish_index(
         sys.stdout.write(
             f"Published Tier-1 genotype store to {repo}:{gt_remote}\n"
         )
+        # and the phased indel genotypes on their own too (they are in the main archive
+        # as well): with the genotypes, the genotype oracle a sites-only search's rows are
+        # checked against (download --what genotype-oracle), without the index
+        indel_gt_dir = os.path.join(os.path.dirname(genotypes_dir), f"indel_genotypes_{vcf_name}")
+        if os.path.isdir(indel_gt_dir) and os.listdir(indel_gt_dir):
+            ig_tarball = os.path.join(os.path.dirname(index_dir),
+                                      f"indel_genotypes_{vcf_name}.tar.gz")
+            _make_genotypes_tarball(ig_tarball, indel_gt_dir)
+            ig_remote = f"indexes/indel_genotypes_{vcf_name}.tar.gz"
+            api.upload_file(
+                path_or_fileobj=ig_tarball,
+                path_in_repo=ig_remote,
+                repo_id=repo,
+                repo_type="dataset",
+                token=token,
+            )
+            os.remove(ig_tarball)
+            sys.stdout.write(
+                f"Published the phased indel genotypes to {repo}:{ig_remote}\n"
+            )
     return remote_path
