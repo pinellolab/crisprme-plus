@@ -1,7 +1,7 @@
 # SNP+indel oracle (synthetic, real CLI)
 
 `run_oracle.sh <empty work dir> [<oracle dir>] [cas12a]` runs inside a CRISPRme image. It
-generates a 16.6 kb reference chromosome and a phased VCF of 59 samples (`oracle.py
+generates a 17 kb reference chromosome and a phased VCF of 61 samples (`oracle.py
 generate`), builds the indexes and dictionaries with `build-index-only`, runs
 `complete-search` with `--per-sample` and with `--population-level`, then checks every row
 whose variant list holds an indel or an MNV (`oracle.py check`) against each sample's two
@@ -57,6 +57,7 @@ target:
 | Z, Z2 | an insertion holding the target's first bases: the 5' end of the spacer (+), the PAM (-) | S54, S55 CFD 1, the row at the insertion's anchor; Z2's PAM, wholly inserted bases, created (TGG) |
 | Z3 | Z's geometry and a SNP alt the guide needs past the insertion, cis (S56) and trans (S57) | S56 CFD 1 under both variants, CONFIRMED, at the anchor, the SNP the target's 13th base; S57 off the perfect row |
 | Z4, Z5 | (-) the PAM's first two bases (forward CC) the last two an insertion adds, its third and the protospacer reference bases; beside the protospacer the reference holds CTA (TAG on -) at Z4, ATA at Z5 | S58, S59 CFD 1 at the anchor; PAM_creation NA at Z4 (the reference has the target with TAG), TGG at Z5 |
+| X, X2 | (+) an insertion holding two whole targets: the guide with TGG and, 25 bases on, with AGG (X), or with TGG again (X2, a repeat) | per-sample: S60 listed with both targets, both rows at the anchor, one the site's row and the other one of its alternative alignments; S61 on one row with the target (its two copies are the same row at the anchor) |
 
 The `cas12a` profile (a 3 kb reference, 8 samples, 5' PAM TTTV, a 20-nt spacer; CFD is not
 computed for a 5' PAM, so a perfect row is one with no mismatch and no bulge):
@@ -82,16 +83,20 @@ site's other alignments). On 9c6b4046, which took a carrier off an indel row whe
 slot held a second indel inside the target, decided on the indel's position, it fails at W
 and V in both modes: S51 and S53, whose haplotypes hold the target, are on no CFD-1 row.
 S51 is on no row at all, and S53 only on the CFD-0.9 RNA-bulge alignment that starts past
-the insertion. On the released v2.8.1 image the check fails 74 times: the start at I, Z, Z2,
-Z3, Z4 and Z5 (a row whose first base is one an insertion adds started at that base's place
-on the haplotype, 3 to 6 bases past the anchor here, and its REF text was read there),
-`Variant_info_spacer+PAM` at D, M2, R and Z3 (variants numbered along the reference: D's SNP
-at the PAM's last base, past a deletion, read 24 for 23, R's 5 for 6, M2's 3 for 1, Z3's 4 for
-13), and `PAM_creation` at Z5 (NA, read from the REF text at the haplotype place); and the
-`cas12a` profile 47 times, at C1, C2, C2B, C3 and C5. With only the first 2.8.2 commit
-(d7a6fff, rows at the anchor) it fails 51 and 24 times: `Variant_info_spacer+PAM` as above
-(Z3: 8), and `PAM_creation` at I, Z2 (NA) and Z4 (TGG), read from the REF text at the anchor,
-and C2. In the genome-wide HGDP + 1000 Genomes search of the README guide (per-sample, 4
+the insertion. On the released v2.8.1 image the check fails 104 times: the start at I, Z,
+Z2, Z3, Z4, Z5, X and X2 (a row whose first base is one an insertion adds started at that
+base's place on the haplotype, 3 to 28 bases past the anchor here, and its REF text was read
+there), `Variant_info_spacer+PAM` at D, M2, R and Z3 (variants numbered along the reference:
+D's SNP at the PAM's last base, past a deletion, read 24 for 23, R's 5 for 6, M2's 3 for 1,
+Z3's 4 for 13), `PAM_creation` at Z5 (NA, read from the REF text at the haplotype place),
+and X2's target on two rows; and the `cas12a` profile 47 times, at C1, C2, C2B, C3 and C5.
+With only the first 2.8.2 commit (d7a6fff, rows at the anchor) it fails 60 and 24 times:
+`Variant_info_spacer+PAM` as above (Z3: 8), `PAM_creation` at I, Z2 and X (NA) and Z4 (TGG),
+read from the REF text at the anchor, and C2; and at X the TGG target is on no row: it
+shares the anchor, the variant and the carrier with the AGG one, and the merge folded the
+two into one entry. On 43809d3, with the other 2.8.2 fixes but the merge still comparing a
+site's alignments at their cluster position on the reference, only that fails, 3 times. In
+the genome-wide HGDP + 1000 Genomes search of the README guide (per-sample, 4
 mismatches + 1 + 1) 229 highest-CFD rows of 2.8.1 start inside an insertion, up to 229 bases
 past the anchor; on 2.8.0, an alternative alignment of that guide started at chr22:22322768,
 the 7th base of G>GCAATCATTAT at 22322762.

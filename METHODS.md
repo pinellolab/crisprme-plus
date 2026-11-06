@@ -572,25 +572,41 @@ insertion and as the target's reference span already counts it. Up to 2.8.1 it s
 base's place on the haplotype, 1 to len(ALT) − len(REF) bases past the anchor, where its REF
 alignment was read, from reference bases the target does not hold. Alignments that start on
 bases of one insertion therefore share the anchor. The merge takes a guide's rows on one
-chromosome for one site while the position of each is within `--merge` bases (3 by default) of
-the one before, on either strand and whatever their bases, and keeps one row to represent the
-site, the others being its alternative alignments: alignments that start on bases of one
-insertion are now one site, and such a row can join the site of a reference or SNP row that
-starts near the anchor (on the HGDP + 1000 Genomes index, the README guide's chr22:21052642 (−)
-of 2.8.1, 4 bases from the reference row at 21052638 (−), is now 21052639, one of that row's
-alternative alignments). Such a row's ALT alignment begins mid-insertion: on the + strand its
-first bases are the last bases the insertion adds that the target holds (TTAT, the 7th to 10th
-of G>GCAATCATTAT, in a 2.8.0 alternative alignment at chr22:22322768). Its REF alignment holds
-the reference bases from the anchor on, as many as the target holds, so it begins with the
-anchor base, which the target does not hold, and past the insertion it is out of register with
-the ALT by the number of inserted bases the target holds, less one. On the − strand both are
-shown reverse-complemented, in the target's orientation: the ALT ends mid-insertion (with a 3′
-PAM, its PAM holds those inserted bases) and the REF ends with the anchor's complement.
-`CFD_score_REF` and the REF seed and non-seed counts are read from that REF alignment.
+chromosome for one site while the cluster position of each (its start, less its RNA bulges and
+plus its DNA bulges on the + strand with a 3′ PAM and on the − strand with a 5′ one) is within
+`--merge` bases (3 by default) of the one before, on either strand and whatever their bases,
+and keeps one row to represent the site, the others being its alternative alignments:
+alignments that start on bases of one insertion are now one site, and such a row can join the
+site of a reference or SNP row that starts near the anchor (on the HGDP + 1000 Genomes index,
+the README guide's chr22:21052642 (−) of 2.8.1, 4 bases from the reference row at 21052638 (−),
+is now 21052639, one of that row's alternative alignments). Within a site, the alignments that
+name the same variants with the same carriers are one entry, the best, as on every row: they
+are one target's alignments with different bulges. The merge compares indel rows there at their
+cluster position on the haplotype carrying the indel, which on a row that starts inside an
+insertion is past the anchor by the rank of its first base among the inserted ones, read from
+the row's bases (`indel_snp_cis.row_first_base`). Two alignments that start on different bases
+an insertion adds are two targets of that haplotype, as many bases apart as 2.8.1 placed them,
+and both are listed, as the site's row or one of its alternative alignments (a population-level
+run lists only each site's row). Two copies of one target inside an insertion (a repeat it
+holds) make the same row at the anchor, its bases, REF alignment and variants the same, and
+that row is listed once, with the carriers of both, where 2.8.1 listed each copy at its own
+start. With the TRAC guide (CTCTCAGCTGGTACACGGCA) on that index, two alleles of chr22:50193929
+that insert 96 bases, a 48-base unit twice, with one carrier each, hold the CFD-0 alignment
+CTACTCAGgaGGgACA-GGCtGAG (−) in both copies, which 2.8.1 listed at 50193950 and 50193998 and
+2.8.2 lists once per allele, at 50193928. Such a row's ALT alignment begins mid-insertion: on
+the + strand its first bases are the last bases the insertion adds that the target holds (TTAT,
+the 7th to 10th of G>GCAATCATTAT, in a 2.8.0 alternative alignment at chr22:22322768). Its REF
+alignment holds the reference bases from the anchor on, as many as the target holds, so it
+begins with the anchor base, which the target does not hold, and past the insertion it is out
+of register with the ALT by the number of inserted bases the target holds, less one. On the −
+strand both are shown reverse-complemented, in the target's orientation: the ALT ends
+mid-insertion (with a 3′ PAM, its PAM holds those inserted bases) and the REF ends with the
+anchor's complement. `CFD_score_REF` and the REF seed and non-seed counts are read from that
+REF alignment.
 
 **`Variant_info_spacer+PAM`.** Each variant is numbered as on a SNP row, by its distance from
-the target's first aligned base to the variant's POS base, the first base being 1: on the +
-strand counted from the left, POS − start; on the − strand from the right,
+the target's first aligned base to the variant's POS base, the first base being 1: on
+the + strand counted from the left, POS − start; on the − strand from the right,
 len(`Aligned_spacer+PAM`) + 1 − (POS − start), less the deleted bases for a deletion, its REF
 and ALT reverse-complemented. A variant before the target's first base is 1 on the + strand and
 the last on the − strand. On an indel row the distance is counted along the haplotype carrying
@@ -605,8 +621,9 @@ insertion was len(ALT) − len(REF) bases short of its place on the + strand (lo
 strand), one past a deletion as many long (short). So was a SNP on a row starting inside an
 insertion, which 2.8.1 placed at its first base's place on the haplotype (Z3: 4 for 13), and
 one whose POS was before that place was taken for a variant before the target's first base, 1
-on the + strand and the last on the − strand (chr22:21052639 (−) above: its SNP, the 22nd, was
-the 24th).
+on the + strand and the last on the − strand (chr22:21052639 (−) above: its SNP, numbered 22,
+was numbered 24). On the − strand each RNA bulge adds one to the numbers, on SNP rows as well:
+chr22:21052639 has one, and its SNP is the target's 21st base.
 
 **`PAM_creation`.** It holds the ALT's PAM when the variants created it and NA when the
 reference holds a PAM there; on an indel row:

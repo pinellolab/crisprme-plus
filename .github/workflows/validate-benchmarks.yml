@@ -203,11 +203,14 @@ jobs:
           # the sequence, the planted sites' expected rows and the co-occurrence
           # companion. Up to 2.8.0 the post-analysis read the overlay's IUPAC codes
           # column by column without genotypes and failed it (TGA/AGA PAMs, phantom
-          # 0-edit targets, chimeras of two samples' variants). Then the Cas12a profile (5'
-          # PAM TTTV): targets whose first base is one an insertion adds, on both strands. Up
-          # to 2.8.1 such rows started past the anchor, their variants were numbered along
-          # the reference, and a PAM holding inserted bases was judged on the REF text read
-          # from the row's start. A few minutes each.
+          # 0-edit targets, chimeras of two samples' variants). Sites X and X2: an
+          # insertion holding two targets lists both, at its anchor (the merge compares a
+          # site's alignments where they are on the haplotype), and one holding a target
+          # twice lists it once. Then the Cas12a profile (5' PAM TTTV): targets whose
+          # first base is one an insertion adds, on both strands. Up to 2.8.1 such rows
+          # started past the anchor, their variants were numbered along the reference, and
+          # a PAM holding inserted bases was judged on the REF text read from the row's
+          # start. A few minutes each.
           mkdir -p orcwork
           docker run --rm $BRANCH_MOUNT -v "${PWD}/orcwork:/W" "$IMG" bash -c '
             set -e

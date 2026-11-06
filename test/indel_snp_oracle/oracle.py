@@ -7,8 +7,9 @@
       need an indel, a SNP, or both, planted in cis, in trans, unphased, as two
       indels on one haplotype, as a multi-allelic SNP on one VCF line, with a SNP at
       the far end of the target, with a target in an indel's flank that does not
-      hold the indel, with an equal-length multi-base record (an MNV), and with
-      targets whose first base is one an insertion adds.
+      hold the indel, with an equal-length multi-base record (an MNV), with
+      targets whose first base is one an insertion adds, and with an insertion
+      holding two targets, and one holding one target twice.
   oracle.py check <workdir> <PostProcess dir> <results dir> [<results dir> ...]
       Builds every sample's two haplotypes from the VCF (a brute-force truth that
       shares no code with CRISPRme's resolution) and checks every row whose variant
@@ -27,9 +28,10 @@
           names, with every named variant on that haplotype; an unphased one carries
           every allele the row names;
       then the planted sites' expectations (who has which target, at what CFD, under
-      which variants), and the SNP+indel co-occurrence companion's CONFIRMED lines
-      (their carriers hold the indel and the named SNP alts on one haplotype, their
-      joint frequency counts haplotype copies). Exit status 1 on any failure.
+      which variants, on how many rows), and the SNP+indel co-occurrence companion's
+      CONFIRMED lines (their carriers hold the indel and the named SNP alts on one
+      haplotype, their joint frequency counts haplotype copies). Exit status 1 on any
+      failure.
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid
 fake-indel genome column by column, without genotypes: 5 of the first 7 sites below
@@ -51,7 +53,7 @@ import zipfile
 G = "ACTGAAATCTGTAAGCAGGC"  # the guide
 COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 CODES = set("RYSWKMBDHVryswkmbdhv")
-NSAMPLES = 59
+NSAMPLES = 61
 MOTIF_BASES = {"A": "A", "C": "C", "G": "G", "T": "T", "R": "AG", "Y": "CT", "S": "CG",
                "W": "AT", "K": "GT", "M": "AC", "B": "CGT", "D": "AGT", "H": "ACT",
                "V": "ACG", "N": "ACGT"}
@@ -73,7 +75,7 @@ def other(b, avoid=()):
 # --------------------------------------------------------------------------- #
 def generate(wd):
     random.seed(7)
-    length = 16600
+    length = 17000
     seq = [random.choice("ACGT") for _ in range(length)]
     variants = []  # dicts: site, kind, pos1, ref, alt, gts{sample: 'a|b'}
     samples = ["S%02d" % i for i in range(1, NSAMPLES + 1)]
@@ -393,6 +395,19 @@ def generate(wd):
         put(z - 2, before + "T" + fwd[2:])
         var(site, "ins", z, "T", "T" + "GT" + fwd[:2], {sample: "1|0"})
         expect[site] = {"perfect": [sample], "pam_creation": {sample: made}}
+
+    # X, X2 (+): an insertion holding two targets, wholly: the guide with TGG and, 25 bases
+    # on, with AGG (X), or with TGG again (X2: a repeat). Both rows start at the anchor, with
+    # the insertion and its carrier, one site. At X they are two targets of the haplotype:
+    # the merge compares a site's alignments where they are on it, so the second stays,
+    # one of the site's alternative alignments (compared at the anchor, the two would fold
+    # into one entry and the other would leave both tables). At X2 the two are the same row
+    # at the anchor, one entry (2.8.1 reported each at its place on the haplotype).
+    for site, x, second, sample in (("X", 16600, "AGG", "S60"), ("X2", 16800, "TGG", "S61")):
+        var(site, "ins", x, seq[x - 1], seq[x - 1] + "AT" + G + "TGG" + "CA" + G + second
+            + "TC", {sample: "1|0"})
+    expect["X"] = {"perfect": ["S60"], "alignments": {"S60": [G + "TGG", G + "AGG"]}}
+    expect["X2"] = {"perfect": ["S61"], "one_row": {"S61": G + "TGG"}}
 
     # (No split multi-allelic SNP records here: CRISPRitz add-variants keeps only the
     # last of two records at one position in the enriched genome and the dictionary,
@@ -870,6 +885,7 @@ def check(wd, pp, result_dirs):
         pam_cut = slice(-kp, None) if side == "3p" else slice(0, kp)
         spacer_cut = slice(0, -kp) if side == "3p" else slice(kp, None)
         seen = {}  # site -> [(samples set, cfd, mm, names, PAM_creation)]
+        targets = {}  # site -> [(block, samples set, target bases)]
         inserted_pams = [0, 0]  # rows whose PAM is wholly inserted bases, those created
         for f in rows:
             where = "%s %s:%d(%s) %s %s" % (name, f["block"], f["start"], f["strand"],
@@ -968,6 +984,7 @@ def check(wd, pp, result_dirs):
                 cfd = f["cfd"] if side == "3p" else float(f["total"] == 0)
                 seen.setdefault(site, []).append((set(samples), cfd, f["mm"], f["var"],
                                                   f["pamc"]))
+                targets.setdefault(site, []).append((f["block"], set(samples), seq))
         print("oracle: %s: %d row blocks with a PAM made wholly of inserted bases, %d of them "
               "PAM_creation" % (name, inserted_pams[0], inserted_pams[1]))
         for site, ex in sorted(expect.items()):
@@ -1006,6 +1023,22 @@ def check(wd, pp, result_dirs):
                            for ss, c, _m, _v, p in got):
                     fail("%s: site %s: no CFD-1 row lists %s with PAM_creation %s"
                          % (name, site, s, want))
+            # per-sample, in each block (the integrated results with the alternative
+            # alignments): "alignments", each target listed; "one_row", on exactly one row
+            for s, want in sorted(ex.get("alignments", {}).items()) if per_sample else ():
+                for b in BLOCKS:
+                    have = {t for blk, ss, t in targets.get(site, ()) if blk == b and s in ss}
+                    for w in want:
+                        if w not in have:
+                            fail("%s: site %s: %s: no row lists %s with its target %s"
+                                 % (name, site, b, s, w))
+            for s, want in sorted(ex.get("one_row", {}).items()) if per_sample else ():
+                for b in BLOCKS:
+                    n = sum(1 for blk, ss, t in targets.get(site, ())
+                            if blk == b and s in ss and t == want)
+                    if n != 1:
+                        fail("%s: site %s: %s: %d rows list %s with %s, one target at one "
+                             "place" % (name, site, b, n, s, want))
             for s in ex.get("one_mm", ()) if per_sample else ():
                 if not any(s in ss and m == 1 for ss, _c, m, _v, _p in got):
                     fail("%s: site %s: no 1-mismatch row lists %s" % (name, site, s))

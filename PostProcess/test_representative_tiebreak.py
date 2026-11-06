@@ -50,6 +50,10 @@ ASSERTS:
     branch. Controls: more carriers, a smaller aligned DNA, a smaller Position or a
     higher CFD still win over it; rows without carriers (a sites-only index) keep the
     order of the merge step's sort.
+  * Alignments that start inside one insertion (2.8.2: all at its anchor): two targets
+    of the insertion with one carrier set both stay, the site's row and an alternative
+    alignment, on both strands; two copies of one target are one row; a bulged alignment
+    of one target, before the same PAM, still folds into the best (as up to 2.8.1).
 
 Run with:
     cd PostProcess && python3 -m unittest test_representative_tiebreak -v
@@ -86,6 +90,11 @@ SNP_COL = 18
 CFD_COL = 20
 
 GUIDE = "GAGTCCGAGCAGAAGAAGAANNN"
+_COMP = str.maketrans("ACGTacgt-", "TGCAtgca-")
+
+
+def _rc(seq):
+    return seq.translate(_COMP)[::-1]
 
 
 def _row(dna, cfd, total=4, cluster_pos=1000, position=1000, snp="n",
@@ -467,6 +476,119 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
             self.assertEqual(len(best), 1)
             counts.add(len(alt))
         self.assertEqual(counts, {2})  # the carrier sets {S1}, {S1,S2}, {S2}
+
+
+class AlignmentsStartingInsideOneInsertion(unittest.TestCase):
+    """2.8.2: a row whose first base is one an insertion adds starts at the insertion's
+    anchor (indel_snp_cis.reference_start), so alignments that start on different bases
+    of one insertion have one Position and one Cluster_Position, and are one site.
+
+    The merge folds a site's alignments naming the same variants with the same carriers
+    into one entry, and compares them where they are on the haplotype carrying the indel
+    (remove_contiguous_samples._haplotype_cluster_position): there, two targets that start
+    on different inserted bases are as many bases apart as 2.8.1 placed them. So they stay,
+    the site's row and its alternative alignments (on the Cluster_Position alone they fold
+    into one: on the HGDP + 1000 Genomes index, an alignment of the TRAC guide's left the
+    tables), and one target's alignments with different bulges before one PAM still fold,
+    as up to 2.8.1. Two copies of one target inside an insertion (a repeat it holds) are
+    the same row at the anchor: one entry.
+
+    The rows are those the indel post-analysis writes: the insertion after the anchor at
+    0-based 100 (VCF POS 101), the target's bases on the haplotype carrying it, the REF
+    text the reference's from the anchor, as many bases as the target holds."""
+
+    T1 = "ACTGAAATCTGTAAGCAGGCTGG"  # the guide + TGG
+    T2 = "ACTGAAATCTGTAAGCAGGCAGG"  # the guide + AGG
+    REFSEQ = "GATTACAGCT" * 10 + "G" + "CCTAGGTCAA" * 10  # the anchor at 100: G
+
+    setUp = IndelRowsKeepTheirOwnCarriers.setUp
+    tearDown = IndelRowsKeepTheirOwnCarriers.tearDown
+    _row = IndelRowsKeepTheirOwnCarriers._row
+    _merge = IndelRowsKeepTheirOwnCarriers._merge
+    INDEL = IndelRowsKeepTheirOwnCarriers.INDEL
+
+    def _site(self, ins):
+        """The insertion's token, and the haplotype carrying it."""
+        anchor = self.REFSEQ[100]
+        return ("chr1_101_%s_%s" % (anchor, anchor + ins),
+                self.REFSEQ[:101] + ins + self.REFSEQ[101:])
+
+    def _inside(self, ins, k, n, strand="+", cfd="1.000", total=0, dna_bulges=0,
+                samples="S1", rsid="rs1", af="0.1"):
+        """A row of the alignment whose first base (the leftmost) is the k-th base the
+        insertion adds, its target the n bases from there; a DNA bulge one base of them."""
+        token, hap = self._site(ins)
+        bases, ref = hap[100 + k:100 + k + n], self.REFSEQ[100:100 + n]
+        if strand == "-":
+            bases, ref = _rc(bases), _rc(ref)
+        r = self._row(bases, cfd, total, samples, snp=token, rsid=rsid, af=af)
+        r[3], r[7] = ref, strand
+        r[5] = "100"  # the anchor
+        # the Cluster_Position: the start, plus the DNA bulges on the + strand, 3' PAM
+        r[CLUSTER_POS_COL] = str(100 + (dna_bulges if strand == "+" else 0))
+        if dna_bulges:
+            r[0], r[1], r[9] = "DNA", "-" + GUIDE, str(dna_bulges)
+        return r
+
+    def test_other_targets_of_one_insertion_stay_as_alternatives(self):
+        """Two targets inside one insertion, 25 bases apart on its haplotype (2.8.1: two
+        sites), the same variant and carrier: one site at the anchor, the second target
+        one of its alternative alignments, on both strands and both branches."""
+        for strand, ins in (("+", "AT" + self.T1 + "CA" + self.T2 + "TC"),
+                            ("-", "AT" + _rc(self.T1) + "CA" + _rc(self.T2) + "TC")):
+            rows = [self._inside(ins, 3, 23, strand), self._inside(ins, 28, 23, strand)]
+            want = {r[DNA_COL] for r in rows}
+            for sort_order in ("score", "total"):
+                for order in (rows, rows[::-1]):
+                    with self.subTest(strand=strand, sort_order=sort_order):
+                        best, alt = self._merge([list(r) for r in order], sort_order)
+                        self.assertEqual((len(best), len(alt)), (1, 1))
+                        self.assertEqual({best[0][DNA_COL], alt[0][DNA_COL]}, want)
+                        self.assertEqual(best[0][19], "1")  # the site's other row
+                        self.assertEqual((best[0][13], alt[0][13]), ("S1", "S1"))
+
+    def test_two_copies_of_one_target_are_one_row(self):
+        """The insertion holds the target twice (a repeat): the two alignments are the
+        same row at the anchor, its bases, REF text, variant and carriers, so one entry
+        (2.8.1 reported each copy at its own start)."""
+        ins = "AT" + self.T1 + "CA" + self.T1 + "TC"
+        rows = [self._inside(ins, 3, 23), self._inside(ins, 28, 23)]
+        self.assertEqual(rows[0], rows[1])
+        for sort_order in ("score", "total"):
+            best, alt = self._merge([list(r) for r in rows], sort_order)
+            self.assertEqual((len(best), len(alt)), (1, 0))
+            self.assertEqual((best[0][DNA_COL], best[0][13]), (self.T1, "S1"))
+
+    def test_bulged_alignments_of_one_target_still_fold(self):
+        """A DNA-bulge alignment of the same target, one base longer and before the same
+        PAM, starts one inserted base earlier: on the haplotype the same site (2.8.1: one
+        Cluster_Position), here Cluster_Positions 100 and 101. One entry, the better one,
+        with the other's rsID and AF."""
+        ins = "AT" + self.T1 + "CA"
+        perfect = self._inside(ins, 3, 23)
+        bulged = self._inside(ins, 2, 24, cfd="0.500", total=1, dna_bulges=1, rsid=".",
+                              af="0.2")
+        self.assertEqual(bulged[DNA_COL], "T" + self.T1)
+        for sort_order in ("score", "total"):
+            for order in ((perfect, bulged), (bulged, perfect)):
+                best, alt = self._merge([list(r) for r in order], sort_order)
+                self.assertEqual((best[0][DNA_COL], best[0][16], best[0][17]),
+                                 (self.T1, ".,rs1", "0.1,0.2"))
+                self.assertEqual(alt, [])
+
+    def test_a_target_on_the_anchor_and_one_inside_stay_apart(self):
+        """The target of a row starting on the anchor base itself (its first base a
+        reference one) and one starting inside the insertion, the same carrier: two
+        alignments, as up to 2.8.1."""
+        ins = "AT" + self.T2 + "CA"
+        token, hap = self._site(ins)
+        on_anchor = self._row(hap[100:123], "0.300", 3, "S1", snp=token)
+        on_anchor[3], on_anchor[5] = self.REFSEQ[100:123], "100"
+        on_anchor[CLUSTER_POS_COL] = "100"
+        rows = [self._inside(ins, 3, 23), on_anchor]
+        best, alt = self._merge([list(r) for r in rows])
+        self.assertEqual((best[0][DNA_COL], [a[DNA_COL] for a in alt]),
+                         (self.T2, [hap[100:123]]))
 
 
 if __name__ == "__main__":
