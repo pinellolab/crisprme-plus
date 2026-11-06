@@ -8,10 +8,16 @@ strand. An indel row's target is bases of the haplotype carrying its indel, whic
 an insertion's bases and not a deletion's, and its variants are numbered the same way
 along that haplotype (indel_snp_cis.variant_places). Up to 2.8.1 they were numbered along
 the reference: a SNP past an insertion was len(ALT) - len(REF) bases short (long on the -
-strand), one past a deletion as many long (short), and on a row starting on a base an
-insertion adds (which 2.8.2 places at the insertion's anchor) shorter again by the bases
-of the insertion the target does not hold. SNP rows, and an indel row's own indel, keep
-their numbers.
+strand), also on a row starting on a base an insertion adds, which 2.8.1 placed at that
+base's place on the haplotype (a SNP before that place got the first number, on the -
+strand the last), and one past a deletion as many long (short). Numbered along the
+reference from the insertion's anchor, where 2.8.2 places such a row, it would be short
+(long) by the inserted bases the target holds, less one (Z3: 8 for 13). SNP rows, and an
+indel row's own indel, keep their numbers.
+
+test_every_block_counts_along_the_target is the test 2.8.1 fails. The other two are guards:
+an insertion a row starts inside keeps the number 2.8.1's clamp gave it, and the case table
+marks as changed exactly the cases 2.8.1 got wrong.
 
 Needs GNU cut (resultIntegrator drops its unused columns with ``cut --complement``);
 intervaltree is stubbed. Run: python -m unittest test_indel_variant_positions -v
@@ -141,7 +147,8 @@ class IndelVariantPositions(unittest.TestCase):
                                  "%s %s (2.8.1 wrote %s)" % (name, crit, old))
 
     def test_an_insertion_keeps_its_place_when_the_row_starts_inside_it(self):
-        """+ strand: position 1; - strand: the last, len(aligned spacer)."""
+        """+ strand: position 1; - strand: the last, len(aligned spacer). A guard: 2.8.1's
+        clamp gave the insertion these numbers too, so 2.8.1 passes it."""
         by = dict(zip(self.names, self.rows))
         self.assertTrue(by["inside_insertion_plus"]["Variant_info_spacer+PAM_(highest_CFD)"]
                         .startswith("1T>T"))
@@ -149,6 +156,9 @@ class IndelVariantPositions(unittest.TestCase):
                         .startswith("24A>"))
 
     def test_the_cases_change_where_2_8_1_was_wrong_only(self):
+        """Checks this module's case table, not the integrator (2.8.1 passes it): the cases
+        whose expected number is not what 2.8.1 wrote are exactly those 2.8.1 got wrong, so
+        the messages of test_every_block_counts_along_the_target, which quote 2.8.1, hold."""
         changed = sorted(n for n in self.names if self.cases[n][1] != self.cases[n][2])
         self.assertEqual(changed, ["inside_insertion_minus", "inside_insertion_plus",
                                    "snp_past_a_deletion_minus", "snp_past_a_deletion_plus",

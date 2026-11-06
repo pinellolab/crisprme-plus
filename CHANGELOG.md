@@ -14,13 +14,16 @@ and the `release-crisprme` skill.
 ### Changed
 - **Alignments that start on bases of one insertion share its anchor, and the merge takes
   them for alignments of one site** (follows from the first fix below; both modes).
-  - Each such row now starts at the insertion's anchor, so alignments that start on
-    different bases one insertion adds have one start and one cluster position: the merge of a
-    cluster's rows keeps one of them as the site's row and lists the others as its alternative
-    alignments. Such a row can also join the site of a reference or SNP row whose target holds
-    the same reference bases: README guide, HGDP + 1000 Genomes, chr22:21052642 (−) of 2.8.1,
-    a CFD-0 alignment of T>TCACC at 21052640, is now 21052639, an alternative alignment of the
-    reference row at 21052638 (−), whose `Other_motifs` goes 2 → 3.
+  - Each such row now starts at the insertion's anchor, so alignments that start on different
+    bases one insertion adds have one start and one cluster position. The merge takes a guide's
+    rows on one chromosome for one site while the position of each is within `--merge` bases (3
+    by default) of the one before, on either strand and whatever their bases, keeps one of them
+    as the site's row and lists the others as its alternative alignments: these alignments are
+    now one site, and such a row can also join the site of a reference or SNP row that starts
+    near the anchor. README guide, HGDP + 1000 Genomes: chr22:21052642 (−) of 2.8.1, a CFD-0
+    alignment of T>TCACC at 21052640, 4 bases from the reference row at 21052638 (−), is now
+    21052639, one of that row's alternative alignments, and the reference row's `Other_motifs`
+    goes 2 → 3.
   - The same search on chr22, released 2.8.1 image against 2.8.2: per-sample, 1,574 → 1,573
     integrated rows and 3,756 → 3,757 alternative alignments (21052642 joins 21052638's site;
     that site's two alternative alignments go 1 → 2 and the moved row, now one of them, loses
@@ -29,6 +32,11 @@ and the `release-crisprme` skill.
     and 11,581 → 11,583, 21052642 and 33175772 (+), now 33175769, joining the reference rows'
     sites at 21052638 (−) and 33175766 (+), whose `Other_motifs` go 2 → 3 and 9 → 10, their
     alternatives' 1 → 2 and 8 → 9.
+  - The outputs built from the rows follow these changes and the fixes below: the summaries by
+    guide and by sample, the report (its counts and top-1000 tables), `observed_haplotypes_raw`
+    and the plots. NRG per-sample: the 1,292 samples listed on 21052642 count one target and one
+    created PAM fewer (the row joined 21052638's site, and its PAM is not created, below), and
+    the other 2,799 samples one target fewer in their population or super-population.
 
 ### Fixed
 - **An indel row whose first base is one an insertion adds is placed at the insertion**
@@ -49,38 +57,44 @@ and the `release-crisprme` skill.
     8 and up to 229 bases past the anchor, 95 of them on a tandem duplication; none at CFD ≥ 0.2
     (highest 0.155); and 151 of 468,715 alternative alignments. Population-level: 232 rows.
     chr22 alone, released 2.8.1 image against 2.8.2: NRG, per-sample, 4 rows move to their
-    anchor (17434488 (+) → 17434485, 21052642 (−) → 21052639, 29300189 (+) → 29300175,
-    32435001 (−) → 32434998), their REF alignment and REF seed and non-seed counts with them,
-    and at 32434998 `CRISPR_BULGE_score_REF`; population-level 3, 21052642 joining
-    21052638's site (above); NRR, per-sample, 11 (8 integrated rows and 3 alternative
-    alignments, among them 44115947 (+), which now starts at 44115944 or 44115946, the
-    anchors of two long insertions it lies in). Every other row is unchanged but for the
+    anchor (17434488 (+) → 17434485, 21052642 (−) → 21052639, 29300189 (+) → 29300175, 32435001
+    (−) → 32434998), their REF alignment and REF seed and non-seed counts with them, and at
+    32434998 `CRISPR_BULGE_score_REF` and `CRISPR_BULGE_risk_score`; population-level 3,
+    21052642 joining 21052638's site (above); NRR, per-sample, 11 (8 integrated rows and 3
+    alternative alignments, among them 44115947 (+), which now starts at 44115944 or 44115946,
+    the anchors of two long insertions it lies in). Every other row is unchanged but for the
     columns the other fixes and the merge above change, and a gene distance that moves with a
-    start. The self-test (`complete-test --chrom chr22
-    --vcf_dataset 1000G`, then `validate-test`: 6 passed, 0 failed, 0 skipped): in
-    `cas9_sg1617` 2 of 632 rows move (21052642 → 21052639, whose SNP goes 24 → 22, and
-    17434488 → 17434485); its other 630 rows and the other benchmarks' tables are unchanged.
+    start. The self-test (`complete-test --chrom chr22 --vcf_dataset 1000G`, then
+    `validate-test`: 6 passed, 0 failed, 0 skipped): in `cas9_sg1617` 2 of 632 rows move
+    (21052642 → 21052639, whose SNP goes 24 → 22, and 17434488 → 17434485); its other 630 rows
+    and the other benchmarks' tables are unchanged.
   - Found from a 2.8.0 alternative alignment at chr22:22322768, the 7th base of
     G>GCAATCATTAT at 22322762. That row also paired the insertion's only carrier with four SNP
     alleles other individuals carry, which 2.8.1 already fixed: the row is gone.
 - **An indel row's variants are numbered along its target in `Variant_info_spacer+PAM`**
   (every release; both modes, any PAM).
-  - A SNP row numbers each variant by its distance from the row's start along the reference.
-    An indel row did the same, but its target is bases of the haplotype carrying its indel,
-    which holds the bases an insertion adds and not those a deletion removes: a SNP past an
-    insertion was numbered len(ALT) − len(REF) bases short on the + strand (long on the −
-    strand), one past a deletion as many long (short; the PAM's last base of a 23-base target
-    read 24), and on a row starting inside an insertion short again by the inserted bases the
-    target holds. The indel's own number, at its POS base, was right.
+  - A SNP row numbers each variant by its distance from the row's start along the reference. An
+    indel row did the same, but its target is bases of the haplotype carrying its indel, which
+    holds the bases an insertion adds and not those a deletion removes: a SNP past an insertion
+    was numbered len(ALT) − len(REF) bases short on the + strand (long on the − strand), one
+    past a deletion as many long (short; the PAM's last base of a 23-base target read 24). So
+    was a SNP on a row starting inside an insertion, which 2.8.1 placed at its first base's
+    place on the haplotype (the SNP+indel oracle's Z3: 4 for 13), and one whose POS was before
+    that place was numbered as a variant before the row's first base, 1 on the + strand and the
+    last on the − strand. The indel's own number, at its POS base, was right.
   - Each variant is now numbered along the target on that haplotype, as a SNP row numbers it
     on the reference (METHODS, "`Variant_info_spacer+PAM`"); an insertion a row starts inside
     keeps 1 on the + strand, the last on the − strand. chr22:21052639 (−) above: its SNP
     G>A at 21052641 is the 22nd, which 2.8.1 clamped to the 24th.
-  - chr22, README guide, released 2.8.1 image against 2.8.2: NRG per-sample 2 rows
-    (21052639 (−) and 33013162 (−), a deletion and two SNPs past it: 17, 13 → 18, 14),
-    population-level 1 (33013162), NRR per-sample 6 (also SNPs past a deletion at 12298466
-    (−), 32526400 (+), 25271097 (+) and 34192005 (+), the last one read 26 in a 24-column
-    target, now 21).
+  - chr22, README guide, released 2.8.1 image against 2.8.2: NRG per-sample 2 rows (21052639 (−)
+    and 33013162 (−), a deletion and two SNPs past it: 17, 13 → 18, 14), population-level 1
+    (33013162), NRR per-sample 6 (also SNPs past a deletion at 12298466 (−), 32526400 (+),
+    25271097 (+) and 34192005 (+), the last one read 26 in a 24-column target, now 21).
+    Genome-wide, 2.8.1's tables of the NRG searches numbered as 2.8.2 numbers them: README
+    guide, per-sample, of the 5,951 rows whose highest-CFD alignment holds an indel, 239 change
+    (165 with a SNP past a deletion, 57 past an insertion, 17 starting inside one), and 81 of
+    2,710 such alternative alignments; population-level, 231 of 5,923; TRAC guide, per-sample,
+    135 of 2,949 and 34 of 1,885. No SNP or MNV row changes.
 - **`PAM_creation` of an indel row whose PAM holds bases an insertion adds** (every
   release; both modes, any PAM).
   - The REF alignment's bases under the PAM were read, from the row's start. A PAM made wholly
@@ -88,12 +102,14 @@ and the `release-crisprme` skill.
     reference window read (a PAM the insertion made could read as not created). A PAM holding
     some inserted bases is now compared with the reference PAM beside the protospacer, on the
     PAM's side of the protospacer's base that touches the PAM; it is created when that base is
-    inserted too. On the − strand with a 3′ PAM (the + strand with a 5′ one), where the start
-    is the PAM's far end, the bases read were shifted by the PAM's inserted bases, so a PAM the
-    reference holds could read as created (chr22:21052639 (−): the reference has CAG beside
-    its protospacer; TGG → NA). For a partly inserted PAM on the + strand with a 3′ PAM (the −
-    strand with a 5′ one) the answer is unchanged unless the insertion also holds the
-    protospacer's end. A PAM on reference bases is still read on them, through the indel.
+    inserted too. On the − strand with a 3′ PAM (the + strand with a 5′ one), where the start is
+    the PAM's far end, the bases read were len(ALT) − len(REF) bases from the reference PAM
+    beside the protospacer, so a PAM the reference holds could read as created, and one the
+    insertion made as not created (chr22:21052639 (−), T>TCACC: the bases read were 4 off, and
+    the reference has CAG beside its protospacer; TGG → NA). For a partly inserted PAM on the +
+    strand with a 3′ PAM (the − strand with a 5′ one) the answer is unchanged unless the
+    insertion also holds the protospacer's end. A PAM on reference bases is still read on them,
+    through the indel.
   - chr22, README guide, released 2.8.1 image against 2.8.2: NRG per-sample 1 row (21052639,
     TGG → NA), NRR per-sample 5: 21052639 (TGG → NA); 25415044 (−), whose PAM is wholly bases
     of an insertion (NA → CAA); and three alignments of 44115947 (+), now 44115944 and

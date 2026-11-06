@@ -1407,9 +1407,10 @@ def _reference_pam(final_result, ref_aligned, hap_start=None):
       insertion adds (the insertion holds the protospacer's end and the PAM's start), the
       PAM has no place on the reference: None. Up to 2.8.1 the REF alignment's bases were
       read: from the row's start, so on the - strand with a 3' PAM (the + strand with a 5'
-      one), where the start is the PAM's far end, they were shifted by the PAM's inserted
-      bases, and since 2.8.2 such a row starting on an added base would read from the
-      insertion's anchor, a base its target does not hold.
+      one), where the start is the PAM's far end, they were len(ALT) - len(REF) bases from
+      the reference PAM beside the protospacer, however many inserted bases the PAM holds,
+      and since 2.8.2 such a row starting on an added base would read from the insertion's
+      anchor, a base its target does not hold.
     * A PAM that spans a deletion's junction, holds an ALT base standing in a REF base's
       place (an MNV's) or the bases REF and ALT share, or has a bulge in it keeps the REF
       alignment's bases, as before.

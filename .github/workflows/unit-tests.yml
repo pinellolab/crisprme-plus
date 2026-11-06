@@ -271,10 +271,13 @@ jobs:
 
       - name: "Indel row Variant_info_spacer+PAM (2.8.2: each variant counted along the target on the haplotype carrying the indel, as a SNP row counts it on the reference)"
         # Up to 2.8.1 resultIntegrator counted an indel row's variants along the reference: a
-        # SNP past an insertion was len(ALT) - len(REF) bases short (long on the - strand), one
-        # past a deletion as many long, and on a row starting on a base an insertion adds
-        # (placed at the insertion's anchor since 2.8.2) short again by the inserted bases its
-        # target holds. The REAL integrator on bestMerge rows of both strands (GNU cut).
+        # SNP past an insertion was len(ALT) - len(REF) bases short (long on the - strand), also
+        # on a row starting on a base an insertion adds, which 2.8.1 placed at that base's
+        # place on the haplotype (a SNP before that place got the first number, on the - strand
+        # the last), and one past a deletion as many long (short). Counted along the reference
+        # from the insertion's anchor, where 2.8.2 places such a row, it would be short (long)
+        # by the inserted bases the target holds, less one. The REAL integrator on bestMerge
+        # rows of both strands (GNU cut).
         working-directory: PostProcess
         run: python -m unittest test_indel_variant_positions -v
 

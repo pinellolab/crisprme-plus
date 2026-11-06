@@ -503,9 +503,10 @@ def reference_start(offset, indel_pos1, indel_start, ref, alt):
 # indel: an insertion's bases are in it, a deletion's are not. Its variants are
 # numbered the same way along that haplotype: from the target's first base on it to
 # each variant's base on it. Up to 2.8.1 they were numbered along the reference, so a
-# variant past the indel was off by len(ALT) - len(REF), and on a row starting on a
-# base an insertion adds (placed at the insertion's anchor since 2.8.2) by as many bases
-# again as the target does not hold of the insertion.
+# variant past the indel was off by len(ALT) - len(REF), also on a row starting on a
+# base an insertion adds, which 2.8.1 placed at that base's place on the haplotype;
+# counted along the reference from the insertion's anchor, where 2.8.2 places such a
+# row, it would be off by the inserted bases the target holds, less one.
 
 
 def haplotype_place(pos1, indel_pos1, ref, alt):
