@@ -54,10 +54,10 @@ def _col(pos_c, alts, carrier_gts, alt_index=None, info=None, ps=None):
 REF = "AAAAA"  # 5-nt reference window; ambiguity columns applied per test
 
 
-def _enumerate(positions, max_putative=-1):
+def _enumerate(positions, max_putative=-1, **caps):
     return oh.enumerate_observed_haplotypes(
         positions, REF, parse_haplotypes, _ploidy_diploid, "chrT",
-        max_putative=max_putative,
+        max_putative=max_putative, **caps
     )
 
 
@@ -347,6 +347,29 @@ class TwoAltsOfOnePosition(unittest.TestCase):
         self.assertEqual(set(haps), {
             frozenset({(1, "A"), (2, "G"), (3, "G")}),
             frozenset({(1, "C"), (2, "G"), (3, "G")})})
+
+    def test_the_unions_above_the_cap_are_at_most_max_unions(self):
+        """A sample PUTATIVE in a window (here a phased slot holding two alts at column
+        0) that carries two alts at k columns: one union per choice of alt made 2^k of
+        them (NA19042 carries two or three at 16 positions of one 26-bp IGL window of
+        chr22: 8.5 million sets and 90 GB). They stay while there are at most max_unions (16);
+        past that there is one, with each column's first alt, or the one ``choose``
+        picks (new_simple_analysis: the alt nearest the guide)."""
+        def cols(k):
+            return [_col(c, ["A", "T"], [{"S": "0|1"}, {"S": "1|0" if c else "0|1"}])
+                    for c in range(k)]
+        haps = _enumerate(cols(4), max_putative=2)
+        self.assertEqual(len(haps), 16)
+        self.assertEqual({h.phase_state for h in haps}, {oh.PUTATIVE})
+        haps = _enumerate(cols(14), max_putative=2)
+        self.assertEqual([h.variant_set for h in haps],
+                         [frozenset((c, "A") for c in range(14))])
+        self.assertEqual((haps[0].carriers, haps[0].phase_state), ({"S"}, oh.PUTATIVE))
+        haps = _enumerate(cols(14), max_putative=2, choose=lambda c, alts: alts[c % 2])
+        self.assertEqual([h.variant_set for h in haps],
+                         [frozenset((c, "AT"[c % 2]) for c in range(14))])
+        haps = _enumerate(cols(5), max_putative=2, max_unions=32)
+        self.assertEqual(len(haps), 32)
 
 
 class HomozygousAndBoundary(unittest.TestCase):

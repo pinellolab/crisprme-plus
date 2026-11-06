@@ -13,7 +13,9 @@ gap). The readers of CRISPRme had to change with it:
     carrier's second ALT counted as reference, and two records of one REF>ALT stopped
     the Tier-1 compile of the whole chromosome;
   * observed_haplotypes: a phased slot holding two ALTs of one position is no haplotype
-    (PUTATIVE), and no combination takes two ALTs of one position;
+    (PUTATIVE), and no combination takes two ALTs of one position; above
+    CRISPRME_IUPAC_CAP variants a sample gets at most 16 unions, past that one, holding at
+    each column the ALT nearest the guide;
   * population_summary decides a carrier with two ALTs on one slot, or an unphased
     genotype, without phase;
   * the SNP+SNP companion compares positions, not variant tokens;
@@ -573,6 +575,48 @@ class TwoAltsOnOneSlotThroughThePostAnalysis(_SnpPostAnalysis):
         phases = {row["SNP"]: row["Phase_Confirmation"] for row in comp["phase_confirmation"]}
         self.assertEqual(phases, {a[0]: "PUTATIVE", t[0]: "PUTATIVE"})
         self.assertNotIn("snp_snp_cooc", comp)
+
+
+class ADenseWindowOfTwoAltsAColumn(_SnpPostAnalysis):
+    """An unphased sample S carries two ALTs (1/2, split into 1/0 and 0/1) at each of 12
+    columns of the site's protospacer and at the last base of its PAM; one of the two is
+    the guide's base (the PAM's G there), the alphabetically later of the two at the
+    five T columns and in the PAM. Above CRISPRME_IUPAC_CAP (10) variants a PUTATIVE
+    sample's sets are its union, which was one per choice of ALT: 8,192 here, 794 of
+    them within 4 mismatches and the PAM, each a row (NA19042, PUTATIVE in an IGL window
+    of chr22 for a slot holding two ALTs, carries two or three at 16 of its 26
+    positions: 8.5 million sets and 90 GB before any row). At most 16 now; past that one
+    union, holding at each such column the ALT nearest the guide: one the PAM allows,
+    then the fewest mismatches (each column's first ALT would put five mismatches in it,
+    and an A in its PAM)."""
+
+    COLS = list(range(2, 14)) + [22]
+    # the guide's base -> (the reference base, the other ALT, the column's code)
+    OF = {"A": ("C", "G", "V"), "C": ("A", "T", "H"), "G": ("A", "T", "D"),
+          "T": ("A", "C", "H")}
+
+    def _spec(self, c):
+        """(the reference base, the ALT nearest the guide, the other ALT, the code)."""
+        if c == 22:  # the PAM's last G: the reference C breaks the PAM, A too, G not
+            return "C", "G", "A", "V"
+        r, other, code = self.OF[SPACER[c]]
+        return r, SPACER[c], other, code
+
+    def test_one_union_nearest_the_guide(self):
+        ref = _site(**{"c%d" % c: self._spec(c)[0] for c in self.COLS})
+        values = {}
+        for c in self.COLS:
+            r, near, other, _code = self._spec(c)
+            values[_pos1(c)] = [(r, near, "rs%dn" % c, "0.1", {"S": "1/0"}),
+                                (r, other, "rs%do" % c, "0.1", {"S": "0/1"})]
+        window = _window(ref, {c: self._spec(c)[3] for c in self.COLS})
+        rows, _comp = self.analyse(ref, [window], values)
+        self.assert_no_row_names_two_alts_of_a_position(rows)
+        got = self.variant_rows(rows)
+        nearest = tuple("chrT_%d_%s_%s" % ((_pos1(c),) + self._spec(c)[:2])
+                        for c in self.COLS)
+        self.assertEqual(list(got), [nearest])
+        self.assertEqual((got[nearest][DNA], got[nearest][SAMPLES_COL]), (SITE, "S"))
 
 
 class TheSnpSnpCompanionComparesPositions(unittest.TestCase):

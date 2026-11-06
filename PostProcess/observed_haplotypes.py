@@ -53,7 +53,12 @@ one alt per column:
   * the PUTATIVE branch's combinations, the union fallback above ``max_putative``
     included, take at most one alt of a column.
 The phase label is per set, so a set such a sample shares reads PUTATIVE for all its
-carriers.
+carriers. The union fallback is one union per choice of alt at the columns where the
+sample carries two or three, while that makes at most ``max_unions``; past that it is
+one union, with the alt ``choose`` picks at each such column (new_simple_analysis: the
+one nearest the guide). Uncapped, k such columns gave 2^k or more unions: NA19042
+carries two or three alts at 16 positions of one 26-bp IGL window (chr22:22,881,180-
+22,881,205, HGDP + 1000 Genomes), which gave 8.5 million sets and needed 90 GB.
 
 STDLIB ONLY. ``population_summary`` is imported for ``parse_haplotypes`` /
 ``_token_is_alt`` ONLY (one source of truth for allele-slot math); that import is
@@ -112,7 +117,7 @@ def _gt_is_phased(gt):
 
 
 def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
-                             max_putative=-1):
+                             max_putative=-1, max_unions=16, choose=None):
     """Build each real individual's per-phase-set cis variant-set(s) for the window.
 
     Args:
@@ -130,6 +135,12 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
         autosomal model returns 2 regardless, and chrX/Y refinements are a documented
         follow-up (they only shrink slots, never invent carriers).
       chrom: chromosome name (unused today; accepted for a future PS/sex axis).
+      max_putative: above this many variants (-1: no cap), a PUTATIVE sample's sets
+        are its union (``CRISPRME_IUPAC_CAP``).
+      max_unions: the most unions a sample gets, one per choice of alt at the columns
+        where it carries two or three; past that, one.
+      choose: callable(pos_c, alts) -> the alt of ``alts`` (two or three a sample
+        carries at column ``pos_c``) that its one union takes; None: the first.
 
     Returns dict[sample_id -> list of (frozenset[(pos_c, alt)], phase_state)].
     Each sample contributes:
@@ -137,7 +148,8 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
         are phased AND share a phase set AND no slot holds two alts of one column;
       * else PUTATIVE sets: every combination of the variants it carries that takes
         at most one alt of a column (above ``max_putative`` variants, the union of
-        everything it carries, one per choice of alt at a column holding two).
+        everything it carries, one per choice of alt at a column holding two while
+        that makes at most ``max_unions``, else one, with the alt ``choose`` picks).
     """
     # 1) Gather, per sample, its (pos_c, alt, slot-tokens, phased?, ps) at each column
     #    it carries. We key alts by (pos_c, alt) so a multiallelic column with two alts
@@ -223,7 +235,9 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
             # A haplotype holds one allele of a position, so no candidate takes two alts
             # of one column (a 1/2 heterozygote, or a phased slot holding two): the
             # combinations choose, per column, nothing or one of the alts carried there,
-            # and the union is one per choice of alt at a column holding two.
+            # and the union is one per choice of alt at a column holding two, while that
+            # makes at most ``max_unions``; past that, one union, with the alt ``choose``
+            # picks at each such column (k such columns make 2^k unions or more).
             carried = sorted(set(
                 (e["pos_c"], e["alt"]) for e in entries
                 if any(tok == e["alt_index"] for tok in e["toks"])
@@ -234,9 +248,19 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
                     by_col.setdefault(pos_c, []).append(alt)
                 cols = sorted(by_col)
                 if max_putative >= 0 and len(carried) > max_putative:
+                    choices = [by_col[c] for c in cols]
+                    n_unions = 1
+                    for alts in choices:
+                        n_unions *= len(alts)
+                    if n_unions > max_unions:
+                        choices = [
+                            alts if len(alts) == 1
+                            else [choose(c, alts) if choose is not None else alts[0]]
+                            for c, alts in zip(cols, choices)
+                        ]
                     out[sid] = [
                         (frozenset(zip(cols, choice)), PUTATIVE)
-                        for choice in itertools.product(*(by_col[c] for c in cols))
+                        for choice in itertools.product(*choices)
                     ]
                 else:
                     out[sid] = [
@@ -250,7 +274,7 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
 
 
 def enumerate_observed_haplotypes(positions, refSeq, parse_haplotypes, ploidy_of,
-                                  chrom, max_putative=-1):
+                                  chrom, max_putative=-1, max_unions=16, choose=None):
     """Enumerate the DISTINCT observed haplotypes for one candidate window.
 
     Args:
@@ -258,7 +282,8 @@ def enumerate_observed_haplotypes(positions, refSeq, parse_haplotypes, ploidy_of
         ``info`` = [rsID, AF, snp_info] used to build the emitted info rows.
       refSeq: the pre-revert reference window (str), len == len(replaceTarget). Each
         ObservedHaplotype.seq is a list(refSeq) copy with its (pos_c, alt) applied.
-      parse_haplotypes, ploidy_of, chrom: as in ``_per_sample_variant_sets``.
+      parse_haplotypes, ploidy_of, chrom, max_putative, max_unions, choose: as in
+        ``_per_sample_variant_sets``.
 
     Returns list[ObservedHaplotype], one per distinct observed variant-set, carriers
     unioned across samples, phase_state downgraded to PUTATIVE if ANY contributor was
@@ -275,7 +300,8 @@ def enumerate_observed_haplotypes(positions, refSeq, parse_haplotypes, ploidy_of
             info_of[(pos_c, alt)] = col["info"][i]
 
     per_sample = _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of,
-                                          chrom, max_putative=max_putative)
+                                          chrom, max_putative=max_putative,
+                                          max_unions=max_unions, choose=choose)
 
     # Dedup: variant_set -> {carriers:set, confirmed_all:bool}. A set is CONFIRMED only
     # if EVERY contributing (sample, path) was CONFIRMED cis.

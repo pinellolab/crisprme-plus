@@ -114,7 +114,9 @@ _SCORER_SELECT = os.environ.get("CRISPRME_SCORER_SELECT", "crispr-bulge").lower(
 _env_ld = os.environ.get("CRISPRME_LOSSLESS_DENSE")
 _LOSSLESS_DENSE = True if _env_ld is None else bool(int(_env_ld or "0"))
 # The co-located union takes one alt of a column: one union per choice of alt at the
-# columns that hold two or three, while that makes at most this many unions a window.
+# columns that hold two or three, while that makes at most this many unions a window (a
+# sites-only dataset's) or a sample (a PUTATIVE sample's above CRISPRME_IUPAC_CAP
+# variants, observed_haplotypes).
 _MAX_UNIONS = 16
 # Accumulator for the ADDITIVE phase-confirmation companion TSV (one row per emitted
 # dict-less variant off-target: identity columns + CONFIRMED/PUTATIVE). Populated ONLY
@@ -376,6 +378,23 @@ def _aligned_mm(seq_prerevert, realTarget, guide_no_pam, revert):
         if i < len(guide_no_pam) and ch != "-" and ch.upper() != guide_no_pam[i]:
             mm += 1
     return mm
+
+
+def _aligned_pam_misses(seq_prerevert, realTarget, revert):
+    """Number of PAM positions of an ungapped, pre-revert candidate sequence whose base
+    the PAM does not allow, the sequence aligned as ``_aligned_mm`` aligns it (the
+    finalizer drops a candidate with any)."""
+    seq = (
+        reverse_complement_table("".join(seq_prerevert))
+        if revert
+        else "".join(seq_prerevert)
+    )
+    t = list(seq)
+    for pos, ch in enumerate(realTarget):
+        if ch == "-":
+            t.insert(pos, "-")
+    return sum(1 for i, ch in enumerate(t[pam_begin:pam_end])
+               if ch.upper() not in iupac_code_set[pam[i]])
 
 
 def _ref_with_bulges(refSeq_final, realTarget, guide_no_pam):
@@ -885,9 +904,24 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     #    legacy embedded-refSeq/sentinel-33 representation, which is present on every
     #    IUPAC candidate). The ``enumerate_observed_haplotypes`` contract never yields
     #    the empty/reference haplotype, so the reference row is our responsibility here.
+    #    Past _MAX_UNIONS unions, a PUTATIVE sample's one union takes, at a column where it
+    #    carries two or three alts, the one nearest the guide: one the PAM allows, then the
+    #    one with the fewest mismatches, on a tie the smaller.
+    _misses_alone = {}
+
+    def _nearest(pos_c, alts):
+        for alt in alts:
+            if (pos_c, alt) not in _misses_alone:
+                seq = list(refSeq)
+                seq[pos_c] = alt
+                _misses_alone[(pos_c, alt)] = (
+                    _aligned_pam_misses(seq, realTarget, revert),
+                    _aligned_mm(seq, realTarget, guide_no_pam, revert))
+        return min(alts, key=lambda alt: (_misses_alone[(pos_c, alt)], alt))
+
     haplotypes = _obshap.enumerate_observed_haplotypes(
         positions, refSeq, parse_haplotypes, ploidy_of, current_chr,
-        max_putative=IUPAC_CAP,
+        max_putative=IUPAC_CAP, max_unions=_MAX_UNIONS, choose=_nearest,
     )
 
     # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block).
