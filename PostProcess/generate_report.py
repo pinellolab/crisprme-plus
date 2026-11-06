@@ -1882,7 +1882,8 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     if meta.get("n_dense_rows") or meta.get("n_four_allele_rows"):
         rows.append(("Dense and four-allele windows",
                      _dense_windows_note(meta.get("n_dense_rows") or 0,
-                                         meta.get("n_four_allele_rows") or 0)))
+                                         meta.get("n_four_allele_rows") or 0,
+                                         meta.get("search_mode") == "per-sample")))
     return _card(
         rows,
         '<p class="caption">Provided to support an off-target analysis accounting '
@@ -1909,9 +1910,11 @@ def _degeneracy_note(max_degeneracy):
     )
 
 
-def _dense_windows_note(n_dense, n_four_allele):
+def _dense_windows_note(n_dense, n_four_allele, per_sample=False):
     """The inputs card's note on the rows in a dense window (2^DENSE_WINDOW_BITS sequences
-    or more) and in one holding a four-allele position."""
+    or more) and in one holding a four-allele position. A population-level row there is a
+    worst-case alignment, which such a window makes of alleles that seldom go together; a
+    per-sample row names the individuals who carry it (``per_sample``)."""
     said = []
     if n_dense:
         said.append(
@@ -1919,8 +1922,9 @@ def _dense_windows_note(n_dense, n_four_allele):
             f"lie{'s' if n_dense == 1 else ''} in a window spelling "
             f"2<sup>{wdens.DENSE_WINDOW_BITS}</sup> sequences or more (each two-allele column "
             "doubles the count, a three-allele one triples it, a four-allele one quadruples "
-            "it): such a window matches nearly any guide somewhere, so a worst-case alignment "
-            "there seldom exists in any one genome.")
+            "it): such a window matches nearly any guide somewhere"
+            + ("." if per_sample else
+               ", so a worst-case alignment there seldom exists in any one genome."))
     if n_four_allele:
         said.append(
             f"{n_four_allele:,} reported off-target{'' if n_four_allele == 1 else 's'} "

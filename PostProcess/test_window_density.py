@@ -626,9 +626,16 @@ class TheReport(unittest.TestCase):
                       "position", html)
         self.assertIn("Each SNP variant row rests on at most 2 ambiguous columns "
                       "(<code>--max-degeneracy 2</code>)", html)
+        self.assertIn("seldom exists in any one genome", html)
         plain = gr.render_inputs_criteria(base)
         self.assertNotIn("Dense and four-allele windows", plain)
         self.assertNotIn("--max-degeneracy", plain)
+        # a per-sample row there names the individuals who carry it: no worst case to doubt
+        per_sample = gr.render_inputs_criteria({**base, "search_mode": "per-sample",
+                                                "n_dense_rows": 1})
+        self.assertIn("1 reported off-target lies in a window spelling 2<sup>20</sup> "
+                      "sequences or more", per_sample)
+        self.assertNotIn("seldom exists in any one genome", per_sample)
 
     def test_the_legend_says_both(self):
         legend = gr.build_annotation_legend_html()
