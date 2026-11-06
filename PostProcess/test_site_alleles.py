@@ -114,7 +114,7 @@ class OnePositionsAlleles(unittest.TestCase):
         got = site_alleles.read_records(recs)
         self.assertEqual([(r[0], r[1]) for r in got], [("C", "T"), ("C", "G")])
         ref, alt, rsid, af, carriers = got[0]
-        self.assertEqual((rsid, af), ("rs1,rs9", "0.3"))
+        self.assertEqual((rsid, af), ("rs9", "0.3"))  # the more frequent record's
         self.assertEqual(carriers, {"S": "1|1", "X": "1|1", "Z": "0|1"})
         two = recs[:2]
         self.assertIs(site_alleles.read_records(two), two)

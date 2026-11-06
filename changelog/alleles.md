@@ -2,13 +2,13 @@
 
 **For whoever merges.** These entries describe CRISPRme's side of CRISPRitz 2.10.0's every-allele
 enrichment and its fifth symbol Q; the engine's own entries (every ALT of a split site coded, Q
-written at a position of four alleles) are the engine track's. Two of them hold end to end only
-with the engine doing its part, which this track could not check against a released engine:
-the merge of two records of one REF>ALT needs the enricher to keep both records' carriers (up to
-2.9.1, and on `feat/multiallelic-enrich`, the later record's entry replaces the earlier's in the
-dictionary), and a Q needs CRISPRitz 2.10.0's `buildTST`/`searchTST`. CRISPRitz still gives the
-first ID of a VCF line listing several ALTs to each of its ALTs (`enricher.py`, `enricher.cpp`):
-no CRISPRme reader can recover the others from the dictionary.
+written at a position of four alleles, the records of one REF>ALT merged in the dictionary) are
+the engine track's. They were checked through the real CLI with the engine track's every-allele
+enricher before Q (`feat/multiallelic-enrich` d75c603) and CRISPRitz 2.9.1's `buildTST` and
+`searchTST`; a search of an index holding Q also needs CRISPRme to read index format 2, which
+2.10.0 writes. CRISPRitz still gives the first ID of a VCF line listing several ALTs to each of
+its ALTs (`enricher.py`, `enricher.cpp`): no CRISPRme reader can recover the others from the
+dictionary.
 
 ### Added
 
@@ -32,13 +32,15 @@ no CRISPRme reader can recover the others from the dictionary.
 ### Changed
 
 - **Two VCF records of one REF>ALT at a position are one allele: their carriers are merged, a
-  haplotype slot carrying the ALT if either record puts it there (decision B2).** The dictionary
-  readers (the Tier-0 and Tier-1 compiles, the dictionary path of the SNP post-analysis, the indel
-  path) merge two entries of one ALT, or a sample listed twice in one entry. Up to 2.8.1 two
-  entries of one ALT stopped the Tier-1 compile of the whole chromosome (`duplicate (pos, alt)
-  record`), and the registry counted each record on its own. A sample that the merge leaves with
-  two ALTs of the position on one slot is resolved without phase (see Fixed). Covered by
-  `PostProcess/test_site_alleles.py`.
+  haplotype slot carrying the ALT if either record puts it there, with the rsID and AF of the more
+  frequent record (decision B2).** CRISPRitz 2.10.0 merges them in the dictionary; CRISPRme's
+  dictionary readers (the Tier-0 and Tier-1 compiles, the dictionary path of the SNP
+  post-analysis, the indel path) merge, by the same rule, two entries of one ALT, or a sample
+  listed twice in one entry, that reach them from another enrichment. Up to 2.8.1 two entries of
+  one ALT stopped the Tier-1 compile of the whole chromosome (`duplicate (pos, alt) record`), and
+  up to CRISPRitz 2.9.1 the later record's entry replaced the earlier's. A sample that the merge
+  leaves with two ALTs of the position on one slot is resolved without phase (see Fixed). Covered
+  by `PostProcess/test_site_alleles.py`.
 - **The input validator says what CRISPRme does with a VCF line that lists several ALTs, and with
   positions that hold several records, and looks for such lines on every run.** It warned only at
   10 ALTs or more, in the opt-in `--full_input_validate`, of an allele-index substring match the

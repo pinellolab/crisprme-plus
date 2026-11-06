@@ -161,30 +161,12 @@ def per_alt(site):
     return dict(got)
 
 
-def _higher_af(a, b):
-    """The higher of two allele-frequency strings; one that does not read as a number
-    loses, and of two such the first stays."""
-    def value(x):
-        try:
-            return float(x)
-        except (TypeError, ValueError):
-            return None
-    va, vb = value(a), value(b)
-    if vb is not None and (va is None or vb > va):
-        return b
-    return a
-
-
-def _joined_ids(a, b):
-    """The IDs of one allele that two records give: each ID once, '.' only when
-    neither has one."""
-    ids = []
-    for x in (a, b):
-        for i in str(x).split(","):
-            i = i.strip()
-            if i and i != "." and i not in ids:
-                ids.append(i)
-    return ",".join(ids) if ids else "."
+def _af_number(af):
+    """An allele-frequency string as a number, 0 when it does not read as one."""
+    try:
+        return float(af)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def read_records(records):
@@ -193,9 +175,10 @@ def read_records(records):
     ``records`` is a list of ``(ref, alt, rsid, af, {sample: genotype})``, one per
     dictionary entry in its order. Each entry's genotypes are read against its own
     allele index (``per_alt_entries``), then two records of one REF>ALT become one:
-    their carriers merged (``merge_carriers``), their IDs joined, the higher AF.
-    Returns the same shape, one record per REF>ALT in first-seen order: ``records``
-    itself when the position is plain and repeats no REF>ALT."""
+    their carriers merged (``merge_carriers``), with the rsID and AF of the more frequent
+    record (on a tie, the earlier), as CRISPRitz 2.10.0's enricher merges them. Returns
+    the same shape, one record per REF>ALT in first-seen order: ``records`` itself when
+    the position is plain and repeats no REF>ALT."""
     keys = [(r[0], r[1]) for r in records]
     entries = [(r[1], r[4]) for r in records]
     got = per_alt_entries(entries)
@@ -210,8 +193,9 @@ def read_records(records):
             out.append((ref, alt, rsid, af, carriers))
             continue
         pref, palt, prsid, paf, pcarriers = out[i]
-        out[i] = (pref, palt, _joined_ids(prsid, rsid), _higher_af(paf, af),
-                  merge_carriers(pcarriers, carriers))
+        if _af_number(af) > _af_number(paf):
+            prsid, paf = rsid, af
+        out[i] = (pref, palt, prsid, paf, merge_carriers(pcarriers, carriers))
     return out
 
 
