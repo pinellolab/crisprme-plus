@@ -2106,17 +2106,6 @@ def _check_threads(args: List[str], threads: bool) -> int:
 MAX_BULGES = 3
 
 
-def _built_three_prime(index_dir: str) -> bool:
-    """Whether index ``index_dir`` was built for a 3' PAM, as its .pam_build records
-    ("<name> <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM); one without it is taken for a
-    3' build, as the search shell's _index_side does."""
-    try:
-        with open(os.path.join(index_dir, ".pam_build")) as fh:
-            return not int(fh.readline().split()[-1]) < 0
-    except (OSError, ValueError, IndexError):
-        return True
-
-
 def _recorded_three_prime(index_dir: str) -> "Optional[bool]":
     """Whether index ``index_dir`` was built for a 3' PAM, as its .pam_build records it
     ("<name> <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM); None without a usable one."""
@@ -5271,9 +5260,10 @@ def build_index_only() -> None:
         # run, with no --samplesID (as a search's ERROR tells a user to run it, to rebuild
         # an INDELS index), leaves them as they are: it said, loud on stderr, that the index
         # was MISSING them (emptyidx F6).
+        _gt_kept = os.path.isdir(os.path.join(workdir, "Dictionaries", f"genotypes_{vcf_name}"))
         print(f"NOTE [build-index-only]: no --samplesID given: the dict-less tiers in place "
-              f"({_reg_dir} and its genotype store) are kept as they are, not rebuilt. To "
-              f"rebuild them, run this again with --samplesID.", flush=True)
+              f"({_reg_dir}{' and its genotype store' if _gt_kept else ''}) are kept as they "
+              f"are, not rebuilt. To rebuild them, run this again with --samplesID.", flush=True)
     elif not db_to_samplesid:
         _why = ("no usable samplesID entries (check the --samplesID listing)"
                 if samples_listing else "no --samplesID was given")

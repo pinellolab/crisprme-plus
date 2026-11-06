@@ -35,6 +35,8 @@ PAMS = {
     "20bp-NNNNNNNN-NO-PAM.txt": "N" * 28 + " 8\n",
     "20bp-NGCG-SpCas9VRER.txt": "N" * 20 + "NGCG 4\n",
     "24bp-NNNN-5p.txt": "N" * 24 + " -4\n",
+    "24bp-NNNN-3p.txt": "N" * 24 + " 4\n",
+    "24bp-VNNN-5p.txt": "VNNN" + "N" * 20 + " -4\n",
 }
 SAMPLES = ["S1", "S2", "S3", "S4", "S5", "S6"]
 THREADS = "2"
@@ -366,6 +368,37 @@ def main(root):
         else:
             say(f"an index under {cell} ({prefix}_2_gx...): not taken for a 3' PAM",
                 rc != 0 and "no variant index here serves this search" in out, out[-800:])
+
+    # a PAM-less index under the 2.9.0 name with no .pam_build: the name records its side as
+    # the file does (an older name with none is a 3' build at widths 3 and 8 only), so under
+    # --index-path a 3'-named one of width 4 serves NGG, pruned by itself, and a 5'-named one a
+    # 5' PAM of its width; both were refused
+    ngg_ref = copy_of(root, ngg2, "truth_ngg_reference")
+    search(ngg_ref, "o", pam="20bp-NGG-SpCas9.txt", variant=False)
+    w = copy_of(root, build(root, seed, "K4_3p", "24bp-NNNN-3p.txt", 1, variant=False),
+                "named_3p_unrecorded")
+    lib = os.path.join(w, "genome_library")
+    os.rename(os.path.join(lib, "NNNN_2_gx"), os.path.join(lib, "20-NNNN_2_gx"))
+    os.remove(os.path.join(lib, "20-NNNN_2_gx", ".pam_build"))
+    rc, out = search(w, "o", pam="20bp-NGG-SpCas9.txt", variant=False,
+                     extra=("--index-path", "genome_library"))
+    if engine_prunes():
+        say("a 3'-named PAM-less index of width 4 with no .pam_build (20-NNNN_2_gx): NGG pruned "
+            "by itself, same results as a dedicated index",
+            rc == 0 and identical(table(w, "o"), table(ngg_ref, "o")), out[-600:])
+    k4_5 = build(root, seed, "K4_5p", "24bp-NNNN-5p.txt", 1, variant=False)
+    truth = copy_of(root, k4_5, "truth_vnnn")
+    search(truth, "o", guide="g20_5p.txt", pam="24bp-VNNN-5p.txt", variant=False,
+           extra=("--index-path", "genome_library"))
+    w = copy_of(root, k4_5, "named_5p_unrecorded")
+    lib = os.path.join(w, "genome_library")
+    os.rename(os.path.join(lib, "NNNN_2_gx"), os.path.join(lib, "NNNN-20_2_gx"))
+    os.remove(os.path.join(lib, "NNNN-20_2_gx", ".pam_build"))
+    rc, out = search(w, "o", guide="g20_5p.txt", pam="24bp-VNNN-5p.txt", variant=False,
+                     extra=("--index-path", "genome_library"))
+    say("a 5'-named PAM-less index with no .pam_build (NNNN-20_2_gx): a 5' PAM of its width, "
+        "same results as the index recorded under its older name",
+        rc == 0 and identical(table(w, "o"), table(truth, "o")), out[-600:])
 
     # a search that enriches a dataset itself codes the fake-indel genome
     w = copy_of(root, ngg2, "on_demand")

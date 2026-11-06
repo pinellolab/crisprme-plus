@@ -101,7 +101,11 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   gets the same: the search script decides it for the search it runs, and the form's bulge cap and
   PAM list count those indexes. Before, a search that only a K = 8 index served stopped for want
   of a variant index (or, for the reference index, built one), and said to pass the flag. Where an
-  index serves the search unpruned, as an all-`N` one of the PAM's width does, nothing changes.
+  index serves the search unpruned, as an all-`N` one of the PAM's width does, nothing changes. On
+  chr22 with HGDP + 1000 Genomes (CRISPRitz 2.10.0), an `NGG` search whose variant index was
+  `NGG`'s own and whose reference index only the `NRR` one, under its older name or as
+  `20-NRR_3_hg38` with no `.pam_build`, said `no installed reference index of hg38`, and wrote
+  the same 2,023 rows, byte for byte, as the dedicated `NGG` indexes.
 - **The run and its report name the index that served the search.** `.Params.txt`'s `Genome_idx`
   says what the search asked for, which another index may serve (`NGG_2_hg38` served by
   `NNNNNNNN_3_hg38`), or none at all (IDX-21). The search script now records the indexes it took,
@@ -128,7 +132,10 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   still write the older name. Covered by `PostProcess/test_defaults_and_index_flex.py` (the
   search script, `crisprme.py`, the web and complete-test take the same of every name form, side
   and record), and through the real engine by `check_index_flex.py`: a download renamed to the new
-  form gives the same results, and one named for a 5′ PAM is not taken for a 3′ search.
+  form gives the same results, one named for a 5′ PAM is not taken for a 3′ search, and a
+  PAM-less index named for its side with no `.pam_build` serves a search of that side (a 3′ one of
+  width 4 an NGG search, pruned; a 5′ one a 5′ PAM of its width), which the search script refused
+  as an unrecorded index that crisprme.py and the web offered.
 - **The web form's PAM picker for a PAM-less index** (plan 2.7, DYNAMIC_PAM_INDEX_COMPAT §8). When an
   all-`N` index is installed for the genome (or the dataset) selected, the form says what it serves
   (any PAM of its guide length on its side, up to its flank) and offers the PAMs of common nucleases
