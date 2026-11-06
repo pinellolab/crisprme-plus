@@ -670,6 +670,25 @@ class TestGateCommand(unittest.TestCase):
             self.assertFalse(os.path.exists(hp.companion_path(self.results)))
 
 
+class TestTheSearchGivesTheGateItsPam(unittest.TestCase):
+    """The pipeline's carrier-gate step passes the search's PAM file: without it the gate
+    reads no PAM region of an alignment, and takes every allele in one for an allele the
+    row's score needs (RV3-1)."""
+
+    def test_the_gate_step_passes_the_pam_file(self):
+        with open(os.path.join(HERE, "submit_job_automated_new_multiple_vcfs.sh")) as fh:
+            lines = fh.read().splitlines()
+        i = next(n for n, ln in enumerate(lines)
+                 if "haplotype_prioritizer.py" in ln and "python " in ln)
+        step = ""
+        while True:
+            step += lines[i]
+            if not lines[i].rstrip().endswith("\\"):
+                break
+            i += 1
+        self.assertIn('--pam "$pam_file"', step)
+
+
 class TestTheFrequencyBoundOfASitesOnlyRow(unittest.TestCase):
     """A sites-only dataset's row of a SNP and an indel the genotype oracle does not hold
     (C2) shows the frequency bound of both: the SNP's frequency from the dataset's registry,
