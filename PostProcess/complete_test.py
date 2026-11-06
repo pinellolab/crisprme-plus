@@ -196,7 +196,7 @@ def check_output(benchmarks: bool) -> None:
     and validate-test would read an earlier run's results as this run's: every folder of
     this mode there (crisprme-test-out_<name> of any benchmark, a heavy one or one an
     earlier release ran too) is named, all in one message, before anything is downloaded
-    or searched. A folder of the other mode is in neither's way.
+    or searched. A folder of the other mode is in neither's way, nor is an empty one.
 
     Args:
         benchmarks (bool): Whether this run is the benchmark mode's.
@@ -207,10 +207,14 @@ def check_output(benchmarks: bool) -> None:
     """
     results_dir = os.path.abspath(os.path.join(os.getcwd(), CRISPRME_DIRS[1]))
     assert os.path.isdir(results_dir)
+    # (an empty one is no earlier run's results: complete-search makes its output folder,
+    # then a refusal of its pre-flight leaves it empty, and that stopped every run after
+    # it, until the user removed it, R2-F2; complete-search takes an empty folder)
     found = [os.path.join(results_dir, d) for d in sorted(os.listdir(results_dir))
              if (d.startswith(f"{COMPLETETESTRESDIR}_") if benchmarks
                  else d == COMPLETETESTRESDIR)
-             and os.path.isdir(os.path.join(results_dir, d))]
+             and os.path.isdir(os.path.join(results_dir, d))
+             and os.listdir(os.path.join(results_dir, d))]
     if found:
         # all in one message (named one at a time, the benchmark mode's six stopped a user
         # five more times), and exit 2, not 0, which a script or a CI step read as a pass

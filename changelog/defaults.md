@@ -392,3 +392,8 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   scores of -1, no report zip and a WARNING in its error log alone (final confirmation of
   2.8.1; TROUBLESHOOTING §1 said so). It says, before it makes anything, which folders it
   tried, and to set `CRISPRME_TMPDIR` to a writable one or give the container a `/tmp`.
+- **complete-test is not stopped by the empty results folder a refused search leaves.**
+  complete-search makes its output folder, and a refusal of its pre-flight leaves it empty: the
+  next complete-test stopped on it, "Complete-test already run once", until the user removed it
+  (R2-F2). An empty folder holds no earlier run's results, and complete-search takes one: only
+  a folder with something in it stops complete-test now.

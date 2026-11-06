@@ -197,8 +197,9 @@ class AnEarlierRunInTheWayIsNamedWhole(unittest.TestCase):
     def run_test(self, folders, ondemand, skip_heavy=None):
         """run_crisprme_test with ``folders`` in Results/, the benchmark mode for
         ``ondemand``: its exit status, its stderr, and the mode it ran (none if refused)."""
-        for name in folders:
+        for name in folders:  # (each with an earlier run's results in it)
             os.makedirs(os.path.join(self.results, name), exist_ok=True)
+            open(os.path.join(self.results, name, "log.txt"), "w").close()
         ran, err = [], io.StringIO()
         with mock.patch.dict(os.environ, self.env(ondemand, skip_heavy), clear=True), \
              mock.patch.object(ct, "_run_benchmarks_ondemand", lambda *a: ran.append("bench")), \
@@ -241,8 +242,25 @@ class AnEarlierRunInTheWayIsNamedWhole(unittest.TestCase):
         code, err, ran = self.run_test([ct.COMPLETETESTRESDIR], True)
         self.assertEqual((code, err, ran), (0, "", ["bench"]))
 
+    def test_an_empty_folder_a_refused_search_left_is_in_no_ones_way(self):
+        # complete-search makes its output folder, then a refusal of its pre-flight leaves it
+        # empty: every complete-test after it stopped, until the user removed it (R2-F2)
+        for mode, folder in ((False, ct.COMPLETETESTRESDIR), (True, self.benchmarks[0])):
+            with self.subTest(benchmarks=mode):
+                os.makedirs(os.path.join(self.results, folder))
+                ran, err = [], io.StringIO()
+                with mock.patch.dict(os.environ, self.env(mode), clear=True), \
+                     mock.patch.object(ct, "_run_benchmarks_ondemand",
+                                       lambda *a: ran.append("bench")), \
+                     mock.patch.object(ct, "_run_prebuilt_index_smoke",
+                                       lambda *a: ran.append("smoke")), \
+                     contextlib.redirect_stderr(err):
+                    ct.run_crisprme_test("chr22", "1000G", 4, False)
+                self.assertEqual((err.getvalue(), ran), ("", ["bench" if mode else "smoke"]))
+
     def test_the_script_exits_2_having_downloaded_nothing(self):
         os.makedirs(os.path.join(self.results, self.benchmarks[0]))
+        open(os.path.join(self.results, self.benchmarks[0], "log.txt"), "w").close()
         res = subprocess.run([sys.executable, self.SCRIPT, "chr22", "1000G", "4", "False"],
                              env=self.env(True), capture_output=True, text=True, timeout=120)
         self.assertEqual((res.returncode, res.stdout, res.stderr),
