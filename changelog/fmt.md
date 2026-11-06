@@ -1,14 +1,40 @@
 <!-- fmt track: [2.9.0] entries for CHANGELOG.md (CRISPRme reads index format 2; the repin to
 CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
 
-**For the merge, not for the changelog: two notes.**
+**For the merge, not for the changelog: four notes.**
 
-1. The Changed entry on the repin to CRISPRitz 2.10.0 comes with the last commit of the track,
-   which sets the version; it is to be merged only once CRISPRitz v2.10.0 is tagged. Until then
-   the image and `install_from_source.sh` build CRISPRitz 2.9.1, which reads index format 1 only,
-   and every search of an index of format 2 stops with the ERROR the first Added entry quotes.
-2. [2.8.1]'s entries that say CRISPRme 2.8.1 refuses an index of format 2 ("the CRISPRitz planned
+1. The Changed entry on the repin to CRISPRitz 2.10.0 comes with the last commit of the track, which
+   sets the version. Merge that commit only once CRISPRitz v2.10.0 is tagged, and only with or after
+   the alleles track (`n290-alleles`): CRISPRitz 2.10.0 writes the four-allele symbol Q, which the
+   alleles track's readers take (`819a6d4`) and this track's do not. On this track alone with
+   2.10.0, a variant search that reports a target through a position whose reference base and SNP
+   ALTs cover A, C, G and T stops in the SNP post-analysis, per-sample and population-level alike:
+   `ValueError: substring not found` at `cluster.dict.py` line 164, exit 1. HGDP + 1000 Genomes
+   holds 2,448 such positions on chr22 (CRISPRitz's `docs/MULTIALLELIC_ENRICHMENT.md`) and 45,026
+   genome-wide; the 300 samples of this track's chr22 runs below hold 134 (in 938 targets of their
+   NGG index), and those runs stopped so: per-sample with `feat/2.10.0` 25ee50c, per-sample and
+   population-level with a8e52ef. With the alleles track merged in (one conflict,
+   `crispritz_bins._BITS`, where both tracks add Q: take the alleles side, which keeps Q out of
+   `_PAM_BITS`), the same build and searches, and a reference search, end with exit 0 and nothing on
+   stderr (a8e52ef): its reference and variant indexes are this track's, file for file, so its SNP
+   post-analysis read the very targets that stopped this track's, and its reference rows are the
+   9,211 above. Until the tag, the image and `install_from_source.sh` build CRISPRitz 2.9.1, which
+   reads index format 1 only, and every search of an index of format 2 stops with the ERROR the
+   first Added entry quotes.
+2. The entries name the CRISPRitz of each real run. 2.9.1 is the tag v2.9.1;
+   `feat/engine-boundaries` c286bf8 writes format 2 and no Q (the engine's boundary fixes alone);
+   `feat/2.10.0` 25ee50c and a8e52ef are CRISPRitz 2.10.0 before its tag, with Q (a8e52ef's
+   `buildTST`, `searchTST`, `searchBruteForce` and `enricher` are 25ee50c's, byte for byte; its
+   `add-variants` takes only the `.fa` and `.fasta` files of the genome folder). None ran on the
+   tag: Gate B step 4b of `docs/RELEASE_CHECKLIST.md` runs `check_real_engine.py` and
+   `check_boundary_rows.py` on the release's own engine.
+3. [2.8.1]'s entries that say CRISPRme 2.8.1 refuses an index of format 2 ("the CRISPRitz planned
    as 2.9.2", "index format 1 only") stay as they are: they say what 2.8.1 does.
+4. The note of an index of format 1 says to build it again, not to download it again: `download`
+   fetches `lucapinello/crisprme-data`, whose archives are all of format 1, and no track points it
+   yet at the rebuilt archives' own location (decision C2). Once one does, the note
+   (`_check_index_format` in the search script, `test_index_format2`) and its entry under Changed
+   can say to download the index again from there.
 
 ### Added
 - **CRISPRme reads index format 2, the format CRISPRitz writes from 2.10.0.** An index of format
@@ -24,22 +50,24 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
   format 2, which CRISPRitz 2.10.0 and later write) than the one installed here, CRISPRitz
   2.9.1, which reads index format 1 only. Install the CRISPRitz this CRISPRme installs with ...`.
   An index of a format newer than 2 is refused as before, naming the formats this release reads.
-  Through the real CLI with CRISPRitz `feat/engine-boundaries` (format 2) on a synthetic genome
-  of perfect, mismatched and bulged sites at contig ends and beside `N` runs, with SNPs and
-  indels by them (`test/index_format2/check_boundary_rows.py`): every search -- reference, and
-  variant per-sample and population-level, NGG and the 5′ TTTV, and NGG under `--prune-pam` off an
-  8-nt flank -- ends with nothing on stderr; every row is its genome's bases at its coordinates;
-  the results hold every row of the same searches with CRISPRitz 2.9.1 (13 against 6 NGG rows, 2
-  against 0 TTTV rows, each row more at a boundary) but the one 2.9.1 reports on the wrong strand
-  (a − strand PAM at a contig's first base, IDX-14); and the 8-nt flank gives the dedicated
-  index's 13 rows (with 2.9.1, 5 of its 6). On hg38 chr22 (five guides -- `ACTGAAATCTGTAAGCAGGC`,
-  TRAC, EMX1, VEGFA site 3 and one whose perfect match starts right after an `N` run -- NGG, 4
-  mismatches + 1 DNA + 1 RNA bulge, `build-index-only` then per-sample over 300 HGDP + 1000
-  Genomes samples, and a reference search): with CRISPRitz 2.9.1 this release gives 2.8.1's
-  integrated results byte for byte (10,942 and 9,210 rows); with format 2, every one of those rows
-  and one more, that perfect match at chr22:11,118,987, which no index of format 1 holds; a
-  reference search of the format-1 index by CRISPRitz 2.10.0 gives the 2.9.1 rows and the note
-  below; and one of the format-2 index by 2.9.1 stops with that ERROR, exit 1.
+  Through the real CLI on a synthetic genome of perfect, mismatched and bulged sites at contig ends
+  and beside `N` runs, with SNPs and indels by them (`test/index_format2/check_boundary_rows.py`),
+  with CRISPRitz 2.10.0 (`feat/2.10.0` 25ee50c) and with the engine of format 2 before Q
+  (`feat/engine-boundaries` c286bf8) alike: every search -- reference, and variant per-sample and
+  population-level, NGG and the 5′ TTTV, and NGG under `--prune-pam` off an 8-nt flank -- ends with
+  nothing on stderr; every row is its genome's bases at its coordinates; the results hold every row
+  of the same searches with CRISPRitz 2.9.1 (13 against 6 NGG rows, 2 against 0 TTTV rows, each row
+  more at a boundary) but the one 2.9.1 reports on the wrong strand (a − strand PAM at a contig's
+  first base, IDX-14); and the 8-nt flank gives the dedicated index's 13 rows (with 2.9.1, 5 of its
+  6). On hg38 chr22 (five guides -- `ACTGAAATCTGTAAGCAGGC`, TRAC, EMX1, VEGFA site 3 and one whose
+  perfect match starts right after an `N` run -- NGG, 4 mismatches + 1 DNA + 1 RNA bulge,
+  `build-index-only` then per-sample over 300 HGDP + 1000 Genomes samples, and a reference search):
+  with CRISPRitz 2.9.1 this release gives 2.8.1's integrated results byte for byte (10,942 and 9,210
+  rows); with format 2 (`feat/engine-boundaries` c286bf8), every one of those rows and one more,
+  that perfect match at chr22:11,118,987, which no index of format 1 holds, and CRISPRitz 2.10.0
+  (25ee50c) gives the same 9,211 reference rows, byte for byte; a reference search of the format-1
+  index by 2.10.0 (25ee50c) gives the 2.9.1 rows and the note below; and one of 2.10.0's format-2
+  index by 2.9.1 stops with that ERROR, exit 1.
 - **Every index CRISPRme builds records what it holds, in `.index_meta.json`.** `build-index-only`,
   a search's own build and each sub-index of an INDELS index write the index format, the build
   PAM, its side, the flank and guide lengths, the budget, whether the PAM is all `N` and whether the
@@ -65,10 +93,12 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
   sibling sub-indexes', else by format 2's rule (which errs only by asking for a rebuild). A folder
   whose `.bin` files are of both formats, which no build writes, is refused as put together from
   two builds. Checked against the real engine (`test/index_format2/check_real_engine.py`): with
-  CRISPRitz `feat/engine-boundaries`, 224 of 224 checks over 60 random contigs, 7 PAMs (NGG, NRG,
-  NNGRRT, the 5′ TTTV, PAM-less K = 3, 4 and 8) and budgets 0 to 3, every count of a contig's sites
-  equal to the targets the engine wrote and all 45,304 cuts of its files told; with 2.9.1, 196 of
-  196.
+  `feat/engine-boundaries` c286bf8 (format 2 before Q), 224 of 224 checks over 60 random contigs,
+  7 PAMs (NGG, NRG, NNGRRT, the 5′ TTTV, PAM-less K = 3, 4 and 8) and budgets 0 to 3, every count
+  of a contig's sites equal to the targets the engine wrote and all 45,304 cuts of its files told;
+  with CRISPRitz 2.10.0 (`feat/2.10.0` 25ee50c), on contigs holding Q among their bases, 252 of
+  252 (those 224 and, for each index, a file of it damaged in nine ways, each read as
+  `crispritz.py index-info` reads it) and all 255,442 cuts told; with 2.9.1, 196 of 196.
 - **A search takes an index the installed CRISPRitz reads ahead of one it would stop on.** Of a
   library holding an index of format 2 and one of format 1 that serve a search, the scan took the
   format-2 one when its budget was the smaller, and then stopped on it under CRISPRitz 2.9.1
@@ -81,11 +111,16 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
   2.9.1 or earlier): it lacks the sites whose guide lies within a few bases of a contig end or an
   N run, which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). To search
   them, move <path> out of the way and build it again with crisprme.py build-index-only (which
-  keeps an index it finds in place).` Through the real CLI (`test_index_format2`):
-  `build-index-only` keeps the three indexes where they are, and with each moved out of the way as
-  its note says, it builds all three in format 2, and the next search gives no note. The note
-  `--prune-pam` gives of a flank wider than its PAM, and the warning of a flank built before
-  CRISPRitz kept an `N` in it, are given of an index of format 1 only.
+  keeps an index it finds in place).` On hg38 chr22 (the guides and samples above), the install
+  CRISPRme 2.8.1 built with CRISPRitz 2.9.1, searched per-sample with CRISPRitz 2.10.0
+  (`feat/2.10.0` a8e52ef), gives 2.8.1's 10,942 rows byte for byte, and the three notes;
+  `build-index-only` alone keeps the three indexes, every `.bin` unchanged; with each moved out of
+  the way as its note says, it builds all three in format 2 from the variant genome in place, and
+  the per-sample and reference searches give the 10,943 and 9,211 rows of format 2 above, byte for
+  byte, with no note and nothing on stderr. `test_index_format2` does the same through
+  `build-index-only` and the search script on stub engines. The note `--prune-pam` gives of a
+  flank wider than its PAM, and the warning of a flank built before CRISPRitz kept an `N` in it,
+  are given of an index of format 1 only.
 - **The side of an index of format 2 is the one its header records.** The search script,
   complete-search, complete-test, the coverage check and the web read it there before
   `.pam_build`, which an index built by `crispritz.py` itself, or downloaded, may lack.
