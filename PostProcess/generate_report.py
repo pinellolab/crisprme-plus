@@ -508,11 +508,12 @@ def render_unobserved_section(gate, n_demoted, n_cb_only, table_html, download_n
         head
         + f'<p class="caption">{n_demoted:,} row{"" if n_demoted == 1 else "s"} ({shown}): '
         "each takes, at its highest-CFD alignment, variants that each occur in the panel "
-        "but that none of its haplotypes carries together (or variants every haplotype "
-        "carrying which has an indel in the target), so no individual of the panel has its "
-        "sequence. They are the search's worst cases that the panel does not show: left out "
-        "of the top-1000 tables, the validation panel and the risk card, and kept here and "
-        "in the integrated results. The <code>Observed</code> column says what the panel "
+        "but that none of its haplotypes carries together (or variants, a single one too, "
+        "every haplotype carrying which has an indel in the target), so no individual of the "
+        "panel has its sequence. They are the search's worst cases that the panel does not "
+        "show: left out of the top-1000 tables, the validation panel and the risk card (the "
+        "panel's totals count them), and kept here and in the integrated results. The "
+        "<code>Observed</code> column says what the panel "
         "shows, and how many haplotypes were expected to carry the variants together if "
         "they were independent: where few were (&ldquo;too rare to tell&rdquo;), the zero "
         "says little." + perfect + cb + "</p>\n" + dl + table_html)
