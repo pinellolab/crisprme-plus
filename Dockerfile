@@ -7,9 +7,11 @@
 # crispritz is compiled from source at a pinned GitHub tag (crispritz_ref) so the image
 # gets the exact, reproducible build we want -- including the latest fixes -- without
 # waiting on the Bioconda autobump lag. (Bioconda crispritz is for `conda install` users.)
-# v2.9.1 carries --prune-pam (which this release documents, and which a build without it
+# The tag must carry --prune-pam (which this release documents, and which a build without it
 # would silently drop, running the search unpruned), the genomic-N flank fix, the non-.bin
-# index-dir crash fix, and the enricher multiallelic-indel fix. crisprme
+# index-dir crash fix and the enricher multiallelic-indel fix (all in v2.9.1 and later), and,
+# from v2.10.0, index format 2, which this release reads (an older engine refuses such an
+# index, and this release says so). crisprme
 # is installed from this build context. The dependency
 # pins mirror the from-scratch Python-3.11 validation on ml007 (see PR #131):
 #   - numerical stack: MODERNIZED now that the legacy RandomForest scorer is retired.
@@ -73,7 +75,7 @@ RUN micromamba install -y -n base \
 
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 
-# ---- Build crispritz 2.9.1 from source and install into the env ------------
+# ---- Build crispritz (the tag crispritz_ref names) from source and install it into the env
 RUN git clone --depth 1 --branch ${crispritz_ref} \
         https://github.com/pinellolab/CRISPRitz.git /opt/crispritz-src \
     && cd /opt/crispritz-src \
