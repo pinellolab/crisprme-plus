@@ -24,6 +24,7 @@ import haplotype_prioritizer as hp  # noqa: E402
 import tier1_genotypes as t1  # noqa: E402
 import build_indel_genotypes as big  # noqa: E402
 import test_build_index_only_atomic as bio  # noqa: E402  (the real crisprme.py, a stub engine)
+import test_dictless_publish as tdp  # noqa: E402  (publish-index with the HF client stubbed)
 
 setUpModule = bio.setUpModule
 tearDownModule = bio.tearDownModule
@@ -672,8 +673,9 @@ class TestPerSampleDenseWindowOnTheDictionary(_PostAnalysis):
 
 class TestGenotypeOracleDownload(unittest.TestCase):
     """download --what genotype-oracle: the phased HGDP + 1000 Genomes genotypes and indel
-    genotypes into Dictionaries/, where the gate finds them, from archives publish-index
-    writes (the HuggingFace client stubbed: the repository is a folder)."""
+    genotypes into Dictionaries/, where the gate finds them, from the archives publish-index
+    uploads of the panel's variant index (the HuggingFace client stubbed: the repository is a
+    folder)."""
 
     def setUp(self):
         import crisprme_hf as hf
@@ -682,10 +684,6 @@ class TestGenotypeOracleDownload(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.hub = os.path.join(self.tmp, "hub")
         os.makedirs(self.hub)
-        src = os.path.join(self.tmp, "src", "Dictionaries")
-        build_panel(src, [(100, "A", "G", {"S00": "1|0"})],
-                    [(104, "CTT", "C", {"S00": "1|0"})], name=hp.ORACLE_PANEL)
-        self.src = src
         orig = hf._hf_snapshot
         self.addCleanup(setattr, hf, "_hf_snapshot", orig)
         self.fetched = []
@@ -702,14 +700,20 @@ class TestGenotypeOracleDownload(unittest.TestCase):
         self.work = os.path.join(self.tmp, "work")
         os.makedirs(self.work)
 
-    def publish(self, store):
-        self.hf._make_genotypes_tarball(
-            os.path.join(self.hub, f"{store}_{hp.ORACLE_PANEL}.tar.gz"),
-            os.path.join(self.src, f"{store}_{hp.ORACLE_PANEL}"))
+    def publish(self, indels=True):
+        """publish-index of the panel's variant index, built with its phased genotypes and
+        (``indels``) its phased indel genotypes: the uploads are the repository's files.
+        Returns their paths in the repository."""
+        root = os.path.join(self.tmp, "src")
+        idx = tdp._mklayout(root, f"NRG_3_hg38+{hp.ORACLE_PANEL}", registry=False,
+                            genotypes=False)
+        build_panel(os.path.join(root, "Dictionaries"), [(100, "A", "G", {"S00": "1|0"})],
+                    [(104, "CTT", "C", {"S00": "1|0"})] if indels else (),
+                    name=hp.ORACLE_PANEL)
+        return [remote for _copy, remote in tdp._publish(idx, self.hub).uploads]
 
     def test_installs_both_stores_where_the_gate_reads_them(self):
-        self.publish("genotypes")
-        self.publish("indel_genotypes")
+        self.assertIn(f"indexes/indel_genotypes_{hp.ORACLE_PANEL}.tar.gz", self.publish())
         dests = self.hf.download_genotype_oracle(self.work, repo="local/test")
         dicts = os.path.join(self.work, "Dictionaries")
         self.assertEqual(dests, [os.path.join(dicts, f"{s}_{hp.ORACLE_PANEL}")
@@ -725,7 +729,8 @@ class TestGenotypeOracleDownload(unittest.TestCase):
         self.assertEqual(self.fetched, [])
 
     def test_without_indel_genotypes_on_the_hub_it_says_so(self):
-        self.publish("genotypes")
+        self.assertNotIn(f"indexes/indel_genotypes_{hp.ORACLE_PANEL}.tar.gz",
+                         self.publish(indels=False))
         import contextlib
         import io
         out = io.StringIO()
