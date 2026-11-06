@@ -677,6 +677,26 @@ class TestGenotypeOracleDownload(unittest.TestCase):
             self.hf.download_genotype_oracle(self.work, repo="local/test")
 
 
+class TestTheReportSaysWhyTheGateDidNotRun(unittest.TestCase):
+    """The inputs card's Carrier gate row for each way the gate did not check the rows."""
+
+    def test_each_status(self):
+        import generate_report as gr
+        said = {status: gr.render_gate_row({"status": status})
+                for status in ("no-oracle", "opt-in", "off", "untiered", "per-sample",
+                               "no-panel")}
+        self.assertIn("crisprme.py download --what genotype-oracle", said["no-oracle"][1])
+        self.assertIn("only on request", said["opt-in"][1])
+        self.assertIn("Turned off", said["off"][1])
+        self.assertIn("build-index-only --samplesID", said["untiered"][1])
+        # a per-sample search's rows name their cis carriers; no phased store, nothing to say
+        self.assertIsNone(said["per-sample"])
+        self.assertIsNone(said["no-panel"])
+        self.assertIsNone(gr.render_gate_row(None))
+        # a companion the report could not read
+        self.assertIn("not read", gr.render_gate_row({"status": "run", "used": False})[1])
+
+
 class TheSearchSaysWhatTheGateDoes(bio._Fixture):
     """complete-search as a user runs it (a stub engine): which panel the gate reads, or why
     it does not run, and its flags checked before anything starts."""
