@@ -300,11 +300,11 @@ jobs:
               --max-total-edits "$mt" --chrom chr22 --mode soundness \
               --out "check_indel_rows_$name.tsv"
           done
-          echo "=== check_indel_rows completeness (cas9_sg1617, chr22:10.5-14.5 Mb)"
+          echo "=== check_indel_rows completeness (cas9_sg1617, chr22:10.5-20.5 Mb)"
           python3 scripts/check_indel_rows.py \
             --results work/Results/crisprme-test-out_cas9_sg1617 --reference "$ref" \
             --vcf "$vcf" --pam work/PAMs/20bp-NGG-SpCas9.txt --mm 4 --bDNA 1 --bRNA 1 \
-            --max-total-edits 6 --region chr22:10500000-14500000 --mode completeness \
+            --max-total-edits 6 --region chr22:10500000-20500000 --mode completeness \
             --out check_indel_rows_completeness.tsv
 
       - name: Upload the indel-check findings on failure

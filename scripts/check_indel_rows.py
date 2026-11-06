@@ -1394,8 +1394,11 @@ def main(argv=None):
                         needed[-1] = (needed[-1][0], max(needed[-1][1], b))
                     else:
                         needed.append((a, b))
-            win = Window(ref, ch, max(0, tlo - pad), thi + pad, vcfs, pad=0,
-                         needed=needed)
+            # a tile that is the whole chromosome (no tabix index) still only needs the
+            # records of --region, so clamp the VCF window to it
+            wlo = max(0, tlo - pad, (lo - pad) if lo is not None else 0)
+            whi = min(thi + pad, (hi + pad) if hi is not None else thi + pad)
+            win = Window(ref, ch, wlo, whi, vcfs, pad=0, needed=needed)
             if args.mode in ("soundness", "both"):
                 for r in sorted(tiles[t], key=lambda x: x["start"]):
                     kind = "indel" if any(is_indel_token(x)
