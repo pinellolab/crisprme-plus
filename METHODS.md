@@ -634,10 +634,10 @@ complementary controls:
   was reported, with the full IUPAC sequence so a user can dig into its other alignments:
   in a population-level search that a greedy worst-case alignment is reported and
   additional haplotype alignments may exist; under `--per-sample` (since 2.9.0) that the
-  haplotypes its carriers have are reported (below), but at a row that names no carrier, a
-  sites-only dataset's, whose rows are the population-level analysis's in either mode.
-  Nothing is silently truncated — the bound, the representative, and the alternatives are
-  all auditable.
+  haplotypes its carriers have are reported (below), but for a row that names no carrier, a
+  sites-only dataset's, whose rows are the population-level analysis's in either mode and
+  keep the first note. Nothing is silently truncated — the bound, the representative, and the
+  alternatives are all auditable.
 
 Together these keep genome-wide variant search tractable while making any bound
 that was applied explicit and reviewable, and guaranteeing no region is dropped.
