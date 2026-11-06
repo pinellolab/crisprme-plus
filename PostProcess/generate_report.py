@@ -1332,6 +1332,10 @@ def _parse_results_filename(tsv_path):
 # dataset (build_summary_meta then also sets meta["reference_only"]).
 REFERENCE_ONLY_DATASETS = "none (reference genome only)"
 
+# The record of the indexes a search took, which the search script writes into its result
+# folder (since 2.9.0), bundled as indexes_searched.txt beside Params.txt.
+INDEXES_SEARCHED_FILE = ".indexes_searched.txt"
+
 
 def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     """Collect summary metadata used by the header card and matrix.
@@ -1477,17 +1481,22 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         if len(_mm):
             obs_max_mmb = int(_mm.max())
 
-    # The indexes the search took (the search script records them in the parameters file
-    # since 2.9.0): which answered it, and how, where Genome_idx says what was asked for,
+    # The indexes the search took (the search script records them since 2.9.0, in
+    # .indexes_searched.txt beside the parameters, which the web compares byte for byte to
+    # reuse a job): which answered it, and how, where Genome_idx says what was asked for,
     # which another index may have served, or none. A run of an earlier release has none.
+    # Prune_pam: complete-search records the flag in the parameters, given or taken by
+    # itself; the search script, for a search the web launched, in the record.
+    taken = _read_kv_sidecar(os.path.join(result_dir, INDEXES_SEARCHED_FILE)) \
+        if result_dir else {}
     indexes = []
-    if params.get("Reference_index"):
-        indexes.append(("Reference index searched", params["Reference_index"]))
-    for key in sorted(k for k in params if k.startswith("Variant_index:")):
-        indexes.append((f"Variant index searched ({key.split(':', 1)[1]})", params[key]))
-    if params.get("Prune_pam") == "auto":
-        indexes.append(("PAM pruning", "--prune-pam, which the search took by itself: no "
-                                       "installed index served this PAM unpruned"))
+    if taken.get("Reference_index"):
+        indexes.append(("Reference index searched", taken["Reference_index"]))
+    for key in sorted(k for k in taken if k.startswith("Variant_index:")):
+        indexes.append((f"Variant index searched ({key.split(':', 1)[1]})", taken[key]))
+    if "auto" in (params.get("Prune_pam"), taken.get("Prune_pam")):
+        indexes.append(("PAM pruning", "--prune-pam, which the search took by itself: an "
+                                       "index it searched serves this PAM only pruned to it"))
 
     return {
         "guides": guides,
@@ -2177,6 +2186,25 @@ def load_sample_dataset(samplesid_dir):
         except OSError:
             continue
     return {sid: lbl for sid, (_n, lbl) in best.items()}
+
+
+def run_sample_ids(result_dir):
+    """The samples a search ran with, as its script gathered them from its samplesID lists:
+    ``.sampleID.txt`` in its result folder, one a row after a header, none for a search
+    with no list. None where the folder has no such file (a report of a table alone)."""
+    path = os.path.join(result_dir, ".sampleID.txt") if result_dir else None
+    if not path or not os.path.isfile(path):
+        return None
+    ids = set()
+    try:
+        with open(path) as handle:
+            for line in handle:
+                sid = line.split("\t", 1)[0].strip()
+                if sid and not sid.startswith("#"):
+                    ids.add(sid)
+    except OSError:
+        return None
+    return ids
 
 
 def _dataset_of(sample_id):
@@ -5950,10 +5978,14 @@ def build_report(
     # inputs/criteria box built HERE (after tiers staged) so the variant_created
     # link uses the ACTUAL bundled filename (.tsv or .tsv.gz), never a broken guess.
     # per-dataset panel sizes for the 'Variants included' row (reuse the already
-    # loaded native-provenance map; cheap -- just tallies sample IDs)
+    # loaded native-provenance map; cheap -- just tallies sample IDs): of the samples the
+    # search ran with (run_sample_ids), each under its own dataset. Every list in
+    # samplesIDs/ was counted, other datasets' and the lists Settings writes too (M2).
+    _run_ids = run_sample_ids(result_dir)
     _ds_counts = {}
-    for _lbl in sample_dataset.values():
-        _ds_counts[_lbl] = _ds_counts.get(_lbl, 0) + 1
+    for _sid, _lbl in sample_dataset.items():
+        if _run_ids is None or _sid in _run_ids:
+            _ds_counts[_lbl] = _ds_counts.get(_lbl, 0) + 1
     _reg_vc = _registry_variant_count(result_dir, meta)
     inputs_criteria_html = render_inputs_criteria(
         meta, tier_links.get("variant_created"),
@@ -6158,6 +6190,12 @@ def build_report(
                         shutil.copyfile(_pp, _dst)
                         bundle.append(_dst)
                         break
+                # and the record of the indexes the search took (build_summary_meta)
+                _pp = os.path.join(result_dir, INDEXES_SEARCHED_FILE)
+                if os.path.isfile(_pp):
+                    _dst = os.path.join(staging, INDEXES_SEARCHED_FILE.lstrip("."))
+                    shutil.copyfile(_pp, _dst)
+                    bundle.append(_dst)
         except Exception as exc:  # noqa: BLE001 - manifest is optional
             sys.stderr.write(f"generate-report: run_manifest unavailable: {exc}\n")
 

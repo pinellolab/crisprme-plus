@@ -4,6 +4,8 @@
 Run: python PostProcess/test_indel_snp_overlay.py   (or via pytest)
 """
 
+import unittest
+
 import overlay_indel_snps as ov
 
 
@@ -116,6 +118,14 @@ def test_crispr_bulge_never_sees_an_iupac_code():
                               range(len(tgt) - 3), 6, -1, 2)
     assert len(rows) == 1 and set(rows[0]["seq"]) <= set("ACGTacgt-"), rows
 
+
+
+def load_tests(loader, tests, pattern):
+    """Under ``python -m unittest`` too, each test_ function above, which it found none of,
+    and said OK (suite P4)."""
+    return unittest.TestSuite(unittest.FunctionTestCase(fn) for name, fn in
+                              sorted(globals().items()) if name.startswith("test_")
+                              and callable(fn))
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

@@ -164,12 +164,16 @@ jobs:
           # image layer, so it never caught it. Here we chmod the code dir READ-ONLY
           # (mimicking Apptainer) and run a reference-only search that PRODUCES HITS (so
           # the graphical/summary reference branch — where the bug lived — actually runs).
-          # A regression fails with "Read-only file system" / "Genome enrichment failed".
-          mkdir -p rowork
-          docker run --rm $BRANCH_MOUNT -v "${PWD}/rowork:/DATA" -w /DATA "$IMG" bash -c '
+          # A regression fails with "Permission denied" / "Genome enrichment failed".
+          # The container runs as root, and root writes through permission bits with
+          # CAP_DAC_OVERRIDE: the container drops it, or chmod a-w makes nothing read-only and
+          # the step cannot fail (CI-1). Its working folder is the container's own, which root
+          # owns: a bind-mounted folder of the runner's user is not root's to write in either.
+          docker run --rm --cap-drop DAC_OVERRIDE $BRANCH_MOUNT "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
             cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
+            mkdir -p /tmp/rowork && cd /tmp/rowork
             mkdir -p Genomes/synth PAMs
             # genome = guide + NGG PAM repeated -> guaranteed hits (exercises post-analysis)
             python -c "open(\"Genomes/synth/chrS.fa\",\"w\").write(\">chrS\n\"+(\"ACGTACGTACGTACGTACGTAGG\"*200)+\"\n\")"

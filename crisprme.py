@@ -809,7 +809,7 @@ def _check_mandatory_args(args: List[str]) -> None:
     if "--output" not in args:
         error("--output is required")
 
-def _check_genome(args: List[str]) -> str:
+def _check_genome(args: List[str], workdir: str = "", command: str = "complete-search") -> str:
     """Retrieves and validates the reference genome directory from command-line 
     arguments.
 
@@ -818,6 +818,9 @@ def _check_genome(args: List[str]) -> str:
 
     Args:
         args: List of command-line arguments.
+        workdir: The working directory of ``command`` (where genome_library/ is), checked
+            first: neither path may hold a space.
+        command: The command that checks it, for its messages.
 
     Returns:
         The absolute path to the reference genome directory.
@@ -826,18 +829,27 @@ def _check_genome(args: List[str]) -> str:
         SystemExit: If the --genome argument is missing or the specified directory 
             does not exist.
     """
+    # The search script, which build-index-only runs too, takes the paths of the working
+    # directory and of the genome folder into its shell commands unquoted, where a space
+    # splits them: it then failed with a path that is no folder's (IDX-19). The working
+    # directory first: a link made under it to the genome has its path.
+    workdir = os.path.abspath(workdir or os.getcwd())
+    if any(c.isspace() for c in workdir):
+        error(f"The working directory {workdir!r} has a space in its path, which {command} "
+              f"cannot take into its commands: run it from a folder whose whole path has no "
+              f"space"
+              + (" (or give a --path that has none)" if command == "build-index-only" else ""))
     try:  # read genome input genome folder path
         genomedir = os.path.abspath(args[args.index("--genome") + 1])
     except IndexError:  # no argument for --genome
         error("Missing input for --genome. Reference genome folder must be specified")
     if not os.path.isdir(genomedir):
         error("The folder specified for --genome does not exist")
-    # The search takes the folder's path into its shell commands unquoted, where a space
-    # splits it: it then failed with a path that is no folder's (IDX-19)
     if any(c.isspace() for c in genomedir):
-        error(f"The --genome folder {genomedir!r} has a space in its path, which the search "
-              f"cannot take into its commands. Move it, or link it, to a path without one "
-              f"(e.g. ln -s '{genomedir}' Genomes/<a name without spaces>)")
+        error(f"The --genome folder {genomedir!r} has a space in its path, which {command} "
+              f"cannot take into its commands: its whole path must have none. Move it, or link "
+              f"it from the working directory under a name without one (ln -s '{genomedir}' "
+              f"{os.path.join(workdir, 'Genomes', '<a name without spaces>')})")
     return genomedir
 
 def _check_vcf(args: List[str], variant: bool) -> str:
@@ -2436,6 +2448,20 @@ def _prune_on_its_own(index_path: str, genome: str, vcf_dirs: List[str], motif: 
     return None
 
 
+def _prune_note(index: str, motif: str) -> str:
+    """What complete-search says first of a search that prunes by itself for ``index``
+    (_prune_on_its_own): which index needs it, the variant one of a dataset or the reference
+    one (in a library of the PAM's own variant index and another PAM's reference index, the
+    reference one alone), as the search script says it for a web search."""
+    served = index_fit.parse_index_name(os.path.basename(index))[2]
+    which = "variant" if "+" in served else "reference"
+    return (f"NOTE [complete-search]: no installed {which} index of {served} serves PAM {motif} "
+            f"unpruned, and {os.path.basename(index)} ({os.path.dirname(index)}) serves it pruned "
+            f"to it at leaf time: searching with --prune-pam, as if it was given. A dedicated "
+            f"{motif} {which} index is searched faster: build one with build-index-only, or "
+            f"download a published one.")
+
+
 def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[str]:
     """What a search under --prune-pam should say of the all-N indexes ``indexes`` it reads,
     whose stored flank is wider than the PAM ``motif`` (the others: nothing), one line each:
@@ -2680,7 +2706,7 @@ def complete_search() -> None:
     _check_unknown_flags(args)  # fail on a typo'd flag before doing any work
     check_crisprme_dirtree()  # check crisprme directory tree structure
     _check_mandatory_args(args)  # check mandatory arguments
-    genomedir = _check_genome(args)  # input genome folder
+    genomedir = _check_genome(args, current_working_directory)  # input genome folder
     variant = "--vcf" in args  # variant-aware search?
     vcfdir = _check_vcf(args, variant)  # input variants dataset
     guidefile = _check_guide(args, "--guide" in args)  # guide file
@@ -3048,14 +3074,7 @@ def complete_search() -> None:
             pam_char, max(bDNA, bRNA) + 1, not pam_begin, total_pam_len - pam_len, bDNA, bRNA)
     if prune_auto:
         prune_pam = True
-        print(
-            f"NOTE [complete-search]: no installed index serves PAM {pam_char} unpruned, and "
-            f"{os.path.basename(prune_auto)} ({os.path.dirname(prune_auto)}) serves it pruned "
-            f"to it at leaf time: searching with --prune-pam, as if it was given. A dedicated "
-            f"{pam_char} index is searched faster: build one with build-index-only, or "
-            f"download a published one.",
-            flush=True,
-        )
+        print(_prune_note(prune_auto, pam_char), flush=True)
     if variant:
         _refuse_no_variant_index(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
@@ -4749,7 +4768,14 @@ def build_index_only() -> None:
     args = input_args[2:]  # retrieve build-index-only input arguments
     if "--help" in args:
         print_help_build_index()
-    genomedir = _check_genome(args)  # reference genome folder
+    # working directory under which genome_library/ is created (mirrors the
+    # current_working_directory complete-search uses to locate genome_library/)
+    workdir = os.getcwd()
+    if "--path" in args:
+        workdir = os.path.abspath(args[args.index("--path") + 1])
+        if not os.path.isdir(workdir):
+            error(f"The working directory {workdir} does not exist")
+    genomedir = _check_genome(args, workdir, "build-index-only")  # reference genome folder
     pamfile = _check_pam(args)  # PAM file
     thread = _check_threads(args, "--thread" in args)  # number of threads
     bDNA = _check_bdna(args, "--bDNA" in args)  # DNA bulges
@@ -4770,13 +4796,6 @@ def build_index_only() -> None:
         )
         sys.exit(0)
     _check_genome_layout(genomedir)  # before anything is built from it
-    # working directory under which genome_library/ is created (mirrors the
-    # current_working_directory complete-search uses to locate genome_library/)
-    workdir = os.getcwd()
-    if "--path" in args:
-        workdir = os.path.abspath(args[args.index("--path") + 1])
-        if not os.path.isdir(workdir):
-            error(f"The working directory {workdir} does not exist")
     # an index built before the headers were written as >id would be taken as present
     from genome_layout import describe_index_problems
 
@@ -5245,7 +5264,17 @@ def build_index_only() -> None:
     # script build_combined_panel.sh writes filtered per-db lists + a listing) or the
     # panel would over-count phantom hom-ref individuals and inflate AN.
     db_to_samplesid = _build_db_to_samplesid(samples_listing, workdir)
-    if not db_to_samplesid:
+    if not db_to_samplesid and not samples_listing and not _tiers_marked and any(
+            f.startswith("reg_") for f in _listdir(_reg_dir)) and not os.path.isdir(
+            os.path.join(_reg_dir, ".building")):
+        # The tiers of an earlier build are in place, whole (no _mark_unfinished), and this
+        # run, with no --samplesID (as a search's ERROR tells a user to run it, to rebuild
+        # an INDELS index), leaves them as they are: it said, loud on stderr, that the index
+        # was MISSING them (emptyidx F6).
+        print(f"NOTE [build-index-only]: no --samplesID given: the dict-less tiers in place "
+              f"({_reg_dir} and its genotype store) are kept as they are, not rebuilt. To "
+              f"rebuild them, run this again with --samplesID.", flush=True)
+    elif not db_to_samplesid:
         _why = ("no usable samplesID entries (check the --samplesID listing)"
                 if samples_listing else "no --samplesID was given")
         loud_warn([
@@ -7117,8 +7146,9 @@ def validate_test():
             sys.exit(1)
     # begin crisprme test
     script_validation = os.path.join(script_path, "validate.py")
+    # (and this release's version: validate.py downloads the references of its own tag)
     code = subprocess.call(
-        f"{sys.executable} {script_validation} {chrom}", shell=True
+        f"{sys.executable} {script_validation} {chrom} {__version__}", shell=True
     )
     if code != 0:
         # validate.py has already said why on stderr (a mismatch, or no complete-test

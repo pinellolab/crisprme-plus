@@ -1268,8 +1268,10 @@ assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 
 A CRISPRitz index is built for one PAM. The PAM is matched against the genome at build
 time, only the surviving sites enter the ternary search tree, and the PAM region itself is
-stored as a flank beside each guide. One index therefore answers one PAM: searching NGG
-and NRG over the same genome means building and storing two indexes.
+stored as a flank beside each guide. An index therefore answers its own PAM and, pruned
+(below), a PAM its own holds, and no other: an NRG index serves an NGG search, but an NGG
+index cannot serve an NRG one, so searching NRG and NGA over the same genome means building
+and storing two dedicated indexes, or one NRR index, or a PAM-less one.
 
 A **PAM-less** index is built with an all-`N` PAM (`PAMs/20bp-NNN-NO-PAM.txt`), which
 constrains nothing, so every guide-length window enters the tree and the stored flank is
@@ -1314,16 +1316,21 @@ PAM-less index: a record, or else a 3′ build at the published widths.
 guide length it was built for nor the side of its PAM, so a 3′ and a 5′ build of one motif, or
 builds for two guide lengths, take one name. Since 2.9.0 a name may carry both, in the order of
 the target on the strand: `<guide>-<PAM>_<N>_…` for a 3′ PAM (`20-NRR_3_hg38`),
-`<PAM>-<guide>_<N>_…` for a 5′ one (`TTTV-23_3_hg38`). CRISPRme takes such an index only for a
-search of the side its name says (before any `.pam_build`), reads the guide length from its
-trees as before, and of one index under both names takes the newer; builds still write the
-older name.
+`<PAM>-<guide>_<N>_…` for a 5′ one (`TTTV-23_3_hg38`). The name records the side as a
+`.pam_build` does, ahead of one, so such an index needs none: CRISPRme takes it only for a
+search of the side its name says, at any flank width the rules above allow on that side. It
+reads the guide length from the trees as before, and of one index under both names takes the
+newer; builds still write the older name.
 
 **Pruning by itself.** Since 2.9.0 a search prunes, as if `--prune-pam` was given, whenever
 no installed index serves it unpruned and one of these does: a wider all-`N` one, or a
 dedicated one of a PAM that holds the search's. It says so first, on the console and in its
-log ("searching with --prune-pam, as if it was given"), and the run's parameters
-(`Prune_pam auto`) and the report's summary say which index served it. Before, the search
+log, naming the index that needs it ("no installed reference index of hg38 serves PAM NGG
+unpruned, and NRR_3_hg38 serves it pruned to it at leaf time: searching with --prune-pam, as
+if it was given"), and the run's record of the indexes it searched (`.indexes_searched.txt`
+in the result folder, beside the parameters: `Reference_index`, `Variant_index:<dataset>`,
+`Prune_pam auto`; `indexes_searched.txt` in the report's zip) and the report's summary say
+which index served it. Before, the search
 stopped for want of a variant index (and said to pass the flag), or built a reference index of
 its PAM from the genome: hours on hg38. Where an index serves the search unpruned (the PAM's
 own, or an all-`N` one of its width), the search runs as before, unpruned; pass `--prune-pam`
@@ -1430,10 +1437,11 @@ next to an N run or a contig end that a shallower one does.
 **Limits.** The web interface never passes `--prune-pam` itself; its searches prune by
 themselves as above. (Before 2.9.0 the flag also required `--index-path`.) (Its PAM picker prefers a PAM whose geometry matches the
 installed index, but falls back to offering every PAM when none matches, so it does not
-itself prevent an unusable pairing: the search does not take an all-`N` index of another
-width without the flag, or one built for the other side, and when no index serves it and
-neither the dataset's VCFs nor its enriched genome are there to build one, it stops with an
-ERROR that names what was asked, the variant indexes installed and what to do.) A shorter PAM
+itself prevent an unusable pairing: the search takes a wider all-`N` index for a 3′ PAM only
+pruned, which it then does by itself, and never one built for the other side, and when no
+index serves it and neither the dataset's VCFs nor its enriched genome are there to build one,
+it stops with an ERROR that names what was asked, the variant indexes installed and what to
+do.) A shorter PAM
 off a wider flank is supported for a 3′ PAM only; for a 5′ PAM the engine requires the flank width to equal the
 PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its
 `.pam_build` records (above). The published

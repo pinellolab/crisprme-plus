@@ -4,6 +4,8 @@
 Run: python PostProcess/test_indel_snp_cis.py   (or via pytest)
 """
 
+import unittest
+
 import indel_snp_cis as isc
 
 
@@ -322,6 +324,14 @@ def test_putative_row_stays_indel_only():
     assert final_result[12] == "A,B"             # carriers unchanged
     assert final_result[15] == "rs_i" and final_result[16] == "0.01"
 
+
+
+def load_tests(loader, tests, pattern):
+    """Under ``python -m unittest`` too, each test_ function above, which it found none of,
+    and said OK (suite P4)."""
+    return unittest.TestSuite(unittest.FunctionTestCase(fn) for name, fn in
+                              sorted(globals().items()) if name.startswith("test_")
+                              and callable(fn))
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

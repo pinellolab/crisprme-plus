@@ -12,6 +12,7 @@ machinery, the whole chain is cross-validated. It guards every coordinate hop
 Run: python PostProcess/test_indel_snp_bruteforce.py   (or via pytest)
 """
 
+import unittest
 import os
 import json
 
@@ -183,6 +184,14 @@ def test_brute_force_snp_flips_a_mismatch():
                 proven += 1
     assert proven > 0, "brute force found no mismatch-reducing SNP"
 
+
+
+def load_tests(loader, tests, pattern):
+    """Under ``python -m unittest`` too, each test_ function above, which it found none of,
+    and said OK (suite P4)."""
+    return unittest.TestSuite(unittest.FunctionTestCase(fn) for name, fn in
+                              sorted(globals().items()) if name.startswith("test_")
+                              and callable(fn))
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

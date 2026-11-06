@@ -65,7 +65,11 @@ function Pick-DataDir {
 }
 $Data = Get-DataDir
 
-function Has-Data { Test-Path (Join-Path $Data 'Genomes') }
+# The first-time setup marks the data folder until both of its downloads have ended well, so
+# a Start after one failed sets up again (download picks up what is there) instead of opening
+# the app on part of the data: Genomes/ is there from the first minutes of a download.
+function Setup-Mark { Join-Path $Data '.setup_unfinished' }
+function Has-Data { (Test-Path (Join-Path $Data 'Genomes')) -and -not (Test-Path (Setup-Mark)) }
 function Docker-Running { try { docker info *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false } }
 # a bind mount actually works (freshly-started Docker can report info OK while its
 # file-sharing is still initializing -> the download's makedirs fails with ENOENT)
@@ -114,17 +118,20 @@ Mk 'Start' 44 {
   if (Has-Data) {
     Invoke-Expression $run; Start-Sleep 3; Start-Process 'http://localhost:8080'
   } else {
-    $r = [System.Windows.Forms.MessageBox]::Show("First run: CRISPRme will download the reference genome + HGDP + 1000 Genomes variant data (~70 GB) into:`n$Data`n`nOnce only. A window shows progress, then your browser opens automatically.","CRISPRme+ - first-time setup",'OKCancel')
+    $first = if (Test-Path (Setup-Mark)) { 'The first-time setup did not finish: CRISPRme will download what is missing of' } else { 'First run: CRISPRme will download' }
+    $r = [System.Windows.Forms.MessageBox]::Show("$first the reference genome + HGDP + 1000 Genomes variant data (~70 GB) into:`n$Data`n`nOnce only. A window shows progress, then your browser opens automatically.","CRISPRme+ - first-time setup",'OKCancel')
     if ($r -eq 'OK') {
       $mnt = "-v `"${Data}:/DATA`" -w /DATA $Image"
-      Run-InConsole 'First-time setup - downloading ~70 GB, then starting CRISPRme' "docker run --rm $mnt crisprme.py download --what all --path /DATA; if (`$LASTEXITCODE -eq 0) { docker run --rm $mnt crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA }; if (`$LASTEXITCODE -eq 0) { $run; Start-Sleep 3; Start-Process 'http://localhost:8080' } else { Write-Host 'The download did not finish: see above, then click Start again.' -ForegroundColor Red }"
+      $mark = Setup-Mark
+      New-Item -ItemType File -Force -Path $mark | Out-Null
+      Run-InConsole 'First-time setup - downloading ~70 GB, then starting CRISPRme' "docker run --rm $mnt crisprme.py download --what all --path /DATA; if (`$LASTEXITCODE -eq 0) { docker run --rm $mnt crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA }; if (`$LASTEXITCODE -eq 0) { Remove-Item -Force -LiteralPath `"$mark`"; $run; Start-Sleep 3; Start-Process 'http://localhost:8080' } else { Write-Host 'The download did not finish: see above, then click Start again to finish setting up.' -ForegroundColor Red }"
     }
   }
 }
 Mk 'Update' 120 { if (Ensure-Docker) { Run-InConsole 'Updating CRISPRme' "docker pull $Image" } }
 Mk 'Stop' 196 { try { docker rm -f crisprme } catch {}; [System.Windows.Forms.MessageBox]::Show('CRISPRme stopped.') }
 
-if (Has-Data) { $status.Text = 'Ready. Click Start to open CRISPRme.' } else { $status.Text = 'First run: Start will set everything up (a ~70 GB download, once).' }
+if (Has-Data) { $status.Text = 'Ready. Click Start to open CRISPRme.' } elseif (Test-Path (Setup-Mark)) { $status.Text = 'Setup did not finish: Start finishes it.' } else { $status.Text = 'First run: Start will set everything up (a ~70 GB download, once).' }
 [void]$form.ShowDialog()
 '@ | Set-Content -Encoding UTF8 $AppScript
 

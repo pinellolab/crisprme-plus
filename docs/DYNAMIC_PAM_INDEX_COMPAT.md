@@ -9,8 +9,9 @@
 > a dedicated index of a broader PAM serve only pruned. `--prune-pam` no longer needs
 > `--index-path`, and a search passes it by itself, and says so first, whenever no installed
 > index serves it unpruned and one serves it pruned: on the command line and from the web
-> interface, which launches the search script with pruning off. The run's parameters and its
-> report name the index that served the search. No `index_meta.json` sidecar is written or
+> interface, which launches the search script with pruning off. The run's record of the
+> indexes it searched (`.indexes_searched.txt`, beside its parameters) and its report name the
+> index that served the search. No `index_meta.json` sidecar is written or
 > read. The nearest record is `.pam_build`, the PAM file an index was built from, which
 > `build-index-only` writes into a reference or variant index, and a search into one it
 > builds (the published 8-nt-flank archives have none). `NNN_3` is published in
@@ -103,9 +104,13 @@ flank-tagged + distinct (e.g. `NNNNNNNN_3_<genome>`, K=8) so it is never confuse
   `build_pam`. CRISPRme passes `--prune-pam` to crispritz by itself, and says so first, when no
   installed index serves the search unpruned and one serves it pruned (a dedicated index of a
   broader PAM, or an all-N flank wider than a 3′ PAM); an all-N flank as wide as the PAM serves
-  unpruned, narrowed by the post-search PAM filter. A PAM no installed index serves is refused,
-  naming the PAM and the indexes there. `--pam == build_pam` is the legacy path (unchanged).
-  Inline `--genome --vcf` build unchanged.
+  unpruned, narrowed by the post-search PAM filter. A search for a PAM no installed index serves
+  builds an index of that PAM where it can, as before: the reference index from the genome, the
+  variant index from the dataset's VCFs or its enriched genome. Where it cannot, it is refused,
+  naming the PAM and the indexes there: a reference index under `--index-path`, which a search
+  never builds into, and a variant index of a dataset installed as a download (no VCFs, no
+  enriched genome). `--pam == build_pam` is the legacy path (unchanged). Inline `--genome
+  --vcf` build unchanged.
 
 ## 5. Web (2.9.0; in 2.8.1 the web interface never pruned)
 The search script prunes by itself for a web search as for one on the command line. The PAM

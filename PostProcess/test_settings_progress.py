@@ -31,6 +31,7 @@ import threading
 import time
 import unittest
 import warnings
+import zipfile
 from typing import List, Optional
 from unittest import mock
 
@@ -1833,12 +1834,14 @@ class TestSettingsRefusesNamesAShellReads(unittest.TestCase):
              "_write_vcf_marker", "add_vcf", "_fb_refresh", "add_pam", "_shlex_quote",
              "fetch_from_hprc", "_uploads_dir", "_unsafe_tar_member", "_genome_upload_assembly",
              "_install_uploaded_genome", "_vcf_upload_problem", "_finalize_upload",
+             "_GENOME_UPLOAD_EXTENSIONS", "_genome_upload_kind_problem", "_UPLOAD_REFUSALS",
              "_MAX_UPLOAD_BYTES", "_fmt_size", "_settings_upload_chunk"],
             current_working_directory=self.cwd,
             __file__=_SETTINGS_PAGE,
             sys=__import__("sys"),
             gzip=gzip,
             tarfile=tarfile,
+            zipfile=zipfile,
             shutil=shutil,
             tempfile=tempfile,
             genome_in_use=genome_in_use,
@@ -2030,11 +2033,13 @@ class TestARefusedBundleIsTheClientsToFix(unittest.TestCase):
         for d in ("Genomes/hg38", "Settings/uploads"):
             os.makedirs(os.path.join(self.cwd, d))
         self.ns = _load_functions(
-            ["_unusable_in_shell", "_uploads_dir", "_finalize_upload", "_MAX_UPLOAD_BYTES",
-             "_fmt_size", "_settings_upload_chunk"],
+            ["_unusable_in_shell", "_uploads_dir", "_finalize_upload", "_UPLOAD_REFUSALS",
+             "_MAX_UPLOAD_BYTES", "_fmt_size", "_settings_upload_chunk"],
             current_working_directory=self.cwd,
             shutil=shutil,
             tarfile=tarfile,
+            gzip=gzip,
+            zipfile=zipfile,
             safe_tar=safe_tar,
             personal_assembly=personal_assembly,
             ONLINE=False,
@@ -2083,7 +2088,10 @@ class TestARefusedBundleIsTheClientsToFix(unittest.TestCase):
                 ("HG01255.tar.gz", self.bundle(top=("HG01255", "HG01256")),
                  "archive must contain exactly one top-level <individual>/ folder"),
                 ("HG00438.tar.gz", self.bundle(top=("HG00438",)),
-                 "an assembly named 'HG00438' already exists -- delete it first")):
+                 "an assembly named 'HG00438' already exists -- delete it first"),
+                # (a file that is no archive, under an archive's name: WEB-9's class)
+                ("HG01255.tar.gz", b"not an archive\n", "not a gzip file"),
+                ("HG01255.zip", b"not an archive\n", "File is not a zip file")):
             with self.subTest(reason=reason):
                 before = _tree(self.cwd)
                 text, status = self.upload(file_name, body)
@@ -2100,6 +2108,139 @@ class TestARefusedBundleIsTheClientsToFix(unittest.TestCase):
         self.assertEqual(status, 500, text)
         self.assertTrue(text.startswith("finalize failed: "), text)
         self.assertEqual(os.listdir(os.path.join(self.cwd, "Settings", "uploads")), [])
+
+
+class TestAGenomeUploadIsRefusedAsTheClientsToFix(unittest.TestCase):
+    """The upload route, undecorated (WEB-9): a genome upload of another kind of file, an
+    NCBI Datasets .zip for one, was taken for a FASTA file and refused only once whole, for
+    its first line, the archive's bytes, as a failure of the server, HTTP 500 'finalize
+    failed: ...'; and so was every refusal of what an upload holds (an archive of gzipped
+    FASTA files, M3). A file of another kind is refused on its first chunk, before the rest
+    streams in, and a refusal at the end is answered 400 with its reason; a failure of the
+    server is still 500."""
+
+    def setUp(self):
+        import personal_assembly
+
+        self.cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cwd, ignore_errors=True)
+        for d in ("Genomes/hg38", "Settings/uploads"):
+            os.makedirs(os.path.join(self.cwd, d))
+        self.ns = _load_functions(
+            ["_validate_name", "_unusable_in_shell", "_genome_upload_problem", "_uploads_dir",
+             "_unsafe_tar_member", "_genome_upload_assembly", "_install_uploaded_genome",
+             "_finalize_upload", "_GENOME_UPLOAD_EXTENSIONS", "_genome_upload_kind_problem",
+             "_UPLOAD_REFUSALS", "_MAX_UPLOAD_BYTES", "_fmt_size", "_settings_upload_chunk"],
+            current_working_directory=self.cwd,
+            __file__=_SETTINGS_PAGE,
+            sys=__import__("sys"),
+            gzip=gzip,
+            tarfile=tarfile,
+            zipfile=zipfile,
+            shutil=shutil,
+            tempfile=tempfile,
+            genome_in_use=genome_in_use,
+            safe_tar=safe_tar,
+            personal_assembly=personal_assembly,
+            ONLINE=False,
+        )
+
+    def upload(self, name, body, index=0, total=1):
+        self.ns["request"] = _Request("genome", name, body)
+        self.ns["request"].headers.update({"X-Chunk-Index": str(index),
+                                           "X-Total-Chunks": str(total)})
+        return self.ns["_settings_upload_chunk"]()
+
+    def test_a_file_of_another_kind_is_refused_on_its_first_chunk(self):
+        zipped = io.BytesIO()
+        with zipfile.ZipFile(zipped, "w") as zf:
+            zf.writestr("ncbi_dataset/data/GCF_000001405.40/chr1.fna", _FA1)
+        for name, body, reason in (
+                ("GCF_000001405.40.zip", zipped.getvalue(),
+                 "GCF_000001405.40.zip is not a file a genome goes in as: upload a FASTA file "
+                 "(.fa, .fasta, .fa.gz or .fasta.gz) or a .tar.gz of them"),
+                ("walk.fa", zipped.getvalue(),
+                 "walk.fa is not FASTA text: a FASTA file opens with a '>' header line"),
+                ("walk.fa.gz", _FA1, "walk.fa.gz is not gzip-compressed, as its name says"),
+                ("walk.tar.gz", _FA1, "walk.tar.gz is not gzip-compressed, as its name says")):
+            with self.subTest(name=name):
+                before = _tree(self.cwd)
+                self.assertEqual(self.upload(name, body, 0, 3), (reason, 400))
+                self.assertEqual(_tree(self.cwd), before)  # (nor a part of it)
+
+    def test_a_refusal_at_the_end_is_answered_400_with_its_reason(self):
+        part = os.path.join(self.cwd, "fagz.tar.gz")
+        _write_tar_gz(part, [("asm/chr1.fa.gz", "file", gzip.compress(_FA1))])
+        with open(part, "rb") as fh:
+            fagz = fh.read()
+        os.remove(part)
+        for name, body, reason in (
+                ("asm.tar.gz", fagz, "no .fa or .fasta file in asm.tar.gz: it holds gzipped "
+                                     "ones (chr1.fa.gz): gunzip them"),
+                ("asm.fa.gz", gzip.compress(_FA1)[:12], "Compressed file ended before")):
+            with self.subTest(name=name):
+                text, status = self.upload(name, body)
+                self.assertEqual(status, 400, text)
+                self.assertTrue(text.startswith(reason), text)
+                self.assertFalse(os.path.exists(os.path.join(self.cwd, "Genomes", "asm")))
+                self.assertEqual(os.listdir(os.path.join(self.cwd, "Settings", "uploads")), [])
+        # a FASTA file, gzipped or not, goes in as before
+        self.assertEqual(self.upload("asm.fa.gz", gzip.compress(_FA1)), ("complete:asm", 200))
+        self.assertEqual(self.upload("chrX.fa", b"\n>chrX\nACGT\n"), ("complete:chrX", 200))
+
+    def test_a_failure_of_the_server_is_still_500(self):
+        def disk_full(*args):
+            raise OSError(28, "No space left on device")
+
+        self.ns["_install_uploaded_genome"] = disk_full
+        text, status = self.upload("asm.fa", _FA1)
+        self.assertEqual(status, 500, text)
+        self.assertEqual(text, "finalize failed: [Errno 28] No space left on device")
+
+
+class TestAnIndexIsListedWithItsDisplayName(unittest.TestCase):
+    """The Installed indexes list and the Remove card named an index by its folder alone:
+    the display name given it (build-index-only --name, or the Display name of a build on
+    this page, its .display_label), which the search form shows, was never shown there
+    (P15.3). Both show it beside the folder; the Remove card still removes by the folder."""
+
+    def setUp(self):
+        self.cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cwd, ignore_errors=True)
+        for name in ("NRR_3_hg38", "NGG_2_hg38"):
+            os.makedirs(os.path.join(self.cwd, "genome_library", name))
+        with open(os.path.join(self.cwd, "genome_library", "NRR_3_hg38", ".display_label"),
+                  "w") as fh:
+            fh.write("SpCas9 NRR, hg38\n")
+        options = lambda: [{"label": "x", "value": n} for n in ("NGG_2_hg38", "NRR_3_hg38")]
+        self.ns = _load_functions(
+            ["_index_listed", "_deletable_options", "_table", "_render_assembly_rows",
+             "_render_all_tables"],
+            current_working_directory=self.cwd,
+            get_available_genomes=lambda: [], get_available_indexes=options,
+            get_all_vcf_datasets=lambda: [], get_custom_annotations=lambda: [],
+            get_available_CAS=lambda: [], get_available_PAM=lambda: [],
+            installed_assemblies=lambda: [],
+        )
+
+    def test_beside_its_folder(self):
+        self.assertEqual([(o["label"], o["value"]) for o in self.ns["_deletable_options"]()],
+                         [("Index: NGG_2_hg38", "index:NGG_2_hg38"),
+                          ("Index: SpCas9 NRR, hg38 (NRR_3_hg38)", "index:NRR_3_hg38")])
+        shown = []
+
+        def walk(node):
+            if isinstance(node, str):
+                shown.append(node)
+            elif isinstance(node, (list, tuple)):
+                for item in node:
+                    walk(item)
+            elif isinstance(node, _Stub):
+                walk(node.args)
+                walk(list(node.kwargs.values()))
+        walk(self.ns["_render_all_tables"]())
+        self.assertIn("SpCas9 NRR, hg38 (NRR_3_hg38)", shown)
+        self.assertIn("NGG_2_hg38", shown)
 
 
 # --- what a Settings dropdown offers --------------------------------------------------
@@ -2147,9 +2288,9 @@ class TestRemoveTakesAnItemTheCardLists(unittest.TestCase):
                 fh.write(text)
         os.makedirs(os.path.join(self.cwd, "samplesIDs"))
         self.ns = _load_functions(
-            ["_deletable_options", "_deletable", "_delete_targets", "_delete_dependents",
-             "_delete_summary", "_dir_size", "_fmt_size", "_own_lists_record", "_own_list",
-             "ask_delete", "do_delete"],
+            ["_deletable_options", "_index_listed", "_deletable", "_delete_targets",
+             "_delete_dependents", "_delete_summary", "_dir_size", "_fmt_size",
+             "_own_lists_record", "_own_list", "ask_delete", "do_delete"],
             current_working_directory=self.cwd + "/",
             shutil=shutil,
             hashlib=hashlib,
@@ -2318,10 +2459,13 @@ class TestVcfUploadIntoARegisteredFolder(unittest.TestCase):
 
         self.ns = _load_functions(
             ["_validate_name", "_unusable_in_shell", "_write_vcf_marker", "add_vcf",
-             "_uploads_dir", "_vcf_upload_problem", "_finalize_upload", "_MAX_UPLOAD_BYTES",
-             "_fmt_size", "_settings_upload_chunk"],
+             "_uploads_dir", "_vcf_upload_problem", "_finalize_upload", "_UPLOAD_REFUSALS",
+             "_MAX_UPLOAD_BYTES", "_fmt_size", "_settings_upload_chunk"],
             current_working_directory=self.cwd,
             shutil=shutil,
+            tarfile=tarfile,
+            gzip=gzip,
+            zipfile=zipfile,
             personal_assembly=personal_assembly,
             ONLINE=False,
             PreventUpdate=_PreventUpdate,
@@ -2366,7 +2510,7 @@ class TestVcfUploadIntoARegisteredFolder(unittest.TestCase):
         for name, dataset in (("x.chr1.vcf.gz", "later"), ("y.chr1.vcf.gz", "regdir")):
             with self.subTest(dataset=dataset):
                 text, status = self.upload(name, b"PART2\n", dataset, 1, 2)
-                self.assert_refused((text, status), 500)
+                self.assert_refused((text, status))  # (the client's to fix: WEB-9)
         self.assertEqual(_tree(self.server, meta=True), before)
         self.assertEqual(os.listdir(os.path.join(self.cwd, "Settings", "uploads")), [])
         self.assertFalse(os.path.exists(os.path.join(self.cwd, "VCFs", "mine")))

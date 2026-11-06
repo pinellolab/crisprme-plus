@@ -123,8 +123,19 @@ on ensureDocker(dk)
   return true
 end ensureDocker
 
+-- the first-time setup marks the data folder until both of its downloads have ended well,
+-- so a Start after one failed sets up again (download picks up what is there) instead of
+-- opening the app on part of the data: Genomes/ is there from the first minutes of a download
+on setupMark()
+  return dataDir & "/.setup_unfinished"
+end setupMark
+
+on setupUnfinished()
+  return (do shell script "test -e " & quoted form of my setupMark() & " && echo yes || echo no") is "yes"
+end setupUnfinished
+
 on hasData()
-  return (do shell script "ls " & quoted form of (dataDir & "/Genomes") & " >/dev/null 2>&1 && echo yes || echo no") is "yes"
+  return (do shell script "ls " & quoted form of (dataDir & "/Genomes") & " >/dev/null 2>&1 && ! test -e " & quoted form of my setupMark() & " && echo yes || echo no") is "yes"
 end hasData
 
 -- remembered data location (empty string if the user hasn't chosen one yet)
@@ -191,12 +202,19 @@ on run
       display dialog "CRISPRme is starting — your browser is opening http://localhost:8080." buttons {"OK"} default button "OK" giving up after 6
     else
       -- first run: download reference + variant data into the chosen folder, then start
-      set r to button returned of (display dialog "First run: CRISPRme will download the reference genome + the HGDP + 1000 Genomes variant data (~70 GB) into:" & return & dataDir & return & return & "You only do this once. A Terminal window shows the progress, then your browser opens automatically." buttons {"Not now", "Download & Start"} default button "Download & Start" with title "CRISPRme+ — first-time setup")
+      if my setupUnfinished() then
+        set intro to "The first-time setup did not finish: CRISPRme will download what is missing of"
+      else
+        set intro to "First run: CRISPRme will download"
+      end if
+      set r to button returned of (display dialog intro & " the reference genome + the HGDP + 1000 Genomes variant data (~70 GB) into:" & return & dataDir & return & return & "You only do this once. A Terminal window shows the progress, then your browser opens automatically." buttons {"Not now", "Download & Start"} default button "Download & Start" with title "CRISPRme+ — first-time setup")
       if r is "Download & Start" then
         set dmount to "-v " & quoted form of dataDir & ":/DATA -w /DATA " & img
         set dlRef to (quoted form of dk) & " run --rm " & dmount & " crisprme.py download --what all --path /DATA"
         set dlVar to (quoted form of dk) & " run --rm " & dmount & " crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA"
-        runInTerminal(dlRef & " && " & dlVar & " && " & runCmd & " && sleep 3 && open http://localhost:8080 && echo && echo 'DONE — CRISPRme is running and your browser is open. You can close this window.'", "First-time setup — downloading ~70 GB, then starting CRISPRme")
+        set mark to quoted form of my setupMark()
+        do shell script "touch " & mark
+        runInTerminal("if " & dlRef & " && " & dlVar & "; then rm -f " & mark & "; " & runCmd & " && sleep 3 && open http://localhost:8080 && echo && echo 'DONE — CRISPRme is running and your browser is open. You can close this window.'; else echo; echo 'The download did not finish: see above, then open CRISPRme and click Start again to finish setting up.'; fi", "First-time setup — downloading ~70 GB, then starting CRISPRme")
       end if
     end if
 

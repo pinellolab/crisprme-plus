@@ -152,8 +152,13 @@ def require_prebuilt_index() -> str:
 
 
 def _recorded_five_prime(index_dir: str) -> Optional[bool]:
-    """Whether an index's .pam_build records a 5' PAM ("<name> <seq_len> <pam_pos>", a
-    negative pam_pos): None without a usable record."""
+    """Whether an index records a 5' PAM: its name, which says the side since 2.9.0
+    (index_fit.parse_index_name: NNNN-20_2_hg38 for a 5' PAM), or else its .pam_build
+    ("<name> <seq_len> <pam_pos>", a negative pam_pos), as the search script's _index_side
+    reads them. None without either."""
+    parsed = index_fit.parse_index_name(os.path.basename(os.path.normpath(index_dir)))
+    if parsed and parsed[4]:
+        return parsed[4] == 5
     try:
         with open(os.path.join(index_dir, ".pam_build")) as fh:
             return int(fh.readline().split()[-1]) < 0
@@ -1082,12 +1087,13 @@ def _pam_files(pams: str) -> list:
 
 
 def _smoke_five_prime(index_name: str, token: str) -> Optional[bool]:
-    """Whether the index was built for a PAM on the 5' side of the guide: what its
-    .pam_build records. Without one, an all-N index is a 3' build, as the search takes it
-    (_index_side in submit_job_automated_new_multiple_vcfs.sh) and every published one is;
-    and a dedicated one, which a search builds with no record, is what the PAM files of
-    its motif in PAMs/ say, or else 3' for a PAM of up to 3 nt, as every shipped one that
-    short is. None for one wider that no PAM file tells of: its side is not known."""
+    """Whether the index was built for a PAM on the 5' side of the guide: what its name or
+    its .pam_build records (_recorded_five_prime). Without either, an all-N index is a 3'
+    build, as the search takes it (_index_side in submit_job_automated_new_multiple_vcfs.sh)
+    and every published one is; and a dedicated one, which a search builds with no record,
+    is what the PAM files of its motif in PAMs/ say, or else 3' for a PAM of up to 3 nt, as
+    every shipped one that short is. None for one wider that no PAM file tells of: its side
+    is not known."""
     recorded = _recorded_five_prime(os.path.join(os.getcwd(), "genome_library", index_name))
     if recorded is not None:
         return recorded

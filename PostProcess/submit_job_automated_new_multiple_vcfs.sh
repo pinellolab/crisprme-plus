@@ -765,10 +765,17 @@ while read vcf_f; do
 	# <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM). An index without one -- built by a
 	# search before 2.8.1, by crispritz.py itself, or downloaded (the published K=8
 	# archive has none) -- is taken for a 3' build, as every published one is
-	# (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. Silent on stderr, which is
-	# fatal to the stage.
+	# (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. A name of CRISPRme 2.9.0 or
+	# later that says the side (_index_name_parts: 20-NRR_3_hg38, NNNN-20_2_hg38) records
+	# it as .pam_build does, ahead of it, as crisprme.py and the web take it
+	# (index_fit.parse_index_name). Silent on stderr, which is fatal to the stage.
 	_index_side() {
-		local _line=
+		local _line= _b=${1%/} _ip_pam _ip_n _ip_rest _ip_guide _ip_side
+		_index_name_parts "${_b##*/}"
+		if [ -n "$_ip_side" ]; then
+			echo "$_ip_side"
+			return 0
+		fi
 		if [ -f "$1/.pam_build" ]; then
 			{ read -r _line <"$1/.pam_build"; } 2>/dev/null
 			_line=${_line%$'\r'}
@@ -988,11 +995,6 @@ while read vcf_f; do
 			# _<suffix> (NRG_2_mini_hg38 for hg38): that index holds another genome.
 			[ "$_ip_rest" = "$_suffix" ] || continue
 			[ "$_n" -ge "$_want" ] || continue
-			# A name that says the side of the guide its PAM is on serves a search of that
-			# side alone (the order of the target in it: _index_name_parts).
-			if [ -n "$_ip_side" ] && [ -z "$_any_side" ]; then
-				[ "$_ip_side" = "$( [ "${pos:-1}" -gt 0 ] && echo 3 || echo 5)" ] || continue
-			fi
 			_named=0
 			[ -z "$_ip_side" ] || _named=1
 			if [ "$_pam" = "$_pam_want" ]; then
@@ -1027,14 +1029,15 @@ while read vcf_f; do
 				continue            # a different dedicated PAM cannot stand in
 			fi
 			# An index serves only a PAM on the side it was built for, as its .pam_build
-			# records it (_index_side). Without a record a dedicated index has no side to
-			# contradict, and an all-N one is a 3' build at the published widths, 3 and 8
-			# (the K=8 archive has no .pam_build), or under the search PAM's own name, as
-			# 2.8.0 took it; at any other width a search before 2.8.1 may have built it
-			# from a 5' PAM file, and the search builds its dedicated index instead.
-			# A dedicated index of another PAM (_exact 1) serves a search of its own side
-			# only, as an all-N one does: a record, or else a 3' build of 3 nt, as every
-			# published one is.
+			# records it, or its name, which says it since 2.9.0 (_index_side: the order of
+			# the target in it, 20-NNNN_2_hg38 for a 3' PAM, NNNN-20_2_hg38 for a 5' one).
+			# Without a record a dedicated index has no side to contradict, and an all-N
+			# one is a 3' build at the published widths, 3 and 8 (the K=8 archive has no
+			# .pam_build), or under the search PAM's own name, as 2.8.0 took it; at any
+			# other width a search before 2.8.1 may have built it from a 5' PAM file, and
+			# the search builds its dedicated index instead. A dedicated index of another
+			# PAM (_exact 1) serves a search of its own side only, as an all-N one does: a
+			# record, or else a 3' build of 3 nt, as every published one is.
 			if [ -z "$_any_side" ]; then
 				_rec=0
 				_side=$(_index_side "$_d") || _rec=1
@@ -1095,8 +1098,9 @@ while read vcf_f; do
 		return 0
 	}
 
-	# What index $1 is, on stdout, for the run's parameters file (_record_indexes): its name
-	# and library, the PAM it was built for and on which side of the guide, the guide its
+	# What index $1 is, on stdout, for the run's record of the indexes it searched
+	# (.indexes_searched.txt): its name and library, the PAM it was built for and on which
+	# side of the guide (_index_side: as its .pam_build or its name records it), the guide its
 	# trees were built for, the bulges it holds, and how the search narrows it to this PAM
 	# when it is another's. Silent on stderr.
 	_index_record() {
@@ -1126,8 +1130,8 @@ while read vcf_f; do
 		[ "${pos:-1}" -gt 0 ] || _want=5
 		_index_name_parts "${1##*/}"
 		_p=$_ip_pam
-		# (a name that says its side says it as the record does)
-		[ -z "$_ip_side" ] || { _have=$_ip_side; _why="as its name says"; }
+		# (a name that says its side records it: _index_side)
+		[ -z "$_ip_side" ] || _why="as its name says"
 		if [ "$_have" = "$_want" ]; then
 			# (nor, for a 3' PAM, a PAM-less one of a width but 3 and 8 that records no side)
 			{ _index_side "$1" >/dev/null || [ -n "${_p//N/}" ] || [ "$_p" = "$true_pam" ]; } \
@@ -1328,26 +1332,29 @@ while read vcf_f; do
 	# script with pruning off, so a web search does the same (complete-search says so on
 	# its console, crisprme.py _prune_on_its_own, the same rule).
 	if [ -z "$_prune_decided" ] && [ "${prune_pam:-0}" != 1 ] && _engine_prunes; then
-		_pruned=
+		_pruned= _pruned_of=
 		_this_vcf=$vcf_name
 		while read -r _v; do
 			[ -n "$_v" ] && [ "$_v" != "_" ] || continue
 			vcf_name=$(basename "$_v")
 			if [ -z "$(_variant_index)" ]; then
 				_pruned=$(prune_pam=1; _variant_index)
-				[ -z "$_pruned" ] || break
+				[ -z "$_pruned" ] || { _pruned_of="variant index of ${ref_name}+${vcf_name}"; break; }
 			fi
 		done <"$vcf_list"
 		vcf_name=$_this_vcf
 		if [ -z "$_pruned" ] && { [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; } \
 			&& [ -z "$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")" ]; then
 			_pruned=$(prune_pam=1; _resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
+			_pruned_of="reference index of $ref_name"
 		fi
 		if [ -n "$_pruned" ]; then
 			prune_pam=1
 			prune_pam_flag="--prune-pam"
-			_pruned_here=1  # (the parameters file says so, below)
-			echo "NOTE: no installed index serves PAM $true_pam unpruned, and ${_pruned##*/} serves it pruned to it at leaf time: searching with --prune-pam, as if it was given"
+			_pruned_here=1  # (the record of the indexes searched says so, below)
+			# (which index needs it: in a library of the PAM's own variant index and another
+			# PAM's reference index, the reference one alone)
+			echo "NOTE: no installed $_pruned_of serves PAM $true_pam unpruned, and ${_pruned##*/} serves it pruned to it at leaf time: searching with --prune-pam, as if it was given"
 		fi
 	fi
 	_prune_decided=1
@@ -1837,35 +1844,32 @@ while read vcf_f; do
 	fi
 	# END STEP 2 - genome indexing
 
-	# Which index answers the search, in the run's parameters file, as the indexes this
-	# run took: the report's summary names them. Genome_idx there says what was asked for,
-	# which another index may serve (NNNNNNNN_3 for an NGG_2 that is not there), or none,
-	# for a search with no bulges. The reference once, then each dataset's.
-	_params=
-	for _pf in "$output_folder/Params.txt" "$output_folder/.Params.txt"; do
-		[ -f "$_pf" ] && { _params=$_pf; break; }
-	done
-	if [ -n "$_params" ]; then
-		{
-			if [ -z "$_indexes_recorded" ]; then
-				if [ "$_no_bulges" = 1 ]; then
-					printf "Reference_index\tnone: a search with no bulges scans the genome\n"
-				else
-					printf "Reference_index\t%s\n" "$(_index_record "$idx_ref")"
-				fi
-				[ "$_pruned_here" != 1 ] || printf "Prune_pam\tauto\n"
+	# Which index answers the search, as the indexes this run took, in .indexes_searched.txt
+	# beside the run's parameters: the report's summary names them. Genome_idx in the
+	# parameters says what was asked for, which another index may serve (NNNNNNNN_3 for an
+	# NGG_2 that is not there), or none, for a search with no bulges. Not in the parameters
+	# file itself: the web reuses an earlier job only when its .Params.txt is the one a new
+	# request writes, byte for byte. The reference once, then each dataset's.
+	[ -n "$_indexes_recorded" ] || : 2>/dev/null >"$output_folder/.indexes_searched.txt"
+	{
+		if [ -z "$_indexes_recorded" ]; then
+			if [ "$_no_bulges" = 1 ]; then
+				printf "Reference_index\tnone: a search with no bulges scans the genome\n"
+			else
+				printf "Reference_index\t%s\n" "$(_index_record "$idx_ref")"
 			fi
-			if [ "$vcf_name" != "_" ]; then
-				if [ -d "$idx_var" ]; then
-					printf "Variant_index:%s\t%s" "$vcf_name" "$(_index_record "$idx_var")"
-				else
-					printf "Variant_index:%s\tnone: a search with no bulges scans the variant genome" "$vcf_name"
-				fi
-				printf "; its indels: %s\n" "$(basename "$indels_index_dir")"
+			[ "$_pruned_here" != 1 ] || printf "Prune_pam\tauto\n"
+		fi
+		if [ "$vcf_name" != "_" ]; then
+			if [ -d "$idx_var" ]; then
+				printf "Variant_index:%s\t%s" "$vcf_name" "$(_index_record "$idx_var")"
+			else
+				printf "Variant_index:%s\tnone: a search with no bulges scans the variant genome" "$vcf_name"
 			fi
-		} >>"$_params" 2>/dev/null
-		_indexes_recorded=1
-	fi
+			printf "; its indels: %s\n" "$(basename "$indels_index_dir")"
+		fi
+	} 2>/dev/null >>"$output_folder/.indexes_searched.txt"
+	_indexes_recorded=1
 
 	# --- RAM safety guard on the search thread count ---------------------------
 	# A CRISPRitz search holds ~per-thread alignment state in RAM; a pamless

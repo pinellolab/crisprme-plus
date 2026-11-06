@@ -1596,22 +1596,27 @@ def index_build_pam(index_dir: str) -> "tuple":
     when the sidecar is absent — correct for the shipped indexes and any index built
     the standard way. Returns ``(pam_name_or_None, seq_len, pam_pos)``.
     """
+    # A name that says the guide and the side (since 2.9.0: index_fit.parse_index_name)
+    # records them ahead of the sidecar, as the search script's _index_side reads the side.
+    parsed = index_fit.parse_index_name(index_dir)
+    named = None
+    if parsed and parsed[3]:
+        k = len(parsed[0])
+        named = (parsed[3] + k, k if parsed[4] == 3 else -k)
     p = os.path.join(index_dir, ".pam_build")
     try:
         with open(p) as fh:
             parts = fh.readline().split()
-        return parts[0], int(parts[1]), int(parts[2])
+        return (parts[0],) + (named or (int(parts[1]), int(parts[2])))
     except (OSError, ValueError, IndexError):
         pass
+    if named:
+        return (None,) + named
     # no sidecar (e.g. an index built by the search pipeline, which doesn't write
     # one): recover the geometry from an installed PAM whose motif matches this
     # index's motif — correct for ANY shipped PAM including 5' Cas12a and 21bp
     # SaCas9, unlike a hardcoded 20bp/3' guess. Fall back to that convention only
     # if no PAM matches.
-    parsed = index_fit.parse_index_name(index_dir)
-    if parsed and parsed[3]:  # a name that says the guide and the side (since 2.9.0)
-        k = len(parsed[0])
-        return None, parsed[3] + k, k if parsed[4] == 3 else -k
     motif = index_fit.index_pam(index_dir)
     try:
         pams_dir = os.path.join(current_working_directory, PAMS_DIR)

@@ -18,6 +18,7 @@ Run with:
 import gzip
 import json
 import os
+import random
 import shutil
 import sys
 import tempfile
@@ -28,19 +29,24 @@ from unittest.mock import MagicMock, patch
 try:  # page modules need the web stack (Dash); the light unit-test CI does not have it
     import dash  # noqa: F401
 except ImportError:  # pragma: no cover
-    raise unittest.SkipTest("dash not installed: web page tests skipped")
+    dash = None
+# Without Dash each class skips, not the module: a SkipTest raised at import is a traceback
+# under `python -m unittest <module>` (skips D7).
+_NEEDS_DASH = unittest.skipUnless(dash, "dash not installed: web page tests skipped")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app object
 
-import pages.load_page as lp  # noqa: E402
-import pages.main_page as mp  # noqa: E402
-import pages.pages_utils as pu  # noqa: E402
+if dash:  # (the pages import Dash)
+    import pages.load_page as lp  # noqa: E402
+    import pages.main_page as mp  # noqa: E402
+    import pages.pages_utils as pu  # noqa: E402
 
 GUIDE = "CTAACAGTTGCTTTTATCAC"
 
 
+@_NEEDS_DASH
 class TestSearchReuse(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", ResourceWarning)  # files the page code leaves open
@@ -148,6 +154,50 @@ class TestSearchReuse(unittest.TestCase):
         self.assertNotEqual(key["crisprme_version"], "unknown")
 
 
+@_NEEDS_DASH
+class TestReuseOnceTheSearchHasRun(unittest.TestCase):
+    """An identical request is sent to an earlier job that the search has run to its end,
+    as the job left its folder. 2.9.0's first cut had the search record the indexes it took
+    in the job's .Params.txt, which change_url compares byte for byte with a new request's,
+    so every identical resubmission started a new search: the record is a file of its own.
+    The search the image runs, its script and its engine, on a small genome."""
+
+    def setUp(self):
+        TestSearchReuse.setUp(self)
+        # the guide's site and two of one mismatch, on a chromosome of 30 kb
+        rng = random.Random(7)
+        seq = [rng.choice("ACGT") for _ in range(30000)]
+        for i, at in enumerate((1000, 9000, 20000)):
+            site = list(GUIDE + "AGG")
+            if i:
+                site[3 + i] = "A" if site[3 + i] != "A" else "C"
+            seq[at:at + len(site)] = site
+        with open(os.path.join(self.tmp, "Genomes", "hg38", "chr1.fa"), "w") as f:
+            f.write(">chr1\n" + "".join(seq) + "\n")
+        os.makedirs(os.path.join(self.tmp, "samplesIDs"))
+        os.makedirs(os.path.join(self.tmp, "VCFs"))
+        # the job runs here, to its end, as the web's pool runs it
+        self.pool.submit.side_effect = lambda fn, *args, **kwargs: fn(*args, **kwargs)
+
+    def test_an_identical_request_is_sent_to_it(self):
+        url = TestSearchReuse.submit(self)
+        job = url[1].split("job=")[-1]
+        folder = os.path.join(self.tmp, "Results", job)
+        with open(os.path.join(folder, "log.txt")) as f:
+            self.assertIn("Job\tDone", f.read())
+        # (a finished search moves its stderr log aside, as log_error_no_check.txt)
+        self.assertFalse(os.path.exists(os.path.join(folder, "log_error.txt")))
+        self.assertEqual(TestSearchReuse.submit(self), ("/load", f"?job={job}", lp.REUSED_HASH))
+        self.assertEqual(self.pool.submit.call_count, 1)
+        self.assertEqual(TestSearchReuse.jobs(self), [job])
+        # what the search recorded of the index it took, beside the request's parameters
+        with open(os.path.join(folder, ".indexes_searched.txt")) as f:
+            self.assertIn("Reference_index\tNRG_2_hg38 (in ", f.read())
+        with open(os.path.join(folder, mp.PARAMS_FILE)) as f:
+            self.assertNotIn("_index", f.read())
+
+
+@_NEEDS_DASH
 class TestDatasetsWithoutTheTiers(unittest.TestCase):
     """A search of a variant dataset with neither Dictionaries/registry_<vcf>/ nor
     genotypes_<vcf>/ (an index built without --samplesID, such as the one the benchmark

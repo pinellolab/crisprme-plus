@@ -8,6 +8,38 @@ twice, the peak by sampling `du -sb` every 10 s. Every published NRR archive is 
 rebuild lane's archives change these sizes again (by 1-2 %, plan 2.5), so re-measure with them,
 and change `PostProcess/test_documented_sizes.py` and every surface it reads together.
 
+**The backlog: what this track fixed, and what it leaves, and why** (list_282.md and plan
+section 4, for the merge). Fixed here, each with its test (the entries below): IDX-17a, IDX-19,
+IDX-21, IDX-22, cli5 D7, OF-12, OF-13, FR :125, F2, RV1-F5, RV4-1, RV4-3, M2, M3, CI-1, WEB-9 (and
+the non-archive bundle answered 500), C11/P7, emptyidx F6, F7 (and the genome-layout refusal's
+banner, WEB-3's class), F8, suite P4, skips D7, P15.3, install P9, R4-4's unused NRG_1 index of
+a 0-bulge assembly search, setup's exit status, progress lines and URLs (FR2 cli a, c, e), the
+checklist's HPC route (`--cleanenv`, a fresh sandbox), backlog 4.4 (the installers). Found done
+already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
+- Design questions, or decisions taken for another release: all of section 4.1 (two cis indels,
+  CRISPR-Bulge batch noise, the one-row drops, phasing truth, phase sets, #77, the calibration
+  edge, the HPRC and HG01255 runs); the report's A6 rsID/MAF order (with the multi-allelic work,
+  plan 2.2), P7 (what the slim report shows), the 0-1-edit sites of the shareable report, the
+  CRISPR-Bulge of reconciled assembly rows; WEB-7 (plan 2.6), WEB-4, WEB-11 (a default), the
+  annotation copies of a web search (the #97 trade), Settings builds without the tiers' RAM; the
+  stderr gate of the pipeline stages (exit codes instead, 44 gates); build locks across hosts.
+- Other tracks' code: the served-mode security items (the security track's round 3, A1); the
+  report's RV1-F1/F2, D6, the 1e-5 wording, P8, mega IUPAC rows, Risk Card sort, text N1 (on its
+  branch); the engine's AF-by-first-record and 5' last-window items, the Bioconda enricher, PKG1
+  (format 2: the engine and fmt tracks); download's completeness check of the dictionaries (its
+  heal path refetches the whole archive: the HF track's); contigs with "_" (bio11.3: the indel
+  pipeline's naming, with its own tests); R2-F1, M5, R4-6 (the build tracks' locks and marks).
+- Not reproduced, or needing a browser walk this track had no time for: P14 (the results page's
+  Group by now opens on CFD_score), N1-N8, M6, OF-11, the base-editing dropdown's 500s, history
+  and Settings hashed haplotype names, the Settings build form's genome list, W1.
+- Test hygiene left: suite P5 (tests that import the web app write `PostProcess/Cache/`, the app's
+  cache folder, relative to the working directory by design: moving it is the web track's call;
+  the folder is ignored by git), bio11.2 (a flake recorded with no detail), the T-31 flock trigger
+  (could not be reproduced on the Mac), R2-F4/R2-F5 and wset N3 coverage, the 5'-PAM synthetic case
+  and a published test archive (audit additions, sized small-medium).
+- Docs and wording nits of 4.6 and 4.8 (RV1-F3, N4, F4, F5, RV4-2, the 2.7.10 entry, the FFR
+  D3R3 items): the docs track's, as they touch other tracks' changelog fragments.
+
 ### Changed
 
 - **SpCas9 NRR (`NAA`, `NAG`, `NGA`, `NGG`) is the default PAM and index; it was NRG (`NAG`,
@@ -60,22 +92,28 @@ and change `PostProcess/test_documented_sizes.py` and every surface it reads tog
   (CRISPRitz 2.9.1); with CRISPRitz 2.10.0 both wrote those rows again.
 - **A search prunes by itself.** When no installed index serves a search unpruned and one serves it
   pruned (a dedicated index of a PAM that holds the search's, or an all-`N` one wider than the PAM),
-  the search prunes, as if `--prune-pam` was given, and says so first: on the console (`NOTE
-  [complete-search]: no installed index serves PAM NGG unpruned, and NRR_3_hg38+hg38_HGDP1kGP (...)
-  serves it pruned to it at leaf time: searching with --prune-pam, as if it was given. A dedicated
-  NGG index is searched faster: ...`) and in its log. The web form, which never passes the flag,
+  the search prunes, as if `--prune-pam` was given, and says so first, naming the index that needs
+  it: on the console (`NOTE [complete-search]: no installed variant index of hg38+hg38_HGDP1kGP
+  serves PAM NGG unpruned, and NRR_3_hg38+hg38_HGDP1kGP (...) serves it pruned to it at leaf time:
+  searching with --prune-pam, as if it was given. A dedicated NGG variant index is searched faster:
+  ...`; in a library of the PAM's own variant index and another PAM's reference index, `no
+  installed reference index of hg38`) and in its log. The web form, which never passes the flag,
   gets the same: the search script decides it for the search it runs, and the form's bulge cap and
   PAM list count those indexes. Before, a search that only a K = 8 index served stopped for want
   of a variant index (or, for the reference index, built one), and said to pass the flag. Where an
   index serves the search unpruned, as an all-`N` one of the PAM's width does, nothing changes.
-- **The run's parameters and the report name the index that served the search.** `.Params.txt`'s
-  `Genome_idx` says what the search asked for, which another index may serve (`NGG_2_hg38` served
-  by `NNNNNNNN_3_hg38`), or none at all (IDX-21). The search script now records the indexes it
-  took: `Reference_index` and `Variant_index:<dataset>`, each with its library, the PAM it was
-  built for and its side of the guide, the guide length its trees were built for, its bulges and
-  how the search narrows it to the search's PAM, the variant one with its INDELS index, or `none`
-  for a search with no bulges, which scans the genome; and `Prune_pam`, `auto` or `given`. The
-  report's summary shows them, a run of an earlier release has none.
+- **The run and its report name the index that served the search.** `.Params.txt`'s `Genome_idx`
+  says what the search asked for, which another index may serve (`NGG_2_hg38` served by
+  `NNNNNNNN_3_hg38`), or none at all (IDX-21). The search script now records the indexes it took,
+  in `.indexes_searched.txt` in the result folder, beside the parameters (which the web compares
+  byte for byte to reuse an earlier job, so they stay as the request wrote them): `Reference_index`
+  and `Variant_index:<dataset>`, each with its library, the PAM it was built for and its side of
+  the guide, the guide length its trees were built for, its bulges and how the search narrows it
+  to the search's PAM, the variant one with its INDELS index, or `none` for a search with no
+  bulges, which scans the genome; and `Prune_pam auto` for a search that pruned by itself
+  (complete-search records `Prune_pam`, `auto` or `given`, in its parameters). The report's
+  summary shows them, and its zip bundles the record as `indexes_searched.txt`; a run of an
+  earlier release has none.
 - **Index names may carry the guide length and the side of the PAM.** `<PAM>_<N>_<genome>` says
   neither, so a 3′ and a 5′ build of one motif, or builds for two guide lengths (20- and 23-nt
   Cas12a), take one name. A name may now carry both, in the order of the target on the strand:
@@ -83,11 +121,14 @@ and change `PostProcess/test_documented_sizes.py` and every surface it reads tog
   Every reader takes both forms (the search script, `crisprme.py`, the web form, `download` and its
   router, which reads a PAM-less name's flank in either form, `publish-index`'s manifest,
   complete-test, the index coverage and N-flank checks): an index of the new form only for a search
-  of the side its name says, and of one index under both names, the newer one. The INDELS index of
+  of the side its name says, which records the side as a `.pam_build` does, ahead of one (such an
+  index needs none, at any flank width), and of one index under both names, the newer one. The
+  INDELS index of
   a variant index so named is `<name>_INDELS`; one a search builds for it is moved there. Builds
-  still write the older name. Covered by `PostProcess/test_defaults_and_index_flex.py`, and through
-  the real engine by `check_index_flex.py`: a download renamed to the new form gives the same
-  results, and one named for a 5′ PAM is not taken for a 3′ search.
+  still write the older name. Covered by `PostProcess/test_defaults_and_index_flex.py` (the
+  search script, `crisprme.py`, the web and complete-test take the same of every name form, side
+  and record), and through the real engine by `check_index_flex.py`: a download renamed to the new
+  form gives the same results, and one named for a 5′ PAM is not taken for a 3′ search.
 - **The web form's PAM picker for a PAM-less index** (plan 2.7, DYNAMIC_PAM_INDEX_COMPAT §8). When an
   all-`N` index is installed for the genome (or the dataset) selected, the form says what it serves
   (any PAM of its guide length on its side, up to its flank) and offers the PAMs of common nucleases
@@ -108,8 +149,8 @@ and change `PostProcess/test_documented_sizes.py` and every surface it reads tog
   progress page still reads the indexing step as done. A personal-assembly search with no bulges
   no longer builds a reference index per haplotype (R4-4). On chr22 with HGDP + 1000 Genomes, a
   search with no bulges of `NGCG`, which no installed index holds, ran in 67 s and built only
-  `NGCG_1_hg38+hg38_HGDP1kGP_INDELS`; its parameters record `Reference_index none` and
-  `Variant_index:hg38_HGDP1kGP none`, each with why.
+  `NGCG_1_hg38+hg38_HGDP1kGP_INDELS`; its record of the indexes searched says `Reference_index
+  none` and `Variant_index:hg38_HGDP1kGP none`, each with why.
 - **A search its input check refuses leaves its output folder empty.** A guide without its
   PAM's `N` padding, for one, is refused before the search starts, but the run had written
   `.command_line.txt`, `.version.txt`, `Params.txt` and `guides.txt` into `Results/<output>/`,
@@ -135,19 +176,29 @@ and change `PostProcess/test_documented_sizes.py` and every surface it reads tog
   took the third field of the PAM file's name, `NO`, where the web reads `NO-PAM` (OF-13).
 - **environment.yml installs pigz**, which the Docker image has and `publish-index` packs an index
   with on every core (install P9).
-- **The Windows one-click app starts nothing after a failed first download.** Its first Start
-  ran `download --what all`, the variant index's download and the app with `;` between them, so a
-  failed download went on to the next and started the app on half the data. Each step now runs
-  only when the one before it succeeded (`$LASTEXITCODE`: Windows PowerShell 5.1 has no `&&`),
-  and a failure says to click Start again (backlog 4.4).
+- **The one-click apps start nothing on half the data after a failed first download.** The
+  Windows app's first Start ran `download --what all`, the variant index's download and the app
+  with `;` between them, so a failed download went on to the next and started the app on half the
+  data; each step now runs only when the one before it succeeded (`$LASTEXITCODE`: Windows
+  PowerShell 5.1 has no `&&`) (backlog 4.4). And both apps, the macOS one too, chose between
+  setting up and opening the app by `Genomes/` alone, which the download makes in its first
+  minutes, so the next Start after a failed download opened the app on part of the data. The
+  setup now marks the data folder (`.setup_unfinished`) until both downloads have ended well: a
+  Start after a failure sets up again, picking up what is there, and the failure says to click
+  Start again to finish setting up. Checked with the macOS app's AppleScript under `osascript`
+  and `install.ps1` under PowerShell 7, each with a stub `docker` that fails the index download,
+  then not; an install of an earlier installer, with `Genomes/` and no mark, opens as before.
 - **A search no longer edits the user's `--vcf` and `--samplesID` lists.** The search script
   appended a newline to each, for `while read`, and cut it off again at its end: a run that
   ended early (no off-target, an error, Ctrl-C) left the newline in them, and a read-only
   `--vcf` list failed the write, on stderr, which fails the stage (RV4-1). It reads copies in
   the output folder (`.vcf_list_searched.txt`, `.samplesID_list_searched.txt`).
-- **A `--genome` folder with a space in its path is refused up front**, in one line that says to
-  move or link it: the search takes the path into its commands unquoted, and failed later with
-  a path that is no folder's (IDX-19).
+- **A `--genome` folder or a working directory with a space in its path is refused up front**,
+  by complete-search and by build-index-only, each in one line that names the command: the
+  search script takes both paths into its commands unquoted, and failed later with a path that
+  is no folder's (IDX-19). The working directory is checked first; for the genome folder, the
+  line says to move it or to link it from the working directory under a name without one (`ln
+  -s '<folder>' <working directory>/Genomes/<a name without spaces>`), which the search takes.
 - **The Settings genome upload says what to do with an archive of gzipped FASTA files.** It was
   refused with `no .fa or .fasta file in X`; it now names the `.fa.gz` files it holds and says
   to gunzip them, or to upload one `.fa.gz` a sequence (M3).
@@ -169,4 +220,53 @@ and change `PostProcess/test_documented_sizes.py` and every surface it reads tog
 - **docs/DYNAMIC_PAM_INDEX_COMPAT.md says what the release does.** Its CLI, web and PAM-picker
   sections called planned what 2.9.0 now does, and described a CLI that took any PAM inside an
   index's own and passed `--prune-pam` by itself, which 2.8.1 did not (IDX-22); they now say
-  what ships and how it differs from the design.
+  what ships and how it differs from the design, and that a search no installed index serves
+  builds an index of its PAM where it can, as before (it said every one was refused). METHODS
+  §9 no longer says that one index answers one PAM, nor that a search takes no all-`N` index of
+  another width without the flag.
+- **validate-benchmarks' read-only smoke can fail.** It made the code folder read-only with
+  `chmod -R a-w` in a container that runs as root, which writes through permission bits with
+  `CAP_DAC_OVERRIDE`, so a write into the code folder passed and the step could not fail (CI-1).
+  Its container drops the capability (`--cap-drop DAC_OVERRIDE`) and works in a folder of its
+  own; RELEASE_CHECKLIST T-38 says so. Run on `pinellolab/crisprme:v2.8.1` with this tree: a
+  search script planted to write into its own folder fails the step (`Permission denied`), and
+  passes it without the flag.
+- **A Settings genome upload of another kind of file is refused on its first chunk, and every
+  refusal of an upload is answered as the client's.** A file that is not FASTA, an NCBI
+  Datasets `.zip` for one, was taken for a FASTA file and refused once whole, for its first line,
+  the archive's bytes, with HTTP 500 `finalize failed: ...`, as was every refusal of what an
+  upload holds (WEB-9). An upload whose name is not `.fa`, `.fasta`, `.fa.gz`, `.fasta.gz`,
+  `.tar.gz` or `.tgz`, or whose first bytes are not what its name says (gzip, or FASTA text), is
+  refused before the rest of it streams in, and a refusal at its end (an archive of gzipped FASTA
+  files, a truncated gzip, a VCF upload into a registered folder) is answered 400 with its reason;
+  so is a personal-assembly bundle that is no archive (`not a gzip file`). A failure of the
+  server is still 500.
+- **validate-test downloads the brute-force references of its own release.** They came from the
+  main branch, and are md5-checked against the registry the release ships, so the day main
+  regenerated one, validate-test of every installed release (Bioconda leaves the references out
+  of its package) failed (C11/P7). They come from the release's tag (`v<version>`, which
+  `crisprme.py validate-test` passes on), or from main for a version with no tag yet.
+- **`PostProcess/bench_cbulge.py` does nothing on import.** It changed the working folder and the
+  module path of whatever imported it, to a developer's path, or failed to import where that path
+  is not (RV4-3); it takes the CRISPR-Bulge repository from `--repo` or `CBULGE_REPO` when run.
+- **The report's "Panel: N individuals" counts the samples the search ran with.** It counted every
+  list in `samplesIDs/`: the datasets not searched, and the lists Settings writes (M2).
+- **build-index-only with no `--samplesID` no longer calls the tiers in place missing.** Run as a
+  search's ERROR says to run it, to rebuild an INDELS index, it left the dict-less tiers of the
+  build before as they were, and said, in a loud WARNING on stderr, that the index was MISSING
+  them, INCOMPLETE (emptyidx F6). It says, on stdout, that they are kept; with none in place, or
+  ones a stopped run left unfinished, it warns as before.
+- **The web status page says why the search was not run when an INDELS sub-index is empty or
+  missing, or the genome folder is not as a search needs it.** Each got the general "remove it and
+  try to submit again", though a new submission fails the same way (emptyidx F7, and the genome
+  layout refusal of the final 2.8.1 review); the banner now gives the ERROR, and for the genome
+  folder what `genome_layout.py` says of it, with the command that fixes it.
+- **Settings shows an index's display name.** The Installed indexes list and the Remove card named
+  an index by its folder alone, never by the display name given it (`build-index-only --name`, or
+  the Display name of a build there), which the search form shows (P15.3): both show it beside the
+  folder.
+- **Six function-based test modules run under `python -m unittest`.** Each reported `Ran 0 tests`
+  and `OK` there, a false pass (suite P4); a `load_tests` hook collects every test function. CI
+  and the release checklist still run them as scripts too.
+- **Four web test modules skip their classes where Dash is not installed.** They raised SkipTest
+  at import, which `python -m unittest <module>` reports as a traceback and an error (skips D7).

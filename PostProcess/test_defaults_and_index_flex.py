@@ -19,6 +19,7 @@ import ast
 import io
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -134,7 +135,32 @@ class TheDefaultIsNRR(unittest.TestCase):
             encoding="utf-8").splitlines() if "download --what all" in ln)
         index_step = line.index("download --what index")
         self.assertIn("; if (`$LASTEXITCODE -eq 0) { docker run", line[:index_step])
-        self.assertIn("; if (`$LASTEXITCODE -eq 0) { $run;", line[index_step:])
+        self.assertIn("; if (`$LASTEXITCODE -eq 0) { Remove-Item -Force -LiteralPath `\"$mark`\"; "
+                      "$run;", line[index_step:])
+
+    def test_a_start_after_a_failed_download_sets_up_again(self):
+        # Start chose between setting up and opening the app by Genomes/ alone, which the
+        # download makes in its first minutes: a Start after a failed download opened the app
+        # on part of the data, as the failure's own advice to click Start again led to. The
+        # setup marks the data folder until both downloads have ended well. (Checked by hand
+        # too: the app's AppleScript with osascript, install.ps1 with PowerShell 7, each with a
+        # stub docker that fails the index download, then not.)
+        ps1 = (_REPO / "docs" / "install.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Has-Data { (Test-Path (Join-Path $Data 'Genomes')) -and -not "
+                      "(Test-Path (Setup-Mark)) }", ps1)
+        start = ps1[ps1.index("$mark = Setup-Mark"):]
+        self.assertLess(start.index("New-Item -ItemType File -Force -Path $mark"),
+                        start.index("Run-InConsole"))
+        sh = (_REPO / "docs" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn('" >/dev/null 2>&1 && ! test -e " & quoted form of my setupMark() & '
+                      '" && echo yes || echo no") is "yes"\nend hasData', sh)
+        start = sh[sh.index("set mark to quoted form of my setupMark()"):]
+        self.assertLess(start.index('do shell script "touch " & mark'),
+                        start.index("runInTerminal("))
+        self.assertIn('runInTerminal("if " & dlRef & " && " & dlVar & "; then rm -f " & mark & '
+                      '"; " & runCmd', start)
+        self.assertIn("else echo; echo 'The download did not finish: see above, then open "
+                      "CRISPRme and click Start again to finish setting up.'; fi", start)
 
 
 class APamDownloadInstallsTheDefaultPam(unittest.TestCase):
@@ -220,6 +246,12 @@ class ASearchWithNoBulgesBuildsNoIndex(tir._ShippedScript):
         run = self.run_pipeline(bulges=1)
         self.assertEqual([c[1] for c in run.builds if c[1] in ("hg38", f"hg38+{self.VCF}")],
                          ["hg38", f"hg38+{self.VCF}"])
+
+
+def index_fit_pam(name):
+    """The PAM of index ``name``, either form of the name (index_fit.index_pam)."""
+    import index_fit
+    return index_fit.index_pam(name)
 
 
 def _lib(root, *names, side=None):
@@ -315,6 +347,74 @@ class ADedicatedIndexServesAPamItHolds(unittest.TestCase):
                         self.assertEqual(bool(served), bool(shell))
 
 
+class TheReportNamesTheIndexesSearched(unittest.TestCase):
+    """The report's summary names the indexes the search took, which the search script
+    records in .indexes_searched.txt beside the run's parameters, and the report's zip
+    bundles that record beside Params.txt, which it leaves as the run wrote it."""
+
+    def test_from_the_record_beside_the_parameters(self):
+        import zipfile
+        import test_generate_report as tgr
+        gr = tgr.gr
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        tsv = tmp / f"{tgr._GUIDE}+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv"
+        tsv.write_text("\t".join(tgr._HEADER) + "\n"
+                       + "".join("\t".join(row) + "\n" for row in tgr._ROWS))
+        params = "Genome_selected\thg38\nGenome_idx\tNGG_2_hg38\nPam\tNGG\n"
+        (tmp / ".Params.txt").write_text(params)
+        (tmp / ".indexes_searched.txt").write_text(
+            "Reference_index\tNRR_3_hg38 (in /lib): built for the PAM NRR on the 3' side of "
+            "a 20-nt guide, with up to 2 bulge(s) of each type, pruned to NGG at leaf time "
+            "(--prune-pam)\nPrune_pam\tauto\n")
+        out_zip = gr.build_report(result_dir=str(tmp), integrated_tsv=str(tsv),
+                                  out_zip=str(tmp / "r.zip"),
+                                  samplesid_dir=str(tmp / "samplesIDs"))
+        with zipfile.ZipFile(out_zip) as zf:
+            html = zf.read("report.html").decode()
+            self.assertEqual(zf.read("data/Params.txt").decode(), params)
+            self.assertEqual(zf.read("data/indexes_searched.txt").decode(),
+                             (tmp / ".indexes_searched.txt").read_text())
+        self.assertIn("<td class=\"k\">Reference index searched</td><td>NRR_3_hg38 (in /lib): "
+                      "built for the PAM NRR", html)
+        self.assertIn("<td class=\"k\">PAM pruning</td>", html)
+
+
+class ThePanelIsTheSearchsOwn(unittest.TestCase):
+    """The report's 'Panel: N individuals' counted every list in samplesIDs/, the lists of
+    the datasets not searched and those Settings writes too (M2): it counts the samples the
+    search ran with, which its script gathers in .sampleID.txt, each under its own dataset."""
+
+    def test_of_the_samples_the_search_ran_with(self):
+        import zipfile
+        import test_generate_report as tgr
+        gr = tgr.gr
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        tsv = tmp / f"{tgr._GUIDE}+NRG_hg38+hg38_1000G_6+3_integrated_results.tsv"
+        tsv.write_text("\t".join(tgr._HEADER) + "\n"
+                       + "".join("\t".join(row) + "\n" for row in tgr._ROWS))
+        sids = tmp / "samplesIDs"
+        sids.mkdir()
+        head = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+        (sids / "hg38_1000G.samplesID.txt").write_text(
+            head + "HG00096\tGBR\tEUR\tmale\nHG00097\tGBR\tEUR\tfemale\n"
+            "NA18525\tCHB\tEAS\tfemale\n")
+        (sids / "hg38_HGDP.samplesID.txt").write_text(  # (a dataset not searched)
+            head + "HGDP00001\tBrahui\tCSA\tmale\nHGDP00003\tBrahui\tCSA\tmale\n")
+        (tmp / ".sampleID.txt").write_text(  # (what the search gathered: 1000G's list)
+            head + "HG00096\tGBR\tEUR\tmale\nHG00097\tGBR\tEUR\tfemale\n"
+            "NA18525\tCHB\tEAS\tfemale\n")
+        with zipfile.ZipFile(gr.build_report(result_dir=str(tmp), integrated_tsv=str(tsv),
+                                             out_zip=str(tmp / "r.zip"),
+                                             samplesid_dir=str(sids))) as zf:
+            html = zf.read("report.html").decode()
+        self.assertIn(" Panel: <strong>3</strong> individuals.", html)
+        self.assertEqual(gr.run_sample_ids(str(tmp)), {"HG00096", "HG00097", "NA18525"})
+        # a report of a table alone, with no result folder, as before
+        self.assertIsNone(gr.run_sample_ids(None))
+
+
 @unittest.skipUnless(shutil.which("python") and tir._gnu_realpath(),
                      "runs the shipped search script as the image does (GNU realpath)")
 class ASearchPrunesByItself(tir._ShippedScript):
@@ -322,11 +422,16 @@ class ASearchPrunesByItself(tir._ShippedScript):
     all-N one, a dedicated one of a PAM that holds the search's), the search prunes as if
     --prune-pam was given, and says so first. It stopped for want of a variant index (the
     flag told to the user), or built a reference one. The web launches the script with
-    pruning off, so its searches do the same. The run's parameters file names the indexes
-    the search took, for the report."""
+    pruning off, so its searches do the same. The run records the indexes the search took,
+    for the report, beside its parameters file: the web reuses a job only when its
+    .Params.txt is a new request's, byte for byte."""
 
     def params(self):
-        return (self.root / f"run{self.runs}" / "out" / "Params.txt").read_text()
+        """The record of the indexes the run searched, once its parameters are checked to
+        be as written."""
+        out = self.root / f"run{self.runs}" / "out"
+        self.assertEqual((out / "Params.txt").read_text(), "Genome_selected\thg38\n")
+        return (out / ".indexes_searched.txt").read_text()
 
     def run_with_params(self, **kw):
         # (complete-search writes the parameters file before it launches the script)
@@ -337,9 +442,9 @@ class ASearchPrunesByItself(tir._ShippedScript):
     def test_an_nrr_variant_index_serves_an_ngg_search_pruned(self):
         self.install("NRR_3")
         run = self.run_pipeline(pam="20bp-NGG-SpCas9", prune=0)
-        self.assertIn("NOTE: no installed index serves PAM NGG unpruned, and "
-                      f"NRR_3_hg38+{self.VCF} serves it pruned to it at leaf time: searching "
-                      "with --prune-pam, as if it was given", run.stdout)
+        self.assertIn(f"NOTE: no installed variant index of hg38+{self.VCF} serves PAM NGG "
+                      f"unpruned, and NRR_3_hg38+{self.VCF} serves it pruned to it at leaf "
+                      "time: searching with --prune-pam, as if it was given", run.stdout)
         self.assertEqual(run.searched(variant=True), (f"NRR_3_hg38+{self.VCF}", True))
         self.assertEqual(run.searched(variant=False), ("NRR_3_hg38", True))
         self.assertEqual(run.builds, [])
@@ -353,6 +458,39 @@ class ASearchPrunesByItself(tir._ShippedScript):
                 self.assertNotIn("as if it was given", run.stdout)
                 self.assertEqual(run.searched(variant=True), (f"{taken}_hg38+{self.VCF}", False))
 
+    def test_the_note_names_the_index_that_needs_it(self):
+        # the variant index is the PAM's own, the reference one another PAM's: it said that
+        # no installed index served the PAM unpruned, and to build a dedicated one
+        self.install("NGG_3", reference=False)
+        self.install("NRR_3", variant=False)
+        run = self.run_pipeline(pam="20bp-NGG-SpCas9", prune=0)
+        self.assertIn("NOTE: no installed reference index of hg38 serves PAM NGG unpruned, and "
+                      "NRR_3_hg38 serves it pruned to it at leaf time", run.stdout)
+        self.assertEqual(run.searched(variant=False), ("NRR_3_hg38", True))
+        # complete-search's, the same, from the same library (crisprme.py _prune_on_its_own)
+        import test_bulge_cap as tbc
+        cm = tbc.crisprme
+        vcfs = self.home / "VCFs" / self.VCF
+        vcfs.mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(cm, "current_working_directory", str(self.home)), \
+                mock.patch.object(cm, "_engine_prunes", return_value=True):
+            for bulges, which in ((1, "reference index of hg38"), (0, None)):
+                index = cm._prune_on_its_own("_", "hg38", [str(vcfs)], "NGG", bulges + 1,
+                                             True, 20, bulges, bulges)
+                with self.subTest(bulges=bulges):
+                    if which is None:  # (no bulges: the reference index is not opened)
+                        self.assertIsNone(index)
+                        continue
+                    self.assertEqual(Path(index).name, "NRR_3_hg38")
+                    self.assertTrue(cm._prune_note(index, "NGG").startswith(
+                        f"NOTE [complete-search]: no installed {which} serves PAM NGG "
+                        f"unpruned, and NRR_3_hg38 ({self.library}) serves it pruned"))
+            shutil.rmtree(self.library / f"NGG_3_hg38+{self.VCF}")
+            self.install("NRR_3", reference=False)
+            index = cm._prune_on_its_own("_", "hg38", [str(vcfs)], "NGG", 2, True, 20, 1, 1)
+            self.assertIn(f"no installed variant index of hg38+{self.VCF} serves PAM NGG",
+                          cm._prune_note(index, "NGG"))
+
     def test_a_wider_pam_less_index_alone_serves_pruned(self):
         self.install("NNNNNNNN_3")
         run = self.run_pipeline(pam="20bp-NRR-SpCas9", prune=0)
@@ -365,7 +503,7 @@ class ASearchPrunesByItself(tir._ShippedScript):
         self.assertEqual(run.builds, [])
         self.assertEqual(run.searched(variant=False), ("NRR_3_hg38", True))
 
-    def test_the_parameters_file_names_the_indexes_searched(self):
+    def test_the_run_records_the_indexes_searched(self):
         self.install("NRR_3")
         run = self.run_with_params(pam="20bp-NGG-SpCas9", prune=0)
         params = self.params()
@@ -436,6 +574,84 @@ class AnIndexNameMayCarryItsGuideAndSide(unittest.TestCase):
         lib = _lib(tempfile.mkdtemp(dir=self.tmp.name), "NRR_2_hg38", "20-NRR_3_hg38")
         self.assertEqual(self.take(lib, "NRR"), "NRR_2_hg38")
 
+    def test_the_side_a_name_says_is_its_record_for_every_reader(self):
+        """A name that says the side records it as a .pam_build does, ahead of one: the
+        search script refused, for want of a .pam_build, a PAM-less index named for a 5'
+        PAM (NNNN-20_2_hg38) for a 5' search, and one named for a 3' PAM of a width but 3
+        and 8 (20-NNNN_2_hg38) for a 3' search, which crisprme.py's pre-flight and the web
+        offered. Old and new names, 3' and 5', recorded, unrecorded and recorded otherwise:
+        the search script, crisprme.py, the web and complete-test take the same."""
+        import test_bulge_cap as tbc
+        import complete_test
+        cm, pu = tbc.crisprme, tbc.pages_utils
+        pams = {"20bp-TTTV-Cas12a": ("TTTV" + "N" * 20, -4),
+                "20bp-NNNN-NO-PAM5": ("N" * 24, -4),
+                "20bp-NGG-SpCas9": ("N" * 20 + "NGG", 3),
+                "20bp-NRRT-x": ("N" * 20 + "NRRT", 4)}
+        indexes = ("NNNN-20_2_hg38", "20-NNNN_2_hg38", "TTTV-20_2_hg38", "20-TTTV_2_hg38",
+                   "20-NNNNNNNN_2_hg38", "NNNN_2_hg38", "TTTV_2_hg38", "NNNNNNNN_2_hg38")
+        taken = {}
+        for name in indexes:
+            k = len(index_fit_pam(name))
+            for record in (None, 3, 5):
+                root = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                lib = _lib(root, name)
+                if record:
+                    (lib / name / ".pam_build").write_text(
+                        f"x {20 + k} {k if record == 3 else -k}\n")
+                (root / "PAMs").mkdir()
+                for pam, (seq, pos) in pams.items():
+                    (root / "PAMs" / f"{pam}.txt").write_text(f"{seq} {pos}\n")
+                for pam, (seq, pos) in pams.items():
+                    motif = seq[:-pos] if pos < 0 else seq[-pos:]
+                    for prune in (0, 1):
+                        shell = self.take(lib, motif, prune=prune, pos=pos)
+                        with self.subTest(index=name, record=record, pam=pam, prune=prune):
+                            mirror = cm._index_the_search_takes(
+                                [str(lib)], motif, "hg38", 2, bool(prune), pos > 0, 20, 1, 1,
+                                False)
+                            self.assertEqual(Path(mirror).name if mirror else "", shell)
+                            if prune:  # (the web counts what the search prunes by itself)
+                                with mock.patch.object(pu, "current_working_directory",
+                                                       str(root) + os.sep):
+                                    self.assertEqual(pu.index_max_bulges("hg38", pam),
+                                                     1 if shell else 0)
+                        taken[name, record, pam, prune] = shell
+                with self.subTest(index=name, record=record, reader="complete-test"):
+                    side = 5 if name.split("_")[0].endswith("-20") else (
+                        3 if name.startswith("20-") else record)
+                    with mock.patch.object(os, "getcwd", return_value=str(root)):
+                        five = complete_test._smoke_five_prime(name, index_fit_pam(name))
+                    if side:
+                        self.assertEqual(five, side == 5)
+        # what the reviewers' runs found refused, served: a 5' PAM-less index named for its
+        # side, with no .pam_build, for a TTTV search; a 3' one of width 4 for an NGG search
+        self.assertEqual(taken["NNNN-20_2_hg38", None, "20bp-TTTV-Cas12a", 0], "NNNN-20_2_hg38")
+        self.assertEqual(taken["20-NNNN_2_hg38", None, "20bp-NGG-SpCas9", 1], "20-NNNN_2_hg38")
+        # ... the name ahead of a record that says the other side
+        self.assertEqual(taken["NNNN-20_2_hg38", 3, "20bp-NNNN-NO-PAM5", 0], "NNNN-20_2_hg38")
+        self.assertEqual(taken["20-NNNN_2_hg38", 5, "20bp-NGG-SpCas9", 1], "20-NNNN_2_hg38")
+        # ... and never for the other side
+        self.assertEqual(taken["NNNN-20_2_hg38", 5, "20bp-NGG-SpCas9", 1], "")
+        self.assertEqual(taken["20-TTTV_2_hg38", None, "20bp-TTTV-Cas12a", 1], "")
+        # an older name, unrecorded, as before: a PAM-less one of width 4 is not taken for a
+        # 3' PAM, a recorded one is
+        self.assertEqual(taken["NNNN_2_hg38", None, "20bp-NGG-SpCas9", 1], "")
+        self.assertEqual(taken["NNNN_2_hg38", 3, "20bp-NGG-SpCas9", 1], "NNNN_2_hg38")
+        self.assertEqual(taken["NNNN_2_hg38", 5, "20bp-TTTV-Cas12a", 0], "NNNN_2_hg38")
+
+    def test_index_side_reads_the_name_first(self):
+        for name, side in (("NNNN-20_2_hg38", "5"), ("20-NNNN_2_hg38", "3"),
+                           ("NNNN_2_hg38", "3")):
+            with self.subTest(name=name):
+                lib = _lib(tempfile.mkdtemp(dir=self.tmp.name), name)
+                said = subprocess.run(
+                    ["bash", "-c", tir.RESOLVER + '\n_index_side "$1"; echo "$?"', "bash",
+                     str(lib / name)], capture_output=True, text=True)
+                # (an older name with no record is taken for a 3' build, status 1)
+                self.assertEqual(said.stdout.split(), [side, "1" if "-" not in name else "0"])
+
+
     def test_the_python_mirrors_and_the_web_take_it_too(self):
         import crisprme_hf
         import index_fit
@@ -488,6 +704,32 @@ class TheSearchScriptTakesTheNewName(tir._ShippedScript):
         # and an NGG search of it, pruned by itself
         run = self.run_pipeline(pam="20bp-NGG-SpCas9")
         self.assertEqual(run.searched(variant=True), (f"20-NRR_3_hg38+{self.VCF}", True))
+
+    def test_a_name_that_says_its_side_needs_no_record(self):
+        # a PAM-less index named for a 5' PAM, with no .pam_build, for a 5' search under
+        # --index-path: it was refused, as "not taken for a 3' PAM", and it records its side
+        _lib(self.home, "NNNN-20_2_hg38")
+        tttv = "TTTV" + "N" * 20 + " -4\n"
+        run = self.run_pipeline(pam="20bp-TTTV-Cas12a", pam_text=tttv, variant=False,
+                                index_path=self.library)
+        self.assertNotIn("index", run.stderr)  # (the stub stops the run at its search)
+        self.assertEqual(run.searched(variant=False), ("NNNN-20_2_hg38", False))
+        self.assertIn("NNNN-20_2_hg38 (in", self.params())
+        self.assertIn("built for the PAM NNNN on the 5' side", self.params())
+        # one named for the other side stays refused, and the refusal says why by its name
+        shutil.rmtree(self.library / "NNNN-20_2_hg38")
+        _lib(self.home, "20-NNNN_2_hg38")
+        run = self.run_pipeline(pam="20bp-TTTV-Cas12a", pam_text=tttv, variant=False,
+                                index_path=self.library)
+        self.assertEqual(run.searched(variant=False), None)
+        self.assertIn("20-NNNN_2_hg38 is a PAM-less index for a PAM on the 3' side of the "
+                      "guide (as its name says), and 20bp-TTTV-Cas12a.txt puts the PAM on the "
+                      "5' side", run.stderr)
+        self.assertNotIn("records no side", run.stderr)
+        self.assertNotIn("record that by running", run.stderr)
+
+    def params(self):
+        return (self.root / f"run{self.runs}" / "out" / ".indexes_searched.txt").read_text()
 
 
 class ThePamPickerOfAPamLessIndex(unittest.TestCase):
@@ -690,22 +932,64 @@ class TheChecklistsHpcRouteIsANewUsersRun(unittest.TestCase):
 
 class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):
     """A genome folder with a space in its path failed later with a misleading path: the
-    search takes it into shell commands unquoted (IDX-19). It is refused in one line."""
+    search takes it into shell commands unquoted (IDX-19), and the working directory's too.
+    complete-search and build-index-only refuse either in one line, the working directory
+    first, and the advice for the genome folder works: a link made under a working directory
+    with no space in its path."""
+
+    def refusal(self, command, cwd, *args):
+        """What ``command`` (complete-search or build-index-only) says, run from ``cwd`` with
+        ``args``, as it stops: (status, stderr)."""
+        import test_bulge_cap as tbc
+        cm = tbc.crisprme
+        err, here = io.StringIO(), os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(cwd)
+        argv = ["crisprme.py", command, *args]
+        with mock.patch.object(cm, "input_args", argv), \
+                mock.patch.object(cm, "current_working_directory", f"{os.getcwd()}/"), \
+                mock.patch.object(cm, "warn_low_memory", lambda: None), \
+                mock.patch.object(sys, "stderr", err), self.assertRaises(SystemExit) as stop:
+            {"complete-search": cm.complete_search, "build-index-only": cm.build_index_only}[
+                command]()
+        return stop.exception.code, err.getvalue()
 
     def test_refused_naming_it(self):
         import test_bulge_cap as tbc
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        (tmp / "my genome").mkdir()
-        (tmp / "hg38").mkdir()
-        err = io.StringIO()
-        with mock.patch.object(sys, "stderr", err), self.assertRaises(SystemExit) as stop:
-            tbc.crisprme._check_genome(["--genome", str(tmp / "my genome")])
-        self.assertEqual(stop.exception.code, 1)
-        self.assertIn("has a space in its path", err.getvalue())
-        self.assertEqual(len(err.getvalue().splitlines()), 1)
-        self.assertEqual(tbc.crisprme._check_genome(["--genome", str(tmp / "hg38")]),
-                         str(tmp / "hg38"))
+        pam = str(_REPO / "PAMs" / "20bp-NRR-SpCas9.txt")
+        for cwd in (tmp / "w", tmp / "w 2"):
+            for folder in ("Genomes/gx", "Genomes/g x"):
+                (cwd / folder).mkdir(parents=True)
+                (cwd / folder / "chr1.fa").write_text(">chr1\nACGT\n")
+        search = ("--pam", pam, "--guide", pam, "--mm", "2", "--bDNA", "1", "--bRNA", "1",
+                  "--output", "o")
+        build = ("--pam", pam, "--bDNA", "1", "--bRNA", "1")
+        for command, extra in (("complete-search", search), ("build-index-only", build)):
+            with self.subTest(command=command, where="the working directory"):
+                status, said = self.refusal(command, tmp / "w 2", "--genome", "Genomes/gx", *extra)
+                self.assertEqual(status, 1)
+                self.assertEqual(said.splitlines(), [
+                    f"Error: The working directory '{tmp / 'w 2'}' has a space in its path, which "
+                    f"{command} cannot take into its commands: run it from a folder whose whole "
+                    "path has no space"
+                    + (" (or give a --path that has none)" if command == "build-index-only"
+                       else "")])
+            with self.subTest(command=command, where="the genome folder"):
+                status, said = self.refusal(command, tmp / "w", "--genome", "Genomes/g x", *extra)
+                self.assertEqual(status, 1)
+                self.assertEqual(len(said.splitlines()), 1)
+                self.assertIn(f"The --genome folder '{tmp / 'w' / 'Genomes' / 'g x'}' has a space "
+                              f"in its path, which {command} cannot take", said)
+                self.assertIn(f"(ln -s '{tmp / 'w' / 'Genomes' / 'g x'}' "
+                              f"{tmp / 'w' / 'Genomes' / '<a name without spaces>'})", said)
+        # ... and the link it advises is taken
+        (tmp / "w" / "Genomes" / "gy").symlink_to(tmp / "w" / "Genomes" / "g x")
+        os.chdir(tmp / "w")
+        self.addCleanup(os.chdir, _HERE)
+        self.assertEqual(tbc.crisprme._check_genome(["--genome", "Genomes/gy"], str(tmp / "w")),
+                         str(tmp / "w" / "Genomes" / "gy"))
 
 
 @unittest.skipUnless(shutil.which("python") and tir._gnu_realpath(),
@@ -838,6 +1122,91 @@ class PoolSearchIndelsKeepsNoDeadHelper(unittest.TestCase):
                     self.assertGreater(len(re.findall(rf"\b{node.name}\b", src)), 1)
 
 
+class TheReadOnlySmokeCanFail(unittest.TestCase):
+    """validate-benchmarks' read-only smoke made the code folder read-only with chmod -R a-w
+    in a container that runs as root, which writes through permission bits with
+    CAP_DAC_OVERRIDE: a write into the code folder passed, and the step could not fail
+    (CI-1). Its container drops the capability, and works in a folder of its own, which
+    root owns. (Run by hand on pinellolab/crisprme:v2.8.1 with this tree: a search script
+    planted to write into its own folder failed the step, rc 1, "Permission denied"; without
+    the --cap-drop it passed, as on GitHub.)"""
+
+    def test_its_container_drops_the_capability(self):
+        text = (_REPO / ".github" / "workflows" / "validate-benchmarks.yml").read_text()
+        step = text[text.index("- name: read-only-container smoke"):]
+        step = step[:step.index("\n      - name:")]
+        self.assertIn('docker run --rm --cap-drop DAC_OVERRIDE $BRANCH_MOUNT "$IMG" bash -c', step)
+        self.assertNotIn("rowork:/DATA", step)  # (a folder of the runner's user)
+        self.assertLess(step.index("mkdir -p /tmp/rowork && cd /tmp/rowork"),
+                        step.index("chmod -R a-w /opt/conda/opt/crisprme"))
+        checklist = (_REPO / "docs" / "RELEASE_CHECKLIST.md").read_text()
+        row = next(ln for ln in checklist.splitlines() if ln.startswith("| T-38 |"))
+        self.assertIn("--cap-drop DAC_OVERRIDE", row)
+
+
+class TheFunctionBasedModulesRunUnderUnittest(unittest.TestCase):
+    """Six test modules whose tests are plain functions, run by their own __main__, reported
+    "Ran 0 tests" and "OK" under python -m unittest, a false pass (suite P4): CI runs them as
+    scripts, but one run by hand or by a loop of `python -m unittest` tested nothing. Each
+    has a load_tests hook that collects every test_ function."""
+
+    def test_each_test_function_is_collected(self):
+        import importlib
+        import test_ci_workflows as tcw
+        modules = tcw.function_based_modules()
+        self.assertEqual(len(modules), 6, modules)
+        for name in modules:
+            with self.subTest(module=name):
+                module = importlib.import_module(name)
+                functions = [k for k, v in vars(module).items()
+                             if k.startswith("test_") and callable(v)]
+                suite = unittest.defaultTestLoader.loadTestsFromModule(module)
+                self.assertEqual(suite.countTestCases(), len(functions))
+                self.assertGreater(len(functions), 1)
+
+
+class AWebTestModuleWithoutDashSkipsItsClasses(unittest.TestCase):
+    """Four web test modules raised SkipTest at import where Dash is not installed, which
+    `python -m unittest <module>` reports as a traceback and an error, not as skips (skips
+    D7). Each class skips now. Dash is made unimportable for the run, as in the light CI."""
+
+    def test_each_skips_and_none_errs(self):
+        for name in ("test_web_search_reuse", "test_web_bulge_notes", "test_web_results_links",
+                     "test_results_summary_and_status"):
+            with self.subTest(module=name):
+                run = subprocess.run(
+                    [sys.executable, "-c", "import sys; sys.modules['dash'] = None; "
+                     f"import unittest; unittest.main(module=None, argv=['x', '{name}'])"],
+                    cwd=_HERE, capture_output=True, text=True, timeout=300)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertNotIn("Traceback", run.stderr)
+                self.assertRegex(run.stderr, r"\nOK \(skipped=\d+\)\n")
+
+
+class TheCrisprBulgeBenchmarkDoesNothingOnImport(unittest.TestCase):
+    """bench_cbulge.py, a developer's benchmark of the CRISPR-Bulge scorer, changed the
+    working folder and the module path at import, to a developer's path, or failed to
+    import where that path is not (RV4-3). main() takes the repository now."""
+
+    def test_import_changes_neither_the_folder_nor_the_path(self):
+        import importlib
+        here, path = os.getcwd(), list(sys.path)
+        sys.modules.pop("bench_cbulge", None)
+        with mock.patch.dict(os.environ, {"CBULGE_REPO": ""}):
+            bench = importlib.import_module("bench_cbulge")
+        self.addCleanup(sys.modules.pop, "bench_cbulge", None)
+        self.assertEqual((os.getcwd(), sys.path), (here, path))
+        # run with no repository given, it says what to give, as a usage error
+        err = io.StringIO()
+        with mock.patch.object(sys, "argv", ["bench_cbulge.py"]), \
+                mock.patch.object(sys, "stderr", err), self.assertRaises(SystemExit) as stop:
+            bench.main()
+        self.assertEqual(stop.exception.code, 2)
+        self.assertIn("give the CRISPR-Bulge repository: --repo <folder>, or CBULGE_REPO",
+                      err.getvalue())
+        self.assertEqual(os.getcwd(), here)
+
+
 class TheDesignDocSaysWhatShips(unittest.TestCase):
     """DYNAMIC_PAM_INDEX_COMPAT.md called a search that prunes by itself, the web's pruning
     and the PAM picker *planned*, and its CLI section described what the CLI did not do
@@ -850,6 +1219,17 @@ class TheDesignDocSaysWhatShips(unittest.TestCase):
             with self.subTest(heading=heading):
                 self.assertNotIn("*planned*", section)
                 self.assertIn("2.9.0", section)
+
+    def test_no_sentence_says_what_2_9_0_no_longer_does(self):
+        # one index for one PAM (an NRG index serves NGG pruned), no all-N index of another
+        # width without the flag (a search prunes by itself), every PAM no index serves
+        # refused (a search builds one where it can)
+        for doc, gone in (("METHODS.md", "One index therefore answers one PAM"),
+                          ("METHODS.md", "does not take an all-`N` index of another"),
+                          ("docs/DYNAMIC_PAM_INDEX_COMPAT.md",
+                           "A PAM no installed index serves is refused")):
+            with self.subTest(doc=doc, gone=gone):
+                self.assertNotIn(gone, " ".join((_REPO / doc).read_text().split()))
 
 
 class OnePerfectMatchPerGuideIsNoWarning(unittest.TestCase):

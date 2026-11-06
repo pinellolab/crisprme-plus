@@ -64,6 +64,7 @@ from typing import List, Optional
 import subprocess
 import tarfile
 import tempfile
+import zipfile
 import string
 import random
 import re
@@ -132,10 +133,39 @@ def _unsafe_tar_member(tar: tarfile.TarFile, dest_dir: str) -> Optional[str]:
 def _genome_upload_assembly(name: str) -> str:
     """The genome an upload of the file ``name`` installs: its name less the FASTA or
     archive extension (Genomes/<assembly>/)."""
-    for ext in (".chromFa.tar.gz", ".fa.gz", ".fasta.gz", ".tar.gz", ".fa", ".fasta"):
+    for ext in (".chromFa.tar.gz", ".fa.gz", ".fasta.gz", ".tar.gz", ".tgz", ".fa", ".fasta"):
         if name.endswith(ext):
             return name[: -len(ext)]
     return name
+
+
+# What a genome upload goes in as (_install_uploaded_genome): a FASTA file, gzipped or not,
+# or a .tar.gz of them. Anything else, an NCBI Datasets .zip for one, was taken for a FASTA
+# file and refused only once whole, for its first line, the archive's bytes (WEB-9).
+_GENOME_UPLOAD_EXTENSIONS = (".fa", ".fasta", ".fa.gz", ".fasta.gz", ".tar.gz", ".tgz")
+
+
+def _genome_upload_kind_problem(name: str, head: bytes) -> Optional[str]:
+    """Why a genome upload of the file ``name``, whose first bytes are ``head``, cannot be
+    one: a name of no kind a genome goes in as, or bytes not of the kind its name says (a
+    gzip file for .gz and .tgz, FASTA text, a '>' header first, for .fa and .fasta). None
+    when it can be. Checked on the first chunk, before a multi-GB upload streams in."""
+    if not name.endswith(_GENOME_UPLOAD_EXTENSIONS):
+        return (f"{name} is not a file a genome goes in as: upload a FASTA file (.fa, .fasta, "
+                f".fa.gz or .fasta.gz) or a .tar.gz of them")
+    if name.endswith((".gz", ".tgz")):
+        if head[:2] != b"\x1f\x8b":
+            return f"{name} is not gzip-compressed, as its name says"
+    elif head.lstrip()[:1] != b">":
+        return f"{name} is not FASTA text: a FASTA file opens with a '>' header line"
+    return None
+
+
+# What an upload's finalize raises for what was sent, not for a failure of the server: the
+# client's to fix, as the refusals of its first chunk (its packing, its members, what it
+# holds; a bundle, what its metadata.json names), answered 400 with the reason (WEB-9).
+_UPLOAD_REFUSALS = (ValueError, EOFError, tarfile.TarError, zipfile.BadZipFile,
+                    gzip.BadGzipFile, personal_assembly.BundleError)
 
 
 def _built_on_genome(assembly: str) -> List[str]:
@@ -392,6 +422,10 @@ def _settings_upload_chunk():
         verr = _genome_upload_problem(assembly)
         if verr:
             return (verr, 400)
+        # nor a file of a kind a genome does not go in as
+        verr = _genome_upload_kind_problem(name, request.get_data()[:64])
+        if verr:
+            return (verr, 400)
     if idx == 0 and target == "vcf":
         verr = _validate_name(dataset)
         if verr:
@@ -426,9 +460,9 @@ def _settings_upload_chunk():
         except Exception as e:
             if os.path.exists(part):
                 os.remove(part)
-            if isinstance(e, personal_assembly.BundleError):
-                # a bundle refused, saying why (its packing, its members, what its
-                # metadata.json names): the client's to fix, as the refusals above
+            if isinstance(e, _UPLOAD_REFUSALS):
+                # what was sent refused, saying why: the client's to fix, as the
+                # refusals above
                 return (str(e), 400)
             return (f"finalize failed: {e}", 500)
         return (f"complete:{result}", 200)
@@ -1454,9 +1488,22 @@ def _render_assembly_rows() -> List[str]:
     return rows
 
 
+def _index_listed(name: str) -> str:
+    """How the Installed indexes list and the Remove card name the index folder ``name``:
+    with the display name given it (its .display_label: build-index-only --name, or the
+    Display name of this page's build), which neither showed (P15.3), else as the folder."""
+    try:
+        with open(os.path.join(current_working_directory, "genome_library", name,
+                               ".display_label")) as fh:
+            shown = fh.read().strip()
+    except OSError:
+        shown = ""
+    return f"{shown} ({name})" if shown and shown != name else name
+
+
 def _render_all_tables() -> html.Div:
     genomes = [g["value"] for g in get_available_genomes()]
-    indexes = [i["value"] for i in get_available_indexes()]
+    indexes = [_index_listed(i["value"]) for i in get_available_indexes()]
     vcfs = [v["value"] for v in get_all_vcf_datasets()]
     anns = [a["value"] for a in get_custom_annotations()]
     cas = [c["label"] for c in get_available_CAS()]
@@ -1500,7 +1547,8 @@ def _deletable_options() -> List:
     for g in get_available_genomes():
         opts.append({"label": f"Genome: {g['value']}", "value": f"genome:{g['value']}"})
     for i in get_available_indexes():
-        opts.append({"label": f"Index: {i['value']}", "value": f"index:{i['value']}"})
+        opts.append({"label": f"Index: {_index_listed(i['value'])}",
+                     "value": f"index:{i['value']}"})
     for v in get_all_vcf_datasets():
         opts.append({"label": f"VCF dataset: {v['value']}", "value": f"vcf:{v['value']}"})
     for a in get_custom_annotations():

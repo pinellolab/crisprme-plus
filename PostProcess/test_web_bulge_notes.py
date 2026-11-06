@@ -55,20 +55,25 @@ try:  # page modules need the web stack (Dash); the light unit-test CI does not 
     import dash  # noqa: F401
     from dash import no_update
 except ImportError:  # pragma: no cover
-    raise unittest.SkipTest("dash not installed: web page tests skipped")
+    dash = None
+# Without Dash each class skips, not the module: a SkipTest raised at import is a traceback
+# under `python -m unittest <module>` (skips D7).
+_NEEDS_DASH = unittest.skipUnless(dash, "dash not installed: web page tests skipped")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app object
 
-import pages.main_page as mp  # noqa: E402
-import pages.pages_utils as pu  # noqa: E402
-import pages.settings_page as sp  # noqa: E402
-import index  # noqa: E402  (check_directories: the data folder the web app starts with)
+if dash:  # (the pages import Dash)
+    import pages.main_page as mp  # noqa: E402
+    import pages.pages_utils as pu  # noqa: E402
+    import pages.settings_page as sp  # noqa: E402
+    import index  # noqa: E402  (check_directories: the data folder the web app starts with)
 
 PAM = "20bp-NRG-SpCas9"
 
 
+@_NEEDS_DASH
 class _Install(unittest.TestCase):
     """A data folder: genome hg38 (raw FASTA), panels "walk" (VCFs + a 1-bulge
     index), "fresh" (VCFs, no index), "zero" (VCFs + a 0-bulge index) and "shipped"
@@ -106,6 +111,7 @@ class _Install(unittest.TestCase):
                      + "".join(f"{s}\thg38_{panel}\tunknown\tunknown\n" for s in samples))
 
 
+@_NEEDS_DASH
 class TestBulgeNote(_Install):
     def note(self, variant, dna, rna):
         return mp.update_bulge_note("hg38", PAM, variant, dna, rna)
@@ -202,6 +208,7 @@ def _vcf(path, samples=("S1", "S2")):
         fh.write("##fileformat=VCFv4.2\n" + cols + "\n")
 
 
+@_NEEDS_DASH
 class TestRefusedDatasets(_Install):
     """A dataset whose search Submit refuses whatever the bulges is not offered as
     searchable: the note says what Submit says."""
@@ -535,6 +542,7 @@ class _Form:
 ORDERS = ("before", "unlowered", "after", "synced")
 
 
+@_NEEDS_DASH
 class TestBulgeCap(_Install):
     def limit(self, variant, dna, rna, edits, held, mms=4):
         return mp.limit_bulges_to_index("hg38", PAM, variant, dna, rna, mms, edits, held)
@@ -662,6 +670,7 @@ class TestBulgeCap(_Install):
                 self.assertEqual(form.change("ref", order), (2, 1, 3))
 
 
+@_NEEDS_DASH
 class TestThePamPickerOfAPamLessIndex(_Install):
     """The PAM picker of a PAM-less index, its callbacks as Dash calls them: shown when one is
     installed for the genome or dataset selected, it offers the PAMs that index serves, checks
@@ -706,6 +715,7 @@ class TestThePamPickerOfAPamLessIndex(_Install):
                 mp.use_pamless_pam(1, forged, None, "hg38", "ref")
 
 
+@_NEEDS_DASH
 class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
     """Submit with a genome or PAM selected that is not installed, or none installed: on the
     data folder the web app starts with (index.check_directories: its folders, all empty),

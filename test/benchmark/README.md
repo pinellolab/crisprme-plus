@@ -30,9 +30,9 @@ alignment instead of CRISPRme's TST index search).
   reference is a header with no rows and `cas9_sg1617_simple`'s holds 3 rows at 2 sites,
   so a search that lost its sites still passed them. One lost site fails these. The
   folder is deliberately not named `brute-force-*`: the Bioconda recipe leaves those
-  folders out of its package (`validate.py` then downloads them from `reference_base_url`,
-  the main branch), where a reference that lands with a release is not there until that
-  release is merged. These ship in every install, Docker, source and Bioconda, and need
+  folders out of its package (`validate.py` then downloads them from `reference_base_url`
+  at the tag of the release that runs, or the main branch for a version with no tag yet),
+  where a reference that lands with a release is not there until that release is merged. These ship in every install, Docker, source and Bioconda, and need
   no network. The committed files came from the Rust generator run over 1 Mb pieces of the
   chromosome overlapping by 200 nt, sorted by position. `generate_references.py --only
   <name> --generator rust/target/release/brute_force_gen` on the whole enriched chr22 (about

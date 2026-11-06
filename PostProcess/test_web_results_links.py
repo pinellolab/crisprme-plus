@@ -39,16 +39,20 @@ try:  # page modules need the web stack (Dash); the light unit-test CI does not 
     import dash  # noqa: F401
     from dash.development.base_component import Component
 except ImportError:  # pragma: no cover
-    raise unittest.SkipTest("dash not installed: web page tests skipped")
+    dash = None
+# Without Dash each class skips, not the module: a SkipTest raised at import is a traceback
+# under `python -m unittest <module>` (skips D7).
+_NEEDS_DASH = unittest.skipUnless(dash, "dash not installed: web page tests skipped")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app object
 
-import pages.load_page as lp  # noqa: E402
-import pages.results_page as rp  # noqa: E402
-import index_fit  # noqa: E402
-from test_index_fit import _newer_index_error  # noqa: E402
+if dash:  # (the pages import Dash)
+    import pages.load_page as lp  # noqa: E402
+    import pages.results_page as rp  # noqa: E402
+    import index_fit  # noqa: E402
+    from test_index_fit import _newer_index_error  # noqa: E402
 
 GUIDE = "CTAACAGTTGCTTTTATCACNNN"
 CRITERIA = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
@@ -86,6 +90,7 @@ def _text(layout):
     return " ".join(out)
 
 
+@_NEEDS_DASH
 class _Tmp(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", ResourceWarning)  # files the page code leaves open
@@ -154,6 +159,7 @@ class _Tmp(unittest.TestCase):
             f.write("CFD")
 
 
+@_NEEDS_DASH
 class TestResultLinkWithoutResults(_Tmp):
     REFUSED = ("/data/Genomes/hg38+x is unfinished: a build-index-only run is writing it, "
                "or stopped before it was done. Let that run finish, or run build-index-only "
@@ -256,6 +262,7 @@ class TestResultLinkWithoutResults(_Tmp):
         self.assertIsNone(rp._result_not_ready("done"))
 
 
+@_NEEDS_DASH
 class TestDownloadLinks(_Tmp):
     def test_summary_by_sample_links_the_file_of_the_selected_criterion(self):
         job = "sbs_ABC"
@@ -305,6 +312,7 @@ class TestDownloadLinks(_Tmp):
                 )
 
 
+@_NEEDS_DASH
 class TestRiskCardPlots(_Tmp):
     def test_private_plot_is_drawn_from_the_private_targets(self):
         job = "card_ABC"
@@ -336,6 +344,7 @@ class TestRiskCardPlots(_Tmp):
         self.assertEqual(len(pd.read_csv(private, sep="\t")), 1)   # 1 of them only S1
 
 
+@_NEEDS_DASH
 class TestGraphicalReportsCaption(_Tmp):
     def _tab(self, job):
         return _text(rp.update_content_tab(
@@ -363,6 +372,7 @@ class TestGraphicalReportsCaption(_Tmp):
                       "mismatches and bulges: run the search again to draw them.", text)
 
 
+@_NEEDS_DASH
 class TestMatrixCaption(_Tmp):
     def test_variant_is_a_site_whose_reported_alignment_is_a_variant_one(self):
         # The caption under the matrix said VARIANT is a target that exists only because a
@@ -387,6 +397,7 @@ class TestMatrixCaption(_Tmp):
         self.assertNotIn("the target exists in the reference genome", text)
 
 
+@_NEEDS_DASH
 class TestStatusPageIds(unittest.TestCase):
     def test_no_id_twice(self):
         for name, layout in (("load_page", lp.load_page("x")),

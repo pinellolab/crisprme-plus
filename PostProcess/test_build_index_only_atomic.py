@@ -2625,6 +2625,40 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                 shutil.rmtree(marker)
 
 
+class ARebuildWithoutSamplesIDSaysTheTiersInPlaceStay(_Fixture):
+    """A search's ERROR for an INDELS index it cannot use says to rebuild it with
+    build-index-only, with no --samplesID, which leaves the dict-less tiers of the build
+    before as they are. It said, in a loud WARNING on stderr, that the index was MISSING
+    them, INCOMPLETE (emptyidx F6). It says they are kept, on stdout; with none in place,
+    or ones a stopped run left unfinished, it warns as before."""
+
+    def rebuild(self):
+        command = ["build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
+                   "--bDNA", "1", "--bRNA", "1", "--thread", "2", "--path", self.work,
+                   "--vcf", self.path("VCFs", "ds")]
+        return self.finish(self.start(command=command))
+
+    def test_the_tiers_in_place_are_said_kept(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        registry = self.path("Dictionaries", "registry_ds")
+        before = sorted(os.listdir(registry))
+        shutil.rmtree(self.lib(INDELS))  # (what the ERROR's command rebuilds)
+        rc, out, err = self.rebuild()
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("INCOMPLETE VARIANT INDEX", err)
+        self.assertIn(f"NOTE [build-index-only]: no --samplesID given: the dict-less tiers in "
+                      f"place ({registry} and its genotype store) are kept as they are, not "
+                      "rebuilt.", out)
+        self.assertEqual(sorted(os.listdir(registry)), before)
+        self.assertTrue(os.path.isdir(self.lib(INDELS)))
+        # none in place: the WARNING, as before
+        shutil.rmtree(registry)
+        rc, out, err = self.rebuild()
+        self.assertIn("WARNING: INCOMPLETE VARIANT INDEX", err)
+        self.assertNotIn("are kept as they are", out)
+
+
 class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
     """A --per-sample search names the carrier samples from the classic per-sample
     dictionaries, and takes the CONFIRMED/PUTATIVE cis phasing, the SNP+SNP
