@@ -1,7 +1,8 @@
 """Whether an index, whoever built it, can answer a search of a guide of a given length.
 
-An index folder is named ``<PAM>_<N>_<genome>``, which says nothing of the guide it was
-built for. The engine reads that length from each tree (``len_guide_used``, the second
+An index folder named ``<PAM>_<N>_<genome>``, as every index was before CRISPRme 2.9.0,
+says nothing of the guide it was built for (the name of 2.9.0 does: parse_index_name). The
+engine reads that length from each tree (``len_guide_used``, the second
 int32 of a .bin, written by buildTST since 2019, whatever built the index), but only to
 offset coordinates: it searches any guide it is given, and past what the tree stores it
 reports wrong alignments or loses targets, at exit 0.
@@ -185,11 +186,12 @@ def parse_index_name(name):
     which says nothing of the guide (spacer) length it was built for, nor of the side of the
     guide its PAM is on: indexes of one PAM for two guide lengths, or for a 3' and a 5' PAM
     (``N...NTTTV 4`` and the Cas12a ``TTTV`` file both build ``TTTV_<N>_<genome>``), take one
-    name. Since CRISPRme 2.9.0 a name may carry both: ``<guide>-<PAM>_<N>_...`` for a 3' PAM
-    (``20-NRR_3_hg38``), ``<PAM>-<guide>_<N>_...`` for a 5' one (``TTTV-23_3_hg38``), in the
-    order of the target on the strand. ``guide`` and ``side`` (3 or 5) are None for an older
-    name. Every reader takes both forms, and of two indexes that serve a search alike, the
-    newer form (the search script's _index_name_parts, the same rule). ``rest`` is the name
+    name. Since CRISPRme 2.9.0 a name carries both, as builds write it (index_name):
+    ``<guide>-<PAM>_<N>_...`` for a 3' PAM (``20-NRR_3_hg38``), ``<PAM>-<guide>_<N>_...`` for
+    a 5' one (``TTTV-23_3_hg38``), in the order of the target on the strand. ``guide`` and
+    ``side`` (3 or 5) are None for an older name. Every reader takes both forms, and of two
+    indexes that serve a search alike, the newer form (the search script's
+    _index_name_parts, the same rule). ``rest`` is the name
     after ``<N>_``: the genome, and ``+<dataset>`` for a variant index."""
     token, sep, rest = os.path.basename(str(name)).partition("_")
     n, sep2, rest = rest.partition("_")
@@ -209,3 +211,16 @@ def index_pam(name):
     first field where it is no index name."""
     parsed = parse_index_name(name)
     return parsed[0] if parsed else os.path.basename(str(name)).split("_")[0]
+
+
+def index_name(pam, n, rest, guide, three_prime):
+    """The name of an index of PAM ``pam`` built with -bMax ``n`` for ``rest`` (the genome,
+    and ``+<dataset>`` for a variant index), for a guide of ``guide`` nt with the PAM on its
+    3' side (``three_prime``) or its 5' side: the form of CRISPRme 2.9.0, which carries both
+    (parse_index_name), under which build-index-only and a search build an index, so that
+    the indexes of one PAM for the two sides, or for two guide lengths, take a name each;
+    the older ``<PAM>_<N>_<rest>`` where the guide length is not known (0 or None: a PAM
+    file of its PAM alone). The search script's _build_name, the same rule."""
+    if not guide:
+        return f"{pam}_{n}_{rest}"
+    return f"{guide}-{pam}_{n}_{rest}" if three_prime else f"{pam}-{guide}_{n}_{rest}"

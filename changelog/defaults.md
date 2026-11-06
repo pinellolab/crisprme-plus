@@ -24,7 +24,14 @@ unterminated-last-line-dropped; M6; wset N1 and N2; wsearch N8; RV3-D; secfu RV1
 uploader's grey refusals and the search with no temporary folder (the final confirmation of 2.8.1);
 setup's exit status, progress lines and URLs (FR2 cli a, c, e); FR :725 (complete-test's chromosomes
 from the Hub); the checklist's HPC route (`--cleanenv`, a fresh sandbox); the installers' first-run
-chain (plan 4.4).
+chain (plan 4.4); the Personal assembly tab's bulge limits (the final confirmation of 2.8.1, with
+OF-11); R6B direct-url-fasta-and-hidden-files (plan 4.8: a Direct URL archive is laid out as an
+upload); of the focused review of f8dbe73 (the last bullet of list_282.md's final confirmation on
+bfddb59), INPUT_FORMATS §4's first lines (the length alone, a third field, a blank line: refused as
+it says) and CRISPR-Bulge's autograph `.pyc` files, left in the temporary folder by every scoring
+run; the stderr fixtures of a runner with less memory than memory_check asks for (list_282.md,
+"Found 2026-11-04": CRISPRME_SKIP_MEM_CHECK); the stale test comment of plan 4.5's coverage gaps
+(test_web_bulge_notes, FR's W3-none-selected-changed: a comment, with no test of its own).
 
 *Found fixed already (checked on this branch):* P12 (exit 2 since 2.8.1); t31 P6 (C3 of 2.8.1: every
 folder named, exit 2, and the banner says reference when the smoke runs reference-only); R2-F3;
@@ -81,6 +88,18 @@ gate track).
   library, per-sample on a tierless index from the web, other PAMs on a variant panel, a 2.8.0-built
   5′ all-N index, the builder version on PAM-less indexes: features the E1 decision did not take;
   the 5′ PAM-less flank-4 indexes are the rebuild's (E4, E5).
+- Of the focused review of f8dbe73, the two items not fixed. A read-only home's Hugging Face cache
+  (`HF_TOKEN_PATH` in place of `HF_HOME`): where the Hub's cache goes when the home cannot hold it
+  is a design question, as `hf_hub_download` keeps each file whole in that cache before `hf_fetch`
+  copies it, so a temporary folder removed at exit would hold each download twice, in /tmp or
+  CRISPRME_TMPDIR, while 2.8.1 keeps a saved login found and falls back to the file's original
+  source, which works (the HF track's). SIGTERM leaving matplotlib's temporary folder: a SIGTERM
+  handler changes how every command, and the pipeline under it, stops (c3's signal design, above),
+  and TROUBLESHOOTING §1 says that a command killed by a signal leaves it in the temporary folder.
+- list_282.md's parked design work: the two-pass dense search (its min-edit lower bound breaks
+  for two or more cis indels and equal-length MNVs: the density track's) and last-ALT-wins at
+  split multi-allelic sites (B1 decided that every allele is coded: the alleles and engine
+  tracks').
 - wsearch N1 (the `/result` region route answers HTTP 500): not a path fix. Fixing the relative
   path, tried here on a real job, stops the 500 but shows no row, as the route reads the columns of
   a pre-2.x bestMerge and an annotation file no search writes (an awk error too); removing the
@@ -92,24 +111,26 @@ gate track).
 Show full log: the security track); the report's RV1-F1, RV1-F2, cli5 D6, the 1e-5 wording, P8, the
 classic path's MAF of an NA allele (FR :438, :531), the mega IUPAC rows, the Risk Card sort, the
 radar chart's guide-length guard (#39, closed as user error) and the "observed haplotypes" wording
-left on purpose (FR :558); the engine's AF-by-first-record and 5′ last-window items, the Bioconda
-enricher, PKG1 and the on-demand index check (format 2: the engine and fmt tracks, whose builds
-check what they write); the mega indels' AF (the rebuild); download's check of the dictionaries
-(FR :163: the HF track's); contigs with "_" (bio11.3 and R6B's RV1-2/RV2-2/R3-1..6: the indel
-pipeline's naming); R2-F1, M5, R4-6 (the build tracks' locks and marks); the 2.8.2 correctness items
-of list_282.md (fix/282-indel-alignment, test/282-indel-realdata-check, the SNP rows whose carriers
-all have an indel: their branches, to forward-port); the CRISPRitz items of plan 4.4's added block
-(the engine); INT N2 (an indel-free dataset installed without its enriched genome: the search must
-tell a dataset with no indels from a broken INDELS index, the emptyidx area); FV :342's wording of
-the web's labels and notes (the web and report tracks' texts).
+left on purpose (FR :558); the engine's AF-by-first-record and 5′ last-window items, its contig-end
+and N-run windows (the roadmap's), the Bioconda enricher, PKG1 and the on-demand index check (format
+2: the engine and fmt tracks, whose builds check what they write); the mega indels' AF (the
+rebuild); download's check of the dictionaries (FR :163: the HF track's); contigs with "_" (bio11.3
+and R6B's RV1-2/RV2-2/R3-1..6: the indel pipeline's naming); R2-F1, M5, R4-6 (the build tracks'
+locks and marks); the 2.8.2 correctness items of list_282.md (fix/282-indel-alignment,
+test/282-indel-realdata-check, the SNP rows whose carriers all have an indel: their branches, to
+forward-port); the CRISPRitz items of plan 4.4's added block (the engine); INT N2 (an indel-free
+dataset installed without its enriched genome: the search must tell a dataset with no indels from a
+broken INDELS index, the emptyidx area); FV :342's wording of the web's labels and notes (the web
+and report tracks' texts).
 
-*Left: not reproduced, or nothing to change.* C18 (the FutureWarning: found fixed, above); C17 (a
-banner) and the older list's validate-test hint and scope (no detail kept in the sources: the list
-names them alone); t31 P4 (VirtioFS: not reproduced on 38a7c4e); the bulge note counting a merged
-panel's list as made (FR2: only a failed write at Submit, which then says why, parts them); the
-older list's code comments (no behaviour); bio11.2 (a flake recorded with no detail); the T-31 flock
-trigger (flock works on Docker Desktop and on Linux; no ENOTTY host to test on); the conda-build
-warnings of install P10 (the Bioconda recipe's, not this repository's); R6B cr-past-first-lines
+*Left: not reproduced, or nothing to change.* RV1-F6 (it names no item of its own: it confirms items
+of the list, each named here); C18 (the FutureWarning: found fixed, above); C17 (a banner) and the
+older list's validate-test hint and scope (no detail kept in the sources: the list names them
+alone); t31 P4 (VirtioFS: not reproduced on 38a7c4e); the bulge note counting a merged panel's list
+as made (FR2: only a failed write at Submit, which then says why, parts them); the older list's code
+comments (no behaviour); bio11.2 (a flake recorded with no detail); the T-31 flock trigger (flock
+works on Docker Desktop and on Linux; no ENOTTY host to test on); the conda-build warnings of
+install P10 (the Bioconda recipe's, not this repository's); R6B cr-past-first-lines
 (build-index-only reads each file whole and refuses it since 2.8.1; a search that builds its own
 index checks two lines a file, and reading every file whole on each search, seconds on hg38, is the
 owner's trade to weigh).
@@ -165,6 +186,47 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   The refusals that told a user to run again with `--prune-pam --index-path` now say, where the
   engine cannot prune, that an index serves the search pruned and the installed CRISPRitz cannot do
   it; the advice to run without `--index-path` no longer says to drop `--prune-pam` too.
+- **An index is named for its guide length and the side of its PAM (E2).** `<PAM>_<N>_<genome>`
+  says neither, so a 3′ and a 5′ build of one motif, or builds for two guide lengths (Cas12a
+  `TTTV` at 20 and 23 nt, as the rebuild adds), took one name, and the second build stopped on
+  the first ("... is already there ... The index for that PAM file has the same name: build it in
+  another working directory (--path)"), as a search did. `build-index-only` and a search now
+  build an index under a name that carries both, in the order of the target on the strand:
+  `20-NRR_3_hg38` for a 20-nt guide and a 3′ PAM, `TTTV-23_3_hg38` for a 5′ PAM and a 23-nt
+  guide, the variant index (`20-NRR_3_hg38+hg38_HGDP1kGP`) and its INDELS index
+  (`<name>_INDELS`) too. The engine writes the older name, in a build folder (a search's in the
+  index's build lock), and the index is renamed into place: an index of the older name in place
+  is never touched (in place, the engine removed a folder of the name it writes before writing
+  it). Every reader takes both forms (the search script, `crisprme.py`, the web form, `download`
+  and its router, which reads a PAM-less name's flank in either form, `publish-index`'s
+  manifest, complete-test, the index coverage, FASTA-header and N-flank checks): an index of the
+  new form only for a search of the side its name says, which records the side as a `.pam_build`
+  does, ahead of one (such an index needs none, at any flank width), and of one index under both
+  names, the newer one. An index of the older name (every one published so far, or built by an
+  earlier release) is used as before. `build-index-only` keeps one in place that is the index it
+  builds (its `.bin` files built for the PAM file's guide length, its `.pam_build` recording that
+  side, or none: a dedicated index, an all-`N` one for a 5′ file, or one at the published widths,
+  3 and 8), and builds beside one that records another, saying so (`.../NNNN_2_hg38 is an index
+  for a PAM on the 3' side of the guide (as its .pam_build records): it is left as it is, and
+  this index is built beside it, as NNNN-20_2_hg38.`). An unrecorded all-`N` one of another
+  width, for a 3′ file, is refused as before, the ERROR now naming the `mv` to each side's name,
+  which records it; so is a folder of the new name that its trees or its record contradict, with
+  the name of what it is. A search's refusal of an unrecorded index for a 5′ PAM names that `mv`
+  too (it said to run `build-index-only` with that file, which still records it). An index is
+  published under its folder's name, so one built by this release under the new one. An earlier
+  release does not read the new form, and builds its own. Covered by
+  `PostProcess/test_build_index_only_atomic.py` (both sides and two guide lengths built in one
+  library, the variant and INDELS indexes too, an index of the older name kept or built beside,
+  each refusal and its `mv`), `test_index_resolution.py` (a search builds its own under the new
+  name beside an index of the older name for the other side or another guide length, which it
+  stopped on), `test_defaults_and_index_flex.py` (every reader takes both forms alike) and, through
+  the real engine, `check_index_flex.py`: the 3′ and 5′ `NNNN` indexes, and the 20- and 23-nt
+  `NGG` ones with their variant and INDELS indexes, built in one library, each searched with the
+  results of that index alone, byte for byte; an index under the older name gives the same
+  results; a 5′ build beside a 3′ index of the older name, each side's search taking its own; one
+  named for a 5′ PAM is not taken for a 3′ search; and a PAM-less index named for its side with no
+  `.pam_build` serves a search of that side (a 3′ one of width 4 an `NGG` search, pruned; a 5′ one
+  a 5′ PAM of its width).
 - `PostProcess/pool_search_indels.py` drops `_index_pam`, a helper nothing called (emptyidx F8);
   the results page's sample tab no longer computes paths it never reads (wsearch N8); and
   `remove_contiguous_samples.py` reads a variant token as an indel's in one place, for the
@@ -215,24 +277,6 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   (complete-search records `Prune_pam`, `auto` or `given`, in its parameters). The report's
   summary shows them, and its zip bundles the record as `indexes_searched.txt`; a run of an
   earlier release has none.
-- **Index names may carry the guide length and the side of the PAM.** `<PAM>_<N>_<genome>` says
-  neither, so a 3′ and a 5′ build of one motif, or builds for two guide lengths (20- and 23-nt
-  Cas12a), take one name. A name may now carry both, in the order of the target on the strand:
-  `20-NRR_3_hg38` for a 20-nt guide and a 3′ PAM, `TTTV-23_3_hg38` for a 5′ PAM and a 23-nt guide.
-  Every reader takes both forms (the search script, `crisprme.py`, the web form, `download` and its
-  router, which reads a PAM-less name's flank in either form, `publish-index`'s manifest,
-  complete-test, the index coverage and N-flank checks): an index of the new form only for a search
-  of the side its name says, which records the side as a `.pam_build` does, ahead of one (such an
-  index needs none, at any flank width), and of one index under both names, the newer one. The
-  INDELS index of
-  a variant index so named is `<name>_INDELS`; one a search builds for it is moved there. Builds
-  still write the older name. Covered by `PostProcess/test_defaults_and_index_flex.py` (the
-  search script, `crisprme.py`, the web and complete-test take the same of every name form, side
-  and record), and through the real engine by `check_index_flex.py`: a download renamed to the new
-  form gives the same results, one named for a 5′ PAM is not taken for a 3′ search, and a
-  PAM-less index named for its side with no `.pam_build` serves a search of that side (a 3′ one of
-  width 4 an NGG search, pruned; a 5′ one a 5′ PAM of its width), which the search script refused
-  as an unrecorded index that crisprme.py and the web offered.
 - **The web form's PAM picker for a PAM-less index** (plan 2.7, DYNAMIC_PAM_INDEX_COMPAT §8). When an
   all-`N` index is installed for the genome (or the dataset) selected, the form says what it serves
   (any PAM of its guide length on its side, up to its flank) and offers the PAMs of common nucleases
@@ -309,6 +353,25 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
 - **The Settings genome upload says what to do with an archive of gzipped FASTA files.** It was
   refused with `no .fa or .fasta file in X`; it now names the `.fa.gz` files it holds and says
   to gunzip them, or to upload one `.fa.gz` a sequence (M3).
+- **A PAM file whose first line is not the motif and the length, one space apart, is refused as
+  INPUT_FORMATS §4 says.** complete-search checked only that the last field of the first line is a
+  number: a line of the length alone made `Results/<output>` and failed the input check later, one
+  with a third field (`N...NGG 3 4`) searched with that field for the PAM's length, and a blank
+  first line, with the motif on the next, was refused as a file of two motif lines (the focused
+  review of f8dbe73). Each gets the one-line refusal of a first line that is not `<motif>
+  <length>`, before anything is made.
+- **CRISPR-Bulge's scoring leaves nothing in the temporary folder.** TensorFlow's autograph writes
+  the code it generates to a module in `$TMPDIR` and removes it at exit, but importing it left
+  `__pycache__/__autograph_generated_file*.pyc` there, one a run: in the data folder itself under
+  `CRISPRME_TMPDIR=/DATA` (the focused review of f8dbe73). The scorer's worker writes no bytecode
+  now (`PYTHONDONTWRITEBYTECODE`, as a user's own setting is kept): a read-only container's search
+  with `-e CRISPRME_TMPDIR=/DATA` leaves `/DATA` as it found it, its results those of 2.8.1.
+- **A Settings Direct URL download is laid out as an upload is.** A `.fasta` file goes in as a
+  `.fa` file, and the hidden files of an archive are left out: a `.fasta` file that needed
+  nothing else stayed so, which no index or search reads, and the `._chr1.fa` that macOS `tar`
+  adds beside `chr1.fa` went in, with which a search stops (plan 4.8, R6B
+  direct-url-fasta-and-hidden-files). `chr1.fa` and `chr1.fasta` in one archive are two of one
+  name, refused as an upload refuses them. docs/SETTINGS_DATA_MANAGER.md said so as a limit.
 - **RELEASE_CHECKLIST's HPC route runs from a clean host environment and a fresh sandbox.**
   Apptainer passes the host's environment into the container (a login shell's `CONDA_*`
   reached it on ml008), and steps 2-4b reused the writable sandbox step 1 had left its caches
@@ -488,7 +551,11 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   (`docker run --read-only` without `--tmpfs /tmp`), a search ended with exit 0, CRISPR-Bulge
   scores of -1, no report zip and a WARNING in its error log alone (final confirmation of
   2.8.1; TROUBLESHOOTING §1 said so). It says, before it makes anything, which folders it
-  tried, and to set `CRISPRME_TMPDIR` to a writable one or give the container a `/tmp`.
+  tried, and to set `CRISPRME_TMPDIR` to a writable one or give the container a `/tmp`. A
+  folder set with `CRISPRME_TMPDIR` or `TMPDIR` is taken, the working folder included (`docker
+  run --read-only -w /DATA -e CRISPRME_TMPDIR=/DATA` runs to its report, its rows those of
+  2.8.1); the working folder is not taken when nothing names it, as the scorer and the report
+  do not run in it.
 - **complete-test is not stopped by the empty results folder a refused search leaves.**
   complete-search makes its output folder, and a refusal of its pre-flight leaves it empty: the
   next complete-test stopped on it, "Complete-test already run once", until the user removed it

@@ -24,9 +24,11 @@ ref_name = sys.argv[4]
 vcf_name = sys.argv[5]
 bMax = sys.argv[6]
 ncpus = sys.argv[7]
-# optional: the name of the variant index this INDELS index goes with, <true_pam>_<bMax>_
-# <ref>+<vcf> or, since 2.9.0, the form that carries the guide length and the side
-# (index_fit.parse_index_name), whose .pam_build _own_pam reads
+# optional: the variant index this INDELS index goes with, whose .pam_build _own_pam reads:
+# its folder, or its name in genome_library/ (<true_pam>_<bMax>_<ref>+<vcf> or, since 2.9.0,
+# the form that carries the guide length and the side: index_fit.parse_index_name). A search
+# passes its folder: it runs this in a folder of the INDELS index's build lock, and puts what
+# it writes there in place (submit_job_automated_new_multiple_vcfs.sh _build_in_lock).
 variant_index = (sys.argv[8] if len(sys.argv) > 8
                  else f"{true_pam}_{bMax}_{ref_name}+{vcf_name}")
 
@@ -231,7 +233,7 @@ if own:
     build_pam_arg = shlex.quote(build_pam)
     # (a PAM-less one, or a dedicated one of a PAM that holds the search's: NRR for NGG)
     _what = "PAM-less" if set(true_pam) == {"N"} else f"of the PAM {true_pam}"
-    print(f"The variant index {true_pam}_{bMax}_{ref_name}+{vcf_name} is {_what} and stands in "
+    print(f"The variant index {os.path.basename(variant_index)} is {_what} and stands in "
           f"for {_index_pam(pam_file)}: indexing the INDELs with its own PAM ({own[0]}"
           + (f", as {own[1]}" if own[1] else "") + ")", flush=True)
 

@@ -11,10 +11,11 @@
 > build/publish/download flow. **Naming note:** `--dictless` is a *publish flag* (it drops the
 > ~152 GB per-sample SNP dictionaries; see below), **not** a name marker — the shipped index
 > names are simply `<pam>_<N>_<ref>+<vcf>` (`NRR_3_hg38+hg38_HGDP1kGP`,
-> `NRG_3_hg38+hg38_HPRC`, `NRG_3_hg38+hg38_mega`). Since 2.9.0 CRISPRme also reads a name that
-> carries the guide length and the side of the PAM, in the order of the target on the strand
-> (`20-NRR_3_hg38` for a 3′ PAM, `TTTV-23_3_hg38` for a 5′ one), takes it only for a search of
-> its side, and of one index under both names, the newer one.
+> `NRG_3_hg38+hg38_HPRC`, `NRG_3_hg38+hg38_mega`). Since 2.9.0 an index is built under a name
+> that carries the guide length and the side of the PAM too, in the order of the target on the
+> strand (`20-NRR_3_hg38` for a 3′ PAM, `TTTV-23_3_hg38` for a 5′ one), and published under it;
+> CRISPRme reads both forms, takes one of the new form only for a search of its side, and of
+> one index under both names, the newer one.
 
 Bulge-enabled CRISPRme searches need a CRISPRitz **index** of the reference
 genome. Building it is the single most expensive one-time step of a search. That
@@ -573,12 +574,12 @@ bundle. Build and publish are the simple case:
 crisprme.py build-index-only \
   --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
   --bDNA 2 --bRNA 2 --thread 16 --path "$CRISPRME_DIR"
-# -> genome_library/NRR_3_hg38/
+# -> genome_library/20-NRR_3_hg38/  (since 2.9.0 the name says the guide length and the side)
 
-crisprme.py publish-index --index genome_library/NRR_3_hg38
-# -> indexes/NRR_3_hg38.tar.gz
+crisprme.py publish-index --index genome_library/20-NRR_3_hg38
+# -> indexes/20-NRR_3_hg38.tar.gz
 
-crisprme.py download --what index --index-name NRR_3_hg38 --path "$CRISPRME_DIR"
+crisprme.py download --what index --index-name 20-NRR_3_hg38 --path "$CRISPRME_DIR"
 ```
 
 ## manifest.json

@@ -1027,6 +1027,44 @@ class ASearchWithNoTemporaryFolderIsRefused(unittest.TestCase):
         self.assertEqual(os.listdir(tmp), [])
         self.assertIn("_refuse_no_temp_folder()", (_REPO / "crisprme.py").read_text())
 
+    def test_a_temporary_folder_set_to_the_working_one_is_taken(self):
+        # docker run --read-only -v <data>:/DATA -w /DATA -e CRISPRME_TMPDIR=/DATA (or -e
+        # TMPDIR=/DATA): $TMPDIR is the working folder. Its search was refused, as the
+        # current folder was left out of tempfile's list wherever it stood, not only as
+        # tempfile's last resort; 2.8.1 ran it to its report.
+        import test_bulge_cap as tbc
+        cm = tbc.crisprme
+        data = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, data, ignore_errors=True)
+        gone = os.path.join(data, "nonexistent")
+        real = tempfile._candidate_tempdir_list
+
+        def read_only_container():
+            # tempfile's own list, in a container whose /tmp, /var/tmp and /usr/tmp it
+            # cannot write
+            return [gone + d if d in ("/tmp", "/var/tmp", "/usr/tmp") else d for d in real()]
+
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(data)
+        env = {k: v for k, v in os.environ.items() if k not in ("TMPDIR", "TEMP", "TMP")}
+        with mock.patch.object(tempfile, "_candidate_tempdir_list", read_only_container):
+            for tmpdir in (os.getcwd(), data):
+                with self.subTest(TMPDIR=tmpdir), \
+                        mock.patch.dict(os.environ, dict(env, TMPDIR=tmpdir), clear=True):
+                    self.assertIsNone(cm._refuse_no_temp_folder())
+            self.assertEqual(os.listdir(data), [])
+            # with none set, the working folder is tempfile's last resort alone, which the
+            # stages that write temporary files do not run in: refused, as before
+            err = io.StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(sys, "stderr", err), \
+                    self.assertRaises(SystemExit) as stop:
+                cm._refuse_no_temp_folder()
+        self.assertEqual(stop.exception.code, 1)
+        self.assertIn(f"written here ({gone}/tmp, {gone}/var/tmp, {gone}/usr/tmp): ",
+                      err.getvalue())
+
 
 class TheImageIsBuiltOnAPinnedBase(unittest.TestCase):
     """The Dockerfile built on `FROM mambaorg/micromamba`, whatever image was latest that day

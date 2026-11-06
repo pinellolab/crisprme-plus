@@ -147,12 +147,14 @@ class TestNoHitsStatus(unittest.TestCase):
                     "nothing can be created in '/data/genome_library' (a read-only mount, no "
                     "write permission, or a full disk). Make that folder writable, or install "
                     "the index there, then run this search again")
-        # (an index in the way, built for a shorter guide)
-        short = ("NGG_2_hg38 was built for a 20-nt guide, and this search has a 23-nt guide "
+        # (an index in the way, its trees built for a shorter guide than its name says)
+        short = ("23-NGG_2_hg38 was built for a 20-nt guide, and this search has a 23-nt guide "
                  "with 1 DNA and 1 RNA bulge(s): it stores too few bases per site, so a search "
                  "of it would report wrong alignments and lose off-targets. This search builds "
-                 "its index under that name: move it out of /data/genome_library, or run this "
-                 "search from another working directory")
+                 "its index under that name: name it for the guide it was built for (mv "
+                 "'/data/genome_library/23-NGG_2_hg38' '/data/genome_library/20-NGG_2_hg38'), "
+                 "move it out of /data/genome_library, or run this search from another working "
+                 "directory")
         # (no variant index serves it, nor VCFs or an enriched genome to build one)
         no_variant = ("no variant index here serves this search (genome hg38, dataset ds, PAM "
                       "NGG, 1 DNA and 1 RNA bulge(s), a 20-nt guide), and none can be built: "

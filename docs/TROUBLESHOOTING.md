@@ -51,7 +51,8 @@ other program a command runs), but not Hugging Face's folder: `HF_HOME` stays
 sends it). A `MPLCONFIGDIR`, `XDG_CACHE_HOME` or `HF_HOME` you set is used as it is.
 
 `docker run --read-only` makes `/tmp` read-only as well, so it needs a writable temporary folder:
-add `--tmpfs /tmp`, or set `CRISPRME_TMPDIR` to a folder of the mounted data folder. Without one,
+add `--tmpfs /tmp`, or set `CRISPRME_TMPDIR` to a folder of the mounted data folder (or to that
+folder itself: `-w /DATA -e CRISPRME_TMPDIR=/DATA`). Without one,
 the CRISPR-Bulge scorer and the report have nowhere to write, and complete-search stops before
 it starts, saying so (until 2.9.0 the search ended with CRISPR-Bulge scores of -1, no report zip,
 and only a WARNING in its error log).
@@ -218,6 +219,9 @@ Each of these names the index and what to do; none of them removes anything.
   mount, has no write permission or is full, and lacks the index this PAM and these bulges need. Make
   it writable, or run `build-index-only` where it is, or search with no bulges, which opens no index.
 - **`... was built for a 20-nt guide, and this search has a 23-nt guide ...: it stores too few bases
-  per site`.** An index name carries no guide length, and this search builds its own under that name.
-  Move that index aside, or run from another working directory. Any published index serves a 21-nt
-  guide at up to 1 bulge of each type.
+  per site`.** This search builds its own index under a name that says its guide length (since
+  2.9.0: `23-NGG_2_hg38`), and an index of that name is there, whose trees were built for another
+  guide (a folder renamed by hand). Name it for the guide it was built for, as the ERROR says (`mv
+  .../23-NGG_2_hg38 .../20-NGG_2_hg38`), or move it aside. An index of the older name
+  (`NGG_2_hg38`) built for another guide is left as it is, and the search builds its own beside it.
+  Any published index serves a 21-nt guide at up to 1 bulge of each type.

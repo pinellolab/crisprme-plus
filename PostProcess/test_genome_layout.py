@@ -860,20 +860,32 @@ class TestDownloadRefusesUnsafeArchive(unittest.TestCase):
                 self.assertEqual(_read(os.path.join(dest, "chr2.fa")), ">chr2\nGG\n")
 
     def test_an_archive_goes_in_as_the_settings_guide_says(self):
-        # docs/SETTINGS_DATA_MANAGER.md, Direct URL: each header written as >id; unlike an
-        # upload, a .fasta file that needs nothing stays so, and a hidden file goes in
-        # (the guide said once it was laid out as an upload is; change both together)
+        # docs/SETTINGS_DATA_MANAGER.md, Direct URL: each header written as >id, and laid
+        # out as an upload is: a .fasta file goes in as a .fa file, and a hidden file is
+        # left out. A .fasta file that needed nothing else stayed so, which no index or
+        # search reads, and the ._chr2.fa that macOS tar adds beside chr2.fa went in, with
+        # which a search stopped (plan 4.8, R6B direct-url-fasta-and-hidden-files)
         members = [self._file("asm/chr1.fasta"), self._file("asm/._chr2.fa", b"\0\5\26\7"),
                    self._file("asm/chr2.fa", b">chr2\nGG\n"),
                    self._file("asm/chr3.fa", b">chr3 3\nCC\n"),
-                   self._file("asm/hg38_chr4.fa", b">chr4\nTT\n")]
+                   self._file("asm/hg38_chr4.fa", b">chr4\nTT\n"),
+                   self._file("asm/hg38_chr5.fasta", b">chr5 5\nAA\n")]
         with mock.patch.object(utils, "download", self._fake_download(members)):
             dest = utils.download_reference_genome(
                 "uasm", self.genomes, source="url", url="http://x/asm.tar.gz")
         self.assertEqual(sorted(os.listdir(dest)),
-                         ["._chr2.fa", "chr1.fasta", "chr2.fa", "chr3.fa", "chr4.fa"])
+                         ["chr1.fa", "chr2.fa", "chr3.fa", "chr4.fa", "chr5.fa"])
+        self.assertEqual(_read(os.path.join(dest, "chr1.fa")), ">chr1\nACGT\n")
+        self.assertEqual(_read(os.path.join(dest, "chr2.fa")), ">chr2\nGG\n")
         self.assertEqual(_read(os.path.join(dest, "chr3.fa")), ">chr3\nCC\n")
         self.assertEqual(_read(os.path.join(dest, "chr4.fa")), ">chr4\nTT\n")
+        self.assertEqual(_read(os.path.join(dest, "chr5.fa")), ">chr5\nAA\n")
+        # what the settings guide says
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "docs", "SETTINGS_DATA_MANAGER.md")) as fh:
+            guide = " ".join(fh.read().split())
+        self.assertIn("As for an upload, a `.fasta` file goes in as a `.fa` file", guide)
+        self.assertNotIn("Unlike an upload", guide)
 
     def test_a_fasta_whose_only_cr_ends_it_goes_in_with_none(self):
         # files named after their sequence, with a plain header: only their CR is to write.
@@ -914,6 +926,18 @@ class TestDownloadRefusesUnsafeArchive(unittest.TestCase):
                       "to two genomes (the two haplotypes of an assembly, say), install each "
                       "under a name of its own.", message)
         self.assertEqual(os.listdir(self.genomes), ["udup"])  # (no staging folder left)
+        self.assertEqual(os.listdir(installed), ["chr9.fa"])
+        # chr1.fa and chr1.fasta: both go in as chr1.fa, as by an upload
+        both = [self._file("asm/chr1.fa", b">chr1\nAAAA\n"),
+                self._file("asm/chr1.fasta", b">chr1\nCCCC\n")]
+        with mock.patch.object(utils, "download", self._fake_download(both)):
+            with self.assertRaises(RuntimeError) as cm:
+                utils.download_reference_genome(
+                    "udup", self.genomes, source="url", url="http://x/asm.tar.gz")
+        self.assertTrue(str(cm.exception).startswith(
+            "The download holds two FASTA files that would both go in as chr1.fa (asm/chr1.fa, "
+            "asm/chr1.fasta), one replacing the other, so nothing was installed."),
+            str(cm.exception))
         self.assertEqual(os.listdir(installed), ["chr9.fa"])
         # one of each name goes in as before
         members[1] = self._file("asm/b/chr2.fa", b">chr2\nCCCC\n")

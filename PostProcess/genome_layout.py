@@ -499,12 +499,15 @@ def describe_name_problems(genomedir: str, reported=()) -> List[str]:
 
 def _indexes_of(library: str, genome: str) -> List[str]:
     """The folders of the genome library named as an index of ``genome``:
-    ``<PAM>_<N>_<genome>``, or ``<PAM>_<N>_<genome>+<dataset>`` of a variant one."""
+    ``<PAM>_<N>_<genome>``, or ``<PAM>_<N>_<genome>+<dataset>`` of a variant one, or a
+    name of the form a build writes since 2.9.0, which carries the guide length and the
+    side (``20-NRR_3_<genome>``, ``TTTV-23_3_<genome>``: index_fit.parse_index_name)."""
     try:
         names = sorted(os.listdir(library))
     except OSError:
         return []
-    named = re.compile(r"[A-Za-z]+_[0-9]+_" + re.escape(genome) + r"(\+.*)?\Z")
+    named = re.compile(r"(?:[0-9]+-[A-Za-z]+|[A-Za-z]+(?:-[0-9]+)?)_[0-9]+_"
+                       + re.escape(genome) + r"(\+.*)?\Z")
     return [name for name in names if named.match(name)]
 
 

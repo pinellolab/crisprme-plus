@@ -1018,19 +1018,27 @@ def _check_pam_file(pamfile: str) -> None:
             more = any(rest.strip() for rest in fh)
     except (OSError, UnicodeDecodeError) as e:
         error(f"cannot read the PAM file '{pamfile}': {e}")
+    # the motif and the PAM's length, one space apart, as the search reads them (the last
+    # field for the length, the first for the motif): a line of the length alone, or with a
+    # third field, passed a check of its last field, and a blank first line, with the motif
+    # on the next, was refused as a file of two motif lines (the focused review of f8dbe73)
+    fields = line.split(" ")
+    try:
+        int(fields[-1])
+        well_formed = len(fields) == 2 and bool(fields[0])
+    except ValueError:
+        well_formed = False
+    if not well_formed:
+        error(
+            f"The PAM file '{pamfile}' must hold the motif and the PAM's length on its first "
+            "line, as in 'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' "
+            "end of the guide)."
+        )
     if more:
         error(
             f"Only one PAM motif per file is supported; the PAM file '{pamfile}' contains "
             "more than one non-empty line. Combine the motifs into a single IUPAC motif "
             "(e.g. NAG + NGG -> NRG)."
-        )
-    try:
-        int(line.split(" ")[-1])
-    except ValueError:
-        error(
-            f"The PAM file '{pamfile}' must hold the motif and the PAM's length on its first "
-            "line, as in 'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' "
-            "end of the guide)."
         )
 
 def _check_index_path(args: List[str]) -> str:
@@ -1288,11 +1296,16 @@ def _refuse_no_temp_folder(candidates: "Optional[List[str]]" = None) -> None:
     whose own folder may be read-only. A search with none (docker run --read-only without
     --tmpfs /tmp) ended with exit 0, CRISPR-Bulge scores of -1, no report zip, and a WARNING
     in its error log alone (final confirmation of 2.8.1). ``candidates``: the folders to
-    try, those by default (tempfile's list, but the current folder)."""
+    try, those by default: tempfile's list ($TMPDIR, $TEMP and $TMP when set, then /tmp,
+    /var/tmp and /usr/tmp) but its last resort, the current folder, which is not the
+    folder of those stages. A folder set by hand is kept, the current one included: a
+    read-only container whose temporary folder is the data volume it works in (-w /DATA
+    -e CRISPRME_TMPDIR=/DATA) runs, as in 2.8.1."""
     import tempfile
 
     if candidates is None:
-        candidates = [d for d in tempfile._candidate_tempdir_list() if d != os.getcwd()]
+        # (tempfile's last entry is always that last resort)
+        candidates = list(dict.fromkeys(tempfile._candidate_tempdir_list()[:-1]))
     for folder in candidates:
         try:
             with tempfile.NamedTemporaryFile(dir=folder, prefix=".crisprme_tmpcheck_"):
@@ -3738,8 +3751,11 @@ def complete_search() -> None:
             if 0 <= code <= 128:
                 _ANNOTATION_TMPDIRS.extend(handed_over)
                 if record_index_source:  # the index it built, if any, is whole
+                    # (under the name a search builds it: index_fit.index_name)
                     _record_built_index_source(
-                        outputfolder, genomedir, f"{pam_char}_{bMax + 1}_{genome_ref}"
+                        outputfolder, genomedir,
+                        index_fit.index_name(pam_char, bMax + 1, genome_ref,
+                                             total_pam_len - pam_len, not pam_begin)
                     )
             if code != 0:
                 # surface WHERE it failed + the actual error, not just "failed", and end
@@ -3778,7 +3794,12 @@ def print_help_build_index() -> None:
         "uses the same genome, PAM and bulge settings. Building the index once "
         "and reusing it avoids repeating the single most expensive step across "
         "many searches, and lets an index be staged (or downloaded) ahead of "
-        "time on a large machine.\n"
+        "time on a large machine. It is named <guide>-<PAM>_<bulges+1>_<genome> "
+        "(<PAM>-<guide>_... for a PAM on the 5' side of the guide; e.g. "
+        "20-NRR_3_hg38), as a search names one it builds: the indexes of one PAM for "
+        "the two sides of the guide, or for two guide lengths, live in one library. "
+        "An index in place under the older name, <PAM>_<bulges+1>_<genome>, that is "
+        "this one is kept.\n"
     )
     sys.stderr.write(
         "Options:\n"
@@ -4045,53 +4066,151 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
         sys.stderr.write(f"Warning: could not write index PAM provenance: {exc}\n")
 
 
+def _index_to_build(library: str, pam: str, n: int, rest: str, pamfile: str,
+                    three_prime: bool) -> str:
+    """The index folder of ``library`` that build-index-only builds, or keeps when it is in
+    place, for PAM file ``pamfile`` (of PAM ``pam``, on the 3' side of the guide with
+    ``three_prime``) with -bMax ``n``, for ``rest`` (the genome, and +<dataset> for a
+    variant index).
+
+    Since 2.9.0 an index is built under the name that says its guide length and its side
+    (index_fit.index_name: 20-NRR_3_hg38, TTTV-23_3_hg38), as a search builds one: under
+    the older name, <PAM>_<N>_<genome>, the indexes of one PAM for the two sides of the
+    guide, or for two guide lengths, took one name, and the build of one stopped on the
+    other in place. An index of the older name in place -- an earlier release's, or a
+    download -- is still kept when nothing it records says it is another index
+    (_older_index_differs): its side is then _refuse_other_side_build's to check, as
+    before. One that is another is left as it is, saying so, and this one is built beside
+    it.
+    """
+    guide = index_fit.pam_file_spacer(pamfile) or 0
+    named = os.path.join(library, index_fit.index_name(pam, n, rest, guide, three_prime))
+    older = os.path.join(library, f"{pam}_{n}_{rest}")
+    if named == older or os.path.isdir(named) or not os.path.isdir(older):
+        return named
+    differs = _older_index_differs(older, guide, three_prime)
+    if not differs:
+        return older
+    print(f"{older} is {differs}: it is left as it is, and this index is built beside it, "
+          f"as {os.path.basename(named)}.", flush=True)
+    return named
+
+
+def _older_index_differs(index_dir: str, guide: int, three_prime: bool) -> "Optional[str]":
+    """What makes ``index_dir``, an index in place under the older name <PAM>_<N>_<genome>,
+    another index than the one build-index-only builds for a guide of ``guide`` nt with its
+    PAM on the 3' side of the guide (``three_prime``) or the 5' side: it holds no .bin (no
+    index), it is in an index format this CRISPRme does not read, its .bin files were built
+    for another guide length, or its .pam_build records the other side. None when nothing
+    it records says so."""
+    try:
+        if not any(f.endswith(".bin") for f in os.listdir(index_dir)):
+            return "no index (it holds no .bin file)"
+    except OSError:
+        return None
+    if index_fit.newer_format_error(index_dir):
+        return "an index a newer CRISPRitz built, in an index format this CRISPRme does not read"
+    built = index_fit.built_guide_len(index_dir)
+    if built and guide and built != guide:
+        return f"an index built for a {built}-nt guide (as its .bin files record)"
+    recorded = _recorded_three_prime(index_dir)
+    if recorded is not None and recorded != three_prime:
+        return (f"an index for a PAM on the {3 if recorded else 5}' side of the guide (as its "
+                f".pam_build records)")
+    return None
+
+
+def _own_index_name(index_dir: str, three_prime: bool, guide: int = 0) -> str:
+    """The folder beside it that index ``index_dir`` takes under the name of 2.9.0
+    (index_fit.index_name), which records what it is: the guide length its .bin files were
+    built for (``guide`` where they record none), and the side of the guide its PAM is on,
+    3' with ``three_prime``. ``index_dir`` itself where neither length is known."""
+    parsed = index_fit.parse_index_name(index_dir)
+    built = index_fit.built_guide_len(index_dir) or guide
+    return os.path.join(os.path.dirname(index_dir), index_fit.index_name(
+        parsed[0], parsed[1], parsed[2], built, three_prime))
+
+
+def _rename_advice(index_dir: str, three_prime: bool, guide: int = 0) -> str:
+    """``mv '<index_dir>' '<its name of 2.9.0>'`` (_own_index_name) for a message, or "" where
+    that name says no more than its own, or another folder has it."""
+    own = _own_index_name(index_dir, three_prime, guide)
+    if own == index_dir or os.path.lexists(own):
+        return ""
+    return f"mv '{index_dir}' '{own}'"
+
+
 def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
-    """Stops build-index-only when ``index_dir``, an index already in place, was built for
-    the other side of the guide from ``pamfile``, as its ``.pam_build`` records it.
+    """Stops build-index-only when ``index_dir``, the index in place it keeps
+    (_index_to_build), records the other side of the guide from ``pamfile``, or no side
+    that tells.
 
     An index stores its targets on the side where the PAM file it was built from puts the
-    PAM, and its name does not say which: of an all-N index, nor of a dedicated one, which
-    PAM files of both sides name alike. build-index-only keeps an index it finds in place
-    and records ``pamfile`` on it (_write_pam_build), so recording a 5' file on a 3' build,
-    or the reverse, would make a search on its real side refuse it and one on the other
-    side search it wrong. The index ``pamfile`` asks for has the same name, so it needs
-    another working directory. An index with no usable ``.pam_build`` records no side to
-    contradict, and is recorded as before -- but for an all-N one of a width but 3 and 8
-    (the published ones, 3' builds), which a search before 2.8.1 built from a 5' PAM file
-    as well as from a 3' one: a 3' file is not recorded on it (a 5' one is, which is what
-    a search tells its user to run).
+    PAM. build-index-only keeps an index it finds in place and records ``pamfile`` on it
+    (_write_pam_build), so recording a 5' file on a 3' build, or the reverse, would make a
+    search on its real side refuse it and one on the other side search it wrong. A name of
+    2.9.0 says the side (index_fit.parse_index_name), and a search reads it ahead of a
+    .pam_build: one whose .pam_build records the other side was named, or recorded, for the
+    wrong one. Under the older name, which says none, an index with no usable .pam_build
+    records no side to contradict, and is recorded as before -- but for an all-N one of a
+    width but 3 and 8 (the published ones, 3' builds), which a search before 2.8.1 built
+    from a 5' PAM file as well as from a 3' one: a 3' file is not recorded on it (a 5' one
+    is, as 2.8.1 says to do). One of the older name that records the other side is kept
+    only when ``pamfile`` says no guide length, as its own index then takes that name
+    (_index_to_build builds one beside it otherwise). Each refusal says how to name the
+    index in place for what it is (_rename_advice): its side, and the guide length its
+    .bin files record, which records it and takes it out of the way.
     """
-    motif = index_fit.index_pam(index_dir)
-    if not motif or not os.path.isdir(index_dir):
+    parsed = index_fit.parse_index_name(index_dir)
+    if not parsed or not os.path.isdir(index_dir):
         return
     try:
         with open(pamfile) as fh:
             wanted = int(fh.readline().split()[-1])
     except (OSError, ValueError, IndexError):
         return
-    try:
-        with open(os.path.join(index_dir, ".pam_build")) as fh:
-            built = int(fh.readline().split()[-1])
-    except (OSError, ValueError, IndexError):
-        built = 0
-    all_n = set(motif) == {"N"}
-    if not built:
-        if all_n and len(motif) not in (3, 8) and wanted > 0:
+    if not wanted:
+        return
+    guide = index_fit.pam_file_spacer(pamfile) or 0
+    side = {True: "3'", False: "5'"}
+    recorded = _recorded_three_prime(index_dir)
+    named = {3: True, 5: False}.get(parsed[4])  # the side its name says (since 2.9.0)
+    what = "a PAM-less index" if set(parsed[0]) == {"N"} else "an index"
+    if named is not None:  # (of this side: _index_to_build names it so)
+        if recorded is not None and recorded != named:
+            mv = _rename_advice(index_dir, recorded, guide)
+            error(
+                f"{index_dir} is already there, and its .pam_build records a PAM on the "
+                f"{side[recorded]} side of the guide, which its name does not: it was named, "
+                f"or recorded, for the wrong side. If it was built for the {side[recorded]} "
+                f"side, name it so" + (f" ({mv})" if mv else "") + f"; if not, remove its "
+                f"record (rm '{index_dir}/.pam_build'). Then run this again."
+            )
+        return
+    if recorded is None:
+        if set(parsed[0]) == {"N"} and len(parsed[0]) not in (3, 8) and wanted > 0:
+            mv3, mv5 = (_rename_advice(index_dir, True, guide),
+                        _rename_advice(index_dir, False, guide))
             error(
                 f"{index_dir} is already there, a PAM-less index that records no side of the "
                 f"guide (.pam_build): a search before 2.8.1 built one of that width from a 5' "
                 f"PAM file as well as from a 3' one, so {pamfile}, a 3' PAM file, is not "
-                f"recorded on it. If it was built from a 5' PAM file, run this with that file; "
-                f"otherwise build this index in another working directory (--path)."
+                f"recorded on it. Name it for the side of the PAM file it was built from, "
+                f"which records it: for a 3' one" + (f" ({mv3})" if mv3 else "") + ", this run "
+                f"then keeps it; for a 5' one" + (f" ({mv5}, or run this with that file)" if mv5
+                                                 else " (run this with that file)")
+                + ", this run then builds its own beside it."
             )
         return
-    if wanted and (built < 0) != (wanted < 0):
-        side = {True: "5'", False: "3'"}
+    if recorded != (wanted > 0):
+        mv = _rename_advice(index_dir, recorded, guide)
         error(
-            f"{index_dir} is already there, {'a PAM-less index' if all_n else 'an index'} for "
-            f"a PAM on the {side[built < 0]} side of the guide (as its .pam_build records), and "
-            f"{pamfile} puts the PAM on the {side[wanted < 0]} side. The index for that "
-            f"PAM file has the same name: build it in another working directory (--path)."
+            f"{index_dir} is already there, {what} for a PAM on the {side[recorded]} side of "
+            f"the guide (as its .pam_build records), and {pamfile} puts the PAM on the "
+            f"{side[wanted > 0]} side. {os.path.basename(pamfile)} says no guide length, so "
+            f"the index for it takes the same name: "
+            + (f"name this one for what it is ({mv}), which records it, or " if mv else "")
+            + "build it in another working directory (--path)."
         )
 
 
@@ -4110,8 +4229,10 @@ def _refuse_short_build(index_dir: str, pamfile: str, bdna: int, brna: int) -> N
     the length). build-index-only keeps an index it finds in place and, before this check,
     said "already present" and recorded ``pamfile`` on it (_write_pam_build), which left a
     record that contradicts the index and a search of it that reports wrong alignments.
-    The index ``pamfile`` asks for has the same name, so it needs another working
-    directory, or this one moved out of the way: never removed here. Nor is one a newer
+    Since 2.9.0 it builds under a name that says the guide length (_index_to_build), and
+    keeps one of the older name built for another length beside it, so the one in the
+    way is under that name, built for another guide than its name says: named for that
+    one (_rename_advice), it is out of the way. Never removed here. Nor is one a newer
     CRISPRitz built kept (_refuse_newer_build): this CRISPRme does not read it.
     """
     _refuse_newer_build(index_dir)
@@ -4119,13 +4240,23 @@ def _refuse_short_build(index_dir: str, pamfile: str, bdna: int, brna: int) -> N
     guide = index_fit.pam_file_spacer(pamfile)
     n = int(os.path.basename(index_dir).split("_")[1])
     if not index_fit.fits(built, n, guide, bdna, brna):
+        parsed = index_fit.parse_index_name(index_dir)
+        # (its side as its name says it, or its .pam_build; 3' as a search takes it, else)
+        three_prime = (parsed[4] == 3) if parsed[4] else (_recorded_three_prime(index_dir)
+                                                          is not False)
+        mv = _rename_advice(index_dir, three_prime)
         error(
             f"{index_dir} is already there, built for a {built}-nt guide (as its .bin files "
             f"record), and {pamfile} asks for a {guide}-nt guide with {bdna} DNA and {brna} "
             f"RNA bulge(s): it stores too few bases per site, so a search of it would report "
-            f"wrong alignments and lose off-targets. The index for that PAM file has the same "
-            f"name: build it in another working directory (--path), or move this one out of "
-            f"{os.path.dirname(index_dir)}."
+            f"wrong alignments and lose off-targets. "
+            + (f"Its name says a {parsed[3]}-nt guide: " if parsed[3] else
+               "The index for that PAM file has the same name: ")
+            + (f"name it for the guide it was built for ({mv}), and run this again, which "
+               f"builds this one under its own name; or move it out of "
+               f"{os.path.dirname(index_dir)}." if mv else
+               f"build it in another working directory (--path), or move this one out of "
+               f"{os.path.dirname(index_dir)}.")
         )
 
 
@@ -4821,10 +4952,12 @@ def _in_build_dir(parent: str, prefix: str, build, stage=None):
 
 
 def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
-                     need_bin=False, **kwargs) -> bool:
-    """Runs index command ``cmd``, which writes ``./genome_library/<name>`` under its
-    working directory, and puts that in ``<workdir>/genome_library/<name>`` only
-    once the command has succeeded.
+                     need_bin=False, engine_name=None, **kwargs) -> bool:
+    """Runs index command ``cmd``, which writes ``./genome_library/<engine_name>`` under
+    its working directory (``name`` by default), and puts that in
+    ``<workdir>/genome_library/<name>`` only once the command has succeeded. The engine
+    names an index <PAM>_<N>_<name>, and an index is named since 2.9.0 in the form that
+    says the guide length and the side too (_index_to_build): it is renamed into place.
 
     Every later run takes an index directory that is there for a finished one, so
     a build that ends early -- Ctrl-C, an OOM kill, a container stop, an engine
@@ -4864,7 +4997,7 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
         _unwritable(lib, e)
 
     def build(tmp):
-        built = os.path.join(tmp, "genome_library", name)
+        built = os.path.join(tmp, "genome_library", engine_name or name)
         code = subprocess.call(cmd, cwd=tmp, **kwargs)
         if code != 0 or not os.path.isdir(built):
             error(f"{failure} (expected {final})")
@@ -4944,9 +5077,10 @@ def build_index_only() -> None:
     Exposes the index-build step that ``complete-search`` otherwise performs
     implicitly, so an index can be constructed once (e.g. on a large machine)
     and reused across many searches. The produced directory
-    (``genome_library/<PAM>_<bMax+1>_<genome>``) is byte-for-byte the same one
-    ``complete-search`` looks for, so no extra bookkeeping is required: a later
-    search with matching --genome/--pam/--bDNA/--bRNA finds and reuses it.
+    (``genome_library/<guide>-<PAM>_<bMax+1>_<genome>``, ``<PAM>-<guide>_...`` for a 5'
+    PAM: _index_to_build) is byte-for-byte the same one ``complete-search`` builds, so no
+    extra bookkeeping is required: a later search with matching
+    --genome/--pam/--bDNA/--bRNA finds and reuses it.
     """
     args = input_args[2:]  # retrieve build-index-only input arguments
     if "--help" in args:
@@ -4997,9 +5131,12 @@ def build_index_only() -> None:
         else:  # 3' PAM (e.g. SpCas9)
             pam_char = pam_char.split(" ")[0][end_idx * (-1):]
     genome_ref = os.path.basename(genomedir)
-    # complete-search indexes with bMax+1 ("for alignments starting with gaps")
-    index_name = f"{pam_char}_{bMax + 1}_{genome_ref}"
-    idx_folder = os.path.join(workdir, "genome_library", index_name)
+    library = os.path.join(workdir, "genome_library")
+    # complete-search indexes with bMax+1 ("for alignments starting with gaps"), since 2.9.0
+    # under the name that says the guide length and the side; one of the older name in
+    # place that is this index is kept (_index_to_build)
+    idx_folder = _index_to_build(library, pam_char, bMax + 1, genome_ref, pamfile, idx_val > 0)
+    index_name = os.path.basename(idx_folder)
     vcf_given = "--vcf" in args
     # Every output this run uses or builds, each with what its build lock guards
     # besides it. While a search holds one of those locks, the run stops before it
@@ -5013,15 +5150,15 @@ def build_index_only() -> None:
         indels_out = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}_INDELS")
         dict_folder = os.path.join(workdir, "Dictionaries", f"dictionaries_{vcf_name}")
         indel_dict = os.path.join(workdir, "Dictionaries", f"log_indels_{vcf_name}")
-        snp_idx = os.path.join(
-            workdir, "genome_library", f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}"
-        )
+        snp_idx = _index_to_build(library, pam_char, bMax + 1, f"{genome_ref}+{vcf_name}",
+                                  pamfile, idx_val > 0)
         indels_idx = snp_idx + "_INDELS"
         _outputs += [(enriched, indels_out), (snp_idx,), (indels_idx,)]
     for _out in _outputs:
         _refuse_locked_build(*_out)
-    # An all-N index already in place is kept, and pamfile recorded on it: not over a
-    # record of the other side of the guide.
+    # An index already in place is kept, and pamfile recorded on it: not over a record of
+    # the other side of the guide, or one that does not tell (an index of the older name in
+    # place that is another is left beside this one's: _index_to_build).
     _refuse_other_side_build(idx_folder, pamfile)
     if vcf_given:
         _refuse_other_side_build(snp_idx, pamfile)
@@ -5091,7 +5228,8 @@ def build_index_only() -> None:
         )
         if _build_index_dir(
             index_cmd, workdir, index_name, "Reference genome indexing failed",
-            indexed=(pamfile, bMax + 1, [(genomedir, "")]), need_bin=True, shell=True,
+            indexed=(pamfile, bMax + 1, [(genomedir, "")]), need_bin=True,
+            engine_name=f"{pam_char}_{bMax + 1}_{genome_ref}", shell=True,
         ):
             print(f"Index built: {idx_folder}", flush=True)
             if record_source:  # the folder it holds, as complete-search records it
@@ -5845,6 +5983,7 @@ def build_index_only() -> None:
             "Variant genome indexing failed",
             indexed=(pamfile, bMax + 1, [(enriched, "")]),
             need_bin=True,
+            engine_name=f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}",
             shell=True,
         )
     else:
@@ -5925,6 +6064,7 @@ def build_index_only() -> None:
                 workdir,
                 os.path.basename(indels_idx),
                 "Indels indexing failed",
+                engine_name=f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}_INDELS",
                 # each chromosome's fake-indel genome, into its directory of the index,
                 # as pool_index_indels.py indexes them (it indexes no contig with an
                 # underscore in its name, and says which)

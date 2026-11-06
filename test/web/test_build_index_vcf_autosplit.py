@@ -123,8 +123,8 @@ for dataset in ("bgz", "pgz", "tbi", "srv"):
     check(stat.S_IMODE(os.stat(vdir).st_mode) == 0o777 & ~UMASK,
           f"{dataset}: the split folder has the umask's mode, not mkdtemp's 0700 "
           f"(got {oct(stat.S_IMODE(os.stat(vdir).st_mode))})")
-    check(os.path.isdir(os.path.join(D, "genome_library", f"NRG_2_toyg+{dataset}")),
-          f"{dataset}: the variant index is built")
+    check(os.path.isdir(os.path.join(D, "genome_library", f"20-NRG_2_toyg+{dataset}")),
+          f"{dataset}: the variant index is built (named for its 20-nt guide and 3' PAM)")
     split = sum(1 for line in subprocess.run(
         f"zcat {vdir}/*.chr*.vcf.gz | grep -v '^#'", shell=True, capture_output=True,
         text=True).stdout.splitlines())
@@ -188,8 +188,8 @@ for dataset, name, chrom in (("nochr", "nochr.vcf.gz", "nochr"),
 for dataset in ("numbered", "dotted", "nochr", "other"):
     names = [f for f in tree(os.path.join(D, "VCFs", dataset)) if not f.endswith(".tbi")]
     check(len(names) == 1 and names[0].startswith(dataset), f"{dataset}: left as it was")
-    check(not os.path.isdir(os.path.join(D, "genome_library", f"NRG_2_toyg+{dataset}")),
-          f"{dataset}: no variant index")
+    check(not [n for n in os.listdir(os.path.join(D, "genome_library"))
+               if n.endswith(f"_toyg+{dataset}")], f"{dataset}: no variant index")
     check(not os.path.isdir(os.path.join(D, "Genomes", f"toyg+{dataset}")),
           f"{dataset}: no enriched genome")
 check(not [f for f in tree(os.path.join(D, "VCFs")) if f.startswith(".vcfsplit")],

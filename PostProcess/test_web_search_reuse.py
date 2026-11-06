@@ -209,9 +209,10 @@ class TestReuseOnceTheSearchHasRun(unittest.TestCase):
         self.assertEqual(TestSearchReuse.submit(self), ("/load", f"?job={job}", lp.REUSED_HASH))
         self.assertEqual(self.pool.submit.call_count, 1)
         self.assertEqual(TestSearchReuse.jobs(self), [job])
-        # what the search recorded of the index it took, beside the request's parameters
+        # what the search recorded of the index it took (it built it, under the name that
+        # says its guide length and side), beside the request's parameters
         with open(os.path.join(folder, ".indexes_searched.txt")) as f:
-            self.assertIn("Reference_index\tNRG_2_hg38 (in ", f.read())
+            self.assertIn("Reference_index\t20-NRG_2_hg38 (in ", f.read())
         with open(os.path.join(folder, mp.PARAMS_FILE)) as f:
             self.assertNotIn("_index", f.read())
 

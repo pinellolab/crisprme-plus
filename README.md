@@ -250,17 +250,23 @@ store the flank on the 3′ side of the guide, so a 5′ search does not use the
 An index also fixes how many bases it stores per site, from the guide length it was built
 for and its `N` (`NRG_3`: N = 3). Every published index was built for a 20-nt guide with
 N = 3, which also serves a 21-nt guide (the shipped SaCas9 PAM files) at up to 1 bulge of
-each type, byte-identically to an index built for it. A guide past that needs its own index:
-the search builds it, or says what to do when an index of the same name is in the way (rule:
+each type, byte-identically to an index built for it. A guide past that needs its own index,
+which the search builds, under a name of its own (rule:
 [methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
 
 The name `<PAM>_<N>_<genome>` says neither the guide length an index was built for nor the
-side of the guide its PAM is on, so two such builds take one name. Since 2.9.0 a name may
-carry both, in the order of the target on the strand: `20-NRR_3_hg38` for a 20-nt guide and a
-3′ PAM, `TTTV-23_3_hg38` for a 5′ TTTV PAM and a 23-nt guide. CRISPRme reads both forms
-(search, web, download, complete-test), takes an index of the new form only for a search of
-its side, and of one index under both names, the newer one. Builds still write the older
-name.
+side of the guide its PAM is on, so two such builds took one name, and the second stopped on
+the first. Since 2.9.0 an index is built under a name that carries both, in the order of the
+target on the strand: `20-NRR_3_hg38` for a 20-nt guide and a 3′ PAM, `TTTV-23_3_hg38` for a
+5′ TTTV PAM and a 23-nt guide; `build-index-only` and a search name what they build so, the
+variant index (`20-NRR_3_hg38+hg38_HGDP1kGP`) and its `_INDELS` index too. So the indexes of
+one PAM for the two sides of the guide, or for two guide lengths, live in one library. CRISPRme
+reads both forms (search, web, download, complete-test), takes an index of the new form only
+for a search of its side, and of one index under both names, the newer one. An index under the
+older name (every one published before the rebuild, or built by an earlier release) is used as
+before, and `build-index-only` keeps one in place that is the index it builds; one for the
+other side or another guide length stays, and the new one is built beside it. An earlier
+release does not read the new form: it builds its own.
 
 The two 8-nt-flank indexes live in a separate dataset repo,
 `lucapinello/crisprme-data-general-index`, because a release older than CRISPRme+ 2.8.1
@@ -2129,13 +2135,13 @@ is under `data/`). Reading top to bottom:
 
 Bulge-enabled searches build a CRISPRitz index of the reference genome. `complete-search` does this automatically on the first run and reuses it afterward, but four commands let you control it explicitly — `build-index-only`, `download`, `publish-index`, and `scorer-env` — useful for batch jobs, shared clusters, and skipping the build via prebuilt indexes.
 
-**`build-index-only`** — build the reusable reference index (into `genome_library/<PAM>_<bulges+1>_<genome>`) without running a search. Pass the same `--genome`/`--pam`/`--bDNA`/`--bRNA` you will search with:
+**`build-index-only`** — build the reusable reference index (into `genome_library/<guide>-<PAM>_<bulges+1>_<genome>`, `<PAM>-<guide>_…` for a PAM on the 5′ side of the guide) without running a search. Pass the same `--genome`/`--pam`/`--bDNA`/`--bRNA` you will search with:
 
 ```bash
 crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt --bDNA 2 --bRNA 2 --thread 16 --path /data/crisprme
 ```
 
-This writes `genome_library/NRR_3_hg38` (the folder number is `max(bDNA,bRNA)+1`, so 2 bulges → `_3_`), which is the same index shipped precomputed on HuggingFace.
+This writes `genome_library/20-NRR_3_hg38` (the guide length, 20, then the PAM of the 3′ side; the folder number is `max(bDNA,bRNA)+1`, so 2 bulges → `_3_`), the index shipped precomputed on HuggingFace as `NRR_3_hg38`. An `NRR_3_hg38` already in place (a download) is kept as this index, and nothing is built.
 
 Add `--vcf` (a VCF dataset directory, e.g. `VCFs/hg38_HGDP1kGP`, **or** a config file listing one VCF folder name under `VCFs/` — the same `--vcf` form `complete-search` accepts) to also pre-build the **variant-aware** index (genome enrichment + SNP/indel indexes). Add `--samplesID` (a listing file, one samplesID filename per line under `samplesIDs/`; a combined panel lists each per-db samplesID file) to make it **self-complete**: with `--samplesID` the build ALSO emits the dict-less Tier-0 registry + Tier-1 genotype tiers and, for a merged panel, writes the combined `samplesIDs/<vcf>.samplesID.txt` list. Without `--samplesID` you get a dicts-only index (no fast post-analysis).
 
@@ -2159,9 +2165,11 @@ crisprme.py download --what assembly --sample HG01255 --path /data/crisprme     
 **`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`). Add `--dictless` for a variant index to drop the ~152 GB per-sample SNP dicts (the registry + genotype tiers replace them; indel logs kept), upload the genotype store as a separate companion, and bundle the samplesID lists so the index is self-complete:
 
 ```bash
-crisprme.py publish-index --index genome_library/NRR_3_hg38
-crisprme.py publish-index --index genome_library/NRR_3_hg38+hg38_HGDP1kGP --dictless
+crisprme.py publish-index --index genome_library/20-NRR_3_hg38
+crisprme.py publish-index --index genome_library/20-NRR_3_hg38+hg38_HGDP1kGP --dictless
 ```
+
+An index is published under its folder's name: one built since 2.9.0 under the name that says its guide length and side, which `download --index-name` takes as it is.
 
 **`scorer-env {create,check,update,list,doctor}`** — manages the dedicated `cbulge` conda env the CRISPR-Bulge scorer runs in (created automatically by `install_from_source.sh` unless deferred with `CRISPRME_SKIP_SCORER_ENV=1`):
 

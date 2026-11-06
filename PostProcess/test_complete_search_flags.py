@@ -488,13 +488,20 @@ class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
             f"(e.g. NAG + NGG -> NRG).", quoted_in=4)
 
     def test_a_pam_file_whose_line_is_not_a_motif_and_a_length(self):
-        pam = self.pam("20bp-NGG-SpCas9.txt", "NNNNNNNNNNNNNNNNNNNNNGG\n")
-        self.assertRefused(
-            self.search(pam),
-            f"The PAM file '{os.path.join(os.path.realpath(self.wd), pam)}' must hold the "
-            f"motif and the PAM's length on its first line, as in "
-            f"'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' end of the "
-            f"guide).", quoted_in=4)
+        # (the last three passed a check of the last field alone: a line of the length
+        # alone made Results/out and failed the input check later, one with a third field
+        # searched with that field for the PAM's length, and a blank first line was refused
+        # as a file of two motif lines; the focused review of f8dbe73)
+        for text in ("NNNNNNNNNNNNNNNNNNNNNGG\n", "3\n", "NNNNNNNNNNNNNNNNNNNNNGG 3 4\n",
+                     "\nNNNNNNNNNNNNNNNNNNNNNGG 3\n"):
+            with self.subTest(text=text):
+                pam = self.pam("20bp-NGG-SpCas9.txt", text)
+                self.assertRefused(
+                    self.search(pam),
+                    f"The PAM file '{os.path.join(os.path.realpath(self.wd), pam)}' must hold "
+                    f"the motif and the PAM's length on its first line, as in "
+                    f"'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' end of "
+                    f"the guide).", quoted_in=4)
 
     def test_a_flag_with_no_value(self):
         pam = self.pam("20bp-NGG-SpCas9.txt")

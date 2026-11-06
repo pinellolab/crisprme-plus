@@ -51,8 +51,9 @@ with its enriched genome (`Genomes/<genome>+<dataset>/`) and its index by `build
 a search without bulges of a dataset that has only its VCFs (the form then offers no bulges)
 enriches the genome and builds the dictionaries and index itself. A personal-assembly
 search (`assembly-search`) builds an index for each haplotype, named after the individual and the
-haplotype plus a hash of the haplotype's folder (e.g. `genome_library/NRG_2_HG01255_paternal_5aeb0fc6`
-and `NRG_2_HG01255_maternal_067bdb25`, each the size of a reference index), searches each haplotype
+haplotype plus a hash of the haplotype's folder (e.g. `genome_library/20-NRR_2_HG01255_paternal_5aeb0fc6`
+and `20-NRR_2_HG01255_maternal_067bdb25`, each the size of a reference index; before 2.9.0 named
+without the guide length, `NRG_2_HG01255_paternal_5aeb0fc6`), searches each haplotype
 through a link of that name in `haplotype_genomes/`, and keeps the alignments of the two haplotypes
 in `haplotype_alignments/`. Deleting an individual (Settings → Data Manager → Delete → *Personal
 assembly*) also removes its haplotype indexes and links; the alignments stay, and

@@ -266,7 +266,7 @@ my_crisprme_run/
 
 ## Section 3.5. Prebuild, reuse, and share the reference index
 
-Bulge-enabled searches need a CRISPRitz **index** of the reference genome. By default `complete-search` builds it on the first run — into `genome_library/<PAM>_<bulges+1>_<genome>` — and silently reuses it on later runs from the same working directory (that is why "Run another search" in Section 3d is fast: *no re-index*). Three commands let you control this explicitly, which matters for batch jobs, shared clusters, and skipping the build entirely.
+Bulge-enabled searches need a CRISPRitz **index** of the reference genome. By default `complete-search` builds it on the first run — into `genome_library/<guide>-<PAM>_<bulges+1>_<genome>` (`<PAM>-<guide>_…` for a 5′ PAM; e.g. `20-NRR_3_hg38`) — and silently reuses it on later runs from the same working directory (that is why "Run another search" in Section 3d is fast: *no re-index*). Three commands let you control this explicitly, which matters for batch jobs, shared clusters, and skipping the build entirely.
 
 ### Build the index once, ahead of time
 
@@ -312,10 +312,10 @@ Publish a locally built index so other machines (or collaborators) can skip the 
 
 ```bash
 # upload — needs an HF write token: export HF_TOKEN=...  (never commit it)
-crisprme.py publish-index --index genome_library/NRR_3_hg38
+crisprme.py publish-index --index genome_library/20-NRR_3_hg38
 
 # elsewhere: download it straight into genome_library/
-crisprme.py download --what index --index-name NRR_3_hg38 --path "$CRISPRME_DIR"
+crisprme.py download --what index --index-name 20-NRR_3_hg38 --path "$CRISPRME_DIR"
 ```
 
 Then run the search with `--index-path "$CRISPRME_DIR/genome_library"` (or simply from `$CRISPRME_DIR`) and it reuses the downloaded index. The index folder name encodes the PAM, bulge count and genome, so an index is only valid for a matching `--genome`/`--pam`/`--bDNA`/`--bRNA`.
@@ -589,11 +589,11 @@ CRISPRme writes to four directories during a search. Subfolders are created auto
 
 | Subfolder | Written when | Depends on |
 |---|---|---|
-| `{pam}_{bulge}_{ref}/` | First search with this PAM + bulge + ref | `--pam`, `--bDNA`/`--bRNA`, `--genome` |
-| `{pam}_{bulge}_{ref}+{vcf}/` | First search with this PAM + bulge + ref + VCF | `--pam`, `--bDNA`/`--bRNA`, `--genome`, `--vcf` |
-| `{pam}_{bulge}_{ref}+{vcf}_INDELS/` | First search with this PAM + bulge + ref + VCF | `--pam`, `--bDNA`/`--bRNA`, `--genome`, `--vcf` |
+| `{guide}-{pam}_{bulge}_{ref}/` | First search with this PAM + bulge + ref | `--pam`, `--bDNA`/`--bRNA`, `--genome` |
+| `{guide}-{pam}_{bulge}_{ref}+{vcf}/` | First search with this PAM + bulge + ref + VCF | `--pam`, `--bDNA`/`--bRNA`, `--genome`, `--vcf` |
+| `{guide}-{pam}_{bulge}_{ref}+{vcf}_INDELS/` | First search with this PAM + bulge + ref + VCF | `--pam`, `--bDNA`/`--bRNA`, `--genome`, `--vcf` |
 
-Where `{pam}` is the PAM sequence extracted from the PAM file (e.g. `NGG` for SpCas9), and `{bulge}` = `max(--bDNA, --bRNA) + 1` (e.g. `--bDNA 1 --bRNA 1` → `2`). The reference-only index (`{pam}_{bulge}_{ref}/`) is shared across all VCF datasets. `--mm` does not affect any folder name and never triggers reindexing.
+Where `{pam}` is the PAM sequence extracted from the PAM file (e.g. `NGG` for SpCas9), `{guide}` the guide length it is built for (the PAM file's `N`s: `20`), before the PAM for a PAM on the 3′ side of the guide and after it for one on the 5′ side (`TTTV-23_…` for Cas12a), and `{bulge}` = `max(--bDNA, --bRNA) + 1` (e.g. `--bDNA 1 --bRNA 1` → `2`). An index of the older name `{pam}_{bulge}_{ref}` (a download, or one an earlier release built) is used as it is. The reference-only index (`{guide}-{pam}_{bulge}_{ref}/`) is shared across all VCF datasets. `--mm` does not affect any folder name and never triggers reindexing.
 
 **`Dictionaries/`**
 

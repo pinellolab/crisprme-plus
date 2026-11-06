@@ -1291,8 +1291,9 @@ therefore takes any index only for a PAM on the side recorded in its `.pam_build
 as before. A PAM-less index without one is taken for a 3′ build at the published widths, 3 and 8
 (the K = 8 archive has no `.pam_build`), or under the search PAM's own name, and at no other
 width: a search before 2.8.1 built one of any width from a 5′ PAM file and recorded nothing. A
-search builds its index under a name an index for the other side may already have, and stops
-rather than search that one; `build-index-only` does not record a PAM file over an index
+search, and `build-index-only`, build an index under a name that says its side (since 2.9.0;
+**Index names** below), so an index of the older name for the other side is left beside it, and
+never searched for this side; `build-index-only` does not record a PAM file over an index
 recorded for the other side, nor a 3′ one over an unrecorded PAM-less index of another width.
 The search PAM is
 widened to *K* with `N`s on the distal side (the end for a 3′ PAM, the front for a 5′ PAM),
@@ -1312,15 +1313,22 @@ holds it (of two, the narrower PAM, NRG before NRR for NGG), then a PAM-less one
 PAM-less ones, the narrowest flank, as before. The side rule above applies to it as to a
 PAM-less index: a record, or else a 3′ build at the published widths.
 
-**Index names.** An index is named `<PAM>_<N>_<genome>[+<dataset>]`, which says neither the
+**Index names.** An index was named `<PAM>_<N>_<genome>[+<dataset>]`, which says neither the
 guide length it was built for nor the side of its PAM, so a 3′ and a 5′ build of one motif, or
-builds for two guide lengths, take one name. Since 2.9.0 a name may carry both, in the order of
-the target on the strand: `<guide>-<PAM>_<N>_…` for a 3′ PAM (`20-NRR_3_hg38`),
-`<PAM>-<guide>_<N>_…` for a 5′ one (`TTTV-23_3_hg38`). The name records the side as a
-`.pam_build` does, ahead of one, so such an index needs none: CRISPRme takes it only for a
-search of the side its name says, at any flank width the rules above allow on that side. It
-reads the guide length from the trees as before, and of one index under both names takes the
-newer; builds still write the older name.
+builds for two guide lengths, took one name, and the second stopped on the first. Since 2.9.0
+an index is built under a name that carries both, in the order of the target on the strand:
+`<guide>-<PAM>_<N>_…` for a 3′ PAM (`20-NRR_3_hg38`), `<PAM>-<guide>_<N>_…` for a 5′ one
+(`TTTV-23_3_hg38`), its INDELS index `<name>_INDELS`. `build-index-only` and a search name what
+they build so (the engine writes the older name, in a build folder, and the index is renamed
+into place). The name records the side as a `.pam_build` does, ahead of one, so such an index
+needs none: CRISPRme takes it only for a search of the side its name says, at any flank width
+the rules above allow on that side. It reads the guide length from the trees as before, and of
+one index under both names takes the newer. An index under the older name is read as before:
+`build-index-only` keeps one in place that records this side and this guide length (or no side,
+by the rules above), and builds beside one that records another, whose refusal of 2.8.1 said
+to build in another working directory; one whose side its record leaves open (an all-`N` one
+of a width but 3 and 8, for a 3′ PAM file) is refused, with the name of each side that
+records it.
 
 **Pruning by itself.** Since 2.9.0 a search prunes, as if `--prune-pam` was given, whenever
 no installed index serves it unpruned and one of these does: a wider all-`N` one, or a
@@ -1410,9 +1418,10 @@ Genomes variant index 110 GB against 28 GB (download sizes, GB = 10⁹ bytes). P
 happens at leaf time, so a PAM-less search is not faster than a dedicated one — the gain
 is that one index answers many PAMs.
 
-**Guide length.** An index name carries no guide length; each tree records the one it was
-built for, as the second int32 of its `.bin` (written by `buildTST` since 2019, whoever built
-the index). The engine reads that length only to offset coordinates and searches any guide it
+**Guide length.** An index name of the older form carries no guide length (one of the 2.9.0
+form says it, **Index names** above); each tree records the one it was built for, as the second
+int32 of its `.bin` (written by `buildTST` since 2019, whoever built the index), which is what
+CRISPRme reads. The engine reads that length only to offset coordinates and searches any guide it
 is given, so past what the tree stores it gives wrong alignments or loses targets, with exit 0.
 A search therefore takes an index only where
 
@@ -1427,10 +1436,12 @@ variant searches (SNP and indel rows, with no bulges too, through the index) and
 fall on the same side of the rule. So a published 20-nt N = 3 index serves a 21-nt guide at up
 to 1 bulge of each type, a 22-nt guide with one bulge of one type, a 23-nt guide with no bulge
 through the index, and no longer guide. An index built for this very guide is preferred to one
-that merely fits. With none that fits, a search builds its own under the name
-`<PAM>_<N>_<genome>`, or stops with an ERROR that names both lengths when an index of that
-name, built for another guide, is in the way; `build-index-only` does the same and leaves that
-index and its `.pam_build` as they are.
+that merely fits. With none that fits, a search builds its own under a name that says its guide
+length (`<guide>-<PAM>_<N>_<genome>`, **Index names** above), beside an index of the older name
+`<PAM>_<N>_<genome>` built for another guide, which it stopped on before 2.9.0, as
+`build-index-only` did; both leave that index and its `.pam_build` as they are. One of the new
+name whose trees were built for another guide than its name says stops either, with an ERROR
+that names both lengths and the name that records what it is.
 A longer build serves a shorter guide, but, like any deeper index, it does not hold a site
 next to an N run or a contig end that a shallower one does.
 

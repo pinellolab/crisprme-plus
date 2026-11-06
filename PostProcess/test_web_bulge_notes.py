@@ -924,7 +924,9 @@ class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
         # BED coordinates in a genome not installed are not read
         out, msgs = self.submit("hg38", "20bp-NGG-SpCas9", ">s\nchr1 0 43", "GS")
         self.assertEqual((out[0], msgs), (None, [no_hg38]))
-        # none selected, with some installed: as before
+        # none selected, with some installed: each named, and no bulge line (one computed for
+        # the fallback genome, hg38_ref, came after them until 2.8.1: the bulge check waits
+        # for a genome and a PAM)
         self.assertEqual(self.submit(None, None)[1], ["Genome", "PAM"])
         # both installed: Submit runs the search
         self.assertEqual(self.submit("susScr11", "20bp-NGG-SpCas9")[0][0], 1)
