@@ -858,6 +858,44 @@ while read vcf_f; do
 		return 0
 	}
 
+	# How the sites that index $1, of index format 1, lacks are searched, on stdout: the end
+	# of the NOTE _check_index_format gives of it. build-index-only builds an index again in
+	# format 2, but keeps one it finds in place, so the note says to move it out of the way
+	# first -- only where this install holds what build-index-only builds it from: for a
+	# reference index, the genome folder this search reads; for a variant index, the
+	# dataset's enriched genome (Genomes/<ref>+<vcf>), and for its INDELS index the
+	# fake-indel genome (Genomes/<ref>+<vcf>_INDELS), in place, with the dataset's VCFs
+	# (VCFs/<vcf>), which build-index-only takes too, and from which alone it enriches the
+	# whole dataset again first. A download installs neither the VCFs nor those genomes, and
+	# the archives published until the rebuild are of format 1: the dataset's archives
+	# rebuilt in format 2 hold those sites. Silent on stderr.
+	_how_built_again() {
+		local _g="Genomes/${ref_name}+${vcf_name}" _from _vcfs
+		case "${1##*/}" in
+		*+*_INDELS) _from="${_g}_INDELS" ;;
+		*+*) _from=$_g ;;
+		*)
+			printf 'To search them, move %s out of the way and build it again with crisprme.py build-index-only (which keeps an index it finds in place).' "$1"
+			return 0
+			;;
+		esac
+		_vcfs=("$vcf_folder"/*.vcf.gz)
+		if [ -e "${_vcfs[0]}" ] && [ -d "$current_working_directory/$_g" ] \
+			&& ! [ -d "$current_working_directory/$_g/.building" ] \
+			&& [ -d "$current_working_directory/$_from" ]; then
+			printf 'To search them, move %s out of the way and build it again with crisprme.py build-index-only (which keeps an index it finds in place), from %s.' "$1" "$_from"
+			return 0
+		fi
+		printf "Where %s is published, its archives rebuilt in index format 2 hold them: building it again with crisprme.py build-index-only takes the dataset's " "$vcf_name"
+		if ! [ -e "${_vcfs[0]}" ]; then
+			printf 'VCFs (VCFs/%s), which this install does not hold.' "$vcf_name"
+		elif ! [ -d "$current_working_directory/$_g" ] || [ -d "$current_working_directory/$_g/.building" ]; then
+			printf 'enriched genome (%s), which this install does not hold, or else its VCFs (VCFs/%s), from which the whole dataset is enriched again first.' "$_g" "$vcf_name"
+		else
+			printf 'fake-indel genome (%s), which this install does not hold.' "$_from"
+		fi
+	}
+
 	# Stop, with one ERROR, before the search reads index $1 when it is in an index format
 	# this install does not search (_unreadable_bin), naming its format and what reads it
 	# (PostProcess/index_fit.py unreadable_format_error, the same words): this CRISPRme
@@ -865,9 +903,8 @@ while read vcf_f; do
 	# CRISPRitz 2.9.1 refuses an index of format 2, and 2.9.0 aborts on one. Of an index it
 	# searches that is in format 1 while the installed CRISPRitz writes format 2, say on
 	# stdout that it lacks the sites at contig ends and N runs that one rebuilt holds, and
-	# that it is built again once moved out of the way: build-index-only keeps an index it
-	# finds in place, and download installs the archives published until the rebuild, all
-	# of format 1. Called where the search takes an index, whether it found it or built it.
+	# how they are searched (_how_built_again). Called where the search takes an index,
+	# whether it found it or built it.
 	_check_index_format() {
 		local _f _v _bin _e _n
 		_f=$(_unreadable_bin "$1")
@@ -877,8 +914,8 @@ while read vcf_f; do
 			[ -n "$_bin" ] || return 0
 			_f=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
 			[ "${_f//[[:space:]]/}" != 435a49fe ] || return 0
-			printf "NOTE: %s is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks the sites whose guide lies within a few bases of a contig end or an N run, which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). To search them, move %s out of the way and build it again with crisprme.py build-index-only (which keeps an index it finds in place).\n" \
-				"$(basename "$1")" "$1"
+			printf "NOTE: %s is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks the sites whose guide lies within a few bases of a contig end or an N run, which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). %s\n" \
+				"$(basename "$1")" "$(_how_built_again "$1")"
 			return 0
 		fi
 		_v=${_f%%$'\t'*}

@@ -496,8 +496,9 @@ def _functions(*names):
 
 def _shell():
     """The search script's functions these tests run."""
-    return _functions("_engine_index_format", "_unreadable_bin", "_check_index_format",
-                      "_index_guide_len", "_index_side", "_index_fits_guide", "_resolve_index_dir")
+    return _functions("_engine_index_format", "_unreadable_bin", "_how_built_again",
+                      "_check_index_format", "_index_guide_len", "_index_side",
+                      "_index_fits_guide", "_resolve_index_dir")
 
 
 class _Index(_Engine):
@@ -626,6 +627,98 @@ class AFormat2IndexIsReadNotRefused(_Index):
             f"move {old} out of the way and build it again with crisprme.py build-index-only "
             "(which keeps an index it finds in place).\n"
             "went on\n"))
+
+
+class TheNoteMovesOnlyAnIndexThisInstallBuildsAgain(_Index):
+    """The note of an index of format 1 said, of a variant and an INDELS index as of a
+    reference one, to move it out of the way and build it again with build-index-only. On an
+    install of downloaded indexes, which holds no VCFs and no enriched genome (the README's
+    Quickstart), build-index-only refuses the dataset ("VCF folder ... not found") and the
+    index stays moved out of the way; with the VCFs alone it enriches the whole dataset again
+    first. The note now sends an index out of the way only where this install builds it again
+    from what it holds -- the genome folder, or the enriched genomes in place and the dataset's
+    VCFs -- and says elsewhere what building it again takes, and that the dataset's archives
+    rebuilt in format 2 hold those sites."""
+
+    PREFIX = ("NOTE: {} is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks the "
+              "sites whose guide lies within a few bases of a contig end or an N run, which an "
+              "index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). ")
+    ARCHIVES = ("Where ds is published, its archives rebuilt in index format 2 hold them: "
+                "building it again with crisprme.py build-index-only takes the dataset's ")
+
+    def setUp(self):
+        super().setUp()
+        self.engine(2)
+        self.work = os.path.join(self.tmp, "work")
+        self.ref = self.index("NGG_2_hg38", fmt=1)
+        self.var = self.index("NGG_2_hg38+ds", fmt=1)
+        self.indels = os.path.join(self.tmp, "lib", "NGG_2_hg38+ds_INDELS")
+        one_target_bin(os.path.join(self.indels, "NGG_2_fakechr1", "NGG_fakechr1_1.bin"), "NGG",
+                       fmt=1)
+
+    def install(self, *parts):
+        """The working directory of the search holds these of the dataset: "vcfs" (its VCFs),
+        "enriched" (its enriched genome), "unfinished" (that genome, marked unfinished by a
+        build-index-only run), "fake" (its fake-indel genome)."""
+        shutil.rmtree(self.work, ignore_errors=True)
+        os.makedirs(os.path.join(self.work, "VCFs"))
+        if "vcfs" in parts:
+            os.makedirs(os.path.join(self.work, "VCFs", "ds"))
+            open(os.path.join(self.work, "VCFs", "ds", "ds.chr1.vcf.gz"), "w").close()
+        for part, folder in (("enriched", "hg38+ds"), ("unfinished", "hg38+ds/.building"),
+                             ("fake", "hg38+ds_INDELS")):
+            if part in parts:
+                os.makedirs(os.path.join(self.work, "Genomes", folder), exist_ok=True)
+
+    def note(self, folder):
+        """The search script's note of index ``folder``, run as the search runs it, in the
+        working directory install() made: on stdout, and nothing on stderr."""
+        out = self.shell(f'ref_name=hg38\nvcf_name=ds\ncurrent_working_directory="{self.work}"\n'
+                         f'vcf_folder="{self.work}/VCFs/ds"\n_check_index_format "$1"', folder)
+        self.assertEqual((out.returncode, out.stderr), (0, ""))
+        prefix = self.PREFIX.format(os.path.basename(folder))
+        self.assertTrue(out.stdout.startswith(prefix) and out.stdout.endswith("\n"), out.stdout)
+        return out.stdout[len(prefix):-1]
+
+    def moved(self, folder, source=None):
+        return (f"To search them, move {folder} out of the way and build it again with crisprme.py "
+                f"build-index-only (which keeps an index it finds in place)"
+                + (f", from {source}." if source else "."))
+
+    def test_of_a_download_only_the_reference_index(self):
+        # (the README's Quickstart: download --what index, VCFs/ empty, no enriched genome)
+        self.install()
+        self.assertEqual(self.note(self.ref), self.moved(self.ref))
+        for folder in (self.var, self.indels):
+            self.assertEqual(self.note(folder),
+                             self.ARCHIVES + "VCFs (VCFs/ds), which this install does not hold.")
+
+    def test_with_the_vcfs_and_no_enriched_genome_the_whole_dataset_is_enriched_again(self):
+        for parts in (("vcfs",), ("vcfs", "fake"), ("vcfs", "enriched", "unfinished", "fake")):
+            with self.subTest(parts=parts):
+                self.install(*parts)
+                for folder in (self.var, self.indels):
+                    self.assertEqual(self.note(folder), self.ARCHIVES + (
+                        "enriched genome (Genomes/hg38+ds), which this install does not hold, or "
+                        "else its VCFs (VCFs/ds), from which the whole dataset is enriched again "
+                        "first."))
+                self.assertEqual(self.note(self.ref), self.moved(self.ref))
+
+    def test_from_the_enriched_genomes_in_place_with_the_vcfs(self):
+        self.install("vcfs", "enriched", "fake")
+        self.assertEqual(self.note(self.var), self.moved(self.var, "Genomes/hg38+ds"))
+        self.assertEqual(self.note(self.indels), self.moved(self.indels, "Genomes/hg38+ds_INDELS"))
+        # the INDELS index is built from the fake-indel genome, which build-index-only makes
+        # only as it enriches the dataset: with the enriched genome in place, it does not
+        self.install("vcfs", "enriched")
+        self.assertEqual(self.note(self.var), self.moved(self.var, "Genomes/hg38+ds"))
+        self.assertEqual(self.note(self.indels), self.ARCHIVES + (
+            "fake-indel genome (Genomes/hg38+ds_INDELS), which this install does not hold."))
+        # and build-index-only takes the dataset's VCFs, whatever is in place
+        self.install("enriched", "fake")
+        for folder in (self.var, self.indels):
+            self.assertEqual(self.note(folder),
+                             self.ARCHIVES + "VCFs (VCFs/ds), which this install does not hold.")
 
 
 def _load_crisprme():
@@ -1030,8 +1123,10 @@ class AFormat1IndexIsBuiltAgain(atomic._Fixture):
     build-index-only, or to download it again, and neither gave format 2: build-index-only
     keeps an index it finds in place ('already present'), and download fetches the archives
     published until the rebuild, all of format 1. Each note now names its index, to be moved
-    out of the way first; that done, build-index-only builds the three in format 2, and the
-    next search notes none."""
+    out of the way first, where this install builds it again; that done, build-index-only
+    builds the three in format 2, and the next search notes none. An install of downloaded
+    indexes holds no VCFs and no enriched genome, from which build-index-only builds the
+    variant and INDELS indexes: their notes say so, and send neither out of the way."""
 
     @classmethod
     def setUpClass(cls):
@@ -1048,15 +1143,27 @@ class AFormat1IndexIsBuiltAgain(atomic._Fixture):
     def formats(self, name):
         return {index_fit.bin_format(os.path.join(self.lib(name), b)) for b in self.bins(name)}
 
-    def test_moved_out_of_the_way_as_its_note_says_it_is_built_in_format_2(self):
-        names = (atomic.REF, atomic.VAR, atomic.INDELS)
+    def format1_install(self):
+        """The three indexes as CRISPRme 2.8.1 built them, with CRISPRitz 2.9.1 (index format
+        1), which CRISPRitz 2.10.0 then replaces."""
         rc, out, err = self.run_bio()  # by the stub of CRISPRitz 2.9.1: index format 1
         self.assertEqual((rc, err), (0, ""))
-        self.assertEqual([self.formats(n) for n in names], [{1}] * 3)
-        path = os.path.join(self.bin, "crispritz.py")  # then CRISPRitz 2.10.0 is installed
+        self.assertEqual([self.formats(n) for n in (atomic.REF, atomic.VAR, atomic.INDELS)],
+                         [{1}] * 3)
+        path = os.path.join(self.bin, "crispritz.py")
         with open(path, "w") as fh:
             fh.write(STUB_2_10.replace("#!PYTHON", "#!" + sys.executable, 1))
         os.chmod(path, 0o755)
+
+    def move(self, *names):
+        """Each index ``names`` names, moved out of the way, as its note says."""
+        os.makedirs(os.path.join(self.root, "format1"), exist_ok=True)
+        for name in names:
+            os.rename(self.lib(name), os.path.join(self.root, "format1", name))
+
+    def test_moved_out_of_the_way_as_its_note_says_it_is_built_in_format_2(self):
+        names = (atomic.REF, atomic.VAR, atomic.INDELS)
+        self.format1_install()
         notes = self.notes()
         self.assertEqual(len(notes), 3, notes)
         # build-index-only keeps each where it is, in format 1
@@ -1065,19 +1172,60 @@ class AFormat1IndexIsBuiltAgain(atomic._Fixture):
         for kept in ("Reference index", "Variant index", "Indels index"):
             self.assertIn(f"{kept} already present", out)
         self.assertEqual([self.formats(n) for n in names], [{1}] * 3)
-        # so each note names its index, to be moved out of the way first
+        # so each note names its index, to be moved out of the way first, and what it is
+        # built again from: the variant and INDELS indexes, the enriched genomes in place
         moved = [re.search(r"\. To search them, move (.+) out of the way and build it again with "
-                           r"crisprme\.py build-index-only ", note) for note in notes]
+                           r"crisprme\.py build-index-only \(which keeps an index it finds in "
+                           r"place\)(, from Genomes/hg38\+ds(_INDELS)?)?\.\Z", note)
+                 for note in notes]
         self.assertTrue(all(moved), notes)
-        self.assertEqual(sorted(os.path.realpath(m.group(1)) for m in moved),
-                         sorted(os.path.realpath(self.lib(n)) for n in names))
-        os.makedirs(os.path.join(self.root, "format1"))
-        for m in moved:
-            os.rename(m.group(1), os.path.join(self.root, "format1", os.path.basename(m.group(1))))
+        self.assertEqual(sorted((os.path.realpath(m.group(1)), m.group(2) or "") for m in moved),
+                         sorted((os.path.realpath(self.lib(n)), source) for n, source in (
+                             (atomic.REF, ""), (atomic.VAR, ", from Genomes/hg38+ds"),
+                             (atomic.INDELS, ", from Genomes/hg38+ds_INDELS"))))
+        self.move(*(os.path.basename(m.group(1)) for m in moved))
         rc, out, err = self.run_bio()
         self.assertEqual((rc, err), (0, ""))
         self.assertEqual([self.formats(n) for n in names], [{2}] * 3)
         self.assertEqual(self.notes(), [])
+
+    def test_of_a_download_only_the_reference_index_is_moved_out_of_the_way(self):
+        """The README's Quickstart installs the indexes and the dictionaries (download --what
+        index), and no VCFs and no enriched genome: build-index-only then refuses the dataset,
+        and a variant index the note had sent out of the way stayed there."""
+        self.format1_install()
+        vcfs = os.path.join(self.root, "VCFs.ds")
+        shutil.move(self.path("VCFs", "ds"), vcfs)
+        for genome in ("hg38+ds", "hg38+ds_INDELS"):
+            shutil.rmtree(self.path("Genomes", genome))
+        notes = self.notes()
+        prefix = ("NOTE: {} is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks "
+                  "the sites whose guide lies within a few bases of a contig end or an N run, "
+                  "which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). ")
+        archives = ("Where ds is published, its archives rebuilt in index format 2 hold them: "
+                    "building it again with crisprme.py build-index-only takes the dataset's ")
+        self.assertEqual(notes, [
+            prefix.format(atomic.REF) + f"To search them, move {self.lib(atomic.REF)} out of the "
+            "way and build it again with crisprme.py build-index-only (which keeps an index it "
+            "finds in place).",
+            prefix.format(atomic.VAR) + archives + "VCFs (VCFs/ds), which this install does not "
+            "hold.",
+            prefix.format(atomic.INDELS) + archives + "VCFs (VCFs/ds), which this install does "
+            "not hold."])
+        # the reference index, moved out of the way, is built in format 2
+        self.move(atomic.REF)
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual([self.formats(n) for n in (atomic.REF, atomic.VAR, atomic.INDELS)],
+                         [{2}, {1}, {1}])
+        self.assertEqual(self.notes(), notes[1:])
+        # with the VCFs back and no enriched genome, building them again enriches the whole
+        # dataset again: the notes say so, and send neither out of the way
+        shutil.move(vcfs, self.path("VCFs", "ds"))
+        self.assertEqual(self.notes(), [
+            prefix.format(name) + archives + "enriched genome (Genomes/hg38+ds), which this "
+            "install does not hold, or else its VCFs (VCFs/ds), from which the whole dataset is "
+            "enriched again first." for name in (atomic.VAR, atomic.INDELS)])
 
 
 class AnArchiveSaysItsFormat(_Index):
