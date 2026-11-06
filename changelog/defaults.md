@@ -379,3 +379,16 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
 - **The Docker image is built on a pinned base.** `FROM mambaorg/micromamba` took whatever image
   was latest the day of the build (C20); the Dockerfile names the tag and the digest of the one
   2.8.1's image was built on (micromamba 2.10.0, Debian 13).
+- **A search refused for want of a reference index under `--index-path` names an all-`N` index
+  there that records no side, and how to use it.** Such an index of a width but 3 and 8 is not
+  taken for a 3′ PAM (a search before 2.8.1 built one of any width from a 5′ PAM file), and
+  `build-index-only` records no side over it, so one really built for a 3′ PAM could only be
+  rebuilt (R6B RV1-6); without `--prune-pam` the refusal did not name it at all. It names it
+  either way, and says that a name of the 2.9.0 form records the side: `mv
+  .../NNNN_3_hg38 .../20-NNNN_3_hg38`, for the guide length its trees were built for, after
+  which the search takes it.
+- **complete-search stops at once when no temporary folder can be written.** With none
+  (`docker run --read-only` without `--tmpfs /tmp`), a search ended with exit 0, CRISPR-Bulge
+  scores of -1, no report zip and a WARNING in its error log alone (final confirmation of
+  2.8.1; TROUBLESHOOTING §1 said so). It says, before it makes anything, which folders it
+  tried, and to set `CRISPRME_TMPDIR` to a writable one or give the container a `/tmp`.

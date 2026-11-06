@@ -786,6 +786,31 @@ class TheSearchScriptTakesTheNewName(tir._ShippedScript):
         self.assertNotIn("records no side", run.stderr)
         self.assertNotIn("record that by running", run.stderr)
 
+    def test_an_unrecorded_pam_less_index_is_named_and_how_to_use_it(self):
+        # an all-N index of a width but 3 and 8, with no .pam_build, really built for a 3'
+        # PAM, under --index-path: a search without --prune-pam named it not at all, and
+        # with it said only that it is not taken for a 3' PAM; build-index-only records no
+        # side over it, so it could only be rebuilt (R6B RV1-6). Its name can say the side
+        shutil.rmtree(self.library)
+        _lib(self.home, "NNNN_3_hg38")
+        with open(self.library / "NNNN_3_hg38" / "chr1.bin", "wb") as fh:  # (its header)
+            fh.write((7).to_bytes(4, sys.byteorder) + (20).to_bytes(4, sys.byteorder))
+        for prune in (0, 1):
+            with self.subTest(prune=prune):
+                run = self.run_pipeline(pam="20bp-NGG-SpCas9", prune=prune, variant=False,
+                                        index_path=self.library)
+                self.assertEqual(run.searched(variant=False), None)
+                self.assertIn("NNNN_3_hg38 is a PAM-less index that records no side of the "
+                              "guide in a .pam_build", run.stderr)
+                self.assertIn(f"if it was built from a 3' PAM file, name it so: mv "
+                              f"'{self.library / 'NNNN_3_hg38'}' "
+                              f"'{self.library / '20-NNNN_3_hg38'}', which records that, for a "
+                              f"guide of 20 nt", run.stderr)
+        # as it says: the search takes it, pruned by itself
+        (self.library / "NNNN_3_hg38").rename(self.library / "20-NNNN_3_hg38")
+        run = self.run_pipeline(pam="20bp-NGG-SpCas9", variant=False, index_path=self.library)
+        self.assertEqual(run.searched(variant=False), ("20-NNNN_3_hg38", True))
+
     def params(self):
         return (self.root / f"run{self.runs}" / "out" / ".indexes_searched.txt").read_text()
 
@@ -974,6 +999,33 @@ class TheSourceEnvironmentHasWhatTheImageHas(unittest.TestCase):
         for package in packages:
             with self.subTest(package=package):
                 self.assertIn(package, listed)
+
+
+class ASearchWithNoTemporaryFolderIsRefused(unittest.TestCase):
+    """A search with no temporary folder it can write (docker run --read-only without
+    --tmpfs /tmp) ended with exit 0, CRISPR-Bulge scores of -1, no report and a WARNING in
+    its error log alone (final confirmation of 2.8.1): complete-search stops first."""
+
+    def test_refused_naming_the_folders_and_the_fix(self):
+        import test_bulge_cap as tbc
+        cm = tbc.crisprme
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err), self.assertRaises(SystemExit) as stop:
+            cm._refuse_no_temp_folder(["/nonexistent/tmp", "/nonexistent/var/tmp"])
+        self.assertEqual(stop.exception.code, 1)
+        self.assertEqual(err.getvalue(), (
+            "Error: No temporary folder can be written here (/nonexistent/tmp, "
+            "/nonexistent/var/tmp): the CRISPR-Bulge scorer and the report write their "
+            "temporary files there, and without one a search reports no CRISPR-Bulge score "
+            "and writes no report. Set CRISPRME_TMPDIR to a writable folder (e.g. one on the "
+            "data volume, -e CRISPRME_TMPDIR=/DATA/crisprme_tmp), or give the container a "
+            "/tmp (docker run --tmpfs /tmp)\n"))
+        # one that can be written: nothing said, nothing left in it
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.assertIsNone(cm._refuse_no_temp_folder(["/nonexistent/tmp", tmp]))
+        self.assertEqual(os.listdir(tmp), [])
+        self.assertIn("_refuse_no_temp_folder()", (_REPO / "crisprme.py").read_text())
 
 
 class TheImageIsBuiltOnAPinnedBase(unittest.TestCase):

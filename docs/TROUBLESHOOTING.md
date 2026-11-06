@@ -52,8 +52,9 @@ sends it). A `MPLCONFIGDIR`, `XDG_CACHE_HOME` or `HF_HOME` you set is used as it
 
 `docker run --read-only` makes `/tmp` read-only as well, so it needs a writable temporary folder:
 add `--tmpfs /tmp`, or set `CRISPRME_TMPDIR` to a folder of the mounted data folder. Without one,
-a search still ends, but the CRISPR-Bulge scorer and the report have nowhere to write: CRISPR-Bulge
-scores read -1, no report zip is written, and only a WARNING in the search's error log says so.
+the CRISPR-Bulge scorer and the report have nowhere to write, and complete-search stops before
+it starts, saying so (until 2.9.0 the search ended with CRISPR-Bulge scores of -1, no report zip,
+and only a WARNING in its error log).
 
 ---
 

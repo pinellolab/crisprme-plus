@@ -1124,12 +1124,14 @@ while read vcf_f; do
 	# Say on stderr why index $1 cannot serve this search, when it was built for the other
 	# side of the guide.
 	_say_other_side() {
-		local _have _want=3 _why="as its .pam_build records" _n _p _ip_pam _ip_n _ip_rest _ip_guide _ip_side
+		local _have _want=3 _why="as its .pam_build records" _n _p _g _ip_pam _ip_n _ip_rest _ip_guide _ip_side
+		local _ip_pam_and_rest
 		_have=$(_index_side "$1") \
 			|| _why="it records no side in a .pam_build, and an index that does not is taken for a 3' build"
 		[ "${pos:-1}" -gt 0 ] || _want=5
 		_index_name_parts "${1##*/}"
 		_p=$_ip_pam
+		_ip_pam_and_rest=${_ip_pam}_${_ip_n}_${_ip_rest}
 		# (a name that says its side records it: _index_side)
 		[ -z "$_ip_side" ] || _why="as its name says"
 		if [ "$_have" = "$_want" ]; then
@@ -1139,6 +1141,11 @@ while read vcf_f; do
 			case "${#_p}" in 3 | 8) return 0 ;; esac
 			printf "       %s is a PAM-less index that records no side of the guide in a .pam_build, and a search before 2.8.1 built one of that width from a 5' PAM file as well as from a 3' one, so it is not taken for a 3' PAM\n" \
 				"$(basename "$1")" >&2
+			# a name that says the side records it (since 2.9.0): the way to use one built
+			# for a 3' PAM, which build-index-only does not record over it (RV1-6)
+			_g=$(_index_guide_len "$1")
+			printf "       if it was built from a 3' PAM file, name it so: mv '%s' '%s', which records that, for a guide of %s nt\n" \
+				"$1" "$(dirname "$1")/${_g:-<guide length>}-$_ip_pam_and_rest" "${_g:-the length it was built for}" >&2
 			return 0
 		fi
 		if [ -z "${_p//N/}" ]; then
@@ -1608,7 +1615,13 @@ while read vcf_f; do
 		# rebuilding (extra compute) -- point the user at the one-download fix.
 		for _l in "${_dead_locks[@]}"; do printf '%s\n' "$_l" >&2; done
 		printf "ERROR: no matching reference index under --index-path '%s'\n" "$ref_lib" >&2
-		_other=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax" any)
+		# (one a search would prune by itself counts, as without --prune-pam a search prunes
+		# where the engine can: a wider all-N index of no recorded side was not named)
+		if _engine_prunes; then
+			_other=$(prune_pam=1; _resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax" any)
+		else
+			_other=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax" any)
+		fi
 		if [ -n "$_other" ]; then
 			_say_other_side "$_other"
 			_n=${_other##*/}; _n=${_n#*_}; _n=${_n%%_*}

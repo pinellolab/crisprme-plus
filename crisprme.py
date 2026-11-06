@@ -1281,6 +1281,34 @@ def _rm_files(fnames: List[str]) -> None:
                 error("Failed removing file")
 
 
+def _refuse_no_temp_folder(candidates: "Optional[List[str]]" = None) -> None:
+    """Stops complete-search before anything is made when no temporary folder can be
+    written: the CRISPR-Bulge scorer and the report make theirs in $TMPDIR (which
+    $CRISPRME_TMPDIR sets: _configure_tmpdir), else /tmp, /var/tmp or /usr/tmp, from stages
+    whose own folder may be read-only. A search with none (docker run --read-only without
+    --tmpfs /tmp) ended with exit 0, CRISPR-Bulge scores of -1, no report zip, and a WARNING
+    in its error log alone (final confirmation of 2.8.1). ``candidates``: the folders to
+    try, those by default (tempfile's list, but the current folder)."""
+    import tempfile
+
+    if candidates is None:
+        candidates = [d for d in tempfile._candidate_tempdir_list() if d != os.getcwd()]
+    for folder in candidates:
+        try:
+            with tempfile.NamedTemporaryFile(dir=folder, prefix=".crisprme_tmpcheck_"):
+                return
+        except OSError:
+            continue
+    error(
+        f"No temporary folder can be written here ({', '.join(candidates)}): the "
+        f"CRISPR-Bulge scorer and the report write their temporary files there, and "
+        f"without one a search reports no CRISPR-Bulge score and writes no report. Set "
+        f"CRISPRME_TMPDIR to a writable folder (e.g. one on the data volume, -e "
+        f"CRISPRME_TMPDIR=/DATA/crisprme_tmp), or give the container a /tmp (docker run "
+        f"--tmpfs /tmp)"
+    )
+
+
 def _writable_tmp_base() -> "Optional[str]":
     """Pick a roomy, writable base dir for annotation intermediates so a small or
     full ``/tmp`` (common in HPC/containers) does not break annotation prep (#138).
@@ -2758,6 +2786,7 @@ def complete_search() -> None:
     merge_t = _check_merge(args, "--merge" in args)  # merge threshold
     sorting_criteria_scoring = _check_sorting_criteria_scoring(args, "--sorting-criteria-scoring" in args)  # sorting criteria score columns
     sorting_criteria = _check_sorting_criteria(args, "--sorting-criteria" in args)  # sorting criteria (mm+bulges) columns
+    _refuse_no_temp_folder()  # (before the output folder is made)
     outputfolder = _check_output(args)  # output folder
     # (given no --samplesID, the samples lists of its datasets: their listing goes in the
     # output folder only once the pre-flight has passed, as a refusal leaves it empty)
