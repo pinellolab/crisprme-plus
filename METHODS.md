@@ -304,7 +304,13 @@ an older index falls back to genotype-store presence. The shipped indexes are
 `HGDP1kGP` = **genotyped-phased** (the re-phased default, above), `HPRC` =
 **genotyped-phased**, and `mega` = **sites-only**;
 `hybrid` is the fourth possible value, for a merged panel mixing phased and unphased
-sources.
+sources. A registry compiled from a genotyped panel's dictionaries also lists, in its
+manifest (`four_base_positions`), the positions whose reference base and SNP ALTs hold all
+four bases, an ALT that no sample carries counted: CRISPRitz 2.10.0 codes such a position Q,
+any base, and codes an ALT that no sample carries as any other, but the registry holds no
+record of such an ALT (it has no group). The SNP post-analysis reads a Q column's ALTs only at
+such a position (a Q at a bulge boundary can be a neighbouring position's), so on an index
+with the tiers alone it takes the position from this list.
 
 ### Re-indexing for a different PAM
 

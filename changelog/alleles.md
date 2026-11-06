@@ -2,15 +2,19 @@
 
 **For whoever merges.** These entries describe CRISPRme's side of CRISPRitz 2.10.0's every-allele
 enrichment and its fifth symbol Q; the engine's own entries (every ALT of a split site coded, Q
-written at a position of four alleles, the records of one REF>ALT merged in the dictionary) are
-the engine track's. They were checked through the real CLI with CRISPRitz 2.9.1, with the
-every-allele enricher before Q (`feat/multiallelic-enrich` d75c603) and with 2.10.0's
-(`feat/2.10.0` 25ee50c) beside 2.9.1's `buildTST` and `searchTST`; a search of an index holding Q
-needs CRISPRme to read index format 2, which 2.10.0 writes (the format track's): with that
-track's commit merged in, MULTIALLELIC section 6.6's kit, coded with a Q, passed on 2.10.0's
-engine. CRISPRitz still gives the first ID of a VCF line listing several ALTs to each of its
-ALTs (`enricher.py`, `enricher.cpp`): no CRISPRme reader can recover the others from the
-dictionary.
+written at a position of four alleles, the records of one REF>ALT merged in the dictionary) are the
+engine track's. They were checked through the real CLI with CRISPRitz 2.9.1, with the every-allele
+enricher before Q (`feat/multiallelic-enrich` d75c603) and with 2.10.0's (`feat/2.10.0` 25ee50c)
+beside 2.9.1's `buildTST` and `searchTST`; a search of an index holding Q needs CRISPRme to read
+index format 2, which 2.10.0 writes (the format track's): with that track's 087fe9b and fa6dbb7
+merged in, on 2.10.0's engine (25ee50c's `add-variants`, `buildTST` and `searchTST`), MULTIALLELIC
+section 6.6's kit passed, the review's synthetic set gave the same tables on the tiers alone as on
+tiers and dictionary, and so did an HPRC kit at a position of four bases, one of which nobody
+carries (under Added). CRISPRitz 2.10.0 still gives each ALT of a VCF line listing several ALTs the
+line's first ID (`enricher.py` and `enricher.cpp`, in the dictionary and the indel log), which no
+CRISPRme reader can undo: the known limit under Changed, METHODS section 8 and the validator's
+warning say so. If the engine track gives each ALT its own ID where the ID column lists one per
+ALT, drop those three.
 
 ### Added
 
@@ -27,9 +31,19 @@ dictionary.
   (`twopass_find`), the cluster sort and the guide extraction from a sequence take it. A Q
   stands for every base, so it cannot say which position it codes: at a bulge boundary, where
   the target's column can be read against a neighbouring position (#139), a Q column admits that
-  position's ALTs only where they and its reference base hold all four bases. Covered by
-  `PostProcess/test_site_alleles.py`, with the real `new_simple_analysis.py` on tiers and
-  dictionaries the repository's own compilers build.
+  position's ALTs only where they and its reference base hold all four bases, an ALT that no
+  sample carries counted, as CRISPRitz codes it. The dictionary lists such an ALT; the Tier-0
+  registry holds no record of it, and lists the positions of four bases in its manifest
+  (`four_base_positions`), so that the tiers alone, the layout of every published index, read
+  such a position as the dictionary does. Checked through the real CLI on an HPRC kit (hg38
+  chr22:1-17,950,000 and the normalised HPRC records up to 17,949,000; TAGGGAAGTTAGGGAGGTTA, NRG,
+  4 mismatches + 1 DNA + 1 RNA bulge, per sample): of its 17 positions of four bases,
+  chr22:17,877,081 holds T>A (8 copies), T>C (none) and T>G (46). On the tiers alone no row named
+  it, and the table held 432,738 rows against the dictionary's 439,108; it is now the
+  dictionary's, byte for byte, T>A on 648 rows (8 carriers) and T>G on 6,220 (44). Each of the
+  search's 8,129 Q columns, 8,108 of them in an alignment with a bulge, is read against a position
+  of four bases. Covered by `PostProcess/test_site_alleles.py`, with the real
+  `new_simple_analysis.py` on tiers and dictionaries the repository's own compilers build.
 
 ### Changed
 
@@ -49,10 +63,25 @@ dictionary.
   enricher stopped making in CRISPRitz 2.9.1; it now warns on any line of two or more ALTs, in
   the full scan and in the first 1,000 records of each VCF on every run. A position's split records
   (`bcftools norm -m -any`, one ALT each, the published panels' form) no longer warn as dropped
-  duplicates; two records of one REF>ALT warn that their carriers are merged. `gnomAD-converter
-  --multiallelic` says, in its help and on stdout, that it joins a position's SNPs and indels into
-  one line with genotypes such as `1|2`, and how CRISPRme reads them. Covered by
-  `PostProcess/test_validate_inputs.py`.
+  duplicates; two records of one REF>ALT warn that their carriers are merged; a line of several
+  ALTs warns that each of them is given the line's first ID (see the known limit below).
+  `gnomAD-converter --multiallelic` says, in its help, on stdout and in the README, what it
+  writes: a position's SNP records joined into one line and its indel records into another
+  (`bcftools norm -m+`), with the converter's genotypes, which are unphased (`1/2`), and how
+  CRISPRme reads them. Covered by `PostProcess/test_validate_inputs.py`.
+- **A known limit, stated with its scale: each ALT of a VCF line that lists several ALTs is given
+  the line's first ID.** CRISPRitz `add-variants` (2.10.0, as 2.9.1) writes a line's first ID for
+  each of its ALTs, in the per-sample dictionary and in the indel log, so where the ID column
+  lists one ID per ALT (`rs1;rs2`, as `bcftools norm -m+` and `gnomAD-converter --multiallelic`
+  join them) the rows of the second and later ALTs give the first's (`rs1`) as their
+  `Variant_rsID`, with the tiers, with the dictionary or both; no reader of the dictionary can
+  recover the others. The published panels are split (`bcftools norm -m -any`: each record keeps
+  the line's whole ID column, which CRISPRme gives its ALT as one item, `rs1;rs2`), and the
+  sites-only (mega) registry builder reads one ID per ALT. Such lines come from a user's VCF, HF's
+  raw HPRC `vcfwave` VCFs (33,993 on chr22, whose IDs are graph IDs, not rsIDs), the 2019 HGDP
+  data `complete-test` uses, and `gnomAD-converter --multiallelic`. METHODS section 8 and the input
+  validator's warning on such a line say so. Checked through the real CLI with CRISPRitz 2.10.0: a
+  line `rsB1;rsB2` A>G,C gives the rows of C `rsB1`.
 
 ### Fixed
 
@@ -72,7 +101,8 @@ dictionary.
   genotypes read so (`1|0` and `0|1` for a `1|2`), and a store of an earlier release is read the
   same way. The sites-only (mega) registry builder and its indel AF companion read such a line one
   ALT at a time, each with its own AF and, where the ID column lists one per ALT, its own ID; they
-  skipped it whole. A position of split or biallelic records reads as before. These lines come
+  skipped it whole (the dictionary gives each ALT the line's first ID: see the known limit under
+  Changed). A position of split or biallelic records reads as before. These lines come
   from HF's raw HPRC `vcfwave` VCFs (33,993 on chr22), the 2019 HGDP data `complete-test` uses, and
   `gnomAD-converter --multiallelic`. Covered by `PostProcess/test_site_alleles.py` and
   `PostProcess/test_build_mega_registry.py`.
