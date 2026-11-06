@@ -27,6 +27,13 @@ from .pages_utils import (
     get_available_PAM,
     get_available_CAS,
     index_max_bulges,
+    index_serves_pam,
+    pam_geometry,
+    pamless_index_geometry,
+    pamless_pam_problem,
+    pamless_presets,
+    write_pamless_pam_file,
+    ENZYME_TABLE,
     pam_motif,
     reference_bulge_capacity,
     read_enabled_annotations,
@@ -53,6 +60,7 @@ from .pages_utils import (
 )
 # the URL fragment a reused job's status page is opened with (the page says so)
 from .load_page import REUSED_HASH
+import index_fit  # noqa: E402  (PostProcess/, on sys.path through pages_utils)
 # the one plain address a notification goes to (the standard library only)
 from .send_mail import plain_address
 from app import (
@@ -2806,28 +2814,28 @@ def _bulges_offered(genome: Optional[str], pam: Optional[str], variant_choice) -
 
 def _index_installed(genome: str, pam: str, panel: Optional[str] = None) -> bool:
     """Whether genome_library holds an index of the genome (+ variant panel) that
-    index_max_bulges counts for this PAM, a 0-bulge one included: index_max_bulges
-    reports 0 for that and for none alike. A search that finds none builds one."""
+    index_max_bulges counts for this PAM (index_serves_pam), a 0-bulge one included:
+    index_max_bulges reports 0 for that and for none alike. A search that finds none
+    builds one."""
     motif = pam_motif(pam)
     if not motif or not genome:
         return False
     genome = genome.replace(" ", "_")
     lib = os.path.join(current_working_directory, "genome_library")
-    want = f"{genome}_{panel}" if panel else ""
+    want = f"{genome}+{genome}_{panel}" if panel else genome
+    _len, _pos = pam_geometry(pam)
+    three_prime = not (_pos is not None and _pos < 0)
     try:
         names = os.listdir(lib)
     except OSError:
         return False
     for d in names:
-        base, _, enriched = d.partition("+")
-        if enriched != want or d.endswith("_INDELS") or not base.endswith(f"_{genome}"):
+        parsed = index_fit.parse_index_name(d)  # either form of the name
+        if not parsed or parsed[2] != want or d.endswith("_INDELS"):
             continue
-        pam_name, sep, n_str = base[: -len(genome) - 1].partition("_")
-        if not sep or not n_str.isdigit():
-            continue
-        if pam_name == motif or (set(pam_name) == {"N"} and len(pam_name) == len(motif)):
-            if os.path.isdir(os.path.join(lib, d)):
-                return True
+        if os.path.isdir(os.path.join(lib, d)) and index_serves_pam(
+                os.path.join(lib, d), motif, three_prime):
+            return True
     return False
 
 
@@ -3026,6 +3034,93 @@ def update_pam_options(genome, variant_choice, current_pam):
     return options, value
 
 
+@app.callback(
+    [
+        Output("pamless-picker", "style"),
+        Output("pamless-picker-note", "children"),
+        Output("pamless-preset", "options"),
+    ],
+    [Input("available-genome", "value"), Input("variant-dataset", "value")],
+)
+def update_pamless_picker(genome, variant_choice):
+    """Show the PAM picker of a PAM-less index when one is installed for the genome (for a
+    variant search, the dataset) selected, with what it serves, and its enzyme presets:
+    those it cannot serve are disabled, with the reason (pamless_presets). Hidden otherwise:
+    the PAM list above is then all there is."""
+    hidden = {"display": "none", "width": "300px"}
+    geometry = pamless_index_geometry(genome, variant_choice)
+    if not geometry:
+        return hidden, "", []
+    side = f"{geometry['side']}'"
+    note = (f"{geometry['name']} is a PAM-less index: it serves any {side} PAM of a "
+            f"{geometry['guide_len']}-nt guide up to {geometry['k']} nt"
+            + (" (as long as its flank, for a 5' PAM)" if geometry["side"] == 5 else "")
+            + ", pruned to it by the search (slower than an index of that PAM). Pick one by "
+            "enzyme, or type it, then Use this PAM.")
+    return {"display": "block", "width": "300px"}, note, pamless_presets(geometry)
+
+
+@app.callback(
+    Output("pamless-custom-pam-feedback", "children"),
+    [Input("pamless-custom-pam", "value")],
+    [State("available-genome", "value"), State("variant-dataset", "value")],
+    prevent_initial_call=True,
+)
+def validate_pamless_custom_pam(custom_pam, genome, variant_choice):
+    """When the typed-PAM field is left (debounce): whether the PAM-less index serves it
+    (pamless_pam_problem), or why not."""
+    geometry = pamless_index_geometry(genome, variant_choice)
+    if not custom_pam or not geometry:
+        return ""
+    why = pamless_pam_problem(custom_pam, geometry)
+    if why:
+        return html.Span(f"Not on this index: {why}.", style={"color": "#c33"})
+    return html.Span(f"{custom_pam.strip().upper()}: served by {geometry['name']}.",
+                     style={"color": "#2a6"})
+
+
+@app.callback(
+    [
+        Output("available-pam", "options", allow_duplicate=True),
+        Output("available-pam", "value", allow_duplicate=True),
+        Output("pamless-custom-pam-feedback", "children", allow_duplicate=True),
+    ],
+    [Input("pamless-use", "n_clicks")],
+    [
+        State("pamless-preset", "value"),
+        State("pamless-custom-pam", "value"),
+        State("available-genome", "value"),
+        State("variant-dataset", "value"),
+    ],
+    prevent_initial_call=True,
+)
+def use_pamless_pam(n_clicks, preset, custom_pam, genome, variant_choice):
+    """Use this PAM: writes the PAM file of the PAM typed (else of the preset picked) for
+    the PAM-less index's guide length and side into PAMs/ (write_pamless_pam_file, unless
+    one of that name is there), and selects it in the PAM list, where the search takes it
+    as any other. Only a PAM the index serves (pamless_pam_problem) and an enzyme of the
+    table are written: what the request names otherwise runs nothing."""
+    geometry = pamless_index_geometry(genome, variant_choice)
+    if not n_clicks or not geometry:
+        raise PreventUpdate
+    enzyme = "Custom"
+    pam = (custom_pam or "").strip().upper()
+    if not pam and preset:
+        known = {f"{e['enzyme']}:{e['pam']}": e for e in ENZYME_TABLE}
+        entry = known.get(preset)
+        if entry is None or pamless_pam_problem(entry["pam"], geometry, entry["guide_len"],
+                                                entry["side"]):
+            raise PreventUpdate
+        enzyme, pam = entry["enzyme"], entry["pam"]
+    why = pamless_pam_problem(pam, geometry)
+    if why:
+        return (no_update, no_update,
+                html.Span(f"Not on this index: {why}.", style={"color": "#c33"}))
+    name = write_pamless_pam_file(pam, geometry, enzyme)
+    return (get_pam_options(genome, variant_choice), name,
+            html.Span(f"{pam} added to the PAM list and selected.", style={"color": "#2a6"}))
+
+
 def _default_genome() -> Optional[str]:
     """Sensible default genome: hg38 if installed, else the first available."""
     gs = [g["value"] for g in get_available_genomes()]
@@ -3194,6 +3289,29 @@ def index_page() -> html.Div:
                     id="available-pam",
                     style={"width": "300px"},
                 )
+            ),
+            # The PAM picker of a PAM-less index (update_pamless_picker): shown when one is
+            # installed for the genome or the dataset selected. It offers the PAMs that
+            # index serves (by enzyme, or typed, checked when the field is left), and
+            # "Use this PAM" adds the chosen one's PAM file to the list above and selects
+            # it (docs/DYNAMIC_PAM_INDEX_COMPAT.md §8).
+            html.Div(
+                [
+                    html.Div(id="pamless-picker-note",
+                             style={"fontSize": "1.3rem", "marginTop": "6px"}),
+                    dcc.Dropdown(id="pamless-preset", options=[], clearable=True,
+                                 placeholder="A PAM this index serves",
+                                 style={"width": "300px", "marginTop": "4px"}),
+                    dcc.Input(id="pamless-custom-pam", type="text", debounce=True,
+                              placeholder="or type one (IUPAC), e.g. NGN",
+                              style={"width": "300px", "marginTop": "4px"}),
+                    html.Div(id="pamless-custom-pam-feedback",
+                             style={"fontSize": "1.3rem"}),
+                    html.Button("Use this PAM", id="pamless-use", n_clicks=0,
+                                style={"marginTop": "4px"}),
+                ],
+                id="pamless-picker",
+                style={"display": "none", "width": "300px"},
             ),
         ],
     )

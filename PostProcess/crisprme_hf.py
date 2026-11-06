@@ -47,6 +47,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import safe_tar  # (PostProcess/: each archive is unpacked with safe modes, owned by this user)
+import index_fit  # (PostProcess/: the two forms of an index's name)
 
 # Default HuggingFace dataset repo. Overridable per-invocation with --hf-repo or
 # the CRISPRME_HF_REPO environment variable (e.g. switch to a pinellolab org
@@ -243,7 +244,8 @@ def index_flank_width(index_name: str) -> Optional[int]:
     """
     if not index_name:
         return None
-    pam = canonical_index_name(index_name).split("_", 1)[0]
+    # (the PAM of either form of the name: index_fit.parse_index_name)
+    pam = index_fit.index_pam(canonical_index_name(index_name))
     if pam and set(pam) == {"N"}:
         return len(pam)
     return None
@@ -2271,6 +2273,12 @@ def publish_index(
             parts[1],
             parts[2],
         )
+    # A name of the 2.9.0 form says the guide length and the side of the PAM too
+    # (index_fit.parse_index_name): the manifest records them, and the PAM itself.
+    _named = index_fit.parse_index_name(index_name)
+    if _named and _named[3]:
+        manifest["pam"], manifest["guide_len"] = _named[0], _named[3]
+        manifest["pam_side"] = "3prime" if _named[4] == 3 else "5prime"
     # optional human-friendly name: explicit arg wins, else a .display_label sidecar
     # written at build time; travels in the manifest so download can restore it.
     if not display_name:

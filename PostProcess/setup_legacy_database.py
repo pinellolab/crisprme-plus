@@ -87,10 +87,11 @@ VCF_HGDP_URL_TEMPLATE: str = (
     "/production/hgdp/hgdp_wgs.20190516/hgdp_wgs.20190516.full.{chrom}.vcf.gz"
 )
 
+# (with no "/" at its end: each URL adds its own, and GitHub answered a "//" with a 307)
 TEST_DATA_BASE_URL: str = os.environ.get(
     "CRISPRME_TESTDATA_URL",
-    "https://raw.githubusercontent.com/pinellolab/crisprme-plus/refs/heads/main/test/data/",
-)
+    "https://raw.githubusercontent.com/pinellolab/crisprme-plus/refs/heads/main/test/data",
+).rstrip("/")
 
 # ==============================================================================
 # PAM file definitions

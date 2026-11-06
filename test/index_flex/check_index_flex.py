@@ -295,8 +295,9 @@ def main(root):
     say("no --samplesID and no list: same results, no KeyError",
         rc == 0 and identical(table(w, "o2"), b11), out[-600:])
     # refused, it leaves its output folder empty: the corrected command, same --output, runs
+    # (NGA, which NRG does not hold: an NGG search of NRG runs, pruned)
     w = as_download(copy_of(root, nrg2, "no_samples_flag_refused"))
-    rc, out = search(w, "o", pam="20bp-NGG-SpCas9.txt", samples=False)
+    rc, out = search(w, "o", pam="20bp-NGA-SpCas9VQR.txt", samples=False)
     left = sorted(os.listdir(os.path.join(w, "Results", "o")))
     rc2, out2 = search(w, "o", samples=False)
     say("no --samplesID, refused: its output folder left empty, and the corrected command runs",
@@ -349,6 +350,22 @@ def main(root):
     if engine_prunes():
         say("K=8 with --prune-pam and no --index-path: same results as a dedicated index",
             rc == 0 and identical(table(w, "o3"), b11), out[-600:])
+
+    # an index under the name of 2.9.0, which carries the guide length and the side of the
+    # PAM (20-NRG_2_gx...: a 20-nt guide, a 3' PAM), the INDELS index's too: the same results;
+    # under the name of a 5' PAM, not taken for this 3' search
+    for prefix, cell in (("20-NRG", "the 2.9.0 name"), ("NRG-20", "a 5' PAM's name")):
+        w = as_download(copy_of(root, nrg2, f"download_named_{prefix}"))
+        lib = os.path.join(w, "genome_library")
+        for name in sorted(os.listdir(lib)):
+            os.rename(os.path.join(lib, name), os.path.join(lib, prefix + name[3:]))
+        rc, out = search(w, "o")
+        if prefix.startswith("20-"):
+            say(f"an index under {cell} ({prefix}_2_gx...): same results",
+                rc == 0 and identical(table(w, "o"), b11), out[-600:])
+        else:
+            say(f"an index under {cell} ({prefix}_2_gx...): not taken for a 3' PAM",
+                rc != 0 and "no variant index here serves this search" in out, out[-800:])
 
     # a search that enriches a dataset itself codes the fake-indel genome
     w = copy_of(root, ngg2, "on_demand")

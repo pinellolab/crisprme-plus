@@ -23,6 +23,8 @@ import os
 import re
 import struct
 
+import index_fit
+
 # More targets than one fake-indel window gives (both strands of its 2 x ~25 bases and the
 # indel's, short in every published dataset): a tree that holds more spans several windows, and
 # so an N between them.
@@ -97,7 +99,8 @@ def built_before_n_fix(index_dir, genome_dir):
     """True when all-N reference index ``index_dir`` holds no N in any flank of the smallest
     one-tree contig of ``genome_dir`` whose sequence holds an N beside its bases; False when it
     holds one there; None where no such contig tells."""
-    pam = os.path.basename(os.path.normpath(index_dir)).split("_")[0]
+    # (its trees are named for the PAM, whichever form the index's name takes)
+    pam = index_fit.index_pam(os.path.normpath(index_dir))
     trees = _bins(index_dir, pam)
     parts = {}
     for _size, _path, contig, part in trees:

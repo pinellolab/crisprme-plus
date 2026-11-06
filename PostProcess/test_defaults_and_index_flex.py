@@ -34,10 +34,10 @@ import crisprme_hf as hf  # noqa: E402
 import test_index_resolution as tir  # noqa: E402  (the shipped script's harness)
 
 
-def _web_functions(*names, **namespace):
-    """The functions ``names`` of pages/main_page.py, run in ``namespace`` (their data
-    lookups stubbed) with the module-level assignments they read."""
-    src = (_REPO / "pages" / "main_page.py").read_text()
+def _web_functions(*names, page="main_page.py", **namespace):
+    """The functions ``names`` of pages/<page>, run in ``namespace`` (their data lookups
+    stubbed) with the module-level assignments they read."""
+    src = (_REPO / "pages" / page).read_text()
     typing = __import__("typing")
     ns = {**{n: getattr(typing, n) for n in typing.__all__}, **namespace}
     for node in ast.parse(src).body:
@@ -358,11 +358,370 @@ class ASearchPrunesByItself(tir._ShippedScript):
         self.assertIn(f"Variant_index:{self.VCF}\tNRR_3_hg38+{self.VCF} (in {self.library}): "
                       "built for the PAM NRR on the 3' side", params)
         self.assertIn(f"; its indels: NRR_3_hg38+{self.VCF}_INDELS\n", params)
+        # an index whose trees record the guide length says it
+        tir.built_for_guide(self.library / "NRR_3_hg38", 20)
+        self.run_with_params(pam="20bp-NGG-SpCas9", prune=0)
+        self.assertIn("built for the PAM NRR on the 3' side of a 20-nt guide, with up to 2 "
+                      "bulge(s) of each type", self.params())
         # with no bulges, no index: the genome is scanned
         run = self.run_with_params(pam="20bp-NRR-SpCas9", bulges=0, variant=False)
         self.assertIn("Reference_index\tnone: a search with no bulges scans the genome\n",
                       self.params())
         self.assertNotIn("Prune_pam", self.params())
+
+
+@unittest.skipUnless(shutil.which("python") and tir._gnu_realpath(),
+                     "runs the shipped search script as the image does (GNU realpath)")
+class AnIndexNameMayCarryItsGuideAndSide(unittest.TestCase):
+    """A name of the 2.9.0 form carries the guide (spacer) length and the side of the PAM, in
+    the order of the target on the strand: <guide>-<PAM>_<N>_... for a 3' PAM, <PAM>-<guide>_...
+    for a 5' one, so two builds that took one name (a 20- and a 23-nt Cas12a guide; a 3' and
+    a 5' PAM of one motif) can lie side by side. Every reader takes both forms, and of the same
+    index under both names, the newer one. Nothing took the new form before."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def take(self, lib, pam, prune=0, pos=3, bmax=2, any_side=""):
+        return tir.resolve(lib, pam, "hg38", bmax, prune=prune, pos=pos, any_side=any_side)
+
+    def test_the_parser(self):
+        import index_fit
+        self.assertEqual(index_fit.parse_index_name("20-NRR_3_hg38+hg38_HGDP1kGP"),
+                         ("NRR", 3, "hg38+hg38_HGDP1kGP", 20, 3))
+        self.assertEqual(index_fit.parse_index_name("TTTV-23_2_hg38"), ("TTTV", 2, "hg38", 23, 5))
+        self.assertEqual(index_fit.parse_index_name("NRR_3_hg38"), ("NRR", 3, "hg38", None, None))
+        for junk in ("NRR", "NRR_x_hg38", "20-NRR_INDELS"):  # no index name
+            with self.subTest(name=junk):
+                self.assertIsNone(index_fit.parse_index_name(junk))
+        # a token that is not of the new form is an older name's PAM, as before
+        self.assertEqual(index_fit.parse_index_name("-NRR_3_hg38")[3:], (None, None))
+
+    def test_the_resolver_takes_it_for_its_own_side_alone(self):
+        lib = _lib(self.tmp.name, "20-NRR_3_hg38")
+        self.assertEqual(self.take(lib, "NRR"), "20-NRR_3_hg38")
+        self.assertEqual(self.take(lib, "NRR", pos=-3), "")  # a 5' search: not its side
+        self.assertEqual(self.take(lib, "NRR", pos=-3, any_side="any"), "20-NRR_3_hg38")
+        self.assertEqual(self.take(lib, "NGG", prune=1), "20-NRR_3_hg38")  # it holds NGG
+        lib = _lib(tempfile.mkdtemp(dir=self.tmp.name), "TTTV-23_2_hg38")
+        self.assertEqual(self.take(lib, "TTTV", pos=-4, bmax=1), "TTTV-23_2_hg38")
+        self.assertEqual(self.take(lib, "TTTV", pos=4, bmax=1), "")
+
+    def test_of_one_index_under_both_names_the_new_one(self):
+        lib = _lib(self.tmp.name, "NRR_3_hg38", "20-NRR_3_hg38")
+        for locale in ("C", "en_US.UTF-8"):
+            with self.subTest(locale=locale):
+                self.assertEqual(tir.resolve(lib, "NRR", "hg38", 2, locale=locale),
+                                 "20-NRR_3_hg38")
+        # the rest of the order comes first: a tighter budget under the older name wins
+        lib = _lib(tempfile.mkdtemp(dir=self.tmp.name), "NRR_2_hg38", "20-NRR_3_hg38")
+        self.assertEqual(self.take(lib, "NRR"), "NRR_2_hg38")
+
+    def test_the_python_mirrors_and_the_web_take_it_too(self):
+        import crisprme_hf
+        import index_fit
+        import test_bulge_cap as tbc
+        lib = _lib(self.tmp.name, "NRR_3_hg38", "20-NRR_3_hg38", "NRR-20_3_hg38")
+        taken = tbc.crisprme._index_the_search_takes([str(lib)], "NRR", "hg38", 2, False,
+                                                     True, 20, 1, 1, False)
+        self.assertEqual(Path(taken).name, self.take(lib, "NRR"))
+        self.assertTrue(tbc.crisprme._index_serves_search("20-NRR_3_hg38", "hg38", "NGG", 2,
+                                                          True, True))
+        self.assertFalse(tbc.crisprme._index_serves_search("NRR-20_3_hg38", "hg38", "NRR", 2,
+                                                           False, True))
+        # the router reads the flank of a PAM-less one in either form
+        self.assertEqual(crisprme_hf.index_flank_width("20-NNNNNNNN_3_hg38+hg38_HGDP1kGP"), 8)
+        self.assertEqual(crisprme_hf.resolve_index_repo("20-NNNNNNNN_3_hg38"),
+                         crisprme_hf.GENERAL_INDEX_HF_REPO)
+        # the web form counts it, on its side
+        pu = tbc.pages_utils
+        root = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        _lib(root, "20-NRR_3_hg38", "NNNN-20_3_hg38+hg38_x")
+        (root / "PAMs").mkdir()
+        (root / "PAMs" / "20bp-NRR-SpCas9.txt").write_text("N" * 20 + "NRR 3\n")
+        with mock.patch.object(pu, "current_working_directory", str(root) + os.sep):
+            self.assertEqual(pu.index_max_bulges("hg38", "20bp-NRR-SpCas9"), 2)
+            self.assertEqual(pu.index_max_bulges("hg38", "20bp-NRR-SpCas9", "x"), 0)
+            self.assertEqual(pu.index_build_pam(str(root / "genome_library" /
+                                                    "NNNN-20_3_hg38+hg38_x")), (None, 24, -4))
+        # complete-test's smoke and the INDELS view read it
+        import complete_test
+        self.assertEqual(complete_test._parse_index_name("20-NRR_3_hg38+hg38_x"),
+                         ("NRR", "hg38", True))
+        self.assertEqual(index_fit.index_pam("TTTV-23_2_hg38"), "TTTV")
+
+
+@unittest.skipUnless(shutil.which("python") and tir._gnu_realpath(),
+                     "runs the shipped search script as the image does (GNU realpath)")
+class TheSearchScriptTakesTheNewName(tir._ShippedScript):
+    """A variant index and its INDELS index under the 2.9.0 name: the scans take them, the
+    searches are handed them, and the indel search is told the name."""
+
+    def test_a_download_of_the_new_name_is_searched(self):
+        self.install("NRR_3")
+        for old in sorted(self.library.iterdir()):
+            old.rename(self.library / ("20-" + old.name))
+        run = self.run_pipeline(pam="20bp-NRR-SpCas9")
+        self.assertEqual(run.reference, "20-NRR_3_hg38")
+        self.assertEqual(run.variant, f"20-NRR_3_hg38+{self.VCF}")
+        self.assertEqual(run.indels, f"20-NRR_3_hg38+{self.VCF}_INDELS")
+        self.assertEqual(run.searched(variant=True), (f"20-NRR_3_hg38+{self.VCF}", False))
+        # and an NGG search of it, pruned by itself
+        run = self.run_pipeline(pam="20bp-NGG-SpCas9")
+        self.assertEqual(run.searched(variant=True), (f"20-NRR_3_hg38+{self.VCF}", True))
+
+
+class ThePamPickerOfAPamLessIndex(unittest.TestCase):
+    """The web form's PAM picker of a PAM-less index (pages_utils, the logic its callbacks
+    run; the callbacks themselves: test_web_bulge_notes in the image): which index it reads,
+    which PAMs it offers and refuses, and the PAM file it writes. There was none: a PAM-less
+    index served from the web only the PAM files installed, of exactly its width."""
+
+    def setUp(self):
+        import test_bulge_cap as tbc
+        self.pu = tbc.pages_utils
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        patcher = mock.patch.object(self.pu, "current_working_directory", str(self.root) + os.sep)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        (self.root / "PAMs").mkdir()
+
+    def test_the_widest_pam_less_index_of_the_genome_or_the_dataset(self):
+        self.assertIsNone(self.pu.pamless_index_geometry("hg38"))
+        _lib(self.root, "NRR_3_hg38", "NNN_3_hg38", "NNNNNNNN_3_hg38",
+             "NNN_3_hg38+hg38_HGDP1kGP")
+        self.assertEqual(self.pu.pamless_index_geometry("hg38"),
+                         {"name": "NNNNNNNN_3_hg38", "k": 8, "side": 3, "guide_len": 20})
+        self.assertEqual(self.pu.pamless_index_geometry("hg38", "HGDP1kGP")["name"],
+                         "NNN_3_hg38+hg38_HGDP1kGP")
+        self.assertIsNone(self.pu.pamless_index_geometry("hg38", "HPRC"))
+
+    def test_what_it_offers_and_refuses(self):
+        k8 = {"name": "NNNNNNNN_3_hg38", "k": 8, "side": 3, "guide_len": 20}
+        offered = {o["value"]: o for o in self.pu.pamless_presets(k8)}
+        self.assertFalse(offered["SpCas9:NRR"]["disabled"])
+        self.assertEqual(list(offered)[0], "SpCas9:NRR")  # the default first
+        for ok in ("SpG:NGN", "SpRY:NRN", "SpCas9VRER:NGCG", "NmeCas9:NNNNGATT"):
+            self.assertFalse(offered[ok]["disabled"], ok)
+        self.assertIn("21-nt guide", offered["SaCas9:NNGRRT"]["label"])
+        self.assertTrue(offered["Cas12a:TTTV"]["disabled"])
+        n3 = {"name": "NNN_3_hg38", "k": 3, "side": 3, "guide_len": 20}
+        self.assertIn("longer than this index's 3-nt flank",
+                      self.pu.pamless_pam_problem("NGCG", n3))
+        self.assertIsNone(self.pu.pamless_pam_problem("ngn", n3))
+        self.assertIn("no IUPAC base", self.pu.pamless_pam_problem("NG;", n3))
+        five = {"name": "NNNN_3_hg38", "k": 4, "side": 5, "guide_len": 23}
+        self.assertIsNone(self.pu.pamless_pam_problem("TTTV", five))
+        self.assertIn("as long as the flank", self.pu.pamless_pam_problem("TTV", five))
+
+    def test_the_pam_file_it_writes(self):
+        k8 = {"name": "NNNNNNNN_3_hg38", "k": 8, "side": 3, "guide_len": 20}
+        name = self.pu.write_pamless_pam_file("ngn", k8, "SpG")
+        self.assertEqual(name, "20bp-NGN-SpG")
+        self.assertEqual((self.root / "PAMs" / "20bp-NGN-SpG.txt").read_text(), "N" * 20 + "NGN 3\n")
+        five = {"name": "NNNN_3_hg38", "k": 4, "side": 5, "guide_len": 23}
+        self.assertEqual(self.pu.write_pamless_pam_file("TTTV", five), "TTTV-23bp-Custom")
+        self.assertEqual((self.root / "PAMs" / "TTTV-23bp-Custom.txt").read_text(),
+                         "TTTV" + "N" * 23 + " -4\n")
+        # never over a file of that name
+        (self.root / "PAMs" / "20bp-NGN-SpG.txt").write_text("mine\n")
+        self.pu.write_pamless_pam_file("NGN", k8, "SpG")
+        self.assertEqual((self.root / "PAMs" / "20bp-NGN-SpG.txt").read_text(), "mine\n")
+
+
+class SetupFailsWhenItsDownloadFails(unittest.TestCase):
+    """`crisprme.py setup` caught the legacy download script's failure, wrote "Legacy database
+    setup exited with error code 1" with no end of line, and ended with exit status 0: with
+    no network, a requests traceback and a status 0 (backlog 4.4, FR2 cli notes (a))."""
+
+    def test_it_ends_with_the_scripts_status(self):
+        import test_bulge_cap as tbc
+        cm = tbc.crisprme
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / "setup_legacy_database.py").write_text("import sys\nsys.exit(3)\n")
+        err = io.StringIO()
+        with mock.patch.object(cm, "script_path", str(tmp)), \
+                mock.patch.object(cm, "input_args", ["crisprme.py", "setup", "--path", str(tmp)]), \
+                mock.patch.object(sys, "stderr", err), self.assertRaises(SystemExit) as stop:
+            cm.setup_database()
+        self.assertEqual(stop.exception.code, 3)
+        self.assertEqual(err.getvalue(), "Legacy database setup exited with error code 3\n")
+
+
+class TheTestDataUrlsHaveOneSlash(unittest.TestCase):
+    """setup's test-data base URL ended in "/" and each URL added another
+    (.../test/data//samplesIDs/...): GitHub answered 307 (backlog 4.4, FR2 cli notes (e))."""
+
+    def test_no_double_slash(self):
+        import importlib
+        import setup_legacy_database as sld
+        for env in ({}, {"CRISPRME_TESTDATA_URL": "https://mirror.example/data/"}):
+            with self.subTest(env=env), mock.patch.dict(os.environ, env):
+                sld = importlib.reload(sld)
+                self.assertFalse(sld.TEST_DATA_BASE_URL.endswith("/"))
+                self.assertNotIn("//samplesIDs", f"{sld.TEST_DATA_BASE_URL}/samplesIDs/x.txt")
+        importlib.reload(sld)
+
+
+class GenerateReportSaysWhyThereIsNothingToReport(unittest.TestCase):
+    """generate-report on a folder with no integrated results -- a search that found no
+    off-target, an assembly-search's combined folder -- ended on a FileNotFoundError
+    traceback (OF-12). It says why, in one line, and exits 1."""
+
+    def test_a_zero_hit_run_and_a_combined_folder(self):
+        import test_bulge_cap as tbc
+        cm = tbc.crisprme
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        for name, said in (("zero", "holds no integrated results (*integrated_results.tsv), "
+                                    "so there is nothing to report"),
+                           ("job_combined", "is an assembly-search's combined folder")):
+            with self.subTest(folder=name):
+                folder = tmp / name
+                folder.mkdir()
+                (folder / "log.txt").write_text("No off-targets found\n")
+                err = io.StringIO()
+                with mock.patch.object(cm, "input_args", ["crisprme.py", "generate-report",
+                                                          "--result-dir", str(folder)]), \
+                        mock.patch.object(sys, "stderr", err), \
+                        self.assertRaises(SystemExit) as stop:
+                    cm.generate_report()
+                self.assertEqual(stop.exception.code, 1)
+                self.assertIn(said, err.getvalue())
+                self.assertEqual(len(err.getvalue().splitlines()), 1)
+
+
+class ThePamLessNucleaseIsNamedAsTheWebNamesIt(unittest.TestCase):
+    """A search of 20bp-NNN-NO-PAM recorded the nuclease "NO" from the CLI and "NO-PAM" from
+    the web (OF-13): the CLI now takes all of the name after the motif."""
+
+    def test_the_name_after_the_motif(self):
+        import test_bulge_cap as tbc
+        for pam_file, nuclease in (("PAMs/20bp-NNN-NO-PAM.txt", "NO-PAM"),
+                                   ("20bp-NRR-SpCas9.txt", "SpCas9"),
+                                   ("/x/23bp-TTTV-Cas12a.txt", "Cas12a"),
+                                   ("TTTV-23bp-Cas12a.txt", "Cas12a")):
+            with self.subTest(pam_file=pam_file):
+                self.assertEqual(tbc.crisprme._nuclease_of(pam_file), nuclease)
+
+
+class TheSourceEnvironmentHasWhatTheImageHas(unittest.TestCase):
+    """environment.yml left out pigz, which the Docker image installs and publish-index packs
+    an index with on every core (install P9). Every conda package of the image's main
+    environment is in environment.yml."""
+
+    def test_the_images_packages_are_in_environment_yml(self):
+        import re
+        docker = (_REPO / "Dockerfile").read_text()
+        env = (_REPO / "environment.yml").read_text()
+        listed = {re.split(r"[=<>\s#]", line.strip()[2:])[0]
+                  for line in env.splitlines() if line.strip().startswith("- ")}
+        # the image's line of the command-line tools, pigz among them
+        line = next(ln for ln in docker.splitlines() if " pigz " in f" {ln} ")
+        packages = [t for t in line.split() if t != "\\"]
+        self.assertIn("pigz", packages)
+        for package in packages:
+            with self.subTest(package=package):
+                self.assertIn(package, listed)
+
+
+class TheChecklistsHpcRouteIsANewUsersRun(unittest.TestCase):
+    """RELEASE_CHECKLIST's HPC route ran its apptainer commands with the host's environment
+    (CONDA_* leaked in on ml008), and steps 2-4b reused step 1's writable sandbox with the
+    caches it left (list_282.md, from the 2.8.1 amd64 local gate)."""
+
+    def test_it_says_to_run_clean_and_to_rebuild_the_sandbox(self):
+        text = " ".join((_REPO / "docs" / "RELEASE_CHECKLIST.md").read_text().split())
+        route = text[text.index("**On an HPC node without Docker**"):]
+        self.assertIn("Run the block from a clean host environment, e.g. in `env -i", route)
+        self.assertIn("after step 1, build the sandbox again from the SIF", route)
+
+
+class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):
+    """A genome folder with a space in its path failed later with a misleading path: the
+    search takes it into shell commands unquoted (IDX-19). It is refused in one line."""
+
+    def test_refused_naming_it(self):
+        import test_bulge_cap as tbc
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / "my genome").mkdir()
+        (tmp / "hg38").mkdir()
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err), self.assertRaises(SystemExit) as stop:
+            tbc.crisprme._check_genome(["--genome", str(tmp / "my genome")])
+        self.assertEqual(stop.exception.code, 1)
+        self.assertIn("has a space in its path", err.getvalue())
+        self.assertEqual(len(err.getvalue().splitlines()), 1)
+        self.assertEqual(tbc.crisprme._check_genome(["--genome", str(tmp / "hg38")]),
+                         str(tmp / "hg38"))
+
+
+@unittest.skipUnless(shutil.which("python") and tir._gnu_realpath(),
+                     "runs the shipped search script as the image does (GNU realpath)")
+class TheVcfListIsNotEdited(tir._ShippedScript):
+    """The search script appended a newline to the user's --vcf list, and cut its last byte
+    at the end: a run that ended early left the newline in it, and a read-only list failed
+    the write, on stderr, which fails the stage (RV4-1). It reads a copy."""
+
+    def test_the_list_is_left_as_it_was(self):
+        # (the run stops at its variant search, as one that ends early does; a read-only
+        # list cannot be tested as root, who writes it anyway)
+        self.install("NRR_3")
+        run = self.launch(pam="20bp-NRR-SpCas9")
+        done = self.finish(run)
+        self.assertEqual((run.work / "vcfs.txt").read_text(), self.VCF + "\n")
+        self.assertEqual(done.searched(variant=True)[0], f"NRR_3_hg38+{self.VCF}")
+        self.assertEqual((run.work / "out" / ".vcf_list_searched.txt").read_text(),
+                         self.VCF + "\n\n")
+
+
+class OnePerfectMatchPerGuideIsNoWarning(unittest.TestCase):
+    """The web results page put up its red "Multiple perfect matches" banner for a search
+    of two guides with one perfect match each: it counted the sites of every guide together
+    (RV1-F5). As the report's banner does, it counts them per guide."""
+
+    HEADER = ["Spacer+PAM", "Chromosome", "Start_coordinate_(highest_CFD)",
+              "Strand_(highest_CFD)", "Mismatches+bulges_(highest_CFD)"]
+
+    def alert(self, rows, count_guides):
+        import types
+        tsv = Path(tempfile.mkdtemp()) / "o.integrated_results.tsv"
+        self.addCleanup(shutil.rmtree, tsv.parent, ignore_errors=True)
+        tsv.write_text("\n".join("\t".join(r) for r in [self.HEADER] + rows) + "\n")
+        dash = types.SimpleNamespace(
+            Alert=lambda children, color: (color, "".join(map(str, children))),
+            Strong=lambda text: text, Code=lambda text: text)
+        ns = _web_functions("_perfect_match_sites", "_perfect_match_alert",
+                            page="results_page.py", dbc=dash, html=dash)
+        return ns["_perfect_match_alert"](str(tsv), count_guides)
+
+    def test_one_perfect_match_per_guide(self):
+        rows = [["GAGTCCGAGCAGAAGAAGAANNN", "chr1", "100", "+", "0"],
+                ["CTAACAGTTGCTTTTATCACNNN", "chr2", "200", "-", "0"],
+                ["CTAACAGTTGCTTTTATCACNNN", "chr2", "900", "-", "2"]]
+        self.assertIsNone(self.alert(rows, 2))
+
+    def test_a_guide_with_two_is_named(self):
+        rows = [["GAGTCCGAGCAGAAGAAGAANNN", "chr1", "100", "+", "0"],
+                ["CTAACAGTTGCTTTTATCACNNN", "chr2", "200", "-", "0"],
+                ["CTAACAGTTGCTTTTATCACNNN", "chr5", "300", "+", "0"]]
+        color, text = self.alert(rows, 2)
+        self.assertEqual(color, "danger")
+        self.assertIn("Guide CTAACAGTTGCTTTTATCACNNN matches 2 genomic sites with 0 "
+                      "mismatches and 0 bulges (chr2:200, chr5:300).", text)
+        self.assertNotIn("GAGTCCGAGCAGAAGAAGAANNN", text)
+
+    def test_one_guide_with_two_as_before(self):
+        rows = [["CTAACAGTTGCTTTTATCACNNN", "chr2", "200", "-", "0"],
+                ["CTAACAGTTGCTTTTATCACNNN", "chr5", "300", "+", "0"]]
+        color, text = self.alert(rows, 1)
+        self.assertIn("This guide matches 2 genomic sites with 0 mismatches and 0 bulges "
+                      "(chr2:200, chr5:300). Each is a candidate cut site", text)
+        self.assertIsNone(self.alert(rows[:1], 1))
 
 
 if __name__ == "__main__":

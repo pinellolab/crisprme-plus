@@ -10,8 +10,11 @@
 > `mega_build_indels.sh` drivers). This page covers the generic single-dataset
 > build/publish/download flow. **Naming note:** `--dictless` is a *publish flag* (it drops the
 > ~152 GB per-sample SNP dictionaries; see below), **not** a name marker — the shipped index
-> names are simply `<pam>_<N>_<ref>+<vcf>` (`NRG_3_hg38+hg38_HGDP1kGP`,
-> `NRG_3_hg38+hg38_HPRC`, `NRG_3_hg38+hg38_mega`).
+> names are simply `<pam>_<N>_<ref>+<vcf>` (`NRR_3_hg38+hg38_HGDP1kGP`,
+> `NRG_3_hg38+hg38_HPRC`, `NRG_3_hg38+hg38_mega`). Since 2.9.0 CRISPRme also reads a name that
+> carries the guide length and the side of the PAM, in the order of the target on the strand
+> (`20-NRR_3_hg38` for a 3′ PAM, `TTTV-23_3_hg38` for a 5′ one), takes it only for a search of
+> its side, and of one index under both names, the newer one.
 
 Bulge-enabled CRISPRme searches need a CRISPRitz **index** of the reference
 genome. Building it is the single most expensive one-time step of a search. That

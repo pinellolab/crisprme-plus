@@ -24,6 +24,11 @@ ref_name = sys.argv[4]
 vcf_name = sys.argv[5]
 bMax = sys.argv[6]
 ncpus = sys.argv[7]
+# optional: the name of the variant index this INDELS index goes with, <true_pam>_<bMax>_
+# <ref>+<vcf> or, since 2.9.0, the form that carries the guide length and the side
+# (index_fit.parse_index_name), whose .pam_build _own_pam reads
+variant_index = (sys.argv[8] if len(sys.argv) > 8
+                 else f"{true_pam}_{bMax}_{ref_name}+{vcf_name}")
 
 # The record of a chromosome's sub-index that buildTST built with no target, which
 # pool_search_indels.py reads. Its fake-indel genome holds indels, but no window of
@@ -101,8 +106,7 @@ def _own_pam():
     k = len(true_pam)
     guide, n, name = len(seq) - abs(size), (k if size > 0 else -k), None
     try:
-        with open(os.path.join("genome_library", f"{true_pam}_{bMax}_{ref_name}+{vcf_name}",
-                               ".pam_build")) as fh:
+        with open(os.path.join("genome_library", variant_index, ".pam_build")) as fh:
             built = fh.read().rsplit(None, 2)
         if len(built) == 3 and abs(int(built[2])) == k and int(built[1]) > k:
             name, guide, n = built[0], int(built[1]) - k, int(built[2])

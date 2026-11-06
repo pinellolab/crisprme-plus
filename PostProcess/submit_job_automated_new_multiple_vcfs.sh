@@ -145,6 +145,13 @@ rm -f $output_folder/queue.txt
 if [ $2 == "_" ]; then
 	echo -e "_" >>$output_folder/tmp_list_vcf.txt
 	vcf_list=$output_folder/tmp_list_vcf.txt
+else
+	# The --vcf list is read from a copy in the output folder, which gets the newline
+	# `while read` needs (below) and loses it at the end: the user's own file was edited in
+	# place, so a run that ended early left the newline in it, and a read-only one failed
+	# the write (RV4-1).
+	cp "$vcf_list" "$output_folder/.vcf_list_searched.txt" \
+		&& vcf_list="$output_folder/.vcf_list_searched.txt"
 fi
 echo >>$vcf_list
 # $6 is the samplefile, read below with `while read`, which drops a last line with no
@@ -853,6 +860,26 @@ while read vcf_f; do
 		[ "$((_g + $2))" -ge "$((_guide + ${bDNA:-0} + (${bRNA:-0} > 0)))" ]
 	}
 
+	# The parts of index folder name $1 (a basename), into _ip_pam, _ip_n and _ip_rest (the
+	# name after <N>_: the genome, and +<dataset> for a variant index), and into _ip_guide and
+	# _ip_side, for a name of CRISPRme 2.9.0 or later that carries the guide (spacer) length and
+	# the side of the guide the PAM is on, in the order of the target on the strand:
+	# <guide>-<PAM>_<N>_... for a 3' PAM (20-NRR_3_hg38), <PAM>-<guide>_<N>_... for a 5' one
+	# (TTTV-23_3_hg38). An older name, <PAM>_<N>_..., says neither, and leaves both empty.
+	# PostProcess/index_fit.py parse_index_name, the same rule. Silent on stderr.
+	_index_name_parts() {
+		local _t=${1%%_*}
+		_ip_rest=${1#*_}; _ip_n=${_ip_rest%%_*}; _ip_rest=${_ip_rest#*_}
+		_ip_pam=$_t; _ip_guide=; _ip_side=
+		case "$_t" in
+			[0-9]*-?*) _ip_guide=${_t%%-*}; _ip_pam=${_t#*-}; _ip_side=3 ;;
+			?*-[0-9]*) _ip_pam=${_t%-*}; _ip_guide=${_t##*-}; _ip_side=5 ;;
+		esac
+		case "$_ip_guide$_ip_pam" in *-*) _ip_pam=$_t; _ip_guide=; _ip_side= ;; esac
+		case "$_ip_guide" in *[!0-9]*) _ip_pam=$_t; _ip_guide=; _ip_side= ;; esac
+		return 0
+	}
+
 	# Into variable $2, the bases IUPAC code $1 stands for as a 4-bit mask (A 1, C 2, G 4,
 	# T 8; N 15), or 0 for anything else.
 	_iupac_mask() {
@@ -921,8 +948,10 @@ while read vcf_f; do
 	# An index must also have been built for a PAM on the search PAM's side (below).
 	_resolve_index_dir() {
 		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4" _any_side="$5"
-		local _d _b _pam _n _exact _better _side _rec _len _g
+		local _d _b _pam _n _exact _better _side _rec _len _g _named
+		local _ip_pam _ip_n _ip_rest _ip_guide _ip_side
 		local _best="" _best_n="" _best_pam_len="" _best_exact="" _best_len="" _best_pam=""
+		local _best_named=""
 		for _d in "$_lib"/*_*_"$_suffix"; do
 			[ -d "$_d" ] || continue
 			case "$_d" in *_INDELS) continue ;; esac
@@ -949,14 +978,21 @@ while read vcf_f; do
 			# (Both skips are silent on purpose: this function's STDOUT is its return
 			# value, and a write to stderr is fatal to the enclosing stage.)
 			_b=$(basename "$_d")
-			_pam=${_b%%_*}          # <PAM>_<N>_<suffix>
-			_n=${_b#*_}
-			_n=${_n%%_*}
+			_index_name_parts "$_b"  # <PAM>_<N>_<suffix>, or <guide>-<PAM>_... / <PAM>-<guide>_...
+			_pam=$_ip_pam
+			_n=$_ip_n
 			case "$_n" in '' | *[!0-9]*) continue ;; esac
 			# The glob also matches the index of a genome whose name merely ends in
 			# _<suffix> (NRG_2_mini_hg38 for hg38): that index holds another genome.
-			[ "${_b#"${_pam}_${_n}_"}" = "$_suffix" ] || continue
+			[ "$_ip_rest" = "$_suffix" ] || continue
 			[ "$_n" -ge "$_want" ] || continue
+			# A name that says the side of the guide its PAM is on serves a search of that
+			# side alone (the order of the target in it: _index_name_parts).
+			if [ -n "$_ip_side" ] && [ -z "$_any_side" ]; then
+				[ "$_ip_side" = "$( [ "${pos:-1}" -gt 0 ] && echo 3 || echo 5)" ] || continue
+			fi
+			_named=0
+			[ -z "$_ip_side" ] || _named=1
 			if [ "$_pam" = "$_pam_want" ]; then
 				_exact=2
 			elif [ -n "${_pam//N/}" ] && [ "${prune_pam:-0}" = "1" ] \
@@ -1032,12 +1068,16 @@ while read vcf_f; do
 					elif [ "$_n" -eq "$_best_n" ] && [ "$_exact" = 1 ] \
 						&& _pam_narrower "$_pam" "$_best_pam"; then
 						_better=1
+					elif [ "$_n" -eq "$_best_n" ] && [ "${#_pam}" -eq "$_best_pam_len" ] \
+						&& [ "$_pam" = "$_best_pam" ] && [ "$_named" -gt "$_best_named" ]; then
+						# the same index under both names, as after a rebuild: the newer name
+						_better=1
 					fi
 				fi
 			fi
 			if [ "$_better" = 1 ]; then
 				_best="$_d"; _best_n="$_n"; _best_pam_len=${#_pam}; _best_exact="$_exact"; _best_len="$_len"
-				_best_pam=$_pam
+				_best_pam=$_pam; _best_named=$_named
 			fi
 		done
 		[ -n "$_best" ] && printf '%s\n' "$_best"
@@ -1058,12 +1098,14 @@ while read vcf_f; do
 	# trees were built for, the bulges it holds, and how the search narrows it to this PAM
 	# when it is another's. Silent on stderr.
 	_index_record() {
-		local _b=${1##*/} _p _n _g
-		_p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
+		local _b=${1##*/} _p _n _g _gl _ip_pam _ip_n _ip_rest _ip_guide _ip_side
+		_index_name_parts "$_b"
+		_p=$_ip_pam; _n=$_ip_n
 		_g=$(_index_guide_len "$1")
+		_gl="a guide of a length it does not record"
+		[ -z "$_g" ] || _gl="a $_g-nt guide"
 		printf "%s (in %s): built for the PAM %s on the %s' side of %s, with up to %s bulge(s) of each type" \
-			"$_b" "$(dirname "$1")" "$_p" "$(_index_side "$1")" \
-			"${_g:+a $_g-nt guide}${_g:-a guide of a length it does not record}" "$((_n - 1))"
+			"$_b" "$(dirname "$1")" "$_p" "$(_index_side "$1")" "$_gl" "$((_n - 1))"
 		if [ "$_p" != "$true_pam" ]; then
 			if [ "${prune_pam:-0}" = 1 ]; then
 				printf ", pruned to %s at leaf time (--prune-pam)" "$true_pam"
@@ -1076,11 +1118,14 @@ while read vcf_f; do
 	# Say on stderr why index $1 cannot serve this search, when it was built for the other
 	# side of the guide.
 	_say_other_side() {
-		local _have _want=3 _why="as its .pam_build records" _n _p=${1##*/}
+		local _have _want=3 _why="as its .pam_build records" _n _p _ip_pam _ip_n _ip_rest _ip_guide _ip_side
 		_have=$(_index_side "$1") \
 			|| _why="it records no side in a .pam_build, and an index that does not is taken for a 3' build"
 		[ "${pos:-1}" -gt 0 ] || _want=5
-		_p=${_p%%_*}
+		_index_name_parts "${1##*/}"
+		_p=$_ip_pam
+		# (a name that says its side says it as the record does)
+		[ -z "$_ip_side" ] || { _have=$_ip_side; _why="as its name says"; }
 		if [ "$_have" = "$_want" ]; then
 			# (nor, for a 3' PAM, a PAM-less one of a width but 3 and 8 that records no side)
 			{ _index_side "$1" >/dev/null || [ -n "${_p//N/}" ] || [ "$_p" = "$true_pam" ]; } \
@@ -1172,9 +1217,9 @@ while read vcf_f; do
 		for _lib in "${_libs[@]}"; do
 			for _d in "$_lib"/*_*_"$_set"; do
 				[ -d "$_d" ] || continue
-				_b=${_d##*/}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
+				_b=${_d##*/}; _index_name_parts "$_b"; _p=$_ip_pam; _n=$_ip_n
 				case "$_n" in '' | *[!0-9]*) continue ;; esac
-				[ "${_b#"${_p}_${_n}_"}" = "$_set" ] || continue  # another genome's (see _resolve_index_dir)
+				[ "$_ip_rest" = "$_set" ] || continue  # another genome's (see _resolve_index_dir)
 				_g=$(_index_guide_len "$_d")
 				_have="$_have${_have:+, }$_b (up to $((_n - 1)) bulge(s) of each type${_g:+, built for a $_g-nt guide})"
 				[ "$_p" = "$true_pam" ] && [ "$_n" -gt 1 ] && [ "$_n" -lt "$bMax" ] \
@@ -1497,9 +1542,9 @@ while read vcf_f; do
 		_dead_locks=() _held=
 		for _l in "$ref_lib"/*_*_"$ref_name".lock; do
 			[ -d "$_l" ] || continue
-			_b=${_l##*/}; _b=${_b%.lock}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
+			_b=${_l##*/}; _b=${_b%.lock}; _index_name_parts "$_b"; _p=$_ip_pam; _n=$_ip_n
 			case "$_n" in '' | *[!0-9]*) continue ;; esac
-			[ "${_b#"${_p}_${_n}_"}" = "$ref_name" ] || continue  # another genome's (see _resolve_index_dir)
+			[ "$_ip_rest" = "$ref_name" ] || continue  # another genome's (see _resolve_index_dir)
 			[ "$_n" -ge "$bMax" ] || continue
 			if [ "$_p" != "$true_pam" ] && ! { [ -n "${_p//N/}" ] \
 				&& [ "${prune_pam:-0}" = "1" ] && _pam_holds "$_p" "$true_pam"; }; then
@@ -1661,9 +1706,10 @@ while read vcf_f; do
 		# idx_var (instead of reconstructing ${true_pam}_${bMax}_..._INDELS) lets a
 		# precomputed/batteries index be found without an (impossible) rebuild.
 		idx_var_base=$(basename "$idx_var")
-		idx_prefix="${idx_var_base%"_${ref_name}+${vcf_name}"}"  # <PAM>_<N>
-		idx_pam="${idx_prefix%_*}"
-		idx_n="${idx_prefix##*_}"
+		# (its <PAM> and <N>, whichever form its name takes: _index_name_parts)
+		_index_name_parts "$idx_var_base"
+		idx_pam=$_ip_pam
+		idx_n=$_ip_n
 		indels_index_dir="$(dirname "$idx_var")/${idx_var_base}_INDELS"
 		indels_out="$current_working_directory/Genomes/${ref_name}+${vcf_name}_INDELS"
 
@@ -1691,6 +1737,16 @@ while read vcf_f; do
 				printf "ERROR: %s is unfinished: a build-index-only run is writing it, or stopped before it was done. Let that run finish, or run build-index-only again to its end, then run this search again\n" "$indels_out" >&2
 				exit 1
 			fi
+			# The engine names what it builds <PAM>_<N>_<genome>+<dataset>_INDELS whatever the
+			# name of the variant index it goes with, which may carry the guide length and the
+			# side (_index_name_parts): built under that name, it is moved to its own, unless
+			# another index's is there.
+			_built_indels="$(dirname "$idx_var")/${idx_pam}_${idx_n}_${ref_name}+${vcf_name}_INDELS"
+			if [ "$_built_indels" != "$indels_index_dir" ] && [ -e "$_built_indels" ]; then
+				printf "ERROR: %s is in the way: this search builds the INDELS index of %s, which is missing, under that name first. Move it out of %s, or run this search from another working directory\n" \
+					"$_built_indels" "$idx_var_base" "$(dirname "$idx_var")" >&2
+				exit 1
+			fi
 			_lock="${indels_index_dir}.lock"
 			_lock_take "$_lock" "indexing $indels_index_dir" "$indels_index_dir"
 			if [ $? != 1 ]; then
@@ -1711,15 +1767,22 @@ while read vcf_f; do
 						"$ref_name" \
 						"$vcf_name" \
 						"$idx_n" \
-						"$ncpus"
+						"$ncpus" \
+						"$idx_var_base"
 				fi
 				_lock_lost "$_lock" && exit 1  # taken over meanwhile, as for the reference
 
 				if [ -s "$logerror" ]; then
 					printf "ERROR: indels indexing failed on %s\n" "$vcf_name" >&2
 					[ -d "$indels_index_dir" ] && rm -r "$indels_index_dir"
+					[ "$_built_indels" != "$indels_index_dir" ] && [ -d "$_built_indels" ] \
+						&& rm -r "$_built_indels"
 					_lock_release "$_lock"
 					exit 1
+				fi
+				# (built under the engine's name: moved to its own)
+				if [ "$_built_indels" != "$indels_index_dir" ] && [ -d "$_built_indels" ]; then
+					mv "$_built_indels" "$indels_index_dir"
 				fi
 
 				_lock_release "$_lock" || exit 1
@@ -1828,7 +1891,7 @@ while read vcf_f; do
 					_searched=("$idx_var")
 				fi
 				for _idx in "${_searched[@]}"; do
-					_idx_pam=$(basename "$_idx"); _idx_pam=${_idx_pam%%_*}
+					_index_name_parts "$(basename "$_idx")"; _idx_pam=$_ip_pam
 					case "$_idx_pam" in
 						'' | *[!Nn]*) ;;
 						*) pamless=1; kind="pamless (memory-heavy) index $(basename "$_idx")" ;;
@@ -1967,7 +2030,7 @@ while read vcf_f; do
 			cd $starting_dir
 			# TODO: REMOVE POOL SCRIPT FROM PROCESSING
 			# (a refused index or an uncaught error: it has said why on stderr)
-			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits" "$prune_pam" "$(dirname "$indels_index_dir")" || exit 1
+			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits" "$prune_pam" "$(dirname "$indels_index_dir")" "$idx_var_base" || exit 1
 			awk '($3 !~ "n") {print $0}' "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" >"$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp"
 			mv "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp" "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
 		else

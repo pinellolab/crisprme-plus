@@ -55,10 +55,12 @@ def indels_index_in_place(library: str, dataset: str, motif: str, n_want: int,
     for name in names:
         if not name.endswith(suffix) or name.startswith("."):
             continue
-        pam, sep, n_str = name[: -len(suffix)].partition("_")
-        if not sep or not n_str.isdigit() or int(n_str) < n_want:
+        parsed = index_fit.parse_index_name(name)  # either form of the name
+        if not parsed or "_" + parsed[2] != suffix or parsed[1] < n_want:
             continue
-        if not _pam_serves(pam, motif, prune, three_prime):
+        if parsed[4] and (parsed[4] == 3) != three_prime:  # a name that says its side
+            continue
+        if not _pam_serves(parsed[0], motif, prune, three_prime):
             continue
         index = os.path.join(library, name)
         indels = index + "_INDELS"

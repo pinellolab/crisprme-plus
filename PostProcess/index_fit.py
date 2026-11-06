@@ -175,3 +175,37 @@ def pam_breadth(pam):
     for code in pam:
         breadth *= len(_IUPAC_BASES.get(code, ""))
     return breadth
+
+
+def parse_index_name(name):
+    """The parts of an index folder's (or archive's) name, ``(pam, n, rest, guide, side)``,
+    or None where the name is not an index's.
+
+    An index is named ``<PAM>_<N>_<genome>[+<dataset>]`` (``NRR_3_hg38+hg38_HGDP1kGP``),
+    which says nothing of the guide (spacer) length it was built for, nor of the side of the
+    guide its PAM is on: indexes of one PAM for two guide lengths, or for a 3' and a 5' PAM
+    (``N...NTTTV 4`` and the Cas12a ``TTTV`` file both build ``TTTV_<N>_<genome>``), take one
+    name. Since CRISPRme 2.9.0 a name may carry both: ``<guide>-<PAM>_<N>_...`` for a 3' PAM
+    (``20-NRR_3_hg38``), ``<PAM>-<guide>_<N>_...`` for a 5' one (``TTTV-23_3_hg38``), in the
+    order of the target on the strand. ``guide`` and ``side`` (3 or 5) are None for an older
+    name. Every reader takes both forms, and of two indexes that serve a search alike, the
+    newer form (the search script's _index_name_parts, the same rule). ``rest`` is the name
+    after ``<N>_``: the genome, and ``+<dataset>`` for a variant index."""
+    token, sep, rest = os.path.basename(str(name)).partition("_")
+    n, sep2, rest = rest.partition("_")
+    if not sep or not sep2 or not token or not n.isdigit():
+        return None
+    pam, guide, side = token, None, None
+    head, dash, tail = token.partition("-")
+    if dash and head.isdigit() and tail and "-" not in tail:
+        pam, guide, side = tail, int(head), 3
+    elif dash and tail.isdigit() and head:
+        pam, guide, side = head, int(tail), 5
+    return pam, int(n), rest, guide, side
+
+
+def index_pam(name):
+    """The PAM of the index named ``name`` (either form: parse_index_name), or the name's
+    first field where it is no index name."""
+    parsed = parse_index_name(name)
+    return parsed[0] if parsed else os.path.basename(str(name)).split("_")[0]

@@ -169,7 +169,7 @@ def _smoke_rank(index_name: str) -> tuple:
     parsed = _parse_index_name(index_name)
     if parsed is None:
         return (2, 0, index_name)
-    token, bmax = parsed[0], int(index_name.split("_", 2)[1])
+    token, bmax = parsed[0], index_fit.parse_index_name(index_name)[1]
     all_n = set(token) == {"N"}
     if all_n and len(token) > 3:
         rank = 3
@@ -725,16 +725,19 @@ def write_samplesids_config(dataset: str) -> str:
 
 
 def _parse_index_name(index_name: str):
-    """Parse a CRISPRme index directory name ``<PAM>_<bMax>_<ref>[+<variant>]``.
+    """Parse a CRISPRme index directory name ``<PAM>_<bMax>_<ref>[+<variant>]``, or the
+    form that carries the guide length and the side since 2.9.0
+    (index_fit.parse_index_name).
 
     Returns (pam_token, ref_genome, is_variant) or None if it does not parse.
     e.g. ``NRG_3_hg38`` -> ('NRG', 'hg38', False);
-         ``NRG_3_hg38+hg38_1000G2021`` -> ('NRG', 'hg38', True).
+         ``NRG_3_hg38+hg38_1000G2021`` -> ('NRG', 'hg38', True);
+         ``20-NRR_3_hg38`` -> ('NRR', 'hg38', False).
     """
-    parts = index_name.split("_", 2)
-    if len(parts) < 3 or not parts[1].isdigit():
+    parsed = index_fit.parse_index_name(index_name)
+    if not parsed:
         return None
-    pam_token, _bmax, rest = parts[0], parts[1], parts[2]
+    pam_token, _bmax, rest = parsed[:3]
     ref = rest.split("+")[0]
     return pam_token, ref, ("+" in rest)
 
@@ -1004,7 +1007,8 @@ def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
             ):
                 continue
             os.mkdir(os.path.join(view, "genome_library", name))
-            five_prime_all_n = set(name.split("_")[0]) == {"N"} and _recorded_five_prime(idx)
+            five_prime_all_n = (set(index_fit.index_pam(name)) == {"N"}
+                                and _recorded_five_prime(idx))
             for f in os.listdir(idx):
                 if tree.fullmatch(f) or (f == ".pam_build" and five_prime_all_n):
                     link("genome_library", name, f)
@@ -1013,7 +1017,9 @@ def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
                 os.path.join(lib, f"{indels}.lock")
             ):
                 os.mkdir(os.path.join(view, "genome_library", indels))
-                fake = "_".join(name.split("_", 2)[:2]) + f"_fake{chrom}"  # <PAM>_<N>_
+                # <PAM>_<N>_fake<chrom>: the engine's name, whichever form the index's takes
+                _parts = index_fit.parse_index_name(name)
+                fake = f"{_parts[0]}_{_parts[1]}_fake{chrom}"
                 if os.path.isdir(os.path.join(lib, indels, fake)):
                     link("genome_library", indels, fake)
         # A variant index with no _INDELS companion (an indel-free dataset, for which

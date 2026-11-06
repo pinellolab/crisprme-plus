@@ -251,6 +251,14 @@ each type, byte-identically to an index built for it. A guide past that needs it
 the search builds it, or says what to do when an index of the same name is in the way (rule:
 [methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
 
+The name `<PAM>_<N>_<genome>` says neither the guide length an index was built for nor the
+side of the guide its PAM is on, so two such builds take one name. Since 2.9.0 a name may
+carry both, in the order of the target on the strand: `20-NRR_3_hg38` for a 20-nt guide and a
+3′ PAM, `TTTV-23_3_hg38` for a 5′ TTTV PAM and a 23-nt guide. CRISPRme reads both forms
+(search, web, download, complete-test), takes an index of the new form only for a search of
+its side, and of one index under both names, the newer one. Builds still write the older
+name.
+
 The two 8-nt-flank indexes live in a separate dataset repo,
 `lucapinello/crisprme-data-general-index`, because a release older than CRISPRme+ 2.8.1
 cannot read them; `download` fetches them from there by itself.

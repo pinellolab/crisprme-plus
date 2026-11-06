@@ -205,6 +205,12 @@ prune_pam_flag = "--prune-pam" if prune_pam == "1" else ""
 # index beside it -- a library given with --index-path, or the working directory's
 index_library = (sys.argv[16] if len(sys.argv) > 16
                  else os.path.join(current_working_directory, "genome_library"))
+# optional: that variant index's name, <true_pam>_<bMax>_<ref>+<vcf> or, since 2.9.0, the
+# form that carries the guide length and the side (<guide>-<PAM>_... for a 3' PAM,
+# <PAM>-<guide>_... for a 5' one: index_fit.parse_index_name); its INDELS index is
+# <name>_INDELS. The sub-indexes in it keep the engine's names, <true_pam>_<bMax>_fake<chrom>.
+variant_index = (sys.argv[17] if len(sys.argv) > 17
+                 else f"{true_pam}_{bMax}_{ref_name}+{vcf_name}")
 
 
 def _in_chrom_view():
@@ -247,8 +253,7 @@ def _own_pam():
         return None
     k = len(true_pam)
     guide, n, name = len(seq) - abs(size), (k if size > 0 else -k), None
-    built = os.path.join(_outside_view(index_library),
-                         f"{true_pam}_{bMax}_{ref_name}+{vcf_name}", ".pam_build")
+    built = os.path.join(_outside_view(index_library), variant_index, ".pam_build")
     try:
         with open(built) as fh:
             got = fh.read().rsplit(None, 2)
@@ -318,7 +323,7 @@ def _rebuild(raw_fakechrom, fasta):
     the user to a run that does build it."""
     cwd = os.path.normpath(_outside_view(current_working_directory))
     indels_index = os.path.join(os.path.normpath(_outside_view(index_library)),
-                                f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS")
+                                f"{variant_index}_INDELS")
     # (a downloaded index comes without the fake-indel genome. download skips an index
     # whose INDELS index is in place, and else swaps in both from one archive: a variant
     # index left there survives a download that fails, as for an index that is not on
@@ -488,7 +493,7 @@ def search_indels(chrom):
         return SKIPPED
     indexed_fakechrom = os.path.join(
         index_library,
-        f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS",
+        f"{variant_index}_INDELS",
         f"{true_pam}_{bMax}_fake{chrom}",
     )
     raw_fakechrom = os.path.join(

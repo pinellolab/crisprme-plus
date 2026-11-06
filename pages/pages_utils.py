@@ -1531,10 +1531,10 @@ def _friendly_index_label(name: str) -> str:
     e.g. ``NGG_3_hg38+hg38_1000G_HGDP`` -> "NGG · hg38 + 1000G_HGDP (≤2 bulges)";
     ``NNN_3_hg38+...`` adds "pamless — any same-length PAM". Falls back to the raw name.
     """
-    parts = name.split("_", 2)
-    if len(parts) < 3 or not parts[1].isdigit():
+    parsed = index_fit.parse_index_name(name)  # either form of the name
+    if not parsed:
         return name
-    motif, nstr, rest = parts[0], parts[1], parts[2]
+    motif, nstr, rest = parsed[0], str(parsed[1]), parsed[2]
     bulges = int(nstr) - 1
     genome, dataset = (rest.split("+", 1) + [""])[:2]
     if dataset.startswith(genome + "_"):  # strip redundant genome prefix on the dataset
@@ -1608,7 +1608,11 @@ def index_build_pam(index_dir: str) -> "tuple":
     # index's motif — correct for ANY shipped PAM including 5' Cas12a and 21bp
     # SaCas9, unlike a hardcoded 20bp/3' guess. Fall back to that convention only
     # if no PAM matches.
-    motif = os.path.basename(index_dir).split("_")[0]
+    parsed = index_fit.parse_index_name(index_dir)
+    if parsed and parsed[3]:  # a name that says the guide and the side (since 2.9.0)
+        k = len(parsed[0])
+        return None, parsed[3] + k, k if parsed[4] == 3 else -k
+    motif = index_fit.index_pam(index_dir)
     try:
         pams_dir = os.path.join(current_working_directory, PAMS_DIR)
         for f in sorted(os.listdir(pams_dir)):
@@ -1666,10 +1670,6 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     # "N" * len(motif) prefix, keeps out a dedicated PAM that merely starts with N's
     # (the shipped NNNRRT, SaCas9-KKH).
     base_suffix = f"_{genome}"  # base = "<motif>_<N>_<genome>"
-
-    def _pam_serves(pam: str, index_dir: str) -> bool:
-        return (index_fit.pam_serves(pam, motif, True, three_prime) is not None
-                and _index_side_serves(index_dir, pam, motif, three_prime))
     # A variant search needs an index whose enriched-genome name is EXACTLY
     # "<genome>_<dataset>" -- the same "+<ref>_<vcf>" folder submit_job resolves. So the
     # combined dropdown value "1000G_HGDP" matches "..._hg38_1000G_HGDP", and a single
@@ -1686,18 +1686,30 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     for d in os.listdir(lib):
         if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
             continue
-        base, _, enriched = d.partition("+")  # enriched="" for a reference index
-        if enriched != want_enriched:
+        # "<motif>_<N>_<genome>[+<enriched>]", or the 2.9.0 form that carries the guide
+        # length and the side (index_fit.parse_index_name)
+        parsed = index_fit.parse_index_name(d)
+        if not parsed:
             continue
-        if not base.endswith(base_suffix):
+        rest_genome, _, enriched = parsed[2].partition("+")  # enriched="" for a reference index
+        if enriched != want_enriched or "_" + rest_genome != base_suffix:
             continue
-        stem = base[: -len(base_suffix)]
-        pam, sep, n_str = stem.partition("_")  # "<motif>" , "<N>"
-        if not sep or not n_str.isdigit() or not _pam_serves(pam, os.path.join(lib, d)):
+        if not index_serves_pam(os.path.join(lib, d), motif, three_prime):
             continue
         best = max(best, index_fit.bulge_cap(
-            index_fit.built_guide_len(os.path.join(lib, d)), int(n_str), guide))
+            index_fit.built_guide_len(os.path.join(lib, d)), parsed[1], guide))
     return best
+
+
+def index_serves_pam(index_dir: str, motif: str, three_prime: bool) -> bool:
+    """Whether index ``index_dir`` serves a search for PAM ``motif`` (3' with
+    ``three_prime``) as the search script takes it: its own PAM, an all-N one of its width,
+    or one the search prunes to it by itself (a wider all-N one for a 3' PAM, a dedicated
+    one of a PAM that holds it: index_fit.pam_serves), built for the search's side of the
+    guide (_index_side_serves)."""
+    pam = index_fit.index_pam(index_dir)
+    return (index_fit.pam_serves(pam, motif, True, three_prime) is not None
+            and _index_side_serves(index_dir, pam, motif, three_prime))
 
 
 def _index_side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) -> bool:
@@ -1707,7 +1719,11 @@ def _index_side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) 
     for a 5' PAM); without one, any side for a dedicated index of the motif, and 3' for any
     other at the published widths, 3 and 8, or an all-N one of the motif's own name (a
     search before 2.8.1 built one of another width from a 5' PAM file with no record).
-    crisprme.py's _side_serves, the same rule."""
+    crisprme.py's _side_serves, the same rule; a name that says its side (since 2.9.0:
+    index_fit.parse_index_name) says it first."""
+    parsed = index_fit.parse_index_name(index_dir)
+    if parsed and parsed[4]:
+        return (parsed[4] == 3) == three_prime
     try:
         with open(os.path.join(index_dir, ".pam_build")) as fh:
             recorded = int(fh.readline().split()[-1])
@@ -1718,6 +1734,150 @@ def _index_side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) 
     if pam == motif and (not pam or set(pam) != {"N"}):
         return True
     return three_prime and (pam == motif or len(pam) in (3, 8))
+
+
+# --------------------------------------------------------------------------- #
+# The PAM picker of a PAM-less index (docs/DYNAMIC_PAM_INDEX_COMPAT.md §8)
+#
+# A PAM-less (all-N) index serves any PAM of its guide length on its side of the guide
+# that is no longer than its flank: for a 3' PAM shorter than the flank, the search prunes
+# the index to it by itself. The search form's PAM list holds the PAM files installed in
+# PAMs/; the picker offers the PAMs such an index serves that are not, by enzyme or typed
+# (checked when the field is left), and writes the chosen one's PAM file into PAMs/, as
+# Settings' "Define a nuclease / PAM" does, so that the form then searches it as any other.
+# --------------------------------------------------------------------------- #
+
+# Common nucleases: the PAM, the side of the guide it is on and the guide length each
+# needs. "recommended" ones head the list; NRR, the default PAM, is the one recommended for
+# an IND package.
+ENZYME_TABLE = [
+    {"enzyme": "SpCas9", "pam": "NRR", "side": 3, "guide_len": 20,
+     "label": "SpCas9 · NRR (NAA, NAG, NGA, NGG; the default, recommended for IND)",
+     "recommended": True},
+    {"enzyme": "SpCas9", "pam": "NRG", "side": 3, "guide_len": 20,
+     "label": "SpCas9 · NRG (NAG, NGG)", "recommended": True},
+    {"enzyme": "SpCas9", "pam": "NGG", "side": 3, "guide_len": 20,
+     "label": "SpCas9 · NGG", "recommended": True},
+    {"enzyme": "SpG", "pam": "NGN", "side": 3, "guide_len": 20,
+     "label": "SpG · NGN", "recommended": True},
+    {"enzyme": "SpRY", "pam": "NRN", "side": 3, "guide_len": 20,
+     "label": "SpRY · NRN", "recommended": True},
+    {"enzyme": "SpRY", "pam": "NYN", "side": 3, "guide_len": 20,
+     "label": "SpRY · NYN", "recommended": True},
+    {"enzyme": "SpCas9VQR", "pam": "NGA", "side": 3, "guide_len": 20,
+     "label": "VQR · NGA", "recommended": True},
+    {"enzyme": "SpCas9VRER", "pam": "NGCG", "side": 3, "guide_len": 20,
+     "label": "VRER · NGCG", "recommended": True},
+    {"enzyme": "xCas9", "pam": "NG", "side": 3, "guide_len": 20,
+     "label": "xCas9 · NG", "recommended": True},
+    {"enzyme": "ScCas9", "pam": "NNG", "side": 3, "guide_len": 20,
+     "label": "S. canis (ScCas9) · NNG", "recommended": False},
+    {"enzyme": "St1Cas9", "pam": "NNAGAA", "side": 3, "guide_len": 20,
+     "label": "S. thermophilus (St1Cas9) · NNAGAA", "recommended": False},
+    {"enzyme": "NmeCas9", "pam": "NNNNGATT", "side": 3, "guide_len": 20,
+     "label": "N. meningitidis (NmeCas9) · NNNNGATT", "recommended": False},
+    {"enzyme": "SaCas9", "pam": "NNGRRT", "side": 3, "guide_len": 21,
+     "label": "SaCas9 · NNGRRT (21-nt guide)", "recommended": False},
+    {"enzyme": "Cas12a", "pam": "TTTV", "side": 5, "guide_len": 23,
+     "label": "Cas12a · TTTV (5' PAM, 23-nt guide)", "recommended": False},
+]
+
+
+def pamless_index_geometry(genome: Optional[str], variant_choice=None) -> Optional[Dict]:
+    """The widest PAM-less (all-N) index installed for ``genome`` -- for a variant search,
+    of the dataset ``variant_choice`` (the dropdown's value) -- as ``{"name", "k" (its
+    flank), "side" (3 or 5), "guide_len"}`` (index_build_pam: its .pam_build, or the
+    published geometry, a 3' build for a 20-nt guide), or None where there is none. Of two,
+    the wider serves more PAMs."""
+    if not genome:
+        return None
+    genome = genome.replace(" ", "_")
+    lib = os.path.join(current_working_directory, "genome_library")
+    datasets = [d for d in str(variant_choice or "").split("+") if d and d != "ref"]
+    want = (f"{genome}+{genome}_{datasets[0]}", f"{genome}+{datasets[0]}") if datasets else (
+        genome,)
+    best = None
+    try:
+        names = sorted(os.listdir(lib))
+    except OSError:
+        return None
+    for d in names:
+        parsed = index_fit.parse_index_name(d)
+        if (not parsed or parsed[2] not in want or d.endswith("_INDELS")
+                or not os.path.isdir(os.path.join(lib, d)) or set(parsed[0]) != {"N"}):
+            continue
+        _name, seq_len, pos = index_build_pam(os.path.join(lib, d))
+        k = len(parsed[0])
+        geometry = {"name": d, "k": k, "side": 3 if pos > 0 else 5,
+                    "guide_len": seq_len - abs(pos)}
+        if best is None or k > best["k"]:
+            best = geometry
+    return best
+
+
+def pamless_pam_problem(pam: str, geometry: Dict, guide_len: Optional[int] = None,
+                        side: Optional[int] = None) -> Optional[str]:
+    """Why the PAM-less index of ``geometry`` (pamless_index_geometry) cannot serve PAM
+    ``pam`` (for a guide of ``guide_len`` nt, on ``side``; the index's by default), or None
+    where it can: an IUPAC motif no longer than its flank, on its side of the guide, for its
+    guide length; a 5' one as long as the flank (the engine pads a shorter PAM on the far
+    side of the guide only)."""
+    pam = (pam or "").strip().upper()
+    guide_len = geometry["guide_len"] if guide_len is None else guide_len
+    side = geometry["side"] if side is None else side
+    if not pam:
+        return "type a PAM, e.g. NGN"
+    bad = sorted(set(c for c in pam if c not in "ACGTRYSWKMBDHVN"))
+    if bad:
+        return f"{', '.join(bad)} is no IUPAC base (A C G T R Y S W K M B D H V N)"
+    if set(pam) == {"N"}:
+        return "a PAM of N alone constrains nothing: pick the index's own PAM-less PAM file"
+    if side != geometry["side"]:
+        return (f"a {side}' PAM: this index stores the flank on the {geometry['side']}' side "
+                f"of the guide, so it needs an index built for a {side}' PAM")
+    if guide_len != geometry["guide_len"]:
+        return (f"a {guide_len}-nt guide: this index was built for a {geometry['guide_len']}-nt "
+                f"guide, so it needs an index of its own")
+    if len(pam) > geometry["k"]:
+        return f"{pam} is longer than this index's {geometry['k']}-nt flank"
+    if side == 5 and len(pam) != geometry["k"]:
+        return (f"a 5' PAM must be as long as the flank ({geometry['k']} nt): the engine pads a "
+                f"shorter one on the far side of the guide only")
+    return None
+
+
+def pamless_presets(geometry: Dict) -> List[Dict]:
+    """The picker's options for the PAM-less index of ``geometry``: each ENZYME_TABLE entry,
+    the recommended ones first, those the index cannot serve disabled, with the reason."""
+    options = []
+    for entry in sorted(ENZYME_TABLE, key=lambda e: not e["recommended"]):
+        why = pamless_pam_problem(entry["pam"], geometry, entry["guide_len"], entry["side"])
+        options.append({
+            "label": entry["label"] + (f" -- not on this index: {why}" if why else ""),
+            "value": f"{entry['enzyme']}:{entry['pam']}",
+            "disabled": bool(why),
+        })
+    return options
+
+
+def write_pamless_pam_file(pam: str, geometry: Dict, enzyme: str = "Custom") -> str:
+    """Writes the PAM file of ``pam`` for the guide length and the side of the PAM-less
+    index of ``geometry`` into PAMs/, named as the shipped ones are
+    (``<guide>bp-<PAM>-<enzyme>``, ``<PAM>-<guide>bp-<enzyme>`` for a 5' PAM), unless one of
+    that name is there; returns the name (the search form's value). ``pam`` must be one
+    pamless_pam_problem passes, and ``enzyme`` a name of ENZYME_TABLE or "Custom"."""
+    pam = pam.strip().upper()
+    guide = geometry["guide_len"]
+    if geometry["side"] == 3:
+        name, line = f"{guide}bp-{pam}-{enzyme}", f"{'N' * guide}{pam} {len(pam)}\n"
+    else:
+        name, line = f"{pam}-{guide}bp-{enzyme}", f"{pam}{'N' * guide} -{len(pam)}\n"
+    path = os.path.join(current_working_directory, PAMS_DIR, name + ".txt")
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(line)
+    return name
 
 
 def reference_bulge_capacity(genome: str, pam_value: str) -> int:
@@ -2158,7 +2318,8 @@ def get_pam_options(genome: str, variant_choice: Optional[str]) -> List:
                 continue
             if not any(d.endswith(sfx) for sfx in suffixes):
                 continue
-            motif = d.split("_")[0]  # <motif>_<N>_<genome>+<vcf_folder>
+            # <motif>_<N>_<genome>+<vcf_folder>, or the 2.9.0 form of the name
+            motif = index_fit.index_pam(d)
             if motif == "N" * len(motif):
                 # PAMLESS index: it serves any PAM SEQUENCE, but only of the SAME
                 # geometry it was built for — a k-mer index cannot search a longer
@@ -2182,7 +2343,7 @@ def get_pam_options(genome: str, variant_choice: Optional[str]) -> List:
                 # A dedicated index of a PAM that holds this one (NRR for NGG) serves it
                 # too, pruned, on the side of the guide it was built for.
                 built = index_fit.built_guide_len(os.path.join(lib, d))
-                n_str = d.split("_")[1]
+                n_str = d.split("_")[1]  # (<N>, in either form of the name)
                 for pv, (slen, spos) in geom.items():
                     pv_motif = pam_motif(pv)
                     if pv_motif != motif and not (

@@ -204,7 +204,16 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
             if f.endswith((".fa", ".fasta")) and not f.startswith(".")
         )
         if not fastas:
-            raise ValueError(f"no .fa or .fasta file in {name}")
+            # (an archive of gzipped FASTA files, as UCSC and the data repo serve them:
+            # say so, it was refused with no hint, M3)
+            gzipped = sorted(
+                f for _root, _dirs, files in os.walk(unpacked) for f in files
+                if f.endswith((".fa.gz", ".fasta.gz")) and not f.startswith("."))
+            raise ValueError(
+                f"no .fa or .fasta file in {name}"
+                + (f": it holds gzipped ones ({', '.join(gzipped[:3])}"
+                   f"{', ...' if len(gzipped) > 3 else ''}): gunzip them and pack the .fa "
+                   f"files, or upload one .fa.gz a sequence" if gzipped else ""))
         seen = {}  # the name each goes in under -> the file
         for fa in fastas:
             fname = os.path.splitext(os.path.basename(fa))[0] + ".fa"

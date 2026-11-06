@@ -957,6 +957,13 @@ class TestGenomeTarUpload(unittest.TestCase):
             ("no FASTA in the archive", "asm.tar.gz", [("asm/README", "file", b"x\n")], None),
             ("hidden FASTA files only", "asm.tar.gz", [("._chr1.fa", "file", _APPLEDOUBLE)],
              "no .fa or .fasta file in asm.tar.gz"),
+            # gzipped FASTA files: said, with what to do (it said nothing more, M3)
+            ("gzipped FASTA files only", "asm.tar.gz",
+             [("chr1.fa.gz", "file", gzip.compress(_FA1)),
+              ("chr2.fa.gz", "file", gzip.compress(_FA2))],
+             "no .fa or .fasta file in asm.tar.gz: it holds gzipped ones (chr1.fa.gz, "
+             "chr2.fa.gz): gunzip them and pack the .fa files, or upload one .fa.gz a "
+             "sequence"),
             ("two FASTA files of one name", "asm.tar.gz",
              [("a/chr1.fa", "file", _FA1), ("b/chr1.fa", "file", _FA1)],
              "would both be installed as chr1.fa (a/chr1.fa, b/chr1.fa)"),

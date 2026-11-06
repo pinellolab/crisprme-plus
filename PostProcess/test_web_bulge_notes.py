@@ -662,6 +662,50 @@ class TestBulgeCap(_Install):
                 self.assertEqual(form.change("ref", order), (2, 1, 3))
 
 
+class TestThePamPickerOfAPamLessIndex(_Install):
+    """The PAM picker of a PAM-less index, its callbacks as Dash calls them: shown when one is
+    installed for the genome or dataset selected, it offers the PAMs that index serves, checks
+    a typed one, and Use this PAM writes its PAM file and selects it in the PAM list. There
+    was none (2.8.1): a PAM-less index served from the web only the PAM files installed."""
+
+    def test_hidden_without_one_and_shown_with_one(self):
+        style, note, options = mp.update_pamless_picker("hg38", "ref")
+        self.assertEqual((style["display"], note, options), ("none", "", []))
+        self.index("NNNNNNNN_3_hg38")
+        style, note, options = mp.update_pamless_picker("hg38", "ref")
+        self.assertEqual(style["display"], "block")
+        self.assertIn("NNNNNNNN_3_hg38 is a PAM-less index: it serves any 3' PAM of a 20-nt "
+                      "guide up to 8 nt", note)
+        self.assertEqual(options[0]["value"], "SpCas9:NRR")
+        # a dataset's own: none for walk
+        self.assertEqual(mp.update_pamless_picker("hg38", "walk")[0]["display"], "none")
+
+    def test_a_typed_pam_is_checked_and_used(self):
+        self.index("NNN_3_hg38")
+        said = mp.validate_pamless_custom_pam("NGCG", "hg38", "ref")
+        self.assertIn("longer than this index's 3-nt flank", said.children)
+        said = mp.validate_pamless_custom_pam("ngn", "hg38", "ref")
+        self.assertIn("NGN: served by NNN_3_hg38", said.children)
+        options, value, said = mp.use_pamless_pam(1, None, "ngn", "hg38", "ref")
+        self.assertEqual(value, "20bp-NGN-Custom")
+        self.assertIn("20bp-NGN-Custom", [o["value"] for o in options])
+        with open(os.path.join(self.tmp, "PAMs", "20bp-NGN-Custom.txt")) as fh:
+            self.assertEqual(fh.read(), "N" * 20 + "NGN 3\n")
+        # one it does not serve writes nothing
+        out = mp.use_pamless_pam(2, None, "NGCG", "hg38", "ref")
+        self.assertIs(out[1], no_update)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "PAMs", "20bp-NGCG-Custom.txt")))
+
+    def test_a_preset_is_used_and_a_forged_one_is_not(self):
+        self.index("NNNNNNNN_3_hg38")
+        _options, value, _said = mp.use_pamless_pam(1, "SpG:NGN", None, "hg38", "ref")
+        self.assertEqual(value, "20bp-NGN-SpG")
+        from dash.exceptions import PreventUpdate
+        for forged in ("SpG:NGN;rm", "Cas12a:TTTV", "../x:NGG"):
+            with self.subTest(preset=forged), self.assertRaises(PreventUpdate):
+                mp.use_pamless_pam(1, forged, None, "hg38", "ref")
+
+
 class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
     """Submit with a genome or PAM selected that is not installed, or none installed: on the
     data folder the web app starts with (index.check_directories: its folders, all empty),

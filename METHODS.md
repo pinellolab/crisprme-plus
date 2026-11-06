@@ -1310,6 +1310,15 @@ holds it (of two, the narrower PAM, NRG before NRR for NGG), then a PAM-less one
 PAM-less ones, the narrowest flank, as before. The side rule above applies to it as to a
 PAM-less index: a record, or else a 3′ build at the published widths.
 
+**Index names.** An index is named `<PAM>_<N>_<genome>[+<dataset>]`, which says neither the
+guide length it was built for nor the side of its PAM, so a 3′ and a 5′ build of one motif, or
+builds for two guide lengths, take one name. Since 2.9.0 a name may carry both, in the order of
+the target on the strand: `<guide>-<PAM>_<N>_…` for a 3′ PAM (`20-NRR_3_hg38`),
+`<PAM>-<guide>_<N>_…` for a 5′ one (`TTTV-23_3_hg38`). CRISPRme takes such an index only for a
+search of the side its name says (before any `.pam_build`), reads the guide length from its
+trees as before, and of one index under both names takes the newer; builds still write the
+older name.
+
 **Pruning by itself.** Since 2.9.0 a search prunes, as if `--prune-pam` was given, whenever
 no installed index serves it unpruned and one of these does: a wider all-`N` one, or a
 dedicated one of a PAM that holds the search's. It says so first, on the console and in its

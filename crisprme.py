@@ -832,6 +832,12 @@ def _check_genome(args: List[str]) -> str:
         error("Missing input for --genome. Reference genome folder must be specified")
     if not os.path.isdir(genomedir):
         error("The folder specified for --genome does not exist")
+    # The search takes the folder's path into its shell commands unquoted, where a space
+    # splits it: it then failed with a path that is no folder's (IDX-19)
+    if any(c.isspace() for c in genomedir):
+        error(f"The --genome folder {genomedir!r} has a space in its path, which the search "
+              f"cannot take into its commands. Move it, or link it, to a path without one "
+              f"(e.g. ln -s '{genomedir}' Genomes/<a name without spaces>)")
     return genomedir
 
 def _check_vcf(args: List[str], variant: bool) -> str:
@@ -2118,6 +2124,9 @@ def _side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) -> boo
     of a PAM that holds the search's (index_fit.pam_holds), at the published widths, 3 and
     8, or an all-N one under the search PAM's own name (a search before 2.8.1 built one of
     another width from a 5' PAM file with no record)."""
+    parsed = index_fit.parse_index_name(index_dir)
+    if parsed and parsed[4]:  # a name that says its side (since 2.9.0)
+        return (parsed[4] == 3) == three_prime
     recorded = _recorded_three_prime(index_dir)
     if recorded is not None:
         return recorded == three_prime
@@ -2194,18 +2203,18 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
                 for d in _listdir(lib):
                     if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
                         continue
-                    base, plus, _enriched = d.partition("+")
-                    if want_plus != bool(plus):
+                    # <PAM>_<N>_<genome>[+<dataset>], or the 2.9.0 form that carries the
+                    # guide length and the side (index_fit.parse_index_name)
+                    parsed = index_fit.parse_index_name(d)
+                    if not parsed or want_plus != ("+" in parsed[2]):
                         continue
-                    if not base.endswith(suffix):
+                    pam, n, rest = parsed[:3]
+                    if rest.partition("+")[0] != genome:
                         continue
-                    stem = base[: -len(suffix)]
-                    pam, _sep, n_str = stem.partition("_")
-                    if (not _sep or not n_str.isdigit()
-                            or not _pam_serves(pam, os.path.join(lib, d))):
+                    if not _pam_serves(pam, os.path.join(lib, d)):
                         continue
                     best = max(best, index_fit.bulge_cap(
-                        index_fit.built_guide_len(os.path.join(lib, d)), int(n_str), guide_len))
+                        index_fit.built_guide_len(os.path.join(lib, d)), n, guide_len))
             return best
 
         # REFERENCE term: installed reference index OR buildable-from-raw-genome ceiling.
@@ -2243,11 +2252,12 @@ def _index_serves_search(index: str, genome: str, motif: str, want: int, prune: 
     at least `want`, and a PAM that is the motif, or all-N of its width, or under
     --prune-pam a dedicated PAM that holds the motif, or all-N and wider for a 3' PAM
     (index_fit.pam_serves)."""
-    pam, _, rest = index.partition("_")
-    n, _, name = rest.partition("_")
-    if name != genome or not n.isdigit() or int(n) < want:
+    parsed = index_fit.parse_index_name(index)  # either form of the name
+    if not parsed or parsed[2] != genome or parsed[1] < want:
         return False
-    return index_fit.pam_serves(pam, motif, prune, three_prime) is not None
+    if parsed[4] and (parsed[4] == 3) != three_prime:  # a name that says its side
+        return False
+    return index_fit.pam_serves(parsed[0], motif, prune, three_prime) is not None
 
 
 def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna: int, brna: int,
@@ -2276,13 +2286,13 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
 
         def _serves(index: str, wide: bool) -> bool:
             name = os.path.basename(index)
-            pam = name.split("_")[0]
             return (_index_serves_search(name, dataset, motif, want, wide, three_prime)
                     and not os.path.isdir(index + ".lock")
                     and any(f.endswith(".bin") for f in _listdir(index))
-                    and _side_serves(index, pam, motif, three_prime)
+                    and _side_serves(index, index_fit.index_pam(name), motif, three_prime)
                     and index_fit.fits(index_fit.built_guide_len(index),
-                                       int(name.split("_")[1]), guide_len, bdna, brna))
+                                       index_fit.parse_index_name(name)[1], guide_len, bdna,
+                                       brna))
 
         indexes = [os.path.join(lib, d) for lib in libs for d in sorted(_listdir(lib))
                    if d.endswith(f"_{dataset}") and os.path.isdir(os.path.join(lib, d))]
@@ -2290,10 +2300,10 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
             continue
         for index in indexes:
             name = os.path.basename(index)
-            pam, _, rest = name.partition("_")
-            n, _, held = rest.partition("_")
-            if not n.isdigit() or held != dataset:
+            parsed = index_fit.parse_index_name(name)
+            if not parsed or parsed[2] != dataset:
                 continue
+            pam, n = parsed[:2]
             built = index_fit.built_guide_len(index)
             have.append(f"{name} (up to {int(n) - 1} bulge(s) of each type"
                         + (f", built for a {built}-nt guide" if built else "") + ")")
@@ -2335,12 +2345,13 @@ def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int,
             best, best_key = None, None
             for d in _listdir(lib):
                 index = os.path.join(lib, d)
-                pam, _, rest = d.partition("_")
-                n, _, held = rest.partition("_")
-                if (held != suffix or not n.isdigit() or int(n) < want or d.endswith("_INDELS")
+                parsed = index_fit.parse_index_name(d)  # either form of the name
+                if (not parsed or parsed[2] != suffix or parsed[1] < want
+                        or d.endswith("_INDELS")
                         or not os.path.isdir(index) or os.path.isdir(index + ".lock")
                         or not any(f.endswith(".bin") for f in _listdir(index))):
                     continue
+                pam, n = parsed[0], str(parsed[1])
                 exact = index_fit.pam_serves(pam, motif, prune, three_prime)
                 if exact is None:
                     continue
@@ -2349,8 +2360,9 @@ def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int,
                         (variant or bdna or brna)
                         and not index_fit.fits(built, int(n), guide_len, bdna, brna)):
                     continue
+                # ... and of the same index under both names, the newer one
                 key = (-exact, -int(not built or built == guide_len), int(n), len(pam),
-                       index_fit.pam_breadth(pam), pam)
+                       index_fit.pam_breadth(pam), pam, -int(bool(parsed[4])))
                 if best_key is None or key < best_key:
                     best, best_key = index, key
             if best:
@@ -2358,6 +2370,14 @@ def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int,
     except Exception:
         return None
     return None
+
+
+def _nuclease_of(pamfile: str) -> str:
+    """The nuclease a PAM file names: all of its name after the motif, by the
+    <length>-<motif>-<CasName>.txt convention, as the web reads it (pages_utils
+    friendly_pam_label): the PAM-less 20bp-NNN-NO-PAM's is "NO-PAM", where complete-search
+    wrote "NO" (OF-13)."""
+    return "-".join(os.path.basename(pamfile).split(".")[0].split("-")[2:])
 
 
 def _engine_prunes() -> bool:
@@ -2412,7 +2432,7 @@ def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[s
     the engine kept a target whose flank holds an N (prune_flank), the sites it misses."""
     notes, seen = [], set()
     for index in indexes:
-        pam = os.path.basename(index).split("_")[0]
+        pam = index_fit.index_pam(index)
         if not index or not pam or set(pam) != {"N"} or len(pam) <= len(motif) or index in seen:
             continue
         seen.add(index)
@@ -2975,7 +2995,7 @@ def complete_search() -> None:
     # The nuclease name is parsed from the PAM filename, which follows the
     # <length>-<motif>-<CasName>.txt convention (e.g. 20bp-NGG-SpCas9.txt):
     # _check_pam_file refused any other name before anything was done.
-    nuclease = os.path.basename(pamfile).split(".")[0].split("-")[2]
+    nuclease = _nuclease_of(pamfile)
     # Treat --max-total-edits as the single "max edits" knob (mirroring the web slider):
     # when the user did NOT specify per-type bulges, default to ONE DNA + ONE RNA bulge
     # (bounded by the bulge depth a search can REACH here). We deliberately cap the derived
@@ -3869,7 +3889,7 @@ def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
     as well as from a 3' one: a 3' file is not recorded on it (a 5' one is, which is what
     a search tells its user to run).
     """
-    motif = os.path.basename(index_dir).split("_")[0]
+    motif = index_fit.index_pam(index_dir)
     if not motif or not os.path.isdir(index_dir):
         return
     try:
@@ -6856,6 +6876,23 @@ def generate_report() -> None:
     sys.path.insert(0, os.path.join(script_path, "PostProcess"))
     import generate_report as _report_module
 
+    # A folder with no integrated results ended on a FileNotFoundError traceback: a search
+    # that found no off-target writes none, and an assembly-search's combined folder holds
+    # the combined report it wrote, not results of its own (OF-12)
+    if result_dir and not integrated_results and _report_module.resolve_integrated_tsv(
+            result_dir) is None:
+        if os.path.basename(os.path.normpath(result_dir)).endswith("_combined"):
+            error(
+                f"{result_dir} is an assembly-search's combined folder: assembly-search writes "
+                f"its report there itself (<output>_combined_report.zip). Run generate-report "
+                f"on a haplotype's folder (<output>_paternal or <output>_maternal) for one of "
+                f"theirs."
+            )
+        error(
+            f"{result_dir} holds no integrated results (*integrated_results.tsv), so there is "
+            f"nothing to report: a search that found no off-target writes none (its log.txt "
+            f"says 'No off-targets found'), and one that failed or is running has none yet."
+        )
     out = _report_module.build_report(
         result_dir=result_dir,
         integrated_tsv=integrated_results,
@@ -7150,9 +7187,11 @@ def setup_database():
             [sys.executable, script_setup, chrom, working_dir, str(force)], check=True
         )
     except subprocess.CalledProcessError as e:
+        # (its own message is above it; the command fails with its status: it ended 0)
         sys.stderr.write(
-                f"Legacy database setup exited with error code {e.returncode}"
+                f"Legacy database setup exited with error code {e.returncode}\n"
             )
+        sys.exit(e.returncode)
 
 
 # HELP FUNCTION

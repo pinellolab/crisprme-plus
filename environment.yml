@@ -54,6 +54,7 @@ dependencies:
   - gdown
   - zip
   - unzip
+  - pigz                       # publish-index packs an index on every core with it (else single-threaded gzip); as in the Docker image
   - gsl
   - importlib-metadata
   - huggingface_hub            # crisprme.py download / publish-index
