@@ -439,11 +439,12 @@ def render_gate_row(gate):
             f"haplotype of the panel carries together), <strong>B</strong> "
             f"{int(c.get('B', 0)):,} (one variant), <strong>C1</strong> {int(c.get('C1', 0)):,} "
             "(two or more variants, each in the panel, that none of its haplotypes carries "
-            "together; or variants every haplotype carrying which has an indel in the "
-            f"target), <strong>C2</strong> {int(c.get('C2', 0)):,} (a variant not in the panel, "
-            "which then cannot say). C1 rows are ranked after every other row: they are left "
-            "out of the top-1000 tables, the plots of Section 2, the validation panel and the "
-            "risk card, and listed in a table of their own after the top-1000 (Section 6). "
+            "together; or variants, a single one too, every haplotype carrying which has an "
+            f"indel in the target), <strong>C2</strong> {int(c.get('C2', 0)):,} (a variant not "
+            "in the panel, which then cannot say). C1 rows are ranked after every other row: "
+            "they are left out of the top-1000 tables, the plots of Section 2, the validation "
+            "panel and the risk card (the panel's totals count them), and listed in a table of "
+            "their own after the top-1000 (Section 6). "
             "A, B and C2 rows keep their place; the <code>Observed</code> column gives the "
             "tier of a row of two or more variants. A zero says little where fewer than "
             f"{float(gate.get('min_expected', 3)):g} panel haplotypes were expected to carry "
@@ -3123,20 +3124,10 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     return off_panel
 
 
-def build_validation_panel(df, cols):
-    """Compute candidate counts at CFD / edit-distance thresholds and the
-    worst-case suggested panel. Returns a dict for rendering.
-
-    Counting is over the OFF-TARGET set (on-target row mm+b==0 excluded), so
-    thresholds report actionable candidates for a confirmation panel. The FULL
-    threshold table is kept (CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, and
-    variant-created counts); the suggested tier is the worst-case top-100.
-    """
-    variant, _reference, ontarget = partition_masks(df, cols)
-    offt = df[~ontarget]  # off-targets only
-
-    # Perfect matches (0 mm + 0 bulge): distinct candidate cut sites. With >1 there
-    # is no a-priori on-target, so these drive the red warning banner + panel.
+def _perfect_match_sites(df, ontarget, cols):
+    """The distinct perfect matches (0 mm + 0 bulge) among ``df``'s ``ontarget`` rows, one
+    per guide and locus (in a MULTI-guide run each guide has its own on-target), and their
+    number by guide: (sites, by_guide)."""
     perfect_sites = []
     perfect_by_guide = {}
     if bool(ontarget.any()):
@@ -3162,6 +3153,36 @@ def build_validation_panel(df, cols):
                      "origin": o, "maf": m}
                 )
                 perfect_by_guide[g] = perfect_by_guide.get(g, 0) + 1
+    return perfect_sites, perfect_by_guide
+
+
+def build_validation_panel(df, cols, demoted=None, demoted_cb=None):
+    """Compute candidate counts at CFD / edit-distance thresholds and the
+    worst-case suggested panel. Returns a dict for rendering.
+
+    Counting is over the OFF-TARGET set (on-target row mm+b==0 excluded), so
+    thresholds report actionable candidates for a confirmation panel. The FULL
+    threshold table is kept (CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, and
+    variant-created counts); the suggested tier is the worst-case top-100.
+
+    ``demoted`` / ``demoted_cb`` (gate_demoted, over ``df``): the rows the carrier gate
+    ranks after every other one, by their highest-CFD and their highest-CRISPR-Bulge
+    alignment. The search's totals (its off-targets, perfect matches and variant-created
+    off-targets, as the Section-1 matrix and run_manifest.json count them) are of every
+    row; the CFD and edit-distance thresholds, their downloads, the panel and the
+    perfect-match banner leave the ``demoted`` rows out, as the risk card's CFD bands do,
+    and the CRISPR-Bulge thresholds the ``demoted_cb`` ones, as its CRISPR-Bulge bands do.
+    """
+    every = df
+    if demoted is not None and bool(demoted.any()):
+        df = every[~demoted]
+    cb_rows = every[~demoted_cb] if demoted_cb is not None and bool(demoted_cb.any()) else every
+    variant, _reference, ontarget = partition_masks(df, cols)
+    offt = df[~ontarget]  # off-targets only
+
+    # Perfect matches (0 mm + 0 bulge): distinct candidate cut sites. With >1 there
+    # is no a-priori on-target, so these drive the red warning banner + panel.
+    perfect_sites, perfect_by_guide = _perfect_match_sites(df, ontarget, cols)
 
     # INDEX-ALIGNED sentinel fallbacks (mirror select_worstcase_panel): a length-0
     # Series here would make (cfd>=t)/(mmb<=t) length-0 and raise "wrong length"
@@ -3169,11 +3190,23 @@ def build_validation_panel(df, cols):
     # CRISPR-Bulge-only / mm+b-only / CFD-skipped run. Full-length sentinels -> empty tiers.
     cfd = _to_float_series(offt[cols["cfd"]]) if "cfd" in cols else pd.Series(-1.0, index=offt.index)
     mmb = _to_int_series(offt[cols["mmb"]]) if "mmb" in cols else pd.Series(10 ** 6, index=offt.index)
+    cb_offt = offt if cb_rows is df else cb_rows[~partition_masks(cb_rows, cols)[2]]
     crispr_bulge = (
-        _to_float_series(offt[cols["crispr_bulge"]]) if "crispr_bulge" in cols
-        else pd.Series(np.nan, index=offt.index)
+        _to_float_series(cb_offt[cols["crispr_bulge"]]) if "crispr_bulge" in cols
+        else pd.Series(np.nan, index=cb_offt.index)
     )
     var_off = variant[~ontarget]
+
+    # the search's totals, of every row
+    if every is df:
+        variant_all, ontarget_all, n_perfect_total = variant, ontarget, len(perfect_sites)
+    else:
+        variant_all, _reference_all, ontarget_all = partition_masks(every, cols)
+        n_perfect_total = len(_perfect_match_sites(every, ontarget_all, cols)[0])
+    offt_all = every[~ontarget_all]
+    var_off_all = variant_all[~ontarget_all]
+    cfd_all = (_to_float_series(offt_all[cols["cfd"]]) if "cfd" in cols
+               else pd.Series(-1.0, index=offt_all.index))
 
     # Headline CFD tiers: the SAME cut points as the top risk card (0.5, 0.2). Each row
     # carries the all-gaps count (worst-case assay list) AND the <=1-gap count (the
@@ -3197,10 +3230,10 @@ def build_validation_panel(df, cols):
         if "crispr_bulge" in cols and ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any() else []
     )
 
-    n_variant = int(var_off.sum())
-    n_variant_cfd = int((var_off & (cfd >= PANEL_VARIANT_CFD_MIN)).sum())
+    n_variant = int(var_off_all.sum())
+    n_variant_cfd = int((var_off_all & (cfd_all >= PANEL_VARIANT_CFD_MIN)).sum())
 
-    has_crispr_bulge = crispr_bulge_computed(df, cols)
+    has_crispr_bulge = crispr_bulge_computed(every, cols)
     # count of >=2-bulge off-targets the single-bulge ML model cannot score (rendered as
     # "-" = N/A); surfaced as a live figure in the panel note so a mostly-empty
     # CRISPR-Bulge column is explained rather than looking like missing data.
@@ -3263,7 +3296,8 @@ def build_validation_panel(df, cols):
     # per-tier off-target subsets (for the bundled curated downloads + links).
     # Each entry: (logical tier key, display label, sub-frame). Only non-empty
     # tiers are bundled/linked (decided by the caller).
-    tiers = build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge)
+    tiers = build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge,
+                              cb_offt=cb_offt, variant_created=offt_all[var_off_all.values])
 
     return {
         "cfd_counts": cfd_counts,
@@ -3272,7 +3306,7 @@ def build_validation_panel(df, cols):
         "mmb_counts": mmb_counts,
         "n_variant": n_variant,
         "n_variant_cfd": n_variant_cfd,
-        "n_offtarget": int((~ontarget).sum()),
+        "n_offtarget": int((~ontarget_all).sum()),
         "has_crispr_bulge": has_crispr_bulge,
         "n_ml_na": n_ml_na,
         "n_ot_total": n_ot_total,
@@ -3284,6 +3318,13 @@ def build_validation_panel(df, cols):
         "tiers": tiers,
         "n_perfect": len(perfect_sites),
         "perfect_sites": perfect_sites,
+        # the search's perfect matches, the carrier gate's demoted ones too (the
+        # off-target-count bridge, run_manifest.json)
+        "n_perfect_total": n_perfect_total,
+        # the rows the carrier gate leaves out of the thresholds and the panel, by the
+        # highest-CFD and the highest-CRISPR-Bulge alignment (0 without the gate)
+        "n_gate_demoted": int(demoted.sum()) if demoted is not None else 0,
+        "n_gate_demoted_cb": int(demoted_cb.sum()) if demoted_cb is not None else 0,
         # per-guide multiplicity: the red "no unambiguous on-target" banner fires
         # only when a SINGLE guide has >= 2 perfect matches (a multi-guide run with
         # one perfect match each is normal, not ambiguous).
@@ -3309,7 +3350,8 @@ def _tier_filename(key):
     return f"{key}.tsv"
 
 
-def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=None):
+def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=None,
+                      cb_offt=None, variant_created=None):
     """Off-target subsets for each threshold tier (section-4 downloads).
 
     Returns a list of dicts ``{key, label, filename, df}`` for the CFD>= and
@@ -3317,10 +3359,16 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=
     mm+b==0 excluded). ``cfd`` / ``mmb`` are the OFF-TARGET-aligned series already
     computed by the caller. Empty tiers are still returned; the caller skips
     bundling/linking empties. Sub-frames carry the ORIGINAL columns so the
-    curated projection is applied uniformly at write time.
+    curated projection is applied uniformly at write time. ``cb_offt``: the
+    off-targets the CRISPR-Bulge tiers are taken from (``crispr_bulge`` is aligned to
+    it; ``offt`` when None), and ``variant_created`` the variant-created tier's rows
+    (``offt``'s when None): build_validation_panel's, which the carrier gate leaves
+    in each.
     """
     tiers = []
     var_off = variant[~ontarget]
+    if cb_offt is None:
+        cb_offt = offt
     for t in CFD_THRESHOLDS:
         sub = offt[(cfd >= t).values]
         tiers.append({
@@ -3331,7 +3379,7 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=
         })
     if crispr_bulge is not None and "crispr_bulge" in cols and ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any():
         for label, fkey, pred in _crispr_bulge_tier_specs():
-            sub = offt[pred(crispr_bulge).values]
+            sub = cb_offt[pred(crispr_bulge).values]
             tiers.append({
                 "key": fkey,  # internal key ('crispr_bulge_0.50' / 'crispr_bulge_gt0'); filenames stable
                 "label": f"{scorer_label()} {label}",
@@ -3352,7 +3400,7 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=
         "key": "variant_created",
         "label": "variant-contributed off-target sites (variant-created)",
         "filename": "variant_created.tsv",
-        "df": offt[var_off.values],
+        "df": offt[var_off.values] if variant_created is None else variant_created,
     })
     return tiers
 
@@ -3509,8 +3557,9 @@ def render_validation_panel(
             f"</a></p>"
         )
     # off-target-count bridge: show the total-sites minus perfect-match subtraction
-    # so summing the Section-1 matrix (which includes perfect matches) reconciles.
-    _np = int(vp.get("n_perfect", 0) or 0)
+    # so summing the Section-1 matrix (which includes perfect matches) reconciles. Of every
+    # row, as the matrix: the carrier gate's demoted ones too (their row below).
+    _np = int(vp.get("n_perfect_total", vp.get("n_perfect", 0)) or 0)
     _off_label = "Off-targets (on-target mm+b=0 excluded)"
     if _np > 0:
         _total_sites = vp["n_offtarget"] + _np
@@ -3529,6 +3578,23 @@ def render_validation_panel(
         f"<tr><td>&hellip; of those with CFD &ge; {PANEL_VARIANT_CFD_MIN}</td>"
         f"<td class='num'>{vp['n_variant_cfd']:,}</td></tr>"
     ) if show_variant_row else ""
+    # the rows the carrier gate ranks after every other one (tier C1): in the totals above,
+    # out of the thresholds, the panel and the risk card (build_validation_panel), by the
+    # alignment of each score
+    _cb_gate = bool(vp.get("crispr_bulge_counts"))
+    if vp.get("n_gate_demoted"):
+        _variant_rows += (
+            "<tr><td>Ranked after every other row by the carrier gate (tier C1: at the "
+            "highest-CFD alignment, variants no haplotype of the panel carries together; "
+            "their table follows the top-1000, in Section 6): counted above, left out of the "
+            "CFD and edit-distance thresholds, the panel and the risk card"
+            + ("&rsquo;s CFD bands" if _cb_gate else "")
+            + f"</td><td class='num'>{vp['n_gate_demoted']:,}</td></tr>")
+    if vp.get("n_gate_demoted_cb") and _cb_gate:
+        _variant_rows += (
+            f"<tr><td>&hellip; at the highest-{scorer_label()} alignment: left out of the "
+            f"{scorer_label()} thresholds and the risk card&rsquo;s {scorer_label()} "
+            f"bands</td><td class='num'>{vp['n_gate_demoted_cb']:,}</td></tr>")
     _panel_variant_note = (
         f" of the selected sites, <strong>{vp['panel_variant']:,}</strong> "
         "are variant-created."
@@ -5702,9 +5768,10 @@ def build_report(
     sample_dataset = load_sample_dataset(samplesid_dir)  # native per-db provenance (dynamic)
 
     # The rows the carrier gate ranks after every other one (tier C1, by the alignment each
-    # view ranks): the top-1000 tables, the plots of Section 2, the validation panel and
-    # the risk card are of the others (``ranked``, ``ranked_cb``); the summary matrix and
-    # the population plot count every row, and the demoted ones have their own table.
+    # view ranks): the top-1000 tables, the plots of Section 2, the validation panel's
+    # thresholds and selection and the risk card are of the others (``ranked``,
+    # ``ranked_cb``); the summary matrix, the validation panel's totals, run_manifest.json
+    # and the population plot count every row, and the demoted ones have their own table.
     demoted = gate_demoted(df)
     ranked = df[~demoted]
     ranked_cb = df[~gate_demoted(df, "_gate_cb")]
@@ -5804,7 +5871,8 @@ def build_report(
 
     perfect_banner = ""
     try:
-        vp = build_validation_panel(ranked, cols)
+        vp = build_validation_panel(df, cols, demoted=demoted,
+                                    demoted_cb=gate_demoted(df, "_gate_cb"))
         perfect_banner = render_perfect_match_banner(vp)
         panel_top100_df = vp.get("panel_df")
 
@@ -6416,7 +6484,7 @@ def build_report(
                     "total_sites": meta.get("n_total"),
                     "off_targets": meta.get("n_offtarget"),
                     "on_target_perfect_matches": (
-                        vp.get("n_perfect") if isinstance(vp, dict) else None),
+                        vp.get("n_perfect_total") if isinstance(vp, dict) else None),
                     "variant_created_off_targets": (
                         vp.get("n_variant") if isinstance(vp, dict) else None),
                     "recommended_panel_size": (

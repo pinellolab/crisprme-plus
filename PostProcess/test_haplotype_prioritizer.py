@@ -421,6 +421,15 @@ class TestReportRanksByTheGate(unittest.TestCase):
     place with their tier as their Observed cell, and the rows themselves are the search's."""
 
     GUIDE = "CTCTCAGCTGGTACACGGCANNN"
+    ROWS = [
+        # chrom pos  mm  cfd   cb     origin variants (CFD and CRISPR-Bulge alignment)
+        ("1000", "0", "1.0", "1.0", "ref", "NA"),
+        ("500", "3", "0.30", "0.10", "ref", "NA"),
+        ("1000", "3", "0.50", "0.40", "alt", f"{CHROM}_1010_A_G,{CHROM}_1015_C_T"),  # A
+        ("2000", "3", "0.95", "0.90", "alt", f"{CHROM}_2010_G_A,{CHROM}_2015_T_C"),  # C1
+        ("3000", "3", "0.40", "0.30", "alt", f"{CHROM}_3010_A_C,{CHROM}_3020_G_T"),  # C2
+        ("4000", "3", "0.20", "0.20", "alt", f"{CHROM}_4010_C_G"),                   # B
+    ]
 
     def setUp(self):
         import generate_report  # noqa: F401  (pandas + matplotlib: installed in CI)
@@ -445,16 +454,6 @@ class TestReportRanksByTheGate(unittest.TestCase):
             fh.write(f"{PANEL}\n")
         self.results = os.path.join(
             self.rd, f"{self.GUIDE}+NGG_hg38+{PANEL}_4+2_integrated_results.tsv")
-        aln = "CTCTCAGCTGGTACACGGCATGG"
-        rows = [
-            # chrom pos  mm  cfd   cb     origin variants (CFD and CRISPR-Bulge alignment)
-            ("1000", "0", "1.0", "1.0", "ref", "NA"),
-            ("500", "3", "0.30", "0.10", "ref", "NA"),
-            ("1000", "3", "0.50", "0.40", "alt", f"{CHROM}_1010_A_G,{CHROM}_1015_C_T"),  # A
-            ("2000", "3", "0.95", "0.90", "alt", f"{CHROM}_2010_G_A,{CHROM}_2015_T_C"),  # C1
-            ("3000", "3", "0.40", "0.30", "alt", f"{CHROM}_3010_A_C,{CHROM}_3020_G_T"),  # C2
-            ("4000", "3", "0.20", "0.20", "alt", f"{CHROM}_4010_C_G"),                   # B
-        ]
         self.cols = ["Spacer+PAM", "Chromosome", "Not_found_in_REF", "Annotation_GENCODE"]
         per_block = ["Start_coordinate", "Strand", "Aligned_spacer+PAM",
                      "Aligned_protospacer+PAM_REF", "Aligned_protospacer+PAM_ALT", "PAM",
@@ -468,29 +467,47 @@ class TestReportRanksByTheGate(unittest.TestCase):
                       "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
                       "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)",
                       "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)"]
+        self.write_results(self.ROWS)
+
+    def write_results(self, rows):
         with open(self.results, "w") as fh:
             fh.write("\t".join(self.cols) + "\n")
-            for pos, mm, cfd, cb, origin, variants in rows:
-                r = {"Spacer+PAM": self.GUIDE, "Chromosome": CHROM,
-                     "Not_found_in_REF": "y" if origin == "alt" else "n",
-                     "Annotation_GENCODE": "intergenic"}
-                for b in hp.BLOCKS:
-                    r.update({f"Start_coordinate_({b})": pos, f"Strand_({b})": "+",
-                              f"Aligned_spacer+PAM_({b})": self.GUIDE,
-                              f"Aligned_protospacer+PAM_REF_({b})": aln,
-                              f"Aligned_protospacer+PAM_ALT_({b})": aln if origin == "alt" else "NA",
-                              f"PAM_({b})": "TGG", f"Mismatches_({b})": mm, f"Bulges_({b})": "0",
-                              f"Mismatches+bulges_({b})": mm, f"REF/ALT_origin_({b})": origin,
-                              f"PAM_creation_({b})": "NA", f"Variant_info_genome_({b})": variants,
-                              f"Variant_MAF_({b})": "0.05" if origin == "alt" else "NA",
-                              f"Variant_rsID_({b})": ".", f"Variant_samples_({b})":
-                                  "S00,S01,S02" if origin == "alt" else "NA"})
-                r.update({"CFD_score_(highest_CFD)": cfd, "CFD_score_REF_(highest_CFD)": "0.1",
-                          "CFD_score_ALT_(highest_CFD)": cfd,
-                          "CRISPR_BULGE_score_(highest_CRISPR_BULGE)": cb,
-                          "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)": "0.05",
-                          "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)": cb})
-                fh.write("\t".join(r.get(c, "NA") for c in self.cols) + "\n")
+            for row in rows:
+                self.write_row(fh, *row)
+
+    def gate(self):
+        done = subprocess.run(
+            [sys.executable, os.path.join(HERE, "haplotype_prioritizer.py"), "--results",
+             self.results, "--dictionaries", self.dicts, "--vcf-list", self.vcfs,
+             "--mode", "population-level"], capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+
+    def write_row(self, fh, pos, mm, cfd, cb, origin, variants, cb_variants=None):
+        """One row of the integrated results: ``variants`` are those of each alignment but
+        the highest-CRISPR-Bulge one when ``cb_variants`` is given."""
+        aln = "CTCTCAGCTGGTACACGGCATGG"
+        r = {"Spacer+PAM": self.GUIDE, "Chromosome": CHROM,
+             "Not_found_in_REF": "y" if origin == "alt" else "n",
+             "Annotation_GENCODE": "intergenic"}
+        for b in hp.BLOCKS:
+            r.update({f"Start_coordinate_({b})": pos, f"Strand_({b})": "+",
+                      f"Aligned_spacer+PAM_({b})": self.GUIDE,
+                      f"Aligned_protospacer+PAM_REF_({b})": aln,
+                      f"Aligned_protospacer+PAM_ALT_({b})": aln if origin == "alt" else "NA",
+                      f"PAM_({b})": "TGG", f"Mismatches_({b})": mm, f"Bulges_({b})": "0",
+                      f"Mismatches+bulges_({b})": mm, f"REF/ALT_origin_({b})": origin,
+                      f"PAM_creation_({b})": "NA",
+                      f"Variant_info_genome_({b})": cb_variants
+                      if cb_variants and b == "highest_CRISPR_BULGE" else variants,
+                      f"Variant_MAF_({b})": "0.05" if origin == "alt" else "NA",
+                      f"Variant_rsID_({b})": ".", f"Variant_samples_({b})":
+                          "S00,S01,S02" if origin == "alt" else "NA"})
+        r.update({"CFD_score_(highest_CFD)": cfd, "CFD_score_REF_(highest_CFD)": "0.1",
+                  "CFD_score_ALT_(highest_CFD)": cfd,
+                  "CRISPR_BULGE_score_(highest_CRISPR_BULGE)": cb,
+                  "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)": "0.05",
+                  "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)": cb})
+        fh.write("\t".join(r.get(c, "NA") for c in self.cols) + "\n")
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -545,6 +562,75 @@ class TestReportRanksByTheGate(unittest.TestCase):
         # the off-target set is the search's: the bundled table is the source file
         self.assertEqual(files["data/integrated_results.tsv.gz"].encode(), source)
         self.assertIn("data/carrier_gate.tsv.gz", files)
+
+    def section4(self, files):
+        """The validation panel's totals, its threshold files and run_manifest.json's
+        counts."""
+        import re
+        html = files["report.html"]
+        bridge = re.search(r"Off-targets \(([\d,]+) total sites &minus; ([\d,]+) perfect "
+                           r"match(?:es)? = ([\d,]+)\)", html).groups()
+        created = re.search(r"Variant-created off-targets \(Not_found_in_REF\)</td>"
+                            r"<td class='num'>([\d,]+)", html).group(1)
+        tiers = {name[len("data/"):]: sorted(self.positions(tsv)) for name, tsv in files.items()
+                 if name.startswith(("data/cfd_ge_", "data/crispr_bulge_ge_",
+                                     "data/variant_created"))}
+        counts = json.loads(files["data/run_manifest.json"])["counts"]
+        return bridge, created, tiers, counts
+
+    def test_the_totals_count_every_row(self):
+        """The validation panel's off-targets, perfect matches and variant-created
+        off-targets, and run_manifest.json's counts, are the search's: the rows the gate
+        ranks after the others are among them, as in the Section-1 matrix, and a row says
+        how many there are. Its thresholds leave them out, as the risk card does: the CFD
+        ones the rows whose highest-CFD alignment is C1, the CRISPR-Bulge ones those whose
+        highest-CRISPR-Bulge alignment is (here 5000's, whose CFD alignment is one
+        variant)."""
+        with open(self.results, "a") as fh:
+            self.write_row(fh, "5000", "2", "0.60", "0.80", "alt", f"{CHROM}_4010_C_G",
+                           cb_variants=f"{CHROM}_2010_G_A,{CHROM}_2015_T_C")
+        bridge, created, tiers, counts = self.section4(self.report())
+        self.assertEqual(bridge, ("7", "1", "6"))
+        self.assertEqual(created, "5")
+        self.assertEqual(tiers["cfd_ge_0.50.tsv"], ["1000", "2000", "5000"])
+        self.assertEqual(tiers["crispr_bulge_ge_0.50.tsv"], ["2000", "5000"])
+        self.assertEqual(tiers["variant_created.tsv"], ["1000", "2000", "3000", "4000", "5000"])
+        self.gate()
+        files = self.report()
+        gated = self.section4(files)
+        self.assertEqual(gated[:2], (bridge, created))
+        self.assertEqual({k: v for k, v in gated[3].items() if k != "recommended_panel_size"},
+                         {k: v for k, v in counts.items() if k != "recommended_panel_size"})
+        self.assertEqual(gated[3]["variant_created_off_targets"], 5)
+        self.assertEqual(gated[2], {"cfd_ge_0.50.tsv": ["1000", "5000"],
+                                    "cfd_ge_0.20.tsv": ["1000", "3000", "4000", "500", "5000"],
+                                    "cfd_ge_0.05.tsv": ["1000", "3000", "4000", "500", "5000"],
+                                    "crispr_bulge_ge_0.20.tsv": ["1000", "3000", "4000"],
+                                    "variant_created.tsv": tiers["variant_created.tsv"]})
+        html = files["report.html"]
+        self.assertIn("Ranked after every other row by the carrier gate (tier C1: at the "
+                      "highest-CFD alignment, variants no haplotype of the panel carries "
+                      "together; their table follows the top-1000, in Section 6): counted "
+                      "above, left out of the CFD and edit-distance thresholds, the panel and "
+                      "the risk card&rsquo;s CFD bands</td><td class='num'>1</td>", html)
+        self.assertIn("&hellip; at the highest-CRISPR-Bulge alignment: left out of the "
+                      "CRISPR-Bulge thresholds and the risk card&rsquo;s CRISPR-Bulge "
+                      "bands</td><td class='num'>2</td>", html)
+        self.assertIn("5000", self.positions(files["data/top1000.tsv"]))
+        self.assertNotIn("5000", self.positions(files["data/top1000_crispr_bulge.tsv"]))
+
+    def test_a_c1_row_whose_crispr_bulge_alignment_is_carried(self):
+        """2000's highest-CRISPR-Bulge alignment one variant (B): it leaves the CFD
+        thresholds but stays in the CRISPR-Bulge ones, which then leave no row out."""
+        self.write_results([r + (f"{CHROM}_4010_C_G",) if r[0] == "2000" else r
+                            for r in self.ROWS])
+        self.gate()
+        files = self.report()
+        _bridge, _created, tiers, _counts = self.section4(files)
+        self.assertEqual(tiers["cfd_ge_0.50.tsv"], ["1000"])
+        self.assertEqual(tiers["crispr_bulge_ge_0.50.tsv"], ["2000"])
+        self.assertIn("2000", self.positions(files["data/top1000_crispr_bulge.tsv"]))
+        self.assertNotIn("at the highest-CRISPR-Bulge alignment: left out", files["report.html"])
 
 
 class _PostAnalysis(unittest.TestCase):

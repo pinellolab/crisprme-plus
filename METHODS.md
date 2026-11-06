@@ -857,8 +857,12 @@ the search without it (`--no-prioritize-observed`).
 - **Report.** A row whose highest-CFD alignment is C1 leaves the top-1000 tables, the plots of
   Section 2, the validation panel and the risk card, and is listed in a table of its own after
   the top-1000, by CFD, with all of them in `unobserved_worst_case.tsv`; a row whose highest
-  CRISPR-Bulge alignment is C1 leaves the ranking by CRISPR-Bulge score. The summary matrix
-  and the population plot count every row. The `Observed` column of a row of two or more
+  CRISPR-Bulge alignment is C1 leaves the ranking by CRISPR-Bulge score. The summary matrix,
+  the validation panel's totals (its off-targets, perfect matches and variant-created
+  off-targets, beside a row that counts the C1 rows), `run_manifest.json` and the
+  population plot count every row; the panel's thresholds leave the C1 rows out as the risk
+  card does (its CRISPR-Bulge thresholds, as the card's CRISPR-Bulge bands, the rows whose
+  highest CRISPR-Bulge alignment is C1). The `Observed` column of a row of two or more
   variants gives its tier's factual label (`together on N of H <panel> haplotypes`,
   `not together on any of H <panel> haplotypes (expected E)`, `not checked: K of N variants
   not in <panel>`), with no "chimera" word, and the inputs card has a **Carrier gate** row:
