@@ -408,3 +408,13 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   and complete-test asked for the unpacked file alone, so every other chromosome came from UCSC
   (FR :725). It takes the gzipped one from the Hub when the unpacked one is not there, and UCSC
   stays its source when neither is: chr21 came from the Hub, 47,644,190 bytes, as from UCSC.
+- **A FASTA whose last line has no line end is refused, and `genome_layout.py --split` ends it
+  with one.** The index build drops a last line with no LF, with no error: a sequence written on
+  one line lost all its off-targets, and a 60-wrapped chr1 whose last line held a guide's
+  on-target gave no row with 2.8.1, and a search with bulges failed (no `.bin`); `--split`,
+  which every genome download and Settings upload runs, deleted lone CRs past the first lines,
+  which left one long line with no LF (LP unterminated-last-line-dropped). The check a search
+  runs first, complete-search's input check and build-index-only refuse such a file (one byte
+  a file), saying to run `--split`, which writes a CR between bases as a line end and ends
+  every file it writes with LF; after it, the same search found the on-target, with and
+  without bulges.

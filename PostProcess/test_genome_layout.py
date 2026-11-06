@@ -283,8 +283,10 @@ class TestHeaderIsExactlyTheId(unittest.TestCase):
         self.assertEqual(self._readb("chr1.fa"), ">chr1\nACGT\n")
 
     def test_a_clean_genome_is_not_touched(self):
+        # (a last line with no LF is no clean file: the index build drops it, and a search
+        # lost its off-targets; TestCommandLine.test_a_last_line_with_no_line_end_...)
         for name in ("chr1.fa", "chr2.fa"):
-            self._writeb(name, f">{name[:-3]}\nACGT\nAC")  # (no last line end, as it was)
+            self._writeb(name, f">{name[:-3]}\nACGT\nAC\n")
         before = {n: os.stat(os.path.join(self.tmp, n)) for n in os.listdir(self.tmp)}
         self.assertEqual(gl.find_unclean_fastas(self.tmp, deep=True), {})
         self.assertEqual(gl.describe_header_problems(self.tmp), [])
@@ -300,7 +302,8 @@ class TestHeaderIsExactlyTheId(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.tmp)), ["NC_000913.3.fa", "chr1.fa", "chr2.fa"])
         self.assertEqual(self._readb("NC_000913.3.fa"), ">NC_000913.3\nACGT\nAC\n")
         self.assertEqual(self._readb("chr1.fa"), ">chr1\nACGT\n")
-        self.assertEqual(self._readb("chr2.fa"), ">chr2\nGG\nCC")  # no line end, as it had none
+        # (ended with LF, which it had none of: the index build drops a last line with none)
+        self.assertEqual(self._readb("chr2.fa"), ">chr2\nGG\nCC\n")
 
     def test_a_cr_further_on_is_for_the_deep_check_and_the_fix_to_find(self):
         self._writeb("chr1.fa", ">chr1\nACGT\nAC\r\nGG\n")
@@ -563,6 +566,38 @@ class TestCommandLine(unittest.TestCase):
         self.assertEqual(self._run(self.tmp).returncode, 0)
         self.assertEqual(self._run("--split", self.tmp).stdout, "")
 
+    def test_a_last_line_with_no_line_end_exits_one_and_split_ends_it(self):
+        # the index build drops a last line with no LF, with no error: a sequence written
+        # on one line lost all its off-targets (LP unterminated-last-line-dropped)
+        _write(os.path.join(self.tmp, "chr1.fa"), ">chr1\nACGT\nACGTAC")
+        r = self._run(self.tmp)
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.stderr.splitlines()[:2], [
+            "ERROR: chr1.fa: its last line has no line end (LF). The index build drops a last "
+            "line with none, so every search of this folder loses the off-targets of its bases "
+            "(all of a sequence written on one line), with no error. End it with one with:",
+            f"    python PostProcess/genome_layout.py --split {self.tmp}"])
+        r = self._run("--split", self.tmp)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("Ended chr1.fa's last line with a line end (LF)", r.stdout)
+        self.assertIn("any CRISPRitz index built from the old layout must be rebuilt", r.stdout)
+        self.assertEqual(_read(os.path.join(self.tmp, "chr1.fa")), ">chr1\nACGT\nACGTAC\n")
+        self.assertEqual(self._run(self.tmp).returncode, 0)
+
+    def test_split_ends_lone_cr_lines_with_lf_and_each_piece_with_one(self):
+        # lone CRs past the first lines were deleted, which left one line of all the rest
+        # with no LF, which the index build dropped (LP unterminated-last-line-dropped)
+        with open(os.path.join(self.tmp, "chr1.fa"), "wb") as f:
+            f.write(b">chr1\nAC\nGT\rAC\rGG")
+        with open(os.path.join(self.tmp, "two.fa"), "wb") as f:
+            f.write(b">chr2\nAAA\n>chr3\nCCC")
+        r = self._run("--split", self.tmp)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(_read(os.path.join(self.tmp, "chr1.fa")), ">chr1\nAC\nGT\nAC\nGG\n")
+        self.assertEqual(_read(os.path.join(self.tmp, "chr2.fa")), ">chr2\nAAA\n")
+        self.assertEqual(_read(os.path.join(self.tmp, "chr3.fa")), ">chr3\nCCC\n")
+        self.assertEqual(self._run("--deep", self.tmp).returncode, 0)
+
     def test_deep_check_finds_a_cr_past_the_first_lines(self):
         with open(os.path.join(self.tmp, "chr1.fa"), "wb") as f:
             f.write(b">chr1\nAC\nGT\r\nAC\n")
@@ -577,28 +612,31 @@ class TestCommandLine(unittest.TestCase):
         # a PAM in the last bases of the sequence the build wrote warnings on stderr and a
         # search of the index crashed (SIGSEGV) or reported other rows, through the real
         # engine (integration round 2 review, F1). The two-line check refuses a CR in its two
-        # lines, --deep one anywhere, and --split writes the file with none
+        # lines, --deep one anywhere, and --split writes the file with none. A file whose
+        # last byte is a CR, its last line ending in no LF, the two-line check refuses too,
+        # since 2.9.0, for that (LP unterminated-last-line-dropped); --split ends it with LF
         path = os.path.join(self.tmp, "chr1.fa")
-        # (the file, refused by the two-line check, as --split writes it)
-        for text, fast, fixed in ((b">chr1\nAC\nGT\r\n", False, b">chr1\nAC\nGT\n"),
-                                  (b">chr1\nAC\nGT\n\r", False, b">chr1\nAC\nGT\n"),
-                                  (b">chr1\nAC\nGT\n\r\r\r", False, b">chr1\nAC\nGT\n"),
-                                  (b">chr1\nAC\nGT\r\n\r\n", False, b">chr1\nAC\nGT\n\n"),
-                                  (b">chr1\nAC\nGT\r\r\n", False, b">chr1\nAC\nGT\n"),
-                                  (b">chr1\nAC\nGT\r\n\n", False, b">chr1\nAC\nGT\n\n"),
-                                  (b">chr1\nAC\nGT\n\r\n", False, b">chr1\nAC\nGT\n\n"),
-                                  (b">chr1\nACGT\r\n", True, b">chr1\nACGT\n"),
-                                  (b">chr1\nACGT\r", True, b">chr1\nACGT"),
-                                  (b">chr1\nACGT\r\nAC\n", True, b">chr1\nACGT\nAC\n"),
-                                  (b">chr1\nAC\nGT\r\n\nAC\n", False, b">chr1\nAC\nGT\n\nAC\n")):
+        cr, lf = "ERROR: chr1.fa: its lines end in CR", "ERROR: chr1.fa: its last line has no"
+        # (the file, what the two-line check refuses it for, as --split writes it)
+        for text, fast, fixed in ((b">chr1\nAC\nGT\r\n", None, b">chr1\nAC\nGT\n"),
+                                  (b">chr1\nAC\nGT\n\r", lf, b">chr1\nAC\nGT\n"),
+                                  (b">chr1\nAC\nGT\n\r\r\r", lf, b">chr1\nAC\nGT\n"),
+                                  (b">chr1\nAC\nGT\r\n\r\n", None, b">chr1\nAC\nGT\n\n"),
+                                  (b">chr1\nAC\nGT\r\r\n", None, b">chr1\nAC\nGT\n"),
+                                  (b">chr1\nAC\nGT\r\n\n", None, b">chr1\nAC\nGT\n\n"),
+                                  (b">chr1\nAC\nGT\n\r\n", None, b">chr1\nAC\nGT\n\n"),
+                                  (b">chr1\nACGT\r\n", cr, b">chr1\nACGT\n"),
+                                  (b">chr1\nACGT\r", cr, b">chr1\nACGT\n"),
+                                  (b">chr1\nACGT\r\nAC\n", cr, b">chr1\nACGT\nAC\n"),
+                                  (b">chr1\nAC\nGT\r\n\nAC\n", None, b">chr1\nAC\nGT\n\nAC\n")):
             with open(path, "wb") as f:
                 f.write(text)
-            for options, refused in (((), fast), (("--deep",), True)):
+            for options, says in (((), fast), (("--deep",), cr)):
                 with self.subTest(text=text, options=options):
                     r = self._run(*options, self.tmp)
-                    if refused:
+                    if says:
                         self.assertEqual(r.returncode, 1, r.stderr)
-                        self.assertIn("ERROR: chr1.fa: its lines end in CR", r.stderr)
+                        self.assertIn(says, r.stderr)
                     else:
                         self.assertEqual((r.returncode, r.stderr), (0, ""))
             with self.subTest(text=text, check="complete-search's"):
