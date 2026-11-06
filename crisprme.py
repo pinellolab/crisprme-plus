@@ -2327,6 +2327,58 @@ def _index_serves_search(index: str, genome: str, motif: str, want: int, prune: 
     return index_fit.pam_serves(parsed[0], motif, prune, three_prime) is not None
 
 
+def _variant_index_elsewhere(index_path: str, genome: str, datasets: List[str]) -> List[str]:
+    """Of ``datasets``, those whose variant index (<PAM>_<N>_<genome>+<dataset>, either form
+    of the name) the --index-path library ``index_path`` holds ("_": none)."""
+    if index_path == "_":
+        return []
+    held = set()
+    for d in _listdir(index_path):
+        parsed = index_fit.parse_index_name(d)
+        if parsed and not d.endswith("_INDELS") and "+" in parsed[2]:
+            ref, _plus, dataset = parsed[2].partition("+")
+            if ref == genome:
+                held.add(dataset)
+    return [d for d in datasets if d in held]
+
+
+def _refuse_no_reference_index(index_path: str, genome: str, motif: str, want: int, prune: bool,
+                               three_prime: bool, guide_len: int, bdna: int, brna: int,
+                               vcf_dirs: List[str]) -> None:
+    """Stops, before anything is done, a variant search with bulges under --index-path that
+    would enrich a dataset first and whose library holds no reference index that serves it
+    (_index_the_search_takes). The search script stops there ("no matching reference index
+    under --index-path", with what the library holds), but only after its STEP 1, the
+    enrichment: hours on hg38, for nothing (IDX-17 e). A reference search, or a variant one
+    with nothing to enrich, reaches that refusal at once, and says more: left to it; so is a
+    library where a run builds an index (its lock), which the search script waits for."""
+    def _enriched_first(vdir: str) -> bool:
+        dataset = f"{genome}+{os.path.basename(os.path.normpath(vdir))}"
+        return (not os.path.isdir(os.path.join(current_working_directory, "Genomes", dataset))
+                and any(f.endswith(".vcf.gz") for f in _listdir(vdir))
+                and not _index_the_search_takes(_variant_libraries(index_path), motif, dataset,
+                                                want, prune, three_prime, guide_len, bdna, brna,
+                                                True))
+
+    if not any(_enriched_first(vdir) for vdir in vcf_dirs):
+        return
+    if _index_the_search_takes([index_path], motif, genome, want, prune, three_prime,
+                               guide_len, bdna, brna, False):
+        return
+    if any(d.endswith(f"_{genome}.lock") for d in _listdir(index_path)):
+        return
+    error(
+        f"No reference index under --index-path {index_path} serves this search (genome "
+        f"{genome}, PAM {motif}, {bdna} DNA and {brna} RNA bulge(s)), and a search builds "
+        f"none there: it would stop on that after enriching the genome with the dataset's "
+        f"variants (hours on a human genome). Install one in that library (crisprme.py "
+        f"download --what index "
+        f"--index-name {motif}_{want}_{genome}, or crisprme.py build-index-only), or run "
+        f"without --index-path, where a search builds one from the genome (a search of the "
+        f"reference genome alone, with --index-path, says what that library holds)"
+    )
+
+
 def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna: int, brna: int,
                              prune: bool, three_prime: bool, guide_len: int,
                              index_path: str) -> None:
@@ -3135,6 +3187,10 @@ def complete_search() -> None:
         _refuse_no_variant_index(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
             bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
+    if variant and index_path != "_" and (bDNA or bRNA):
+        _refuse_no_reference_index(index_path, genome_ref, pam_char, max(bDNA, bRNA) + 1,
+                                   prune_pam, not pam_begin, total_pam_len - pam_len, bDNA, bRNA,
+                                   resolve_vcf_dataset_dirs(vcfdir, current_working_directory))
     if _no_bulges_reached:
         # A 0-bulge search reports a site that needs a bulge at its next best alignment, or
         # not at all, and the rest of the run reads as any other: never silently. Under
@@ -3441,6 +3497,22 @@ def complete_search() -> None:
             _have_indel = os.path.isdir(os.path.join(_dict_root, f"log_indels_{_vn}"))
             if not (_have_snp and _have_indel):
                 _missing.append(_vn)
+        # (a dataset whose variant index the --index-path library holds: its dictionaries
+        # are not there for a search, which reads them from the working directory, as it
+        # reads the dataset's sample list and VCF folder; IDX-17 c)
+        _elsewhere = _variant_index_elsewhere(index_path, genome_ref, _missing)
+        if _elsewhere:
+            error(
+                f"The variant index of {', '.join(_elsewhere)} is in --index-path {index_path}, "
+                f"but a search reads a dataset's dictionaries (Dictionaries/registry_<dataset> "
+                f"or dictionaries_<dataset>, and log_indels_<dataset>), its sample list and its "
+                f"VCF folder from the working directory, {current_working_directory.rstrip('/')}"
+                f", which holds none of {', '.join(_elsewhere)}'s: run the search from the "
+                f"folder that holds them (the one the index was downloaded into, "
+                f"{os.path.dirname(os.path.normpath(index_path))}, for a download), or "
+                f"download them here (crisprme.py download --what index --index-name <the "
+                f"index>)"
+            )
         if _missing:
             error(
                 "No prebuilt variant index found for: %s.\n\n"

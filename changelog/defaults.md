@@ -12,18 +12,19 @@ and change `PostProcess/test_documented_sizes.py` and every surface it reads tog
 of `_r281/r109/list_282.md` and of the plan's section 4, for the merge; the ids are the sources', a
 JSON line where the plan cites one, as FV :335).
 
-*Fixed here, each with its test (the entries below):* IDX-17 (a), and (b) by E1 (a search with no
-bulges reads no index); IDX-19; IDX-21; IDX-22; cli5 D7; OF-11; OF-12; OF-13; FR :98; FR :125;
-FR :89 and :189 (the base-editing window's HTTP 500s); FR :278; FR :286; FV :328 (the Settings build
-form's genome list); FV :335; F2 (the web's bulge-cap side rule); RV1-F5; RV4-1; RV4-3; M1; M2; M3;
-CI-1; WEB-9 and the bundle that is no archive; C11/P7; C16; C19; C20; emptyidx F6, F7 (with the
-genome-layout refusal's banner) and F8; suite P4; skips D7; P15.3; install P6; install P10 (the
-Hub's warning, git's advice); install P9 (pigz); R2-F2; R4-4 (the unused index of an assembly search
-with no bulges); R6B RV1-6, RV2-5, RV3-4 and RV3-6; LP unterminated-last-line-dropped; M6; wset N1
-and N2; wsearch N8; RV3-D; secfu RV1-N1; the chunked uploader's grey refusals and the search with no
-temporary folder (the final confirmation of 2.8.1); setup's exit status, progress lines and URLs
-(FR2 cli a, c, e); FR :725 (complete-test's chromosomes from the Hub); the checklist's HPC route
-(`--cleanenv`, a fresh sandbox); the installers' first-run chain (plan 4.4).
+*Fixed here, each with its test (the entries below):* IDX-17 (a), (c) and (e), and (b) by E1 (a
+search with no bulges reads no index); IDX-19; IDX-21; IDX-22; cli5 D7; OF-11; OF-12; OF-13; FR :98;
+FR :125; FR :89 and :189 (the base-editing window's HTTP 500s); FR :278; FR :286; FV :328 (the
+Settings build form's genome list); FV :335; F2 (the web's bulge-cap side rule); RV1-F5; RV4-1;
+RV4-3; M1; M2; M3; CI-1; WEB-9 and the bundle that is no archive; C11/P7; C16; C19; C20; emptyidx
+F6, F7 (with the genome-layout refusal's banner) and F8; suite P4; skips D7; P15.3; install P6;
+install P10 (the Hub's warning, git's advice); install P9 (pigz); R2-F2; R4-4 (the unused index of
+an assembly search with no bulges); R6B RV1-6, RV2-5, RV3-4 and RV3-6; LP
+unterminated-last-line-dropped; M6; wset N1 and N2; wsearch N8; RV3-D; secfu RV1-N1; the chunked
+uploader's grey refusals and the search with no temporary folder (the final confirmation of 2.8.1);
+setup's exit status, progress lines and URLs (FR2 cli a, c, e); FR :725 (complete-test's chromosomes
+from the Hub); the checklist's HPC route (`--cleanenv`, a fresh sandbox); the installers' first-run
+chain (plan 4.4).
 
 *Found fixed already (checked on this branch):* P12 (exit 2 since 2.8.1); t31 P6 (C3 of 2.8.1: every
 folder named, exit 2, and the banner says reference when the smoke runs reference-only); R2-F3;
@@ -41,6 +42,9 @@ gate track).
 - Plan 4.1, every item: two cis indels in one protospacer; CRISPR-Bulge's batch noise; the one-row
   drops; phasing against trio truth; phase sets; #77; the calibration edge; the HPRC and HG01255
   runs; the documented limits. Each is science or a measurement, not a code fix.
+- IDX-17 (d) (a dataset downloaded to another folder: the search reads its dictionaries, sample
+  list and VCF folder from the working directory, and the input check says its VCF folder is not
+  there): `--index-path` covering a dataset's data is plan 2.7's "medium" item, not taken by E1.
 - R6B RV3-7 (a variant search under `--index-path` with no variant index in either library builds
   one in the working directory): R6B leaves it to the owner, the docs describe what it does, and
   refusing would stop a search the dataset's VCFs can serve (plan 2.7's `--index-path` row,
@@ -509,3 +513,16 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   none when one has no readable header (a file cut short, or no VCF); the note and Submit said
   all the same to build the index in Settings, "which writes the list" (M6). They name the file,
   and say to add the dataset again with it whole, or to add the list.
+- **A variant search under `--index-path` whose library holds no reference index it can use
+  stops before it enriches the genome.** The search script stops on such a library, but only
+  after its first step, the enrichment of the genome with the dataset's variants, hours on
+  hg38 (IDX-17 e): complete-search stops first, in one line, when that step would run (the
+  dataset's VCFs here, no enriched genome, no variant index that serves the search). A
+  reference search, which reaches the script's refusal at once and says what the library holds,
+  is left to it, and so is a library where a run is building an index, which the script waits
+  for.
+- **A variant index of `--index-path` whose dictionaries are not in the working directory is
+  named.** complete-search said "No prebuilt variant index found" for a dataset whose variant
+  index the library held (IDX-17 c): it says that the index is there, that a search reads the
+  dataset's dictionaries, sample list and VCF folder from the working directory, and to run the
+  search from the folder that holds them.

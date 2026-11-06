@@ -311,6 +311,65 @@ class TestCliBulgeCap(unittest.TestCase):
         self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path=shared), 1)
         self.assertEqual(cap(_MOTIF, _REF, is_variant=True, index_path=shared), 1)
 
+    def test_a_variant_search_that_would_enrich_first_is_refused_up_front(self):
+        """Under --index-path with no reference index there that serves the search, the
+        search script stops, but after it has enriched the genome with the dataset's
+        variants, hours on hg38 (IDX-17 e): complete-search stops first, then. A search with
+        nothing to enrich reaches the script's refusal at once (it says what the library
+        holds), and one whose library a run builds in is left to the script, which waits."""
+        import io
+        from unittest import mock
+        shared = os.path.join(self.root, "shared")
+        os.makedirs(shared)
+        vcfs = os.path.join(self.root, "VCFs", _VCF)
+        _mkfile(os.path.join(vcfs, "x.chr22.vcf.gz"), "")
+        refuse = crisprme._refuse_no_reference_index
+
+        def stop():
+            err = io.StringIO()
+            with mock.patch.object(sys, "stderr", err):
+                try:
+                    refuse(shared, _REF, _MOTIF, 2, False, True, 20, 1, 1, [vcfs])
+                except SystemExit as exit_:
+                    return exit_.code, err.getvalue()
+            return None, err.getvalue()
+
+        code, said = stop()
+        self.assertEqual(code, 1)
+        self.assertEqual(said, (
+            f"Error: No reference index under --index-path {shared} serves this search (genome "
+            f"{_REF}, PAM {_MOTIF}, 1 DNA and 1 RNA bulge(s)), and a search builds none there: "
+            f"it would stop on that after enriching the genome with the dataset's variants "
+            f"(hours on a human genome). Install one in that library (crisprme.py download "
+            f"--what index --index-name {_MOTIF}_2_{_REF}, or crisprme.py build-index-only), or "
+            f"run without --index-path, where a search builds one from the genome (a search of "
+            f"the reference genome alone, with --index-path, says what that library holds)\n"))
+        # a run building one there: the search script waits for it
+        os.makedirs(os.path.join(shared, f"{_MOTIF}_2_{_REF}.lock"))
+        self.assertEqual(stop(), (None, ""))
+        os.rmdir(os.path.join(shared, f"{_MOTIF}_2_{_REF}.lock"))
+        # nothing to enrich: the enriched genome is here
+        os.makedirs(os.path.join(self.root, "Genomes", f"{_REF}+{_VCF}"))
+        self.assertEqual(stop(), (None, ""))
+        os.rmdir(os.path.join(self.root, "Genomes", f"{_REF}+{_VCF}"))
+        # an index there that serves it
+        _mkfile(os.path.join(shared, f"{_MOTIF}_2_{_REF}", "TSTgenome.NRG.bin"))
+        self.assertEqual(stop(), (None, ""))
+
+    def test_a_variant_index_in_the_library_whose_dictionaries_are_elsewhere(self):
+        """A dataset whose variant index the --index-path library holds, with no dictionaries
+        in the working directory: complete-search said "No prebuilt variant index found"
+        while it was there (IDX-17 c); it names the datasets so held, and says where a search
+        reads their dictionaries from."""
+        shared = os.path.join(self.root, "shared")
+        for name in (f"{_MOTIF}_2_{_REF}+{_VCF}", f"20-NRR_3_{_REF}+other",
+                     f"{_MOTIF}_2_hg19+third", f"{_MOTIF}_2_{_REF}+{_VCF}_INDELS"):
+            os.makedirs(os.path.join(shared, name))
+        held = crisprme._variant_index_elsewhere
+        self.assertEqual(held(shared, _REF, [_VCF, "other", "third", "none"]), [_VCF, "other"])
+        self.assertEqual(held("_", _REF, [_VCF]), [])
+        self.assertIn("is in --index-path", open(crisprme.__file__).read())
+
     def test_a_wider_pamless_index_at_index_path_counts_under_prune(self):
         shared = os.path.join(self.root, "shared")
         _mkfile(os.path.join(shared, f"NNNNNNNN_3_{_REF}", "TSTgenome.N.bin"))
