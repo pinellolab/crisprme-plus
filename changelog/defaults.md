@@ -8,6 +8,14 @@ twice, the peak by sampling `du -sb` every 10 s. Every published NRR archive is 
 rebuild lane's archives change these sizes again (by 1-2 %, plan 2.5), so re-measure with them,
 and change `PostProcess/test_documented_sizes.py` and every surface it reads together.
 
+**For the merge, not for the changelog (E2 and the rebuild).** `build-index-only` names an index
+for its guide length and side (`20-NRR_3_hg38+hg38_HGDP1kGP`), and `publish-index` publishes it
+under its folder's name. The rebuild's archives, built with this release, take that name unless
+renamed at staging; every command and document that downloads by the published name
+(`download --index-name NRR_3_hg38+hg38_HGDP1kGP`, the installers, the self-test) then needs
+`download` to find an archive of the new name for the older one, or the rebuild to publish under
+the older name, which every reader takes: the HF track's choice, with plan 3 C2's new location.
+
 **The backlog: what this track fixed, what it found fixed, and what it leaves, and why** (every item
 of `_r281/r109/list_282.md` and of the plan's section 4, for the merge; the ids are the sources', a
 JSON line where the plan cites one, as FV :335).
@@ -29,9 +37,8 @@ OF-11); R6B direct-url-fasta-and-hidden-files (plan 4.8: a Direct URL archive is
 upload); of the focused review of f8dbe73 (the last bullet of list_282.md's final confirmation on
 bfddb59), INPUT_FORMATS §4's first lines (the length alone, a third field, a blank line: refused as
 it says) and CRISPR-Bulge's autograph `.pyc` files, left in the temporary folder by every scoring
-run; the stderr fixtures of a runner with less memory than memory_check asks for (list_282.md,
-"Found 2026-11-04": CRISPRME_SKIP_MEM_CHECK); the stale test comment of plan 4.5's coverage gaps
-(test_web_bulge_notes, FR's W3-none-selected-changed: a comment, with no test of its own).
+run; the stale test comment of plan 4.5's coverage gaps (test_web_bulge_notes, FR's
+W3-none-selected-changed: a comment, with no test of its own).
 
 *Found fixed already (checked on this branch):* P12 (exit 2 since 2.8.1); t31 P6 (C3 of 2.8.1: every
 folder named, exit 2, and the banner says reference when the smoke runs reference-only); R2-F3;
@@ -43,7 +50,11 @@ warning); install P10's pandas FutureWarning (validate.py reads by position, run
 R4-7 (web-e2e's in-image step runs test_index_resolution; no `ps` there is its one allowed skip);
 text N1 to N3; P14 (the results page's Group by opens on CFD_score); the older list's first-paint
 label (Gate B walk 2b and the 38a7c4e walk's step 9 passed); A6 (the alleles track); results F2 (the
-gate track).
+gate track); the stderr fixtures of a runner with less memory than memory_check asks for
+(list_282.md, "Found 2026-11-04": CRISPRME_SKIP_MEM_CHECK): with memory_check reading the 15.6 GB of
+GitHub's runner, so that every complete-search and complete-test that does not skip it warns, every
+step of unit-tests.yml passes in the CI image, and web-e2e's in-image tests in the image (b648227's
+fix of the one fixture that compared it was the one needed).
 
 *Left: design questions, or the PI's or an owner's call.*
 - Plan 4.1, every item: two cis indels in one protospacer; CRISPR-Bulge's batch noise; the one-row
