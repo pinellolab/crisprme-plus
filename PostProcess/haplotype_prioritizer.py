@@ -28,10 +28,12 @@ a sites-only dataset (the genotype oracle, opt-in) -- and gives the alignment a 
       >= 0.001) is given with them, as information, and applied to nothing.
 
 A haplotype holds a row only when it holds the row's target: on a phased slot that carries
-the row's SNPs, an indel of the store that changes the bases the target covers (an indel
-another of the slot's alleles makes impossible -- one at a listed SNP's own position, or one
-whose REF covers it -- is a phasing artefact and changes nothing) means the slot does not have
-the row's sequence. An unphased call keeps the carrier ("phase not known"), as a slot that
+the row's SNPs, an indel of the store that changes the bases the target covers means the slot
+does not have the row's sequence -- but an indel another of the slot's alleles makes
+impossible (one at a listed SNP's own position, or one whose REF covers it: a phasing
+artefact), and one that leaves the target's bases where they were, read on the reference
+from the target's first base on or up to its last (a tandem repeat's unit gained or lost),
+change nothing. An unphased call keeps the carrier ("phase not known"), as a slot that
 holds two ALTs at one position does (the PUTATIVE rule for two ALTs on one slot).
 
 The gate changes no row and drops none: it writes a companion TSV (<results>_carrier_gate.tsv,
@@ -331,30 +333,77 @@ def changing_indels(index, lo, hi):
     return out
 
 
-def not_at(changing, snp_pos, own=()):
-    """{sample: genotype} of each of ``changing`` (changing_indels) a slot can hold with the
-    SNPs at ``snp_pos`` (1-based): not one of ``own``, and neither at a SNP's position nor
-    over it, as such an indel is another allele of that base (a slot phased with both is a
-    phasing artefact)."""
-    return [g for p, r, a, g in changing
-            if (p, r, a) not in own and not any(p <= q <= p + len(r) - 1 for q in snp_pos)]
+def breakers_of(changing, alleles, lo, hi, seq_at=None, own=()):
+    """{sample: genotype} of each of ``changing`` (changing_indels) that takes a target's
+    bases lo..hi off a haplotype holding the SNP alleles ``alleles`` ({POS: base}): not one
+    of ``own``, not one at a SNP's position or over it (another allele of that base: a slot
+    phased with both is a phasing artefact), and, given the reference (``seq_at``), not one
+    that leaves the target's bases where they were (holds_target: a tandem repeat's unit
+    gained or lost). Without the reference, every other indel that changes the bases."""
+    out = []
+    for p, r, a, g in changing:
+        if (p, r, a) in own or any(p <= q <= p + len(r) - 1 for q in alleles):
+            continue
+        if seq_at is not None and holds_target(seq_at, lo, hi, alleles, (p, r, a)):
+            continue
+        out.append(g)
+    return out
 
 
-def breaking_indels(index, lo, hi, snps, own=()):
-    """{sample: genotype} of each indel of ``index`` that changes the reference bases
-    lo..hi (0-based, inclusive) of a haplotype carrying it, but those of ``own`` and those a
-    slot cannot hold with the SNPs ``snps`` ([(pos, REF, ALT)]): not_at."""
-    return not_at(changing_indels(index, lo, hi), {p for p, _r, _a in snps}, own)
+def holds_target(seq_at, lo, hi, alleles, indel):
+    """Whether a haplotype that holds the SNP alleles ``alleles`` ({POS: base}) and the
+    indel ``indel`` (POS, REF, ALT) still has the target's bases lo..hi (0-based, inclusive):
+    the reference there with those alleles, read on the haplotype from the target's first
+    base on, or up to its last base, as the indel rows read a second indel
+    (indel_snp_cis.target_pairs). In a tandem repeat a unit gained or lost at the target's
+    edge leaves its bases where they were. ``seq_at(a, b)``: the reference bases a..b-1
+    (0-based, upper case; shorter at a chromosome's end). The bases the indel's REF and ALT
+    share at the start or at the end stay reference bases."""
+    p, r, a = indel
+    p0 = p - 1
+    n = hi - lo + 1
+    target = "".join(alleles.get(q + 1, seq_at(q, q + 1)) for q in range(lo, hi + 1))
+    c = isc.kept_bases(r, a)
+    t = isc.shared_tail(r, a)
+    gone_from, gone_to = p0 + c, p0 + len(r) - t  # reference bases the indel takes out
+    put = a[c:len(a) - t].upper()                  # and the bases it puts in their place
+    pad = n + len(r) + len(a)
+    first = max(0, min(lo, p0) - pad)
+    ref = seq_at(first, max(hi, p0 + len(r)) + 1 + pad)
+    hap = []  # (reference position or None, base)
+    for q in range(first, first + len(ref)):
+        if q == gone_from:
+            hap.extend((None, b) for b in put)
+        if gone_from <= q < gone_to:
+            continue
+        hap.append((q, alleles.get(q + 1, ref[q - first])))
+    if gone_from >= first + len(ref):
+        hap.extend((None, b) for b in put)
+    where = {q: i for i, (q, _b) in enumerate(hap) if q is not None}
+    bases = "".join(b for _q, b in hap)
+    i, j = where.get(lo), where.get(hi)
+    return ((i is not None and bases[i:i + n] == target)
+            or (j is not None and j - n + 1 >= 0 and bases[j - n + 1:j + 1] == target))
+
+
+def breaking_indels(index, lo, hi, snps, own=(), seq_at=None):
+    """{sample: genotype} of each indel of ``index`` that takes the target's bases lo..hi
+    (0-based, inclusive) off a haplotype holding the SNPs ``snps`` ([(pos, REF, ALT)]):
+    breakers_of."""
+    return breakers_of(changing_indels(index, lo, hi), {p: a for p, _r, a in snps}, lo, hi,
+                       seq_at, own)
 
 
 class PanelChrom(object):
     """One panel's phased genotypes on one chromosome: the SNP store (Tier-1) and the indel
     store, either absent. ``carriers`` gives a variant's carriers with each genotype read
     against that variant ("1|0"), or None for a variant the panel does not hold.
-    ``wanted``: the positions the rows touch, for the indel store (IndelIndex)."""
+    ``wanted``: the positions the rows touch, for the indel store (IndelIndex); ``seq_at``:
+    the chromosome's reference bases (holds_target), or None."""
 
-    def __init__(self, name, dictionaries, chrom, role="own", wanted=None):
+    def __init__(self, name, dictionaries, chrom, role="own", wanted=None, seq_at=None):
         self.name = name
+        self.seq_at = seq_at
         self.role = role
         self.chrom = chrom
         self.gt = None
@@ -558,7 +607,8 @@ def classify(variants, panels, span=None, min_expected=MIN_EXPECTED, af_of=None)
         breakers = []
         if snps_only and span is not None:
             breakers = breaking_indels(panel.indels, span[0], span[1],
-                                       [(v[1], v[2], v[3]) for v in variants])
+                                       [(v[1], v[2], v[3]) for v in variants],
+                                       seq_at=panel.seq_at)
         if k == 1 and not breakers:
             # one variant, and nothing in the target to take a slot off it
             return Verdict(TIER_B, panel=panel.name, panel_haplotypes=panel.haplotypes(pos),
@@ -643,7 +693,13 @@ def _maf_values(field):
 
 def _gate_chromosome(job):
     """Tier every alignment of one chromosome's rows: (chrom, lines, counts, panel facts)."""
-    chrom, rows, dictionaries, panel_specs, datasets, min_expected = job
+    chrom, rows, dictionaries, panel_specs, datasets, min_expected, genome = job
+    seq_at = None
+    fasta = os.path.join(genome, f"{chrom}.fa") if genome else None
+    if fasta and os.path.isfile(fasta):
+        with open(fasta) as fh:
+            ref = "".join(ln.strip() for ln in fh if not ln.startswith(">")).upper()
+        seq_at = lambda a, b, _s=ref: _s[max(a, 0):max(b, 0)]  # noqa: E731
     wanted = set()
     for _row, _block, _guide, start, _strand, aligned, variants, _maf in rows:
         wanted.update(v[1] - 1 for v in variants)
@@ -654,7 +710,8 @@ def _gate_chromosome(job):
                 span = None
             if span is not None:
                 wanted.update(range(span[0], span[1] + 1))
-    panels = [PanelChrom(name, root, chrom, role, wanted) for name, root, role in panel_specs]
+    panels = [PanelChrom(name, root, chrom, role, wanted, seq_at)
+              for name, root, role in panel_specs]
     panels = [p for p in panels if p.gt is not None or p.indels is not None]
     registries = []
     for name in datasets:
@@ -729,11 +786,12 @@ def _gate_chromosome(job):
 
 
 def run_gate(results, out_path, dictionaries, panel_specs, datasets,
-             min_expected=MIN_EXPECTED, threads=1):
+             min_expected=MIN_EXPECTED, threads=1, genome=None):
     """Write the companion of ``results`` to ``out_path``; return (counts, panel facts).
-    ``panel_specs``: [(panel name, Dictionaries folder holding its stores, role)]."""
+    ``panel_specs``: [(panel name, Dictionaries folder holding its stores, role)];
+    ``genome``: the reference genome folder (<chrom>.fa), for holds_target."""
     by_chrom = _read_rows(results)
-    jobs = [(chrom, rows, dictionaries, panel_specs, datasets, min_expected)
+    jobs = [(chrom, rows, dictionaries, panel_specs, datasets, min_expected, genome)
             for chrom, rows in sorted(by_chrom.items(), key=lambda kv: -len(kv[1]))]
     if threads > 1 and len(jobs) > 1:
         from multiprocessing import Pool
@@ -878,6 +936,9 @@ def main(argv=None):
     parser.add_argument("--oracle", default="",
                         help="a folder holding genotypes_<panel>/ (CRISPRME_GENOTYPE_TIER)")
     parser.add_argument("--min-expected", type=float, default=MIN_EXPECTED)
+    parser.add_argument("--genome", default="",
+                        help="the search's reference genome folder (<chrom>.fa): an indel "
+                             "that leaves a target's bases (a repeat unit) takes no slot off")
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--meta", default=None, help="the sidecar JSON (default: "
                         "<results folder>/" + META_NAME + ")")
@@ -901,7 +962,8 @@ def main(argv=None):
     if status == "run":
         out = companion_path(args.results)
         counts, facts = run_gate(args.results, out, args.dictionaries, panels, datasets,
-                                 args.min_expected, max(1, args.threads))
+                                 args.min_expected, max(1, args.threads),
+                                 args.genome or None)
         meta["counts"] = counts
         meta["companion"] = os.path.basename(out)
         for name, root, role in panels:

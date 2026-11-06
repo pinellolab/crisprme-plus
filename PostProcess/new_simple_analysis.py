@@ -648,8 +648,10 @@ def _drop_indel_slots(haplotypes, positions, start, n_bases):
         return haplotypes
     out = []
     for hap in haplotypes:
-        # (an indel at one of its SNPs, or over one, is another allele of that base)
-        breakers = _hp.not_at(window, {start + pc + 1 for pc, _a in hap.variant_set})
+        # (an indel at one of its SNPs, or over one, is another allele of that base; one
+        # that leaves the target's bases, a repeat unit, takes no slot off)
+        breakers = _hp.breakers_of(window, {start + pc + 1: alt for pc, alt in hap.variant_set},
+                                   start, start + n_bases - 1, _ref_bases)
         if not breakers:
             out.append(hap)
             continue
@@ -679,15 +681,23 @@ def _drop_indel_slots(haplotypes, positions, start, n_bases):
     return out
 
 
-def _drop_indel_slots_dict(entries, slot, start, window):
+def _ref_bases(a, b):
+    """The chromosome's reference bases a..b-1 (0-based), for haplotype_prioritizer."""
+    return genomeStr[max(a, 0):max(b, 0)]
+
+
+def _drop_indel_slots_dict(entries, slot, start, n_bases, window):
     """The phased classic-dictionary path's counterpart of _drop_indel_slots: ``entries``
     {key: [seq, samples, info]} of one haplotype slot (key = (pos_c, base, ...)), each
-    less the samples whose indel on that slot changes the target's bases (``window``:
-    _window_indels; an unphased indel call takes none off)."""
+    less the samples whose indel on that slot takes the target's bases off it (``window``:
+    _window_indels of the target's n_bases from start; an unphased indel call takes none
+    off)."""
     for key, value in entries.items():
         if not value[1] or key[0] in ("greedy", "greedy_cfd", "lossless_hap"):
             continue
-        breakers = _hp.not_at(window, {start + pc + 1 for pc in key[0::2]})
+        breakers = _hp.breakers_of(window, {start + pc + 1: b for pc, b in zip(key[0::2],
+                                                                            key[1::2])},
+                                   start, start + n_bases - 1, _ref_bases)
         if not breakers:
             continue
         drop = set()
@@ -1391,7 +1401,7 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 if _window:
                     for lvl in totalDict[count]:
                         _drop_indel_slots_dict(totalDict[count][lvl], count, int(split[4]),
-                                               _window)
+                                               len(refSeq), _window)
 
             refSeq_with_bulges = list(refSeq)
             for pos, char in enumerate(realTarget):

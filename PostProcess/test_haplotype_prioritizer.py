@@ -88,6 +88,25 @@ class TestParseAndSupport(unittest.TestCase):
         # is unphased, so its slot may or may not hold the target
         self.assertEqual((haps, cis, unknown), (1, {"S2"}, {"S3"}))
 
+    def test_an_indel_that_leaves_the_targets_bases(self):
+        # GGGG + 10 CA units + TTTT; a target over 6 units inside the repeat
+        ref = "GGGG" + "CA" * 10 + "TTTT"
+
+        def seq_at(a, b):
+            return ref[max(a, 0):max(b, 0)]
+        # a unit lost or gained inside it: the repeat goes on past the target, so the target's
+        # bases are there, read from its first base on
+        self.assertTrue(hp.holds_target(seq_at, 8, 19, {}, (12, "ACA", "A")))
+        self.assertTrue(hp.holds_target(seq_at, 8, 19, {}, (12, "A", "ACA")))
+        # with the row's SNP allele kept on the haplotype
+        self.assertTrue(hp.holds_target(seq_at, 8, 19, {10: "G"}, (14, "ACA", "A")))
+        # over the whole repeat and past its end: one unit fewer is another sequence
+        self.assertFalse(hp.holds_target(seq_at, 2, 25, {}, (12, "ACA", "A")))
+        # a deletion in a stretch with no repeat
+        plain = "ACGTTGCAAGTCCATGGTCA"
+        self.assertFalse(hp.holds_target(lambda a, b: plain[max(a, 0):b], 2, 17, {},
+                                         (8, "CAA", "C")))
+
     def test_two_alts_on_one_slot_is_unknown(self):
         alt_g = {"S1": "1|0", "S2": "1|0"}
         alt_t = {"S1": "1|0"}  # S1's first slot holds G and T at one position
@@ -173,6 +192,22 @@ class TestClassify(unittest.TestCase):
                                       "in the target")
         # a target that ends before the deletion's bases keeps them
         self.assertEqual(hp.classify([v(100, "A", "G")], [p], span=(90, 103)).tier, "B")
+
+    def test_a_repeat_unit_lost_in_the_target_keeps_the_haplotype(self):
+        # a CA repeat on chr22 bases 100..119 (0-based); the SNP C>G at 104 and a CA unit
+        # lost after 109 on the same slots: given the reference, the target over the inner
+        # units keeps its bases, so the carriers keep it; without it, positions alone
+        ref = "G" * 100 + "CA" * 10 + "T" * 20
+        snps = [(105, "C", "G", {"S00": "1|0", "S01": "1|0"})]
+        indels = [(110, "ACA", "A", {"S00": "1|0", "S01": "1|0"})]
+        self.assertEqual(ref[104] + ref[109:112], "CACA")
+        p = self.panel(snps, indels)
+        span = (102, 113)
+        p.seq_at = lambda a, b: ref[max(a, 0):max(b, 0)]
+        self.assertEqual(hp.classify([v(105, "C", "G")], [p], span=span).tier, "B")
+        p.seq_at = None
+        self.assertEqual(hp.classify([v(105, "C", "G")], [p], span=span).state,
+                         hp.INDEL_IN_TARGET)
 
     def test_two_snps_together_only_beside_an_indel_in_the_target(self):
         snps = [(100, "A", "G", {"S00": "1|0", "S01": "1|0"}),
@@ -476,14 +511,15 @@ class _PostAnalysis(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.at = len(self.FLANK)
 
-    def world(self, site, snps, indels, tiers):
+    def world(self, site, snps, indels, tiers, right=None):
         """``snps`` [(column, REF, ALT, {sample: gt})] and ``indels`` [(column, REF, ALT,
-        {sample: gt})], columns of ``site``; ``tiers``: "tiers" or "dict"."""
+        {sample: gt})], columns of ``site``; ``tiers``: "tiers" or "dict"; ``right``: the
+        flank after the site (by default the one before it)."""
         import tier0_registry as t0
         chrom = "chrT"
         self.fasta = os.path.join(self.tmp, "chrT.fa")
         with open(self.fasta, "w") as fh:
-            fh.write(">chrT\n" + self.FLANK + site + self.FLANK + "\n")
+            fh.write(">chrT\n" + self.FLANK + site + (right or self.FLANK) + "\n")
         d = os.path.join(self.tmp, "Dictionaries")
         recs = [(self.at + c + 1, r, a, f"rs{c}", dict(g)) for c, r, a, g in snps]
         if tiers == "tiers":
@@ -569,6 +605,32 @@ class TestPerSampleIndelInTheTarget(_PostAnalysis):
         population = self.analyse(self.WINDOW, "1", 0)
         self.assertEqual(sorted(s for r in population for s in r[2].split(",")),
                          ["S00", "S01", "S02", "S03"])
+
+    def test_dict_less_tiers(self):
+        self.check("tiers")
+
+    def test_classic_dictionary(self):
+        self.check("dict")
+
+
+class TestPerSampleIndelThatLeavesTheTarget(_PostAnalysis):
+    """An indel inside the target that leaves its bases where they were takes no carrier
+    off: the PAM's GG runs on into GGGG past the site, so a G lost there leaves the target's
+    bases, read from its first base on (S00 keeps the row). A T lost in the TTTT the site
+    holds does not (S01 loses it); S02 has the SNP alone."""
+
+    SITE = "CTAAAAGTTGCTTTTATCACTGG"
+    RIGHT = "GGGG" + "ACGTGCATTC" * 10
+    SNPS = [(4, "A", "C", {"S00": "1|0", "S01": "1|0", "S02": "1|0"})]
+    INDELS = [(21, "GG", "G", {"S00": "1|0"}), (12, "TT", "T", {"S01": "1|0"})]
+    WINDOW = SITE[:4] + "M" + SITE[5:]
+
+    def check(self, tiers):
+        self.world(self.SITE, self.SNPS, self.INDELS, tiers, right=self.RIGHT)
+        per_sample = self.analyse(self.WINDOW, "0", 0)
+        self.assertEqual({r[:2] for r in per_sample}, {(self.GUIDE + "TGG", 0)})
+        self.assertEqual(sorted(s for r in per_sample for s in r[2].split(",")),
+                         ["S00", "S02"])
 
     def test_dict_less_tiers(self):
         self.check("tiers")

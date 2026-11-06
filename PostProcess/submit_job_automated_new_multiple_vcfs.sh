@@ -2428,7 +2428,7 @@ if [ -n "${results_tsv}" ] && [ "$(head -c 1 "$vcf_list")" != "_" ]; then
 		--dictionaries "$current_working_directory/Dictionaries" --vcf-list "$vcf_list" \
 		--mode "$_gate_mode" --prioritize-observed "${CRISPRME_PRIORITIZE_OBSERVED:-auto}" \
 		--oracle "${CRISPRME_GENOTYPE_TIER:-}" --min-expected "${CRISPRME_GATE_MIN_EXPECTED:-3}" \
-		--threads "$ncpus"; then
+		--genome "$ref_folder" --threads "$ncpus"; then
 		echo -e 'Carrier gate\tEnd\t'$(date) >>$log
 	else
 		rm -f "${results_tsv%_integrated_results.tsv}_carrier_gate.tsv" "${output_folder}/.carrier_gate.json"
