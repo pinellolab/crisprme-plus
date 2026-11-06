@@ -12,9 +12,10 @@ from check to failure mode.
 A slower, opt-in full-file scan (`run_full`, `--full_input_validate`) covers
 issues that can only be caught by reading an entire VCF: structural variants
 anywhere in the file, full chromosome coverage, INFO/AF field-position
-consistency, FILTER PASS ratio, POS bounds, high-allele-count multiallelic
-sites, breakend notation, duplicate records, mixed GT phasing, and indels near
-a chromosome start.
+consistency, FILTER PASS ratio, POS bounds, records listing several ALTs,
+breakend notation, positions holding several records, mixed GT phasing, and
+indels near a chromosome start. The lightweight pass looks at the first
+records of each VCF for lines listing several ALTs too.
 """
 
 from typing import Dict, List, NamedTuple, Optional, Tuple
@@ -74,9 +75,8 @@ STRUCTURAL_VARIANT_LEN = 50
 # enricher.py:302 builds indel context as genomeStr[pos-26 : pos+26+len(ref)];
 # a negative start silently wraps via Python slicing instead of erroring
 INDEL_START_PROXIMITY = 26
-# enricher.py's allele-index matching does `str(value) in gt_string`, a
-# substring test that misfires once two-digit allele indices appear
-MULTIALLELIC_WARN_THRESHOLD = 10
+# the records of each VCF the lightweight pass reads for lines listing several ALTs
+MULTI_ALT_SCAN_RECORDS = 1000
 # warn (not error) below this PASS ratio; a dataset legitimately restricted to
 # one difficult chromosome can have a low ratio without being misconfigured
 FILTER_PASS_WARN_RATIO = 0.10
@@ -545,6 +545,57 @@ def check_vcf_content(vcf_path: str) -> List[Issue]:
     except OSError as e:
         issues.append(Issue(ERROR, f"{fname}: error reading VCF content ({e})"))
     return issues
+
+
+def _multi_alt_issue(fname: str, count: int, example: str, scanned: Optional[int]) -> Issue:
+    """The WARN for VCF lines that list several ALTs (C>A,T): what CRISPRme does with
+    them. ``scanned`` is the number of records read (the lightweight pass), or None for
+    a whole file."""
+    where = (
+        f"{count} of its first {scanned} records list"
+        if scanned is not None
+        else f"{count} record(s) list"
+    )
+    return Issue(
+        WARN,
+        f"{fname}: {where} several ALTs on one line (e.g. {example}) — CRISPRme "
+        "reads each ALT with its own carriers, a genotype such as 1|2 read against "
+        "each ALT's own allele index (1|0 under the first, 0|1 under the second); "
+        "where the genotypes cannot tell which index an ALT is (every carrier of "
+        "two ALTs is 1|2), its carriers are resolved without phase (PUTATIVE). "
+        "A VCF split with `bcftools norm -m -any`, as the published panels are "
+        "built, gives each ALT a record of its own",
+    )
+
+
+def check_vcf_multi_alt(vcf_path: str, max_records: int = MULTI_ALT_SCAN_RECORDS) -> List[Issue]:
+    """Warns when the first ``max_records`` records of a VCF hold a line that lists
+    several ALTs. Bounded, so it runs on every invocation; the full scan
+    (`--full_input_validate`) counts every such line. An unreadable file is left to
+    `check_vcf_content`, which says so."""
+    fname = os.path.basename(vcf_path)
+    count = scanned = 0
+    example = ""
+    try:
+        with gzip.open(vcf_path, "rt") as fin:
+            for line in fin:
+                if line.startswith("#"):
+                    continue
+                fields = line.split("\t", 5)
+                if len(fields) < 5:
+                    continue
+                scanned += 1
+                if "," in fields[4]:
+                    count += 1
+                    if not example:
+                        example = f"{fields[0]}:{fields[1]} {fields[3]}>{fields[4]}"
+                if scanned >= max_records:
+                    break
+    except (OSError, EOFError, UnicodeDecodeError):
+        return []
+    if not count:
+        return []
+    return [_multi_alt_issue(fname, count, example, scanned)]
 
 
 def check_tbi_files(vcf_dir: str) -> List[Issue]:
@@ -1276,6 +1327,7 @@ def run_lightweight(
                 ok_message=f"{os.path.basename(vf)}: gzip-compressed, valid #CHROM "
                 "header with samples, first record has an AF field",
             )
+            report.add(check_vcf_multi_alt(vf))
             if has_samplesfile and sample_ids:
                 report.add(
                     check_samples_in_vcf_header(vf, sample_ids),
@@ -1386,9 +1438,9 @@ def check_vcf_full_scan(
     - POS bounds vs. chromosome length: a build/genome mismatch causes an
       IndexError in `enricher.py`, only reachable by scanning far enough into
       the file.
-    - Multiallelic sites with >=10 ALT alleles: `enricher.py`'s allele-index
-      matching is a substring test (`str(value) in gt_string`) that misfires
-      once two-digit allele indices appear.
+    - Records listing several ALTs on one line (C>A,T): CRISPRme reads each
+      ALT's carriers against that ALT's own allele index (`site_alleles`), and
+      a carrier whose genotypes cannot tell it is resolved without phase.
     - Breakend/SV notation in ALT (`]`/`[` without a leading `<`): only
       `<DEL>`-style symbolic ALT is filtered out; breakend text is spliced as
       literal sequence into the enriched genome.
@@ -1397,9 +1449,10 @@ def check_vcf_full_scan(
       out of the indel/SV path, but does so silently, so these records are
       never searched at all with zero signal to the user (not corrupted,
       just invisibly omitted).
-    - Duplicate CHR+POS records: the per-variant dict is keyed by
-      `(chrom, pos)` only, so a duplicate record silently overwrites the
-      first with no warning.
+    - Positions holding several records: split records of one site (each ALT
+      its own record; CRISPRitz 2.10.0 codes and lists every ALT, earlier
+      releases only the last record's), and records of one REF>ALT, which
+      CRISPRme reads as one allele with their carriers merged.
     - Mixed GT phasing separators (`|` vs `/`): `new_simple_analysis.py`
       decides phasing for the *entire chromosome* from whichever dict entry
       its iteration happens to hit first — a mixed phased/unphased VCF
@@ -1441,10 +1494,16 @@ def check_vcf_full_scan(
     pass_count = 0
     total_count = 0
     multiallelic_count = 0
+    multiallelic_example = ""
     breakend_count = 0
     symbolic_alt_count = 0
     seen_positions: Dict[Tuple[str, str], int] = {}
-    duplicate_examples: List[str] = []
+    # the alleles of the position being read (a sorted VCF holds a position's records
+    # together)
+    block_key: Tuple[str, str] = ("", "")
+    seen_alleles: set = set()
+    same_allele_count = 0
+    same_allele_examples: List[str] = []
     phased_seen = False
     unphased_seen = False
     indel_near_start_count = 0
@@ -1468,19 +1527,28 @@ def check_vcf_full_scan(
                 if expected_chrom_norm and _normalize_chrom(chrom) != expected_chrom_norm:
                     rogue_chroms[chrom] = rogue_chroms.get(chrom, 0) + 1
 
-                # duplicate CHR+POS
+                # several records at one CHR+POS, and records of one REF>ALT
                 key = (chrom, pos_str)
                 if key in seen_positions:
                     seen_positions[key] += 1
-                    if len(duplicate_examples) < 5:
-                        duplicate_examples.append(f"{chrom}:{pos_str}")
                 else:
                     seen_positions[key] = 1
+                if key != block_key:
+                    block_key = key
+                    seen_alleles = set()
+                alt_alleles = alt.split(",")
+                record_alleles = {(ref, a) for a in alt_alleles}
+                for allele in sorted(record_alleles & seen_alleles):
+                    same_allele_count += 1
+                    if len(same_allele_examples) < 5:
+                        same_allele_examples.append(f"{chrom}:{pos_str} {allele[0]}>{allele[1]}")
+                seen_alleles |= record_alleles
 
                 # REF/ALT length survey + breakend + multiallelic + indel proximity
-                alt_alleles = alt.split(",")
-                if len(alt_alleles) >= MULTIALLELIC_WARN_THRESHOLD:
+                if len(alt_alleles) > 1:
                     multiallelic_count += 1
+                    if not multiallelic_example:
+                        multiallelic_example = f"{chrom}:{pos_str} {ref}>{alt}"
                 is_breakend = any(
                     ("[" in a or "]" in a) and not a.startswith("<") for a in alt_alleles
                 )
@@ -1624,13 +1692,7 @@ def check_vcf_full_scan(
         )
     if multiallelic_count:
         issues.append(
-            Issue(
-                WARN,
-                f"{fname}: {multiallelic_count} site(s) have >="
-                f"{MULTIALLELIC_WARN_THRESHOLD} ALT alleles — crispritz matches "
-                "allele indices by substring, which misattributes samples once "
-                "two-digit allele indices appear",
-            )
+            _multi_alt_issue(fname, multiallelic_count, multiallelic_example, None)
         )
     if af_index_overflow_count:
         # Once CRISPRitz PR #36 has shipped, both the SNP and indel paths
@@ -1682,15 +1744,20 @@ def check_vcf_full_scan(
                 "dropped",
             )
         )
-    if duplicate_examples:
+    if same_allele_count:
         dup_count = sum(1 for n in seen_positions.values() if n > 1)
         issues.append(
             Issue(
                 WARN,
-                f"{fname}: {dup_count} duplicate CHR+POS record(s) found "
-                f"(e.g. {', '.join(duplicate_examples)}) — the per-variant "
-                "dict is keyed by CHR+POS only, so all but the last duplicate "
-                "are silently dropped",
+                f"{fname}: {same_allele_count} record(s) repeat the REF>ALT of an "
+                f"earlier record at their position (e.g. "
+                f"{', '.join(same_allele_examples)}; {dup_count} position(s) hold "
+                "more than one record) — CRISPRme reads the records of one REF>ALT "
+                "as one allele, their carriers merged: a haplotype slot carries the "
+                "ALT if either record puts it there. A sample left with two ALTs of "
+                "one position on one slot is resolved without phase (PUTATIVE). "
+                "Split records of one site, one ALT each, are read each as its own "
+                "allele",
             )
         )
     if phased_seen and unphased_seen:

@@ -351,6 +351,18 @@ def convert_vcf(
     return vcf_outfname
 
 
+# What --multiallelic makes of a position's records, and how CRISPRme reads it (stdout).
+MULTIALLELIC_NOTE = (
+    "NOTE: --multiallelic joins the records of each position into one line listing "
+    "every ALT (bcftools norm -m+), SNPs and indels together, so a sample carrying two "
+    "of them gets a genotype such as 1|2. CRISPRme reads each ALT of such a line with "
+    "its own carriers, each genotype against that ALT's own allele index; where the "
+    "genotypes cannot tell which ALT a carrier holds on a haplotype slot, the carrier "
+    "is resolved without phase (PUTATIVE). Without --multiallelic each record keeps one "
+    "ALT, as the published panels are built."
+)
+
+
 def bcftools_merge(vcf_fname: str, multiallelic: bool) -> str:
     """
     Merges alleles in a VCF file using bcftools and returns the path to the merged
@@ -450,6 +462,8 @@ def convert_gnomad_vcfs() -> None:
     if not gnomad_vcfs:  # no gnomAD vcf found
         raise FileNotFoundError(f"No gnomAD VCF file found in {gnomad_vcfs_dir}")
     samples = read_samples_ids(samples_ids)  # recover samples data from sample file
+    if multiallelic:
+        print(MULTIALLELIC_NOTE, flush=True)
     threads = multiprocessing.cpu_count() if threads == 0 else threads
     try:
         pool = multiprocessing.Pool(processes=threads)
