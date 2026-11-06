@@ -633,10 +633,13 @@ complementary controls:
   single conservative representative, never the whole region.
 - **Hyperdense windows, flagged whatever the cap.** A window spelling 2²⁰ sequences or
   more is hyperdense: it matches nearly any guide somewhere, as uninformative as a gap, yet
-  the engine reports it, as every column admits the guide's base. Such a window is listed
-  in the BED below whatever `CRISPRME_IUPAC_CAP` is, read from its own letters (so a window
-  whose only variant letters are four-allele positions is listed too), and the report's
-  `High_complexity_region` column gives its count (`24 in window (2^24.0 sequences)`).
+  the engine reports it, as it does any window it aligns to the guide within the search's
+  mismatches and bulges (each of the 381 hyperdense windows the README guide's search of
+  chr22 lists on the published index is aligned with 2 to 4 columns that do not admit the
+  guide's base). Such a window is listed in the BED below whatever `CRISPRME_IUPAC_CAP` is,
+  read from its own letters (so a window whose only variant letters are four-allele
+  positions is listed too), and the report's `High_complexity_region` column gives its count
+  (`24 in window (2^24.0 sequences)`).
   Among the indexable NRG windows of chr22 (holding no `N`, their letters able to spell NRG
   on either strand) the reference genome has none, the variant genome of HGDP + 1000
   Genomes published with CRISPRitz 2.9.1 has 1,763 (the worst 2^23.00), and the one

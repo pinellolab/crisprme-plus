@@ -57,7 +57,7 @@
   for: 2 for a two-allele column (R, Y, S, W, K, M), 3 for a three-allele one (B, D, H, V), 4 for a
   four-allele one (`Q`), 1 for a base or an `N` (an assembly gap, which matches nothing). Such a
   window matches nearly any guide somewhere, as uninformative as a gap, yet the search reports it,
-  each of its columns admitting the guide's base. It is listed in
+  as it reports any window it aligns within the mismatches and bulges asked for. It is listed in
   `<out>.high_variant_density_regions.bed`, read from its own letters (a window whose only variant
   letters are four-allele positions too), and the report's `High_complexity_region` column gives its
   count (`24 in window (2^24.0 sequences)`), as the integrated results'
@@ -76,8 +76,9 @@
   2.9.1 has 1,763 (the worst 2^23.00), and the one CRISPRitz 2.10.0 writes from the same VCF, every
   allele coded, 5,103 (the worst 2^44.75, at chr22:22,881,189 in the IGL locus). On the published
   index, the README guide's search of chr22 lists 565 dense windows, 381 of them hyperdense (the
-  worst 2^24.00), and 164 of the population-level report's 2,198 rows lie in one (1 of the
-  per-sample report's 1,574). The threshold is one constant, `window_density.HYPERDENSE_BITS`; see
+  worst 2^24.00; each aligned with 2 to 4 columns that do not admit the guide's base), and 164 of
+  the population-level report's 2,198 rows lie in one (1 of the per-sample report's 1,574). The
+  threshold is one constant, `window_density.HYPERDENSE_BITS`; see
   [`METHODS.md` §5](METHODS.md#5-search-space-control-for-high-variant-density-regions).
 - **A row whose window holds a four-allele position says so.** Where the reference base and three
   ALTs cover A, C, G and T, the variant genome writes `Q`, which matches any base (`N` stays an

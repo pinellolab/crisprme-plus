@@ -1005,7 +1005,9 @@ its purpose and usage:
   knob from the `CRISPRME_IUPAC_CAP` environment variable, where `-1` disables the
   per-window greedy IUPAC cap: a window spelling more than 2 to the power
   `CRISPRME_IUPAC_CAP` sequences, 2¹⁰ by default, is reported by its greedy worst-case
-  alignment; see METHODS.md §5.)
+  alignment, except by a `--per-sample` search of a genotyped index with the dict-less tiers,
+  which reports its carriers' own haplotypes and its reference row, as for any window; see
+  METHODS.md §5.)
   <br>NOTE: for a **variant-created** off-target you must also pass `--vcf` (or use a
   precomputed variant index); a reference-only search will not surface it regardless of
   this value.
