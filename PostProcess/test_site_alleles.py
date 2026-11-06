@@ -80,7 +80,8 @@ class OnePositionsAlleles(unittest.TestCase):
     def test_split_and_biallelic_positions_come_back_as_they_are(self):
         for entries in ([("A", {"S": "1|0"})],
                         [("A", {"S": "1|0"}), ("T", {"S": "0|1", "X": "1|1"})],
-                        [("A", {"S": "1/0", "H": "1", "M": ".|1"})], []):
+                        [("A", {"S": "1/0", "H": "1", "M": ".|1"})], [],
+                        [("A", {"S": "1|0", "E": ""})]):  # a carrier with no genotype
             self.assertIs(site_alleles.per_alt_entries(entries), entries)
 
     def test_a_line_of_several_alts_is_read_per_alt(self):

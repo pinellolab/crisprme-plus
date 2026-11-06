@@ -114,7 +114,7 @@ _SCORER_SELECT = os.environ.get("CRISPRME_SCORER_SELECT", "crispr-bulge").lower(
 _env_ld = os.environ.get("CRISPRME_LOSSLESS_DENSE")
 _LOSSLESS_DENSE = True if _env_ld is None else bool(int(_env_ld or "0"))
 # The co-located union takes one alt of a column: one union per choice of alt at the
-# columns that hold two or three, at most this many unions a window.
+# columns that hold two or three, while that makes at most this many unions a window.
 _MAX_UNIONS = 16
 # Accumulator for the ADDITIVE phase-confirmation companion TSV (one row per emitted
 # dict-less variant off-target: identity columns + CONFIRMED/PUTATIVE). Populated ONLY
@@ -1223,9 +1223,10 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 # phantom (trans-as-cis) haplotypes. Default OFF -> byte-identical.
                 if _LOSSLESS_DENSE and registry_only_mode:
                     # A haplotype holds one allele of a position: one union per choice of
-                    # alt at a column holding two or three (CRISPRitz 2.10.0 codes every
-                    # ALT), the first _MAX_UNIONS of them; past that, the alt the greedy
-                    # representative took there (else the column's first).
+                    # alt at the columns holding two or three (CRISPRitz 2.10.0 codes every
+                    # ALT) while there are at most _MAX_UNIONS of them; past that, one
+                    # union with the alt the greedy representative took at each such
+                    # column (else the column's first).
                     _cols = sorted(by_pos)
                     _choices = [list(by_pos[_pc]) for _pc in _cols]
                     _n = 1

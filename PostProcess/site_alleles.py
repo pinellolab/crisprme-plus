@@ -28,7 +28,8 @@ tier readers (tier0_compile, simple_analysis_registry, indel_snp_cis, observed_h
 population_summary) and unit-tested on its own (test_site_alleles.py).
 """
 
-_PLAIN = ("0", "1", ".")
+# the tokens of a split or biallelic record's genotypes ("" an empty genotype)
+_PLAIN = ("0", "1", ".", "")
 
 
 def gt_tokens(gt):
@@ -72,7 +73,7 @@ def alt_tokens(entries):
     for _alt, carriers in entries:
         common = None
         for g in carriers.values():
-            toks = {t for t in gt_tokens(g)[0] if t not in ("0", ".")}
+            toks = {t for t in gt_tokens(g)[0] if t not in ("0", ".", "")}
             common = toks if common is None else common & toks
         shared.append(common)
     settled = True
