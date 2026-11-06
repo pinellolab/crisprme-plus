@@ -84,8 +84,8 @@ population-level run of the README guide).
   says; every other A or B alignment lists a combination a haplotype carries, and every C1
   alignment that a haplotype does carry is one with an indel in the target. The harness's stricter
   test (a haplotype that reproduces the alignment within its mismatches with a valid PAM) reaches
-  2,572 of the 2,574, and the per-sample run of the same search reports the row's CFD at the locus
-  of PS_SAME of them (PS_LOWER below it, PS_NONE with no row within three bases). Covered by
+  2,572 of the 2,574, and the per-sample run of the same search reports a row within three bases
+  of every one of them, at the CFD the row shows. Covered by
   `PostProcess/test_haplotype_prioritizer.py`.
 - **`--prioritize-observed` checks a sites-only dataset's rows against the phased HGDP + 1000
   Genomes genotypes, and `download --what genotype-oracle` installs them.** The `mega` panel has no

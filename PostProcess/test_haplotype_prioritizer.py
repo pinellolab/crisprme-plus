@@ -362,7 +362,8 @@ class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
                           alignment=self.alignment(aligned=alt, cfd=0.0))
         self.assertEqual((ver.tier, ver.state, ver.kept),
                          ("A", hp.SAME_SCORE, (f"{CHROM}_113_T_G",)))
-        # the same with the panel's A -> C at the PAM's R base on S00's slot
+        # the same panel (a second store of its own) with an A -> C at the PAM's R base,
+        # on the slot of S00, the sample carrying the variant the score needs
         self.dicts = os.path.join(self.tmp, "Dictionaries2")
         broken = self.panel([(113, "T", "G", {"S00": "1|0"}), (121, "A", "G", {"S02": "1|0"}),
                              (122, "A", "C", {"S00": "1|0"})])
