@@ -100,8 +100,8 @@ irm https://pinellolab.github.io/crisprme-plus/install.ps1 | iex
 ```
 Then open **CRISPRme** (Applications on macOS; Desktop / Start Menu on Windows) — a
 small window with three buttons: **Start**, **Update**, **Stop**. Click **Start**: the
-first time it downloads the reference + variant data automatically (~45 GB download, once;
-~98 GB on disk once installed — keep ~150 GB free; a reference-only setup is far smaller, ~25 GB), then
+first time it downloads the reference + variant data automatically (~70 GB download, once;
+~150 GB on disk once installed — keep ~200 GB free; a reference-only setup is far smaller, ~44 GB), then
 opens the web interface at http://localhost:8080; every Start after that is instant.
 (Memory: the **whole-genome *variant-aware* search** needs **~64 GB of RAM** — set that
 under Docker Desktop → Settings → Resources → Memory. **On Windows with the WSL 2 backend
@@ -363,8 +363,8 @@ Memory scales with the search — pick your tier (measured figures):
 
 | Search | RAM | Disk |
 |---|---|---|
-| **Reference-only / single-chromosome** (toy or reference-genome runs) | **8–16 GB** | ~22 GB (reference-only install) |
-| **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`NRR_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~98 GB (full variant-aware install; keep ~150 GB free) |
+| **Reference-only / single-chromosome** (toy or reference-genome runs) | **8–16 GB** | ~44 GB (reference-only install) |
+| **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`NRR_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~150 GB (full variant-aware install; keep ~200 GB free) |
 
 The variant-aware genome-wide search is the memory-heavy one: the CRISPRitz search
 process alone peaks around **68–75 GB** loading and traversing the variant index, so
@@ -1298,8 +1298,8 @@ per-run view of the working directory in which that chromosome is the only one: 
 `.crisprme-test-view-*` folder of symlinks, removed when the run ends. So its result
 tables hold exactly the off-targets the whole-genome test reports on that chromosome (the
 shareable report's top-1000 view then ranks that chromosome alone, so it can list sites the
-whole-genome report ranks below its top 1000), for a fraction of the cost: with `NRG_3_hg38+hg38_HGDP1kGP`, `--chrom chr22` peaked at about 5 GB of RAM
-and took about 1.5 to 4 minutes at 16 threads in testing. A chromosome that holds none of
+whole-genome report ranks below its top 1000), for a fraction of the cost: with `NRR_3_hg38+hg38_HGDP1kGP`, `--chrom chr22` peaked at about 10 GB of RAM
+and took about 2 minutes at 16 threads in testing (about 5 GB and 1.5 to 4 minutes with `NRG_3_hg38+hg38_HGDP1kGP`). A chromosome that holds none of
 the example guide's off-targets, as `chrM` and most contigs of the reference-only
 `NRG_3_hg38` do, passes with an empty result, which Complete Search ends without an
 `integrated_results.tsv`. A chromosome that the genome or the index does not have is
@@ -2321,7 +2321,7 @@ test across the entire genome:
   across the entire human genome using a prebuilt index you have downloaded: without
   `--chrom`, the prebuilt-index smoke searches the example guide RNA over every
   chromosome of the index's genome. With a variant index such as
-  `NRG_3_hg38+hg38_HGDP1kGP` it is a genome-wide variant search and needs the memory
+  `NRR_3_hg38+hg38_HGDP1kGP` it is a genome-wide variant search and needs the memory
   given in [§0](#0-system-requirements) (64 GB or more).
 
 After the benchmark mode's Single Chromosome Test, the Off-Target Sites Validation Test
@@ -2349,15 +2349,16 @@ to handle large datasets and complex genetic analysis tasks.
 ---
 
 To run the quicker test on chromosome 22 against a prebuilt index you have already
-downloaded (e.g. `NRG_3_hg38+hg38_HGDP1kGP`), execute the following command:
+downloaded (e.g. `NRR_3_hg38+hg38_HGDP1kGP`), execute the following command:
 
   ```bash
   crisprme.py complete-test --chrom chr22 --thread 4
   ```
 
 It searches chromosome 22 alone and reports the off-targets the
-[Full Genome Test](#322-full-genome-test) reports there. With `NRG_3_hg38+hg38_HGDP1kGP`
-it peaked at about 5 GB of RAM and took about 1.5 to 4 minutes at 16 threads in testing.
+[Full Genome Test](#322-full-genome-test) reports there. With `NRR_3_hg38+hg38_HGDP1kGP`
+it peaked at about 10 GB of RAM and took about 2 minutes at 16 threads in testing (about 5 GB
+and 1.5 to 4 minutes with `NRG_3_hg38+hg38_HGDP1kGP`).
 `validate-test` does not apply to it, as to any run of the prebuilt-index smoke.
 
 As CI runs it, the single-chromosome test is `complete-test`'s benchmark mode followed by
@@ -2377,7 +2378,7 @@ crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skippe
 To run the detailed test across the entire genome against a prebuilt index you
 have already downloaded, execute the following command (with no option at all,
 `complete-test` prints its help instead). Without `--chrom` it searches every chromosome
-of the index's genome; with a variant index such as `NRG_3_hg38+hg38_HGDP1kGP` it is a
+of the index's genome; with a variant index such as `NRR_3_hg38+hg38_HGDP1kGP` it is a
 genome-wide variant search, so give it the 64 GB or more of RAM that
 [§0](#0-system-requirements) gives for one:
 

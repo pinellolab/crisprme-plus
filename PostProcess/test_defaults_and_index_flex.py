@@ -118,6 +118,24 @@ class TheDefaultIsNRR(unittest.TestCase):
                     if "--index-name NRG_3_hg38+hg38_HGDP1kGP" in line:
                         self.fail(f"{path} still recommends the NRG index: {line.strip()}")
 
+    def test_the_one_click_installers_download_the_nrr_index(self):
+        # the route the README and the website call the easiest
+        for path in ("docs/install.sh", "docs/install.ps1"):
+            text = (_REPO / path).read_text(encoding="utf-8")
+            with self.subTest(path=path):
+                self.assertIn("--index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA", text)
+                self.assertNotIn("NRG_3_hg38+hg38_HGDP1kGP", text)
+
+    def test_install_ps1_starts_nothing_after_a_failed_download(self):
+        # Its first Start ran the two downloads and the app with ";" between them, so a failed
+        # download went on to the next and started the app on half the data (backlog 4.4).
+        # (Windows PowerShell 5.1 has no "&&": each step tests the exit status before it.)
+        line = next(ln for ln in (_REPO / "docs" / "install.ps1").read_text(
+            encoding="utf-8").splitlines() if "download --what all" in ln)
+        index_step = line.index("download --what index")
+        self.assertIn("; if (`$LASTEXITCODE -eq 0) { docker run", line[:index_step])
+        self.assertIn("; if (`$LASTEXITCODE -eq 0) { $run;", line[index_step:])
+
 
 class APamDownloadInstallsTheDefaultPam(unittest.TestCase):
     """The data repo's pams/ held NGG, NNN and NRG only: the default PAM file comes with
@@ -550,6 +568,36 @@ class SetupFailsWhenItsDownloadFails(unittest.TestCase):
         self.assertEqual(stop.exception.code, 3)
         self.assertEqual(err.getvalue(), "Legacy database setup exited with error code 3\n")
 
+    def test_its_progress_lines_come_as_they_are_printed(self):
+        # Into a pipe or a file, as a merged log has them, the script's progress lines came
+        # at its end, after its errors (backlog 4.4, FR2 cli notes (c)).
+        import test_bulge_cap as tbc
+        cm = tbc.crisprme
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / "setup_legacy_database.py").write_text(
+            "import sys\nprint('Downloading hg38')\n"
+            "sys.stderr.write('ERROR: no network\\n')\nsys.exit(1)\n")
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONUNBUFFERED"}
+        with open(tmp / "log", "wb") as log:
+            saved = os.dup(1), os.dup(2)
+            os.dup2(log.fileno(), 1)
+            os.dup2(log.fileno(), 2)
+            try:
+                with mock.patch.object(cm, "script_path", str(tmp)), \
+                        mock.patch.object(cm, "input_args",
+                                          ["crisprme.py", "setup", "--path", str(tmp)]), \
+                        mock.patch.dict(os.environ, env, clear=True), \
+                        self.assertRaises(SystemExit):
+                    cm.setup_database()
+            finally:
+                os.dup2(saved[0], 1)
+                os.dup2(saved[1], 2)
+                os.close(saved[0])
+                os.close(saved[1])
+        self.assertEqual((tmp / "log").read_text().splitlines()[:2],
+                         ["Downloading hg38", "ERROR: no network"])
+
 
 class TheTestDataUrlsHaveOneSlash(unittest.TestCase):
     """setup's test-data base URL ended in "/" and each URL added another
@@ -665,7 +713,8 @@ class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):
 class TheVcfListIsNotEdited(tir._ShippedScript):
     """The search script appended a newline to the user's --vcf list, and cut its last byte
     at the end: a run that ended early left the newline in it, and a read-only list failed
-    the write, on stderr, which fails the stage (RV4-1). It reads a copy."""
+    the write, on stderr, which fails the stage (RV4-1). Its --samplesID list too, when
+    writable. It reads copies."""
 
     def test_the_list_is_left_as_it_was(self):
         # (the run stops at its variant search, as one that ends early does; a read-only
@@ -677,6 +726,130 @@ class TheVcfListIsNotEdited(tir._ShippedScript):
         self.assertEqual(done.searched(variant=True)[0], f"NRR_3_hg38+{self.VCF}")
         self.assertEqual((run.work / "out" / ".vcf_list_searched.txt").read_text(),
                          self.VCF + "\n\n")
+
+    def test_nor_the_samples_list(self):
+        # (a last line with no newline, as an editor may leave it: the run added one, and
+        # cut it off again at its end, which a run that ends early never reaches)
+        self.install("NRR_3")
+        samples = self.root / "my_samples.txt"
+        samples.write_text(f"{self.VCF}.samplesID.txt")
+        self.finish(self.launch(pam="20bp-NRR-SpCas9", samples=samples))
+        self.assertEqual(samples.read_text(), f"{self.VCF}.samplesID.txt")
+
+
+@unittest.skipUnless(shutil.which("python") and tir._gnu_realpath(),
+                     "runs the shipped search script as the image does (GNU realpath)")
+class AFlankWiderThanA5PrimePamIsSaid(tir._ShippedScript):
+    """A 5' search refused for want of an index named none of the PAM-less indexes of its
+    side there whose flank is wider than its PAM: the scan skips them without a word, as a 5'
+    PAM is read off a flank of its own width only, and the user was left thinking the index
+    was recorded wrong (cli5 D7). The refusal says so, and what would serve."""
+
+    SAID = ("       NNNNNNNN_2_hg38 is a PAM-less index whose flank is 8 nt, and TTTV is a 5' "
+            "PAM of 4 nt: a 5' PAM is read off a flank of its own width only, so this search "
+            "needs NNNN_2_hg38 or TTTV_2_hg38, built for a 5' PAM\n")
+
+    def test_under_index_path(self):
+        self.install("NNNNNNNN_2", variant=False)
+        tir.built_for(self.library / "NNNNNNNN_2_hg38", -8)
+        for prune in (0, 1):
+            with self.subTest(prune=prune):
+                run = self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=prune, variant=False,
+                                        index_path=self.library)
+                self.assertIsNone(run.searched(variant=False))
+                self.assertIn("ERROR: no matching reference index under --index-path",
+                              run.stderr)
+                self.assertIn(self.SAID, run.stderr)
+        # a 3' PAM is not told it
+        run = self.run_pipeline(pam="20bp-NGCG-SpCas9VRER", prune=0, variant=False,
+                                index_path=self.library)
+        self.assertNotIn("whose flank is", run.stderr)
+
+
+class AFlankWiderThanA5PrimePamIsSaidByThePreflight(unittest.TestCase):
+    """The same, in complete-search's pre-flight refusal of a variant search."""
+
+    def test_in_the_preflight_of_a_variant_search(self):
+        import struct
+        import test_bulge_cap as tbc
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        cwd = tbc.crisprme.current_working_directory
+        tbc.crisprme.current_working_directory = f"{root}/"
+        self.addCleanup(setattr, tbc.crisprme, "current_working_directory", cwd)
+        for folder in ("Dictionaries/registry_ds", "Dictionaries/log_indels_ds",
+                       "genome_library/NNNNNNNN_2_hg38+ds"):
+            (root / folder).mkdir(parents=True)
+        (root / "genome_library/NNNNNNNN_2_hg38+ds/X_chr1_1.bin").write_bytes(
+            struct.pack("=ii", 7, 20))
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err), self.assertRaises(SystemExit):
+            tbc.crisprme._refuse_no_variant_index([str(root / "VCFs" / "ds")], "hg38", "TTTV",
+                                                  1, 1, False, False, 20, "_")
+        said = AFlankWiderThanA5PrimePamIsSaid.SAID.strip().replace("_hg38", "_hg38+ds")
+        self.assertIn(said + ". ", err.getvalue())
+
+
+class ASearchTheInputCheckRefusesLeavesItsOutputFolderEmpty(unittest.TestCase):
+    """A search the input check refused (a guide without its PAM's N padding, say) left
+    .command_line.txt, .version.txt, Params.txt and guides.txt in its output folder, so the
+    corrected command, with the same --output, stopped on "Output folder ... not empty!"
+    (found running this track's chr22 searches). It leaves the folder as it found it."""
+
+    def test_the_same_command_again_is_refused_for_its_input_again(self):
+        import subprocess
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / "Genomes" / "g").mkdir(parents=True)
+        (tmp / "Genomes" / "g" / "chr1.fa").write_text(">chr1\n" + "ACGTTGCAAC" * 60 + "\n")
+        (tmp / "PAMs").mkdir()
+        (tmp / "PAMs" / "20bp-NGG-SpCas9.txt").write_text("N" * 21 + "GG 3\n")
+        (tmp / "g.txt").write_text("ACTGAAATCTGTAAGCAGGC\n")  # without its NNN
+        env = {**os.environ, "CRISPRME_SKIP_SCORER_ENV": "1"}
+        try:
+            import Bio.Seq  # noqa: F401
+        except ImportError:  # (the search reads nothing of it before its input check)
+            (tmp / "stub" / "Bio").mkdir(parents=True)
+            (tmp / "stub" / "Bio" / "__init__.py").write_text("")
+            (tmp / "stub" / "Bio" / "Seq.py").write_text("Seq = str\n")
+            env["PYTHONPATH"] = str(tmp / "stub")
+        for attempt in (1, 2):
+            run = subprocess.run(
+                [sys.executable, str(_REPO / "crisprme.py"), "complete-search", "--genome",
+                 "Genomes/g", "--guide", "g.txt", "--pam", "PAMs/20bp-NGG-SpCas9.txt", "--mm",
+                 "4", "--output", "o", "--thread", "1"],
+                cwd=tmp, env=env, capture_output=True, text=True, timeout=300)
+            with self.subTest(attempt=attempt):
+                self.assertEqual(run.returncode, 1, run.stderr[-2000:])
+                self.assertIn("expects a padded length of 23 nt", run.stdout + run.stderr)
+                self.assertNotIn("not empty", run.stderr)
+                self.assertEqual(os.listdir(tmp / "Results" / "o"), [])
+
+
+class PoolSearchIndelsKeepsNoDeadHelper(unittest.TestCase):
+    """pool_search_indels.py kept _index_pam, which nothing called (emptyidx F8)."""
+
+    def test_every_function_of_it_is_called(self):
+        import re
+        src = (_HERE / "pool_search_indels.py").read_text()
+        for node in ast.parse(src).body:
+            if isinstance(node, ast.FunctionDef):
+                with self.subTest(function=node.name):
+                    self.assertGreater(len(re.findall(rf"\b{node.name}\b", src)), 1)
+
+
+class TheDesignDocSaysWhatShips(unittest.TestCase):
+    """DYNAMIC_PAM_INDEX_COMPAT.md called a search that prunes by itself, the web's pruning
+    and the PAM picker *planned*, and its CLI section described what the CLI did not do
+    (IDX-22): 2.9.0 does them, and the sections say so, and how it differs."""
+
+    def test_the_shipped_sections_are_not_planned(self):
+        text = (_REPO / "docs" / "DYNAMIC_PAM_INDEX_COMPAT.md").read_text()
+        for heading in ("## 4. CLI", "## 5. Web", "## 8. Web PAM picker"):
+            section = text[text.index(heading):].split("\n## ", 1)[0]
+            with self.subTest(heading=heading):
+                self.assertNotIn("*planned*", section)
+                self.assertIn("2.9.0", section)
 
 
 class OnePerfectMatchPerGuideIsNoWarning(unittest.TestCase):

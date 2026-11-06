@@ -11,7 +11,7 @@ up, move, or share any part of it with your normal file manager.
 | **CLI** | `--path <DIR>` on every command (defaults to the current directory). All data + results land under `<DIR>`. |
 | **Docker** | `docker run -v "$PWD:/DATA" -w /DATA …` — your host `$PWD` is mounted as `/DATA` in the container. |
 | **Apptainer / Singularity** | `apptainer run --bind "$PWD:/DATA" --pwd /DATA …` — same idea. |
-| **One-click app / web** | asks *where to store the data* on first launch (a ~45 GB download → ~98 GB on disk; keep ~150 GB free — a reference-only setup is far smaller, ~25 GB) and **remembers** it. |
+| **One-click app / web** | asks *where to store the data* on first launch (a ~70 GB download → ~150 GB on disk; keep ~200 GB free — a reference-only setup is far smaller, ~44 GB) and **remembers** it. |
 
 Because it is a normal host directory, you have full read/write access to it at all times.
 

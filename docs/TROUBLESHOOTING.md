@@ -60,19 +60,19 @@ scores read -1, no report zip is written, and only a WARNING in the search's err
 ## 2. A genome-wide search needs a lot of disk — plan for it
 
 The default variant-aware install (`download --what all`, then
-`download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`) takes **~98 GB** on disk
-(measured: 97.9 GB) before any results:
+`download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP`) takes **~150 GB** on disk
+(measured: 150.0 GB) before any results:
 
 | Item | Approx size |
 |---|---|
 | Reference genome (hg38) | ~3 GB |
-| Reference + variant-aware indexes (`NRG_3_hg38`, `NRG_3_hg38+hg38_HGDP1kGP` and its indel index) | ~41 GB |
+| Reference + variant-aware indexes (`NRR_3_hg38`, `NRR_3_hg38+hg38_HGDP1kGP` and its indel index) | ~94 GB |
 | Its `Dictionaries/`: genotype store ~30 GB, allele-frequency registry ~8.5 GB, indel genotype store ~7.7 GB, indel logs ~6.5 GB (fetched by default; per-sample analysis, this index's default, reads the store) | ~52 GB |
-| Annotations | ~1 GB |
+| Annotations | ~0.1 GB |
 | Per-run results (grows with mismatches/bulges; larger for per-sample runs, the default on a phased index) | GB–tens of GB |
 
-The install peaks around 103 GB while the genotype store unpacks. Keep everything on a
-disk with **~150 GB free** before a first variant-aware run.
+The install peaks around 161 GB while the archives unpack. Keep everything on a
+disk with **~200 GB free** before a first variant-aware run.
 Use `CRISPRME_TMPDIR` (Section 1) on the same roomy disk.
 
 **Reclaiming space:** by default `complete-search` removes bulky intermediates when

@@ -155,15 +155,17 @@ else
 fi
 echo >>$vcf_list
 # $6 is the samplefile, read below with `while read`, which drops a last line with no
-# newline: hence the one added here. A search with none (reference-only, or variant-aware
-# without --samplesID) is handed the install's shared empty placeholder
-# $starting_dir/vuoto.txt, which is never written: a newline added to it stayed there for
-# good whenever a run ended before stripping it again (no hits, an error, a Ctrl-C), one
-# more each time. It is told apart as that very file (-ef), not by its name, which a
-# samples list of the user's own may share. A real samplefile gets the trailing newline
-# only when it is writable, so a read-only one does not die with "Read-only file system".
-if [ $6 != "_" ] && [ ! "$6" -ef "$starting_dir/vuoto.txt" ] && [ -w "$6" ]; then
-	echo >>$6
+# newline: hence the one added here, to a copy in the output folder, as for the --vcf list
+# (the user's own file was edited in place, and a run that ended early left the newline in
+# it: RV4-1). A search with none (reference-only, or variant-aware without --samplesID) is
+# handed the install's shared empty placeholder $starting_dir/vuoto.txt, which is never
+# written: a newline added to it stayed there for good whenever a run ended before
+# stripping it again (no hits, an error, a Ctrl-C), one more each time. It is told apart as
+# that very file (-ef), not by its name, which a samples list of the user's own may share.
+if [ $6 != "_" ] && [ ! "$6" -ef "$starting_dir/vuoto.txt" ]; then
+	cp "$6" "$output_folder/.samplesID_list_searched.txt" \
+		&& sampleID="$output_folder/.samplesID_list_searched.txt" \
+		&& echo >>"$sampleID"
 fi
 
 # Genome layout guard: CRISPRme keys its chromosome list (and so all post-analysis)
@@ -1148,6 +1150,23 @@ while read vcf_f; do
 			"$_want" "$((_n - 1))" >&2
 	}
 
+	# Say on stderr why the PAM-less indexes of library $1 for $2 whose flank is wider than
+	# this 5' PAM cannot serve it, which the scan skips without a word: the engine reads a
+	# 5' PAM off a flank of its own width only (_resolve_index_dir).
+	_say_wider_flank() {
+		[ "${pos:-1}" -gt 0 ] && return 0
+		local _d _b _nn _ip_pam _ip_n _ip_rest _ip_guide _ip_side
+		printf -v _nn '%*s' "${#true_pam}" ''
+		for _d in "$1"/*_*_"$2"; do
+			[ -d "$_d" ] || continue
+			_b=${_d##*/}; _index_name_parts "$_b"
+			[ "$_ip_rest" = "$2" ] && [ -n "$_ip_pam" ] && [ -z "${_ip_pam//N/}" ] \
+				&& [ "${#_ip_pam}" -gt "${#true_pam}" ] || continue
+			printf "       %s is a PAM-less index whose flank is %s nt, and %s is a 5' PAM of %s nt: a 5' PAM is read off a flank of its own width only, so this search needs %s or %s, built for a 5' PAM\n" \
+				"$_b" "${#_ip_pam}" "$true_pam" "${#true_pam}" "${_nn// /N}_${bMax}_$2" "${true_pam}_${bMax}_$2" >&2
+		done
+	}
+
 	# A search builds its index under the name <PAM>_<bMax>_<suffix>, which says nothing of
 	# the side of the guide, so index $1 in place under that name, which the scan refused,
 	# may have been built for the other side: a search of it would find wrong targets, or
@@ -1245,6 +1264,7 @@ while read vcf_f; do
 			_other=$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax" any)
 			[ -z "$_other" ] || { _say_other_side "$_other"; break; }
 		done
+		for _lib in "${_libs[@]}"; do _say_wider_flank "$_lib" "$_set"; done
 		exit 1
 	}
 
@@ -1591,6 +1611,7 @@ while read vcf_f; do
 				printf "\n" >&2
 			fi
 		fi
+		_say_wider_flank "$ref_lib" "$ref_name"
 		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s)\n" "$true_pam" "$ref_name" "$bMax" "$(basename "$idx_folder1")" >&2
 		printf "       re-run 'crisprme.py download --what index --index-name %s' (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$(basename "$idx_folder1")" >&2
 		exit 1
@@ -2591,14 +2612,7 @@ fi
 echo -e 'Integrating results\tEnd\t'$(date) >>$log
 truncate -s -1 $guide_file
 truncate -s -1 $vcf_list
-# Strip the trailing newline from the empirical/sample file ONLY when it is a real,
-# non-empty, WRITABLE file. The "no empirical data" case passes the shipped read-only
-# placeholder ($starting_dir/vuoto.txt, told apart as that very file), which got no
-# newline; truncating it fails on a read-only install (e.g. an Apptainer/Singularity SIF)
-# and aborted assembly-search there (issue #143).
-if [ "$6" != "_" ] && [ ! "$6" -ef "$starting_dir/vuoto.txt" ] && [ -s "$6" ] && [ -w "$6" ]; then
-	truncate -s -1 "$6"
-fi
+# (the samplefile $6 is not touched: the newline went to the copy read above)
 # END STEP 8 - results integration
 
 # START STEP 9 - database creation

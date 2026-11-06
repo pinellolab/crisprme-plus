@@ -151,14 +151,6 @@ def _pam_line(pam_path: str):
     return seq, int(size)
 
 
-def _index_pam(pam_path: str) -> str:
-    """The PAM index-genome names an index by, read from a PAM file as crispritz.py
-    reads it: the first |n| bases of its sequence for a 5' PAM (n < 0), the last n
-    for a 3' one."""
-    seq, size = _pam_line(pam_path)
-    return seq[:-size] if size < 0 else seq[-size:]
-
-
 def _fake_genome(fake_dir: str):
     """What a chromosome's fake-indel genome holds, by pool_index_indels.py's test of it
     (_fake_genome_is_empty): "sequence", "empty" (every FASTA header-only: no indel,

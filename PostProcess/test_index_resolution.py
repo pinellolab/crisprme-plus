@@ -4120,16 +4120,14 @@ class AFinishedRunRestoresOnlyRealAnnotations(unittest.TestCase):
 
 
 def _samplefile_blocks():
-    """The shipped blocks that handle the samplefile ($6), verbatim: the one that adds
-    its trailing newline as a run starts (from its comment to its fi), the loop that
-    reads the datasets it lists, and the one that strips the newline as a finished run
-    ends (from its comment to its fi)."""
+    """The shipped blocks that handle the samplefile ($6), verbatim: the one that copies it
+    into the output folder with its trailing newline as a run starts (from its comment to
+    its fi), and the loop that reads the datasets it lists. (Up to 2.8.1 the newline went
+    to $6 itself, and a third block stripped it as a finished run ended.)"""
     text = _SCRIPT.read_text()
     blocks = []
     for first, last in (("# $6 is the samplefile", "\nfi\n"),
-                        ("while read samples; do", "\ndone <$sampleID\n"),
-                        ("# Strip the trailing newline from the empirical/sample file",
-                         "\nfi\n")):
+                        ("while read samples; do", "\ndone <$sampleID\n")):
         start = text.index(first)
         blocks.append(text[start:text.index(last, start) + len(last)])
     return blocks
@@ -4184,28 +4182,28 @@ class TheSamplesPlaceholderIsNeverWritten(_ShippedScript):
                          run.stderr)
         self.assertEqual(self.vuoto.read_bytes(), b"")
 
-    def test_a_real_samplefile_still_gets_its_newline_and_loses_it_again(self):
-        # the newline that `while read` needs for the last line, stripped as a finished
-        # run ends; the placeholder is left as it is by both, even one an older run left
-        # a newline in
-        add, _, strip = _samplefile_blocks()
+    def test_a_real_samplefile_is_read_from_a_copy_with_its_newline(self):
+        # the newline that `while read` needs for the last line goes to a copy in the
+        # output folder, and the list itself is left as it is (RV4-1), as is the
+        # placeholder, even one an older run left a newline in
+        add, _ = _samplefile_blocks()
         samples = self.root / "samples.txt"
         samples.write_text(f"{self.VCF}.samplesID.txt")
         self.vuoto.write_bytes(b"\n")
-        for block, body in ((add, f"{self.VCF}.samplesID.txt\n"),
-                            (strip, f"{self.VCF}.samplesID.txt")):
-            for samplefile in (samples, self.vuoto):
-                out = self.run_blocks(samplefile, block)
-                self.assertEqual((out.returncode, out.stderr), (0, ""))
-            self.assertEqual(samples.read_text(), body)
-            self.assertEqual(self.vuoto.read_bytes(), b"\n")
+        for samplefile in (samples, self.vuoto):
+            out = self.run_blocks(samplefile, add)
+            self.assertEqual((out.returncode, out.stderr), (0, ""))
+        self.assertEqual(samples.read_text(), f"{self.VCF}.samplesID.txt")
+        self.assertEqual((self.root / "blocks" / ".samplesID_list_searched.txt").read_text(),
+                         f"{self.VCF}.samplesID.txt\n")
+        self.assertEqual(self.vuoto.read_bytes(), b"\n")
 
     def test_a_samples_list_of_ones_own_called_vuoto_txt_is_read_whole(self):
         # its one line has no newline, so `while read` reads it only with the one the
-        # script adds; a finished run leaves the list as it was, and the placeholder alone.
-        # Told apart by name, the list got no newline, its dataset was never read, and
-        # the run failed only at its end, on the samples its results name.
-        add, read, strip = _samplefile_blocks()
+        # script adds; the list is left as it was, and the placeholder alone. Told apart
+        # by name, the list got no newline, its dataset was never read, and the run
+        # failed only at its end, on the samples its results name.
+        add, read = _samplefile_blocks()
         rows = "S1\tPOP1\tSUP1\tF\nS2\tPOP1\tSUP1\tM\n"
         (self.home / "samplesIDs").mkdir()
         (self.home / "samplesIDs" / f"{self.VCF}.samplesID.txt").write_text(
@@ -4213,7 +4211,7 @@ class TheSamplesPlaceholderIsNeverWritten(_ShippedScript):
         mine = self.root / "lists" / "vuoto.txt"
         mine.parent.mkdir()
         mine.write_text(f"{self.VCF}.samplesID.txt")
-        out = self.run_blocks(mine, add, read, strip)
+        out = self.run_blocks(mine, add, read)
         self.assertEqual((out.returncode, out.stderr), (0, ""))
         read_in = self.root / "blocks" / ".sampleID.txt"
         self.assertEqual(read_in.read_text() if read_in.exists() else "", rows)

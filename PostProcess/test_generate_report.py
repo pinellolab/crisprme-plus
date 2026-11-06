@@ -2980,16 +2980,17 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_pipeline_no_readonly_or_bare_relative_writes(self):
         """Regression guard for the read-only-container bug: the search pipeline must
-        not write a bare-relative dummy.txt nor append to $6 without a writability
-        guard (both crashed a reference-only run under Apptainer)."""
+        not write a bare-relative dummy.txt nor append to $6 (both crashed a
+        reference-only run under Apptainer; since 2.9.0 the script reads a copy of $6)."""
         p = os.path.join(os.path.dirname(__file__),
                          "submit_job_automated_new_multiple_vcfs.sh")
         src = open(p).read()
         # the fixed bare-relative dummy.txt write must be gone
         self.assertNotIn("echo -e \"dummy_file\" >dummy.txt", src)
         self.assertNotIn(">dummy.txt", src.replace('"${output_folder}/dummy.txt"', ""))
-        # appending to the samplefile $6 must be writability-guarded
-        self.assertIn('[ -w "$6" ]', src)
+        # the samplefile $6 is never written
+        self.assertNotIn("echo >>$6", src)
+        self.assertNotIn('truncate -s -1 "$6"', src)
 
     def test_persona_audit_report_additions(self):
         """Scores/columns legend (CFD/CRISPR-Bulge + citations + alignment notation),

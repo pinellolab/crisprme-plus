@@ -69,7 +69,7 @@ and old tools lack the guard — so those go in a **SEPARATE HF repo** (proposed
 knows both; `publish-index` targets the pam-less repo only for width>3 indexes.
 
 ### Layer 2 — RUNTIME version-gate: fail-safe even if an index is hand-moved
-*Planned, not in 2.8.1 (which writes and reads no `index_meta.json`):* each pam-less index ships
+*Planned, not in 2.9.0 (which writes and reads no `index_meta.json`):* each pam-less index ships
 a sidecar `index_meta.json`:
 ```json
 { "build_pam": "NNNNNNNN", "flank_len": 8, "pam_at_start": false,
@@ -97,17 +97,19 @@ flank-tagged + distinct (e.g. `NNNNNNNN_3_<genome>`, K=8) so it is never confuse
 ## 4. CLI
 - **CRISPRitz:** default call unchanged (byte-identical). `--prune-pam` (opt-in) applies the PAM
   file as a subset filter, validating subset + `L ≤ K` against the index name/sidecar.
-- **CRISPRme** (*planned*; in 2.8.1 the user passes `--prune-pam` with `--index-path`, and only
-  an all-N index is narrowed: see the status note):
-  `complete-search --index-path <idx> --pam <searchPAM>` — `--pam` may be any valid
-  subset of the index's `build_pam`; CRISPRme **auto-passes `--prune-pam` to crispritz when
-  `--pam ⊊ build_pam`** (narrower than build) and validates with a clear error on an invalid PAM.
-  `--pam == build_pam` is the legacy path (unchanged). Inline `--genome --vcf` build unchanged.
+- **CRISPRme** (as designed, 2.9.0 does this, with or without `--index-path`; in 2.8.1 the user
+  passed `--prune-pam` with `--index-path`, and only an all-N index was narrowed):
+  `complete-search --pam <searchPAM>` — `--pam` may be any valid subset of an installed index's
+  `build_pam`. CRISPRme passes `--prune-pam` to crispritz by itself, and says so first, when no
+  installed index serves the search unpruned and one serves it pruned (a dedicated index of a
+  broader PAM, or an all-N flank wider than a 3′ PAM); an all-N flank as wide as the PAM serves
+  unpruned, narrowed by the post-search PAM filter. A PAM no installed index serves is refused,
+  naming the PAM and the indexes there. `--pam == build_pam` is the legacy path (unchanged).
+  Inline `--genome --vcf` build unchanged.
 
-## 5. Web (*planned*, not in 2.8.1: the web interface never passes `--prune-pam`)
-On index selection, read the sidecar → a **PAM picker** populated with that index's valid set
-(dropdown of common subsets + a custom field with live subset/length validation); default =
-`build_pam`. A one-line hint states the index's supported PAM family and max length.
+## 5. Web (2.9.0; in 2.8.1 the web interface never pruned)
+The search script prunes by itself for a web search as for one on the command line. The PAM
+picker is section 8: it reads the index's name and `.pam_build`, not a sidecar.
 
 ## 6. NNN index publish plan (*superseded*)
 2.8.1 publishes `NNN_3` in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
@@ -120,7 +122,17 @@ flank-tagged name, with the `index_meta.json` sidecar (`build_pam`, `flank_len`,
 State plainly: *existing indexes and commands are unchanged; pam-less (dynamic-PAM) indexes live
 at a separate HF repo and require CRISPRitz ≥ `<X>` and CRISPRme ≥ `<Y>`.*
 
-## 8. Web PAM picker (*planned*, not in 2.8.1)
+## 8. Web PAM picker (2.9.0, with the differences below)
+2.9.0 ships this picker (`pages_utils.ENZYME_TABLE`, `pamless_presets`, `pamless_pam_problem`)
+for the widest all-N index installed for the genome or dataset selected, with these differences:
+the guide length and side come from the index name, `.pam_build` and the trees (`.bin`), not
+from a sidecar; a preset is offered only for the index's own guide length (a 21-nt SaCas9 guide,
+which a 20-nt index serves at up to 1 bulge of each type, is listed as not on this index); a 5′
+PAM only as long as the flank; the custom field shows no site count; "Use this PAM" writes the
+PAM file into `PAMs/` and selects it in the form's PAM list, and the search prunes by itself, so
+no flag is passed; the recommended preset is SpCas9 NRR (the default PAM), not NGG.
+
+The design, as written before it shipped:
 Legacy per-PAM indexes keep the **existing flat dropdown** (the `guidelen-PAM-enzyme` list)
 unchanged. Pam-less indexes get a new **index-scoped, data-driven** picker:
 

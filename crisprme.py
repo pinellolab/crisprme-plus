@@ -2316,12 +2316,23 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
             wider = (f"{os.path.basename(served[0])} serves it pruned to this PAM at leaf time "
                      f"(--prune-pam), which the installed CRISPRitz cannot do: install a "
                      f"CRISPRitz build that supports --prune-pam (CRISPRme pins one). ")
+        # (the search script's _say_wider_flank: a 5' PAM is read off a flank of its width)
+        flank = ""
+        for index in ([] if three_prime else indexes):
+            parsed = index_fit.parse_index_name(os.path.basename(index))
+            if (parsed and parsed[2] == dataset and set(parsed[0]) == {"N"}
+                    and len(parsed[0]) > len(motif)):
+                flank += (f"{os.path.basename(index)} is a PAM-less index whose flank is "
+                          f"{len(parsed[0])} nt, and {motif} is a 5' PAM of {len(motif)} nt: a "
+                          f"5' PAM is read off a flank of its own width only, so this search "
+                          f"needs {'N' * len(motif)}_{want}_{dataset} or {motif}_{want}_{dataset}, "
+                          f"built for a 5' PAM. ")
         error(
             f"no variant index here serves this search (genome {genome}, dataset {vcf}, PAM "
             f"{motif}, {bdna} DNA and {brna} RNA bulge(s), a {guide_len}-nt guide), and none can "
             f"be built: neither its VCFs (VCFs/{vcf}) nor its enriched genome (Genomes/{dataset}) "
             f"is installed. Variant indexes installed for {vcf}: {', '.join(have) or 'none'}. "
-            f"{fewer}{wider}To install one: crisprme.py download --what index --index-name "
+            f"{fewer}{wider}{flank}To install one: crisprme.py download --what index --index-name "
             f"{motif}_{max(want, 3)}_{dataset} if it is published, or crisprme.py build-index-only with "
             f"the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)."
         )
@@ -3290,6 +3301,13 @@ def complete_search() -> None:
     if validation_report.has_errors() or (
         full_validation_report is not None and full_validation_report.has_errors()
     ):
+        # (what this run wrote into the output folder goes with it: the corrected command,
+        # with the same --output, runs instead of stopping on a folder 'not empty')
+        for name in (".command_line.txt", ".version.txt", "Params.txt", "guides.txt"):
+            try:
+                os.remove(os.path.join(outputfolder, name))
+            except FileNotFoundError:
+                pass
         sys.exit(1)
 
     # Pre-flight: a variant search needs a PREBUILT variant index. A fresh
@@ -7183,8 +7201,9 @@ def setup_database():
     # begin crisprme test
     script_setup = os.path.join(script_path, "setup_legacy_database.py")
     try:
+        # (-u: its progress lines reach a pipe or a log as they are printed, not at its end)
         subprocess.run(
-            [sys.executable, script_setup, chrom, working_dir, str(force)], check=True
+            [sys.executable, "-u", script_setup, chrom, working_dir, str(force)], check=True
         )
     except subprocess.CalledProcessError as e:
         # (its own message is above it; the command fails with its status: it ended 0)

@@ -51,7 +51,7 @@ if docker info >/dev/null 2>&1; then
 fi
 
 # ---- 2. Config dir --------------------------------------------------------
-# The app stores its data (a ~45 GB download, ~98 GB once installed) in a folder the user
+# The app stores its data (a ~70 GB download, ~150 GB once installed) in a folder the user
 # picks on first run and which is remembered in ${DATA_DIR}/.data_location (so a
 # low-space home disk can send the data to an external/other disk). ${DATA_DIR} itself
 # only holds that tiny pointer file — the big data lives wherever the user chooses. The
@@ -67,7 +67,7 @@ if [ "$OS" = "Darwin" ]; then
   SRC="$(mktemp -t crisprme_app).applescript"
   cat > "$SRC" <<'OSA'
 -- CRISPRme+ launcher. Three actions: Start / Update / Stop.
--- Data (a ~45 GB download, ~98 GB once installed) lives in a user-chosen folder,
+-- Data (a ~70 GB download, ~150 GB once installed) lives in a user-chosen folder,
 -- remembered across launches in ~/CRISPRme/.data_location so a low-space home disk
 -- can point elsewhere.
 property img : "pinellolab/crisprme:latest"
@@ -140,9 +140,9 @@ end setDataDir
 -- disk), then remember it. Returns the chosen crisprme-data path.
 on pickDataDir()
   set defaultDir to configDir & "/crisprme-data"
-  set choice to button returned of (display dialog "Where should CRISPRme store its data? (A ~45 GB download, ~98 GB once installed: pick a disk with ~150 GB free.)" & return & return & "Default (your home folder):" & return & defaultDir & return & return & "If that disk is low on space, choose another disk or folder." buttons {"Choose a folder…", "Use default"} default button "Use default" with title "CRISPRme+ — data location")
+  set choice to button returned of (display dialog "Where should CRISPRme store its data? (A ~70 GB download, ~150 GB once installed: pick a disk with ~200 GB free.)" & return & return & "Default (your home folder):" & return & defaultDir & return & return & "If that disk is low on space, choose another disk or folder." buttons {"Choose a folder…", "Use default"} default button "Use default" with title "CRISPRme+ — data location")
   if choice is "Choose a folder…" then
-    set f to (choose folder with prompt "Select a folder for the CRISPRme data (~98 GB once installed; keep ~150 GB free):")
+    set f to (choose folder with prompt "Select a folder for the CRISPRme data (~150 GB once installed; keep ~200 GB free):")
     set base to POSIX path of f
     if base does not end with "/" then set base to base & "/"
     set p to base & "crisprme-data"
@@ -191,12 +191,12 @@ on run
       display dialog "CRISPRme is starting — your browser is opening http://localhost:8080." buttons {"OK"} default button "OK" giving up after 6
     else
       -- first run: download reference + variant data into the chosen folder, then start
-      set r to button returned of (display dialog "First run: CRISPRme will download the reference genome + the HGDP + 1000 Genomes variant data (~45 GB) into:" & return & dataDir & return & return & "You only do this once. A Terminal window shows the progress, then your browser opens automatically." buttons {"Not now", "Download & Start"} default button "Download & Start" with title "CRISPRme+ — first-time setup")
+      set r to button returned of (display dialog "First run: CRISPRme will download the reference genome + the HGDP + 1000 Genomes variant data (~70 GB) into:" & return & dataDir & return & return & "You only do this once. A Terminal window shows the progress, then your browser opens automatically." buttons {"Not now", "Download & Start"} default button "Download & Start" with title "CRISPRme+ — first-time setup")
       if r is "Download & Start" then
         set dmount to "-v " & quoted form of dataDir & ":/DATA -w /DATA " & img
         set dlRef to (quoted form of dk) & " run --rm " & dmount & " crisprme.py download --what all --path /DATA"
-        set dlVar to (quoted form of dk) & " run --rm " & dmount & " crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA"
-        runInTerminal(dlRef & " && " & dlVar & " && " & runCmd & " && sleep 3 && open http://localhost:8080 && echo && echo 'DONE — CRISPRme is running and your browser is open. You can close this window.'", "First-time setup — downloading ~45 GB, then starting CRISPRme")
+        set dlVar to (quoted form of dk) & " run --rm " & dmount & " crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA"
+        runInTerminal(dlRef & " && " & dlVar & " && " & runCmd & " && sleep 3 && open http://localhost:8080 && echo && echo 'DONE — CRISPRme is running and your browser is open. You can close this window.'", "First-time setup — downloading ~70 GB, then starting CRISPRme")
       end if
     end if
 
@@ -222,9 +222,9 @@ OSA
   say "The first Start downloads the data (once) and opens the web app; after that Start is instant."
   open "$APPS" 2>/dev/null || true
 else
-  # Linux: minimal — run the web interface directly (pick any disk with ~150 GB free)
+  # Linux: minimal — run the web interface directly (pick any disk with ~200 GB free)
   say "${YEL}Linux clickable-app support is minimal in this MVP.${NC}"
   say "Use: docker run --rm -v <data-folder>:/DATA -w /DATA -p 8080:8080 ${IMAGE} crisprme.py web-interface"
-  say "(then open http://localhost:8080; <data-folder> is any folder with ~150 GB free: the data take ~98 GB once downloaded)"
+  say "(then open http://localhost:8080; <data-folder> is any folder with ~200 GB free: the data take ~150 GB once downloaded)"
   say "${YEL}NVIDIA GPU?${NC} add '--gpus all -e CRISPRME_COMPUTE_BACKEND=cuda' to the docker run to use it (auto CPU-fallback if unavailable)."
 fi
