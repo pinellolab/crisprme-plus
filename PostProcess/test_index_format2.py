@@ -33,6 +33,7 @@ Stdlib only.
 import json
 import os
 import random
+import re
 import shutil
 import stat
 import struct
@@ -616,11 +617,14 @@ class AFormat2IndexIsReadNotRefused(_Index):
         self.engine(2)
         out = self.shell('_check_index_format "$1"; echo went on', old)
         self.assertEqual((out.returncode, out.stderr), (0, ""))
+        # (build-index-only keeps an index it finds in place, and download installs the
+        # archives published until the rebuild, of format 1: AFormat1IndexIsBuiltAgain)
         self.assertEqual(out.stdout, (
             "NOTE: NGG_2_g is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks "
             "the sites whose guide lies within a few bases of a contig end or an N run, which an "
-            "index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). Build it again "
-            "with crisprme.py build-index-only, or download it again, to search them.\n"
+            "index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). To search them, "
+            f"move {old} out of the way and build it again with crisprme.py build-index-only "
+            "(which keeps an index it finds in place).\n"
             "went on\n"))
 
 
@@ -1017,6 +1021,63 @@ class BuildIndexOnlyTakesFormat2(atomic._Fixture):
         self.assertEqual((rc, err), (0, ""))
         self.assertIn("Reference index already present", out)
         self.assertEqual({n: index_fit.read_index_meta(self.lib(n)) for n in before}, before)
+
+
+class AFormat1IndexIsBuiltAgain(atomic._Fixture):
+    """A search by a CRISPRitz that writes index format 2 notes each index of format 1 it
+    takes, as lacking the sites at contig ends and N runs: a variant search with bulges, its
+    reference, variant and INDELS indexes. Each note said to build its index again with
+    build-index-only, or to download it again, and neither gave format 2: build-index-only
+    keeps an index it finds in place ('already present'), and download fetches the archives
+    published until the rebuild, all of format 1. Each note now names its index, to be moved
+    out of the way first; that done, build-index-only builds the three in format 2, and the
+    next search notes none."""
+
+    @classmethod
+    def setUpClass(cls):
+        atomic.setUpModule()  # (its stub Bio package, which crisprme.py imports)
+        cls.addClassCleanup(atomic.tearDownModule)
+
+    def notes(self):
+        """The notes a search gives of an index of format 1, on its stdout (log_verbose.txt)."""
+        self.run_search()
+        with open(self.path("Results", "search", "log_verbose.txt")) as fh:
+            return [line for line in fh.read().splitlines()
+                    if line.startswith("NOTE: ") and " is in index format 1 " in line]
+
+    def formats(self, name):
+        return {index_fit.bin_format(os.path.join(self.lib(name), b)) for b in self.bins(name)}
+
+    def test_moved_out_of_the_way_as_its_note_says_it_is_built_in_format_2(self):
+        names = (atomic.REF, atomic.VAR, atomic.INDELS)
+        rc, out, err = self.run_bio()  # by the stub of CRISPRitz 2.9.1: index format 1
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual([self.formats(n) for n in names], [{1}] * 3)
+        path = os.path.join(self.bin, "crispritz.py")  # then CRISPRitz 2.10.0 is installed
+        with open(path, "w") as fh:
+            fh.write(STUB_2_10.replace("#!PYTHON", "#!" + sys.executable, 1))
+        os.chmod(path, 0o755)
+        notes = self.notes()
+        self.assertEqual(len(notes), 3, notes)
+        # build-index-only keeps each where it is, in format 1
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        for kept in ("Reference index", "Variant index", "Indels index"):
+            self.assertIn(f"{kept} already present", out)
+        self.assertEqual([self.formats(n) for n in names], [{1}] * 3)
+        # so each note names its index, to be moved out of the way first
+        moved = [re.search(r"\. To search them, move (.+) out of the way and build it again with "
+                           r"crisprme\.py build-index-only ", note) for note in notes]
+        self.assertTrue(all(moved), notes)
+        self.assertEqual(sorted(os.path.realpath(m.group(1)) for m in moved),
+                         sorted(os.path.realpath(self.lib(n)) for n in names))
+        os.makedirs(os.path.join(self.root, "format1"))
+        for m in moved:
+            os.rename(m.group(1), os.path.join(self.root, "format1", os.path.basename(m.group(1))))
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual([self.formats(n) for n in names], [{2}] * 3)
+        self.assertEqual(self.notes(), [])
 
 
 class AnArchiveSaysItsFormat(_Index):

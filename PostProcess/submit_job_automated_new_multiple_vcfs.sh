@@ -864,8 +864,10 @@ while read vcf_f; do
 	# would read a newer format's version as the guide length it was built for, and
 	# CRISPRitz 2.9.1 refuses an index of format 2, and 2.9.0 aborts on one. Of an index it
 	# searches that is in format 1 while the installed CRISPRitz writes format 2, say on
-	# stdout that it lacks the sites at contig ends and N runs that one rebuilt holds.
-	# Called where the search takes an index, whether it found it or built it.
+	# stdout that it lacks the sites at contig ends and N runs that one rebuilt holds, and
+	# that it is built again once moved out of the way: build-index-only keeps an index it
+	# finds in place, and download installs the archives published until the rebuild, all
+	# of format 1. Called where the search takes an index, whether it found it or built it.
 	_check_index_format() {
 		local _f _v _bin _e _n
 		_f=$(_unreadable_bin "$1")
@@ -875,8 +877,8 @@ while read vcf_f; do
 			[ -n "$_bin" ] || return 0
 			_f=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
 			[ "${_f//[[:space:]]/}" != 435a49fe ] || return 0
-			printf "NOTE: %s is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks the sites whose guide lies within a few bases of a contig end or an N run, which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). Build it again with crisprme.py build-index-only, or download it again, to search them.\n" \
-				"$(basename "$1")"
+			printf "NOTE: %s is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks the sites whose guide lies within a few bases of a contig end or an N run, which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). To search them, move %s out of the way and build it again with crisprme.py build-index-only (which keeps an index it finds in place).\n" \
+				"$(basename "$1")" "$1"
 			return 0
 		fi
 		_v=${_f%%$'\t'*}

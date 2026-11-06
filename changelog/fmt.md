@@ -75,13 +75,17 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
   (PKG1-scan-takes-format2); it took the format-1 one before 2.8.1, misreading the other. The
   search script's scan and complete-search's now rank an index the installed CRISPRitz reads
   first, and take the other only where none serves.
-- **A search of an index of format 1 by CRISPRitz 2.10.0 says what it lacks.** On stdout: `NOTE:
-  <index> is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks the sites whose
-  guide lies within a few bases of a contig end or an N run, which an index built by CRISPRitz
-  2.10.0 or later holds (METHODS section 9). Build it again with crisprme.py build-index-only, or
-  download it again, to search them.` The note `--prune-pam` gives of a flank wider than its PAM,
-  and the warning of a flank built before CRISPRitz kept an `N` in it, are given of an index of
-  format 1 only.
+- **A search of an index of format 1 by CRISPRitz 2.10.0 says what it lacks, and how to build it
+  again.** On stdout, once for each index it takes (a variant search with bulges takes three: the
+  reference, variant and INDELS indexes): `NOTE: <index> is in index format 1 (built by CRISPRitz
+  2.9.1 or earlier): it lacks the sites whose guide lies within a few bases of a contig end or an
+  N run, which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9). To search
+  them, move <path> out of the way and build it again with crisprme.py build-index-only (which
+  keeps an index it finds in place).` Through the real CLI (`test_index_format2`):
+  `build-index-only` keeps the three indexes where they are, and with each moved out of the way as
+  its note says, it builds all three in format 2, and the next search gives no note. The note
+  `--prune-pam` gives of a flank wider than its PAM, and the warning of a flank built before
+  CRISPRitz kept an `N` in it, are given of an index of format 1 only.
 - **The side of an index of format 2 is the one its header records.** The search script,
   complete-search, complete-test, the coverage check and the web read it there before
   `.pam_build`, which an index built by `crispritz.py` itself, or downloaded, may lack.
