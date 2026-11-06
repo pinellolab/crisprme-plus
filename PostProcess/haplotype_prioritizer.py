@@ -17,9 +17,10 @@ a sites-only dataset (the genotype oracle, opt-in) -- and gives the alignment a 
       leaves the CFD the results report, the alignment's mismatches and its PAM as they are
       (an allele at a PAM base the search leaves free, a mismatch for a mismatch the table
       scores alike) is not needed for the row's score, so a haplotype carrying the rest has
-      the row's off-target at the row's score. The CFD says this of the two alignments
-      ranked by it, not of the one ranked by CRISPR-Bulge score, which the gate does not
-      read. States: "one haplotype" when a single haplotype carries them all, "phase not
+      the row's off-target at the row's score. The CFD says this of the alignments it
+      scores (the highest-CFD one, which the report ranks by, and the fewest-mismatches
+      one), not of the one ranked by CRISPR-Bulge score, which the gate does not read.
+      States: "one haplotype" when a single haplotype carries them all, "phase not
       known" when only samples whose genotypes do not say which haplotype holds which
       variant carry them all, "same score" (with "same score, phase not known" and "same
       score as the reference") when a haplotype reaches the alignment's CFD without every

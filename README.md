@@ -1036,8 +1036,10 @@ its purpose and usage:
   them, so two or more of them can sit on no one haplotype. By default the search checks each
   row's variants against the dataset's own phased genotypes (and its phased indel genotypes)
   and writes their tier to `..._carrier_gate.tsv`: **A** (two or more variants one phased
-  haplotype carries together, or that reach the row's CFD without the variants that do not
-  change it — an allele at the PAM's `N` base, a mismatch for a mismatch scored alike),
+  haplotype carries together, or that reach the row's CFD without the variants that change
+  neither it, nor the alignment's mismatches, nor its PAM — an allele at a PAM base the
+  search's PAM leaves free, a mismatch for a mismatch scored alike; of the alignments the
+  gate reads a CFD of, which the one ranked by CRISPR-Bulge score is not),
   **B** (one variant), **C1** (two or more variants, each in the
   panel, that no haplotype of it carries together and none reaches the row's CFD without; or
   variants, a single one too, every

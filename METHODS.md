@@ -862,9 +862,10 @@ the search without it (`--no-prioritize-observed`).
     alignment's CFD: a 20-nt spacer with a 3-base 3' PAM, the row's own CFD where the
     alignment has one, every variant a SNP inside the alignment, and the alleles the
     alignment takes. A CRISPR-Bulge score is not recomputed (the model is not run again),
-    and an allele the CFD never reads does change it, so this state is the CFD's to give:
-    the alignment ranked by CRISPR-Bulge score, which has no CFD column, is C1 where no
-    haplotype carries its combination, and its row leaves the views ranked by that score.
+    and an allele the CFD never reads does change it, so this state is the CFD's to give,
+    on the alignments it scores: the alignment ranked by CRISPR-Bulge score, which has no CFD
+    column, is C1 where no haplotype carries its combination, and its row leaves the views
+    ranked by that score.
     Run without the search's PAM the gate cannot read a PAM region, and takes every allele
     in one for an allele the row needs.
   - **B**: one variant. The panel, or the frequency the dataset gives it, says that some

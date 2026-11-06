@@ -23,11 +23,18 @@ population-level run of the README guide).
   phased haplotype carries together (states `one haplotype`, and `phase not known` where only
   unphased calls, or two ALTs of one position on one slot, show it), or that a haplotype reaches
   the alignment's CFD without (states `same score`, `same score, phase not known` and `same score
-  as the reference`): an allele the worst case takes can leave the CFD the row reports and the
-  alignment's mismatches as they are -- one at the PAM's `N` base, a mismatch for a mismatch the
+  as the reference`): an allele the worst case takes can leave the CFD the row reports (its three
+  decimals), the alignment's mismatches and its PAM as they are -- one at a PAM base the search's
+  PAM leaves free, a mismatch for a mismatch the
   CFD table scores alike -- and then a haplotype carrying the rest, and nothing else inside the
   alignment that changes them, has the row's off-target at the row's score (the companion's
-  `Scoring_variants` column names the variants the score needs); **B**, one variant; **C1**,
+  `Scoring_variants` column names the variants the score needs). The guide's side of an alignment
+  writes its PAM as `N`, which every base matches, so the PAM region is read against the search's
+  own PAM (the search gives the gate its PAM file): without an allele the PAM needs there is no
+  off-target at the site at all. The CFD gives this state to the alignments it scores (the
+  highest-CFD one, which the report ranks by, and the fewest-mismatches one), not to the one ranked
+  by CRISPR-Bulge score, which the gate does not read (the model is not run again) and which an
+  allele the CFD never reads does change; **B**, one variant; **C1**,
   two or more variants, each in the panel, that none of its haplotypes carries together nor
   reaches the row's CFD without, with E,
   the haplotypes expected to carry them together if they were independent (below 3, the state is
@@ -60,23 +67,25 @@ population-level run of the README guide).
   search and the report say so. On the genome-wide population-level search of the README guide
   (HGDP + 1000 Genomes, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, 198,826 rows) the gate took 31 s
   in the search (35 s and 1.6 GB on 12 threads alone) and gave, by each row's highest-CFD
-  alignment, A 4,672 (690 `one haplotype`, 1 `phase not known`, 2,977 `same score`, 114 `same score
-  as the reference`), B 55,191, C1 39,714 (244 where 3 or more haplotypes were expected, 39,266
+  alignment, A 4,155 (690 `one haplotype`, 1 `phase not known`, 2,574 `same score`, none `same
+  score as the reference`), B 55,191, C1 40,231 (246 where 3 or more haplotypes were expected,
+  39,781
   `too rare to tell`, 204 `indel in the target`, 172 of them of one variant) and C2 0. The report's
   top-1000 by CFD and validation panel then hold no row whose highest-CFD alignment is C1, and its
-  own table all 39,714, while the
+  own table all 40,231, while the
   panel's totals are the search's (198,826 sites, 1 perfect match, 91,289 variant-created
-  off-targets) and 40,601 rows are C1 at their highest-CRISPR-Bulge alignment. The integrated
+  off-targets) and 43,264 rows are C1 at their highest-CRISPR-Bulge alignment. The integrated
   results are byte for byte those of the same search with `--no-prioritize-observed`. Checked
   against all 8,182 phased haplotypes by a harness that rebuilds every alignment's window on each
   haplotype from the VCF (on the 2.8.1 run of the same search, whose rows are the same file): the
-  only alignments left in tier A or B that list a combination no haplotype carries are the 3,091
-  of a `same score` state (2,887 and 2,663 at the other two alignments), which is what that state
+  only alignments left in tier A or B that list a combination no haplotype carries are the 2,574
+  of a `same score` state (2,328 at the fewest-mismatches alignment, none at the CRISPR-Bulge one),
+  which is what that state
   says; every other A or B alignment lists a combination a haplotype carries, and every C1
   alignment that a haplotype does carry is one with an indel in the target. The harness's stricter
   test (a haplotype that reproduces the alignment within its mismatches with a valid PAM) reaches
-  2,712 of the 3,091, and the per-sample run of the same search reports the row's CFD at the locus
-  of 2,568 of them (179 below it, 344 with no row within three bases). Covered by
+  2,572 of the 2,574, and the per-sample run of the same search reports the row's CFD at the locus
+  of PS_SAME of them (PS_LOWER below it, PS_NONE with no row within three bases). Covered by
   `PostProcess/test_haplotype_prioritizer.py`.
 - **`--prioritize-observed` checks a sites-only dataset's rows against the phased HGDP + 1000
   Genomes genotypes, and `download --what genotype-oracle` installs them.** The `mega` panel has no
@@ -88,9 +97,9 @@ population-level run of the README guide).
   on disk from the Hub), and which `CRISPRME_GENOTYPE_TIER` can name elsewhere. A variant the panel
   does not hold makes its row C2, kept in place, with its frequency bound (a SNP's frequency from
   the dataset's registry, an indel's from its indel frequencies, `AF_max` both). On chr22 of the
-  mega panel (five guides, NRG, 4 + 1 + 1, 20,338 rows): A 153 (48 of them `same score`), B 4,419
+  mega panel (five guides, NRG, 4 + 1 + 1, 20,338 rows): A 137 (32 of them `same score`), B 4,419
   (1,568 of a variant not in
-  the panel), C1 578 (54 where 3 or more haplotypes were expected, 508 `too rare to tell`, 16
+  the panel), C1 594 (58 where 3 or more haplotypes were expected, 520 `too rare to tell`, 16
   `indel in the target`, 13 of them of one variant), C2 3,519 (1,919 within the bound, 1,600 below
   it), the integrated results byte for byte those of the search without the flag. Without the
   oracle the search says so (a `WARNING` line on stdout), and the rows are reported unchecked.
@@ -152,7 +161,12 @@ population-level run of the README guide).
   last, as the indel rows read a second indel, so an indel that leaves the target's bases where
   they were (a tandem repeat's unit gained or lost) takes no carrier off; an indel at one of the
   row's SNPs, or over one (another allele of that base: a phasing artefact), does not either, nor
-  does an unphased call. On chr22 of the HGDP + 1000 Genomes panel (five guides, NRG, 4 + 1 + 1,
+  does an unphased call. A haploid call -- a male's on chrX outside PAR -- is his one haplotype's,
+  so his calls in a window are now read as that one haplotype (not as every subset of them, as an
+  unphased sample's are) and an indel of his that changes the target takes him off the row,
+  whatever else that haplotype holds. On the genome-wide per-sample search of the README guide
+  (HGDP + 1000 Genomes, NRG, 4 + 1 + 1) that leaves PSX_ROWS. On chr22 of the HGDP + 1000 Genomes
+  panel (five guides, NRG, 4 + 1 + 1,
   per sample), of the 22,628 SNP alignments of 2.8.1's 20,751 rows, 132 left their row (32,227
   carrier listings): 127 have no carrier left, and 5 keep 8 of their carriers but, tied with
   another alignment of their row, leave its place to the one with more carriers (the same SNP
