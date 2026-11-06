@@ -146,15 +146,22 @@ end, and a − strand PAM in the first K − L nt, and one exactly K − L nt fr
 on the + strand at another position. On hg38 at K = 8 that is 145 + 101 NGG and 308 + 241 NRG
 sites, about 7.5 × 10⁻⁷ of all, none on a primary chromosome (whole-genome, K = 8 lost one row
 of 27,216 for a guide picked for its perfect match there, and one of 216,978 for VEGFA site 3);
-a search that reads a wider flank says so on stdout. A wider index must have been built by
+a search that reads a wider flank of format 1 says so on stdout (an index of format 2 has no
+such limit: with `--prune-pam` it gives a dedicated index's rows for the same guide length, contig
+ends included). A wider index must have been built by
 CRISPRme 2.8.1 (CRISPRitz 2.9.1), which keeps a target whose flank holds an `N`, as every
 archive published here was; the search warns of one built before. They are
 correspondingly larger, because nothing is excluded at build time: 71 GB for the reference
 index against 9 GB for `NRG_3_hg38`, and 110 GB against 28 GB for the HGDP + 1000 Genomes
 variant index. Choose one when you expect to search several PAMs over the same genome.
 
-**Limits of every index at contig ends and `N` runs** (dedicated or PAM-less, any flank; engine
-limits, [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)). An index of
+**Limits of every index of format 1 at contig ends and `N` runs** (dedicated or PAM-less, any
+flank; [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)). Every index
+published here was built by CRISPRitz 2.9.1, in index format 1. CRISPRitz 2.10.0, which
+CRISPRme 2.9.0 installs, writes format 2, which holds these sites, and reads a − strand PAM at a
+contig's first base right in either format; CRISPRme 2.9.0 reads both formats, and says on stdout
+when a search takes an index of format 1 (2.8.1 refuses an index of format 2, and 2.8.0 aborts on
+one). An index of format 1 of
 budget N cannot report a site whose guide lies within N − 1 nt of a contig start, a contig end or
 an `N` run, even a perfect match, which a search without bulges (a scan of the FASTA) does
 report; but a variant search without bulges on an install without its whole enriched genome (a

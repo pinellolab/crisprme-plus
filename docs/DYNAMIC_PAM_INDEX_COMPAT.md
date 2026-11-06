@@ -8,10 +8,14 @@
 > is the search PAM or all-N: an all-N flank as wide as the PAM (`NNN_3` for a 3-nt PAM)
 > serves without the flag, narrowed by the post-search PAM filter; a wider flank
 > (`NNNNNNNN_3`) serves only under `--prune-pam`; a dedicated index of another PAM is refused,
-> even one whose PAM holds the search PAM (an `NRG` index does not serve an `NGG` search). No
-> `index_meta.json` sidecar is written or read. The nearest record is `.pam_build`, the PAM
+> even one whose PAM holds the search PAM (an `NRG` index does not serve an `NGG` search). 2.8.1
+> writes and reads no `index_meta.json` sidecar; its nearest record is `.pam_build`, the PAM
 > file an index was built from, which `build-index-only` writes into a reference or variant
 > index, and a search into one it builds (the published 8-nt-flank archives have none).
+> CRISPRme 2.9.0 writes the sidecar as `.index_meta.json` into every index it builds (Layer 2
+> below), and reads the index format, build PAM, side and guide length from the header of a
+> format-2 index's `.bin` files (CRISPRitz 2.10.0 and later), which make the index
+> self-describing.
 > `NNN_3` is published in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
 > `lucapinello/crisprme-data-general-index`. The parts below marked *planned* are not in
 > 2.8.1. What ships is described in
@@ -67,8 +71,22 @@ and old tools lack the guard — so those go in a **SEPARATE HF repo** (proposed
 knows both; `publish-index` targets the pam-less repo only for width>3 indexes.
 
 ### Layer 2 — RUNTIME version-gate: fail-safe even if an index is hand-moved
-*Planned, not in 2.8.1 (which writes and reads no `index_meta.json`):* each pam-less index ships
-a sidecar `index_meta.json`:
+*As built in CRISPRme 2.9.0 (2.8.1 writes and reads no sidecar):* every index CRISPRme builds
+(`build-index-only`, a search's own build, each sub-index of an INDELS index) records what it
+holds in `.index_meta.json`, written into the index folder. It is a dot file because
+`crispritz.py search` refuses an index folder that holds any other file but a `.bin` (an ERROR on
+stdout, no targets file, exit 0), as `.pam_build` and `.display_label` are:
+```json
+{ "index_format": 2, "build_pam": "NNNNNNNN", "side": "3'", "flank_len": 8, "guide_len": 20,
+  "max_bulges": 3, "pamless": true, "four_allele": false,
+  "built_by": {"crispritz": "2.10.0", "crisprme": "2.9.0"} }
+```
+Each value is read from the headers of the index's `.bin` files where they hold it (format 2 holds
+them all; format 1 its guide length, and its file names the PAM); of an index this run built, the
+rest from its PAM file and the installed CRISPRitz, and of one found in place nothing the index
+does not hold itself. An index of format 2 needs CRISPRitz 2.10.0 and CRISPRme 2.9.0 or later;
+`publish-index` puts the format and the record on the archive's manifest. The original plan,
+kept for the record, also had the sidecar carry minimum versions and the web read it:
 ```json
 { "build_pam": "NNNNNNNN", "flank_len": 8, "pam_at_start": false,
   "min_crispritz_version": "<this release>", "min_crisprme_version": "<consuming release>" }
@@ -84,13 +102,18 @@ encoded in the index name (`{PAM}_{bMax+1}_{genome}`) AND stored inside the inde
 with **no sidecar**. The current **width-3 NNN index needs NO sidecar** to be used with
 `--prune-pam`. The sidecar only adds explicit min-version metadata + web-picker hints; the
 `searchTST` length guard provides the actual hand-move safety. Ship a sidecar when convenient (it is
-free and ignored by old tools), but nothing depends on it for correctness.
+free and ignored by old tools, as a dot file), but nothing depends on it for correctness -- but
+for an index with no `.bin`, such as the sub-index of a chromosome whose indels hold no site, the
+only record of the format it was built in, by whose rule CRISPRme tells it from a lost one.
 
 ## 3. Format compatibility
-No `.bin` format change — a pam-less index is a standard CRISPRitz index built with a longer
-all-N PAM. New tools read legacy indexes with **byte-identical** default behavior. Naming is
-flank-tagged + distinct (e.g. `NNNNNNNN_3_<genome>`, K=8) so it is never confused with a legacy
-`NNN_3`. Adding the sidecar is invisible to old tools (they ignore unknown files).
+No `.bin` format change for the PAM-less design itself — a pam-less index is a standard
+CRISPRitz index built with a longer all-N PAM. New tools read legacy indexes with
+**byte-identical** default behavior. Naming is flank-tagged + distinct (e.g.
+`NNNNNNNN_3_<genome>`, K=8) so it is never confused with a legacy `NNN_3`. Adding the sidecar is
+invisible to old tools: a dot file, which they pass over. (CRISPRitz 2.10.0 writes index format 2
+for every index, PAM-less or not: CRISPRitz's `docs/INDEX_FORMAT.md`. With it a wider flank also
+holds the PAMs within *K − L* nt of a contig end, and CRISPRme 2.8.1 refuses it, 2.8.0 aborts.)
 
 ## 4. CLI
 - **CRISPRitz:** default call unchanged (byte-identical). `--prune-pam` (opt-in) applies the PAM
