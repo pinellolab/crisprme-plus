@@ -394,14 +394,17 @@ haplotypes is bounded by ≈2×(number of carriers) rather than 2^*k*, so it is
 efficient, and each enumerated haplotype carries its **exact set of carriers**
 (which in turn yields its exact frequency, Section 3). Cross-individual chimeras
 — combinations assembled from variants carried by *different* people — are
-**excluded** by construction. A SNP row's carriers are resolved from SNP genotypes
-only: an individual whose haplotype holding the row's SNPs also carries an indel
-inside the target is still listed, though its own sequence there is the indel's
-(reported on the indel row when it is in budget). On chr22 of the HGDP + 1000 Genomes
-panel, per sample, this affects 2.2% of SNP row-blocks (990 of 45,921, five guides),
-and 545 of them have no listed carrier that holds the sequence. It only over-lists, no
-site is lost, and 2.8.0 behaves the same; it is fixed in the next release (§8,
-residuals).
+**excluded** by construction. Since 2.9.0 a SNP row's carriers are also read against the
+index's phased indel genotypes (`Dictionaries/indel_genotypes_<vcf>/`): an individual whose
+only phased haplotypes holding the row's SNPs (and no other SNP of the window) also hold an
+indel that changes the bases the target covers is not listed, as its own sequence there is
+the indel's (reported on the indel row when it is in budget), and a row left with no carrier
+is not reported. An indel at one of the row's SNPs, or over one, is another allele of that
+base, so a slot phased with both is a phasing artefact and keeps the carrier; so does an
+unphased call of the SNP or of the indel. The same holds on the classic per-sample
+dictionaries. Up to 2.8.1 such a carrier was listed: on chr22 of the HGDP + 1000 Genomes
+panel, per sample, 2.2% of SNP row-blocks (990 of 45,921, five guides) named one, and 545
+of them had no listed carrier that holds the sequence.
 
 ### Behavior by phasing status
 The confidence attached to an enumerated haplotype depends on the phasing of the
@@ -650,11 +653,12 @@ Under `--per-sample` a capped window emits no greedy representative at all (sinc
 the representative unions the carriers of alleles that different individuals carry, so it
 can be a haplotype no single one has, and the window is reported by its observed haplotypes,
 its reference row and its BED line. That is the observed-haplotype path, which reads the
-index's dict-less tiers. **Known limit:** an index without them (one built without
-`--samplesID`, such as the one the benchmark `complete-test` builds) goes the classic
-dictionary path, which still reports a capped window by its greedy worst-case alignment,
-flagged in `High_variant_density_region`, whose listed carriers (the carriers of any allele
-it takes) need not carry every variant in it. On the NGG index the README's self-test builds
+index's dict-less tiers; since 2.9.0 a capped window on an index without them (one built
+without `--samplesID`, such as the one the benchmark `complete-test` builds) goes the same
+path, reading the same genotypes in the classic per-sample dictionaries. Up to 2.8.1 such an
+index's classic dictionary path still reported a capped window by its greedy worst-case
+alignment, flagged in `High_variant_density_region`, whose listed carriers (the carriers of any
+allele it takes) need not carry every variant in it. On the NGG index the README's self-test builds
 (`complete-test`'s benchmark mode: `NGG_2_hg38_chr22+hg38_1000G`, chr22 of the benchmark's
 phased 1000 Genomes VCF, built without `--samplesID`), the README's guide
 (`CTAACAGTTGCTTTTATCAC`) with the `20bp-NGG-SpCas9` PAM, 4 mismatches, 1 DNA and 1 RNA bulge,
@@ -662,14 +666,11 @@ searched per sample at the default `CRISPRME_IUPAC_CAP`, gives 5 such rows (8 to
 each, CFD at most 0.001). They name 102 individuals as carriers 114 times (some on more than
 one row), and each time the carrier lacks one of its row's variants: 342 of the run's 56,730
 SNP-row carrier listings (a row lists its carriers once for each of its three alignments).
-After `build-index-only --samplesID` the same search returns exactly those 5 rows fewer, and
-every carrier it lists has all of its row's variants on one phased haplotype. `complete-search` and
-the report say so (its Search mode row; and, when no dataset of the search has the tiers, such
-a row of two or more SNPs reads `N carriers (>=1 of K vars, poss. chimera)` in its `Observed`
-column, as in a population-level analysis, not `N cis carriers`: the report cannot tell which
-dataset a row comes from, so beside a dataset with the tiers such a row still reads
-`N cis carriers`, and its legend says why); rebuild the index with
-`build-index-only --samplesID`, or use a prebuilt one. It is fixed in the next release.
+After `build-index-only --samplesID` the same search returned exactly those 5 rows fewer, and
+every carrier it lists has all of its row's variants on one phased haplotype; since 2.9.0 the
+index without the tiers gives the same rows (560 against 565, the five rows above gone). The
+2.8.1 report said so of a 2.8.1 search's results, and still does when it reads them again (a
+search since 2.9.0 writes the carrier gate's sidecar, `.carrier_gate.json`, in either mode).
 
 ### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
@@ -795,6 +796,71 @@ ML-scoring-bound (CRISPR-Bulge), and is **unaffected by the mode** — a dense i
 the full indel cost regardless (parallelizing that path is a follow-up). Correspondingly, the
 `indel_snp_cooc.tsv` companion is **byte-identical** in both modes (§8).
 
+### The carrier gate: a population-level row's variants against phased haplotypes
+
+A population-level row is a window's worst case: its alignment takes, column by column, the
+allele that matches the guide best, and on a genotyped panel it lists every sample that carries
+any of those alleles. Two or more of them can sit on no one haplotype, so that no individual has
+the sequence the row reports, and such a row, being the best-matching, ranks first. A sites-only
+panel (`mega`) has no genotypes at all, and its rows are built the same way. Since 2.9.0 the
+search checks each row's variant combination against phased haplotypes after it has written the
+integrated results (`haplotype_prioritizer.py`), and the report ranks by the result. Detection is
+unchanged: the gate adds and drops no row, and the integrated results are byte for byte those of
+the search without it (`--no-prioritize-observed`).
+
+- **Which haplotypes.** A genotyped dataset's own phased genotypes (`Dictionaries/genotypes_<vcf>/`
+  for the SNPs, `indel_genotypes_<vcf>/` for the indels), by default in a population-level
+  search. A sites-only dataset's rows are checked, on request (`--prioritize-observed`; the web
+  form's check box), against the phased HGDP + 1000 Genomes genotypes (4,091 samples, 8,182
+  haplotypes on an autosome): the genotype oracle, which an installed
+  `NRG_3_hg38+hg38_HGDP1kGP` index brings, or `download --what genotype-oracle` installs
+  alone (`CRISPRME_GENOTYPE_TIER` names another folder). Without it the search says so and the
+  rows are reported unchecked. A per-sample search needs no gate: its rows name their cis
+  carriers. A row does not say which dataset it comes from, so the gate reads every phased
+  store the search has: a variant is in a panel when the panel holds its POS, REF and ALT (a
+  REF that differs is counted, and said, as a normalization difference).
+- **Tiers**, for each of a row's three alignments (highest CFD, fewest mismatches + bulges,
+  highest CRISPR-Bulge):
+  - **A**: two or more variants that one phased haplotype of the panel carries together — on
+    one slot of a phased sample, with no indel of the store on that slot that changes the
+    target's bases (as for the per-sample rows, §4). States: `one haplotype` when a single
+    one does; `phase not known` when only samples whose genotypes cannot say which haplotype
+    holds which variant carry them all (an unphased call, or two ALTs of one position on one
+    slot, the PUTATIVE rule).
+  - **B**: one variant. The panel, or the frequency the dataset gives it, says that some
+    individual carries it, so it cannot be a combination nobody carries; that is all B says
+    (call quality is another question).
+  - **C1**: two or more variants, each in the panel, that none of its haplotypes carries
+    together; or one variant whose every phased carrying haplotype also holds an indel that
+    changes the target (state `indel in the target`). A zero means something only where
+    some were expected: E, the panel haplotypes expected to carry the variants together if
+    they were independent (the panel's haplotypes times the product of the variants' panel
+    frequencies; linkage is not modelled), is given, and below a threshold (3 by default,
+    `--gate-min-expected`; 0 turns it off) the state is `too rare to tell`. Ranked after the
+    others all the same.
+  - **C2**: two or more variants, one or more of them not in the panel: absence of evidence,
+    not evidence of absence, as the combination may be a real haplotype of an ancestry the
+    panel has few samples of. Kept in its place. The safeguards' frequency bound (the
+    product of the variants' frequencies at least 1e-06 and the rarest at least 0.001) is
+    given as information and applied to nothing.
+- **Output.** `..._carrier_gate.tsv` beside the integrated results, one line per alignment
+  that uses a variant (the row's line, the alignment, the variants, tier, state, panel, the
+  haplotypes that carry them together and their samples, E, the frequency product and
+  rarest frequency, and the label), and `.carrier_gate.json` (how the gate ran, its panels
+  with their samples by superpopulation, and its tiers by each row's highest-CFD alignment).
+- **Report.** A row whose highest-CFD alignment is C1 leaves the top-1000 tables, the plots of
+  Section 2, the validation panel and the risk card, and is listed in a table of its own after
+  the top-1000, by CFD, with all of them in `unobserved_worst_case.tsv`; a row whose highest
+  CRISPR-Bulge alignment is C1 leaves the ranking by CRISPR-Bulge score. The summary matrix
+  and the population plot count every row. The `Observed` column of a row of two or more
+  variants gives its tier's factual label (`together on N of H <panel> haplotypes`,
+  `not together on any of H <panel> haplotypes (expected E)`, `not checked: K of N variants
+  not in <panel>`), with no "chimera" word, and the inputs card has a **Carrier gate** row:
+  the panels, the counts by tier, and the panel's samples by superpopulation (on HGDP +
+  1000 Genomes: AFR 986, AMR 549, CSA 782, EAS 816, EUR 771, MID 157, OCE 30), as a
+  haplotype found only in an ancestry with few samples there can be missing from it. The
+  carriers it names are the panel's individuals, not the patient's.
+
 ---
 
 ## 6. Functional annotation of off-targets
@@ -902,11 +968,13 @@ one real individual:
 
 On a genotyped index the carrier roster is
 populated in both analysis modes; under `--per-sample` it is pruned to the **exact
-cis carriers** (but for a dense window's greedy alignment on an index without the
-dict-less tiers, §5), so `putative` cleanly marks reconstructions that no one actually
+cis carriers**, so `putative` cleanly marks reconstructions that no one actually
 carries — separating genuine haplotypes from worst-case combinations. In a
 population-level analysis a multi-variant SNP roster is the union of each variant's
-carriers and reads `N carriers (>=1 of K vars, poss. chimera)`; an indel (or MNV) row's
+carriers; where the carrier gate ran (§5) the cell gives the row's tier instead (`together
+on N of H <panel> haplotypes`, `not together on any of H <panel> haplotypes (expected E)`,
+`not checked: K of N variants not in <panel>`), and without it the cell reads `N carriers
+(>=1 of K vars, poss. chimera)`; an indel (or MNV) row's
 roster is resolved per carrier in both modes (§4), so it reads `N carrier(s)`: CONFIRMED
 where each carrier is placed on its phased haplotype, PUTATIVE where the phase is unknown
 (an unphased call, an MNV). On an install without SNP genotypes (`download --what index
@@ -1197,12 +1265,10 @@ none of its 13,853,761 indels has one, and their per-dataset frequencies are in 
 release (HPRC's chrY log needs rebuilding with it). The phased indel genotype store
 leaves out equal-length multi-base records (MNVs), so their carriers are resolved with the
 phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
-among its 195,813 indel-search records. A SNP row's carriers are resolved from SNP genotypes
-only (§4): an individual whose haplotype holding the row's SNPs also carries an indel inside
-the target is still listed, though its own sequence there is the indel's (reported on the
-indel row when in budget). On chr22 of the HGDP + 1000 Genomes panel, per sample, this
-affects 2.2% of SNP row-blocks, and 545 have no carrier that holds the sequence. It only
-over-lists, 2.8.0 behaves the same, and it is fixed in the next release.
+among its 195,813 indel-search records. Up to 2.8.1 a SNP row's carriers were resolved from
+SNP genotypes only, so an individual whose haplotype holding the row's SNPs also carries an
+indel inside the target was still listed; since 2.9.0 the phased indel genotypes take it off
+(§4), but for an unphased call of either, which keeps it.
 On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists of the results
 tables are not in the order of its `Variant_info_genome`: the merge of a cluster's rows
 (`remove_contiguous_samples.py`) sorts the three lists each on its own, as text, and keeps

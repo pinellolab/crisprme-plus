@@ -2815,6 +2815,15 @@ def complete_search() -> None:
                 f"it off.",
                 flush=True,
             )
+        elif _gate_status == "untiered":
+            print(
+                "[complete-search] Carrier gate: not run, as the genotyped datasets of this "
+                "search have the classic per-sample dictionaries alone, not the phased "
+                "genotype store the gate reads (Dictionaries/genotypes_<vcf>/, which "
+                "build-index-only --samplesID writes and a downloaded index has): the rows "
+                "are reported unchecked.",
+                flush=True,
+            )
         elif _gate_status == "no-oracle":
             print(
                 f"WARNING [complete-search]: --prioritize-observed: the phased "

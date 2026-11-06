@@ -464,6 +464,12 @@ def render_gate_row(gate):
                 "--prioritize-observed</code>, or the web form's check box).")
     elif status == "off":
         text = "Turned off for this search: the rows are shown unchecked."
+    elif status == "untiered":
+        text = ("Not run: the search's genotyped datasets have the classic per-sample "
+                "dictionaries alone, not the phased genotype store the gate reads "
+                "(<code>Dictionaries/genotypes_&lt;vcf&gt;/</code>, which "
+                "<code>build-index-only --samplesID</code> writes, and a downloaded index "
+                "has), so the rows are shown unchecked.")
     else:
         return None
     return ("Carrier gate", text)

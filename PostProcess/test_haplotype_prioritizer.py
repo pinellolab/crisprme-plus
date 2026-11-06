@@ -170,6 +170,16 @@ class TestClassify(unittest.TestCase):
         # a target that ends before the deletion's bases keeps them
         self.assertEqual(hp.classify([v(100, "A", "G")], [p], span=(90, 103)).tier, "B")
 
+    def test_two_snps_together_only_beside_an_indel_in_the_target(self):
+        snps = [(100, "A", "G", {"S00": "1|0", "S01": "1|0"}),
+                (102, "C", "T", {"S00": "1|0", "S01": "1|0"})]
+        indels = [(104, "CTT", "C", {"S00": "1|0", "S01": "1|0"})]
+        p = self.panel(snps, indels)
+        ver = hp.classify([v(100, "A", "G"), v(102, "C", "T")], [p], span=(90, 112))
+        self.assertEqual((ver.tier, ver.state, ver.haplotypes), ("C1", hp.INDEL_IN_TARGET, 2))
+        self.assertEqual(ver.label(), f"all 2 {PANEL} haplotypes carrying them together have "
+                                      "an indel in the target")
+
     def test_indel_on_the_other_slot_unphased_or_at_the_snp(self):
         snps = [(100, "A", "G", {"S00": "1|0", "S01": "1|0", "S02": "1|0"})]
         indels = [
@@ -687,6 +697,12 @@ class TestPlanPanels(unittest.TestCase):
                          ("opt-in", []))
         self.assertEqual(hp.plan_panels(d, ["hg38_mega"], "population-level", "on"),
                          ("no-oracle", []))
+        # a genotyped dataset with the classic dictionaries alone: said, not run
+        os.makedirs(os.path.join(d, "dictionaries_hg38_1000G"))
+        self.assertEqual(hp.plan_panels(d, ["hg38_1000G"], "population-level", "auto"),
+                         ("untiered", []))
+        self.assertEqual(hp.plan_panels(d, ["hg38_1000G"], "per-sample", "auto"),
+                         ("no-panel", []))
 
     def test_the_oracle_conventional_or_given(self):
         os.makedirs(os.path.join(self.dicts, f"genotypes_{hp.ORACLE_PANEL}"))

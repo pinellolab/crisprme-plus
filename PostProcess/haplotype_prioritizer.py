@@ -20,9 +20,9 @@ a sites-only dataset (the genotype oracle, opt-in) -- and gives the alignment a 
   C1  two or more variants, each one in the panel, that no haplotype of it carries together.
       E, the number of panel haplotypes expected to carry them together if they were
       independent, says how much the zero means: below the threshold (3 by default) the
-      state is "too rare to tell". Or one variant every carrying haplotype of which also
-      holds an indel inside the target, so that none of them has the row's sequence (state
-      "indel in the target");
+      state is "too rare to tell". Or variants (one or more) every haplotype carrying which
+      also holds an indel inside the target, so that none of them has the row's sequence
+      (state "indel in the target");
   C2  two or more variants, one or more not in the panel: it cannot say. The safeguards'
       frequency bound (the product of the variants' frequencies >= 1e-6 and the rarest
       >= 0.001) is given with them, as information, and applied to nothing.
@@ -501,8 +501,9 @@ class Verdict(object):
             if self.state == INDEL_IN_TARGET:
                 n = self.haplotypes or 0
                 return (f"{'the' if n == 1 else 'all'} {n:,} {self.panel} haplotype"
-                        f"{'' if n == 1 else 's'} carrying it {'has' if n == 1 else 'have'} "
-                        f"an indel in the target")
+                        f"{'' if n == 1 else 's'} carrying "
+                        f"{'it' if self.n_variants == 1 else 'them together'} "
+                        f"{'has' if n == 1 else 'have'} an indel in the target")
             text = f"not together on any of {hap_of}"
             if self.state == TOO_RARE:
                 return text + f"; too rare to tell (expected {self.expected:.2g})"
@@ -579,11 +580,11 @@ def classify(variants, panels, span=None, min_expected=MIN_EXPECTED, af_of=None)
                            n_variants=k)
         return Verdict(TIER_A, PHASE_NOT_KNOWN, panel.name, hap_total, 0, sorted(unknown),
                        None, af_product, af_min, n_variants=k)
-    if k == 1:
-        # every haplotype carrying it has an indel that changes the target
-        panel, gts, _h, _c, _u, carrying = max(full, key=lambda f: f[5])
+    panel, gts, _h, _c, _u, carrying = max(full, key=lambda f: f[5])
+    if carrying:
+        # haplotypes carry them (together), each with an indel that changes the target
         return Verdict(TIER_C1, INDEL_IN_TARGET, panel.name, panel.haplotypes(pos),
-                       carrying, n_variants=1)
+                       carrying, n_variants=k)
     expected, panel = max(
         ((p.haplotypes(pos) * math.prod(p.allele_freq(v, gv) for v, gv in zip(variants, g)), p)
          for p, g, _h, _c, _u, _t in full), key=lambda e: e[0])
@@ -784,12 +785,15 @@ def _registry_manifest(dictionaries, name):
 
 def dataset_kind(dictionaries, name):
     """"genotyped" when the dataset has a phased SNP store, "sites-only" when its registry
-    says it has no genotypes, else "other" (classic dictionaries, nothing)."""
+    says it has no genotypes, "untiered" when it has the classic per-sample dictionaries
+    alone (an index built without --samplesID), else "other"."""
     if os.path.isdir(os.path.join(dictionaries, f"genotypes_{name}")):
         return "genotyped"
     man = _registry_manifest(dictionaries, name)
     if man.get("aggregation") == "info_af" or man.get("data_type") == "sites-only":
         return "sites-only"
+    if os.path.isdir(os.path.join(dictionaries, f"dictionaries_{name}")):
+        return "untiered"
     return "other"
 
 
@@ -815,7 +819,9 @@ def plan_panels(dictionaries, datasets, mode, prioritize, oracle=None):
     "on" (--prioritize-observed: a sites-only dataset is checked against the oracle too,
     in either mode), "off". Status: "run", "off", "per-sample" (nothing to check: the
     per-sample rows name their cis carriers), "opt-in" (sites-only only, not asked),
-    "no-panel" (no phased store), "no-oracle" (asked, the oracle not installed)."""
+    "untiered" (a genotyped dataset with the classic dictionaries alone: the gate reads the
+    phased store build-index-only --samplesID writes), "no-panel" (no phased store),
+    "no-oracle" (asked, the oracle not installed)."""
     if prioritize == "off":
         return "off", []
     kinds = {d: dataset_kind(dictionaries, d) for d in datasets}
@@ -839,6 +845,8 @@ def plan_panels(dictionaries, datasets, mode, prioritize, oracle=None):
         return "per-sample", []
     if sites_only and prioritize != "on":
         return "opt-in", []
+    if mode == "population-level" and any(kinds[d] == "untiered" for d in datasets):
+        return "untiered", []
     return "no-panel", []
 
 
@@ -914,6 +922,11 @@ def main(argv=None):
     elif status == "opt-in":
         print("Carrier gate: not run on a sites-only dataset unless asked "
               "(--prioritize-observed).", flush=True)
+    elif status == "untiered":
+        print("Carrier gate: not run: the search's genotyped datasets have the classic "
+              "per-sample dictionaries alone, not the phased genotype store it reads "
+              "(Dictionaries/genotypes_<vcf>/, which build-index-only --samplesID writes, and "
+              "a downloaded index has); the rows are reported unchecked.", flush=True)
     tmp = meta_path + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(meta, fh, indent=1, sort_keys=True)
