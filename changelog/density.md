@@ -1,6 +1,6 @@
 <!-- density track: [2.9.0] entries for CHANGELOG.md, to be merged by the docs track. -->
 
-**For the merge, not for the changelog: three notes.**
+**For the merge, not for the changelog: four notes.**
 
 1. The entries name `Q`, which the variant genome writes at a four-allele position from CRISPRitz
    2.10.0 (the engine track), and the hyperdense threshold, 2^20 sequences
@@ -44,6 +44,11 @@
    format track (76d8451), never pushed, ran CRISPRitz 2.10.0 on a small genome holding twelve
    four-allele positions in each of two windows of the README guide (ml003): both paths, both
    modes, list them at 2^24 and 2^25 sequences, `n_variants` 12 and 13, `four_allele` 12.
+4. `docs/example-report.html`, the slim report of a per-sample search of the published index,
+   still says "Such dense windows are reported greedily", as 2.8.1's code wrote it. Built again
+   with this code it says the per-sample sentence (Fixed, below), and
+   `test_generate_report`'s `test_the_example_report_says_where_its_files_are`, which reads that
+   sentence off a population-level report, must then build a per-sample one.
 
 ### Added
 
@@ -138,4 +143,7 @@
   sequences and IUPAC protospacer only (on chr22 of the published index, the README guide's
   per-sample search: 2 rows), as the BED's new `greedy` column says. The report reads such a row as
   before: it takes a dense window's row for its greedy alignment only when no dataset of the search
-  has the tiers.
+  has the tiers. Its legend said in every report that "such dense windows are reported greedily
+  (one representative alignment is shown)"; a per-sample report of a search with the tiers now
+  says that a dense window's rows are its carriers' own haplotypes, except on a sites-only dataset
+  or one without the tiers.

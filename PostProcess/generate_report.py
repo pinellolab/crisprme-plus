@@ -4050,6 +4050,24 @@ def _asset_data_uri(name):
     return ""
 
 
+# What the legend's High_complexity_region entry says of a dense window's rows, and then of a
+# hyperdense one, by whether the dict-less tiers give the rows (build_annotation_legend_html):
+# in a population-level report, and a --per-sample one whose datasets all lack the tiers
+# (_UNTIERED), a greedy worst-case alignment stands for a dense window, and one in a hyperdense
+# window seldom exists in any one genome; in any other --per-sample report the tiers' observed
+# haplotypes give a dense window's rows, as any window's, and only a sites-only dataset (whose
+# rows are the population-level analysis's) or one without the tiers a greedy one (whose note
+# in the integrated results says so).
+_DENSE_ROWS = {
+    False: ("Such dense windows are reported greedily (one representative alignment is shown; "
+            "{hvdr_where}).", ", so a worst-case alignment there seldom exists in any one "
+            "genome."),
+    True: ("Under <code>--per-sample</code> a dense window&rsquo;s rows are its "
+           "carriers&rsquo; own haplotypes, as any window&rsquo;s, except on a sites-only "
+           "dataset or one without the dict-less tiers, which reports it greedily (one "
+           "representative alignment is shown); {hvdr_where}.", "."),
+}
+
 # Annotation legend (Section 7): plain-language meaning of every annotation
 # column value, so a reviewer never has to guess what "dELS" or "Tier1_TSG" is.
 _ANNOTATION_LEGEND = [
@@ -4128,15 +4146,14 @@ _ANNOTATION_LEGEND = [
      "names the specific variant(s) (as <code>chrom;pos;ref;alt</code>) that produce "
      "THIS off-target; this column (e.g. <code>16 in window</code>) counts ALL variants "
      "spanning the surrounding window, so a row can legitimately show one variant while "
-     "its window count is much larger. Such dense windows are reported greedily (one "
-     "representative alignment is shown; {hvdr_where}). A window is dense when it spells "
+     "its window count is much larger. {dense_rows} A window is dense when it spells "
      "more sequences than <code>CRISPRME_IUPAC_CAP</code> allows (2<sup>"
      + str(wdens.DEFAULT_IUPAC_CAP) + "</sup> by default: each two-allele column doubles "
      "the count, a three-allele one triples it, a four-allele one quadruples it). One "
      "spelling 2<sup>" + str(wdens.HYPERDENSE_BITS) + "</sup> or more is hyperdense, and is "
      "flagged whatever that cap is, with the count (e.g. <code>24 in window (2^24.0 "
-     "sequences)</code>): it matches nearly any guide somewhere, so a worst-case alignment "
-     "there seldom exists in any one genome. <code>1 four-allele position</code>: the window "
+     "sequences)</code>): it matches nearly any guide somewhere{hyperdense_rows} "
+     "<code>1 four-allele position</code>: the window "
      "holds a position where all four bases are observed alleles, which the variant genome "
      "writes <code>Q</code> (an <code>N</code> is an assembly gap and matches nothing)."),
 ]
@@ -4314,7 +4331,8 @@ def build_annotation_legend_html(cols=None, df=None, hvdr_where=None):
     run must not print a COSMIC Cancer Gene Census glossary). Returns "" when no
     entry qualifies, so the caller omits the whole section. ``cols=None`` keeps the
     legacy full legend (backward-compatible). ``hvdr_where`` (_hvdr_where's, which it
-    defaults to) says where the variant set of a high-variant-density window is."""
+    defaults to) says where the variant set of a high-variant-density window is; what stands
+    for a dense window follows the report's mode (_DENSE_ROWS)."""
     def _active(key):
         if cols is None:
             return True
@@ -4324,7 +4342,10 @@ def build_annotation_legend_html(cols=None, df=None, hvdr_where=None):
             return bool(df[cols[key]].map(lambda v: not _is_na(v)).any())
         return True
 
-    entries = [(t, d.replace("{hvdr_where}", hvdr_where or _hvdr_where()))
+    dense_rows, hyperdense_rows = _DENSE_ROWS[_PER_SAMPLE and not _UNTIERED]
+    entries = [(t, d.replace("{dense_rows}", dense_rows)
+                .replace("{hyperdense_rows}", hyperdense_rows)
+                .replace("{hvdr_where}", hvdr_where or _hvdr_where()))
                for (k, t, d) in _ANNOTATION_LEGEND if _active(k)]
     if not entries:
         return ""

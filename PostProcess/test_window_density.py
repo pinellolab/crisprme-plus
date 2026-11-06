@@ -791,8 +791,9 @@ class TheIntegratedRow(unittest.TestCase):
         --report-full) of a run with --max-degeneracy 1, in either mode, from the result folder
         as it is then: these integrated results, the post-analysis's BEDs of 2.9.0, and the
         Params.txt complete-search wrote. It states the cap, counts the rows in a hyperdense
-        window and in one holding a four-allele position, and bundles the windows under the
-        BEDs' own header."""
+        window and in one holding a four-allele position, says what stands for a dense window
+        (TheReport.test_the_legend_says_what_stands_for_a_dense_window), and bundles the windows
+        under the BEDs' own header."""
         rd = tempfile.mkdtemp(prefix="window_density_report_")
         self.addCleanup(shutil.rmtree, rd, True)
         shutil.copy(os.path.join(self.d, "job.bestMerge.txt.integrated_results.tsv"),
@@ -807,7 +808,8 @@ class TheIntegratedRow(unittest.TestCase):
                      "Pam\tNRG\nMax_bulges\t2\nMismatches\t4\nDNA\t1\nRNA\t1\n"
                      "Max_total_edits\t6\nMax_degeneracy\t1\nNuclease\tSpCas9\n"
                      "Ref_comp\tTrue\n")
-        for mode in ("population-level", "per-sample"):
+        for mode, rows, doubt in (("population-level", TheReport.GREEDY, True),
+                                  ("per-sample", TheReport.OWN, False)):
             with self.subTest(mode=mode):
                 with open(os.path.join(rd, ".search_mode"), "w") as fh:
                     fh.write(mode + "\n")
@@ -825,8 +827,10 @@ class TheIntegratedRow(unittest.TestCase):
                         "together on one phased haplotype.",
                         '<td class="k">Hyperdense and four-allele windows</td>',
                         "2 reported off-targets lie in a hyperdense window",
-                        "2 reported off-targets lie in a window holding a four-allele position")
+                        "2 reported off-targets lie in a window holding a four-allele position",
+                        rows)
                 self.assertEqual([s for s in said if s not in html], [])
+                self.assertEqual(TheReport.DOUBT in html, doubt)
                 lines = bundled.splitlines(True)
                 self.assertEqual(lines[0], header)
                 self.assertEqual({len(line.split("\t")) for line in lines}, {10})
@@ -954,6 +958,33 @@ class TheReport(unittest.TestCase):
         self.assertIn("2<sup>20</sup> or more is hyperdense, and is flagged whatever that cap "
                       "is", legend)
         self.assertIn("<code>1 four-allele position</code>", legend)
+
+    GREEDY = "Such dense windows are reported greedily (one representative alignment is shown; "
+    OWN = ("Under <code>--per-sample</code> a dense window&rsquo;s rows are its carriers&rsquo; "
+           "own haplotypes, as any window&rsquo;s, except on a sites-only dataset or one without "
+           "the dict-less tiers, which reports it greedily (one representative alignment is "
+           "shown); the full variant set for each window is in the")
+    DOUBT = ", so a worst-case alignment there seldom exists in any one genome."
+
+    def test_the_legend_says_what_stands_for_a_dense_window(self):
+        """A greedy worst-case alignment, in a population-level report and in a --per-sample one
+        whose datasets all lack the dict-less tiers. In any other --per-sample report the
+        tiers' observed haplotypes give a dense window's rows, as any window's (the rows' notes
+        say no greedy worst case stands for it), and no worst case is doubted, as in the inputs
+        card."""
+        saved = gr._PER_SAMPLE, gr._UNTIERED
+        self.addCleanup(setattr, gr, "_UNTIERED", saved[1])
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", saved[0])
+        for per_sample, untiered, rows, doubt in ((False, False, self.GREEDY, True),
+                                                  (True, True, self.GREEDY, True),
+                                                  (True, False, self.OWN, False)):
+            with self.subTest(per_sample=per_sample, untiered=untiered):
+                gr._PER_SAMPLE, gr._UNTIERED = per_sample, untiered
+                legend = gr.build_annotation_legend_html()
+                self.assertIn(rows, legend)
+                self.assertNotIn(self.OWN if rows == self.GREEDY else self.GREEDY, legend)
+                self.assertIn("it matches nearly any guide somewhere%s <code>1 four-allele "
+                              "position</code>" % (self.DOUBT if doubt else "."), legend)
 
 
 # test_build_index_only_atomic's stub engine, behind a crispritz.py that first notes the
