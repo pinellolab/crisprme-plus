@@ -55,6 +55,7 @@ import math
 import os
 import sys
 
+import build_mega_indel_af as bia
 import indel_snp_cis as isc
 import population_summary as ps
 import tier0_compile as t0c
@@ -580,8 +581,8 @@ def classify(variants, panels, span=None, min_expected=MIN_EXPECTED, af_of=None)
 
     ``span`` (lo, hi): the target's reference bases, for an alignment of SNPs only: a slot
     that holds them with an indel changing those bases does not hold the target. ``af_of``:
-    the dataset's frequency of a variant (its registry), or None, for the frequency bound of
-    a multi-variant alignment. A variant is in a panel when the panel holds its POS, REF and
+    the dataset's frequency of a variant (its registry; an indel's, its indel frequencies),
+    or None, for the frequency bound of a multi-variant alignment. A variant is in a panel when the panel holds its POS, REF and
     ALT; the panels are the stores a search reads (a row does not say which dataset it comes
     from): the first with evidence decides, the one with the most haplotypes holding the
     variants together for A, the most expected for C1."""
@@ -723,8 +724,24 @@ def _gate_chromosome(job):
             except Exception:  # noqa: BLE001 - a frequency for the bound only
                 pass
 
+    # an indel's, of a sites-only dataset's indel frequencies (build_mega_indel_af: AF_max,
+    # as its registry gives for a SNP); a genotyped dataset's rows carry theirs (MAF)
+    at_indels = {v[1] for row in rows for v in row[6] if not is_snp(v)}
+    indel_afs = []
+    for name in datasets:
+        path = os.path.join(dictionaries, f"indel_af_{name}", f"indel_af_{chrom}.tsv.gz")
+        if at_indels and os.path.isfile(path):
+            try:
+                indel_afs.append(bia.IndelAfReader(path, at_indels))
+            except Exception:  # noqa: BLE001 - a frequency for the bound only
+                pass
+
     def af_of(v):
         if not is_snp(v):
+            for reader in indel_afs:
+                rec = reader.lookup(v[1], v[2], v[3])
+                if rec and "AF_max" in rec:
+                    return rec["AF_max"]
             return None
         for reg in registries:
             groups = reg.lookup(v[1], v[3])
@@ -745,7 +762,7 @@ def _gate_chromosome(job):
         if verdict is None:
             if panels:
                 fallback = _maf_values(maf)
-                bound = af_of if registries else None
+                bound = af_of if registries or indel_afs else None
                 verdict = classify(variants, panels, span, min_expected, bound)
                 if verdict.af_product is None and len(variants) >= 2 \
                         and len(fallback) == len(variants):

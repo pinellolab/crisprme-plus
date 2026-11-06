@@ -133,9 +133,10 @@ def build_indel_af_store(vcf, chrom, out_dir, dataset_meta=None):
 class IndelAfReader(object):
     """Loads indel_af_<chrom>.tsv.gz into a dict keyed by (pos:int, ref, alt) for
     O(1) lookup. lookup() returns {dataset: af, 'AF_max': af} (only present keys),
-    or None if the indel is absent."""
+    or None if the indel is absent. ``wanted``: the positions (POS) to keep, so a
+    chromosome's whole store is not held for a few indels; None keeps all."""
 
-    def __init__(self, store_path):
+    def __init__(self, store_path, wanted=None):
         self._d = {}
         self._labels = []
         opener = gzip.open if store_path.endswith(".gz") else open
@@ -153,6 +154,8 @@ class IndelAfReader(object):
                 if len(f) != nfields:
                     continue  # skip a malformed row rather than mis-parse AF_max
                 pos, ref, alt = int(f[0]), f[1], f[2]
+                if wanted is not None and pos not in wanted:
+                    continue
                 rec = {}
                 for i, lab in enumerate(self._labels):
                     v = f[3 + i]

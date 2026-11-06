@@ -367,6 +367,54 @@ class TestGateCommand(unittest.TestCase):
             self.assertFalse(os.path.exists(hp.companion_path(self.results)))
 
 
+class TestTheFrequencyBoundOfASitesOnlyRow(unittest.TestCase):
+    """A sites-only dataset's row of a SNP and an indel the genotype oracle does not hold
+    (C2) shows the frequency bound of both: the SNP's frequency from the dataset's registry,
+    the indel's from its indel frequencies, as the mega index's builders write them."""
+
+    def setUp(self):
+        import build_mega_indel_af as bia
+        import build_mega_registry as bmr
+        self.tmp = tempfile.mkdtemp(prefix="gate_bound_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        dicts = os.path.join(self.tmp, "Dictionaries")
+        build_panel(dicts, [(300, "A", "G", {"S00": "1|0"})], name=hp.ORACLE_PANEL)
+        vcf = os.path.join(self.tmp, "mega.chr22.vcf.gz")
+        with gzip.open(vcf, "wt") as fh:
+            fh.write("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n")
+            fh.write(f"{CHROM}\t100\trs1\tA\tG\t.\tPASS\tAF_gnomAD=0.05;AF_max=0.05\n")
+            fh.write(f"{CHROM}\t104\trs2\tCTT\tC\t.\tPASS\tAF_gnomAD=0.02;AF_max=0.02\n")
+        bmr.build(vcf, CHROM, os.path.join(dicts, "registry_hg38_mega"))
+        bia.build_indel_af_store(vcf, CHROM, os.path.join(dicts, "indel_af_hg38_mega"))
+        out = os.path.join(self.tmp, "Results", "job")
+        os.makedirs(out)
+        vcfs = os.path.join(self.tmp, "list_vcf.txt")
+        with open(vcfs, "w") as fh:
+            fh.write("VCFs/hg38_mega\n")
+        self.results = os.path.join(out, "GUIDE+NRG_hg38+hg38_mega_4+2_integrated_results.tsv")
+        aln = "ACGTACGTACGTACGTACGTAGG"
+        # the row's MAF gives no indel frequency (a sites-only index's indel log has none)
+        write_results(self.results, [
+            {"Spacer+PAM": "G", "Chromosome": CHROM,
+             **block("highest_CFD", 90, "+", aln, "alt", f"{CHROM}_100_A_G,{CHROM}_104_CTT_C",
+                     "NA,0.05"),
+             **block("fewest_mm+b", 90, "+", aln, "ref", "NA"),
+             **block("highest_CRISPR_BULGE", 90, "+", aln, "ref", "NA")}])
+        self.cmd = [sys.executable, os.path.join(HERE, "haplotype_prioritizer.py"),
+                    "--results", self.results, "--dictionaries", dicts, "--vcf-list", vcfs,
+                    "--mode", "population-level", "--prioritize-observed", "on"]
+
+    def test_the_snp_and_the_indel_frequency(self):
+        done = subprocess.run(self.cmd, capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        with open(hp.companion_path(self.results)) as fh:
+            body = [ln.rstrip("\n").split("\t") for ln in fh if not ln.startswith("#")]
+        self.assertEqual([(r[1], r[7]) for r in body], [("highest_CFD", "C2")])
+        self.assertEqual(body[0][-1], "not checked: 2 of 2 variants not in hg38_HGDP1kGP; "
+                                      "frequency product 1.0e-03, rarest 2.0e-02 "
+                                      "(within the 1e-06 / 0.001 bound)")
+
+
 class TestReportRanksByTheGate(unittest.TestCase):
     """generate_report on a population-level run the gate checked: the C1 row leaves the
     top-1000, the panel and the risk card for its own table, the A and C2 rows keep their
