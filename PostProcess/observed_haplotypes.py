@@ -57,8 +57,8 @@ carriers. The union fallback is one union per choice of alt at the columns where
 sample carries two or three, while that makes at most ``max_unions``; past that it is
 one union, with the alt ``choose`` picks at each such column (new_simple_analysis: the
 one nearest the guide). Uncapped, k such columns gave 2^k or more unions: NA19042
-carries two or three alts at 16 positions of one 26-bp IGL window (chr22:22,881,180-
-22,881,205, HGDP + 1000 Genomes), which gave 8.5 million sets and needed 90 GB.
+carries two or three alts at 16 positions of one 26-bp IGL window of HGDP + 1000
+Genomes (chr22:22,881,180-22,881,205), which gave 8.5 million sets and needed 90 GB.
 
 STDLIB ONLY. ``population_summary`` is imported for ``parse_haplotypes`` /
 ``_token_is_alt`` ONLY (one source of truth for allele-slot math); that import is

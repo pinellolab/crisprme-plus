@@ -443,7 +443,11 @@ input genotypes:
   individual could plausibly carry — bounded by `CRISPRME_IUPAC_CAP` (default **10**): an individual
   carrying more variants than the cap in a single window falls back to the union
   (the combinatorial blow-up is confined to that individual, and the dense window
-  is surfaced in the high-variant-density BED).
+  is surfaced in the high-variant-density BED). A haplotype holds one allele of a position,
+  so no subset and no union takes two ALTs of one: where the individual carries two or three
+  ALTs of a position (a `1/2` heterozygote, or a phased slot holding two), there is one union
+  per choice of ALT while that makes at most 16, and past that one union, holding at each such
+  position the ALT nearest the guide (one the PAM allows, then the fewest mismatches).
 - **Mixed data** (e.g. a merge of phased and unphased sources, or block-phased
   VCFs from WhatsHap/GATK/HapCUT2). Genotypes are handled conservatively:
   same-individual variant-sets are enumerated; combinations that would require

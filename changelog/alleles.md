@@ -38,18 +38,20 @@ own ID where the ID column lists one per ALT, change those three.
   admits every ALT its registry lists, as each of its columns does: see Fixed), and of them only
   the bases: an ALT that is no base, such as the `*` of a spanning deletion (in a GATK joint call),
   which the dictionary of CRISPRitz 2.10.0 lists, is no allele of a Q, as of any other code (with
-  the dictionary, a row substituted it, `*` in its DNA column). The dictionary lists such an ALT;
-  the Tier-0 registry holds no record of it, and lists the positions of four bases in its manifest
-  (`four_base_positions`), so that the tiers alone, the layout of every published index, read such
-  a position as the dictionary does. Checked through the real CLI on an HPRC kit
-  (hg38 chr22:1-17,950,000 and the normalised HPRC records up to 17,949,000; TAGGGAAGTTAGGGAGGTTA,
-  NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per sample): of its 17 positions of four bases,
-  chr22:17,877,081 holds T>A (8 copies), T>C (none) and T>G (46). On the tiers alone no row named
-  it, and the table held 432,738 rows against the dictionary's 439,108; it is now the dictionary's,
-  byte for byte, T>A on 648 rows (8 carriers) and T>G on 6,220 (44). Each of the search's 8,129 Q
-  columns, 8,108 of them in an alignment with a bulge, is read against a position of four bases.
-  Covered by `PostProcess/test_site_alleles.py`, with the real `new_simple_analysis.py` on tiers and
-  dictionaries the repository's own compilers build.
+  the dictionary, a row substituted it, `*` in its DNA column, and the CRISPR-Bulge scorer, which
+  cannot read it, failed the batch it was scored in: no alignment of that batch, up to 100,000 the
+  SNP post-analysis scores together, had a CRISPR-Bulge score, and no row of the review's synthetic
+  search had one). The dictionary lists such an ALT; the Tier-0 registry holds no record of it, and
+  lists the positions of four bases in its manifest (`four_base_positions`), so that the tiers
+  alone, the layout of every published index, read such a position as the dictionary does. Checked
+  through the real CLI on an HPRC kit (hg38 chr22:1-17,950,000 and the normalised HPRC records up to
+  17,949,000; TAGGGAAGTTAGGGAGGTTA, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per sample): of its 17
+  positions of four bases, chr22:17,877,081 holds T>A (8 copies), T>C (none) and T>G (46). On the
+  tiers alone no row named it, and the table held 432,738 rows against the dictionary's 439,108; it
+  is now the dictionary's, byte for byte, T>A on 648 rows (8 carriers) and T>G on 6,220 (44). Each
+  of the search's 8,129 Q columns, 8,108 of them in an alignment with a bulge, is read against a
+  position of four bases. Covered by `PostProcess/test_site_alleles.py`, with the real
+  `new_simple_analysis.py` on tiers and dictionaries the repository's own compilers build.
 
 ### Changed
 
