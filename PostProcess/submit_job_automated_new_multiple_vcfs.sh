@@ -755,26 +755,11 @@ while read vcf_f; do
 	# search before 2.8.1, by crispritz.py itself, or downloaded (the published K=8
 	# archive has none) -- is taken for a 3' build, as every published one is
 	# (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. An index of format 2 (CRISPRitz
-	# 2.10.0 and later) records the side itself, in the header of its .bin files (bit 0 of
-	# the flags: the PAM at the 5' end), which is then read first. Silent on stderr, which is
-	# fatal to the stage.
+	# 2.10.0 and later) records the side itself, in the header of its .bin files
+	# (_header_side), which is then read first. Silent on stderr, which is fatal to the stage.
 	_index_side() {
-		local _line= _bin _f
-		_bin=$(find -L "$1" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)
-		if [ -n "$_bin" ]; then
-			_f=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
-			if [ "${_f//[[:space:]]/}" = 435a49fe ]; then
-				_f=$(od -An -t d4 -j12 -N4 "$_bin" 2>/dev/null)
-				_f=${_f//[[:space:]]/}
-				case "$_f" in
-				'' | *[!0-9]*) ;;
-				*)
-					if [ $((_f & 1)) -eq 1 ]; then echo 5; else echo 3; fi
-					return 0
-					;;
-				esac
-			fi
-		fi
+		local _line=
+		_header_side "$1" && return 0
 		if [ -f "$1/.pam_build" ]; then
 			{ read -r _line <"$1/.pam_build"; } 2>/dev/null
 			_line=${_line%$'\r'}
@@ -788,6 +773,22 @@ while read vcf_f; do
 		fi
 		echo 3
 		return 1
+	}
+
+	# The side of the guide index $1 records in the header of its .bin files, on stdout: 3
+	# or 5, of an index of format 2 (CRISPRitz 2.10.0 and later: the magic, then the
+	# version, the header's length and the flags, whose bit 0 is the PAM at the 5' end);
+	# nothing, and status 1, of one of format 1, which records none. Silent on stderr.
+	_header_side() {
+		local _bin _f
+		_bin=$(find -L "$1" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)
+		[ -n "$_bin" ] || return 1
+		_f=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
+		[ "${_f//[[:space:]]/}" = 435a49fe ] || return 1
+		_f=$(od -An -t d4 -j12 -N4 "$_bin" 2>/dev/null)
+		_f=${_f//[[:space:]]/}
+		case "$_f" in '' | *[!0-9]*) return 1 ;; esac
+		if [ $((_f & 1)) -eq 1 ]; then echo 5; else echo 3; fi
 	}
 
 	# The guide length index $1 was built for, on stdout: the second int32 of any .bin of
@@ -1043,12 +1044,13 @@ while read vcf_f; do
 			else
 				continue            # a different dedicated PAM cannot stand in
 			fi
-			# An index serves only a PAM on the side it was built for, as its .pam_build
-			# records it (_index_side). Without a record a dedicated index has no side to
-			# contradict, and an all-N one is a 3' build at the published widths, 3 and 8
-			# (the K=8 archive has no .pam_build), or under the search PAM's own name, as
-			# 2.8.0 took it; at any other width a search before 2.8.1 may have built it
-			# from a 5' PAM file, and the search builds its dedicated index instead.
+			# An index serves only a PAM on the side it was built for, as the header of its
+			# .bin files or its .pam_build records it (_index_side). Without a record a
+			# dedicated index has no side to contradict, and an all-N one is a 3' build at
+			# the published widths, 3 and 8 (the K=8 archive has no .pam_build), or under
+			# the search PAM's own name, as 2.8.0 took it; at any other width a search
+			# before 2.8.1 may have built it from a 5' PAM file, and the search builds its
+			# dedicated index instead.
 			if [ -z "$_any_side" ]; then
 				_rec=0
 				_side=$(_index_side "$_d") || _rec=1
@@ -1110,11 +1112,12 @@ while read vcf_f; do
 	}
 
 	# Say on stderr why index $1 cannot serve this search, when it was built for the other
-	# side of the guide.
+	# side of the guide, and what records that side (_index_side).
 	_say_other_side() {
 		local _have _want=3 _why="as its .pam_build records" _n _p=${1##*/}
 		_have=$(_index_side "$1") \
 			|| _why="it records no side in a .pam_build, and an index that does not is taken for a 3' build"
+		_header_side "$1" >/dev/null && _why="as the header of its .bin files records"
 		[ "${pos:-1}" -gt 0 ] || _want=5
 		_p=${_p%%_*}
 		if [ "$_have" = "$_want" ]; then

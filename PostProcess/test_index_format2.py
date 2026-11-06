@@ -497,8 +497,8 @@ def _functions(*names):
 def _shell():
     """The search script's functions these tests run."""
     return _functions("_engine_index_format", "_unreadable_bin", "_how_built_again",
-                      "_check_index_format", "_index_guide_len", "_index_side",
-                      "_index_fits_guide", "_resolve_index_dir")
+                      "_check_index_format", "_index_guide_len", "_index_side", "_header_side",
+                      "_index_fits_guide", "_resolve_index_dir", "_say_other_side")
 
 
 class _Index(_Engine):
@@ -835,6 +835,65 @@ class EachIndexRecordsWhatItHolds(_Index):
                       _functions("_record_index_side"))
 
 
+class TheSideOfAFormat2IndexIsItsHeaders(_Index):
+    """An index of format 2 records the side of the guide it was built for in the header of
+    its .bin files, and every reader takes it there before .pam_build. build-index-only read
+    .pam_build alone: over a 5' PAM-less index with none (crispritz.py built it, or it was
+    downloaded) it recorded the 3' PAM file it was given; the web read that record alone, a 3'
+    geometry; and a 3' search refused the index as a 5' build "as its .pam_build records",
+    which said 3'."""
+
+    PAM_3P = os.path.join(os.path.dirname(HERE), "PAMs", "20bp-NNN-NO-PAM.txt")
+
+    def five_prime(self, record=None, fmt=2):
+        """A 5' PAM-less index for a 20-nt guide, in index format ``fmt``, with ``record`` for
+        its .pam_build (none for None)."""
+        folder = self.index(f"NNN_2_g{fmt}", fmt=fmt, at_start=True)
+        if record:
+            with open(os.path.join(folder, ".pam_build"), "w") as fh:
+                fh.write(record + "\n")
+        return folder
+
+    def test_build_index_only_records_no_pam_file_of_the_other_side(self):
+        crisprme = _load_crisprme()
+        folder = self.five_prime()
+        crisprme._write_pam_build(folder, self.PAM_3P)
+        self.assertFalse(os.path.exists(os.path.join(folder, ".pam_build")))
+        pam_5p = os.path.join(self.tmp, "23bp-NNN-5p.txt")
+        with open(pam_5p, "w") as fh:
+            fh.write("N" * 23 + " -3\n")
+        crisprme._write_pam_build(folder, pam_5p)
+        with open(os.path.join(folder, ".pam_build")) as fh:
+            self.assertEqual(fh.read(), "23bp-NNN-5p 23 -3\n")
+
+    def test_the_web_reads_the_geometry_in_the_header(self):
+        import test_bulge_cap
+        index_build_pam = test_bulge_cap.pages_utils.index_build_pam
+        folder = self.five_prime()
+        self.assertEqual(index_build_pam(folder), (None, 23, -3))
+        # (a record of another geometry names a PAM file that does not describe the index)
+        for record, name in (("20bp-NNN-NO-PAM 23 3", None), ("23bp-NNN-5p 23 -3", "23bp-NNN-5p")):
+            with self.subTest(record=record):
+                with open(os.path.join(folder, ".pam_build"), "w") as fh:
+                    fh.write(record + "\n")
+                self.assertEqual(index_build_pam(folder), (name, 23, -3))
+        # an index of format 1 records no side in its headers: its .pam_build is read
+        self.assertEqual(index_build_pam(self.five_prime("23bp-NNN-5p 23 -3", fmt=1)),
+                         ("23bp-NNN-5p", 23, -3))
+
+    def test_the_search_says_what_records_the_side(self):
+        call = 'pam_name=20bp-NNN-NO-PAM.txt\ntrue_pam=NNN\n_say_other_side "$1"'
+        for fmt, why in ((2, "the header of its .bin files"), (1, "its .pam_build")):
+            with self.subTest(fmt=fmt):
+                folder = self.five_prime("23bp-NNN-5p 23 -3" if fmt == 1 else
+                                         "20bp-NNN-NO-PAM 23 3", fmt=fmt)
+                out = self.shell(call, folder, pam_line="N" * 23 + " 3")
+                self.assertEqual((out.stdout, out.stderr), ("", (
+                    f"       {os.path.basename(folder)} is a PAM-less index for a PAM on the 5' "
+                    f"side of the guide (as {why} records), and 20bp-NNN-NO-PAM.txt puts the PAM "
+                    "on the 3' side, so a search of it would find nothing\n")))
+
+
 def crisprme_version():
     with open(os.path.join(os.path.dirname(HERE), "crisprme.py")) as fh:
         for line in fh:
@@ -1114,6 +1173,74 @@ class BuildIndexOnlyTakesFormat2(atomic._Fixture):
         self.assertEqual((rc, err), (0, ""))
         self.assertIn("Reference index already present", out)
         self.assertEqual({n: index_fit.read_index_meta(self.lib(n)) for n in before}, before)
+
+
+class BuildIndexOnlyTakesTheSideInTheHeader(atomic._Fixture):
+    """build-index-only read the side of the guide an index in place was built for from its
+    .pam_build alone. Over a 5' PAM-less index of format 2 that had none (crispritz.py built
+    it, or it was downloaded) it recorded the shipped 3' PAMs/20bp-NNN-NO-PAM.txt and said
+    'already present', at exit 0; and it refused a 3' one of flank 4 with none, given a 3' PAM
+    file of that flank, as 'a PAM-less index that records no side of the guide'. The header
+    of its .bin files records the side, and is read first."""
+
+    PAM_3P = os.path.join(atomic.REPO, "PAMs", "20bp-NNN-NO-PAM.txt")
+
+    @classmethod
+    def setUpClass(cls):
+        atomic.setUpModule()  # (its stub Bio package, which crisprme.py imports)
+        cls.addClassCleanup(atomic.tearDownModule)
+
+    def fresh(self):
+        super().fresh()
+        path = os.path.join(self.bin, "crispritz.py")
+        with open(path, "w") as fh:
+            fh.write(STUB_2_10.replace("#!PYTHON", "#!" + sys.executable, 1))
+        os.chmod(path, 0o755)
+
+    def in_place(self, name, at_start):
+        """A PAM-less index of format 2 for a 20-nt guide in genome_library, as crispritz.py
+        builds it for a PAM on the 5' side of the guide (``at_start``) or the 3' side: a tree
+        a chromosome, and no .pam_build."""
+        pam = name.split("_")[0]
+        for chrom in atomic.GENOME:
+            one_target_bin(os.path.join(self.lib(name), f"{pam}_{chrom}_1.bin"), pam, 20, 2,
+                           at_start)
+        return self.lib(name)
+
+    def build(self, pam):
+        return self.finish(self.start(command=[
+            "build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", pam,
+            "--bDNA", "1", "--bRNA", "1", "--thread", "2", "--path", self.work]))
+
+    def test_a_pam_file_of_the_other_side_is_refused_and_not_recorded(self):
+        index = self.in_place("NNN_2_hg38", at_start=True)
+        # (with no .pam_build, and with the 3' one this run recorded over it)
+        for record in (None, "20bp-NNN-NO-PAM 23 3\n"):
+            with self.subTest(record=record):
+                if record:
+                    atomic._write(os.path.join(index, ".pam_build"), record)
+                rc, out, err = self.build(self.PAM_3P)
+                self.assertEqual(rc, 1, out)
+                self.assertEqual(err, (
+                    f"Error: {index} is already there, a PAM-less index for a PAM on the 5' side "
+                    "of the guide (as the header of its .bin files records), and "
+                    f"{self.PAM_3P} puts the PAM on the 3' side. The index for that PAM file has "
+                    "the same name: build it in another working directory (--path).\n"))
+                self.assertNotIn("already present", out)
+                self.assertEqual(os.path.exists(os.path.join(index, ".pam_build")), bool(record))
+                self.assertEqual(self.calls(), [])
+
+    def test_one_of_the_side_its_header_records_is_kept_and_recorded(self):
+        index = self.in_place("NNNN_2_hg38", at_start=False)
+        pam = self.path("PAMs", "24bp-NNNN-3p.txt")
+        atomic._write(pam, "N" * 24 + " 4\n")
+        rc, out, err = self.build(pam)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn(f"Reference index already present: {index}", out)
+        with open(os.path.join(index, ".pam_build")) as fh:
+            self.assertEqual(fh.read(), "24bp-NNNN-3p 24 4\n")
+        self.assertEqual(index_fit.read_index_meta(index)["side"], "3'")
+        self.assertEqual(self.calls(), [])
 
 
 class AFormat1IndexIsBuiltAgain(atomic._Fixture):

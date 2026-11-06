@@ -1587,35 +1587,40 @@ def pam_geometry(pam_value: str) -> "tuple":
 
 
 def index_build_pam(index_dir: str) -> "tuple":
-    """Provenance of the PAM an index was built with, from its ``.pam_build`` sidecar.
+    """Provenance of the PAM an index was built with: the geometry its .bin headers
+    record, else its ``.pam_build`` sidecar.
 
     ``build-index-only`` / the search pipeline write ``.pam_build`` into each index
     directory as ``<pam_name> <seq_len> <pam_pos>`` so the index self-describes the
-    PAM geometry it can actually serve (see get_pam_options). Falls back to the
-    canonical 20bp-guide, 3' convention (seq_len = 20 + len(motif), pos = len(motif))
-    when the sidecar is absent — correct for the shipped indexes and any index built
-    the standard way. Returns ``(pam_name_or_None, seq_len, pam_pos)``.
+    PAM geometry it can actually serve (see get_pam_options). An index of format 2
+    (CRISPRitz 2.10.0 and later) records its geometry itself, in the header of its .bin
+    files (index_fit), which is read first: the name its ``.pam_build`` gives is kept where
+    that record agrees with it, and an index built by crispritz.py itself, or downloaded,
+    may have none. Falls back to the canonical 20bp-guide, 3' convention (seq_len = 20 +
+    len(motif), pos = len(motif)) when neither is there — correct for the shipped indexes
+    and any index built the standard way. Returns ``(pam_name_or_None, seq_len, pam_pos)``.
     """
     p = os.path.join(index_dir, ".pam_build")
     try:
         with open(p) as fh:
             parts = fh.readline().split()
-        return parts[0], int(parts[1]), int(parts[2])
+        recorded = parts[0], int(parts[1]), int(parts[2])
     except (OSError, ValueError, IndexError):
-        pass
-    # no sidecar, but an index of format 2 (CRISPRitz 2.10.0 and later): the header of its
-    # .bin files records the geometry it was built for (index_fit)
+        recorded = None
     five_prime = index_fit.built_five_prime(index_dir)
     if five_prime is not None:
         width = len(os.path.basename(index_dir).split("_")[0])
         guide = index_fit.built_guide_len(index_dir)
         if guide:
-            return None, guide + width, -width if five_prime else width
-    # no sidecar (e.g. an index built by the search pipeline, which doesn't write
-    # one): recover the geometry from an installed PAM whose motif matches this
-    # index's motif — correct for ANY shipped PAM including 5' Cas12a and 21bp
-    # SaCas9, unlike a hardcoded 20bp/3' guess. Fall back to that convention only
-    # if no PAM matches.
+            geometry = (guide + width, -width if five_prime else width)
+            return (recorded[0] if recorded and recorded[1:] == geometry else None,) + geometry
+    if recorded:
+        return recorded
+    # no header that records it, and no sidecar (e.g. an index built by the search
+    # pipeline before it wrote one): recover the geometry from an installed PAM whose
+    # motif matches this index's motif — correct for ANY shipped PAM including 5'
+    # Cas12a and 21bp SaCas9, unlike a hardcoded 20bp/3' guess. Fall back to that
+    # convention only if no PAM matches.
     motif = os.path.basename(index_dir).split("_")[0]
     try:
         pams_dir = os.path.join(current_working_directory, PAMS_DIR)

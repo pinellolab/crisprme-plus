@@ -1080,8 +1080,9 @@ def _pam_files(pams: str) -> list:
 
 
 def _smoke_five_prime(index_name: str, token: str) -> Optional[bool]:
-    """Whether the index was built for a PAM on the 5' side of the guide: what its
-    .pam_build records. Without one, an all-N index is a 3' build, as the search takes it
+    """Whether the index was built for a PAM on the 5' side of the guide: what the header of
+    its .bin files records (index format 2), else its .pam_build. Without either, an all-N
+    index is a 3' build, as the search takes it
     (_index_side in submit_job_automated_new_multiple_vcfs.sh) and every published one is;
     and a dedicated one, which a search builds with no record, is what the PAM files of
     its motif in PAMs/ say, or else 3' for a PAM of up to 3 nt, as every shipped one that

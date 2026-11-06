@@ -2118,10 +2118,11 @@ def _recorded_three_prime(index_dir: str) -> "Optional[bool]":
 def _side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) -> bool:
     """Whether index ``index_dir``, of PAM ``pam``, was built for the side of the guide where
     a search for ``motif`` (a 3' PAM with ``three_prime``) puts its PAM, as the search
-    script's _resolve_index_dir takes it: as its .pam_build records; without one, any side
-    for a dedicated index, and 3' for an all-N one, at the published widths, 3 and 8, or
-    under the search PAM's own name only (a search before 2.8.1 built one of another width
-    from a 5' PAM file with no record)."""
+    script's _resolve_index_dir takes it: as the header of its .bin files records (index
+    format 2), else its .pam_build; without either, any side for a dedicated index, and 3'
+    for an all-N one, at the published widths, 3 and 8, or under the search PAM's own name
+    only (a search before 2.8.1 built one of another width from a 5' PAM file with no
+    record)."""
     recorded = _recorded_three_prime(index_dir)
     if recorded is not None:
         return recorded == three_prime
@@ -2140,7 +2141,7 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
     Index folders are named ``<motif>_<N>_<genome>`` (reference) or
     ``<motif>_<N>_<genome>+<enriched>`` (variant); the usable bulge count is N-1 (the +1
     covers alignments that start with a gap). A pamless all-N index of the same length
-    serves any PAM on the side it was built for (its ``.pam_build``; 3' without one); a
+    serves any PAM on the side it was built for (_side_serves; 3' without a record); a
     wider one serves only under ``prune`` (--prune-pam) and only a 3' PAM
     (``three_prime``), exactly as the search shell decides. ``guide_len`` is the search's
     guide length: an index built for a shorter guide serves it with fewer bulges, or none
@@ -2174,10 +2175,10 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         # the requested motif, or is all-N of the same width, or -- under --prune-pam
         # and for a 3' PAM only -- all-N and wider: a stored flank of width K serves a
         # shorter 3' PAM by N-padding it, and the engine refuses a shorter 5' PAM.
-        # An index serves only a PAM on the side it was built for, which its .pam_build
-        # records ("<name> <seq_len> <pam_pos>", pam_pos < 0 for 5'); without one, a
-        # dedicated index any, and an all-N one a 3' PAM at widths 3 and 8 or of its own
-        # name (_side_serves).
+        # An index serves only a PAM on the side it was built for, which the header of its
+        # .bin files records (index format 2), else its .pam_build ("<name> <seq_len>
+        # <pam_pos>", pam_pos < 0 for 5'); without either, a dedicated index any, and an
+        # all-N one a 3' PAM at widths 3 and 8 or of its own name (_side_serves).
         # These are the search shell's rules (_resolve_index_dir in
         # PostProcess/submit_job_automated_new_multiple_vcfs.sh); the two must not
         # disagree about the same directory, or the derived default bulges come from
@@ -3786,7 +3787,9 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
     PAM. The sidecar lives inside the index dir, so it travels in the publish
     tarball and download automatically. Non-fatal on any error. An index in place that
     was built for another guide length keeps its record: this PAM file does not describe
-    it (a longer build, which serves a shorter guide: _refuse_short_build stops the rest).
+    it (a longer build, which serves a shorter guide: _refuse_short_build stops the rest);
+    nor is it recorded on one whose .bin headers record the other side of the guide (index
+    format 2: _refuse_other_side_build stops the run first).
     """
     if not os.path.isdir(index_dir):
         return
@@ -3796,6 +3799,9 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
         seq, pos = parts[0], int(parts[1])
         built = index_fit.built_guide_len(index_dir)
         if built and built != len(seq) - abs(pos):
+            return
+        five_prime = index_fit.built_five_prime(index_dir)
+        if five_prime is not None and five_prime != (pos < 0):
             return
         name = os.path.splitext(os.path.basename(pamfile))[0]
         with open(os.path.join(index_dir, ".pam_build"), "w") as fd:
@@ -3818,7 +3824,8 @@ def _write_index_meta(index_dir: str, pamfile: str) -> None:
 
 def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
     """Stops build-index-only when ``index_dir``, an index already in place, was built for
-    the other side of the guide from ``pamfile``, as its ``.pam_build`` records it.
+    the other side of the guide from ``pamfile``, as the header of its .bin files records it
+    (index format 2: CRISPRitz 2.10.0 and later), else as its ``.pam_build`` does.
 
     An index stores its targets on the side where the PAM file it was built from puts the
     PAM, and its name does not say which: of an all-N index, nor of a dedicated one, which
@@ -3826,11 +3833,11 @@ def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
     and records ``pamfile`` on it (_write_pam_build), so recording a 5' file on a 3' build,
     or the reverse, would make a search on its real side refuse it and one on the other
     side search it wrong. The index ``pamfile`` asks for has the same name, so it needs
-    another working directory. An index with no usable ``.pam_build`` records no side to
-    contradict, and is recorded as before -- but for an all-N one of a width but 3 and 8
-    (the published ones, 3' builds), which a search before 2.8.1 built from a 5' PAM file
-    as well as from a 3' one: a 3' file is not recorded on it (a 5' one is, which is what
-    a search tells its user to run).
+    another working directory. An index of format 1 with no usable ``.pam_build`` records
+    no side to contradict, and is recorded as before -- but for an all-N one of a width
+    but 3 and 8 (the published ones, 3' builds), which a search before 2.8.1 built from a
+    5' PAM file as well as from a 3' one: a 3' file is not recorded on it (a 5' one is,
+    which is what a search tells its user to run).
     """
     motif = os.path.basename(index_dir).split("_")[0]
     if not motif or not os.path.isdir(index_dir):
@@ -3840,11 +3847,16 @@ def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
             wanted = int(fh.readline().split()[-1])
     except (OSError, ValueError, IndexError):
         return
-    try:
-        with open(os.path.join(index_dir, ".pam_build")) as fh:
-            built = int(fh.readline().split()[-1])
-    except (OSError, ValueError, IndexError):
-        built = 0
+    five_prime = index_fit.built_five_prime(index_dir)
+    if five_prime is not None:
+        built, where = (-1 if five_prime else 1), "the header of its .bin files"
+    else:
+        where = "its .pam_build"
+        try:
+            with open(os.path.join(index_dir, ".pam_build")) as fh:
+                built = int(fh.readline().split()[-1])
+        except (OSError, ValueError, IndexError):
+            built = 0
     all_n = set(motif) == {"N"}
     if not built:
         if all_n and len(motif) not in (3, 8) and wanted > 0:
@@ -3860,7 +3872,7 @@ def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
         side = {True: "5'", False: "3'"}
         error(
             f"{index_dir} is already there, {'a PAM-less index' if all_n else 'an index'} for "
-            f"a PAM on the {side[built < 0]} side of the guide (as its .pam_build records), and "
+            f"a PAM on the {side[built < 0]} side of the guide (as {where} records), and "
             f"{pamfile} puts the PAM on the {side[wanted < 0]} side. The index for that "
             f"PAM file has the same name: build it in another working directory (--path)."
         )
