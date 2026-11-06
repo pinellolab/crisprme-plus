@@ -567,7 +567,9 @@ def _multi_alt_issue(fname: str, count: int, example: str, scanned: Optional[int
         "add-variants writes it: where the ID column lists one per ALT (rs1;rs2), "
         "the rows of the second ALT name the first's (rs1). A VCF split with "
         "`bcftools norm -m -any`, as the published panels are built, gives each "
-        "ALT a record of its own, holding the line's whole ID column",
+        "ALT a record of its own holding the line's whole ID column: a SNP's rows "
+        "give it whole (rs1;rs2), an indel's its first ID (rs1), as for every "
+        "indel record",
     )
 
 

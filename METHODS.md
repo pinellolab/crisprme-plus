@@ -1220,15 +1220,21 @@ ACTGA (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per sample, genome-wide, HGDP + 
 953 of 1,967 rows of two or more SNPs and 118 of 293 rows of an indel and one or more SNPs
 listed their rsIDs in another order than their variants. The report's MAF, the lowest
 frequency of the list, did not depend on it.
-Every ALT of a VCF line that lists several ALTs is given the line's first ID: CRISPRitz
-`add-variants` writes it for each ALT of the line, in the per-sample dictionary and in the
-indel log, so where the ID column lists one ID per ALT (`rs1;rs2`, as `bcftools norm -m+` and
+An indel row gives its record's first ID, and so does each ALT of a VCF line that lists
+several ALTs: CRISPRitz `add-variants` writes the first ID alone into the indel log for every
+indel record, whatever the number of its ALTs, and into the per-sample dictionary for each
+ALT of a line of several, so no reader of either can recover the others. A SNP of a record of
+one ALT keeps the record's whole ID column, which CRISPRme gives as one item (`rs1;rs2`).
+So where the ID column lists one ID per ALT (`rs1;rs2`, as `bcftools norm -m+` and
 `gnomAD-converter --multiallelic` join them) the rows of the second and later ALTs give the
-first's (`rs1`), and no reader of the dictionary can recover the others. A record of a VCF
-split with `bcftools norm -m -any` keeps the line's whole ID column, which CRISPRme gives its
-ALT as one item (`rs1;rs2`); the published panels are split, and the sites-only (mega)
-registry builder reads one ID per ALT. The input validator says so where it finds such a
-line (in each VCF's first 1,000 records on every run, anywhere with `--full_input_validate`).
+first's (`rs1`); and a record of a VCF split with `bcftools norm -m -any`, as the published
+panels are, keeps the line's whole ID column, which its SNP rows give whole and its indel rows
+by the first ID. The mega's VCF lists two IDs for 68,017 of the 222,283 PASS indel records of
+chr22 (`22:22652455:TTATG:T;rs1372713682`, whose rows give `22:22652455:TTATG:T`), the
+HGDP + 1000 Genomes panel's for 8 of its 240,557; the sites-only (mega) registry builder,
+which names the mega's SNPs, gives each ALT of a line its own ID where the ID column lists one
+per ALT. The input validator says so where it finds a line of several ALTs (in each VCF's
+first 1,000 records on every run, anywhere with `--full_input_validate`).
 The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
 alignments may exceed it (the report surfaces the observed maximum), while an indel row,

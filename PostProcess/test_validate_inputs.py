@@ -1210,7 +1210,10 @@ class TestCheckVcfFullScan(unittest.TestCase):
     def test_a_line_of_several_alts_warns_of_its_ids(self):
         # CRISPRitz add-variants writes a line's first ID for each of its ALTs (in the
         # dictionary and the indel log): the rows of rs2's ALT name rs1. The warning
-        # said nothing of it.
+        # said nothing of it. Split, each ALT's record holds the whole ID column, which
+        # a SNP's rows give whole and an indel's by its first ID alone (the indel log
+        # holds no other, of any indel record): the warning implied that splitting
+        # gives every ALT its line's IDs.
         with tempfile.TemporaryDirectory() as tmp:
             records = [vcf_record(pos=1000, vid="rs1;rs2", ref="A", alt="C,G",
                                   info="AF=0.1,0.05", samples=("1|2",))]
@@ -1220,6 +1223,8 @@ class TestCheckVcfFullScan(unittest.TestCase):
                           issues[0].message)
             self.assertIn("the rows of the second ALT name the first's (rs1)",
                           issues[0].message)
+            self.assertIn("a SNP's rows give it whole (rs1;rs2), an indel's its first ID "
+                          "(rs1), as for every indel record", issues[0].message)
 
     def test_a_line_of_ten_alts_warns_once(self):
         with tempfile.TemporaryDirectory() as tmp:

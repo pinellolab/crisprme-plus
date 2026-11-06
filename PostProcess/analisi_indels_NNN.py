@@ -702,12 +702,12 @@ with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, 
         splitted = entry.strip().split("\t")
         fake_pos = splitted[5].strip().split(",")  # inizio,fine del fakechr
         # start       end fakechr          #pos_vera,samples,rsID,MAF,INDELinfo,start_fake,ref_seq
-        # (an rsID holding ',' -- a VCF ID "rs1;rs2", which CRISPRitz writes "rs1,rs2" --
-        # reads ';', so a row's rsID list keeps one item per variant)
+        # (the rsID is the record's first ID: CRISPRitz add-variants writes no other into
+        # the indel log, whatever the number of ALTs; METHODS section 8)
         INDELS_tree[int(fake_pos[0]) : int(fake_pos[1])] = [
             splitted[0],
             splitted[1],
-            splitted[2].replace(",", ";"),
+            splitted[2],
             splitted[3],
             splitted[4],
             int(fake_pos[0]),
