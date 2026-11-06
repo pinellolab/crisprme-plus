@@ -2011,13 +2011,20 @@ while read vcf_f; do
 		ln -s "$src"/*.bin "$view"/ 2>/dev/null
 		printf '%s' "$view"
 	}
+	# The views are the searches' alone: each goes as its search ends, whether it found
+	# targets or failed. They stayed in the result folder of every search of an index with
+	# a sidecar (a download, and since 2.8.1 every index a search builds: RV3-4, RV3-6).
+	_drop_bin_views() {
+		rm -rf "${output_folder}/.binview"
+	}
 
 	if ! [ -f "$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" ]; then
 		echo -e 'Search Reference Start'  # off-targets search on reference genome
 		if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # bulge-enabled: TST index search
 			idx_ref_view="$(_bin_only_view "$idx_ref")"
 			crispritz.py search "$idx_ref_view" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result --max-edits $max_total_edits $prune_pam_flag \
-				|| { echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
+				|| { _drop_bin_views; echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
+			_drop_bin_views
 		else  # no bulges: brute-force scan of the genome folder this run was given
 			# ($ref_folder, not Genomes/<its name>: a genome kept elsewhere -- an
 			# assembly-search haplotype -- has no folder there, and the engine then
@@ -2039,7 +2046,8 @@ while read vcf_f; do
 			if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ] || ! _enriched_genome_whole; then
 				idx_var_view="$(_bin_only_view "$idx_var")"
 				crispritz.py search "$idx_var_view" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result -var --max-edits $max_total_edits $prune_pam_flag \
-					|| { echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
+					|| { _drop_bin_views; echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
+				_drop_bin_views
 			else  # no bulges: brute-force scan
 				crispritz.py search "$current_working_directory/Genomes/${ref_name}+${vcf_name}/" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result \
 					|| { echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }

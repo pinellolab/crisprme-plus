@@ -226,12 +226,15 @@ from an index of that PAM (see below).
 **One index for many PAMs.** Each index above is built for one PAM, and serves any PAM its
 own holds at every position (an NRR index serves NGG, NAG, NGA, NAA and NRG). A **PAM-less** index instead
 stores the raw genomic flank, so a single index answers any 3′ PAM no longer than that flank.
-In both cases the PAM is applied during the search (`--prune-pam`), which a search does by
-itself when no index of its own PAM is installed, and says so first:
+A dedicated index of a PAM that holds the search's, or a PAM-less one wider than the search's
+PAM, is pruned to it during the search (`--prune-pam`), which a search does by itself when no
+installed index serves it unpruned, and says so first. A PAM-less index as wide as the PAM
+(`NNN_3_hg38` for NGG) serves it unpruned: the search reads it as it is and keeps the targets of
+the PAM after the search, with no note.
 
 ```bash
 crisprme.py complete-search \
-  --pam ./PAMs/20bp-NGG-SpCas9.txt  ...   # from an NRR or a PAM-less index: pruned to NGG
+  --pam ./PAMs/20bp-NGG-SpCas9.txt  ...   # from an NRR or a wider PAM-less index: pruned to NGG
 ```
 
 | Index (`--index-name`) | Flank | Serves | Download |

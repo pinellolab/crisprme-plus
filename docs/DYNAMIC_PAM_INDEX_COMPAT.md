@@ -130,12 +130,17 @@ at a separate HF repo and require CRISPRitz ≥ `<X>` and CRISPRme ≥ `<Y>`.*
 ## 8. Web PAM picker (2.9.0, with the differences below)
 2.9.0 ships this picker (`pages_utils.ENZYME_TABLE`, `pamless_presets`, `pamless_pam_problem`)
 for the widest all-N index installed for the genome or dataset selected, with these differences:
-the guide length and side come from the index name, `.pam_build` and the trees (`.bin`), not
-from a sidecar; a preset is offered only for the index's own guide length (a 21-nt SaCas9 guide,
-which a 20-nt index serves at up to 1 bulge of each type, is listed as not on this index); a 5′
-PAM only as long as the flank; the custom field shows no site count; "Use this PAM" writes the
-PAM file into `PAMs/` and selects it in the form's PAM list, and the search prunes by itself, so
-no flag is passed; the recommended preset is SpCas9 NRR (the default PAM), not NGG.
+the guide length and side come from the index name (a name of the 2.9.0 form says both), else
+its `.pam_build`, else a PAM file installed for its motif, else a 3′ build for a 20-nt guide is
+assumed, as every published PAM-less index is (`pages_utils.index_build_pam`; no
+`index_meta.json` and no tree is read); a preset is offered only for the index's own guide
+length (a 21-nt SaCas9 guide, which a 20-nt index serves at up to 1 bulge of each type, is
+listed as not on this index); a 5′ PAM only as long as the flank; the custom field shows no
+site count; "Use this PAM" writes the PAM file into `PAMs/` and selects it in the form's PAM
+list (on a server online, which writes nothing into the data folder, as Settings does not, it
+selects the PAM file installed for that PAM and refuses one with none), and the search prunes
+by itself, so no flag is passed; the recommended preset is SpCas9 NRR (the default PAM), not
+NGG.
 
 The design, as written before it shipped:
 Legacy per-PAM indexes keep the **existing flat dropdown** (the `guidelen-PAM-enzyme` list)

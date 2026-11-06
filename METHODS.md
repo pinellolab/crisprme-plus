@@ -1435,13 +1435,14 @@ A longer build serves a shorter guide, but, like any deeper index, it does not h
 next to an N run or a contig end that a shallower one does.
 
 **Limits.** The web interface never passes `--prune-pam` itself; its searches prune by
-themselves as above. (Before 2.9.0 the flag also required `--index-path`.) (Its PAM picker prefers a PAM whose geometry matches the
-installed index, but falls back to offering every PAM when none matches, so it does not
-itself prevent an unusable pairing: the search takes a wider all-`N` index for a 3′ PAM only
-pruned, which it then does by itself, and never one built for the other side, and when no
-index serves it and neither the dataset's VCFs nor its enriched genome are there to build one,
-it stops with an ERROR that names what was asked, the variant indexes installed and what to
-do.) A shorter PAM
+themselves as above. (Before 2.9.0 the flag also required `--index-path`.) (Its PAM list
+prefers a PAM whose geometry matches the installed index, but falls back to offering every PAM
+when none matches, so it does not itself prevent an unusable pairing; the PAM picker of a
+PAM-less index offers only the PAMs that index serves. The search takes a wider all-`N` index
+for a 3′ PAM only pruned, which it then does by itself, and never one built for the other side,
+and when no index serves it and neither the dataset's VCFs nor its enriched genome are there to
+build one, it stops with an ERROR that names what was asked, the variant indexes installed and
+what to do.) A shorter PAM
 off a wider flank is supported for a 3′ PAM only; for a 5′ PAM the engine requires the flank width to equal the
 PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its
 `.pam_build` records (above). The published

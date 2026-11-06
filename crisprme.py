@@ -2153,9 +2153,11 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
     when only such an index serves it (_prune_on_its_own), so complete-search passes
     ``prune`` for the bulges it can reach. ``guide_len`` is the search's
     guide length: an index built for a shorter guide serves it with fewer bulges, or none
-    (index_fit). ``index_path`` is the search's --index-path, a library looked at beside
-    the working directory's; ``genomedir`` its --genome folder, wherever it is, whose FASTA
-    files make a reference index buildable (Genomes/<genome> without one).
+    (index_fit). ``index_path`` is the search's --index-path: the library a search reads its
+    reference index from in place of the working directory's, and a variant index from
+    beside it (the search script's ref_lib and _variant_index); ``genomedir`` its --genome
+    folder, wherever it is, whose FASTA files make a reference index buildable
+    (Genomes/<genome> without one).
 
     The REFERENCE and VARIANT terms are ASYMMETRIC:
       * REFERENCE: the larger of the installed reference index depth and -- when the raw
@@ -2165,6 +2167,10 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         mkdir lock). This is the fix for the dict-less bug where a variant tarball ships no
         reference index, so a fresh-install variant complete-search silently derived 0
         bulges even though the raw genome IS shipped and a bmax=2 reference is buildable.
+        Not under --index-path, whose library alone a search reads the reference index
+        from, and never builds into: there it stops when the library holds none, so a
+        default of 1 bulge from an index it would not build stopped the search (plan 4.8
+        RV2-5).
       * VARIANT: STRICTLY the installed variant index (index_max_bulges(...,dataset)); a
         variant/indel index can NOT be built dict-less (its source VCFs are not shipped),
         so this term is never relaxed to a buildable ceiling.
@@ -2174,9 +2180,9 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
     error -> 0.
     """
     try:
-        libs = [os.path.join(current_working_directory, "genome_library")]
-        if index_path and index_path != "_":
-            libs.append(index_path)
+        given = bool(index_path) and index_path != "_"
+        ref_libs = ([index_path] if given
+                    else [os.path.join(current_working_directory, "genome_library")])
         if not motif or not genome:
             return 0
         # A directory is <PAM>_<N>_<genome>. It serves this search when its PAM is
@@ -2200,7 +2206,8 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
 
         def _scan(want_plus: bool) -> int:
             best = 0
-            for lib in libs:
+            for lib in (_variant_libraries(index_path if given else "_") if want_plus
+                        else ref_libs):
                 for d in _listdir(lib):
                     if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
                         continue
@@ -2218,12 +2225,13 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
                         index_fit.built_guide_len(os.path.join(lib, d)), n, guide_len))
             return best
 
-        # REFERENCE term: installed reference index OR buildable-from-raw-genome ceiling.
+        # REFERENCE term: installed reference index OR buildable-from-raw-genome ceiling
+        # (none under --index-path: a search builds no index into that library).
         ref_installed = _scan(want_plus=False)
         raw = genomedir or os.path.join(current_working_directory, "Genomes", genome)
         ref_buildable = 0
         try:
-            if os.path.isdir(raw) and any(
+            if not given and os.path.isdir(raw) and any(
                 f.endswith((".fa", ".fasta")) for f in os.listdir(raw)
             ):
                 ref_buildable = MAX_BULGES - 1
@@ -3070,12 +3078,19 @@ def complete_search() -> None:
             bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
     if _no_bulges_reached:
         # A 0-bulge search reports a site that needs a bulge at its next best alignment, or
-        # not at all, and the rest of the run reads as any other: never silently.
+        # not at all, and the rest of the run reads as any other: never silently. Under
+        # --index-path a search builds no reference index (its library alone serves one).
+        if index_path != "_":
+            advice = (f"Install an index of it in that library (crisprme.py download --what "
+                      f"index, or crisprme.py build-index-only), or run without --index-path, "
+                      f"where a search with --bDNA/--bRNA builds one from the genome")
+        else:
+            advice = "Pass --bDNA/--bRNA explicitly (a search builds an index it can build)"
         print(
             f"WARNING [complete-search]: no --bDNA/--bRNA given, and no index this search can "
-            f"use holds bulges for PAM {pam_char} on {genome_ref}: searching with NO bulges, so "
-            f"bulged off-targets are not reported. Pass --bDNA/--bRNA explicitly (a search builds "
-            f"an index it can build).",
+            f"use holds bulges for PAM {pam_char} on {genome_ref}"
+            + (f" in --index-path {index_path}" if index_path != "_" else "")
+            + f": searching with NO bulges, so bulged off-targets are not reported. {advice}.",
             flush=True,
         )
     # [max-total-edits] Surface the silent combined-edit prune (issue #107): when the

@@ -55,7 +55,8 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   `docs/install.ps1`), the Docker Quickstart, the web user guide, the CLI guide,
   PRECOMPUTED_INDEXES, METHODS, the Hugging Face cards, RELEASE_CHECKLIST's default-index gate, the
   help of `download`, `setup` and `complete-test`, complete-test's advice when no index is
-  installed, and the advice of a search and of the report to download a tiered index.
+  installed, the advice of a search and of the report to download a tiered index, and the notes
+  of the panel build recipes (`seq_script/merge_panels/`) and of the paper's dataset table.
   complete-test's smoke searches a PAM-less 8-nt-flank index for NRR (it searched it for NRG). The
   NRG and NGG indexes stay published and searchable. What it costs: the default install is a ~70 GB
   download (it was ~45 GB) and takes ~150 GB on disk (it took ~98 GB; measured 150,048,109,201
@@ -143,8 +144,11 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   those it does not serve disabled with the reason, and a field for a PAM of one's own, checked when
   the field is left. "Use this PAM" writes that PAM's file into `PAMs/` and selects it; the search
   prunes the index to it by itself. Only a PAM the index serves, and a nuclease of the table, is
-  written. Covered by `PostProcess/test_defaults_and_index_flex.py` and
-  `PostProcess/test_web_bulge_notes.py` (in the image).
+  written. A server online writes nothing into the data folder, as its Settings page does not:
+  there the picker selects the PAM file installed for the PAM, whatever its name, offers only the
+  nucleases whose PAM file is installed, and says that it adds none for any other. Covered by
+  `PostProcess/test_defaults_and_index_flex.py` and `PostProcess/test_web_bulge_notes.py` (in the
+  image).
 
 ### Fixed
 
@@ -277,3 +281,21 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   and the release checklist still run them as scripts too.
 - **Four web test modules skip their classes where Dash is not installed.** They raised SkipTest
   at import, which `python -m unittest <module>` reports as a traceback and an error (skips D7).
+- **With no `--bDNA`/`--bRNA`, a search under `--index-path` takes the bulges that library
+  serves.** complete-search chose 1 bulge of each type when the genome's FASTA files were there
+  to build a reference index from, or the working directory's library held one, though under
+  `--index-path` a search reads the reference index from that library alone and builds none
+  there: given a library with no index of the PAM, it then stopped on `no matching reference index
+  under --index-path` (plan 4.8 RV2-5). It searches with no bulges, which needs no index, and its
+  WARNING says to install an index of the PAM in that library, or to run without
+  `--index-path`.
+- **A search leaves no hidden `.binview/` folder in its results.** The engine reads an index
+  folder that holds `.bin` files alone, so a search hands it a folder of links to the trees of an
+  index with a sidecar (a download's, and since 2.8.1 every index a search or `build-index-only`
+  builds), which stayed in the result folder (RV3-4, RV3-6). It goes as each search ends, whether
+  the search found targets or failed.
+- **Submit makes no job folder for base-editing values the form does not offer.** With base
+  editing on, a window bound that is no whole number, or a nucleotide that is no base, was refused
+  (by `int()` and an `assert`) only after the job folder and its files were made, so each such
+  request left a folder that never ran, as a Max edits value did before 2.8.1 (secfu RV1-N1). The
+  values are checked with the others, first.

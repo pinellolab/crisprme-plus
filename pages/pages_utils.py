@@ -1851,18 +1851,37 @@ def pamless_pam_problem(pam: str, geometry: Dict, guide_len: Optional[int] = Non
     return None
 
 
-def pamless_presets(geometry: Dict) -> List[Dict]:
+def pamless_presets(geometry: Dict, installed_only: bool = False) -> List[Dict]:
     """The picker's options for the PAM-less index of ``geometry``: each ENZYME_TABLE entry,
-    the recommended ones first, those the index cannot serve disabled, with the reason."""
+    the recommended ones first, those the index cannot serve disabled, with the reason; with
+    ``installed_only`` (a server online, which adds no PAM file), those whose PAM file is not
+    installed too (installed_pam_file)."""
     options = []
     for entry in sorted(ENZYME_TABLE, key=lambda e: not e["recommended"]):
         why = pamless_pam_problem(entry["pam"], geometry, entry["guide_len"], entry["side"])
+        if not why and installed_only and installed_pam_file(entry["pam"], geometry) is None:
+            why = "no PAM file of it on this server, which adds none online"
         options.append({
             "label": entry["label"] + (f" -- not on this index: {why}" if why else ""),
             "value": f"{entry['enzyme']}:{entry['pam']}",
             "disabled": bool(why),
         })
     return options
+
+
+def installed_pam_file(pam: str, geometry: Dict) -> Optional[str]:
+    """The installed PAM file (its name, the search form's value) of ``pam`` for the guide
+    length and the side of the PAM-less index of ``geometry`` -- the motif and geometry
+    write_pamless_pam_file writes, whatever the file is named -- or None where there is
+    none."""
+    pam = (pam or "").strip().upper()
+    seq_len = geometry["guide_len"] + len(pam)
+    pos = len(pam) if geometry["side"] == 3 else -len(pam)
+    for option in get_available_PAM():
+        if (pam_motif(option["value"]) == pam
+                and pam_geometry(option["value"]) == (seq_len, pos)):
+            return option["value"]
+    return None
 
 
 def write_pamless_pam_file(pam: str, geometry: Dict, enzyme: str = "Custom") -> str:

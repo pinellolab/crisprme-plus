@@ -32,6 +32,7 @@ from .pages_utils import (
     pamless_index_geometry,
     pamless_pam_problem,
     pamless_presets,
+    installed_pam_file,
     write_pamless_pam_file,
     ENZYME_TABLE,
     pam_motif,
@@ -1181,7 +1182,7 @@ def change_url(
     # with any values, which name the folders and files the search reads and go into its
     # command line (and its steps' shell commands): only what the form offers runs.
     if not _launchable(genome_selected, pam, variant_choice, mms, dna, rna, max_edits_val,
-                       advanced_open):
+                       advanced_open, (radio_be_value, be_start, be_stop, be_nt)):
         raise PreventUpdate
     mms = int(mms)
     # job start
@@ -1463,19 +1464,8 @@ def change_url(
     max_bulges = max(dna, rna) + 1
     assert isinstance(dna, int)
     assert isinstance(rna, int)
-    # base editing
-    if be_start is None or not bool(be_start) or radio_be_value == "N":
-        be_start = 1
-    else:
-        be_start = int(be_start)
-    if be_stop is None or not bool(be_stop) or radio_be_value == "N":
-        be_stop = 0
-    else:
-        be_stop = int(be_stop)
-    if be_nt is None or not bool(be_nt) or radio_be_value == "N":
-        be_nt = "none"
-    else:
-        assert be_nt in DNA_ALPHABET
+    # base editing (_launchable took the values before the job folder was made)
+    be_start, be_stop, be_nt = _base_editing(radio_be_value, be_start, be_stop, be_nt)
     assert isinstance(be_start, int)
     assert isinstance(be_stop, int)
     assert isinstance(be_nt, str)
@@ -1956,14 +1946,39 @@ def _notification_entry(address: str, job_id: str) -> str:
     return f"{address}\n{base}/load?job={job_id}\n{date}\n"
 
 
+def _base_editing(radio_be_value, be_start, be_stop,
+                  be_nt) -> Optional[Tuple[int, int, str]]:
+    """The base-editing window and nucleotide change_url hands the search: 1, 0 and "none"
+    with base editing off ("N") or for a value not given, else a window bound as a whole
+    number and a nucleotide of DNA_ALPHABET, as the form's dropdowns offer them; None for
+    a value they do not offer."""
+    if radio_be_value == "N":
+        return 1, 0, "none"
+    start = _form_number(be_start, 0, _BE_WINDOW_MAX) if be_start else 1
+    stop = _form_number(be_stop, 0, _BE_WINDOW_MAX) if be_stop else 0
+    if start is None or stop is None or (be_nt and be_nt not in DNA_ALPHABET):
+        return None
+    return start, stop, be_nt or "none"
+
+
+# The highest window position the base-editing dropdowns offer: a guide's length (the
+# longest guide a PAM file of the form names is far shorter).
+_BE_WINDOW_MAX = 1000
+
+
 def _launchable(genome: Optional[str], pam: Optional[str], variant_choice: Optional[str],
-                mms, dna, rna, max_edits, advanced_open) -> bool:
+                mms, dna, rna, max_edits, advanced_open,
+                base_editing=("N", None, None, None)) -> bool:
     """Whether change_url runs a search of these values: a genome and a PAM the form
     offers (installed), "ref" or a variant dataset it offers for the genome, whole
     numbers of mismatches and bulges, and, where the Max edits slider governs (Advanced
-    closed), no value or a whole number of the slider's range (_max_edits_offered).
-    change_url asks it before it makes the job folder: the Max edits value was converted
-    only after that, and one int() refused left a folder that never ran."""
+    closed), no value or a whole number of the slider's range (_max_edits_offered), and
+    base-editing values the form offers (_base_editing: the radio, the window's start and
+    stop, the nucleotide). change_url asks it before it makes the job folder: the Max
+    edits and the base-editing values were converted only after that, and one int()
+    refused left a folder that never ran."""
+    if _base_editing(*base_editing) is None:
+        return False
     if genome not in [g["value"] for g in get_available_genomes()]:
         return False
     if pam not in [p["value"] for p in get_available_PAM()]:
@@ -3056,8 +3071,11 @@ def update_pamless_picker(genome, variant_choice):
             f"{geometry['guide_len']}-nt guide up to {geometry['k']} nt"
             + (" (as long as its flank, for a 5' PAM)" if geometry["side"] == 5 else "")
             + ", pruned to it by the search (slower than an index of that PAM). Pick one by "
-            "enzyme, or type it, then Use this PAM.")
-    return {"display": "block", "width": "300px"}, note, pamless_presets(geometry)
+            "enzyme, or type it, then Use this PAM."
+            + (" This server runs online and adds no PAM file: a PAM is used only where "
+               "its file is installed." if ONLINE else ""))
+    return ({"display": "block", "width": "300px"}, note,
+            pamless_presets(geometry, installed_only=ONLINE))
 
 
 @app.callback(
@@ -3075,8 +3093,18 @@ def validate_pamless_custom_pam(custom_pam, genome, variant_choice):
     why = pamless_pam_problem(custom_pam, geometry)
     if why:
         return html.Span(f"Not on this index: {why}.", style={"color": "#c33"})
+    if ONLINE and installed_pam_file(custom_pam, geometry) is None:
+        return html.Span(_NO_PAM_FILE_ONLINE.format(pam=custom_pam.strip().upper()),
+                         style={"color": "#c33"})
     return html.Span(f"{custom_pam.strip().upper()}: served by {geometry['name']}.",
                      style={"color": "#2a6"})
+
+
+# What the picker says online of a PAM whose file is not installed: Settings changes nothing
+# of the data folder online (add_pam), and neither does the picker.
+_NO_PAM_FILE_ONLINE = ("{pam}: no PAM file of it is installed, and this server adds none (it "
+                       "runs online). Pick a PAM of the PAM list, or search {pam} with a "
+                       "CRISPRme of your own.")
 
 
 @app.callback(
@@ -3099,7 +3127,9 @@ def use_pamless_pam(n_clicks, preset, custom_pam, genome, variant_choice):
     the PAM-less index's guide length and side into PAMs/ (write_pamless_pam_file, unless
     one of that name is there), and selects it in the PAM list, where the search takes it
     as any other. Only a PAM the index serves (pamless_pam_problem) and an enzyme of the
-    table are written: what the request names otherwise runs nothing."""
+    table are written: what the request names otherwise runs nothing. Online, where
+    Settings changes nothing of the data folder (add_pam), nothing is written: the PAM
+    file installed for that PAM is selected, where there is one (installed_pam_file)."""
     geometry = pamless_index_geometry(genome, variant_choice)
     if not n_clicks or not geometry:
         raise PreventUpdate
@@ -3116,6 +3146,13 @@ def use_pamless_pam(n_clicks, preset, custom_pam, genome, variant_choice):
     if why:
         return (no_update, no_update,
                 html.Span(f"Not on this index: {why}.", style={"color": "#c33"}))
+    if ONLINE:
+        name = installed_pam_file(pam, geometry)
+        if name is None:
+            return (no_update, no_update,
+                    html.Span(_NO_PAM_FILE_ONLINE.format(pam=pam), style={"color": "#c33"}))
+        return (get_pam_options(genome, variant_choice), name,
+                html.Span(f"{pam} selected ({name}).", style={"color": "#2a6"}))
     name = write_pamless_pam_file(pam, geometry, enzyme)
     return (get_pam_options(genome, variant_choice), name,
             html.Span(f"{pam} added to the PAM list and selected.", style={"color": "#2a6"}))

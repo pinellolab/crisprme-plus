@@ -119,6 +119,30 @@ class TheDefaultIsNRR(unittest.TestCase):
                     if "--index-name NRG_3_hg38+hg38_HGDP1kGP" in line:
                         self.fail(f"{path} still recommends the NRG index: {line.strip()}")
 
+    def test_no_surface_calls_the_nrg_index_the_default(self):
+        # the build recipes' notes and the paper's table still named NRG the default
+        for path, gone in (
+                ("seq_script/merge_panels/README.md",
+                 "default is the re-phased `NRG_3_hg38+hg38_HGDP1kGP`"),
+                ("seq_script/merge_panels/README.md",
+                 "The current shipped default (`NRG_3_hg38+hg38_HGDP1kGP`)"),
+                ("seq_script/merge_panels/README.md",
+                 "`NRG_3_hg38+hg38_HGDP1kGP`** (4,091 samples = 925 HGDP + 3,166 1000 Genomes), "
+                 "which is the current **recommended variant default**"),
+                ("seq_script/merge_panels/hgdp1kgp_build.sh",
+                 'the DEFAULT "real-haplotypes" variant index NRG_3_hg38+hg38_HGDP1kGP'),
+                ("seq_script/merge_panels/onekg2021_build.sh",
+                 "default is the SHAPEIT5 re-phased NRG_3_hg38+hg38_HGDP1kGP"),
+                ("paper/reproducibility/variant-datasets/README.md",
+                 "`NRG_3_hg38+hg38_HGDP1kGP` *(default)*"),
+                ("test/web/test_variant_dropdown.py",
+                 "`NRG_3_hg38+hg38_HGDP1kGP`, the current default")):
+            with self.subTest(path=path, gone=gone[:40]):
+                # (the text of the lines, without a comment's "#" or a quote's ">")
+                text = " ".join(line.lstrip("#> \t")
+                                for line in (_REPO / path).read_text().splitlines())
+                self.assertNotIn(gone, " ".join(text.split()))
+
     def test_the_one_click_installers_download_the_nrr_index(self):
         # the route the README and the website call the easiest
         for path in ("docs/install.sh", "docs/install.ps1"):
@@ -246,6 +270,40 @@ class ASearchWithNoBulgesBuildsNoIndex(tir._ShippedScript):
         run = self.run_pipeline(bulges=1)
         self.assertEqual([c[1] for c in run.builds if c[1] in ("hg38", f"hg38+{self.VCF}")],
                          ["hg38", f"hg38+{self.VCF}"])
+
+
+@unittest.skipUnless(shutil.which("python") and tir._gnu_realpath(),
+                     "runs the shipped search script as the image does (GNU realpath)")
+class ASearchLeavesNoViewOfItsIndexes(tir._ShippedScript):
+    """The engine searches an index folder that holds .bin files alone, so a search hands it
+    a view of an index with a sidecar (.pam_build: a download, and every index a search or
+    build-index-only builds): links to its .bin files, in <output>/.binview/. The view stayed
+    in the result folder (RV3-4, RV3-6): it goes as the search ends, found what it may or
+    failed."""
+
+    def sidecars(self, *names):
+        for name in names:
+            (self.library / name / ".pam_build").write_text("20bp-NRG-SpCas9 23 3\n")
+
+    def test_a_search_that_goes_on(self):
+        self.install("NRG_3", variant=False)
+        self.sidecars("NRG_3_hg38")
+        run = self.run_pipeline(variant=False, env={"STUB_FINDS_NOTHING": "1"})
+        self.assertIn("Search Reference completed", run.stdout)
+        searched = next(c for c in run.calls if c[0] == "search")[1]
+        self.assertEqual(Path(searched).parent.name, ".binview")  # (it was given the view)
+        self.assertFalse((self.root / f"run{self.runs}" / "out" / ".binview").exists())
+
+    def test_searches_that_fail(self):
+        self.install("NRG_3")
+        self.sidecars("NRG_3_hg38", f"NRG_3_hg38+{self.VCF}")
+        for last in ("reference", "variant"):  # (the stub fails the run's last search)
+            with self.subTest(last=last):
+                run = self.run_pipeline(variant=last == "variant")
+                self.assertIn(f"ERROR: Off-targets search {last.title()} failed", run.stderr)
+                searched = [c for c in run.calls if c[0] == "search"][-1][1]
+                self.assertEqual(Path(searched).parent.name, ".binview")
+                self.assertFalse((self.root / f"run{self.runs}" / "out" / ".binview").exists())
 
 
 def index_fit_pam(name):
@@ -1223,11 +1281,22 @@ class TheDesignDocSaysWhatShips(unittest.TestCase):
     def test_no_sentence_says_what_2_9_0_no_longer_does(self):
         # one index for one PAM (an NRG index serves NGG pruned), no all-N index of another
         # width without the flag (a search prunes by itself), every PAM no index serves
-        # refused (a search builds one where it can)
+        # refused (a search builds one where it can); and what 2.9.0 does not do: the picker
+        # reads no tree (its geometry is index_build_pam's), an all-N index as wide as the PAM
+        # serves unpruned, with no note, and the PAM list is what offers every PAM
         for doc, gone in (("METHODS.md", "One index therefore answers one PAM"),
                           ("METHODS.md", "does not take an all-`N` index of another"),
                           ("docs/DYNAMIC_PAM_INDEX_COMPAT.md",
-                           "A PAM no installed index serves is refused")):
+                           "A PAM no installed index serves is refused"),
+                          ("docs/DYNAMIC_PAM_INDEX_COMPAT.md",
+                           "`.pam_build` and the trees (`.bin`)"),
+                          ("README.md", "which a search does by itself when no index of its "
+                                        "own PAM is installed"),
+                          ("README.md", "from an NRR or a PAM-less index: pruned to NGG"),
+                          ("docs/DOCKER_QUICKSTART.md", "a search prunes an index to its PAM "
+                                                        "by itself when no index of that PAM "
+                                                        "is installed"),
+                          ("METHODS.md", "(Its PAM picker prefers a PAM whose geometry")):
             with self.subTest(doc=doc, gone=gone):
                 self.assertNotIn(gone, " ".join((_REPO / doc).read_text().split()))
 

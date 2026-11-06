@@ -714,6 +714,47 @@ class TestThePamPickerOfAPamLessIndex(_Install):
             with self.subTest(preset=forged), self.assertRaises(PreventUpdate):
                 mp.use_pamless_pam(1, forged, None, "hg38", "ref")
 
+    def test_online_it_writes_no_pam_file_and_selects_an_installed_one(self):
+        # Settings changes nothing of the data folder on a server online (add_pam); Use this
+        # PAM wrote a PAM file into PAMs/ all the same, one a request, which every visitor's
+        # PAM list then showed
+        self.index("NNNNNNNN_3_hg38")
+        pams = os.path.join(self.tmp, "PAMs")
+        with open(os.path.join(pams, "20bp-NGG-SpCas9.txt"), "w") as fh:
+            fh.write("N" * 20 + "NGG 3\n")
+        with open(os.path.join(pams, "21bp-NGN-Other.txt"), "w") as fh:  # another guide length
+            fh.write("N" * 21 + "NGN 3\n")
+        before = sorted(os.listdir(pams))
+        with patch.object(mp, "ONLINE", True), patch.object(sp, "ONLINE", True):
+            for preset, typed in ((None, "NGNN"), (None, "NGNA"), (None, "NAAAAAAA"),
+                                  (None, "RYRYRYRY"), (None, "NGN"), ("SpG:NGN", None)):
+                with self.subTest(preset=preset, typed=typed):
+                    out = mp.use_pamless_pam(1, preset, typed, "hg38", "ref")
+                    self.assertIs(out[1], no_update)
+                    self.assertIn("this server adds none (it runs online)", out[2].children)
+            self.assertEqual(sorted(os.listdir(pams)), before)
+            # a PAM whose file is installed, typed or by enzyme, under whatever name
+            for preset, typed in ((None, "ngg"), ("SpCas9:NGG", None), (None, "NRG")):
+                with self.subTest(preset=preset, typed=typed):
+                    options, value, said = mp.use_pamless_pam(1, preset, typed, "hg38", "ref")
+                    want = "20bp-NGG-SpCas9" if (typed or preset).upper().endswith("NGG") \
+                        else PAM
+                    self.assertEqual(value, want)
+                    self.assertIn(want, [o["value"] for o in options])
+            self.assertEqual(sorted(os.listdir(pams)), before)
+            # the presets offer what is installed, and the typed field says the same
+            _style, note, options = mp.update_pamless_picker("hg38", "ref")
+            self.assertIn("This server runs online and adds no PAM file", note)
+            offered = {o["value"] for o in options if not o["disabled"]}
+            self.assertEqual(offered, {"SpCas9:NRG", "SpCas9:NGG"})
+            self.assertIn("this server adds none",
+                          mp.validate_pamless_custom_pam("NGNA", "hg38", "ref").children)
+            self.assertIn("NGG: served by NNNNNNNN_3_hg38",
+                          mp.validate_pamless_custom_pam("NGG", "hg38", "ref").children)
+        # locally, as before
+        _options, value, _said = mp.use_pamless_pam(1, None, "NGNA", "hg38", "ref")
+        self.assertEqual(value, "20bp-NGNA-Custom")
+
 
 @_NEEDS_DASH
 class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):

@@ -290,6 +290,27 @@ class TestCliBulgeCap(unittest.TestCase):
         self.assertEqual(cap(_MOTIF, _REF, is_variant=True, index_path=shared), 1)
         self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path="_"), 0)
 
+    def test_under_index_path_that_library_alone_serves_the_reference_and_none_is_built(self):
+        """Under --index-path a search reads the reference index from that library alone and
+        builds none (it stops when the library holds none): a raw genome, or a reference
+        index of the working directory's library, gave a default of 1 bulge to a search that
+        then stopped on 'no matching reference index under --index-path' (plan 4.8 RV2-5)."""
+        shared = os.path.join(self.root, "shared")
+        os.makedirs(shared)
+        _mkfile(os.path.join(self.root, "Genomes", _REF, "chr22.fa"), ">chr22\nA\n")
+        _mkfile(os.path.join(self.root, "genome_library", f"{_MOTIF}_3_{_REF}",
+                             "TSTgenome.NRG.bin"))
+        _mkfile(os.path.join(self.root, "genome_library", f"{_MOTIF}_3_{_REF}+{_VCF}",
+                             "TSTgenome.NRG.bin"))
+        cap = crisprme._installed_index_bulge_cap
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False), 2)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path=shared), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=True, index_path=shared), 0)
+        # the library's own reference index serves; a variant index is read from either
+        _mkfile(os.path.join(shared, f"{_MOTIF}_2_{_REF}", "TSTgenome.NRG.bin"))
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path=shared), 1)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=True, index_path=shared), 1)
+
     def test_a_wider_pamless_index_at_index_path_counts_under_prune(self):
         shared = os.path.join(self.root, "shared")
         _mkfile(os.path.join(shared, f"NNNNNNNN_3_{_REF}", "TSTgenome.N.bin"))

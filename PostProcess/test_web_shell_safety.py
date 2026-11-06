@@ -478,6 +478,40 @@ class TestSearchLaunch(_WebFolder):
                 self.assertEqual(self.jobs(), [])
         self.assertNothingRun()
 
+    def test_base_editing_values_are_the_form_s_before_anything_is_written(self):
+        # with base editing on, int() refused a window bound that is no number, and an
+        # assert a nucleotide that is no base, only after the job folder and its files were
+        # made: each such request left a folder that never ran (secfu RV1-N1)
+
+        def submit(start, stop, nt, radio="Y", name=None):
+            return mp.change_url(1, "http://127.0.0.1:8080/index", "hg38", "ref", PAM, "IP",
+                                 "CTAACAGTTGCTTTTATCAC", 4, 1, 1, radio, start, stop, nt,
+                                 [], None, name, 6, True, "population-level", [])
+
+        for start, stop, nt in (("x", 5, "A"), (1, "5;touch${IFS}MARK_h;#", "A"), (1, 5, "Z"),
+                                ([1], 5, "A"), (1.5, 5, "A"), (1, 5, ["A"]), (-1, 5, "A"),
+                                ("1" * 5000, 5, "A")):
+            with self.subTest(start=str(start)[:30], stop=stop, nt=nt):
+                with self.assertRaises(PreventUpdate):
+                    submit(start, stop, nt)
+                self.assertEqual(self.pool.submit.call_count, 0)
+                self.assertEqual(self.jobs(), [])
+        self.assertNothingRun()
+        # the form's values, and base editing off whatever the dropdowns hold, as before
+        for i, (start, stop, nt, radio, want) in enumerate((
+                (4, 8, "A", "Y", ("A", "4", "8")), ("4", "8", "T", "Y", ("T", "4", "8")),
+                (None, None, None, "Y", ("none", "1", "0")),
+                ("x", "y", "Z", "N", ("none", "1", "0")))):
+            with self.subTest(start=start, stop=stop, nt=nt, radio=radio):
+                submit(start, stop, nt, radio, name=f"be{i}")
+                self.assertEqual(self.pool.submit.call_count, 1)
+                self.pool.reset_mock()
+                (job,) = [j for j in self.jobs() if j.startswith(f"be{i}_")]
+                with open(os.path.join(self.data, "Results", job, ".Params.txt")) as fh:
+                    params = dict(line.rstrip("\n").split("\t", 1) for line in fh)
+                self.assertEqual((params["BE_nucleotide"], params["BE_start"],
+                                  params["BE_stop"]), want)
+
     def test_max_edits_is_a_whole_number_of_the_slider_s_range_before_anything_is_written(self):
         # with Advanced options closed the Max edits slider governs, and int() refused a
         # value that is not a number only after the job folder and its files were made:

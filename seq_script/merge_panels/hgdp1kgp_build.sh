@@ -1,6 +1,8 @@
 #!/bin/bash
 # gnomAD HGDP+1kGP RE-PHASED single-source, PHASED variant-index build (as-run, resumable) —
-# the DEFAULT "real-haplotypes" variant index NRG_3_hg38+hg38_HGDP1kGP.
+# the "real-haplotypes" variant index NRG_3_hg38+hg38_HGDP1kGP, the default before 2.9.0. The
+# default since 2.9.0, NRR_3_hg38+hg38_HGDP1kGP, is the same build with the NRR PAM
+# (PAM=<data folder>/PAMs/20bp-NRR-SpCas9.txt; the index then says NRR where this says NRG).
 #
 # WHAT THIS IS: a standard CRISPRme variant-aware index built by ENRICHING hg38 with the gnomAD
 # v3.1.2 HGDP+1kGP jointly-called callset, RE-PHASED by us with SHAPEIT5 (phase_common scaffold
