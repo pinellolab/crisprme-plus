@@ -89,7 +89,7 @@ Some releases before 2.7.10 printed this at the start of a search:
 > bulges. This combination can crash the underlying search engine (issue #105 ...)`
 
 CRISPRme+ no longer prints it. The crash it warned about was fixed in CRISPRitz 2.7.1,
-and every supported install pins a later CRISPRitz (2.9.1 for CRISPRme+ 2.8.1). Only if
+and every supported install pins a later CRISPRitz (2.10.0 for CRISPRme+ 2.9.0). Only if
 you run CRISPRme against an older, unpinned CRISPRitz and a search **aborts with a memory
 error** while using a degenerate PAM (`NRG`, `NNN`, …) *with* bulges, either:
 

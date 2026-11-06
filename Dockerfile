@@ -30,7 +30,7 @@ FROM mambaorg/micromamba
 
 LABEL org.opencontainers.image.authors="ManuelTgn, lucapinello"
 
-ARG crispritz_ref=v2.9.1
+ARG crispritz_ref=v2.10.0
 ENV SHELL=bash
 ENV PREFIX=/opt/conda
 # Quiet the noisy-but-harmless startup warnings so a clean copy-paste run shows no

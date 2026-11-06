@@ -86,6 +86,13 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
   archive's manifest, and `download` says which format an archive is in.
 
 ### Changed
+- **The image and `install_from_source.sh` build CRISPRitz 2.10.0, and the Bioconda recipe pins
+  `crispritz >=2.10.0,<2.11.0`.** CRISPRitz 2.10.0 writes index format 2, codes every allele of a
+  split multi-allelic site (the four-allele symbol Q where they cover A, C, G and T) and reads
+  every record's `AF` (its CHANGELOG). The pin is the Dockerfile's `ARG crispritz_ref`, which
+  `install_from_source.sh`'s `CRISPRITZ_REF` default equals; the recipe's bound keeps out a later
+  minor CRISPRitz, which may change the index format or the enricher again (2.8.1's was
+  `>=2.9.1,<2.9.2`).
 - **The check that an index is whole follows the index format it was built in.**
   `build-index-only` and the search check an index before they take it: each `.bin` whole, and no
   contig that holds a site without its trees. That check read every `.bin` of format 2 as "not a

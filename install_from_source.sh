@@ -24,7 +24,7 @@ if [ "$(uname -s)" = Darwin ]; then
 fi
 
 : "${CONDA_PREFIX:?Activate the conda env first: 'mamba activate crisprme'}"
-CRISPRITZ_REF="${CRISPRITZ_REF:-v2.9.1}"
+CRISPRITZ_REF="${CRISPRITZ_REF:-v2.10.0}"
 CXX="${CXX:-g++}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this crisprme checkout
 

@@ -524,7 +524,7 @@ official Docker installation guide specific to your OS:
 The CRISPRme Docker image is now published as a multi-architecture image with a
 native `linux/arm64` build, so it runs **natively on Apple Silicon Macs with no
 emulation** (no Rosetta / QEMU, no "platform mismatch" warning). Each architecture's
-image is built from source: it compiles CRISPRitz v2.9.1 and installs CRISPRme+ from
+image is built from source: it compiles CRISPRitz v2.10.0 and installs CRISPRme+ from
 this repository, so it does not depend on the Bioconda packages. Docker automatically
 selects the correct architecture when you pull or run the image, so no special flags
 are required.
@@ -641,7 +641,7 @@ Silicon Mac in testing.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from a checkout, for development or on a Linux system where you prefer not to use Bioconda. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.9.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from a checkout, for development or on a Linux system where you prefer not to use Bioconda. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.10.0 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
 **Prerequisites:** Linux, `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
 
@@ -660,7 +660,7 @@ cd crisprme-plus
 mamba env create -f environment.yml
 mamba activate crisprme
 
-# 3. build CRISPRitz 2.9.1 from source and install both tools into the env
+# 3. build CRISPRitz 2.10.0 from source and install both tools into the env
 bash install_from_source.sh
 
 # 4. verify (both tools are now on your PATH)
@@ -668,7 +668,7 @@ crisprme.py --version
 command -v crispritz.py
 ```
 
-The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then copies `crisprme.py`/`crispritz.py` into `$CONDA_PREFIX/bin` and their support trees into `$CONDA_PREFIX/opt/…`, and creates the dedicated `cbulge` conda env for the CRISPR-Bulge off-target scorer (set `CRISPRME_SKIP_SCORER_ENV=1` to defer it — create it later with `crisprme.py scorer-env create`). `CRISPRITZ_REF` defaults to the **v2.9.1** tag; override it with `CRISPRITZ_REF=<tag> bash install_from_source.sh` to build a different CRISPRitz revision.
+The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then copies `crisprme.py`/`crispritz.py` into `$CONDA_PREFIX/bin` and their support trees into `$CONDA_PREFIX/opt/…`, and creates the dedicated `cbulge` conda env for the CRISPR-Bulge off-target scorer (set `CRISPRME_SKIP_SCORER_ENV=1` to defer it — create it later with `crisprme.py scorer-env create`). `CRISPRITZ_REF` defaults to the **v2.10.0** tag; override it with `CRISPRITZ_REF=<tag> bash install_from_source.sh` to build a different CRISPRitz revision.
 
 **Smoke-test the install** with the brute-force benchmark CI runs: `complete-test`'s benchmark mode downloads chromosome 22 with its 1000 Genomes variants, builds small test indexes and runs the full pipeline for every registered benchmark, and `validate-test` then compares the off-targets with the committed brute-force ground truth:
 
