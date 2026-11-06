@@ -1486,11 +1486,16 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
         plain = self.run_pipeline(pam="20bp-NGCG-SpCas9VRER", variant=False)
         self.assertEqual([c[1] for c in plain.builds], ["hg38"])
         self.assertEqual(plain.searched(variant=False), ("NGCG_2_hg38", False))
+        lib = os.path.realpath(self.library)
+        # (and, since 2.9.0, how to use one built for a 3' PAM: a name that says its side,
+        # here for the guide length its trees say, which these stand-ins do not)
         self.assertNoMatchSaysWhy(
             self.run_pipeline(pam="20bp-NGCG-SpCas9VRER", prune=1, variant=False),
             "       NNNN_2_hg38 is a PAM-less index that records no side of the guide in a "
             ".pam_build, and a search before 2.8.1 built one of that width from a 5' PAM file as "
-            "well as from a 3' one, so it is not taken for a 3' PAM\n", "NGCG")
+            "well as from a 3' one, so it is not taken for a 3' PAM\n"
+            f"       if it was built from a 3' PAM file, name it so: mv '{lib}/NNNN_2_hg38' "
+            f"'{lib}/<guide length>-NNNN_2_hg38', which records that\n", "NGCG")
 
     def test_a_plain_miss_says_what_it_said(self):
         self.install("NGG_3", variant=False)

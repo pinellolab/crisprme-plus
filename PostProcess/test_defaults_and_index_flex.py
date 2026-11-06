@@ -802,10 +802,10 @@ class TheSearchScriptTakesTheNewName(tir._ShippedScript):
                 self.assertEqual(run.searched(variant=False), None)
                 self.assertIn("NNNN_3_hg38 is a PAM-less index that records no side of the "
                               "guide in a .pam_build", run.stderr)
+                lib = Path(os.path.realpath(self.library))
                 self.assertIn(f"if it was built from a 3' PAM file, name it so: mv "
-                              f"'{self.library / 'NNNN_3_hg38'}' "
-                              f"'{self.library / '20-NNNN_3_hg38'}', which records that, for a "
-                              f"guide of 20 nt", run.stderr)
+                              f"'{lib / 'NNNN_3_hg38'}' '{lib / '20-NNNN_3_hg38'}', which "
+                              f"records that, for a guide of 20 nt", run.stderr)
         # as it says: the search takes it, pruned by itself
         (self.library / "NNNN_3_hg38").rename(self.library / "20-NNNN_3_hg38")
         run = self.run_pipeline(pam="20bp-NGG-SpCas9", variant=False, index_path=self.library)

@@ -1144,8 +1144,8 @@ while read vcf_f; do
 			# a name that says the side records it (since 2.9.0): the way to use one built
 			# for a 3' PAM, which build-index-only does not record over it (RV1-6)
 			_g=$(_index_guide_len "$1")
-			printf "       if it was built from a 3' PAM file, name it so: mv '%s' '%s', which records that, for a guide of %s nt\n" \
-				"$1" "$(dirname "$1")/${_g:-<guide length>}-$_ip_pam_and_rest" "${_g:-the length it was built for}" >&2
+			printf "       if it was built from a 3' PAM file, name it so: mv '%s' '%s', which records that%s\n" \
+				"$1" "$(dirname "$1")/${_g:-<guide length>}-$_ip_pam_and_rest" "${_g:+, for a guide of $_g nt}" >&2
 			return 0
 		fi
 		if [ -z "${_p//N/}" ]; then

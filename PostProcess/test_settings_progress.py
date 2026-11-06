@@ -1438,13 +1438,16 @@ class TestVcfUploadWritesItsSampleList(_SamplesIDCase):
 class TestSettingsBuildPassesSampleList(_SamplesIDCase):
     """build_index, undecorated: the command a Settings build launches."""
 
-    names = _SID_NAMES + ["build_index"]
+    names = _SID_NAMES + ["_dataset_genome", "build_index"]
 
     def setUp(self):
         self.launched = []
         self.stubs = {
             "launch_settings_job":
                 lambda argv, stage: self.launched.append((argv, stage)) or "job",
+            # (no dataset here records its genome: the build of one with another genome is
+            # refused, test_web_bulge_notes)
+            "vcf_reference_genome": lambda dataset: None,
             "_start": lambda job: (job, False, "started"),
             "ONLINE": False,
             "PreventUpdate": _PreventUpdate,
