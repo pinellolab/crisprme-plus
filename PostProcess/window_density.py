@@ -29,8 +29,8 @@ import math
 DENSE_WINDOW_BITS = 20
 
 # CRISPRME_IUPAC_CAP's default, in bits: above 2^10 sequences the dictionary path reports a
-# window by its greedy worst-case alignment (ten two-allele columns, as the count of
-# positions it was until 2.9.0 allowed).
+# window by its greedy worst-case alignment. That is ten two-allele columns, which the cap
+# allowed when it counted ambiguous positions, up to 2.8.1.
 DEFAULT_IUPAC_CAP = 10
 
 # The letter of a four-allele position in a variant genome (CRISPRitz 2.10.0 and later).
