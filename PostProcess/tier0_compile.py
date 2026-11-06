@@ -310,6 +310,7 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
     positions (``four_base_positions``, sorted), each of the position's ALTs counted,
     one no sample carries included, so that a reader of a Q column can tell such a
     position from one ``alts_at`` gives three bases (``RegistryReader.four_base``).
+    A chromosome without one gets no list: its registry is the bytes it was.
 
     Returns a dict of build stats:
       {"manifest": <manifest dict>, "n_written": int, "n_skipped_indel": int,
@@ -378,7 +379,7 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
         records, sample_meta, None, ploidy_of, out_bin, out_idx,
         alt_index=alt_index, panel_index=panel_index, compress=compress,
         regime_for_pos=regime_for_pos,
-        manifest_extra={"four_base_positions": four_base},
+        manifest_extra={"four_base_positions": four_base} if four_base else None,
     )
 
     stats["n_positions"] = len(seen_positions)
