@@ -11,8 +11,8 @@ of positions could see: a three-allele column was one position, as a two-allele 
   * a window over the cap is dense, as since 2.8.1; one spelling 2^HYPERDENSE_BITS
     sequences or more is hyperdense, and is listed in the high-variant-density BED whatever
     the cap, read from its letters (Q too, whether or not the decomposition reads Q); the
-    BED gives each window's variant columns, bits, four-allele positions and whether it was
-    capped, and only a capped window's row is noted, and reported, as a greedy worst case;
+    BED gives each window's variant columns, bits, four-allele positions and whether a
+    greedy worst case stands for it, and only then is its row noted, and reported, as one;
   * the four-allele positions of the reported windows go to <out>.four_allele_positions.bed,
     and resultIntegrator flags a row whose window holds one in High_variant_density_region,
     which the report shows in High_complexity_region, with a hyperdense window's sequences;
@@ -306,7 +306,7 @@ class TheCapCountsBits(_PostAnalysis):
         rows, said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE="0")
         self.assertEqual(hvdr[0], ["#chrom", "start", "end", "guide", "n_variants",
                                    "samples_with_alt", "iupac_protospacer", "bits",
-                                   "four_allele", "capped"])
+                                   "four_allele", "greedy"])
         self.assertEqual(
             hvdr[1:],
             [["chrT", str(self.start), str(self.start + 23), CRRNA, "7", "S1,S2",
@@ -410,8 +410,9 @@ class AWindowOfFourAllelePositions(_PostAnalysis):
     def test_it_is_listed_and_its_four_allele_positions_counted(self):
         # the BED gives a minus-strand window's protospacer on the forward strand
         forward = self.q_only[::-1].translate(str.maketrans("ACGT", "TGCA"))
-        # a window of Q alone is capped as any dense window where the post-analysis reads Q;
-        # where it reads none, no decomposition ran on it, and nothing capped it
+        # where the post-analysis reads Q, the dictionary path reports a window of Q alone by
+        # its greedy worst case, as any dense window; where it reads none, no decomposition
+        # ran on it, and no greedy alignment stands for it
         reads_q = "Q" in _load_pure_functions({})["iupac_nucleotides"]
         alone = "1" if reads_q else "0"
         for fast in ("0", "1"):
@@ -450,9 +451,10 @@ class AHyperdenseWindowWithinTheCap(_PostAnalysis):
         self.window = _site_window(MISMATCHED, codes)
         self.start = self.write_inputs([MISMATCHED], [(0, self.window, "+")], entries)[0]
 
-    def test_it_is_listed_uncapped_when_the_cap_holds_it(self):
+    def test_within_the_cap_no_greedy_alignment_stands_for_it(self):
         """Per sample with CRISPRME_IUPAC_CAP=-1, the window's combinations are enumerated:
-        its BED line says it was not capped, and its row is S1's own haplotype."""
+        its BED line says no greedy worst case stands for it, and its row is S1's own
+        haplotype."""
         rows, said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE="0", CRISPRME_IUPAC_CAP="-1")
         self.assertEqual([line[4:5] + line[6:] for line in hvdr[1:]],
                          [["15", self.window, "22.60", "0", "0"]])
@@ -461,7 +463,7 @@ class AHyperdenseWindowWithinTheCap(_PostAnalysis):
         self.assertEqual(
             [(r[7], r[17]) for r in rows if r[12] == "S1"],
             [("1", "chrT_%d_G_A,chrT_%d_C_T" % (self.start + 3, self.start + 9))])
-        # at the default cap it is capped
+        # at the default cap the dictionary path reports it by its greedy worst case
         _rows, _said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE="0")
         self.assertEqual([line[9] for line in hvdr[1:]], ["1"])
 
@@ -623,8 +625,8 @@ class MaxDegeneracyOnTheTierPath(unittest.TestCase):
 
 class TheTierPathListsTheWindow(unittest.TestCase):
     """The observed haplotypes of the dict-less tiers list a window in the high-variant-density
-    BED by its bits, population-level (every window capped) and per sample (its observed
-    haplotypes enumerated whatever the cap)."""
+    BED by its bits, population-level (a greedy worst case stands for every window) and per
+    sample (none does: the window's observed haplotypes are enumerated whatever the cap)."""
 
     def three_allele_window(self):
         """TheCapCountsBits' seven three-allele columns: 2^11.09 sequences."""
@@ -637,29 +639,29 @@ class TheTierPathListsTheWindow(unittest.TestCase):
 
     def test_seven_three_allele_columns_are_over_the_cap(self):
         window, mydict = self.three_allele_window()
-        for fast in (True, False):
+        for fast, greedy in ((True, "1"), (False, "0")):
             with self.subTest(fast=fast):
                 _rows, bed, _counts = _tier_path(window, MISMATCHED, mydict, fast=fast)
                 self.assertEqual([line[4:5] + line[6:] for line in bed],
-                                 [["7", window, "11.09", "0", "1"]])
+                                 [["7", window, "11.09", "0", greedy]])
                 _rows, bed, _counts = _tier_path(window, MISMATCHED, mydict, fast=fast, cap=12)
                 self.assertEqual(bed, [])
 
     def test_a_hyperdense_window_whatever_the_cap(self):
-        """Twenty two-allele columns: 2^20 sequences, listed under any cap; capped only
-        population-level, or over the cap."""
+        """Twenty two-allele columns: 2^20 sequences, listed under any cap; a greedy worst
+        case stands for it population-level only."""
         site = GUIDE + "TGG"
         alt = {"A": "G", "G": "A", "C": "T", "T": "C"}
         window = _site_window(site, {col: "R" if base in "AG" else "Y"
                                      for col, base in enumerate(GUIDE)})
         mydict = {"chrT,%d" % (col + 1): "S1:1|0;%s,%s;rs%d;0.1" % (base, alt[base], col)
                   for col, base in enumerate(GUIDE)}
-        for fast, cap, capped in ((True, "-1", "1"), (True, "30", "1"), (False, "-1", "0"),
-                                  (False, "30", "0"), (False, "10", "1")):
+        for fast, cap, greedy in ((True, "-1", "1"), (True, "30", "1"), (False, "-1", "0"),
+                                  (False, "30", "0"), (False, "10", "0")):
             with self.subTest(fast=fast, cap=cap):
                 _rows, bed, _counts = _tier_path(window, site, mydict, fast=fast, cap=int(cap))
                 self.assertEqual([line[4:5] + line[6:] for line in bed],
-                                 [["20", window, "20.00", "0", capped]])
+                                 [["20", window, "20.00", "0", greedy]])
 
 
 # intervaltree is not among the light CI deps: a stand-in that answers as it does
@@ -701,8 +703,8 @@ def _gnu_cut():
 class TheIntegratedRow(unittest.TestCase):
     """The real resultIntegrator.py on bestMerge rows at chrT 1000, 2000, 3000, 4000 and 5000,
     beside the post-analysis's BEDs: a dense window over 1000 (2.9.0's BED), one over 4000
-    (2.8.1's), a hyperdense one over 5000 that was not capped, and four-allele positions in
-    the windows at 1000 and 2000, and just past the one at 3000."""
+    (2.8.1's), a hyperdense one over 5000 that no greedy alignment stands for, and four-allele
+    positions in the windows at 1000 and 2000, and just past the one at 3000."""
 
     ALN = GUIDE + "TGG"
 
@@ -723,7 +725,7 @@ class TheIntegratedRow(unittest.TestCase):
                 fh.write("\t".join(block * 3) + "\n")
         with open(os.path.join(cls.d, "job_chrT.high_variant_density_regions.bed"), "w") as fh:
             fh.write("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
-                     "iupac_protospacer\tbits\tfour_allele\tcapped\n"
+                     "iupac_protospacer\tbits\tfour_allele\tgreedy\n"
                      "chrT\t1000\t1023\t%s\t23\tS1\tRRRRRRRRRRRRRRRRRRRRQRR\t24.00\t1\t1\n"
                      "chrT\t5000\t5023\t%s\t21\tS1\tRRRRRRRRRRRRRRRRRRRRRGG\t21.00\t0\t0\n"
                      % (CRRNA, CRRNA))
@@ -771,9 +773,9 @@ class TheIntegratedRow(unittest.TestCase):
         self.assertEqual(self.notes[2000], "four_allele_positions=chrT:2011")
         self.assertEqual(self.notes[3000], "NA")
 
-    def test_a_hyperdense_window_that_was_not_capped(self):
-        """A per-sample search enumerated it within CRISPRME_IUPAC_CAP: no greedy worst case
-        stands for it."""
+    def test_a_window_no_greedy_alignment_stands_for(self):
+        """Its rows are its carriers' own haplotypes (a per-sample search with the dict-less
+        tiers, or one that enumerated it within CRISPRME_IUPAC_CAP)."""
         self.assertEqual(
             self.notes[5000],
             "high_variant_density (21 variants, 2^21.00 sequences); "
@@ -817,7 +819,7 @@ class TheReport(unittest.TestCase):
         row["High_variant_density_region"] = self.NOTE % ("12", "")
         self.assertTrue(gr._greedy_union(row, self.COLS))
 
-    def test_a_hyperdense_window_that_was_not_capped_is_no_greedy_union(self):
+    def test_a_window_no_greedy_alignment_stands_for_is_no_greedy_union(self):
         """With CRISPRME_IUPAC_CAP=-1 (or a cap the window is within) a per-sample search on
         untiered datasets enumerates a hyperdense window's combinations: its row is a
         carrier's own haplotype, whose cis carriers the Observed cell names, as 2.8.1's did."""
@@ -835,7 +837,7 @@ class TheReport(unittest.TestCase):
         self.assertEqual(gr._curated_cell("observed", row, cols), "1 cis carrier")
         self.assertEqual(gr._curated_cell("complex_region", row, cols),
                          "15 in window (2^22.6 sequences)")
-        # capped, it is the window's greedy worst-case alignment
+        # where one stands for the window, it is its greedy worst-case alignment
         row["High_variant_density_region"] = self.NOTE % ("15", ", 2^22.60 sequences")
         self.assertTrue(gr._greedy_union(row, cols))
         self.assertEqual(gr._curated_cell("observed", row, cols),

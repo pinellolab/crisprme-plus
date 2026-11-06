@@ -386,18 +386,18 @@ def _aligned_target(seq_prerevert, realTarget, revert):
     return t
 
 
-def _log_dense_window(split, replaceTarget, samples, n_seq, capped):
+def _log_dense_window(split, replaceTarget, samples, n_seq, greedy):
     """One line of <out>.high_variant_density_regions.bed for a window spelling more than
     2^CRISPRME_IUPAC_CAP sequences, or 2^HYPERDENSE_BITS or more (the caller checks which):
     its span, guide, variant columns (window_density.variant_columns: every letter standing
     for two bases or more, a four-allele Q among them), carriers, full IUPAC protospacer
     (every variant column as its code, so a user can see all its alleles and dig into its
     other alignments; resultIntegrator puts it in the High_variant_density_region column),
-    its bits (log2 of the sequences it spells), its four-allele positions (Q), and whether it
-    was ``capped``: reported as a dense window, over the cap or in a population-level search
-    (resultIntegrator's note then says a greedy worst-case alignment is reported there), not
-    a hyperdense window whose alignments a per-sample search enumerated within the cap.
-    Best-effort: never breaks the run."""
+    its bits (log2 of the sequences it spells), its four-allele positions (Q), and whether
+    its rows are its ``greedy`` worst-case alignment (the dictionary path over the cap, any
+    population-level search; resultIntegrator's note then says so), not its carriers' own
+    haplotypes (the tier path per sample, or a hyperdense window a per-sample search
+    enumerated within the cap). Best-effort: never breaks the run."""
     _hvdr_lines[0] += 1
     try:
         start = int(split[4])
@@ -410,7 +410,7 @@ def _log_dense_window(split, replaceTarget, samples, n_seq, capped):
             "%s\t%d\t%d\t%s\t%d\t%s\t%s\t%.2f\t%d\t%d\n"
             % (split[3], key[0], key[1], key[2], _wd.variant_columns(replaceTarget),
                ",".join(sorted(samples)) if samples else ".", replaceTarget,
-               _wd.bits(n_seq), len(_wd.four_allele_offsets(replaceTarget)), int(capped))
+               _wd.bits(n_seq), len(_wd.four_allele_offsets(replaceTarget)), int(greedy))
         )
     except Exception:
         pass  # BED logging is best-effort; never break the run
@@ -422,7 +422,7 @@ def _list_undecomposed_window(split):
     only variant letters are four-allele positions (Q) where the post-analysis takes no Q,
     or none of its variant columns could be read. The flag reads the window's own letters
     (window_density), whatever the decomposition made of them; its carriers are unknown, and
-    nothing capped it."""
+    no greedy alignment stands for it."""
     n_seq = _wd.sequences(split[2])  # a bulge gap counts one, the strand nothing
     if _wd.over_cap(n_seq, IUPAC_CAP) or _wd.hyperdense(n_seq):
         window = split[2].replace("-", "")
@@ -992,7 +992,7 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                     _cfd_rep["info"], _obshap.PUTATIVE, cluster_to_save,
                 )
         # visibility: still log dense windows to the shared BED (as the cap does), and
-        # hyperdense ones whatever the cap; every window is capped here
+        # hyperdense ones whatever the cap; a greedy worst case stands for every window here
         if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.hyperdense(_n_seq):
             _log_dense_window(split, replaceTarget, _window_carriers, _n_seq, True)
         return
@@ -1048,14 +1048,12 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     # remains the correct behavior for POPULATION-LEVEL mode (the _FAST_MODE early-return
     # path above), which is unchanged.
     #
-    # A hyperdense window within the cap is listed too, uncapped: its observed haplotypes
-    # are enumerated as any window's are.
+    # So no greedy worst case stands for the window, over the cap or hyperdense within it.
     if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.hyperdense(_n_seq):
         _samples = set()
         for _h in haplotypes:
             _samples |= _h.carriers
-        _log_dense_window(split, replaceTarget, _samples, _n_seq,
-                          _wd.over_cap(_n_seq, IUPAC_CAP))
+        _log_dense_window(split, replaceTarget, _samples, _n_seq, False)
 
     # 3b) Finalize each observed VARIANT haplotype through the shared finalizer (may be
     #     an empty loop when no productive observed haplotype exists).
@@ -1159,8 +1157,8 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
         # Log only GENUINELY-dense windows to the BED (in fast mode ``capped`` is forced for
         # every window, but the high-variant-density BED must still list only the
         # hypervariable ones -- byte-identical to the non-fast BED contents): over the cap,
-        # or hyperdense whatever the cap is (uncapped when a per-sample search enumerates it
-        # within the cap).
+        # or hyperdense whatever the cap is (its combinations enumerated, no greedy worst
+        # case, when a per-sample search holds it within the cap).
         if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.hyperdense(_n_seq):
             _samples = set()
             for _cnt in totalDict:
@@ -2115,14 +2113,14 @@ crispr_bulge_best.write(header + "\tCFD\n")  # Write header
 # as many combinations of its alleles. Above 2^CRISPRME_IUPAC_CAP it reports the window by its
 # greedy worst-case alignment instead; every path lists such a window, and any spelling
 # 2^HYPERDENSE_BITS sequences or more whatever the cap, in this BED (with its bits, its
-# four-allele positions, and whether it was capped), so a real off-target risk is still
-# surfaced without the combinatorial blow-up. Up to 2.8.1 the cap counted ambiguous
-# positions: the same number where each holds one ALT. -1 disables it.
+# four-allele positions, and whether a greedy worst case stands for it), so a real
+# off-target risk is still surfaced without the combinatorial blow-up. Up to 2.8.1 the cap
+# counted ambiguous positions: the same number where each holds one ALT. -1 disables it.
 IUPAC_CAP = int(os.environ.get("CRISPRME_IUPAC_CAP", str(_wd.DEFAULT_IUPAC_CAP)))
 hvdr_bed = open(outputFile + ".high_variant_density_regions.bed", "w")
 hvdr_bed.write(
     "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\tbits"
-    "\tfour_allele\tcapped\n"
+    "\tfour_allele\tgreedy\n"
 )
 
 # Load ONLY the SNP-dictionary entries this chromosome's targets actually query,
