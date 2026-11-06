@@ -429,7 +429,11 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   CFD and CRISPR-Bulge merges by a variable nothing set, so every merge took
   `--sorting-criteria` and `--sorting-criteria-scoring` did nothing (wset N1). The CFD and
   CRISPR-Bulge merges take it now; its default is what they took, `mm+bulges,mm` (it said
-  `mm+bulges`), so a search with neither flag, and every web search, merges as before.
+  `mm+bulges`), so a search with neither flag, and every web search, merges as before. On chr22
+  with HGDP + 1000 Genomes (three guides, NGG, 4 mismatches + 1 + 1 bulge, per-sample), a search
+  with neither flag wrote the same 2,023 rows, byte for byte, as this branch before the change,
+  and one with `--sorting-criteria-scoring bulges` 82 of them otherwise; both with nothing on
+  stderr.
 - **build-index-only refuses, before it enriches anything, a VCF the enrichment cannot read.**
   `crispritz add-variants` takes each VCF's chromosome from the last part of its file name that
   holds `chr` and reads the genome's FASTA file of that name, so a multi-chromosome VCF whose
