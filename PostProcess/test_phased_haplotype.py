@@ -41,7 +41,9 @@ Driving ``iupac_decomposition`` directly with synthetic fixtures:
     maximal combo, every sample on every sub-combo (cis unverifiable).
   * PHASED TRANS (alts on alternating haplotypes of one sample): variants on
     different haplotypes do NOT fully combine (no false cis attribution).
-  * >cap GREEDY path: unaffected -- exactly one 0mm representative per haplotype.
+  * >cap dense window: since 2.9.0 the haplotypes its carriers have, beside its
+    reference row (up to 2.8.1 one greedy representative per haplotype, which could
+    take alleles of different samples).
 
 The harness AST-loads only the pure functions of ``new_simple_analysis.py``
 (everything before the ``inFasta = open(...)`` module body) and injects the
@@ -280,19 +282,33 @@ class PhasedTransDoesNotCombine(unittest.TestCase):
 class DenseWindowOverCap(unittest.TestCase):
     """A per-sample window denser than IUPAC_CAP on the dictionary: up to 2.8.1 it took
     the greedy high-variant-density path (one level-0 representative per haplotype, no
-    combination, no peel); since 2.9.0 it is enumerated as the haplotypes its carriers
-    have, as on the dict-less tiers (the greedy representative listed the carriers of any
-    of its alleles). Here S carries the four SNPs on one slot: one 0mm row, S's, beside the
-    window's reference row."""
+    combination, no peel), whose alignment took each column's best allele and listed the
+    carriers of any of them, so that nobody need carry it; since 2.9.0 it is enumerated as
+    the haplotypes its carriers have, as on the dict-less tiers, beside the window's
+    reference row. (N=4 with cap=2 -> countIUPAC (4) > cap (2).)"""
 
-    def test_dense_window_over_cap(self):
-        # N=4 with cap=2 -> countIUPAC (4) > cap (2)
-        rows = [r for r in _decompose(4, phased=True, cap=2) if r[12] != "n"]
-        self.assertEqual(len(rows), 1, "the dense window must give exactly one variant row")
-        row = rows[0]
-        self.assertEqual(int(row[7]), 0, "the row must be the 0mm haplotype S carries")
-        self.assertEqual(_n_snps_in_row(row), 4)
-        self.assertEqual(row[12], "S")
+    def _rows(self, carriers):
+        """(the window's reference row's mismatches, [(samples, mismatches, SNPs) of each
+        variant row]); ``carriers``: the sample whose first slot holds each of the 4 SNPs."""
+        split, overrides = _build_fixture(4, phased=True, cap=2)
+        for i, sample in enumerate(carriers):
+            overrides["mydict"]["chrT," + str(i + 1)] = f"{sample}:1|0;C,A;rs{i};0.10"
+        ns = _load_pure_functions(overrides)
+        rows = []
+        ns["iupac_decomposition"](split, GUIDE.replace("-", ""), GUIDE_NO_PAM, rows)
+        return ([int(r[7]) for r in rows if r[12] == "n"],
+                sorted((r[12], int(r[7]), _n_snps_in_row(r)) for r in rows if r[12] != "n"))
+
+    def test_one_carrier_of_every_snp(self):
+        # S carries the four SNPs on one slot: one 0mm row, S's (the greedy row was S's too)
+        self.assertEqual(self._rows(["S"] * 4), ([4], [("S", 0, 4)]))
+
+    def test_carriers_of_two_snps_each(self):
+        # S1 carries the first two SNPs on one slot, S2 the last two: the greedy row took the
+        # four, 0 mismatches, naming S1 and S2, neither of whom has it; the window is now
+        # S1's haplotype and S2's, 2 mismatches each
+        self.assertEqual(self._rows(["S1", "S1", "S2", "S2"]),
+                         ([4], [("S1", 2, 2), ("S2", 2, 2)]))
 
 
 if __name__ == "__main__":
