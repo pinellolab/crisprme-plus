@@ -59,6 +59,34 @@ current_working_directory = f"{os.getcwd()}/"
 
 input_args = sys.argv
 
+# Hugging Face Hub logs at error level only, as the Docker image sets it (Dockerfile):
+# on a source or Bioconda install every anonymous download of the public data said
+# "You are sending unauthenticated requests to the HF Hub" (install P10). Before any
+# module that imports huggingface_hub, which reads it then; a value set stays.
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+
+
+def _interrupted(exc_type, exc, tb, _default=sys.excepthook) -> None:
+    """Ends a command a Ctrl-C stopped with one line on stderr, not a KeyboardInterrupt
+    traceback (install P6), naming for complete-search the folder the run wrote into; the
+    run still ends by SIGINT, as Python ends one after this hook, so a shell sees 130.
+    Every other exception goes to Python's own hook."""
+    if not issubclass(exc_type, KeyboardInterrupt):
+        _default(exc_type, exc, tb)
+        return
+    command = input_args[1] if len(input_args) > 1 else "crisprme.py"
+    where = ""
+    if command == "complete-search" and "--output" in input_args[:-1]:
+        folder = os.path.join(current_working_directory, "Results",
+                              input_args[input_args.index("--output") + 1])
+        if os.path.isdir(folder):
+            where = f": what it wrote is in {folder}"
+    sys.stderr.write(f"\ncrisprme.py {command} interrupted (Ctrl-C){where}\n")
+
+
+if __name__ == "__main__":  # (run as the command, not loaded by a test)
+    sys.excepthook = _interrupted
+
 if "--debug" in input_args:
     print("DEBUG MODE")
     # Switch to cwd-relative PostProcess ONLY when running from a source checkout
@@ -586,7 +614,7 @@ def print_help_complete_search() -> None:
         "\t--merge, window size (nucleotides) to merge candidate off-targets "
         "using the highest scoring as pivot [default: 3]\n"
         "\t--sorting-criteria-scoring, comma-separated list to sort targets by "
-        "scoring criteria: 'mm', 'bulges', or 'mm+bulges' [default: 'mm+bulges']\n"
+        "scoring criteria: 'mm', 'bulges', or 'mm+bulges' [default: 'mm+bulges,mm']\n"
         "\t--sorting-criteria, comma-separated list to sort targets by 'mm', "
         "'bulges', or 'mm+bulges' [default: 'mm+bulges,mm']\n"
         "\t--output, specify the output folder name; results will be saved in "
@@ -1969,7 +1997,9 @@ def _check_sorting_criteria_scoring(args: List[str], sorting_criteria: bool) -> 
             forbidden or repeated criteria, or exceeds the allowed number of criteria.
     """
     if not sorting_criteria:
-        return "mm+bulges"
+        # what the CFD and CRISPR-Bulge merges have used: --sorting-criteria's default (they
+        # took --sorting-criteria, whatever this flag said, until 2.9.0: wset N1)
+        return "mm+bulges,mm"
     try:
         sorting_criteria_scoring = args[args.index("--sorting-criteria-scoring") + 1]
     except IndexError:
@@ -4083,6 +4113,35 @@ def _check_genome_layout(genomedir: str) -> None:
         )
 
 
+def _refuse_vcf_of_no_fasta(vcfdir: str, genomedir: str) -> None:
+    """Stops a build whose enrichment would fail on a VCF file of a chromosome the genome
+    has no FASTA file of. crispritz add-variants takes each file's chromosome from the last
+    part of its name that holds 'chr' (walk.chr1.vcf.gz: chr1) and reads
+    <genome>/<chromosome>.fa: a file named otherwise (nochr.vcf.gz), or a dataset of
+    another genome, ended in 'ERROR: cannot open <genome>/<name>.fa' and 'Genome
+    enrichment (add-variants) failed' (wset N2; FV :328 from the web)."""
+    if not os.path.isdir(vcfdir):
+        return
+    for name in sorted(os.listdir(vcfdir)):
+        if not name.endswith(".vcf.gz"):
+            continue
+        chrom = ([tok for tok in name.split(".") if "chr" in tok] or [""])[-1]
+        if chrom and not os.path.isfile(os.path.join(genomedir, f"{chrom}.fa")):
+            error(
+                f"The VCF dataset cannot be enriched: the name of {name} makes it a VCF of "
+                f"chromosome {chrom} (the enrichment, crispritz add-variants, takes the last "
+                f"part of a VCF's file name that holds 'chr' for its chromosome), and the "
+                f"genome {genomedir} has no {chrom}.fa. Name each VCF after the chromosome "
+                f"it holds (<name>.chr<N>.vcf.gz), as the genome's FASTA file of it is "
+                f"named, or build the index with the genome the dataset is of"
+            )
+
+
+class _NoChrInName(Exception):
+    """A VCF to split holds a chromosome whose name the enrichment cannot read
+    (_ensure_per_chromosome_vcfs)."""
+
+
 def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
     """Make a variant dataset usable by ``crispritz add-variants``, which requires
     the VCF folder to hold **per-chromosome** files and derives each chromosome from
@@ -4157,10 +4216,28 @@ def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
                 _run([tabix, "-p", "vcf", indexed])
                 src = indexed
             chroms = _run([tabix, "-l", src]).split()
+            # The enrichment takes each file's chromosome from the token of its name that
+            # holds 'chr' and reads Genomes/<genome>/<that token>.fa: a chromosome named
+            # without it (1, Contig1, NC_000913.3) was split under its own name, and the
+            # build failed on 'cannot open .../.fa' (wset N2)
+            unnamed = [chrom for chrom in chroms if "chr" not in chrom]
+            if unnamed:
+                raise _NoChrInName(
+                    f"{f} holds the chromosome(s) {', '.join(unnamed[:5])}"
+                    f"{' ...' if len(unnamed) > 5 else ''}, whose names do not hold 'chr': "
+                    f"the enrichment (crispritz add-variants) takes a VCF's chromosome from "
+                    f"the part of its file name that holds 'chr' (<name>.chr<N>.vcf.gz) and "
+                    f"reads the genome's FASTA file of that name. Rename them in the VCF to "
+                    f"the names of the genome's sequences (bcftools annotate --rename-chrs "
+                    f"<old new file>, e.g. 1 to chr1), sequences named with 'chr' too, then "
+                    f"add it again")
             for chrom in chroms:
                 dst = os.path.join(tmp, f"{base}.{chrom}.vcf.gz")
                 _run([bcftools, "view", "-r", chrom, src, "-Oz", "-o", dst])
                 _run([tabix, "-p", "vcf", dst])
+    except _NoChrInName as exc:
+        shutil.rmtree(tmp, ignore_errors=True)
+        error(f"The VCF dataset cannot be enriched: {exc}")
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(tmp, ignore_errors=True)
         hint = (". Sort it by position (bcftools sort -Oz -o <sorted>.vcf.gz <file>), "
@@ -4940,6 +5017,7 @@ def build_index_only() -> None:
     # single multi-chromosome VCF so a user-provided dataset "just works" (no-op when
     # the folder is already per-chromosome, e.g. the shipped datasets).
     _ensure_per_chromosome_vcfs(vcfdir)
+    _refuse_vcf_of_no_fasta(vcfdir, genomedir)
     # OPTIONAL --samplesID: a listing file (one samplesID filename per line under
     # samplesIDs/, the same format complete-search uses; combined panels list both
     # 1000G and HGDP). When given, the build ALSO emits the ADDITIVE dictless tiers

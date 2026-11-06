@@ -30,7 +30,8 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this crisprme checkout
 echo ">> Building CRISPRitz ${CRISPRITZ_REF} from source (compiler: ${CXX})"
 TMP="$(mktemp -d)"
 SRC="${TMP}/crispritz-src"
-git clone --depth 1 --branch "${CRISPRITZ_REF}" \
+# (a tag checks out as a detached HEAD: no advice about it, which reads as a problem)
+git -c advice.detachedHead=false clone --depth 1 --branch "${CRISPRITZ_REF}" \
     https://github.com/pinellolab/CRISPRitz.git "${SRC}"
 cd "${SRC}"
 ${CXX} -std=c++11 -O3 -fopenmp \

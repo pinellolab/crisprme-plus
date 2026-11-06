@@ -1801,7 +1801,7 @@ def change_url(
         )
     )
     # set sorting criteria for score and fewest
-    sorting_criteria_scoring = "mm+bulges"
+    sorting_criteria_scoring = "mm+bulges,mm"  # (complete-search's default)
     sorting_criteria = "mm+bulges,mm"
     # TODO: use functions rather than calling scripts
     run_job_sh = os.path.join(

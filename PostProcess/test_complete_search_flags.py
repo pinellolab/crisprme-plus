@@ -506,5 +506,48 @@ class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
                                    f"Please input a value for flag {flag}")
 
 
+@unittest.skipUnless(_importable() and shutil.which("crispritz.py"),
+                     "runs complete-search, which needs the image's engine")
+class TestACtrlCEndsInOneLine(unittest.TestCase):
+    """Ctrl-C during complete-search ended crisprme.py in a KeyboardInterrupt traceback
+    (install P6). It ends in one line, which names the folder the search wrote into, and the
+    run still ends by SIGINT, as a shell expects of one."""
+
+    def test_a_search_interrupted_while_it_runs(self):
+        import signal
+        import time
+        wd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, wd, ignore_errors=True)
+        os.makedirs(os.path.join(wd, "Genomes", "g"))
+        with open(os.path.join(wd, "Genomes", "g", "chr1.fa"), "w") as fh:
+            fh.write(">chr1\n" + "ACGTTGCAACTAACAGTTGCTTTTATCACAGG" * 2000 + "\n")
+        os.makedirs(os.path.join(wd, "PAMs"))
+        with open(os.path.join(wd, "PAMs", "20bp-NGG-SpCas9.txt"), "w") as fh:
+            fh.write("N" * 21 + "GG 3\n")
+        with open(os.path.join(wd, "guide.txt"), "w") as fh:
+            fh.write("CTAACAGTTGCTTTTATCACNNN\n")
+        # (its lines as a terminal shows them, each as it is printed)
+        env = dict(os.environ, CRISPRME_SKIP_SCORER_ENV="1", CRISPRME_SKIP_MEM_CHECK="1",
+                   PYTHONUNBUFFERED="1")
+        # in a session of its own, which the Ctrl-C of a terminal signals whole
+        run = subprocess.Popen(
+            [sys.executable, CRISPRME, "complete-search", "--genome", "Genomes/g", "--guide",
+             "guide.txt", "--pam", "PAMs/20bp-NGG-SpCas9.txt", "--mm", "4", "--output", "o",
+             "--thread", "1"],
+            cwd=wd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            start_new_session=True)
+        self.addCleanup(lambda: run.poll() is None and os.killpg(run.pid, signal.SIGKILL))
+        for line in run.stdout:  # (it launches the pipeline after this line)
+            if line.startswith("Launching job"):
+                break
+        time.sleep(1)
+        os.killpg(run.pid, signal.SIGINT)
+        _out, err = run.communicate(timeout=300)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(err.splitlines()[-1], "crisprme.py complete-search interrupted "
+                         f"(Ctrl-C): what it wrote is in {os.path.join(wd, 'Results', 'o')}")
+        self.assertEqual(run.returncode, -signal.SIGINT)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -976,6 +976,48 @@ class TheSourceEnvironmentHasWhatTheImageHas(unittest.TestCase):
                 self.assertIn(package, listed)
 
 
+class ASelfTestOfASourceInstallSaysNoNoise(unittest.TestCase):
+    """Messages a source or Bioconda install printed that the image does not (install P10):
+    the Hub's "You are sending unauthenticated requests to the HF Hub" on every anonymous
+    download (a server warning huggingface_hub logs, which the image's HF_HUB_VERBOSITY=error
+    hides), and git's detached-HEAD advice as install_from_source.sh checked out the CRISPRitz
+    tag."""
+
+    def test_the_hub_logs_at_error_level_as_in_the_image(self):
+        self.assertIn("ENV HF_HUB_VERBOSITY=error", (_REPO / "Dockerfile").read_text())
+        for given, want in ((None, "error"), ("info", "info")):  # (one set stays)
+            env = {k: v for k, v in os.environ.items() if k != "HF_HUB_VERBOSITY"}
+            if given:
+                env["HF_HUB_VERBOSITY"] = given
+            with self.subTest(given=given):
+                # (loading crisprme.py's definitions runs its module code)
+                run = subprocess.run(
+                    [sys.executable, "-c", "import os, test_bulge_cap; "
+                     "print(os.environ.get('HF_HUB_VERBOSITY'))"],
+                    cwd=_HERE, env=env, capture_output=True, text=True, timeout=300)
+                self.assertEqual(run.stdout.split()[-1:], [want], run.stderr[-2000:])
+
+    def test_the_crispritz_tag_is_checked_out_without_advice(self):
+        lines = (_REPO / "install_from_source.sh").read_text().splitlines()
+        at = next(i for i, line in enumerate(lines)
+                  if line.startswith("git ") and " clone " in line)
+        clone = (lines[at] + " " + lines[at + 1]).replace("\\", " ")  # (the command's 2 lines)
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+        subprocess.run([*git, "init", "-q", str(tmp / "repo")], check=True)
+        subprocess.run([*git, "-C", str(tmp / "repo"), "commit", "-q", "--allow-empty", "-m",
+                        "x"], check=True)
+        subprocess.run([*git, "-C", str(tmp / "repo"), "tag", "v2.9.1"], check=True)
+        command = (clone.replace('"${CRISPRITZ_REF}"', "v2.9.1")
+                   .replace("https://github.com/pinellolab/CRISPRitz.git", f"file://{tmp}/repo")
+                   .replace('"${SRC}"', str(tmp / "src")))
+        run = subprocess.run(command, shell=True, capture_output=True, text=True, cwd=tmp)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("detached HEAD", run.stderr)
+        self.assertTrue((tmp / "src" / ".git").is_dir())
+
+
 class TheChecklistsHpcRouteIsANewUsersRun(unittest.TestCase):
     """RELEASE_CHECKLIST's HPC route ran its apptainer commands with the host's environment
     (CONDA_* leaked in on ml008), and steps 2-4b reused step 1's writable sandbox with the
@@ -1166,6 +1208,38 @@ class ASearchTheInputCheckRefusesLeavesItsOutputFolderEmpty(unittest.TestCase):
                 self.assertIn("expects a padded length of 23 nt", run.stdout + run.stderr)
                 self.assertNotIn("not empty", run.stderr)
                 self.assertEqual(os.listdir(tmp / "Results" / "o"), [])
+
+
+class EachMergeTakesItsOwnSortingCriteria(unittest.TestCase):
+    """merge_close_targets_cfd.sh chose the criteria of the CFD and CRISPR-Bulge merges by a
+    variable nothing set, so every merge took --sorting-criteria and --sorting-criteria-scoring
+    did nothing (wset N1). The score merges take it now, and its default is what they took,
+    --sorting-criteria's, so a run with neither flag merges as before."""
+
+    def merge(self, pivot):
+        """The criteria the merge hands remove_contiguous_samples.py (a stand-in here) for
+        a merge of pivot ``pivot``, with scoring criteria 'bulges' and others 'mm'."""
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / "remove_contiguous_samples.py").write_text(
+            "import sys\nopen('argv.txt', 'w').write(' '.join(sys.argv[1:]))\n")
+        subprocess.run(["bash", str(_HERE / "merge_close_targets_cfd.sh"), "in.txt", "out.txt",
+                        "3", pivot, "bulges", "mm"], cwd=tmp, check=True, capture_output=True)
+        return (tmp / "argv.txt").read_text().split()[-2:]
+
+    def test_the_score_merges_take_the_scoring_criteria(self):
+        self.assertEqual(self.merge("score"), ["score", "bulges"])
+        self.assertEqual(self.merge("total"), ["total", "mm"])
+
+    def test_with_no_flag_they_merge_as_before(self):
+        import test_bulge_cap as tbc
+        cm = tbc.crisprme
+        self.assertEqual(cm._check_sorting_criteria_scoring([], False),
+                         cm._check_sorting_criteria([], False))
+        self.assertEqual(cm._check_sorting_criteria([], False), "mm+bulges,mm")
+        page = (_REPO / "pages" / "main_page.py").read_text()
+        self.assertIn('sorting_criteria_scoring = "mm+bulges,mm"', page)
+        self.assertIn('sorting_criteria = "mm+bulges,mm"', page)
 
 
 class PoolSearchIndelsKeepsNoDeadHelper(unittest.TestCase):

@@ -321,3 +321,28 @@ already: P12 (complete-test with no index exits 2 since 2.8.1). Left:
   `+`, so an index of another genome, of a dataset named after this one, was offered too
   (FR :278), and it showed each underscore of the dataset's name as " + ", as for a merged
   panel of two datasets (`my + vcf` for `hg38_my_vcf`; FR :286).
+- **A Ctrl-C ends a command in one line.** crisprme.py ended in a `KeyboardInterrupt` traceback
+  (install P6); it says `crisprme.py <command> interrupted (Ctrl-C)`, for complete-search with
+  the folder the run wrote into, and still ends by the signal (status 130 in a shell). The
+  pipeline's own stages, which the same Ctrl-C stops, leave theirs in the run's
+  `log_error.txt`, as before.
+- **A source or Bioconda install's self-test prints no warning the image does not.** Every
+  anonymous download of the public data printed "You are sending unauthenticated requests to
+  the HF Hub", a server warning that huggingface_hub logs and the Docker image hides
+  (`HF_HUB_VERBOSITY=error`): crisprme.py sets the same level, unless the variable is set
+  already. And `install_from_source.sh` printed git's advice about a detached HEAD as it checked
+  out the CRISPRitz tag (install P10).
+- **`--sorting-criteria-scoring` is used.** The merge of close targets chose the criteria of the
+  CFD and CRISPR-Bulge merges by a variable nothing set, so every merge took
+  `--sorting-criteria` and `--sorting-criteria-scoring` did nothing (wset N1). The CFD and
+  CRISPR-Bulge merges take it now; its default is what they took, `mm+bulges,mm` (it said
+  `mm+bulges`), so a search with neither flag, and every web search, merges as before.
+- **build-index-only refuses, before it enriches anything, a VCF the enrichment cannot read.**
+  `crispritz add-variants` takes each VCF's chromosome from the last part of its file name that
+  holds `chr` and reads the genome's FASTA file of that name, so a multi-chromosome VCF whose
+  chromosomes are named without `chr` (`1` on a `chr1` genome, `Contig1`, `NC_000913.3`), which
+  the build split under those names, a VCF named so by chance (`nochr.vcf.gz`), and one of a
+  chromosome the genome has no FASTA of (another genome's dataset) each ended in `ERROR: cannot
+  open <genome>/<name>.fa` and "Genome enrichment (add-variants) failed", the split one after
+  splitting the dataset in place (wset N2). Each is one ERROR that says why and what to do, and
+  the dataset is left as it was.

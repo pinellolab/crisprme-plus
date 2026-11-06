@@ -1086,7 +1086,7 @@ its purpose and usage:
   off-targets. Pivot targets are selected based on the highest score (e.g., 
   CFD, CRISPR-Bulge) or criteria defined by the `--sorting-criteria`. 
 
-- `--sorting-criteria-scoring` (*Optional - Default: `mm+bulges`*)
+- `--sorting-criteria-scoring` (*Optional - Default: `mm+bulges,mm`*)
   <br>Specifies sorting criteria for merging when using CFD/CRISPR-Bulge scores. 
   Options include:
     - mm: Number of mismatches.
