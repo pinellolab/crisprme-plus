@@ -27,7 +27,15 @@ variant, rsID and AF lists aligned by that count (remove_contiguous_samples.py).
 
 from __future__ import annotations
 
+import re
+
 import site_alleles
+
+# A genotype token of a dictionary value other than 0, 1 and '.' (an allele index from 2, or
+# of two digits): the value holds a record that lists several ALTs on one VCF line. It reads
+# from a sample's ':' to the end of its genotype, so a sample name's digits do not count;
+# an ID holding ':' only sends a value to the slower, equally correct read.
+_FOREIGN_TOKEN = re.compile(r":[^,;$]*?(?:[2-9]|\d\d)")
 
 
 def _one_id(rsid):
@@ -80,6 +88,9 @@ def legacy_5tuple_from_entry(entry, chrom, chr_pos):
             + split_entry[1].split(",")[1]
         )
     rsID_list = [_one_id(r) for r in rsID_list]
+    if len(set(snp_list)) == len(snp_list) and not _FOREIGN_TOKEN.search(
+            "$".join(",".join(s) for s in sample_list)):
+        return snp_list, sample_list, rsID_list, AF_list, snp_info_list
     refs = [info.rsplit("_", 2)[1] for info in snp_info_list]
     records = [(ref, alt, rs, af, _samples_map(samples))
                for ref, alt, rs, af, samples in zip(refs, snp_list, rsID_list, AF_list,
