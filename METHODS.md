@@ -405,9 +405,10 @@ indel (below): an indel that leaves the target's bases where they were (a tandem
 unit gained or lost, where the repeat runs on past the target) takes no carrier off. An indel
 at one of the row's SNPs, or over one, is another allele of that base, so a slot phased with
 both is a phasing artefact and keeps the carrier; so does an unphased call of the SNP or of
-the indel. The same holds on the classic per-sample dictionaries. Up to 2.8.1 such a carrier was listed: on chr22 of the HGDP + 1000 Genomes
-panel, per sample, 2.2% of SNP row-blocks (990 of 45,921, five guides) named one, and 545
-of them had no listed carrier that holds the sequence.
+the indel. The same holds on the classic per-sample dictionaries. Up to 2.8.1 such a carrier
+was listed: on chr22 of the HGDP + 1000 Genomes panel, per sample, 2.2% of SNP row-blocks
+(990 of 45,921, five guides) named one, and 545 of them had no listed carrier that holds the
+sequence.
 
 ### Behavior by phasing status
 The confidence attached to an enumerated haplotype depends on the phasing of the
@@ -826,10 +827,10 @@ the search without it (`--no-prioritize-observed`).
   highest CRISPR-Bulge):
   - **A**: two or more variants that one phased haplotype of the panel carries together — on
     one slot of a phased sample, with no indel of the store on that slot that takes the
-    target's bases off it (as for the per-sample rows, §4, read on the search's reference). States: `one haplotype` when a single
-    one does; `phase not known` when only samples whose genotypes cannot say which haplotype
-    holds which variant carry them all (an unphased call, or two ALTs of one position on one
-    slot, the PUTATIVE rule).
+    target's bases off it (as for the per-sample rows, §4, read on the search's reference).
+    States: `one haplotype` when a single one does; `phase not known` when only samples whose
+    genotypes cannot say which haplotype holds which variant carry them all (an unphased
+    call, or two ALTs of one position on one slot, the PUTATIVE rule).
   - **B**: one variant. The panel, or the frequency the dataset gives it, says that some
     individual carries it, so it cannot be a combination nobody carries; that is all B says
     (call quality is another question).
