@@ -646,8 +646,8 @@ complementary controls:
   (`window_density.HYPERDENSE_BITS`, the one constant to tune). At the default cap every
   hyperdense window is dense as well. Within a cap raised to its bits, or with
   `CRISPRME_IUPAC_CAP=-1`, a `--per-sample` search enumerates its combinations as any other
-  window's, so its rows are its carriers' own haplotypes: its BED line says it was not
-  capped, and its rows are noted without a greedy worst case.
+  window's, so its rows are its carriers' own haplotypes: its BED line says no greedy
+  worst case stands for it, and its rows are not noted as one.
 - **Four-allele positions.** Where the reference base and three ALTs cover A, C, G and T,
   the variant genome writes `Q` (CRISPRitz 2.10.0), which matches any base; `N` stays an
   assembly gap. The post-analysis lists the four-allele positions of the windows the
@@ -658,12 +658,14 @@ complementary controls:
   written to a `high_variant_density_regions.bed` sidecar (region span; variant count,
   every variant column of the window, a four-allele one too; carriers; the full IUPAC
   protospacer; and, since 2.9.0, its bits, its number of four-allele positions, and
-  whether it was capped, over the cap or in a population-level search), and each
-  affected off-target carries a `High_variant_density_region` column in
-  `integrated_results.tsv` giving the window's variant count and sequences and the full
-  IUPAC sequence so a user can dig into them, and, for a capped window, noting that a
-  greedy worst-case alignment is reported and additional haplotype alignments may
-  exist. Nothing is silently truncated — the bound, the representative, and the
+  whether a greedy worst-case alignment stands for it, as it does on the dictionary path
+  over the cap and in a population-level search), and each affected off-target carries a
+  `High_variant_density_region` column in `integrated_results.tsv` giving the window's
+  variant count and sequences and the full IUPAC sequence so a user can dig into them,
+  and, where a greedy worst-case alignment stands for the window, noting that one is
+  reported and additional haplotype alignments may exist (a `--per-sample` row of the
+  observed-haplotype path below is its carriers' own haplotype, and is not so noted).
+  Nothing is silently truncated — the bound, the representative, and the
   alternatives are all auditable. `complete-search` says per chromosome how many windows
   were dense and how many hyperdense (stdout, `log_verbose.txt`).
 - **The ambiguous columns an alignment rests on, D, and `--max-degeneracy`.** D counts the
@@ -715,8 +717,9 @@ the genotyped path is intentionally *not* done — it would risk trans-as-cis ph
 Under `--per-sample` a capped window emits no greedy representative at all (since 2.7.10):
 the representative unions the carriers of alleles that different individuals carry, so it
 can be a haplotype no single one has, and the window is reported by its observed haplotypes,
-its reference row and its BED line. That is the observed-haplotype path, which reads the
-index's dict-less tiers. **Known limit:** an index without them (one built without
+its reference row and its BED line (which says that no greedy worst case stands for it).
+That is the observed-haplotype path, which reads the index's dict-less tiers.
+**Known limit:** an index without them (one built without
 `--samplesID`, such as the one the benchmark `complete-test` builds) goes the classic
 dictionary path, which still reports a capped window by its greedy worst-case alignment,
 flagged in `High_variant_density_region`, whose listed carriers (the carriers of any allele

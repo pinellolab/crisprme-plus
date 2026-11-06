@@ -55,20 +55,21 @@
   count (`24 in window (2^24.0 sequences)`), as the integrated results'
   `High_variant_density_region` note does (`2^24.00 sequences`). The BED gains three columns, `bits`
   (log2 of the window's sequences), `four_allele` (how many four-allele positions it holds) and
-  `capped` (1 when the window was over `CRISPRME_IUPAC_CAP` or the search population-level), and its
-  `n_variants` counts every variant column of the window, a four-allele one too. Only a capped
-  window's note says that a greedy worst-case alignment is reported there: within a cap raised to
-  its bits, or with `CRISPRME_IUPAC_CAP=-1`, a `--per-sample` search enumerates a hyperdense
-  window's combinations as any other's, and its rows read as in 2.8.1 (`N cis carriers`). The
-  report's inputs card says how many rows lie in such a window, and `complete-search` says per
-  chromosome how many windows were dense (over `CRISPRME_IUPAC_CAP`) and how many hyperdense
-  (stdout, `log_verbose.txt`). Among the indexable NRG windows of chr22, the reference genome has
-  none, the variant genome of HGDP + 1000 Genomes published with CRISPRitz 2.9.1 has 1,763 (the
-  worst 2^23.00), and the one CRISPRitz 2.10.0 writes from the same VCF, every allele coded, 5,103
-  (the worst 2^44.75, at chr22:22,881,189 in the IGL locus). On the published index, the README
-  guide's search of chr22 lists 565 dense windows, 381 of them hyperdense (the worst 2^24.00), and
-  164 of the population-level report's 2,198 rows lie in one (1 of the per-sample report's 1,574).
-  The threshold is one constant, `window_density.HYPERDENSE_BITS`; see
+  `greedy` (1 when a greedy worst-case alignment stands for the window: on an index without the
+  dict-less tiers over `CRISPRME_IUPAC_CAP`, and in any population-level search), and its
+  `n_variants` counts every variant column of the window, a four-allele one too. Only where one
+  stands for the window does its note say that a greedy worst-case alignment is reported there:
+  within a cap raised to its bits, or with `CRISPRME_IUPAC_CAP=-1`, a `--per-sample` search
+  enumerates a hyperdense window's combinations as any other's, and its rows read as in 2.8.1
+  (`N cis carriers`). The report's inputs card says how many rows lie in such a window, and
+  `complete-search` says per chromosome how many windows were dense (over `CRISPRME_IUPAC_CAP`) and
+  how many hyperdense (stdout, `log_verbose.txt`). Among the indexable NRG windows of chr22, the
+  reference genome has none, the variant genome of HGDP + 1000 Genomes published with CRISPRitz
+  2.9.1 has 1,763 (the worst 2^23.00), and the one CRISPRitz 2.10.0 writes from the same VCF, every
+  allele coded, 5,103 (the worst 2^44.75, at chr22:22,881,189 in the IGL locus). On the published
+  index, the README guide's search of chr22 lists 565 dense windows, 381 of them hyperdense (the
+  worst 2^24.00), and 164 of the population-level report's 2,198 rows lie in one (1 of the
+  per-sample report's 1,574). The threshold is one constant, `window_density.HYPERDENSE_BITS`; see
   [`METHODS.md` §5](METHODS.md#5-search-space-control-for-high-variant-density-regions).
 - **A row whose window holds a four-allele position says so.** Where the reference base and three
   ALTs cover A, C, G and T, the variant genome writes `Q`, which matches any base (`N` stays an
@@ -111,15 +112,27 @@
   window of two-allele columns where the count of columns did: on the published HGDP + 1000 Genomes
   index, whose chr22 holds no three-allele column, the README guide's searches of chr22 report the
   same rows as with 2.8.1 (per-sample 1,574, population-level 2,198; their `bestMerge` tables are
-  byte-identical, and their BEDs list the same 565 windows, 8,155 lines), the notes only giving the
-  windows' sequences. A three-allele column weighs 1.58 bits and a four-allele one 2, where each
-  counted 1: coding every allele of a split site makes them common, and the immunoglobulin loci
-  explode (on chr22 of HGDP + 1000 Genomes, five guides' variant search returns 4,372,248 raw
-  targets with CRISPRitz 2.10.0, 96.6% of them in IGL, where 2.9.1 returned 206,883), which the
-  count of columns could not see. A VCF line that lists several ALTs writes a three-allele column
-  with any release: on a small genome whose phased VCF has seven such lines in one window of the
-  README guide (3^7 = 2^11.09 sequences), 2.8.1 listed the window nowhere; it is listed now, and an
-  index built without `--samplesID` reports it by its greedy worst-case alignment under
-  `--per-sample` too, with the known limit of 2.8.1 for such an index: its listed carriers need not
-  carry that alignment (METHODS.md §5). `-1` still disables the cap; a hyperdense window is listed
-  all the same, not capped.
+  byte-identical, and their BEDs list the same 565 windows, 8,155 lines), the notes giving the
+  windows' sequences (and per sample no greedy worst case: Fixed, below). A three-allele column
+  weighs 1.58 bits and a four-allele one 2, where each counted 1: coding every allele of a split
+  site makes them common, and the immunoglobulin loci explode (on chr22 of HGDP + 1000 Genomes, five
+  guides' variant search returns 4,372,248 raw targets with CRISPRitz 2.10.0, 96.6% of them in IGL,
+  where 2.9.1 returned 206,883), which the count of columns could not see. A VCF line that lists
+  several ALTs writes a three-allele column with any release: on a small genome whose phased VCF has
+  seven such lines in one window of the README guide (3^7 = 2^11.09 sequences), 2.8.1 listed the
+  window nowhere; it is listed now, and an index built without `--samplesID` reports it by its
+  greedy worst-case alignment under `--per-sample` too, with the known limit of 2.8.1 for such an
+  index: its listed carriers need not carry that alignment (METHODS.md §5). `-1` still disables the
+  cap; a hyperdense window is listed all the same.
+
+### Fixed
+
+- **A per-sample row on an index with the dict-less tiers is no longer noted as a dense window's
+  greedy worst-case alignment.** Since 2.7.10 that path reports a dense window by its carriers' own
+  haplotypes and its reference row, never by a greedy representative, yet
+  `High_variant_density_region` said of each of its rows that "a greedy worst-case alignment is
+  reported here; additional haplotype alignments may exist". It now gives the window's variants,
+  sequences and IUPAC protospacer only (on chr22 of the published index, the README guide's
+  per-sample search: 2 rows), as the BED's new `greedy` column says. The report reads such a row as
+  before: it takes a dense window's row for its greedy alignment only when no dataset of the search
+  has the tiers.
