@@ -135,13 +135,18 @@ own ID where the ID column lists one per ALT, change those three.
   at most 16 a sample, and past that one, holding at each such position the ALT nearest the guide
   (uncapped, NA19042, PUTATIVE in the IGL window chr22:22,881,180-22,881,205 and carrying two or
   three ALTs at 16 of its 26 positions, gave 8.5 million unions there, and 90 GB; now 331 distinct
-  haplotypes in all for the window's 790 carriers, in 0.1 s). The population summary decides such
-  a carrier without phase, as it now decides a carrier whose genotype at a variant of the row is
-  unphased; the SNP+SNP co-occurrence companion counts positions, not variants, so two ALTs of one
-  position are no co-occurrence; and a sites-only dataset's co-located union takes one ALT of a
-  position (one union per choice, at most 16 a window). The phase label is per row, so a row such a
-  sample shares reads PUTATIVE for all its carriers. Covered by
-  `PostProcess/test_observed_haplotypes.py` and `PostProcess/test_site_alleles.py`.
+  haplotypes in all for the window's 790 carriers, in 0.1 s). Through the real CLI, on an index
+  CRISPRitz 2.10.0 built from the 10,429 HGDP + 1000 Genomes records of chr22:22,860,001-22,899,000,
+  a per-sample search of TGGGGGATAAATATGCTTGC (NGG, 2 mismatches; its protospacer is
+  chr22:22,881,187-22,881,206) now takes 58 s in all, its largest process at 0.55 GB; before, its
+  SNP post-analysis was stopped after 40 minutes, at 15 GB, having treated 76 of the 384 alignments
+  that hold more than 10 variants. The population summary decides such a carrier without phase, as
+  it now decides a carrier whose genotype at a variant of the row is unphased; the SNP+SNP
+  co-occurrence companion counts positions, not variants, so two ALTs of one position are no
+  co-occurrence; and a sites-only dataset's co-located union takes one ALT of a position (one union
+  per choice, at most 16 a window). The phase label is per row, so a row such a sample shares reads
+  PUTATIVE for all its carriers. Covered by `PostProcess/test_observed_haplotypes.py` and
+  `PostProcess/test_site_alleles.py`.
 - **The dictionary path keeps only the ALTs a target's own column holds, as the observed path does
   (#139); a sites-only dataset substitutes every ALT its registry lists, as up to 2.8.1.** The
   dictionary path, and a genotyped panel's registry read alone (`download --no-genotypes`),
