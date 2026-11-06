@@ -644,28 +644,37 @@ class ALineOfSeveralAltsThroughThePostAnalysis(_SnpPostAnalysis):
         self.assertEqual(phases[t + "," + g], "CONFIRMED")
 
 
+def _mega_vcf(path, records):
+    """A sites-only VCF as the mega's: ``records`` of (1-based position, REF, ALT, ID,
+    FILTER), each with an ``AF_HGDP``."""
+    with open(path, "w") as fh:
+        fh.write("##fileformat=VCFv4.2\n"
+                 '##INFO=<ID=AF_HGDP,Number=A,Type=Float,Description="AF">\n'
+                 "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n")
+        for p, ref, alt, rs, flt in records:
+            fh.write(f"chrT\t{p}\t{rs}\t{ref}\t{alt}\t.\t{flt}\tAF_HGDP=0.1\n")
+    return path
+
+
 class TheSitesOnlyUnionTakesOneAltAColumn(_SnpPostAnalysis):
     """A sites-only dataset's window: column 5 holds C>A and C>T (split records), column
-    9 A>G. The co-located union applied both alts of column 5 (the sequence holding the
-    later, the row naming both): one union per choice of alt now."""
+    9 A>C and A>G. The co-located union applied every alt of a column (the sequence
+    holding the later, the row naming both): one union per choice of alt now, each
+    choice its own row, though the greedy representative gives one of them (A and G,
+    the guide's bases) and the others only their own unions."""
 
-    def test_two_unions(self):
-        vcf = os.path.join(self.tmp, "mega.chrT.vcf")
-        with open(vcf, "w") as fh:
-            fh.write("##fileformat=VCFv4.2\n"
-                     '##INFO=<ID=AF_HGDP,Number=A,Type=Float,Description="AF">\n'
-                     "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n")
-            for p, ref, alt, rs in ((_pos1(5), "C", "A", "rsA"), (_pos1(5), "C", "T", "rsT"),
-                                    (_pos1(9), "A", "G", "rsG")):
-                fh.write(f"chrT\t{p}\t{rs}\t{ref}\t{alt}\t.\tPASS\tAF_HGDP=0.1\n")
+    def test_one_union_per_choice(self):
+        vcf = _mega_vcf(os.path.join(self.tmp, "mega.chrT.vcf"), (
+            (_pos1(5), "C", "A", "rsA", "PASS"), (_pos1(5), "C", "T", "rsT", "PASS"),
+            (_pos1(9), "A", "C", "rsC", "PASS"), (_pos1(9), "A", "G", "rsG", "PASS")))
         ref = _site(c5="C", c9="A")
-        rows, _comp = self.analyse(ref, [_window(ref, {5: "H", 9: "R"})], None,
-                                   sites_only_vcf=vcf, mode="0", mms=1)
+        rows, _comp = self.analyse(ref, [_window(ref, {5: "H", 9: "V"})], None,
+                                   sites_only_vcf=vcf, mode="0", mms=2)
         self.assert_no_row_names_two_alts_of_a_position(rows)
         p5, p9 = _pos1(5), _pos1(9)
-        got = self.variant_rows(rows)
-        self.assertIn(("chrT_%d_C_A" % p5, "chrT_%d_A_G" % p9), got)
-        self.assertIn(("chrT_%d_C_T" % p5, "chrT_%d_A_G" % p9), got)
+        self.assertEqual(set(self.variant_rows(rows)),
+                         {("chrT_%d_C_%s" % (p5, a5), "chrT_%d_A_%s" % (p9, a9))
+                          for a5 in "AT" for a9 in "CG"})
 
 
 # --------------------------------------------------------------------------- #
