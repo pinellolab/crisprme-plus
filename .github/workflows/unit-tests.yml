@@ -306,6 +306,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_observed_haplotype_integration -v
 
+      - name: "SNP rows drop a carrier whose SNP haplotype holds an indel changing the target"
+        working-directory: PostProcess
+        run: python -m unittest test_snp_row_indel_carriers -v
+
       - name: "AF panel denominator uses VCF-filtered genotyped samples"
         working-directory: PostProcess
         run: python -m unittest test_af_denominator_panel -v

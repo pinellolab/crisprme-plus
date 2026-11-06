@@ -191,6 +191,45 @@ and the `release-crisprme` skill.
   `test_indel_row_coordinates` (rows starting inside an insertion, rows whose PAM an insertion
   adds after a reference protospacer, 3′ and 5′ PAMs, both strands), `test_indel_snp_cis` and
   `test_representative_tiebreak` (the real merge: alignments that start inside one insertion).
+- **A per-sample SNP row no longer lists a carrier whose haplotype holding its SNPs also holds
+  an indel that changes the target** (every release with per-sample genotypes; the known limit
+  2.8.1 stated).
+  - The enriched genome holds SNPs only, so a SNP row's carriers came from SNP genotypes alone,
+    and an individual was listed whose own sequence there is the indel's (on the indel row, when
+    in budget). On chr22 of the HGDP + 1000 Genomes panel an alternative alignment at
+    chr22:21052638 − listed the 1,292 carriers of 21052641 G>A, which sits on the same 1,448
+    haplotypes as 21052640 T>TCACC: none of them has that target.
+  - Such a carrier now leaves the row, read on the phased indel genotype store the indel
+    post-analysis reads, by the rule 2.8.1 applies to an indel row's second indel. An indel
+    changes the target when it deletes or replaces a base of its span (protospacer and PAM) or
+    inserts bases between two of them; not when its deleted bases all lie outside the span (its
+    junction at or past the target's edge), nor when it inserts before the first base or after
+    the last. Whether the bases change is read on the haplotype's own bases: a repeat unit gained
+    or lost at the target's edge leaves them, and the carrier stays. A phased carrier is decided
+    by its haplotype (an indel on the other haplotype takes nothing off); one homozygous for the
+    indel leaves the row; one whose indel call is unphased cannot be tied to a haplotype and
+    stays, PUTATIVE. An indel at the position of a SNP the row names is another allele of that
+    base, a phasing artefact, and takes no carrier off. A row left with no carrier is not
+    reported. Population-level searches are unchanged (their rows are worst-case composites).
+  - README guide, HGDP + 1000 Genomes, NRG, 4 mismatches + 1 + 1, per-sample (2.8.1 output,
+    checked against haplotypes rebuilt from the phased VCF): genome-wide, 280 of 65,184
+    highest-CFD SNP rows of the integrated results listed such carriers (28,700 listings,
+    13,525 of them carriers homozygous for the indel), and 208 had no other carrier (none at
+    CFD ≥ 0.2, highest 0.112); 210 of 39,752 alternative alignments (24,145 listings), 152 with no other
+    carrier. TRAC guide: 157 of 49,841 rows (30,340 listings), 97 with no other carrier (highest
+    CFD 0.049). chr22 alone: 3 rows and 7 alternative alignments. After the fix, checked the same
+    way genome-wide: none, but for 2 listings whose indel sits at the position of the row's SNP
+    (a phasing artefact, kept as at an indel row's own position).
+  - Cost (per-sample searches only): the SNP post-analysis reads the indels of the store near
+    each chromosome's SNP targets (839,234 of its 17.2 million genome-wide, 3 to 40 s a
+    chromosome, in parallel) and reads a carrier's bases only where it holds one that changes a
+    target, once per case. Genome-wide, run beside 2.8.1 on one host: the SNP post-analysis took
+    9 min 11 s (2.8.1: 9 min 32 s), its largest worker 2.03 GB (1.83 GB; a median of +0.1 GB a
+    chromosome); chr22: 43 s (37 to 38 s).
+  - Covered by `PostProcess/test_snp_row_indel_carriers.py` and the SNP+indel oracle, which now
+    checks every per-sample SNP row's carriers against their haplotypes and plants sites Y1-Y4
+    (cis, trans, homozygous, unphased, a G run at the target's edge, an always-cis SNP): d7a6fff
+    fails it 62 times (57 row blocks at 11 sites, and the Y sites' expectations).
 
 ## [2.8.1] - 2026-11-05
 

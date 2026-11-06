@@ -394,14 +394,41 @@ haplotypes is bounded by ≈2×(number of carriers) rather than 2^*k*, so it is
 efficient, and each enumerated haplotype carries its **exact set of carriers**
 (which in turn yields its exact frequency, Section 3). Cross-individual chimeras
 — combinations assembled from variants carried by *different* people — are
-**excluded** by construction. A SNP row's carriers are resolved from SNP genotypes
-only: an individual whose haplotype holding the row's SNPs also carries an indel
-inside the target is still listed, though its own sequence there is the indel's
-(reported on the indel row when it is in budget). On chr22 of the HGDP + 1000 Genomes
-panel, per sample, this affects 2.2% of SNP row-blocks (990 of 45,921, five guides),
-and 545 of them have no listed carrier that holds the sequence. It only over-lists, no
-site is lost, and 2.8.0 behaves the same; it is fixed in the next release (§8,
-residuals).
+**excluded** by construction. A SNP row's target is the reference with the SNP alleles
+of a haplotype (the enriched genome holds SNPs only), so it is not the sequence of a
+haplotype that also holds an indel changing the target's bases: that haplotype's own
+target there is the indel row's, when it is in budget. Since 2.8.2 a per-sample SNP row
+does not list such a carrier. The carriers are read against the phased indel genotype
+store the indel post-analysis reads (§4, SNP+indel), as an indel row's second indel is:
+- an indel changes the target when it deletes or replaces a base of the target's span
+  (protospacer and PAM, a DNA-bulge base included) or inserts bases between two of them.
+  One whose deleted bases all lie outside the span, its junction at or past the target's
+  edge, or that inserts before the target's first base or after its last, leaves the
+  target's bases as they are;
+- whether the bases change is read on the haplotype's own bases, written with every indel
+  of the store it holds there and its own SNP alleles: in a tandem repeat a unit gained or
+  lost at the target's edge leaves them as they are (from the first base on, or up to the
+  last), and the carrier stays. The bases must be read through the SNPs the row names: a
+  haplotype whose indel pushes a named SNP out of the stretch, or deletes its base, has its
+  target thanks to the indel, not the SNP;
+- a phased carrier is decided by its haplotype: one whose indel is on the other haplotype
+  stays. One homozygous for the indel holds it on every haplotype and leaves the row.
+  Otherwise one whose indel call or SNP call is unphased cannot be tied to a haplotype and
+  stays, PUTATIVE, as every carrier on an unphased panel is. An indel at the position of a SNP the
+  row names is another allele of that base (a VCF writes a haplotype holding both as one
+  record), so a haplotype phased with both is a phasing artefact, and it stays; a
+  haplotype whose bases cannot be read (an indel there whose slot is unknown, two records
+  of one base) leaves the row;
+- a row left with no carrier is not reported. The population-level analysis (§5) is
+  unchanged: its rows are worst-case composites.
+
+On chr22 of the HGDP + 1000 Genomes panel, the README guide, NRG, 4 mismatches + 1 + 1, per
+sample, up to 2.8.1 3 of 628 highest-CFD SNP rows of the integrated results and 7 of 399 of
+the alternative alignments listed such carriers (4,234 listings), and 7 of them had no other
+carrier: chr22:21052638 − listed 1,292 carriers of 21052641 G>A, which sits on the same 1,448
+haplotypes as 21052640 T>TCACC. Genome-wide, 280 of 65,184 highest-CFD SNP rows (28,700
+listings, 13,525 of them carriers homozygous for the indel), and 208 had no other carrier (none
+at CFD ≥ 0.2, highest 0.112).
 
 ### Behavior by phasing status
 The confidence attached to an enumerated haplotype depends on the phasing of the
@@ -1308,12 +1335,13 @@ none of its 13,853,761 indels has one, and their per-dataset frequencies are in 
 release (HPRC's chrY log needs rebuilding with it). The phased indel genotype store
 leaves out equal-length multi-base records (MNVs), so their carriers are resolved with the
 phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
-among its 195,813 indel-search records. A SNP row's carriers are resolved from SNP genotypes
-only (§4): an individual whose haplotype holding the row's SNPs also carries an indel inside
-the target is still listed, though its own sequence there is the indel's (reported on the
-indel row when in budget). On chr22 of the HGDP + 1000 Genomes panel, per sample, this
-affects 2.2% of SNP row-blocks, and 545 have no carrier that holds the sequence. It only
-over-lists, 2.8.0 behaves the same, and it is fixed in the next release.
+among its 195,813 indel-search records. Since 2.8.2 a per-sample SNP row does not list a
+carrier whose haplotype holding its SNPs also holds an indel that changes the target's bases
+(§4); up to 2.8.1 it did. What remains: an MNV inside the target, which the phased indel
+store does not hold (the HGDP + 1000 Genomes index has none); a carrier whose indel call is
+unphased, which stays listed, PUTATIVE; a dense window reported by its greedy worst case on
+an index without the dict-less tiers (§5), whose carriers need not carry every variant in it;
+and the population-level analysis, whose rows are worst-case composites.
 On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists of the results
 tables are not in the order of its `Variant_info_genome`: the merge of a cluster's rows
 (`remove_contiguous_samples.py`) sorts the three lists each on its own, as text, and keeps

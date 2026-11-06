@@ -63,6 +63,10 @@ import itertools
 
 CONFIRMED = "CONFIRMED"
 PUTATIVE = "PUTATIVE"
+# A ``slot_filter``'s verdicts on a carrier's haplotype (see _per_sample_variant_sets):
+# it has the target (KEEP), it does not (DROP), or it cannot be told and stays, PUTATIVE.
+KEEP = "KEEP"
+DROP = "DROP"
 
 
 class ObservedHaplotype(object):
@@ -137,7 +141,7 @@ def _gt_is_phased(gt):
 
 
 def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
-                             max_putative=-1):
+                             max_putative=-1, slot_filter=None):
     """Build each real individual's per-phase-set cis variant-set(s) for the window.
 
     Args:
@@ -155,6 +159,13 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
         autosomal model returns 2 regardless, and chrX/Y refinements are a documented
         follow-up (they only shrink slots, never invent carriers).
       chrom: chromosome name (unused today; accepted for a future PS/sex axis).
+      slot_filter: None, or callable(sample_id, slot, variant_set) -> KEEP, DROP or
+        PUTATIVE, asked of each haplotype a sample contributes: ``slot`` is the slot
+        index of a phased sample's set, None for an unphased sample's candidate subset.
+        DROP takes that haplotype out (it does not have the target's sequence: a SNP
+        row's carrier whose haplotype also holds an indel that changes the target);
+        PUTATIVE keeps it, its phase no longer CONFIRMED. A set two slots share is kept
+        when one of them is (a KEEP before a PUTATIVE). None: every haplotype is kept.
 
     Returns dict[sample_id -> list of (frozenset[(pos_c, alt)], phase_state)].
     Each sample contributes:
@@ -206,16 +217,18 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
                 for h, tok in enumerate(toks):
                     if tok == e["alt_index"]:
                         slots.setdefault(h, set()).add((e["pos_c"], e["alt"]))
-            sets = []
-            seen_keys = set()
+            state_of = {}  # set -> its phase state, in first-seen slot order
             for h, vset in slots.items():
                 if not vset:
                     continue
                 key = frozenset(vset)
-                if key in seen_keys:
-                    continue  # two identical slots (hom) => one CONFIRMED set
-                seen_keys.add(key)
-                sets.append((key, CONFIRMED))
+                verdict = KEEP if slot_filter is None else slot_filter(sid, h, key)
+                if verdict == DROP:
+                    continue  # this slot does not have the set's target
+                state = CONFIRMED if verdict == KEEP else PUTATIVE
+                if state_of.get(key) != CONFIRMED:
+                    state_of[key] = state  # two identical slots (hom) => one set
+            sets = list(state_of.items())
             if sets:
                 out[sid] = sets
             # A phased sample with no slot actually carrying an alt (all ref/missing)
@@ -240,18 +253,22 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
             ))
             if carried:
                 if max_putative >= 0 and len(carried) > max_putative:
-                    out[sid] = [(frozenset(carried), PUTATIVE)]
+                    cands = [frozenset(carried)]
                 else:
-                    out[sid] = [
-                        (frozenset(combo), PUTATIVE)
+                    cands = [
+                        frozenset(combo)
                         for r in range(1, len(carried) + 1)
                         for combo in itertools.combinations(carried, r)
                     ]
+                if slot_filter is not None:
+                    cands = [c for c in cands if slot_filter(sid, None, c) != DROP]
+                if cands:
+                    out[sid] = [(c, PUTATIVE) for c in cands]
     return out
 
 
 def enumerate_observed_haplotypes(positions, refSeq, parse_haplotypes, ploidy_of,
-                                  chrom, max_putative=-1):
+                                  chrom, max_putative=-1, slot_filter=None):
     """Enumerate the DISTINCT observed haplotypes for one candidate window.
 
     Args:
@@ -259,7 +276,8 @@ def enumerate_observed_haplotypes(positions, refSeq, parse_haplotypes, ploidy_of
         ``info`` = [rsID, AF, snp_info] used to build the emitted info rows.
       refSeq: the pre-revert reference window (str), len == len(replaceTarget). Each
         ObservedHaplotype.seq is a list(refSeq) copy with its (pos_c, alt) applied.
-      parse_haplotypes, ploidy_of, chrom: as in ``_per_sample_variant_sets``.
+      parse_haplotypes, ploidy_of, chrom, slot_filter: as in
+        ``_per_sample_variant_sets``.
 
     Returns list[ObservedHaplotype], one per distinct observed variant-set, carriers
     unioned across samples, phase_state downgraded to PUTATIVE if ANY contributor was
@@ -276,7 +294,8 @@ def enumerate_observed_haplotypes(positions, refSeq, parse_haplotypes, ploidy_of
             info_of[(pos_c, alt)] = col["info"][i]
 
     per_sample = _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of,
-                                          chrom, max_putative=max_putative)
+                                          chrom, max_putative=max_putative,
+                                          slot_filter=slot_filter)
 
     # Dedup: variant_set -> {carriers:set, confirmed_all:bool}. A set is CONFIRMED only
     # if EVERY contributing (sample, path) was CONFIRMED cis.

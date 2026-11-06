@@ -2,6 +2,7 @@
 from math import trunc
 from operator import index
 import sys
+import bisect
 import json
 import gzip
 import os
@@ -73,6 +74,17 @@ except Exception:  # module absent in an old deploy -> legacy dict path only
     _obshap = None
     _phase_companion = None
     _snpsnp_companion = None
+# 2.8.2: a SNP row's carrier whose haplotype holding the row's SNPs also holds an indel
+# that changes the target's bases does not have the row's sequence there (the enriched
+# genome holds SNPs only, so the carriers come from SNP genotypes). In a per-sample
+# search such a carrier leaves the row, read on the phased indel genotype store the
+# indel post-analysis already reads (analisi_indels_NNN.py: the 2.8.1 rule for an indel
+# row's second indel). Guarded like the tiers above: without the module there is no
+# filter and the rows are those of 2.8.1.
+try:
+    import indel_snp_cis as _isc
+except Exception:  # module absent in an old deploy -> no filter
+    _isc = None
 
 # Two-pass POPULATION-LEVEL analysis (docs/DESIGN_2.5.1_two_pass_fast_mode.md) -- the
 # DEFAULT since 2.5.3. Driven by the internal CRISPRME_FAST_MODE env var ("1" = default
@@ -135,6 +147,15 @@ _snp_snp_cooc_keys = set()
 # module body -- e.g. test_phased_haplotype's iupac_decomposition round-trip.
 myreg = None
 mygt = None
+# The indels of the phased indel genotype store near this chromosome's SNP targets
+# (_SnpRowIndels), read at run time in a per-sample search only; None (population-level,
+# no store, CRISPRME_INDEL_SNP=0, an old deploy, the unit-test harness): no SNP row loses
+# a carrier, as in 2.8.1. _dict_keys_read: the dictionary keys the run read (an absent
+# one of them is a position with no SNP); None when no dictionary was read.
+_snp_indels = None
+_dict_keys_read = None
+_snp_site_cache = {}
+_snp_indel_stats = {"targets": 0, "listings": 0, "gone": 0, "putative": 0, "kept": 0}
 # Registry-only install (Tier-0 registry present, NO per-sample dict, NO genotype
 # tier -- e.g. a `--no-genotypes` download). Computed once after tier detection;
 # when True the variant finalizer emits degraded off-target rows (empty Samples ->
@@ -614,6 +635,346 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
     cluster_to_save.append(final_line)
 
 
+# ---------------------------------------------------------------------------------
+# 2.8.2: a SNP row's carrier whose haplotype also holds an indel inside the target
+# ---------------------------------------------------------------------------------
+# Verdicts on a carrier's haplotype, the values of observed_haplotypes.KEEP / DROP /
+# PUTATIVE (repeated here so the dictionary path needs no observed_haplotypes).
+_SLOT_KEEP, _SLOT_DROP, _SLOT_PUTATIVE = "KEEP", "DROP", "PUTATIVE"
+# How far around a SNP target the store's indels are read: a haplotype is read around
+# the target over its length and the bases its indels add or delete
+# (indel_snp_cis.snp_target_frame); one that needs more cannot be read.
+_SNP_INDEL_MARGIN = 500
+
+
+def _merge_spans(spans, margin):
+    """Sorted, disjoint (first, last) intervals covering every (lo, hi) of ``spans``
+    widened by ``margin`` on each side (0-based, inclusive)."""
+    out = []
+    for lo, hi in sorted(spans):
+        lo, hi = lo - margin, hi + margin
+        if out and lo <= out[-1][1] + 1:
+            out[-1][1] = max(out[-1][1], hi)
+        else:
+            out.append([lo, hi])
+    return [tuple(iv) for iv in out]
+
+
+class _SnpRowIndels(object):
+    """The indels of a phased indel genotype store (build_indel_genotypes: one line per
+    indel alt, '<POS>_<REF>_<ALT>' then 'sample:gt,...') whose REF meets a SNP target
+    span widened by ``margin``: only those a SNP row's carrier can hold inside, or
+    around, its target. Their carriers are parsed when first asked for."""
+
+    def __init__(self, store_path, spans, margin):
+        self.intervals = _merge_spans(spans, margin)
+        starts = [a for a, _b in self.intervals]
+        self.indels = []
+        self._tokens = {}
+        self._gts = {}
+        if self.intervals:
+            with (gzip.open(store_path, "rt") if store_path.endswith(".gz")
+                  else open(store_path)) as fh:
+                for line in fh:
+                    key, _tab, toks = line.partition("\t")
+                    pos, _u, rest = key.partition("_")
+                    ref, _u, alt = rest.partition("_")
+                    try:
+                        p0 = int(pos) - 1
+                    except ValueError:
+                        continue
+                    k = bisect.bisect_right(starts, p0 + len(ref) - 1) - 1
+                    if k < 0 or self.intervals[k][1] < p0:
+                        continue  # meets no target's surroundings
+                    rec = (p0 + 1, ref, alt)
+                    self.indels.append(rec)
+                    self._tokens[rec] = toks.rstrip("\n")
+        self.indels.sort()
+        self._starts = [p for p, _r, _a in self.indels]
+        self._ivstarts = starts
+        self._maxref = max((len(r) for _p, r, _a in self.indels), default=1)
+
+    def __len__(self):
+        return len(self.indels)
+
+    def near(self, first, last):
+        """The indels whose REF meets the reference positions first..last."""
+        k = bisect.bisect_left(self._starts, first - self._maxref + 1)
+        out = []
+        while k < len(self.indels) and self.indels[k][0] - 1 <= last:
+            p, r, _a = self.indels[k]
+            if p - 1 + len(r) > first:
+                out.append(self.indels[k])
+            k += 1
+        return out
+
+    def touching(self, lo, hi):
+        """The indels that change the reference bases lo..hi of a haplotype carrying
+        them (indel_snp_cis.changes_span): a deleted or replaced base inside, or bases
+        inserted between two of them. One whose deleted bases all lie outside (its
+        junction at or past the target's edge), or that inserts before the first base
+        or after the last, leaves them as they are."""
+        return [rec for rec in self.near(lo - 1, hi + 1)
+                if _isc.changes_span(rec[0], rec[1], rec[2], lo, hi)]
+
+    def covers(self, first, last):
+        """True iff the reference positions first..last were read whole."""
+        k = bisect.bisect_right(self._ivstarts, first) - 1
+        return k >= 0 and self.intervals[k][1] >= last
+
+    def carriers(self, rec):
+        """{sample: normalized genotype} of an indel (build_indel_genotypes)."""
+        gts = self._gts.get(rec)
+        if gts is None:
+            gts = {}
+            for tok in self._tokens.get(rec, "").split(","):
+                s, _c, g = tok.partition(":")
+                if s:
+                    gts[s] = g
+            self._gts[rec] = gts
+        return gts
+
+
+def _snp_site(pos0):
+    """{forward alt: {sample: genotype}} of the SNP records at ``pos0`` (0-based), each
+    genotype read against its own alt (indel_snp_cis.biallelic_site): from the
+    dictionary entries the run read, else the Tier-1 genotype store; {} at a position
+    with none; None where neither can say (a dictionary key the run did not read, and no
+    Tier-1 store)."""
+    if pos0 in _snp_site_cache:
+        return _snp_site_cache[pos0]
+    raw = {}
+    if _dict_keys_read is not None and (current_chr + "," + str(pos0 + 1)) in _dict_keys_read:
+        snps, samples, _rs, _af, _info = retrieveFromDict(pos0)
+        for alt, toks in zip(snps, samples):
+            if toks and len(alt) == 1:
+                raw[alt] = dict(t.split(":", 1) for t in toks if ":" in t)
+    elif mygt is not None:
+        for alt in mygt.alts_at(pos0 + 1):
+            if len(alt) == 1 and alt in "ACGT":
+                raw[alt] = dict(t.partition(":")[::2]
+                                for t in (mygt.carrier_tokens(pos0 + 1, alt) or []))
+    else:
+        raw = None
+    rec = None if raw is None else _isc.biallelic_site(raw)
+    if len(_snp_site_cache) > 200000:
+        _snp_site_cache.clear()
+    _snp_site_cache[pos0] = rec
+    return rec
+
+
+def _snp_slot_allele(sample, slot, lo, hi, row):
+    """source -> base on the haplotype of ``sample`` on ``slot`` (None: a candidate
+    haplotype of an unphased sample) that holds a SNP row's alleles ``row`` ({0-based
+    position: alt}) in its target lo..hi: an ALT base is itself; a position of the target
+    holds the row's allele; one outside it the haplotype's own SNP allele, else the
+    reference base. None where the genotypes cannot put an allele on the haplotype (an
+    unphased or missing call, two alts on one slot, a position no source read)."""
+    def allele(src):
+        if isinstance(src, str):
+            return src
+        if not 0 <= src < len(genomeStr):
+            return None
+        if lo <= src <= hi:
+            return row.get(src, genomeStr[src])
+        rec = _snp_site(src)
+        if rec is None:
+            return None
+        got = None
+        for alt, carriers in rec.items():
+            g = carriers.get(sample)
+            if g is None:
+                continue
+            toks, kind = _isc._gt_tokens(g)
+            if all(t == "1" for t in toks):
+                t = "1"  # homozygous (or haploid): the alt is on every slot
+            elif slot is not None and kind == "phased" and slot < len(toks):
+                t = toks[slot]
+            else:
+                return None
+            if t == "1":
+                if got is not None:
+                    return None
+                got = alt
+            elif t != "0":
+                return None
+        return got or genomeStr[src]
+    return allele
+
+
+def _snp_indel_on_slot(sample, slot, rec):
+    """True / False: whether the haplotype of ``sample`` on ``slot`` holds the store's
+    indel ``rec``; None where its genotype cannot put it on that haplotype (an unphased
+    heterozygous call, or a candidate haplotype of an unphased sample). A homozygous (or
+    haploid) carrier holds it on every haplotype."""
+    g = _snp_indels.carriers(rec).get(sample)
+    if g is None:
+        return False
+    toks, kind = _isc._gt_tokens(g)
+    if all(t == "1" for t in toks):
+        return True
+    if slot is not None and kind == "phased" and slot < len(toks):
+        return toks[slot] == "1"
+    return None if "1" in toks else False
+
+
+def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
+    """KEEP, DROP or PUTATIVE: whether the haplotype of ``sample`` on ``slot`` (None: a
+    candidate haplotype of an unphased sample) holding the SNP alts ``vset`` ({(column,
+    alt)}, the column counted from lo) has the SNP row's target lo..hi, given the
+    store's indels that change its bases (``touching``).
+
+    It does when it holds none of them (KEEP). One it holds changes the target, unless
+    its own bases still read the target at its place, from the first base on or up to
+    the last, through the row's SNPs (a repeat unit gained or lost at the target's edge:
+    indel_snp_cis.snp_target_held), read with every indel of the store it holds there:
+    KEEP if they do, DROP if not, or if they cannot be read (an indel there whose slot
+    is unknown, two records of one base, a frame the store was not read over). An indel
+    whose slot is unknown (an unphased heterozygous call, or an unphased sample's
+    candidate haplotype) cannot be tied to the haplotype: if no other one is on it, the
+    carrier stays, PUTATIVE. An indel at the position of a SNP the row names is another
+    allele of that base (a haplotype holding both is one VCF record), so a slot phased
+    with both is a phasing artefact: it takes no carrier off the row, as for an indel
+    row's own position (2.8.1).
+
+    ``readings`` (a dict of the target's, or None) keeps each reading of the bases: it
+    depends on the haplotype only through the indels each way reads, the row's SNPs and
+    the haplotype's alleles at the frame's positions outside the target that hold a SNP
+    record, so the carriers of one common indel share a reading."""
+    row = {lo + pc: alt for pc, alt in vset}
+    mine, unknown = [], False
+    for rec in touching:
+        if rec[0] - 1 in row:
+            continue  # another allele of a row SNP's base: a phasing artefact
+        on = _snp_indel_on_slot(sample, slot, rec)
+        if on is None:
+            unknown = True
+        elif on:
+            mine.append(rec)
+    if not mine:
+        return _SLOT_PUTATIVE if unknown else _SLOT_KEEP
+    first, last = _isc.snp_target_frame(lo, hi, mine)
+    held = [list(mine), list(mine)]  # the indels each way reads
+    for rec in _snp_indels.near(first, last):
+        p, r, _a = rec
+        if rec in mine or p - 1 in row:
+            continue
+        reach = (p - 2 + len(r) >= lo, p - 1 <= hi)  # from the first base on, up to the last
+        if not any(reach):
+            continue
+        on = _snp_indel_on_slot(sample, slot, rec)
+        if on is False:
+            continue
+        for side in (0, 1):
+            if reach[side] and held[side] is not None:
+                held[side] = None if on is None else held[side] + [rec]
+    for side in (0, 1):
+        if held[side] is not None and not _snp_indels.covers(
+                *_isc.snp_target_frame(lo, hi, held[side])):
+            held[side] = None  # the store was not read that far
+    allele = _snp_slot_allele(sample, slot, lo, hi, row)
+    frames = [_isc.snp_target_frame(lo, hi, h) for h in held if h is not None]
+    if readings is None or not frames:
+        held_bases = _isc.snp_target_held(lo, hi, sorted(row), held, allele, genomeStr)
+    else:
+        first, last = min(f[0] for f in frames), max(f[1] for f in frames)
+        sites = readings.get((first, last))
+        if sites is None:  # the positions where one haplotype's allele can differ
+            sites = readings[(first, last)] = [
+                q for q in range(max(first, 0), min(last + 1, len(genomeStr)))
+                if not lo <= q <= hi and _snp_site(q)]
+        key = (tuple(None if h is None else tuple(h) for h in held), vset,
+               tuple(allele(q) for q in sites))
+        held_bases = readings.get(key)
+        if held_bases is None:
+            held_bases = readings[key] = _isc.snp_target_held(lo, hi, sorted(row), held,
+                                                              allele, genomeStr)
+    if held_bases:
+        _snp_indel_stats["kept"] += 1
+        return _SLOT_KEEP
+    return _SLOT_DROP
+
+
+def _snp_row_slot_filter(split):
+    """The slot filter (observed_haplotypes.enumerate_observed_haplotypes) of the SNP
+    target ``split`` in a per-sample search: _snp_slot_verdict for each haplotype a
+    carrier contributes, the dropped ones recorded in its ``dropped`` set of (sample,
+    variant set). None when no indel of the store changes the target's bases (or no
+    store was read): then every carrier stays, and the rows are those of 2.8.1."""
+    if _snp_indels is None or _isc is None or _FAST_MODE:
+        return None
+    lo, hi = _isc.snp_target_span(int(split[4]), len(split[2].replace("-", "")))
+    touching = _snp_indels.touching(lo, hi)
+    if not touching:
+        return None
+    holders = set().union(*(_snp_indels.carriers(rec) for rec in touching))
+    seen = {}
+    readings = {}
+    dropped = set()
+
+    def verdict(sample, slot, vset):
+        if sample not in holders:
+            return _SLOT_KEEP  # holds none of the indels that change the target
+        key = (sample, slot, vset)
+        v = seen.get(key)
+        if v is None:
+            v = seen[key] = _snp_slot_verdict(sample, slot, vset, lo, hi, touching,
+                                              readings)
+            if v == _SLOT_DROP:
+                dropped.add((sample, vset))
+            elif v == _SLOT_PUTATIVE:
+                _snp_indel_stats["putative"] += 1
+        return v
+    verdict.dropped = dropped
+    return verdict
+
+
+def _filter_snp_lattice(levels, slot, unphased, verdict, kept):
+    """Take off each SNP combination of a dictionary-path lattice (``levels``: {level:
+    {key: [sequence, carriers, info]}}, the carriers of haplotype slot ``slot``, None on
+    an unphased dataset) the carriers whose haplotype does not have its target
+    (``verdict``: _snp_row_slot_filter); a carrier with an unphased SNP call in the
+    window (``unphased``) is asked as an unphased sample's candidate. A combination's
+    key alternates (column, alt). ``kept`` ({variant set: carriers}) is filled in with
+    the carriers each combination keeps. Untouched carriers keep their set as it was."""
+    for level in levels:
+        for key, ent in levels[level].items():
+            vset = frozenset(zip(key[0::2], key[1::2]))
+            if ent[1]:
+                gone = {s for s in ent[1]
+                        if verdict(s, None if s in unphased else slot, vset) == _SLOT_DROP}
+                if gone:
+                    ent[1] = ent[1] - gone
+            kept.setdefault(vset, set()).update(ent[1])
+
+
+def _count_snp_row_drops(verdict, kept_sets):
+    """Add a target's dropped carrier listings to the stats: the (sample, variant set)
+    pairs its slot filter dropped whose sample is not on that set's row after all
+    (another of its haplotypes has it), and the sets left with no carrier. ``kept_sets``:
+    {variant set: its carriers} as emitted."""
+    if verdict is None or not verdict.dropped:
+        return
+    lost = [(s, v) for s, v in verdict.dropped if s not in kept_sets.get(v, ())]
+    if lost:
+        _snp_indel_stats["targets"] += 1
+        _snp_indel_stats["listings"] += len(lost)
+        _snp_indel_stats["gone"] += len({v for _s, v in lost if not kept_sets.get(v)})
+
+
+def _report_snp_indels():
+    """One stdout line on the SNP rows' carriers taken off (stdout only: the pipeline
+    treats any stderr write as a fatal stage failure)."""
+    st = _snp_indel_stats
+    if st["targets"] or st["putative"] or st["kept"]:
+        print("snp-indel: %d SNP target(s) lost %d carrier listing(s) whose haplotype "
+              "holding the SNPs also holds an indel that changes the target's bases; %d "
+              "haplotype(s) left with no carrier are not reported; %d carrier haplotype(s) "
+              "kept, PUTATIVE, beside an unphased indel; %d kept, the indel leaving the "
+              "target's bases as they are" % (st["targets"], st["listings"], st["gone"],
+                                               st["putative"], st["kept"]), flush=True)
+
+
 def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     """DICT-LESS observed-haplotype branch of iupac_decomposition.
 
@@ -835,10 +1196,15 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     #    legacy embedded-refSeq/sentinel-33 representation, which is present on every
     #    IUPAC candidate). The ``enumerate_observed_haplotypes`` contract never yields
     #    the empty/reference haplotype, so the reference row is our responsibility here.
+    #    A carrier's haplotype that also holds an indel changing the target's bases
+    #    does not have this sequence: the slot filter takes it out (2.8.2; None, the
+    #    2.8.1 enumeration, when no indel of the phased store changes the target).
+    slot_filter = _snp_row_slot_filter(split)
     haplotypes = _obshap.enumerate_observed_haplotypes(
         positions, refSeq, parse_haplotypes, ploidy_of, current_chr,
-        max_putative=IUPAC_CAP,
+        max_putative=IUPAC_CAP, slot_filter=slot_filter,
     )
+    _count_snp_row_drops(slot_filter, {h.variant_set: h.carriers for h in haplotypes})
 
     # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block).
     refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
@@ -880,6 +1246,10 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
         _samples = set()
         for _h in haplotypes:
             _samples |= _h.carriers
+        # the samples with an alt in the window, also the ones whose haplotype an indel
+        # took off the window's rows (2.8.2): the BED lists the window, not its targets
+        if slot_filter is not None:
+            _samples |= {_s for _s, _v in slot_filter.dropped}
         _start = int(split[4])
         try:
             # 7th field = the FULL IUPAC protospacer (every variant column as its
@@ -933,6 +1303,12 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
     if haplotype_check:
         totalDict[1] = dict()
         totalDict[1][0] = dict()
+    # 2.8.2 (per-sample): the carriers whose haplotype also holds an indel that changes
+    # the target leave its rows (None: no indel of the phased store changes it, or a
+    # population-level search: the 2.8.1 rows). snp_unphased: the carriers with an
+    # unphased SNP call in this window, whose slot is unknown.
+    snp_filter = _snp_row_slot_filter(split)
+    snp_unphased = set()
     countIUPAC = 0
     for pos_c, c in enumerate(replaceTarget):
         if c in iupac_code:
@@ -957,6 +1333,8 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                     for count, sample in enumerate(sampleSet[i]):
                         sampleInfo = sample.split(":")
                         gt_alleles = sampleInfo[1].split("|")
+                        if snp_filter is not None and len(gt_alleles) < 2:
+                            snp_unphased.add(sampleInfo[0])  # its slot is unknown
                         for haplo in totalDict:
                             allele = gt_alleles[haplo] if len(gt_alleles) > haplo else gt_alleles[0]  # haploid guard
                             if allele != "0":
@@ -1193,6 +1571,7 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         ]
         if revert:
             refSeq = reverse_complement_table(refSeq)
+        snp_kept = {}  # variant set -> the carriers its combinations keep (2.8.2)
         for count in totalDict:
             createdNewLayer = True
             # capped -> range(0): the single greedy entry is already in level 0
@@ -1276,6 +1655,13 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                                     totalDict[count][lo][lk][1] = (
                                         totalDict[count][lo][lk][1] - hv[1]
                                     )
+
+            # 2.8.2 (per-sample, not the capped worst case): a carrier whose haplotype
+            # also holds an indel that changes the target's bases leaves the combination
+            # it is on (its slot here, ``count``, on a phased dataset).
+            if snp_filter is not None and not capped:
+                _filter_snp_lattice(totalDict[count], count if haplotype_check else None,
+                                    snp_unphased, snp_filter, snp_kept)
 
             refSeq_with_bulges = list(refSeq)
             for pos, char in enumerate(realTarget):
@@ -1394,6 +1780,8 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             # This reads ONLY final_line columns and never mutates it,
                             # so the bestMerge output is byte-identical.
                             _collect_variant_off_target(final_line)
+        if snp_filter is not None and not capped:
+            _count_snp_row_drops(snp_filter, snp_kept)
 
 
 def _cfd_from_alignment(aligned_crrna, aligned_proto):
@@ -1595,14 +1983,16 @@ def calculate_scores(cluster_to_save):
     return [cluster_with_CFD_score, cluster_with_CRISPR_BULGE_score]
 
 
-def _collect_needed_dict_keys(cluster_path, chrom):
+def _collect_needed_dict_keys(cluster_path, chrom, spans=None):
     """Return the SNP-dictionary keys ('<chrom>,<1-based pos>') this chromosome's
     targets will query. iupac_decomposition() calls retrieveFromDict() for each
     genomic position spanned by a target that contains an IUPAC code, so we take the
     full span of every such target -- a SUPERSET of the exact query set, so no
     queried position is ever missed. This lets us load only these entries instead of
     the whole per-chromosome dictionary (a 1000G+HGDP chr2 dict is ~13 GB on disk,
-    ~26 GB via json.load; loading only the queried positions keeps peak RAM small)."""
+    ~26 GB via json.load; loading only the queried positions keeps peak RAM small).
+    ``spans`` (a list), when given, gets each such target's (first, last) reference
+    position (0-based, inclusive)."""
     needed = set()
     try:
         with open(cluster_path) as fh:
@@ -1621,9 +2011,43 @@ def _collect_needed_dict_keys(cluster_path, chrom):
                 span = len(target.replace("-", ""))
                 for p in range(start, start + span):
                     needed.add(chrom + "," + str(p + 1))
+                if spans is not None:
+                    spans.append((start, start + span - 1))
     except OSError:
         pass
     return needed
+
+
+def _resolve_indel_genotype_path(dict_path, chrom):
+    """The phased indel genotype store of ``chrom`` (build_indel_genotypes) from the SNP
+    dict path: ``<...>/Dictionaries/indel_genotypes_<vcf>/gt_indel_<chrom>.tsv.gz``, the
+    one analisi_indels_NNN.py reads, or None when absent. MIRRORS
+    ``_resolve_genotype_paths``."""
+    dict_dir = os.path.dirname(dict_path)
+    name = os.path.basename(dict_dir)
+    suffix = name[len("dictionaries_"):] if name.startswith("dictionaries_") else name
+    path = os.path.join(os.path.dirname(dict_dir), "indel_genotypes_" + suffix,
+                        "gt_indel_" + str(chrom) + ".tsv.gz")
+    return path if os.path.isfile(path) else None
+
+
+def _snp_indel_frame_keys(store, spans, chrom):
+    """The dictionary keys a haplotype is read over around each SNP target an indel of
+    ``store`` (_SnpRowIndels) changes (indel_snp_cis.snp_target_frame, with every
+    indel of the store there): positions outside the target the dictionary path needs
+    the alleles of, besides the target's own."""
+    keys = set()
+    for lo, hi in spans:
+        touching = store.touching(lo, hi)
+        if not touching:
+            continue
+        # a reading's frame is sized by the target's indels a haplotype holds and the
+        # store's indels it reaches there: twice widened, these keys hold any of them
+        first, last = _isc.snp_target_frame(lo, hi, store.near(lo - 1, hi + 1))
+        first, last = _isc.snp_target_frame(lo, hi, store.near(first, last))
+        for p in range(max(first, 0), last + 1):
+            keys.add(chrom + "," + str(p + 1))
+    return keys
 
 
 def _load_dict_targeted(dict_path, needed_keys):
@@ -1933,9 +2357,39 @@ mydict = {}
 dict_tier_present = False  # True once a per-sample dict FILE loads (mode 1); stays
 #                            False on a dict-less install (modes 2/3) -- the reliable
 #                            "dict absent" signal for the registry-only guard (#136).
+
+def _read_snp_row_indels(spans, needed_keys):
+    """In a per-sample search, read the indels of the phased indel genotype store near
+    this chromosome's SNP targets ``spans`` (see _snp_row_slot_filter), and add to
+    ``needed_keys`` the dictionary keys a haplotype is read over around a target one of
+    them changes. None (no SNP row loses a carrier) in a population-level search, with
+    CRISPRME_INDEL_SNP=0, with no store, or when it cannot be read."""
+    if (_isc is None or _FAST_MODE or not spans
+            or os.environ.get("CRISPRME_INDEL_SNP", "1") not in ("1", "true", "True", "yes")):
+        return None
+    try:
+        path = _resolve_indel_genotype_path(sys.argv[2], current_chr)
+        if path is None:
+            return None
+        t0 = time.time()
+        store = _SnpRowIndels(path, spans, _SNP_INDEL_MARGIN)
+        needed_keys |= _snp_indel_frame_keys(store, spans, current_chr)
+        print(f"Read {len(store)} indel(s) of the phased indel genotype store near "
+              f"{current_chr}'s SNP targets in {time.time() - t0:.1f}s")
+        return store
+    except Exception as err:  # never break the SNP post-analysis on the store
+        print("No phased indel genotype store (or unreadable) for", current_chr, "-", err)
+        return None
+
+
+_iupac_spans = []
 try:
-    _needed_keys = _collect_needed_dict_keys(sys.argv[3], current_chr)
+    _needed_keys = _collect_needed_dict_keys(sys.argv[3], current_chr, _iupac_spans)
+    # 2.8.2: read before the dictionary, which then also reads the alleles around a
+    # target an indel of the store changes
+    _snp_indels = _read_snp_row_indels(_iupac_spans, _needed_keys)
     mydict, haplotype_check = _load_dict_targeted(sys.argv[2], _needed_keys)
+    _dict_keys_read = _needed_keys
     dict_tier_present = True
     print(
         f"Loaded {len(mydict)} SNP dictionary entr(y/ies) for {current_chr} "
@@ -2026,6 +2480,10 @@ if registry_only_mode and _twopass_emit is not None and (
     if not _FAST_MODE:
         print(f"Sites-only dataset on {current_chr}: population-level post-analysis.")
     _FAST_MODE = True
+# 2.8.2: no carrier to take off a SNP row without genotypes, nor in a population-level
+# post-analysis (its rows are worst-case composites)
+if registry_only_mode or _FAST_MODE:
+    _snp_indels = None
 
 # check PAM position and relative coordinates on targets
 pam_at_beginning = False
@@ -2156,6 +2614,7 @@ else:
     _write_phase_confirmation_companion()
     # ADDITIVE + guarded + gated-on-myreg: SNP+SNP co-occurrence companion TSV.
     _write_snp_snp_cooc_companion()
+    _report_snp_indels()
     # print complete and exit with no error
     print("ANALYSIS COMPLETE IN", time.time() - global_start)
     exit(0)
@@ -2210,5 +2669,6 @@ _write_population_summary_companion()
 _write_phase_confirmation_companion()
 # ADDITIVE + guarded + gated-on-myreg: SNP+SNP co-occurrence companion TSV.
 _write_snp_snp_cooc_companion()
+_report_snp_indels()
 
 print("ANALYSIS COMPLETE IN", time.time() - global_start)

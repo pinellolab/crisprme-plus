@@ -642,7 +642,8 @@ def local_haplotype(lo, hi, window, others=()):
     inclusive), as [(place, source)] in the order the haplotype holds them.
 
     ``window`` (VCF POS, REF, ALT) is the indel of the fake-indel window, written as the
-    window writes it: its REF out, its ALT in, the anchor base included. ``others`` are
+    window writes it: its REF out, its ALT in, the anchor base included; None for a
+    haplotype read around a SNP row's target, which holds no window indel. ``others`` are
     the haplotype's other indels; the bases one shares with its REF at either end
     (kept_bases, shared_tail) stay reference bases. A source is a reference position
     (int), whose base is the haplotype's own allele there, or a base an ALT puts in
@@ -655,13 +656,15 @@ def local_haplotype(lo, hi, window, others=()):
     keeps: two records at one POS always do (an insertion and a deletion there are two
     alleles of one site, though the bases each changes do not meet). The bases do not
     depend on the order of ``others``."""
-    refs = sorted((p1 - 1, p1 - 1 + len(ref)) for p1, ref, _alt in [window, *others])
+    records = ([window] if window is not None else []) + list(others)
+    refs = sorted((p1 - 1, p1 - 1 + len(ref)) for p1, ref, _alt in records)
     if any(b[0] < a[1] for a, b in zip(refs, refs[1:])):
         return None  # two REFs share a base
     edits = []
-    p1, ref, alt = window
-    s = p1 - 1
-    edits.append((s, s + len(ref), alt, s - 1, 2))
+    if window is not None:
+        p1, ref, alt = window
+        s = p1 - 1
+        edits.append((s, s + len(ref), alt, s - 1, 2))
     for p1, ref, alt in others:
         s = p1 - 1
         c = kept_bases(ref, alt)
@@ -695,7 +698,7 @@ def _same_base(x, y, value):
     return bx is not None and bx == by
 
 
-def target_pairs(window_hap, hap, first, last):
+def target_pairs(window_hap, hap, first, last, through=()):
     """The ways ``hap`` can hold the bases ``window_hap`` holds at places first..last
     (the target's first and last base on the window; local_haplotype), at the target's
     own place: one from the place of its first base on, one up to the place of its last
@@ -706,8 +709,9 @@ def target_pairs(window_hap, hap, first, last):
     and the base past them: for a deletion, the junction). The haplotype must have the
     bases through that indel, as the row names it, not only in a stretch that another of
     its variants has lengthened (a repeat unit gained upstream can push the indel out of
-    a stretch whose bases are those of the window). Always two, in that order: a target
-    the window written out does not hold has neither."""
+    a stretch whose bases are those of the window). ``through``: more places the stretch
+    must hold, the bases of the SNPs a SNP row names (snp_target_held). Always two, in
+    that order: a target the window written out does not hold has neither."""
     keys = [k for k, _s in window_hap]
     try:
         i, j = keys.index(first), keys.index(last)
@@ -716,7 +720,7 @@ def target_pairs(window_hap, hap, first, last):
     want = [s for _k, s in window_hap[i:j + 1]]
     n = len(want)
     lit = [x for x in range(i, j + 1) if len(keys[x]) == 3 and keys[x][1] == 2]
-    core = {keys[x] for x in lit}
+    core = {keys[x] for x in lit} | set(through)
     if lit and lit[-1] < j:
         core.add(keys[lit[-1] + 1])  # the base past the window's ALT: a deletion's junction
     hkeys = [k for k, _s in hap]
@@ -742,6 +746,65 @@ def holds_target_bases(ways, value):
     haplotype whose alleles ``value`` gives (source -> base, None where not known)."""
     return any(pairs is not None and all(_same_base(x, y, value) for x, y in pairs)
                for pairs in ways)
+
+
+# ---------------------------------------------------------------------------
+# A SNP row's carrier whose haplotype holds an indel inside the target (2.8.2)
+# ---------------------------------------------------------------------------
+# A SNP row is a target on the reference with SNP alleles: the enriched genome holds
+# no indel, so its carriers are read from SNP genotypes. A carrier whose haplotype
+# holding the row's SNPs also holds an indel that changes the target's bases does not
+# have the row's sequence there. As for an indel row's second indel (2.8.1), that is
+# read on the haplotype's bases: in a tandem repeat a unit gained or lost at the
+# target's edge leaves them as they are.
+
+
+def snp_target_span(start, target_len):
+    """(lo, hi): the reference bases (0-based, inclusive) a SNP row's target covers: its
+    start and as many bases as the target holds, the PAM and any DNA-bulge base
+    included (an RNA bulge is a gap of the guide, no base of the target)."""
+    return start, start + target_len - 1
+
+
+def snp_target_frame(lo, hi, indels):
+    """(first, last): the reference positions (0-based, inclusive) snp_target_held
+    writes a haplotype over: the target's span and, on either side, its length and the
+    bases the haplotype's indels ``indels`` [(POS, REF, ALT)] add or delete."""
+    margin = hi - lo + 1 + sum(abs(len(r) - len(a)) for _p, r, a in indels)
+    return lo - margin, hi + margin
+
+
+def snp_target_held(lo, hi, snps, held, value, reference):
+    """True iff a haplotype holding a SNP row's SNPs and some indels has the row's
+    target at its place: the bases of the reference lo..hi (0-based, inclusive) with the
+    haplotype's own alleles there, read from the target's first base on or up to its
+    last base, the stretch holding the base of every SNP the row names (``snps``, their
+    0-based positions), not one another variant pushed out of it.
+
+    ``held`` gives, for each way (from the first base on, up to the last base), the
+    haplotype's indels [(POS, REF, ALT)] that way reads, or None where it cannot be read
+    (an indel there that cannot be put on a slot). ``value`` (source -> base, None where
+    not known) gives the haplotype's alleles, the row's at a position of lo..hi;
+    ``reference`` is the chromosome's sequence. A way that reads two records of one base
+    (two indels whose REFs share a base, or a SNP alt of the haplotype on a base of an
+    indel's REF) cannot be read."""
+    through = [(p, 0) for p in snps]
+    for side in (0, 1):
+        indels = held[side]
+        if indels is None:
+            continue
+        if any(not 0 <= q < len(reference) or value(q) != reference[q]
+               for p, r, _a in indels for q in range(p - 1, p - 1 + len(r))):
+            continue  # a SNP alt on a base of the indel's REF: two records of one base
+        first, last = snp_target_frame(lo, hi, indels)
+        hap = local_haplotype(first, last, None, indels)
+        if hap is None:
+            continue  # two of its indels overlap
+        ways = target_pairs(local_haplotype(first, last, None), hap, (lo, 0), (hi, 0),
+                            through)
+        if holds_target_bases([ways[side]], value):
+            return True
+    return False
 
 
 class IndelCarriers(object):
