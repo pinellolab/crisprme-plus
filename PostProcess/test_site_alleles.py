@@ -316,6 +316,17 @@ class TheFourAlleleCode(unittest.TestCase):
         sets = twopass_find.iupac_window_to_sets("AQN")
         self.assertEqual(sets[1], frozenset("ACGT"))
 
+    def test_the_brute_force_truth_reads_q_as_every_base(self):
+        """test/benchmark/generate_brute_force.py, the benchmarks' truth (it imports
+        Biopython, which this job does not install: its table is read from the file)."""
+        import ast
+        path = os.path.join(os.path.dirname(HERE), "test", "benchmark", "generate_brute_force.py")
+        with open(path) as fh:
+            tree = ast.parse(fh.read())
+        table = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                     and getattr(n.targets[0], "id", "") == "iupac_dict")
+        self.assertEqual(table.get("Q"), {"A", "C", "G", "T"})
+
     def test_the_cluster_sort_takes_q(self):
         with open(os.path.join(HERE, "cluster.dict.py")) as fh:
             line = next(l for l in fh if l.startswith("alphabet = "))
