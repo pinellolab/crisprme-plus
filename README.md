@@ -2158,7 +2158,7 @@ crisprme.py download --what assembly --sample HG01255 --path /data/crisprme     
 crisprme.py download --what genotype-oracle --path /data/crisprme                                       # the phased HGDP + 1000 Genomes genotypes (complete-search --prioritize-observed on the mega panel)
 ```
 
-**`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`). Add `--dictless` for a variant index to drop the ~152 GB per-sample SNP dicts (the registry + genotype tiers replace them; indel logs kept), upload the genotype store as a separate companion, and bundle the samplesID lists so the index is self-complete:
+**`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`). Add `--dictless` for a variant index to drop the ~152 GB per-sample SNP dicts (the registry + genotype tiers replace them; indel logs kept), upload the genotype store as a separate companion, and bundle the samplesID lists so the index is self-complete. With the genotype store, the index's phased indel genotypes are uploaded on their own too (`indel_genotypes_<vcf>.tar.gz`; they stay in the index's archive as well), for `download --what genotype-oracle`:
 
 ```bash
 crisprme.py publish-index --index genome_library/NRG_3_hg38

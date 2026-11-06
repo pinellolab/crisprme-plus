@@ -845,7 +845,9 @@ the search without it (`--no-prioritize-observed`).
     not evidence of absence, as the combination may be a real haplotype of an ancestry the
     panel has few samples of. Kept in its place. The safeguards' frequency bound (the
     product of the variants' frequencies at least 1e-06 and the rarest at least 0.001) is
-    given as information and applied to nothing.
+    given as information and applied to nothing: a SNP's frequency is the dataset's registry's
+    (on `mega`, `AF_max`), an indel's that of its indel frequencies (`indel_af_<vcf>/`), or
+    else the row's own.
 - **Output.** `..._carrier_gate.tsv` beside the integrated results, one line per alignment
   that uses a variant (the row's line, the alignment, the variants, tier, state, panel, the
   haplotypes that carry them together and their samples, E, the frequency product and
