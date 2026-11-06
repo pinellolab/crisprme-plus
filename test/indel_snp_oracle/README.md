@@ -1,7 +1,7 @@
 # SNP+indel oracle (synthetic, real CLI)
 
 `run_oracle.sh <empty work dir>` runs inside a CRISPRme image. It generates a 16 kb
-reference chromosome and a phased VCF of 53 samples (`oracle.py generate`), builds the
+reference chromosome and a phased VCF of 57 samples (`oracle.py generate`), builds the
 indexes and dictionaries with `build-index-only`, runs `complete-search` with
 `--per-sample` and with `--population-level`, then checks every row whose variant list
 holds an indel or an MNV (`oracle.py check`) against each sample's two haplotypes
@@ -12,8 +12,11 @@ in `validate-benchmarks.yml`.
 Every such row of the integrated results and of the alternative alignments, in all
 three blocks, must show a concrete NRG PAM; its CFD must be the CFD of its own
 alignment; its mismatch count must be the alignment's and its mismatches + bulges their
-sum; its REF text must be the reference at its start, the bases its target holds,
-gapped as its target; every variant it names must be a record of the VCF, forward
+sum; its start must be the reference coordinate of its target's first base (the leftmost,
+forward strand) on a listed carrier's haplotype, or, when that is a base an insertion adds,
+the insertion's anchor (its VCF POS); its REF text must be the reference at its start, the
+bases its target holds, gapped as its target; every variant it names must be a record of
+the VCF, forward
 strand; and every carrier it lists must have the sequence: a phased carrier on one of
 its haplotypes at that site, spanning the indel, with every variant the row names on
 that haplotype; an unphased one every allele the row names. The planted sites then pin
@@ -41,6 +44,8 @@ who has which target:
 | K, K2 | an equal-length multi-base record, an MNV (+, -), and on both of S48's, S50's slots a SNP at the target's far-end base | S47, S49 CFD 1 alone; S48, S50 off the perfect row (an RNA-bulge alignment that does not reach that base lists them under the MNV alone); S48 on a one-mismatch row |
 | W | a deletion, the PAM TGG followed by a G; on S51's slot a 1-bp deletion in that G run, on S52's a spacer deletion | S51 CFD 1 (the run puts the G back: the target's bases are unchanged); S52 on no row |
 | V | a deletion, the target's 5' end in an AC repeat; on S53's slot a CA insertion written inside the target (left unnormalized) | S53 CFD 1 (the target is on its haplotype up to its last base) |
+| Z, Z2 | an insertion holding the target's first bases: the 5' end of the spacer (+), the PAM (-) | S54, S55 CFD 1, the row at the insertion's anchor |
+| Z3 | Z's geometry and a SNP alt the guide needs past the insertion, cis (S56) and trans (S57) | S56 CFD 1 under both variants, CONFIRMED, at the anchor; S57 off the perfect row |
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid fake-indel
 genome column by column, without genotypes: on aa9c54b (the 2.8.1 release candidate)
@@ -55,7 +60,13 @@ site's other alignments). On 9c6b4046, which took a carrier off an indel row whe
 slot held a second indel inside the target, decided on the indel's position, it fails at W
 and V in both modes: S51 and S53, whose haplotypes hold the target, are on no CFD-1 row.
 S51 is on no row at all, and S53 only on the CFD-0.9 RNA-bulge alignment that starts past
-the insertion.
+the insertion. On v2.8.1 the start check fails at I, Z, Z2 and Z3, in all three blocks and
+both modes (27 failures): a row whose first base is one an insertion adds started at that
+base's place on the haplotype, 3 to 6 bases past the anchor here, and its REF text was read
+there. In the genome-wide HGDP + 1000 Genomes search of the README guide (per-sample, 4
+mismatches + 1 + 1) 229 highest-CFD rows of 2.8.1 start so, up to 229 bases past the anchor;
+on 2.8.0, an alternative alignment of that guide started at chr22:22322768, the 7th base of
+G>GCAATCATTAT at 22322762.
 
 Not covered: split multi-allelic SNP records at one position. CRISPRitz add-variants
 keeps only the last of them in the enriched genome and in the dictionary, so the other

@@ -7,7 +7,8 @@
       need an indel, a SNP, or both, planted in cis, in trans, unphased, as two
       indels on one haplotype, as a multi-allelic SNP on one VCF line, with a SNP at
       the far end of the target, with a target in an indel's flank that does not
-      hold the indel, and with an equal-length multi-base record (an MNV).
+      hold the indel, with an equal-length multi-base record (an MNV), and with
+      targets whose first base is one an insertion adds.
   oracle.py check <workdir> <PostProcess dir> <results dir> [<results dir> ...]
       Builds every sample's two haplotypes from the VCF (a brute-force truth that
       shares no code with CRISPRme's resolution) and checks every row whose variant
@@ -16,6 +17,9 @@
         * the PAM is a concrete NRG and no IUPAC code is left;
         * CFD, recomputed from the row's own alignment, is the reported CFD;
         * the mismatch count is the alignment's, and mismatches + bulges is their sum;
+        * the start is the reference coordinate of the target's first base (the
+          leftmost, forward strand) on a listed carrier's haplotype, or, when that is
+          a base an insertion adds, the insertion's anchor (its VCF POS);
         * the REF text is the reference at the reported start, gapped as the target;
         * every variant it names is a record of the VCF, forward strand;
         * every listed carrier really has the reported sequence: a phased carrier on
@@ -47,7 +51,7 @@ import zipfile
 G = "ACTGAAATCTGTAAGCAGGC"  # the guide
 COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 CODES = set("RYSWKMBDHVryswkmbdhv")
-NSAMPLES = 53
+NSAMPLES = 57
 
 
 def rc(s):
@@ -345,6 +349,31 @@ def generate(wd):
     var("V", "ins", v0 + 5, "A", "ACA", {"S53": "0|1"})
     expect["V"] = {"perfect": ["S53"]}
 
+    # Z (+), Z2 (-), Z3 (+): a target whose first base (the leftmost, forward strand) is
+    # one an insertion adds: the insertion holds the target's 5' end (on - its PAM side).
+    # Such a base has no reference coordinate, and the row starts at the base the
+    # insertion follows, its anchor (the VCF POS). Up to 2.8.1 it started at the base's
+    # place on the haplotype, past the anchor by its rank in the insertion, and its REF
+    # text was read there (an HGDP + 1000 Genomes row: chr22:22322768, the 7th base of
+    # G>GCAATCATTAT at 22322762). Z3 needs a SNP alt in cis next to the insertion, as
+    # that row did, and is resolved per haplotype: S56 has it in cis, S57 in trans.
+    z0 = 15100
+    put(z0, G[6:] + "TGG")
+    var("Z", "ins", z0, seq[z0 - 1], seq[z0 - 1] + "TTCAT" + G[:6], {"S54": "1|0"})
+    expect["Z"] = {"perfect": ["S54"]}
+    z2 = 15400
+    fwd = rc(G + "TGG")  # CCA + the guide's complement
+    put(z2, fwd[9:])
+    var("Z2", "ins", z2, seq[z2 - 1], seq[z2 - 1] + "GA" + fwd[:9], {"S55": "0|1"})
+    expect["Z2"] = {"perfect": ["S55"]}
+    z3 = 15700
+    put(z3, G[6:12] + other(G[12]) + G[13:] + "TGG")
+    var("Z3", "ins", z3, seq[z3 - 1], seq[z3 - 1] + "AAG" + G[:6],
+        {"S56": "1|0", "S57": "1|0"})
+    var("Z3", "snp", z3 + 7, seq[z3 + 6], G[12], {"S56": "1|0", "S57": "0|1"})
+    expect["Z3"] = {"perfect": ["S56"], "never_perfect": ["S57"], "cooc": ["S56"],
+                    "named": {"S56": ["chr21_%d_%s_%s" % (z3 + 7, seq[z3 + 6], G[12])]}}
+
     # (No split multi-allelic SNP records here: CRISPRitz add-variants keeps only the
     # last of two records at one position in the enriched genome and the dictionary,
     # so the other alt is invisible to every stage. PostProcess/
@@ -472,6 +501,25 @@ class Truth(object):
                     anchor = next((p for p in reversed(pos[:k]) if p is not None), None)
                 if anchor is not None and abs(anchor - start) <= slack:
                     out.append((h, seg))
+                k = hap.find(probe, k + 1)
+        return out
+
+    def ref_starts(self, sample, seq, strand, start, slack=40, first=()):
+        """The reference coordinate of the first base (the leftmost, forward strand) of
+        every occurrence of ``seq`` on the sample's haplotypes near ``start``: the base's
+        own, or, for a base an insertion adds, the reference base the insertion follows
+        (its anchor, the VCF POS)."""
+        out = set()
+        for h in (0, 1):
+            hap, pos = self.haplotype(sample, h, first)
+            probe = seq if strand == "+" else rc(seq)
+            k = hap.find(probe)
+            while k >= 0:
+                p = pos[k]
+                if p is None:  # an inserted base: the base before it
+                    p = next((q for q in reversed(pos[:k]) if q is not None), None)
+                if p is not None and abs(p - start) <= slack:
+                    out.add(p)
                 k = hap.find(probe, k + 1)
         return out
 
@@ -651,6 +699,17 @@ def check(wd, pp, result_dirs):
             samples = [s for s in f["samples"].split(",") if s and s != "NA"]
             toks = [t.split("_") for t in f["var"].split(",")]
             named = [(int(t[-3]), t[-2], t[-1]) for t in toks]
+            # the start is the reference coordinate of the target's first base on a
+            # carrier's haplotype, or, for a base an insertion adds, the insertion's
+            # anchor (up to 2.8.1 the base's place on the haplotype, past the anchor)
+            if samples:
+                at = set()
+                for s in samples:
+                    at |= truth.ref_starts(s, stripped.upper(), f["strand"], f["start"],
+                                           first=named)
+                if at and f["start"] not in at:
+                    fail("%s: starts at %d, its first base is at %s on its carriers' "
+                         "haplotypes" % (where, f["start"], sorted(at)))
             for n in named:
                 if not truth.is_record(*n):
                     fail("%s: %s is not a record of the VCF" % (where, "_".join(map(str, n))))
