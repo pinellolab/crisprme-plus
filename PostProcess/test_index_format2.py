@@ -48,6 +48,9 @@ import crispritz_bins  # noqa: E402
 import index_coverage  # noqa: E402
 import index_fit  # noqa: E402
 import prune_flank  # noqa: E402
+import test_build_index_only_atomic as atomic  # noqa: E402  (its stub engine and fixture)
+import test_dictless_publish as dpub  # noqa: E402  (publish and download, offline)
+import test_indel_empty_chromosome as empty  # noqa: E402  (its stub engine and harnesses)
 
 MAGIC = b"CZI\xfe"
 # the four bits a tree or a flank gives a base (writePair, saveTST); Q is 1111 in a flank
@@ -818,8 +821,6 @@ class AWideFlankOfFormat2NeedsNoWarning(_Index):
         self.assertIn("nor has one built by CRISPRitz 2.10.0 or later (index format 2)", notes[0])
 
 
-import test_indel_empty_chromosome as empty  # noqa: E402  (its stub engine and harnesses)
-
 
 class AnEmptySubIndexRecordsItsFormat(empty._Fixture):
     """pool_index_indels.py records a sub-index buildTST built with no target, by buildTST's
@@ -947,8 +948,6 @@ class ASearchReadsAnEmptySubIndexByItsFormat(empty._Fixture):
         self.assertIn("No NRG target in the indels of chrB: skipping its indel search", res.stdout)
 
 
-import test_build_index_only_atomic as atomic  # noqa: E402  (its stub engine and fixture)
-
 # The stub engine of test_build_index_only_atomic, as CRISPRitz 2.10.0: its crispritz.py
 # states VERSION 2.10.0 and INDEX_FORMAT 2, and index-genome writes each .bin in index
 # format 2 (its one target's flags byte, where format 1 has its '0', holds the whole pad).
@@ -1018,3 +1017,97 @@ class BuildIndexOnlyTakesFormat2(atomic._Fixture):
         self.assertEqual((rc, err), (0, ""))
         self.assertIn("Reference index already present", out)
         self.assertEqual({n: index_fit.read_index_meta(self.lib(n)) for n in before}, before)
+
+
+class AnArchiveSaysItsFormat(_Index):
+    """publish-index puts the index format of an index's .bin files, and the record of what it
+    holds, on the archive's manifest, and refuses an index of two formats; download says at
+    once, on stdout, that an archive the installed CRISPRitz cannot read is installed but
+    refused by every search."""
+
+    NAME = "NGG_2_hg38+hg38_ds"
+
+    def layout(self, fmt=2, mixed=False):
+        root = os.path.join(self.tmp, "src")
+        idx = os.path.join(root, "genome_library", self.NAME)
+        one_target_bin(os.path.join(idx, "NGG_chr22_1.bin"), "NGG", fmt=fmt)
+        if mixed:
+            one_target_bin(os.path.join(idx, "NGG_chr21_1.bin"), "NGG", fmt=3 - fmt)
+        one_target_bin(os.path.join(idx + "_INDELS", "NGG_2_fakechr22", "NGG_fakechr22_1.bin"),
+                       "NGG", fmt=fmt)
+        for name, text in (("log_indels_hg38_ds/logchr22.txt", "chr22\n"),
+                           ("dictionaries_hg38_ds/my_dict_chr22.json", "{}")):
+            os.makedirs(os.path.dirname(os.path.join(root, "Dictionaries", name)), exist_ok=True)
+            with open(os.path.join(root, "Dictionaries", name), "w") as fh:
+                fh.write(text)
+        return idx
+
+    def manifest(self, api):
+        import tarfile
+        with tarfile.open(api.uploads[0][0]) as tf:
+            return json.load(tf.extractfile("manifest.json"))
+
+    @staticmethod
+    def publish(idx, sink):
+        """test_dictless_publish's offline publish, its notes kept off the test's output."""
+        import contextlib
+        import io
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return dpub._publish(idx, sink)
+
+    def test_publish_records_the_format_and_the_record(self):
+        self.engine(2)
+        idx = self.layout()
+        index_fit.write_index_meta(idx, built=True)
+        sink = os.path.join(self.tmp, "sink")
+        os.makedirs(sink)
+        manifest = self.manifest(self.publish(idx, sink))
+        self.assertEqual(manifest["index_format"], 2)
+        self.assertEqual(manifest["index_meta"]["index_format"], 2)
+        self.assertEqual(manifest["index_meta"]["build_pam"], "NGG")
+        with self.assertRaises(ValueError) as told:
+            self.publish(self.layout_mixed(), sink)
+        self.assertIn("holds .bin files of index formats 1 and 2: it was put together from two "
+                      "builds", str(told.exception))
+
+    def layout_mixed(self):
+        shutil.rmtree(os.path.join(self.tmp, "src"))
+        return self.layout(mixed=True)
+
+    def test_download_says_at_once_an_archive_the_engine_cannot_read(self):
+        import contextlib
+        import io
+
+        self.engine(2)
+        idx = self.layout()
+        sink = os.path.join(self.tmp, "sink")
+        os.makedirs(sink)
+        self.publish(idx, sink)
+        orig = dpub.hf._hf_snapshot
+        self.addCleanup(setattr, dpub.hf, "_hf_snapshot", orig)
+
+        def fake_snapshot(repo, allow_patterns, local_dir, token=None, reporter=None, **_kw):
+            os.makedirs(os.path.join(local_dir, "indexes"), exist_ok=True)
+            for pat in allow_patterns:
+                src = os.path.join(sink, os.path.basename(pat))
+                if os.path.isfile(src):
+                    shutil.copy(src, os.path.join(local_dir, "indexes", os.path.basename(pat)))
+            return local_dir
+
+        dpub.hf._hf_snapshot = fake_snapshot
+        for engine, warned in ((None, True), (2, False)):
+            with self.subTest(engine=engine):
+                self.engine(engine)
+                work = os.path.join(self.tmp, f"dst{engine}")
+                os.makedirs(work)
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    dpub.hf.download_component("index", work, repo="local/test",
+                                               index_name=self.NAME, token="x", genotypes=False)
+                installed = os.path.join(work, "genome_library", self.NAME)
+                self.assertTrue(os.path.isdir(installed))
+                self.assertEqual(f"WARNING: {installed} was built by a newer CRISPRitz" in
+                                 out.getvalue(), warned, out.getvalue())
+                self.assertIn("index format 2", err.getvalue() if not warned else out.getvalue())
+
