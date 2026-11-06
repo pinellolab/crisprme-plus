@@ -365,10 +365,11 @@ def _rebuild(raw_fakechrom, fasta):
 def _other_sub_indexes_format(sub):
     """The index format of the .bin files of the other sub-indexes of the INDELS index
     ``sub`` is a sub-index of (the newest, of the first that holds one), or None where none
-    holds a .bin: index-genome builds them all in one run, with one CRISPRitz."""
+    holds a .bin: index-genome builds them all in one run, with one CRISPRitz. Read where the
+    sub-index really is: complete-test --chrom's view links the one sub-index alone."""
     import index_fit
 
-    parent, own = os.path.split(os.path.normpath(sub))
+    parent, own = os.path.split(os.path.realpath(sub))
     try:
         others = sorted(os.listdir(parent))
     except OSError:

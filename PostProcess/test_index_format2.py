@@ -893,6 +893,7 @@ class ASearchReadsAnEmptySubIndexByItsFormat(empty._Fixture):
     format 2, and none in one of format 1."""
 
     run_search = empty.SearchSide.run_search
+    from_view = empty.SearchSide.from_view
     searched = empty.SearchSide.searched
     fake = empty.SearchSide.fake
     LOGS = {"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"], "chrB": ["chrB\t\trs2\t0.2\tC>CG\t5\tACGT"]}
@@ -919,6 +920,20 @@ class ASearchReadsAnEmptySubIndexByItsFormat(empty._Fixture):
                     self.assertEqual((res.returncode, res.stderr), (0, ""))
                     self.assertIn("No NRG target in the indels of chrB: skipping its indel "
                                   "search", res.stdout)
+
+    def test_by_the_other_sub_indexes_from_complete_tests_view(self):
+        """complete-test --chrom searches from a view that links the chromosome's sub-index
+        alone: its siblings are read where it really is."""
+        for fmt, refused in ((1, False), (2, True)):
+            with self.subTest(sibling=fmt):
+                shutil.rmtree(os.path.join(self.tmp, "work"), ignore_errors=True)
+                shutil.rmtree(os.path.join(self.tmp, "out"), ignore_errors=True)
+                self.sibling(fmt)
+                res, _ = self.run_search(self.LOGS, {"chrB": False}, view="chrB",
+                                         fakes={"chrB": AnEmptySubIndexRecordsItsFormat.EDGE})
+                self.assertEqual(res.returncode, 1 if refused else 0, res.stdout + res.stderr)
+                self.assertEqual("holds a target of NRG: the index is incomplete" in res.stderr,
+                                 refused, res.stderr)
 
     def test_by_its_own_record(self):
         self.sibling(2)

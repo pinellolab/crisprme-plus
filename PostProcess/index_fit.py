@@ -218,16 +218,18 @@ def readable_formats():
 def unreadable_bin(index_dir):
     """(path, format) of the first .bin of ``index_dir``, or of a folder in it (an INDELS
     index holds one a chromosome), in an index format this install does not search
-    (readable_formats); None where there is none."""
+    (readable_formats); None where there is none. The first .bin of each folder is read, as
+    the search script's _unreadable_bin reads it: one build writes a folder whole (a folder of
+    two builds is refused as such, index_coverage)."""
     readable = readable_formats()
     try:
         for top, dirs, files in os.walk(index_dir):
             dirs.sort()
-            for name in sorted(files):
-                if name.endswith(".bin"):
-                    fmt = bin_format(os.path.join(top, name))
-                    if fmt is not None and fmt not in readable:
-                        return os.path.join(top, name), fmt
+            bins = sorted(name for name in files if name.endswith(".bin"))
+            if bins:
+                fmt = bin_format(os.path.join(top, bins[0]))
+                if fmt is not None and fmt not in readable:
+                    return os.path.join(top, bins[0]), fmt
     except OSError:
         pass
     return None
