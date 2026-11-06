@@ -57,7 +57,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 
 #### The local gate: nothing stays skipped
 
-Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. So step 4b runs here, on the release's own engine, the three engine checks CI runs only on that published image: `test/index_flex/check_index_flex.py`, `test/indel_snp_oracle/run_oracle.sh` and `scripts/check_alt_pam.py`. It needs Docker, git-lfs, and network to Docker Hub, Hugging Face, EBI, GitHub, MCR, PyPI (step 5) and the Debian package mirror (step 2). 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them. Step 4b adds about 16 min on the Mac (index_flex 14, the oracle under 2) and 30 to 40 min on a busy amd64 node (index_flex 28 to 37, the oracle 3); its index_flex and oracle need nothing from step 4 and can run beside it.
+Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. So step 4b runs here, on the release's own engine, the three engine checks CI runs only on that published image: `test/index_flex/check_index_flex.py`, `test/indel_snp_oracle/run_oracle.sh` and `scripts/check_alt_pam.py`, and the two no CI job runs, which need the engine the release installs: `test/index_format2/check_real_engine.py` (CRISPRme's reader of the index files the engine writes, and its rule for a contig's sites, against the engine's own) and `test/index_format2/check_boundary_rows.py` (rows at contig ends and `N` runs through the CLI). It needs Docker, git-lfs, and network to Docker Hub, Hugging Face, EBI, GitHub, MCR, PyPI (step 5) and the Debian package mirror (step 2). 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them. Step 4b adds about 16 min on the Mac (index_flex 14, the oracle under 2) and 30 to 40 min on a busy amd64 node (index_flex 28 to 37, the oracle 3); its index_flex and oracle need nothing from step 4 and can run beside it.
 
 **Three skips are allowed, and only these**, each run elsewhere in the gate: `no TensorFlow here` (`test_crispr_bulge_fidelity`, the CRISPR-Bulge fidelity gate, runs in its own env in step 3), `en_US.UTF-8 is not installed` (`test_index_resolution`'s locale tests, step 2) and `no ps here to compare` (`test_index_resolution`, runs in the `unit-tests` job, whose runner has `ps`).
 
@@ -111,6 +111,12 @@ grep -q "^INDEX FLEX PASS" "$GATE/flex.log" && grep -q "^PASS  K=8 with --prune-
 docker run --rm -v "$GATE:/gate" "$IMG" bash /opt/conda/opt/crisprme/test/indel_snp_oracle/run_oracle.sh /gate/oracle 2>&1 | tee "$GATE/oracle.log"
 grep -q "^ORACLE PASS" "$GATE/oracle.log" || echo GATE_FAILED
 python3 "$SRC/scripts/check_alt_pam.py" "$GATE"/heavy/Results/crisprme-test-out_*/*integrated_results.tsv || echo GATE_FAILED
+#     And index format 2 (CRISPRitz 2.10.0 and later): the reader against the engine's index files
+#     (with Q, the four-allele symbol), and rows at contig ends and N runs through the CLI.
+docker run --rm "$IMG" python3 /opt/conda/opt/crisprme/test/index_format2/check_real_engine.py /tmp/fmt2 20261106 q 2>&1 | tee "$GATE/fmt2_engine.log"
+grep -q "^all passed" "$GATE/fmt2_engine.log" || echo GATE_FAILED
+docker run --rm "$IMG" python3 /opt/conda/opt/crisprme/test/index_format2/check_boundary_rows.py /tmp/fmt2_rows 2>&1 | tee "$GATE/fmt2_rows.log"
+grep -q "^all passed" "$GATE/fmt2_rows.log" || echo GATE_FAILED
 
 # 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.
 docker run -d --rm --name gate-web -p 8090:8080 "$IMG" crisprme.py web-interface
@@ -147,6 +153,10 @@ grep -q "^INDEX FLEX PASS" gate/flex.log && grep -q "^PASS  K=8 with --prune-pam
 apptainer exec --bind "$PWD" --pwd "$PWD" sb /usr/local/bin/_entrypoint.sh bash /opt/conda/opt/crisprme/test/indel_snp_oracle/run_oracle.sh "$PWD/gate/oracle" 2>&1 | tee gate/oracle.log
 grep -q "^ORACLE PASS" gate/oracle.log || echo GATE_FAILED
 apptainer exec --bind "$PWD" sb /usr/local/bin/_entrypoint.sh python3 /opt/conda/opt/crisprme/scripts/check_alt_pam.py "$PWD"/gate/heavy/Results/crisprme-test-out_*/*integrated_results.tsv || echo GATE_FAILED
+apptainer exec --bind "$PWD" --pwd "$PWD" sb /usr/local/bin/_entrypoint.sh python3 /opt/conda/opt/crisprme/test/index_format2/check_real_engine.py "$PWD/gate/fmt2" 20261106 q 2>&1 | tee gate/fmt2_engine.log
+grep -q "^all passed" gate/fmt2_engine.log || echo GATE_FAILED
+apptainer exec --bind "$PWD" --pwd "$PWD" sb /usr/local/bin/_entrypoint.sh python3 /opt/conda/opt/crisprme/test/index_format2/check_boundary_rows.py "$PWD/gate/fmt2_rows" 2>&1 | tee gate/fmt2_rows.log
+grep -q "^all passed" gate/fmt2_rows.log || echo GATE_FAILED
 ```
 
 ### C. Release mechanics (at/after tag)
