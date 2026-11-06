@@ -677,6 +677,44 @@ class TheSitesOnlyUnionTakesOneAltAColumn(_SnpPostAnalysis):
                           for a5 in "AT" for a9 in "CG"})
 
 
+class TheSitesOnlyPathTakesEveryAltItsRegistryLists(_SnpPostAnalysis):
+    """A sites-only (mega) registry is read from its VCF, every record of it: it lists
+    the ALTs an index built by CRISPRitz 2.9.1 or earlier never coded (the earlier
+    records of a split site; chr22:10,752,820 C>A, whose later record C>T is the one
+    coded) and non-PASS records. 2.8.1 substituted each at its position's column, and so
+    does this release; with the dictionary path's column filter, a search of the
+    published mega index lost them (on chr22, for five guides, the highest CFD of 114
+    sites fell: TRAC's chr22:22,900,049 from 0.524 to 0.127)."""
+
+    def test_an_alt_the_enrichment_did_not_code(self):
+        # column 5: C>A then C>T, coded Y (the later record's alone); column 9: A>C, coded
+        # M, and A>G, a non-PASS record CRISPRitz never codes
+        vcf = _mega_vcf(os.path.join(self.tmp, "mega.chrT.vcf"), (
+            (_pos1(5), "C", "A", "rsA", "PASS"), (_pos1(5), "C", "T", "rsT", "PASS"),
+            (_pos1(9), "A", "C", "rsC", "PASS"), (_pos1(9), "A", "G", "rsG", "LowQual")))
+        ref = _site(c5="C", c9="A")
+        rows, _comp = self.analyse(ref, [_window(ref, {5: "Y", 9: "M"})], None,
+                                   sites_only_vcf=vcf, mms=2)
+        p5, p9 = _pos1(5), _pos1(9)
+        got = self.variant_rows(rows)
+        # the guide's own bases: the worst case of the site
+        self.assertIn(("chrT_%d_C_A" % p5, "chrT_%d_A_G" % p9), got)
+        self.assertEqual(set(got), {("chrT_%d_C_%s" % (p5, a5), "chrT_%d_A_%s" % (p9, a9))
+                                    for a5 in "AT" for a9 in "CG"})
+
+    def test_a_q_column(self):
+        """A Q column admits every ALT the registry lists at its position, whether or not
+        they and the reference hold four bases (the registry drops an ALT with no
+        frequency; a Q at a bulge boundary can be a neighbouring position's): each is
+        the panel's own allele at its own position."""
+        vcf = _mega_vcf(os.path.join(self.tmp, "mega.chrT.vcf"), (
+            (_pos1(5), "C", "A", "rsA", "PASS"), (_pos1(5), "C", "T", "rsT", "PASS")))
+        ref = _site(c5="C")
+        rows, _comp = self.analyse(ref, [_window(ref, {5: "Q"})], None, sites_only_vcf=vcf)
+        self.assertEqual(set(self.variant_rows(rows)),
+                         {("chrT_%d_C_A" % _pos1(5),), ("chrT_%d_C_T" % _pos1(5),)})
+
+
 # --------------------------------------------------------------------------- #
 # The merge of a cluster's rows: the real remove_contiguous_samples.py
 # --------------------------------------------------------------------------- #

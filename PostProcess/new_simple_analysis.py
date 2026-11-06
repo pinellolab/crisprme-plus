@@ -147,6 +147,9 @@ mygt = None
 # "NA") instead of dropping the site (#136). Default False keeps every other mode
 # (legacy, registry+dict, dictless-with-genotypes) byte-identical.
 registry_only_mode = False
+# A registry-only install whose registry is a sites-only one (the mega's), read from its
+# VCF rather than from what the enrichment coded. Computed with registry_only_mode.
+_sites_only_registry = False
 
 
 # For scoring of CFD And Doench
@@ -296,8 +299,12 @@ def _column_alleles(code, ref_base, alts, chr_pos=None):
     exactly the reference base and the alts CRISPRitz used for THIS off-target. At a
     bulge boundary a position-keyed alt that the column does NOT permit would steer
     the decomposition to the wrong allele and drop the real variant-bulge off-target,
-    so only alts representable by the code are kept (a no-op wherever the code already
-    permits the alt, i.e. every non-bulge column). A Q permits every base, so it says
+    so only alts representable by the code are kept. Where the alts are those the
+    enrichment coded -- the dictionary's, and the tiers compiled from it -- that is a
+    no-op at every non-bulge column. A sites-only registry is read from its VCF, every
+    record of it, so it lists alts the enrichment never coded: the legacy decomposition
+    takes all of them there, as up to 2.8.1, without this filter
+    (``_sites_only_registry``). A Q permits every base, so it says
     nothing about which position it codes: its alts are kept only where the position
     is one whose reference base and alts hold all four bases (the only position Q
     codes), and none elsewhere. An ALT that no sample carries counts, as CRISPRitz
@@ -990,11 +997,21 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 pos_c + int(split[4])
             )
             # #139, as the observed path: only the alts the target's own column stands
-            # for, so the two paths agree (the dictionary lists every alt of the
-            # position, and an alt the column does not hold is no allele of this
-            # off-target)
-            _admitted = _column_alleles(c, refSeq[pos_c], snpToReplace,
-                                        pos_c + int(split[4]))
+            # for, so the two paths agree (the dictionary lists the alts the enrichment
+            # coded at the position, and one the column does not hold is no allele of
+            # this off-target). Not on a sites-only registry: it lists every record of
+            # its VCF, the earlier records of a split site that an index built by
+            # CRISPRitz 2.9.1 or earlier never coded and non-PASS records included, each
+            # the panel's own allele at its own position, and this path substitutes
+            # every one, as up to 2.8.1 (the finalizer's budget and PAM gates decide the
+            # row). Filtered, a search of the published mega index lost them: on chr22,
+            # for five guides, the highest CFD of 114 sites fell (TRAC's
+            # chr22:22,900,049 from 0.524 to 0.127).
+            if _sites_only_registry:
+                _admitted = set(snpToReplace)
+            else:
+                _admitted = _column_alleles(c, refSeq[pos_c], snpToReplace,
+                                            pos_c + int(split[4]))
             for i, elem in enumerate(snpToReplace):
                 if elem not in _admitted:
                     continue
@@ -2079,15 +2096,16 @@ if registry_only_mode:
         f"with degraded (NA) Samples -- no genotype tier to resolve carriers"
         f"{' (aggregate info_af registry; sample-less dict ignored)' if _aggregate_registry else ''}."
     )
+_sites_only_registry = registry_only_mode and (
+    _aggregate_registry or getattr(myreg, "manifest", {}).get("data_type") == "sites-only"
+)
 # A sites-only dataset has no genotypes for a per-sample search to resolve: its rows are
 # the population-level path's whatever the search's mode (each dataset of a search has a
 # post-analysis of its own). On the enumeration of the per-sample path, which joins
 # variants only through shared carriers, it lost its multi-variant worst cases: whole
 # sites and higher scores, in a search beside a genotyped dataset, where the mode is
 # per-sample by default, too.
-if registry_only_mode and _twopass_emit is not None and (
-    _aggregate_registry or getattr(myreg, "manifest", {}).get("data_type") == "sites-only"
-):
+if _sites_only_registry and _twopass_emit is not None:
     if not _FAST_MODE:
         print(f"Sites-only dataset on {current_chr}: population-level post-analysis.")
     _FAST_MODE = True
