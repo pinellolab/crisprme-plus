@@ -439,7 +439,7 @@ def render_gate_row(gate):
             f"haplotype of the panel carries together), <strong>B</strong> "
             f"{int(c.get('B', 0)):,} (one variant), <strong>C1</strong> {int(c.get('C1', 0)):,} "
             "(two or more variants, each in the panel, that none of its haplotypes carries "
-            "together; or one variant whose every carrying haplotype has an indel in the "
+            "together; or variants every haplotype carrying which has an indel in the "
             f"target), <strong>C2</strong> {int(c.get('C2', 0)):,} (a variant not in the panel, "
             "which then cannot say). C1 rows are ranked after every other row: they are left "
             "out of the top-1000 tables, the plots of Section 2, the validation panel and the "
@@ -476,9 +476,10 @@ def render_gate_row(gate):
 
 
 def render_unobserved_section(gate, n_demoted, n_cb_only, table_html, download_name,
-                              n_shown):
+                              n_shown, n_perfect=0):
     """The table after the top-1000 of the rows the gate ranks after every other one (tier
-    C1), or "" when there are none."""
+    C1), or "" when there are none. ``n_perfect``: how many of them are perfect matches,
+    which the validation panel and its banner would otherwise have put first."""
     if not gate or not gate.get("used") or not (n_demoted or n_cb_only):
         return ""
     head = ('<h3 style="margin:1.4em 0 0.3em 0">Ranked after every other row: variant '
@@ -498,18 +499,22 @@ def render_unobserved_section(gate, n_demoted, n_cb_only, table_html, download_n
           f"{'it' if n_cb_only == 1 else 'them'} out: the highest-scoring alignment there "
           "combines variants none of the panel's haplotypes carries together."
           if n_cb_only else "")
+    perfect = (f" <strong>{n_perfect:,} of them {'is a perfect match' if n_perfect == 1 else 'are perfect matches'}"
+               "</strong> (0 mismatches and bulges), which the validation panel would have put "
+               "first: a perfect match of variants no panel haplotype carries together may "
+               "still be real in a person the panel does not represent." if n_perfect else "")
     return (
         head
         + f'<p class="caption">{n_demoted:,} row{"" if n_demoted == 1 else "s"} ({shown}): '
         "each takes, at its highest-CFD alignment, variants that each occur in the panel "
-        "but that none of its haplotypes carries together (or a variant whose every carrying "
-        "haplotype has an indel in the target), so no individual of the panel has its "
+        "but that none of its haplotypes carries together (or variants every haplotype "
+        "carrying which has an indel in the target), so no individual of the panel has its "
         "sequence. They are the search's worst cases that the panel does not show: left out "
         "of the top-1000 tables, the validation panel and the risk card, and kept here and "
         "in the integrated results. The <code>Observed</code> column says what the panel "
         "shows, and how many haplotypes were expected to carry the variants together if "
         "they were independent: where few were (&ldquo;too rare to tell&rdquo;), the zero "
-        "says little." + cb + "</p>\n" + dl + table_html)
+        "says little." + perfect + cb + "</p>\n" + dl + table_html)
 
 
 def gate_demoted(df, prefix="_gate_cfd"):
@@ -5969,7 +5974,8 @@ def build_report(
                 build_table_html(_shown, cols, has_crispr_bulge,
                                  datasets=meta.get("datasets", ""), untiered=untiered)
                 if len(_shown) else "",
-                unobserved_name, len(_shown))
+                unobserved_name, len(_shown),
+                int((_to_int_series(_unobs[cols["mmb"]]) == 0).sum()) if "mmb" in cols else 0)
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"generate-report: carrier gate table unavailable: {exc}\n")
             unobserved_html, unobserved_name = "", None

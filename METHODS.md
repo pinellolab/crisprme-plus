@@ -831,8 +831,8 @@ the search without it (`--no-prioritize-observed`).
     individual carries it, so it cannot be a combination nobody carries; that is all B says
     (call quality is another question).
   - **C1**: two or more variants, each in the panel, that none of its haplotypes carries
-    together; or one variant whose every phased carrying haplotype also holds an indel that
-    changes the target (state `indel in the target`). A zero means something only where
+    together; or variants (one or more) every phased haplotype carrying which also holds an
+    indel that changes the target (state `indel in the target`). A zero means something only where
     some were expected: E, the panel haplotypes expected to carry the variants together if
     they were independent (the panel's haplotypes times the product of the variants' panel
     frequencies; linkage is not modelled), is given, and below a threshold (3 by default,

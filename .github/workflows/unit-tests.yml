@@ -291,8 +291,10 @@ jobs:
         # phased SNP store, the phased indel store, a VCF line with two ALTs), the command
         # the search runs (the integrated results left byte for byte as they were), the report
         # that ranks by its companion, the real new_simple_analysis.py's per-sample rows on
-        # the dict-less tiers and on a classic dictionary, and the genotype-oracle download
-        # with the HuggingFace client stubbed (pandas + numpy + matplotlib, installed above).
+        # the dict-less tiers and on a classic dictionary, the real crisprme.py's gate flags
+        # and banner against test_build_index_only_atomic's stub engine, and the
+        # genotype-oracle download with the HuggingFace client stubbed (pandas + numpy +
+        # matplotlib, installed above).
         working-directory: PostProcess
         run: python -m unittest test_haplotype_prioritizer -v
 

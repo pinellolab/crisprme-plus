@@ -1037,8 +1037,8 @@ its purpose and usage:
   row's variants against the dataset's own phased genotypes (and its phased indel genotypes)
   and writes their tier to `..._carrier_gate.tsv`: **A** (two or more variants one phased
   haplotype carries together), **B** (one variant), **C1** (two or more variants, each in the
-  panel, that no haplotype of it carries together; or a variant whose every carrying
-  haplotype has an indel in the target), **C2** (a variant not in the panel: it cannot say).
+  panel, that no haplotype of it carries together; or variants every haplotype carrying
+  which has an indel in the target), **C2** (a variant not in the panel: it cannot say).
   The report ranks C1 rows after every other row: they leave the top-1000 tables, the plots,
   the validation panel and the risk card for a table of their own after the top-1000, and
   stay in the integrated results, which the gate does not change. A, B and C2 rows keep their

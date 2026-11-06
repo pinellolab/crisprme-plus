@@ -23,6 +23,10 @@ sys.path.insert(0, HERE)
 import haplotype_prioritizer as hp  # noqa: E402
 import tier1_genotypes as t1  # noqa: E402
 import build_indel_genotypes as big  # noqa: E402
+import test_build_index_only_atomic as bio  # noqa: E402  (the real crisprme.py, a stub engine)
+
+setUpModule = bio.setUpModule
+tearDownModule = bio.tearDownModule
 
 CHROM = "chr22"
 PANEL = "hg38_TESTPANEL"
@@ -671,6 +675,43 @@ class TestGenotypeOracleDownload(unittest.TestCase):
     def test_no_genotypes_on_the_hub_is_an_error(self):
         with self.assertRaises(ValueError):
             self.hf.download_genotype_oracle(self.work, repo="local/test")
+
+
+class TheSearchSaysWhatTheGateDoes(bio._Fixture):
+    """complete-search as a user runs it (a stub engine): which panel the gate reads, or why
+    it does not run, and its flags checked before anything starts."""
+
+    def test_it_names_the_panel_or_says_why_not(self):
+        rc, out, err = self.run_bio()  # ds, with its phased genotype store
+        self.assertEqual(rc, 0, err)
+        rc, out, err = self.run_search("--population-level")
+        self.assertIn("Launching job ", out, out + err)
+        self.assertIn("[complete-search] Carrier gate: each row's variant combination is "
+                      "checked against the phased genotypes of ds; the report ranks a "
+                      "combination no haplotype carries after every other row", out)
+        for options in (("--population-level", "--no-prioritize-observed"), ("--per-sample",)):
+            with self.subTest(options=options):
+                rc, out, err = self.run_search(*options)
+                self.assertIn("Launching job ", out, out + err)
+                self.assertNotIn("Carrier gate", out)
+        # the same dataset with the classic dictionaries alone: said, not run
+        shutil.rmtree(self.path("Dictionaries", "genotypes_ds"))
+        shutil.rmtree(self.path("Dictionaries", "registry_ds"))
+        rc, out, err = self.run_search("--population-level")
+        self.assertIn("[complete-search] Carrier gate: not run, as the genotyped datasets of "
+                      "this search have the classic per-sample dictionaries alone", out)
+
+    def test_its_flags_are_checked_first(self):
+        for options, said in (
+                (("--prioritize-observed", "--no-prioritize-observed"),
+                 "--prioritize-observed and --no-prioritize-observed are mutually exclusive"),
+                (("--gate-min-expected", "-1"), "--gate-min-expected needs a number >= 0"),
+                (("--gate-min-expected", "three"), "--gate-min-expected needs a number >= 0")):
+            with self.subTest(options=options):
+                rc, out, err = self.run_search(*options)
+                self.assertEqual(rc, 1)
+                self.assertIn(said, err)
+                self.assertNotIn("Launching job", out)
 
 
 class TestPlanPanels(unittest.TestCase):
