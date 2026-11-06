@@ -630,10 +630,14 @@ complementary controls:
 - **Density reporting + transparency.** Every window that triggers the cap is written
   to a `high_variant_density_regions.bed` sidecar (region span, variant count,
   carriers, and the full IUPAC protospacer), and each affected off-target carries a
-  `High_variant_density_region` column in `integrated_results.tsv` noting that a
-  greedy worst-case alignment is reported and additional haplotype alignments may
-  exist, with the full IUPAC sequence so a user can dig into them. Nothing is silently
-  truncated — the bound, the representative, and the alternatives are all auditable.
+  `High_variant_density_region` column in `integrated_results.tsv` noting how the window
+  was reported, with the full IUPAC sequence so a user can dig into its other alignments:
+  in a population-level search that a greedy worst-case alignment is reported and
+  additional haplotype alignments may exist; under `--per-sample` (since 2.9.0) that the
+  haplotypes its carriers have are reported (below), but at a row that names no carrier, a
+  sites-only dataset's, whose rows are the population-level analysis's in either mode.
+  Nothing is silently truncated — the bound, the representative, and the alternatives are
+  all auditable.
 
 Together these keep genome-wide variant search tractable while making any bound
 that was applied explicit and reviewable, and guaranteeing no region is dropped.

@@ -4299,8 +4299,7 @@ _ANNOTATION_LEGEND = [
      "names the specific variant(s) (as <code>chrom;pos;ref;alt</code>) that produce "
      "THIS off-target; this column (e.g. <code>16 in window</code>) counts ALL variants "
      "spanning the surrounding window, so a row can legitimately show one variant while "
-     "its window count is much larger. Such dense windows are reported greedily (one "
-     "representative alignment is shown; {hvdr_where})."),
+     "its window count is much larger. {hvdr_how}"),
 ]
 
 
@@ -4483,7 +4482,45 @@ def _hvdr_where(hvdr_bundle_name=None, hvdr_n_regions=0, report_full=False):
     return where
 
 
-def build_annotation_legend_html(cols=None, df=None, hvdr_where=None):
+def _dense_greedy_clauses(df=None, cols=None, untiered=None):
+    """Where a --per-sample search can still report a window denser than
+    CRISPRME_IUPAC_CAP by its greedy worst-case alignment, each as a clause: on its datasets
+    without the dict-less tiers, in a search before 2.9.0 (_GREEDY_DENSE), and at a flagged
+    row that names no carrier, a sites-only dataset's (its rows are the population-level
+    analysis's whatever the mode). Since 2.9.0 a genotyped dataset's dense window is the
+    haplotypes its carriers have, as any window (new_simple_analysis.py). [] for a
+    population-level search, which reports every window by its greedy worst case."""
+    if not _PER_SAMPLE:
+        return []
+    clauses = []
+    if untiered and _GREEDY_DENSE:
+        clauses.append(f"on {_untiered_named(untiered)}, a window can still be reported by "
+                       "its greedy worst-case alignment, whose listed carriers need not carry "
+                       "every variant in it")
+    if df is not None and cols and all(k in cols for k in ("complex_region", "origin", "samples")):
+        flagged = df[~df[cols["complex_region"]].map(_is_na)]
+        alt = flagged[cols["origin"]].astype(str).str.strip().str.lower().eq("alt")
+        if bool((alt & flagged[cols["samples"]].map(lambda v: _count_samples(v) == 0)).any()):
+            clauses.append("a flagged row that names no carrier, a sites-only dataset's, is its "
+                           "window's greedy worst-case alignment, as in a population-level search")
+    return clauses
+
+
+def _hvdr_how(hvdr_where=None, clauses=None):
+    """How the search reported a high-variant-density window, with where its variants are
+    (_hvdr_where), as the legend says it: greedily in a population-level search, by the
+    haplotypes its carriers have under --per-sample, with _dense_greedy_clauses's
+    ``clauses`` (where it can still be greedy)."""
+    where = hvdr_where or _hvdr_where()
+    if not _PER_SAMPLE:
+        return ("Such dense windows are reported greedily (one representative alignment is "
+                f"shown; {where}).")
+    return ("Under <code>--per-sample</code> such a window is reported, as any other, by the "
+            f"haplotypes its carriers have ({where})" + "".join(f"; {c}" for c in clauses or [])
+            + ".")
+
+
+def build_annotation_legend_html(cols=None, df=None, hvdr_where=None, hvdr_how=None):
     """Render the annotation legend (Section 7). Only include an entry when its
     backing annotation column is actually present in this run (and, when ``df`` is
     given, carries at least one real value), so a run WITHOUT a given annotation is
@@ -4491,7 +4528,8 @@ def build_annotation_legend_html(cols=None, df=None, hvdr_where=None):
     run must not print a COSMIC Cancer Gene Census glossary). Returns "" when no
     entry qualifies, so the caller omits the whole section. ``cols=None`` keeps the
     legacy full legend (backward-compatible). ``hvdr_where`` (_hvdr_where's, which it
-    defaults to) says where the variant set of a high-variant-density window is."""
+    defaults to) says where the variant set of a high-variant-density window is, and
+    ``hvdr_how`` (_hvdr_how's, with it) how the search reported the window."""
     def _active(key):
         if cols is None:
             return True
@@ -4501,7 +4539,7 @@ def build_annotation_legend_html(cols=None, df=None, hvdr_where=None):
             return bool(df[cols[key]].map(lambda v: not _is_na(v)).any())
         return True
 
-    entries = [(t, d.replace("{hvdr_where}", hvdr_where or _hvdr_where()))
+    entries = [(t, d.replace("{hvdr_how}", hvdr_how or _hvdr_how(hvdr_where)))
                for (k, t, d) in _ANNOTATION_LEGEND if _active(k)]
     if not entries:
         return ""
@@ -4663,6 +4701,7 @@ def render_html(
     table_crispr_bulge_html="", inputs_criteria_html="", legend_html=None,
     next_steps_html="", plots_exclusion_note="", table_exclusion_note="", untiered=None,
     n_variant=None, unobserved_html="", unobserved_name=None, gate_companion_name=None,
+    dense_greedy=None,
 ):
     # ``plots_exclusion_note`` / ``table_exclusion_note``: the top_exclusion_note
     # captions of Section 2 and Section 6 (empty when nothing is left out).
@@ -4672,6 +4711,8 @@ def render_html(
     # ``unobserved_html``: the table of the rows the carrier gate ranks after every other
     # one (render_unobserved_section); ``unobserved_name`` / ``gate_companion_name`` their
     # curated download and the gate's own table (--report-full), when bundled.
+    # ``dense_greedy`` (_dense_greedy_clauses): where a --per-sample search can still report
+    # a dense window by its greedy worst-case alignment.
     gate_download = ""
     if unobserved_name:
         gate_download += (
@@ -4726,14 +4767,25 @@ def render_html(
             f'\n  <a class="download" href="{_dl_href(hvdr_bundle_name)}" download>'
             f"Highly complex regions near top sites ({hvdr_n_regions:,}) &mdash; BED</a>"
         )
+        # how the search reported them: greedily in a population-level search, by the
+        # haplotypes their carriers have under --per-sample, but where _dense_greedy_clauses
+        # say (``dense_greedy``)
+        how = (
+            "carry so many overlapping variants that a single greedy worst-case alignment "
+            "is reported for each (flagged in the <code>High_complexity_region</code> "
+            "column of the table) &mdash; ADDITIONAL haplotype alignments may exist there. "
+            if not _PER_SAMPLE else
+            "carry so many overlapping variants that they are flagged in the "
+            "<code>High_complexity_region</code> column of the table; under "
+            "<code>--per-sample</code> each is reported, as any other window, by the "
+            "haplotypes its carriers have" + "".join(f"; {c}" for c in dense_greedy or [])
+            + ". ")
         hvdr_callout = (
             f'<p class="caption" style="border-left:4px solid #d97706;'
             f'padding-left:0.7em;background:#fffbeb">'
             f"<strong>Highly complex (high-variant-density) regions:</strong> "
             f"{hvdr_n_regions:,} window(s) overlapping the top-ranked reported off-targets "
-            f"carry so many overlapping variants that a single greedy worst-case alignment "
-            f"is reported for each (flagged in the <code>High_complexity_region</code> "
-            f"column of the table) &mdash; ADDITIONAL haplotype alignments may exist there. "
+            f"{how}"
             f"Those regions (span, variant count, carriers, full IUPAC protospacer) are "
             f"bundled as <code>{_esc(hvdr_bundle_name)}</code>. The <strong>complete "
             f"genome-wide</strong> flag is in the <code>High_variant_density_region</code> "
@@ -6332,6 +6384,9 @@ def build_report(
     table_exclusion_note = top_exclusion_note(
         ranked, cols, _shown_tables, panel_top100_name, mmb_le_1_name=tier_links.get("mmb_1")
     )
+    # where a --per-sample search can still report a dense window by its greedy worst-case
+    # alignment (the legend's High_complexity_region entry, the --report-full callout)
+    dense_greedy = _dense_greedy_clauses(df, cols, untiered)
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
         table_html, (tsv_gz_name if report_full else None), top1000_name, footer_html,
@@ -6360,13 +6415,16 @@ def build_report(
         unobserved_html=unobserved_html,
         unobserved_name=unobserved_name,
         gate_companion_name=gate_companion_name,
+        dense_greedy=dense_greedy,
         legend_html=(
             '<h3 style="margin:0.6em 0 0.3em">Scores &amp; columns</h3>'
             + build_score_legend_html(untiered, gate=gate)
             + (
                 '<h3 style="margin:1.2em 0 0.3em">Annotations</h3>' + _ann_legend
                 if (_ann_legend := build_annotation_legend_html(
-                    cols, df, _hvdr_where(hvdr_bundle_name, hvdr_n_regions, report_full)))
+                    cols, df, hvdr_how=_hvdr_how(
+                        _hvdr_where(hvdr_bundle_name, hvdr_n_regions, report_full),
+                        dense_greedy)))
                 else ""
             )
         ),

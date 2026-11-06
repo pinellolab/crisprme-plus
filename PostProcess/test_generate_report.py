@@ -1495,38 +1495,70 @@ class TestGenerateReport(unittest.TestCase):
         tiers (new_simple_analysis.py), and its pipeline writes the carrier gate's sidecar
         (.carrier_gate.json), whatever the gate did. So in its report the flagged two-SNP row
         of a search without the tiers reads "2 cis carriers", and no text says that a dense
-        window can be reported by a greedy alignment."""
+        window can be reported by a greedy alignment: not the inputs card, nor the legend's
+        High_complexity_region entry, nor the --report-full callout of the dense windows
+        near the top-ranked sites (they said so of a per-sample search on the tiers too).
+        Both say how such a window is reported, and that a flagged row that names no carrier,
+        a sites-only dataset's, is still its window's greedy worst-case alignment."""
         rd = os.path.join(self.tmp, "Results", "job")
         os.makedirs(rd)
-        dense = ("high_variant_density (12 variants): a greedy worst-case alignment is "
-                 "reported here; additional haplotype alignments may exist")
+        dense = ("high_variant_density (12 variants): the haplotypes its carriers have are "
+                 "reported here")
         with open(self.tsv) as src:
             lines = src.read().splitlines()
-        with open(os.path.join(rd, os.path.basename(self.tsv)), "w") as dst:
-            for i, line in enumerate(lines):
-                fields = line.split("\t")
-                flag = ("High_variant_density_region" if i == 0
-                        else dense if fields[1] in ("chr5", "chr7") else "NA")
-                dst.write("\t".join(fields + [flag]) + "\n")
+
+        def results(no_carrier=()):
+            with open(os.path.join(rd, os.path.basename(self.tsv)), "w") as dst:
+                for i, line in enumerate(lines):
+                    fields = line.split("\t")
+                    if fields[1] in no_carrier:
+                        fields[_HEADER.index("Variant_samples_(highest_CFD)")] = ""
+                    flag = ("High_variant_density_region" if i == 0
+                            else dense if fields[1] in ("chr5", "chr7") else "NA")
+                    dst.write("\t".join(fields + [flag]) + "\n")
+            out = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir, report_full=True,
+                                  out_zip=os.path.join(self.tmp, "since290_report.zip"))
+            with zipfile.ZipFile(out) as zf:
+                return {n: zf.read(n).decode("utf-8") for n in zf.namelist()
+                        if n.endswith((".html", ".tsv"))}
+
         for name, text in ((".search_mode", "per-sample"),
                            (".untiered_datasets", "hg38_1000G_HGDP\n"),
                            (".variant_datasets", "hg38_1000G_HGDP\n"),
-                           (".carrier_gate.json", '{"status": "per-sample"}')):
+                           (".carrier_gate.json", '{"status": "per-sample"}'),
+                           ("job_chr5.high_variant_density_regions.bed",
+                            "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
+                            "iupac_protospacer\n"
+                            "chr5\t390\t413\tGUIDE\t12\tHG00096,HGDP00001\t"
+                            "ACGTNNNNACGTACGTACGTNGG\n")):
             with open(os.path.join(rd, name), "w") as h:
                 h.write(text)
-        out = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir,
-                              out_zip=os.path.join(self.tmp, "since290_report.zip"))
-        with zipfile.ZipFile(out) as zf:
-            files = {n: zf.read(n).decode("utf-8") for n in zf.namelist()
-                     if n.endswith((".html", ".tsv"))}
+        files = results()
         top = [line.split("\t") for line in files["data/top1000.tsv"].splitlines()]
         observed = top[0].index("Observed")
         self.assertEqual({r[observed] for r in top[1:] if r[1] in ("chr5", "chr7")},
                          {"2 cis carriers"})
+        # (no assertIn/assertNotIn on the page: their message would print all of it)
         html = files["report.html"]
-        self.assertNotIn("poss. chimera", html)
-        self.assertNotIn("greedy worst-case alignment", html.split("<h2>2.", 1)[0])
-        self.assertIn("named carrier samples only for", html)
+        self.assertEqual(re.findall(r".{0,80}(?:poss\. chimera|greed).{0,80}", html,
+                                    re.I | re.S), [])
+        for said in ("named carrier samples only for",
+                     "Highly complex (high-variant-density) regions:</strong> 1 window(s) "
+                     "overlapping the top-ranked reported off-targets carry so many "
+                     "overlapping variants that they are flagged in the "
+                     "<code>High_complexity_region</code> column of the table; under "
+                     "<code>--per-sample</code> each is reported, as any other window, by the "
+                     "haplotypes its carriers have. ",
+                     "Under <code>--per-sample</code> such a window is reported, as any other, "
+                     "by the haplotypes its carriers have (the full variant set for each "
+                     "window is in the"):
+            self.assertTrue(said in html, said)
+        # a flagged row that names no carrier: a sites-only dataset's, the population-level
+        # analysis's
+        html = results(no_carrier=("chr7",))["report.html"]
+        self.assertEqual(html.count("; a flagged row that names no carrier, a sites-only "
+                                    "dataset's, is its window's greedy worst-case alignment, "
+                                    "as in a population-level search."), 2)
 
     def test_variant_contributed_prose_tracks_whether_file_is_bundled(self):
         """The 'Variant-contributed sites' row must not claim variant_created.tsv is
@@ -2244,41 +2276,93 @@ class TestGenerateReport(unittest.TestCase):
         self.assertNotIn("paper-style", html)
         self.assertIn("the same ref/alt scatter as for the cfd score", html.lower())
 
-    def _integrated_mafs(self, rows):
-        """Each criterion's ``Variant_MAF``, in the rows' order, that the REAL
-        resultIntegrator.py writes for bestMerge rows given as (variant field, AF field): the
-        AF column of a variant row as the merge step hands it on. Skips without GNU cut."""
+    def _integrate(self, blocks, files=None, env=None, intervaltree=None):
+        """The rows the REAL resultIntegrator.py integrates from bestMerge rows of
+        ``blocks`` (one 24-column block each, the row's three criteria alike), with ``files``
+        ({name: text}) in its folder, ``env`` in its environment and ``intervaltree`` the
+        module it imports (the stub of no interval by default). Skips without GNU cut."""
         import csv
         import subprocess
-        from test_seed_counts_dna_bulge import INTERVALTREE_STUB, SPACER_3P, _block, _gnu_cut
+        from test_seed_counts_dna_bulge import INTERVALTREE_STUB, SPACER_3P, _gnu_cut
         if not _gnu_cut():
             self.skipTest("resultIntegrator.py needs GNU cut --complement")
         pp = os.path.dirname(os.path.abspath(__file__))
-        d = tempfile.mkdtemp(prefix="maf_", dir=self.tmp)
-        with open(os.path.join(d, "intervaltree.py"), "w") as fh:
-            fh.write(INTERVALTREE_STUB)
+        d = tempfile.mkdtemp(prefix="integrated_", dir=self.tmp)
+        files = dict(files or {}, **{"intervaltree.py": intervaltree or INTERVALTREE_STUB,
+                                     "job.found.bed": "NA\n" * len(blocks),
+                                     "dummy.txt": "", "guides.txt": SPACER_3P + "\n"})
+        for name, text in files.items():
+            with open(os.path.join(d, name), "w") as fh:
+                fh.write(text)
         best = os.path.join(d, "job.bestMerge.txt")
         with open(best, "w") as fh:
-            for snp, af in rows:
-                block = _block("X", SPACER_3P, SPACER_3P, "CTAACtGTTGCTTTTATCACTGG",
-                               "CTAACtGTTGCTTTTATCgCTGG", 1, 0, "HG00001", snp)
-                block[17] = af
+            for block in blocks:
                 fh.write("\t".join(block * 3) + "\n")
-        with open(os.path.join(d, "job.found.bed"), "w") as fh:
-            fh.write("NA\n" * len(rows))
-        open(os.path.join(d, "dummy.txt"), "w").close()
-        with open(os.path.join(d, "guides.txt"), "w") as fh:
-            fh.write(SPACER_3P + "\n")
         res = subprocess.run(
             [sys.executable, os.path.join(pp, "resultIntegrator.py"), best,
              os.path.join(d, "dummy.txt"), os.path.join(d, "job.found.bed"),
              os.path.join(d, "guides.txt"), d + "/", "true", "hg38", "vuota", "1", "0", "none"],
-            cwd=pp, env=dict(os.environ, PYTHONPATH=d), capture_output=True, text=True)
+            cwd=pp, env=dict(os.environ, PYTHONPATH=d, **(env or {})), capture_output=True,
+            text=True)
         self.assertEqual((res.returncode, res.stderr), (0, ""))
         with open(best + ".integrated_results.tsv", newline="") as fh:
-            integrated = list(csv.DictReader(fh, delimiter="\t"))
+            return list(csv.DictReader(fh, delimiter="\t"))
+
+    def _integrated_mafs(self, rows):
+        """Each criterion's ``Variant_MAF``, in the rows' order, that the REAL
+        resultIntegrator.py writes for bestMerge rows given as (variant field, AF field): the
+        AF column of a variant row as the merge step hands it on. Skips without GNU cut."""
+        from test_seed_counts_dna_bulge import SPACER_3P, _block
+        blocks = []
+        for snp, af in rows:
+            block = _block("X", SPACER_3P, SPACER_3P, "CTAACtGTTGCTTTTATCACTGG",
+                           "CTAACtGTTGCTTTTATCgCTGG", 1, 0, "HG00001", snp)
+            block[17] = af
+            blocks.append(block)
+        integrated = self._integrate(blocks)
         return {criterion: [r["Variant_MAF_(%s)" % criterion] for r in integrated]
                 for criterion in ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")}
+
+    def test_the_dense_window_note_says_how_the_search_reported_it(self):
+        """resultIntegrator.py's High_variant_density_region note said of every row in a
+        window of the search's high_variant_density_regions.bed that a greedy worst-case
+        alignment is reported there. So it is in a population-level search, but under
+        --per-sample a genotyped dataset's dense window is the haplotypes its carriers have
+        (on the dict-less tiers since 2.7.10, on the classic dictionaries since 2.9.0): its
+        rows, and the window's reference row, say that now. A row that names no carrier, a
+        sites-only dataset's, is the population-level analysis's in either mode."""
+        from test_seed_counts_dna_bulge import SPACER_3P, _block
+        # a stand-in that holds the bed's interval (the light CI env has no intervaltree)
+        tree = (
+            "class _Interval:\n"
+            "    def __init__(self, begin, end, data):\n"
+            "        self.begin, self.end, self.data = begin, end, data\n"
+            "    def __lt__(self, other):\n"
+            "        return (self.begin, self.end) < (other.begin, other.end)\n"
+            "class IntervalTree:\n"
+            "    def __init__(self):\n"
+            "        self.items = []\n"
+            "    def __setitem__(self, key, value):\n"
+            "        self.items.append(_Interval(key.start, key.stop, value))\n"
+            "    def __getitem__(self, point):\n"
+            "        return {i for i in self.items if i.begin <= point < i.end}\n")
+        bed = ("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
+               "iupac_protospacer\n"
+               "chrT\t990\t1013\tGUIDE\t12\tHG00001\tCTAACWGTTGCTTTTATCRCTGG\n")
+        blocks = [_block("X", SPACER_3P, SPACER_3P, "CTAACtGTTGCTTTTATCACTGG",
+                         "CTAACtGTTGCTTTTATCgCTGG", 1, 0, samples, snp)
+                  for samples, snp in (("HG00001", "chrT_1005_A_T"), ("", "chrT_1005_A_T"),
+                                       ("NA", "NA"))]
+        greedy = ("high_variant_density (12 variants): a greedy worst-case alignment is "
+                  "reported here; additional haplotype alignments may exist; "
+                  "full_IUPAC=CTAACWGTTGCTTTTATCRCTGG")
+        carriers = ("high_variant_density (12 variants): the haplotypes its carriers have are "
+                    "reported here; full_IUPAC=CTAACWGTTGCTTTTATCRCTGG")
+        for mode, notes in (("1", [greedy, greedy, greedy]), ("0", [carriers, greedy, carriers])):
+            with self.subTest(CRISPRME_FAST_MODE=mode):
+                rows = self._integrate(blocks, {"job.high_variant_density_regions.bed": bed},
+                                       {"CRISPRME_FAST_MODE": mode}, tree)
+                self.assertEqual([r["High_variant_density_region"] for r in rows], notes)
 
     def test_the_maf_texts_say_what_the_integrator_writes(self):
         """The MAF note under the top-1000 tables and the legend's MAF entry said that a
