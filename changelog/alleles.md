@@ -3,11 +3,13 @@
 **For whoever merges.** These entries describe CRISPRme's side of CRISPRitz 2.10.0's every-allele
 enrichment and its fifth symbol Q; the engine's own entries (every ALT of a split site coded, Q
 written at a position of four alleles, the records of one REF>ALT merged in the dictionary) are
-the engine track's. They were checked through the real CLI with the engine track's every-allele
-enricher before Q (`feat/multiallelic-enrich` d75c603) and CRISPRitz 2.9.1's `buildTST` and
-`searchTST`; a search of an index holding Q also needs CRISPRme to read index format 2, which
-2.10.0 writes. CRISPRitz still gives the first ID of a VCF line listing several ALTs to each of
-its ALTs (`enricher.py`, `enricher.cpp`): no CRISPRme reader can recover the others from the
+the engine track's. They were checked through the real CLI with CRISPRitz 2.9.1, with the
+every-allele enricher before Q (`feat/multiallelic-enrich` d75c603) and with 2.10.0's
+(`feat/2.10.0` 25ee50c) beside 2.9.1's `buildTST` and `searchTST`; a search of an index holding Q
+needs CRISPRme to read index format 2, which 2.10.0 writes (the format track's): with that
+track's commit merged in, MULTIALLELIC section 6.6's kit, coded with a Q, passed on 2.10.0's
+engine. CRISPRitz still gives the first ID of a VCF line listing several ALTs to each of its
+ALTs (`enricher.py`, `enricher.cpp`): no CRISPRme reader can recover the others from the
 dictionary.
 
 ### Added
