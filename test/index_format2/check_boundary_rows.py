@@ -24,7 +24,10 @@ engine; --compare then checks that the format-2 results hold every format-1 row 
 genome's bases (format 1 reports a minus-strand PAM at a contig's first base on the plus strand,
 IDX-14), and that each row more lies at a boundary.
 
-Exits non-zero on any failure.
+Exits non-zero on any failure. With CRISPRitz 2.9.1 (index format 1) four checks fail, as they
+must: three searches report the minus-strand PAM at chrB's first base on the plus strand (IDX-14),
+and so the dedicated index's rows differ from the 8-nt flank's by that row (measured: 12 passed,
+4 failed).
 """
 
 import glob
