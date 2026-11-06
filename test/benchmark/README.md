@@ -59,6 +59,39 @@ Cas9 reference **exactly** (3495 rows, 0 diff) on the identical enriched genome,
 confirming the algorithm + PAM/edge-gap filters. The Cas12a reference was produced
 by the same validated generator.
 
+## What `validate-test` covers, and what it does not
+
+`validate-test` compares **sites** — the (chromosome, start, strand) triples of the
+engine's raw CRISPRitz target reports — on two genomes: the plain reference and the
+**SNV-only** 1000 Genomes chr22 enriched genome. That is the right check for the search
+engine: it proves the TST index misses no site an exhaustive aligner finds.
+
+It does **not** check:
+
+- **indel rows.** The references are built from the SNV-enriched FASTA, which holds no
+  indel, so the fake-indel genome and everything the indel post-analysis derives from it
+  are outside the comparison. A wrong indel coordinate, a wrong REF text, a wrong carrier
+  list or a dropped indel off-target all pass it. (The chr22 1000 Genomes VCF the
+  self-test uses has no indel in `chr22:22322700-22322850` at all, which is why the
+  2.8.0 row reported at `chr22:22322768` could not be caught here.)
+- **anything but the site.** The aligned spacer/target strings, the REF/ALT text, the
+  PAM, the mismatch and bulge counts, the named variants, the carriers and the whole
+  alternative-alignments table are never compared with an independent truth.
+- **per-carrier truth.** The enriched genome collapses every individual into IUPAC codes,
+  so the reference cannot say which sample carries which sequence.
+
+**`scripts/check_indel_rows.py` is the check for that part**, on real data: it builds
+each sample's two haplotypes itself from the VCF the search read, keeps its own map from
+haplotype offsets to reference coordinates, aligns with its own exhaustive
+dynamic-programming aligner, and then checks every indel/MNV row block of the integrated
+results and of the alternative alignments (soundness), and demands every in-budget
+alignment on a carrier's haplotype that holds a base of an indel (completeness). It
+imports no CRISPRme module. `test/indel_snp_oracle/run_oracle.sh` runs it beside
+`oracle.py check`, `validate-benchmarks.yml` runs it on the chr22 self-test output after
+`validate-test`, and `docs/RELEASE_CHECKLIST.md` makes it a release gate on a real
+HGDP + 1000 Genomes chr22 search. Its unit and mutation tests are
+`PostProcess/test_check_indel_rows.py`.
+
 ## Reproducible generation pipeline
 ```bash
 # 1. Build the variant-enriched genome the same way CRISPRme does internally

@@ -295,6 +295,22 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_variant_positions -v
 
+      - name: "Independent real-data indel check (scripts/check_indel_rows.py: its own VCF reader, haplotype builder and aligner; mutation tests that corrupt a right row)"
+        # scripts/check_indel_rows.py is the second opinion on the indel path that
+        # validate-test cannot give: validate-test compares only the engine's SITES
+        # (chromosome, start, strand) on the reference and the SNV-only 1000 Genomes
+        # chr22 genome, so an indel row's coordinate, aligned strings, REF text,
+        # variants, carriers and the alternative-alignment table are never checked
+        # against an independent truth on real data. These tests build a reference, a
+        # phased VCF and rows by hand, assert a right row raises nothing, and assert
+        # that each corruption of it is caught: the start shifted by 1 and by an
+        # insertion's offset (the 2.8.1 defect), one target base changed, a carrier
+        # swapped for a non-carrier, a named variant dropped, a cross-haplotype SNP
+        # added, and a phantom of the shape reported at chr22:22322768 on 2.8.0.
+        # Stdlib only -- the checker imports no CRISPRme module, and neither do they.
+        working-directory: PostProcess
+        run: python -m unittest test_check_indel_rows -v
+
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
         run: python -m unittest test_bulge_cap -v

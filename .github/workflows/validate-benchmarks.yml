@@ -22,6 +22,7 @@ on:
       - "test/data/**"
       - "test/indel_snp_oracle/**"
       - "scripts/check_alt_pam.py"
+      - "scripts/check_indel_rows.py"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
       - "test/index_flex/**"
@@ -37,6 +38,7 @@ on:
       - "test/data/**"
       - "test/indel_snp_oracle/**"
       - "scripts/check_alt_pam.py"
+      - "scripts/check_indel_rows.py"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
       - "test/index_flex/**"
@@ -261,6 +263,57 @@ jobs:
           if ! grep -q ", 0 failed, 0 skipped\.$" validate-test.log; then
             echo "FAIL: a benchmark did not run"; exit 1
           fi
+
+      - name: "Independent real-data indel check on the chr22 self-test output (scripts/check_indel_rows.py)"
+        # validate-test above compares only the engine's SITES (chromosome, start,
+        # strand) on the reference and the SNV-only 1000 Genomes chr22 genome, so an
+        # indel row's coordinate, aligned strings, REF text, variants, carriers and the
+        # alternative-alignment table are never checked against an independent truth
+        # (test/benchmark/README.md says so). This step is that check, on the output
+        # complete-test just produced: scripts/check_indel_rows.py builds each sample's
+        # two haplotypes itself from the self-test's 1000 Genomes VCF, keeps its own map
+        # from haplotype offsets to reference coordinates, and aligns with its own
+        # exhaustive DP aligner -- it imports no CRISPRme module and runs on the runner,
+        # stdlib only, no image. On v2.8.1 it flags the 2 cas9_sg1617 rows whose first
+        # aligned base is one an insertion adds; with that fixed it passes every
+        # benchmark. Soundness on each benchmark, then completeness on a 4 Mb slice
+        # (the whole chromosome is hours; the release gate runs that on a real panel).
+        run: |
+          set -euo pipefail
+          ref=work/Genomes/hg38_chr22
+          vcf=$(ls work/VCFs/hg38_1000G/*.vcf.gz | head -1)
+          [ -d "$ref" ] && [ -n "$vcf" ] || { echo "FAIL: no self-test genome/VCF"; exit 1; }
+          # name:PAM:mm:bDNA:bRNA:max-total-edits, from test/benchmark/benchmarks.json
+          for spec in cas9_sg1617:20bp-NGG-SpCas9.txt:4:1:1:6 \
+                      cas12a_hbg:TTTV-20bp-Cas12a.txt:4:1:1:6 \
+                      cas9_sg1617_n5:20bp-NGG-SpCas9.txt:6:2:2:5 \
+                      cas12a_hbg_n5:TTTV-20bp-Cas12a.txt:6:2:2:5 \
+                      cas9_sg1617_simple:20bp-NGG-SpCas9.txt:6:2:2:3 \
+                      cas12a_hbg_simple:TTTV-20bp-Cas12a.txt:6:2:2:3; do
+            IFS=: read -r name pam mm bd br mt <<< "$spec"
+            d=work/Results/crisprme-test-out_$name
+            ls "$d"/*integrated_results.tsv >/dev/null 2>&1 || {
+              echo "[$name] no integrated results (not run here); skipped"; continue; }
+            echo "=== check_indel_rows $name ($mm/$bd/$br, cap $mt)"
+            python3 scripts/check_indel_rows.py --results "$d" --reference "$ref" \
+              --vcf "$vcf" --pam "work/PAMs/$pam" --mm "$mm" --bDNA "$bd" --bRNA "$br" \
+              --max-total-edits "$mt" --chrom chr22 --mode soundness \
+              --out "check_indel_rows_$name.tsv"
+          done
+          echo "=== check_indel_rows completeness (cas9_sg1617, chr22:10.5-14.5 Mb)"
+          python3 scripts/check_indel_rows.py \
+            --results work/Results/crisprme-test-out_cas9_sg1617 --reference "$ref" \
+            --vcf "$vcf" --pam work/PAMs/20bp-NGG-SpCas9.txt --mm 4 --bDNA 1 --bRNA 1 \
+            --max-total-edits 6 --region chr22:10500000-14500000 --mode completeness \
+            --out check_indel_rows_completeness.tsv
+
+      - name: Upload the indel-check findings on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-indel-rows-findings
+          path: check_indel_rows_*.tsv
+          if-no-files-found: ignore
 
       - name: "ALT-PAM and no-N release gate on the chr22 outputs (no ALT row shows a PAM the search did not match, no reported target holds an N)"
         run: |

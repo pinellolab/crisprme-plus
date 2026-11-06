@@ -1475,6 +1475,61 @@ validate-test`. This is a one-time correctness check, not a per-search step:
   real CFD-scored multiallelic fixture; the ML score's (CRISPR-Bulge) best-effort bound is
   described under *Worst-case scoring in the population-level analysis* above.
 
+`validate-test` compares the engine's **sites** — (chromosome, start, strand) — on the
+reference and on the **SNV-only** 1000 Genomes chr22 enriched genome. It therefore says
+nothing about the **indel path**: the brute-force references are built from a FASTA that
+holds no indel, so the fake-indel genome, an indel row's coordinate, its aligned
+spacer/target strings, its REF/ALT text, its named variants, its carriers and the whole
+alternative-alignments table are outside the comparison, and so is the per-carrier truth
+(the enriched genome collapses every individual into IUPAC codes). The synthetic SNP+indel
+oracle (`test/indel_snp_oracle`) checks those on a planted 16 kb chromosome, through the
+real CLI, but only there.
+
+**Validation (the indel path on real data).** `scripts/check_indel_rows.py` is an
+independent checker of the indel path on a real panel, added in 2.8.2. It shares no code
+with CRISPRme's variant or indel machinery: its inputs are only what a user has — the
+reference FASTA, the VCF(s) the search read, the guide, the PAM file, the search budget
+and the result folder — and it builds each sample's two haplotypes itself (every variant
+of that haplotype in the window, SNVs, MNVs and indels, phased; unphased genotypes by the
+documented PUTATIVE rule), keeps its own map from haplotype offsets to reference
+coordinates, and aligns with its own exhaustive dynamic-programming aligner. It runs two
+ways:
+
+- **Soundness.** Every row block of the integrated results (the highest-CFD, fewest
+  mm+b and highest-CRISPR-Bulge blocks) and every alternative alignment whose variant
+  list names an indel or an MNV must satisfy: the target (gaps removed, PAM included) is
+  on a listed carrier's haplotype at the reported coordinate (the first aligned base's
+  reference coordinate, the insertion's anchor for a base an insertion adds); the aligned
+  pair is a valid alignment whose mismatches, bulge types and sizes and totals recount
+  exactly, within the budget; the PAM matches the searched motif; the REF text is the
+  reference read from the row's start, gapped as the target; every named variant is a VCF
+  record, forward strand, on that carrier's haplotype and inside the target's span, and
+  every variant of that haplotype that changes the target is named; every listed carrier
+  carries the target; and no carrier of the indel whose haplotype holds the target there
+  is missing from the row or from another reported row of the site naming the same
+  variants (the merge folds those).
+- **Completeness (the real-data brute force).** For every indel and MNV record of the VCF
+  in the checked region, each carrier's haplotype window is built, identical sequences are
+  deduplicated, every in-budget alignment on both strands with the PAM that holds a base
+  the record changes is enumerated (for a deletion, one that spans the junction — a target
+  wholly in a flank is reference or SNP sequence and gives no indel row), mapped to the
+  reference, and required to be reported for that sample, as an integrated row or an
+  alternative alignment, unless a reported row of the same site lists that sample with no
+  more edits (what the merge keeps). The documented limits of 2.8.1 — two indels changing
+  one target on one haplotype, a carrier whose calls there cannot be phased, a site at a
+  contig's end — are counted per class and listed, never silently skipped.
+
+Measured on chr22 of the HGDP + 1000 Genomes panel (README guide, NRG, 4 mismatches +
+1 DNA + 1 RNA bulge, both analysis modes): on 2.8.1 the checker reports exactly the four
+rows per mode whose first aligned base is one an insertion adds, and nothing else; with
+the 2.8.2 placement fix it reports none. On the 2.8.0 run it reports 1,432 row blocks,
+among them the alternative alignment at chr22:22322768 that paired an insertion's only
+carrier with five SNP alleles other individuals carry. On the documented chr22 self-test
+it reports the two `cas9_sg1617` rows of 2.8.1 and passes every benchmark with the fix.
+`test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check`,
+`validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`,
+and `docs/RELEASE_CHECKLIST.md` makes it a release gate.
+
 This establishes that the engine **does not miss** off-targets relative to
 exhaustive search. It does **not** validate the *scoring* models' predictive
 accuracy against experimental cleavage — a regulatory-grade package should add a

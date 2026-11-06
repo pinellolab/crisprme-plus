@@ -45,5 +45,23 @@ for mode in per-sample population-level; do
 	python3 -I "$gate" Results/"$out" || rc=1
 done
 python3 -I "$here/oracle.py" check "$wd" "$pp" Results/orc_per Results/orc_pop || rc=1
+# The same rows through the independent real-data checker (scripts/check_indel_rows.py),
+# which shares no code with oracle.py either: its own VCF reader, haplotype builder and
+# exhaustive aligner, driven only by what a user has. On this synthetic world the two
+# must agree, so a disagreement is a bug in one of them. Soundness and completeness.
+chk=$here/../../scripts/check_indel_rows.py
+if [ -f "$chk" ]; then
+	for mode in soundness completeness; do
+		for out in orc_per orc_pop; do
+			echo "=== check_indel_rows --$mode $out $(date -u)"
+			python3 -I "$chk" --results "Results/$out" --reference Genomes/synth \
+				--vcf VCFs/synth_vcf/synth.chr21.vcf.gz --pam PAMs/20bp-NRG-SpCas9.txt \
+				--mm 4 --bDNA 1 --bRNA 1 --max-total-edits 6 --chrom chr21 \
+				--mode "$mode" --out "check_${out}_${mode}.tsv" || rc=1
+		done
+	done
+else
+	echo "WARNING: $chk not found; the independent real-data check was skipped"
+fi
 [ "$rc" = 0 ] && echo "ORACLE PASS" || echo "ORACLE FAIL"
 exit "$rc"
