@@ -1309,7 +1309,7 @@ over HGDP + 1000 Genomes (4,091 samples, guide `ACTGAAATCTGTAAGCAGGC`, NRG, 4 mi
 set aside; the two PAM-less arms are identical with it, MD5 `c4586f7a`). The same holds for
 NRR: 386,012 rows each (MD5 `f810dd76`) over a dedicated index, both PAM-less indexes with
 `--prune-pam`, and the 3-nt one without it. Those indexes are of format 1, built by CRISPRitz
-2.9.1 (below). For them it holds at *L = K*, and at *K > L* for a guide
+2.9.1 or earlier (below). For them it holds at *L = K*, and at *K > L* for a guide
 with no site at a contig's very end or start, as this one has none. The build scans a contig
 for a PAM only where a whole window of *K* bases fits, so with *K > L* a + strand PAM with 1 to
 *K − L* bases after it to the contig's end, and a − strand PAM in the contig's first *K − L*
