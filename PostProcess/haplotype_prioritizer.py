@@ -14,13 +14,16 @@ a sites-only dataset (the genotype oracle, opt-in) -- and gives the alignment a 
 
   A   two or more variants that one phased haplotype of the panel carries together, or that
       a haplotype reaches the alignment's CFD without: a variant the alignment takes which
-      leaves its CFD as it is (an allele at the PAM's N base, a mismatch for a mismatch the
-      table scores alike) is not needed for the row's score, so a haplotype carrying the
-      rest has the row's off-target at the row's score. States: "one haplotype" when a
-      single haplotype carries them all, "phase not known" when only samples whose genotypes
-      do not say which haplotype holds which variant carry them all, "same score" (with
-      "same score, phase not known" and "same score as the reference") when a haplotype
-      reaches the alignment's CFD without every variant;
+      leaves the CFD the results report, the alignment's mismatches and its PAM as they are
+      (an allele at a PAM base the search leaves free, a mismatch for a mismatch the table
+      scores alike) is not needed for the row's score, so a haplotype carrying the rest has
+      the row's off-target at the row's score. The CFD says this of the two alignments
+      ranked by it, not of the one ranked by CRISPR-Bulge score, which the gate does not
+      read. States: "one haplotype" when a single haplotype carries them all, "phase not
+      known" when only samples whose genotypes do not say which haplotype holds which
+      variant carry them all, "same score" (with "same score, phase not known" and "same
+      score as the reference") when a haplotype reaches the alignment's CFD without every
+      variant;
   B   one variant: the panel or the dataset's allele frequency says that some individual
       carries it. It cannot be a combination nobody carries, which is all B says;
   C1  two or more variants, each one in the panel, that no haplotype of it carries together.
@@ -65,6 +68,7 @@ from collections import namedtuple
 import build_mega_indel_af as bia
 import bulge_cfd_penalty as bcp
 import indel_snp_cis as isc
+import pam_filter as pf
 import population_summary as ps
 import tier0_compile as t0c
 import tier0_registry as t0
@@ -96,6 +100,10 @@ ORACLE_PANEL = "hg38_HGDP1kGP"
 
 # the integrated results' three alignments of a row, by the suffix of their columns
 BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
+# the alignment the report's second ranking takes, which has no CFD column: the gate reads
+# no CRISPR-Bulge score (the model is not run again), so the "same score" states, which the
+# CFD decides, are not its to give
+CB_BLOCK = BLOCKS[2]
 _BLOCK_COLUMNS = ("Start_coordinate", "Strand", "Aligned_spacer+PAM",
                   "Aligned_protospacer+PAM_ALT", "PAM", "REF/ALT_origin",
                   "Variant_info_genome", "Variant_MAF")
@@ -103,9 +111,9 @@ _BLOCK_COLUMNS = ("Start_coordinate", "Strand", "Aligned_spacer+PAM",
 # the alignment CFD is defined for: a 20-nt spacer and a 3-base 3' PAM (cfd_score)
 SPACER_PAM_LEN = 23
 CFD_PAM_LEN = 3
-# the integrated results report a CFD of three decimals, so two alignments whose CFDs are
-# within half of the last digit have the CFD the row reports
-CFD_SHOWN = 5e-4
+# the integrated results report a CFD of three decimals: two alignments have the CFD the row
+# reports when they round to the same three decimals, which is what the label says of them
+CFD_DECIMALS = 3
 # a minus-strand alignment is written on the other strand, base by base
 COMPLEMENT = {"A": "T", "C": "G", "G": "C", "T": "A"}
 
@@ -117,9 +125,15 @@ COMPANION_COLUMNS = (
     "AF_product", "AF_min", "Label", "Scoring_variants",
 )
 
-# one alignment of a row of the integrated results, as the gate reads it
+# the search's PAM (pam_filter: the motif the PAM file asks for, and whether it is 3'), read
+# by the gate over an alignment's PAM region
+Pam = namedtuple("Pam", "motif three_prime")
+
+# one alignment of a row of the integrated results, as the gate reads it ("pam": the
+# search's PAM, None where the gate was not given it)
 Alignment = namedtuple(
-    "Alignment", "row block guide start strand crrna aligned pam_len variants maf cfd")
+    "Alignment", "row block guide start strand crrna aligned pam_len variants maf cfd pam",
+    defaults=(None,))
 
 
 # --------------------------------------------------------------------------- #
@@ -196,8 +210,10 @@ def variant_columns(start, aligned, strand, variants):
 
 
 def same_cfd(one, other):
-    """Whether two alignments have the CFD the results report of them (CFD_SHOWN)."""
-    return one is not None and other is not None and abs(one - other) <= CFD_SHOWN
+    """Whether two alignments have the CFD the integrated results report of them: the same
+    three decimals (CFD_DECIMALS), which is what a "same score" label says of them."""
+    return (one is not None and other is not None
+            and round(one, CFD_DECIMALS) == round(other, CFD_DECIMALS))
 
 
 def matches(guide_base, base):
@@ -206,26 +222,64 @@ def matches(guide_base, base):
     return guide_base == "N" or guide_base == base
 
 
-def scoring_variants(crrna, aligned, placed, pam_len=CFD_PAM_LEN, shown=None):
+def read_pam(path):
+    """The search's PAM (Pam) from its PAM file, as the post-analysis reads it
+    (pam_filter._requested_pam: the motif and the side it sits on), or None."""
+    try:
+        motif, three_prime = pf._requested_pam(path)
+    except (OSError, ValueError, IndexError):
+        return None
+    return Pam(motif.upper(), three_prime) if motif else None
+
+
+def pam_asks(aligned, pam_len, pam):
+    """{column: the IUPAC character the search's PAM asks there} over an alignment's PAM
+    region -- its last ``pam_len`` characters, or its first for a 5' PAM, as the
+    post-analysis reads it. The guide's side of an alignment writes its PAM as N, which
+    every base matches, so a column of the region is read against the search's PAM
+    instead: an allele the PAM needs is one the row needs, however the CFD scores it.
+    Without the search's PAM (``pam`` None, or a motif of another length) the gate cannot
+    say which bases make a PAM, and asks for "" -- which no base gives -- at either end's
+    ``pam_len`` columns."""
+    n = len(aligned)
+    if pam_len <= 0 or pam_len > n:
+        return {}
+    if pam is None or len(pam.motif) != pam_len:
+        return {c: "" for c in list(range(pam_len)) + list(range(n - pam_len, n))}
+    cols = range(n - pam_len, n) if pam.three_prime else range(pam_len)
+    return {c: pam.motif[i] for i, c in enumerate(cols)}
+
+
+def pam_gives(base, asks):
+    """Whether ``base`` makes a PAM at a column that asks for the IUPAC character ``asks``
+    (pam_filter, as the post-analysis gates a target's PAM); "" is given by no base."""
+    return bool(asks) and pf._pam_can_match(base, asks)
+
+
+def scoring_variants(crrna, aligned, placed, pam_len=CFD_PAM_LEN, shown=None, pam=None):
     """The indexes of the variants of an alignment its score needs: those whose allele,
     taken back to the reference base (``placed``: variant_columns), change the CFD the row
     reports, or turn a column that matches the guide into one that does not, or the other
     way round (the row's mismatches are the alignment's, and one more would be another
-    alignment, outside the search's budget). The others leave the row's score and its
-    mismatches as they are -- an allele at the PAM's N base, a mismatch for a mismatch the
-    table scores alike -- so a haplotype carrying the rest alone has the row's off-target at
-    the row's score. Every index when they change the CFD together (the PAM's
-    factor is read over its bases at once), and None when the gate cannot read the
-    alignment's CFD, or ``shown`` (the row's CFD) is not the CFD it reads."""
+    alignment, outside the search's budget), or leave the PAM region a sequence the
+    search's PAM (``pam``) does not take, where there is no off-target at all. The others
+    leave the row's score and its mismatches as they are -- an allele at a PAM base the
+    search leaves free, a mismatch for a mismatch the table scores alike -- so a haplotype
+    carrying the rest alone has the row's off-target at the row's score. Every index when
+    they change the CFD together (the PAM's factor is read over its bases at once), and
+    None when the gate cannot read the alignment's CFD, or ``shown`` (the row's CFD) is not
+    the CFD it reads."""
     whole = alignment_cfd(crrna, aligned, pam_len)
     if not whole:  # another geometry, or a score of 0 that no allele can lower
         return None
-    if shown is not None and abs(round(whole, 3) - shown) > CFD_SHOWN:
+    if shown is not None and not same_cfd(whole, shown):
         return None
+    asks = pam_asks(aligned, pam_len, pam)
     keep = [k for k, (col, ref) in enumerate(placed)
             if not same_cfd(alignment_cfd(crrna, aligned[:col] + ref + aligned[col + 1:],
                                           pam_len), whole)
-            or matches(crrna[col], ref) != matches(crrna[col], aligned[col])]
+            or matches(crrna[col], ref) != matches(crrna[col], aligned[col])
+            or (col in asks and not pam_gives(ref, asks[col]))]
     if len(keep) == len(placed):
         return keep
     rest = list(aligned)
@@ -240,8 +294,9 @@ def scoring_variants(crrna, aligned, placed, pam_len=CFD_PAM_LEN, shown=None):
 def score_breakers(panel, alignment, variants):
     """{sample: genotype} of each allele of the panel inside the alignment, other than the
     ones the row takes, that changes the CFD the row reports or the alignment's
-    mismatches: a slot holding one does not have the row's off-target at the row's score,
-    however the row's own variants sit on it."""
+    mismatches, or leaves the PAM region a sequence the search's PAM does not take: a slot
+    holding one does not have the row's off-target at the row's score, however the row's
+    own variants sit on it."""
     aligned = alignment.aligned.upper()
     whole = alignment_cfd(alignment.crrna, aligned, alignment.pam_len)
     if whole is None:
@@ -249,6 +304,7 @@ def score_breakers(panel, alignment, variants):
     minus = alignment.strand == "-"
     cols = [i for i, ch in enumerate(aligned) if ch != "-"]
     own = {(v[1], v[3]) for v in variants}
+    asks = pam_asks(aligned, alignment.pam_len, alignment.pam)
     out = []
     for off, col in enumerate(cols):
         pos = int(alignment.start) + (len(cols) - 1 - off if minus else off) + 1
@@ -262,7 +318,8 @@ def score_breakers(panel, alignment, variants):
                                            aligned[:col] + base + aligned[col + 1:],
                                            alignment.pam_len), whole)
                     or matches(alignment.crrna[col], base)
-                    != matches(alignment.crrna[col], aligned[col])):
+                    != matches(alignment.crrna[col], aligned[col])
+                    or (col in asks and not pam_gives(base, asks[col]))):
                 out.append(gts)
     return out
 
@@ -364,11 +421,14 @@ def slots_holding(variant_gts, others=(), breakers=()):
     breaker (an indel that changes the target, ``breakers``: [genotype]) and the number with
     one. None when the genotypes cannot put the alleles on slots (an unphased or a missing
     call, haploid against diploid): such a carrier stays listed. A breaker whose call cannot
-    be put on a slot takes no slot off."""
+    be put on a slot takes no slot off. A haploid sample (a male's chrX calls) has one
+    slot and no other: an allele of ``others`` on it leaves nowhere else for the target,
+    so a breaker there breaks it whatever else the slot holds."""
     parsed = [_tokens(g) for g in variant_gts]
     n = _exact(parsed)
     if n is None:
         return None
+    haploid = all(kind == "haploid" for _toks, kind in parsed)
     other = [_tokens(g) for g in others]
     if other and _exact(parsed + other) != n:
         return None
@@ -376,7 +436,7 @@ def slots_holding(variant_gts, others=(), breakers=()):
     for h in range(n):
         if not all(toks[h] == "1" for toks, _kind in parsed):
             continue
-        if any(toks[h] == "1" for toks, _kind in other):
+        if not haploid and any(toks[h] == "1" for toks, _kind in other):
             continue
         hit = False
         for g in breakers:
@@ -773,15 +833,19 @@ def same_score_verdict(variants, panels, span, alignment):
     """The verdict of an alignment whose CFD a real haplotype reaches without every
     variant it takes (tier A, states "same score", "same score, phase not known", "same
     score as the reference"), or None: no such haplotype, every variant changes the CFD,
-    or the gate cannot read it (``alignment``: an Alignment, or None)."""
-    if alignment is None or len(variants) < 2 or not all(is_snp(v) for v in variants):
+    the alignment is the one ranked by CRISPR-Bulge score (CB_BLOCK: the CFD does not say
+    what that score is, and the gate does not run the model again, so an alignment no
+    haplotype carries is C1 there), or the gate cannot read it (``alignment``: an
+    Alignment, or None)."""
+    if (alignment is None or alignment.block == CB_BLOCK or len(variants) < 2
+            or not all(is_snp(v) for v in variants)):
         return None
     placed = variant_columns(alignment.start, alignment.aligned.upper(), alignment.strand,
                              variants)
     if placed is None:
         return None
     keep = scoring_variants(alignment.crrna, alignment.aligned.upper(), placed,
-                            alignment.pam_len, alignment.cfd)
+                            alignment.pam_len, alignment.cfd, alignment.pam)
     if keep is None or len(keep) == len(variants):
         return None
     pos = variants[0][1]
@@ -876,10 +940,11 @@ def classify(variants, panels, span=None, min_expected=MIN_EXPECTED, af_of=None,
 # --------------------------------------------------------------------------- #
 # The gate over a search's integrated results
 # --------------------------------------------------------------------------- #
-def _read_rows(results):
+def _read_rows(results, pam=None):
     """{chromosome: [Alignment]} of every alignment of the integrated results that uses a
     variant (row: its 1-based data line; cfd: the CFD the row shows, where the alignment
-    has one -- the ranking by CRISPR-Bulge score has no CFD column)."""
+    has one -- the ranking by CRISPR-Bulge score has no CFD column; pam: the search's
+    PAM)."""
     by_chrom = {}
     with open(results) as fh:
         header = fh.readline().rstrip("\n").split("\t")
@@ -908,7 +973,7 @@ def _read_rows(results):
                         cfd = None
                 by_chrom.setdefault(f[ci], []).append(Alignment(
                     row, block, f[gi], f[si], f[sti], f[ci_].upper(), f[ai],
-                    len(f[pi].strip()), variants, f[mi], cfd))
+                    len(f[pi].strip()), variants, f[mi], cfd, pam))
     return by_chrom
 
 
@@ -989,8 +1054,10 @@ def _gate_chromosome(job):
             except ValueError:
                 span = None
         # the alignment decides the tier too (same_score_verdict), so two rows share a
-        # verdict only when they take the same alleles over the same aligned bases
-        key = (tuple(variants), span, aln.crrna, aln.aligned, aln.cfd)
+        # verdict only when they take the same alleles over the same aligned bases, and
+        # are both ranked by a score the gate reads (the CRISPR-Bulge one is not)
+        key = (tuple(variants), span, aln.crrna, aln.aligned, aln.cfd,
+               aln.block == CB_BLOCK)
         verdict = cache.get(key)
         if verdict is None:
             if panels:
@@ -1038,11 +1105,12 @@ def _gate_chromosome(job):
 
 
 def run_gate(results, out_path, dictionaries, panel_specs, datasets,
-             min_expected=MIN_EXPECTED, threads=1, genome=None):
+             min_expected=MIN_EXPECTED, threads=1, genome=None, pam=None):
     """Write the companion of ``results`` to ``out_path``; return (counts, panel facts).
     ``panel_specs``: [(panel name, Dictionaries folder holding its stores, role)];
-    ``genome``: the reference genome folder (<chrom>.fa), for holds_target."""
-    by_chrom = _read_rows(results)
+    ``genome``: the reference genome folder (<chrom>.fa), for holds_target; ``pam``: the
+    search's PAM (Pam), read over an alignment's PAM region."""
+    by_chrom = _read_rows(results, pam)
     jobs = [(chrom, rows, dictionaries, panel_specs, datasets, min_expected, genome)
             for chrom, rows in sorted(by_chrom.items(), key=lambda kv: -len(kv[1]))]
     if threads > 1 and len(jobs) > 1:
@@ -1071,8 +1139,10 @@ def run_gate(results, out_path, dictionaries, panel_specs, datasets,
             "# CRISPRme carrier gate. One line per alignment of a row of the integrated results\n"
             "# that uses a variant (Row: the row's line, header excluded; Block: which alignment).\n"
             "# Tier A: two or more variants one phased haplotype of the panel carries together,\n"
-            "# or that a haplotype reaches the alignment's CFD without (Scoring_variants: those\n"
-            "# its CFD needs, which that haplotype carries; the others leave the CFD as it is).\n"
+            "# or, of an alignment ranked by CFD, that a haplotype reaches its CFD without\n"
+            "# (Scoring_variants: those its CFD needs, which that haplotype carries; the others\n"
+            "# leave the CFD the results report, the alignment's mismatches and its PAM as they\n"
+            "# are).\n"
             "# Tier B: one variant. Tier C1: two or more variants, each in the panel, that no\n"
             "# haplotype of it carries together (or a variant whose every carrying haplotype has\n"
             "# an indel in the target): the report ranks these after every other row. Tier C2:\n"
@@ -1193,6 +1263,9 @@ def main(argv=None):
     parser.add_argument("--genome", default="",
                         help="the search's reference genome folder (<chrom>.fa): an indel "
                              "that leaves a target's bases (a repeat unit) takes no slot off")
+    parser.add_argument("--pam", default="",
+                        help="the search's PAM file: an allele a row's PAM needs is one its "
+                             "score needs. Without it every allele in a PAM region is")
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--meta", default=None, help="the sidecar JSON (default: "
                         "<results folder>/" + META_NAME + ")")
@@ -1217,7 +1290,8 @@ def main(argv=None):
         out = companion_path(args.results)
         counts, facts = run_gate(args.results, out, args.dictionaries, panels, datasets,
                                  args.min_expected, max(1, args.threads),
-                                 args.genome or None)
+                                 args.genome or None,
+                                 read_pam(args.pam) if args.pam else None)
         meta["counts"] = counts
         meta["companion"] = os.path.basename(out)
         for name, root, role in panels:

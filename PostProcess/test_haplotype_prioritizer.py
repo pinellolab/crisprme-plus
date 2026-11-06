@@ -108,6 +108,15 @@ class TestParseAndSupport(unittest.TestCase):
         self.assertFalse(hp.holds_target(lambda a, b: plain[max(a, 0):b], 2, 17, {},
                                          (8, "CAA", "C")))
 
+    def test_a_haploid_slot_holding_a_breaker_is_broken(self):
+        # a male's chrX calls are his one haplotype's: an indel of his that changes the
+        # target takes it off, whatever else that haplotype holds (RV3-3)
+        self.assertEqual(hp.slots_holding(["1"], [], ["1"]), (0, 1))
+        self.assertEqual(hp.slots_holding(["1"], ["1"], ["1"]), (0, 1))
+        self.assertEqual(hp.slots_holding(["1"], ["1"], []), (1, 0))
+        # a diploid sample has another slot for the target, and keeps the row
+        self.assertEqual(hp.slots_holding(["1|0"], ["1|0"], ["1|0"]), (0, 0))
+
     def test_two_alts_on_one_slot_is_unknown(self):
         alt_g = {"S1": "1|0", "S2": "1|0"}
         alt_t = {"S1": "1|0"}  # S1's first slot holds G and T at one position
@@ -258,9 +267,11 @@ class TestClassify(unittest.TestCase):
 
 class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
     """A row's worst case takes every allele that matches the guide best, and some of them
-    leave its CFD as it is (an allele at the PAM's N base, a mismatch for a mismatch the
-    CFD table scores alike). A haplotype carrying the rest alone has the row's off-target
-    at the row's score, so the row is tier A, not C1 (RV2-1)."""
+    leave its CFD, its mismatches and its PAM as they are (an allele at a PAM base the
+    search leaves free, a mismatch for a mismatch the CFD table scores alike). A haplotype
+    carrying the rest alone has the row's off-target at the row's score, so the row is
+    tier A, not C1 (RV2-1); one whose allele the row's PAM needs, or whose CFD is another
+    at the three decimals the results report, is not (RV3-1)."""
 
     # a 20-nt spacer + NGG, the alignment CFD is defined for; the ALT protospacer takes a
     # mismatch at spacer position 3 (103) and the PAM's N base (121), which CFD never reads
@@ -270,6 +281,8 @@ class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
     # a second guide whose position 7 scores dC and dT alike: both alleles leave the CFD
     GUIDE_TIE = "CTAACAATTGCTTTTATCACNNN"
     ALT_TIE = "CTAACACTTGCTTTTATCACGGG"  # REF has T at 107, the ALT C, scored the same
+    # the search's PAM: the first base of an NRG PAM is free, its second is A or G
+    PAM = hp.Pam("NRG", True)
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="gate_score_")
@@ -282,9 +295,10 @@ class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
         self.addCleanup(p.close)
         return p
 
-    def alignment(self, guide=GUIDE, aligned=ALT, strand="+", start=100, cfd=None):
-        return hp.Alignment(1, hp.BLOCKS[0], guide, start, strand, guide, aligned, 3,
-                            (), "NA", cfd)
+    def alignment(self, guide=GUIDE, aligned=ALT, strand="+", start=100, cfd=None,
+                  pam=PAM, block=hp.BLOCKS[0]):
+        return hp.Alignment(1, block, guide, start, strand, guide, aligned, 3,
+                            (), "NA", cfd, pam)
 
     def test_the_columns_of_a_variant_on_either_strand(self):
         plus = hp.variant_columns(100, self.ALT, "+",
@@ -300,12 +314,106 @@ class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
 
     def test_which_variants_the_cfd_needs(self):
         placed = hp.variant_columns(100, self.ALT, "+", [v(103, "A", "T"), v(121, "A", "G")])
-        self.assertEqual(hp.scoring_variants(self.GUIDE, self.ALT, placed), [0])
+        self.assertEqual(hp.scoring_variants(self.GUIDE, self.ALT, placed, pam=self.PAM), [0])
         # the row's own CFD must be the one the gate reads, or it says nothing
-        self.assertEqual(hp.scoring_variants(self.GUIDE, self.ALT, placed, shown=0.706), [0])
-        self.assertIsNone(hp.scoring_variants(self.GUIDE, self.ALT, placed, shown=0.5))
+        self.assertEqual(hp.scoring_variants(self.GUIDE, self.ALT, placed, shown=0.706,
+                                             pam=self.PAM), [0])
+        self.assertIsNone(hp.scoring_variants(self.GUIDE, self.ALT, placed, shown=0.5,
+                                              pam=self.PAM))
         # another geometry (a 4-base PAM) is not CFD's
         self.assertIsNone(hp.alignment_cfd(self.GUIDE, self.ALT, pam_len=4))
+
+    # a row of three mismatches whose CFD, 0.000, the results report as 0.000 whatever
+    # happens at its PAM: its PAM is GAG, an NRG, and the reference has GCG, which is not
+    ALT_PAM_MADE = "CTAACAGTTGCTGTGAGCACGAG"
+
+    def test_an_allele_the_pam_needs_is_needed(self):
+        """The guide's side of an alignment writes its PAM as N, which every base
+        matches, and the CFD of a row scoring 0.000 moves within the decimals it reports
+        whatever the PAM does: the allele that makes the PAM is read against the search's
+        own PAM instead. Without it the sequence has no NRG PAM, so there is no off-target
+        there at all and the row stays C1 (RV3-1; 461 rows of the genome-wide run,
+        chr9:92157298(+) among them, were labelled "same score" for it)."""
+        alt = self.ALT_PAM_MADE
+        placed = hp.variant_columns(100, alt, "+", [v(113, "T", "G"), v(122, "C", "A")])
+        self.assertEqual(placed, [(12, "T"), (21, "C")])
+        # the CFD cannot see it: with the PAM's R base back at the reference both the row
+        # and the sequence a haplotype without that allele has are reported as 0.000
+        self.assertTrue(hp.same_cfd(hp.alignment_cfd(self.GUIDE, alt[:21] + "C" + alt[22:]),
+                                    hp.alignment_cfd(self.GUIDE, alt)))
+        self.assertEqual(hp.scoring_variants(self.GUIDE, alt, placed, shown=0.0,
+                                             pam=self.PAM), [0, 1])
+        p = self.panel([(113, "T", "G", {"S00": "1|0"}), (122, "C", "A", {"S02": "1|0"})])
+        ver = hp.classify([v(113, "T", "G"), v(122, "C", "A")], [p],
+                          alignment=self.alignment(aligned=alt, cfd=0.0))
+        self.assertEqual(ver.tier, "C1")
+        self.assertNotIn(ver.state, hp.SAME_SCORE_STATES)
+
+    def test_another_allele_the_pam_needs_takes_the_slot(self):
+        """The same of an allele of the panel the row does not take: the row's PAM is GAG,
+        and the one slot carrying the variant its score needs also carries an allele at the
+        PAM's R base that leaves GCG there, which is no NRG. That slot has no off-target at
+        all, so the row stays C1 (score_breakers reads the PAM region too); the row's own
+        allele at the PAM's free N base needs no haplotype."""
+        alt = self.ALT_PAM_MADE  # the variant at column 20 is its N base, A -> G
+        variants = [v(113, "T", "G"), v(121, "A", "G")]
+        kept = self.panel([(113, "T", "G", {"S00": "1|0"}), (121, "A", "G", {"S02": "1|0"})])
+        ver = hp.classify(variants, [kept],
+                          alignment=self.alignment(aligned=alt, cfd=0.0))
+        self.assertEqual((ver.tier, ver.state, ver.kept),
+                         ("A", hp.SAME_SCORE, (f"{CHROM}_113_T_G",)))
+        # the same with the panel's A -> C at the PAM's R base on S00's slot
+        self.dicts = os.path.join(self.tmp, "Dictionaries2")
+        broken = self.panel([(113, "T", "G", {"S00": "1|0"}), (121, "A", "G", {"S02": "1|0"}),
+                             (122, "A", "C", {"S00": "1|0"})])
+        # the CFD reports 0.000 with it as without it
+        self.assertTrue(hp.same_cfd(hp.alignment_cfd(self.GUIDE, alt[:21] + "C" + alt[22:]),
+                                    hp.alignment_cfd(self.GUIDE, alt)))
+        ver = hp.classify(variants, [broken],
+                          alignment=self.alignment(aligned=alt, cfd=0.0))
+        self.assertEqual(ver.tier, "C1")
+
+    def test_the_crispr_bulge_alignment_has_no_same_score_state(self):
+        """The exemption is the CFD's. The gate reads no CRISPR-Bulge score (the model is
+        not run again), and an allele the CFD never reads -- the PAM's N base -- does
+        change that score, so the alignment the report's second ranking takes is C1 where
+        no haplotype carries its combination (RV3-2: chr6:133354312(-) was 4th by
+        CRISPR-Bulge at 0.0702, the haplotype its label named scoring 0.0124)."""
+        p = self.panel([(103, "A", "T", {"S00": "1|0", "S01": "0|1"}),
+                        (121, "A", "G", {"S02": "1|0"})])
+        variants = [v(103, "A", "T"), v(121, "A", "G")]
+        by_cfd = hp.classify(variants, [p], alignment=self.alignment(block=hp.BLOCKS[0]))
+        self.assertEqual((by_cfd.tier, by_cfd.state), ("A", hp.SAME_SCORE))
+        by_cb = hp.classify(variants, [p], alignment=self.alignment(block=hp.CB_BLOCK))
+        self.assertEqual(by_cb.tier, "C1")
+        self.assertNotIn(by_cb.state, hp.SAME_SCORE_STATES)
+
+    def test_without_the_searchs_pam_every_allele_in_a_pam_region_is_needed(self):
+        """The gate reads an alignment's PAM region against the search's PAM file. Run
+        without it (--pam), it cannot say which bases make a PAM there and takes every
+        allele of either end as one the row needs."""
+        placed = hp.variant_columns(100, self.ALT, "+", [v(103, "A", "T"), v(121, "A", "G")])
+        self.assertEqual(hp.scoring_variants(self.GUIDE, self.ALT, placed, pam=None), [0, 1])
+        p = self.panel([(103, "A", "T", {"S00": "1|0"}), (121, "A", "G", {"S02": "1|0"})])
+        ver = hp.classify([v(103, "A", "T"), v(121, "A", "G")], [p],
+                          alignment=self.alignment(pam=None))
+        self.assertEqual(ver.tier, "C1")
+
+    def test_a_cfd_that_differs_at_the_decimals_shown_is_a_variant_the_score_needs(self):
+        """"The same CFD" is the CFD the integrated results report, of three decimals: an
+        allele that moves it from 0.008 to 0.007 changes what the row says (RV3-1; the
+        gate took any difference up to 5e-4 for none)."""
+        guide = "CTAACAGTTGCTTTTATCA-CNNN"
+        alt = "CTAATAAT-GATTTAATCAGCTGG"
+        placed = [(4, "G"), (21, "C")]
+        self.assertEqual(
+            [round(hp.alignment_cfd(guide, alt), 6),
+             round(hp.alignment_cfd(guide, alt[:4] + "G" + alt[5:]), 6)],
+            [0.007654, 0.007216])
+        # the allele at column 4 moves the CFD the results report; the other, at the PAM's
+        # free first base, leaves the CFD and gives an NRG PAM all the same
+        self.assertEqual(hp.scoring_variants(guide, alt, placed, shown=0.008, pam=self.PAM),
+                         [0])
 
     def test_a_haplotype_with_the_scoring_variant_alone_is_tier_a(self):
         p = self.panel([(103, "A", "T", {"S00": "1|0", "S01": "0|1"}),
@@ -352,7 +460,7 @@ class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
         placed = hp.variant_columns(100, alt, "+", [v(101, "T", "A"), v(121, "A", "G")])
         self.assertEqual(hp.alignment_cfd(guide, alt),
                          hp.alignment_cfd(guide, "T" + alt[1:]))
-        self.assertEqual(hp.scoring_variants(guide, alt, placed), [0])
+        self.assertEqual(hp.scoring_variants(guide, alt, placed, pam=self.PAM), [0])
         p = self.panel([(101, "T", "A", {"S00": "1|0"}), (121, "A", "G", {"S02": "1|0"})])
         ver = hp.classify([v(101, "T", "A"), v(121, "A", "G")], [p],
                           alignment=self.alignment(guide, alt))
@@ -385,7 +493,9 @@ class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
 
     def test_the_search_writes_the_tier_and_the_scoring_variants(self):
         """The command the pipeline runs: the companion says which variants the CFD needs,
-        and the sidecar counts the rows a haplotype reaches the CFD of."""
+        and the sidecar counts the rows a haplotype reaches the CFD of. The search gives
+        it its PAM file (--pam); run without it, no allele of a PAM region is read as one
+        the row can do without, and the same row is C1."""
         build_panel(self.dicts, [(103, "A", "T", {"S00": "1|0", "S01": "0|1"}),
                                  (105, "T", "G", {"S02": "1|0"}),
                                  (121, "A", "G", {"S03": "1|0"})])
@@ -412,23 +522,34 @@ class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
              **block("fewest_mm+b", 100, "+", self.ALT, "ref", "NA", **same),
              **block("highest_CRISPR_BULGE", 100, "+", self.ALT, "ref", "NA", **same)},
         ])
-        done = subprocess.run(
-            [sys.executable, os.path.join(HERE, "haplotype_prioritizer.py"),
-             "--results", results, "--dictionaries", self.dicts, "--vcf-list", vcfs,
-             "--mode", "population-level"], capture_output=True, text=True)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        pam_file = os.path.join(self.tmp, "20bp-NRG-SpCas9.txt")
+        with open(pam_file, "w") as fh:
+            fh.write("N" * 20 + "NRG 3\n")
+
+        def run(*extra):
+            done = subprocess.run(
+                [sys.executable, os.path.join(HERE, "haplotype_prioritizer.py"),
+                 "--results", results, "--dictionaries", self.dicts, "--vcf-list", vcfs,
+                 "--mode", "population-level", *extra], capture_output=True, text=True)
+            self.assertEqual((done.returncode, done.stderr), (0, ""))
+            with open(hp.companion_path(results)) as fh:
+                body = [ln.rstrip("\n").split("\t") for ln in fh if not ln.startswith("#")]
+            with open(os.path.join(out, hp.META_NAME)) as fh:
+                return done.stdout, body, json.load(fh)["counts"]
+
+        stdout, body, counts = run("--pam", pam_file)
         self.assertIn("A 1 (1 of them on a haplotype that reaches the row's CFD without "
-                      "every variant)", done.stdout)
-        with open(hp.companion_path(results)) as fh:
-            body = [ln.rstrip("\n").split("\t") for ln in fh if not ln.startswith("#")]
+                      "every variant)", stdout)
         tier, state = (hp.COMPANION_COLUMNS.index(c) for c in ("Tier", "State"))
         scoring = hp.COMPANION_COLUMNS.index("Scoring_variants")
         self.assertEqual([(r[0], r[tier], r[state], r[scoring]) for r in body],
                          [("1", "A", hp.SAME_SCORE, f"{CHROM}_103_A_T"),
                           ("2", "C1", hp.TOO_RARE, "-")])
-        with open(os.path.join(out, hp.META_NAME)) as fh:
-            self.assertEqual(json.load(fh)["counts"],
-                             {"A": 1, "C1": 1, hp.SAME_SCORE_COUNT: 1})
+        self.assertEqual(counts, {"A": 1, "C1": 1, hp.SAME_SCORE_COUNT: 1})
+        _stdout, body, counts = run()
+        self.assertEqual([(r[0], r[tier], r[state]) for r in body],
+                         [("1", "C1", hp.TOO_RARE), ("2", "C1", hp.TOO_RARE)])
+        self.assertEqual(counts, {"C1": 2})
 
 
 def write_results(path, rows):
@@ -625,6 +746,9 @@ class TestReportRanksByTheGate(unittest.TestCase):
             (2015, "T", "C", {s: "0|1" for s in SAMPLES}),
             (3010, "A", "C", {"S04": "1|0"}),
             (4010, "C", "G", {"S05": "0|1"}),
+            # the pair of the CRISPR-Bulge test below: on no one haplotype
+            (5011, "A", "G", {"S00": "1|0"}),
+            (5021, "A", "T", {"S02": "1|0"}),
         ])
         self.rd = os.path.join(self.tmp, "Results", "job")
         os.makedirs(self.rd)
@@ -650,6 +774,9 @@ class TestReportRanksByTheGate(unittest.TestCase):
                       "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
                       "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)",
                       "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)"]
+        self.pam_file = os.path.join(self.tmp, "20bp-NGG-SpCas9.txt")
+        with open(self.pam_file, "w") as fh:
+            fh.write("N" * 20 + "NGG 3\n")
         self.write_results(self.ROWS)
 
     def write_results(self, rows):
@@ -662,13 +789,15 @@ class TestReportRanksByTheGate(unittest.TestCase):
         done = subprocess.run(
             [sys.executable, os.path.join(HERE, "haplotype_prioritizer.py"), "--results",
              self.results, "--dictionaries", self.dicts, "--vcf-list", self.vcfs,
-             "--mode", "population-level"], capture_output=True, text=True)
+             "--mode", "population-level", "--pam", self.pam_file],
+            capture_output=True, text=True)
         self.assertEqual((done.returncode, done.stderr), (0, ""))
 
-    def write_row(self, fh, pos, mm, cfd, cb, origin, variants, cb_variants=None):
+    def write_row(self, fh, pos, mm, cfd, cb, origin, variants, cb_variants=None,
+                  aln="CTCTCAGCTGGTACACGGCATGG"):
         """One row of the integrated results: ``variants`` are those of each alignment but
-        the highest-CRISPR-Bulge one when ``cb_variants`` is given."""
-        aln = "CTCTCAGCTGGTACACGGCATGG"
+        the highest-CRISPR-Bulge one when ``cb_variants`` is given; ``aln`` its aligned
+        protospacer+PAM."""
         r = {"Spacer+PAM": self.GUIDE, "Chromosome": CHROM,
              "Not_found_in_REF": "y" if origin == "alt" else "n",
              "Annotation_GENCODE": "intergenic"}
@@ -864,6 +993,30 @@ class TestReportRanksByTheGate(unittest.TestCase):
         self.assertIn("5000", self.positions(files["data/top1000.tsv"]))
         self.assertNotIn("5000", self.positions(files["data/top1000_crispr_bulge.tsv"]))
 
+    def test_the_crispr_bulge_views_keep_no_row_by_a_same_score_verdict(self):
+        """A row whose two alleles no haplotype carries together, one of them at the PAM's
+        N base: a haplotype carrying the other alone has the row's CFD, so the row keeps
+        its place in the views ranked by CFD; the CRISPR-Bulge score of such a haplotype
+        is another, which the gate does not read, so the row leaves the views ranked by
+        that score (RV3-2)."""
+        # three mismatches with the guide, CFD 0.183; its variants are at the guide's own
+        # base in column 10 (the score needs it: without it the alignment has a mismatch
+        # more) and at the PAM's N base
+        self.write_results(self.ROWS + [
+            ("5000", "3", "0.183", "0.90", "alt", f"{CHROM}_5011_A_G,{CHROM}_5021_A_T",
+             None, "CACACCGCTGGTACACGGCATGG")])
+        self.gate()
+        with open(hp.companion_path(self.results)) as fh:
+            body = [ln.rstrip("\n").split("\t") for ln in fh if not ln.startswith("#")]
+        tier, state = (hp.COMPANION_COLUMNS.index(c) for c in ("Tier", "State"))
+        mine = [(r[1], r[tier], r[state]) for r in body if r[4] == "5000"]
+        self.assertEqual(mine, [("highest_CFD", "A", hp.SAME_SCORE),
+                                ("fewest_mm+b", "A", hp.SAME_SCORE),
+                                ("highest_CRISPR_BULGE", "C1", hp.TOO_RARE)])
+        files = self.report()
+        self.assertIn("5000", self.positions(files["data/top1000.tsv"]))
+        self.assertNotIn("5000", self.positions(files["data/top1000_crispr_bulge.tsv"]))
+
     def test_a_c1_row_whose_crispr_bulge_alignment_is_carried(self):
         """2000's highest-CRISPR-Bulge alignment one variant (B): it leaves the CFD
         thresholds but stays in the CRISPR-Bulge ones, which then leave no row out."""
@@ -890,16 +1043,19 @@ class _PostAnalysis(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="gate_nsa_")
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.at = len(self.FLANK)
+        self.chrom = "chrT"
 
-    def world(self, site, snps, indels, tiers, right=None):
+    def world(self, site, snps, indels, tiers, right=None, chrom="chrT", meta=SAMPLE_META):
         """``snps`` [(column, REF, ALT, {sample: gt})] and ``indels`` [(column, REF, ALT,
         {sample: gt})], columns of ``site``; ``tiers``: "tiers" or "dict"; ``right``: the
-        flank after the site (by default the one before it)."""
+        flank after the site (by default the one before it); ``chrom`` and ``meta``: the
+        chromosome and the panel's samples (on chrX a male's calls are haploid)."""
+        import tier0_compile as t0c
         import tier0_registry as t0
-        chrom = "chrT"
-        self.fasta = os.path.join(self.tmp, "chrT.fa")
+        self.chrom = chrom
+        self.fasta = os.path.join(self.tmp, f"{chrom}.fa")
         with open(self.fasta, "w") as fh:
-            fh.write(">chrT\n" + self.FLANK + site + (right or self.FLANK) + "\n")
+            fh.write(f">{chrom}\n" + self.FLANK + site + (right or self.FLANK) + "\n")
         d = os.path.join(self.tmp, "Dictionaries")
         recs = [(self.at + c + 1, r, a, f"rs{c}", dict(g)) for c, r, a, g in snps]
         if tiers == "tiers":
@@ -907,11 +1063,11 @@ class _PostAnalysis(unittest.TestCase):
             gd = os.path.join(d, "genotypes_ds")
             os.makedirs(rd)
             os.makedirs(gd)
-            t0.compile_registry_panel(recs, SAMPLE_META, None, t0.autosomal_ploidy,
+            t0.compile_registry_panel(recs, meta, None, t0c.ploidy_of_for_chrom(chrom),
                                       os.path.join(rd, f"reg_{chrom}.bin"),
                                       os.path.join(rd, f"reg_{chrom}.idx"))
             t1.compile_genotypes([(p, a, g, r) for p, r, a, _rs, g in recs],
-                                 t1.build_sample_axis(SAMPLE_META),
+                                 t1.build_sample_axis(meta),
                                  os.path.join(gd, f"gt_{chrom}.bin"),
                                  os.path.join(gd, f"gt_{chrom}.idx"))
         else:
@@ -941,7 +1097,7 @@ class _PostAnalysis(unittest.TestCase):
         """The rows of new_simple_analysis.py for the variant search's row ``window`` (the
         site with an IUPAC code at each SNP column): [(DNA, mismatches, samples, SNPs)]."""
         targets = os.path.join(self.tmp, f"targets_{mode}.txt")
-        row = ["X", self.GUIDE + "NNN", window, "chrT", str(self.at), str(self.at), "+",
+        row = ["X", self.GUIDE + "NNN", window, self.chrom, str(self.at), str(self.at), "+",
                "0", "0", "0", "NA", "y", "NA", "NA", "NA", "NA", "NA", "NA"]
         with open(targets, "w") as fh:
             fh.write("#header\n" + "\t".join(row) + "\n")
@@ -991,6 +1147,45 @@ class TestPerSampleIndelInTheTarget(_PostAnalysis):
 
     def test_classic_dictionary(self):
         self.check("dict")
+
+
+class TestPerSampleIndelInTheTargetOfAMale(_PostAnalysis):
+    """F2 on a haploid call: a male's chrX genotypes are his one haplotype's, so an indel
+    of his that changes the target takes him off the row, and his SNPs there are never a
+    haplotype of their own. S00 is male and carries the row's SNP, a second SNP of the
+    window and a deletion inside the target; S01 (female) carries the row's SNP alone
+    (RV3-3: the fix took only phased calls off, leaving 778 haploid carrier listings in
+    the per-sample genome-wide run)."""
+
+    META = {s: ("TEST", "AFR", "male" if s == "S00" else "female") for s in SAMPLES}
+    SITE = "CTAAAAGTTGCTTTTATCACTGG"
+    # the row's SNP at column 4, a second at column 17, a deletion of the T at column 13
+    SNPS = [(4, "A", "C", {"S00": "1", "S01": "1|0"}), (17, "T", "A", {"S00": "1"})]
+    INDELS = [(12, "TT", "T", {"S00": "1"})]
+    WINDOW = SITE[:4] + "M" + SITE[5:17] + "W" + SITE[18:]
+
+    def check(self, tiers):
+        self.world(self.SITE, self.SNPS, self.INDELS, tiers, chrom="chrX", meta=self.META)
+        rows = self.analyse(self.WINDOW, "0", 2)
+        named = [(r[3], r[2]) for r in rows if r[3] not in ("n", "NA")]
+        self.assertEqual(named, [(f"chrX_{self.at + 5}_A_C", "S01")])
+
+    def test_dict_less_tiers(self):
+        self.check("tiers")
+
+    def test_classic_dictionary(self):
+        self.check("dict")
+
+    def test_his_haplotype_is_his_calls_together(self):
+        """Without an indel to take it off, the male's row is the haplotype he has -- both
+        his SNPs -- and not every subset of them (which the enumerator gave an unphased
+        call, and read a haploid one as)."""
+        self.world(self.SITE, self.SNPS, (), "tiers", chrom="chrX", meta=self.META)
+        rows = self.analyse(self.WINDOW, "0", 2)
+        named = sorted((r[3], r[2]) for r in rows if r[3] not in ("n", "NA"))
+        self.assertEqual(named, [
+            (f"chrX_{self.at + 5}_A_C", "S01"),
+            (f"chrX_{self.at + 5}_A_C,chrX_{self.at + 18}_T_A", "S00")])
 
 
 class TestPerSampleIndelThatLeavesTheTarget(_PostAnalysis):

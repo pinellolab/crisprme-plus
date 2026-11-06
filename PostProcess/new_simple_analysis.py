@@ -694,7 +694,9 @@ def _drop_indel_slots_dict(entries, slot, start, n_bases, window):
     {key: [seq, samples, info]} of one haplotype slot (key = (pos_c, base, ...)), each
     less the samples whose indel on that slot takes the target's bases off it (``window``:
     _window_indels of the target's n_bases from start; an unphased indel call takes none
-    off)."""
+    off). A haploid call (a male's chrX one) holds its allele on the sample's one
+    haplotype, which the seeding above puts on either slot: it takes the sample off both,
+    as a phased call takes it off its own."""
     for key, value in entries.items():
         if not value[1] or key[0] in ("greedy", "greedy_cfd", "lossless_hap"):
             continue
@@ -713,7 +715,9 @@ def _drop_indel_slots_dict(entries, slot, start, n_bases, window):
                 if gt is None:
                     continue
                 toks, kind = _isc._gt_tokens(gt)
-                if kind == "phased" and slot < len(toks) and toks[slot] == "1":
+                if kind == "unphased":
+                    continue
+                if toks[slot if slot < len(toks) else 0] == "1":
                     drop.add(sid)
                     break
         if drop:

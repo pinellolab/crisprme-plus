@@ -405,7 +405,11 @@ indel (below): an indel that leaves the target's bases where they were (a tandem
 unit gained or lost, where the repeat runs on past the target) takes no carrier off. An indel
 at one of the row's SNPs, or over one, is another allele of that base, so a slot phased with
 both is a phasing artefact and keeps the carrier; so does an unphased call of the SNP or of
-the indel. The same holds on the classic per-sample dictionaries. Up to 2.8.1 such a carrier
+the indel. A haploid call — a male's on chrX outside PAR — is his one haplotype's, so his
+calls in a window are cis by construction (they make one enumerated haplotype, not every
+subset of them) and an indel of his that changes the target takes him off the row, whatever
+else that haplotype holds. The same holds on the classic per-sample dictionaries. Up to
+2.8.1 such a carrier
 was listed: on chr22 of the HGDP + 1000 Genomes panel, per sample, 2.2% of SNP row-blocks
 (990 of 45,921, five guides) named one, and 545 of them had no listed carrier that holds the
 sequence.
@@ -417,7 +421,9 @@ input genotypes:
 - **Phased data** (alleles separated by `|`). The cis/trans configuration is
   known, so a per-individual, per-chromosome variant-set is a **confirmed** cis
   haplotype: that individual carries exactly those variants together on one
-  chromosome.
+  chromosome. A **haploid** call (one allele, no separator: a male's on chrX
+  outside PAR) is read the same way since 2.9.0 — it is his one haplotype's, so
+  there is nothing to phase — and a missing call (`.`) carries nothing.
 - **Unphased data** (alleles separated by `/`). The cis/trans configuration is
   unknown, so **every** cis/trans arrangement of the individual's carried variants
   is possible. CRISPRme+ therefore reports **every non-empty subset** of that
@@ -838,21 +844,29 @@ the search without it (`--no-prioritize-observed`).
 
     **A also where a haplotype reaches the alignment's CFD without every variant.** The
     worst case takes the best-matching allele in every column, and some of those alleles
-    leave the CFD exactly as it is: one at the PAM's `N` base, which the score never reads,
-    or a mismatch for a mismatch the CFD table scores alike. The gate scores the alignment
-    from its aligned spacer+PAM and protospacer+PAM (`bulge_cfd_penalty`, as the search
-    scores a row), takes each allele in turn back to its reference base, and keeps the
-    variants that change the CFD; if a phased haplotype carries those, it has the row's
-    off-target at the row's score, and the row is A (states `same score`, `same score, phase
-    not known`, and `same score as the reference` where no variant changes the CFD), with
-    the variants the score needs in the companion's `Scoring_variants` column and in the
-    label. Were it C1 the whole site would leave the top views, though a named individual
-    carries an off-target there with the row's score. Checked only where the gate reads the
+    leave the CFD the results report (three decimals), the alignment's mismatches and its
+    PAM as they are: one at a PAM base the search's PAM leaves free, or a mismatch for a
+    mismatch the CFD table scores alike. The gate scores the alignment from its aligned
+    spacer+PAM and protospacer+PAM (`bulge_cfd_penalty`, as the search scores a row), takes
+    each allele in turn back to its reference base, and keeps the variants that change the
+    CFD, the alignment's mismatches, or its PAM — the guide's side of an alignment writes
+    its PAM as `N`, which every base matches, so the PAM region is read against the
+    search's own PAM instead (its PAM file, `pam_filter`, as the post-analysis gates a
+    target's PAM): without an allele the PAM needs there is no off-target at the site at
+    all. If a phased haplotype carries the variants kept, it has the row's off-target at
+    the row's score, and the row is A (states `same score`, `same score, phase not known`,
+    and `same score as the reference` where no variant changes the CFD), with the variants
+    the score needs in the companion's `Scoring_variants` column and in the label. Were it
+    C1 the whole site would leave the top views, though a named individual carries an
+    off-target there with the row's score. Checked only where the gate reads the
     alignment's CFD: a 20-nt spacer with a 3-base 3' PAM, the row's own CFD where the
-    alignment has one (the ranking by CRISPR-Bulge score has no CFD column), every variant a
-    SNP inside the alignment, and the alleles the alignment takes. A CRISPR-Bulge score is
-    not recomputed (the model is not run again), so the CFD decides for all three
-    alignments.
+    alignment has one, every variant a SNP inside the alignment, and the alleles the
+    alignment takes. A CRISPR-Bulge score is not recomputed (the model is not run again),
+    and an allele the CFD never reads does change it, so this state is the CFD's to give:
+    the alignment ranked by CRISPR-Bulge score, which has no CFD column, is C1 where no
+    haplotype carries its combination, and its row leaves the views ranked by that score.
+    Run without the search's PAM the gate cannot read a PAM region, and takes every allele
+    in one for an allele the row needs.
   - **B**: one variant. The panel, or the frequency the dataset gives it, says that some
     individual carries it, so it cannot be a combination nobody carries; that is all B says
     (call quality is another question).
