@@ -32,7 +32,14 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
   the results hold every row of the same searches with CRISPRitz 2.9.1 (13 against 6 NGG rows, 2
   against 0 TTTV rows, each row more at a boundary) but the one 2.9.1 reports on the wrong strand
   (a − strand PAM at a contig's first base, IDX-14); and the 8-nt flank gives the dedicated
-  index's 13 rows (with 2.9.1, 5 of its 6).
+  index's 13 rows (with 2.9.1, 5 of its 6). On hg38 chr22 (five guides -- `ACTGAAATCTGTAAGCAGGC`,
+  TRAC, EMX1, VEGFA site 3 and one whose perfect match starts right after an `N` run -- NGG, 4
+  mismatches + 1 DNA + 1 RNA bulge, `build-index-only` then per-sample over 300 HGDP + 1000
+  Genomes samples, and a reference search): with CRISPRitz 2.9.1 this release gives 2.8.1's
+  integrated results byte for byte (10,942 and 9,210 rows); with format 2, every one of those rows
+  and one more, that perfect match at chr22:11,118,987, which no index of format 1 holds; a
+  reference search of the format-1 index by CRISPRitz 2.10.0 gives the 2.9.1 rows and the note
+  below; and one of the format-2 index by 2.9.1 stops with that ERROR, exit 1.
 - **Every index CRISPRme builds records what it holds, in `.index_meta.json`.** `build-index-only`,
   a search's own build and each sub-index of an INDELS index write the index format, the build
   PAM, its side, the flank and guide lengths, the budget, whether the PAM is all `N` and whether the
