@@ -1173,8 +1173,9 @@ class ReviewRound2(Base):
     def test_the_checker_holds_no_crisprme_code(self):
         """F1: no import of CRISPRme's variant or indel modules, and none of the helper
         names of PostProcess/indel_snp_cis.py (a regression guard against copying)."""
-        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
-                                "scripts", "check_indel_rows.py")).read()
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
+                               "scripts", "check_indel_rows.py")) as fh:
+            src = fh.read()
         for mod in ("indel_snp_cis", "analisi_indels", "overlay_indel", "resultIntegrator",
                     "remove_contiguous_samples", "observed_haplotypes", "cfd_score",
                     "bulge_cfd_penalty"):
@@ -2194,6 +2195,16 @@ class ReviewRound5(Base):
         lenient = C.Reported([], argparse_ns_ctx(), criterion="mm+bulges,mm", scoring="mm")
         self.assertIsNone(lenient.worse([few, entry("highest_CFD", 2, 1, 0.5003)], d))
         self.assertIsNotNone(lenient.worse([few, entry("highest_CFD", 3, 1, 0.5003)], d))
+        # a second CFD row of the group, of a lower CFD, changes nothing either way
+        self.assertIsNotNone(reported.worse([few, entry("highest_CFD", 2, 1, 0.5003),
+                                             entry("highest_CFD", 0, 0, 0.3)], d))
+        # the run's own command line names the criteria the merge read
+        res = os.path.join(self.tmp, "run")
+        os.makedirs(res)
+        with open(os.path.join(res, ".command_line.txt"), "w") as fh:
+            fh.write("crisprme.py complete-search --sorting-criteria mm,bulges "
+                     "--sorting-criteria-scoring mm+bulges --max-total-edits 5\n")
+        self.assertEqual(C.run_kind(res)[3:], ("mm,bulges", "mm+bulges", 5))
         self.assertIsNone(reported.worse([few, entry("highest_CFD", 3, 1, 0.501)], d))
         d2 = C.Best(C.edits(2, 0), 0.5005)   # prints 0.500 or 0.501: not surely a tie
         self.assertIsNone(reported.worse([few, entry("highest_CFD", 3, 1, 0.5005)], d2))
@@ -2336,7 +2347,8 @@ class Driver(Base):
         rc = C.main(["--results", case.res, "--reference", fa, "--vcf", case.vcf, "--pam",
                      case.pam, "--mm", "4", "--bDNA", "1", "--bRNA", "1", "--mode",
                      "soundness", "--chrom", "chr21", "--guide", GUIDE, "--out", out])
-        self.assertEqual(rc, 0, open(out).read())
+        with open(out) as fh:
+            self.assertEqual(rc, 0, fh.read())
 
     def test_the_bgzf_tabix_reader_matches_the_stream(self):
         """N4: a BGZF file in small blocks with a tabix index: region reads seek and find
