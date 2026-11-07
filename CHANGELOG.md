@@ -76,9 +76,9 @@ and the `release-crisprme` skill.
     and a sites-only dataset's rows list no carrier (2.8.1, below): a row that lists none
     for a record a sites-only VCF holds is checked as above but for its carriers
     (`limit-no-genotypes`, one line per block). The decision is each record's: beside a
-    genotyped dataset (the default index with `hg38_mega`, which
-    `docs/PRECOMPUTED_INDEXES.md` has a search list) the genotyped dataset's rows are
-    checked in full, a row that lists no carrier for a record no sites-only VCF holds fails
+    genotyped dataset (the default index with `hg38_mega`, which an install of both lists
+    for a search, `docs/PRECOMPUTED_INDEXES.md`) the genotyped dataset's rows are checked in
+    full, a row that lists no carrier for a record no sites-only VCF holds fails
     (`no-carrier-listed`), and a sample listed for a record only sites-only VCFs hold
     carries nothing (`carrier-without-indel`). A row that names an earlier SNP record of a
     split site is a note (`variant-shadowed`, non-gating): the documented limit says
@@ -231,27 +231,27 @@ and the `release-crisprme` skill.
     demands), completeness counts the 159,913 indel and MNV records of chr22 only
     `hg38_mega` holds, and its limits are those of the HGDP + 1000 Genomes run alone
     (population-level 4 two-indel targets where that run lists 8: the clusters of the other
-    4 hold a row of `hg38_mega` as good). The previous commit's checker failed those runs on
-    6,762, 277 and 6,756 row blocks: each carrier-less row as `no-carrier-listed`, and the 9
-    (population-level 3) that name chr22:25093750 C>G, the earlier record of a split site of
-    `hg38_mega`'s VCF, as `variant-shadowed`. Genome-wide soundness of the 2.8.1 runs
-    reports that inside-insertion class and nothing else that gates: for the README guide
-    per sample 1,111 row blocks (233 integrated rows and 151 alternative ones, the count the
-    investigation of the chr22:22322768 report made), population-level 682 (232 rows), and
-    for TRAC 1,332 (256 integrated, 204 alternative rows), 70 to 100 s per run with `--jobs
-    24`. Genome-wide completeness of the 2.8.1 README per-sample run takes 60 to 78 min on
-    40 processes of a node at load 80 to 730 (at most 52 CPU-hours, 6 GB, a 31 MB TSV: a
-    background job, not a release gate) and reports that inside-insertion class again —
-    63,651 carrier targets missing at the right coordinate, at 348 records, every one a
-    carrier of a 2.8.1 row of the same record placed past its anchor, and the 4 carriers of
-    chr2:206097253 C>CA whose target at the anchor is listed by rows of its site that lack
-    the highest-CFD block, which the merge gave to the misplaced row of the insertion's next
-    target (at the same Cluster Position) — and nothing else that gates. 4,012 of them,
-    nearly all at chr13:109235190, a comparison at the Cluster Position alone misses: there
-    a target that starts on the anchor base and one that starts on the first base the
-    insertion adds share that position. Its limits are 439 two-indel targets, 17 split-site
-    targets, 142 windows across N, and 190 records whose carriers' slots hold overlapping
-    alleles where a target reads.
+    4 hold a row of `hg38_mega` as good). Before the checker read a sites-only VCF record by
+    record, it failed those runs on 6,762, 277 and 6,756 row blocks: each carrier-less row
+    as `no-carrier-listed`, and the 9 (population-level 3) that name chr22:25093750 C>G, the
+    earlier record of a split site of `hg38_mega`'s VCF, as `variant-shadowed`. Genome-wide
+    soundness of the 2.8.1 runs reports that inside-insertion class and nothing else that
+    gates: for the README guide per sample 1,111 row blocks (233 integrated rows and 151
+    alternative ones, the count the investigation of the chr22:22322768 report made),
+    population-level 682 (232 rows), and for TRAC 1,332 (256 integrated, 204 alternative
+    rows), 70 to 100 s per run with `--jobs 24`. Genome-wide completeness of the 2.8.1
+    README per-sample run takes 56 to 78 min on 40 processes of a node at load 60 to 730 (at
+    most 52 CPU-hours, 6 GB, a 31 MB TSV: a background job, not a release gate) and reports
+    that inside-insertion class again — 63,651 carrier targets missing at the right
+    coordinate, at 348 records, every one a carrier of a 2.8.1 row of the same record placed
+    past its anchor, and the 4 carriers of chr2:206097253 C>CA whose target at the anchor is
+    listed by rows of its site that lack the highest-CFD block, which the merge gave to the
+    misplaced row of the insertion's next target (at the same Cluster Position) — and
+    nothing else that gates. 4,012 of them, nearly all at chr13:109235190, a comparison at
+    the Cluster Position alone misses: there a target that starts on the anchor base and one
+    that starts on the first base the insertion adds share that position. Its limits are 439
+    two-indel targets, 17 split-site targets, 142 windows across N, and 190 records whose
+    carriers' slots hold overlapping alleles where a target reads.
   - **Found with it** (reported, not fixed here): on the oracle, the merge lists the
     unphased S19 on two alternative alignments weaker than its strongest. The merge keys an
     indel row by Cluster Position, variant list and aligned target, not the aligned spacer:

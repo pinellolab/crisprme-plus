@@ -256,8 +256,8 @@ VCF ACCESS. A .tbi beside a VCF makes every read a seek. Without one, each VCF i
 once into an in-memory block index (nothing is written), which costs one decompression of
 the file; a canonical install (one VCF per chromosome, 28 GB) is then feasible with
 --jobs. An unindexed read starts 20 kb before its region, so give a .tbi for a panel
-with deletions longer than that (HPRC's chr22 has 582; completeness lists each VCF whose
-reads met one, coverage-unindexed-long-ref). Several VCFs are read as one panel: a
+with deletions longer than that (HPRC's chr22 has 582; a check lists each VCF whose reads
+met one, coverage-unindexed-long-ref). Several VCFs are read as one panel: a
 genotyped one beside a sites-only one is the default index with hg38_mega. A sites-only
 VCF's split sites are not read as shadowed: CRISPRme's mega index holds earlier records
 of some (its rows name them), so which it holds cannot be read off the VCF's order.

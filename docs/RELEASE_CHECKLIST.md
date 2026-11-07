@@ -175,7 +175,7 @@ done
 #     known upstream defect can be listed with --known (class, chrom, start, strand,
 #     variants, samples, reason): it turns non-gating as known-defect, and a listed one
 #     that stops showing is reported as known-not-seen. Genome-wide COMPLETENESS (at most
-#     about 52 CPU-hours per guide: 60 to 78 min on 40 processes of a loaded node, 6 GB, a
+#     about 52 CPU-hours per guide: 56 to 78 min on 40 processes of a loaded node, 6 GB, a
 #     TSV of about 31 MB) is not a release gate; chr22 above stands for it.
 
 # 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.

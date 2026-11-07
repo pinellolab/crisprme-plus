@@ -1627,7 +1627,7 @@ population-level) and of TRAC reports only that inside-insertion class (1,111, 6
 carrier targets missing at the right coordinate (63,651 carrier targets of 348 records,
 each a carrier of a 2.8.1 row of the same record placed past its anchor, and 4 whose
 target at the anchor lost its highest-CFD block to such a row at its Cluster Position),
-and nothing else that gates (60 to 78 min on 40 processes of a loaded node). On the HPRC
+and nothing else that gates (56 to 78 min on 40 processes of a loaded node). On the HPRC
 chr22 panel (9,125 MNVs, 4.5% of its calls with a missing allele) and on a copy of it with
 every fourth sample unphased, the d7a6fff fix passes soundness in both modes and
 completeness population-level; per sample, its merge loses 686 carrier targets that start
