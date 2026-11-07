@@ -22,8 +22,9 @@ of the dataset), an indel row a target within its chromosome. The --prune-pam se
 flank must give the rows of the dedicated NGG index (format 2; format 1 misses the PAMs within 5
 nt of a contig end, IDX-4). Run inside an image with the tree under test in place, once with each
 engine; --compare then checks that the format-2 results hold every format-1 row that is its
-genome's bases (format 1 reports a minus-strand PAM at a contig's first base on the plus strand,
-IDX-14), and that each row more lies at a boundary.
+genome's bases (CRISPRitz 2.9.1, the engine of format 1 here, reports a minus-strand PAM at a
+contig's first base on the plus strand, IDX-14; 2.10.0 reads it right in either format), and
+that each row more lies at a boundary.
 
 Exits non-zero on any failure. With CRISPRitz 2.9.1 (index format 1) four checks fail, as they
 must: three searches report the minus-strand PAM at chrB's first base on the plus strand (IDX-14),
@@ -309,8 +310,9 @@ def compare(one, two):
     for output in SEARCHES:
         _h1, rows1 = table(one, output)
         _h2, rows2 = table(two, output)
-        # (format 1 reports a minus-strand PAM at a contig's first base on the plus strand,
-        # at the max bulges: not its genome's bases, and not a row of format 2)
+        # (CRISPRitz 2.9.1, which writes format 1, reports a minus-strand PAM at a contig's
+        # first base on the plus strand, at the max bulges: not its genome's bases, and not a
+        # row of format 2)
         wrong = {(c, str(st), sd) for _b, c, st, sd, _t, _w in wrong_rows(seqs, recs, rows1)}
         k1 = {key(r) for r in rows1 if (r["Chromosome"], r["Start_coordinate_(highest_CFD)"],
                                         r["Strand_(highest_CFD)"]) not in wrong}

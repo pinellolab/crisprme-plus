@@ -1373,9 +1373,9 @@ stretches between `N` runs; of the 1,050 such NRG sites (535 on primary contigs)
 within 4 mismatches of the nine guides checked (TRAC, `ACTGAAATCTGTAAGCAGGC`, BCL11A sg1617,
 EMX1, HBG1, CCR5, VEGFA site 3, FANCF and HEK4), and 9 of 20,000 random 20-mers have one at up
 to 4 mismatches. The exposure that matters is a guide whose own on-target sits at such a
-boundary: its report then holds no perfect match. Two more engine limits at contig ends, as
-measured on hg38: a − strand PAM at a contig's first base is reported on the + strand at base
-*N* (11 NGG and 37 NRG contigs open so, all alt, random or chrUn contigs; the primary
+boundary: its report then holds no perfect match. Two more limits of CRISPRitz 2.9.1 at contig
+ends, as measured on hg38: a − strand PAM at a contig's first base is reported on the + strand
+at base *N* (11 NGG and 37 NRG contigs open so, all alt, random or chrUn contigs; the primary
 chromosomes open with `N`), and a + strand PAM on a contig's last bases is found by no search,
 indexed or not (8 NGG and 31 NRG contigs end so, none a primary chromosome, and no fake-indel
 contig, which all end in `N`). CRISPRitz 2.10.0 lifts all three. Its search reads a − strand PAM

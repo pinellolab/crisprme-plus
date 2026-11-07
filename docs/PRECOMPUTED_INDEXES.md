@@ -170,10 +170,13 @@ download) searches the variant index, so its SNP variant rows have this limit to
 a larger budget is not a strict superset of a smaller one. For `NRG_3_hg38` that is 546 + strand
 and 504 − strand sites (1,050 NRG sites in all, 535 on primary contigs), none within 4 mismatches
 of nine therapeutic guides checked: what matters is a guide whose own on-target sits at such a
-boundary, whose report then has no perfect match. A − strand PAM at a contig's first base is
-reported on the + strand (11 NGG and 37 NRG hg38 contigs), and a + strand PAM on a contig's last
-bases is found by no search (8 NGG and 31 NRG contigs): all alt, random or chrUn contigs, none a
-primary chromosome.
+boundary, whose report then has no perfect match. Under CRISPRitz 2.9.1 (CRISPRme 2.8.1),
+a − strand PAM at a contig's first base is reported on the + strand (11 NGG and 37 NRG hg38
+contigs), and a + strand PAM on a contig's last bases is found by no search, indexed or not (8
+NGG and 31 NRG contigs): all alt, random or chrUn contigs, none a primary chromosome. Under
+CRISPRitz 2.10.0 the first is reported on its own strand from an index of either format, and the
+second by a search without bulges (a scan of the FASTA) and from an index of format 2, but not
+from one of format 1.
 
 > **Flank width and compatibility.** A 3-nt flank is readable by any CRISPRme version: the
 > stored geometry is the same as a dedicated 3-nt PAM index, which is why `NNN_3` ships in
