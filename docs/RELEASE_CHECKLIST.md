@@ -181,7 +181,7 @@ done
 #     that stops showing is reported as known-not-seen. Exit 2 is no verdict: a usage
 #     error, or a configuration the checker refuses (two genotyped datasets that share
 #     samples; check each dataset's search alone). Genome-wide COMPLETENESS (at most
-#     about 52 CPU-hours per guide: 56 to 78 min on 40 processes of a loaded node, 6 GB, a
+#     about 52 CPU-hours per guide: 53 to 78 min on 40 processes of a loaded node, 6 GB, a
 #     TSV of about 31 MB) is not a release gate; chr22 above stands for it.
 
 # 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.

@@ -293,7 +293,7 @@ and the `release-crisprme` skill.
     alternative ones, the count the investigation of the chr22:22322768 report made),
     population-level 682 (232 rows), and for TRAC 1,332 (256 integrated, 204 alternative
     rows), 70 to 100 s per run with `--jobs 24`. Genome-wide completeness of the 2.8.1
-    README per-sample run takes 56 to 78 min on 40 processes of a node at load 60 to 730 (at
+    README per-sample run takes 53 to 78 min on 40 processes of a node at load 40 to 730 (at
     most 52 CPU-hours, 6 GB, a 31 MB TSV: a background job, not a release gate) and reports
     that inside-insertion class again — 63,651 carrier targets missing at the right
     coordinate, at 348 records, every one a carrier of a 2.8.1 row of the same record placed
