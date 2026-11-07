@@ -47,6 +47,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import safe_tar  # (PostProcess/: each archive is unpacked with safe modes, owned by this user)
+import index_fit  # (PostProcess/: the index format of an index, and whether this install reads it)
 
 # Default HuggingFace dataset repo. Overridable per-invocation with --hf-repo or
 # the CRISPRME_HF_REPO environment variable (e.g. switch to a pinellolab org
@@ -1750,9 +1751,11 @@ def download_component(
                     mf = tf.extractfile("manifest.json")
                     if mf is not None:
                         meta = json.load(mf)
+                        fmt = meta.get("index_format")
                         sys.stderr.write(
                             f"Downloaded index {index_name} "
-                            f"(built {meta.get('created_at', 'unknown')})\n"
+                            f"(built {meta.get('created_at', 'unknown')}"
+                            + (f", index format {fmt}" if fmt else "") + ")\n"
                         )
                         label = meta.get("display_label")
                 except (KeyError, json.JSONDecodeError):
@@ -1813,6 +1816,15 @@ def download_component(
                     os.rename(dst, backup)  # move any existing index aside (same FS)
                 os.rename(src, dst)  # move the new one into place (atomic, same FS)
                 shutil.rmtree(backup, ignore_errors=True)
+            # an index in an index format the CRISPRitz installed here does not read (built
+            # by a newer one) is installed all the same, but every search refuses it, with
+            # these words: say so now, on STDOUT, rather than after a search is set up
+            for sub in (install_name, install_name + "_INDELS"):
+                _why = index_fit.unreadable_format_error(os.path.join(local_dir, sub))
+                if _why:
+                    sys.stdout.write(f"WARNING: {_why}. It is installed, and every search "
+                                     f"refuses it until then.\n")
+                    break
             # a variant index bundles its per-sample dictionaries (see publish_index):
             # install them into <workdir>/Dictionaries/ so the variant search finds
             # them without the source VCFs (same atomic swap as the index dirs above).
@@ -2043,7 +2055,10 @@ def _make_index_tarball(
     ``download --what index`` self-complete, no separate ``--what samples``), and
     ``manifest.json`` at the archive root (see download_component's extractor).
     Neither path stores an index's ``.genome_source`` record (``_INDEX_SOURCE_FILENAME``),
-    which names a folder of this machine.
+    which names a folder of this machine, nor an AppleDouble file ``._<name>``, which macOS
+    tar and cp leave beside each file they copy onto a volume without extended attributes:
+    ``._<tree>.bin`` is no tree of the index (index_fit.is_tree), and searchTST stops on a
+    folder that holds one.
 
     Both the samplesID files (small text) and manifest.json are staged into a
     single temp dir so the two code paths share ONE staging mechanism.
@@ -2084,10 +2099,13 @@ def _make_index_tarball(
                 for arc in staged_sids:
                     inputs += ["-C", tmpd, arc]
                 inputs += ["-C", tmpd, "manifest.json"]
-                # --exclude applies to the inputs after it
+                # --exclude applies to the inputs after it; COPYFILE_DISABLE: the tar of
+                # macOS adds a ._<name> of its own for each file with extended attributes
                 subprocess.check_call(
                     [tar, "--use-compress-program", pigz,
-                     f"--exclude={_INDEX_SOURCE_FILENAME}", "-cf", tarball, *inputs]
+                     f"--exclude={_INDEX_SOURCE_FILENAME}", "--exclude=._*", "-cf", tarball,
+                     *inputs],
+                    env=dict(os.environ, COPYFILE_DISABLE="1"),
                 )
                 return
             except (subprocess.CalledProcessError, OSError) as exc:
@@ -2106,18 +2124,19 @@ def _make_index_tarball(
                 "(slow for large indexes). Install pigz for parallel compression.\n"
             )
         # fallback: single-threaded Python tarfile (identical layout)
-        def _no_source_record(info):  # as the --exclude above
-            return None if os.path.basename(info.name) == _INDEX_SOURCE_FILENAME else info
+        def _stored(info):  # as the --exclude options above
+            name = os.path.basename(info.name)
+            return None if name == _INDEX_SOURCE_FILENAME or name.startswith("._") else info
 
         with tarfile.open(tarball, "w:gz") as tf:
             # -> genome_library/<name>/ on unpack
-            tf.add(index_dir, arcname=index_name, filter=_no_source_record)
+            tf.add(index_dir, arcname=index_name, filter=_stored)
             if os.path.isdir(indels_dir):
                 tf.add(indels_dir, arcname=os.path.basename(indels_dir),
-                       filter=_no_source_record)
+                       filter=_stored)
             for dp in (dict_dirs or []):  # -> Dictionaries/<basename>/ on unpack
                 tf.add(dp, arcname=os.path.join("Dictionaries", os.path.basename(dp)),
-                       filter=_no_source_record)
+                       filter=_stored)
             for arc in staged_sids:  # -> samplesIDs/<basename> on unpack
                 tf.add(os.path.join(tmpd, arc), arcname=arc)
             info = tarfile.TarInfo(name="manifest.json")
@@ -2239,6 +2258,22 @@ def publish_index(
     # #141 design): PAM / bulge / genome parsed from the folder name
     # <PAM>_<bMax+1>_<ref>, plus a UTC timestamp.
     manifest = {"name": index_name, "created_at": datetime.now(timezone.utc).isoformat()}
+    # the index format its .bin files are in (1: CRISPRitz up to 2.9.1; 2: 2.10.0 and later,
+    # which CRISPRme 2.8.1 refuses and 2.8.0 aborts on), and what it records it holds
+    # (index_fit.write_index_meta): what an archive card states of it. An index whose files
+    # differ in format was put together from two builds, and is not published.
+    formats = sorted(f for f in index_fit.bin_formats(index_dir) if f is not None)
+    if len(formats) > 1:
+        raise ValueError(
+            f"{index_dir} holds .bin files of index formats "
+            f"{' and '.join(map(str, formats))}: it was put together from two builds. Build "
+            f"it again with build-index-only, then publish it."
+        )
+    if formats:
+        manifest["index_format"] = formats[0]
+    index_meta = index_fit.read_index_meta(index_dir)
+    if index_meta:
+        manifest["index_meta"] = index_meta
     parts = index_name.rsplit("_", 2)
     if len(parts) == 3:
         manifest["pam"], manifest["index_bmax"], manifest["genome"] = (

@@ -1,20 +1,21 @@
 > ⚠️ **CRISPRme+ release model.** Two channels, both live:
 > 1. **Docker** *(live)* — a source-built multi-arch image published on version tags by
 >    `.github/workflows/docker-multiarch.yml` (needs the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`
->    repo secrets). It builds **CRISPRitz 2.9.1 + CRISPRme from source**; the version lives in
+>    repo secrets). It builds **CRISPRitz 2.10.0 + CRISPRme from source**; the version lives in
 >    `crisprme.py` (there is **no** `ARG crisprme_version`).
 > 2. **Conda / Bioconda** *(live)* — the Bioconda `crisprme` recipe has built CRISPRme+ on
 >    **Python 3.11** from `pinellolab/crisprme-plus` tags since 2.7.9 (the 2.1.x line stays
 >    available as `crisprme=2.1.14`). Per release: when the CRISPRitz pin moves, bump the
->    `crispritz` recipe first (2.9.1 for 2.8.1), then the `crisprme` recipe: version, sha256 of
+>    `crispritz` recipe first (2.10.0 for 2.9.0), then the `crisprme` recipe: version, sha256 of
 >    the tag tarball, and its `crispritz` pin. Bound that pin, `crispritz >=X,<Y`: X is the
 >    CRISPRitz the release is built and validated on (the Dockerfile's `crispritz_ref`), Y the
->    next CRISPRitz that changes the index format or the enricher. For 2.8.1 that is
->    `crispritz >=2.9.1,<2.9.2`: 2.8.1 reads index format 1, and the CRISPRitz planned as 2.9.2
->    writes format 2 and enriches multi-allelic sites another way. With a bare `>=` the solver
->    installs the newest engine beside the release, an engine it was never tested on. Check the
->    result like a user: a fresh Miniforge, `conda create -n crisprme crisprme=X.Y.Z
->    python=3.11`, then `crisprme.py scorer-env create` and `scorer-env doctor`.
+>    next CRISPRitz that changes the index format or the enricher. For 2.9.0 that is
+>    `crispritz >=2.10.0,<2.11.0`: CRISPRitz 2.10.0 writes index format 2 and codes every allele
+>    of a split multi-allelic site (the four-allele symbol Q), and a later minor CRISPRitz may
+>    change either (for 2.8.1 it was `>=2.9.1,<2.9.2`: 2.8.1 reads index format 1 only). With a
+>    bare `>=` the solver installs the newest engine beside the release, an engine it was never
+>    tested on. Check the result like a user: a fresh Miniforge, `conda create -n crisprme
+>    crisprme=X.Y.Z python=3.11`, then `crisprme.py scorer-env create` and `scorer-env doctor`.
 >
 > The sections below have been corrected for this model: the image is built from source, so the
 > Dockerfile pins **CRISPRitz** (`ARG crispritz_ref`) and never CRISPRme's own version.

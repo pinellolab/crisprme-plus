@@ -152,8 +152,12 @@ def require_prebuilt_index() -> str:
 
 
 def _recorded_five_prime(index_dir: str) -> Optional[bool]:
-    """Whether an index's .pam_build records a 5' PAM ("<name> <seq_len> <pam_pos>", a
-    negative pam_pos): None without a usable record."""
+    """Whether an index records a 5' PAM: in the header of its .bin files (index format 2),
+    else in its .pam_build ("<name> <seq_len> <pam_pos>", a negative pam_pos); None without
+    a usable record."""
+    five_prime = index_fit.built_five_prime(index_dir)
+    if five_prime is not None:
+        return five_prime
     try:
         with open(os.path.join(index_dir, ".pam_build")) as fh:
             return int(fh.readline().split()[-1]) < 0
@@ -1076,8 +1080,9 @@ def _pam_files(pams: str) -> list:
 
 
 def _smoke_five_prime(index_name: str, token: str) -> Optional[bool]:
-    """Whether the index was built for a PAM on the 5' side of the guide: what its
-    .pam_build records. Without one, an all-N index is a 3' build, as the search takes it
+    """Whether the index was built for a PAM on the 5' side of the guide: what the header of
+    its .bin files records (index format 2), else its .pam_build. Without either, an all-N
+    index is a 3' build, as the search takes it
     (_index_side in submit_job_automated_new_multiple_vcfs.sh) and every published one is;
     and a dedicated one, which a search builds with no record, is what the PAM files of
     its motif in PAMs/ say, or else 3' for a PAM of up to 3 nt, as every shipped one that

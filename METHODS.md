@@ -1281,8 +1281,10 @@ published PAM-less index), and the engine reads it on the side the search's PAM 
 so a 5′ search of a 3′-built index finds nothing at all. A dedicated index is named after its
 PAM by PAM files of both sides alike (`N…NTTTV 4` and the 5′ Cas12a file both build
 `TTTV_<N>_<genome>`), and read on the wrong side it reports sites that are not there. CRISPRme
-therefore takes any index only for a PAM on the side recorded in its `.pam_build` (written by
-`build-index-only`, and by a search that builds an index). A dedicated index without one is used
+therefore takes any index only for a PAM on the side it was built for: the side the header of
+its `.bin` files records, for an index of format 2 (below), else the one recorded in its
+`.pam_build` (written by `build-index-only`, and by a search that builds an index). A dedicated
+index of format 1 without one is used
 as before. A PAM-less index without one is taken for a 3′ build at the published widths, 3 and 8
 (the K = 8 archive has no `.pam_build`), or under the search PAM's own name, and at no other
 width: a search before 2.8.1 built one of any width from a 5′ PAM file and recorded nothing. A
@@ -1306,18 +1308,30 @@ over HGDP + 1000 Genomes (4,091 samples, guide `ACTGAAATCTGTAAGCAGGC`, NRG, 4 mi
 `c76f3490` once the licence-gated COSMIC column, empty on the dedicated arm's fresh install, is
 set aside; the two PAM-less arms are identical with it, MD5 `c4586f7a`). The same holds for
 NRR: 386,012 rows each (MD5 `f810dd76`) over a dedicated index, both PAM-less indexes with
-`--prune-pam`, and the 3-nt one without it. That holds at *L = K*, and at *K > L* for a guide
+`--prune-pam`, and the 3-nt one without it. Those indexes are of format 1, built by CRISPRitz
+2.9.1 or earlier (below). For them it holds at *L = K*, and at *K > L* for a guide
 with no site at a contig's very end or start, as this one has none. The build scans a contig
 for a PAM only where a whole window of *K* bases fits, so with *K > L* a + strand PAM with 1 to
 *K − L* bases after it to the contig's end, and a − strand PAM in the contig's first *K − L*
-bases, are not indexed, and a − strand PAM exactly *K − L* bases from the start is reported on
-the + strand at another coordinate. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG
+bases, are not indexed. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG
 sites (about 7.5 × 10⁻⁷ of all), none on a primary chromosome for those PAMs; in two
 whole-genome searches the 8-nt flank lost one row each against a dedicated index (27,215 of
 27,216 rows for a guide picked for its perfect match on `chr11_JH159136v1_alt`, and 216,977 of
-216,978 for VEGFA site 3 at 5 mismatches). A search that reads a flank wider than its PAM says
-so on stdout and in the run's `Params.txt`. N runs inside a contig are not affected by the
-width.
+216,978 for VEGFA site 3 at 5 mismatches). A − strand PAM exactly *K − L* bases from the start
+is indexed in the window at the contig's first base, which CRISPRitz 2.9.1's search read as a
+window of the + strand, as it read that of a − strand PAM at a contig's first base (below): it
+reported that PAM on the + strand at another coordinate. CRISPRitz 2.10.0's search reads it
+right, in an index of either format. A search that reads a flank of format 1 wider than its PAM
+says so on stdout and in the run's `Params.txt`; under CRISPRitz 2.9.1 it also says that PAM is
+reported on the + strand. N runs inside a contig are not affected by the width. An index of
+format 2 stores a PAM-less window whose flank runs off the contig, its
+bases off the contig as `N`, which matches no PAM base: with `--prune-pam` it returns the rows of
+a dedicated index of format 2 **built for the same guide length and budget**, for any 3′ PAM of
+*L ≤ K*, contig ends included (CRISPRitz's `docs/INDEX_FORMAT.md`, section 8; through the real CLI
+on a synthetic genome of sites at contig ends and N runs, `test/index_format2/check_boundary_rows.py`,
+an NGG search off an 8-nt flank gives the dedicated index's 13 rows, where of format 1 it gives
+5 of 6). Of two indexes of format 2 built for one guide length, the one of the larger budget
+returns a superset of the other's rows. Neither holds across guide lengths (below).
 
 **Genomic `N`.** This equivalence needs engine support, not just a filter. A genomic `N`
 is stored as a code that intersects nothing, so it fails a PAM match at every position; a
@@ -1340,8 +1354,12 @@ A search that reads such an index wider than its PAM warns on stdout (it reads t
 tree of a contig whose sequence holds an `N`, and of the INDELS index one of several indel
 windows), and goes on.
 
-**Contig ends and N runs.** These limits hold for every index, dedicated or PAM-less, at any
-width. An index of budget *N* holds a window of the guide, the PAM and *N* more bases, and the
+**Contig ends and N runs.** CRISPRitz writes an index in one of two formats (its
+`docs/INDEX_FORMAT.md`). Up to 2.9.1 it writes **format 1**, which every index published until
+the rebuild for CRISPRme 2.9.0 is; from 2.10.0, which CRISPRme 2.9.0 installs, it writes
+**format 2**, whose `.bin` files open with a header that records the format, the build PAM, its
+side, the guide length and the budget. The limits of this paragraph are those of format 1, for
+every index, dedicated or PAM-less, at any width. An index of format 1 of budget *N* holds a window of the guide, the PAM and *N* more bases, and the
 build drops a window that holds an `N` or runs past the contig's start, so it cannot report a
 site whose guide lies within *N − 1* bases of a contig start, a contig end or an `N` run, even a
 perfect match; a search without bulges, which scans the FASTA, reports it. A variant search
@@ -1355,12 +1373,27 @@ stretches between `N` runs; of the 1,050 such NRG sites (535 on primary contigs)
 within 4 mismatches of the nine guides checked (TRAC, `ACTGAAATCTGTAAGCAGGC`, BCL11A sg1617,
 EMX1, HBG1, CCR5, VEGFA site 3, FANCF and HEK4), and 9 of 20,000 random 20-mers have one at up
 to 4 mismatches. The exposure that matters is a guide whose own on-target sits at such a
-boundary: its report then holds no perfect match. Two more engine limits at contig ends, as
-measured on hg38: a − strand PAM at a contig's first base is reported on the + strand at base
-*N* (11 NGG and 37 NRG contigs open so, all alt, random or chrUn contigs; the primary
+boundary: its report then holds no perfect match. Two more limits of CRISPRitz 2.9.1 at contig
+ends, as measured on hg38: a − strand PAM at a contig's first base is reported on the + strand
+at base *N* (11 NGG and 37 NRG contigs open so, all alt, random or chrUn contigs; the primary
 chromosomes open with `N`), and a + strand PAM on a contig's last bases is found by no search,
 indexed or not (8 NGG and 31 NRG contigs end so, none a primary chromosome, and no fake-indel
-contig, which all end in `N`). They need an engine change, and the indexes rebuilt with it.
+contig, which all end in `N`). CRISPRitz 2.10.0 lifts all three. Its search reads a − strand PAM
+at a contig's first base on the − strand, in an index of either format; its scan reaches a PAM on
+a contig's last base, also without an index; and an index of format 2 keeps every site whose guide
+lies on the contig with no `N` in it, the pad of *N* bases being allowed to run off the contig or
+into an `N`. An alignment is then reported only where every base it uses exists, so every row is
+the contig's own bases. On hg38 chr22 and chr1 a format-2 NGG index returns every row of the
+format-1 one and 1,827 and 5,512 more, all next to an `N` run (CRISPRitz's `docs/INDEX_FORMAT.md`,
+section 11). An index of format 1 keeps the first and the last limit until it is built again
+(a search without bulges, which scans the FASTA, finds the last PAM of a contig at once), and a
+search of one by CRISPRitz 2.10.0 says so on stdout. CRISPRme 2.8.1 refuses an index of format 2, and
+2.8.0 aborts on one; CRISPRme 2.9.0 searches it where the installed CRISPRitz reads it (2.10.0
+and later: the `INDEX_FORMAT` of its `crispritz.py`), and refuses it, naming both, under
+CRISPRitz 2.9.1. Which sites a contig holds, which CRISPRme checks to tell a lost `.bin` from a
+contig with no site, follows the format the index was built in, read from its own `.bin` files;
+an index CRISPRme builds records it, with the build PAM, side, flank and guide length, in its
+`.index_meta.json` (a sub-index with no `.bin` has no other record of it).
 
 **Cost.** A PAM-less index is much larger, because no site is excluded at build time: the
 reference index is 71 GB against 9 GB for a dedicated NRG index, and the HGDP + 1000
@@ -1369,8 +1402,9 @@ happens at leaf time, so a PAM-less search is not faster than a dedicated one �
 is that one index answers many PAMs.
 
 **Guide length.** An index name carries no guide length; each tree records the one it was
-built for, as the second int32 of its `.bin` (written by `buildTST` since 2019, whoever built
-the index). The engine reads that length only to offset coordinates and searches any guide it
+built for, as the second int32 of its `.bin` in format 1 (written by `buildTST` since 2019,
+whoever built the index), and in its header in format 2. The engine reads that length only to
+offset coordinates and searches any guide it
 is given, so past what the tree stores it gives wrong alignments or loses targets, with exit 0.
 A search therefore takes an index only where
 
@@ -1389,8 +1423,15 @@ that merely fits. With none that fits, a search builds its own under the name
 `<PAM>_<N>_<genome>`, or stops with an ERROR that names both lengths when an index of that
 name, built for another guide, is in the way; `build-index-only` does the same and leaves that
 index and its `.pam_build` as they are.
-A longer build serves a shorter guide, but, like any deeper index, it does not hold a site
-next to an N run or a contig end that a shallower one does.
+A longer build serves a shorter guide, but, like any deeper index of format 1, it does not hold a
+site next to an N run or a contig end that a shallower one does. The rule was measured on
+indexes of format 1; on one of format 2 the rows inside it are a dedicated index's away from
+contig ends and N runs, but not there: an index built for 20-nt guides holds sites whose 21st
+base would lie off the contig or on an `N`, which an index built for 21-nt guides does not, and,
+with bulges, a few alignments differ at interior sites too (CRISPRitz's `docs/INDEX_FORMAT.md`,
+section 5.1, measures both). So every equivalence above holds between indexes built for the same
+guide length; for the rows of a guide length, search an index built for it, which the search
+prefers.
 
 **Limits.** `--prune-pam` requires `--index-path` and is command-line only: the web
 interface never passes the flag. (Its PAM picker prefers a PAM whose geometry matches the
