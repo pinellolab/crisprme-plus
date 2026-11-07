@@ -37,6 +37,7 @@ from .pages_utils import (
     get_variant_dataset_options,
     variant_dataset_has_genotypes,
     variant_dataset_data_type,
+    genotype_oracle_installed,
     variant_dataset_sample_count,
     samplesid_problem,
     _vcf_folder_has_samples,
@@ -142,9 +143,11 @@ def _reuse_key(
     search_mode: str,
     full_report: Optional[List[str]],
     job_name: str,
+    prioritize_observed: Optional[List[str]] = None,
 ) -> Dict[str, object]:
     """What decides a web search's results that .Params.txt and the guides do not
-    record: the analysis mode, the full-report option, the annotations (the beds
+    record: the analysis mode, the full-report option, the carrier-gate check of a
+    sites-only panel (prioritize_observed), the annotations (the beds
     enabled for the genome, the COSMIC licence state, and the size and time of the
     assembled bed and gene file: .Params.txt names only the assembled file) and the
     CRISPRme version. Plus the job name typed: a new name asks for a new job, which is
@@ -164,6 +167,7 @@ def _reuse_key(
             "per-sample" if str(search_mode) in ("per-sample", "full") else "population-level"
         ),
         "report_full": bool(full_report and "full" in full_report),
+        "prioritize_observed": bool(prioritize_observed and "on" in prioritize_observed),
         "annotations": sorted(read_enabled_annotations(genome)),
         "cosmic": cosmic_license_enabled(),
         "annotation_files": files,
@@ -1030,6 +1034,7 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
         State("advanced-thresholds-collapse", "is_open"),
         State("search-mode", "value"),
         State("full-report", "value"),
+        State("prioritize-observed", "value"),
     ],
 )
 def change_url(
@@ -1054,6 +1059,7 @@ def change_url(
     advanced_open: bool,
     search_mode: str = "population-level",
     full_report: Optional[List[str]] = None,
+    prioritize_observed: Optional[List[str]] = None,
 ) -> Tuple[str, str, str]:
     """Launch the targets search and generates the input files for
     post-processing operations, and results visualization.
@@ -1115,6 +1121,10 @@ def change_url(
         User mail address
     job_name : str
         Submitted job ID
+    prioritize_observed : List[str]
+        ["on"]: check a sites-only panel's variant combinations against the phased
+        HGDP + 1000 Genomes genotypes (the carrier gate; complete-search
+        --prioritize-observed)
 
     Returns
     -------
@@ -1549,7 +1559,7 @@ def change_url(
     # changed annotation set still got the old annotations.
     reuse_key = _reuse_key(
         genome_selected, annotation_name, gencode_name, search_mode, full_report,
-        safe_job_name,
+        safe_job_name, prioritize_observed,
     )
     try:
         with open(os.path.join(result_dir, REUSE_KEY_FILE), mode="w") as handle_key:
@@ -1871,6 +1881,10 @@ def change_url(
     # value is a list of ticked values) sets CRISPRME_REPORT_FULL=True so submit_job runs
     # generate_report.py --report-full (mirrors `complete-search --report-full`).
     report_full_env = "True" if (full_report and "full" in full_report) else "False"
+    # The carrier gate (haplotype_prioritizer.py, after the integrated results): on by
+    # default for a population-level search of a genotyped panel; the check box asks it
+    # for a sites-only panel too (complete-search --prioritize-observed).
+    gate_env = "on" if (prioritize_observed and "on" in prioritize_observed) else "auto"
     # Persist the resolved analysis mode as <result_dir>/.search_mode, mirroring the CLI
     # (crisprme.py complete-search). The web launches submit_job directly, so without this
     # generate_report.build_summary_meta falls back to "population-level" and would mislabel
@@ -1924,7 +1938,7 @@ def change_url(
             max_total_edits]
     cmd = (
         f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} "
-        f"CRISPRME_REPORT_FULL={report_full_env} "
+        f"CRISPRME_REPORT_FULL={report_full_env} CRISPRME_PRIORITIZE_OBSERVED={gate_env} "
         + " ".join(shlex.quote(str(a)) for a in args)
         + f" 1> {shlex.quote(log_verbose)} 2>{shlex.quote(log_error)}"
     )
@@ -2674,6 +2688,30 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
     if not has_gt and value == "per-sample":
         value = "population-level"
     return options, value
+
+
+PRIORITIZE_OBSERVED_LABEL = (" Check a sites-only panel's variant combinations against the "
+                             "phased HGDP + 1000 Genomes genotypes")
+
+
+# The carrier-gate check box: offered for a sites-only panel (a genotyped one is checked
+# against its own genotypes by default) once the phased HGDP + 1000 Genomes genotypes are
+# installed (Dictionaries/genotypes_hg38_HGDP1kGP/, haplotype_prioritizer.find_oracle).
+@app.callback(
+    [Output("prioritize-observed", "options"), Output("prioritize-observed", "value")],
+    [Input("variant-dataset", "value"), Input("available-genome", "value")],
+    [State("prioritize-observed", "value")],
+)
+def update_prioritize_observed(dataset_value, genome_value, current):
+    genome_value, _pam, dataset_value = _offered(genome_value, None, dataset_value)
+    sites_only = variant_dataset_data_type(genome_value, dataset_value) == "sites-only"
+    oracle = genotype_oracle_installed()
+    label = PRIORITIZE_OBSERVED_LABEL
+    if sites_only and not oracle:
+        label += " (not installed)"
+    usable = sites_only and oracle
+    return ([{"label": label, "value": "on", "disabled": not usable}],
+            (current or []) if usable else [])
 
 
 # Limit the DNA/RNA bulge options to the bulge depth a search can REACH here.
@@ -3455,6 +3493,26 @@ def index_page() -> html.Div:
                             "intractable on dense panels. It requires a genotyped panel; on a "
                             "sites-only (aggregate) panel there are no genotypes to resolve, so "
                             "it falls back to the population-level analysis.",
+                        ],
+                        style={"font-size": "1.25rem", "color": "#555"},
+                    ),
+                    dcc.Checklist(
+                        id="prioritize-observed",
+                        options=[{"label": PRIORITIZE_OBSERVED_LABEL, "value": "on",
+                                  "disabled": True}],
+                        value=[],
+                        labelStyle={"display": "block", "font-size": "1.3rem"},
+                    ),
+                    html.P(
+                        [
+                            "A population-level search checks each row's variant combination "
+                            "against the panel's own phased genotypes (the carrier gate): the "
+                            "report ranks a combination no haplotype carries after every other "
+                            "row, and drops none. A sites-only panel has no genotypes: tick "
+                            "this to check its rows against the phased HGDP + 1000 Genomes "
+                            "genotypes, when they are installed (",
+                            html.Code("crisprme.py download --what genotype-oracle"),
+                            ").",
                         ],
                         style={"font-size": "1.25rem", "color": "#555"},
                     ),

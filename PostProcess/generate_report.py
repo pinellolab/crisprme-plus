@@ -326,6 +326,227 @@ _PER_SAMPLE = False
 # dense windows come as their observed haplotypes, flagged there too, no row reads so.
 _UNTIERED = False
 
+# False for a search that wrote the carrier gate's sidecar (.carrier_gate.json: 2.9.0 and
+# later, in either mode): its per-sample post-analysis gives a window denser than
+# CRISPRME_IUPAC_CAP on the classic dictionaries as the haplotypes its carriers have, as on
+# the tiers, so none of its rows is a greedy alignment (_greedy_union) and the texts that
+# say a dense window can be one leave it out. True for an earlier search's results.
+_GREEDY_DENSE = True
+
+
+# The carrier gate (haplotype_prioritizer.py, run by the search before the report): the tier of
+# each row's variant combination, from the run's *_carrier_gate.tsv, keyed by the row's line in
+# the integrated results, for the highest-CFD alignment the report shows and the highest
+# CRISPR-Bulge one its second ranking takes. A C1 row -- variants each in the panel, which no
+# haplotype of it carries together -- leaves the top-1000 tables, the validation panel and the
+# risk card for a table of its own after the top-1000 (it stays in the integrated results); an
+# A or C2 row keeps its place, and the label of its tier is its Observed cell.
+GATE_DEMOTED = "C1"
+_GATE_BLOCKS = (("highest_CFD", "_gate_cfd"), ("highest_CRISPR_BULGE", "_gate_cb"))
+GATE_META = ".carrier_gate.json"
+UNOBSERVED_NAME = "unobserved_worst_case.tsv"
+
+
+def load_carrier_gate(result_dir, integrated_tsv, df):
+    """(df, gate): ``df`` with the gate's tier and label of each row (columns _gate_cfd_tier,
+    _gate_cfd_label, _gate_cb_tier, _gate_cb_label; "" where the gate gave none), and the
+    run's .carrier_gate.json (None when the search wrote none: an earlier release, a
+    reference-only search) with "used" set when its companion was read. A companion whose
+    rows are not this table's (another run's file, an edited table) is not used."""
+    folder = result_dir or os.path.dirname(os.path.abspath(integrated_tsv))
+    try:
+        with open(os.path.join(folder, GATE_META)) as fh:
+            gate = json.load(fh)
+    except (OSError, ValueError):
+        return df, None
+    gate["used"] = False
+    if gate.get("status") != "run" or not gate.get("companion"):
+        return df, gate
+    try:
+        chroms = df["Chromosome"].astype(str).tolist()
+        starts = df["Start_coordinate_(highest_CFD)"].astype(str).tolist()
+    except KeyError:
+        return df, gate
+    tiers = {block: {} for block, _p in _GATE_BLOCKS}
+    labels = {block: {} for block, _p in _GATE_BLOCKS}
+    try:
+        with open(os.path.join(folder, os.path.basename(gate["companion"]))) as fh:
+            for line in fh:
+                if line.startswith("#"):
+                    continue
+                f = line.rstrip("\n").split("\t")
+                if len(f) < 17 or f[1] not in tiers:
+                    continue
+                row = int(f[0]) - 1
+                if f[1] == "highest_CFD" and not (
+                        0 <= row < len(chroms) and chroms[row] == f[3] and starts[row] == f[4]):
+                    sys.stderr.write("generate-report: the carrier gate's companion does not "
+                                     "match the integrated results; not used\n")
+                    return df, gate
+                tiers[f[1]][row] = f[7]
+                labels[f[1]][row] = f[16]
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"generate-report: carrier gate companion unavailable: {exc}\n")
+        return df, gate
+    df = df.copy()
+    for block, prefix in _GATE_BLOCKS:
+        df[prefix + "_tier"] = [tiers[block].get(i, "") for i in range(len(df))]
+        df[prefix + "_label"] = [labels[block].get(i, "") for i in range(len(df))]
+    gate["used"] = True
+    return df, gate
+
+
+def _gate_panels(gate):
+    """The panels the gate read, "hg38_HGDP1kGP (4,091 samples, 8,182 haplotypes)", each
+    as HTML."""
+    out = []
+    for p in (gate or {}).get("panels") or []:
+        what = f"{int(p.get('samples', 0)):,} samples, {int(p.get('haplotypes', 0)):,} haplotypes"
+        if p.get("role") == "oracle":
+            what += ", the phased HGDP + 1000 Genomes genotypes"
+        if not p.get("indels"):
+            what += ", no indel genotypes"
+        out.append(f"<code>{_esc(p.get('name'))}</code> ({what})")
+    return ", ".join(out)
+
+
+def _gate_ancestry(gate):
+    """The panels' samples by superpopulation, the caveat every tier carries."""
+    parts = []
+    for p in (gate or {}).get("panels") or []:
+        sp = p.get("superpopulations") or {}
+        if sp:
+            parts.append(", ".join(f"{_esc(k)} {int(n):,}" for k, n in sorted(sp.items())))
+    if not parts:
+        return ""
+    return (" The panel's samples by superpopulation: " + "; ".join(parts) + ". A haplotype "
+            "found only in an ancestry with few samples there can be missing from it, so a "
+            "C1 or C2 row can be real in a person of that ancestry.")
+
+
+def render_gate_row(gate):
+    """The 'Carrier gate' row of the inputs card (label, HTML), or None when there is
+    nothing to say (an earlier release, a per-sample search of genotyped datasets)."""
+    if not gate:
+        return None
+    status = gate.get("status")
+    if status == "run" and gate.get("used"):
+        c = gate.get("counts") or {}
+        same = int(c.get("A_same_score", 0))
+        text = (
+            "Each row's variant combination was checked against the phased genotypes of "
+            + _gate_panels(gate) + ". By each row's highest-CFD alignment: "
+            f"<strong>A</strong> {int(c.get('A', 0)):,} (two or more variants that one phased "
+            "haplotype of the panel carries together"
+            + (f", {same:,} of them on a haplotype that reaches the row's CFD without every "
+               "variant: the others leave it as it is, so they are not needed for the "
+               "row's score" if same else "")
+            + f"), <strong>B</strong> "
+            f"{int(c.get('B', 0)):,} (one variant), <strong>C1</strong> {int(c.get('C1', 0)):,} "
+            "(two or more variants, each in the panel, that none of its haplotypes carries "
+            "together and none reaches the row's CFD without; or variants, a single one too, "
+            f"every haplotype carrying which has an indel in the target), <strong>C2</strong> "
+            f"{int(c.get('C2', 0)):,} (a variant not "
+            "in the panel, which then cannot say). A C1 row is ranked after every other row "
+            "in the views ranked by the score of the alignment that is C1: a row whose "
+            "highest-CFD alignment is C1 is left out of the top-1000 by CFD, panels (a) and "
+            "(b) of Section 2, the validation panel's CFD thresholds and the risk card's CFD "
+            "bands; a row whose highest-CRISPR-Bulge alignment is C1 is left out of the "
+            "top-1000 by CRISPR-Bulge score, panels (c) and (d), the panel's CRISPR-Bulge "
+            "thresholds and the card's CRISPR-Bulge bands (so a row can be in one ranking and "
+            "not the other). The panel's totals count them, and they are listed in a table of "
+            "their own after the top-1000 (Section 6). "
+            "A, B and C2 rows keep their place; the <code>Observed</code> column gives the "
+            "tier of a row the gate checked &mdash; a row of two or more variants, and a row "
+            "of one whose every carrying haplotype has an indel in the target. A zero says "
+            f"little where fewer than "
+            f"{float(gate.get('min_expected', 3)):g} panel haplotypes were expected to carry "
+            "the variants together if they were independent (&ldquo;too rare to tell&rdquo;). "
+            "The gate changes no row: the integrated results are those of the search."
+            + _gate_ancestry(gate))
+    elif status == "run":
+        text = ("The gate's table of this search was not read, so the rows are shown "
+                "unchecked.")
+    elif status == "no-oracle":
+        text = ("<code>--prioritize-observed</code> asked to check the sites-only rows against "
+                "the phased HGDP + 1000 Genomes genotypes, which are not installed: the rows are "
+                "shown unchecked. Install them with <code>crisprme.py download --what "
+                "genotype-oracle</code>.")
+    elif status == "opt-in":
+        text = ("Not run: a sites-only dataset's rows are checked against the phased HGDP + "
+                "1000 Genomes genotypes only on request (<code>complete-search "
+                "--prioritize-observed</code>, or the web form's check box).")
+    elif status == "off":
+        text = "Turned off for this search: the rows are shown unchecked."
+    elif status == "untiered":
+        text = ("Not run: the search's genotyped datasets have the classic per-sample "
+                "dictionaries alone, not the phased genotype store the gate reads "
+                "(<code>Dictionaries/genotypes_&lt;vcf&gt;/</code>, which "
+                "<code>build-index-only --samplesID</code> writes, and a downloaded index "
+                "has), so the rows are shown unchecked.")
+    else:
+        return None
+    return ("Carrier gate", text)
+
+
+def render_unobserved_section(gate, n_demoted, n_cb_only, table_html, download_name,
+                              n_shown, n_perfect=0):
+    """The table after the top-1000 of the rows the gate ranks after every other one (tier
+    C1), or "" when there are none. ``n_perfect``: how many of them are perfect matches,
+    which the validation panel and its banner would otherwise have put first."""
+    if not gate or not gate.get("used") or not (n_demoted or n_cb_only):
+        return ""
+    head = ('<h3 style="margin:1.4em 0 0.3em 0">Ranked after every other row: variant '
+            "combinations no haplotype of the panel carries (carrier gate, tier C1)</h3>\n")
+    if not n_demoted:
+        return (head + '<p class="caption">No row of the CFD ranking is in this tier. '
+                f"{n_cb_only:,} row{' is' if n_cb_only == 1 else 's are'} left out of the "
+                "views ranked by CRISPR-Bulge score (its table and panels (c) and (d) of "
+                "Section 2): its highest-scoring alignment there combines "
+                "variants none of the panel's haplotypes carries together.</p>\n")
+    dl = (f'<p style="margin:0 0 0.5em"><a class="download" href="{_dl_href(download_name)}" '
+          f"download>&#11015; Download all {n_demoted:,} (curated TSV)</a></p>\n"
+          if download_name else "")
+    shown = (f"the first {n_shown:,} by CFD are shown" if n_shown < n_demoted
+             else "sorted by CFD")
+    cb = (f" {n_cb_only:,} more row{' keeps its' if n_cb_only == 1 else 's keep their'} place "
+          "by CFD, but the views ranked by CRISPR-Bulge score leave "
+          f"{'it' if n_cb_only == 1 else 'them'} out: the highest-scoring alignment there "
+          "combines variants none of the panel's haplotypes carries together."
+          if n_cb_only else "")
+    perfect = (f" <strong>{n_perfect:,} of them {'is a perfect match' if n_perfect == 1 else 'are perfect matches'}"
+               "</strong> (0 mismatches and bulges), which the validation panel would have put "
+               "first: a perfect match of variants no panel haplotype carries together may "
+               "still be real in a person the panel does not represent." if n_perfect else "")
+    return (
+        head
+        + f'<p class="caption">{n_demoted:,} row{"" if n_demoted == 1 else "s"} ({shown}): '
+        "each takes, at its highest-CFD alignment, variants that each occur in the panel "
+        "but that none of its haplotypes carries together, none of them reaching the row's "
+        "CFD without every variant (or variants, a single one too, "
+        "every haplotype carrying which has an indel in the target), so no individual of the "
+        "panel has its sequence at this score. They are the search's worst cases that the "
+        "panel does not show: left out of the views ranked by CFD (the top-1000 by CFD, "
+        "panels (a) and (b) of Section 2, the validation panel's CFD thresholds and the risk "
+        "card's CFD bands; the panel's totals count them), and kept here and in the "
+        "integrated results. A row of this table whose highest-CRISPR-Bulge alignment is not "
+        "C1 keeps its place in the views ranked by that score. The site itself can still "
+        "have a real off-target with fewer of the variants and a lower score, which a "
+        "<code>--per-sample</code> search of a genotyped panel reports as its own row. The "
+        "<code>Observed</code> column says what the panel "
+        "shows, and how many haplotypes were expected to carry the variants together if "
+        "they were independent: where few were (&ldquo;too rare to tell&rdquo;), the zero "
+        "says little." + perfect + cb + "</p>\n" + dl + table_html)
+
+
+def gate_demoted(df, prefix="_gate_cfd"):
+    """The rows the carrier gate ranks after the others (tier C1), by the alignment of
+    ``prefix`` (_gate_cfd: highest CFD; _gate_cb: highest CRISPR-Bulge)."""
+    col = prefix + "_tier"
+    if col not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df[col].eq(GATE_DEMOTED)
+
 
 def _greedy_union(row, cols):
     """True for a row of a --per-sample report whose named roster can be the union of its
@@ -333,7 +554,8 @@ def _greedy_union(row, cols):
     when no dataset of the search has the dict-less tiers (_UNTIERED), with >=2 variants
     and no indel (an indel row is resolved per carrier haplotype in both modes). Its
     Observed cell and its per-site link read as in a population-level report."""
-    if not (_PER_SAMPLE and _UNTIERED and "complex_region" in cols and "var_genome" in cols):
+    if not (_PER_SAMPLE and _UNTIERED and _GREEDY_DENSE and "complex_region" in cols
+            and "var_genome" in cols):
         return False
     variants = row.get(cols["var_genome"])
     return (not _is_na(row.get(cols["complex_region"]))
@@ -897,6 +1119,13 @@ def _curated_cell(kind, row, cols):
             return "reference"
         n = _count_samples(_get("samples"))
         nvar = _count_variants(_get("var_genome")) if "var_genome" in cols else 0
+        # the carrier gate's label of a row it checked (tiers A, C1, C2: a row of two or
+        # more variants, and a row of one every haplotype carrying which has an indel in
+        # the target), but for a per-sample row, whose named carriers are its cis carriers
+        # already
+        tier = row.get("_gate_cfd_tier")
+        if tier in ("A", "C1", "C2") and not (_PER_SAMPLE and n > 0):
+            return str(row.get("_gate_cfd_label"))
         if n > 0:
             if _PER_SAMPLE and not _greedy_union(row, cols):
                 # --per-sample: the roster is the EXACT cis carriers (phased) -- but for
@@ -1657,7 +1886,8 @@ def build_mmb_matrix(df, cols, meta):
 
 
 def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
-                           variant_count=None, no_registry=False, n_variant=None):
+                           variant_count=None, no_registry=False, n_variant=None,
+                           gate_row=None):
     """'Analysis inputs & criteria' box (FDA off-target guidance VII.F.i / F.ii).
 
     States, in one place, the variant database(s), the variant inclusion policy
@@ -1673,6 +1903,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     ``variant_count`` (``{'n_records', 'databases'}`` from the Tier-0 registry) add
     the panel size + database SNP-variant count to the inclusion row when known
     (registry sample counts preferred -- they match the AC/AN denominator).
+    ``gate_row`` (render_gate_row): the carrier gate's row, after the Search mode one.
     ``no_registry`` (_run_lacks_registry) says the run's index has no Tier-0 registry,
     so that no SNP+indel co-occurrence table was written; a registry this report does
     not find (results read away from their install) is not that.
@@ -1751,11 +1982,12 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
             "which CRISPRitz <code>add-variants</code> copied from "
             f"{'its VCF' if _one else 'their VCFs'}: a variant whose <code>AF</code> they give "
             "as 0, or not at all, has no frequency. "
-            f"Where {'its' if _one else 'their'} variants are dense, a window can "
-            "still be reported by its greedy worst-case alignment, flagged in "
-            "<code>High_complexity_region</code> (<code>High_variant_density_region</code> in "
-            "the integrated results), whose listed carriers need not carry every variant in "
-            "it. To get the tiers, rebuild the index with <code>build-index-only "
+            + (f"Where {'its' if _one else 'their'} variants are dense, a window can "
+               "still be reported by its greedy worst-case alignment, flagged in "
+               "<code>High_complexity_region</code> (<code>High_variant_density_region</code> "
+               "in the integrated results), whose listed carriers need not carry every variant "
+               "in it. " if _GREEDY_DENSE else "")
+            + "To get the tiers, rebuild the index with <code>build-index-only "
             "--samplesID</code>, or download a prebuilt one (<code>crisprme.py download --what "
             "index --index-name NRG_3_hg38+hg38_HGDP1kGP</code>)."
         )
@@ -1784,11 +2016,13 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
                 "frequencies are the <code>AF</code> of those dictionaries (an indel's, of the "
                 "index's indel log), which CRISPRitz <code>add-variants</code> copied from "
                 f"{'its VCF' if _one else 'their VCFs'} (a variant whose <code>AF</code> they "
-                "give as 0, or not at all, has no frequency); "
-                f"where {'its' if _one else 'their'} "
-                "variants are dense, it can still report a window by its greedy worst-case "
-                "alignment, whose listed carriers need not carry every variant in it. To get the "
-                "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
+                "give as 0, or not at all, has no frequency)"
+                + (f"; where {'its' if _one else 'their'} "
+                   "variants are dense, it can still report a window by its greedy worst-case "
+                   "alignment, whose listed carriers need not carry every variant in it"
+                   if _GREEDY_DENSE else "")
+                + ". To get the tiers, rebuild the index with <code>build-index-only "
+                "--samplesID</code>, or "
                 "download a prebuilt one (<code>crisprme.py download --what index --index-name "
                 "NRG_3_hg38+hg38_HGDP1kGP</code>). " if _ut else ""
             ) + "For sites-only (aggregate) panels there are no "
@@ -1802,6 +2036,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     rows = [
         ("Variant database(s)", _esc(ds)),
         ("Search mode", sm_note),
+    ] + ([gate_row] if gate_row else []) + [
         ("Variants included",
          "All variants present in the database(s) &mdash; common and rare, genic "
          "and intergenic, SNPs and insertions/deletions (indels)."
@@ -2540,7 +2775,7 @@ def _num_ok(tok):
         return False
 
 
-def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
+def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None):
     """Produce the key graphical-report scatter panels (section 2).
 
     Returns a list of (title, caption, data_uri). Panels:
@@ -2550,26 +2785,38 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
       (d) top-N by CRISPR-Bulge DELTA = ALT - REF    -- only when include_crispr_bulge is True
     So: CRISPR-Bulge computed -> 4 panels; CRISPR-Bulge absent -> 2 panels. Every panel is
     guarded; a failing panel yields a placeholder URI (never aborts).
+
+    ``df_cb`` (default ``df``) is the frame the CRISPR-Bulge panels rank, as the
+    CRISPR-Bulge table ranks its own: the carrier gate leaves a row out of the ranking by
+    a score when the alignment that score belongs to is C1, and the two alignments of a
+    row need not be the same one.
     """
     panels = []
 
-    # candidate frame: drop on-/near-on-target rows (mm+b<=1), same as the table
+    # candidate frames: drop on-/near-on-target rows (mm+b<=1), same as the tables
     # (build_report says so under the plots: top_exclusion_note)
-    base = df
-    if "mmb" in cols:
-        base = base[_to_int_series(base[cols["mmb"]]) > 1]
+    def _candidates(frame):
+        if "mmb" in cols:
+            return frame[_to_int_series(frame[cols["mmb"]]) > 1]
+        return frame
+
+    base = _candidates(df)
+    base_cb = _candidates(df if df_cb is None else df_cb)
     n_shown = min(n, len(base))
+    n_shown_cb = min(n, len(base_cb))
 
     # stable, as in select_top: tied rows keep the table's order, and a top-N that ends
     # inside a tie keeps the tie's first rows
-    def _score_sorted(score_col):
-        s = _to_float_series(base[score_col]).fillna(-1.0)
-        return base.assign(_s=s).sort_values("_s", ascending=False, kind="stable").head(n)
+    def _score_sorted(score_col, frame=None):
+        frame = base if frame is None else frame
+        s = _to_float_series(frame[score_col]).fillna(-1.0)
+        return frame.assign(_s=s).sort_values("_s", ascending=False, kind="stable").head(n)
 
-    def _delta_sorted(alt_col, ref_col):
-        delta = _to_float_series(base[alt_col]) - _to_float_series(base[ref_col])
+    def _delta_sorted(alt_col, ref_col, frame=None):
+        frame = base if frame is None else frame
+        delta = _to_float_series(frame[alt_col]) - _to_float_series(frame[ref_col])
         return (
-            base.assign(_delta=delta)
+            frame.assign(_delta=delta)
             .sort_values("_delta", ascending=False, na_position="last", kind="stable")
             .head(n)
         )
@@ -2634,9 +2881,9 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
         _sl = scorer_label()
         try:
             uri = _cfd_style_scatter(
-                _score_sorted(cr_score), cr_score, cr_ref, cr_alt,
+                _score_sorted(cr_score, base_cb), cr_score, cr_ref, cr_alt,
                 xlabel=f"Candidate off-target site (ranked by {_sl})",
-                title=f"Top {n_shown} candidates by {_sl} score",
+                title=f"Top {n_shown_cb} candidates by {_sl} score",
                 score_name=_sl,
                 maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
             )
@@ -2654,9 +2901,9 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
         if "crispr_bulge_ref" in cols and "crispr_bulge_alt" in cols:
             try:
                 uri = _cfd_style_scatter(
-                    _delta_sorted(cr_alt, cr_ref), cr_score, cr_ref, cr_alt,
+                    _delta_sorted(cr_alt, cr_ref, base_cb), cr_score, cr_ref, cr_alt,
                     xlabel="Candidate off-target site (ranked by variant effect ALT-REF)",
-                    title=f"Top {n_shown} by variant-induced {_sl} increase (ALT-REF)",
+                    title=f"Top {n_shown_cb} by variant-induced {_sl} increase (ALT-REF)",
                     score_name=_sl,
                     maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
                 )
@@ -2912,20 +3159,10 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     return off_panel
 
 
-def build_validation_panel(df, cols):
-    """Compute candidate counts at CFD / edit-distance thresholds and the
-    worst-case suggested panel. Returns a dict for rendering.
-
-    Counting is over the OFF-TARGET set (on-target row mm+b==0 excluded), so
-    thresholds report actionable candidates for a confirmation panel. The FULL
-    threshold table is kept (CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, and
-    variant-created counts); the suggested tier is the worst-case top-100.
-    """
-    variant, _reference, ontarget = partition_masks(df, cols)
-    offt = df[~ontarget]  # off-targets only
-
-    # Perfect matches (0 mm + 0 bulge): distinct candidate cut sites. With >1 there
-    # is no a-priori on-target, so these drive the red warning banner + panel.
+def _perfect_match_sites(df, ontarget, cols):
+    """The distinct perfect matches (0 mm + 0 bulge) among ``df``'s ``ontarget`` rows, one
+    per guide and locus (in a MULTI-guide run each guide has its own on-target), and their
+    number by guide: (sites, by_guide)."""
     perfect_sites = []
     perfect_by_guide = {}
     if bool(ontarget.any()):
@@ -2951,6 +3188,36 @@ def build_validation_panel(df, cols):
                      "origin": o, "maf": m}
                 )
                 perfect_by_guide[g] = perfect_by_guide.get(g, 0) + 1
+    return perfect_sites, perfect_by_guide
+
+
+def build_validation_panel(df, cols, demoted=None, demoted_cb=None):
+    """Compute candidate counts at CFD / edit-distance thresholds and the
+    worst-case suggested panel. Returns a dict for rendering.
+
+    Counting is over the OFF-TARGET set (on-target row mm+b==0 excluded), so
+    thresholds report actionable candidates for a confirmation panel. The FULL
+    threshold table is kept (CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, and
+    variant-created counts); the suggested tier is the worst-case top-100.
+
+    ``demoted`` / ``demoted_cb`` (gate_demoted, over ``df``): the rows the carrier gate
+    ranks after every other one, by their highest-CFD and their highest-CRISPR-Bulge
+    alignment. The search's totals (its off-targets, perfect matches and variant-created
+    off-targets, as the Section-1 matrix and run_manifest.json count them) are of every
+    row; the CFD and edit-distance thresholds, their downloads, the panel and the
+    perfect-match banner leave the ``demoted`` rows out, as the risk card's CFD bands do,
+    and the CRISPR-Bulge thresholds the ``demoted_cb`` ones, as its CRISPR-Bulge bands do.
+    """
+    every = df
+    if demoted is not None and bool(demoted.any()):
+        df = every[~demoted]
+    cb_rows = every[~demoted_cb] if demoted_cb is not None and bool(demoted_cb.any()) else every
+    variant, _reference, ontarget = partition_masks(df, cols)
+    offt = df[~ontarget]  # off-targets only
+
+    # Perfect matches (0 mm + 0 bulge): distinct candidate cut sites. With >1 there
+    # is no a-priori on-target, so these drive the red warning banner + panel.
+    perfect_sites, perfect_by_guide = _perfect_match_sites(df, ontarget, cols)
 
     # INDEX-ALIGNED sentinel fallbacks (mirror select_worstcase_panel): a length-0
     # Series here would make (cfd>=t)/(mmb<=t) length-0 and raise "wrong length"
@@ -2958,11 +3225,23 @@ def build_validation_panel(df, cols):
     # CRISPR-Bulge-only / mm+b-only / CFD-skipped run. Full-length sentinels -> empty tiers.
     cfd = _to_float_series(offt[cols["cfd"]]) if "cfd" in cols else pd.Series(-1.0, index=offt.index)
     mmb = _to_int_series(offt[cols["mmb"]]) if "mmb" in cols else pd.Series(10 ** 6, index=offt.index)
+    cb_offt = offt if cb_rows is df else cb_rows[~partition_masks(cb_rows, cols)[2]]
     crispr_bulge = (
-        _to_float_series(offt[cols["crispr_bulge"]]) if "crispr_bulge" in cols
-        else pd.Series(np.nan, index=offt.index)
+        _to_float_series(cb_offt[cols["crispr_bulge"]]) if "crispr_bulge" in cols
+        else pd.Series(np.nan, index=cb_offt.index)
     )
     var_off = variant[~ontarget]
+
+    # the search's totals, of every row
+    if every is df:
+        variant_all, ontarget_all, n_perfect_total = variant, ontarget, len(perfect_sites)
+    else:
+        variant_all, _reference_all, ontarget_all = partition_masks(every, cols)
+        n_perfect_total = len(_perfect_match_sites(every, ontarget_all, cols)[0])
+    offt_all = every[~ontarget_all]
+    var_off_all = variant_all[~ontarget_all]
+    cfd_all = (_to_float_series(offt_all[cols["cfd"]]) if "cfd" in cols
+               else pd.Series(-1.0, index=offt_all.index))
 
     # Headline CFD tiers: the SAME cut points as the top risk card (0.5, 0.2). Each row
     # carries the all-gaps count (worst-case assay list) AND the <=1-gap count (the
@@ -2986,10 +3265,10 @@ def build_validation_panel(df, cols):
         if "crispr_bulge" in cols and ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any() else []
     )
 
-    n_variant = int(var_off.sum())
-    n_variant_cfd = int((var_off & (cfd >= PANEL_VARIANT_CFD_MIN)).sum())
+    n_variant = int(var_off_all.sum())
+    n_variant_cfd = int((var_off_all & (cfd_all >= PANEL_VARIANT_CFD_MIN)).sum())
 
-    has_crispr_bulge = crispr_bulge_computed(df, cols)
+    has_crispr_bulge = crispr_bulge_computed(every, cols)
     # count of >=2-bulge off-targets the single-bulge ML model cannot score (rendered as
     # "-" = N/A); surfaced as a live figure in the panel note so a mostly-empty
     # CRISPR-Bulge column is explained rather than looking like missing data.
@@ -3052,7 +3331,8 @@ def build_validation_panel(df, cols):
     # per-tier off-target subsets (for the bundled curated downloads + links).
     # Each entry: (logical tier key, display label, sub-frame). Only non-empty
     # tiers are bundled/linked (decided by the caller).
-    tiers = build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge)
+    tiers = build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge,
+                              cb_offt=cb_offt, variant_created=offt_all[var_off_all.values])
 
     return {
         "cfd_counts": cfd_counts,
@@ -3061,7 +3341,7 @@ def build_validation_panel(df, cols):
         "mmb_counts": mmb_counts,
         "n_variant": n_variant,
         "n_variant_cfd": n_variant_cfd,
-        "n_offtarget": int((~ontarget).sum()),
+        "n_offtarget": int((~ontarget_all).sum()),
         "has_crispr_bulge": has_crispr_bulge,
         "n_ml_na": n_ml_na,
         "n_ot_total": n_ot_total,
@@ -3073,6 +3353,13 @@ def build_validation_panel(df, cols):
         "tiers": tiers,
         "n_perfect": len(perfect_sites),
         "perfect_sites": perfect_sites,
+        # the search's perfect matches, the carrier gate's demoted ones too (the
+        # off-target-count bridge, run_manifest.json)
+        "n_perfect_total": n_perfect_total,
+        # the rows the carrier gate leaves out of the thresholds and the panel, by the
+        # highest-CFD and the highest-CRISPR-Bulge alignment (0 without the gate)
+        "n_gate_demoted": int(demoted.sum()) if demoted is not None else 0,
+        "n_gate_demoted_cb": int(demoted_cb.sum()) if demoted_cb is not None else 0,
         # per-guide multiplicity: the red "no unambiguous on-target" banner fires
         # only when a SINGLE guide has >= 2 perfect matches (a multi-guide run with
         # one perfect match each is normal, not ambiguous).
@@ -3098,7 +3385,8 @@ def _tier_filename(key):
     return f"{key}.tsv"
 
 
-def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=None):
+def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=None,
+                      cb_offt=None, variant_created=None):
     """Off-target subsets for each threshold tier (section-4 downloads).
 
     Returns a list of dicts ``{key, label, filename, df}`` for the CFD>= and
@@ -3106,10 +3394,16 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=
     mm+b==0 excluded). ``cfd`` / ``mmb`` are the OFF-TARGET-aligned series already
     computed by the caller. Empty tiers are still returned; the caller skips
     bundling/linking empties. Sub-frames carry the ORIGINAL columns so the
-    curated projection is applied uniformly at write time.
+    curated projection is applied uniformly at write time. ``cb_offt``: the
+    off-targets the CRISPR-Bulge tiers are taken from (``crispr_bulge`` is aligned to
+    it; ``offt`` when None), and ``variant_created`` the variant-created tier's rows
+    (``offt``'s when None): build_validation_panel's, which the carrier gate leaves
+    in each.
     """
     tiers = []
     var_off = variant[~ontarget]
+    if cb_offt is None:
+        cb_offt = offt
     for t in CFD_THRESHOLDS:
         sub = offt[(cfd >= t).values]
         tiers.append({
@@ -3120,7 +3414,7 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=
         })
     if crispr_bulge is not None and "crispr_bulge" in cols and ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any():
         for label, fkey, pred in _crispr_bulge_tier_specs():
-            sub = offt[pred(crispr_bulge).values]
+            sub = cb_offt[pred(crispr_bulge).values]
             tiers.append({
                 "key": fkey,  # internal key ('crispr_bulge_0.50' / 'crispr_bulge_gt0'); filenames stable
                 "label": f"{scorer_label()} {label}",
@@ -3141,7 +3435,7 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=
         "key": "variant_created",
         "label": "variant-contributed off-target sites (variant-created)",
         "filename": "variant_created.tsv",
-        "df": offt[var_off.values],
+        "df": offt[var_off.values] if variant_created is None else variant_created,
     })
     return tiers
 
@@ -3298,8 +3592,9 @@ def render_validation_panel(
             f"</a></p>"
         )
     # off-target-count bridge: show the total-sites minus perfect-match subtraction
-    # so summing the Section-1 matrix (which includes perfect matches) reconciles.
-    _np = int(vp.get("n_perfect", 0) or 0)
+    # so summing the Section-1 matrix (which includes perfect matches) reconciles. Of every
+    # row, as the matrix: the carrier gate's demoted ones too (their row below).
+    _np = int(vp.get("n_perfect_total", vp.get("n_perfect", 0)) or 0)
     _off_label = "Off-targets (on-target mm+b=0 excluded)"
     if _np > 0:
         _total_sites = vp["n_offtarget"] + _np
@@ -3318,6 +3613,23 @@ def render_validation_panel(
         f"<tr><td>&hellip; of those with CFD &ge; {PANEL_VARIANT_CFD_MIN}</td>"
         f"<td class='num'>{vp['n_variant_cfd']:,}</td></tr>"
     ) if show_variant_row else ""
+    # the rows the carrier gate ranks after every other one (tier C1): in the totals above,
+    # out of the thresholds, the panel and the risk card (build_validation_panel), by the
+    # alignment of each score
+    _cb_gate = bool(vp.get("crispr_bulge_counts"))
+    if vp.get("n_gate_demoted"):
+        _variant_rows += (
+            "<tr><td>Ranked after every other row by the carrier gate (tier C1: no haplotype "
+            "of the panel has the sequence of the row's highest-CFD alignment; their table "
+            "follows the top-1000, in Section 6): counted above, left out of the CFD and "
+            "edit-distance thresholds, the panel and the risk card"
+            + ("&rsquo;s CFD bands" if _cb_gate else "")
+            + f"</td><td class='num'>{vp['n_gate_demoted']:,}</td></tr>")
+    if vp.get("n_gate_demoted_cb") and _cb_gate:
+        _variant_rows += (
+            f"<tr><td>&hellip; at the highest-{scorer_label()} alignment: left out of the "
+            f"{scorer_label()} thresholds and the risk card&rsquo;s {scorer_label()} "
+            f"bands</td><td class='num'>{vp['n_gate_demoted_cb']:,}</td></tr>")
     _panel_variant_note = (
         f" of the selected sites, <strong>{vp['panel_variant']:,}</strong> "
         "are variant-created."
@@ -4022,8 +4334,7 @@ _ANNOTATION_LEGEND = [
      "names the specific variant(s) (as <code>chrom;pos;ref;alt</code>) that produce "
      "THIS off-target; this column (e.g. <code>16 in window</code>) counts ALL variants "
      "spanning the surrounding window, so a row can legitimately show one variant while "
-     "its window count is much larger. Such dense windows are reported greedily (one "
-     "representative alignment is shown; {hvdr_where})."),
+     "its window count is much larger. {hvdr_how}"),
 ]
 
 
@@ -4117,7 +4428,7 @@ _SCORE_LEGEND = [
 ]
 
 
-def build_score_legend_html(untiered=None):
+def build_score_legend_html(untiered=None, gate=None):
     """Render the scores-&-columns legend (Section 7, always present). ``untiered``: the
     datasets a search resolved without the dict-less tiers, for which the Observed and MAF
     entries say what holds instead of their --per-sample claims: in a --per-sample report
@@ -4134,7 +4445,7 @@ def build_score_legend_html(untiered=None):
         # joint AF
         named = _untiered_named(untiered)
         extra = {
-            "Observed": (
+            "Observed": "" if not _GREEDY_DENSE else (
                 f" On {named}, a dense window flagged in <code>High_complexity_region</code> "
                 "can be reported by its greedy worst-case alignment, which lists the carriers "
                 "of any of its variants rather than its exact cis carriers: they need not carry "
@@ -4162,6 +4473,28 @@ def build_score_legend_html(untiered=None):
                 "blank where none of them has a frequency)."),
         }
         legend = [(term, definition + extra.get(term, "")) for term, definition in legend]
+    if gate and gate.get("used"):
+        # the labels the carrier gate gives the rows it checked (render_gate_row)
+        legend = [(term, definition + (
+            " Where the carrier gate ran (Section 1), a row of two or more variants reads "
+            "its tier: <code>together on N of H &lt;panel&gt; haplotypes</code> (A; "
+            "<code>carried together by N &lt;panel&gt; samples, phase not known</code> when "
+            "only unphased calls show it; <code>the same CFD on N of H &lt;panel&gt; "
+            "haplotypes, which carry &lt;variants&gt;</code>, or <code>the same CFD as the "
+            "reference here</code>, when a haplotype reaches the row's CFD without every "
+            "variant, the others leaving it as it is), <code>not together on any of H "
+            "&lt;panel&gt; haplotypes</code> (C1, with the number expected if the variants "
+            "were independent; such a row is ranked after every other one, in its own "
+            "table), <code>not checked: K of N variants not in &lt;panel&gt;</code> (C2, "
+            "with the product of the variants' frequencies and the rarest, the 1e-06 / "
+            "0.001 bound shown as information only). A row of one variant reads its "
+            "carriers, unless every haplotype carrying it has an indel that takes the "
+            "target's bases off it (<code>all N &lt;panel&gt; haplotypes carrying it have "
+            "an indel in the target</code>: C1, ranked after every other row as well). The "
+            "carriers a population-level row lists are "
+            "those of any of its variants; the panel's haplotypes are its individuals', not "
+            "the patient's." if term == "Observed" else ""))
+            for term, definition in legend]
     items = "".join(
         '<div class="legend-item"><div class="legend-term">%s</div>'
         '<div class="legend-def">%s</div></div>' % (term, definition)
@@ -4191,7 +4524,45 @@ def _hvdr_where(hvdr_bundle_name=None, hvdr_n_regions=0, report_full=False):
     return where
 
 
-def build_annotation_legend_html(cols=None, df=None, hvdr_where=None):
+def _dense_greedy_clauses(df=None, cols=None, untiered=None):
+    """Where a --per-sample search can still report a window denser than
+    CRISPRME_IUPAC_CAP by its greedy worst-case alignment, each as a clause: on its datasets
+    without the dict-less tiers, in a search before 2.9.0 (_GREEDY_DENSE), and at a flagged
+    row that names no carrier, a sites-only dataset's (its rows are the population-level
+    analysis's whatever the mode). Since 2.9.0 a genotyped dataset's dense window is the
+    haplotypes its carriers have, as any window (new_simple_analysis.py). [] for a
+    population-level search, which reports every window by its greedy worst case."""
+    if not _PER_SAMPLE:
+        return []
+    clauses = []
+    if untiered and _GREEDY_DENSE:
+        clauses.append(f"on {_untiered_named(untiered)}, a window can still be reported by "
+                       "its greedy worst-case alignment, whose listed carriers need not carry "
+                       "every variant in it")
+    if df is not None and cols and all(k in cols for k in ("complex_region", "origin", "samples")):
+        flagged = df[~df[cols["complex_region"]].map(_is_na)]
+        alt = flagged[cols["origin"]].astype(str).str.strip().str.lower().eq("alt")
+        if bool((alt & flagged[cols["samples"]].map(lambda v: _count_samples(v) == 0)).any()):
+            clauses.append("a flagged row that names no carrier, a sites-only dataset's, is its "
+                           "window's greedy worst-case alignment, as in a population-level search")
+    return clauses
+
+
+def _hvdr_how(hvdr_where=None, clauses=None):
+    """How the search reported a high-variant-density window, with where its variants are
+    (_hvdr_where), as the legend says it: greedily in a population-level search, by the
+    haplotypes its carriers have under --per-sample, with _dense_greedy_clauses's
+    ``clauses`` (where it can still be greedy)."""
+    where = hvdr_where or _hvdr_where()
+    if not _PER_SAMPLE:
+        return ("Such dense windows are reported greedily (one representative alignment is "
+                f"shown; {where}).")
+    return ("Under <code>--per-sample</code> such a window is reported, as any other, by the "
+            f"haplotypes its carriers have ({where})" + "".join(f"; {c}" for c in clauses or [])
+            + ".")
+
+
+def build_annotation_legend_html(cols=None, df=None, hvdr_where=None, hvdr_how=None):
     """Render the annotation legend (Section 7). Only include an entry when its
     backing annotation column is actually present in this run (and, when ``df`` is
     given, carries at least one real value), so a run WITHOUT a given annotation is
@@ -4199,7 +4570,8 @@ def build_annotation_legend_html(cols=None, df=None, hvdr_where=None):
     run must not print a COSMIC Cancer Gene Census glossary). Returns "" when no
     entry qualifies, so the caller omits the whole section. ``cols=None`` keeps the
     legacy full legend (backward-compatible). ``hvdr_where`` (_hvdr_where's, which it
-    defaults to) says where the variant set of a high-variant-density window is."""
+    defaults to) says where the variant set of a high-variant-density window is, and
+    ``hvdr_how`` (_hvdr_how's, with it) how the search reported the window."""
     def _active(key):
         if cols is None:
             return True
@@ -4209,7 +4581,7 @@ def build_annotation_legend_html(cols=None, df=None, hvdr_where=None):
             return bool(df[cols[key]].map(lambda v: not _is_na(v)).any())
         return True
 
-    entries = [(t, d.replace("{hvdr_where}", hvdr_where or _hvdr_where()))
+    entries = [(t, d.replace("{hvdr_how}", hvdr_how or _hvdr_how(hvdr_where)))
                for (k, t, d) in _ANNOTATION_LEGEND if _active(k)]
     if not entries:
         return ""
@@ -4370,13 +4742,28 @@ def render_html(
     observed_haplotypes_bundle_name=None, observed_haplotypes_modals="",
     table_crispr_bulge_html="", inputs_criteria_html="", legend_html=None,
     next_steps_html="", plots_exclusion_note="", table_exclusion_note="", untiered=None,
-    n_variant=None,
+    n_variant=None, unobserved_html="", unobserved_name=None, gate_companion_name=None,
+    dense_greedy=None,
 ):
     # ``plots_exclusion_note`` / ``table_exclusion_note``: the top_exclusion_note
     # captions of Section 2 and Section 6 (empty when nothing is left out).
     # ``untiered``: the datasets a search resolved without the dict-less tiers, whose
     # dense windows the Section-6 caption qualifies (or what --per-sample gives there).
     # ``n_variant``: the number of variant-created off-targets (build_validation_panel).
+    # ``unobserved_html``: the table of the rows the carrier gate ranks after every other
+    # one (render_unobserved_section); ``unobserved_name`` / ``gate_companion_name`` their
+    # curated download and the gate's own table (--report-full), when bundled.
+    # ``dense_greedy`` (_dense_greedy_clauses): where a --per-sample search can still report
+    # a dense window by its greedy worst-case alignment.
+    gate_download = ""
+    if unobserved_name:
+        gate_download += (
+            f'\n  <a class="download" href="{_dl_href(unobserved_name)}" download>'
+            f"Ranked after the others: no panel haplotype carries them (curated TSV)</a>")
+    if gate_companion_name:
+        gate_download += (
+            f'\n  <a class="download" href="{_dl_href(gate_companion_name)}" download>'
+            f"Carrier gate, every alignment's tier (TSV gzip)</a>")
     scatter_html = []
     for title, caption, uri in scatter_panels:
         scatter_html.append(
@@ -4422,14 +4809,25 @@ def render_html(
             f'\n  <a class="download" href="{_dl_href(hvdr_bundle_name)}" download>'
             f"Highly complex regions near top sites ({hvdr_n_regions:,}) &mdash; BED</a>"
         )
+        # how the search reported them: greedily in a population-level search, by the
+        # haplotypes their carriers have under --per-sample, but where _dense_greedy_clauses
+        # say (``dense_greedy``)
+        how = (
+            "carry so many overlapping variants that a single greedy worst-case alignment "
+            "is reported for each (flagged in the <code>High_complexity_region</code> "
+            "column of the table) &mdash; ADDITIONAL haplotype alignments may exist there. "
+            if not _PER_SAMPLE else
+            "carry so many overlapping variants that they are flagged in the "
+            "<code>High_complexity_region</code> column of the table; under "
+            "<code>--per-sample</code> each is reported, as any other window, by the "
+            "haplotypes its carriers have" + "".join(f"; {c}" for c in dense_greedy or [])
+            + ". ")
         hvdr_callout = (
             f'<p class="caption" style="border-left:4px solid #d97706;'
             f'padding-left:0.7em;background:#fffbeb">'
             f"<strong>Highly complex (high-variant-density) regions:</strong> "
             f"{hvdr_n_regions:,} window(s) overlapping the top-ranked reported off-targets "
-            f"carry so many overlapping variants that a single greedy worst-case alignment "
-            f"is reported for each (flagged in the <code>High_complexity_region</code> "
-            f"column of the table) &mdash; ADDITIONAL haplotype alignments may exist there. "
+            f"{how}"
             f"Those regions (span, variant count, carriers, full IUPAC protospacer) are "
             f"bundled as <code>{_esc(hvdr_bundle_name)}</code>. The <strong>complete "
             f"genome-wide</strong> flag is in the <code>High_variant_density_region</code> "
@@ -4552,7 +4950,7 @@ def render_html(
                     "cannot tell which dataset a row comes from, so a row of two or more SNPs "
                     "there still reads <strong>&ldquo;N cis carriers&rdquo;</strong>, and its "
                     "link <strong>&ldquo;N other observed haplotypes&rdquo;</strong>, and can be "
-                    "such an alignment.") if untiered else ""
+                    "such an alignment.") if untiered and _GREEDY_DENSE else ""
             )
         else:
             _oh_expl = (
@@ -4567,7 +4965,7 @@ def render_html(
             ) + (
                 f" On {_untiered_named(untiered)}, <code>--per-sample</code> can still report "
                 "a dense window by its greedy worst-case alignments, whose listed carriers need "
-                "not carry every variant in them." if untiered else ""
+                "not carry every variant in them." if untiered and _GREEDY_DENSE else ""
             )
         observed_haplotypes_table_note = (
             f'<p class="caption">{_oh_expl}</p>'
@@ -4682,7 +5080,7 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 
 <h2>5. Downloads</h2>
 <p>{raw_download}
-  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 by CFD (curated TSV)</a>{top1000_cb_download}{panel_download}{hvdr_download}{cooc_download}{snp_snp_download}{indel_af_download}{observed_haplotypes_download}
+  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 by CFD (curated TSV)</a>{top1000_cb_download}{panel_download}{hvdr_download}{cooc_download}{snp_snp_download}{indel_af_download}{observed_haplotypes_download}{gate_download}
 </p>{tier_download_html}
 {hvdr_callout}
 {cooc_callout}
@@ -4709,6 +5107,7 @@ locally with <code>crisprme.py web-interface</code>.</p>
 <p style="margin:0 0 0.5em"><a class="download" href="{_dl_href(top1000_name)}" download>&#11015; Download this table &mdash; top-1000 by CFD (curated TSV)</a></p>
 {table_html}
 {crispr_bulge_block}
+{unobserved_html}
 
 {legend_section}
 
@@ -5406,6 +5805,9 @@ def build_report(
         low_memory=False,
     )
     cols = _resolve(df.columns, list(_COLS.keys()))
+    # the carrier gate's tier of each row (read before any row is dropped: the companion
+    # names the rows by their line)
+    df, gate = load_carrier_gate(result_dir, integrated_tsv, df)
     # drop annotation curated columns whose source is absent from THIS run (no
     # all-"-" COSMIC/ENCODE/... column implying a screen that was never performed)
     global _PRESENT_ANN_KINDS
@@ -5442,6 +5844,8 @@ def build_report(
     # reads as in population-level (_greedy_union)
     untiered = meta.get("untiered") or []
     _UNTIERED = _PER_SAMPLE and bool(untiered) and bool(meta.get("untiered_all"))
+    global _GREEDY_DENSE
+    _GREEDY_DENSE = gate is None
     version = meta.get("version") or _package_version()
     has_crispr_bulge = crispr_bulge_computed(df, cols)
 
@@ -5457,7 +5861,15 @@ def build_report(
     sample_superpop = load_sample_superpop(samplesid_dir, fn.get("datasets", ""))
     sample_dataset = load_sample_dataset(samplesid_dir)  # native per-db provenance (dynamic)
 
-    top_df = select_top(df, cols, n=top_n)
+    # The rows the carrier gate ranks after every other one (tier C1, by the alignment each
+    # view ranks): the top-1000 tables, the plots of Section 2, the validation panel's
+    # thresholds and selection and the risk card are of the others (``ranked``,
+    # ``ranked_cb``); the summary matrix, the validation panel's totals, run_manifest.json
+    # and the population plot count every row, and the demoted ones have their own table.
+    demoted = gate_demoted(df)
+    ranked = df[~demoted]
+    ranked_cb = df[~gate_demoted(df, "_gate_cb")]
+    top_df = select_top(ranked, cols, n=top_n)
 
     # ---- SECTION 1: summary + matrix ---------------------------------------
     try:
@@ -5477,15 +5889,16 @@ def build_report(
     risk_modal_html = ""
     try:
         import risk_card as _rc
-        _mmb = _to_int_series(df[cols["mmb"]])
-        _bul = _to_int_series(df[cols["bulges"]])
+        _mmb = _to_int_series(ranked[cols["mmb"]])
+        _bul = _to_int_series(ranked[cols["bulges"]])
         _offt = _mmb > 0                                   # off-targets (exclude perfect)
         # CFD is calibrated on <=1-gap; the Bulges column is the CFD-alignment's gap count.
-        _cfd_sc = _to_float_series(df[cols["cfd"]])[_offt & (_bul <= 1)].dropna().tolist()
+        _cfd_sc = _to_float_series(ranked[cols["cfd"]])[_offt & (_bul <= 1)].dropna().tolist()
         # CRISPR-Bulge: do NOT reuse the CFD-alignment gap count -- the CB score belongs to
         # the CB alignment, whose <=1-gap domain is encoded by score>=0 (>=2-gap -> -1). Pass
         # all off-target CB values; the card keeps only the in-band (>=0.2) ones.
-        _cb_sc = (_to_float_series(df[cols["crispr_bulge"]])[_offt].dropna().tolist()
+        _cb_mmb = _to_int_series(ranked_cb[cols["mmb"]])
+        _cb_sc = (_to_float_series(ranked_cb[cols["crispr_bulge"]])[_cb_mmb > 0].dropna().tolist()
                   if has_crispr_bulge and "crispr_bulge" in cols else None)
         _nperf = int((_mmb == 0).sum())
         _card_html, risk_modal_html = _rc.render_risk_card(meta, _cfd_sc, _cb_sc, _nperf)
@@ -5498,7 +5911,7 @@ def build_report(
     # ---- SECTION 2: scatter panels -----------------------------------------
     try:
         scatter_panels = plot_scatter_panels(
-            df, cols, n=top_n, include_crispr_bulge=has_crispr_bulge
+            ranked, cols, n=top_n, include_crispr_bulge=has_crispr_bulge, df_cb=ranked_cb
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: scatter panels unavailable: {exc}\n")
@@ -5552,7 +5965,8 @@ def build_report(
 
     perfect_banner = ""
     try:
-        vp = build_validation_panel(df, cols)
+        vp = build_validation_panel(df, cols, demoted=demoted,
+                                    demoted_cb=gate_demoted(df, "_gate_cb"))
         perfect_banner = render_perfect_match_banner(vp)
         panel_top100_df = vp.get("panel_df")
 
@@ -5686,7 +6100,7 @@ def build_report(
     top_crispr_bulge_df = None
     if has_crispr_bulge:
         try:
-            top_crispr_bulge_df = select_top_crispr_bulge(df, cols, n=top_n)
+            top_crispr_bulge_df = select_top_crispr_bulge(ranked_cb, cols, n=top_n)
             if len(top_crispr_bulge_df):
                 table_crispr_bulge_html = build_table_html(
                     top_crispr_bulge_df, cols, has_crispr_bulge, datasets=meta.get("datasets", ""),
@@ -5700,6 +6114,45 @@ def build_report(
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"generate-report: CRISPR-Bulge table unavailable: {exc}\n")
             table_crispr_bulge_html, top_crispr_bulge_df = "", None
+
+    # ---- the rows the carrier gate ranks after every other one (tier C1): a table of
+    # their own after the top-1000, and all of them in a curated download ---------------
+    unobserved_html = ""
+    unobserved_name = None
+    gate_companion_name = None
+    if gate and gate.get("used"):
+        try:
+            _unobs = df[demoted]
+            if "cfd" in cols:
+                _unobs = _unobs.assign(
+                    _cfd=pd.to_numeric(_unobs[cols["cfd"]], errors="coerce").fillna(-1.0)
+                ).sort_values("_cfd", ascending=False, kind="stable").drop(columns=["_cfd"])
+            _n_cb_only = int((gate_demoted(df, "_gate_cb") & ~demoted).sum())
+            if len(_unobs):
+                unobserved_name = _stage_curated(_unobs, UNOBSERVED_NAME)
+            _shown = _unobs.head(top_n)
+            unobserved_html = render_unobserved_section(
+                gate, len(_unobs), _n_cb_only,
+                build_table_html(_shown, cols, has_crispr_bulge,
+                                 datasets=meta.get("datasets", ""), untiered=untiered)
+                if len(_shown) else "",
+                unobserved_name, len(_shown),
+                int((_to_int_series(_unobs[cols["mmb"]]) == 0).sum()) if "mmb" in cols else 0)
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"generate-report: carrier gate table unavailable: {exc}\n")
+            unobserved_html, unobserved_name = "", None
+        # the gate's own table (every alignment's tier), the heavy full-data layer
+        if report_full:
+            try:
+                _src = os.path.join(result_dir or os.path.dirname(integrated_tsv),
+                                    os.path.basename(gate["companion"]))
+                gate_companion_name = "carrier_gate.tsv.gz"
+                with open(_src, "rb") as _s, \
+                        gzip.open(os.path.join(staging, gate_companion_name), "wb") as _d:
+                    shutil.copyfileobj(_s, _d, length=1024 * 1024)
+            except (OSError, KeyError) as exc:
+                sys.stderr.write(f"generate-report: carrier gate companion not bundled: {exc}\n")
+                gate_companion_name = None
 
     # ---- high-variant-density ("highly complex") regions BED (#144) ----------
     # Merge the per-chromosome beds the search wrote into ONE bundled file (single
@@ -5948,6 +6401,7 @@ def build_report(
         variant_count=_reg_vc,
         no_registry=_run_lacks_registry(result_dir, meta),
         n_variant=vp.get("n_variant"),
+        gate_row=render_gate_row(gate),
     )
     # Assemble the per-site observed-haplotype modals (built as a side effect of the
     # top-1000 table renders) into a single backdrop + modal set + one self-contained
@@ -5967,11 +6421,14 @@ def build_report(
         else f"this table or its download (<code>{_esc(top1000_name)}</code>)"
     )
     plots_exclusion_note = top_exclusion_note(
-        df, cols, "these plots", panel_top100_name, mmb_le_1_name=tier_links.get("mmb_1")
+        ranked, cols, "these plots", panel_top100_name, mmb_le_1_name=tier_links.get("mmb_1")
     )
     table_exclusion_note = top_exclusion_note(
-        df, cols, _shown_tables, panel_top100_name, mmb_le_1_name=tier_links.get("mmb_1")
+        ranked, cols, _shown_tables, panel_top100_name, mmb_le_1_name=tier_links.get("mmb_1")
     )
+    # where a --per-sample search can still report a dense window by its greedy worst-case
+    # alignment (the legend's High_complexity_region entry, the --report-full callout)
+    dense_greedy = _dense_greedy_clauses(df, cols, untiered)
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
         table_html, (tsv_gz_name if report_full else None), top1000_name, footer_html,
@@ -5997,13 +6454,19 @@ def build_report(
         table_exclusion_note=table_exclusion_note,
         untiered=untiered,
         n_variant=vp.get("n_variant"),
+        unobserved_html=unobserved_html,
+        unobserved_name=unobserved_name,
+        gate_companion_name=gate_companion_name,
+        dense_greedy=dense_greedy,
         legend_html=(
             '<h3 style="margin:0.6em 0 0.3em">Scores &amp; columns</h3>'
-            + build_score_legend_html(untiered)
+            + build_score_legend_html(untiered, gate=gate)
             + (
                 '<h3 style="margin:1.2em 0 0.3em">Annotations</h3>' + _ann_legend
                 if (_ann_legend := build_annotation_legend_html(
-                    cols, df, _hvdr_where(hvdr_bundle_name, hvdr_n_regions, report_full)))
+                    cols, df, hvdr_how=_hvdr_how(
+                        _hvdr_where(hvdr_bundle_name, hvdr_n_regions, report_full),
+                        dense_greedy)))
                 else ""
             )
         ),
@@ -6024,6 +6487,10 @@ def build_report(
         _linkable.add(observed_haplotypes_bundle_name)
     if top_crispr_bulge_df is not None and len(top_crispr_bulge_df):
         _linkable.add("top1000_crispr_bulge.tsv")
+    if unobserved_name:
+        _linkable.add(unobserved_name)
+    if gate_companion_name:
+        _linkable.add(gate_companion_name)
     _linkable.update(v for v in tier_links.values() if v)
     html_doc = _linkify_bundled_filenames(html_doc, _linkable)
 
@@ -6071,6 +6538,8 @@ def build_report(
         bundle += staged_tier_paths
         if hvdr_bundle_name:
             bundle.append(os.path.join(staging, hvdr_bundle_name))
+        if gate_companion_name:
+            bundle.append(os.path.join(staging, gate_companion_name))
         if cooc_bundle_name:
             bundle.append(os.path.join(staging, cooc_bundle_name))
         if snp_snp_bundle_name:
@@ -6115,13 +6584,24 @@ def build_report(
                     "total_sites": meta.get("n_total"),
                     "off_targets": meta.get("n_offtarget"),
                     "on_target_perfect_matches": (
-                        vp.get("n_perfect") if isinstance(vp, dict) else None),
+                        vp.get("n_perfect_total") if isinstance(vp, dict) else None),
                     "variant_created_off_targets": (
                         vp.get("n_variant") if isinstance(vp, dict) else None),
                     "recommended_panel_size": (
                         vp.get("panel_size") if isinstance(vp, dict) else None),
                 },
                 "database": _reg_vc,  # {n_records SNPs, n_indels, databases} or None
+                # the carrier gate: how it ran, and its tiers by each row's highest-CFD
+                # alignment (None for a search that wrote no sidecar)
+                "carrier_gate": ({
+                    "status": gate.get("status"),
+                    "used": gate.get("used"),
+                    "panels": [p.get("name") for p in gate.get("panels") or []],
+                    "min_expected": gate.get("min_expected"),
+                    # the tiers by each row's highest-CFD alignment, and A_same_score, the
+                    # A rows a haplotype reaches the row's CFD on without every variant
+                    "tiers": gate.get("counts"),
+                } if gate else None),
                 "source_integrated_results": os.path.basename(integrated_tsv),
                 # Resolved from the engine on PATH, never hardcoded: the literal
                 # "v2.8.3" here outlived three CRISPRitz pins and shipped a wrong

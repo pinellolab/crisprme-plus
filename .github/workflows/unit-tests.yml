@@ -295,6 +295,18 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_site_alleles -v
 
+      - name: "Carrier gate (2.9.0: a population-level row's variants checked against phased haplotypes, ranked after the others when none carries them together, never dropped) + the per-sample rows (no carrier whose haplotype has an indel in the target; no greedy row of a dense window on the dictionaries) + download --what genotype-oracle"
+        # haplotype_prioritizer.py's tiers on stores the repository's own writers build (the
+        # phased SNP store, the phased indel store, a VCF line with two ALTs), the command
+        # the search runs (the integrated results left byte for byte as they were), the report
+        # that ranks by its companion, the real new_simple_analysis.py's per-sample rows on
+        # the dict-less tiers and on a classic dictionary, the real crisprme.py's gate flags
+        # and banner against test_build_index_only_atomic's stub engine, and the
+        # genotype-oracle download with the HuggingFace client stubbed (pandas + numpy +
+        # matplotlib, installed above).
+        working-directory: PostProcess
+        run: python -m unittest test_haplotype_prioritizer -v
+
       - name: "AF panel denominator uses VCF-filtered genotyped samples"
         working-directory: PostProcess
         run: python -m unittest test_af_denominator_panel -v

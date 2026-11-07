@@ -109,11 +109,19 @@ class ObservedHaplotype(object):
 
 
 def _gt_is_phased(gt):
-    """True iff a genotype string is PHASED (uses '|'), False if unphased ('/') or
-    haploid / single-token (no separator -> treat as unconfirmed-phase, PUTATIVE)."""
+    """True iff a genotype string says which haplotype holds its alleles: a PHASED call
+    (uses '|'), or a HAPLOID one (a single allele token, e.g. a male chrX call), whose
+    one allele is on its one haplotype -- so the sample's variants in a window are cis by
+    construction, and a variant that breaks the target takes that haplotype off (F2).
+    False for an unphased call ('/') and for a missing one ('.': no allele to place), both
+    of which stay unconfirmed-phase (PUTATIVE)."""
     if gt is None:
         return False
-    return "|" in gt
+    if "|" in gt:
+        return True
+    if "/" in gt:
+        return False
+    return gt.strip() not in ("", ".")
 
 
 def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
@@ -145,7 +153,8 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
     Returns dict[sample_id -> list of (frozenset[(pos_c, alt)], phase_state)].
     Each sample contributes:
       * one CONFIRMED set per non-empty haplotype slot when ALL its covered columns
-        are phased AND share a phase set AND no slot holds two alts of one column;
+        are phased (a haploid call -- a male chrX one -- is its one slot's) AND share a
+        phase set AND no slot holds two alts of one column;
       * else PUTATIVE sets: every combination of the variants it carries that takes
         at most one alt of a column (above ``max_putative`` variants, the union of
         everything it carries, one per choice of alt at a column holding two while

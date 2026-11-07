@@ -1016,10 +1016,11 @@ its purpose and usage:
   an index without them (built without `--samplesID`, as the benchmark `complete-test`
   builds its own) it names the carrier samples only, with the `AF` of the classic per-sample
   dictionaries (an indel's, of the index's indel log), which CRISPRitz `add-variants` copied
-  from the VCF (see the MAF column below), and a dense window can still be reported by its
-  greedy worst-case alignment, whose listed carriers need not carry every variant in it;
-  `complete-search` and the report's Search mode row say so (a population-level search's
-  too, of what `--per-sample` gives there). Rebuild it with `build-index-only --samplesID`,
+  from the VCF (see the MAF column below); `complete-search` and the report's Search mode
+  row say so (a population-level search's too, of what `--per-sample` gives there). (Up to
+  2.8.1 a dense window there could still be reported by its greedy worst-case alignment,
+  whose listed carriers need not carry every variant in it; since 2.9.0 it gives the
+  haplotypes its carriers have.) Rebuild it with `build-index-only --samplesID`,
   or use a prebuilt index. On a genotyped+PHASED index (HGDP + 1000
   Genomes (the default), or HPRC) this is already the context-aware default; on
   a sites-only index (`mega`) it cannot resolve carriers (no genotypes) and
@@ -1029,6 +1030,39 @@ its purpose and usage:
   allele frequencies), lossless for detection and tractable on any panel. It replaces the
   removed `--full` flag; `--per-sample` is a genotype-resolution dial, not a speed dial
   (see METHODS §5).
+
+- `--no-prioritize-observed` / `--prioritize-observed` / `--gate-min-expected <E>` (*Optional*)
+  <br>The **carrier gate** (since 2.9.0). A population-level row of a genotyped dataset takes,
+  per variant window, the alleles that match the guide best and lists every carrier of any of
+  them, so two or more of them can sit on no one haplotype. By default the search checks each
+  row's variants against the dataset's own phased genotypes (and its phased indel genotypes)
+  and writes their tier to `..._carrier_gate.tsv`: **A** (two or more variants one phased
+  haplotype carries together, or that reach the row's CFD without the variants that change
+  neither it, nor the alignment's mismatches, nor its PAM — an allele at a PAM base the
+  search's PAM leaves free, a mismatch for a mismatch scored alike; of the alignments the
+  gate reads a CFD of, which the one ranked by CRISPR-Bulge score is not),
+  **B** (one variant), **C1** (two or more variants, each in the
+  panel, that no haplotype of it carries together and none reaches the row's CFD without; or
+  variants, a single one too, every
+  haplotype carrying which has an indel in the target), **C2** (a variant not in the panel:
+  it cannot say). The report ranks a C1 row after every other row in the views ranked by the
+  score of the alignment that is C1: a row whose highest-CFD alignment is C1 leaves the
+  top-1000 by CFD, the CFD plots, the validation panel and the risk card's CFD bands, and one
+  whose highest-CRISPR-Bulge alignment is C1 leaves the views ranked by that score, for a
+  table of their own after
+  the top-1000 (the panel's totals, as the summary matrix, count every row), and stay in the
+  integrated results, which the gate does not change. A, B and C2 rows keep their
+  place, and the `Observed` column gives the tier's factual label (a row of one variant reads
+  its carriers, unless every haplotype carrying it has an indel in the target).
+  `--no-prioritize-observed`
+  turns the gate off. `--prioritize-observed` checks a **sites-only** dataset's rows (the
+  `mega` panel) against the phased HGDP + 1000 Genomes genotypes (the genotype oracle: see
+  `download --what genotype-oracle`; an installed `NRG_3_hg38+hg38_HGDP1kGP` index brings it
+  too). `--gate-min-expected` (default 3) is the number of panel haplotypes expected to carry
+  a combination if its variants were independent below which the gate calls a combination
+  none carries "too rare to tell" (ranked after the others all the same); 0 turns that
+  distinction off. A per-sample search needs no gate: its rows name their cis carriers. See
+  METHODS §5.
 
 - `--compute-backend {cpu,cuda,metal}` (*Optional*)
   <br>ML-scorer compute device: `cpu` (default) | `cuda` (NVIDIA/Linux GPU) | `metal`
@@ -2001,11 +2035,16 @@ is under `data/`). Reading top to bottom:
   | `observed` | A single variant with non-zero allele frequency — carried by ≥1 individual by definition, even where the carrier cannot be named | Any variant-aware run, incl. sites-only panels |
   | `putative` | A multi-variant combination whose cis co-occurrence cannot be confirmed | Any variant-aware run |
 
-  Under **`--per-sample`** the carrier list is the exact cis carriers (but for a dense
-  window's greedy alignment on an index without the dict-less tiers: see below), so `putative`
+  Under **`--per-sample`** the carrier list is the exact cis carriers, so `putative`
   cleanly marks reconstructions no one actually carries. (In a population-level run a
-  multi-variant SNP list is the union of each variant's carriers, flagged
-  `(>=1 of K vars, poss. chimera)`; an indel (or MNV) row is resolved per carrier in
+  multi-variant SNP list is the union of each variant's carriers; where the carrier gate ran
+  (`--no-prioritize-observed` above) the column gives its tier instead: `together on N of H
+  <panel> haplotypes`, `the same CFD on N of H <panel> haplotypes, which carry <variants>`,
+  `not together on any of H <panel> haplotypes (expected E)`, `not
+  checked: K of N variants not in <panel>`; without it, `(>=1 of K vars, poss. chimera)`. A
+  row of one variant reads its carriers, unless the gate found that every haplotype carrying
+  it has an indel in the target, which it says.
+  An indel (or MNV) row is resolved per carrier in
   either mode and reads `N carrier(s)`: CONFIRMED where each carrier is placed on its
   phased haplotype, PUTATIVE where the phase is unknown (an unphased call, an MNV). On an
   install without SNP genotypes (`download --what index --no-genotypes`), a row an indel
@@ -2072,15 +2111,12 @@ is under `data/`). Reading top to bottom:
   window CRISPRme does **not** fabricate a synthetic cross-sample "worst-case" haplotype under
   `--per-sample`; it reports the real observed haplotypes (exact carriers) and flags the dense region in
   `high_variant_density_regions.bed`. A population-level run (`--population-level`, or the default on a
-  sites-only/unphased index) still reports the conservative worst-case representative, as it should for a screen.
-  On an index without the tiers (one built without `--samplesID`, such as the one the benchmark
-  `complete-test` builds), a dense window can still be reported by its greedy worst-case alignment,
-  flagged in `High_variant_density_region`, whose listed carriers need not carry every variant in it
-  (when no dataset of the search has the tiers, the report's `Observed` column reads
-  `N carriers (>=1 of K vars, poss. chimera)` for such a row of two or more SNPs, as in a
-  population-level run; the report cannot tell which dataset a row comes from, so beside a dataset
-  with the tiers such a row still reads `N cis carriers`): rebuild the index with
-  `build-index-only --samplesID`, or use a prebuilt one.
+  sites-only/unphased index) still reports the conservative worst-case representative, as it should for a screen,
+  and its carrier gate ranks one no haplotype carries after the others (`--no-prioritize-observed`).
+  Since 2.9.0 the same holds on an index without the tiers (one built without `--samplesID`, such as
+  the one the benchmark `complete-test` builds): up to 2.8.1 a dense window there could still be
+  reported by its greedy worst-case alignment, whose listed carriers need not carry every variant in
+  it.
 
 ##### Input Arguments
 ---
@@ -2132,16 +2168,17 @@ To build a **different PAM** (NGG, NNGRRT, TTTN, …) on the shipped re-phased *
 
 **`complete-search --index-path <dir>`** — reuse a prebuilt/staged index library instead of building one under the working directory. A missing matching reference index is a hard error (rather than a silent rebuild), which is what you want on a read-only shared mount. A variant index is read from that library first, with its `_INDELS` index beside it, then from the working directory's `genome_library/`; a search builds no index in that library. The dataset's `Dictionaries/`, `samplesIDs/` and `Genomes/` stay in the working directory (links are fine).
 
-**`download`** — fetch reference data from a HuggingFace dataset repository over HF's CDN (typically much faster than the FTP/UCSC sources). `--what` selects the component: `genome`, `annotations`, `pams`, `samples`, `index` (with `--index-name`), `assembly` (with `--sample <HPRC id>`), `vcf` (with `--dataset` — the raw source VCFs of a variant panel, kept bgzipped under `VCFs/<dataset>/`; the default repo hosts `hg38_HGDP1kGP`, `hg38_HPRC` and `hg38_mega`, which you need only to build an index yourself), `build-inputs` (with `--dataset`: the pre-enriched genome kit that lets `build-index-only` skip enrichment for a new PAM; hosted for `hg38_HGDP1kGP` and `hg38_mega`), or `all` (genome + annotations + PAMs + samples; on hg38 `all` also fetches the default `NRG_3_hg38` reference index so a reference scan works with no on-demand build). For `--what index`, `--no-genotypes` skips the big separate Tier-1 genotype store; the Tier-0 registry it keeps still corrects allele frequencies and rsIDs, but **per-individual `Samples` and CONFIRMED cis phasing require the genotype tier**: without it a search runs the population-level analysis (each variant site's worst case, with no carriers but those of an indel, which the index itself holds), and `--per-sample` falls back to it with a warning — omit `--no-genotypes` for full dict-less variant-aware output. Default repo `lucapinello/crisprme-data`, overridable with `--hf-repo` or `CRISPRME_HF_REPO`:
+**`download`** — fetch reference data from a HuggingFace dataset repository over HF's CDN (typically much faster than the FTP/UCSC sources). `--what` selects the component: `genome`, `annotations`, `pams`, `samples`, `index` (with `--index-name`), `assembly` (with `--sample <HPRC id>`), `vcf` (with `--dataset` — the raw source VCFs of a variant panel, kept bgzipped under `VCFs/<dataset>/`; the default repo hosts `hg38_HGDP1kGP`, `hg38_HPRC` and `hg38_mega`, which you need only to build an index yourself), `build-inputs` (with `--dataset`: the pre-enriched genome kit that lets `build-index-only` skip enrichment for a new PAM; hosted for `hg38_HGDP1kGP` and `hg38_mega`), `genotype-oracle` (the phased genotypes and indel genotypes of a panel, by default HGDP + 1000 Genomes (`--panel HGDP1kGP`), into `Dictionaries/`, without its index: what `complete-search --prioritize-observed` checks a sites-only dataset's rows against; an installed index of the panel already holds them), or `all` (genome + annotations + PAMs + samples; on hg38 `all` also fetches the default `NRG_3_hg38` reference index so a reference scan works with no on-demand build). For `--what index`, `--no-genotypes` skips the big separate Tier-1 genotype store; the Tier-0 registry it keeps still corrects allele frequencies and rsIDs, but **per-individual `Samples` and CONFIRMED cis phasing require the genotype tier**: without it a search runs the population-level analysis (each variant site's worst case, with no carriers but those of an indel, which the index itself holds), and `--per-sample` falls back to it with a warning — omit `--no-genotypes` for full dict-less variant-aware output. Default repo `lucapinello/crisprme-data`, overridable with `--hf-repo` or `CRISPRME_HF_REPO`:
 
 ```bash
 crisprme.py download --what all --path /data/crisprme
 crisprme.py download --what index --index-name NRG_3_hg38 --path /data/crisprme
 crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /data/crisprme           # recommended default (phased HGDP + 1000 Genomes, 4,091 samples)
 crisprme.py download --what assembly --sample HG01255 --path /data/crisprme                            # an HPRC individual's diploid assembly (for assembly-search)
+crisprme.py download --what genotype-oracle --path /data/crisprme                                       # the phased HGDP + 1000 Genomes genotypes (complete-search --prioritize-observed on the mega panel)
 ```
 
-**`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`). Add `--dictless` for a variant index to drop the ~152 GB per-sample SNP dicts (the registry + genotype tiers replace them; indel logs kept), upload the genotype store as a separate companion, and bundle the samplesID lists so the index is self-complete:
+**`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`). Add `--dictless` for a variant index to drop the ~152 GB per-sample SNP dicts (the registry + genotype tiers replace them; indel logs kept), upload the genotype store as a separate companion, and bundle the samplesID lists so the index is self-complete. With the genotype store, the index's phased indel genotypes are uploaded on their own too (`indel_genotypes_<vcf>.tar.gz`; they stay in the index's archive as well), for `download --what genotype-oracle`:
 
 ```bash
 crisprme.py publish-index --index genome_library/NRG_3_hg38

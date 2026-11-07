@@ -77,6 +77,17 @@ except Exception:  # module absent in an old deploy -> legacy dict path only
     _phase_companion = None
     _snpsnp_companion = None
 
+# The phased indel genotypes (Dictionaries/indel_genotypes_<vcf>/), for the per-sample
+# rows: a carrier slot that also holds an indel changing the bases a SNP target covers does
+# not have the target (haplotype_prioritizer.breaking_indels / slots_holding). Guarded like
+# the tiers: without the modules, no carrier is taken off.
+try:
+    import haplotype_prioritizer as _hp
+    import indel_snp_cis as _isc
+except Exception:  # module absent in an old deploy -> carriers as before
+    _hp = None
+    _isc = None
+
 # Two-pass POPULATION-LEVEL analysis (docs/DESIGN_2.5.1_two_pass_fast_mode.md) -- the
 # DEFAULT since 2.5.3. Driven by the internal CRISPRME_FAST_MODE env var ("1" = default
 # population-level; "0" = per-sample genotype resolution, i.e. `crisprme.py ... --per-sample`)
@@ -143,6 +154,7 @@ _snp_snp_cooc_keys = set()
 # module body -- e.g. test_phased_haplotype's iupac_decomposition round-trip.
 myreg = None
 mygt = None
+myindels = None
 # Registry-only install (Tier-0 registry present, NO per-sample dict, NO genotype
 # tier -- e.g. a `--no-genotypes` download). Computed once after tier detection;
 # when True the variant finalizer emits degraded off-target rows (empty Samples ->
@@ -688,6 +700,104 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
     cluster_to_save.append(final_line)
 
 
+def _window_indels(start, n_bases):
+    """The indels of the phased indel store that change the bases start..start+n_bases-1
+    (0-based) of a SNP target, with their carriers (haplotype_prioritizer.changing_indels);
+    [] without the store."""
+    if myindels is None or n_bases <= 0:
+        return []
+    return _hp.changing_indels(myindels, start, start + n_bases - 1)
+
+
+def _drop_indel_slots(haplotypes, positions, start, n_bases):
+    """The observed haplotypes of a per-sample window less each carrier none of whose
+    phased slots holding the haplotype's SNPs (and no other SNP of the window) is free of
+    an indel that changes the target's bases: on those slots the target is not there. A
+    carrier whose genotypes cannot put them on slots stays listed, as does one whose indel
+    call is unphased; a haplotype left with no carrier gives no row (2.8.1 documented
+    these rows; 990 of 45,921 SNP row-blocks on chr22 of the HGDP + 1000 Genomes panel
+    named such a carrier)."""
+    window = _window_indels(start, n_bases)
+    if not window:
+        return haplotypes
+    out = []
+    for hap in haplotypes:
+        # only the indels some carrier of the haplotype has, and of those (an indel at one of
+        # its SNPs, or over one, is another allele of that base; one that leaves the target's
+        # bases, a repeat unit, takes no slot off) the ones that take the target off
+        carried = [w for w in window if not hap.carriers.isdisjoint(w[3])]
+        breakers = _hp.breakers_of(carried, {start + pc + 1: alt for pc, alt in hap.variant_set},
+                                   start, start + n_bases - 1, _ref_bases) if carried else []
+        if not breakers:
+            out.append(hap)
+            continue
+        # a carrier with none of them keeps the haplotype as it is
+        keep = hap.carriers.difference(*breakers)
+        for sid in hap.carriers - keep:
+            mine, others = [], []
+            for col in positions:
+                for i, alt in enumerate(col["alts"]):
+                    gt = col["carrier_gts"][i].get(sid)
+                    if gt is None:
+                        continue
+                    norm = _isc._for_alt(gt, col["alt_index"][i])
+                    if (col["pos_c"], alt) in hap.variant_set:
+                        mine.append(norm)
+                    else:
+                        others.append(norm)
+            if len(mine) != len(hap.variant_set):
+                keep.add(sid)
+                continue
+            got = _hp.slots_holding(mine, others,
+                                    [b[sid] for b in breakers if sid in b])
+            if got is None or got[0] or not got[1]:
+                keep.add(sid)
+        if keep:
+            hap.carriers = keep
+            out.append(hap)
+    return out
+
+
+def _ref_bases(a, b):
+    """The chromosome's reference bases a..b-1 (0-based), for haplotype_prioritizer."""
+    return genomeStr[max(a, 0):max(b, 0)]
+
+
+def _drop_indel_slots_dict(entries, slot, start, n_bases, window):
+    """The phased classic-dictionary path's counterpart of _drop_indel_slots: ``entries``
+    {key: [seq, samples, info]} of one haplotype slot (key = (pos_c, base, ...)), each
+    less the samples whose indel on that slot takes the target's bases off it (``window``:
+    _window_indels of the target's n_bases from start; an unphased indel call takes none
+    off). A haploid call (a male's chrX one) holds its allele on the sample's one
+    haplotype, which the seeding above puts on either slot: it takes the sample off both,
+    as a phased call takes it off its own."""
+    for key, value in entries.items():
+        if not value[1] or key[0] in ("greedy", "greedy_cfd", "lossless_hap"):
+            continue
+        carried = [w for w in window if not value[1].isdisjoint(w[3])]
+        if not carried:
+            continue
+        breakers = _hp.breakers_of(carried, {start + pc + 1: b for pc, b in zip(key[0::2],
+                                                                             key[1::2])},
+                                   start, start + n_bases - 1, _ref_bases)
+        if not breakers:
+            continue
+        drop = set()
+        for sid in value[1]:
+            for b in breakers:
+                gt = b.get(sid)
+                if gt is None:
+                    continue
+                toks, kind = _isc._gt_tokens(gt)
+                if kind == "unphased":
+                    continue
+                if toks[slot if slot < len(toks) else 0] == "1":
+                    drop.add(sid)
+                    break
+        if drop:
+            value[1] = value[1] - drop
+
+
 def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     """DICT-LESS observed-haplotype branch of iupac_decomposition.
 
@@ -923,6 +1033,8 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
         positions, refSeq, parse_haplotypes, ploidy_of, current_chr,
         max_putative=IUPAC_CAP, max_unions=_MAX_UNIONS, choose=_nearest,
     )
+    if myindels is not None:
+        haplotypes = _drop_indel_slots(haplotypes, positions, int(split[4]), len(refSeq))
 
     # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block).
     refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
@@ -1000,6 +1112,22 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
             and _t0c is not None:
         _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save)
         return
+    # A per-sample window denser than CRISPRME_IUPAC_CAP on the classic dictionaries (an
+    # index without the dict-less tiers): up to 2.8.1 its greedy worst-case alignment, whose
+    # carriers were those of any allele it took, so that nobody need carry it (5 rows of
+    # the README guide on the self-test's NGG_2_hg38_chr22+hg38_1000G named 102 individuals
+    # 114 times). The dictionary holds the same genotypes the tiers do: enumerate the
+    # haplotypes the window's carriers have, as the tiers' path does.
+    if not _FAST_MODE and not registry_only_mode and IUPAC_CAP >= 0 and _obshap is not None \
+            and _popsum is not None and _t0c is not None:
+        # the columns the window's lattice would take, counted as the code below counts them
+        _rt = split[2].replace("-", "")
+        _n_ref = len(genomeStr[int(split[4]): int(split[4]) + len(_rt)])
+        if split[6] == "-":
+            _rt = reverse_complement_table(_rt)
+        if sum(1 for _i, _c in enumerate(_rt) if _c in iupac_code and _i < _n_ref) > IUPAC_CAP:
+            _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save)
+            return
 
     realTarget = split[2]
     replaceTarget = split[2].replace("-", "")
@@ -1399,6 +1527,14 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                                     totalDict[count][lo][lk][1] = (
                                         totalDict[count][lo][lk][1] - hv[1]
                                     )
+
+            # a per-sample slot whose indel changes the target's bases does not have it
+            if haplotype_check and not capped and myindels is not None:
+                _window = _window_indels(int(split[4]), len(refSeq))
+                if _window:
+                    for lvl in totalDict[count]:
+                        _drop_indel_slots_dict(totalDict[count][lvl], count, int(split[4]),
+                                               len(refSeq), _window)
 
             refSeq_with_bulges = list(refSeq)
             for pos, char in enumerate(realTarget):
@@ -2150,6 +2286,31 @@ if _sites_only_registry and _twopass_emit is not None:
     if not _FAST_MODE:
         print(f"Sites-only dataset on {current_chr}: population-level post-analysis.")
     _FAST_MODE = True
+
+# The phased indel genotypes of this chromosome, for a per-sample search (_drop_indel_slots,
+# _drop_indel_slots_dict). A population-level row lists every carrier of any of its alleles
+# anyway, and the carrier gate (haplotype_prioritizer.py) reads this store for it.
+myindels = None
+if not _FAST_MODE and not registry_only_mode and _hp is not None:
+    try:
+        _ig_path = os.path.join(
+            os.path.dirname(os.path.dirname(sys.argv[2])),
+            "indel_genotypes_" + os.path.basename(os.path.dirname(sys.argv[2]))[
+                len("dictionaries_"):],
+            "gt_indel_" + current_chr + ".tsv.gz")
+        if os.path.basename(os.path.dirname(sys.argv[2])).startswith("dictionaries_") \
+                and os.path.isfile(_ig_path):
+            # (only the indels that meet a variant target of this chromosome: the positions
+            # the dictionary was read at)
+            _keys = globals().get("_needed_keys")
+            if _keys is None:
+                _keys = _collect_needed_dict_keys(sys.argv[3], current_chr)
+            myindels = _hp.IndelIndex(_ig_path, {int(_k.rsplit(",", 1)[1]) - 1 for _k in _keys})
+            print(f"Opened the phased indel genotypes for {current_chr} "
+                  f"({len(myindels.indels)} indels) at {_ig_path}")
+    except Exception as _ig_err:  # never break the run on a bad/old store
+        myindels = None
+        print("No phased indel genotypes (or unreadable) for", current_chr, "-", _ig_err)
 
 # check PAM position and relative coordinates on targets
 pam_at_beginning = False

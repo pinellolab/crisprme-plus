@@ -323,11 +323,18 @@ for count, line in enumerate(inEmpiricalResults):
 
 # High-variant-density regions (#144): load every
 # <out>.high_variant_density_regions.bed the search produced, so each off-target row
-# can be flagged when it lands in a dense window. In such a window the greedy
-# worst-case alignment is what gets reported and ADDITIONAL haplotype alignments may
-# exist -- the bed carries the region span, variant count, carriers and the FULL IUPAC
-# protospacer, surfaced verbatim so an interested user can dig into the other alignments.
+# can be flagged when it lands in a dense window. In a population-level search such a
+# window is reported by its greedy worst-case alignment and ADDITIONAL haplotype
+# alignments may exist; under --per-sample a genotyped dataset's dense window is the
+# haplotypes its carriers have, as any window (new_simple_analysis.py; since 2.9.0 on the
+# classic dictionaries too), and a row that names no carrier, a sites-only dataset's, is
+# still the population-level analysis's -- the bed carries the region span, variant count,
+# carriers and the FULL IUPAC protospacer, surfaced verbatim so an interested user can dig
+# into the other alignments.
 hvdr_by_chrom = {}
+# the search's mode, as new_simple_analysis.py reads it (CRISPRME_FAST_MODE: "1" =
+# population-level, "0" or unset = per-sample)
+_PER_SAMPLE = not int(os.environ.get("CRISPRME_FAST_MODE", "0") or "0")
 try:
     _hvdr_folder = os.path.dirname(outFile_name) or "."
     for _bed in glob.glob(
@@ -350,7 +357,10 @@ except Exception as _hvdr_err:  # never break integration on a bad/missing bed
     print("high-variant-density BED join skipped:", _hvdr_err)
 
 
-def _hvdr_note(chrom, pos):
+def _hvdr_note(chrom, pos, greedy=True):
+    # ``greedy``: the row is its window's greedy worst-case alignment (a population-level
+    # one, or a sites-only dataset's); False for a per-sample row, one of the haplotypes
+    # the window's carriers have
     tree = hvdr_by_chrom.get(chrom)
     if not tree:
         return "NA"
@@ -358,10 +368,16 @@ def _hvdr_note(chrom, pos):
     if not hits:
         return "NA"
     nvar, iupac = sorted(hits)[0].data
-    note = (
-        "high_variant_density (%s variants): a greedy worst-case alignment is "
-        "reported here; additional haplotype alignments may exist" % nvar
-    )
+    if greedy:
+        note = (
+            "high_variant_density (%s variants): a greedy worst-case alignment is "
+            "reported here; additional haplotype alignments may exist" % nvar
+        )
+    else:
+        note = (
+            "high_variant_density (%s variants): the haplotypes its carriers have are "
+            "reported here" % nvar
+        )
     if iupac:
         note += "; full_IUPAC=%s" % iupac
     return note
@@ -1170,10 +1186,13 @@ for nline, line in enumerate(inCrispritzResults):
             saveDict["Susceptible_to_TBE"] = "y"
 
     # #144: flag this off-target if it lands in a high-variant-density window
-    # (chrom=target[4], highest-CFD start=target[5]); "NA" otherwise.
+    # (chrom=target[4], highest-CFD start=target[5]); "NA" otherwise. A per-sample row
+    # names its carriers (target[13]; "NA" for a reference row), but a sites-only
+    # dataset's, which names none.
     try:
         saveDict["High_variant_density_region"] = _hvdr_note(
-            str(target[4]), int(target[5])
+            str(target[4]), int(target[5]),
+            greedy=not _PER_SAMPLE or not str(target[13]).strip()
         )
     except (ValueError, IndexError):
         saveDict["High_variant_density_region"] = "NA"

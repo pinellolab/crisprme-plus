@@ -2637,9 +2637,10 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
     dictionaries, and takes the CONFIRMED/PUTATIVE cis phasing, the SNP+SNP
     co-occurrence and the exact joint AF from the dict-less tiers, which a build without
     --samplesID does not write (the benchmark complete-test's, a build from the web
-    Settings page). On such an index its banner promised them all the same. Its
-    post-analysis also still reports a dense window by its greedy worst-case alignment,
-    with the carriers of any of the variants that alignment takes. The search records
+    Settings page). On such an index its banner promised them all the same. (Up to 2.8.1
+    its post-analysis also reported a dense window by its greedy worst-case alignment, with
+    the carriers of any of the variants that alignment takes, and the banner said so;
+    since 2.9.0 it gives the haplotypes the window's carriers have.) The search records
     the datasets it names so (.untiered_datasets), for the report's Search mode row
     (test_generate_report), which cannot tell from the results; and beside them every
     dataset it searches (.variant_datasets), as no column of a row says its dataset. A
@@ -2695,10 +2696,8 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                     "is reported for its variants, whose allele frequencies are the AF of those "
                     "dictionaries (an indel's, of the index's indel log), which CRISPRitz "
                     "add-variants copied from its VCF: a variant whose AF they give as 0, or not "
-                    "at all, has no frequency. Where its variants are dense, a window can still "
-                    "be reported by its greedy worst-case alignment, flagged in "
-                    "High_variant_density_region, whose listed carriers need not carry every "
-                    "variant in it. To get the tiers, rebuild the index with build-index-only "
+                    "at all, has no frequency. To get the tiers, rebuild the index with "
+                    "build-index-only "
                     "--samplesID, or download a prebuilt one (crisprme.py download --what index "
                     "--index-name NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
                     "dense panels; pass --population-level for the fast worst-case screen.\n", out)
@@ -2720,9 +2719,8 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
             "come from those tiers, and in either mode its variants' allele frequencies are the "
             "AF of those dictionaries (an indel's, of the index's indel log), which CRISPRitz "
             "add-variants copied from its VCF (a variant whose AF they give as 0, or not at all, "
-            "has no frequency); where its variants are dense, it can still report a window by "
-            "its greedy worst-case alignment, whose listed carriers need not carry every variant "
-            "in it. To get the tiers, rebuild the index with build-index-only --samplesID, or "
+            "has no frequency). To get the tiers, rebuild the index with build-index-only "
+            "--samplesID, or "
             "download a prebuilt one (crisprme.py download --what index --index-name "
             "NRG_3_hg38+hg38_HGDP1kGP). "), out)
         self.assertNotIn("the VCF gives", out)
