@@ -59,8 +59,9 @@ names, P14 and N7, each recorded here).
 
 *Found fixed already (checked on this branch):* P8 (fixed in 2.8.1: the tier path writes the REF
 protospacer's mismatches in lower case, as the dictionary path does, CHANGELOG [2.8.1], covered by
-`test_tier_ref_columns`, which unit-tests.yml runs); P12 (exit 2 since 2.8.1); t31 P6 (C3 of 2.8.1: every
-folder named, exit 2, and the banner says reference when the smoke runs reference-only); R2-F3;
+`test_tier_ref_columns`, which unit-tests.yml runs); P12 (exit 2 since 2.8.1); t31 P6 (C3 of
+2.8.1: every folder named, exit 2, and the banner says reference when the smoke runs
+reference-only); R2-F3;
 R4-5; WEB-8; cli5 D5 (= IDX-7); IDX-20 (2.8.1 runs a store-less install population-level and says
 why); F3 of the docs review (a wrong-side all-N variant index is named by the search script's
 refusal since 2.8.1); F6 of the docs review (DYNAMIC_PAM §1 says a 3′ PAM); install P4 (Biopython's
@@ -379,9 +380,11 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   index, which the indel search reads at any bulges, is still found or built as before. The web's
   progress page still reads the indexing step as done. A personal-assembly search with no bulges
   no longer builds a reference index per haplotype (R4-4). On chr22 with HGDP + 1000 Genomes, a
-  search with no bulges of `NGCG`, which no installed index holds, ran in 67 s and built only
-  `NGCG_1_hg38+hg38_HGDP1kGP_INDELS`; its record of the indexes searched says `Reference_index
-  none` and `Variant_index:hg38_HGDP1kGP none`, each with why.
+  search with no bulges of `NGCG`, which no installed index holds, built only the index of its
+  indels, `20-NGCG_1_hg38+hg38_HGDP1kGP_INDELS`, in 50 s with nothing on stderr, where 2.8.1 built
+  `NGCG_1_hg38` and `NGCG_1_hg38+hg38_HGDP1kGP` as well (54 s); its record of the indexes searched
+  says `Reference_index none` and `Variant_index:hg38_HGDP1kGP none`, each with why, the second
+  naming that index of its indels.
 - **A search its input check refuses leaves its output folder empty.** A guide without its
   PAM's `N` padding, for one, is refused before the search starts, but the run had written
   `.command_line.txt`, `.version.txt`, `Params.txt` and `guides.txt` into `Results/<output>/`,
@@ -682,8 +685,10 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   bulges + 1: `NRR_2_hg38` for a search of 1 DNA and 1 RNA bulge, the default, where every index
   published is of N = 3, so the download it advised stopped on `No index 'NRR_2_hg38' found`. It
   names the one of N = 3 for up to 2 bulges (`NRR_3_hg38`), "if it is published", as the refusal
-  for want of a variant index does. Covered by `PostProcess/test_index_resolution.py` and
-  `test_bulge_cap.py`.
+  for want of a variant index does. On chr22 with HGDP + 1000 Genomes, both refusals of a search of
+  1 + 1 bulge under an empty `--index-path` name `NRR_3_hg38`, which the Hub holds, and the Hub
+  holds no `NRR_2_hg38` (`download` stops on it), nor an `NGCG_3_hg38`. Covered by
+  `PostProcess/test_index_resolution.py` and `test_bulge_cap.py`.
 - **A variant index of `--index-path` whose dictionaries are not in the working directory is
   named.** complete-search said "No prebuilt variant index found" for a dataset whose variant
   index the library held (IDX-17 c): it says that the index is there, that a search reads the
@@ -719,7 +724,9 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   combination of mismatches and bulges"), and a web search of 4 + 2 + 2 could not select its
   sites of 8, nor a complete-search of 4 + 1 + 1 its sites of 6. It offers 0 to mismatches + DNA
   + RNA, up to the cap on them together (Max edits, `--max-total-edits`), and opens on that; a
-  job written before the DNA and RNA lines of its parameters is shown as before. Covered by
+  job written before the DNA and RNA lines of its parameters is shown as before. On chr22 with
+  HGDP + 1000 Genomes, a complete-search of 4 + 1 + 1 drew the plots of totals 4 to 6, and its
+  selector offered 0 to 5 and opened on 5: it offers 0 to 6 and opens on 6. Covered by
   `PostProcess/test_web_results_links.py` (in the image).
 - **The report of a search of two or more variant datasets names them all.** A search of a
   `--vcf` list of two names its results file after the last dataset alone, and its report
@@ -729,13 +736,16 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   with the run's counts (its panel is the samples the search ran with, each under its
   dataset), and says that each variant's frequency is that of its own dataset's panel, as
   each dataset is searched with its own. A search of one dataset, or a result folder of an
-  earlier release, is reported as before. Covered by `PostProcess/test_generate_report.py`.
+  earlier release, is reported as before: `generate-report` of a chr22 search of HGDP + 1000
+  Genomes gives the same labels and registry counts with its list of one dataset, and names both
+  datasets, crediting no registry, with a list of two. Covered by
+  `PostProcess/test_generate_report.py`.
 - **The report of a search with no variant dataset fits a personal haplotype too.** It said
   `none (reference genome only)` and "Sites in the reference genome", also in the report of
   each haplotype of assembly-search, a search of a personal genome (RV1-F2): it says `none
-  (no variant dataset searched)`, and "Sites in the genome searched (hg38)", or
-  (`HG01255_paternal_5aeb0fc6`), the genome the search names. Covered by
-  `PostProcess/test_generate_report.py`.
+  (no variant dataset searched)`, and "Sites in the genome searched (hg38)", with the name the
+  search gives the genome: `WALK01_paternal_575e5055` in the paternal report of an assembly-search
+  of the walkthrough's bundle. Covered by `PostProcess/test_generate_report.py`.
 - **The report of a search that computed no score says so in place of its score tables.** A
   Cas12a search, or one of any PAM on the 5′ side, computes neither CFD nor CRISPR-Bulge, and
   its report printed the risk card's CFD bands and Section 4's CFD tiers, each 0, and the
@@ -743,16 +753,20 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   the panel was chosen by mismatches and bulges alone (cli5 D6). The card and Section 4 say
   that neither score is computed for the nuclease and that the panel is chosen by mismatches
   and bulges, and the panel's note says how; assembly-search's combined report too. A scored
-  search's report is unchanged. Covered by `PostProcess/test_generate_report.py`.
+  search's report is unchanged. A Cas12a (`TTTV`) search of chr22 with no bulges reports so.
+  Covered by `PostProcess/test_generate_report.py`.
 - **`download --what index` brings again the dictionaries an installed variant index has
-  lost.** A search of a variant index whose dictionaries were gone (`Dictionaries/registry_<dataset>`
-  or `dictionaries_<dataset>`, and `log_indels_<dataset>`) said to download the index again,
+  lost.** A search of a variant index whose dictionaries were gone
+  (`Dictionaries/registry_<dataset>` or `dictionaries_<dataset>`, and `log_indels_<dataset>`) said
+  to download the index again,
   and complete-search's check said to download it, but the download took the index for
   installed, as its folder, its INDELS index, the reference index and the genotype store were
   there, and did nothing (FR :163). It counts the dictionaries a search reads as part of the
   install, and brings them with the rest of the index's archive. The search's advice names the
   command, and says that in the web app, whose Settings page downloads no index that is
-  installed, the index is removed there first. Covered by `PostProcess/test_crisprme_hf.py` and
+  installed, the index is removed there first. With the Hub offline, a download of
+  `NRR_3_hg38+hg38_HGDP1kGP` over an install of it without the dictionaries said "already
+  installed" before, and goes to fetch it now. Covered by `PostProcess/test_crisprme_hf.py` and
   `test_index_resolution.py`.
 - **assembly-search searches a haplotype again when its FASTA files changed since its
   result.** A run of the same `--output` reused a finished haplotype search whose parameters
@@ -761,7 +775,10 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   reconciled (R4-6). Each haplotype's result records the genome it was searched from (the
   folder and the fingerprint of its FASTA files, as an index records it), and a run reuses it
   only while the genome is that one; a result of CRISPRme 2.8.1 or earlier, which records
-  none, is searched again. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+  none, is searched again. An assembly-search of the walkthrough's bundle, run again after a base
+  of the maternal on-target was changed, reused the paternal result and searched the maternal
+  haplotype again (one perfect match, not two), where the code before reused both. Covered by
+  `PostProcess/test_assembly_haplotype_genomes.py`.
 - **A search keeps no INDELS index it built while build-index-only put the SNP codes on the
   fake-indel genome.** build-index-only marks that genome unfinished only just before the
   first FASTA it changes, so a search past its check of the mark before then built its INDELS
@@ -775,7 +792,8 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   its column holds -1, and the stars of the perfect matches were drawn there, below the axes,
   while the legend listed them (wsearch N3). A perfect match is starred, and in the legend,
   only at a score of its own; the plot of the count of edits stars them as before. The
-  results page's plots and the Personal Risk Cards' alike. Covered by
+  results page's plots and the Personal Risk Cards' alike: the CFD plot of the Cas12a search above,
+  whose one site is its on-target, names no perfect match. Covered by
   `PostProcess/test_top_plots.py`.
 - **The web's per-sample option and the report's advice say what a web user can do.** The
   search form disabled Per-sample for a genotyped dataset whose index is not built yet (listed
