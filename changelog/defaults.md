@@ -722,8 +722,8 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   search draws the population plots of 0 to its mismatches + DNA + RNA bulges (WEB-4): a web
   search of 4 mismatches and no bulge opened on 5, which has no plot ("No result found for this
   combination of mismatches and bulges"), and a web search of 4 + 2 + 2 could not select its
-  sites of 8, nor a complete-search of 4 + 1 + 1 its sites of 6. It offers 0 to mismatches + DNA
-  + RNA, up to the cap on them together (Max edits, `--max-total-edits`), and opens on that; a
+  sites of 8, nor a complete-search of 4 + 1 + 1 its sites of 6. It offers 0 to mismatches +
+  DNA + RNA, up to the cap on them together (Max edits, `--max-total-edits`), and opens on that; a
   job written before the DNA and RNA lines of its parameters is shown as before. On chr22 with
   HGDP + 1000 Genomes, a complete-search of 4 + 1 + 1 drew the plots of totals 4 to 6, and its
   selector offered 0 to 5 and opened on 5: it offers 0 to 6 and opens on 6. Covered by
