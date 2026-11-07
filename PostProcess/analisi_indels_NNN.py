@@ -1395,32 +1395,36 @@ def _reference_pam(final_result, ref_aligned, hap_start=None):
       alignment's bases.
     * A row whose REF alignment is its ALT: the reference holds this very target at the
       row's start, PAM included: its REF alignment's bases (not created; since 2.10.0).
-    * An insertion or a deletion (since 2.10.0): the PAM is judged where the reference
-      holds it whatever place of its repeat the VCF writes the indel at
+    * An insertion, a deletion or a complex record (since 2.10.0): the PAM is judged where
+      the reference holds it whatever place of its repeat the VCF writes the indel at
       (indel_snp_cis.pam_reference_place), on the row's haplotype, the reference with the
       row's indel and SNP alts: the reference bases the PAM sits on in a placement of the
       indel that leaves it on reference bases; else the reference PAM beside the
       protospacer's base that touches the PAM, in a placement that leaves that base on the
-      reference; else (an insertion holding that base wherever it is placed) None. Where
-      the VCF's placement leaves the PAM on reference bases, those are the bases read up
-      to 2.8.1, through the indel: a PAM past an indel inside the target sits
-      len(REF) - len(ALT) bases from where the REF alignment, read from the row's start,
-      puts it, which up to 2.8.0 flagged a PAM the reference already has as created.
-      Up to 2.10.0's first fixes a PAM holding bases an insertion adds, or across a
-      deletion's junction, was judged where the VCF writes the indel: on a row that
-      starts on a reference base, on its REF alignment's window, which is not the
-      reference PAM beside the protospacer when the indel lies between them (the - strand
-      with a 3' PAM, the + strand with a 5' one: chr3:154367344 (-), C>CCT, read AGG as
-      created beside a reference GGG; chr22:21056178 (-), CT>C, read the deleted bases,
-      CTC, GAG on -, as not created where the reference holds TCT, AGA on -, beside the
-      protospacer), and on a row that starts inside an insertion by the inserted-PAM
-      rules there, so an insertion of a repeat unit beside a reference PAM, written left
-      of it, read as created (with NRR, chr22:25415044 (-), the same alignment as its
-      site's reference row).
-    * Any other record (an MNV, a complex record whose ALT bases stand in REF bases'
-      places): as up to 2.8.1, a PAM on reference bases read on them through the record,
-      and one holding its ALT bases on the REF alignment's window, the reference under
-      them.
+      reference; else (an insertion holding that base wherever it is placed) None. A
+      complex record (REF bases replaced, and bases added or lost: A>T plus inserted
+      bases) is its replaced bases, read as the REF bases they replace, as a SNP alt is,
+      and its added bases (or lost ones), placed as an insertion's (a deletion's): a PAM
+      made of its added bases is judged as one made of an insertion's. Where the VCF's
+      placement leaves the PAM on reference bases, those are the bases read up to 2.8.1,
+      through the indel: a PAM past an indel inside the target sits len(REF) - len(ALT)
+      bases from where the REF alignment, read from the row's start, puts it, which up to
+      2.8.0 flagged a PAM the reference already has as created. Up to 2.8.1 a PAM holding
+      an indel's ALT bases, or across a deletion's junction, was read on the REF
+      alignment's window, from the row's start: on a row that starts on a reference base
+      that is not the reference PAM beside the protospacer when the indel lies between
+      them (the - strand with a 3' PAM, the + strand with a 5' one: chr3:154367344 (-),
+      C>CCT, read AGG as created beside a reference GGG; chr22:21056178 (-), CT>C, read
+      the deleted bases, CTC, GAG on -, as not created where the reference holds TCT, AGA
+      on -, beside the protospacer), and on a row that starts inside an insertion, which
+      2.8.1 started past the anchor, it is reference bases the target does not hold.
+      Judged where the VCF writes it, a repeat unit inserted beside a reference PAM,
+      written left of it, would put inserted bases in a PAM the reference holds (with NRR,
+      chr22:25415044 (-), the same alignment as its site's reference row); placed further
+      right, the PAM is on the reference's own bases: not created.
+    * An MNV (no base added or lost): as up to 2.8.1, a PAM on reference bases read on them
+      through the record, and one holding its ALT bases on the REF alignment's window,
+      which for an MNV is the reference under them.
 
     ``hap_start`` is the target's first base on the haplotype carrying the indel (the
     window's real start plus its offset there); it is the row's start except for a row
@@ -1509,10 +1513,11 @@ def _queue_row(final_result, hap_start=None):
     # The reference bases are those of the PAM's place on the reference, read through the
     # indel wherever in its repeat it sits (_reference_pam), not the REF alignment's,
     # which is read from the row's start -- except where the REF alignment is the ALT
-    # (the reference holds this very target there) or the record is not an insertion or
-    # a deletion. A PAM with no place on the reference (_reference_pam's None: an
-    # insertion that holds the protospacer's base touching the PAM wherever it is placed)
-    # was created by the insertion, and is written as the SNP path writes a created PAM.
+    # (the reference holds this very target there) or the record is an MNV (whose window
+    # is the reference under the PAM). A PAM with no place on the reference
+    # (_reference_pam's None: an insertion, or a complex record's added bases, that holds
+    # the protospacer's base touching the PAM wherever it is placed) was created by the
+    # indel, and is written as the SNP path writes a created PAM.
     ref_pam = _reference_pam(final_result, ref_aligned, hap_start)
     if ref_pam is None:
         final_result[10] = final_result[2][pam_begin:pam_end].upper()

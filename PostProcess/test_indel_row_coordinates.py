@@ -27,9 +27,10 @@ wherever in its repeat the VCF writes the indel (indel_snp_cis.pam_reference_pla
 target whose PAM an insertion adds right after a reference protospacer does not move, and
 its PAM is not created on a tandem duplication of the PAM's bases or where the reference
 holds another PAM beside the protospacer (DUPS); the geometries where that rule reads
-another PAM than 2.10.0's first fixes did (PLACED: a repeat insertion moved off the PAM, the
-reference PAM beside the protospacer of a row that starts on its anchor, a deletion across
-a - strand PAM, Cas12a on both strands).
+another PAM than 2.10.0's unreleased drafts did (PLACED: a repeat insertion moved off the
+PAM, the reference PAM beside the protospacer of a row that starts on its anchor, a deletion
+across a - strand PAM, Cas12a on both strands, and complex records, judged as their replaced
+and added or lost bases).
 
 Needs pandas and numpy (the analyzer imports them); intervaltree is stubbed when it is
 not installed. Run: python -m unittest test_indel_row_coordinates -v
@@ -245,7 +246,7 @@ class _PlantedDuplications(object):
 # reference bases put at the site, the record (offset of its VCF POS's base, 0-based, from
 # the site's first base; REF; ALT), the target as shown, the offset of its first base on the
 # haplotype carrying the record, the offset the row starts at, the expected PAM_gen). Each
-# one's PAM_gen differs from 2.10.0's first fixes' (in brackets), which judged a PAM holding
+# one's PAM_gen differs from 2.10.0's drafts' (in brackets), which judged a PAM holding
 # inserted bases, or a deletion's junction, where the VCF writes the indel.
 def _placed_sites():
     rc20 = rc(G20)
@@ -273,6 +274,25 @@ def _placed_sites():
             # (-) TTCCA after the anchor G, a target from its 3rd base, the PAM wholly
             # inserted, the reference CCG (CGG on -) beside the protospacer: n [TGG]
             ("W2", "-", "CCG" + rc20 + "TTGCA", (2, "G", "GTTCCA"), G20 + "TGG", 5, 2, "n"),
+            # complex records (REF bases replaced and bases added or lost), judged as their
+            # replaced bases, read as the REF bases they replace, and their added (lost)
+            # bases, placed as an insertion's (a deletion's); in brackets, on
+            # 50803b6, which read a complex record on the REF alignment's window:
+            # (+) A>T and a target added after it, its PAM and the protospacer's end added
+            # bases, the row at the replaced A: created [the window from it, AGG: n]
+            ("CX1", "+", "A" + "GTCAGTCAGTCAGTCAGTC" + "AGG" + "CATTAC",
+             (0, "A", "T" + "CCGTA" + G20 + "TGG" + "CATCC"), G20 + "TGG", 6, 0, "TGG"),
+            # (-) its mirror, C>T and the bases added: created [the window CCG, CGG on -: n]
+            ("CX2", "-", "C" + "C" + "GTAGTAGTAGTAGTAGTAGTAGTA" + "CATTAC",
+             (0, "C", "T" + "GTCAG" + rc(G20 + "TGG") + "GATCA"), G20 + "TGG", 6, 0, "TGG"),
+            # (-) G>CCA, the row on the replaced G, the PAM CCA it and two added bases, the
+            # reference CTG (CAG on -) beside the protospacer: n [the window GGC, GCC on -:
+            # TGG]
+            ("CX3", "-", "CT" + "G" + rc20 + "TTAA", (2, "G", "CCA"), G20 + "TGG", 2, 2, "n"),
+            # (-) TG>C, T replaced and G lost, the junction inside the PAM CCA: the
+            # reference TGA (TCA on -) beside the protospacer: created [the window CTG, CAG
+            # on -, with the lost G: n]
+            ("CX4", "-", "CTGA" + rc20 + "TTGCA", (1, "TG", "C"), G20 + "TGG", 0, 0, "TGG"),
         ],
         "5p": [
             # (+) T>TTT at the end of a T run (unnormalized): placed 3 bases left, the PAM
@@ -283,6 +303,11 @@ def _placed_sites():
             # [the window TAAA, TTTA on -: n]
             ("B3", "-", f23[:19] + "CCCC" + "TAAA" + "GTCAGT",
              (18, f23[18], f23[18] + f23[19:] + "TAAA"), "TTTA" + G23, 0, 0, "TTTA"),
+            # (+) a complex record, T>G and a target added after it, the PAM and the
+            # spacer's first bases added: created [on 50803b6 the window from the
+            # replaced T, TTTA: n]
+            ("CB5", "+", "T" + "TTA" + "GGCCAGGCCAGG" + "CATTAC",
+             (0, "T", "G" + "CA" + "TTTC" + G23 + "GC"), "TTTC" + G23, 3, 0, "TTTC"),
         ],
     }
 
@@ -477,7 +502,7 @@ class RowCoordinates(unittest.TestCase):
         not move), its REF text is the reference from there, and its PAM_gen is NA where
         the insertion copies the reference's own PAM (REF = ALT) or the reference holds
         another valid PAM beside the protospacer, the ALT's PAM where it holds none, as up
-        to 2.8.1, whose REF alignment read those bases. 2.10.0's first inserted-PAM rule
+        to 2.8.1, whose REF alignment read those bases. A 2.10.0 draft of the inserted-PAM rule
         took every such PAM for created (TRAC, HGDP + 1000 Genomes: chr22:20586277 (+),
         REF = ALT)."""
         p = _PlantedDuplications(side)
@@ -501,7 +526,7 @@ class RowCoordinates(unittest.TestCase):
         """2.10.0: a PAM holding inserted bases, or a deletion's junction, is judged wherever
         in its repeat the VCF writes the indel, through the shipped analyzer: each planted
         row starts where it should and gets the PAM_gen of _placed_sites, which 2.10.0's
-        first fixes did not give it (a repeat insertion moved off the PAM, the reference PAM
+        drafts did not give it (a repeat insertion moved off the PAM, the reference PAM
         beside the protospacer on a row that starts on a reference base or inside an
         insertion, a deletion's junction on the - strand, Cas12a on both strands)."""
         p = _PlantedPlacements(side)

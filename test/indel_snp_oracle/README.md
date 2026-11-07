@@ -1,7 +1,7 @@
 # SNP+indel oracle (synthetic, real CLI)
 
 `run_oracle.sh <empty work dir> [<oracle dir>] [cas12a]` runs inside a CRISPRme image. It
-generates a 21 kb reference chromosome and a phased VCF of 85 samples (`oracle.py
+generates a 22 kb reference chromosome and a phased VCF of 89 samples (`oracle.py
 generate`), builds the indexes and dictionaries with `build-index-only`, runs
 `complete-search` with `--per-sample` and with `--population-level`, then checks every row
 whose variant list holds an indel or an MNV (`oracle.py check`) against each sample's two
@@ -37,8 +37,10 @@ built whole (an insertion's bases rotated through its repeat, a deletion's junct
 through it): created when no placement leaves the PAM on reference bases holding the motif,
 and, where none leaves it on reference bases at all, when the reference PAM beside the
 protospacer's base that touches the PAM lacks the motif in a placement that leaves that base
-on the reference, or when no placement does (an MNV: the reference bases under the PAM). The
-planted sites then pin who has which target:
+on the reference, or when no placement does (an MNV: the reference bases under the PAM; a
+complex record, bases replaced and bases added or lost: its first min(len(REF), len(ALT))
+changed bases in the places of the REF bases they replace, read as those, and its other bases
+an insertion's or a deletion's). The planted sites then pin who has which target:
 
 | Site | Planted | Expected |
 |---|---|---|
@@ -73,6 +75,10 @@ planted sites then pin who has which target:
 | QD | (-) CA>C deletes the A of CCAG before the protospacer, its junction inside the PAM CCG (CGG on -) | S83 CFD 1; PAM_creation CGG (the reference holds CAG, CTG on -, beside the protospacer; the window from the row's start, CCA, is TGG on -, another protospacer's PAM) |
 | QW | (-) TTCCA inserted after the anchor G: a target from its 3rd added base, its PAM the last three, and the reference's CCG (CGG on -) before the protospacer | per-sample (the reference's own target represents the site in a population-level run): S84 CFD 1 at the anchor; PAM_creation NA |
 | QA | (+) G[16:] + TGG inserted after G[15], no repeat | S85 CFD 1; PAM_creation TGG (the protospacer's end and the PAM are inserted wherever the insertion sits; the window holds AGG) |
+| QX | (+) a complex record, A>T and 33 bases added after it that hold a whole target from the 6th, its PAM and the protospacer's end added bases | S86 CFD 1, the row at the replaced A; PAM_creation TGG (as for the insertion of those bases after an anchor; the window, read from the replaced A, holds AGG) |
+| QY | (-) its mirror, C>T and the bases added, the PAM (forward CCA) and the protospacer's first forward base added | S87 CFD 1; PAM_creation TGG (the window, CCG from the replaced C, is CGG on -) |
+| QZ | (-) a complex record, G>CCA: the row starts on the replaced G, its PAM CCA (TGG on -) that base and the two added ones, the protospacer reference bases, and the reference holds CTG (CAG on -) beside it | S88 CFD 1, the site's row in both modes; PAM_creation NA (the window from the replaced G, GGC, is GCC on -) |
+| QV | (-) a complex record, TG>C: the T replaced by C and the G lost, the junction inside the PAM CCA (TGG on -) | S89 CFD 1; PAM_creation TGG (the reference holds TGA, TCA on -, beside the protospacer; the window from the row's start, CTG, is CAG on -, with the lost G) |
 
 The `cas12a` profile (a 3.8 kb reference, 11 samples, 5' PAM TTTV, a 20-nt spacer; CFD is not
 computed for a 5' PAM, so a perfect row is one with no mismatch and no bulge):
@@ -151,8 +157,8 @@ on a haplotype holding every SNP it names, the target's first base at the row's 
 unphased one must carry every SNP it names. (A row naming two alts of one position, which no
 haplotype holds, is counted and not checked: site N2's lone `2|1` carrier of an alt on a
 multi-allelic VCF line is read by the SNP path as carrying the other alt too, a defect of its
-own.) Sites Y1-Y4 sit at 17000-17900 and use samples S70-S78 (the reference is 21 kb, the
-panel 85 samples):
+own.) Sites Y1-Y4 sit at 17000-17900 and use samples S70-S78 (the reference is 22 kb, the
+panel 89 samples):
 
 | Site | Planted | Expected (per sample) |
 |---|---|---|
@@ -178,3 +184,11 @@ and CB1 and CB3 in the `cas12a` profile (samples S79-S85 and S10-S11; the refere
 sites (rows read where the VCF writes the indel: on their REF alignment's window from the row's
 start, or, for a row starting inside an insertion, by the inserted-PAM rules there); on the
 released v2.8.1 image 204 and 60 times.
+
+The complex records' reading (a complex record's replaced bases read as the REF bases they
+replace, its added or lost bases placed as an insertion's or a deletion's) added sites QX, QY,
+QZ and QV (samples S86-S89; the reference grew to 22 kb). On 50803b6, which left a complex
+record to its REF alignment's window, the SpCas9 oracle fails 31 times, all at those sites; on
+37d81de, whose inserted-PAM rules already read QX and QY right (their rows start inside the
+added bases), 57 times (the 42 above and 15 at QZ and QV); on the released v2.8.1 image 231
+times. The `cas12a` profile is unchanged: 0 failures on 50803b6, 10 on 37d81de, 60 on v2.8.1.

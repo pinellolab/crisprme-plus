@@ -638,17 +638,26 @@ def _pam_place_every_placement(genome, indel, snps, first, n, k, pam_right):
     """pam_reference_place's rule read the long way: every place of the indel that gives
     the same haplotype (the reference with the row's indel and SNP alts) is built whole,
     each of its bases mapped to the reference, and the rule's three steps are read off
-    those maps: the VCF's placement first, then the ones right of it, then left."""
+    those maps: the VCF's placement first, then the ones right of it, then left. A complex
+    record's first min(len(REF), len(ALT)) changed bases are written into the reference
+    as the SNP alts are, in the places of the REF bases they replace (whose reference
+    bases are read), and its other ALT bases added after them, or its other REF bases
+    deleted; the haplotype so built is the record's (checked)."""
     ipos, iref, ialt = indel
     c, t = _trims(iref, ialt)
     rm, am = iref[c:len(iref) - t], ialt[c:len(ialt) - t].upper()
-    if bool(rm) == bool(am):
+    if len(rm) == len(am):
         return None
     rs = list(genome.upper())
     for p, _r, a in snps:
         rs[p - 1] = a.upper()
+    whole = "".join(rs[:ipos - 1]) + ialt.upper() + "".join(rs[ipos - 1 + len(iref):])
+    r = min(len(rm), len(am))
+    for i in range(r):  # a complex record's bases in REF bases' places
+        rs[ipos - 1 + c + i] = am[i]
     rs = "".join(rs)
-    a0, d, m = ipos - 1 + c, len(rm), len(am)
+    rm, am = rm[r:], am[r:]
+    a0, d, m = ipos - 1 + c + r, len(rm), len(am)
 
     def build(at, ins):
         if m:
@@ -657,6 +666,7 @@ def _pam_place_every_placement(genome, indel, snps, first, n, k, pam_right):
         return rs[:at] + rs[at + d:], list(range(at)) + list(range(at + d, len(rs)))
 
     h0 = build(a0, am)[0]
+    assert h0 == whole, (indel, snps)
     maps = []
     span = m + d + n + k + 8
     for at in sorted(range(a0 - span, a0 + span + 1),
@@ -689,14 +699,16 @@ def _bases(genome, k, place):
     return place[0], frozenset(genome[lo:lo + k].upper() for lo in place[1])
 
 
-def _random_pam_rows(seed, count):
+def _random_pam_rows(seed, count, complex_share=0.0):
     """Random indel rows: a reference holding a tandem repeat (a unit of 1 to 6 bases, 1 to
     12 times) or none, an insertion (of whole units, a rotated or a broken unit, or random
     bases) or a deletion in or beside it, written left-aligned as bcftools norm writes it
     or at another place of its repeat, with its anchor, without one, or with a shared tail;
     0 to 2 SNP alts near it; a target of 20 to 24 bases holding the indel's changed bases
-    or its junction, with a PAM of 3 or 4 bases at either end. Yields (genome, indel, snps,
-    first, n, k, pam_right)."""
+    or its junction, with a PAM of 3 or 4 bases at either end. With ``complex_share``, that
+    share of the rows have a complex record instead: the 1 or 2 REF bases from the anchor
+    on replaced (the first by another base) and the same bases added, or deleted. Yields
+    (genome, indel, snps, first, n, k, pam_right)."""
     import random
     rng = random.Random(seed)
 
@@ -732,9 +744,17 @@ def _random_pam_rows(seed, count):
         else:             # a deletion: whole units or random bases
             dl = len(unit) * rng.randint(1, 2) if shape <= 5 else rng.randint(1, 8)
             ipos, iref, ialt = a, genome[a - 1:a + dl], genome[a - 1]
+        if complex_share and rng.random() < complex_share:
+            # a complex record: the j REF bases from the anchor on replaced
+            j = rng.choice([1, 1, 2])
+            put = rng.choice([b for b in "ACGT" if b != genome[a - 1]]) + rnd(j - 1)
+            if shape <= 3:
+                ipos, iref, ialt = a, genome[a - 1:a - 1 + j], put + ins
+            else:
+                ipos, iref, ialt = a, genome[a - 1:a - 1 + j + dl], put
         c, t = _trims(iref, ialt)
         gone, added = len(iref) - c - t, len(ialt) - c - t
-        if (gone > 0) == (added > 0):
+        if gone == added or (not complex_share and (gone > 0) == (added > 0)):
             continue
         if rng.random() < 0.7:  # left-aligned, as bcftools norm writes it
             while ipos > 2 and len(iref) == 1 + gone and len(ialt) == 1 + added and \
@@ -850,14 +870,88 @@ def test_pam_reference_place_geometries():
     genome = "T" * 30 + "C" + "GTAC" + "CA" + _rc(g) + "T" * 30
     assert isc.pam_reference_place(genome, (31, "CGTAC", "C"), [], 30, 23, 3, False) == \
         ("ref", (34,))
-    # an MNV or a complex record: not this rule's
+    # an MNV: not this rule's (the caller reads the reference under its PAM)
     assert isc.pam_reference_place(genome, (31, "CG", "TA"), [], 30, 23, 3, False) is None
-    assert isc.pam_reference_place(genome, (31, "CG", "TAA"), [], 30, 23, 3, False) is None
+    # a complex record is: CG>TAA is CG replaced by TA and an A added after them; the PAM
+    # (TAA forward) holds the added A, and the protospacer's touching base is the reference
+    # one after it: the PAM beside it is the reference's TCG, the REF bases CG included
+    assert isc.pam_reference_place(genome, (31, "CG", "TAA"), [], 30, 23, 3, False) == \
+        ("ref", (29,))
     # Cas12a (TTTV at the target's left end, + strand): T>TTT, the reference TTTA beside
     # the spacer
     genome = "C" * 28 + "TTTA" + "GATCCAGTCACGTTAGCATG" + "C" * 30
     assert isc.pam_reference_place(genome, (31, "T", "TTT"), [], 30, 24, 4, False) == \
         ("ref", (28,))
+
+
+def test_pam_reference_place_reads_a_complex_record_as_replaced_and_added_bases():
+    """2.10.0: a complex record (REF bases replaced and bases added or lost, as HPRC writes
+    many insertions: A>T plus inserted bases) is its replaced bases, in the places of the
+    REF bases they replace and read as those (a SNP alt's rule), and its other bases, added
+    after them (or deleted), placed as an insertion's (a deletion's). On 3,000 random rows,
+    half of them complex records, pam_reference_place gives what building every placement
+    of those bases, and reading the rule off them, gives. On 50803b6 a complex
+    record was not this rule's: a PAM holding its added bases was read on the REF
+    alignment's window, at the anchor on a row that starts inside them (NA where that
+    window happens to hold a valid PAM, though the PAM has no place on the reference)."""
+    complex_rows = created = beside = 0
+    for row in _random_pam_rows(2102, 3000, complex_share=0.5):
+        want = _pam_place_every_placement(*row)
+        got = _bases(row[0], row[5], isc.pam_reference_place(*row))
+        assert got == want, (row, isc.pam_reference_place(*row), want)
+        genome, (ipos, iref, ialt), snps, first, n, k, right = row
+        c, t = _trims(iref, ialt)
+        if len(iref) - c - t and len(ialt) - c - t:
+            complex_rows += 1
+            created += got == ("created", frozenset())
+            beside += got[0] == "ref" and len(iref) < len(ialt)
+    assert complex_rows > 900 and created > 80 and beside > 300, \
+        (complex_rows, created, beside)
+
+
+def test_pam_reference_place_complex_records_by_hand():
+    """2.10.0, complex records by hand (3' PAM; pamc-review-r1's F1 and its residual)."""
+    g = "ACTGAAATCTGTAAGCAGGC"
+    # + strand: A>T and 33 bases added after it, which hold a whole target: its PAM and the
+    # protospacer's end are added bases wherever they sit: created, as for the insertion of
+    # the same bases after the A (A>A+I); the REF alignment's window, read from the anchor,
+    # holds AGG
+    ins = "CCGTA" + g + "TGG" + "CATCC"
+    genome = "C" * 40 + "A" + "GTCAGTCAGTCAGTCAGTC" + "AGG" + "C" * 40
+    for alt in ("T" + ins, "A" + ins):
+        assert isc.pam_reference_place(genome, (41, "A", alt), [], 46, 23, 3, True) == \
+            ("created", ())
+    # - strand (forward CCA at the target's left end): C>T and the mirror bases added; the
+    # reference after the anchor C holds C (the window, CCN, is NGG on -)
+    ins = "GTCAG" + _rc(g + "TGG") + "GATCA"
+    genome = "T" * 40 + "C" + "C" + "GTAGTAGTAGTAGTAGTAGTAGTA" + "T" * 40
+    for alt in ("T" + ins, "C" + ins):
+        assert isc.pam_reference_place(genome, (41, "C", alt), [], 46, 23, 3, False) == \
+            ("created", ())
+    # - strand, G>CCA: the row starts on the replaced base, the PAM CCA (TGG on -) is it
+    # and the two added bases, and the protospacer's touching base is a reference one: the
+    # reference PAM beside it, CTG (CAG on -), holds the motif (the window, read from the
+    # row's start, GGC, is GCC on -)
+    genome = "T" * 38 + "CT" + "G" + _rc(g) + "TTAA" + "T" * 30
+    assert isc.pam_reference_place(genome, (41, "G", "CCA"), [], 40, 23, 3, False) == \
+        ("ref", (38,))
+    # - strand, TG>C: T replaced by C and G deleted, the junction inside the PAM CCA (TGG
+    # on -): the reference PAM beside the protospacer is TGA (TCA on -), no motif (the
+    # window, read from the row's start, CTG, is CAG on -, with the deleted G)
+    genome = "T" * 38 + "CTGA" + _rc(g) + "T" * 30
+    assert isc.pam_reference_place(genome, (40, "TG", "C"), [], 38, 23, 3, False) == \
+        ("ref", (39,))
+    # + strand, A>GTTT on the PAM's last base: the PAM is reference bases and the replaced
+    # one, read as the reference's A (TGA: created by the record); the added TTT follow it
+    genome = "T" * 40 + g + "TGA" + "CATTAC" + "T" * 30
+    assert isc.pam_reference_place(genome, (63, "A", "GTTT"), [], 40, 23, 3, True) == \
+        ("ref", (60,))
+    # + strand, A>CTGG on the protospacer's last base: the PAM is the added TGG, and the
+    # protospacer's touching base the replaced one, in its REF base's place: the reference
+    # PAM beside it, AGG
+    genome = "T" * 40 + g[:19] + "A" + "AGG" + "CATTAC" + "T" * 30
+    assert isc.pam_reference_place(genome, (60, "A", g[19] + "TGG"), [], 40, 23, 3, True) \
+        == ("ref", (60,))
 
 
 def test_pam_reference_place_reads_a_snp_alt_in_the_pam_as_its_reference_base():
@@ -889,7 +983,8 @@ def test_pam_reference_place_cost_does_not_grow_with_the_insertion():
     one Python step per inserted base: the lines of indel_snp_cis run for a target 30 bases
     from the end of a 1 kb and a 20 kb insertion are as many, in a repeat (a tandem
     duplication, which the placements walk through) and out of one, and a 1 Mb one takes
-    well under a second (process time)."""
+    well under a second (process time); so for a complex record whose 1 kb, 20 kb or 1 Mb
+    of replaced bases come before its added ones."""
     import sys
     import time
 
@@ -919,15 +1014,27 @@ def test_pam_reference_place_cost_does_not_grow_with_the_insertion():
         first = 200 + 1 + length - 30
         return (genome, (201, "C", "C" + unit), [], first, 23, 3, True)
 
+    def complex_row(length, dup):  # ``length`` REF bases replaced, then 100 bases added
+        unit = ("ACGTTGCAAC" * 10)[:100]
+        tail = unit if dup else "T" + unit[1:]
+        genome = "G" * 200 + "A" * length + tail + "G" * 200
+        first = 200 + length + 100 - 30
+        return (genome, (201, genome[200:200 + length], "C" * length + unit), [], first, 23,
+                3, True)
+
     lines = {}
     for dup in (True, False):
         for length in (1000, 20000):
             got, lines[dup, length] = count_lines(*row(length, dup))
             assert got == (("ref", (200 + 1 + length - 30 + 20,)) if dup else ("created", ()))
+            got, lines["cx", dup, length] = count_lines(*complex_row(length, dup))
+            assert got == (("ref", (200 + length + 90,)) if dup else ("created", ()))
         assert lines[dup, 1000] == lines[dup, 20000], lines
+        assert lines["cx", dup, 1000] == lines["cx", dup, 20000], lines
     t0 = time.process_time()
     for dup in (True, False):
         isc.pam_reference_place(*row(1000000, dup))
+        isc.pam_reference_place(*complex_row(1000000, dup))
     assert time.process_time() - t0 < 0.5
 
 

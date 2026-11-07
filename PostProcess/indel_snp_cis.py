@@ -632,14 +632,13 @@ def _revcomp(seq):
 # repeat that is not fixed: the VCF writes an insertion at the left end of its repeat
 # (bcftools norm left-aligns it), but the same haplotype holds the same bases with the
 # inserted sequence rotated through the repeat and written further right, and a deletion
-# likewise. Up to 2.8.1, and in 2.10.0's first fixes, the PAM was judged where the VCF
-# writes the indel, so the answer depended on that choice: an insertion of a repeat unit
-# next to a reference PAM, written left of it, put inserted bases in a PAM the reference
-# holds (created, wrongly), and a row that starts on a reference base read its REF
-# alignment's window, which is not the reference PAM beside the protospacer when the
-# indel lies between them (on the - strand with a 3' PAM, the + strand with a 5' one,
-# where the row starts at the PAM's far end: an insertion's bases, or a deletion's,
-# shift that window off the PAM's place).
+# likewise. Up to 2.8.1 the PAM was judged where the VCF writes the indel, so the answer
+# depended on that choice: an insertion of a repeat unit next to a reference PAM, written
+# left of it, puts inserted bases in a PAM the reference holds (created, wrongly), and a
+# row that starts on a reference base read its REF alignment's window, which is not the
+# reference PAM beside the protospacer when the indel lies between them (on the - strand
+# with a 3' PAM, the + strand with a 5' one, where the row starts at the PAM's far end: an
+# insertion's bases, or a deletion's, shift that window off the PAM's place).
 #
 # The rule reads every placement of the indel on the row's haplotype -- the reference
 # with the row's own variants: its indel and the SNP alts it names -- and judges the PAM
@@ -657,6 +656,16 @@ def _revcomp(seq):
 # a PAM that a repeat spans: placed before the indel and past it, the PAM sits on two
 # places, and it is not created if either holds the motif), so the answer depends on the
 # haplotype alone, not on where in its repeat the VCF writes the indel.
+#
+# A complex record replaces REF bases and adds bases or loses some (A>T plus inserted
+# bases: HPRC writes many insertions so). It is read as haplotype_base_kind and
+# reference_start read it: its first min(len(REF), len(ALT)) changed bases stand in the
+# places of the REF bases they replace, as an MNV's, and its other ALT bases are added
+# after them (or its other REF bases deleted). The replaced bases are read as a SNP alt of
+# the row is, the reference base each replaces, and the added (deleted) bases are placed
+# as an insertion's (a deletion's), so a PAM made of a complex record's added bases is
+# judged as one made of an insertion's. An MNV moves no base: its PAM is read on the
+# reference under it, by the caller.
 
 
 def _with_alts(genome, lo, hi, alts):
@@ -680,14 +689,15 @@ def pam_reference_place(genome, indel, snps, first, n, k, pam_right):
     the k reference bases genome[lo:lo + k] (forward strand) of each place ``lo`` the rule
     finds -- the PAM is not created if one of them holds the motif; ("created", ()), no
     placement of the indel gives the PAM a place on the reference, so the indel created
-    it; None for a record that is neither an insertion nor a deletion (an MNV, a complex
-    record whose ALT bases stand in REF bases' places), which the caller judges as 2.8.1.
+    it; None for a record that adds no base and loses none (an MNV), which the caller
+    judges on the reference under the PAM, as 2.8.1.
 
     A PAM that placements put on the reference has one place there or two -- before the
     indel and past it, which hold the same bases --, and the first is the VCF's placement's
-    when it has one. A SNP alt of the row in the PAM is read as the reference base it
-    replaces, and then the two can differ: both are given (a row without SNP alts gets the
-    first only). The PAM beside the protospacer has one place.
+    when it has one. A SNP alt of the row in the PAM, or a base a complex record replaces,
+    is read as the reference base it replaces, and then the two can differ: both are given
+    (a row without SNP alts or replaced bases gets the first only). The PAM beside the
+    protospacer has one place.
 
     ``indel`` is the row's indel (VCF POS, REF, ALT); ``snps`` [(POS, REF, ALT)] the SNP
     alts the row names next to it; ``first`` the target's first base (the leftmost,
@@ -697,14 +707,16 @@ def pam_reference_place(genome, indel, snps, first, n, k, pam_right):
     ``k`` the PAM's; ``pam_right``: the PAM is the target's right end, forward (the +
     strand with a 3' PAM, the - strand with a 5' one).
 
-    The indel's changed bases are e = POS - 1 + the bases REF and ALT share at the start
-    (the anchor) on: an insertion's m added bases lie at [e, e + m) of the haplotype and
-    can sit s bases further right while the haplotype's next s bases repeat them
-    (H[e + i] = H[e + m + i]), or further left likewise; a deletion's d bases, deleted
-    from the reference at [e, e + d), leave the haplotype's junction before its base e,
-    which can move while the reference repeats them (R[e + i] = R[e + d + i]). Those
-    comparisons read the reference with the row's SNP alts, so a placement keeps the same
-    haplotype with the same variants. With the PAM at [p0, p0 + k) of the haplotype:
+    The indel's changed bases start at POS - 1 + the bases REF and ALT share at the start
+    (the anchor); a complex record's first min(gone, added) of them stand in REF bases'
+    places, and e is the base past those. An insertion's m added bases lie at [e, e + m)
+    of the haplotype and can sit s bases further right while the haplotype's next s bases
+    repeat them (H[e + i] = H[e + m + i]), or further left likewise; a deletion's d bases,
+    deleted from the reference at [e, e + d), leave the haplotype's junction before its
+    base e, which can move while the reference repeats them (R[e + i] = R[e + d + i]).
+    Those comparisons read the reference with the row's SNP alts and the bases a complex
+    record replaces, so a placement keeps the same haplotype with the same variants. With
+    the PAM at [p0, p0 + k) of the haplotype:
       * an insertion placed at x leaves the PAM on the reference, as genome[p0:] when
         x >= p0 + k and as genome[p0 - m:] when x + m <= p0; otherwise the protospacer's
         base by the PAM is on the reference when x >= p0 (PAM at the right) or
@@ -714,37 +726,50 @@ def pam_reference_place(genome, indel, snps, first, n, k, pam_right):
         x >= p0 + k and as genome[p0 + d:] when x <= p0; otherwise the PAM beside the
         protospacer is genome[p0:p0 + k] (PAM at the right) or genome[p0 + d:p0 + d + k].
     Only the shifts those tests need are read, each one slice comparison, so a long
-    insertion adds no Python step per inserted base."""
+    insertion, or a long run of replaced bases, adds no Python step per base."""
     ipos, iref, ialt = indel
     c = kept_bases(iref, ialt)
     t = shared_tail(iref, ialt)
     gone, added = len(iref) - c - t, len(ialt) - c - t
-    if (gone > 0) == (added > 0):
-        return None  # an MNV or a complex record: ALT bases in REF bases' places
-    e = ipos - 1 + c
+    if gone == added:
+        return None  # an MNV: its ALT bases stand in REF bases' places, none added or lost
+    # a complex record's bases that stand in REF bases' places, at [rep_at, e): read as the
+    # row's SNP alts are; its other bases are an insertion's (a deletion's) at e
+    r = min(gone, added)
+    rep_at, rep = ipos - 1 + c, ialt[c:c + r].upper()
+    e = rep_at + r
+    gone, added = gone - r, added - r
     p0 = first + n - k if pam_right else first
     alts = {}
     for p, _r, a in snps or ():
         alts[p - 1] = a.upper()
+
+    def hap_ref(lo, hi):  # the reference as the row's haplotype holds it outside the indel
+        seq = _with_alts(genome, lo, hi, alts)
+        if seq is None or not r or hi <= rep_at or lo >= e:
+            return seq
+        a, b = max(lo, rep_at), min(hi, e)
+        return seq[:a - lo] + rep[a - rep_at:b - rep_at] + seq[b - lo:]
+
     if added:
         m = added
-        ins = ialt[c:c + m].upper()
+        ins = ialt[c + r:c + r + m].upper()
 
         def moves(s):  # the inserted bases can sit s bases further right (left if s < 0)
             if s > 0:
-                if _with_alts(genome, e, e + 1, alts) != ins[0]:
+                if hap_ref(e, e + 1) != ins[0]:
                     return False  # not a repeat on that side (no slice read)
-                x = _with_alts(genome, e, e + s, alts)
+                x = hap_ref(e, e + s)
                 return x is not None and (ins + x)[:s] == x
-            if _with_alts(genome, e - 1, e, alts) != ins[-1]:
+            if hap_ref(e - 1, e) != ins[-1]:
                 return False
-            y = _with_alts(genome, e + s, e, alts)
+            y = hap_ref(e + s, e)
             return y is not None and (y + ins)[s:] == y
 
         # the PAM before the insertion (x >= p0 + k: genome[p0:]) or past it
         # (x + m <= p0: genome[p0 - m:]), where the VCF has it, then by moving it
         los = [p0] if e >= p0 + k else [p0 - m] if e + m <= p0 else []
-        if not los or alts:
+        if not los or alts or r:
             if p0 not in los and moves(p0 + k - e):
                 los.append(p0)
             if p0 - m not in los and moves(p0 - m - e):
@@ -760,12 +785,12 @@ def pam_reference_place(genome, indel, snps, first, n, k, pam_right):
     d = gone
 
     def slides(lo, s):  # the deleted bases can sit at lo .. lo + d - 1 instead
-        x = _with_alts(genome, lo, lo + s, alts)
-        z = _with_alts(genome, lo + d, lo + d + s, alts)
+        x = hap_ref(lo, lo + s)
+        z = hap_ref(lo + d, lo + d + s)
         return x is not None and z is not None and x == z
 
     los = [p0] if e >= p0 + k else [p0 + d] if e <= p0 else []
-    if not los or alts:
+    if not los or alts or r:
         if p0 not in los and e < p0 + k and slides(e, p0 + k - e):
             los.append(p0)  # the junction moved past the PAM
         if p0 + d not in los and e > p0 and slides(p0, e - p0):
