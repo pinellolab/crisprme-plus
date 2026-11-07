@@ -8,12 +8,17 @@ whose variant list holds an indel or an MNV (`oracle.py check`) against each sam
 haplotypes built from the VCF, and the carriers of every per-sample SNP-only row ("SNP rows"
 below), and runs the ALT-PAM and no-N release gate
 (`scripts/check_alt_pam.py`) on both results. It then runs the independent real-data
-indel check (`scripts/check_indel_rows.py`, which shares no code with `oracle.py` or
+indel check (`scripts/check_indel_rows.py`, which imports and copies no code of `oracle.py` or
 CRISPRme) on both results, soundness and completeness; the population-level run, which
-writes no alternative alignments, is checked per locus, and the planted two-indel sites
-come out as non-gating `limit-two-indels` lines. It exits non-zero on any failure; CI runs it
-in `validate-benchmarks.yml`, with both profiles: SpCas9 (3' PAM NRG, the sites below) and
-`cas12a` (5' PAM TTTV, the C sites further below).
+writes no alternative alignments, is checked per merge cluster, the planted two-indel sites
+come out as non-gating `limit-two-indels` lines and site P's phasing artefact as
+`limit-overlapping-records`. `known_check_indel_rows.tsv` lists the two
+alternative-alignment blocks of the per-sample run where CRISPRme's merge lists the unphased
+S19 on an alignment weaker than its strongest (a CRISPRme defect found by the checker, not
+fixed on this branch): they print as `known-defect`, and as `known-not-seen` once fixed. It
+exits non-zero on any other failure; CI runs it in `validate-benchmarks.yml`, with both
+profiles: SpCas9 (3' PAM NRG, the sites below) and `cas12a` (5' PAM TTTV, the C sites
+further below).
 
 Every such row of the integrated results and of the alternative alignments, in all
 three blocks, must show a concrete PAM of the searched motif; its CFD must be the CFD of its

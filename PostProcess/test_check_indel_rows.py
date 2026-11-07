@@ -8,12 +8,16 @@ corrupt one field of such a row -- the start shifted by 1 and by an insertion's 
 one target base changed, a carrier swapped or added or dropped, a named variant dropped,
 a cross-haplotype SNP added, the aligned spacer rewritten, a phantom of the shape Manuel
 Tognon reported (an insertion's only carrier listed under SNP alleles only other
-individuals carry), an MNV row and an unphased row each with a phantom base -- and
-assert that each one is reported, with its class. CRISPRme's documented limits (a split
-multi-allelic site, two indels in one target, a complex allele split into overlapping
-records, a phasing artefact, a tandem-repeat second indel) must come out under their own
-non-gating class, never as a failure, and the driver must never pass silently (a
-chromosome no VCF covers, one FASTA of several contigs, an indexed VCF).
+individuals carry), an MNV row and an unphased row each with a phantom base, an unphased
+carrier listed on a weaker target than its strongest, an indel block labelled REF origin,
+a population-level cluster whose row is worse than a carrier's target -- and assert that
+each one is reported, with its class. The truth is the VCF: a slot whose alleles overlap
+gives no sequence and is counted (limit-overlapping-records), never judged by CRISPRme's
+rules; those rules (a split multi-allelic site, two indels in one target, a second indel
+read up to the target's last base, the PUTATIVE carriers of an MNV) only turn a
+disagreement into a non-gating limit. The driver must never pass silently (a chromosome
+no VCF covers, one FASTA of several contigs, an indexed VCF, a short table line, a window
+holding N), and the checker must hold no CRISPRme code.
 
 Everything is built here: a small reference, a phased VCF (plain gzip, or BGZF with a
 tabix index written by this file's own writer), and rows in the column layout of
@@ -42,6 +46,10 @@ LONG = "TTGACCGGTATCAGCTAGCCTTAGGCATCGATGCTAGCATGACTGATCGTACGTAGCTAGT"
 
 def other(b):
     return "A" if b != "A" else "C"
+
+
+def al(pos1, ref, alt):
+    return C.Allele(pos1, ref, alt, 0, 1)
 
 
 # --------------------------------------------------------------------------- #
@@ -673,7 +681,10 @@ class Mutations(Base):
                 (snp, info["seq"][snp - 1], other(info["seq"][snp - 1]), {"S01": "1/1"})]
         rc, found = Case(self.tmp, info["seq"], recs, info["rows"]).run()
         self.assertEqual(rc, 1, found)
-        self.assertIn("carrier-without-allele", classes(found), found)
+        # S01 is homozygous for the SNP: its record's haplotype is known (the record and
+        # the SNP), and it holds the SNP the row does not name
+        self.assertTrue(classes(gating(found)) & {"carrier-without-allele",
+                                                  "variant-missing"}, found)
 
     def test_a_complex_allele_carrier_listed_is_caught(self):
         """F8: TG>T and G>GT overlap on one slot: CRISPRme takes that slot off."""
@@ -749,10 +760,10 @@ class Limits(Base):
         case = Case(self.tmp, info["seq"], recs, rows)
         rc, found = case.run()
         self.assertEqual((rc, gating(found)), (0, []), found)
-        self.assertIn("limit-complex-allele", classes(found), found)
+        self.assertIn("limit-overlapping-records", classes(found), found)
         rc, found = case.run(mode="completeness", budget=("0", "0", "0", "0"))
         self.assertEqual((rc, gating(found)), (0, []), found)
-        self.assertTrue(any(f[1] == "limit-complex-allele" and "S02" in f[3]
+        self.assertTrue(any(f[1] == "limit-overlapping-records" and "S02" in f[3]
                             for f in found), found)
 
     def test_an_mnv_carrier_known_phased_is_putative(self):
@@ -797,10 +808,10 @@ class Edges(Base):
         """N3: a deletion that starts before the window's lower edge removes the bases it
         covers inside the window."""
         seq = "ACGT" * 10
-        hap, pl, conf = C.apply_keys(seq, [(3, "GTACG", "G")], 5, 12)
-        self.assertEqual(conf, [])
-        self.assertEqual(hap, seq[7:12])
-        self.assertEqual(pl[0], (7, 0, 0))
+        hap = C.make_hap(seq, [al(3, "GTACG", "G")], 5, 12)
+        self.assertEqual(hap.clash, [])
+        self.assertEqual(hap.seq, seq[7:12])
+        self.assertEqual(hap.place[0], (7, 0))
 
     def test_a_record_within_a_target_of_the_contig_end_is_listed(self):
         seq = GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + "ACGT"
@@ -916,6 +927,237 @@ class Completeness(Base):
 
 
 # --------------------------------------------------------------------------- #
+# review round 2: the truth is the VCF, the documented view only classifies
+# --------------------------------------------------------------------------- #
+def world_strongest(tmp, gts):
+    """A deletion and the spacer SNP that supplies the guide's base, with ``gts`` for
+    S05 (the deletion's and the SNP's calls); the weak row lists S05 with the
+    reference base at the SNP (1 mismatch), the strong row with the SNP (0)."""
+    seq = PRE + GUIDE[:5] + "C" + GUIDE[6:10] + "C" + GUIDE[10:] + "TGG" + POST + LONG
+    dpos, spos = len(PRE) + 10, len(PRE) + 6
+    snp = (spos, "C", GUIDE[5], {"S05": gts[1]})
+    dele = (dpos, GUIDE[9] + "C", GUIDE[9], {"S05": gts[0]})
+    start = len(PRE)
+    ref_text = seq[start:start + 23]
+    strong = row_fields("chr21", start, "+", GUIDE + "NNN", ref_text, GUIDE + "TGG", "TGG",
+                        0, 0, "X", "%s,%s" % (tok("chr21", dele), tok("chr21", snp)), "S05")
+    weak = row_fields("chr21", start, "+", GUIDE + "NNN", ref_text,
+                      GUIDE[:5] + "C" + GUIDE[6:] + "TGG", "TGG", 1, 0, "X",
+                      tok("chr21", dele), "S05")
+    return seq, [snp, dele], strong, weak
+
+
+class ReviewRound2(Base):
+    def test_a_putative_carrier_on_a_weaker_target_is_caught(self):
+        """F2 (case A): unphased S05 carries the guide's base at the SNP: METHODS section
+        4 lists it for that target only, never for the reference base there."""
+        seq, recs, strong, weak = world_strongest(self.tmp, ("0/1", "0/1"))
+        rc, found = Case(self.tmp, seq, recs, [strong, weak]).run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual(classes(gating(found)), {"carrier-not-strongest"}, found)
+        rc, found = Case(self.tmp, seq, recs, [weak]).run()
+        self.assertEqual(classes(gating(found)), {"carrier-not-strongest"}, found)
+        rc, found = Case(self.tmp, seq, recs, [weak]).run(
+            mode="completeness", budget=("1", "0", "0", "1"))
+        self.assertIn("missing-putative-row", classes(gating(found)), found)
+        rc, found = Case(self.tmp, seq, recs, [strong]).run(
+            mode="both", budget=("1", "0", "0", "1"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_phased_carrier_with_a_far_unknown_call_is_demanded_exactly(self):
+        """F3 (case B): S05's slot 0 holds the deletion and the SNP in cis; one call 6 bp
+        past the PAM is unphased or missing. The target touches no call of unknown phase,
+        so its slot-0 target (0 mm) is demanded, and the right row passes."""
+        seq = PRE + GUIDE[:5] + "C" + GUIDE[6:10] + "C" + GUIDE[10:] + "TGG" + POST + LONG
+        dpos, spos, bpos = len(PRE) + 10, len(PRE) + 6, len(PRE) + 15
+        far = len(PRE) + 24 + 6
+        for gt_far in ("0/1", "1|.", "0|1"):
+            recs = [(spos, "C", GUIDE[5], {"S05": "1|0"}),
+                    (dpos, GUIDE[9] + "C", GUIDE[9], {"S05": "1|0"}),
+                    (bpos, seq[bpos - 1], other(seq[bpos - 1]), {"S05": "0|1"}),
+                    (far, seq[far - 1], other(seq[far - 1]), {"S05": gt_far})]
+            rc, found = Case(self.tmp, seq, recs, []).run(
+                mode="completeness", budget=("0", "0", "0", "0"))
+            self.assertIn("missing-row", classes(gating(found)), (gt_far, found))
+            var = "%s,%s" % (tok("chr21", recs[1]), tok("chr21", recs[0]))
+            start = len(PRE)
+            rows = [row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                               GUIDE + "TGG", "TGG", 0, 0, "X", var, "S05")]
+            for mm in ("0", "1", "2"):
+                rc, found = Case(self.tmp, seq, recs, rows).run(
+                    mode="both", budget=(mm, "0", "0", mm))
+                self.assertEqual((rc, gating(found)), (0, []), (gt_far, mm, found))
+
+    def test_region_reads_the_rows_of_its_records(self):
+        """F4 (case C): a --region whose left edge falls between a right row's start and
+        its record's POS."""
+        case, info = world_deletion(self.tmp)
+        rc, found = case.run(mode="completeness", budget=("0", "0", "0", "0"),
+                             extra=["--region", "chr21:%d-%d" % (info["pos1"] - 2, 200)])
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        write_results(case.res, [])
+        rc, found = case.run(mode="completeness", budget=("0", "0", "0", "0"),
+                             extra=["--region", "chr21:%d-%d" % (info["pos1"] - 2, 200)])
+        self.assertIn("missing-row", classes(found), found)
+
+    def test_a_same_position_snp_on_a_listed_slot_is_counted(self):
+        """F1 (case D): a SNP at the insertion's own POS on its slot: the VCF describes
+        the anchor twice, so there is no sequence to judge by; the carrier is listed under
+        limit-overlapping-records, never passed over in silence."""
+        tail = GUIDE[6:] + "TGG"
+        seq = LONG + PRE + tail + POST
+        anchor0 = len(LONG) + len(PRE) - 1
+        a = seq[anchor0]
+        g2 = a + GUIDE[1:]
+        rec = (anchor0 + 1, a, a + GUIDE[1:6], {"S04": "1|0"})
+        snp = (anchor0 + 1, a, other(a), {"S04": "1|0"})
+        rows = [row_fields("chr21", anchor0, "+", g2 + "NNN", seq[anchor0:anchor0 + 23],
+                           g2 + "TGG", "TGG", 0, 0, "X", tok("chr21", rec), "S04",
+                           spacer=g2 + "NNN")]
+        case = Case(self.tmp, seq, [rec, snp], rows)
+        rc, found = case.run(guide=g2)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-overlapping-records", classes(found), found)
+        self.assertTrue(any("S04" in f[3] for f in found), found)
+        rc, found = case.run(guide=g2, mode="completeness", budget=("0", "0", "0", "0"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-overlapping-records", classes(found), found)
+
+    def test_an_indel_block_labelled_ref_is_checked(self):
+        """N1 (case E): a shifted indel block whose origin column says ref."""
+        case, info = world_deletion(self.tmp)
+        write_results(case.res, [set_field(info["rows"][0], start=info["start"] + 1,
+                                           origin="ref")])
+        rc, found = case.run()
+        self.assertEqual(rc, 1)
+        self.assertTrue({"origin-not-alt", "start-not-on-variant-sequence"}
+                        <= classes(gating(found)), found)
+
+    def test_a_target_ending_inside_a_second_insertion_is_the_two_indel_limit(self):
+        """Genome-wide (chr10:98432871, chr11:105091858 ...): the target's last bases are
+        added by a second insertion anchored at its last reference coordinate. It needs two
+        indel records, which no fake-indel window holds: the documented limit, not an
+        unexplained miss."""
+        seq = PRE + GUIDE[:10] + GUIDE[11:] + "T" + "AAAA" + POST
+        k = len(PRE) + 10           # 1-based POS of GUIDE[9], the record's anchor
+        t = len(PRE) + 10 + 9 + 1   # 1-based POS of the T the second insertion follows
+        recs = [(k, GUIDE[9], GUIDE[9] + GUIDE[10], {"S01": "1|0"}),
+                (t, "T", "TGG", {"S01": "1|0"})]
+        case = Case(self.tmp, seq, recs, [])
+        rc, found = case.run(mode="completeness", budget=("0", "0", "0", "0"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-two-indels", classes(found), found)
+
+    def test_a_second_indel_read_up_to_the_last_base_is_the_documented_limit(self):
+        """A carrier that lost a CA repeat unit at the target's left edge holds the row's
+        bases up to its last base, not from its start: its own haplotype holds the target
+        two bases to the left. CRISPRme documents listing it (METHODS section 4); the
+        truth disagrees, and the disagreement is a limit, not a pass and not a failure."""
+        g = "CACATTGTCAGTACGATCGA"
+        seq = LONG + "GTCA" + g[:10] + "C" + g[10:] + "TGG" + POST
+        s0 = len(LONG) + 4
+        d1 = (s0 + 10, g[9] + "C", g[9], {"S01": "1|0", "S02": "1|0"})
+        d2 = (s0, seq[s0 - 1:s0 + 2], seq[s0 - 1], {"S01": "1|0"})
+        rows = [row_fields("chr21", s0, "+", g + "NNN", seq[s0:s0 + 23], g + "TGG", "TGG",
+                           0, 0, "X", tok("chr21", d1), "S01,S02", spacer=g + "NNN")]
+        case = Case(self.tmp, seq, [d1, d2], rows)
+        rc, found = case.run(guide=g)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertTrue(any(f[1] == "limit-two-indels" and f[3] == "S01" for f in found),
+                        found)
+        rc, found = case.run(guide=g, mode="completeness", budget=("0", "0", "0", "0"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-two-indels", classes(found), found)
+
+    def test_a_cluster_row_worse_than_the_target_is_caught(self):
+        """F5: one row per cluster (no alternative alignments). The indel row's line is
+        replaced by a worse alignment of the same cluster (the reference with the C as a
+        DNA bulge, 1 edit): the cluster no longer holds a row as good as S01's target."""
+        case, info = world_deletion(self.tmp)
+        with open(os.path.join(case.res, ".alt_mode"), "w") as fh:
+            fh.write("no-alt-alignments\n")
+        s0, seq = info["start"], info["seq"]
+        worse = row_fields("chr21", s0, "+", GUIDE[:10] + "-" + GUIDE[10:] + "NNN",
+                           seq[s0:s0 + 24], seq[s0:s0 + 24], "TGG", 0, 1, "DNA", "NA", "NA")
+        worse = set_field(worse, origin="ref", var="NA", samples="NA")
+        write_results(case.res, [worse])
+        rc, found = case.run(mode="completeness", budget=("0", "1", "0", "1"))
+        self.assertEqual(rc, 1, found)
+        self.assertIn("missing-locus", classes(gating(found)), found)
+        write_results(case.res, [worse, info["rows"][0]])
+        rc, found = case.run(mode="completeness", budget=("0", "1", "0", "1"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_the_cluster_check_takes_the_targets_best_alignment(self):
+        """F5 on real data: chr22:25443200-25443340 of hg38 and the insertion
+        chr22:25443277 T>TA, whose README-guide target at 25443269 (-) has many alignments
+        (3 mm + 2 bulges at best, 4 + 2 the first the aligner meets). The review replaced
+        its population-level row by a worse one of the cluster (6 edits): the cluster row
+        must be as good as the target's best alignment."""
+        g = "CTAACAGTTGCTTTTATCAC"
+        seq = ("GCAACCTTTATGTTCTTCAGTAGGCGAATGTACCAACAAACTTTGTTACACTGATCAATGGAATATTATC"
+               "CAGTGATAAAAAACCATTGAGATACATTTGGATTCGATTTATTAATCTCAGTTACCTACTATTCTGACAT")
+        rec = (77, "T", "TA", {"S01": "1|0"})
+        worse = row_fields("chr21", 69, "-", "CTAACAGTTG-CTTTTATCACNNN",
+                           "-TATCAATGGTTTTTTATCACTGG", "NA", "TGG", 4, 2, "RNA,DNA", "NA",
+                           "NA", spacer=g + "NNN")
+        worse = set_field(worse, origin="ref", alt="NA")
+        case = Case(self.tmp, seq, [rec], [worse])
+        with open(os.path.join(case.res, ".alt_mode"), "w") as fh:
+            fh.write("no-alt-alignments\n")
+        rc, found = case.run(mode="completeness", guide=g)
+        hits = [f for f in gating(found) if f[1] == "missing-locus"
+                and "Cluster Position 69 " in f[2]]
+        self.assertTrue(hits and "(5 edits" in hits[0][2], found)
+
+    def test_the_cluster_check_compares_cfd(self):
+        rep = C.Reported([], C.Ctx(argparse_ns(), "NRG", 3, False, [GUIDE]),
+                         loci={"chr21": [([100, 101, 100], 2, 0.300, 7)]})
+        self.assertTrue(rep.locus("chr21", 102, 3, 0.2)[0])
+        self.assertFalse(rep.locus("chr21", 102, 1, 0.2)[0])     # fewer edits
+        self.assertFalse(rep.locus("chr21", 102, 3, 0.5)[0])     # higher CFD
+        self.assertTrue(rep.locus("chr21", 120, 3, 0.2)[0])      # the nearest row
+        self.assertFalse(rep.locus("chr21", 900, 3, 0.2)[0])     # no row near
+
+    def test_a_short_table_line_is_reported(self):
+        """N4: a results line with fewer fields than its header is not skipped silently."""
+        case, info = world_deletion(self.tmp)
+        write_results(case.res, [info["rows"][0], info["rows"][0][:5]])
+        rc, found = case.run()
+        self.assertEqual(rc, 1)
+        self.assertIn("row-unreadable", classes(found), found)
+
+    def test_a_window_with_ns_is_counted(self):
+        """N4: a stretch of N next to a record: the windows across it are counted."""
+        case, info = world_deletion(self.tmp)
+        seq = info["seq"] + "NNNN" + "ACGTACGTACGTACGT" + "TGG" + LONG
+        case = Case(self.tmp, seq, [info["rec"]], info["rows"])
+        rc, found = case.run(mode="completeness", budget=("0", "0", "0", "0"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-n-bases", classes(found), found)
+
+    def test_the_checker_holds_no_crisprme_code(self):
+        """F1: no import of CRISPRme's variant or indel modules, and none of the helper
+        names of PostProcess/indel_snp_cis.py (a regression guard against copying)."""
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
+                                "scripts", "check_indel_rows.py")).read()
+        for mod in ("indel_snp_cis", "analisi_indels", "overlay_indel", "resultIntegrator",
+                    "remove_contiguous_samples", "observed_haplotypes", "cfd_score",
+                    "bulge_cfd_penalty"):
+            self.assertNotRegex(src, r"(?m)^\s*(from|import)\s+%s" % mod)
+        for name in ("kept_bases", "shared_tail", "changes_span", "target_ref_span",
+                     "holds_indel", "local_haplotype", "target_pairs", "biallelic_site",
+                     "resolve_carriers", "worst_case_bases", "_for_alt", "reference_start",
+                     "window_place", "holds_target_bases"):
+            self.assertNotRegex(src, r"\bdef %s\b" % name)
+
+
+def argparse_ns():
+    import argparse
+    return argparse.Namespace(mm=4, bdna=1, brna=1, max_total_edits=6)
+
+
+# --------------------------------------------------------------------------- #
 # the driver never passes silently
 # --------------------------------------------------------------------------- #
 class Driver(Base):
@@ -1018,49 +1260,115 @@ class Driver(Base):
 class Pieces(unittest.TestCase):
     def test_places_of_an_insertion(self):
         seq = "ACGT" * 10
-        hap, pl, conf = C.apply_keys(seq, [(5, "A", "ATTT")], 0, 12, (5, "A", "ATTT"))
-        self.assertEqual(hap, seq[:5] + "TTT" + seq[5:12])
-        self.assertEqual(pl[4], (4, 0, 0))
-        self.assertEqual(pl[5:8], [(4, 2, 0), (4, 2, 1), (4, 2, 2)])
-        self.assertEqual(pl[8], (5, 0, 0))
-        self.assertEqual(conf, [])
+        hap = C.make_hap(seq, [al(5, "A", "ATTT")], 0, 12)
+        self.assertEqual(hap.seq, seq[:5] + "TTT" + seq[5:12])
+        self.assertEqual(hap.place[4], (4, 0))
+        self.assertEqual(hap.place[5:8], [(4, 1), (4, 2), (4, 3)])
+        self.assertEqual(hap.place[8], (5, 0))
+        self.assertEqual(hap.clash, [])
 
-    def test_places_of_a_deletion_an_mnv_and_a_shared_tail(self):
+    def test_places_of_a_deletion_an_mnv_a_shared_tail_and_a_complex_allele(self):
         seq = "ACGT" * 10
-        hap, pl, _c = C.apply_keys(seq, [(5, "ACG", "A")], 0, 12)
-        self.assertEqual(hap, seq[:5] + seq[7:12])
-        self.assertEqual(pl[4:6], [(4, 0, 0), (7, 0, 0)])
-        hap, pl, _c = C.apply_keys(seq, [(5, "AC", "TG")], 0, 12)
-        self.assertEqual((hap[4:6], pl[4:6]), ("TG", [(4, 0, 0), (5, 0, 0)]))
-        # GCA>GA at POS 3: the shared A keeps its own coordinate
-        hap, pl, _c = C.apply_keys(seq, [(3, "GTA", "GA")], 0, 8)
-        self.assertEqual(hap, "ACGACGT")
-        self.assertEqual(pl[2:4], [(2, 0, 0), (4, 0, 0)])
+        hap = C.make_hap(seq, [al(5, "ACG", "A")], 0, 12)
+        self.assertEqual(hap.seq, seq[:5] + seq[7:12])
+        self.assertEqual(hap.place[4:6], [(4, 0), (7, 0)])
+        hap = C.make_hap(seq, [al(5, "AC", "TG")], 0, 12)
+        self.assertEqual((hap.seq[4:6], hap.place[4:6]), ("TG", [(4, 0), (5, 0)]))
+        # GTA>GA at POS 3: the shared A keeps its own coordinate
+        hap = C.make_hap(seq, [al(3, "GTA", "GA")], 0, 8)
+        self.assertEqual(hap.seq, "ACGACGT")
+        self.assertEqual(hap.place[2:4], [(2, 0), (4, 0)])
+        # A>TCG: T in the A's place, C and G added after it (the last replaced base)
+        hap = C.make_hap(seq, [al(5, "A", "TCG")], 0, 8)
+        self.assertEqual(hap.seq[4:7], "TCG")
+        self.assertEqual(hap.place[4:7], [(4, 0), (4, 1), (4, 2)])
 
-    def test_overlapping_records_conflict(self):
+    def test_an_alleles_window_is_its_bases_placed_inside(self):
+        """make_hap writes an allele's edit by slices (HPRC holds 86-kb insertions): the
+        slice for a window is exactly the bases whose place lies in it."""
+        import random
+        rnd = random.Random(7)
+        ref = "".join(rnd.choice("ACGT") for _ in range(400))
+        for _ in range(3000):
+            p = rnd.randint(50, 300)
+            r = ref[p - 1:p - 1 + rnd.randint(1, 30)]
+            alt = "".join(rnd.choice("ACGT") for _ in range(rnd.randint(1, 30)))
+            if rnd.random() < 0.5:
+                alt = r[0] + alt
+            if alt == r:
+                continue
+            a = al(p, r, alt)
+            lo = rnd.randint(0, 380)
+            hi = rnd.randint(lo, 400)
+            i, j = a.window(lo, hi)
+            want = [k for k, pl in enumerate(a.places()) if lo <= pl[0] < hi]
+            self.assertEqual(list(range(i, j)), want, (a.key, lo, hi))
+            hap = C.make_hap(ref, [a], lo, hi)
+            self.assertEqual(hap.place, sorted(hap.place))  # bisection relies on it
+
+    def test_alleles_whose_ref_spans_meet_are_a_clash(self):
+        """VCF 4.x: two alleles of one haplotype describing one base give no sequence."""
         seq = "ACGT" * 10
-        _h, _p, conf = C.apply_keys(seq, [(5, "ACG", "A"), (6, "CG", "C")], 0, 12)
-        self.assertEqual(conf, [(6, "CG", "C")])
+        for other in (al(6, "CG", "C"), al(5, "A", "G"), al(6, "C", "T"), al(5, "A", "AT")):
+            hap = C.make_hap(seq, [al(5, "ACG", "A"), other], 0, 12)
+            self.assertEqual(len(hap.clash), 1, other.key)
+            self.assertEqual(hap.seq, seq[:12])  # neither is written
+        hap = C.make_hap(seq, [al(5, "A", "AT"), al(6, "C", "T")], 0, 12)
+        self.assertEqual(hap.clash, [])  # side by side, not overlapping
 
     def test_the_junction_rule(self):
-        # GT>G at POS 100: the junction is between 99 and 101
-        d = (100, "GT", "G")
-        self.assertTrue(C.holds_main([(98, 0, 0), (99, 0, 0), (101, 0, 0)], d))
-        self.assertFalse(C.holds_main([(101, 0, 0), (102, 0, 0)], d))
-        self.assertFalse(C.holds_main([(97, 0, 0), (98, 0, 0), (99, 0, 0)], d))
-        i = (100, "G", "GAAA")
-        self.assertTrue(C.holds_main([(99, 2, 2), (100, 0, 0)], i))
-        self.assertFalse(C.holds_main([(98, 0, 0), (99, 0, 0)], i))
-        m = (100, "AC", "TG")
-        self.assertTrue(C.holds_main([(99, 0, 0), (100, 0, 0)], m))
-        self.assertFalse(C.holds_main([(101, 0, 0), (102, 0, 0)], m))
+        seq = "ACGTACGTACGTACGTACGT"
+        d = al(6, "CG", "C")     # deletes the G at 0-based 6
+        hap = C.make_hap(seq, [d], 0, 20)
+        i = hap.at(5)[0]
+        self.assertTrue(C.holds_edit(hap, i - 2, 4, d))       # holds 5 and 7 side by side
+        self.assertFalse(C.holds_edit(hap, i + 1, 4, d))      # 7.. only
+        self.assertFalse(C.holds_edit(hap, i - 3, 4, d))      # ..5 only
+        ins = al(6, "C", "CAAA")
+        hap = C.make_hap(seq, [ins], 0, 20)
+        j = hap.at(5)[1]                                      # the first added base
+        self.assertTrue(C.holds_edit(hap, j + 2, 3, ins))
+        self.assertFalse(C.holds_edit(hap, j - 3, 3, ins))
+        m = al(6, "CG", "TT")
+        hap = C.make_hap(seq, [m], 0, 20)
+        self.assertTrue(C.holds_edit(hap, 4, 2, m))
+        self.assertFalse(C.holds_edit(hap, 7, 3, m))
 
-    def test_changes_span(self):
-        self.assertTrue(C.changes_span((100, "GT", "G"), 99, 101))
-        self.assertFalse(C.changes_span((100, "GT", "G"), 102, 120))
-        self.assertTrue(C.changes_span((100, "G", "GAAA"), 99, 100))
-        self.assertFalse(C.changes_span((100, "G", "GAAA"), 100, 120))
-        self.assertFalse(C.changes_span((100, "GTT", "G"), 99, 101, gone=(100, 101)))
+    def test_touches(self):
+        self.assertTrue(C.touches(al(100, "GT", "G"), 99, 101))
+        self.assertFalse(C.touches(al(100, "GT", "G"), 101, 120))
+        self.assertTrue(C.touches(al(100, "G", "GAAA"), 98, 100))    # adds between 99, 100
+        self.assertFalse(C.touches(al(100, "G", "GAAA"), 100, 120))  # adds before 100
+        self.assertFalse(C.touches(al(100, "G", "GAAA"), 90, 99))    # adds after 99
+        self.assertTrue(C.touches(al(100, "A", "C"), 99, 99))
+
+    def test_genotypes(self):
+        self.assertEqual(C.parse_gt("0|1"), ((0, 1), True))
+        self.assertEqual(C.parse_gt("1/0"), ((1, 0), False))
+        self.assertEqual(C.parse_gt("1|."), ((1, None), True))
+        self.assertEqual(C.parse_gt("1"), ((1,), True))
+        self.assertEqual(C.record_slots(((0, 1), True), 1), ([1], True))
+        self.assertEqual(C.record_slots(((0, 1), False), 1), ([None], False))
+        self.assertEqual(C.record_slots(((1, 1), False), 1), ([0, 1], True))
+        main = ((1, 0), True)
+        self.assertEqual(C.on_slot(main, 0, ((1, 0), True), 1), "yes")
+        self.assertEqual(C.on_slot(main, 0, ((0, 1), True), 1), "no")
+        self.assertEqual(C.on_slot(main, 0, ((0, 1), False), 1), "?")
+        self.assertEqual(C.on_slot(main, 0, ((None, 1), True), 1), "?")
+        self.assertEqual(C.on_slot(main, 0, ((1, 1), False), 1), "yes")
+        self.assertEqual(C.on_slot(main, 0, ((1,), True), 1), "?")    # haploid vs diploid
+
+    def test_cfd(self):
+        """The CFD tables read as data reproduce scores CRISPRme printed: a perfect NGG
+        site, one mismatch, a DNA and an RNA bulge."""
+        cfd = C.Cfd(C.default_cfd_dir())
+        self.assertAlmostEqual(cfd.score(GUIDE + "NNN", GUIDE + "TGG"), 1.0)
+        self.assertAlmostEqual(cfd.score(GUIDE + "NNN", GUIDE + "TAG"), 0.259259259, 6)
+        # the oracle's alternative alignment chr21:8000 (CFD 0.455, printed)
+        self.assertAlmostEqual(cfd.score("ACTGAAATCTGTAAGCAGGCNNN",
+                                         "ACTGACATCTGTAAGCAGGCTGG"), 0.455, 3)
+        self.assertAlmostEqual(cfd.score("A-CTGAAATCTGTAAGCAGGCNNN",
+                                         "AC-TGACATCTGTAAGCAGGCTGG"), 0.423, 3)
 
     def test_cluster_position(self):
         # + strand, 3' PAM: an RNA bulge (one base fewer) or a DNA bulge moves the start
@@ -1094,16 +1402,6 @@ class Pieces(unittest.TestCase):
         self.assertIsNotNone(C.recount("-" + GUIDE[1:] + "NNN", "A" + GUIDE[1:] + "TGG",
                                        3, False)[3])
 
-    def test_readings_from_either_end(self):
-        """A haplotype that lost a repeat unit at the target's left edge holds the target
-        up to its last base, not from its first."""
-        seq = "ACAC" + GUIDE + "TGG" + "TTTT"
-        n = len(GUIDE) + 3
-        hap, pl, _c = C.apply_keys(seq, [(2, "CAC", "C")], 0, len(seq))
-        first, last = (4, 0, 0), (4 + n - 1, 0, 0)
-        self.assertTrue(C.reads_as(hap, pl, seq[4:4 + n], first, last, set()))
-        self.assertIsNotNone(C.reading(hap, pl, n, 1, first, last))
-
     def test_the_pam_file_and_the_guides(self):
         tmp = tempfile.mkdtemp(prefix="chkidl_")
         try:
@@ -1132,8 +1430,13 @@ class Pieces(unittest.TestCase):
                                      (5, "A", "G", {"S02": "0|1"}),
                                      (9, "A", "C,G", {"S01": "1|2"})])
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
-            self.assertEqual(win.shadowed, {(5, "A", "C")})
-            self.assertEqual(win.norm((9, "A", "G"), "S01"), (["0", "1"], "phased"))
+            self.assertEqual({a.key for a in win.shadowed}, {(5, "A", "C")})
+            # every carrier of the two alts of POS 9 holds both: the genotypes cannot
+            # tell CRISPRme which allele number is which
+            self.assertEqual({a.key for a in win.untied}, {(9, "A", "C"), (9, "A", "G")})
+            g = win.by_key[(9, "A", "G")][0]
+            self.assertEqual(win.call(g, "S01"), ((1, 2), True))
+            self.assertEqual(g.number, 2)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

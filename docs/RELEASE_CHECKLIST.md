@@ -116,8 +116,9 @@ python3 "$SRC/scripts/check_alt_pam.py" "$GATE"/heavy/Results/crisprme-test-out_
 #     validate-test compares only the engine's sites on the reference and the SNV-only chr22
 #     1000 Genomes genome, so no indel row's coordinate, REF text, variants or carriers are
 #     ever checked against an independent truth (test/benchmark/README.md). The checker
-#     builds each sample's haplotypes from the VCF itself and aligns with its own exhaustive
-#     aligner; it imports no CRISPRme module and needs only Python's standard library.
+#     writes each sample's haplotypes from the VCF itself (every allele of a slot) and
+#     aligns with its own exhaustive aligner; it imports and copies no CRISPRme code and
+#     needs only Python's standard library (the repository's CFD tables are read as data).
 #     $D22 is a chr22-only HGDP + 1000 Genomes install (Genomes/hg38, VCFs/hg38_HGDP1kGP,
 #     genome_library, Dictionaries), $VCF its chr22 VCF (a .tbi beside it makes reads seeks;
 #     without one the VCF is read once into an in-memory index, nothing is written).
@@ -129,8 +130,9 @@ for mode in per-sample population-level; do
     --gene_annotation Annotations/gencode.protein_coding.bed.gz --index-path genome_library \
     --mm 4 --bDNA 1 --bRNA 1 --thread 8 --output "gate_${mode}" --"$mode"
   #   soundness (every indel/MNV row real) and completeness (no real indel off-target
-  #   missed: per sample on the per-sample run; per locus on the population-level run,
-  #   which keeps one row per cluster -- the checker reads that from Results/*/.alt_mode)
+  #   missed: per sample on the per-sample run; per merge cluster on the population-level
+  #   run, which keeps one row per cluster -- its row must have no more edits than each
+  #   target and at least its CFD; the checker reads the mode from Results/*/.alt_mode)
   for check in soundness completeness; do
     python3 "$SRC/scripts/check_indel_rows.py" --results "$D22/Results/gate_${mode}" \
       --reference "$D22/Genomes/hg38" --vcf "$VCF" --pam "$D22/PAMs/20bp-NRG-SpCas9.txt" \
@@ -152,13 +154,16 @@ for g in readme:guide.txt trac:guide_trac.txt; do
     || echo GATE_FAILED
 done
 #     The gate is the exit status: 0 gating findings. Non-gating lines are documented
-#     CRISPRme limits (limit-last-alt-wins, limit-two-indels, limit-complex-allele,
-#     limit-putative-carrier, limit-contig-end), each listed with its sample and target:
-#     read them, and say in the release notes if a class grew. A known upstream defect can
+#     CRISPRme limits (limit-last-alt-wins, limit-two-indels, limit-putative-carrier,
+#     limit-contig-end), slots whose VCF alleles overlap and so give no sequence
+#     (limit-overlapping-records), and windows the checker cannot judge (limit-n-bases,
+#     limit-putative-cap), each listed with its samples and target: read them, and say in
+#     the release notes if a class grew. A known upstream defect can
 #     be listed with --known (class, chrom, start, strand, variants, samples, reason): it
 #     turns non-gating as known-defect, and a listed one that stops showing is reported as
-#     known-not-seen. Genome-wide COMPLETENESS (about 70 CPU-hours per guide: 82 min on
-#     48 processes of a busy node) is not a release gate; chr22 above stands for it.
+#     known-not-seen. Genome-wide COMPLETENESS (about 40 CPU-hours per guide: 64 min on
+#     40 processes of a busy node, a 1-GB TSV mostly of limit-overlapping-records lines) is
+#     not a release gate; chr22 above stands for it.
 
 # 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.
 docker run -d --rm --name gate-web -p 8090:8080 "$IMG" crisprme.py web-interface

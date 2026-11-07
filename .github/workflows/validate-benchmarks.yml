@@ -270,15 +270,17 @@ jobs:
         # indel row's coordinate, aligned strings, REF text, variants, carriers and the
         # alternative-alignment table are never checked against an independent truth
         # (test/benchmark/README.md says so). This step is that check, on the output
-        # complete-test just produced: scripts/check_indel_rows.py builds each sample's
-        # two haplotypes itself from the self-test's 1000 Genomes VCF, keeps its own map
-        # from haplotype offsets to reference coordinates, and aligns with its own
-        # exhaustive DP aligner -- it imports no CRISPRme module and runs on the runner,
-        # stdlib only, no image. Soundness on each benchmark with its own budget
-        # (test/benchmark/benchmarks.json), then completeness of cas9_sg1617 on the
-        # whole of chr22 (about 5 min on 4 processes). complete-test runs with
-        # --ci-cd-test, which writes no alternative alignments (.alt_mode =
-        # no-alt-alignments), so completeness is checked per locus here; the per-sample
+        # complete-test just produced: scripts/check_indel_rows.py writes each sample's
+        # haplotypes itself from the self-test's 1000 Genomes VCF, keeps its own map
+        # from haplotype bases to reference coordinates, and aligns with its own
+        # exhaustive DP aligner -- it imports and copies no CRISPRme code and runs on the
+        # runner, stdlib only, no image (the CFD tables in PostProcess/ are read as data).
+        # Soundness on each benchmark with its own budget (test/benchmark/benchmarks.json),
+        # then completeness of cas9_sg1617 on the whole of chr22 (about 3 min on 4
+        # processes; the step about 4 min). complete-test runs with --ci-cd-test, which
+        # writes no alternative alignments (.alt_mode = no-alt-alignments), so
+        # completeness is checked per merge cluster here (the cluster's row must have no
+        # more edits than each target and at least its CFD); the per-sample
         # completeness gate is the release checklist's step 4c on a real panel, and the
         # SNP+indel oracle above. Non-gating limit lines (documented CRISPRme limits)
         # are printed and uploaded on failure; any gating line fails the step.
