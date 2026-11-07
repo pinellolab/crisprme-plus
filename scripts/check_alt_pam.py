@@ -33,16 +33,18 @@ drops a target with an N in its guide region and matches an N to no PAM base. A 
 target with an N means that guard gave way, and the genome's gaps could come out as
 off-targets. An empty or NA cell (the ALT of a REF row) holds no target.
 
-One exception (2.10.0): the REF text of an indel row (one whose Variant_info_genome names a
-variant whose REF and ALT differ in length) is the reference at the row's coordinates, as
-many bases as its target holds, and next to an assembly gap it can run into the gap while
-the target, on the haplotype carrying the indel, holds none (on HPRC's chr22, the README
-guide's rows at chr22:11978143 (-) and 11980225 (+)). Such an N passes where the reference
-genome itself holds an N at that position, read from the row's start and strand (the - strand
-reverse-complemented) and the text's gaps; any other N in it, and every N of an ALT text,
-still fails. The genome is ``--genome`` (a folder of <chromosome>.fa files, as Genomes/hg38,
-or one FASTA file), else the run's own: Genomes/<Genome_ref of the run's Params.txt> beside
-its Results folder. Without one, such an N fails, as before.
+One exception (2.10.0): the REF text of an indel row (an ALT-origin block whose
+Variant_info_genome names a variant whose REF and ALT differ in length) is the reference at
+the row's coordinates, as many bases as its target holds, and next to an assembly gap it can
+run into the gap while the target, on the haplotype carrying the indel, holds none (on
+HPRC's chr22, the README guide's rows at chr22:11978143 (-) and 11980225 (+)). Such an N
+passes where the reference genome itself holds an N at that position, read from the row's
+start and strand (the - strand reverse-complemented) and the text's gaps; any other N in it,
+every N of an ALT text, and every N of a REF-origin block's REF text (the reported target
+itself, whatever its Variant_info_genome names) still fails. The genome is ``--genome`` (a
+folder of <chromosome>.fa files, as Genomes/hg38, or one FASTA file), else the run's own:
+Genomes/<Genome_ref of the run's Params.txt> beside its Results folder. Without one, such an
+N fails, as before.
 
 Exit status 0 when every block passes both checks, 1 on any violation (each listed on
 stdout), 2 on a usage error.
@@ -213,8 +215,9 @@ def check_no_n(path, genome=None):
     """(targets checked, [violations], REF texts of indel rows that hold an N only where the
     reference does) for one integrated results table: every ``Aligned_protospacer+PAM_REF``
     and ``_ALT`` cell of each block that holds a target must hold no N or n, but the REF
-    text of an indel row may where the reference genome itself holds an N
-    (n_where_the_reference_has_n)."""
+    text of an indel row (an ALT-origin block naming an indel) may where the reference
+    genome itself holds an N (n_where_the_reference_has_n). A REF-origin block's REF text
+    is the reported target itself, and never may."""
     csv.field_size_limit(1 << 30)
     checked = accepted = 0
     bad = []
@@ -228,14 +231,15 @@ def check_no_n(path, genome=None):
                 try:
                     cells.append((b, side, col["Aligned_protospacer+PAM_%s_(%s)" % (side, b)],
                                   col["Start_coordinate_(%s)" % b], col["Strand_(%s)" % b],
-                                  col.get("Variant_info_genome_(%s)" % b)))
+                                  col.get("Variant_info_genome_(%s)" % b),
+                                  col.get("REF/ALT_origin_(%s)" % b)))
                 except KeyError:
                     continue
         if not cells:
             raise ValueError("%s: no Aligned_protospacer+PAM columns -- not an integrated "
                              "results table" % path)
         for row in reader:
-            for b, side, i_seq, i_start, i_strand, i_var in cells:
+            for b, side, i_seq, i_start, i_strand, i_var, i_origin in cells:
                 seq = row[i_seq]
                 if seq in ("", "NA"):
                     continue
@@ -243,7 +247,8 @@ def check_no_n(path, genome=None):
                 if "N" not in seq.upper():
                     continue
                 chrom = row[col.get("Chromosome", 1)]
-                if (side == "REF" and i_var is not None and _names_indel(row[i_var])
+                if (side == "REF" and i_var is not None and i_origin is not None
+                        and row[i_origin] == "alt" and _names_indel(row[i_var])
                         and n_where_the_reference_has_n(seq, int(row[i_start]), row[i_strand],
                                                         chrom, genome)):
                     accepted += 1

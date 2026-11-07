@@ -129,9 +129,10 @@ class AltPamGate(unittest.TestCase):
     # -- an indel row's REF text over the reference's own N (2.10.0) ---------------------
 
     def _gap_run(self, cells, genome_arg=True, params_genome=False):
-        """A run's table of indel-row blocks (start, strand, REF, ALT, variants) over chr1,
-        whose reference holds N at 100-129 and bases elsewhere; --genome given, or found as
-        the run's Genomes/<Genome_ref> beside its Results folder."""
+        """A run's table of indel-row blocks (start, strand, REF, ALT, variants[, origin:
+        "alt" unless given]) over chr1, whose reference holds N at 100-129 and bases
+        elsewhere; --genome given, or found as the run's Genomes/<Genome_ref> beside its
+        Results folder."""
         data = os.path.join(self.tmp, "DATA")
         gdir = os.path.join(data, "Genomes", "hgT")
         os.makedirs(gdir)
@@ -150,10 +151,10 @@ class AltPamGate(unittest.TestCase):
                      "Variant_info_genome_(%s)" % b]
         lines = ["\t".join(head)]
         g = self.G + "NNN"
-        for start, strand, ref, alt, var in cells:
+        for start, strand, ref, alt, var, *origin in cells:
             row = [g, "chr1"]
             for _b in BLOCKS:
-                row += [str(start), strand, g, ref, alt, "alt", var]
+                row += [str(start), strand, g, ref, alt, (origin or ["alt"])[0], var]
             lines.append("\t".join(row))
         path = os.path.join(res, "x_integrated_results.tsv")
         with open(path, "w") as fh:
@@ -213,6 +214,17 @@ class AltPamGate(unittest.TestCase):
                                  (100, "+", "N" * 23, self.ALT, "chr1_110_AC_GT")])
         self.assertEqual(rc, 1, out)
         self.assertIn("6 with an N; 3 indel rows' REF texts", out)
+
+    def test_a_ref_origin_blocks_ref_text_over_the_references_n_fails(self):
+        """The exception is an indel row's: an ALT-origin block, whose REF text is the
+        reference at its start and not its target. A REF-origin block's REF text is the
+        reported target itself, so an N there fails whatever its Variant_info_genome names
+        (no table holds such a block, whose Variant_info_genome is NA; pamc-review-r1's G2)."""
+        rc, out = self._gap_run([(100, "+", "N" * 23, self.ALT, self.INDEL),
+                                 (100, "+", "N" * 23, "NA", self.INDEL, "ref")])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("3 with an N; 3 indel rows' REF texts", out)
+        self.assertIn("    highest_CFD REF chr1:100(+) " + "N" * 23, out)
 
     def test_an_indel_rows_ref_n_without_a_genome_fails(self):
         rc, out = self._gap_run([(100, "+", "N" * 23, self.ALT, self.INDEL)],
