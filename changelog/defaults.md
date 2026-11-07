@@ -304,6 +304,10 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   built again, or a dedicated index of the PAM beside it, which a search takes first. And the NOTE
   of a search that prunes by itself offers a published index "if it is published", as the refusals
   do — none is published for a genome of one's own, or for `TTTV`, `NGA` and most other PAMs.
+  On a 30 kb genome whose `20-NNNN_2_gn` was built before an N run was put into it, the search
+  the older advice named — no `--prune-pam`, no `--index-path` — takes that same index, pruned
+  by itself, and builds none (`genome_library` holds `20-NNNN_2_gn` alone after it), in 27 s
+  with nothing on stderr.
 - **An index is named for its guide length and the side of its PAM (E2).** `<PAM>_<N>_<genome>`
   says neither, so a 3′ and a 5′ build of one motif, or builds for two guide lengths (Cas12a
   `TTTV` at 20 and 23 nt, as the rebuild adds), took one name, and the second build stopped on
@@ -410,7 +414,9 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   which tells the search script that it took the flag (it records `Prune_pam`, `auto` or `given`,
   in the parameters too), or the script, for a web search. The report's
   summary shows them, and its zip bundles the record as `indexes_searched.txt`; a run of an
-  earlier release has none.
+  earlier release has none. On chr22 with HGDP + 1000 Genomes, an `NGG` search of the `NRR`
+  indexes with 1 + 1 bulge and no flag records both index lines, each `pruned to NGG at leaf
+  time (--prune-pam)`, and `Prune_pam auto` with them, which only a web search wrote before.
 - **The web form's PAM picker for a PAM-less index** (plan 2.7, DYNAMIC_PAM_INDEX_COMPAT §8). When an
   all-`N` index is installed for the genome (or the dataset) selected, the form says what it serves
   (any PAM of its guide length on its side, up to its flank) and offers the PAMs of common nucleases
@@ -441,7 +447,12 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   wherever its enriched genome is whole, an installed index of the search's PAM beside it or not:
   it named that index, with its bulges, as the index searched, and the report's summary with it,
   though only the genome was scanned (every local or Settings build keeps its enriched genome, so
-  a web search with no bulges, "Max edits" at 0 bulges, is the common case).
+  a web search with no bulges, "Max edits" at 0 bulges, is the common case). On chr22 with HGDP +
+  1000 Genomes, the `NRR` indexes installed and the enriched genome in place, a search with no
+  bulges of `NRR`, and one of `NGG` which only those indexes serve, each record
+  `Variant_index:hg38_HGDP1kGP none: a search with no bulges scans the variant genome; its
+  indels: NRR_3_hg38+hg38_HGDP1kGP_INDELS`, and their reports' summary rows say it; each named
+  `NRR_3_hg38+hg38_HGDP1kGP`, with its two bulges, before this.
 - **A search its input check refuses leaves its output folder empty.** A guide without its
   PAM's `N` padding, for one, is refused before the search starts, but the run had written
   `.command_line.txt`, `.version.txt`, `Params.txt` and `guides.txt` into `Results/<output>/`,
@@ -874,7 +885,9 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   Settings' Build an index locally and Download a prebuilt index
   beside the commands that get the tiers, and the form's Include the full report beside
   `--report-full` in every sentence that names it (the website's example report with them).
-  Covered by
+  The report of a population-level search of chr22 with HGDP + 1000 Genomes holds both
+  per-sample sentences and all four `--report-full` ones, each with the form's option beside
+  the flag. Covered by
   `PostProcess/test_web_shell_safety.py`, `test_web_bulge_notes.py` and
   `test/web/test_settings_vcf_datasets.py` (in the image), and `test_generate_report.py`.
 - **build-index-only refuses an INDELS index in place that lacks the sub-indexes it builds.** It
