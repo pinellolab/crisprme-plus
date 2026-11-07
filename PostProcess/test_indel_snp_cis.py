@@ -471,6 +471,154 @@ def test_variant_places_snps_past_a_deletion_and_snp_rows():
         90, [101, 110])
 
 
+def _row_first_base_base_by_base(strand, start, alt_aligned, ref_aligned, indel, snps=()):
+    """row_first_base as c3a75fe wrote it: the haplotype built one base at a time
+    (haplotype_base_kind), then a slice compared at each k. The model the sliced one must
+    give back."""
+    ipos, iref, ialt = indel
+    if len(ialt) <= len(iref) or start != ipos - 2 + len(iref) - isc.shared_tail(iref, ialt):
+        return start
+    target = alt_aligned.replace("-", "").upper()
+    refb = ref_aligned.replace("-", "").upper()
+    if not target or len(refb) != len(target):
+        return start
+    if strand == "-":
+        target, refb = _rc(target), _rc(refb)
+    n, more = len(target), len(ialt) - len(iref)
+    hap = []
+    for h in range(start, start + n + more):
+        kind, p = isc.haplotype_base_kind(h, ipos, iref, ialt)
+        if kind == "ref":
+            hap.append(refb[p - start] if 0 <= p - start < n else "?")
+        else:
+            hap.append(ialt[h - ipos + 1].upper())
+    for pos1, _r, alt in snps:
+        at = isc.haplotype_place(pos1, ipos, iref, ialt)
+        if at is not None and 0 <= at - 1 - start < len(hap):
+            hap[at - 1 - start] = alt.upper()
+    hap = "".join(hap)
+    for k in range(more + 1):
+        if hap[k:k + n] == target:
+            return start + k
+    return start
+
+
+def test_row_first_base_equals_the_base_by_base_reading():
+    """2.8.2: row_first_base cuts the haplotype in slices and finds the target with
+    str.find. On 4,000 random rows (plain, unnormalized, complex and anchorless insertions,
+    deletions and MNVs; rows at the anchor, on it and near it; both strands; gaps and lower
+    case; SNPs in and out of the window, a multi-base one now and then; low-complexity
+    sequence, where several k hold the target; targets that are nowhere) it gives what the
+    base-by-base reading gives."""
+    import random
+    rng = random.Random(282)
+
+    def rnd(n, alpha):
+        return "".join(rng.choice(alpha) for _ in range(n))
+
+    placed = 0
+    for _ in range(4000):
+        alpha = rng.choice(["ACGT", "AC", "A", "ACGT"])
+        ref = rnd(260, alpha)
+        ipos = rng.randint(100, 140)
+        a = ipos - 1
+        shape = rng.randrange(6)
+        if shape == 0:    # plain insertion
+            iref = ref[a]; ialt = iref + rnd(rng.randint(1, 60), alpha)
+        elif shape == 1:  # unnormalized, a shared tail
+            iref = ref[a:a + 3]; ialt = iref[:2] + rnd(rng.randint(1, 30), alpha) + iref[2:]
+        elif shape == 2:  # complex: a replaced base, then added ones
+            iref = ref[a:a + 2]; ialt = iref[0] + rnd(rng.randint(2, 40), alpha)
+        elif shape == 3:  # no first base shared
+            iref = ref[a]; ialt = rnd(rng.randint(1, 20), alpha) + iref
+        elif shape == 4:  # several first bases shared
+            iref = ref[a:a + 4]; ialt = iref + rnd(rng.randint(1, 50), alpha)
+        else:             # a deletion or an MNV: the start
+            iref = ref[a:a + 3]; ialt = rng.choice([iref[0], rnd(3, "ACGT")])
+        hap = ref[:a] + ialt + ref[a + len(iref):]
+        anchor = ipos - 2 + len(iref) - isc.shared_tail(iref, ialt)
+        start = anchor if rng.random() < 0.85 else anchor + rng.choice([-3, -1, 1, 2])
+        n = rng.choice([20, 23, 24])
+        k = rng.randint(0, max(0, len(ialt) - len(iref) + 2))
+        snps = []
+        for _s in range(rng.choice([0, 0, 1, 2, 3])):
+            p1 = rng.randint(a - 5, a + len(iref) + n + 10)
+            snps.append((p1, ref[p1 - 1], rng.choice("ACGT") if rng.random() < 0.9
+                         else rnd(2, "ACGT")))
+        target = hap[start + k:start + k + n] if rng.random() < 0.9 else rnd(n, "ACGT")
+        ref_text = ref[start:start + n]
+        if len(target) != n:
+            continue
+        if rng.random() < 0.3:  # an RNA bulge: a gap at one place in both
+            g = rng.randint(1, n - 2)
+            target, ref_text = target[:g] + "-" + target[g:], ref_text[:g] + "-" + ref_text[g:]
+        target = "".join(c.lower() if rng.random() < 0.2 else c for c in target)
+        strand = rng.choice("+-")
+        if strand == "-":
+            target, ref_text = _rc(target.upper()), _rc(ref_text)
+        args = (strand, start, target, ref_text, (ipos, iref, ialt), snps)
+        want = _row_first_base_base_by_base(*args)
+        assert isc.row_first_base(*args) == want, args
+        placed += want != start
+    assert placed > 800  # about a third of the rows start on an added base (1,241)
+
+
+def test_row_first_base_cost_does_not_grow_with_the_insertion():
+    """2.8.2: a row at the anchor of a long insertion is placed without a Python step per
+    inserted base. HPRC holds 402 insertions of 53.9 to 54.4 kb at chr22:10690626, and built
+    base by base (as up to c3a75fe) a row there took 83 ms: the merge's 16,058 rows of the
+    README guide inside them took most of its 27 minutes. The lines of indel_snp_cis run for
+    a row 20 bases from the end of a 1 kb and of a 20 kb insertion are as many, and a 1 Mb
+    one is placed in well under a second (process time; base by base, about one second)."""
+    import sys
+    import time
+
+    def run_counting_lines(*args):
+        count = [0]
+
+        def local(frame, event, arg):
+            if event == "line":
+                count[0] += 1
+            return local
+
+        def tracer(frame, event, arg):
+            return local if frame.f_globals is vars(isc) else None
+
+        before = sys.gettrace()
+        sys.settrace(tracer)
+        try:
+            out = isc.row_first_base(*args)
+        finally:
+            sys.settrace(before)
+        return out, count[0]
+
+    ref = ("GATTACAGCT" * 30)[:300]
+    a = 100  # the anchor (0-based), VCF POS 101
+
+    def row(length, strand):
+        ins = "C" * (length - 30) + "ATGCATGCAATTGGCCAAGTTCAGTACGTA"
+        alt = ref[a] + ins
+        hap = ref[:a + 1] + ins + ref[a + 1:]
+        k = length - 20  # its first base: the k-th added base
+        target, ref_text = hap[a + k:a + k + 23], ref[a:a + 23]
+        if strand == "-":
+            target, ref_text = _rc(target), _rc(ref_text)
+        return (strand, a, target, ref_text, (a + 1, ref[a], alt), [(a + 8, ref[a + 7], "T")]), k
+
+    lines = {}
+    for length in (1000, 20000):
+        for strand in "+-":
+            args, k = row(length, strand)
+            first, lines[length, strand] = run_counting_lines(*args)
+            assert first == a + k, (length, strand, first)
+    assert lines[1000, "+"] == lines[20000, "+"] and lines[1000, "-"] == lines[20000, "-"], lines
+    t0 = time.process_time()
+    for strand in "+-":
+        args, k = row(1000000, strand)
+        assert isc.row_first_base(*args) == a + k
+    assert time.process_time() - t0 < 0.5
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

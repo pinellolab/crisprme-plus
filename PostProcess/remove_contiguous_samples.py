@@ -103,7 +103,27 @@ def _merge_row(kept, ele, snp_info):
     )  # snp_info - 1 points to AF column
 
 
-def _haplotype_cluster_position(row):
+def _first_base_offset(start, strand, variants, target, ref):
+    """How far past its start an indel row's first aligned base is on the haplotype
+    carrying its indel (indel_snp_cis.row_first_base), from the row's Position, strand,
+    variants, aligned target and REF text; 0 for a row with no indel or one this cannot
+    read."""
+    try:
+        toks = []
+        for tok in variants.split(","):
+            p = tok.rsplit("_", 3)
+            toks.append((int(p[1]), p[2], p[3]))
+        indel = next((t for t in toks if len(t[1]) != len(t[2])), None)
+        if indel is None:
+            return 0
+        start = int(start)
+        return _isc.row_first_base(strand, start, target, ref, indel,
+                                   [t for t in toks if t is not indel]) - start
+    except (IndexError, ValueError):
+        return 0
+
+
+def _haplotype_cluster_position(row, memo=None):
     """An indel row's cluster position on the haplotype carrying its indel: its
     Cluster_Position plus how far past its start its first aligned base is there.
 
@@ -118,22 +138,25 @@ def _haplotype_cluster_position(row):
     earlier and the Cluster_Position adds it back), can have two Cluster_Positions when
     they start inside an insertion. The row's Position is the column before its
     Cluster_Position, its strand the one after, its aligned target and REF text columns
-    2 and 3. A row with no indel, or one this cannot read: its Cluster_Position."""
+    2 and 3. A row with no indel, or one this cannot read: its Cluster_Position.
+
+    ``memo`` (a dict, one per cluster) keeps the offset by what it is read from: the
+    Position, strand and variants, and the bases of the target and REF text, gaps and case
+    aside, as row_first_base reads them. The aligned spacer is not among them, and since
+    2.8.2 the merge keys an indel row by it as well, so every alignment of a target comes
+    here; without the memo each read the haplotype again, the whole ALT for a row at the
+    anchor of a long insertion."""
     cluster = int(row[pos])
     try:
-        toks = []
-        for tok in row[snp_info].split(","):
-            p = tok.rsplit("_", 3)
-            toks.append((int(p[1]), p[2], p[3]))
-        indel = next((t for t in toks if len(t[1]) != len(t[2])), None)
-        if indel is None:
-            return cluster
-        start = int(row[pos - 1])
-        first = _isc.row_first_base(row[pos + 1], start, row[2], row[3], indel,
-                                    [t for t in toks if t is not indel])
-        return cluster + first - start
-    except (IndexError, ValueError):
+        what = (row[pos - 1], row[pos + 1], row[snp_info],
+                row[2].replace("-", "").upper(), row[3].replace("-", "").upper())
+    except IndexError:
         return cluster
+    if memo is None:
+        return cluster + _first_base_offset(*what)
+    if what not in memo:
+        memo[what] = _first_base_offset(*what)
+    return cluster + memo[what]
 
 
 def _fold_same_carriers(rows, fold_of, snp_info):
@@ -209,13 +232,14 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             # And only rows with one alignment of it (2.8.2): a carrier resolved PUTATIVE
             # (phase unknown) gets the strongest target its own alleles allow on each
             # alignment (indel_snp_cis.worst_case_bases): the guide's base where the
-            # alignment pairs a SNP's base with a guide base, the CFD's choice where it
-            # leaves that base as a DNA bulge. So two alignments of one target string can
-            # list it with different bases, and with the target alone as the key it went
-            # onto the other alignment with the first one's bases, a target weaker than its
-            # own there (the SNP+indel oracle's S19). Rows of one alignment still merge
-            # (one target from two VCF datasets); the alignments of a target with one
-            # carrier set are folded into the best below (_fold_same_carriers).
+            # alignment pairs a SNP's base with a guide base, the CFD's choice (the
+            # reference base in a search that scores no CFD) where it leaves that base as a
+            # DNA bulge. So two alignments of one target string can list it with different
+            # bases, and with the target alone as the key it went onto the other alignment
+            # with the first one's bases, a target weaker than its own there (the SNP+indel
+            # oracle's S19). Rows of one alignment still merge (one target from two VCF
+            # datasets); the alignments of a target with one carrier set are folded into
+            # the best below (_fold_same_carriers), carrier sets compared whole.
             if _holds_indel_token(ele[snp_info]):
                 key += (ele[2].upper(), ele[1].upper())
             if key in dict_var.keys():
@@ -224,12 +248,14 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                 dict_var[key] = [ele]
     # Alignments of one site naming the same variants with the same carriers are folded
     # into one entry once the variant rows are sorted (_fold_same_carriers), the site
-    # being their cluster position on the haplotype carrying the indel.
+    # being their cluster position on the haplotype carrying the indel, read once per
+    # target, REF text, place and variants (the memo), not once per aligned spacer.
     fold_of = {}
+    first_base_memo = {}
     for key in dict_var.keys():
         if len(key) == 4:  # an indel or MNV row (its target and aligned spacer in the key)
             row = dict_var[key][0]
-            fold_of[id(row)] = (_haplotype_cluster_position(row), key[1],
+            fold_of[id(row)] = (_haplotype_cluster_position(row, first_base_memo), key[1],
                                 frozenset(row[true_guide - 2].split(",")))
 
     final_list_best_ref = list()

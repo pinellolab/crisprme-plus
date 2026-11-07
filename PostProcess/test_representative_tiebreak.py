@@ -57,7 +57,12 @@ ASSERTS:
   * Two alignments of one indel target string (2.8.2: the merge keys an indel row by its
     aligned spacer too): a carrier resolved PUTATIVE stays on the alignment it was resolved
     on (the SNP+indel oracle's site U, S19); one alignment from two VCF datasets is still
-    one entry; alignments of one target with one carrier set are one entry, the best.
+    one entry; alignments of one target with one carrier set are one entry, the best; carrier
+    sets are compared whole (an alignment whose carriers are a subset of a better one's keeps
+    its entry), the same entries in every order.
+  * Cost (2.8.2): one target's alignments inside a 54 kb insertion, each its own aligned
+    spacer, have their place on the haplotype read once per target, not once per alignment
+    (indel_snp_cis.row_first_base, counted in a fresh interpreter).
 
 Run with:
     cd PostProcess && python3 -m unittest test_representative_tiebreak -v
@@ -589,6 +594,31 @@ class OneTargetTwoAlignments(unittest.TestCase):
                         self.assertEqual(s20[0][1], strong[1])
                     self.assertEqual([r[1] for r in out if r[13] == "S19,S20"], [bulge[1]])
 
+    def test_carrier_sets_are_compared_whole(self):
+        """The fold compares whole carrier sets, so that every block keeps one row count
+        whatever its order. S04 (homozygous for the SNP) and S06 (phased, the SNP in cis)
+        carry the A wherever the target is; the unphased S01 and S03 take it where the
+        alignment pairs it with the guide's A (the perfect alignment) and the C where it is
+        a DNA bulge (ACTGAA-ATCTG..., whose CFD the A makes 0). So ACTGAA-ATCTG... with the
+        A lists S04 and S06 alone and keeps an entry of its own, though both are listed on
+        the perfect alignment of that target and variants (METHODS: an extra alternative
+        alignment, never a wrong carrier or score). The same three entries in every order."""
+        rows = [self._u(self.G, "ACTGAAATCTGTAAGCAGGCTGG", "1.000", 0, "S01,S03,S04,S06",
+                        snp=True),
+                self._u(self.BULGED_B, "AC-tgAAATCTGTAAGCAGGCTGG", "0.000", 2, "S04,S06",
+                        snp=True),
+                self._u(self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG", "0.014", 2, "S01,S03")]
+        both = self.SNP + "," + self.DEL
+        for sort_order in ("score", "total"):
+            for order in (rows, rows[::-1], rows[1:] + rows[:1]):
+                with self.subTest(sort_order=sort_order, first=order[0][DNA_COL]):
+                    out = self._all(order, sort_order)
+                    got = {(r[1], r[DNA_COL]): (r[SNP_COL], r[13]) for r in out}
+                    self.assertEqual(got, {
+                        (self.G, "ACTGAAATCTGTAAGCAGGCTGG"): (both, "S01,S03,S04,S06"),
+                        (self.BULGED_B, "AC-tgAAATCTGTAAGCAGGCTGG"): (both, "S04,S06"),
+                        (self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG"): (self.DEL, "S01,S03")})
+
 
 class AlignmentsStartingInsideOneInsertion(unittest.TestCase):
     """2.8.2: a row whose first base is one an insertion adds starts at the insertion's
@@ -701,6 +731,86 @@ class AlignmentsStartingInsideOneInsertion(unittest.TestCase):
         best, alt = self._merge([list(r) for r in rows])
         self.assertEqual((best[0][DNA_COL], [a[DNA_COL] for a in alt]),
                          (self.T2, [hap[100:123]]))
+
+
+# Runs the real merge script in a fresh interpreter with indel_snp_cis.row_first_base
+# counting its calls, and prints their number.
+_COUNTING_MERGE = """
+import runpy, sys
+import indel_snp_cis as isc
+calls = []
+_read = isc.row_first_base
+def _counted(*args, **kwargs):
+    calls.append(args[1])
+    return _read(*args, **kwargs)
+isc.row_first_base = _counted
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+sys.stderr.write("ROW_FIRST_BASE_CALLS %d\\n" % len(calls))
+"""
+
+
+class OneTargetsAlignmentsInsideALongInsertion(unittest.TestCase):
+    """2.8.2, cost: the merge reads a row's place on the haplotype carrying its indel
+    (_haplotype_cluster_position) once per target, REF text, place and variants, not once
+    per aligned spacer, which the merge also keys an indel row by.
+
+    The rows start inside an insertion of 54 kb, as at chr22:10690626 of HPRC, where 402
+    alleles of 53.9 to 54.4 kb hold 16,058 rows of the README guide's chr22 search: 20
+    DNA-bulge alignments of one target (the gap in a different place of the guide, the
+    mismatches in a different case), its perfect alignment and a second target. Read per
+    aligned spacer, 22 times; per target, 3. The fold is the same either way: the bulged
+    alignments fold into the perfect one, and the second target is its alternative."""
+
+    T1 = AlignmentsStartingInsideOneInsertion.T1
+    T2 = AlignmentsStartingInsideOneInsertion.T2
+    INS = "C" * 30000 + "AT" + T1 + "CA" + T2 + "TC" + "G" * 23950
+    setUp = IndelRowsKeepTheirOwnCarriers.setUp
+    tearDown = IndelRowsKeepTheirOwnCarriers.tearDown
+    _site = AlignmentsStartingInsideOneInsertion._site
+    _inside = AlignmentsStartingInsideOneInsertion._inside
+    _row = IndelRowsKeepTheirOwnCarriers._row
+    REFSEQ = AlignmentsStartingInsideOneInsertion.REFSEQ
+    INDEL = IndelRowsKeepTheirOwnCarriers.INDEL
+
+    def _merge_counting(self, rows):
+        infile = os.path.join(self.d, "in.txt")
+        outfile = os.path.join(self.d, "out.txt")
+        with open(infile, "w") as fh:
+            fh.write("\t".join(POST_ADJUST_HEADER) + "\n")
+            for r in rows:
+                fh.write("\t".join(r) + "\n")
+        cmd = [sys.executable, "-c", _COUNTING_MERGE,
+               os.path.join(PP, "remove_contiguous_samples.py"), infile, outfile,
+               "3", "5", "7", "11", "16", "19", "21", "score", "mm+bulges"]
+        res = subprocess.run(cmd, cwd=PP, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        calls = [int(l.split()[1]) for l in res.stderr.splitlines()
+                 if l.startswith("ROW_FIRST_BASE_CALLS ")]
+        out = []
+        for path in (outfile, outfile + ".discarded_samples"):
+            with open(path) as fh:
+                out.append([l.rstrip("\n").split("\t") for l in fh.readlines()[1:]])
+        return calls, out
+
+    def test_the_place_is_read_once_per_target(self):
+        k1 = 30000 + 3  # T1's first base: the k-th base the insertion adds
+        perfect = self._inside(self.INS, k1, 23)
+        bulged = []
+        for i in range(20):
+            r = self._inside(self.INS, k1 - 1, 24, cfd="0.%03d" % (100 + i), total=1,
+                             dna_bulges=1, rsid=".", af="0.2")
+            r[1] = GUIDE[:i] + "-" + GUIDE[i:]
+            r[DNA_COL] = r[DNA_COL][:i + 1] + r[DNA_COL][i + 1].lower() + r[DNA_COL][i + 2:]
+            bulged.append(r)
+        self.assertEqual(len({(r[1], r[DNA_COL]) for r in bulged}), 20)
+        self.assertEqual(len({r[DNA_COL].upper() for r in bulged}), 1)
+        second = self._inside(self.INS, k1 + 25, 23, cfd="0.800", total=1)
+        calls, (best, alt) = self._merge_counting([perfect] + bulged + [second])
+        self.assertEqual(calls, [3])
+        self.assertEqual((len(best), len(alt)), (1, 1))
+        self.assertEqual((best[0][DNA_COL], best[0][16], best[0][17]), (self.T1, ".,rs1", "0.1,0.2"))
+        self.assertEqual(alt[0][DNA_COL], self.T2)
 
 
 if __name__ == "__main__":

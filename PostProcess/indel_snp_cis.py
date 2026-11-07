@@ -558,10 +558,21 @@ def row_first_base(strand, start, alt_aligned, ref_aligned, indel, snps=()):
     smallest k at which they are the target's is taken: two places can hold the same
     target only in a repeat the target lies wholly in, where they hold the same bases (the
     smaller is the base itself on a row starting on a reference base). None of them,
-    which a row the post-analysis wrote never gives: ``start``."""
+    which a row the post-analysis wrote never gives: ``start``.
+
+    Cost: the haplotype is cut from the REF text and the ALT in slices and the target
+    found in it with ``str.find``, so no Python step is taken per base of the ALT. Built
+    base by base (haplotype_base_kind for each of its len(ALT) - len(REF) + 23 bases, then
+    a slice compared at each k), a row at the anchor of one of the 402 insertions of 53.9
+    to 54.4 kb that HPRC holds at chr22:10690626 took 83 ms, and the merge
+    (remove_contiguous_samples) places each of the 16,058 rows of the README guide's chr22
+    search that start inside them."""
     ipos, iref, ialt = indel
-    if len(ialt) <= len(iref) or start != ipos - 2 + len(iref) - shared_tail(iref, ialt):
-        return start  # no base added, or the row starts before the added bases' anchor
+    if len(ialt) <= len(iref):
+        return start  # no base added
+    t = shared_tail(iref, ialt)
+    if start != ipos - 2 + len(iref) - t:
+        return start  # the row starts before the added bases' anchor
     target = alt_aligned.replace("-", "").upper()
     refb = ref_aligned.replace("-", "").upper()
     if not target or len(refb) != len(target):
@@ -569,22 +580,24 @@ def row_first_base(strand, start, alt_aligned, ref_aligned, indel, snps=()):
     if strand == "-":
         target, refb = _revcomp(target), _revcomp(refb)
     n, more = len(target), len(ialt) - len(iref)
-    hap = []
-    for h in range(start, start + n + more):
-        kind, p = haplotype_base_kind(h, ipos, iref, ialt)
-        if kind == "ref":
-            hap.append(refb[p - start] if 0 <= p - start < n else "?")
-        else:
-            hap.append(ialt[h - ipos + 1].upper())
-    for pos1, _r, alt in snps:
-        at = haplotype_place(pos1, ipos, iref, ialt)
-        if at is not None and 0 <= at - 1 - start < len(hap):
-            hap[at - 1 - start] = alt.upper()
-    hap = "".join(hap)
-    for k in range(more + 1):
-        if hap[k:k + n] == target:
-            return start + k
-    return start
+    # The haplotype's n + more bases from ``start`` on, by haplotype_base_kind: ``start``
+    # holds the ALT's base number ``at`` (from 0; len(REF) - t - 1). It is the REF text's
+    # first base when it is one REF and ALT share at the start (at < c, a plain insertion),
+    # and an ALT base standing in a REF base's place otherwise; then come the ALT's bases
+    # up to its shared tail, then the REF text's bases from its second on (the tail
+    # included).
+    c = kept_bases(iref, ialt)
+    at = start - ipos + 1
+    hap = (refb[0] if at < c else "") + ialt[max(c, at):len(ialt) - t].upper() + refb[1:]
+    if snps:
+        hap = list(hap)
+        for pos1, _r, alt in snps:
+            place = haplotype_place(pos1, ipos, iref, ialt)
+            if place is not None and 0 <= place - 1 - start < len(hap):
+                hap[place - 1 - start] = alt.upper()
+        hap = "".join(hap)
+    k = hap.find(target)
+    return start + k if 0 <= k <= more else start
 
 
 def variant_places(strand, start, alt_aligned, ref_aligned, tokens):
