@@ -3799,10 +3799,18 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
         self.assertNotIn("supplies the reference index only", run.stderr)
 
     def test_an_index_that_serves_with_its_dictionaries_gone_says_so(self):
+        # and how to download it again: a download of an installed index brings what of it
+        # is missing, the dictionaries too since 2.9.0 (FR :163), and Settings downloads
+        # none that is installed
         self.install("NRG_3")
         shutil.rmtree(self.home / "Dictionaries" / f"registry_{self.VCF}")
         run = self.refused()
-        self.assertIn("Its dictionaries are not installed", run.stderr)
+        self.assertIn(
+            f"Its dictionaries are not installed (Dictionaries/registry_{self.VCF} or "
+            f"dictionaries_{self.VCF}, and log_indels_{self.VCF}): download the index again, "
+            f"which installs them (crisprme.py download --what index --index-name NRG_3_hg38+"
+            f"{self.VCF}; in the web app, remove the index in Settings, then download it "
+            "there). ", run.stderr)
         self.assertNotIn("--prune-pam", run.stderr)  # (it needs no flag)
 
     def test_the_enriched_genome_alone_can_build_it(self):

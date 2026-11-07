@@ -702,3 +702,13 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   that neither score is computed for the nuclease and that the panel is chosen by mismatches
   and bulges, and the panel's note says how; assembly-search's combined report too. A scored
   search's report is unchanged. Covered by `PostProcess/test_generate_report.py`.
+- **`download --what index` brings again the dictionaries an installed variant index has
+  lost.** A search of a variant index whose dictionaries were gone (`Dictionaries/registry_<dataset>`
+  or `dictionaries_<dataset>`, and `log_indels_<dataset>`) said to download the index again,
+  and complete-search's check said to download it, but the download took the index for
+  installed, as its folder, its INDELS index, the reference index and the genotype store were
+  there, and did nothing (FR :163). It counts the dictionaries a search reads as part of the
+  install, and brings them with the rest of the index's archive. The search's advice names the
+  command, and says that in the web app, whose Settings page downloads no index that is
+  installed, the index is removed there first. Covered by `PostProcess/test_crisprme_hf.py` and
+  `test_index_resolution.py`.

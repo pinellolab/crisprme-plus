@@ -474,12 +474,16 @@ class TestIndexAlreadyInstalled(unittest.TestCase):
             os.makedirs(os.path.join(root, "genome_library", n))
         return root
 
-    def _genotype_store(self, root, vcf):
-        # the Tier-1 genotype store lands under <workdir>/Dictionaries/genotypes_<vcf>/
-        os.makedirs(os.path.join(root, "Dictionaries", f"genotypes_{vcf}"))
+    def _genotype_store(self, root, vcf, dictionaries=("registry", "log_indels")):
+        # the Tier-1 genotype store lands under <workdir>/Dictionaries/genotypes_<vcf>/,
+        # beside the dictionaries the variant tarball brings (registry_<vcf>/, or the
+        # classic dictionaries_<vcf>/, and log_indels_<vcf>/)
+        for d in ("genotypes",) + tuple(dictionaries):
+            os.makedirs(os.path.join(root, "Dictionaries", f"{d}_{vcf}"))
 
     # A COMPLETE variant install = main dir + _INDELS + shared reference index
-    # (NRG_3_hg38) + genotype store (genotypes_hg38_X). Reference-only has none.
+    # (NRG_3_hg38) + its dictionaries + genotype store (genotypes_hg38_X). Reference-only
+    # has none.
 
     def test_reference_only_installed_is_noop(self):
         wd = self._library("NRG_3_hg38")
@@ -534,12 +538,31 @@ class TestIndexAlreadyInstalled(unittest.TestCase):
         )
         self.assertIsNone(self._run(wd, "NRG_3_hg38+hg38_X"))
 
+    def test_variant_missing_its_dictionaries_still_downloads(self):
+        # a search of the index without them says to download it again: that must heal
+        # them, not no-op (FR :163). The classic dictionaries_<vcf>/ stand for the registry.
+        for present in (("registry",), ("log_indels",), ("dictionaries",), ()):
+            with self.subTest(present=present):
+                wd = self._library(
+                    "NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS", "NRG_3_hg38"
+                )
+                self._genotype_store(wd, "hg38_X", present)
+                self.assertIsNone(self._run(wd, "NRG_3_hg38+hg38_X"))
+        wd = self._library("NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS", "NRG_3_hg38")
+        self._genotype_store(wd, "hg38_X", ("dictionaries", "log_indels"))
+        self.assertEqual(
+            self._run(wd, "NRG_3_hg38+hg38_X"),
+            os.path.join(wd, "genome_library", "NRG_3_hg38+hg38_X"),
+        )
+
     def test_no_genotypes_does_not_require_store(self):
         # with --no-genotypes the genotype store is not part of a complete install,
         # so an otherwise-complete install still no-ops.
         wd = self._library(
             "NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS", "NRG_3_hg38"
         )
+        for d in ("registry", "log_indels"):
+            os.makedirs(os.path.join(wd, "Dictionaries", f"{d}_hg38_X"))
         self.assertEqual(
             self._run(wd, "NRG_3_hg38+hg38_X", genotypes=False),
             os.path.join(wd, "genome_library", "NRG_3_hg38+hg38_X"),

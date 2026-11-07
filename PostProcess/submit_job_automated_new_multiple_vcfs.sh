@@ -1322,8 +1322,11 @@ while read vcf_f; do
 			done
 		done
 		for _lib in "${_libs[@]}"; do
-			if [ -n "$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")" ]; then
-				_todo="Its dictionaries are not installed (Dictionaries/registry_${vcf_name} or dictionaries_${vcf_name}, and log_indels_${vcf_name}): download the index again. "
+			_at=$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")
+			if [ -n "$_at" ]; then
+				# (a download of an installed index brings what of it is missing, these too;
+				# Settings downloads none that is installed)
+				_todo="Its dictionaries are not installed (Dictionaries/registry_${vcf_name} or dictionaries_${vcf_name}, and log_indels_${vcf_name}): download the index again, which installs them (crisprme.py download --what index --index-name ${_at##*/}; in the web app, remove the index in Settings, then download it there). "
 				break
 			elif [ "${prune_pam:-0}" != 1 ]; then
 				# (a search prunes by itself where the engine can: here it cannot)

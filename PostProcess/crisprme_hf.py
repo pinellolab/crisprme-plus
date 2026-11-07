@@ -1653,19 +1653,26 @@ def download_component(
         # only with ALL of: its _INDELS companion (renamed into place by a SEPARATE
         # os.rename, so a main dir without it is an interrupted install); the shared
         # reference index (<pam>_<N>_<ref>, which travels once -- not inside each
-        # variant tarball); and, unless --no-genotypes, its Tier-1 genotype store
-        # (Dictionaries/genotypes_<vcf>/). Any missing piece falls through to the
-        # fetch/heal path below, which re-fetches only what is absent.
+        # variant tarball); the dictionaries a variant search reads, which its tarball
+        # brings (Dictionaries/registry_<vcf>/ or dictionaries_<vcf>/, and
+        # log_indels_<vcf>/: a search without them says to download the index again,
+        # which no-opped over the install, FR :163); and, unless --no-genotypes, its
+        # Tier-1 genotype store (Dictionaries/genotypes_<vcf>/). Any missing piece falls
+        # through to the fetch/heal path below, which re-fetches only what is absent.
         installed_name = canonical_index_name(index_name)
         installed_dir = os.path.join(local_dir, installed_name)
         _vcf = installed_name.partition("+")[2]
         _ref_index_dir = os.path.join(local_dir, installed_name.partition("+")[0])
-        _genotype_dir = os.path.join(workdir, "Dictionaries", f"genotypes_{_vcf}")
+        _dicts = os.path.join(workdir, "Dictionaries")
+        _genotype_dir = os.path.join(_dicts, f"genotypes_{_vcf}")
         _complete = os.path.isdir(installed_dir) and (
             not _vcf
             or (
                 os.path.isdir(f"{installed_dir}_INDELS")
                 and os.path.isdir(_ref_index_dir)
+                and os.path.isdir(os.path.join(_dicts, f"log_indels_{_vcf}"))
+                and any(os.path.isdir(os.path.join(_dicts, f"{_tier}_{_vcf}"))
+                        for _tier in ("registry", "dictionaries"))
                 and (not genotypes or os.path.isdir(_genotype_dir))
             )
         )
