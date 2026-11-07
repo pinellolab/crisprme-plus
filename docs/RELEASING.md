@@ -73,7 +73,7 @@ major.minor**: CRISPRme 2.10.z runs on CRISPRitz 2.10.z, then 2.11 on 2.11, and 
 - **A patch of one package moves only that package's patch number**, and needs no release of
   the other while it keeps both packages' interfaces.
 
-2.10.0 is the first release under the policy: CRISPRme went from 2.8.1 to 2.10.0, skipping
+2.10.0 is the first release under the policy: CRISPRme goes from 2.8.1 to 2.10.0, skipping
 2.9.x, to meet CRISPRitz 2.10.0, which writes index format 2. Before it the two numbered apart
 (CRISPRme 2.8.1 ran on CRISPRitz 2.9.1).
 

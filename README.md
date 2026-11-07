@@ -397,7 +397,7 @@ front, see `docs/SCALABILITY_ANALYSIS.md`.
 > pins `crispritz >=X.Y.0,<X.(Y+1)`), and a breaking change in either package, such as a new
 > index format, bumps the minor of both, so the versions that go together can be told at a
 > glance. Every route below installs the matching CRISPRitz (`crisprme.py --version` and
-> `crispritz.py version` print them). 2.10.0 is the first release under this rule: CRISPRme went
+> `crispritz.py version` print them). 2.10.0 is the first release under this rule: CRISPRme goes
 > from 2.8.1 to 2.10.0 to meet CRISPRitz 2.10.0 ([RELEASING](docs/RELEASING.md#version-policy)).
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
