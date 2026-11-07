@@ -166,6 +166,17 @@ def bin_format(path):
     return int.from_bytes(head[4:], sys.byteorder, signed=True)
 
 
+def is_tree(name):
+    """Whether ``name``, a file of an index folder, is named as one of its trees,
+    ``<PAM>_<contig>_<part>.bin``, as the search script's links to them are (_bin_only_view):
+    a dot file is none. macOS tar and cp leave an AppleDouble file ``._<name>`` beside each
+    file they copy onto a volume without extended attributes; ``._NGG_chr22_1.bin`` opens
+    with no magic, so it reads as a format-1 tree built for a 512-nt guide (its second
+    int32), and searchTST stops on a folder that holds one (CRISPRitz's docs/INDEX_FORMAT.md,
+    section 5)."""
+    return name.endswith(".bin") and not name.startswith(".")
+
+
 _engine_cache = {}
 
 
@@ -216,17 +227,17 @@ def readable_formats():
 
 
 def unreadable_bin(index_dir, every=False):
-    """(path, format) of the first .bin of ``index_dir``, or of a folder in it (an INDELS
-    index holds one a chromosome), in an index format this install does not search
-    (readable_formats); None where there is none. The first .bin of each folder is read, as
+    """(path, format) of the first tree of ``index_dir`` (is_tree), or of a folder in it (an
+    INDELS index holds one a chromosome), in an index format this install does not search
+    (readable_formats); None where there is none. The first tree of each folder is read, as
     the search script's _unreadable_bin reads it: one build writes a folder whole (a folder of
-    two builds is refused as such, index_coverage); with ``every``, every .bin, as a build
+    two builds is refused as such, index_coverage); with ``every``, every tree, as a build
     just made is checked."""
     readable = readable_formats()
     try:
         for top, dirs, files in os.walk(index_dir):
             dirs.sort()
-            bins = sorted(name for name in files if name.endswith(".bin"))
+            bins = sorted(name for name in files if is_tree(name))
             for name in bins if every else bins[:1]:
                 fmt = bin_format(os.path.join(top, name))
                 if fmt is not None and fmt not in readable:
@@ -262,10 +273,11 @@ def unreadable_format_error(index_dir):
 
 
 def _first_bin_header(index_dir):
-    """read_index_header of the first .bin of ``index_dir``, or None where it has none."""
+    """read_index_header of the first tree of ``index_dir`` (is_tree), or None where it has
+    none."""
     try:
         for name in sorted(os.listdir(index_dir)):
-            if name.endswith(".bin"):
+            if is_tree(name):
                 return read_index_header(os.path.join(index_dir, name))
     except OSError:
         pass
@@ -308,15 +320,15 @@ def built_five_prime(index_dir):
 
 
 def bin_formats(index_dir):
-    """{format: number of .bin files} of the .bin files of ``index_dir`` itself, from their
-    first eight bytes (bin_format; None for one too short to tell)."""
+    """{format: number of .bin files} of the trees of ``index_dir`` itself (is_tree), from
+    their first eight bytes (bin_format; None for one too short to tell)."""
     found = {}
     try:
         names = sorted(os.listdir(index_dir))
     except OSError:
         return found
     for name in names:
-        if name.endswith(".bin"):
+        if is_tree(name):
             fmt = bin_format(os.path.join(index_dir, name))
             found[fmt] = found.get(fmt, 0) + 1
     return found
@@ -381,7 +393,7 @@ def write_index_meta(index_dir, pam_file=None, built=False):
             return None
         meta["index_format"] = fmt
         for name in sorted(os.listdir(index_dir)):
-            if not name.endswith(".bin"):
+            if not is_tree(name):
                 continue
             info = read_index_header(os.path.join(index_dir, name))
             if fmt == 2 and "error" not in info:

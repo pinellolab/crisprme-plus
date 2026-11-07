@@ -1680,6 +1680,182 @@ class AnArchiveSaysItsFormat(_Index):
                 self.assertIn("index format 2", err.getvalue() if not warned else out.getvalue())
 
 
+# The AppleDouble file ._<name> that macOS tar and cp write beside each file they copy onto a
+# volume without extended attributes: its magic 0x00051607, its version 0x00020000, the filler
+# "Mac OS X" and its entries, in 4096 bytes
+APPLE_DOUBLE = bytes.fromhex("00051607000200004d6163204f5320582020202000020000000900000032000000"
+                             "e00000000200000112000000000000000000").ljust(4096, b"\0")
+
+
+def apple_double(path):
+    """The ._<name> file macOS leaves beside the file ``path``."""
+    with open(os.path.join(os.path.dirname(path), "._" + os.path.basename(path)), "wb") as fh:
+        fh.write(APPLE_DOUBLE)
+
+
+class AnAppleDoubleFileIsNoTree(_Index):
+    """macOS tar and cp leave an AppleDouble file ._<name> beside each file they copy onto a
+    volume without extended attributes. ._NGG_chr22_1.bin opens with no magic, and every reader
+    of an index took it for one of its trees, of index format 1 and built for a 512-nt guide
+    (its second int32): an index of format 2 beside one was refused as put together from two
+    builds, with rm -rf as the remedy, by the search and by publish-index; under CRISPRitz 2.9.1
+    its format went unseen; build-index-only kept an index built for too short a guide, and
+    complete-search, the web and the search script took it as fitting any guide (CRISPRme 2.8.1
+    did so too); its record was not written, or named the PAM "." of a 512-nt guide; and
+    --prune-pam gave the note of a wide flank of format 1. The search script's probes read the
+    first .bin find or sort lists, which the file may be, by the locale and the order of the
+    file system (of the names' hashes on ext4 and APFS, else of their writing), so the 16 folders
+    here hold trees of 16 names, each written before its ._ file in half of them and after it in
+    the others. Every reader takes the index's trees alone now, the search hands the engine those
+    alone (searchTST stops on a folder that holds such a file), and publish-index leaves the
+    file out."""
+
+    NAME = AnArchiveSaysItsFormat.NAME
+    layout = AnArchiveSaysItsFormat.layout
+    manifest = AnArchiveSaysItsFormat.manifest
+
+    def trees(self, n=16, pam="TTTV", guide=21, at_start=True):
+        """The trees of ``n`` indexes of one each, of index format 2, of a contig of a name of
+        its own, the ._ file of each written before it in half of them and after it in the
+        others."""
+        found = []
+        for i in range(n):
+            tree = os.path.join(self.tmp, "lib", f"{pam}_2_g{i}", f"{pam}_chr{i + 1}_1.bin")
+            os.makedirs(os.path.dirname(tree))
+            if i % 2:
+                apple_double(tree)
+            one_target_bin(tree, pam, guide, 2, at_start)
+            if not i % 2:
+                apple_double(tree)
+            found.append(tree)
+        return found
+
+    def test_index_fit_and_the_coverage_check_read_its_trees(self):
+        genome = os.path.join(self.tmp, "Genomes", "g")
+        os.makedirs(genome)
+        with open(os.path.join(genome, "chr1.fa"), "w") as fh:
+            fh.write(">chr1\n" + "ACGT" * 10 + "\n")
+        self.engine(2)
+        five = self.index("TTTV_2_g", guide=21, at_start=True)
+        old = self.index("NGG_2_g", fmt=1, guide=21)
+        for folder, pam in ((five, "TTTV"), (old, "NGG")):
+            apple_double(os.path.join(folder, f"{pam}_chr1_1.bin"))
+        self.assertEqual((index_fit.bin_formats(five), index_fit.bin_formats(old)),
+                         ({2: 1}, {1: 1}))
+        self.assertEqual((index_fit.built_guide_len(five), index_fit.built_guide_len(old)),
+                         (21, 21))
+        self.assertIs(index_fit.built_five_prime(five), True)
+        self.assertEqual(crispritz_bins.index_format(five), 2)
+        self.assertEqual(index_coverage.problems(five, genome), [])
+        self.assertEqual(crispritz_bins.incomplete_bins(five), [])
+        self.assertIsNone(index_fit.write_index_meta(five))
+        self.assertIsNone(index_fit.write_index_meta(old))
+        self.assertEqual(index_fit.read_index_meta(five), {
+            "index_format": 2, "build_pam": "TTTV", "side": "5'", "flank_len": 4,
+            "guide_len": 21, "max_bulges": 2, "pamless": False, "four_allele": False})
+        self.assertEqual(index_fit.read_index_meta(old), {
+            "index_format": 1, "build_pam": "NGG", "flank_len": 3, "guide_len": 21,
+            "max_bulges": 2, "pamless": False, "four_allele": False})
+        self.engine(None)  # CRISPRitz 2.9.1, which reads format 1 alone
+        self.assertEqual(index_fit.unreadable_bin(five), (os.path.join(five, "TTTV_chr1_1.bin"), 2))
+        # a folder renamed: its trees are named for NGG alone
+        renamed = os.path.join(self.tmp, "lib", "NRG_2_g")
+        os.rename(old, renamed)
+        self.assertEqual(index_coverage.problems(renamed, genome), [
+            ("", "its trees are named for NGG, not NRG: the folder was renamed")])
+
+    def test_the_search_script_reads_its_trees(self):
+        # (a 23-nt guide with 1 + 1 bulges: an index built for 21 nt with N = 2 does not fit it)
+        pam_line = "TTTV" + "N" * 23 + " -4"
+        call = ('_index_guide_len "$1"; echo; _header_side "$1"; _index_fits_guide "$1" 2; '
+                'echo "fits $?"; _check_index_format "$1"; echo went on')
+        trees = self.trees()
+        self.engine(2)
+        for tree in trees:
+            out = self.shell(call, os.path.dirname(tree), pam_line=pam_line)
+            self.assertEqual((out.stdout, out.stderr), ("21\n5\nfits 1\nwent on\n", ""), tree)
+        lib = os.path.dirname(os.path.dirname(trees[0]))
+        for i in range(len(trees)):
+            out = self.shell(f'_resolve_index_dir "$1" TTTV g{i} 2', lib, pam_line=pam_line)
+            self.assertEqual((out.stdout, out.stderr), ("", ""), trees[i])
+        self.engine(None)  # CRISPRitz 2.9.1, which reads format 1 alone
+        for tree in trees:
+            folder = os.path.dirname(tree)
+            # (sorted as inside the container, where a ._ file sorts first)
+            out = self.shell('export LC_ALL=C; _check_index_format "$1"', folder, pam_line=pam_line)
+            self.assertEqual(out.returncode, 1, tree)
+            self.assertIn(f"ERROR: {folder} was built by a newer CRISPRitz "
+                          f"({os.path.basename(tree)} is in index format 2", out.stderr)
+
+    def test_the_engine_is_handed_its_trees_alone(self):
+        folder = self.index("NGG_2_g", contigs=("chr1", "chr2"))
+        for c in ("chr1", "chr2"):
+            apple_double(os.path.join(folder, f"NGG_{c}_1.bin"))
+        out_dir = os.path.join(self.tmp, "out")
+        script = f'output_folder="{out_dir}"\n{_functions("_bin_only_view")}\n_bin_only_view "$1"'
+        out = subprocess.run(["bash", "-c", script, "bash", folder], capture_output=True, text=True)
+        view = os.path.join(out_dir, ".binview", "NGG_2_g")
+        self.assertEqual((out.stdout, out.stderr), (view, ""))
+        self.assertEqual(sorted(os.listdir(view)), ["NGG_chr1_1.bin", "NGG_chr2_1.bin"])
+        for c in ("chr1", "chr2"):
+            os.remove(os.path.join(folder, f"._NGG_{c}_1.bin"))
+        out = subprocess.run(["bash", "-c", script, "bash", folder], capture_output=True, text=True)
+        self.assertEqual((out.stdout, out.stderr), (folder, ""))  # (its trees alone: as it is)
+
+    def test_complete_search_and_the_web_read_its_trees(self):
+        import test_bulge_cap
+
+        crisprme = _load_crisprme()
+        self.engine(2)
+        short = self.index("NGG_2_toy")  # built for 20 nt: no 23-nt guide with 1 + 1 bulges
+        apple_double(os.path.join(short, "NGG_chr1_1.bin"))
+        self.assertIsNone(crisprme._index_the_search_takes(
+            [os.path.dirname(short)], "NGG", "toy", 2, False, True, 23, 1, 1, False))
+        five = self.index("TTTV_2_g", guide=21, at_start=True)  # (its geometry, in its header)
+        apple_double(os.path.join(five, "TTTV_chr1_1.bin"))
+        self.assertEqual(test_bulge_cap.pages_utils.index_build_pam(five), (None, 25, -4))
+        genome = os.path.join(self.tmp, "Genomes", "g")
+        os.makedirs(genome)
+        with open(os.path.join(genome, "chr1.fa"), "w") as fh:
+            fh.write(">chr1\n" + "ACGT" * 20 + "N" * 30 + "ACGT" * 20 + "\n")
+        k8 = self.index("NNNNNNNN_3_g")
+        apple_double(os.path.join(k8, "NNNNNNNN_chr1_1.bin"))
+        self.assertEqual(crisprme._wider_flank_notes([k8], "NRG", genome), [])
+
+    def test_publish_index_takes_it_and_leaves_the_file_out(self):
+        self.engine(2)
+        idx = self.layout()
+        apple_double(os.path.join(idx, "NGG_chr22_1.bin"))
+        apple_double(os.path.join(idx + "_INDELS", "NGG_2_fakechr22", "NGG_fakechr22_1.bin"))
+        sink = os.path.join(self.tmp, "sink")
+        os.makedirs(sink)
+        api = AnArchiveSaysItsFormat.publish(idx, sink)
+        self.assertEqual(self.manifest(api)["index_format"], 2)
+        # with tar and pigz, and with Python's tarfile alike (gzip stands in for pigz)
+        import contextlib
+        import io
+        import tarfile
+        from unittest import mock
+
+        pigz = os.path.join(self.tmp, "pigz", "pigz")
+        os.makedirs(os.path.dirname(pigz))
+        with open(pigz, "w") as fh:
+            fh.write('#!/bin/sh\nexec gzip "$@"\n')
+        os.chmod(pigz, 0o755)
+        which = shutil.which
+        name = os.path.basename(idx)
+        for found in (lambda program: pigz if program == "pigz" else which(program),
+                      lambda program: None):
+            tarball = os.path.join(self.tmp, f"{name}.tar.gz")
+            with mock.patch.object(dpub.hf.shutil, "which", side_effect=found), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                dpub.hf._make_index_tarball(tarball, idx, name, idx + "_INDELS", {"name": name})
+            with tarfile.open(tarball) as tf:
+                names = tf.getnames()
+            self.assertIn(f"{name}/NGG_chr22_1.bin", names)
+            self.assertIn(f"{name}_INDELS/NGG_2_fakechr22/NGG_fakechr22_1.bin", names)
+            self.assertEqual([n for n in names if os.path.basename(n).startswith("._")], [])
+
 
 class CheckBoundaryRowsChecksEachBlock(unittest.TestCase):
     """test/index_format2/check_boundary_rows.py checks that each row of a search's integrated

@@ -64,11 +64,11 @@ def _five_prime(index_dir, five_prime_search):
 
 def _trees(index_dir, pam):
     """{contig: {part numbers}} of the trees of ``index_dir`` named for PAM ``pam``, and the
-    PAMs other .bin files there are named for."""
+    PAMs its other trees are named for (index_fit.is_tree: a macOS ._<tree>.bin is none)."""
     named = re.compile(r"%s_(.*)_([0-9]+)\.bin\Z" % re.escape(pam))
     tree = re.compile(r"([^_]+)_.+_[0-9]+\.bin\Z")
     parts, others = {}, set()
-    for f in os.listdir(index_dir):
+    for f in filter(index_fit.is_tree, os.listdir(index_dir)):
         m = named.match(f)
         if m:
             parts.setdefault(m.group(1), set()).add(int(m.group(2)))

@@ -181,13 +181,14 @@ def _format2_problem(path, size):
 
 
 def incomplete_bins(directory):
-    """``[(path, problem)]`` for each .bin under ``directory``, an index (an INDELS
-    index has one directory a chromosome), that is not whole."""
+    """``[(path, problem)]`` for each tree under ``directory``, an index (an INDELS
+    index has one directory a chromosome), that is not whole (index_fit.is_tree: a macOS
+    ._<tree>.bin is none)."""
     found = []
     for top, dirs, files in os.walk(directory):
         dirs.sort()
         for name in sorted(files):
-            if name.endswith(".bin"):
+            if index_fit.is_tree(name):
                 path = os.path.join(top, name)
                 problem = bin_problem(path)
                 if problem:

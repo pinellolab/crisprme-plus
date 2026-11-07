@@ -2055,7 +2055,10 @@ def _make_index_tarball(
     ``download --what index`` self-complete, no separate ``--what samples``), and
     ``manifest.json`` at the archive root (see download_component's extractor).
     Neither path stores an index's ``.genome_source`` record (``_INDEX_SOURCE_FILENAME``),
-    which names a folder of this machine.
+    which names a folder of this machine, nor an AppleDouble file ``._<name>``, which macOS
+    tar and cp leave beside each file they copy onto a volume without extended attributes:
+    ``._<tree>.bin`` is no tree of the index (index_fit.is_tree), and searchTST stops on a
+    folder that holds one.
 
     Both the samplesID files (small text) and manifest.json are staged into a
     single temp dir so the two code paths share ONE staging mechanism.
@@ -2096,10 +2099,13 @@ def _make_index_tarball(
                 for arc in staged_sids:
                     inputs += ["-C", tmpd, arc]
                 inputs += ["-C", tmpd, "manifest.json"]
-                # --exclude applies to the inputs after it
+                # --exclude applies to the inputs after it; COPYFILE_DISABLE: the tar of
+                # macOS adds a ._<name> of its own for each file with extended attributes
                 subprocess.check_call(
                     [tar, "--use-compress-program", pigz,
-                     f"--exclude={_INDEX_SOURCE_FILENAME}", "-cf", tarball, *inputs]
+                     f"--exclude={_INDEX_SOURCE_FILENAME}", "--exclude=._*", "-cf", tarball,
+                     *inputs],
+                    env=dict(os.environ, COPYFILE_DISABLE="1"),
                 )
                 return
             except (subprocess.CalledProcessError, OSError) as exc:
@@ -2118,18 +2124,19 @@ def _make_index_tarball(
                 "(slow for large indexes). Install pigz for parallel compression.\n"
             )
         # fallback: single-threaded Python tarfile (identical layout)
-        def _no_source_record(info):  # as the --exclude above
-            return None if os.path.basename(info.name) == _INDEX_SOURCE_FILENAME else info
+        def _stored(info):  # as the --exclude options above
+            name = os.path.basename(info.name)
+            return None if name == _INDEX_SOURCE_FILENAME or name.startswith("._") else info
 
         with tarfile.open(tarball, "w:gz") as tf:
             # -> genome_library/<name>/ on unpack
-            tf.add(index_dir, arcname=index_name, filter=_no_source_record)
+            tf.add(index_dir, arcname=index_name, filter=_stored)
             if os.path.isdir(indels_dir):
                 tf.add(indels_dir, arcname=os.path.basename(indels_dir),
-                       filter=_no_source_record)
+                       filter=_stored)
             for dp in (dict_dirs or []):  # -> Dictionaries/<basename>/ on unpack
                 tf.add(dp, arcname=os.path.join("Dictionaries", os.path.basename(dp)),
-                       filter=_no_source_record)
+                       filter=_stored)
             for arc in staged_sids:  # -> samplesIDs/<basename> on unpack
                 tf.add(os.path.join(tmpd, arc), arcname=arc)
             info = tarfile.TarInfo(name="manifest.json")

@@ -778,10 +778,12 @@ while read vcf_f; do
 	# The side of the guide index $1 records in the header of its .bin files, on stdout: 3
 	# or 5, of an index of format 2 (CRISPRitz 2.10.0 and later: the magic, then the
 	# version, the header's length and the flags, whose bit 0 is the PAM at the 5' end);
-	# nothing, and status 1, of one of format 1, which records none. Silent on stderr.
+	# nothing, and status 1, of one of format 1, which records none. A dot file is no tree
+	# of the index: the AppleDouble ._<tree>.bin that macOS tar and cp leave beside each
+	# file opens with no magic (PostProcess/index_fit.py is_tree). Silent on stderr.
 	_header_side() {
 		local _bin _f
-		_bin=$(find -L "$1" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)
+		_bin=$(find -L "$1" -maxdepth 1 -name '[!.]*.bin' -print -quit 2>/dev/null)
 		[ -n "$_bin" ] || return 1
 		_f=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
 		[ "${_f//[[:space:]]/}" = 435a49fe ] || return 1
@@ -791,16 +793,17 @@ while read vcf_f; do
 		if [ $((_f & 1)) -eq 1 ]; then echo 5; else echo 3; fi
 	}
 
-	# The guide length index $1 was built for, on stdout: the second int32 of any .bin of
+	# The guide length index $1 was built for, on stdout: the second int32 of any tree of
 	# it (len_guide_used, which buildTST has written since 2019, whoever built the index;
 	# its .pam_build, which build-index-only used to rewrite over any index it found, may
 	# say another), or, in index format 2 (CRISPRitz 2.10.0 and later: the magic, then the
 	# version, the header's length and the flags), the header's guide_len; nothing where it
 	# cannot tell, as in a format newer than this CRISPRme reads (_unreadable_bin), whose
-	# second int32 is its version. Silent on stderr.
+	# second int32 is its version. Not of a dot file (_header_side), whose second int32 is
+	# 512 in a macOS ._<tree>.bin. Silent on stderr.
 	_index_guide_len() {
 		local _bin _g
-		_bin=$(find -L "$1" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)
+		_bin=$(find -L "$1" -maxdepth 1 -name '[!.]*.bin' -print -quit 2>/dev/null)
 		[ -n "$_bin" ] || return 0
 		_g=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
 		if [ "${_g//[[:space:]]/}" = 435a49fe ]; then
@@ -833,14 +836,16 @@ while read vcf_f; do
 	}
 	engine_index_format=$(_engine_index_format)
 
-	# "<format><TAB><file>" on stdout for the first .bin of index $1, or of a folder in it
+	# "<format><TAB><file>" on stdout for the first tree of index $1, or of a folder in it
 	# (an INDELS index holds one a chromosome), in an index format this install does not
 	# search: newer than the installed CRISPRitz reads (_engine_index_format), or than this
 	# CRISPRme reads (formats 1 and 2); nothing where there is none. CRISPRitz 2.10.0 and
 	# later open an index file with the magic "CZI" 0xFE and then the format version as an
 	# int32 (index format 2: CRISPRitz's docs/INDEX_FORMAT.md); up to 2.9.1 a file opens with
 	# its leaf count (format 1). PostProcess/index_fit.py unreadable_bin says the same. The
-	# first .bin of each folder is read: one build writes a folder whole. Silent on stderr.
+	# first tree of each folder is read: one build writes a folder whole. A dot file is none
+	# (_header_side): a macOS ._<tree>.bin read first would pass for the folder's trees, of
+	# format 1. Silent on stderr.
 	_unreadable_bin() {
 		local _bin _head _v _seen= _max
 		_max=${engine_index_format:-$(_engine_index_format)}
@@ -855,7 +860,7 @@ while read vcf_f; do
 			case "$_v" in '' | *[!0-9]*) ;; *) [ "$_v" -gt "$_max" ] || continue ;; esac
 			printf '%s\t%s' "${_v:-?}" "$_bin"
 			return 0
-		done < <(find -L "$1" -maxdepth 2 -name '*.bin' -print0 2>/dev/null | sort -z 2>/dev/null)
+		done < <(find -L "$1" -maxdepth 2 -name '[!.]*.bin' -print0 2>/dev/null | sort -z 2>/dev/null)
 		return 0
 	}
 
@@ -922,7 +927,7 @@ while read vcf_f; do
 		_f=$(_unreadable_bin "$1")
 		if [ -z "$_f" ]; then
 			[ "${engine_index_format:-$(_engine_index_format)}" -ge 2 ] 2>/dev/null || return 0
-			_bin=$(find -L "$1" -maxdepth 2 -name '*.bin' -print -quit 2>/dev/null)
+			_bin=$(find -L "$1" -maxdepth 2 -name '[!.]*.bin' -print -quit 2>/dev/null)
 			[ -n "$_bin" ] || return 0
 			_f=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
 			[ "${_f//[[:space:]]/}" != 435a49fe ] || return 0
@@ -1876,10 +1881,12 @@ while read vcf_f; do
 	# downloaded/published index carries them too). Hand the search a symlink-only view
 	# of just the .bin files, kept under the SAME dir basename (crispritz may parse the
 	# "<pam>_<N>_<genome>" name for the bulge budget), so the sidecars can't trip the
-	# "only .bin files" check. Echoes the original dir untouched when it is already clean.
+	# "only .bin files" check, nor the AppleDouble ._<tree>.bin that macOS tar and cp leave
+	# beside each file (_header_side), which the glob below leaves out: searchTST stops on
+	# a folder that holds one. Echoes the original dir untouched when it is already clean.
 	_bin_only_view() {  # $1 = index dir -> stdout: a dir safe to pass to crispritz -index
 		local src="${1%/}"
-		if [ -z "$(find "$src" -maxdepth 1 ! -type d ! -name '*.bin' -print -quit 2>/dev/null)" ]; then
+		if [ -z "$(find "$src" -maxdepth 1 ! -type d \( ! -name '*.bin' -o -name '.*' \) -print -quit 2>/dev/null)" ]; then
 			printf '%s' "$src"
 			return 0
 		fi
