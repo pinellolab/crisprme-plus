@@ -639,7 +639,8 @@ lists only each site's row); one target's alignments with different bulges befor
 into the best, as up to 2.8.1, also when they start on different bases an insertion adds. Two
 copies of one target inside an insertion (a repeat it holds) make the same row at the anchor,
 its bases, REF alignment and variants the same, and that row is listed once, with the carriers
-of both, where 2.8.1 listed each copy at its own start. A bulged alignment of the second copy,
+of both, where 2.8.1 listed each copy at its own start; its `PAM_creation` is created when
+either copy's PAM is (below). A bulged alignment of the second copy,
 which 2.8.1 folded into that copy's row, then has no row of its own copy to fold into and is
 listed as one of the site's alternative alignments (the SNP+indel oracle's X2). With the TRAC
 guide (CTCTCAGCTGGTACACGGCA) on that index, two alleles of chr22:50193929 that insert 96 bases,
@@ -705,14 +706,34 @@ does not depend on where in its repeat the VCF writes the indel:
 3. else, an insertion that holds that base, with the protospacer's end and the PAM's start,
    wherever it is placed: no place on the reference, created.
 
+A complex record replaces REF bases and adds bases or loses some (A>T and inserted bases after
+it: HPRC writes many insertions so). Its first min(len(REF), len(ALT)) changed bases stand in
+the places of the REF bases they replace, as an MNV's, and are read as those REF bases, as a
+SNP alt of the row is; its other ALT bases are added after them, or its other REF bases
+deleted, and are placed as an insertion's or a deletion's are. So a PAM made of a complex record's added bases is judged as one made of an
+insertion's: a target wholly inside them, its PAM and the protospacer's end added bases, is
+created unless a placement of those bases through their repeat puts its PAM on the reference
+(up to 2.8.1 such a PAM was read on the REF alignment's window, reference bases the target
+does not hold, NA where they happen to hold a valid PAM). On HPRC's chr22 (8,022 complex
+records with a net insertion, 1,055 with a net deletion), with the TRAC guide, three CFD-0
+alignments wholly inside the added bases of three complex records whose added bases repeat
+the reference after them are not created (chr22:37509610 (−), 42134819 (−) and 42135364 (−):
+placed further right, their PAM is the reference's own GGG).
+
 A row whose REF alignment is its ALT has its target, PAM included, on the reference at its
 start: NA (since 2.10.0). A PAM with a bulge in it keeps the REF alignment's bases, and so does
-a PAM holding an ALT base that stands in a REF base's place, an MNV's or a complex record's, as
-up to 2.8.1 (for an MNV, which moves no base, those are the reference bases under the PAM). The
-rule reads
-the row's haplotype: a carrier's other indels are not part of it (a carrier whose second indel
-changes the target's bases is not listed on the row, above), and a repeat that runs past the
-target is read on the reference.
+a PAM holding an MNV's ALT bases, as up to 2.8.1 (an MNV moves no base: those are the reference
+bases under the PAM). The rule reads the row's haplotype: a carrier's other indels are not part
+of it (a carrier whose second indel changes the target's bases is not listed on the row,
+above), and a repeat that runs past the target is read on the reference. A row that stands for
+two copies of one target inside one insertion (above) is created when either copy's PAM is:
+each copy is judged on its own, and a placement of the insertion can put one copy's PAM on the
+reference's own (not created) while the copy the insertion adds has none (TRAC guide,
+chr22:50193928 (−): a 96-base allele holds the CFD-0 alignment CTACTCAGgaGGgACA-GGCtGAG twice,
+at 50193950 and 50193998 on its haplotype, where 2.8.1 listed each; placed further right, the
+insertion leaves the left copy's PAM on the reference's own CTC, GAG on −, and no placement
+takes the right copy's off it: the row reads GAG). The merge keeps that value whichever copy it
+meets first.
 
 Examples, SNP+indel oracle (`test/indel_snp_oracle`): a tandem duplication of a 27-base unit
 holding a whole target, the copy written left of the reference's (PR, PM): the copy's target
@@ -727,7 +748,13 @@ TTCCA inserted between the reference's CCG and its protospacer on the − strand
 inserted PAM), the reference holds a valid PAM beside the very protospacer: NA. CA>C inside the
 PAM CCG on the − strand (QD) leaves the reference's CAG (CTG on −) beside the protospacer:
 created. Inserted bases holding the protospacer's last four bases and the PAM on the + strand
-(QA): created.
+(QA): created. Complex records: A>T on the + strand and C>T on the − strand, each with 33
+bases added after it that hold a whole target (QX, QY): created, though the REF alignment,
+read from the replaced base where such a row starts, holds AGG (+) and CCG (CGG on −) in the
+PAM's columns; G>CCA on the − strand, the row starting on the replaced base, its PAM CCA (TGG
+on −) that base and the two added ones, beside a reference CTG (CAG on −) (QZ): NA; TG>C on
+the − strand, the T replaced and the G lost, the junction inside the PAM CCA (QV): the
+reference holds TGA (TCA on −) beside the protospacer, created.
 
 In 2.8.1 a PAM on reference bases was read on them, through the indel, and any other on the REF
 alignment's bases, read from the row's start. That answered the question only
@@ -743,11 +770,12 @@ C>CCT, read AGG as created where the reference holds GGG beside the protospacer:
 that starts inside an insertion started at its first base's place on the haplotype, past the
 anchor, and the bases read were reference bases the target does not hold (chr22:21052639 (−):
 TGG, where the reference has CAG beside its protospacer: now NA; with NRR, chr22:44115947 (+),
-wholly inside a 37- or a 33-base insertion: now TAA, at 44115944 and 44115946). And every PAM
-holding inserted bases was read where the VCF writes the insertion, so a repeat unit inserted
-next to a reference PAM read as created, in 2.10.0's first fixes (README 48 of 75 such
-alignments genome-wide; NRR chr22:25415044 (−): CAA, the same alignment as its site's reference
-row; TRAC guide chr22:49196564 (−) and 50193928 (−): now NA, as 2.8.1 read them). Genome-wide,
+wholly inside a 37- or a 33-base insertion: now TAA, at 44115944 and 44115946). With such
+rows at the anchor, reading the PAM where the VCF writes the insertion would not do either: a
+repeat unit inserted next to a reference PAM would read as created, where a placement further
+right puts that PAM on the reference's own bases (with NRR, chr22:25415044 (−), the same
+alignment as its site's reference row; TRAC guide, chr22:49196564 (−) and the row of
+50193928 (−): NA, as 2.8.1 read them). Genome-wide,
 2.8.1's tables (2.8.1's code gives back every value in them) with each row's PAM_creation
 computed by 2.10.0's code, highest-CFD alignments: README guide, per-sample, 97 go NA → created
 (70 rows and 27 alternative alignments: a PAM across a deletion's junction on the − strand 56,
