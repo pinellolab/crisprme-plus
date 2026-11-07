@@ -1734,15 +1734,19 @@ def index_serves_pam(index_dir: str, motif: str, three_prime: bool) -> bool:
 def _index_side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) -> bool:
     """Whether index ``index_dir``, of PAM ``pam``, was built for the side of the guide
     where a search for ``motif`` (a 3' PAM with ``three_prime``) puts its PAM, as the
-    search script's _resolve_index_dir takes it: as its .pam_build records (pam_pos < 0
-    for a 5' PAM); without one, any side for a dedicated index of the motif, and 3' for any
-    other at the published widths, 3 and 8, or an all-N one of the motif's own name (a
-    search before 2.8.1 built one of another width from a 5' PAM file with no record).
-    crisprme.py's _side_serves, the same rule; a name that says its side (since 2.9.0:
+    search script's _resolve_index_dir takes it: as the header of its .bin files records
+    (index format 2), else as its .pam_build does (pam_pos < 0 for a 5' PAM); without
+    either, any side for a dedicated index of the motif, and 3' for any other at the
+    published widths, 3 and 8, or an all-N one of the motif's own name (a search before
+    2.8.1 built one of another width from a 5' PAM file with no record). crisprme.py's
+    _side_serves, the same rule; a name that says its side (since 2.9.0:
     index_fit.parse_index_name) says it first."""
     parsed = index_fit.parse_index_name(index_dir)
     if parsed and parsed[4]:
         return (parsed[4] == 3) == three_prime
+    five_prime = index_fit.built_five_prime(index_dir)
+    if five_prime is not None:
+        return (not five_prime) == three_prime
     try:
         with open(os.path.join(index_dir, ".pam_build")) as fh:
             recorded = int(fh.readline().split()[-1])

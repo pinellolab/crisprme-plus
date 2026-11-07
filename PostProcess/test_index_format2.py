@@ -512,7 +512,8 @@ def _shell():
     """The search script's functions these tests run."""
     return _functions("_engine_index_format", "_unreadable_bin", "_how_built_again",
                       "_check_index_format", "_index_guide_len", "_index_side", "_header_side",
-                      "_index_fits_guide", "_resolve_index_dir", "_say_other_side")
+                      "_index_fits_guide", "_resolve_index_dir", "_say_other_side",
+                      "_index_name_parts", "_pam_holds", "_pam_narrower")
 
 
 class _Index(_Engine):
@@ -967,6 +968,22 @@ class TheSideOfAFormat2IndexIsItsHeaders(_Index):
         # an index of format 1 records no side in its headers: its .pam_build is read
         self.assertEqual(index_build_pam(self.five_prime("23bp-NNN-5p 23 -3", fmt=1)),
                          ("23bp-NNN-5p", 23, -3))
+
+    def test_the_web_serves_a_search_of_the_side_in_the_header(self):
+        """The web's rule of the side an index serves (pages_utils._index_side_serves, as
+        crisprme.py's _side_serves and the search script's _index_side) read a name that says
+        the side (2.9.0), then .pam_build, and not the header: a 5' PAM-less index of format 2
+        with no .pam_build, of the published width 3, was offered to a 3' search, as a 3'
+        build, and not to a 5' one. The header is read after the name, as the others read it."""
+        import test_bulge_cap
+        serves = test_bulge_cap.pages_utils._index_side_serves
+        crisprme = _load_crisprme()
+        folder = self.five_prime()
+        for motif, three_prime in (("NGG", True), ("TTV", False)):
+            with self.subTest(motif=motif):
+                self.assertEqual(serves(folder, "NNN", motif, three_prime), not three_prime)
+                self.assertEqual(crisprme._side_serves(folder, "NNN", motif, three_prime),
+                                 not three_prime)
 
     def test_the_search_says_what_records_the_side(self):
         call = 'pam_name=20bp-NNN-NO-PAM.txt\ntrue_pam=NNN\n_say_other_side "$1"'
