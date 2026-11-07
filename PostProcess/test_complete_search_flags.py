@@ -328,6 +328,10 @@ class TestThePrunePamHelpSaysWhichSideItServes(unittest.TestCase):
         self.assertIn("are not indexed (the search says so)", entry)
         self.assertIn("built by CRISPRme 2.8.1 or later", entry)
         self.assertNotIn("The result is identical to a dedicated index", entry)
+        # (those are the limits of index format 1: one of format 2, which CRISPRitz writes
+        # from 2.10.0, indexes those PAMs, and the search says nothing of it)
+        self.assertIn("from a wider one of index format 1 (built by CRISPRitz 2.9.1 or "
+                      "earlier), a + strand PAM", entry)
 
 
 class TestTheComputeBackendHelpSaysWhatAMissingScorerEnvDoes(unittest.TestCase):
