@@ -1078,8 +1078,8 @@ class _ShippedScript(unittest.TestCase):
             vcfs.write_text(self.VCF + "\n")
             samples.write_text("")
         samples = given or samples
-        # complete-search refuses --prune-pam without --index-path; the usual value
-        # is the working directory's own genome_library
+        # complete-search refused --prune-pam without --index-path before 2.9.0; a run
+        # given the flag names the working directory's own genome_library, as one did
         if index_path is None:
             index_path = self.library if prune else "_"
         args = [self.home / "Genomes" / "hg38", vcfs, guides, pam_file, empty, samples,

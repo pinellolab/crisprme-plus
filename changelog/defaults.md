@@ -387,13 +387,18 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
 - **A search prunes by itself.** When no installed index serves a search unpruned and one serves it
   pruned (a dedicated index of a PAM that holds the search's, or an all-`N` one wider than the PAM),
   the search prunes, as if `--prune-pam` was given, and says so first, naming the index that needs
-  it: on the console (`NOTE [complete-search]: no installed variant index of hg38+hg38_HGDP1kGP
-  serves PAM NGG unpruned, and NRR_3_hg38+hg38_HGDP1kGP (...) serves it pruned to it at leaf time:
-  searching with --prune-pam, as if it was given. A dedicated NGG variant index is searched faster:
-  ...`; in a library of the PAM's own variant index and another PAM's reference index, `no
-  installed reference index of hg38`) and in its log. The web form, which never passes the flag,
-  gets the same: the search script decides it for the search it runs, and the form's bulge cap and
-  PAM list count those indexes. Before, a search that only a K = 8 index served stopped for want
+  it: from the command line on the console (`NOTE [complete-search]: no installed variant index of
+  hg38+hg38_HGDP1kGP serves PAM NGG unpruned, and NRR_3_hg38+hg38_HGDP1kGP (...) serves it pruned
+  to it at leaf time: searching with --prune-pam, as if it was given. A dedicated NGG variant index
+  is searched faster: ...`; in a library of the PAM's own variant index and another PAM's
+  reference index, `no installed reference index of hg38`), from the web, which has no console, in
+  the search's `log_verbose.txt` (`NOTE: no installed ...`). The web form, which never passes the
+  flag, gets the same: the search script decides it for the search it runs, and the form's bulge
+  cap and PAM list count those indexes. Of an all-`N` index wider than the PAM that it reads so, a
+  web search also says in its log what such a flank cannot index at a contig's ends, and warns of
+  one built before CRISPRitz 2.9.1, as complete-search says both on its console and in
+  `.Params.txt` (one text, `prune_flank.wider_flank_notes`; the web's names Settings beside
+  `build-index-only`). Before, a search that only a K = 8 index served stopped for want
   of a variant index (or, for the reference index, built one), and said to pass the flag. Where an
   index serves the search unpruned, as an all-`N` one of the PAM's width does, nothing changes. On
   chr22 with HGDP + 1000 Genomes (CRISPRitz 2.10.0), an `NGG` search whose variant index was

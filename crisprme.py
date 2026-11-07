@@ -2546,9 +2546,11 @@ def _prune_on_its_own(index_path: str, genome: str, vcf_dirs: List[str], motif: 
     the search script prunes when no installed index serves it without pruning and one
     does pruned (a dedicated index of a PAM that holds the search's, or a wider all-N one;
     index_fit.pam_serves), and says so in its log ("searching with --prune-pam, as if it
-    was given"). A variant index of each dataset first, which only the dataset's VCFs
-    build; then the reference index, which a search with bulges opens, from --index-path
-    or else the working directory's genome_library. Not where the engine cannot prune."""
+    was given"), for a web search; complete-search decides the same for its own, says so on
+    its console (_prune_note), and tells the script that it took the flag ("auto"). A
+    variant index of each dataset first, which only the dataset's VCFs build; then the
+    reference index, which a search with bulges opens, from --index-path or else the
+    working directory's genome_library. Not where the engine cannot prune."""
     if not _engine_prunes():
         return None
     takes = []
@@ -2589,45 +2591,11 @@ def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[s
     say of the all-N indexes ``indexes`` it reads, whose stored flank is wider than the PAM
     ``motif`` (the others: nothing), one line each: the sites such a flank cannot index
     (METHODS section 9), and, for an index built before the engine kept a target whose flank
-    holds an N (prune_flank), the sites it misses and what serves the search whole: that
-    index built again, or a dedicated index of the PAM beside it, which the search takes
-    first (_index_the_search_takes). A search without --prune-pam and --index-path built a
-    dedicated index before 2.9.0; it now prunes from that same index by itself."""
-    notes, seen = [], set()
-    for index in indexes:
-        pam = index_fit.index_pam(index)
-        if not index or not pam or set(pam) != {"N"} or len(pam) <= len(motif) or index in seen:
-            continue
-        seen.add(index)
-        if not notes:
-            d = len(pam) - len(motif)
-            notes.append(
-                f"NOTE [complete-search]: --prune-pam serves the {len(motif)}-nt PAM {motif} from "
-                f"{os.path.basename(index)}, whose stored flank is {len(pam)} nt: a + strand PAM "
-                f"with 1 to {d} nt after it to the end of a contig, and a - strand PAM in the first "
-                f"{d} nt of a contig, are not indexed, and one {d} nt from the start is reported on "
-                f"the + strand at another position (METHODS section 9). An index whose flank is "
-                f"the PAM's width, or a dedicated one, has no such limit.")
-        try:
-            if os.path.basename(index).count("+"):
-                before = prune_flank.indels_built_before_n_fix(index + "_INDELS") \
-                    if os.path.isdir(index + "_INDELS") else None
-                if before is None:
-                    before = prune_flank.built_before_n_fix(index, genomedir)
-            else:
-                before = prune_flank.built_before_n_fix(index, genomedir)
-        except OSError:
-            before = None
-        if before:
-            notes.append(
-                f"WARNING [complete-search]: {os.path.basename(index)} stores no N in the flank of "
-                f"any target where its genome has one: it was built before CRISPRitz 2.9.1 "
-                f"(CRISPRme 2.8.0 or earlier), which dropped such targets, and searched for the "
-                f"shorter PAM {motif} it misses the sites whose flank holds an N. Remove it and "
-                f"build it again with build-index-only (which keeps an index it finds in place), "
-                f"or put a dedicated {motif} index beside it, which a search takes before it "
-                f"(build one with build-index-only, or download one if it is published).")
-    return notes
+    holds an N, the sites it misses and what serves the search whole: that index built
+    again, or a dedicated index of the PAM beside it, which the search takes first
+    (_index_the_search_takes). prune_flank.wider_flank_notes, which the search script runs
+    for a search it prunes by itself, one the web launched."""
+    return prune_flank.wider_flank_notes(indexes, motif, genomedir, "complete-search")
 
 
 def _variant_libraries(index_path: str) -> List[str]:

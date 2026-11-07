@@ -1529,7 +1529,8 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     # reuse a job): which answered it, and how, where Genome_idx says what was asked for,
     # which another index may have served, or none. A run of an earlier release has none.
     # Prune_pam: complete-search records the flag in the parameters, given or taken by
-    # itself; the search script, for a search the web launched, in the record.
+    # itself; the search script records it in the record where the search took it by itself:
+    # one the web launched, or one complete-search took it for ("auto").
     taken = _read_kv_sidecar(os.path.join(result_dir, INDEXES_SEARCHED_FILE)) \
         if result_dir else {}
     indexes = []

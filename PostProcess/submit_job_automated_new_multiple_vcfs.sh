@@ -1438,6 +1438,20 @@ while read vcf_f; do
 			# (which index needs it: in a library of the PAM's own variant index and another
 			# PAM's reference index, the reference one alone)
 			echo "NOTE: no installed $_pruned_of serves PAM $true_pam unpruned, and ${_pruned##*/} serves it pruned to it at leaf time: searching with --prune-pam, as if it was given"
+			# and, of each index it reads so whose flank is wider than the PAM, what such a
+			# flank cannot index, and whether it was built before the engine kept a target
+			# whose flank holds an N: what complete-search says on its console of the
+			# indexes it takes for a search of its own (crisprme.py _wider_flank_notes)
+			_wide=()
+			{ [ "$bDNA" -eq 0 ] && [ "$bRNA" -eq 0 ]; } \
+				|| _wide+=("$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")")
+			while read -r _v; do
+				[ -n "$_v" ] && [ "$_v" != "_" ] || continue
+				vcf_name=$(basename "$_v")
+				_wide+=("$(_variant_index)")
+			done <"$vcf_list"
+			vcf_name=$_this_vcf
+			python "$starting_dir/prune_flank.py" "$true_pam" "$ref_folder" "${_wide[@]}"
 		fi
 	fi
 	_prune_decided=1

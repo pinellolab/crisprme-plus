@@ -556,6 +556,60 @@ class ASearchPrunesByItself(tir._ShippedScript):
         self.assertEqual(run.searched(variant=True), (f"NNNNNNNN_3_hg38+{self.VCF}", True))
         self.assertIn("searching with --prune-pam, as if it was given", run.stdout)
 
+    def test_it_says_what_a_flank_wider_than_the_pam_costs_where_it_decides(self):
+        """complete-search says, of an all-N index wider than the PAM that a search reads
+        pruned, what such a flank cannot index, and warns of one built before CRISPRitz 2.9.1
+        (crisprme.py _wider_flank_notes), on its console. A web search, which prunes by
+        itself since 2.9.0, said neither: the script says both in its log, where it decides.
+        Given "auto", complete-search has said them."""
+        import test_prune_flank as tpf
+        (self.home / "Genomes" / "hg38" / "chr1.fa").write_text(
+            ">chr1\n" + "ACGT" * 20 + "N" * 30 + "ACGT" * 20 + "\n")
+        self.install("NNNNNNNN_3")
+        # (the trees of chr1, whose sequence holds an N: none in a flank, as an index built
+        # before the fix; the variant index's INDELS index tells nothing)
+        for name in ("NNNNNNNN_3_hg38", f"NNNNNNNN_3_hg38+{self.VCF}"):
+            tpf.tree(str(self.library / name / "NNNNNNNN_chr1_1.bin"), 8,
+                     ["ACGTACGT", "TTTTACGT"])
+        flank = ("NOTE: --prune-pam serves the 3-nt PAM NGG from {}, whose stored flank is 8 "
+                 "nt: a + strand PAM with 1 to 5 nt after it to the end of a contig, and a - "
+                 "strand PAM in the first 5 nt of a contig, are not indexed")
+        old = ("WARNING: {} stores no N in the flank of any target where its genome has one: "
+               "it was built before CRISPRitz 2.9.1 (CRISPRme 2.8.0 or earlier), which "
+               "dropped such targets, and searched for the shorter PAM NGG it misses the "
+               "sites whose flank holds an N. Put a dedicated NGG index beside it, which a "
+               "search takes before it (build one with crisprme.py build-index-only or in "
+               "the web app's Settings, or download one if it is published), or remove it and "
+               "build it again with build-index-only (which keeps an index it finds in "
+               "place).")
+        run = self.run_pipeline(pam="20bp-NGG-SpCas9", prune=0)
+        # (nothing on stderr, which fails a stage, but the stub's stop at the last search)
+        self.assertEqual(run.stderr, "ERROR: Off-targets search Variant failed\n")
+        self.assertIn("searching with --prune-pam, as if it was given", run.stdout)
+        # (the flank once, of the first index; the warning of each)
+        self.assertEqual(run.stdout.count("whose stored flank is 8 nt"), 1)
+        self.assertIn(flank.format("NNNNNNNN_3_hg38"), run.stdout)
+        for name in ("NNNNNNNN_3_hg38", f"NNNNNNNN_3_hg38+{self.VCF}"):
+            self.assertIn(old.format(name), run.stdout)
+        # a reference search reads the reference index alone
+        run = self.run_pipeline(pam="20bp-NGG-SpCas9", prune=0, variant=False)
+        self.assertIn(old.format("NNNNNNNN_3_hg38"), run.stdout)
+        self.assertNotIn(f"+{self.VCF} stores no N", run.stdout)
+        # given the flag, or "auto", complete-search has said them on its console
+        for passed in ("auto", 1):
+            with self.subTest(prune=passed):
+                run = self.run_pipeline(pam="20bp-NGG-SpCas9", prune=passed, index_path="_")
+                self.assertEqual(run.searched(variant=True),
+                                 (f"NNNNNNNN_3_hg38+{self.VCF}", True))
+                self.assertNotIn("stored flank", run.stdout)
+                self.assertNotIn("stores no N", run.stdout)
+        # an index of the PAM's width serves it unpruned: nothing to say
+        shutil.rmtree(self.library)
+        self.install("NNN_3")
+        run = self.run_pipeline(pam="20bp-NGG-SpCas9", prune=0)
+        self.assertNotIn("as if it was given", run.stdout)
+        self.assertNotIn("stored flank", run.stdout)
+
     def test_a_reference_search_takes_one_rather_than_build_one(self):
         self.install("NRR_3", variant=False)
         run = self.run_pipeline(pam="20bp-NGG-SpCas9", variant=False, prune=0)
@@ -620,15 +674,20 @@ class ASearchPrunesByItself(tir._ShippedScript):
         so the script's own decision never ran and the record held no Prune_pam line: a
         command-line search and a web search of the same library left different records
         (METHODS section 9 lists the line). complete-search says it took the flag itself
-        ("auto"), and the record says so for either."""
+        ("auto"), and the record says so for either. Given "auto", the script takes the
+        flag without deciding again, and without saying it again: complete-search has said
+        so on its console."""
         self.install("NRR_3", variant=False)
-        for passed, recorded in ((0, True), ("auto", True), (1, False)):
+        # (0 is a web search, which the script decides; with no --index-path, as from the
+        # command line)
+        for passed, recorded, said in ((0, True, True), ("auto", True, False),
+                                       (1, False, False)):
             with self.subTest(prune=passed):
-                run = self.run_with_params(pam="20bp-NGG-SpCas9", variant=False, prune=passed)
+                run = self.run_with_params(pam="20bp-NGG-SpCas9", variant=False, prune=passed,
+                                           index_path="_")
                 self.assertEqual(run.searched(variant=False), ("NRR_3_hg38", True))
                 self.assertEqual("Prune_pam\tauto\n" in self.params(), recorded)
-        # (the script says it where it decides; complete-search has said so itself)
-        self.assertNotIn("as if it was given", run.stdout)
+                self.assertEqual("as if it was given" in run.stdout, said)
 
 
 class CompleteSearchSaysWhoTookThePruningFlag(unittest.TestCase):

@@ -1333,18 +1333,18 @@ records it.
 
 **Pruning by itself.** Since 2.9.0 a search prunes, as if `--prune-pam` was given, whenever
 no installed index serves it unpruned and one of these does: a wider all-`N` one, or a
-dedicated one of a PAM that holds the search's. It says so first, on the console and in its
-log, naming the index that needs it ("no installed reference index of hg38 serves PAM NGG
-unpruned, and NRR_3_hg38 serves it pruned to it at leaf time: searching with --prune-pam, as
-if it was given"), and the run's record of the indexes it searched (`.indexes_searched.txt`
-in the result folder, beside the parameters: `Reference_index`, `Variant_index:<dataset>`,
-`Prune_pam auto`; `indexes_searched.txt` in the report's zip) and the report's summary say
-which index served it. Before, the search
-stopped for want of a variant index (and said to pass the flag), or built a reference index of
-its PAM from the genome: hours on hg38. Where an index serves the search unpruned (the PAM's
-own, or an all-`N` one of its width), the search runs as before, unpruned; pass `--prune-pam`
-to prune it anyway. A search with no bulges opens no reference index, so it neither prunes
-nor builds one (below).
+dedicated one of a PAM that holds the search's. It says so first, naming the index that needs
+it ("no installed reference index of hg38 serves PAM NGG unpruned, and NRR_3_hg38 serves it
+pruned to it at leaf time: searching with --prune-pam, as if it was given"): a search from the
+command line on its console, one from the web, which has none, in its `log_verbose.txt`. The
+run's record of the indexes it searched (`.indexes_searched.txt` in the result folder, beside
+the parameters: `Reference_index`, `Variant_index:<dataset>`, `Prune_pam auto`;
+`indexes_searched.txt` in the report's zip) and the report's summary say which index served
+it. Before, the search stopped for want of a variant index (and said to pass the flag), or
+built a reference index of its PAM from the genome: hours on hg38. Where an index serves the
+search unpruned (the PAM's own, or an all-`N` one of its width), the search runs as before,
+unpruned; pass `--prune-pam` to prune it anyway. A search with no bulges opens no reference
+index, so it neither prunes nor builds one (below).
 
 **Equivalence.** Pruning changes only which leaves are written out, never how a guide is
 aligned to the genome, so it cannot move an alignment or a score. Measured genome-wide
@@ -1365,8 +1365,8 @@ sites (about 7.5 × 10⁻⁷ of all), none on a primary chromosome for those PAM
 whole-genome searches the 8-nt flank lost one row each against a dedicated index (27,215 of
 27,216 rows for a guide picked for its perfect match on `chr11_JH159136v1_alt`, and 216,977 of
 216,978 for VEGFA site 3 at 5 mismatches). A search that reads a flank wider than its PAM says
-so on stdout and in the run's `Params.txt`. N runs inside a contig are not affected by the
-width.
+so: from the command line on stdout and in the run's `Params.txt`, from the web in its
+`log_verbose.txt`. N runs inside a contig are not affected by the width.
 
 **Genomic `N`.** This equivalence needs engine support, not just a filter. A genomic `N`
 is stored as a code that intersects nothing, so it fails a PAM match at every position; a
@@ -1385,9 +1385,9 @@ flank holds an `N`, and searched with `--prune-pam` for a PAM narrower than its 
 the sites whose flank holds an `N` past the PAM (3 of 36 rows on a synthetic genome, 2.6 % of
 the indel rows on chr22). Its `.pam_build` has the same format, but its trees tell: one built
 since stores an `N` (a 0 nibble) in the flank of a target beside one, and no earlier build does.
-A search that reads such an index wider than its PAM warns on stdout (it reads the smallest
-tree of a contig whose sequence holds an `N`, and of the INDELS index one of several indel
-windows), and goes on.
+A search that reads such an index wider than its PAM warns of it in the same places (it reads
+the smallest tree of a contig whose sequence holds an `N`, and of the INDELS index one of
+several indel windows), and goes on.
 
 **Contig ends and N runs.** These limits hold for every index, dedicated or PAM-less, at any
 width. An index of budget *N* holds a window of the guide, the PAM and *N* more bases, and the

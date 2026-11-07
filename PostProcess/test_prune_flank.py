@@ -7,7 +7,9 @@ index searched under --prune-pam for a narrower PAM misses the sites whose flank
 (idx audit IDX-5: 3 of 36 rows on the synthetic genome, 2.6% of the indel rows on chr22). The
 index records nothing of its engine; its trees do, as an N nibble (0) in a flank, which no
 earlier build stores (prune_flank). A flank wider than the PAM also cannot index a PAM at a
-contig's end (IDX-4): the search says both on stdout, and into the run's Params.txt.
+contig's end (IDX-4): complete-search says both on stdout, and into the run's Params.txt; the
+search script, of a search it prunes by itself (one the web launched), in its log
+(test_defaults_and_index_flex).
 
 The trees are fabricated as buildTST writes them (measured on real ones: for an odd flank the
 last byte's high nibble is padding, its low nibble the last base).

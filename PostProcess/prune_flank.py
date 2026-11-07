@@ -17,11 +17,18 @@ A tree (.bin) is int numLeaves and int len_guide_used, then each target: int gui
 flank in ceil(K/2) bytes, two bases a byte, high nibble first (for odd K the last byte's high
 nibble is padding, always 0, and its low nibble the last base), then '0', or '_' and an int;
 then the tree itself (crispritz_bins has the whole layout).
+
+Command line, for the search script, of a search it prunes by itself (one the web launched,
+which never passes --prune-pam): what wider_flank_notes says of the indexes it reads, on
+stdout, one line each (nothing on stderr, which fails the stage)::
+
+    python prune_flank.py <PAM> <genome dir> <index dir> ...
 """
 
 import os
 import re
 import struct
+import sys
 
 import index_fit
 
@@ -137,3 +144,65 @@ def indels_built_before_n_fix(indels_dir):
         if holds is not None:
             return not holds
     return None
+
+
+def wider_flank_notes(indexes, motif, genome_dir, who=None):
+    """What a search under --prune-pam, given or taken by itself, should say of the all-N
+    indexes ``indexes`` it reads whose stored flank is wider than the PAM ``motif`` (the
+    others: nothing), one line each: the sites such a flank cannot index (METHODS section 9),
+    and, for an index built before the engine kept a target whose flank holds an N, the
+    sites it misses and what serves the search whole: that index built again, or a dedicated
+    index of the PAM beside it, which the search takes first. A search without --prune-pam
+    and --index-path built a dedicated index before 2.9.0; it now prunes from that same index
+    by itself. ``who``: "complete-search", which says them on its console for a search of its
+    own; None for the search script, which says them in its log for a search it prunes by
+    itself, one the web launched, and so names the web app's route beside the command."""
+    tag = f" [{who}]" if who else ""
+    notes, seen = [], set()
+    for index in indexes:
+        pam = index_fit.index_pam(index) if index else ""
+        if not pam or set(pam) != {"N"} or len(pam) <= len(motif) or index in seen:
+            continue
+        seen.add(index)
+        if not notes:
+            d = len(pam) - len(motif)
+            notes.append(
+                f"NOTE{tag}: --prune-pam serves the {len(motif)}-nt PAM {motif} from "
+                f"{os.path.basename(index)}, whose stored flank is {len(pam)} nt: a + strand PAM "
+                f"with 1 to {d} nt after it to the end of a contig, and a - strand PAM in the "
+                f"first {d} nt of a contig, are not indexed, and one {d} nt from the start is "
+                f"reported on the + strand at another position (METHODS section 9). An index "
+                f"whose flank is the PAM's width, or a dedicated one, has no such limit.")
+        try:
+            if os.path.basename(index).count("+"):
+                before = indels_built_before_n_fix(index + "_INDELS") \
+                    if os.path.isdir(index + "_INDELS") else None
+                if before is None:
+                    before = built_before_n_fix(index, genome_dir)
+            else:
+                before = built_before_n_fix(index, genome_dir)
+        except OSError:
+            before = None
+        if before:
+            if who:
+                serves = (f"Remove it and build it again with build-index-only (which keeps an "
+                          f"index it finds in place), or put a dedicated {motif} index beside "
+                          f"it, which a search takes before it (build one with build-index-only, "
+                          f"or download one if it is published).")
+            else:
+                serves = (f"Put a dedicated {motif} index beside it, which a search takes before "
+                          f"it (build one with crisprme.py build-index-only or in the web app's "
+                          f"Settings, or download one if it is published), or remove it and "
+                          f"build it again with build-index-only (which keeps an index it finds "
+                          f"in place).")
+            notes.append(
+                f"WARNING{tag}: {os.path.basename(index)} stores no N in the flank of any target "
+                f"where its genome has one: it was built before CRISPRitz 2.9.1 (CRISPRme 2.8.0 "
+                f"or earlier), which dropped such targets, and searched for the shorter PAM "
+                f"{motif} it misses the sites whose flank holds an N. {serves}")
+    return notes
+
+
+if __name__ == "__main__":
+    for _note in wider_flank_notes(sys.argv[3:], sys.argv[1], sys.argv[2]):
+        print(_note)
