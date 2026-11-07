@@ -14,7 +14,8 @@ under its folder's name. The rebuild's archives, built with this release, take t
 renamed at staging; every command and document that downloads by the published name
 (`download --index-name NRR_3_hg38+hg38_HGDP1kGP`, the installers, the self-test) then needs
 `download` to find an archive of the new name for the older one, or the rebuild to publish under
-the older name, which every reader takes: the HF track's choice, with plan 3 C2's new location.
+the older name, which every reader takes: the rebuild's choice (plan 2.5), with plan 3 C2's new
+location.
 
 **The backlog: what this track fixed, what it found fixed, and what it leaves, and why** (every item
 of `_r281/r109/list_282.md` and of the plan's section 4, for the merge; the ids are the sources', a
@@ -51,7 +52,10 @@ its FASTA files changed); M5 (by E2's builds in the build lock: a search puts an
 name only whole, its `.bin` files in it, so the ERROR of a folder with no `.bin` can no longer
 name one a search is building, as `test_index_resolution`'s
 `test_a_build_leaves_nothing_under_its_name_and_touches_no_index_of_the_older_one` shows; a
-search of 2.8.1 or earlier, which builds in place, run in the same library at once, still can).
+search of 2.8.1 or earlier, which builds in place, run in the same library at once, still can);
+wsearch N3 (the plots' perfect-match legend with no star); FV :342's first two (the per-sample
+option of a dataset not indexed yet, the report's per-sample advice; its other three are R4-4's
+names, P14 and N7, each recorded here).
 
 *Found fixed already (checked on this branch):* P8 (fixed in 2.8.1: the tier path writes the REF
 protospacer's mismatches in lower case, as the dictionary path does, CHANGELOG [2.8.1], covered by
@@ -108,18 +112,41 @@ not wrong). D3R3-7 is moot: no `{{EQUIVALENCE_NUMBERS}}` placeholder is left in 
   a re-download, and TROUBLESHOOTING says HF_HOME moves it); the dash interrupt of plan 4.4 (a
   signal to crisprme.py alone) and c3's signal nits (a process-scan race, SIGHUP to the caller's
   group, two signals): c3's signal design (the image now stops by SIGINT); `targets-scoring` and web
-  searches without the scorer env (documented in 2.8.1: refusing, as complete-search does, or
-  warning on the web form is the scoring track's call); a variant search of a `Genomes/` link of
+  searches without the scorer env (documented in 2.8.1: refusing them, as complete-search does,
+  or warning on the web form, decides what an install without that env can still do, CFD-only
+  searches); a variant search of a `Genomes/` link of
   another name (which name a variant genome takes, the link's or its target's, with installs holding
   either); R6B RV1-5 (a partial `--samplesID` list drops carriers: "owner's call"), dash-alone-id
   ("none needed"), f4-wrong-list-named ("owner call"), renamed-ids-stale-index and
   refused-download-drops-installed-genome ("for the owner to decide"); R4-4's hashed haplotype index
-  names in Settings and History (each haplotype's own index, named so since 2.8.1: showing the
-  individual's name needs a record of it, the web track's); the results pages that open only
+  names in Settings and History (each haplotype's own index, named so since 2.8.1, one name a
+  haplotype: whether those lists name the individual instead is a choice of what they show); the
+  results pages that open only
   job-id-form folders and the region page's refused chromosome ids (by design, the security round 2
   decisions b and c); setup re-downloading the annotations, with the setup guide's A2e (rv2-3: which
-  form setup keeps, bgzipped as a search reads or plain, is one choice the guide then follows, the
-  cli track's setup work of 2.8.1).
+  form setup keeps, bgzipped as a search reads or plain, is one choice the guide then follows).
+- The served-mode names of plan 4.3 (a genome, PAM or dataset name placed by hand in the data
+  folder, or through Settings before 2.8.1, reaches the pipeline's shell commands): plan 3 A1
+  leaves the PI to choose between restricting the names a search takes and recording the limit.
+  Such a name is the operator's: Settings, which refuses one since 2.8.1, is off on a served
+  instance.
+- The classic path's MAF of a row one of whose variants has no frequency (FR :438, :531): 2.8.1
+  documents the rule, in the report's MAF note (a variant with no frequency is left out of a
+  row's MAF, which is blank when none has one); a blank MAF, or a joint one, for such a row is a
+  choice of what the column means.
+- The IUPAC letters of a sites-only (mega) row's DNA: no haplotype resolves its codes into one
+  allele, and printing one would print a sequence no individual is known to carry; how such a
+  row shows its alleles is plan 2.6's degeneracy flags, a design.
+- Contigs with "_" in their name (bio11.3, and R6B's RV1-2/RV2-2/R3-1..6 around it): every reader
+  of the fake-indel genome (the INDELS build, the SNP overlay, the indel post-analysis, the
+  search script) takes the chromosome off the engine's folder name `fake_<vcf>_<chrom>` after
+  its last `_`; whether the engine's naming changes, with index format 2, or every reader does,
+  is a design question. INPUT_FORMATS documents the rename that avoids it, and no published
+  index has such a contig.
+- INT N2 (an indel-free dataset installed without its enriched genome: every search says to
+  download its INDELS index again): telling a dataset with no indel from an INDELS index lost or
+  never built needs a record of the dataset's indels that an install may not hold, a design of
+  the INDELS check.
 - Plan 2.7's roadmap beyond E1 and E2 (list_282.md's index-flexibility list): `index_meta.json`,
   serving other guide lengths (E3 decided: pair them), the 5′ wider-flank prune (a CRISPRitz
   change), migrating an old fake-indel genome, a stale-index stamp, a web setting for a shared
@@ -131,7 +158,7 @@ not wrong). D3R3-7 is moot: no `{{EQUIVALENCE_NUMBERS}}` placeholder is left in 
   is a design question, as `hf_hub_download` keeps each file whole in that cache before `hf_fetch`
   copies it, so a temporary folder removed at exit would hold each download twice, in /tmp or
   CRISPRME_TMPDIR, while 2.8.1 keeps a saved login found and falls back to the file's original
-  source, which works (the HF track's). SIGTERM leaving matplotlib's temporary folder: a SIGTERM
+  source, which works. SIGTERM leaving matplotlib's temporary folder: a SIGTERM
   handler changes how every command, and the pipeline under it, stops (c3's signal design, above),
   and TROUBLESHOOTING §1 says that a command killed by a signal leaves it in the temporary folder.
 - list_282.md's parked design work: the two-pass dense search (its min-edit lower bound breaks
@@ -141,30 +168,30 @@ not wrong). D3R3-7 is moot: no `{{EQUIVALENCE_NUMBERS}}` placeholder is left in 
 - wsearch N1 (the `/result` region route answers HTTP 500): not a path fix. Fixing the relative
   path, tried here on a real job, stops the 500 but shows no row, as the route reads the columns of
   a pre-2.x bestMerge and an annotation file no search writes (an awk error too); removing the
-  route, which nothing links to, or rewriting it on the integrated results is the web track's
-  choice. N2 (fixed caption text), N3 (a legend entry with no star at -1) and N5 (a short window)
-  are cosmetic and the web track's, with N7 above.
+  route, which nothing links to, or rewriting it on the integrated results is a choice. N5 (a
+  finished job whose last steps warn shows the failure text until its log's rename, its last
+  step, as its status page does): whether a log of warnings alone reads as done on both pages is
+  a choice.
 
-*Left: other tracks' work.* The served-mode security item left (A1's names placed by hand: the
-security track); A6 (the rsID and MAF lists of a multi-variant row, sorted apart from its variants:
-the alleles track's, with the multi-allelic work, as decided: "document now, fix next") and results
-F2 (a SNP row that lists a carrier whose haplotype holds an indel in the target: the gate track's
-carrier gate); the report's RV1-F1, RV1-F2, cli5 D6, P8, the classic path's MAF of an NA allele (FR
-:438, :531), the mega IUPAC rows, the Risk Card sort, the radar chart's guide-length guard (#39,
-closed as user error) and the "observed haplotypes" wording left on purpose (FR :558); the engine's
-AF-by-first-record and 5′ last-window items, its contig-end and N-run windows (the roadmap's), the
-Bioconda enricher, PKG1 and the on-demand index check (format 2: the engine and fmt tracks, whose
-builds check what they write); the mega indels' AF (the rebuild); download's check of the
-dictionaries (FR :163: the HF track's); contigs with "_" (bio11.3 and R6B's RV1-2/RV2-2/R3-1..6: the
-indel pipeline's naming); R2-F1, M5, R4-6 (the build tracks' locks and marks); the 2.8.2 correctness
+*Left: the work of this release's other lanes, the rebuild and the integration.* A6 (the rsID
+and MAF lists of a multi-variant row, sorted apart from its variants) and results F2 (a SNP row
+that lists a carrier whose haplotype holds an indel in the target): fixed by the alleles and gate
+lanes (`changelog/alleles.md`, `changelog/gate.md`); the engine's AF-by-first-record, its PAMs at a
+contig's last bases (the 5′ last-window item), its contig-end and N-run windows, the Bioconda
+enricher (its recipe installs it), PKG1 and the on-demand index check: the engine and fmt lanes'
+(CRISPRitz 2.10.0, index format 2, whose builds check what they write), with the CRISPRitz items
+of plan 4.4's added block; the mega indels' AF: the rebuild's (plan 2.5); the 2.8.2 correctness
 items of list_282.md (fix/282-indel-alignment, test/282-indel-realdata-check, the SNP rows whose
-carriers all have an indel: their branches, to forward-port); the CRISPRitz items of plan 4.4's
-added block (the engine); INT N2 (an indel-free dataset installed without its enriched genome: the
-search must tell a dataset with no indels from a broken INDELS index, the emptyidx area); FV :342's
-wording of the web's labels and notes (the web and report tracks' texts).
+carriers all have an indel): their branches, forward-ported at the integration (the plan's
+status log).
 
 *Left: not reproduced, or nothing to change.* RV1-F6 (it names no item of its own: it confirms items
-of the list, each named here); C17 (a banner) and the older list's validate-test hint and scope (no
+of the list, each named here); the radar chart's guide-length guard (#39, closed as user error);
+the "observed haplotypes" wording of FR :558 (kept on purpose); wsearch N2 (the Graphical Reports
+caption states the perfect-match stars and the plots drawn before 2.8.1 in general terms: accurate
+as it is, as its review found); the tie order of a Personal Risk Card's plots (text r1 F3: no value
+changes, and the web's top-1000 plots and the report's agree, as its review measured); C17 (a
+banner) and the older list's validate-test hint and scope (no
 detail kept in the sources: the list names them alone); t31 P4 (VirtioFS: not reproduced on
 38a7c4e); the bulge note counting a merged panel's list as made (FR2: only a failed write at Submit,
 which then says why, parts them); the older list's code comments (no behaviour); bio11.2 (a flake
@@ -175,14 +202,17 @@ repository's); R6B cr-past-first-lines (build-index-only reads each file whole a
 each search, seconds on hg38, is the owner's trade to weigh).
 
 *Left: tests and CI.* Suite P5 (tests that import the web app write `PostProcess/Cache/`, the app's
-cache folder relative to the working directory, ignored by git: moving it is the web track's call);
-R2-F4, R2-F5, wset N3, RV1-F4, N6, text F2, the value tests of plan 4.5 (resultIntegrator's columns,
-add_risk_score's fields, the CB sentinels, resolve_phased's manifest), the recovery route of a
-missing INDELS sub-index, the audit's test additions (a 5′-PAM synthetic case, `complete-test
---index-name`, a published test archive, a leftover INDELS folder): coverage of other tracks' code,
-sized small to medium, with no failing behaviour behind them; R6B's cigate items (the retry loop's
-budget, the wiring guards' comments, the SKIP_HEAVY wording, the inert chr22 ALT-PAM step, a
-registry stamped by its aggregation alone) and FFR D3R3-6 and RV1-WEB2-6: the CI track's.
+cache folder relative to the working directory, ignored by git: where the app keeps its cache is a
+choice of its layout); R2-F4, R2-F5, wset N3, RV1-F4, N6, text F2, the value tests of plan 4.5
+(resultIntegrator's columns, add_risk_score's fields, the CB sentinels, resolve_phased's
+manifest), the recovery route of a missing INDELS sub-index, the audit's test additions (a 5′-PAM
+synthetic case, `complete-test --index-name`, a published test archive, a leftover INDELS folder):
+coverage of code that works, where a new test must fail before its fix and none has a failing
+behaviour to fix; R6B's cigate items (the retry loop's time budget against the job's limit, which
+guards a YAML comment satisfies, the SKIP_HEAVY wording, the chr22 ALT-PAM step that plan 2.10's
+multi-allelic gate G4 replaces, a registry stamped by its aggregation alone), FFR D3R3-6 (a
+fragment test skips fenced code, which no fragment holds) and RV1-WEB2-6 (a test helper's open
+file, a ResourceWarning): the workflows' own design, with no wrong result.
 
 *Left: docs and wording.* RV1-F3, N4, F5, RV4-2, the 2.7.10 entry and R6B's three changelog
 wordings: each is the wording of an entry of the released CHANGELOG (2.8.1's, the CFD entry
