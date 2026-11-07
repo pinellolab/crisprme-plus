@@ -1038,6 +1038,37 @@ class AWideFlankOfFormat2NeedsNoWarning(_Index):
         self.assertIn("nor has one built by CRISPRitz 2.10.0 or later (index format 2)", notes[0])
 
 
+class TheNoteOfAWideFlankOfFormat1SaysWhatTheEngineMisreports(_Index):
+    """A - strand PAM exactly K - L nt from a contig's start lies, in a PAM-less index of
+    format 1 whose flank is K nt, in the window at index 0, which CRISPRitz 2.9.1's search read
+    as a + strand one: it reported that PAM on the + strand at another position. 2.10.0's search
+    reads index 0 of a 3' index right in either format (B1): of the published 8-nt-flank index
+    it gives the dedicated index's row. complete-search's --prune-pam note of such an index said
+    the misreport under 2.10.0 too, on stdout and in the run's Params.txt; it says it only under
+    a CRISPRitz that reads format 1 alone (2.9.1), and the limits of the build under either."""
+
+    def test_the_misreport_is_said_under_crispritz_2_9_1_alone(self):
+        genome = os.path.join(self.tmp, "Genomes", "g")
+        os.makedirs(genome)
+        with open(os.path.join(genome, "chr1.fa"), "w") as fh:
+            fh.write(">chr1\n" + "ACGT" * 40 + "\n")
+        k8 = self.index("NNNNNNNN_3_g", fmt=1)
+        crisprme = _load_crisprme()
+        limits = ("NOTE [complete-search]: --prune-pam serves the 3-nt PAM NGG from "
+                  "NNNNNNNN_3_g, whose stored flank is 8 nt: a + strand PAM with 1 to 5 nt after "
+                  "it to the end of a contig, and a - strand PAM in the first 5 nt of a contig, "
+                  "are not indexed")
+        misreport = ", and one 5 nt from the start is reported on the + strand at another position"
+        rest = (" (METHODS section 9). An index whose flank is the PAM's width, or a dedicated "
+                "one, has no such limit, nor has one built by CRISPRitz 2.10.0 or later (index "
+                "format 2).")
+        for stated, version, note in ((2, "2.10.0", limits + rest),
+                                      (None, "2.9.1", limits + misreport + rest)):
+            with self.subTest(engine=version):
+                self.engine(stated)
+                self.assertEqual(index_fit.engine_version(), version)
+                self.assertEqual(crisprme._wider_flank_notes([k8], "NGG", genome), [note])
+
 
 class AnEmptySubIndexRecordsItsFormat(empty._Fixture):
     """pool_index_indels.py records a sub-index buildTST built with no target, by buildTST's

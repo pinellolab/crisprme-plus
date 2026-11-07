@@ -2377,8 +2377,10 @@ def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[s
     """What a search under --prune-pam should say of the all-N indexes ``indexes`` it reads,
     whose stored flank is wider than the PAM ``motif`` (the others: nothing), one line each:
     the sites such a flank cannot index in index format 1 (METHODS section 9; format 2, which
-    CRISPRitz writes from 2.10.0, holds them), and, for an index built before the engine kept
-    a target whose flank holds an N (prune_flank), the sites it misses."""
+    CRISPRitz writes from 2.10.0, holds them), with, under a CRISPRitz that reads format 1
+    alone (2.9.1), the one its search reports on the wrong strand (2.10.0's reads it right in
+    either format), and, for an index built before the engine kept a target whose flank holds
+    an N (prune_flank), the sites it misses."""
     notes, seen = [], set()
     for index in indexes:
         pam = os.path.basename(index).split("_")[0]
@@ -2387,14 +2389,17 @@ def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[s
         seen.add(index)
         if not notes and 1 in index_fit.bin_formats(index):
             d = len(pam) - len(motif)
+            # (a - strand PAM d nt from the start: its window is at index 0, which CRISPRitz
+            # 2.9.1's search read as a + strand one)
+            misread = (f", and one {d} nt from the start is reported on the + strand at another "
+                       f"position" if index_fit.engine_index_format() == 1 else "")
             notes.append(
                 f"NOTE [complete-search]: --prune-pam serves the {len(motif)}-nt PAM {motif} from "
                 f"{os.path.basename(index)}, whose stored flank is {len(pam)} nt: a + strand PAM "
                 f"with 1 to {d} nt after it to the end of a contig, and a - strand PAM in the first "
-                f"{d} nt of a contig, are not indexed, and one {d} nt from the start is reported on "
-                f"the + strand at another position (METHODS section 9). An index whose flank is "
-                f"the PAM's width, or a dedicated one, has no such limit, nor has one built by "
-                f"CRISPRitz 2.10.0 or later (index format 2).")
+                f"{d} nt of a contig, are not indexed{misread} (METHODS section 9). An index whose "
+                f"flank is the PAM's width, or a dedicated one, has no such limit, nor has one "
+                f"built by CRISPRitz 2.10.0 or later (index format 2).")
         try:
             if os.path.basename(index).count("+"):
                 before = prune_flank.indels_built_before_n_fix(index + "_INDELS") \
