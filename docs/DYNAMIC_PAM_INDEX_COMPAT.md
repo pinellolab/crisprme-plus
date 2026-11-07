@@ -66,10 +66,9 @@ update (as an all-PAM / broadest survey — the top of the NGG->NRR->NNN ladder)
 (2026-10-30) keep the targets with an `N` in their flank, and a 2.8.0 search of them can fail or
 report malformed rows: use them with 2.8.1 or later. Only **variable/longer-flank** indexes (width > 3,
 e.g. `NNNNNNNN_3` with an 8-nt flank) are unsafe for old code — a 3-nt search is a width mismatch
-and old tools lack the guard — so those go in a **SEPARATE HF repo** (proposed
-`pinellolab/crisprme-indexes-pamless`; 2.8.1 publishes them in
-`lucapinello/crisprme-data-general-index`) the old default never points at. New code's resolver
-knows both; `publish-index` targets the pam-less repo only for width>3 indexes.
+and old tools lack the guard — so those go in a **SEPARATE HF repo**,
+`lucapinello/crisprme-data-general-index` (since 2.8.1), which the old default never points at.
+New code's resolver knows both; `publish-index` targets that repo only for width>3 indexes.
 
 ### Layer 2 — RUNTIME version-gate: fail-safe even if an index is hand-moved
 *As built in CRISPRme 2.10.0 (2.8.1 writes and reads no sidecar):* every index CRISPRme builds
