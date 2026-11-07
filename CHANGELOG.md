@@ -458,18 +458,24 @@ and the `release-crisprme` skill.
   recorded that file on it, whose 3′ geometry the web then read, and a 3′ search refused the index
   as a 5′ build "(as its .pam_build records)", which recorded 3′; and it refused a 3′ index of
   flank 4 that had none, given a 3′ PAM file of that flank, as "a PAM-less index that records no
-  side of the guide". It now refuses a PAM file of the other side than the header's, saying the
-  header records it, and records one of its side; the web takes the index's geometry from its
-  header, and the PAM name of `.pam_build` only where that record's geometry is the header's; and a
-  search that refuses an index for its side says which of the two it read. With CRISPRitz 2.10.0
-  (`feat/2.10.0` 8bda5bb) on a genome of three contigs: of a 5′ PAM-less index that `crispritz.py
-  index-genome` built, `build-index-only` with the shipped 3′ PAM file stops (exit 1: `Error: ...
-  is already there, a PAM-less index for a PAM on the 5' side of the guide (as the header of its
-  .bin files records), and ... puts the PAM on the 3' side. ...`) and writes nothing, the web reads
-  `(None, 23, -3)` of the index, and a 3′ search stops, saying the header records that side; with a
-  5′ PAM file, `build-index-only` records that file, the web reads its name and the 5′ geometry,
-  and a 5′ search of the index ends with exit 0 and nothing on stderr. Of a 3′ index of flank 4,
-  `build-index-only` with a 3′ PAM file of that flank keeps it (exit 0) and records that file.
+  side of the guide". It now records a PAM file on such an index only when it is of the side the
+  header records: given one of the other side, it builds that file's index beside it, under the
+  name that says its side (the names of this release, under Changed), saying the header records
+  the other side, and it refuses one of its PAM alone, which says no guide length and so takes the
+  index's own name; the web takes the index's geometry from its header, the PAM name of
+  `.pam_build` only where that record's geometry is the header's, and offers the index to a
+  search of that side alone; and a search that refuses an index for its side says which of the
+  two it read. With CRISPRitz 2.10.0 (`feat/2.10.0` 2647aa1's build) and this release's code
+  (cb550f1) on a genome of three contigs: of a 5′ PAM-less index that `crispritz.py index-genome`
+  built (`NNN_2_bx`), the web reads `(None, 23, -3)` and offers it to a 5′ search, not a 3′ one;
+  `build-index-only` with the shipped 3′ PAM file says `NNN_2_bx is an index for a PAM on the 5'
+  side of the guide (as the header of its .bin files records): it is left as it is, and this index
+  is built beside it, as 20-NNN_2_bx.`, records nothing on `NNN_2_bx` and the 3′ file on
+  `20-NNN_2_bx` (exit 0, nothing on stderr), and a 3′ search takes `20-NNN_2_bx`; with a 5′ PAM
+  file, `build-index-only` keeps `NNN_2_bx` and records that file, the web reads its name and the
+  5′ geometry, and a 5′ search takes `NNN_2_bx`, each with exit 0 and nothing on stderr. Of a 3′
+  index of flank 4, `build-index-only` with a 3′ PAM file of that flank keeps it (exit 0) and
+  records that file.
 - **The second-indel check of an indel row reads no base beyond its chromosome.** The haplotype
   window `_breaking_slots` writes around an indel target ran past the chromosome's ends by up to
   the target's length and the indels' (the positions it read from the dictionary were clamped at
