@@ -52,6 +52,21 @@ and the `release-crisprme` skill.
     such a second copy in the README search per-sample, 1 of 228 rows population-level and 22
     of 444 (251 and 193) with the TRAC guide per-sample, all at CFD 0.004 or less; per-sample,
     every other one is still listed, as a row or an alternative alignment.
+  - Cost: the merge reads a row's place on the haplotype once per target, REF alignment, start
+    and variants, and cuts the haplotype from the indel's ALT in slices, so a long insertion
+    adds no step per inserted base. HPRC holds 402 insertions of 53.9 to 54.4 kb at
+    chr22:10690626, and the README guide's chr22 search puts 16,058 rows inside them, now all at
+    their anchor (2.8.1: at most 760 rows at one cluster position). On that index, the released
+    2.8.1 image and 2.8.2 side by side on one host, per-sample: each of the three merges takes
+    4.4 to 4.6 s against 3.1 to 3.5 s, and the merge step, which is mostly sorting, 77 to 80 s
+    against 54 to 56 s (its sorts by cluster position now meet those rows at one place: the
+    highest-CFD file, shuffled, sorts in 15.3 s against 9.8 s); population-level 4.6 and 77 s
+    against 3.4 and 53 s; TRAC guide, per-sample, 3.8 to 4.0 s and 53 s against 3.0 to 3.1 s and
+    50 s. On chr22 of HGDP + 1000 Genomes every merge of the searches below takes under a
+    second, as in 2.8.1. Covered by `test_indel_snp_cis` (the sliced reading against the
+    base-by-base one on 4,000 random rows; the Python lines it runs do not grow with the
+    insertion) and `test_representative_tiebreak` (one target's 20 alignments inside a 54 kb
+    insertion: one reading).
   - The same search on chr22, released 2.8.1 image against 2.8.2 without the SNP-row fix (the
     last entry below, which gives the counts with it): per-sample, 1,574 → 1,573 integrated
     rows and 3,756 → 3,757 alternative alignments (21052642 joins 21052638's site; that site's
@@ -276,9 +291,10 @@ and the `release-crisprme` skill.
   - A carrier whose genotypes cannot put an allele on the indel's haplotype (an unphased call,
     a missing allele, and every carrier of an MNV) gets the strongest target its own alleles
     allow on each alignment: the guide's base at a position the alignment pairs with a guide
-    base, the base with the higher CFD at one it leaves as a DNA bulge. So two alignments of one
-    target string can list it with different bases. The merge keyed an indel or MNV row by its
-    cluster position, variants and upper-cased target, not by its aligned spacer: the two
+    base, the base with the higher CFD at one it leaves as a DNA bulge (the reference base where
+    no CFD is scored: a 5′ PAM, or a guide or PAM not 20 and 3 nt long). So two alignments of
+    one target string can list it with different bases. The merge keyed an indel or MNV row by
+    its cluster position, variants and upper-cased target, not by its aligned spacer: the two
     alignments' rows were one entry, the first in the file's order, with the carriers of both.
     Such a carrier could then be listed on an alignment where its own alleles give a stronger
     target, and the alignment it was resolved on left both tables. SNP+indel oracle, site U (S19
@@ -295,21 +311,35 @@ and the `release-crisprme` skill.
     alignment of it, so only alignments of one target string that list different carriers,
     through a PUTATIVE one, now keep an entry each. At site U, S19 is listed under the deletion
     alone only on alignments where the SNP's base is a DNA bulge, and A-CTGAAATCTG…, with C
-    facing the guide's A, lists S20 alone.
+    facing the guide's A, lists S20 alone. Carrier sets are compared whole, so that every block
+    keeps one row count whatever its order; so an alignment whose carriers are all listed on a
+    better alignment of that target and variants still keeps an entry when the better one also
+    lists a PUTATIVE carrier resolved to another base on the weaker one: with a SNP whose base
+    the weaker alignment leaves as a DNA bulge, only the carriers homozygous for the SNP, or
+    phased with it in cis, are listed on the weaker one with the SNP. That entry is an extra
+    alternative alignment, its carriers and score right (none in the searches below, nor on
+    chr22 of HPRC and its unphased copy).
+  - Cost: the merge sorts and folds one row per alignment where it sorted one per target
+    string, and still reads each target's place on the haplotype once, whatever its alignments.
+    With the README guide on HPRC's chr22, per-sample, each of its three merges takes 4.4 to
+    4.6 s against 2.8.1's 3.1 to 3.5 s (the cost note of the first entry above).
   - chr22 of HGDP + 1000 Genomes, the searches above (README guide NRG per-sample and
     population-level, NRR per-sample, TRAC guide per-sample): every table is byte-identical
     with and without this fix. Of their groups of indel or MNV rows with one cluster position,
     variant list and target string, 105 of 233 (NRG, both modes), 259 of 629 (NRR) and 131 of
     300 (TRAC) hold two or more alignments, each group with one carrier set, and each still
-    kept as before. The real-data indel check (test/282-indel-realdata-check), which found the
-    defect, found no carrier listed so on chr22 of HGDP + 1000 Genomes, HPRC or an unphased
-    copy of HPRC.
+    kept as before. On chr22 of HPRC and of a copy of it with every fourth sample unphased (the
+    real-data indel check's builds; README guide per-sample and population-level, TRAC guide
+    per-sample), every table is byte-identical too. The real-data indel check
+    (test/282-indel-realdata-check), which found the defect, found no carrier listed so on chr22
+    of HGDP + 1000 Genomes, HPRC or an unphased copy of HPRC.
   - Covered by `test_representative_tiebreak` (site U's rows through the real merge; without
-    this fix S19 is on the CFD-0.423 alignment, or that alignment is gone) and by the SNP+indel
-    oracle. It checks again every carrier an indel row lists (a phased one at an occurrence of
-    the target holding every variant the row names, an unphased one carrying every allele it
-    names) and that every variant it names is a record of the VCF, which the stricter start
-    check above had stopped doing, and now also that an unphased carrier's target is the
+    this fix S19 is on the CFD-0.423 alignment, or that alignment is gone; and an alignment
+    whose carriers are a part of a better one's keeping its entry in every order) and by the
+    SNP+indel oracle. It checks again every carrier an indel row lists (a phased one at an
+    occurrence of the target holding every variant the row names, an unphased one carrying every
+    allele it names) and that every variant it names is a record of the VCF, which the stricter
+    start check above had stopped doing, and now also that an unphased carrier's target is the
     strongest its own alleles allow on the row's alignment. Without this fix that check fails
     twice, at site U.
 
