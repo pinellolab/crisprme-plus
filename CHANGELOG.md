@@ -95,7 +95,9 @@ and the `release-crisprme` skill.
     (mm+bulges, then mm, by default) is at most the least key of the target's alignments,
     and a highest-CFD block of at least its CFD at three decimals, with, where the two print
     the same three decimals, a key no greater than the least of the target's alignments of
-    that CFD (`merge_close_targets_cfd.sh` hands both files the sorting criteria) — as
+    that CFD (`merge_close_targets_cfd.sh` hands both files the sorting criteria; where a
+    run's command line names `--sorting-criteria-scoring`, which a later CRISPRme branch
+    hands the CFD file, a tie no worse under either is accepted) — as
     `remove_contiguous_samples.py` folds the rows of one site, variant list and carrier set
     into the first by each file's order: a row with exactly that target and variants whose
     fold group (the rows of its site naming those variants with its carrier set: two
@@ -164,7 +166,8 @@ and the `release-crisprme` skill.
     upstream turn non-gating, and a listed one that stops showing is reported); `--snp-rows
     report` (the SNP-only rows of a per-sample run, report-only: their strings, target and
     listed carriers, and the phased carriers a SNP row of their site leaves out;
-    population-level SNP rows are a documented worst-case union and are out of scope);
+    population-level SNP rows are a documented worst-case union and are out of scope, as are
+    a sites-only dataset's SNP rows, population-level whatever the search's mode);
     `--max-total-edits` defaults to the run's own cap (its `.Params.txt`), else
     complete-search's 6; `--samples` (the panel) to the run's `.sampleID.txt`, else every
     VCF sample. Rows are keyed by guide: in a run of several guides one guide's row stands

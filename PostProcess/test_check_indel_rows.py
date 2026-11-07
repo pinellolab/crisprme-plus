@@ -2189,6 +2189,11 @@ class ReviewRound5(Base):
         why = reported.worse([few, entry("highest_CFD", 2, 1, 0.5003)], d)
         self.assertIn("a tie at three decimals, which the merge breaks on "
                       "--sorting-criteria mm+bulges,mm", why)
+        # a CRISPRme whose CFD merge reads --sorting-criteria-scoring (here mm: the row's 2
+        # mismatches tie the target's) breaks the tie on that: either reading is accepted
+        lenient = C.Reported([], argparse_ns_ctx(), criterion="mm+bulges,mm", scoring="mm")
+        self.assertIsNone(lenient.worse([few, entry("highest_CFD", 2, 1, 0.5003)], d))
+        self.assertIsNotNone(lenient.worse([few, entry("highest_CFD", 3, 1, 0.5003)], d))
         self.assertIsNone(reported.worse([few, entry("highest_CFD", 3, 1, 0.501)], d))
         d2 = C.Best(C.edits(2, 0), 0.5005)   # prints 0.500 or 0.501: not surely a tie
         self.assertIsNone(reported.worse([few, entry("highest_CFD", 3, 1, 0.5005)], d2))

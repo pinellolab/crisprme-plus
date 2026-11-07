@@ -1548,39 +1548,41 @@ documents, and fails. It runs two ways:
   default) is at most the least of the target's alignments', and a highest-CFD block of at
   least its CFD that, where the two print the same three decimals, has a key no greater
   than the least of the target's alignments of that CFD (the CFD file sorts on the CFD,
-  then on the same criteria) — since the merge keeps, of the rows of one site, variant
-  list and carrier set, the first by each file's order (§4): a row with exactly that
-  target and variants whose fold group (the rows of its site naming those variants with
-  its carrier set, which two alignments of one target always share) is no worse, or rows
-  of its site naming the same variants with the target's own carrier set that are no
-  worse. The fold key holds no strand, while one target's alignments share theirs, so a
-  fold group is taken on one strand: a fold across strands loses another target. The
-  merge's later keys (the Cluster Position, the carrier count, the aligned text) only
-  order alignments equal in all of these and are not compared. The merge sorts on the CFD
-  of a row's own alignment, written to three decimals (the results' `CFD_score_ALT`; their
-  `CFD_score` prints the higher of the REF and ALT scores), so each row's CFD is
-  recomputed from its aligned strings and compared at three decimals. A PUTATIVE target is
-  the carrier's own: it is held to the alignments under which the rule picks it for that
-  carrier, and a target the rule ties with another to its own best. The site is the
-  cluster position on the haplotype carrying the record: CRISPRitz's Cluster Position (the
-  start moved to the PAM's fixed end, shared by every alignment of one PAM site) plus the
-  rank of the row's first base among the bases an insertion adds, as the fix branch's
-  merge compares rows that start inside one insertion; a row whose own target is not at
-  its start stands for no other alignment. A target that needs a second indel-path record
-  is demanded exactly when the fake-indel window's own reading holds its bases from the
-  same first base (CRISPRme then keeps the carrier), and is the two-indel limit otherwise.
-  A target touching a call of unknown phase is demanded as the sample's strongest. A run
-  that writes no alternative alignments (population-level, or `--ci-cd-test`) keeps one
-  row per merge cluster: there the target's cluster — the integrated row with a block
-  within `--merge` bp of its Cluster Position, or of one that the in-budget alignments of
-  the enriched reference (the SNP alleles CRISPRme's stores hold) and of every indel
-  record's window chain to it, each within `--merge` bp of the next, as the merge clusters
-  (every record the chain reaches is read, up to 3 kb either side) — must be reported with
-  a fewest-mm+b block of no more edits than the target's best alignment by the first
-  sorting criterion (the merge picks between a cluster's reference and variant rows on
-  mm+bulges, or the CFD, alone) and a highest-CFD block of at least its CFD (each row's
-  recomputed from its own aligned strings, the value the merge sorts on). A record only
-  sites-only VCFs hold is carried by nobody: it is counted, not demanded.
+  then on the same criteria; where a run names `--sorting-criteria-scoring`, which a later
+  branch hands the CFD file, a tie no worse under either is accepted) — since the merge
+  keeps, of the rows of one site, variant list and carrier set, the first by each file's
+  order (§4): a row with exactly that target and variants whose fold group (the rows of
+  its site naming those variants with its carrier set, which two alignments of one target
+  always share) is no worse, or rows of its site naming the same variants with the
+  target's own carrier set that are no worse. The fold key holds no strand, while one
+  target's alignments share theirs, so a fold group is taken on one strand: a fold across
+  strands loses another target. The merge's later keys (the Cluster Position, the carrier
+  count, the aligned text) only order alignments equal in all of these and are not
+  compared. The merge sorts on the CFD of a row's own alignment, written to three decimals
+  (the results' `CFD_score_ALT`; their `CFD_score` prints the higher of the REF and ALT
+  scores), so each row's CFD is recomputed from its aligned strings and compared at three
+  decimals. A PUTATIVE target is the carrier's own: it is held to the alignments under
+  which the rule picks it for that carrier, and a target the rule ties with another to its
+  own best. The site is the cluster position on the haplotype carrying the record:
+  CRISPRitz's Cluster Position (the start moved to the PAM's fixed end, shared by every
+  alignment of one PAM site) plus the rank of the row's first base among the bases an
+  insertion adds, as the fix branch's merge compares rows that start inside one insertion;
+  a row whose own target is not at its start stands for no other alignment. A target that
+  needs a second indel-path record is demanded exactly when the fake-indel window's own
+  reading holds its bases from the same first base (CRISPRme then keeps the carrier), and
+  is the two-indel limit otherwise. A target touching a call of unknown phase is demanded
+  as the sample's strongest. A run that writes no alternative alignments
+  (population-level, or `--ci-cd-test`) keeps one row per merge cluster: there the
+  target's cluster — the integrated row with a block within `--merge` bp of its Cluster
+  Position, or of one that the in-budget alignments of the enriched reference (the SNP
+  alleles CRISPRme's stores hold) and of every indel record's window chain to it, each
+  within `--merge` bp of the next, as the merge clusters (every record the chain reaches
+  is read, up to 3 kb either side) — must be reported with a fewest-mm+b block of no more
+  edits than the target's best alignment by the first sorting criterion (the merge picks
+  between a cluster's reference and variant rows on mm+bulges, or the CFD, alone) and a
+  highest-CFD block of at least its CFD (each row's recomputed from its own aligned
+  strings, the value the merge sorts on). A record only sites-only VCFs hold is carried by
+  nobody: it is counted, not demanded.
 
 It does not check the `CFD_score_REF`/`_ALT`, `CFD_risk_score` and CRISPR-Bulge columns or
 which row the CRISPR-Bulge block keeps, `Variant_info_spacer+PAM`, `PAM_creation`, the seed

@@ -181,7 +181,9 @@ the merge of ``remove_contiguous_samples.py``).
   the first of them in each file's order: the fewest file sorts on the sorting criteria in
   turn (--sorting-criteria, crisprme.py's default mm+bulges,mm), the CFD file on the CFD
   (as the analysis writes it, to three decimals) and then on the same criteria
-  (merge_close_targets_cfd.sh hands both files --sorting-criteria). Two alignments of one
+  (merge_close_targets_cfd.sh hands both files --sorting-criteria; a later CRISPRme branch
+  hands the CFD file --sorting-criteria-scoring, so where a run's command line names one, a
+  CFD tie no worse under either is taken as no worse). Two alignments of one
   target share its start, variants, carriers and site, so they always fold. The site is the
   cluster position on the haplotype carrying the record: the Cluster Position plus the
   rank of the row's first base among the bases an insertion adds (0 on any other base), as
@@ -243,7 +245,9 @@ per-class summary on stdout, exit status 1 on any gating finding (2 on a usage e
 SNP-only rows of a per-sample run can be checked in report-only mode
 (``--snp-rows report``: their strings, target and listed carriers, and the phased
 carriers a SNP row of their site leaves out); population-level SNP rows are a documented
-worst-case union and are out of scope. Without --max-total-edits the cap is the run's own
+worst-case union and are out of scope, as are a sites-only dataset's SNP rows, which are
+population-level whatever the search's mode (one limit-no-genotypes line each). Without
+--max-total-edits the cap is the run's own
 (its .Params.txt), else complete-search's 6; without --samples the panel is the run's
 .sampleID.txt, else every sample of the VCF(s). Rows are keyed by guide: one guide's row
 stands for no demand of another.
@@ -1494,13 +1498,14 @@ def result_tables(resdir):
 def run_kind(resdir):
     """(analysis mode, alternative alignments written, merge window, the sorting
     criteria of the fewest block (--sorting-criteria, crisprme.py's default
-    'mm+bulges,mm' when the command line gives none), total-edits cap or None) of a run,
-    from its own markers. A population-level run writes no alternative alignments by
-    design, nor does a run made with --ci-cd-test (the documented chr22 self-test): both
-    keep one row per cluster (.alt_mode = no-alt-alignments). The cap is the one the
+    'mm+bulges,mm' when the command line gives none), the scoring criteria the command
+    line gives (--sorting-criteria-scoring, else None), total-edits cap or None) of a
+    run, from its own markers. A population-level run writes no alternative alignments
+    by design, nor does a run made with --ci-cd-test (the documented chr22 self-test):
+    both keep one row per cluster (.alt_mode = no-alt-alignments). The cap is the one the
     search used (.Params.txt's Max_total_edits, else --max-total-edits in
     .command_line.txt)."""
-    mode = alt = cap = None
+    mode = alt = cap = scoring = None
     merge, criterion = 3, "mm+bulges,mm"
     p = os.path.join(resdir, ".alt_mode")
     if os.path.exists(p):
@@ -1521,6 +1526,9 @@ def run_kind(resdir):
         m = re.search(r"--sorting-criteria\s+(\S+)", v)
         if m:
             criterion = m.group(1)
+        m = re.search(r"--sorting-criteria-scoring\s+(\S+)", v)
+        if m:
+            scoring = m.group(1)
         m = re.search(r"--max-total-edits\s+(-?\d+)", v)
         if m:
             cap = int(m.group(1))
@@ -1538,7 +1546,7 @@ def run_kind(resdir):
             break
     if mode == "population-level" and alt is None:
         alt = False
-    return mode, alt, merge, criterion, cap
+    return mode, alt, merge, criterion, scoring, cap
 
 
 def samples_of(row):
@@ -3483,7 +3491,8 @@ class Reported(object):
     guide -- its carriers, its Cluster Position, its block's edits and CFD -- and every
     integrated line's clusters, edits and CFD (runs with one row per cluster)."""
 
-    def __init__(self, rows, ctx, loci=None, merge=3, criterion="mm+bulges,mm"):
+    def __init__(self, rows, ctx, loci=None, merge=3, criterion="mm+bulges,mm",
+                 scoring=None):
         self.exact = set()
         self.exact_any = set()           # (guide, sample, strand, start, + reading)
         self.by_var = defaultdict(list)  # (guide, variants) -> [Entry]
@@ -3498,6 +3507,11 @@ class Reported(object):
         self.criteria = tuple(c for c in criterion.split(",")
                               if c in ("mm+bulges", "mm", "bulges")) or ("mm+bulges", "mm")
         self.criterion = self.criteria[0]
+        # --sorting-criteria-scoring: a CRISPRme whose merge gives it to the CFD file (a
+        # later branch's does; 2.8.x's never reads it) breaks a CFD tie on it instead, so
+        # a tie no worse under either is taken as no worse
+        self.scoring = tuple(c for c in (scoring or "").split(",")
+                             if c in ("mm+bulges", "mm", "bulges")) or None
         self._k = {}
         self._groups = {}   # (guide, variants) -> {(strand, carriers, site): [Entry]}
         self.loci = {}
@@ -3646,26 +3660,32 @@ class Reported(object):
                         "%.3f (%.6f, printed %s), the target %.3f (%.6f)"
                         % (cfd3(top.cfd), top.cfd, top.row.get("cfd", "") or "nothing",
                            cfd3(d.cfd), d.cfd))
-            tied = [crit_key(crits, mm, b) for mm, b, c in keys
-                    if c is not None and cfd_same(c, d.cfd)]
-            if tied:
+            why = None
+            for crs in [crits] + ([self.scoring] if self.scoring and
+                                  self.scoring != crits else []):
+                tied = [crit_key(crs, mm, b) for mm, b, c in keys
+                        if c is not None and cfd_same(c, d.cfd)]
+                if not tied:
+                    return None
                 tk = min(tied)
                 ok = False
                 for e in cfd:
                     if cfd_below(e.cfd, d.cfd):
                         continue
-                    if (not cfd_same(e.cfd, d.cfd) or not all(c in e.crit for c in crits)
-                            or tuple(e.crit[c] for c in crits) <= tk):
+                    if (not cfd_same(e.cfd, d.cfd) or not all(c in e.crit for c in crs)
+                            or tuple(e.crit[c] for c in crs) <= tk):
                         ok = True   # a higher (or not surely equal) CFD, or no worse key
                         break
-                if not ok:
-                    rk = min(tuple(e.crit[c] for c in crits) for e in cfd
-                             if cfd_same(e.cfd, d.cfd))
-                    return ("the row of its site with its carriers has a highest-CFD block "
-                            "of %.3f with %s, the target %.3f with %s (a tie at three "
-                            "decimals, which the merge breaks on --sorting-criteria %s)"
-                            % (cfd3(top.cfd), crit_text(crits, rk), cfd3(d.cfd),
-                               crit_text(crits, tk), ",".join(crits)))
+                if ok:
+                    return None
+                rk = min(tuple(e.crit[c] for c in crs) for e in cfd
+                         if cfd_same(e.cfd, d.cfd))
+                why = why or ("the row of its site with its carriers has a highest-CFD block "
+                              "of %.3f with %s, the target %.3f with %s (a tie at three "
+                              "decimals, which the merge breaks on --sorting-criteria %s)"
+                              % (cfd3(top.cfd), crit_text(crs, rk), cfd3(d.cfd),
+                                 crit_text(crs, tk), ",".join(crs)))
+            return why
         return None
 
     def listed_at(self, guide, sample, cluster, tok):
@@ -3949,7 +3969,7 @@ def main(argv=None):
     if not tables:
         sys.stderr.write("ERROR: no results table under %s\n" % args.results)
         return 2
-    mode_run, alt_written, merge, criterion, run_cap = run_kind(args.results)
+    mode_run, alt_written, merge, criterion, scoring, run_cap = run_kind(args.results)
     # the total-edits cap: the one given, else the run's own, else complete-search's 6
     if args.max_total_edits is None:
         if run_cap is None:
@@ -4112,7 +4132,7 @@ def main(argv=None):
         here = [r for r in indel_rows if r["chrom"] == ch]
         reported[ch] = Reported(here, ctx, loci={k: v for k, v in loci.items()
                                                   if k[1] == ch},
-                                merge=merge, criterion=criterion)
+                                merge=merge, criterion=criterion, scoring=scoring)
     # the samples SNP rows list per site and variant list (they merge their carriers
     # there), for the SNP-row report's missing carriers
     snp_listed = defaultdict(set)
