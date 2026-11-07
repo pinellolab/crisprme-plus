@@ -1636,7 +1636,7 @@ one of several indel windows), and goes on.
 
 **Contig ends and N runs.** CRISPRitz writes an index in one of two formats (its
 `docs/INDEX_FORMAT.md`). Up to 2.9.1 it writes **format 1**, which every index published until
-the rebuild for CRISPRme 2.10.0 is; from 2.10.0, which CRISPRme 2.10.0 installs, it writes
+the rebuild for CRISPRme 2.10.0 is; from 2.10.0, the CRISPRitz CRISPRme 2.10.0 installs, it writes
 **format 2**, whose `.bin` files open with a header that records the format, the build PAM, its
 side, the guide length and the budget. The limits of this paragraph are those of format 1, for
 every index, dedicated or PAM-less, at any width. An index of format 1 of budget *N* holds a window of the guide, the PAM and *N* more bases, and the

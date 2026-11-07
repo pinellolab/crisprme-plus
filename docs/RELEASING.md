@@ -6,16 +6,16 @@
 > 2. **Conda / Bioconda** *(live)* — the Bioconda `crisprme` recipe has built CRISPRme+ on
 >    **Python 3.11** from `pinellolab/crisprme-plus` tags since 2.7.9 (the 2.1.x line stays
 >    available as `crisprme=2.1.14`). Per release: when the CRISPRitz pin moves, bump the
->    `crispritz` recipe first (2.10.0 for 2.10.0), then the `crisprme` recipe: version, sha256 of
->    the tag tarball, and its `crispritz` pin. Bound that pin, `crispritz >=X,<Y`: X is the
->    CRISPRitz the release is built and validated on (the Dockerfile's `crispritz_ref`), Y the
->    next CRISPRitz that changes the index format or the enricher. For 2.10.0 that is
->    `crispritz >=2.10.0,<2.11.0`: CRISPRitz 2.10.0 writes index format 2 and codes every allele
->    of a split multi-allelic site (the four-allele symbol Q), and a later minor CRISPRitz may
->    change either (for 2.8.1 it was `>=2.9.1,<2.9.2`: 2.8.1 reads index format 1 only). With a
->    bare `>=` the solver installs the newest engine beside the release, an engine it was never
->    tested on. Check the result like a user: a fresh Miniforge, `conda create -n crisprme
->    crisprme=X.Y.Z python=3.11`, then `crisprme.py scorer-env create` and `scorer-env doctor`.
+>    `crispritz` recipe first, then the `crisprme` recipe: version, sha256 of the tag tarball,
+>    and its `crispritz` pin. The two share their major.minor ([Version policy](#version-policy)
+>    below), so CRISPRme X.Y.z pins `crispritz >=X.Y.0,<X.(Y+1)`: for 2.10.0,
+>    `crispritz >=2.10.0,<2.11`. CRISPRitz 2.10.0 writes index format 2 and codes every allele of
+>    a split multi-allelic site (the four-allele symbol Q); a change of either is a breaking
+>    change, which bumps the minor of both (for 2.8.1, before the policy, the pin was
+>    `>=2.9.1,<2.9.2`: 2.8.1 reads index format 1 only). With a bare `>=` the solver installs
+>    the newest engine beside the release, an engine it was never tested on. Check the result
+>    like a user: a fresh Miniforge, `conda create -n crisprme crisprme=X.Y.Z python=3.11`, then
+>    `crisprme.py scorer-env create` and `scorer-env doctor`.
 >
 > The sections below have been corrected for this model: the image is built from source, so the
 > Dockerfile pins **CRISPRitz** (`ARG crispritz_ref`) and never CRISPRme's own version.
@@ -55,6 +55,27 @@ a Claude Code session opened at the repo root:
 The rest of this document is the manual, step-by-step version of exactly what the
 skill automates — use it if you prefer to run the commands yourself, or if the
 skill isn't available.
+
+## Version policy
+
+CRISPRme+ and CRISPRitz, its search engine, are released together and **share their
+major.minor**: CRISPRme 2.10.z runs on CRISPRitz 2.10.z, then 2.11 on 2.11, and so on (Luca,
+2026-11-07). Patch numbers are independent: a CRISPRme 2.10.2 may run on a CRISPRitz 2.10.0.
+
+- **CRISPRme X.Y.z requires CRISPRitz X.Y.\***. The Bioconda `crisprme` recipe pins
+  `crispritz >=X.Y.0,<X.(Y+1)` (for 2.10.z, `crispritz >=2.10.0,<2.11`), the Dockerfile's
+  `ARG crispritz_ref` and `install_from_source.sh`'s `CRISPRITZ_REF` default name a CRISPRitz
+  X.Y tag (`v2.10.0`), and `crisprme.py --version` and `crispritz.py version` read X.Y alike.
+- **A breaking change in either package bumps the minor of both**: an index format, the
+  enricher's output (the variant genome, the dictionaries, the indel log), a command line or a
+  file one package reads of the other. A user can then tell at a glance which versions go
+  together, and an index records the CRISPRitz that wrote it (`.index_meta.json`).
+- **A patch of one package moves only that package's patch number**, and needs no release of
+  the other while it keeps both packages' interfaces.
+
+2.10.0 is the first release under the policy: CRISPRme went from 2.8.1 to 2.10.0, skipping
+2.9.x, to meet CRISPRitz 2.10.0, which writes index format 2. Before it the two numbered apart
+(CRISPRme 2.8.1 ran on CRISPRitz 2.9.1).
 
 ## The sync model
 

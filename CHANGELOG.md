@@ -320,13 +320,19 @@ and the `release-crisprme` skill.
   image).
 
 ### Changed
+- **CRISPRme and CRISPRitz share their major.minor version; this release is 2.10.0, after 2.8.1.**
+  CRISPRme X.Y.z requires CRISPRitz X.Y.* (2.10.z, then 2.11, ...), patch numbers are
+  independent, and a breaking change in either package -- an index format, the enricher's output
+  -- bumps the minor of both, so the versions that go together can be told at a glance (Luca,
+  2026-11-07; `docs/RELEASING.md`, Version policy). CRISPRme skips 2.9.x to meet CRISPRitz 2.10.0;
+  up to 2.8.1 the two numbered apart (CRISPRme 2.8.1 runs on CRISPRitz 2.9.1).
 - **The image and `install_from_source.sh` build CRISPRitz 2.10.0, and the Bioconda recipe pins
-  `crispritz >=2.10.0,<2.11.0`.** CRISPRitz 2.10.0 writes index format 2, codes every allele of a
+  `crispritz >=2.10.0,<2.11`.** CRISPRitz 2.10.0 writes index format 2, codes every allele of a
   split multi-allelic site (the four-allele symbol Q where they cover A, C, G and T) and reads
   every record's `AF` (its CHANGELOG). The pin is the Dockerfile's `ARG crispritz_ref`, which
-  `install_from_source.sh`'s `CRISPRITZ_REF` default equals; the recipe's bound keeps out a later
-  minor CRISPRitz, which may change the index format or the enricher again (2.8.1's was
-  `>=2.9.1,<2.9.2`).
+  `install_from_source.sh`'s `CRISPRITZ_REF` default equals; the recipe's bound, the next minor,
+  keeps out a CRISPRitz that may change the index format or the enricher again (the version
+  policy above; 2.8.1's was `>=2.9.1,<2.9.2`).
 - **The check that an index is whole follows the index format it was built in.**
   `build-index-only` and the search check an index before they take it: each `.bin` whole, and no
   contig that holds a site without its trees. That check read every `.bin` of format 2 as "not a

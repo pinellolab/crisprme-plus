@@ -25,6 +25,13 @@ Version-sync points (ALL must equal the same `X.Y.Z`):
 - git tag / GitHub release → `vX.Y.Z`
 - Bioconda `recipes/crisprme/meta.yaml` → `{% set version = "X.Y.Z" %}` + fresh `sha256` + `build.number: 0`
 
+Version policy (Luca, 2026-11-07; `docs/RELEASING.md`): CRISPRme and CRISPRitz share their
+major.minor (2.10, then 2.11, ...) and their patch numbers are independent. CRISPRme X.Y.z
+requires CRISPRitz X.Y.*: the recipe pins `crispritz >=X.Y.0,<X.(Y+1)`, and `crispritz_ref` is a
+CRISPRitz X.Y tag. A breaking change in either package (an index format, the enricher's output)
+bumps the minor of BOTH. So a release whose minor differs from its `crispritz_ref`'s is wrong:
+stop and fix it, or release CRISPRitz first.
+
 Bioconda source URL is `https://github.com/pinellolab/crisprme-plus/archive/refs/tags/v{{ version }}.tar.gz`,
 so the recipe pulls the **GitHub release tarball** — its sha256 is the hash of that exact tarball.
 
@@ -149,7 +156,7 @@ Edit `recipes/crisprme/meta.yaml`:
 - `{% set version = "X.Y.Z" %}`  ← bump
 - `source.sha256:` ← the hash from above
 - `build.number: 0`  ← RESET to 0 (only INCREMENT, keeping version, for a same-version rebuild)
-- `crispritz >=A.B.C,<…`  ← keep it BOUNDED below the next CRISPRitz that changes the index format or the enricher (`>=2.10.0,<2.11.0` for 2.10.0; `docs/RELEASING.md`), and move it when `crispritz_ref` moves
+- `crispritz >=X.Y.0,<X.(Y+1)`  ← CRISPRme X.Y.z requires CRISPRitz X.Y.* (the version policy: `>=2.10.0,<2.11` for 2.10.z; `docs/RELEASING.md`); keep it BOUNDED, and move it with the minor
 - Do NOT edit `source.url` — it uses `{{ version }}` and resolves automatically.
 
 ```bash
