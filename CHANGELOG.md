@@ -29,23 +29,27 @@ and the `release-crisprme` skill.
     entry, the best: one target's alignments with different bulges, as on every row. The merge
     compares indel rows there at their cluster position on the haplotype carrying the indel,
     which on a row that starts inside an insertion is past the anchor by the rank of its first
-    base among the inserted ones, read from the row's bases. Alignments that start on different
-    bases of one insertion are other targets of that haplotype, as many bases apart as 2.8.1
-    placed them, so each is listed, as the site's row or one of its alternative alignments
-    (compared at the anchor, all but the best of them would leave both tables). Two copies of
-    one target inside an insertion (a repeat it holds) make the same row at the anchor, its
-    bases, REF alignment and variants the same, and that row is listed once, with the carriers
-    of both, where 2.8.1 listed each copy at its own start. TRAC guide (CTCTCAGCTGGTACACGGCA),
-    HGDP + 1000 Genomes, per-sample: two alleles of chr22:50193929 that insert 96 bases, a
-    48-base unit twice, with one carrier each, hold the CFD-0 alignment
-    CTACTCAGgaGGgACA-GGCtGAG (−) in both copies; 2.8.1 listed it at 50193950 and 50193998,
-    2.8.2 once per allele at 50193928, so the insertion's 2 rows and 7 alternative alignments
-    of 2.8.1 are 1 row and 6 alternative alignments. Genome-wide, 2.8.1's tables merged as
-    2.8.2 merges them: of the alignments that start inside an insertion, the highest-CFD ones,
-    5 of 371 (229 rows and 142 alternative alignments) are such a second copy in the README
-    search per-sample, 1 of 228 rows population-level and 22 of 444 (251 and 193) with the TRAC
-    guide per-sample, all at CFD 0.004 or less; per-sample, every other one is still listed, as
-    a row or an alternative alignment.
+    base among the inserted ones, read from the row's bases. Alignments whose cluster positions
+    on that haplotype differ are other targets of it, as many bases apart as 2.8.1 placed them,
+    so each is listed, as the site's row or one of its alternative alignments (compared at the
+    anchor, all but the best of those that start inside one insertion would leave both tables);
+    one target's alignments with different bulges before one PAM still fold into the best, also
+    when they start on different bases of one insertion. Two copies of one target inside an
+    insertion (a repeat it holds) make the same row at the anchor, its bases, REF alignment and
+    variants the same, and that row is listed once, with the carriers of both, where 2.8.1
+    listed each copy at its own start; a bulged alignment of the second copy, which 2.8.1
+    folded into that copy's row, has no row of its own copy left to fold into and is listed as
+    one of the site's alternative alignments (in the SNP+indel oracle's X2, the second copy's
+    DNA-bulge alignment). TRAC guide (CTCTCAGCTGGTACACGGCA), HGDP + 1000 Genomes, per-sample:
+    two alleles of chr22:50193929 that insert 96 bases, a 48-base unit twice, with one carrier
+    each, hold the CFD-0 alignment CTACTCAGgaGGgACA-GGCtGAG (−) in both copies; 2.8.1 listed it
+    at 50193950 and 50193998, 2.8.2 once per allele at 50193928, so the insertion's 2 rows and
+    7 alternative alignments of 2.8.1 are 1 row and 6 alternative alignments. Genome-wide,
+    2.8.1's tables merged as 2.8.2 merges them: of the alignments that start inside an
+    insertion, the highest-CFD ones, 5 of 371 (229 rows and 142 alternative alignments) are
+    such a second copy in the README search per-sample, 1 of 228 rows population-level and 22
+    of 444 (251 and 193) with the TRAC guide per-sample, all at CFD 0.004 or less; per-sample,
+    every other one is still listed, as a row or an alternative alignment.
   - The same search on chr22, released 2.8.1 image against 2.8.2: per-sample, 1,574 → 1,573
     integrated rows and 3,756 → 3,757 alternative alignments (21052642 joins 21052638's site;
     that site's two alternative alignments go 1 → 2 and the moved row, now one of them, loses
@@ -60,15 +64,17 @@ and the `release-crisprme` skill.
     inside another insertion is now the row of a site of its own, at that one's anchor,
     49196564; and 50193998 (−) is a second copy (above).
   - The outputs built from the rows follow these changes and the fixes below: the summaries by
-    guide and by sample, the report (its counts and top-1000 tables), `observed_haplotypes_raw`
-    and the plots, and the companions that give a row's start (`offtarget_start`): the
-    SNP+indel co-occurrence companion (`*.indel_snp_cooc.tsv`) and, on a sites-only (mega)
-    index, the per-dataset indel frequency companion (`*.indel_af.tsv`). NRG per-sample: the
-    1,292 samples listed on 21052642 count one target and one created PAM fewer (the row joined
-    21052638's site, and its PAM is not created, below), and the other 2,799 samples one target
-    fewer in their population or super-population. The co-occurrence companions of the chr22
-    searches above are unchanged; in the SNP+indel oracle the 197 lines of Z3, which starts
-    inside an insertion, go from 15702, 15703 and 15704 to 15699.
+    guide and by sample, the report (its counts and top-1000 tables),
+    `observed_haplotypes_raw`, the per-site `observed_haplotypes.tsv` (in the report's zip,
+    `data/observed_haplotypes.tsv`) and the plots, and the companions that give a row's start
+    (`offtarget_start`): the SNP+indel co-occurrence companion (`*.indel_snp_cooc.tsv`) and, on
+    a sites-only (mega) index, the per-dataset indel frequency companion (`*.indel_af.tsv`).
+    NRG per-sample: the 1,292 samples listed on 21052642 count one target and one created PAM
+    fewer (the row joined 21052638's site, and its PAM is not created, below), and the other
+    2,799 samples one target fewer in their population or super-population. The co-occurrence
+    companions and `observed_haplotypes.tsv` of the chr22 searches above are unchanged; in the
+    SNP+indel oracle the 197 co-occurrence lines of Z3, which starts inside an insertion, go
+    from 15702, 15703 and 15704 to 15699.
 
 ### Fixed
 - **An indel row whose first base is one an insertion adds is placed at the insertion**
@@ -128,40 +134,63 @@ and the `release-crisprme` skill.
     (165 with a SNP past a deletion, 57 past an insertion, 17 starting inside one), and 81 of
     2,710 such alternative alignments; population-level, 231 of 5,923; TRAC guide, per-sample,
     135 of 2,949 and 34 of 1,885. No SNP or MNV row changes.
-- **`PAM_creation` of an indel row whose PAM holds bases an insertion adds** (every
-  release; both modes, any PAM).
-  - The REF alignment's bases under the PAM were read, from the row's start. A PAM made wholly
-    of inserted bases has no reference bases: it is now created by the insertion, with no
-    reference window read (a PAM the insertion made could read as not created). A PAM holding
-    some inserted bases is now compared with the reference PAM beside the protospacer, on the
-    PAM's side of the protospacer's base that touches the PAM; it is created when that base is
-    inserted too. On the − strand with a 3′ PAM (the + strand with a 5′ one), where the start is
-    the PAM's far end, the bases read were len(ALT) − len(REF) bases from the reference PAM
-    beside the protospacer, so a PAM the reference holds could read as created, and one the
-    insertion made as not created (chr22:21052639 (−), T>TCACC: the bases read were 4 off, and
-    the reference has CAG beside its protospacer; TGG → NA). For a partly inserted PAM on the +
-    strand with a 3′ PAM (the − strand with a 5′ one) the answer is unchanged unless the
-    insertion also holds the protospacer's end. A PAM on reference bases is still read on them,
-    through the indel.
+- **`PAM_creation` of an indel row that starts inside an insertion, whose PAM holds bases the
+  insertion adds** (every release; both modes, any PAM).
+  - Such a row's REF alignment is reference bases its target does not start on (read from the
+    insertion's anchor, above; up to 2.8.1 from its first base's place on the haplotype), and
+    the PAM was judged on that alignment's bases under it. A PAM made wholly of inserted bases
+    is now created by the insertion, with no reference window read (a PAM the insertion made
+    could read as not created). A PAM holding some inserted bases is now compared with the
+    reference PAM beside the protospacer, on the PAM's side of the protospacer's base that
+    touches the PAM; it is created when that base is inserted too, as it always is on
+    the + strand with a 3′ PAM (the − strand with a 5′ one), where the protospacer lies between
+    the row's first base and its PAM. On the − strand with a 3′ PAM (the + strand with a 5′
+    one), where the start is the PAM's far end, the bases read were len(ALT) − len(REF) bases
+    from the reference PAM beside the protospacer, so a PAM the reference holds could read as
+    created, and one the insertion made as not created (chr22:21052639 (−), T>TCACC: the bases
+    read were 4 off, and the reference has CAG beside its protospacer; TGG → NA).
+  - Every other indel row is judged as up to 2.8.1: a PAM on reference bases on those bases,
+    through the indel, and a PAM holding bases an insertion adds, on a row that starts on a
+    reference base, on the row's REF alignment, the reference at its own place. Where an
+    insertion copies the bases a reference PAM sits on (a tandem duplication), the PAM of a row
+    that ends on the copy is the reference's own there, and it is not created (TRAC guide,
+    per-sample: the alternative alignment of chr22:20586277 (+), on the anchor of an insertion
+    of two more copies of the 16-base unit the reference repeats after it, the same alignment
+    as its site's reference row). And in every case a row whose REF alignment is its ALT has
+    its PAM on the reference at its start: NA.
   - chr22, README guide, released 2.8.1 image against 2.8.2: NRG per-sample 1 row (21052639,
     TGG → NA), NRR per-sample 5: 21052639 (TGG → NA); 25415044 (−), whose PAM is wholly bases
     of an insertion (NA → CAA); and three alignments of 44115947 (+), now 44115944 and
-    44115946, wholly inside a 37- or 33-base insertion (NA → TAA). In the SNP+indel oracle Z2
-    (wholly inserted) reads TGG, Z4 NA and Z5 TGG (partly inserted).
+    44115946, wholly inside a 37- or 33-base insertion (NA → TAA). TRAC guide, per-sample: 2
+    rows and 6 alternative alignments, 28013783 (+), wholly inside an insertion (NA → CAG), and
+    50193928 (−), the second-copy example above, its row and its 6 alternative alignments,
+    other alleles of that insertion, whose PAM is inserted bases (NA → GAG). In the SNP+indel
+    oracle Z2 (wholly inserted) reads TGG, Z4 NA and Z5 TGG (partly inserted), and T, T2 and
+    the Cas12a profile's C6 (an insertion that copies the bases a reference PAM sits on, or
+    adds a PAM before another reference PAM, on a row that starts on a reference base) NA.
+  - Genome-wide, 2.8.1's tables with each row's `PAM_creation` computed by 2.8.2's code
+    (2.8.1's code gives back every value in them): README guide, per-sample, highest-CFD
+    alignments, 57 whose PAM is wholly inserted bases go NA → created (26 rows and 31
+    alternative alignments) and, partly, 18 NA → created (14 and 4) and 3 rows created → NA;
+    population-level 26, 14 and 3 rows; TRAC guide, per-sample, 151 (57 and 94) and 33 NA →
+    created (27 and 6). All of them start inside an insertion: every row that starts on a
+    reference base keeps 2.8.1's value.
 - The SNP+indel oracle (`test/indel_snp_oracle`) checks every indel row's start (strictly: at
   an occurrence on a listed carrier's haplotype that holds the row's variants; up to now a row
   with no carrier occurrence within 40 bp of its start was not checked),
   `Variant_info_spacer+PAM` and `PAM_creation` against its carriers' haplotypes, plants Z, Z2,
   Z3 (rows starting inside an insertion), Z4 and Z5 (a PAM partly inserted, the reference PAM
-  beside the protospacer valid and not), X (an insertion holding two targets: both are listed)
-  and X2 (one holding a target twice: one row), and has a Cas12a profile (5′ PAM TTTV, both
-  strands, rows starting inside an insertion, PAMs wholly and partly inserted, a SNP past a
+  beside the protospacer valid and not), X (an insertion holding two targets: both are listed),
+  X2 (one holding a target twice: one row), T and T2 (an insertion after a reference
+  protospacer that copies the reference's own PAM, or adds one before another reference PAM:
+  not created), and has a Cas12a profile (5′ PAM TTTV, both strands, rows starting inside an
+  insertion, PAMs wholly and partly inserted, a tandem duplication of a PAM (C6), a SNP past a
   deletion). The released v2.8.1 image fails it 104 times (SpCas9) and 47 times (Cas12a); with
   2.8.2's first fix alone (rows at the anchor) 60 and 24. Unit tests:
   `test_indel_variant_positions` (the real integrator), `test_indel_pam_creation`,
-  `test_indel_row_coordinates` (rows starting inside an insertion, 3′ and 5′ PAMs, both
-  strands), `test_indel_snp_cis` and `test_representative_tiebreak` (the real merge: alignments
-  that start inside one insertion).
+  `test_indel_row_coordinates` (rows starting inside an insertion, rows whose PAM an insertion
+  adds after a reference protospacer, 3′ and 5′ PAMs, both strands), `test_indel_snp_cis` and
+  `test_representative_tiebreak` (the real merge: alignments that start inside one insertion).
 
 ## [2.8.1] - 2026-11-05
 

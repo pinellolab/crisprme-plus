@@ -21,6 +21,12 @@ Before 2.8.1 an RNA-bulge row took the cluster position on the + strand with a 3
 and on the - strand with a 5' PAM, so it started one base before its first aligned base,
 and the REF text of an RNA,DNA row, and of a 5' PAM RNA-bulge row, was a base off.
 
+Since 2.8.2 a target whose first base is one an insertion adds starts at the insertion's
+anchor, and its PAM_gen follows the inserted-PAM rules (INSIDE); a target whose PAM an
+insertion adds right after a reference protospacer does not move, and its PAM_gen is the
+REF alignment's reading, as up to 2.8.1 (DUPS: on a tandem duplication of the PAM's bases,
+not created).
+
 Needs pandas and numpy (the analyzer imports them); intervaltree is stubbed when it is
 not installed. Run: python -m unittest test_indel_row_coordinates -v
 """
@@ -180,6 +186,56 @@ class _PlantedInsertions(object):
                 for (s, _w0, _win), f0 in zip(windows, starts)]
 
 
+# Targets whose PAM is wholly bases an insertion adds, on a row that starts on a reference
+# base (2.8.2): the protospacer is reference bases up to the insertion's anchor, its last
+# base, and the insertion adds the PAM's bases right after it. (strand, the target as
+# shown, the reference's bases after the protospacer (forward), the expected PAM_gen.) The
+# row does not move, and its PAM is judged on its REF alignment, the reference from its
+# start, as up to 2.8.1: where the insertion copies the reference's own PAM there (a
+# tandem duplication) the REF alignment is the ALT, and the PAM is not created; another
+# valid PAM there is not created either; no PAM there, it is.
+DUPS = {
+    "3p": [
+        ("+", G20 + "TGG", "TGG", "n"),        # a tandem duplication: REF = ALT
+        ("+", G20 + "TGG", "AGG", "n"),        # the reference's AGG at the PAM's place
+        ("+", G20 + "TGG", "TCA", "TGG"),      # no PAM there: created
+    ],
+    "5p": [
+        ("-", "TTTA" + G23, "TAAA", "n"),      # a tandem duplication of TAAA (TTTA on -)
+        ("-", "TTTA" + G23, "GAAA", "n"),      # TTTC on - at the PAM's place
+        ("-", "TTTA" + G23, "TAAT", "TTTA"),   # ATTA on -: created
+    ],
+}
+
+
+class _PlantedDuplications(object):
+    """One PAM side's targets whose PAM an insertion adds after a reference protospacer
+    (DUPS): the reference, the insertions, their fake-indel windows and engine rows."""
+
+    def __init__(self, side):
+        rng = random.Random(2822)
+        self.side = side
+        kp = len(MOTIF[side][1])
+        seq = [rng.choice("ACGT") for _ in range(3000 + 600 * len(DUPS[side]))]
+        self.sites = []
+        start0 = 1000
+        for strand, shown, after, pam_gen in DUPS[side]:
+            fwd = shown if strand == "+" else rc(shown)
+            prot, pam_fwd = fwd[:-kp], fwd[-kp:]
+            for i, c in enumerate(prot + after):
+                seq[start0 + i] = c
+            anchor = start0 + len(prot) - 1  # 0-based: the protospacer's last base
+            self.sites.append(dict(
+                strand=strand, shown=shown, fwd=fwd, start0=start0, pos1=anchor + 1,
+                ref=prot[-1], alt=prot[-1] + pam_fwd, pam_gen=pam_gen,
+                first_off=25 - (len(prot) - 1), sample="S%02d" % (len(self.sites) + 1)))
+            start0 += 600
+        self.ref = "".join(seq)
+
+    windows = _Planted.windows
+    engine_rows = _PlantedInsertions.engine_rows
+
+
 class RowCoordinates(unittest.TestCase):
     def analyze(self, p, side, gate="1"):
         """The SHIPPED analyzer on planted sites ``p`` (their reference, fake-indel
@@ -332,6 +388,45 @@ class RowCoordinates(unittest.TestCase):
                 self.assertEqual(int(c[5]), a, where + ": Cluster_Position")
                 self.assertEqual(c[18].upper(), ref, where + ": REF text")
                 self.assertEqual(c[10], s["shown"][cut] if created else "n", where + ": PAM_gen")
+
+    def run_duplications(self, side, gate="1"):
+        """A target whose PAM an insertion adds right after its protospacer, which is
+        reference bases from the row's first base on: the row starts at that base (it does
+        not move), its REF text is the reference from there, and its PAM_gen is the REF
+        alignment's reading, as up to 2.8.1: NA where the insertion copies the reference's
+        own PAM (REF = ALT) or the reference holds another valid PAM there, the ALT's PAM
+        where it holds none. 2.8.2's first inserted-PAM rule took every such PAM for
+        created (TRAC, HGDP + 1000 Genomes: chr22:20586277 (+), REF = ALT)."""
+        p = _PlantedDuplications(side)
+        got = self.analyze(p, side, gate)
+        for s in p.sites:
+            token = "%s_%d_%s_%s" % (CHROM, s["pos1"], s["ref"], s["alt"])
+            n = len(s["fwd"])
+            ref = p.ref[s["start0"]:s["start0"] + n]
+            ref = ref if s["strand"] == "+" else rc(ref)
+            for suffix, by_token in got.items():
+                c = by_token[token]
+                where = "%s duplication %s(%s) %s" % (side, suffix, s["strand"], c[2])
+                self.assertEqual(c[2], s["shown"], where)
+                self.assertEqual(int(c[4]), s["start0"], where + ": Start_coordinate")
+                self.assertEqual(int(c[5]), s["start0"], where + ": Cluster_Position")
+                self.assertEqual(c[18].upper(), ref, where + ": REF text")
+                self.assertEqual(c[10], s["pam_gen"], where + ": PAM_gen")
+                self.assertEqual(c[12], s["sample"], where)
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_an_inserted_pam_on_a_row_that_does_not_move_three_prime_pam(self):
+        self.run_duplications("3p")
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_an_inserted_pam_on_a_row_that_does_not_move_five_prime_pam(self):
+        """Cas12a (TTTV): on the - strand the PAM is the target's right end, forward."""
+        self.run_duplications("5p")
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_an_inserted_pam_on_a_row_that_does_not_move_gate_off(self):
+        self.run_duplications("3p", gate="0")
+        self.run_duplications("5p", gate="0")
 
     @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
     def test_rows_starting_inside_an_insertion_three_prime_pam(self):

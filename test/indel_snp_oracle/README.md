@@ -1,7 +1,7 @@
 # SNP+indel oracle (synthetic, real CLI)
 
 `run_oracle.sh <empty work dir> [<oracle dir>] [cas12a]` runs inside a CRISPRme image. It
-generates a 17 kb reference chromosome and a phased VCF of 61 samples (`oracle.py
+generates a 17 kb reference chromosome and a phased VCF of 63 samples (`oracle.py
 generate`), builds the indexes and dictionaries with `build-index-only`, runs
 `complete-search` with `--per-sample` and with `--population-level`, then checks every row
 whose variant list holds an indel or an MNV (`oracle.py check`) against each sample's two
@@ -26,15 +26,19 @@ haplotype (the distance from the target's first base to the variant's POS base, 
 being 1; from the right on the - strand, len(aligned spacer) + 1 - distance, less a
 deletion's deleted bases; a variant before the first base is 1 on the + strand, the last on
 the - strand). Its `PAM_creation` must be the ALT's PAM when the variants created the PAM, NA
-otherwise: a PAM on reference bases is created when the reference bases it sits on lack the
-motif, one made wholly of inserted bases always, one holding some inserted bases when the
-reference PAM beside the protospacer (on the PAM's side of the protospacer's base that touches
-the PAM) lacks it, or when that base is inserted too. The planted sites then pin who has which
-target:
+otherwise: never created when its REF alignment is its ALT (the reference holds the target at
+its start); on a row that starts inside an insertion, a PAM made wholly of inserted bases is
+created always, one holding some inserted bases when the reference PAM beside the protospacer
+(on the PAM's side of the protospacer's base that touches the PAM) lacks the motif, or when
+that base is inserted too; a PAM on reference bases is created when the reference bases it
+sits on lack the motif; and one holding inserted bases on a row that starts on a reference
+base when the row's REF alignment lacks the motif in the PAM's columns. The planted sites then
+pin who has which target:
 
 | Site | Planted | Expected |
 |---|---|---|
 | A | deletion + G>A at the PAM's last base, in cis (S02) and in trans (S03) | S01, S03 CFD 1 (TGG); S02 no target |
+| T, T2 | (+) an insertion after a target's reference protospacer adds TGG: a copy of the reference's own TGG there (T, a tandem duplication), or before the reference's AGG (T2) | per-sample (the reference's own target represents each site in a population-level run): S62, S63 CFD 1, the row at the target's first base, a reference one; PAM_creation NA (the REF alignment, the reference from there, holds TGG at T, AGG at T2) |
 | B | minus-strand insertion + PAM SNP in cis (S06) and in trans (S07) | S05, S07 CFD 1 (AGG) |
 | C | deletion, no SNP | S09 CFD 1 |
 | D | deletion + a PAM-creating A>G SNP in cis (S10) | S10 CFD 1, CONFIRMED co-occurrence; S11 no target |
@@ -59,7 +63,7 @@ target:
 | Z4, Z5 | (-) the PAM's first two bases (forward CC) the last two an insertion adds, its third and the protospacer reference bases; beside the protospacer the reference holds CTA (TAG on -) at Z4, ATA at Z5 | S58, S59 CFD 1 at the anchor; PAM_creation NA at Z4 (the reference has the target with TAG), TGG at Z5 |
 | X, X2 | (+) an insertion holding two whole targets: the guide with TGG and, 25 bases on, with AGG (X), or with TGG again (X2, a repeat) | per-sample: S60 listed with both targets, both rows at the anchor, one the site's row and the other one of its alternative alignments; S61 on one row with the target (its two copies are the same row at the anchor) |
 
-The `cas12a` profile (a 3 kb reference, 8 samples, 5' PAM TTTV, a 20-nt spacer; CFD is not
+The `cas12a` profile (a 3.3 kb reference, 9 samples, 5' PAM TTTV, a 20-nt spacer; CFD is not
 computed for a 5' PAM, so a perfect row is one with no mismatch and no bulge):
 
 | Site | Planted | Expected |
@@ -69,6 +73,7 @@ computed for a 5' PAM, so a perfect row is one with no mismatch and no bulge):
 | C3 | (-) an insertion holding the spacer's 3' end (the target's leftmost bases); a SNP past it, cis (S05) and trans (S06) | S05 perfect at the anchor, the SNP the 16th base, the PAM (reference bases) not created; S06 one mismatch |
 | C4 | (-) the PAM, at the right, wholly bases an insertion adds | S07 perfect, the PAM created (TTTA) |
 | C5 | (+) a deletion in the spacer and a SNP past it, cis (S08) | S08 perfect, the SNP the 20th base |
+| C6 | (-) C4's geometry where the insertion copies the reference's own TAAA (TTTA on -) after the spacer, a tandem duplication | S09 perfect (per-sample: the reference's own target represents the site in a population-level run), the PAM not created |
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid fake-indel
 genome column by column, without genotypes: on aa9c54b (the 2.8.1 release candidate)
@@ -95,11 +100,14 @@ With only the first 2.8.2 commit (d7a6fff, rows at the anchor) it fails 60 and 2
 read from the REF text at the anchor, and C2; and at X the TGG target is on no row: it
 shares the anchor, the variant and the carrier with the AGG one, and the merge folded the
 two into one entry. On 43809d3, with the other 2.8.2 fixes but the merge still comparing a
-site's alignments at their cluster position on the reference, only that fails, 3 times. In
-the genome-wide HGDP + 1000 Genomes search of the README guide (per-sample, 4
-mismatches + 1 + 1) 229 highest-CFD rows of 2.8.1 start inside an insertion, up to 229 bases
-past the anchor; on 2.8.0, an alternative alignment of that guide started at chr22:22322768,
-the 7th base of G>GCAATCATTAT at 22322762.
+site's alignments at their cluster position on the reference, that fails 3 times. There and
+on c3a75fe, whose inserted-PAM rules judged every row, also one that starts on a reference
+base, the PAMs of T and T2, and the `cas12a` profile's C6, read as created: 11 and 4
+failures on 43809d3, 8 and 4 on c3a75fe. The released image and d7a6fff read those PAMs on
+the REF alignment: NA, as now. In the genome-wide HGDP + 1000 Genomes search of the README
+guide (per-sample, 4 mismatches + 1 + 1) 229 highest-CFD rows of 2.8.1 start inside an
+insertion, up to 229 bases past the anchor; on 2.8.0, an alternative alignment of that guide
+started at chr22:22322768, the 7th base of G>GCAATCATTAT at 22322762.
 
 Not covered: split multi-allelic SNP records at one position. CRISPRitz add-variants
 keeps only the last of them in the enriched genome and in the dictionary, so the other

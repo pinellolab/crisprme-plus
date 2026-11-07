@@ -220,7 +220,10 @@ jobs:
         # read from the row's start: on the + strand with a 3' PAM (the - strand with a 5'
         # one) a deletion or an insertion in the protospacer moved them len(REF) - len(ALT)
         # bases, and a PAM the reference already has was flagged as created (the WALK
-        # panel's chr2:10000 and chr3:20000 rows, pinned here).
+        # panel's chr2:10000 and chr3:20000 rows, pinned here). Since 2.8.2 a PAM holding
+        # bases an insertion adds is judged by the inserted-PAM rules on a row that starts
+        # inside the insertion, on the REF alignment on any other (a tandem duplication of
+        # the PAM's bases: not created), and never created when the REF alignment is the ALT.
         working-directory: PostProcess
         run: python -m unittest test_indel_pam_creation -v
 
@@ -257,15 +260,17 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows test_check_alt_pam -v
 
-      - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; 2.8.2: a row whose first base is one an insertion adds starts at the insertion's anchor, its PAM_gen by the inserted-PAM rules; both strands, PAM at either end)"
+      - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; 2.8.2: a row whose first base is one an insertion adds starts at the insertion's anchor, its PAM_gen by the inserted-PAM rules, and one whose PAM an insertion adds after a reference protospacer keeps the REF alignment's reading; both strands, PAM at either end)"
         # Up to 2.8.0 analisi_indels_NNN.py took CRISPRitz's Cluster_Position for an
         # RNA-bulge row on the + strand with a 3' PAM and on the - strand with a 5' PAM,
         # one base before the first aligned base, and the REF text of an RNA,DNA row, and
         # of a 5' PAM RNA-bulge row, was a base off. Up to 2.8.1 a row whose first base is
         # one an insertion adds started at that base's place on the haplotype, and a PAM
-        # holding inserted bases was judged on the REF text read from the row's start. The
-        # shipped analyzer on planted alignments given as the engine reports them (pandas +
-        # numpy).
+        # holding inserted bases was judged on the REF text read from the row's start; a
+        # first version of 2.8.2's rules took a PAM made of inserted bases for created on
+        # every row, also on one starting on a reference base whose REF text is its ALT (a
+        # tandem duplication of the PAM's bases). The shipped analyzer on planted
+        # alignments given as the engine reports them (pandas + numpy).
         working-directory: PostProcess
         run: python -m unittest test_indel_row_coordinates -v
 

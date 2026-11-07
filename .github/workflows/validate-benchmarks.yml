@@ -206,7 +206,10 @@ jobs:
           # 0-edit targets, chimeras of two samples' variants). Sites X and X2: an
           # insertion holding two targets lists both, at its anchor (the merge compares a
           # site's alignments where they are on the haplotype), and one holding a target
-          # twice lists it once. Then the Cas12a profile (5' PAM TTTV): targets whose
+          # twice lists it once. Sites T and T2: an insertion after a reference
+          # protospacer that copies the reference's PAM there, or adds one before
+          # another, on a row that starts on a reference base: not created (the REF
+          # alignment's reading). Then the Cas12a profile (5' PAM TTTV): targets whose
           # first base is one an insertion adds, on both strands. Up to 2.8.1 such rows
           # started past the anchor, their variants were numbered along the reference, and
           # a PAM holding inserted bases was judged on the REF text read from the row's

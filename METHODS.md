@@ -584,25 +584,28 @@ name the same variants with the same carriers are one entry, the best, as on eve
 are one target's alignments with different bulges. The merge compares indel rows there at their
 cluster position on the haplotype carrying the indel, which on a row that starts inside an
 insertion is past the anchor by the rank of its first base among the inserted ones, read from
-the row's bases (`indel_snp_cis.row_first_base`). Two alignments that start on different bases
-an insertion adds are two targets of that haplotype, as many bases apart as 2.8.1 placed them,
-and both are listed, as the site's row or one of its alternative alignments (a population-level
-run lists only each site's row). Two copies of one target inside an insertion (a repeat it
-holds) make the same row at the anchor, its bases, REF alignment and variants the same, and
-that row is listed once, with the carriers of both, where 2.8.1 listed each copy at its own
-start. With the TRAC guide (CTCTCAGCTGGTACACGGCA) on that index, two alleles of chr22:50193929
-that insert 96 bases, a 48-base unit twice, with one carrier each, hold the CFD-0 alignment
-CTACTCAGgaGGgACA-GGCtGAG (−) in both copies, which 2.8.1 listed at 50193950 and 50193998 and
-2.8.2 lists once per allele, at 50193928. Such a row's ALT alignment begins mid-insertion: on
-the + strand its first bases are the last bases the insertion adds that the target holds (TTAT,
-the 7th to 10th of G>GCAATCATTAT, in a 2.8.0 alternative alignment at chr22:22322768). Its REF
-alignment holds the reference bases from the anchor on, as many as the target holds, so it
-begins with the anchor base, which the target does not hold, and past the insertion it is out
-of register with the ALT by the number of inserted bases the target holds, less one. On the −
-strand both are shown reverse-complemented, in the target's orientation: the ALT ends
-mid-insertion (with a 3′ PAM, its PAM holds those inserted bases) and the REF ends with the
-anchor's complement. `CFD_score_REF` and the REF seed and non-seed counts are read from that
-REF alignment.
+the row's bases (`indel_snp_cis.row_first_base`). Two alignments whose cluster positions on
+that haplotype differ are two targets of it, as many bases apart as 2.8.1 placed them, and both
+are listed, as the site's row or one of its alternative alignments (a population-level run
+lists only each site's row); one target's alignments with different bulges before one PAM fold
+into the best, as up to 2.8.1, also when they start on different bases an insertion adds. Two
+copies of one target inside an insertion (a repeat it holds) make the same row at the anchor,
+its bases, REF alignment and variants the same, and that row is listed once, with the carriers
+of both, where 2.8.1 listed each copy at its own start. A bulged alignment of the second copy,
+which 2.8.1 folded into that copy's row, then has no row of its own copy to fold into and is
+listed as one of the site's alternative alignments (the SNP+indel oracle's X2). With the TRAC
+guide (CTCTCAGCTGGTACACGGCA) on that index, two alleles of chr22:50193929 that insert 96 bases,
+a 48-base unit twice, with one carrier each, hold the CFD-0 alignment CTACTCAGgaGGgACA-GGCtGAG
+(−) in both copies, which 2.8.1 listed at 50193950 and 50193998 and 2.8.2 lists once per
+allele, at 50193928. Such a row's ALT alignment begins mid-insertion: on the + strand its first
+bases are the last bases the insertion adds that the target holds (TTAT, the 7th to 10th of
+G>GCAATCATTAT, in a 2.8.0 alternative alignment at chr22:22322768). Its REF alignment holds the
+reference bases from the anchor on, as many as the target holds, so it begins with the anchor
+base, which the target does not hold, and past the insertion it is out of register with the ALT
+by the number of inserted bases the target holds, less one. On the − strand both are shown
+reverse-complemented, in the target's orientation: the ALT ends mid-insertion (with a 3′ PAM,
+its PAM holds those inserted bases) and the REF ends with the anchor's complement.
+`CFD_score_REF` and the REF seed and non-seed counts are read from that REF alignment.
 
 **`Variant_info_spacer+PAM`.** Each variant is numbered as on a SNP row, by its distance from
 the target's first aligned base to the variant's POS base, the first base being 1: on
@@ -628,34 +631,50 @@ chr22:21052639 has one, and its SNP is the target's 21st base.
 **`PAM_creation`.** It holds the ALT's PAM when the variants created it and NA when the
 reference holds a PAM there; on an indel row:
 
+- a row whose REF alignment is its ALT has its target, PAM included, on the reference at its
+  start: NA (since 2.8.2);
 - a PAM on reference bases only is read on those bases, through the indel (since 2.8.1);
-- a PAM made wholly of bases an insertion adds has no reference bases: the insertion created
-  it (in the oracle's Z2 the ALT's TGG);
-- a PAM that holds some bases an insertion adds is compared with the reference PAM beside the
-  protospacer: the reference bases next to the protospacer's base that touches the PAM, on the
-  PAM's side. That base, and then the whole protospacer, are reference bases, the inserted
-  ones being in the PAM, so the question is whether the reference holds a valid PAM at the
-  PAM's place beside that protospacer (in the oracle's Z4 it holds TAG: not created; in Z5
-  TAT: created). When that base too is one the insertion adds, the insertion holds the
-  protospacer's end and the PAM's start, and the PAM has no place on the reference: created;
-- a PAM across a deletion's junction, one that holds an ALT base standing in a REF base's
-  place (an MNV's) or the bases REF and ALT share, and one with a bulge in it keep the REF
-  alignment's bases.
+- on a row that starts inside an insertion, whose REF alignment, read from the anchor, is
+  reference bases its target does not start on (since 2.8.2):
+  - a PAM made wholly of bases the insertion adds has no reference bases: the insertion created
+    it (in the oracle's Z2 the ALT's TGG);
+  - a PAM that holds some of them is compared with the reference PAM beside the protospacer:
+    the reference bases next to the protospacer's base that touches the PAM, on the PAM's side.
+    That base, and then the whole protospacer, are reference bases, the inserted ones being in
+    the PAM, so the question is whether the reference holds a valid PAM at the PAM's place
+    beside that protospacer (in the oracle's Z4 it holds TAG: not created; in Z5 TAT: created).
+    When that base too is one the insertion adds, the insertion holds the protospacer's end and
+    the PAM's start, and the PAM has no place on the reference: created. That is always so on
+    the + strand with a 3′ PAM (the − strand with a 5′ one), where the protospacer lies between
+    the row's first base and its PAM;
+- any other PAM keeps the REF alignment's bases, as up to 2.8.1: one that holds bases an
+  insertion adds on a row that starts on a reference base, whose REF alignment is the reference
+  at the row's own place (where the insertion copies the bases a reference PAM sits on, a
+  tandem duplication, the row's PAM is that copy and the reference holds the very PAM there:
+  not created, as in the oracle's T and C6, and at T2 it holds another, AGG under an inserted
+  TGG), one across a deletion's junction, one that holds an ALT base standing in a REF base's
+  place (an MNV's) or the bases REF and ALT share, and one with a bulge in it.
 
-Up to 2.8.1 a PAM holding inserted bases took the REF alignment's bases, read from the row's
-start. For a PAM made wholly of inserted bases those were reference bases it does not sit on,
-which could hold a valid PAM: on the README search of HGDP + 1000 Genomes with NRR, the
-alignments of chr22:44115947 (+), wholly inside a 37- or a 33-base insertion, and 25415047 (−)
-were reported as not created (now TAA, at 44115944 and 44115946, and CAA, at 25415044). For a
-PAM partly made of them, on the + strand with a 3′ PAM (the − strand with a 5′ one) the
-protospacer runs from the start to the PAM, so the bases read were those beside the
-protospacer, and the answer is unchanged unless the insertion also holds the protospacer's end.
-On the − strand with a 3′ PAM (the + strand with a 5′ one) the start is the PAM's far end, and
-the bases read were len(ALT) − len(REF) bases from the reference PAM beside the protospacer,
-however many inserted bases the PAM holds (chr22:21052639 (−) and the oracle's Z5: 4 bases off,
-their PAMs holding 2): a PAM the reference holds could be reported as created (chr22:21052639
-(−), whose reference has CAG beside the protospacer: TGG, now NA), and a PAM the insertion made
-as not created (Z5: NA, now TGG).
+Up to 2.8.1 a row that starts inside an insertion started at its first base's place on the
+haplotype, and a PAM holding inserted bases took the REF alignment's bases, read from there.
+For a PAM made wholly of inserted bases those were reference bases it does not sit on, which
+could hold a valid PAM: on the README search of HGDP + 1000 Genomes with NRR, the alignments of
+chr22:44115947 (+), wholly inside a 37- or a 33-base insertion, and 25415047 (−) were reported
+as not created (now TAA, at 44115944 and 44115946, and CAA, at 25415044). For a PAM partly made
+of them, on the + strand with a 3′ PAM (the − strand with a 5′ one) they were reference bases
+past the anchor that the target does not hold either. On the − strand with a 3′ PAM
+(the + strand with a 5′ one) the start is the PAM's far end, and the bases read were len(ALT) −
+len(REF) bases from the reference PAM beside the protospacer, however many inserted bases the
+PAM holds (chr22:21052639 (−) and the oracle's Z5: 4 bases off, their PAMs holding 2): a PAM
+the reference holds could be reported as created (chr22:21052639 (−), whose reference has CAG
+beside the protospacer: TGG, now NA), and a PAM the insertion made as not created (Z5: NA, now
+TGG). A row that starts on a reference base is judged as before: its REF alignment is the
+reference at its own place. Genome-wide, on 2.8.1's tables (2.8.1's code gives back every value
+in them), 2.8.2's code changes these alignments only, all of them starting inside an insertion:
+with the README guide, per-sample, of the highest-CFD alignments 57 whose PAM is wholly
+inserted bases go NA → created (26 rows and 31 alternative alignments) and, partly, 18 NA →
+created (14 and 4) and 3 rows created → NA; population-level 26, 14 and 3 rows; with the TRAC
+guide, per-sample, 151 (57 and 94) and 33 NA → created (27 and 6).
 
 From 2.5.0 to 2.8.0 each code was instead read **column by column without genotypes** —
 the guide's base when it was an allele, else the code's first allele. That reported one

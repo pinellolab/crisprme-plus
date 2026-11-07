@@ -8,8 +8,10 @@
       indels on one haplotype, as a multi-allelic SNP on one VCF line, with a SNP at
       the far end of the target, with a target in an indel's flank that does not
       hold the indel, with an equal-length multi-base record (an MNV), with
-      targets whose first base is one an insertion adds, and with an insertion
-      holding two targets, and one holding one target twice.
+      targets whose first base is one an insertion adds, with an insertion
+      holding two targets, and one holding one target twice, and with insertions
+      after a reference protospacer that copy its PAM (a tandem duplication) or
+      add one before another reference PAM.
   oracle.py check <workdir> <PostProcess dir> <results dir> [<results dir> ...]
       Builds every sample's two haplotypes from the VCF (a brute-force truth that
       shares no code with CRISPRme's resolution) and checks every row whose variant
@@ -53,7 +55,7 @@ import zipfile
 G = "ACTGAAATCTGTAAGCAGGC"  # the guide
 COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 CODES = set("RYSWKMBDHVryswkmbdhv")
-NSAMPLES = 61
+NSAMPLES = 63
 MOTIF_BASES = {"A": "A", "C": "C", "G": "G", "T": "T", "R": "AG", "Y": "CT", "S": "CG",
                "W": "AT", "K": "GT", "M": "AC", "B": "CGT", "D": "AGT", "H": "ACT",
                "V": "ACG", "N": "ACGT"}
@@ -110,6 +112,23 @@ def generate(wd):
     var("A", "pamsnp", a0 + 10 + 3 + 10 + 2 + 1, "G", "A",
         {"S02": "1|0", "S03": "0|1", "S04": "1|0"})
     expect["A"] = {"perfect": ["S01", "S03"], "never": ["S02"]}
+
+    # T, T2 (+): an insertion after a target's protospacer adds three bases that make its
+    # PAM, the protospacer being reference bases from the target's first base on: the row
+    # starts there, on a reference base, and does not move. At T the insertion copies the
+    # reference's own TGG after the protospacer (a tandem duplication of the bases holding
+    # the reference target's PAM): the row's REF alignment is its ALT, the reference holds
+    # this very target there, and the inserted copy's PAM is not created. At T2 it adds TGG
+    # before the reference's AGG: the REF alignment, read from the row's start, holds AGG in
+    # the PAM's columns, a valid PAM at the PAM's place: not created either (the row is
+    # judged on its REF alignment, as up to 2.8.1; 2.8.2's first inserted-PAM rule took
+    # both for created). The reference's own target represents each site in a
+    # population-level run, which writes no alternative alignments: checked per-sample.
+    for site, t, after, sample in (("T", 1500, "TGG", "S62"), ("T2", 2500, "AGG", "S63")):
+        put(t, G + after)
+        var(site, "ins", t + 20, G[19], G[19] + "TGG", {sample: "1|0"})
+        expect[site] = {"perfect": [sample], "pam_creation": {sample: "NA"},
+                        "per_sample_only": True}
 
     # B (-): a 2-bp insertion restores the target on the minus strand; a C>T SNP at
     # the PAM's last base (forward C) in cis (S06) and in trans (S07).
@@ -431,9 +450,9 @@ def generate_cas12a(wd):
     profile's checks (CFD is not computed for a 5' PAM: a perfect row is one with no
     mismatch and no bulge)."""
     random.seed(12)
-    seq = [random.choice("ACGT") for _ in range(3000)]
+    seq = [random.choice("ACGT") for _ in range(3300)]
     variants = []
-    samples = ["S%02d" % i for i in range(1, 9)]
+    samples = ["S%02d" % i for i in range(1, 10)]
     expect = {}
 
     def put(start0, s):
@@ -486,7 +505,8 @@ def generate_cas12a(wd):
                     "named": {"S05": ["chr21_%d_%s_%s" % (c3 + 6, seq[c3 + 5], fwd[8])]}}
 
     # C4 (-): the PAM (forward, at the right) is wholly bases an insertion adds after the
-    # spacer's last forward base; the row starts on the reference: created.
+    # spacer's last forward base; the row starts on the reference, and its REF alignment,
+    # the reference from its start, holds no TTTV in the PAM's columns: created.
     c4 = 2200
     put(c4, fwd[:20] + other("A") + "C")
     var("C4", "ins", c4 + 20, fwd[19], fwd[19] + fwd[20:] + "G", {"S07": "1|0"})
@@ -500,6 +520,17 @@ def generate_cas12a(wd):
     var("C5", "snp", c5 + 21, seq[c5 + 20], S12[15], {"S08": "1|0"})
     expect["C5"] = {"perfect": ["S08"],
                     "named": {"S08": ["chr21_%d_%s_%s" % (c5 + 21, seq[c5 + 20], S12[15])]}}
+
+    # C6 (-): C4's geometry where the insertion copies the reference's own TAAA (TTTA on -)
+    # after the spacer, a tandem duplication of the bases holding the reference target's
+    # PAM: the row starts on the reference, its REF alignment is its ALT, and the inserted
+    # copy's PAM is not created. The reference's own target represents the site in a
+    # population-level run: checked per-sample.
+    c6 = 2800
+    put(c6, fwd)
+    var("C6", "ins", c6 + 20, fwd[19], fwd[19] + fwd[20:], {"S09": "1|0"})
+    expect["C6"] = {"perfect": ["S09"], "pam_creation": {"S09": "NA"},
+                    "per_sample_only": True}
 
     _write(wd, seq, variants, samples, expect, "NNNN" + S12, "TTTV-20bp-Cas12a.txt",
            "TTTVNNNNNNNNNNNNNNNNNNNN -4", S12, ["TTTV", "5p"])
@@ -759,33 +790,55 @@ def expected_positions(pos, k, strand, spacer_len, tokens):
     return out
 
 
-def expected_pam_creation(ref, pos, k, n, strand, motif, side):
+def expected_pam_creation(ref, pos, k, n, strand, motif, side, alt):
     """Whether the variants created the PAM of the occurrence at index ``k`` (forward) of
-    a haplotype, ``n`` bases long: "created" or "not", or None where this oracle does not
-    say (a PAM across a deletion's junction, which keeps the REF alignment's bases).
+    a haplotype, ``n`` bases long, ``alt`` its target as the row aligns it: "created" or
+    "not", or None where this oracle does not say (a PAM with a bulge in it, or across a
+    deletion's junction, which keep the REF alignment's bases).
+      * the reference holds this very target at the row's start (its REF alignment, the
+        reference from there, is the target): not created;
+      * on a row whose first base is one an insertion adds (it starts at the anchor):
+        - a PAM made wholly of inserted bases: created, it has no reference bases;
+        - a PAM holding some inserted bases: does the reference hold the motif beside the
+          protospacer, on the PAM's side of the protospacer's base that touches the PAM;
+          created when that base is inserted too (no place on the reference);
       * a PAM on reference bases: does the reference hold the motif on them;
-      * a PAM made wholly of inserted bases: created, it has no reference bases;
-      * a PAM holding some inserted bases: does the reference hold the motif beside the
-        protospacer, on the PAM's side of the protospacer's base that touches the PAM;
-        created when that base is inserted too (no place on the reference)."""
+      * a PAM holding inserted bases on a row that starts on a reference base: does the
+        row's REF alignment, the reference at its own place, hold the motif in the PAM's
+        columns (as up to 2.8.1: on a tandem duplication of a PAM's bases, the very PAM
+        the insertion copies)."""
     kp = len(motif)
     right = (strand == "+") == (side == "3p")
     idx = range(k + n - kp, k + n) if right else range(k, k + kp)
     rp = [pos[i] for i in idx]
-    if all(p is None for p in rp):
+    inside = pos[k] is None
+    start = next((q for q in reversed(pos[:k]) if q is not None), None) if inside else pos[k]
+    if start is None:
+        return None
+    refaln = ref[start:start + n]
+    if strand == "-":
+        refaln = rc(refaln)
+    if refaln == alt.replace("-", "").upper():
+        return "not"
+    pam_cut = slice(-kp, None) if side == "3p" else slice(0, kp)
+    if "-" in alt[pam_cut]:
+        return None
+    if any(p is None for p in rp) and not inside:
+        refpam = refaln[pam_cut]
+    elif all(p is None for p in rp):
         return "created"
-    if any(p is None for p in rp):
+    elif any(p is None for p in rp):
         p = pos[k + n - kp - 1] if right else pos[k + kp]
         if p is None:
             return "created"
         lo = p + 1 if right else p - kp
         refpam = ref[lo:lo + kp]
+        refpam = refpam if strand == "+" else rc(refpam)
     else:
         if any(b != a + 1 for a, b in zip(rp, rp[1:])):
             return None
         refpam = ref[rp[0]:rp[-1] + 1]
-    if strand == "-":
-        refpam = rc(refpam)
+        refpam = refpam if strand == "+" else rc(refpam)
     ok = len(refpam) == kp and all(b in MOTIF_BASES[m] for b, m in zip(refpam, motif))
     return "not" if ok else "created"
 
@@ -886,7 +939,9 @@ def check(wd, pp, result_dirs):
         spacer_cut = slice(0, -kp) if side == "3p" else slice(kp, None)
         seen = {}  # site -> [(samples set, cfd, mm, names, PAM_creation)]
         targets = {}  # site -> [(block, samples set, target bases)]
-        inserted_pams = [0, 0]  # rows whose PAM is wholly inserted bases, those created
+        # rows whose PAM is wholly inserted bases, those with a PAM_creation: [0] starting on
+        # a reference base, [1] inside the insertion (at its anchor)
+        inserted_pams = [[0, 0], [0, 0]]
         for f in rows:
             where = "%s %s:%d(%s) %s %s" % (name, f["block"], f["start"], f["strand"],
                                             f["alt"], f["var"])
@@ -959,7 +1014,8 @@ def check(wd, pp, result_dirs):
                          "target on its carriers' haplotypes" % (where, f["vinfo"],
                                                                  sorted({str(w) for w in want})))
             # PAM_creation: the ALT's PAM when the variants created it, else NA
-            made = {expected_pam_creation(truth.ref, pos, k, len(seq), f["strand"], motif, side)
+            made = {expected_pam_creation(truth.ref, pos, k, len(seq), f["strand"], motif,
+                                          side, f["alt"])
                     for _s, pos, k in held} - {None}
             if made:
                 alt_pam = f["alt"][pam_cut].upper()
@@ -969,8 +1025,9 @@ def check(wd, pp, result_dirs):
                                        if (f["strand"] == "+") == (side == "3p")
                                        else range(k, k + kp)))
                 if wholly:
-                    inserted_pams[0] += 1
-                    inserted_pams[1] += f["pamc"].upper() == alt_pam
+                    tally = inserted_pams[any(pos[k] is None for _s, pos, k in held)]
+                    tally[0] += 1
+                    tally[1] += f["pamc"].upper() == alt_pam
                 ok = (("created" in made and f["pamc"].upper() == alt_pam)
                       or ("not" in made and f["pamc"] in ("NA", "n", "")))
                 if not ok:
@@ -985,8 +1042,10 @@ def check(wd, pp, result_dirs):
                 seen.setdefault(site, []).append((set(samples), cfd, f["mm"], f["var"],
                                                   f["pamc"]))
                 targets.setdefault(site, []).append((f["block"], set(samples), seq))
-        print("oracle: %s: %d row blocks with a PAM made wholly of inserted bases, %d of them "
-              "PAM_creation" % (name, inserted_pams[0], inserted_pams[1]))
+        print("oracle: %s: row blocks with a PAM made wholly of inserted bases: %d starting "
+              "inside the insertion, %d of them PAM_creation; %d starting on a reference "
+              "base, %d of them PAM_creation" % ((name,) + tuple(inserted_pams[1])
+                                                 + tuple(inserted_pams[0])))
         for site, ex in sorted(expect.items()):
             if ex.get("per_sample_only") and not per_sample:
                 continue
