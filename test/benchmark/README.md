@@ -117,20 +117,21 @@ runs -- keeps one row per merge cluster, and there the row of the target's clust
 chained within `--merge` bp by the rows CRISPRme can write, as the merge clusters: the
 reference rows, the SNP rows of the mode -- population-level each alignment's worst case,
 per sample the haplotypes individuals hold -- and the targets some carrier of an indel
-record holds) must be no worse than each target. It does not check the CFD_REF/ALT, CFD risk and CRISPR-Bulge
-scores (nor which row the CRISPR-Bulge block keeps), `Variant_info_spacer+PAM`,
-`PAM_creation`, the seed counts, MAF, rsID, `Other_motifs`, `Not_found_in_REF` or the
-annotations, nor the merge's keys after the sorting criteria and the CFD (the Cluster
-Position, the carrier count, the aligned text), which only order alignments equal in all
-of these. Give each VCF a `.tbi` when the panel has deletions longer than 20 kb (HPRC's
-does): a read without one looks back 20 kb, and the checker lists such a VCF under its
-own coverage class. Two genotyped datasets that share samples are refused (exit 2):
-CRISPRme resolves each dataset on its own genotypes and joins their rows, which the
-checker does not model; a sites-only dataset beside a genotyped one is checked. `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py
-check`, `validate-benchmarks.yml` runs it on the chr22 self-test output after
-`validate-test`, and `docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a
-real HGDP + 1000 Genomes chr22 search in both modes and genome-wide. Its unit and
-mutation tests are `PostProcess/test_check_indel_rows.py`.
+record holds) must be no worse than each target. It does not check the CFD_REF/ALT, CFD risk
+and CRISPR-Bulge scores (nor which row the CRISPR-Bulge block keeps),
+`Variant_info_spacer+PAM`, `PAM_creation`, the seed counts, MAF, rsID, `Other_motifs`,
+`Not_found_in_REF` or the annotations, nor the merge's keys after the sorting criteria and
+the CFD (the Cluster Position, the carrier count, the aligned text), which only order
+alignments equal in all of these. Give each VCF a `.tbi` when the panel has deletions longer
+than 20 kb (HPRC's does): a read without one looks back 20 kb, and the checker lists such a
+VCF under its own coverage class. Two genotyped datasets that share samples are refused
+(exit 2): CRISPRme resolves each dataset on its own genotypes and joins their rows, which
+the checker does not model; a sites-only dataset beside a genotyped one is checked.
+`test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check`,
+`validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
+`docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a real HGDP + 1000 Genomes
+chr22 search in both modes and genome-wide. Its unit and mutation tests are
+`PostProcess/test_check_indel_rows.py`.
 
 ## Reproducible generation pipeline
 ```bash

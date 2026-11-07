@@ -151,7 +151,9 @@ done
 #     searches of guide.txt (README) and guide_trac.txt (TRAC), NRG, 4 + 1 + 1. --vcf-dir
 #     is the panel's VCF folder; give it a .tbi per VCF (in a folder you can write: link
 #     the VCFs there and run `tabix -p vcf`), or let the checker index each one in memory
-#     (one decompression of the file, about 28 GB for this panel).
+#     (one decompression of the file, about 28 GB for this panel: the README run took
+#     388 s and 8.3 GB so on 24 processes of a node at load 250 to 300, against 89 s and
+#     4.5 GB with a .tbi).
 for g in readme:guide.txt trac:guide_trac.txt; do
   python3 "$SRC/scripts/check_indel_rows.py" --results "$GW/Results/${g%%:*}" \
     --reference "$GW/Genomes/hg38" --vcf-dir "$GW/VCFs/hg38_HGDP1kGP" \
