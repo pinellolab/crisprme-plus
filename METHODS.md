@@ -1728,8 +1728,8 @@ and when no index serves it and neither the dataset's VCFs nor its enriched geno
 build one, it stops with an ERROR that names what was asked, the variant indexes installed and
 what to do.) A shorter PAM
 off a wider flank is supported for a 3′ PAM only; for a 5′ PAM the engine requires the flank width to equal the
-PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its
-`.pam_build` records (above). The published
+PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its name,
+the header of its `.bin` files or its `.pam_build` records (above). The published
 PAM-less indexes are 3′ builds, so they serve no 5′ PAM: a Cas12a search needs a dedicated
 index. A flank wider than
 3 nt is not readable by CRISPRme versions before this one, so those indexes are published

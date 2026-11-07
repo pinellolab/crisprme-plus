@@ -1357,8 +1357,9 @@ phased genotyped index such as `NRR_3_hg38+hg38_HGDP1kGP`). Of several it takes 
 of a 3-nt PAM first (NGG, NRG, NRR), then `NNN`, then any other PAM, and an all-`N` index
 wider than 3 nt last. It searches each in its own geometry: an all-`N` index wider than 3 nt
 (the published `NNNNNNNN_3`) for NRR, the default PAM, with `--prune-pam`, and any other for its own PAM, with
-the example guide padded for it, on the side of the guide its `.pam_build` records (the 3′
-side without one). With another nuclease's PAM the example guide may have no off-target in
+the example guide padded for it, on the side of the guide its name (the 2.10.0 form), the
+header of its `.bin` files (index format 2) or its `.pam_build` records (the 3′ side without
+any). With another nuclease's PAM the example guide may have no off-target in
 the genome, which passes as an empty result.
 
 With `--chrom` (e.g. `--chrom chr22`) it searches that chromosome only. It runs from a
