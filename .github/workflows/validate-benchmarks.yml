@@ -269,7 +269,9 @@ jobs:
           # Params.txt), with no IUPAC code left. Blind to a motif that allows the base a
           # misreading produces (NRR's last position): the unit tests cover that. And no
           # REF or ALT target of any block may hold an N, an assembly gap, which matches
-          # no guide and no PAM.
+          # no guide and no PAM; but an indel row's REF text, the reference at its
+          # coordinates, may where the run's genome (work/Genomes/<Genome_ref>) itself
+          # holds an N there (2.10.0).
           shopt -s nullglob
           tables=(work/Results/crisprme-test-out_*/*integrated_results.tsv)
           if [ "${#tables[@]}" -eq 0 ]; then echo "FAIL: no integrated results under work/Results"; exit 1; fi

@@ -245,6 +245,21 @@ and the `release-crisprme` skill.
   placement built whole, on 3,000 random rows, and the same answer for every record that
   writes one haplotype) and `test_representative_tiebreak` (the real merge: alignments that
   start inside one insertion).
+- **The release gate `scripts/check_alt_pam.py` lets an indel row's REF text hold an N where
+  the reference genome does** (the gate's no-N check, since 2.8.1).
+  - An indel row's REF text is the reference at the row's coordinates, as many bases as its
+    target holds, and next to an assembly gap it can run into the gap while the target, on
+    the haplotype carrying the indel, holds none. On HPRC's chr22 the README guide's rows at
+    chr22:11978143 (−) and 11980225 (+) (3 blocks each) failed the gate on this release, and
+    15 such targets on the released 2.8.1 image.
+  - Such an N now passes where the genome itself holds an N at that position, read from the
+    row's start and strand and the text's gaps (the genome given with `--genome`, else the
+    run's own: `Genomes/<Genome_ref>` beside its `Results` folder). Every other N fails as
+    before: an ALT text's, a SNP or MNV row's REF text, an N over a reference base, and one
+    the gate cannot check against a genome. HPRC chr22, README guide, per-sample: those 6
+    targets pass and nothing else changes (on the released image's table, its 15); the chr22
+    searches of HGDP + 1000 Genomes, the self-test and the SNP+indel oracle hold no N. Covered
+    by `test_check_alt_pam`.
 - **A per-sample SNP row no longer lists a carrier whose haplotype holding its SNPs also holds
   an indel that changes the target** (every release with per-sample genotypes; the known limit
   2.8.1 stated).
