@@ -625,6 +625,13 @@ def print_help_complete_search() -> None:
         "matches the guide lowers the searched edit count, so a VARIANT off-target's "
         "REF-based mismatches+bulges reported in the results can exceed the cap "
         "(reference off-targets are always <= the cap) [OPTIONAL]\n"
+        "\t--max-degeneracy, the most ambiguous columns a reported SNP variant row may "
+        "rest on, unless its carriers hold its variants together on one phased haplotype: "
+        "columns of the variant genome where the reference base would be a mismatch, or "
+        "break the PAM, and the row's allele fits. A worst-case alignment (population-level, "
+        "or a dense window's) is cut back to the strongest within it; any other row resting "
+        "on more without such carriers is left out. Rows resting on 2 or more such columns "
+        "are rarely carried by anyone. Variant searches only; off by default [OPTIONAL]\n"
         "\t--full_input_validate, also run a full per-VCF-record scan (chromosome "
         "coverage, AF/FILTER consistency, POS bounds, multiallelic/breakend/"
         "duplicate/phasing survey) before launching the search; slower than the "
@@ -781,8 +788,8 @@ _COMPLETE_SEARCH_FLAGS = frozenset(
         "--alt-alignments", "--annotation", "--bDNA", "--bRNA", "--be-base",
         "--be-window", "--compute-backend", "--full_input_validate",
         "--gene_annotation", "--genome", "--guide", "--index-path",
-        "--keep-intermediates", "--max-total-edits", "--merge", "--mm",
-        "--no-alt-alignments", "--output", "--pam", "--per-sample",
+        "--keep-intermediates", "--max-degeneracy", "--max-total-edits", "--merge",
+        "--mm", "--no-alt-alignments", "--output", "--pam", "--per-sample",
         "--personal_annotation", "--population-level", "--prune-pam",
         "--report-full", "--samplesID", "--sequence", "--sorting-criteria",
         "--sorting-criteria-scoring", "--thread", "--vcf",
@@ -3003,6 +3010,25 @@ def complete_search() -> None:
             error("Please provide a non-negative integer for --max-total-edits")
         if max_total_edits < 0:
             error("--max-total-edits must be a non-negative integer")
+    # the most ambiguous columns a reported SNP variant row may rest on unless its carriers
+    # hold its variants together on one phased haplotype (--max-degeneracy; -1, the
+    # default, is no cap). new_simple_analysis.py reads it from
+    # CRISPRME_MAX_DEGENERACY, inherited by the post-analysis like CRISPRME_FAST_MODE.
+    max_degeneracy = -1
+    if "--max-degeneracy" in args:
+        try:
+            max_degeneracy = int(args[args.index("--max-degeneracy") + 1])
+        except (IndexError, ValueError):
+            error("Please provide a non-negative integer for --max-degeneracy")
+        if max_degeneracy < 0:
+            error("--max-degeneracy must be a non-negative integer")
+        if not variant:
+            print(
+                "WARNING [complete-search]: --max-degeneracy caps the ambiguous columns of "
+                "variant rows, and this search has no --vcf: it changes nothing.",
+                flush=True,
+            )
+    os.environ["CRISPRME_MAX_DEGENERACY"] = str(max_degeneracy)
 
     # extract pam seq from file
     pam_len = 0
@@ -3175,6 +3201,9 @@ def complete_search() -> None:
         # the binding total-edits cap the search actually used (the "Max edits" the
         # user set): the report + web read this; without it they showed "n/a".
         p.write("Max_total_edits\t" + str(max_total_edits) + "\n")
+        # the reports read it from here (written only when given, as it is off by default)
+        if max_degeneracy >= 0:
+            p.write("Max_degeneracy\t" + str(max_degeneracy) + "\n")
         # Persist the silent-prune WARN into the run sidecar so it reaches
         # .Params.txt -> report.zip. The parent-stdout WARN (printed earlier in
         # complete_search) is NOT captured: log_verbose.txt only redirects the child

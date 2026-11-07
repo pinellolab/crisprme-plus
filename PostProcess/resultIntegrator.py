@@ -5,6 +5,7 @@ import operator
 from posixpath import expanduser
 from intervaltree import IntervalTree
 from utils import gene_region_class
+import bisect
 import sys
 import time
 import glob
@@ -330,13 +331,15 @@ for count, line in enumerate(inEmpiricalResults):
 # classic dictionaries too), and a row that names no carrier, a sites-only dataset's, is
 # still the population-level analysis's -- the bed carries the region span, variant count,
 # carriers and the FULL IUPAC protospacer, surfaced verbatim so an interested user can dig
-# into the other alignments.
+# into the other alignments, and (2.9.0) the window's bits: log2 of the sequences it spells,
+# and whether a greedy worst-case alignment stands for it (greedy 0: its rows are its
+# carriers' own haplotypes, as a per-sample search reports any window).
 hvdr_by_chrom = {}
+_hvdr_folder = os.path.dirname(outFile_name) or "."
 # the search's mode, as new_simple_analysis.py reads it (CRISPRME_FAST_MODE: "1" =
 # population-level, "0" or unset = per-sample)
 _PER_SAMPLE = not int(os.environ.get("CRISPRME_FAST_MODE", "0") or "0")
 try:
-    _hvdr_folder = os.path.dirname(outFile_name) or "."
     for _bed in glob.glob(
         os.path.join(_hvdr_folder, "*high_variant_density_regions.bed")
     ):
@@ -349,38 +352,79 @@ try:
             _chrom, _s, _e = _f[0], int(_f[1]), int(_f[2])
             _nvar = _f[4]
             _iupac = _f[6] if len(_f) > 6 else ""
+            _bits = _f[7] if len(_f) > 7 else ""
+            # a BED of 2.8.1 has no such column: its note said so of every window
+            _greedy = _f[9] != "0" if len(_f) > 9 else True
             hvdr_by_chrom.setdefault(_chrom, IntervalTree())[_s - 1 : _e + 1] = (
                 _nvar,
                 _iupac,
+                _bits,
+                _greedy,
             )
 except Exception as _hvdr_err:  # never break integration on a bad/missing bed
     print("high-variant-density BED join skipped:", _hvdr_err)
+
+# Four-allele positions (2.9.0): <out>.four_allele_positions.bed, 0-based, lists each
+# position of the windows the search reported where the variant genome writes Q (the
+# reference base and three ALTs cover A, C, G and T). A row whose window holds one is
+# flagged in the same column as a dense window.
+four_allele_by_chrom = {}
+try:
+    for _bed in glob.glob(os.path.join(_hvdr_folder, "*four_allele_positions.bed")):
+        for _ln in open(_bed):
+            if _ln.startswith("#") or not _ln.strip():
+                continue
+            _f = _ln.rstrip("\n").split("\t")
+            four_allele_by_chrom.setdefault(_f[0], set()).add(int(_f[1]))
+    four_allele_by_chrom = {c: sorted(p) for c, p in four_allele_by_chrom.items()}
+except Exception as _fa_err:  # never break integration on a bad/missing bed
+    four_allele_by_chrom = {}
+    print("four-allele positions BED join skipped:", _fa_err)
 
 
 def _hvdr_note(chrom, pos, greedy=True):
     # ``greedy``: the row is its window's greedy worst-case alignment (a population-level
     # one, or a sites-only dataset's); False for a per-sample row, one of the haplotypes
-    # the window's carriers have
+    # the window's carriers have. The window's BED line says whether one stands for it
+    # (its greedy column; a BED of 2.8.1 has none, and its note said so of every window):
+    # either makes the note say so.
     tree = hvdr_by_chrom.get(chrom)
     if not tree:
         return "NA"
     hits = tree[pos]
     if not hits:
         return "NA"
-    nvar, iupac = sorted(hits)[0].data
-    if greedy:
-        note = (
-            "high_variant_density (%s variants): a greedy worst-case alignment is "
-            "reported here; additional haplotype alignments may exist" % nvar
+    nvar, iupac, bits, window_greedy = sorted(hits)[0].data
+    note = "high_variant_density (%s variants%s)" % (
+        nvar, ", 2^%s sequences" % bits if bits else ""
+    )
+    if greedy or window_greedy:
+        note += (
+            ": a greedy worst-case alignment is reported here; additional haplotype "
+            "alignments may exist"
         )
     else:
-        note = (
-            "high_variant_density (%s variants): the haplotypes its carriers have are "
-            "reported here" % nvar
-        )
+        note += ": the haplotypes its carriers have are reported here"
     if iupac:
         note += "; full_IUPAC=%s" % iupac
     return note
+
+
+def _four_allele_note(chrom, start, aligned):
+    """The four-allele positions (1-based) in the window of a row starting at ``start``
+    (0-based) whose aligned target is ``aligned``, as "four_allele_positions=chr:pos,...";
+    "" when it holds none."""
+    positions = four_allele_by_chrom.get(chrom)
+    if not positions:
+        return ""
+    end = start + len(aligned.replace("-", ""))
+    first = bisect.bisect_left(positions, start)
+    last = bisect.bisect_left(positions, end)
+    if first == last:
+        return ""
+    return "four_allele_positions=" + ",".join(
+        "%s:%d" % (chrom, p + 1) for p in positions[first:last]
+    )
 
 
 # writing header in file
@@ -1188,7 +1232,8 @@ for nline, line in enumerate(inCrispritzResults):
     # #144: flag this off-target if it lands in a high-variant-density window
     # (chrom=target[4], highest-CFD start=target[5]); "NA" otherwise. A per-sample row
     # names its carriers (target[13]; "NA" for a reference row), but a sites-only
-    # dataset's, which names none.
+    # dataset's, which names none. And (2.9.0) if its window (the highest-CFD alignment's,
+    # target[2]) holds a four-allele position.
     try:
         saveDict["High_variant_density_region"] = _hvdr_note(
             str(target[4]), int(target[5]),
@@ -1196,6 +1241,15 @@ for nline, line in enumerate(inCrispritzResults):
         )
     except (ValueError, IndexError):
         saveDict["High_variant_density_region"] = "NA"
+    try:
+        _fa_note = _four_allele_note(str(target[4]), int(target[5]), str(target[2]))
+    except (ValueError, IndexError):
+        _fa_note = ""
+    if _fa_note:
+        saveDict["High_variant_density_region"] = (
+            _fa_note if saveDict["High_variant_density_region"] == "NA"
+            else saveDict["High_variant_density_region"] + "; " + _fa_note
+        )
 
     # derive the single-class gene region from the finalized GENCODE feature-set +
     # protein-coding gene distance (shared helper => identical to the report/web).

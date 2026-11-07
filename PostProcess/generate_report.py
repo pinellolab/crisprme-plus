@@ -118,6 +118,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from utils import gene_region_class  # noqa: E402  # shared with resultIntegrator + web
 import cb_operating_point as cbop  # noqa: E402  # CRISPR-Bulge sensitive operating point (single source of truth)
+import window_density as wdens  # noqa: E402  # the hyperdense threshold (single source of truth)
 
 # report-generator version -- bumped here, stamped in the footer provenance line.
 REPORT_GENERATOR_VERSION = "2.4"
@@ -296,7 +297,7 @@ CURATED_COLUMNS = (
     ("DHS", "dhs"),
     ("COSMIC_cancer_gene", "cosmic"),  # Cancer Gene Census tier/role; "-" when none
     ("IntOGen_cancer_driver", "intogen"),  # IntOGen (CC0) cancer-driver gene; "-" when none
-    ("High_complexity_region", "complex_region"),  # TOTAL variants in the surrounding window (NOT this row's variant)
+    ("High_complexity_region", "complex_region"),  # TOTAL variants in the surrounding window (NOT this row's variant), its sequences when hyperdense, its four-allele positions
 )
 # value used when a curated column's source is missing / blank
 CURATED_MISSING = "-"
@@ -548,17 +549,32 @@ def gate_demoted(df, prefix="_gate_cfd"):
     return df[col].eq(GATE_DEMOTED)
 
 
+def _dense_note(value):
+    """True when a High_variant_density_region value flags a window the high-variant-density
+    BED lists: a dense one (over CRISPRME_IUPAC_CAP), or a hyperdense one whatever the cap (a
+    four-allele position alone flags none)."""
+    return not _is_na(value) and str(value).strip().startswith("high_variant_density")
+
+
+def _greedy_note(value):
+    """True when a High_variant_density_region value says its window is reported by a greedy
+    worst-case alignment (resultIntegrator, from the BED's greedy column): not one whose
+    rows are its carriers' own haplotypes, as a hyperdense window's within the cap."""
+    return _dense_note(value) and "greedy worst-case alignment" in str(value)
+
+
 def _greedy_union(row, cols):
     """True for a row of a --per-sample report whose named roster can be the union of its
-    variants' carriers rather than its cis carriers: one flagged in High_complexity_region,
-    when no dataset of the search has the dict-less tiers (_UNTIERED), with >=2 variants
-    and no indel (an indel row is resolved per carrier haplotype in both modes). Its
+    variants' carriers rather than its cis carriers: one flagged in High_complexity_region
+    as a dense window's greedy alignment (_greedy_note), when no dataset of the search has
+    the dict-less tiers (_UNTIERED), in a search before 2.9.0 (_GREEDY_DENSE), with >=2
+    variants and no indel (an indel row is resolved per carrier haplotype in both modes). Its
     Observed cell and its per-site link read as in a population-level report."""
     if not (_PER_SAMPLE and _UNTIERED and _GREEDY_DENSE and "complex_region" in cols
             and "var_genome" in cols):
         return False
     variants = row.get(cols["var_genome"])
-    return (not _is_na(row.get(cols["complex_region"]))
+    return (_greedy_note(row.get(cols["complex_region"]))
             and _count_variants(variants) >= 2 and not _has_indel(variants))
 
 
@@ -1083,19 +1099,13 @@ def _curated_cell(kind, row, cols):
     elif kind == "complex_region":
         # TOTAL variants in the surrounding protospacer window (NOT this row's
         # variant) -- rendered "N in window" so it can't be misread as the
-        # per-target Variant count. Full note + IUPAC live in
+        # per-target Variant count -- with the sequences the window spells when it is
+        # hyperdense, and its four-allele positions. Full note + IUPAC live in
         # integrated_results.tsv and the bundled regions BED.
         v = _get("complex_region")
         if _is_na(v):
             return CURATED_MISSING
-        s = str(v)
-        if "(" in s and " variants" in s:
-            try:
-                n = s.split("(", 1)[1].split(" variants")[0].strip()
-                return f"{n} in window"
-            except Exception:
-                pass
-        return "dense window"
+        return _density_cell(str(v))
     elif kind == "perfect_match":
         # "Yes" for a perfect genomic match (0 mismatches + 0 bulges): a candidate
         # cut site with no a-priori on/off-target distinction. Blank otherwise.
@@ -1153,6 +1163,46 @@ def _curated_cell(kind, row, cols):
     if _is_na(v):
         return CURATED_MISSING
     return str(v)
+
+
+def _density_counts(df, cols):
+    """The rows in a hyperdense window (2^HYPERDENSE_BITS sequences or more), and those in one
+    holding a four-allele position (High_variant_density_region), for the inputs card."""
+    n_hyperdense = n_four_allele = 0
+    if "complex_region" in cols and cols["complex_region"] in df.columns:
+        for v in df[cols["complex_region"]]:
+            if _is_na(v):
+                continue
+            cell = _density_cell(str(v))
+            if " sequences)" in cell:
+                n_hyperdense += 1
+            if "four-allele" in cell:
+                n_four_allele += 1
+    return n_hyperdense, n_four_allele
+
+
+def _density_cell(note):
+    """The High_complexity_region cell of a High_variant_density_region note: "N in window"
+    for a dense window, with "(2^F sequences)" when it is hyperdense (2^HYPERDENSE_BITS
+    sequences or more), and "K four-allele position(s)" when it holds any. Plain ASCII: the
+    cell is shared by the HTML table AND the TSV downloads."""
+    parts = []
+    if _dense_note(note):
+        head = note.split(")", 1)[0]
+        n = re.search(r"\((\d+) variants", head)
+        f = re.search(r"2\^([0-9.]+) sequences", head)
+        if n:
+            cell = f"{n.group(1)} in window"
+            if f and float(f.group(1)) >= wdens.HYPERDENSE_BITS:
+                cell += f" (2^{float(f.group(1)):.1f} sequences)"
+            parts.append(cell)
+        else:
+            parts.append("dense window")
+    q = re.search(r"four_allele_positions=([^;\s]+)", note)
+    if q:
+        k = len(q.group(1).split(","))
+        parts.append(f"{k} four-allele position{'' if k == 1 else 's'}")
+    return "; ".join(parts) if parts else "dense window"
 
 
 def curated_headers(has_crispr_bulge):
@@ -1706,6 +1756,8 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         if len(_mm):
             obs_max_mmb = int(_mm.max())
 
+    n_hyperdense_rows, n_four_allele_rows = _density_counts(df, cols)
+
     return {
         "guides": guides,
         "guide_display": ", ".join(guides) if guides else "n/a",
@@ -1735,6 +1787,10 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         # True when every dataset the search names is one of them
         "untiered_all": bool(untiered) and bool(searched) and set(searched) <= set(untiered),
         "reference_only": reference_only,
+        # complete-search's --max-degeneracy (.Params.txt "Max_degeneracy"; absent when off)
+        "max_degeneracy": params.get("Max_degeneracy"),
+        "n_hyperdense_rows": n_hyperdense_rows,
+        "n_four_allele_rows": n_four_allele_rows,
     }
 
 
@@ -2061,10 +2117,16 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
          f"sequences are detected and flagged (<code>PAM_creation</code>). The "
          f"edit cap bounds the search against the variant-enriched (IUPAC-expanded) "
          f"genome; individual reported alignments &mdash; especially "
-         f"variant-expanded ones &mdash; may show more total edits."),
+         f"variant-expanded ones &mdash; may show more total edits."
+         + _degeneracy_note(meta.get("max_degeneracy"))),
         ("Variant-contributed sites",
          "Flagged by REF/ALT origin and <code>PAM_creation</code>; " + vc_note),
     ]
+    if meta.get("n_hyperdense_rows") or meta.get("n_four_allele_rows"):
+        rows.append(("Hyperdense and four-allele windows",
+                     _hyperdense_windows_note(meta.get("n_hyperdense_rows") or 0,
+                                              meta.get("n_four_allele_rows") or 0,
+                                              meta.get("search_mode") == "per-sample")))
     return _card(
         rows,
         '<p class="caption">Provided to support an off-target analysis accounting '
@@ -2072,6 +2134,50 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         "choice, any allele-frequency threshold, and any population stratification "
         "is the sponsor&rsquo;s to provide.</p>",
     )
+
+
+def _degeneracy_note(max_degeneracy):
+    """What complete-search's --max-degeneracy (.Params.txt "Max_degeneracy") did, for the
+    search-criteria row: "" when it was not given. A row whose carriers hold its variants
+    together on one phased haplotype (a per-sample report's CONFIRMED row) is kept whatever
+    the columns it rests on, so the cap is stated with that exception."""
+    try:
+        k = int(str(max_degeneracy).strip())
+    except (TypeError, ValueError):
+        return ""
+    return (
+        f" A SNP variant row rests on at most {k} ambiguous column{'' if k == 1 else 's'} "
+        f"(<code>--max-degeneracy {k}</code>) unless its carriers hold its variants together "
+        "on one phased haplotype. An ambiguous column is one of the variant genome where the "
+        "reference base would be a mismatch, or break the PAM, and the row&rsquo;s allele "
+        "fits. A worst-case alignment was cut back to the strongest within that, and any other "
+        "row resting on more without such carriers was left out."
+    )
+
+
+def _hyperdense_windows_note(n_hyperdense, n_four_allele, per_sample=False):
+    """The inputs card's note on the rows in a hyperdense window (2^HYPERDENSE_BITS sequences
+    or more) and in one holding a four-allele position. A population-level row there is a
+    worst-case alignment, which such a window makes of alleles that seldom go together; a
+    per-sample row names the individuals who carry it (``per_sample``)."""
+    said = []
+    if n_hyperdense:
+        said.append(
+            f"{n_hyperdense:,} reported off-target{'' if n_hyperdense == 1 else 's'} "
+            f"lie{'s' if n_hyperdense == 1 else ''} in a hyperdense window, one spelling "
+            f"2<sup>{wdens.HYPERDENSE_BITS}</sup> sequences or more (each two-allele column "
+            "doubles the count, a three-allele one triples it, a four-allele one quadruples "
+            "it): such a window matches nearly any guide somewhere"
+            + ("." if per_sample else
+               ", so a worst-case alignment there seldom exists in any one genome."))
+    if n_four_allele:
+        said.append(
+            f"{n_four_allele:,} reported off-target{'' if n_four_allele == 1 else 's'} "
+            f"lie{'s' if n_four_allele == 1 else ''} in a window holding a four-allele "
+            "position, where all four bases are observed alleles: the variant genome writes it "
+            "<code>Q</code>, which matches any base (an <code>N</code> is an assembly gap and "
+            "matches nothing).")
+    return " ".join(said) + " Each is flagged in <code>High_complexity_region</code>."
 
 
 def render_summary_and_matrix(meta, spec_score, matrix, spec_score_cb=None):
@@ -4256,6 +4362,19 @@ def _asset_data_uri(name):
     return ""
 
 
+# What the legend's High_complexity_region entry says of the rows of a hyperdense window
+# (build_annotation_legend_html), after _hvdr_how has said how the search reported a dense
+# one: where a greedy worst-case alignment stands for a dense window -- a population-level
+# report, and a --per-sample one before 2.9.0 (_GREEDY_DENSE) whose datasets all lack the
+# dict-less tiers (_UNTIERED) -- one in a hyperdense window seldom exists in any one genome;
+# in any other --per-sample report a dense window's rows are its carriers' own haplotypes, as
+# any window's, and only a sites-only dataset's rows (the population-level analysis's, whose
+# notes in the integrated results say so) are a greedy one.
+_HYPERDENSE_ROWS = {
+    False: ", so a worst-case alignment there seldom exists in any one genome.",
+    True: ".",
+}
+
 # Annotation legend (Section 7): plain-language meaning of every annotation
 # column value, so a reviewer never has to guess what "dELS" or "Tier1_TSG" is.
 _ANNOTATION_LEGEND = [
@@ -4334,7 +4453,16 @@ _ANNOTATION_LEGEND = [
      "names the specific variant(s) (as <code>chrom;pos;ref;alt</code>) that produce "
      "THIS off-target; this column (e.g. <code>16 in window</code>) counts ALL variants "
      "spanning the surrounding window, so a row can legitimately show one variant while "
-     "its window count is much larger. {hvdr_how}"),
+     "its window count is much larger. {hvdr_how} A window is dense when it spells "
+     "more sequences than <code>CRISPRME_IUPAC_CAP</code> allows (2<sup>"
+     + str(wdens.DEFAULT_IUPAC_CAP) + "</sup> by default: each two-allele column doubles "
+     "the count, a three-allele one triples it, a four-allele one quadruples it). One "
+     "spelling 2<sup>" + str(wdens.HYPERDENSE_BITS) + "</sup> or more is hyperdense, and is "
+     "flagged whatever that cap is, with the count (e.g. <code>24 in window (2^24.0 "
+     "sequences)</code>): it matches nearly any guide somewhere{hyperdense_rows} "
+     "<code>1 four-allele position</code>: the window "
+     "holds a position where all four bases are observed alleles, which the variant genome "
+     "writes <code>Q</code> (an <code>N</code> is an assembly gap and matches nothing)."),
 ]
 
 
@@ -4571,7 +4699,8 @@ def build_annotation_legend_html(cols=None, df=None, hvdr_where=None, hvdr_how=N
     entry qualifies, so the caller omits the whole section. ``cols=None`` keeps the
     legacy full legend (backward-compatible). ``hvdr_where`` (_hvdr_where's, which it
     defaults to) says where the variant set of a high-variant-density window is, and
-    ``hvdr_how`` (_hvdr_how's, with it) how the search reported the window."""
+    ``hvdr_how`` (_hvdr_how's, with it) how the search reported the window; what a
+    hyperdense window's rows are follows the report's mode (_HYPERDENSE_ROWS)."""
     def _active(key):
         if cols is None:
             return True
@@ -4581,7 +4710,9 @@ def build_annotation_legend_html(cols=None, df=None, hvdr_where=None, hvdr_how=N
             return bool(df[cols[key]].map(lambda v: not _is_na(v)).any())
         return True
 
-    entries = [(t, d.replace("{hvdr_how}", hvdr_how or _hvdr_how(hvdr_where)))
+    hyperdense_rows = _HYPERDENSE_ROWS[_PER_SAMPLE and not (_UNTIERED and _GREEDY_DENSE)]
+    entries = [(t, d.replace("{hvdr_how}", hvdr_how or _hvdr_how(hvdr_where))
+                .replace("{hyperdense_rows}", hyperdense_rows))
                for (k, t, d) in _ANNOTATION_LEGEND if _active(k)]
     if not entries:
         return ""
@@ -6198,11 +6329,17 @@ def build_report(
         if _hvdr_files:
             _hvdr_path = os.path.join(staging, "high_variant_density_regions.bed")
             _hvdr_seen = set()  # dedup: per-chrom beds carry duplicate region rows
+            # the beds' own header: 2.9.0 added the window's bits and four-allele positions
+            _hvdr_header = (
+                "#chrom\tstart\tend\tguide\tn_variants\t"
+                "samples_with_alt\tiupac_protospacer\n"
+            )
+            with open(_hvdr_files[0]) as _first:
+                _top = _first.readline()
+                if _top.startswith("#chrom"):
+                    _hvdr_header = _top if _top.endswith("\n") else _top + "\n"
             with open(_hvdr_path, "w") as _out:
-                _out.write(
-                    "#chrom\tstart\tend\tguide\tn_variants\t"
-                    "samples_with_alt\tiupac_protospacer\n"
-                )
+                _out.write(_hvdr_header)
                 for _bf in _hvdr_files:
                     for _ln in open(_bf):
                         if _ln.startswith("#") or not _ln.strip():

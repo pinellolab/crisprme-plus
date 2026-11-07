@@ -35,6 +35,9 @@ except Exception:  # module absent in an old deploy -> no genotype tier
 import simple_analysis_registry as _sar
 # One position's genotypes read against each ALT's own allele index (stdlib, pure).
 import site_alleles as _site
+# The ambiguity budget: how many sequences a window spells (its bits), the hyperdense flag,
+# and the ambiguous columns an alignment rests on. Pure and stdlib-only, like _sar.
+import window_density as _wd
 # Position-aware CFD bulge penalty (2.8.0). Core dependency; if a very old deploy lacks
 # it, fall back to a trivial pass-through so scoring never breaks (bulges then revert to
 # the previous free-pass behaviour rather than raising).
@@ -164,6 +167,23 @@ registry_only_mode = False
 # A registry-only install whose registry is a sites-only one (the mega's), read from its
 # VCF rather than from what the enrichment coded. Computed with registry_only_mode.
 _sites_only_registry = False
+
+# --max-degeneracy (complete-search sets CRISPRME_MAX_DEGENERACY; -1, its default, is none):
+# the ambiguous columns a reported SNP row may rest on (window_density.degeneracy). A
+# worst-case alignment is cut back to the strongest within it (twopass_emit.
+# cut_to_degeneracy); any other row resting on more is withheld, unless its carriers hold its
+# variants together on one phased haplotype. Counted for the note at the end.
+MAX_DEGENERACY = int(os.environ.get("CRISPRME_MAX_DEGENERACY", "-1") or "-1")
+_degeneracy_counts = {"cut": 0, "withheld": 0}
+# The windows the high-variant-density BED lists, by (start, end, guide): over
+# CRISPRME_IUPAC_CAP, and hyperdense (window_density.HYPERDENSE_BITS). And the four-allele
+# positions (Q) of the windows the search reported, 0-based, for
+# <out>.four_allele_positions.bed. Counted and written at the end.
+_hvdr_windows = {"over_cap": set(), "hyperdense": set()}
+_four_allele_positions = set()
+# The lines written to the high-variant-density BED, so that the main loop lists from its
+# letters a dense window whose decomposition did not (_list_undecomposed_window).
+_hvdr_lines = [0]
 
 
 # For scoring of CFD And Doench
@@ -433,6 +453,141 @@ def _ref_with_bulges(refSeq_final, realTarget, guide_no_pam):
     return "".join(ref)
 
 
+def _aligned_target(seq_prerevert, realTarget, revert):
+    """A pre-revert candidate sequence as the finalizer aligns it: reverse-complemented on the
+    minus strand, with realTarget's bulge gaps ('-') re-inserted."""
+    seq = (
+        reverse_complement_table("".join(seq_prerevert))
+        if revert
+        else "".join(seq_prerevert)
+    )
+    t = list(seq)
+    for pos, ch in enumerate(realTarget):
+        if ch == "-":
+            t.insert(pos, "-")
+    return t
+
+
+def _log_dense_window(split, replaceTarget, samples, n_seq, greedy):
+    """One line of <out>.high_variant_density_regions.bed for a window spelling more than
+    2^CRISPRME_IUPAC_CAP sequences, or 2^HYPERDENSE_BITS or more (the caller checks which):
+    its span, guide, variant columns (window_density.variant_columns: every letter standing
+    for two bases or more, a four-allele Q among them), carriers, full IUPAC protospacer
+    (every variant column as its code, so a user can see all its alleles and dig into its
+    other alignments; resultIntegrator puts it in the High_variant_density_region column),
+    its bits (log2 of the sequences it spells), its four-allele positions (Q), and whether
+    its rows are its ``greedy`` worst-case alignment (the dictionary path over the cap, any
+    population-level search; resultIntegrator's note then says so), not its carriers' own
+    haplotypes (the tier path per sample, or a hyperdense window a per-sample search
+    enumerated within the cap). Best-effort: never breaks the run."""
+    _hvdr_lines[0] += 1
+    try:
+        start = int(split[4])
+        key = (start, start + len(replaceTarget), split[1].replace("-", ""))
+        if _wd.over_cap(n_seq, IUPAC_CAP):
+            _hvdr_windows["over_cap"].add(key)
+        if _wd.hyperdense(n_seq):
+            _hvdr_windows["hyperdense"].add(key)
+        hvdr_bed.write(
+            "%s\t%d\t%d\t%s\t%d\t%s\t%s\t%.2f\t%d\t%d\n"
+            % (split[3], key[0], key[1], key[2], _wd.variant_columns(replaceTarget),
+               ",".join(sorted(samples)) if samples else ".", replaceTarget,
+               _wd.bits(n_seq), len(_wd.four_allele_offsets(replaceTarget)), int(greedy))
+        )
+    except Exception:
+        pass  # BED logging is best-effort; never break the run
+
+
+def _list_undecomposed_window(split):
+    """List in the high-variant-density BED a window whose letters make it dense or
+    hyperdense though its decomposition listed nothing: none ran on it, as on a window whose
+    only variant letters are four-allele positions (Q) where the post-analysis takes no Q,
+    or none of its variant columns could be read. The flag reads the window's own letters
+    (window_density), whatever the decomposition made of them; its carriers are unknown, and
+    no greedy alignment stands for it."""
+    n_seq = _wd.sequences(split[2])  # a bulge gap counts one, the strand nothing
+    if _wd.over_cap(n_seq, IUPAC_CAP) or _wd.hyperdense(n_seq):
+        window = split[2].replace("-", "")
+        if split[6] == "-":
+            window = reverse_complement_table(window)
+        _log_dense_window(split, window, set(), n_seq, False)
+
+
+def _withheld_by_degeneracy(target_to_list, refSeq_with_bulges, guide_no_pam, confirmed):
+    """True, and counted, when --max-degeneracy withholds a finalized row: it rests on more
+    ambiguous columns than MAX_DEGENERACY (window_density.degeneracy of the aligned row
+    against its aligned reference) and its carriers do not confirm it (``confirmed``: they
+    hold its variants together on one phased haplotype)."""
+    if MAX_DEGENERACY < 0 or confirmed:
+        return False
+    if _wd.degeneracy(target_to_list, refSeq_with_bulges, guide_no_pam, pam, pos_beg,
+                      pos_end, pam_begin, pam_end) <= MAX_DEGENERACY:
+        return False
+    _degeneracy_counts["withheld"] += 1
+    return True
+
+
+def _cut_to_degeneracy(rep, columns, refSeq, realTarget, refSeq_with_bulges, guide_no_pam,
+                       revert, rank_fn):
+    """A greedy worst-case representative (twopass_emit's) cut back to the strongest
+    alignment resting on at most MAX_DEGENERACY ambiguous columns, ranked by ``rank_fn``
+    (lowest first); ``rep`` itself when --max-degeneracy is off or it is within it."""
+    if MAX_DEGENERACY < 0:
+        return rep
+
+    def _degeneracy_of(seq_list):
+        return _wd.degeneracy(_aligned_target(seq_list, realTarget, revert),
+                              refSeq_with_bulges, guide_no_pam, pam, pos_beg, pos_end,
+                              pam_begin, pam_end)
+
+    cut = _twopass_emit.cut_to_degeneracy(rep, columns, refSeq, MAX_DEGENERACY,
+                                          _degeneracy_of, rank_fn)
+    if cut is not rep:
+        _degeneracy_counts["cut"] += 1
+    if cut is None:
+        return {"seq": list(refSeq), "carriers": set(), "info": [],
+                "chosen": {col["pos_c"]: None for col in columns}}
+    return cut
+
+
+def _note_four_allele(split):
+    """Record the four-allele positions (Q) of a reported window, 0-based on the forward
+    strand (Q is its own complement, so a minus-strand window is only read backwards)."""
+    window = split[2].replace("-", "")
+    if split[6] == "-":
+        window = window[::-1]
+    start = int(split[4])
+    for offset in _wd.four_allele_offsets(window):
+        _four_allele_positions.add(start + offset)
+
+
+def _write_density_notes():
+    """<out>.four_allele_positions.bed (0-based BED of the four-allele positions of the
+    windows the search reported, written when there is one; resultIntegrator flags the rows
+    whose window holds one), and a stdout line each on those positions, on the windows of
+    the high-variant-density BED and on --max-degeneracy (stdout only: any stderr write fails
+    the stage)."""
+    if _four_allele_positions:
+        with open(outputFile + ".four_allele_positions.bed", "w") as fh:
+            fh.write("#chrom\tstart\tend\n")
+            for p in sorted(_four_allele_positions):
+                fh.write("%s\t%d\t%d\n" % (current_chr, p, p + 1))
+        print(f"Four-allele positions (Q: every base is an observed allele there) in the "
+              f"windows of {current_chr}: {len(_four_allele_positions)}")
+    if _hvdr_windows["over_cap"] or _hvdr_windows["hyperdense"]:
+        over = (f"{len(_hvdr_windows['over_cap'])} spell more than 2^{IUPAC_CAP} sequences "
+                f"(dense: over CRISPRME_IUPAC_CAP), " if IUPAC_CAP >= 0 else "")
+        print(f"High-variant-density windows of {current_chr}: {over}"
+              f"{len(_hvdr_windows['hyperdense'])} spell 2^{_wd.HYPERDENSE_BITS} or more "
+              f"(hyperdense); listed in {os.path.basename(outputFile)}"
+              f".high_variant_density_regions.bed")
+    if MAX_DEGENERACY >= 0:
+        print(f"--max-degeneracy {MAX_DEGENERACY} on {current_chr}: "
+              f"{_degeneracy_counts['cut']} worst-case alignment(s) cut back to rest on at "
+              f"most {MAX_DEGENERACY} ambiguous column(s); {_degeneracy_counts['withheld']} "
+              f"row(s) resting on more, which no phased carrier confirms, withheld")
+
+
 def _record_phase_confirmation(final_line, phase_state):
     """Record one dict-less variant off-target's identity + CONFIRMED/PUTATIVE flag
     for the ADDITIVE phase-confirmation companion TSV. PURE w.r.t. ``final_line``
@@ -556,6 +711,9 @@ def _finalize_observed_entry(split, realTarget, refSeq_prerevert,
     if mm_new_t - int(split[8]) > allowed_mms:
         return
     if not pam_ok:
+        return
+    if _withheld_by_degeneracy(target_to_list, refSeq_with_bulges, guide_no_pam,
+                               phase_state == _obshap.CONFIRMED):
         return
 
     final_line[2] = "".join(target_to_list)
@@ -875,6 +1033,9 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
 
     if not positions:
         return
+    # the sequences the window spells: over 2^CRISPRME_IUPAC_CAP, or hyperdense, it is listed
+    # in the high-variant-density BED below
+    _n_seq = _wd.sequences(replaceTarget)
 
     # --- 2.5.1 FAST MODE: worst-POSSIBLE representative, NO haplotype enumeration ------
     # Emit the candidate's reference off-target (locus coverage) + ONE greedy worst-case
@@ -921,6 +1082,14 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
         _rep = _twopass_emit.greedy_worst_case(
             _columns, refSeq, realTarget, guide_no_pam, revert,
             pos_beg, pos_end, reverse_complement_table, pam_valid_fn=_pam_valid_fast,
+        )
+        # the window's carriers, as the high-variant-density BED lists them below
+        _window_carriers = _rep["carriers"]
+        # --max-degeneracy: the fewest mismatches with a valid PAM within the budget
+        _rep = _cut_to_degeneracy(
+            _rep, _columns, refSeq, realTarget, refSeq_with_bulges, guide_no_pam, revert,
+            lambda _s: (0 if _pam_valid_fast(_s) else 1,
+                        _aligned_mm(_s, realTarget, guide_no_pam, revert)),
         )
         if _rep["info"]:  # >=1 alt lowered/held the alignment vs the reference
             _finalize_observed_entry(
@@ -979,11 +1148,21 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                 for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
                     if _ch.upper() not in iupac_code_set[pam[_i]]:
                         return False
+                # --max-degeneracy: the strongest alignment within the budget
+                if MAX_DEGENERACY >= 0 and _wd.degeneracy(
+                        _tl, refSeq_with_bulges, guide_no_pam, pam, pos_beg, pos_end,
+                        pam_begin, pam_end) > MAX_DEGENERACY:
+                    return False
                 return True
             _cfd_rep = _twopass_emit.greedy_max_score(
                 _columns, refSeq, realTarget, guide_no_pam, revert,
                 pos_beg, pos_end, reverse_complement_table, _cfd_fast,
                 valid_fn=_emittable_fast,
+            )
+            # a window too dense for greedy_max_score's exact search: cut the greedy one
+            _cfd_rep = _cut_to_degeneracy(
+                _cfd_rep, _columns, refSeq, realTarget, refSeq_with_bulges, guide_no_pam,
+                revert, lambda _s: (0 if _pam_valid_fast(_s) else 1, -_cfd_fast(_s)),
             )
             if _cfd_rep["info"] and _cfd_rep["seq"] != _rep["seq"]:
                 _finalize_observed_entry(
@@ -991,18 +1170,10 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                     revert, "".join(_cfd_rep["seq"]), sorted(_cfd_rep["carriers"]),
                     _cfd_rep["info"], _obshap.PUTATIVE, cluster_to_save,
                 )
-        # visibility: still log genuinely-dense windows to the shared BED (as the cap does)
-        if IUPAC_CAP >= 0 and len(positions) > IUPAC_CAP:
-            try:
-                _start = int(split[4])
-                hvdr_bed.write(
-                    "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
-                    % (split[3], _start, _start + len(replaceTarget),
-                       split[1].replace("-", ""), len(positions),
-                       ",".join(sorted(_rep["carriers"])) if _rep["carriers"] else ".",
-                       replaceTarget))
-            except Exception:
-                pass  # BED logging is best-effort; never break the run
+        # visibility: still log dense windows to the shared BED (as the cap does), and
+        # hyperdense ones whatever the cap; a greedy worst case stands for every window here
+        if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.hyperdense(_n_seq):
+            _log_dense_window(split, replaceTarget, _window_carriers, _n_seq, True)
         return
     # --- end fast mode ----------------------------------------------------------------
 
@@ -1072,25 +1243,13 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     # without fabricating a carrier-less worst case. The conservative worst-case rep
     # remains the correct behavior for POPULATION-LEVEL mode (the _FAST_MODE early-return
     # path above), which is unchanged.
-    if IUPAC_CAP >= 0 and len(positions) > IUPAC_CAP:
+    #
+    # So no greedy worst case stands for the window, over the cap or hyperdense within it.
+    if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.hyperdense(_n_seq):
         _samples = set()
         for _h in haplotypes:
             _samples |= _h.carriers
-        _start = int(split[4])
-        try:
-            # 7th field = the FULL IUPAC protospacer (every variant column as its
-            # ref+alt ambiguity code) so a user can see all alleles in the window and
-            # dig into the other possible alignments (resultIntegrator surfaces this
-            # + a "dense region" flag as an integrated_results column).
-            hvdr_bed.write(
-                "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
-                % (split[3], _start, _start + len(replaceTarget),
-                   split[1].replace("-", ""), len(positions),
-                   ",".join(sorted(_samples)) if _samples else ".",
-                   replaceTarget)
-            )
-        except Exception:
-            pass  # BED logging is best-effort; never break the run
+        _log_dense_window(split, replaceTarget, _samples, _n_seq, False)
 
     # 3b) Finalize each observed VARIANT haplotype through the shared finalizer (may be
     #     an empty loop when no productive observed haplotype exists).
@@ -1120,12 +1279,9 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
     # haplotypes the window's carriers have, as the tiers' path does.
     if not _FAST_MODE and not registry_only_mode and IUPAC_CAP >= 0 and _obshap is not None \
             and _popsum is not None and _t0c is not None:
-        # the columns the window's lattice would take, counted as the code below counts them
-        _rt = split[2].replace("-", "")
-        _n_ref = len(genomeStr[int(split[4]): int(split[4]) + len(_rt)])
-        if split[6] == "-":
-            _rt = reverse_complement_table(_rt)
-        if sum(1 for _i, _c in enumerate(_rt) if _c in iupac_code and _i < _n_ref) > IUPAC_CAP:
+        # the sequences the window spells, counted as the code below counts them for its
+        # cap (window_density: in bits, a three-allele column log2 3, a Q 2)
+        if _wd.over_cap(_wd.sequences(split[2].replace("-", "")), IUPAC_CAP):
             _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save)
             return
 
@@ -1212,40 +1368,31 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                     ]
 
     if countIUPAC > 0:  # if found valid alternative targets
-        # High-variant-density cap: above IUPAC_CAP ambiguity codes the multi-SNP
-        # combination below would enumerate up to 2^countIUPAC sequences. Instead
-        # report a single GREEDY representative per haplotype -- at each ambiguity
-        # position pick the min-mismatch allele (preferring an alt on ties, which
+        # High-variant-density cap: a window spelling more than 2^IUPAC_CAP sequences
+        # (window_density.sequences) would have the multi-SNP combination below enumerate
+        # as many. Instead report a single GREEDY representative per haplotype -- at each
+        # ambiguity position pick the min-mismatch allele (preferring an alt on ties, which
         # keeps PAM-region variant alleles so PAM-creation is preserved). This is the
         # exact min-mismatch / max-CFD haplotype (mismatch is additive per position,
         # so the greedy equals the argmin over all 2^k combinations) without the
         # blow-up. The region is logged to <out>.high_variant_density_regions.bed.
         # FAST MODE forces the greedy representative for EVERY window (never enumerate the
-        # 2^k lattice); otherwise it triggers only above IUPAC_CAP ambiguity codes. The
-        # greedy rep is the exact min-mismatch / max-CFD haplotype either way.
-        capped = _FAST_MODE or (IUPAC_CAP >= 0 and countIUPAC > IUPAC_CAP)
+        # 2^k lattice); otherwise it triggers only above the cap. The greedy rep is the
+        # exact min-mismatch / max-CFD haplotype either way.
+        _n_seq = _wd.sequences(replaceTarget)
+        capped = _FAST_MODE or _wd.over_cap(_n_seq, IUPAC_CAP)
+        # Log only GENUINELY-dense windows to the BED (in fast mode ``capped`` is forced for
+        # every window, but the high-variant-density BED must still list only the
+        # hypervariable ones -- byte-identical to the non-fast BED contents): over the cap,
+        # or hyperdense whatever the cap is (its combinations enumerated, no greedy worst
+        # case, when a per-sample search holds it within the cap).
+        if _wd.over_cap(_n_seq, IUPAC_CAP) or _wd.hyperdense(_n_seq):
+            _samples = set()
+            for _cnt in totalDict:
+                for _v in totalDict[_cnt][0].values():
+                    _samples |= _v[1]
+            _log_dense_window(split, replaceTarget, _samples, _n_seq, capped)
         if capped:
-            # Log only GENUINELY-dense windows to the BED (in fast mode ``capped`` is forced
-            # for every window, but the high-variant-density BED must still list only the
-            # hypervariable ones -- byte-identical to the non-fast BED contents).
-            if IUPAC_CAP >= 0 and countIUPAC > IUPAC_CAP:
-                _samples = set()
-                for _cnt in totalDict:
-                    for _v in totalDict[_cnt][0].values():
-                        _samples |= _v[1]
-                _start = int(split[4])
-                hvdr_bed.write(
-                    "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
-                    % (
-                        split[3],
-                        _start,
-                        _start + len(replaceTarget),
-                        split[1].replace("-", ""),
-                        countIUPAC,
-                        ",".join(sorted(_samples)) if _samples else ".",
-                        replaceTarget,  # full IUPAC protospacer (dig-in aid)
-                    )
-                )
             # PAM-validity of a candidate (mirrors the finalizer's pam_ok gate); consumed
             # by the fast-mode greedy so a PAM-region variant is not decided by lex order
             # (which drops ~half the PAM-creation off-targets).
@@ -1260,6 +1407,14 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         return False
                 return True
 
+            # --max-degeneracy counts the ambiguous columns of an alignment against its
+            # aligned reference, which the finalization below builds the same way
+            _ref_aln = (
+                _ref_with_bulges(reverse_complement_table(refSeq) if revert else refSeq,
+                                 realTarget, guide_no_pam)
+                if MAX_DEGENERACY >= 0 else None
+            )
+
             # Build the greedy representative per haplotype and REPLACE the per-SNP
             # level-0 entries with that single entry, so the finalization below scores
             # exactly one row (bulges/PAM/creation/CFD via the existing code path).
@@ -1268,18 +1423,20 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 by_pos = {}
                 for (pos_c, elem), v in totalDict[count][0].items():
                     by_pos.setdefault(pos_c, []).append((elem, v))
+                # the window's variant columns as twopass_emit takes them. v[1] is the
+                # carrier set; v[2] a one-element [[rsID, AF, snp]] list (per-SNP level-0
+                # entry).
+                _cols = [
+                    {"pos_c": _pc,
+                     "candidates": [{"alt": _elem, "carriers": _v[1], "info": _v[2][0]}
+                                    for _elem, _v in _cands]}
+                    for _pc, _cands in by_pos.items()
+                ]
                 if _FAST_MODE and _twopass_emit is not None:
                     # FAST MODE: the PAM-aware, multi-pass + brute-force greedy
                     # (twopass_emit.greedy_worst_case) -- lossless, prefers PAM-creating
                     # alleles so a PAM-region variant off-target is not silently dropped
-                    # (the real-data 141-miss fix). v[1] is the carrier set; v[2] a
-                    # one-element [[rsID, AF, snp]] list (per-SNP level-0 entry).
-                    _cols = [
-                        {"pos_c": _pc,
-                         "candidates": [{"alt": _elem, "carriers": _v[1], "info": _v[2][0]}
-                                        for _elem, _v in _cands]}
-                        for _pc, _cands in by_pos.items()
-                    ]
+                    # (the real-data 141-miss fix).
                     _rep = _twopass_emit.greedy_worst_case(
                         _cols, refSeq, realTarget, guide_no_pam, revert,
                         pos_beg, pos_end, reverse_complement_table, pam_valid_fn=_pam_ok_leg)
@@ -1310,6 +1467,23 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             greedy_seq[pos_c] = best_elem
                             greedy_samples |= best_v[1]
                             greedy_info.extend(best_v[2])
+                    _rep = {"seq": greedy_seq, "carriers": greedy_samples,
+                            "info": greedy_info,
+                            "chosen": {_col["pos_c"]: next(
+                                (_c for _c in _col["candidates"]
+                                 if greedy_seq[_col["pos_c"]] != refSeq[_col["pos_c"]]
+                                 and _c["alt"] == greedy_seq[_col["pos_c"]]), None)
+                                for _col in _cols}}
+                # --max-degeneracy: the fewest mismatches with a valid PAM within it
+                _cut = _cut_to_degeneracy(
+                    _rep, _cols, refSeq, realTarget, _ref_aln, guide_no_pam, revert,
+                    lambda _s: (0 if _pam_ok_leg(_s) else 1,
+                                _aligned_mm(_s, realTarget, guide_no_pam, revert)),
+                )
+                if _cut is not _rep:
+                    greedy_seq = list(_cut["seq"])
+                    greedy_samples = set(_cut["carriers"])
+                    greedy_info = list(_cut["info"])
                 if not greedy_info:  # no allele changed anything: document the region anyway
                     any_v = next(iter(totalDict[count][0].values()), None)
                     if any_v is not None:
@@ -1392,12 +1566,23 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
                             if _ch.upper() not in iupac_code_set[pam[_i]]:
                                 return False
+                        # --max-degeneracy: the strongest alignment within the budget
+                        if MAX_DEGENERACY >= 0 and _wd.degeneracy(
+                                _tl, _ref_aln, guide_no_pam, pam, pos_beg, pos_end,
+                                pam_begin, pam_end) > MAX_DEGENERACY:
+                            return False
                         return True
 
                     _cfd_rep = _twopass_emit.greedy_max_score(
                         _cols, refSeq, realTarget, guide_no_pam, revert,
                         pos_beg, pos_end, reverse_complement_table, _cfd_fast_leg,
                         valid_fn=_emittable_leg,
+                    )
+                    # a window too dense for greedy_max_score's exact search: cut the
+                    # greedy one
+                    _cfd_rep = _cut_to_degeneracy(
+                        _cfd_rep, _cols, refSeq, realTarget, _ref_aln, guide_no_pam, revert,
+                        lambda _s: (0 if _pam_ok_leg(_s) else 1, -_cfd_fast_leg(_s)),
                     )
                     if _cfd_rep["info"] and list(_cfd_rep["seq"]) != list(greedy_seq):
                         totalDict[count][0][("greedy_cfd", 1)] = [
@@ -1604,7 +1789,13 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         # value of mm and bulges is over allowed threshold, discard target
                         if mm_new_t - int(split[8]) > allowed_mms:
                             continue
-                        elif pam_ok:
+                        # --max-degeneracy: a row the phased lattice built is carried by
+                        # its carriers on one haplotype; any other resting on more
+                        # ambiguous columns than the budget is withheld
+                        elif pam_ok and not _withheld_by_degeneracy(
+                            target_to_list, refSeq_with_bulges, guide_no_pam,
+                            haplotype_check and not capped,
+                        ):
                             final_line[2] = "".join(target_to_list)
                             final_line[7] = str(mm_new_t - int(final_line[8]))
                             # total differences between targets and guide (mismatches + bulges)
@@ -2171,15 +2362,21 @@ mmblg_best.write(header + "\tCFD\n")  # Write header
 crispr_bulge_best = open(outputFile + ".bestCRISPR_BULGE.txt", "w+")
 crispr_bulge_best.write(header + "\tCFD\n")  # Write header
 
-# High-variant-density cap: a protospacer window overlapping many ambiguity codes
-# (dense/hypervariable regions, e.g. MHC, and unbounded for unphased VCFs) would
-# otherwise enumerate up to 2^k haplotype sequences. Above CRISPRME_IUPAC_CAP codes
-# we report only the single-variant targets (k rows, not 2^k) and log the region,
-# so a real off-target risk is still surfaced without the combinatorial blow-up.
-IUPAC_CAP = int(os.environ.get("CRISPRME_IUPAC_CAP", "10"))
+# High-variant-density cap, in bits: a protospacer window overlapping many ambiguity codes
+# (dense/hypervariable regions, e.g. MHC and the immunoglobulin loci, and unbounded for
+# unphased VCFs) spells up to 2^bits sequences (window_density.sequences: 2 for each of
+# R/Y/S/W/K/M, 3 for each of B/D/H/V, 4 for each Q), and the dictionary path would enumerate
+# as many combinations of its alleles. Above 2^CRISPRME_IUPAC_CAP it reports the window by its
+# greedy worst-case alignment instead; every path lists such a window, and any spelling
+# 2^HYPERDENSE_BITS sequences or more whatever the cap, in this BED (with its bits, its
+# four-allele positions, and whether a greedy worst case stands for it), so a real
+# off-target risk is still surfaced without the combinatorial blow-up. Up to 2.8.1 the cap
+# counted ambiguous positions: the same number where each holds one ALT. -1 disables it.
+IUPAC_CAP = int(os.environ.get("CRISPRME_IUPAC_CAP", str(_wd.DEFAULT_IUPAC_CAP)))
 hvdr_bed = open(outputFile + ".high_variant_density_regions.bed", "w")
 hvdr_bed.write(
-    "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\n"
+    "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\tbits"
+    "\tfour_allele\tgreedy\n"
 )
 
 # Load ONLY the SNP-dictionary entries this chromosome's targets actually query,
@@ -2371,9 +2568,15 @@ for line in inTarget:
     target = split[2]
     guide_no_bulge = split[1].replace("-", "")
     guide_no_pam = guide[pos_beg:pos_end]
+    # a four-allele position (Q) in the window: listed for the rows' flag
+    four_allele = "Q" in target or "q" in target
+    if four_allele:
+        _note_four_allele(split)
 
     # check if targets cointains IUPAC nucleotide
-    if any((c in iupac_nucleotides) for c in target):
+    decomposed = any((c in iupac_nucleotides) for c in target)
+    hvdr_lines = _hvdr_lines[0]
+    if decomposed:
         iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save)
     else:
         # process_iupac = False
@@ -2385,6 +2588,10 @@ for line in inTarget:
         # count of mm_bul for ref sequence in case of alternative target
         split.append(0)
         cluster_to_save.append(split)
+    # the high-variant-density BED reads a window's letters, not what its decomposition made
+    # of them: a dense or hyperdense window it did not list is listed here
+    if (decomposed or four_allele) and _hvdr_lines[0] == hvdr_lines:
+        _list_undecomposed_window(split)
 
     if len(cluster_to_save) >= 100000:
         # after reading 100k lines from file and creating the cluster, start processing it
@@ -2441,6 +2648,8 @@ else:
     _write_phase_confirmation_companion()
     # ADDITIVE + guarded + gated-on-myreg: SNP+SNP co-occurrence companion TSV.
     _write_snp_snp_cooc_companion()
+    # the four-allele positions, and the notes on dense windows and --max-degeneracy
+    _write_density_notes()
     # print complete and exit with no error
     print("ANALYSIS COMPLETE IN", time.time() - global_start)
     exit(0)
@@ -2495,5 +2704,7 @@ _write_population_summary_companion()
 _write_phase_confirmation_companion()
 # ADDITIVE + guarded + gated-on-myreg: SNP+SNP co-occurrence companion TSV.
 _write_snp_snp_cooc_companion()
+# the four-allele positions, and the notes on dense windows and --max-degeneracy
+_write_density_notes()
 
 print("ANALYSIS COMPLETE IN", time.time() - global_start)

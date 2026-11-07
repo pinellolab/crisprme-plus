@@ -2330,7 +2330,10 @@ class TestGenerateReport(unittest.TestCase):
         --per-sample a genotyped dataset's dense window is the haplotypes its carriers have
         (on the dict-less tiers since 2.7.10, on the classic dictionaries since 2.9.0): its
         rows, and the window's reference row, say that now. A row that names no carrier, a
-        sites-only dataset's, is the population-level analysis's in either mode."""
+        sites-only dataset's, is the population-level analysis's in either mode. Since 2.9.0
+        the window's BED line says whether a greedy worst case stands for it (its greedy
+        column: 1 in a population-level search, 0 in a per-sample one), and gives its bits;
+        a BED of 2.8.1, which has neither, keeps what 2.8.1 said of every window."""
         from test_seed_counts_dna_bulge import SPACER_3P, _block
         # a stand-in that holds the bed's interval (the light CI env has no intervaltree)
         tree = (
@@ -2346,21 +2349,33 @@ class TestGenerateReport(unittest.TestCase):
             "        self.items.append(_Interval(key.start, key.stop, value))\n"
             "    def __getitem__(self, point):\n"
             "        return {i for i in self.items if i.begin <= point < i.end}\n")
-        bed = ("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
-               "iupac_protospacer\n"
-               "chrT\t990\t1013\tGUIDE\t12\tHG00001\tCTAACWGTTGCTTTTATCRCTGG\n")
+        def bed(greedy=None):
+            # as the post-analysis writes it (new_simple_analysis.py); None: a BED of 2.8.1
+            if greedy is None:
+                return ("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
+                        "iupac_protospacer\n"
+                        "chrT\t990\t1013\tGUIDE\t12\tHG00001\tCTAACWGTTGCTTTTATCRCTGG\n")
+            return ("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
+                    "iupac_protospacer\tbits\tfour_allele\tgreedy\n"
+                    "chrT\t990\t1013\tGUIDE\t12\tHG00001\tCTAACWGTTGCTTTTATCRCTGG\t12.00\t0"
+                    "\t%d\n" % greedy)
         blocks = [_block("X", SPACER_3P, SPACER_3P, "CTAACtGTTGCTTTTATCACTGG",
                          "CTAACtGTTGCTTTTATCgCTGG", 1, 0, samples, snp)
                   for samples, snp in (("HG00001", "chrT_1005_A_T"), ("", "chrT_1005_A_T"),
                                        ("NA", "NA"))]
-        greedy = ("high_variant_density (12 variants): a greedy worst-case alignment is "
-                  "reported here; additional haplotype alignments may exist; "
+        greedy = ("high_variant_density (12 variants, 2^12.00 sequences): a greedy worst-case "
+                  "alignment is reported here; additional haplotype alignments may exist; "
                   "full_IUPAC=CTAACWGTTGCTTTTATCRCTGG")
-        carriers = ("high_variant_density (12 variants): the haplotypes its carriers have are "
-                    "reported here; full_IUPAC=CTAACWGTTGCTTTTATCRCTGG")
-        for mode, notes in (("1", [greedy, greedy, greedy]), ("0", [carriers, greedy, carriers])):
-            with self.subTest(CRISPRME_FAST_MODE=mode):
-                rows = self._integrate(blocks, {"job.high_variant_density_regions.bed": bed},
+        carriers = ("high_variant_density (12 variants, 2^12.00 sequences): the haplotypes its "
+                    "carriers have are reported here; full_IUPAC=CTAACWGTTGCTTTTATCRCTGG")
+        old_greedy = ("high_variant_density (12 variants): a greedy worst-case alignment is "
+                      "reported here; additional haplotype alignments may exist; "
+                      "full_IUPAC=CTAACWGTTGCTTTTATCRCTGG")
+        for mode, text, notes in (("1", bed(1), [greedy, greedy, greedy]),
+                                  ("0", bed(0), [carriers, greedy, carriers]),
+                                  ("0", bed(), [old_greedy, old_greedy, old_greedy])):
+            with self.subTest(CRISPRME_FAST_MODE=mode, bed_of_2_8_1=text == bed()):
+                rows = self._integrate(blocks, {"job.high_variant_density_regions.bed": text},
                                        {"CRISPRME_FAST_MODE": mode}, tree)
                 self.assertEqual([r["High_variant_density_region"] for r in rows], notes)
 
