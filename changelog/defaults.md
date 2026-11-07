@@ -669,3 +669,13 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   SNP+indel companion (`indel_snp_cooc.tsv`) lists the first 50 of its carriers by name, which
   its count takes all of: the README and METHODS say so (LP RV4-cooc-carrier-cap). Covered by
   `PostProcess/test_defaults_and_index_flex.py`.
+- **The Graphical Reports selector offers the totals of mismatches and bulges the search has.**
+  It offered 0 to the mismatches + `Max_bulges`, an index dimension (max(DNA, RNA) + 1 as the
+  web writes it, max(DNA, RNA) as complete-search does), and opened on the largest, where the
+  search draws the population plots of 0 to its mismatches + DNA + RNA bulges (WEB-4): a web
+  search of 4 mismatches and no bulge opened on 5, which has no plot ("No result found for this
+  combination of mismatches and bulges"), and a web search of 4 + 2 + 2 could not select its
+  sites of 8, nor a complete-search of 4 + 1 + 1 its sites of 6. It offers 0 to mismatches + DNA
+  + RNA, up to the cap on them together (Max edits, `--max-total-edits`), and opens on that; a
+  job written before the DNA and RNA lines of its parameters is shown as before. Covered by
+  `PostProcess/test_web_results_links.py` (in the image).

@@ -6553,6 +6553,17 @@ def update_content_tab(
             nuclease = (next(s for s in params.split("\n") if "Nuclease" in s)).split(
                 "\t"
             )[-1]
+            # the bulges of each type the search took (DNA, RNA), and its cap on mismatches
+            # and bulges together (Max_total_edits): None for a job written before either
+            def _param_int(key):
+                try:
+                    return int(next(s.split("\t")[-1] for s in params.split("\n")
+                                    if s.startswith(key + "\t")))
+                except (StopIteration, ValueError):
+                    return None
+
+            bulge_dna, bulge_rna = _param_int("DNA"), _param_int("RNA")
+            max_total_edits = _param_int("Max_total_edits")
     except OSError as e:
         raise e
     # initialize page layout list
@@ -7297,7 +7308,18 @@ def update_content_tab(
                 )
             )
         )
-        total = int(mms) + int(max_bulges)
+        # The totals the search drew the population plots for, 0 to its mismatches + DNA +
+        # RNA bulges (submit_job_automated_new_multiple_vcfs.sh), up to its cap on them
+        # together, past which a site has none. It took mismatches + Max_bulges, an index
+        # dimension (max(DNA, RNA) + 1 from the web, max(DNA, RNA) from the CLI): a job with
+        # no bulges opened on a total with no plot, and one of 2 DNA and 2 RNA bulges could
+        # not reach its sites of 8 (WEB-4).
+        if bulge_dna is None or bulge_rna is None:
+            total = int(mms) + int(max_bulges)  # (a job written before the two)
+        else:
+            total = int(mms) + bulge_dna + bulge_rna
+        if max_total_edits is not None:
+            total = min(total, max_total_edits)
         opt_mm = [{"label": str(i), "value": str(i)} for i in range(total + 1)]
         opt_blg = [
             {"label": str(i), "value": str(i)} for i in range(int(max_bulges) + 1)

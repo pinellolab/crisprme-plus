@@ -373,6 +373,46 @@ class TestGraphicalReportsCaption(_Tmp):
 
 
 @_NEEDS_DASH
+class TestGraphicalReportsTotals(_Tmp):
+    """The Graphical Reports selector of the total of mismatches and bulges, which opens on
+    its largest. The search draws the population plots of totals 0 to its mismatches + DNA +
+    RNA bulges, and finds no site past its cap on them together (Max_total_edits). The
+    selector offered up to mismatches + Max_bulges, an index dimension, max(DNA, RNA) + 1 as
+    the web writes it and max(DNA, RNA) as complete-search does (WEB-4): a web job with no
+    bulges opened on a total with no plot ("No result found"), and one of 2 DNA and 2 RNA
+    bulges, or a complete-search one of 1 and 1, could not reach its sites of most edits."""
+
+    def _totals(self, job, params):
+        d = self._job(job, log="Job\tDone\tFri\n")
+        with open(os.path.join(d, ".Params.txt"), "w") as f:
+            f.write("".join(f"{k}\t{v}\n" for k, v in {
+                "Genome_selected": "hg38", "Genome_ref": "hg38",
+                "Genome_idx": "NRG_2_hg38+hg38_x", "Pam": "NRG", **params,
+                "Nuclease": "SpCas9", "Ref_comp": "True"}.items()))
+        dropdown = _by_id(rp.update_content_tab(
+            "tab-summary-graphical", [{"row": 0}], "CFD", [{"Guide": GUIDE}], f"?job={job}",
+            "both"), "mm-dropdown")
+        return [int(o["value"]) for o in dropdown.options], int(dropdown.value)
+
+    def test_the_totals_are_the_search_s(self):
+        for job, params, last in (
+                # the web: Max_bulges max(DNA, RNA) + 1
+                ("web400_ABC", {"Max_bulges": 1, "Mismatches": 4, "DNA": 0, "RNA": 0,
+                                "Max_total_edits": 4}, 4),
+                ("web422_ABC", {"Max_bulges": 3, "Mismatches": 4, "DNA": 2, "RNA": 2,
+                                "Max_total_edits": 8}, 8),
+                # complete-search: Max_bulges max(DNA, RNA), and a cap of 6 by default
+                ("cli411_ABC", {"Max_bulges": 1, "Mismatches": 4, "DNA": 1, "RNA": 1,
+                                "Max_total_edits": 6}, 6),
+                ("cli622_ABC", {"Max_bulges": 2, "Mismatches": 6, "DNA": 2, "RNA": 2,
+                                "Max_total_edits": 6}, 6),
+                # a job written before the DNA, RNA and Max_total_edits lines: as before
+                ("old_ABC", {"Max_bulges": 2, "Mismatches": 4}, 6)):
+            with self.subTest(job=job):
+                self.assertEqual(self._totals(job, params), (list(range(last + 1)), last))
+
+
+@_NEEDS_DASH
 class TestMatrixCaption(_Tmp):
     def test_variant_is_a_site_whose_reported_alignment_is_a_variant_one(self):
         # The caption under the matrix said VARIANT is a target that exists only because a
