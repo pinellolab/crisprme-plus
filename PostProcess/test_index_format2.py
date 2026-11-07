@@ -1647,3 +1647,42 @@ class AnArchiveSaysItsFormat(_Index):
                 self.assertEqual(f"WARNING: {installed} was built by a newer CRISPRitz" in
                                  out.getvalue(), warned, out.getvalue())
                 self.assertIn("index format 2", err.getvalue() if not warned else out.getvalue())
+
+
+
+class CheckBoundaryRowsChecksEachBlock(unittest.TestCase):
+    """test/index_format2/check_boundary_rows.py checks that each row of a search's integrated
+    results is its genome's bases at its coordinates, in each of the row's blocks: the
+    alignments of the highest CFD score, of the fewest mismatches and bulges, and of the highest
+    CRISPR-Bulge score, which a row reports apart. It named the third highest_CRISPR_Bulge,
+    which the integrated results name highest_CRISPR_BULGE, and so never checked it. It checks
+    each block resultIntegrator.py writes now, and a row that lacks one is wrong."""
+
+    def test_a_wrong_alignment_in_any_block_is_told(self):
+        import importlib.util
+
+        path = os.path.join(os.path.dirname(HERE), "test", "index_format2",
+                            "check_boundary_rows.py")
+        spec = importlib.util.spec_from_file_location("check_boundary_rows", path)
+        rows = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rows)
+        with open(os.path.join(HERE, "resultIntegrator.py")) as fh:
+            blocks = list(dict.fromkeys(re.findall(r'"Start_coordinate_\(([^)]+)\)"', fh.read())))
+        self.assertEqual(len(blocks), 3, blocks)
+        seqs, recs = rows.genome()
+        site = seqs["chrA"][2000:2023]  # the site planted inside chrA, on the + strand
+        good = {"Chromosome": "chrA"}
+        for block in blocks:
+            good.update({f"Start_coordinate_({block})": "2000", f"Strand_({block})": "+",
+                         f"Aligned_protospacer+PAM_REF_({block})": site,
+                         f"Aligned_protospacer+PAM_ALT_({block})": "NA",
+                         f"REF/ALT_origin_({block})": "ref",
+                         f"Variant_info_genome_({block})": "NA"})
+        self.assertEqual(rows.wrong_rows(seqs, recs, [good]), [])
+        for block in blocks:
+            with self.subTest(block=block):
+                moved = dict(good, **{f"Start_coordinate_({block})": "2001"})  # a base off
+                self.assertEqual([bad[0] for bad in rows.wrong_rows(seqs, recs, [moved])], [block])
+                lacking = {k: v for k, v in good.items() if not k.endswith(f"_({block})")}
+                self.assertEqual([bad[0] for bad in rows.wrong_rows(seqs, recs, [lacking])],
+                                 [block])

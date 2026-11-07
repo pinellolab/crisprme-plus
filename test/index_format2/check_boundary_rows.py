@@ -15,9 +15,10 @@ samples -- and runs complete-search on it (reference, and variant per-sample and
 population-level, 4 mismatches and 1 + 1 bulges; NGG, and the 5' TTTV; and NGG under --prune-pam
 off a PAM-less index of an 8-nt flank, in a working directory of its own), with the CRISPRitz on
 PATH. It checks that every run ends well with nothing on stderr, and that every row of the
-integrated results is the genome's own bases at its coordinates: a reference row its reference
-bases, a variant row its reference bases but at its variants' positions (each a variant of the
-dataset), an indel row a target within its chromosome. The --prune-pam search off the 8-nt
+integrated results is the genome's own bases at its coordinates, in each of its three alignments
+(highest CFD, fewest mismatches and bulges, highest CRISPR-Bulge score): a reference row its
+reference bases, a variant row its reference bases but at its variants' positions (each a variant
+of the dataset), an indel row a target within its chromosome. The --prune-pam search off the 8-nt
 flank must give the rows of the dedicated NGG index (format 2; format 1 misses the PAMs within 5
 nt of a contig end, IDX-4). Run inside an image with the tree under test in place, once with each
 engine; --compare then checks that the format-2 results hold every format-1 row that is its
@@ -42,6 +43,8 @@ G = "CTAACAGTTGCTTTTATCAC"
 TTTV_G = "TTTA" + "GACTTCAGATCGGTACCATG"  # a 5' TTTV site
 SAMPLES = ["S1", "S2", "S3", "S4", "S5", "S6"]
 COMP = str.maketrans("ACGTN", "TGCAN")
+# a row's three alignments, as the integrated results name them (resultIntegrator.py)
+BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
 failed = []
 
 
@@ -189,13 +192,17 @@ def table(work, output):
 def wrong_rows(seqs, recs, rows):
     """The rows of a run, as (block, chromosome, start, strand, target, why), that are not
     their chromosome's bases at their coordinates (REF), or those but at the positions of their
-    variants (ALT), each a variant of the dataset; or, an indel row, not within its chromosome."""
+    variants (ALT), each a variant of the dataset; or, an indel row, not within its chromosome.
+    Each of a row's blocks is checked, and a row that lacks one is wrong."""
     snps = {(c, p): (ref, alt) for c, p, ref, alt, _g in recs if len(ref) == len(alt) == 1}
     bad = []
     for row in rows:
-        for block in ("highest_CFD", "fewest_mm+b", "highest_CRISPR_Bulge"):
+        for block in BLOCKS:
             start = row.get(f"Start_coordinate_({block})")
-            if start in (None, "", "NA", "n"):
+            if start is None:
+                bad.append((block, row.get("Chromosome"), None, None, None, "no such block"))
+                continue
+            if start in ("", "NA", "n"):
                 continue
             chrom, strand = row["Chromosome"], row[f"Strand_({block})"]
             ref_al = row.get(f"Aligned_protospacer+PAM_REF_({block})", "")
