@@ -404,7 +404,15 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   chr22 with HGDP + 1000 Genomes (CRISPRitz 2.10.0), an `NGG` search whose variant index was
   `NGG`'s own and whose reference index only the `NRR` one, under its older name or as
   `20-NRR_3_hg38` with no `.pam_build`, said `no installed reference index of hg38`, and wrote
-  the same 2,023 rows, byte for byte, as the dedicated `NGG` indexes.
+  the same 2,023 rows, byte for byte, as the dedicated `NGG` indexes. On chr22 with HGDP + 1000
+  Genomes and the `NRR` indexes alone (CRISPRitz 2.9.1), an `NGG` search with one bulge of each type
+  said it on the console from the command line, and nothing of it in its `log_verbose.txt`; the same
+  search sent with the web form's Submit (`change_url`) said it in its `log_verbose.txt`. Both
+  recorded `Prune_pam auto` and wrote the same 2,023 rows, byte for byte, with nothing on stderr. On
+  a 30 kb genome whose `20-NNNN_2_gn` was built before an N run was put into it, an `NGG` search
+  from the web form says in its log what the 4-nt flank does not index and that the index was built
+  before CRISPRitz 2.9.1, and from the web form of the code before, only that it pruned. Covered by
+  `PostProcess/test_defaults_and_index_flex.py` and `test_prune_flank.py`.
 - **The run and its report name the index that served the search.** `.Params.txt`'s `Genome_idx`
   says what the search asked for, which another index may serve (`NGG_2_hg38` served by
   `NNNNNNNN_3_hg38`), or none at all (IDX-21). The search script now records the indexes it took,
