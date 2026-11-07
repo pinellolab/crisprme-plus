@@ -694,6 +694,30 @@ class AssemblySearchSearchesEachHaplotypeOnItsOwnGenome(_Workdir):
         self.run_search("job", individual="W1")
         self.assertEqual(self.engine.calls, [])
 
+    def test_a_finished_haplotype_search_of_a_genome_changed_since_is_searched_again(self):
+        # the same search parameters and the same folder, but other FASTA files (a bundle
+        # imported again under the path): its finished result, the old sequence's, was
+        # reused (R4-6). It records the genome it was searched from, and is reused only
+        # while that genome is unchanged
+        self.run_search("job", individual="W1")
+        combined = os.path.join(self.cwd, "Results", "job_combined", "job_combined_hg38.tsv")
+        os.remove(combined)
+        _write_genome(self.genome("W1", "maternal"), "CTAACAGTTGCTTTTATCACTGG",
+                      mtime=time.time() - 3600)
+        self.SEQS = {"W1": dict(self.SEQS["W1"], maternal="CTAACAGTTGCTTTTATCACTGG")}
+        self.engine.calls.clear()
+        self.run_search("job", individual="W1")
+        self.assertEqual([c[0] for c in self.engine.calls], ["job_maternal"])
+        self.assertOwnSequences("job", "W1")
+        # one that records none, as CRISPRme 2.8.1 and earlier wrote them: searched again,
+        # as whether its genome changed since cannot be told
+        os.remove(combined)
+        os.remove(os.path.join(self.cwd, "Results", "job_paternal", ".genome_source"))
+        self.engine.calls.clear()
+        self.run_search("job", individual="W1")
+        self.assertEqual([c[0] for c in self.engine.calls], ["job_paternal"])
+        self.assertOwnSequences("job", "W1")
+
     def test_a_bundle_imported_again_with_other_content_is_indexed_again(self):
         self.run_search("one", individual="W1")
         _write_genome(self.genome("W1", "maternal"), "CTAACAGTTGCTTTTATCACTGG", mtime=time.time() - 3600)

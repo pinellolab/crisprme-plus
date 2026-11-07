@@ -712,3 +712,11 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   command, and says that in the web app, whose Settings page downloads no index that is
   installed, the index is removed there first. Covered by `PostProcess/test_crisprme_hf.py` and
   `test_index_resolution.py`.
+- **assembly-search searches a haplotype again when its FASTA files changed since its
+  result.** A run of the same `--output` reused a finished haplotype search whose parameters
+  and genome folder were the run's, whatever the folder held: after a bundle was imported
+  again under the same path with other FASTA files, the result of the old sequence was
+  reconciled (R4-6). Each haplotype's result records the genome it was searched from (the
+  folder and the fingerprint of its FASTA files, as an index records it), and a run reuses it
+  only while the genome is that one; a result of CRISPRme 2.8.1 or earlier, which records
+  none, is searched again. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.

@@ -687,6 +687,49 @@ def stamp_built_haplotype_indexes(cwd: str, genome_view: str, present_before: Li
             print(f"Note: could not record which genome {os.path.basename(index_dir)} holds ({e})")
 
 
+def haplotype_genome_source(cwd: str, genome_view: str) -> Dict:
+    """Which genome a search of `genome_view` reads, as an index records it
+    (`.genome_source`): the genome folder and its `genome_fingerprint`.
+
+    Raises:
+        OSError: When the genome folder cannot be read.
+    """
+    return {"genome": _genome_identity(cwd, genome_view),
+            "fingerprint": genome_fingerprint(genome_view)}
+
+
+def record_haplotype_source(results_dir: str, source: Optional[Dict]) -> None:
+    """Writes into a haplotype's finished result folder which genome it was searched from,
+    `source` (`haplotype_genome_source`, taken as the search began), as its
+    `.genome_source`, as an index records it. Never fails the run: a result that records
+    none is searched again by the next run (`haplotype_source_matches`)."""
+    if source is None:
+        return
+    try:
+        _write_index_source(results_dir, source)
+    except OSError as e:
+        print(f"Note: could not record which genome {os.path.basename(results_dir)} was "
+              f"searched from ({e}): the next run searches it again")
+
+
+def haplotype_source_matches(cwd: str, results_dir: str, genome_view: str) -> bool:
+    """Whether the finished haplotype result in `results_dir` was searched from the genome
+    `genome_view` holds now: its `.genome_source` names that genome folder and its
+    `genome_fingerprint` of now. `haplotype_params_match` compares the folder's path
+    alone, so the result of a bundle whose FASTA files changed under that path (imported
+    again, say) was reused (R4-6). A result that records none, one of an earlier CRISPRme,
+    is not: whether the files changed since cannot be told."""
+    record = _read_index_source(results_dir)
+    if record is None:
+        return False
+    try:
+        now = haplotype_genome_source(cwd, genome_view)
+    except OSError:
+        return False
+    return (record.get("genome"), record.get("fingerprint")) == (now["genome"],
+                                                                 now["fingerprint"])
+
+
 def stamp_index_source(cwd: str, genome_dir: str, index_dir: str) -> None:
     """Writes into `index_dir`, an index a complete-search has just built from
     `genome_dir`, which genome it holds (`.genome_source`, as

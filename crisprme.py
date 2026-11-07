@@ -220,7 +220,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
     DEFAULT_HF_REPO,
 )
 from utils import download_reference_genome  # noqa: E402
-from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file, haplotype_genome_view, clear_stale_haplotype_indexes, stamp_built_haplotype_indexes, stamp_index_source, foreign_index_sources, haplotype_search_name, unrecorded_index_dirs  # noqa: E402
+from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file, haplotype_genome_view, clear_stale_haplotype_indexes, stamp_built_haplotype_indexes, stamp_index_source, foreign_index_sources, haplotype_search_name, unrecorded_index_dirs, haplotype_genome_source, record_haplotype_source, haplotype_source_matches  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
 from assembly_annotate import add_annotation_column, add_closest_gene_columns  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
@@ -6523,6 +6523,13 @@ def _run_haplotype_search(
             f"An index of {os.path.basename(genomedir)} under genome_library/ holds "
             f"another genome and could not be removed ({e}). Remove it and run again."
         )
+    # Which genome the search reads, as it begins: its result records it once it ends,
+    # and a later run reuses the result only while the genome is still that one
+    # (haplotype_source_matches; none recorded, it searches again)
+    try:
+        source = haplotype_genome_source(current_working_directory, genomedir)
+    except OSError:
+        source = None
     try:
         code = subprocess.call(cmd, shell=True, cwd=current_working_directory)
     finally:
@@ -6534,7 +6541,14 @@ def _run_haplotype_search(
             f"Haplotype search failed for --output {output_name}! See "
             f"{os.path.join(output_folder, 'log_error.txt')} for details"
         )
+    record_haplotype_source(output_folder, source)
     return output_folder
+
+
+# Why a finished haplotype result of the same search parameters is searched again
+# (haplotype_source_matches)
+_CHANGED_HAPLOTYPE = ("results of the haplotype's FASTA files before they changed, or of a "
+                      "search that recorded no genome (CRISPRme 2.8.1 or earlier)")
 
 
 def assembly_search() -> None:
@@ -6677,17 +6691,21 @@ def assembly_search() -> None:
     # successfully -- e.g. a retry after a failure that only affected
     # reconciliation (a chromAlias/liftOver issue, say), not the searches
     paternal_complete = haplotype_search_complete(paternal_output_dir)
-    paternal_reusable = paternal_complete and haplotype_params_match(
+    paternal_same_search = paternal_complete and haplotype_params_match(
         paternal_output_dir, paternal_search_genome, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
         max_total_edits,
     )
+    paternal_reusable = paternal_same_search and haplotype_source_matches(
+        current_working_directory, paternal_output_dir, paternal_search_genome)
     if paternal_reusable:
         print(f"Found existing completed paternal search results at Results/{paternal_output_name}, reusing (not re-running)")
         paternal_results = paternal_output_dir
     else:
         if paternal_complete:
             clean_incomplete_haplotype_output(
-                paternal_output_dir, reason="results built with different search parameters"
+                paternal_output_dir,
+                reason=(_CHANGED_HAPLOTYPE if paternal_same_search
+                        else "results built with different search parameters"),
             )
         else:
             clean_incomplete_haplotype_output(paternal_output_dir)
@@ -6698,17 +6716,21 @@ def assembly_search() -> None:
         )
 
     maternal_complete = haplotype_search_complete(maternal_output_dir)
-    maternal_reusable = maternal_complete and haplotype_params_match(
+    maternal_same_search = maternal_complete and haplotype_params_match(
         maternal_output_dir, maternal_search_genome, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
         max_total_edits,
     )
+    maternal_reusable = maternal_same_search and haplotype_source_matches(
+        current_working_directory, maternal_output_dir, maternal_search_genome)
     if maternal_reusable:
         print(f"Found existing completed maternal search results at Results/{maternal_output_name}, reusing (not re-running)")
         maternal_results = maternal_output_dir
     else:
         if maternal_complete:
             clean_incomplete_haplotype_output(
-                maternal_output_dir, reason="results built with different search parameters"
+                maternal_output_dir,
+                reason=(_CHANGED_HAPLOTYPE if maternal_same_search
+                        else "results built with different search parameters"),
             )
         else:
             clean_incomplete_haplotype_output(maternal_output_dir)
