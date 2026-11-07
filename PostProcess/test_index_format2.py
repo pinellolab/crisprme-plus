@@ -224,7 +224,10 @@ class _Engine(unittest.TestCase):
 
     def engine(self, index_format=2, version=None):
         """Put on PATH a CRISPRitz whose crispritz.py states ``index_format`` (None: none,
-        as 2.9.1's), or none at all with ``index_format`` False."""
+        as 2.9.1's), or none at all with ``index_format`` False: then a folder of PATH that
+        holds the installed one (the Docker image's /opt/conda/bin, a source or a Bioconda
+        install's) gives way to one of links to all else it holds, so that bash, sed and
+        python are found as before."""
         path = [p for p in os.environ.get("PATH", "").split(os.pathsep)
                 if not p.startswith(os.path.join(self.tmp, "engine"))]
         if index_format is not False:
@@ -232,8 +235,19 @@ class _Engine(unittest.TestCase):
             stub_engine(folder, version or ("2.9.1" if index_format is None else "2.10.0"),
                         index_format)
             path.insert(0, folder)
+        else:
+            path = [self.without_crispritz(p) if shutil.which("crispritz.py", path=p) else p
+                    for p in path]
         os.environ["PATH"] = os.pathsep.join(path)
         return os.environ["PATH"]
+
+    def without_crispritz(self, folder):
+        """A folder of links to all ``folder`` holds but its crispritz.py."""
+        links = tempfile.mkdtemp(prefix="bin_without_crispritz_", dir=self.tmp)
+        for name in os.listdir(folder):
+            if name != "crispritz.py":
+                os.symlink(os.path.join(os.path.abspath(folder), name), os.path.join(links, name))
+        return links
 
 
 class TheFormat2TreeIsTold(unittest.TestCase):
@@ -526,19 +540,31 @@ class _Index(_Engine):
 class TheInstalledEngineSaysWhatItReads(_Engine):
     """index_fit reads the index format the installed CRISPRitz reads from its crispritz.py
     (INDEX_FORMAT, which CRISPRitz states from 2.10.0; 2.9.1 states none and reads format 1
-    only), and the search script reads the same."""
+    only), and the search script reads the same. Each case is told on this host's PATH, and
+    on one whose only folder holds an installed CRISPRitz 2.9.1 beside the bash and sed the
+    search script runs, as the Docker image's /opt/conda/bin holds its crispritz.py beside
+    python. The case of none takes the installed one off PATH and leaves bash and sed: it
+    was told on a PATH that still held it, and failed wherever CRISPRitz is installed (the
+    release image, a source or a Bioconda install)."""
 
     def test_from_its_crispritz_py(self):
-        for stated, version, fmt, readable in ((2, "2.10.0", 2, (1, 2)), (None, "2.9.1", 1, (1,)),
-                                               (False, None, None, (1, 2))):
-            with self.subTest(stated=stated):
-                self.engine(stated)
-                self.assertEqual(index_fit.engine_index_format(), fmt)
-                self.assertEqual(index_fit.engine_version(), version)
-                self.assertEqual(index_fit.readable_formats(), readable)
-                out = subprocess.run(["bash", "-c", f"{_shell()}\n_engine_index_format"],
-                                     capture_output=True, text=True, env=dict(os.environ))
-                self.assertEqual((out.stdout, out.stderr), (f"{fmt or 2}\n", ""))
+        installed = stub_engine(os.path.join(self.tmp, "installed"), "2.9.1", None)
+        for tool in ("bash", "sed"):
+            os.symlink(shutil.which(tool), os.path.join(installed, tool))
+        for path in (os.environ.get("PATH", ""), installed):
+            for stated, version, fmt, readable in ((2, "2.10.0", 2, (1, 2)),
+                                                   (None, "2.9.1", 1, (1,)),
+                                                   (False, None, None, (1, 2))):
+                with self.subTest(path="installed" if path == installed else "host",
+                                  stated=stated):
+                    os.environ["PATH"] = path
+                    self.engine(stated)
+                    self.assertEqual(index_fit.engine_index_format(), fmt)
+                    self.assertEqual(index_fit.engine_version(), version)
+                    self.assertEqual(index_fit.readable_formats(), readable)
+                    out = subprocess.run(["bash", "-c", f"{_shell()}\n_engine_index_format"],
+                                         capture_output=True, text=True, env=dict(os.environ))
+                    self.assertEqual((out.stdout, out.stderr), (f"{fmt or 2}\n", ""))
 
 
 class AFormat2IndexIsReadNotRefused(_Index):
