@@ -60,13 +60,14 @@ named a command a web search cannot pass: both sentences that say to re-run the 
 per-sample (the Search mode row and the caption of the variant combinations), the commands that
 get the tiers, and every sentence that names `--report-full` (the variant-created list and
 subset, the raw integrated results, the dense windows, the observed-haplotypes companion the
-slim zip leaves out); its other three are R4-4's names, P14 and N7, each recorded here. Of the audit's test
-additions (plan 4.5), the leftover INDELS folder (build-index-only's "Indels index already present"
-of an INDELS index without its sub-indexes: a behaviour, not a test). Of R6B: the cigate items F1
-(the scan guard that saw no skip of a method), F2 and F3 (the wiring guards a YAML comment
-satisfied, and the logs of a job its time limit cancels) and F4 (the SKIP_HEAVY wording), with FFR
-RV1-WEB2-6 (a test helper's open file); emptyidx RV1-2, RV2-2 and R3-1 (T-40's "always a broken
-build"). Plan 4.1's FUTURE_WORK figure (~17–19%, a raw count, beside METHODS §8's).
+slim zip leaves out); its other three are R4-4's names, P14 and N7, each recorded here. Of the
+audit's test additions (plan 4.5), the leftover INDELS folder (build-index-only's "Indels index
+already present" of an INDELS index without its sub-indexes: a behaviour, not a test). Of R6B:
+the cigate items F1 (the scan guard that saw no skip of a method), F2 and F3 (the wiring guards
+a YAML comment satisfied, and the logs of a job its time limit cancels) and F4 (the SKIP_HEAVY
+wording), with FFR RV1-WEB2-6 (a test helper's open file); emptyidx RV1-2, RV2-2 and R3-1
+(T-40's "always a broken build"). Plan 4.1's FUTURE_WORK figure (~17–19%, a raw count, beside
+METHODS §8's).
 
 *Found fixed already (checked on this branch):* P8 (fixed in 2.8.1: the tier path writes the REF
 protospacer's mismatches in lower case, as the dictionary path does, CHANGELOG [2.8.1], covered by
