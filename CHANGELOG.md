@@ -24,8 +24,9 @@ and the `release-crisprme` skill.
     site of a reference or SNP row that starts near the anchor. README guide, HGDP + 1000
     Genomes: chr22:21052642 (−) of 2.8.1, a CFD-0 alignment of T>TCACC at 21052640, 4 bases
     from the reference row at 21052638 (−), is now 21052639, one of that row's alternative
-    alignments, and the reference row's `Other_motifs` goes 2 → 3 (2 again with the SNP-row fix
-    below, which takes off that site's SNP-only alternative alignment).
+    alignments, and the reference row's `Other_motifs` goes 2 → 3 (per-sample, 2 again with the
+    SNP-row fix below, which takes off that site's SNP-only alternative alignment; a
+    population-level run, which that fix leaves alone, keeps 3).
   - Within a site, the alignments that name the same variants with the same carriers are one
     entry, the best: one target's alignments with different bulges, as on every row. The merge
     compares indel rows there at their cluster position on the haplotype carrying the indel,
@@ -166,8 +167,10 @@ and the `release-crisprme` skill.
   - chr22, README guide, released 2.8.1 image against 2.8.2: NRG per-sample 1 row (21052639,
     TGG → NA), NRR per-sample 5: 21052639 (TGG → NA); 25415044 (−), whose PAM is wholly bases
     of an insertion (NA → CAA); and three alignments of 44115947 (+), now 44115944 and
-    44115946, wholly inside a 37- or 33-base insertion (NA → TAA). TRAC guide, per-sample: 2
-    rows and 6 alternative alignments, 28013783 (+), wholly inside an insertion (NA → CAG), and
+    44115946, wholly inside a 37- or 33-base insertion (NA → TAA). TRAC guide, per-sample: 3
+    rows and 6 alternative alignments: 28013783 (+), wholly inside an insertion (NA → CAG);
+    49196564 (−), which 2.8.1 listed as an alternative alignment of 49196601 (−) and which is
+    now the row of a site of its own, at its insertion's anchor (above; NA → GGG); and
     50193928 (−), the second-copy example above, its row and its 6 alternative alignments,
     other alleles of that insertion, whose PAM is inserted bases (NA → GAG). In the SNP+indel
     oracle Z2 (wholly inserted) reads TGG, Z4 NA and Z5 TGG (partly inserted), and T, T2 and
@@ -250,8 +253,9 @@ and the `release-crisprme` skill.
     `MinAF_bound` is the pair's marginal bound and does not change). Population-level searches
     give the same tables with and without this fix (2,198 → 2,197 rows, by the fix above).
     Where rows go, the CRISPR-Bulge score of another alignment scored in the same batch can
-    move in its last printed digit (NRR 38558318 (−): 3.56555e-16 → 3.56556e-16; 3 alignments
-    in these searches); no block's choice of alignment changes.
+    move in its last printed digits (NRR 38558318 (−): 3.56555e-16 → 3.56556e-16; 3 alignments
+    in these searches); that changes no block's choice of alignment (the one block that
+    changes, NRR 47366716 (−) above, changes because its alignment went).
   - Cost (per-sample searches only): the SNP post-analysis reads the indels of the store near
     each chromosome's SNP targets (839,234 of its 17.2 million genome-wide, 3 to 46 s a
     chromosome, in parallel) and reads a carrier's bases only where it holds one that changes a

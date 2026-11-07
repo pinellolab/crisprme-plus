@@ -648,7 +648,10 @@ its PAM holds those inserted bases) and the REF ends with the anchor's complemen
 the target's first aligned base to the variant's POS base, the first base being 1: on
 the + strand counted from the left, POS − start; on the − strand from the right,
 len(`Aligned_spacer+PAM`) + 1 − (POS − start), less the deleted bases for a deletion, its REF
-and ALT reverse-complemented. A variant before the target's first base is 1 on the + strand and
+and ALT reverse-complemented. The number shown is its absolute value: a deletion that
+reaches past the target's far end makes it negative (TRAC guide, chr22:48378297 (−), 21
+bases deleted at 48378315: 24 + 1 − 18 − 21 = −14, shown 14, as in 2.8.1). A variant
+before the target's first base is 1 on the + strand and
 the last on the − strand. On an indel row the distance is counted along the haplotype carrying
 the indel, the target's own bases: the bases an insertion adds count, those a deletion removes
 do not. So a SNP past an indel is len(ALT) − len(REF) bases further along the target than along
