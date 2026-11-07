@@ -134,7 +134,7 @@ def generate(wd):
     # this very target there, and the inserted copy's PAM is not created. At T2 it adds TGG
     # before the reference's AGG: the REF alignment, read from the row's start, holds AGG in
     # the PAM's columns, a valid PAM at the PAM's place: not created either (the row is
-    # judged on its REF alignment, as up to 2.8.1; 2.8.2's first inserted-PAM rule took
+    # judged on its REF alignment, as up to 2.8.1; 2.10.0's first inserted-PAM rule took
     # both for created). The reference's own target represents each site in a
     # population-level run, which writes no alternative alignments: checked per-sample.
     for site, t, after, sample in (("T", 1500, "TGG", "S62"), ("T2", 2500, "AGG", "S63")):
@@ -501,7 +501,7 @@ def generate_cas12a(wd):
         var(site, "ins", c2, "T", "T" + "GTT", {sample: "1|0"})
         expect[site] = {"perfect": [sample], "pam_creation": {sample: made}}
     # At C2 the reference holds the same target one base left (TTTA + the spacer at 1298):
-    # the indel row, at the insertion's anchor 1299, is an alignment of that site (2.8.2),
+    # the indel row, at the insertion's anchor 1299, is an alignment of that site (2.10.0),
     # and with no CFD to rank them (5' PAM) the reference row represents it; a
     # population-level run writes no alternative alignments, so it is checked per-sample.
     expect["C2"]["per_sample_only"] = True
@@ -1077,7 +1077,7 @@ def check(wd, pp, result_dirs):
             # names; an unphased one carries every allele the row names, and is listed
             # PUTATIVE with the strongest target its own alleles allow on the row's alignment
             # (putative_stronger). 75ff25b's rewrite of this loop kept the occurrences for
-            # the start only and dropped the first two checks; restored in 2.8.2 with the
+            # the start only and dropped the first two checks; restored in 2.10.0 with the
             # third, which up to 8d3f278 fails at site U: the merge keyed an indel row by its
             # target alone, and S19, resolved with the reference base where that base is a
             # DNA bulge of one alignment, went onto another alignment of the same target,
@@ -1104,7 +1104,7 @@ def check(wd, pp, result_dirs):
             # the start is the reference coordinate of the target's first base on a
             # carrier's haplotype, or, for a base an insertion adds, the insertion's
             # anchor (up to 2.8.1 the base's place on the haplotype, past the anchor), of an
-            # occurrence that holds the row's variants. Up to the oracle of 2.8.2 a row with
+            # occurrence that holds the row's variants. Up to the oracle of 2.10.0 a row with
             # no carrier occurrence within 40 bp of its start was not checked here, and an
             # occurrence that did not hold its variants counted.
             if samples:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Variant_info_spacer+PAM on indel rows (resultIntegrator.py, 2.8.2), through the REAL
+"""Variant_info_spacer+PAM on indel rows (resultIntegrator.py, 2.10.0), through the REAL
 integrator on bestMerge rows.
 
 A SNP row's variants are numbered by their distance from the row's start along the
@@ -11,7 +11,7 @@ the reference: a SNP past an insertion was len(ALT) - len(REF) bases short (long
 strand), also on a row starting on a base an insertion adds, which 2.8.1 placed at that
 base's place on the haplotype (a SNP before that place got the first number, on the -
 strand the last), and one past a deletion as many long (short). Numbered along the
-reference from the insertion's anchor, where 2.8.2 places such a row, it would be short
+reference from the insertion's anchor, where 2.10.0 places such a row, it would be short
 (long) by the inserted bases the target holds, less one (Z3: 8 for 13). SNP rows, and an
 indel row's own indel, keep their numbers.
 

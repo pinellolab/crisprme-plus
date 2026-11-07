@@ -99,11 +99,11 @@ there), `Variant_info_spacer+PAM` at D, M2, R and Z3 (variants numbered along th
 D's SNP at the PAM's last base, past a deletion, read 24 for 23, R's 5 for 6, M2's 3 for 1,
 Z3's 4 for 13), `PAM_creation` at Z5 (NA, read from the REF text at the haplotype place),
 and X2's target on two rows; and the `cas12a` profile 47 times, at C1, C2, C2B, C3 and C5.
-With only the first 2.8.2 commit (d7a6fff, rows at the anchor) it fails 60 and 24 times:
+With only the first 2.10.0 commit (d7a6fff, rows at the anchor) it fails 60 and 24 times:
 `Variant_info_spacer+PAM` as above (Z3: 8), `PAM_creation` at I, Z2 and X (NA) and Z4 (TGG),
 read from the REF text at the anchor, and C2; and at X the TGG target is on no row: it
 shares the anchor, the variant and the carrier with the AGG one, and the merge folded the
-two into one entry. On 43809d3, with the other 2.8.2 fixes but the merge still comparing a
+two into one entry. On 43809d3, with the other 2.10.0 fixes but the merge still comparing a
 site's alignments at their cluster position on the reference, that fails 3 times. There and
 on c3a75fe, whose inserted-PAM rules judged every row, also one that starts on a reference
 base, the PAMs of T and T2, and the `cas12a` profile's C6, read as created: 11 and 4
@@ -132,7 +132,7 @@ covers: the phased indel genotype store holds only records whose REF and ALT dif
 length, so an MNV's phase is unknown to the post-analysis, and such a carrier gets the
 strongest target its own alleles allow, PUTATIVE, as an unphased carrier does (site U).
 
-## SNP rows (2.8.2, `snp_rows.py`)
+## SNP rows (2.10.0, `snp_rows.py`)
 
 A SNP row's carriers came from SNP genotypes alone, so up to 2.8.1 it listed a carrier whose
 haplotype holding its SNPs also holds an indel inside the target, though that haplotype does

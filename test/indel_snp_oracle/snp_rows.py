@@ -1,4 +1,4 @@
-"""The SNP+indel oracle's SNP-row part (2.8.2): sites Y1-Y4, and a per-sample check of
+"""The SNP+indel oracle's SNP-row part (2.10.0): sites Y1-Y4, and a per-sample check of
 every SNP-only row's carriers against their haplotypes. oracle.py calls ``plant`` from
 ``generate`` and ``check`` from its ``check``.
 
@@ -7,7 +7,7 @@ genome holds SNPs only, so up to 2.8.1 a SNP row's carriers came from SNP genoty
 and it listed every carrier of its SNPs, also one whose haplotype holding them has an indel
 inside the target, though that haplotype does not have the row's sequence (an HGDP + 1000
 Genomes row: chr22:21052638 -, its SNP 21052641 G>A on the same 1,448 haplotypes as
-21052640 T>TCACC). Since 2.8.2 a per-sample SNP row does not list such a carrier.
+21052640 T>TCACC). Since 2.10.0 a per-sample SNP row does not list such a carrier.
 
 Stdlib only.
 """

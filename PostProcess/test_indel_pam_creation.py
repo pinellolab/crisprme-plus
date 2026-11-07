@@ -22,7 +22,7 @@ insertion in the protospacer read bases len(REF) - len(ALT) away, and a PAM the 
 already has was flagged as created: the WALK panel's rows chr2:10000 (rsW_J_del) and
 chr3:20000 (rsW_N_del + rsW_N14) showed PAM_creation TGG over a reference TGG.
 
-Since 2.8.2 a PAM holding bases an insertion adds follows the inserted-PAM rules (wholly
+Since 2.10.0 a PAM holding bases an insertion adds follows the inserted-PAM rules (wholly
 inserted: created; partly: the reference PAM beside the protospacer) on a row that starts
 inside the insertion, at its anchor, and keeps the REF alignment's reading, as up to 2.8.1,
 on a row that starts on a reference base: on a tandem duplication of a PAM's bases the REF
@@ -278,14 +278,14 @@ class IndelPamCreation(unittest.TestCase):
         ns = _ns(_row(g + "TGG", token, anchor), ref_aligned, genome=genome)
         self.assertEqual(ns["final_result"][PAM_GEN], "TGG")
 
-    # -- a PAM made of bases an insertion adds (2.8.2) ----------------------------------
+    # -- a PAM made of bases an insertion adds (2.10.0) ----------------------------------
 
     def test_a_wholly_inserted_pam_was_created_by_the_insertion(self):
         """- strand, 3' PAM (the oracle's Z2): the target's leftmost bases, its PAM CCA
         (TGG on -), are the 3rd to 5th bases an insertion adds. The PAM has no reference
         bases: created, whatever the reference holds beside the anchor (up to 2.8.1 the
         REF alignment's window was read, from the row's start: on Z2 TGG on the reference
-        hid it, and 2.8.2's first fix read it at the anchor)."""
+        hid it, and 2.10.0's first fix read it at the anchor)."""
         g = self.GUIDE
         fwd = _revcomp(g + "TGG")      # CCA + the guide's complement
         # the anchor and the reference after it: the REF alignment's window from the
@@ -347,7 +347,7 @@ class IndelPamCreation(unittest.TestCase):
             self.assertIsNone(ns["_reference_pam"](row, ref_aligned, hap))
             self.assertEqual(ns["final_result"][PAM_GEN], "TGG")
 
-    # -- a row that starts on a reference base keeps 2.8.1's reading (2.8.2) -------------
+    # -- a row that starts on a reference base keeps 2.8.1's reading (2.10.0) -------------
 
     def test_a_tandem_duplication_of_the_pam_on_a_row_that_does_not_move(self):
         """+ strand, 3' PAM: G>GTGG after the protospacer copies the three bases after it,
@@ -355,7 +355,7 @@ class IndelPamCreation(unittest.TestCase):
         bases the insertion adds, and the row starts on its first base, a reference one: it
         does not move. Its REF alignment, the reference from that start, is its ALT: the
         reference holds this very target there, with the same PAM, and the insertion
-        created nothing. NA, as up to 2.8.1; 2.8.2's first version of the inserted-PAM rule
+        created nothing. NA, as up to 2.8.1; 2.10.0's first version of the inserted-PAM rule
         took the PAM for created (TGG) wherever the row starts (TRAC, HGDP + 1000 Genomes:
         chr22:20586277 (+), alternative alignments with REF = ALT)."""
         g = self.GUIDE
@@ -459,7 +459,7 @@ class IndelPamCreation(unittest.TestCase):
         """+ strand, 3' PAM: the protospacer ends at the insertion's anchor and the PAM is
         two added bases and a reference one. The row starts on a reference base and keeps
         its REF alignment's window, the three bases after the anchor, which here is the
-        reference PAM beside the protospacer (no change in 2.8.2 for this geometry)."""
+        reference PAM beside the protospacer (no change in 2.10.0 for this geometry)."""
         g = self.GUIDE
         for after, made in (("AGG", "n"), ("GTA", "TGG")):
             genome = "N" * 50 + g + after + "N" * 20

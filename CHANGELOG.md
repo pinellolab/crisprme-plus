@@ -45,9 +45,9 @@ and the `release-crisprme` skill.
     DNA-bulge alignment). TRAC guide (CTCTCAGCTGGTACACGGCA), HGDP + 1000 Genomes, per-sample:
     two alleles of chr22:50193929 that insert 96 bases, a 48-base unit twice, with one carrier
     each, hold the CFD-0 alignment CTACTCAGgaGGgACA-GGCtGAG (−) in both copies; 2.8.1 listed it
-    at 50193950 and 50193998, 2.8.2 once per allele at 50193928, so the insertion's 2 rows and
+    at 50193950 and 50193998, 2.10.0 once per allele at 50193928, so the insertion's 2 rows and
     7 alternative alignments of 2.8.1 are 1 row and 6 alternative alignments. Genome-wide,
-    2.8.1's tables merged as 2.8.2 merges them: of the alignments that start inside an
+    2.8.1's tables merged as 2.10.0 merges them: of the alignments that start inside an
     insertion, the highest-CFD ones, 5 of 371 (229 rows and 142 alternative alignments) are
     such a second copy in the README search per-sample, 1 of 228 rows population-level and 22
     of 444 (251 and 193) with the TRAC guide per-sample, all at CFD 0.004 or less; per-sample,
@@ -57,7 +57,7 @@ and the `release-crisprme` skill.
     adds no step per inserted base. HPRC holds 402 insertions of 53.9 to 54.4 kb at
     chr22:10690626, and the README guide's chr22 search puts 16,058 rows inside them, now all at
     their anchor (2.8.1: at most 760 rows at one cluster position). On that index, the released
-    2.8.1 image and 2.8.2 side by side on one host, per-sample: each of the three merges takes
+    2.8.1 image and 2.10.0 side by side on one host, per-sample: each of the three merges takes
     4.4 to 4.6 s against 3.1 to 3.5 s, and the merge step, which is mostly sorting, 77 to 80 s
     against 54 to 56 s (its sorts by cluster position now meet those rows at one place: the
     highest-CFD file, shuffled, sorts in 15.3 s against 9.8 s); population-level 4.6 and 77 s
@@ -67,7 +67,7 @@ and the `release-crisprme` skill.
     base-by-base one on 4,000 random rows; the Python lines it runs do not grow with the
     insertion) and `test_representative_tiebreak` (one target's 20 alignments inside a 54 kb
     insertion: one reading).
-  - The same search on chr22, released 2.8.1 image against 2.8.2 without the SNP-row fix (the
+  - The same search on chr22, released 2.8.1 image against 2.10.0 without the SNP-row fix (the
     last entry below, which gives the counts with it): per-sample, 1,574 → 1,573 integrated
     rows and 3,756 → 3,757 alternative alignments (21052642 joins 21052638's site; that site's
     two alternative alignments go 1 → 2 and the moved row, now one of them, loses
@@ -114,7 +114,7 @@ and the `release-crisprme` skill.
     per-sample, 229 highest-CFD rows (233 rows in any block) of 170,660 started so, a median of
     8 and up to 229 bases past the anchor, 95 of them on a tandem duplication; none at CFD ≥ 0.2
     (highest 0.155); and 151 of 468,715 alternative alignments. Population-level: 232 rows.
-    chr22 alone, released 2.8.1 image against 2.8.2: NRG, per-sample, 4 rows move to their
+    chr22 alone, released 2.8.1 image against 2.10.0: NRG, per-sample, 4 rows move to their
     anchor (17434488 (+) → 17434485, 21052642 (−) → 21052639, 29300189 (+) → 29300175, 32435001
     (−) → 32434998), their REF alignment and REF seed and non-seed counts with them, and at
     32434998 `CRISPR_BULGE_score_REF` and `CRISPR_BULGE_risk_score`; population-level 3,
@@ -146,11 +146,11 @@ and the `release-crisprme` skill.
     keeps 1 on the + strand, the last on the − strand. chr22:21052639 (−) above: its SNP
     G>A at 21052641 is numbered 22 (the target's 21st base: on the − strand an RNA
     bulge adds one, as on SNP rows), which 2.8.1 clamped to 24.
-  - chr22, README guide, released 2.8.1 image against 2.8.2: NRG per-sample 2 rows (21052639 (−)
+  - chr22, README guide, released 2.8.1 image against 2.10.0: NRG per-sample 2 rows (21052639 (−)
     and 33013162 (−), a deletion and two SNPs past it: 17, 13 → 18, 14), population-level 1
     (33013162), NRR per-sample 6 (also SNPs past a deletion at 12298466 (−), 32526400 (+),
     25271097 (+) and 34192005 (+), the last one read 26 in a 24-column target, now 21).
-    Genome-wide, 2.8.1's tables of the NRG searches numbered as 2.8.2 numbers them: README
+    Genome-wide, 2.8.1's tables of the NRG searches numbered as 2.10.0 numbers them: README
     guide, per-sample, of the 5,951 rows whose highest-CFD alignment holds an indel, 239 change
     (165 with a SNP past a deletion, 57 past an insertion, 17 starting inside one), and 81 of
     2,710 such alternative alignments; population-level, 231 of 5,923; TRAC guide, per-sample,
@@ -179,7 +179,7 @@ and the `release-crisprme` skill.
     of two more copies of the 16-base unit the reference repeats after it, the same alignment
     as its site's reference row). And in every case a row whose REF alignment is its ALT has
     its PAM on the reference at its start: NA.
-  - chr22, README guide, released 2.8.1 image against 2.8.2: NRG per-sample 1 row (21052639,
+  - chr22, README guide, released 2.8.1 image against 2.10.0: NRG per-sample 1 row (21052639,
     TGG → NA), NRR per-sample 5: 21052639 (TGG → NA); 25415044 (−), whose PAM is wholly bases
     of an insertion (NA → CAA); and three alignments of 44115947 (+), now 44115944 and
     44115946, wholly inside a 37- or 33-base insertion (NA → TAA). TRAC guide, per-sample: 3
@@ -191,7 +191,7 @@ and the `release-crisprme` skill.
     oracle Z2 (wholly inserted) reads TGG, Z4 NA and Z5 TGG (partly inserted), and T, T2 and
     the Cas12a profile's C6 (an insertion that copies the bases a reference PAM sits on, or
     adds a PAM before another reference PAM, on a row that starts on a reference base) NA.
-  - Genome-wide, 2.8.1's tables with each row's `PAM_creation` computed by 2.8.2's code
+  - Genome-wide, 2.8.1's tables with each row's `PAM_creation` computed by 2.10.0's code
     (2.8.1's code gives back every value in them): README guide, per-sample, highest-CFD
     alignments, 57 whose PAM is wholly inserted bases go NA → created (26 rows and 31
     alternative alignments) and, partly, 18 NA → created (14 and 4) and 3 rows created → NA;
@@ -209,7 +209,7 @@ and the `release-crisprme` skill.
   not created), and has a Cas12a profile (5′ PAM TTTV, both strands, rows starting inside an
   insertion, PAMs wholly and partly inserted, a tandem duplication of a PAM (C6), a SNP past a
   deletion). The released v2.8.1 image fails these checks 104 times (SpCas9) and 47 times
-  (Cas12a); with 2.8.2's first fix alone (rows at the anchor) 60 and 24. Unit tests:
+  (Cas12a); with 2.10.0's first fix alone (rows at the anchor) 60 and 24. Unit tests:
   `test_indel_variant_positions` (the real integrator), `test_indel_pam_creation`,
   `test_indel_row_coordinates` (rows starting inside an insertion, rows whose PAM an insertion
   adds after a reference protospacer, 3′ and 5′ PAMs, both strands), `test_indel_snp_cis` and
@@ -246,7 +246,7 @@ and the `release-crisprme` skill.
     (highest CFD 0.049). chr22 alone: 3 rows and 7 alternative alignments. After the fix,
     checked the same way genome-wide: none, but for 2 listings whose indel sits at the position
     of the row's SNP (a phasing artefact, kept as at an indel row's own position).
-  - The same search on chr22, released 2.8.1 image against 2.8.2, per-sample: 1,574 → 1,570
+  - The same search on chr22, released 2.8.1 image against 2.10.0, per-sample: 1,574 → 1,570
     integrated rows and 3,756 → 3,753 alternative alignments (without this fix, 1,573 and
     3,757). This fix takes off the rows at 26806221 (−), 27144006 (+) and 30569221 (−), and the
     alternative alignments at 21052638 (−), 27795808 (−), 42848613 (−) and 44756100 (+), whose

@@ -47,10 +47,10 @@ def _rep_tiebreak(x):
     among rows with carriers only: the rows of a sites-only index (mega) have none and
     their REF alignment was never upper case, so their ties stay in the sort's order.
 
-    2.8.2: two alignments of one indel target string can share their aligned DNA too, since
+    2.10.0: two alignments of one indel target string can share their aligned DNA too, since
     the merge keys an indel row by its aligned spacer as well. Those with one carrier set are
     folded into one entry (_fold_same_carriers), and an exact tie between them keeps the
-    input order, in which the merge kept the first of them before 2.8.2.
+    input order, in which the merge kept the first of them before 2.10.0.
     """
     try:
         _samples = str(x[true_guide - 2])
@@ -128,7 +128,7 @@ def _haplotype_cluster_position(row, memo=None):
     Cluster_Position plus how far past its start its first aligned base is there.
 
     That is the Cluster_Position itself, except on a row whose first base is one an
-    insertion adds. Since 2.8.2 such a row starts at the insertion's anchor
+    insertion adds. Since 2.10.0 such a row starts at the insertion's anchor
     (indel_snp_cis.reference_start), while its first base is the k-th added base, k bases
     past the anchor on the haplotype, which the row's bases tell
     (indel_snp_cis.row_first_base). So two alignments that start on different bases of
@@ -143,7 +143,7 @@ def _haplotype_cluster_position(row, memo=None):
     ``memo`` (a dict, one per cluster) keeps the offset by what it is read from: the
     Position, strand and variants, and the bases of the target and REF text, gaps and case
     aside, as row_first_base reads them. The aligned spacer is not among them, and since
-    2.8.2 the merge keys an indel row by it as well, so every alignment of a target comes
+    2.10.0 the merge keys an indel row by it as well, so every alignment of a target comes
     here; without the memo each read the haplotype again, the whole ALT for a row at the
     anchor of a long insertion."""
     cluster = int(row[pos])
@@ -170,7 +170,7 @@ def _fold_same_carriers(rows, fold_of, snp_info):
 
     The cluster position is the one on the haplotype (_haplotype_cluster_position): one
     site's alignments there, the bulged ones folding into the best, as up to 2.8.1. Since
-    2.8.2 alignments that start on different bases of one insertion share its anchor and
+    2.10.0 alignments that start on different bases of one insertion share its anchor and
     one site; on the Cluster_Position alone they would fold into one entry, and all but
     the best would leave both tables. They are other targets of the haplotype (2.8.1
     reported them at their own starts), and stay: the site's row and its alternatives."""
@@ -219,7 +219,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             list_ref.append(ele)
         else:
             # merge samples of identical targets (coming from different VCF datasets).
-            # Since 2.8.2 a row that starts on a base an insertion adds starts at its
+            # Since 2.10.0 a row that starts on a base an insertion adds starts at its
             # anchor, so two copies of one target inside one insertion (a repeat it
             # holds), the same bases with the same carriers, are such identical rows too:
             # one entry, at the anchor (2.8.1 reported each at its own start).
@@ -229,7 +229,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             # can name the same variants with different carriers: an RNA-bulge alignment
             # does not reach the base a SNP sits on, so it holds carriers of that SNP
             # that the full alignment does not. So only rows with one sequence merge here.
-            # And only rows with one alignment of it (2.8.2): a carrier resolved PUTATIVE
+            # And only rows with one alignment of it (2.10.0): a carrier resolved PUTATIVE
             # (phase unknown) gets the strongest target its own alleles allow on each
             # alignment (indel_snp_cis.worst_case_bases): the guide's base where the
             # alignment pairs a SNP's base with a guide base, the CFD's choice (the

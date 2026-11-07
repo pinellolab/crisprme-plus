@@ -1393,14 +1393,14 @@ def _reference_pam(final_result, ref_aligned, hap_start=None):
 
     * A row whose REF alignment is its ALT: the reference holds this very target at the
       row's start, PAM included, and the REF alignment's bases are returned (not created),
-      whatever the rules below would read (since 2.8.2).
+      whatever the rules below would read (since 2.10.0).
     * A PAM on reference bases only: the bases it sits on, read through the indel. A PAM
       past the indel on the target -- on the + strand for a 3' PAM, on the - strand for
       a 5' one -- sits len(REF) - len(ALT) bases from where the row's REF alignment, read
       from the row's start, puts it (alignRefFromVar), so up to 2.8.0 a deletion or an
       insertion in the protospacer read the wrong bases there, and a PAM the reference
       already has was flagged as created.
-    * On a row whose first base is one an insertion adds (since 2.8.2 it starts at the
+    * On a row whose first base is one an insertion adds (since 2.10.0 it starts at the
       insertion's anchor, and ``hap_start`` differs from its start), whose REF alignment,
       read from the anchor, is reference bases its target does not start on:
       - a PAM made wholly of bases the insertion adds has no reference bases at all: None;

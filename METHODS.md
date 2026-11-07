@@ -397,7 +397,7 @@ efficient, and each enumerated haplotype carries its **exact set of carriers**
 **excluded** by construction. A SNP row's target is the reference with the SNP alleles
 of a haplotype (the enriched genome holds SNPs only), so it is not the sequence of a
 haplotype that also holds an indel changing the target's bases: that haplotype's own
-target there is the indel row's, when it is in budget. Since 2.8.2 a per-sample SNP row
+target there is the indel row's, when it is in budget. Since 2.10.0 a per-sample SNP row
 does not list such a carrier. The carriers are read against the phased indel genotype
 store the indel post-analysis reads (§4, SNP+indel), as an indel row's second indel is:
 - an indel changes the target when it deletes or replaces a base of the target's span
@@ -590,7 +590,7 @@ in a search that scores no CFD, where the other leaves it as a DNA bulge), and t
 cluster's rows, which otherwise keeps one row per position and variant list, keeps one per
 carrier set there, so that no carrier is added to a sequence it does not have, nor to an
 alignment it was not resolved on (the merge keys an indel row by its aligned spacer as well as
-by its target, since 2.8.2: up to 2.8.1 the alignments of one target string were one entry
+by its target, since 2.10.0: up to 2.8.1 the alignments of one target string were one entry
 whatever their carriers, and in the SNP+indel oracle's site U the unphased S19 was listed with
 the reference base on the alignment where its alleles give the guide's base); of the alignments
 with one carrier set it keeps the best by the order that picks each block's representative (the
@@ -644,7 +644,7 @@ which 2.8.1 folded into that copy's row, then has no row of its own copy to fold
 listed as one of the site's alternative alignments (the SNP+indel oracle's X2). With the TRAC
 guide (CTCTCAGCTGGTACACGGCA) on that index, two alleles of chr22:50193929 that insert 96 bases,
 a 48-base unit twice, with one carrier each, hold the CFD-0 alignment CTACTCAGgaGGgACA-GGCtGAG
-(−) in both copies, which 2.8.1 listed at 50193950 and 50193998 and 2.8.2 lists once per
+(−) in both copies, which 2.8.1 listed at 50193950 and 50193998 and 2.10.0 lists once per
 allele, at 50193928. Such a row's ALT alignment begins mid-insertion: on the + strand its first
 bases are the last bases the insertion adds that the target holds (TTAT, the 7th to 10th of
 G>GCAATCATTAT, in a 2.8.0 alternative alignment at chr22:22322768). Its REF alignment holds the
@@ -683,10 +683,10 @@ chr22:21052639 has one, and its SNP is the target's 21st base.
 reference holds a PAM there; on an indel row:
 
 - a row whose REF alignment is its ALT has its target, PAM included, on the reference at its
-  start: NA (since 2.8.2);
+  start: NA (since 2.10.0);
 - a PAM on reference bases only is read on those bases, through the indel (since 2.8.1);
 - on a row that starts inside an insertion, whose REF alignment, read from the anchor, is
-  reference bases its target does not start on (since 2.8.2):
+  reference bases its target does not start on (since 2.10.0):
   - a PAM made wholly of bases the insertion adds has no reference bases: the insertion created
     it (in the oracle's Z2 the ALT's TGG);
   - a PAM that holds some of them is compared with the reference PAM beside the protospacer:
@@ -721,7 +721,7 @@ the reference holds could be reported as created (chr22:21052639 (−), whose re
 beside the protospacer: TGG, now NA), and a PAM the insertion made as not created (Z5: NA, now
 TGG). A row that starts on a reference base is judged as before: its REF alignment is the
 reference at its own place. Genome-wide, on 2.8.1's tables (2.8.1's code gives back every value
-in them), 2.8.2's code changes these alignments only, all of them starting inside an insertion:
+in them), 2.10.0's code changes these alignments only, all of them starting inside an insertion:
 with the README guide, per-sample, of the highest-CFD alignments 57 whose PAM is wholly
 inserted bases go NA → created (26 rows and 31 alternative alignments) and, partly, 18 NA →
 created (14 and 4) and 3 rows created → NA; population-level 26, 14 and 3 rows; with the TRAC
@@ -1359,7 +1359,7 @@ none of its 13,853,761 indels has one, and their per-dataset frequencies are in 
 release (HPRC's chrY log needs rebuilding with it). The phased indel genotype store
 leaves out equal-length multi-base records (MNVs), so their carriers are resolved with the
 phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
-among its 195,813 indel-search records. Since 2.8.2 a per-sample SNP row does not list a
+among its 195,813 indel-search records. Since 2.10.0 a per-sample SNP row does not list a
 carrier whose haplotype holding its SNPs also holds an indel that changes the target's bases
 (§4); up to 2.8.1 it did, and so it does with `CRISPRME_INDEL_SNP=0`. What remains: an MNV
 inside the target, which the phased indel store does not hold (the HGDP + 1000 Genomes index

@@ -21,7 +21,7 @@ Before 2.8.1 an RNA-bulge row took the cluster position on the + strand with a 3
 and on the - strand with a 5' PAM, so it started one base before its first aligned base,
 and the REF text of an RNA,DNA row, and of a 5' PAM RNA-bulge row, was a base off.
 
-Since 2.8.2 a target whose first base is one an insertion adds starts at the insertion's
+Since 2.10.0 a target whose first base is one an insertion adds starts at the insertion's
 anchor, and its PAM_gen follows the inserted-PAM rules (INSIDE); a target whose PAM an
 insertion adds right after a reference protospacer does not move, and its PAM_gen is the
 REF alignment's reading, as up to 2.8.1 (DUPS: on a tandem duplication of the PAM's bases,
@@ -130,7 +130,7 @@ class _Planted(object):
         return rows
 
 
-# Targets whose first base (the leftmost, forward) is one an insertion adds (2.8.2):
+# Targets whose first base (the leftmost, forward) is one an insertion adds (2.10.0):
 # (strand, the target as shown, how many of its leftmost forward bases the insertion
 # adds, the added bases before them, the reference base before the anchor). The row
 # starts at the insertion's anchor; its PAM is reference bases, wholly inserted bases,
@@ -187,7 +187,7 @@ class _PlantedInsertions(object):
 
 
 # Targets whose PAM is wholly bases an insertion adds, on a row that starts on a reference
-# base (2.8.2): the protospacer is reference bases up to the insertion's anchor, its last
+# base (2.10.0): the protospacer is reference bases up to the insertion's anchor, its last
 # base, and the insertion adds the PAM's bases right after it. (strand, the target as
 # shown, the reference's bases after the protospacer (forward), the expected PAM_gen.) The
 # row does not move, and its PAM is judged on its REF alignment, the reference from its
@@ -395,7 +395,7 @@ class RowCoordinates(unittest.TestCase):
         not move), its REF text is the reference from there, and its PAM_gen is the REF
         alignment's reading, as up to 2.8.1: NA where the insertion copies the reference's
         own PAM (REF = ALT) or the reference holds another valid PAM there, the ALT's PAM
-        where it holds none. 2.8.2's first inserted-PAM rule took every such PAM for
+        where it holds none. 2.10.0's first inserted-PAM rule took every such PAM for
         created (TRAC, HGDP + 1000 Genomes: chr22:20586277 (+), REF = ALT)."""
         p = _PlantedDuplications(side)
         got = self.analyze(p, side, gate)

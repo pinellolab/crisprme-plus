@@ -50,17 +50,17 @@ ASSERTS:
     branch. Controls: more carriers, a smaller aligned DNA, a smaller Position or a
     higher CFD still win over it; rows without carriers (a sites-only index) keep the
     order of the merge step's sort.
-  * Alignments that start inside one insertion (2.8.2: all at its anchor): two targets
+  * Alignments that start inside one insertion (2.10.0: all at its anchor): two targets
     of the insertion with one carrier set both stay, the site's row and an alternative
     alignment, on both strands; two copies of one target are one row; a bulged alignment
     of one target, before the same PAM, still folds into the best (as up to 2.8.1).
-  * Two alignments of one indel target string (2.8.2: the merge keys an indel row by its
+  * Two alignments of one indel target string (2.10.0: the merge keys an indel row by its
     aligned spacer too): a carrier resolved PUTATIVE stays on the alignment it was resolved
     on (the SNP+indel oracle's site U, S19); one alignment from two VCF datasets is still
     one entry; alignments of one target with one carrier set are one entry, the best; carrier
     sets are compared whole (an alignment whose carriers are a subset of a better one's keeps
     its entry), the same entries in every order.
-  * Cost (2.8.2): one target's alignments inside a 54 kb insertion, each its own aligned
+  * Cost (2.10.0): one target's alignments inside a 54 kb insertion, each its own aligned
     spacer, have their place on the haplotype read once per target, not once per alignment
     (indel_snp_cis.row_first_base, counted in a fresh interpreter).
 
@@ -488,7 +488,7 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
 
 
 class OneTargetTwoAlignments(unittest.TestCase):
-    """2.8.2: an indel row merges only with rows of its own alignment, its target and its
+    """2.10.0: an indel row merges only with rows of its own alignment, its target and its
     aligned spacer the same.
 
     A carrier resolved PUTATIVE (phase unknown) is listed with the strongest target its own
@@ -621,7 +621,7 @@ class OneTargetTwoAlignments(unittest.TestCase):
 
 
 class AlignmentsStartingInsideOneInsertion(unittest.TestCase):
-    """2.8.2: a row whose first base is one an insertion adds starts at the insertion's
+    """2.10.0: a row whose first base is one an insertion adds starts at the insertion's
     anchor (indel_snp_cis.reference_start), so alignments that start on different bases
     of one insertion have one Position and one Cluster_Position, and are one site.
 
@@ -751,7 +751,7 @@ sys.stderr.write("ROW_FIRST_BASE_CALLS %d\\n" % len(calls))
 
 
 class OneTargetsAlignmentsInsideALongInsertion(unittest.TestCase):
-    """2.8.2, cost: the merge reads a row's place on the haplotype carrying its indel
+    """2.10.0, cost: the merge reads a row's place on the haplotype carrying its indel
     (_haplotype_cluster_position) once per target, REF text, place and variants, not once
     per aligned spacer, which the merge also keys an indel row by.
 

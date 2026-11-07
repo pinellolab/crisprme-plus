@@ -197,7 +197,7 @@ jobs:
         run: |
           # A small reference with SpCas9 sites that need an indel, a SNP or both, in
           # cis, in trans, unphased and as two indels on one haplotype; build-index-only
-          # then complete-search both ways, and every indel row (and, since 2.8.2, the
+          # then complete-search both ways, and every indel row (and, since 2.10.0, the
           # carriers of every per-sample SNP-only row) is checked against each
           # carrier's own haplotype built from the VCF (test/indel_snp_oracle): the PAM,
           # the CFD of the row's alignment, its mismatches, that every listed carrier has

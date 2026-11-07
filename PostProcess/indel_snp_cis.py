@@ -495,7 +495,7 @@ def reference_start(offset, indel_pos1, indel_start, ref, alt):
 
 
 # ---------------------------------------------------------------------------
-# Counting along an indel row's target (2.8.2)
+# Counting along an indel row's target (2.10.0)
 # ---------------------------------------------------------------------------
 # A SNP row's target is reference bases, and Variant_info_spacer+PAM numbers each of
 # its variants by its distance from the row's start along the reference
@@ -505,7 +505,7 @@ def reference_start(offset, indel_pos1, indel_start, ref, alt):
 # each variant's base on it. Up to 2.8.1 they were numbered along the reference, so a
 # variant past the indel was off by len(ALT) - len(REF), also on a row starting on a
 # base an insertion adds, which 2.8.1 placed at that base's place on the haplotype;
-# counted along the reference from the insertion's anchor, where 2.8.2 places such a
+# counted along the reference from the insertion's anchor, where 2.10.0 places such a
 # row, it would be off by the inserted bases the target holds, less one.
 
 
@@ -762,7 +762,7 @@ def holds_target_bases(ways, value):
 
 
 # ---------------------------------------------------------------------------
-# A SNP row's carrier whose haplotype holds an indel inside the target (2.8.2)
+# A SNP row's carrier whose haplotype holds an indel inside the target (2.10.0)
 # ---------------------------------------------------------------------------
 # A SNP row is a target on the reference with SNP alleles: the enriched genome holds
 # no indel, so its carriers are read from SNP genotypes. A carrier whose haplotype

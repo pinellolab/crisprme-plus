@@ -1,5 +1,5 @@
 """A SNP row's carrier whose haplotype holding the row's SNPs also holds an indel that
-changes the target's bases (2.8.2).
+changes the target's bases (2.10.0).
 
 The enriched genome holds SNPs only, so a SNP row's carriers come from SNP genotypes. Up
 to 2.8.1 a carrier whose haplotype also held an indel inside the target was listed,

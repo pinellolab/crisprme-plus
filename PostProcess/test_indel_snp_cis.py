@@ -340,7 +340,7 @@ def test_reference_start_flank_and_anchor_are_their_own_place():
 
 def test_reference_start_on_an_added_base_is_the_insertions_anchor():
     # chr22:22322762 G>GCAATCATTAT (HGDP1kGP): a target starting at the 7th added base
-    # was placed 6 bases past the POS, at its haplotype place, before 2.8.2
+    # was placed 6 bases past the POS, at its haplotype place, before 2.10.0
     for k in range(1, 11):
         assert _start(25 + k, "G", "GCAATCATTAT") == W + 25
     assert _start(25 + 11, "G", "GCAATCATTAT") == W + 26     # past it: the reference
@@ -371,7 +371,7 @@ def test_reference_start_agrees_with_offset_to_real_on_reference_bases():
                 assert _start(off, ref, alt) == real, (ref, alt, off)
 
 
-# --- counting along an indel row's target (variant_places, 2.8.2): a variant's place on
+# --- counting along an indel row's target (variant_places, 2.10.0): a variant's place on
 # the haplotype carrying the indel, and the row's first base there.
 
 
@@ -504,7 +504,7 @@ def _row_first_base_base_by_base(strand, start, alt_aligned, ref_aligned, indel,
 
 
 def test_row_first_base_equals_the_base_by_base_reading():
-    """2.8.2: row_first_base cuts the haplotype in slices and finds the target with
+    """2.10.0: row_first_base cuts the haplotype in slices and finds the target with
     str.find. On 4,000 random rows (plain, unnormalized, complex and anchorless insertions,
     deletions and MNVs; rows at the anchor, on it and near it; both strands; gaps and lower
     case; SNPs in and out of the window, a multi-base one now and then; low-complexity
@@ -564,7 +564,7 @@ def test_row_first_base_equals_the_base_by_base_reading():
 
 
 def test_row_first_base_cost_does_not_grow_with_the_insertion():
-    """2.8.2: a row at the anchor of a long insertion is placed without a Python step per
+    """2.10.0: a row at the anchor of a long insertion is placed without a Python step per
     inserted base. HPRC holds 402 insertions of 53.9 to 54.4 kb at chr22:10690626, and built
     base by base (as up to c3a75fe) a row there took 83 ms: the merge's 16,058 rows of the
     README guide inside them took most of its 27 minutes. The lines of indel_snp_cis run for

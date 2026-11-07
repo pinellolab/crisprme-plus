@@ -74,7 +74,7 @@ except Exception:  # module absent in an old deploy -> legacy dict path only
     _obshap = None
     _phase_companion = None
     _snpsnp_companion = None
-# 2.8.2: a SNP row's carrier whose haplotype holding the row's SNPs also holds an indel
+# 2.10.0: a SNP row's carrier whose haplotype holding the row's SNPs also holds an indel
 # that changes the target's bases does not have the row's sequence there (the enriched
 # genome holds SNPs only, so the carriers come from SNP genotypes). In a per-sample
 # search such a carrier leaves the row, read on the phased indel genotype store the
@@ -636,7 +636,7 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
 
 
 # ---------------------------------------------------------------------------------
-# 2.8.2: a SNP row's carrier whose haplotype also holds an indel inside the target
+# 2.10.0: a SNP row's carrier whose haplotype also holds an indel inside the target
 # ---------------------------------------------------------------------------------
 # Verdicts on a carrier's haplotype, the values of observed_haplotypes.KEEP / DROP /
 # PUTATIVE (repeated here so the dictionary path needs no observed_haplotypes).
@@ -1197,7 +1197,7 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     #    IUPAC candidate). The ``enumerate_observed_haplotypes`` contract never yields
     #    the empty/reference haplotype, so the reference row is our responsibility here.
     #    A carrier's haplotype that also holds an indel changing the target's bases
-    #    does not have this sequence: the slot filter takes it out (2.8.2; None, the
+    #    does not have this sequence: the slot filter takes it out (2.10.0; None, the
     #    2.8.1 enumeration, when no indel of the phased store changes the target).
     slot_filter = _snp_row_slot_filter(split)
     haplotypes = _obshap.enumerate_observed_haplotypes(
@@ -1247,7 +1247,7 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
         for _h in haplotypes:
             _samples |= _h.carriers
         # the samples with an alt in the window, also the ones whose haplotype an indel
-        # took off the window's rows (2.8.2): the BED lists the window, not its targets
+        # took off the window's rows (2.10.0): the BED lists the window, not its targets
         if slot_filter is not None:
             _samples |= {_s for _s, _v in slot_filter.dropped}
         _start = int(split[4])
@@ -1303,7 +1303,7 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
     if haplotype_check:
         totalDict[1] = dict()
         totalDict[1][0] = dict()
-    # 2.8.2 (per-sample): the carriers whose haplotype also holds an indel that changes
+    # 2.10.0 (per-sample): the carriers whose haplotype also holds an indel that changes
     # the target leave its rows (None: no indel of the phased store changes it, or a
     # population-level search: the 2.8.1 rows). snp_unphased: the carriers with an
     # unphased SNP call in this window, whose slot is unknown.
@@ -1571,7 +1571,7 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         ]
         if revert:
             refSeq = reverse_complement_table(refSeq)
-        snp_kept = {}  # variant set -> the carriers its combinations keep (2.8.2)
+        snp_kept = {}  # variant set -> the carriers its combinations keep (2.10.0)
         for count in totalDict:
             createdNewLayer = True
             # capped -> range(0): the single greedy entry is already in level 0
@@ -1656,7 +1656,7 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                                         totalDict[count][lo][lk][1] - hv[1]
                                     )
 
-            # 2.8.2 (per-sample, not the capped worst case): a carrier whose haplotype
+            # 2.10.0 (per-sample, not the capped worst case): a carrier whose haplotype
             # also holds an indel that changes the target's bases leaves the combination
             # it is on (its slot here, ``count``, on a phased dataset).
             if snp_filter is not None and not capped:
@@ -2385,7 +2385,7 @@ def _read_snp_row_indels(spans, needed_keys):
 _iupac_spans = []
 try:
     _needed_keys = _collect_needed_dict_keys(sys.argv[3], current_chr, _iupac_spans)
-    # 2.8.2: read before the dictionary, which then also reads the alleles around a
+    # 2.10.0: read before the dictionary, which then also reads the alleles around a
     # target an indel of the store changes
     _snp_indels = _read_snp_row_indels(_iupac_spans, _needed_keys)
     mydict, haplotype_check = _load_dict_targeted(sys.argv[2], _needed_keys)
@@ -2480,7 +2480,7 @@ if registry_only_mode and _twopass_emit is not None and (
     if not _FAST_MODE:
         print(f"Sites-only dataset on {current_chr}: population-level post-analysis.")
     _FAST_MODE = True
-# 2.8.2: no carrier to take off a SNP row without genotypes, nor in a population-level
+# 2.10.0: no carrier to take off a SNP row without genotypes, nor in a population-level
 # post-analysis (its rows are worst-case composites)
 if registry_only_mode or _FAST_MODE:
     _snp_indels = None
