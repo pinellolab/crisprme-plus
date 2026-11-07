@@ -1388,40 +1388,39 @@ def _report_overlaid():
 
 def _reference_pam(final_result, ref_aligned, hap_start=None):
     """The reference bases under an indel row's PAM, in the target's orientation, for
-    telling whether the row's indel created its PAM, or None when the PAM has none: the
-    indel (final_result[17]'s first token) created it.
+    telling whether the row's variants created its PAM, or None when the PAM has no place
+    on the reference: its indel (final_result[17]'s first token) created it.
 
+    * A PAM with a bulge in it, or a window shorter than the PAM, keeps the REF
+      alignment's bases.
     * A row whose REF alignment is its ALT: the reference holds this very target at the
-      row's start, PAM included, and the REF alignment's bases are returned (not created),
-      whatever the rules below would read (since 2.10.0).
-    * A PAM on reference bases only: the bases it sits on, read through the indel. A PAM
-      past the indel on the target -- on the + strand for a 3' PAM, on the - strand for
-      a 5' one -- sits len(REF) - len(ALT) bases from where the row's REF alignment, read
-      from the row's start, puts it (alignRefFromVar), so up to 2.8.0 a deletion or an
-      insertion in the protospacer read the wrong bases there, and a PAM the reference
-      already has was flagged as created.
-    * On a row whose first base is one an insertion adds (since 2.10.0 it starts at the
-      insertion's anchor, and ``hap_start`` differs from its start), whose REF alignment,
-      read from the anchor, is reference bases its target does not start on:
-      - a PAM made wholly of bases the insertion adds has no reference bases at all: None;
-      - a PAM holding some of them: the reference PAM next to the target's protospacer, the
-        reference bases beside the protospacer's base that touches the PAM, on the PAM's
-        side (that base and the protospacer are reference bases, the inserted ones being in
-        the PAM). So the question is whether the reference holds a valid PAM there, at the
-        PAM's own place beside that protospacer. When that base too is one the insertion
-        adds (the insertion holds the protospacer's end and the PAM's start), the PAM has no
-        place on the reference: None.
-      Up to 2.8.1 such a row started at its first base's place on the haplotype and its REF
-      alignment's bases were read from there, so on the - strand with a 3' PAM (the + strand
-      with a 5' one), where the start is the PAM's far end, they were len(ALT) - len(REF)
-      bases from the reference PAM beside the protospacer, however many inserted bases the
-      PAM holds.
-    * Any other PAM keeps the REF alignment's bases, as up to 2.8.1: one holding bases an
-      insertion adds on a row that starts on a reference base -- its REF alignment is the
-      reference at the row's own place, which on a tandem duplication of the bases a PAM
-      sits on holds the very PAM the insertion copies --, one that spans a deletion's
-      junction, holds an ALT base standing in a REF base's place (an MNV's) or the bases
-      REF and ALT share, or has a bulge in it.
+      row's start, PAM included: its REF alignment's bases (not created; since 2.10.0).
+    * An insertion or a deletion (since 2.10.0): the PAM is judged where the reference
+      holds it whatever place of its repeat the VCF writes the indel at
+      (indel_snp_cis.pam_reference_place), on the row's haplotype, the reference with the
+      row's indel and SNP alts: the reference bases the PAM sits on in a placement of the
+      indel that leaves it on reference bases; else the reference PAM beside the
+      protospacer's base that touches the PAM, in a placement that leaves that base on the
+      reference; else (an insertion holding that base wherever it is placed) None. Where
+      the VCF's placement leaves the PAM on reference bases, those are the bases read up
+      to 2.8.1, through the indel: a PAM past an indel inside the target sits
+      len(REF) - len(ALT) bases from where the REF alignment, read from the row's start,
+      puts it, which up to 2.8.0 flagged a PAM the reference already has as created.
+      Up to 2.10.0's first fixes a PAM holding bases an insertion adds, or across a
+      deletion's junction, was judged where the VCF writes the indel: on a row that
+      starts on a reference base, on its REF alignment's window, which is not the
+      reference PAM beside the protospacer when the indel lies between them (the - strand
+      with a 3' PAM, the + strand with a 5' one: chr3:154367344 (-), C>CCT, read AGG as
+      created beside a reference GGG; chr22:21056178 (-), CT>C, read the deleted bases,
+      CTC, GAG on -, as not created where the reference holds TCT, AGA on -, beside the
+      protospacer), and on a row that starts inside an insertion by the inserted-PAM
+      rules there, so an insertion of a repeat unit beside a reference PAM, written left
+      of it, read as created (with NRR, chr22:25415044 (-), the same alignment as its
+      site's reference row).
+    * Any other record (an MNV, a complex record whose ALT bases stand in REF bases'
+      places): as up to 2.8.1, a PAM on reference bases read on them through the record,
+      and one holding its ALT bases on the REF alignment's window, the reference under
+      them.
 
     ``hap_start`` is the target's first base on the haplotype carrying the indel (the
     window's real start plus its offset there); it is the row's start except for a row
@@ -1433,34 +1432,34 @@ def _reference_pam(final_result, ref_aligned, hap_start=None):
     if ref_aligned.upper() == final_result[2].upper():
         return window  # the reference holds this very target at the row's start
     try:
-        tok = final_result[17].split(",")[0].split("_")
-        ipos, iref, ialt = int(tok[-3]), tok[-2], tok[-1]
-        row_start = int(final_result[4])
-        start = row_start if hap_start is None else int(hap_start)
+        toks = [x.split("_") for x in final_result[17].split(",")]
+        ipos, iref, ialt = int(toks[0][-3]), toks[0][-2], toks[0][-1]
+        snps = [(int(x[-3]), x[-2], x[-1]) for x in toks[1:]
+                if len(x[-2]) == 1 and len(x[-1]) == 1]
+        start = int(final_result[4]) if hap_start is None else int(hap_start)
     except (IndexError, ValueError):
         return window
     k = len(pam)
     n = len(final_result[2].replace("-", ""))
     # the PAM is at the target's right end, forward strand: + with a 3' PAM, - with a 5'
     right = (final_result[6] == "+") != pam_at_beginning
-    first = start + n - k if right else start
-    if start != row_start:  # the row's first base is one the insertion adds
-        kinds = [_isc.haplotype_base_kind(w, ipos, iref, ialt)
-                 for w in range(first, first + k)]
-        added = sum(1 for kind, _p in kinds if kind == "added")
-        if added == k:
-            return None  # wholly inserted: the insertion created it
-        if added:
-            # the protospacer's base that touches the PAM, and the reference PAM beside it
-            kind, p = _isc.haplotype_base_kind(first - 1 if right else first + k,
-                                                ipos, iref, ialt)
-            if kind == "added":
-                return None  # the insertion holds the protospacer's end and the PAM's start
-            lo = p + 1 if right else p - k
+    place = _isc.pam_reference_place(genomeStr, (ipos, iref, ialt), snps, start, n, k,
+                                     right)
+    if place is not None:
+        if place[0] == "created":
+            return None  # no placement of the insertion gives the PAM a reference place
+        found = []
+        for lo in place[1]:  # its place(s) on the reference: one holding the motif wins
             if not 0 <= lo <= lo + k <= len(genomeStr):
-                return window
+                continue
             ref = genomeStr[lo:lo + k]
-            return (ref if final_result[6] == "+" else reverse_complement_table(ref)).upper()
+            ref = (ref if final_result[6] == "+" else reverse_complement_table(ref)).upper()
+            if all(c in iupac_code_set and iupac_code_set[pam[i]] & iupac_code_set[c]
+                   for i, c in enumerate(ref)):
+                return ref
+            found.append(ref)
+        return found[0] if found else window
+    first = start + n - k if right else start
     reals = []
     for w in range(first, first + k):  # a base's place on the haplotype -> the reference
         if w < ipos - 1:
@@ -1470,7 +1469,7 @@ def _reference_pam(final_result, ref_aligned, hap_start=None):
         else:
             reals.append(w - len(ialt) + len(iref))
     if reals[-1] - reals[0] != k - 1 or not 0 <= reals[0] <= reals[-1] < len(genomeStr):
-        return window  # across a deletion's junction
+        return window
     ref = genomeStr[reals[0]:reals[-1] + 1]
     return (ref if final_result[6] == "+" else reverse_complement_table(ref)).upper()
 
@@ -1507,13 +1506,13 @@ def _queue_row(final_result, hap_start=None):
     # uppercase (the guide carries N there, so those positions always "match" and
     # alignRefFromVar leaves them uppercase), making this defensive only -- but it
     # removes the false-positive class outright rather than relying on that.
-    # The reference bases are those the PAM sits on, read through the indel
-    # (_reference_pam), not the REF alignment's, which is read from the row's start --
-    # except where the REF alignment is the ALT, or the PAM holds bases an insertion adds
-    # on a row that starts on a reference base, which keep the REF alignment's as up to
-    # 2.8.1. A PAM with no reference bases (_reference_pam's None: on a row starting on a
-    # base an insertion adds, a PAM the insertion made) was created by the insertion, and
-    # is written as the SNP path writes a created PAM.
+    # The reference bases are those of the PAM's place on the reference, read through the
+    # indel wherever in its repeat it sits (_reference_pam), not the REF alignment's,
+    # which is read from the row's start -- except where the REF alignment is the ALT
+    # (the reference holds this very target there) or the record is not an insertion or
+    # a deletion. A PAM with no place on the reference (_reference_pam's None: an
+    # insertion that holds the protospacer's base touching the PAM wherever it is placed)
+    # was created by the insertion, and is written as the SNP path writes a created PAM.
     ref_pam = _reference_pam(final_result, ref_aligned, hap_start)
     if ref_pam is None:
         final_result[10] = final_result[2][pam_begin:pam_end].upper()

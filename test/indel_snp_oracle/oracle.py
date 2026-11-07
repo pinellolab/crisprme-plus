@@ -9,9 +9,11 @@
       the far end of the target, with a target in an indel's flank that does not
       hold the indel, with an equal-length multi-base record (an MNV), with
       targets whose first base is one an insertion adds, with an insertion
-      holding two targets, and one holding one target twice, and with insertions
+      holding two targets, and one holding one target twice, with insertions
       after a reference protospacer that copy its PAM (a tandem duplication) or
-      add one before another reference PAM.
+      add one before another reference PAM, and with repeat and non-repeat
+      insertions and a deletion whose PAM is judged wherever in its repeat the
+      VCF writes the indel (2.10.0).
   oracle.py check <workdir> <PostProcess dir> <results dir> [<results dir> ...]
       Builds every sample's two haplotypes from the VCF (a brute-force truth that
       shares no code with CRISPRme's resolution) and checks every row whose variant
@@ -30,6 +32,10 @@
           names, with every named variant on that haplotype; an unphased one carries
           every allele the row names, and the row's target is the strongest its own
           alleles allow on the row's alignment (PUTATIVE: putative_stronger);
+        * Variant_info_spacer+PAM numbers each variant along the target on a carrier's
+          haplotype, and PAM_creation is the ALT's PAM where the variants created it,
+          read over every placement of the row's indel on the haplotype its variants
+          make (expected_pam_creation);
       in the per-sample results, every SNP-only row's carriers have its target at its
       start (snp_rows.py: a carrier whose haplotype holding its SNPs also holds an indel
       inside the target has not);
@@ -60,7 +66,7 @@ import zipfile
 G = "ACTGAAATCTGTAAGCAGGC"  # the guide
 COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 CODES = set("RYSWKMBDHVryswkmbdhv")
-NSAMPLES = 78
+NSAMPLES = 85
 MOTIF_BASES = {"A": "A", "C": "C", "G": "G", "T": "T", "R": "AG", "Y": "CT", "S": "CG",
                "W": "AT", "K": "GT", "M": "AC", "B": "CGT", "D": "AGT", "H": "ACT",
                "V": "ACG", "N": "ACGT"}
@@ -90,7 +96,7 @@ def _snp_rows():
 # --------------------------------------------------------------------------- #
 def generate(wd):
     random.seed(7)
-    length = 18500
+    length = 21000
     seq = [random.choice("ACGT") for _ in range(length)]
     variants = []  # dicts: site, kind, pos1, ref, alt, gts{sample: 'a|b'}
     samples = ["S%02d" % i for i in range(1, NSAMPLES + 1)]
@@ -444,6 +450,60 @@ def generate(wd):
     expect["X"] = {"perfect": ["S60"], "alignments": {"S60": [G + "TGG", G + "AGG"]}}
     expect["X2"] = {"perfect": ["S61"], "one_row": {"S61": G + "TGG"}}
 
+    # 2.10.0: PAMs judged wherever in its repeat the VCF writes the indel (the reference
+    # with the row's variants: a place of the indel that leaves the PAM on reference
+    # bases; else the reference PAM beside the protospacer's base that touches the PAM, on
+    # the reference in some place; else created). Each site's PAM_creation differs from
+    # 2.10.0's first fixes', which judged a PAM holding inserted bases, or a deletion's
+    # junction, where the VCF writes the indel (in brackets).
+    # PR (+), PM (-): a tandem duplication of a 27-base unit holding a whole target; the
+    # VCF writes the copy left of the reference's, and the copy's target starts inside it,
+    # its PAM wholly inserted; placed one unit right, the insertion leaves that PAM on the
+    # reference's own: NA [created]. The reference's target 3 bases on represents each site
+    # in a population-level run: checked per-sample.
+    for site, x0, fwd, sample in (("PR", 18600, G + "TGG", "S79"),
+                                  ("PM", 18900, rc(G + "TGG"), "S80")):
+        unit = "TT" + fwd + "AA"
+        put(x0, "C" + unit + "CGTACGTA")
+        var(site, "ins", x0 + 1, "C", "C" + unit, {sample: "1|0"})
+        expect[site] = {"perfect": [sample], "pam_creation": {sample: "NA"},
+                        "per_sample_only": True}
+    # QC (-): C>CCAG after its anchor C (the PAM's far end, forward), whose first added base
+    # the reference repeats there: in either place it holds the PAM's inner bases and the
+    # protospacer's first forward base, so the PAM has no place on the reference: TGG
+    # [NA: the REF alignment's window from the anchor, CCC, GGG on -].
+    put(19200, "T" + "C" + rc(G)[1:] + "TTAA")
+    var("QC", "ins", 19202, "C", "CCAG", {"S81": "1|0"})
+    expect["QC"] = {"perfect": ["S81"], "pam_creation": {"S81": "TGG"}}
+    # QN (-): C>CCA after its anchor C, no repeat: the protospacer's first forward base is a
+    # reference one, and the reference holds CTC beside it (GAG on -: the reference's own
+    # target, 2 bases left, which represents the site in a population-level run): NA
+    # [TGG: the window from the anchor, CGC, GCG on -].
+    put(19500, "CT" + "C" + rc(G) + "TTAA")
+    var("QN", "ins", 19503, "C", "CCA", {"S82": "1|0"})
+    expect["QN"] = {"perfect": ["S82"], "pam_creation": {"S82": "NA"},
+                    "per_sample_only": True}
+    # QD (-): CA>C deletes the A of CCAG before the protospacer, the junction inside the PAM
+    # CCG (CGG on -): the reference PAM beside the protospacer is CAG (CTG on -): CGG [NA:
+    # the window from the row's start, CCA, TGG on -, the PAM of another protospacer].
+    put(19800, "CCAG" + rc(G) + "TTGCA")
+    var("QD", "del", 19802, "CA", "C", {"S83": "1|0"})
+    expect["QD"] = {"perfect": ["S83"], "pam_creation": {"S83": "CGG"}}
+    # QW (-): TTCCA inserted after its anchor G: a target starts on the 3rd added base, its
+    # PAM CCA (TGG on -) the last three, and the protospacer is the reference's after the
+    # insertion, which holds CCG before it (CGG on -: the reference's own target, which
+    # represents the site in a population-level run): NA [TGG].
+    put(20100, "CCG" + rc(G) + "TTGCA")
+    var("QW", "ins", 20103, "G", "GTTCCA", {"S84": "1|0"})
+    expect["QW"] = {"perfect": ["S84"], "pam_creation": {"S84": "NA"},
+                    "per_sample_only": True}
+    # QA (+): G[16:] + TGG inserted after G[15], no repeat: the protospacer's last four
+    # bases and the PAM are inserted wherever the insertion sits: TGG [NA: the REF
+    # alignment's window from the row's start, AGG].
+    put(20400, G[:16] + "TTTT" + "AGG" + "CATTAC")
+    var("QA", "ins", 20416, G[15], G[15] + G[16:] + "TGG", {"S85": "1|0"})
+    expect["QA"] = {"perfect": ["S85"], "pam_creation": {"S85": "TGG"}}
+
     # (No split multi-allelic SNP records here: CRISPRitz add-variants keeps only the
     # last of two records at one position in the enriched genome and the dictionary,
     # so the other alt is invisible to every stage. PostProcess/
@@ -466,9 +526,9 @@ def generate_cas12a(wd):
     profile's checks (CFD is not computed for a 5' PAM: a perfect row is one with no
     mismatch and no bulge)."""
     random.seed(12)
-    seq = [random.choice("ACGT") for _ in range(3300)]
+    seq = [random.choice("ACGT") for _ in range(3800)]
     variants = []
-    samples = ["S%02d" % i for i in range(1, 10)]
+    samples = ["S%02d" % i for i in range(1, 12)]
     expect = {}
 
     def put(start0, s):
@@ -547,6 +607,22 @@ def generate_cas12a(wd):
     var("C6", "ins", c6 + 20, fwd[19], fwd[19] + fwd[20:], {"S09": "1|0"})
     expect["C6"] = {"perfect": ["S09"], "pam_creation": {"S09": "NA"},
                     "per_sample_only": True}
+
+    # 2.10.0, PAMs judged wherever in its repeat the VCF writes the insertion:
+    # CB1 (+): T>TTT written at the end of a T run (a record left unnormalized): placed three
+    # bases left, as bcftools norm writes it, the insertion leaves the PAM TTTA on the
+    # reference (the reference's own target, which represents the site in a
+    # population-level run): NA [TTTA: the REF alignment's window from the anchor, TAGA].
+    put(3100, "CC" + "TT" + "T" + "A" + S12 + "GGCC")
+    var("CB1", "ins", 3105, "T", "TTT", {"S10": "1|0"})
+    expect["CB1"] = {"perfect": ["S10"], "pam_creation": {"S10": "NA"},
+                     "per_sample_only": True}
+    # CB3 (-): the spacer's last four forward bases and the PAM (TAAA, TTTA on -) inserted
+    # after its 16th, no repeat: TTTA [NA: the window from the row's start, TAAA].
+    f = rc(S12)
+    put(3400, f[:16] + "CCCC" + "TAAA" + "GTCAGT")
+    var("CB3", "ins", 3416, f[15], f[15] + f[16:] + "TAAA", {"S11": "1|0"})
+    expect["CB3"] = {"perfect": ["S11"], "pam_creation": {"S11": "TTTA"}}
 
     _write(wd, seq, variants, samples, expect, "NNNN" + S12, "TTTV-20bp-Cas12a.txt",
            "TTTVNNNNNNNNNNNNNNNNNNNN -4", S12, ["TTTV", "5p"])
@@ -806,57 +882,137 @@ def expected_positions(pos, k, strand, spacer_len, tokens):
     return out
 
 
-def expected_pam_creation(ref, pos, k, n, strand, motif, side, alt):
-    """Whether the variants created the PAM of the occurrence at index ``k`` (forward) of
-    a haplotype, ``n`` bases long, ``alt`` its target as the row aligns it: "created" or
-    "not", or None where this oracle does not say (a PAM with a bulge in it, or across a
-    deletion's junction, which keep the REF alignment's bases).
+def _trims(ref, alt):
+    """The bases REF and ALT share at the start, and then at the end."""
+    c = 0
+    while c < min(len(ref), len(alt)) and ref[c] == alt[c]:
+        c += 1
+    t = 0
+    while t < min(len(ref), len(alt)) - c and ref[-1 - t] == alt[-1 - t]:
+        t += 1
+    return c, t
+
+
+def _row_haplotype(ref, named):
+    """The haplotype a row names, around its indel: the reference with its SNP alts (rs) and
+    its indel (or MNV) applied where the VCF writes it (h0), with h0's place of each
+    reference position. (rs, h0, indel, the changed bases' first reference position A,
+    their REF and ALT parts rm, am); None without an indel or MNV."""
+    rec = next(((p, r, a) for p, r, a in named if len(r) != len(a) or len(r) > 1), None)
+    if rec is None:
+        return None
+    rs = list(ref)
+    for p, r, a in named:
+        if len(r) == 1 and len(a) == 1:
+            rs[p - 1] = a
+    rs = "".join(rs)
+    p, r, a = rec
+    c, t = _trims(r, a)
+    rm, am = r[c:len(r) - t], a[c:len(a) - t]
+    A = p - 1 + c
+    h0 = rs[:A] + am + rs[A + len(rm):]
+    return rs, h0, rec, A, rm, am
+
+
+def expected_pam_creation(ref, f, named, motif, side):
+    """Whether the variants a row names created its PAM: "created" or "not", or None where
+    this oracle does not say (a PAM with a bulge in it, a row whose target is not on the
+    haplotype its variants make at its start). The rule (2.10.0), read the long way, on
+    the haplotype the row's variants make (the reference with its SNP alts and its indel):
       * the reference holds this very target at the row's start (its REF alignment, the
         reference from there, is the target): not created;
-      * on a row whose first base is one an insertion adds (it starts at the anchor):
-        - a PAM made wholly of inserted bases: created, it has no reference bases;
-        - a PAM holding some inserted bases: does the reference hold the motif beside the
-          protospacer, on the PAM's side of the protospacer's base that touches the PAM;
-          created when that base is inserted too (no place on the reference);
-      * a PAM on reference bases: does the reference hold the motif on them;
-      * a PAM holding inserted bases on a row that starts on a reference base: does the
-        row's REF alignment, the reference at its own place, hold the motif in the PAM's
-        columns (as up to 2.8.1: on a tandem duplication of a PAM's bases, the very PAM
-        the insertion copies)."""
+      * an insertion or a deletion: every place of its changed bases that keeps that
+        haplotype (an insertion's bases rotated through its repeat, a deletion's junction
+        moved through it) is built whole, and each base of it mapped to the reference:
+        - a place that leaves the PAM on reference bases: the reference bases there (two
+          places can give two readings when a SNP alt sits in the PAM): created when none
+          of them holds the motif;
+        - else a place that leaves the protospacer's base that touches the PAM on a
+          reference base: is the motif on the reference beside it, on the PAM's side;
+        - else (an insertion that holds that base wherever it sits): created;
+      * an MNV: the reference bases under the PAM, which its bases replace.
+    Up to the oracle of 2.10.0's first fixes, a PAM holding inserted bases was read where
+    the VCF writes the insertion, and a PAM across a deletion's junction was not checked."""
     kp = len(motif)
-    right = (strand == "+") == (side == "3p")
-    idx = range(k + n - kp, k + n) if right else range(k, k + kp)
-    rp = [pos[i] for i in idx]
-    inside = pos[k] is None
-    start = next((q for q in reversed(pos[:k]) if q is not None), None) if inside else pos[k]
-    if start is None:
-        return None
-    refaln = ref[start:start + n]
-    if strand == "-":
-        refaln = rc(refaln)
-    if refaln == alt.replace("-", "").upper():
+    right = (f["strand"] == "+") == (side == "3p")
+    alt = f["alt"]
+    target = alt.replace("-", "").upper()
+    n = len(target)
+    tf = target if f["strand"] == "+" else rc(target)
+    refaln = ref[f["start"]:f["start"] + n]
+    if (refaln if f["strand"] == "+" else rc(refaln)) == target:
         return "not"
     pam_cut = slice(-kp, None) if side == "3p" else slice(0, kp)
     if "-" in alt[pam_cut]:
         return None
-    if any(p is None for p in rp) and not inside:
-        refpam = refaln[pam_cut]
-    elif all(p is None for p in rp):
-        return "created"
-    elif any(p is None for p in rp):
-        p = pos[k + n - kp - 1] if right else pos[k + kp]
-        if p is None:
-            return "created"
-        lo = p + 1 if right else p - kp
-        refpam = ref[lo:lo + kp]
-        refpam = refpam if strand == "+" else rc(refpam)
-    else:
-        if any(b != a + 1 for a, b in zip(rp, rp[1:])):
-            return None
-        refpam = ref[rp[0]:rp[-1] + 1]
-        refpam = refpam if strand == "+" else rc(refpam)
-    ok = len(refpam) == kp and all(b in MOTIF_BASES[m] for b, m in zip(refpam, motif))
-    return "not" if ok else "created"
+    made = _row_haplotype(ref, named)
+    if made is None:
+        return None
+    rs, h0, (p, r, a), A, rm, am = made
+    d, m = len(rm), len(am)
+    # the target's place on h0 that starts where the row starts: its first base's reference
+    # position, or for a base an insertion adds the insertion's anchor
+    starts = []
+    x = h0.find(tf, max(0, A - n - m - 60))
+    while 0 <= x <= A + d + m + 60:
+        if x < A:
+            at = x
+        elif x < A + m:
+            at = A - 1
+        else:
+            at = x - m + d
+        if at == f["start"]:
+            starts.append(x)
+        x = h0.find(tf, x + 1)
+    if not starts:
+        return None
+
+    def holds(bases):
+        b = bases if f["strand"] == "+" else rc(bases)
+        return len(b) == kp and all(c in MOTIF_BASES[mm] for c, mm in zip(b, motif))
+
+    if bool(rm) == bool(am):  # an MNV: no placement but its own
+        verdicts = set()
+        for x in starts:
+            q = x + n - kp if right else x
+            verdicts.add("not" if holds(ref[q:q + kp]) else "created")
+        return verdicts.pop() if len(verdicts) == 1 else None
+    span = m + d + n + kp + 10
+    lo, hi = max(0, A - span), min(len(rs), A + d + span)
+    loc, X = rs[lo:hi], A - lo
+
+    def build(at, ins):
+        if m:
+            return (loc[:at] + ins + loc[at:],
+                    list(range(at)) + [None] * m + list(range(at, len(loc))))
+        return loc[:at] + loc[at + d:], list(range(at)) + list(range(at + d, len(loc)))
+
+    h_loc = build(X, am)[0]
+    maps = []
+    for at in sorted(range(max(0, X - span), min(len(loc) - d, X + span) + 1),
+                     key=lambda y: (y != X, y < X, abs(y - X))):
+        hj, pos = build(at, h_loc[at:at + m])
+        if hj == h_loc:
+            maps.append(pos)
+    verdicts = set()
+    for x in starts:
+        p0 = (x + n - kp if right else x) - lo
+        tb = p0 - 1 if right else p0 + kp
+        free = set()
+        for pos in maps:
+            refs = pos[p0:p0 + kp]
+            if None not in refs and refs == list(range(refs[0], refs[0] + kp)):
+                free.add(ref[lo + refs[0]:lo + refs[0] + kp])
+        if free:
+            verdicts.add("not" if any(holds(b) for b in free) else "created")
+            continue
+        beside = next((lo + pos[tb] for pos in maps if pos[tb] is not None), None)
+        if beside is None:
+            verdicts.add("created")
+        else:
+            q = beside + 1 if right else beside - kp
+            verdicts.add("not" if holds(ref[q:q + kp]) else "created")
+    return verdicts.pop() if len(verdicts) == 1 else None
 
 
 def first_place(pos, k):
@@ -1131,10 +1287,10 @@ def check(wd, pp, result_dirs):
                     fail("%s: Variant_info_spacer+PAM %s, the variants are at %s along the "
                          "target on its carriers' haplotypes" % (where, f["vinfo"],
                                                                  sorted({str(w) for w in want})))
-            # PAM_creation: the ALT's PAM when the variants created it, else NA
-            made = {expected_pam_creation(truth.ref, pos, k, len(seq), f["strand"], motif,
-                                          side, f["alt"])
-                    for _s, pos, k in held} - {None}
+            # PAM_creation: the ALT's PAM when the variants created it, else NA (2.10.0:
+            # judged on the haplotype the row's variants make, wherever in its repeat the
+            # VCF writes its indel)
+            made = {expected_pam_creation(truth.ref, f, named, motif, side)} - {None}
             if made:
                 alt_pam = f["alt"][pam_cut].upper()
                 wholly = all(pos[i] is None

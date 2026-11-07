@@ -1,7 +1,7 @@
 # SNP+indel oracle (synthetic, real CLI)
 
 `run_oracle.sh <empty work dir> [<oracle dir>] [cas12a]` runs inside a CRISPRme image. It
-generates an 18.5 kb reference chromosome and a phased VCF of 78 samples (`oracle.py
+generates a 21 kb reference chromosome and a phased VCF of 85 samples (`oracle.py
 generate`), builds the indexes and dictionaries with `build-index-only`, runs
 `complete-search` with `--per-sample` and with `--population-level`, then checks every row
 whose variant list holds an indel or an MNV (`oracle.py check`) against each sample's two
@@ -31,18 +31,19 @@ being 1; from the right on the - strand, len(aligned spacer) + 1 - distance, les
 deletion's deleted bases; a variant before the first base is 1 on the + strand, the last on
 the - strand). Its `PAM_creation` must be the ALT's PAM when the variants created the PAM, NA
 otherwise: never created when its REF alignment is its ALT (the reference holds the target at
-its start); on a row that starts inside an insertion, a PAM made wholly of inserted bases is
-created always, one holding some inserted bases when the reference PAM beside the protospacer
-(on the PAM's side of the protospacer's base that touches the PAM) lacks the motif, or when
-that base is inserted too; a PAM on reference bases is created when the reference bases it
-sits on lack the motif; and one holding inserted bases on a row that starts on a reference
-base when the row's REF alignment lacks the motif in the PAM's columns. The planted sites then
-pin who has which target:
+its start); otherwise read on the haplotype the row's variants make (the reference with its
+SNP alts and its indel), over every placement of the indel that keeps that haplotype, each
+built whole (an insertion's bases rotated through its repeat, a deletion's junction moved
+through it): created when no placement leaves the PAM on reference bases holding the motif,
+and, where none leaves it on reference bases at all, when the reference PAM beside the
+protospacer's base that touches the PAM lacks the motif in a placement that leaves that base
+on the reference, or when no placement does (an MNV: the reference bases under the PAM). The
+planted sites then pin who has which target:
 
 | Site | Planted | Expected |
 |---|---|---|
 | A | deletion + G>A at the PAM's last base, in cis (S02) and in trans (S03) | S01, S03 CFD 1 (TGG); S02 no target |
-| T, T2 | (+) an insertion after a target's reference protospacer adds TGG: a copy of the reference's own TGG there (T, a tandem duplication), or before the reference's AGG (T2) | per-sample (the reference's own target represents each site in a population-level run): S62, S63 CFD 1, the row at the target's first base, a reference one; PAM_creation NA (the REF alignment, the reference from there, holds TGG at T, AGG at T2) |
+| T, T2 | (+) an insertion after a target's reference protospacer adds TGG: a copy of the reference's own TGG there (T, a tandem duplication), or before the reference's AGG (T2) | per-sample (the reference's own target represents each site in a population-level run): S62, S63 CFD 1, the row at the target's first base, a reference one; PAM_creation NA (at T a placement 3 bases right leaves the PAM on the reference's own TGG; at T2 the PAM is wholly inserted wherever the insertion sits, and the reference holds AGG beside the protospacer) |
 | B | minus-strand insertion + PAM SNP in cis (S06) and in trans (S07) | S05, S07 CFD 1 (AGG) |
 | C | deletion, no SNP | S09 CFD 1 |
 | D | deletion + a PAM-creating A>G SNP in cis (S10) | S10 CFD 1, CONFIRMED co-occurrence; S11 no target |
@@ -66,8 +67,14 @@ pin who has which target:
 | Z3 | Z's geometry and a SNP alt the guide needs past the insertion, cis (S56) and trans (S57) | S56 CFD 1 under both variants, CONFIRMED, at the anchor, the SNP the target's 13th base; S57 off the perfect row |
 | Z4, Z5 | (-) the PAM's first two bases (forward CC) the last two an insertion adds, its third and the protospacer reference bases; beside the protospacer the reference holds CTA (TAG on -) at Z4, ATA at Z5 | S58, S59 CFD 1 at the anchor; PAM_creation NA at Z4 (the reference has the target with TAG), TGG at Z5 |
 | X, X2 | (+) an insertion holding two whole targets: the guide with TGG and, 25 bases on, with AGG (X), or with TGG again (X2, a repeat) | per-sample: S60 listed with both targets, both rows at the anchor, one the site's row and the other one of its alternative alignments; S61 on one row with the target (its two copies are the same row at the anchor) |
+| PR, PM | (+, -) a tandem duplication of a 27-base unit holding a whole target, the copy written left of the reference's: the copy's target starts inside the insertion, its PAM wholly inserted | per-sample (the reference's target 3 bases on represents each site in a population-level run): S79, S80 CFD 1 at the anchor; PAM_creation NA (placed one unit right, the insertion leaves the PAM on the reference's own) |
+| QC | (-) C>CCAG after the anchor C, the PAM's far end; the reference repeats its first base: in both places it holds the PAM's inner bases and the protospacer's first forward base | S81 CFD 1; PAM_creation TGG (no placement gives the PAM a place on the reference; the REF alignment's window, CCC from the anchor, is GGG on -) |
+| QN | (-) C>CCA after the anchor C, no repeat; the reference holds CTC (GAG on -) beside the protospacer | per-sample (the reference's own target 2 bases left represents the site in a population-level run): S82 CFD 1; PAM_creation NA (the window, CGC, is GCG on -) |
+| QD | (-) CA>C deletes the A of CCAG before the protospacer, its junction inside the PAM CCG (CGG on -) | S83 CFD 1; PAM_creation CGG (the reference holds CAG, CTG on -, beside the protospacer; the window from the row's start, CCA, is TGG on -, another protospacer's PAM) |
+| QW | (-) TTCCA inserted after the anchor G: a target from its 3rd added base, its PAM the last three, and the reference's CCG (CGG on -) before the protospacer | per-sample (the reference's own target represents the site in a population-level run): S84 CFD 1 at the anchor; PAM_creation NA |
+| QA | (+) G[16:] + TGG inserted after G[15], no repeat | S85 CFD 1; PAM_creation TGG (the protospacer's end and the PAM are inserted wherever the insertion sits; the window holds AGG) |
 
-The `cas12a` profile (a 3.3 kb reference, 9 samples, 5' PAM TTTV, a 20-nt spacer; CFD is not
+The `cas12a` profile (a 3.8 kb reference, 11 samples, 5' PAM TTTV, a 20-nt spacer; CFD is not
 computed for a 5' PAM, so a perfect row is one with no mismatch and no bulge):
 
 | Site | Planted | Expected |
@@ -78,6 +85,8 @@ computed for a 5' PAM, so a perfect row is one with no mismatch and no bulge):
 | C4 | (-) the PAM, at the right, wholly bases an insertion adds | S07 perfect, the PAM created (TTTA) |
 | C5 | (+) a deletion in the spacer and a SNP past it, cis (S08) | S08 perfect, the SNP the 20th base |
 | C6 | (-) C4's geometry where the insertion copies the reference's own TAAA (TTTA on -) after the spacer, a tandem duplication | S09 perfect (per-sample: the reference's own target represents the site in a population-level run), the PAM not created |
+| CB1 | (+) T>TTT written at the end of a T run (left unnormalized): the PAM the anchor, the two added T and a reference A | S10 perfect (per-sample: the reference's own target represents the site), the PAM not created (placed three bases left, as bcftools norm writes it, the insertion leaves TTTA on the reference; the REF alignment's window, TAGA from the anchor, held none) |
+| CB3 | (-) the spacer's last four forward bases and the PAM (TAAA, TTTA on -) inserted after its 16th, no repeat | S11 perfect, the PAM created (TTTA; the window from the row's start holds TAAA, TTTA on -) |
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid fake-indel
 genome column by column, without genotypes: on aa9c54b (the 2.8.1 release candidate)
@@ -142,8 +151,8 @@ on a haplotype holding every SNP it names, the target's first base at the row's 
 unphased one must carry every SNP it names. (A row naming two alts of one position, which no
 haplotype holds, is counted and not checked: site N2's lone `2|1` carrier of an alt on a
 multi-allelic VCF line is read by the SNP path as carrying the other alt too, a defect of its
-own.) Sites Y1-Y4 sit at 17000-17900 and use samples S70-S78 (the reference is 18.5 kb, the
-panel 78 samples):
+own.) Sites Y1-Y4 sit at 17000-17900 and use samples S70-S78 (the reference is 21 kb, the
+panel 85 samples):
 
 | Site | Planted | Expected (per sample) |
 |---|---|---|
@@ -161,3 +170,11 @@ indel-row failures counted above: the released v2.8.1 image fails those checks 1
 (104 + 62) and the `cas12a` profile 53 times (47 + 6), and the whole oracle, with site U's two
 failures of the check of an unphased carrier's target, 168 and 53 times (e4dbb9c 64 and 6,
 8d3f278 2 and 0).
+
+2.10.0's placement rule (a PAM holding inserted bases, or a deletion's junction, judged
+wherever in its repeat the VCF writes the indel) added sites PR, PM, QC, QN, QD, QW and QA,
+and CB1 and CB3 in the `cas12a` profile (samples S79-S85 and S10-S11; the reference grew to
+21 kb and 3.8 kb). On 37d81de, before that rule, the oracle fails 42 and 10 times, all at those
+sites (rows read where the VCF writes the indel: on their REF alignment's window from the row's
+start, or, for a row starting inside an insertion, by the inserted-PAM rules there); on the
+released v2.8.1 image 204 and 60 times.

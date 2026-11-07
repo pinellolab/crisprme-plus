@@ -18,7 +18,7 @@ import os
 # the sites' place on the oracle's reference and the samples they use (S70-S78): clear
 # of the other sites' and samples, so the oracle can grow on either side
 Y_SITES = (17000, 17300, 17600, 17900)
-LENGTH = 18500
+LENGTH = 21000
 
 
 def plant(put, var, expect, seq, guide, rc):

@@ -209,12 +209,14 @@ jobs:
           # site's alignments where they are on the haplotype), and one holding a target
           # twice lists it once. Sites T and T2: an insertion after a reference
           # protospacer that copies the reference's PAM there, or adds one before
-          # another, on a row that starts on a reference base: not created (the REF
-          # alignment's reading). Then the Cas12a profile (5' PAM TTTV): targets whose
-          # first base is one an insertion adds, on both strands. Up to 2.8.1 such rows
-          # started past the anchor, their variants were numbered along the reference, and
-          # a PAM holding inserted bases was judged on the REF text read from the row's
-          # start. A few minutes each.
+          # another: not created. Sites PR, PM, QC, QN, QD, QW, QA (and the Cas12a
+          # profile's CB1, CB3): a PAM holding inserted bases, or a deletion's junction, is
+          # judged wherever in its repeat the VCF writes the indel (2.10.0; the oracle
+          # builds every placement on the haplotype the row's variants make). Then the
+          # Cas12a profile (5' PAM TTTV): targets whose first base is one an insertion
+          # adds, on both strands. Up to 2.8.1 such rows started past the anchor, their
+          # variants were numbered along the reference, and a PAM holding inserted bases
+          # was judged on the REF text read from the row's start. A few minutes each.
           mkdir -p orcwork
           docker run --rm $BRANCH_MOUNT -v "${PWD}/orcwork:/W" "$IMG" bash -c '
             set -e

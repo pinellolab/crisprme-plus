@@ -22,10 +22,14 @@ and on the - strand with a 5' PAM, so it started one base before its first align
 and the REF text of an RNA,DNA row, and of a 5' PAM RNA-bulge row, was a base off.
 
 Since 2.10.0 a target whose first base is one an insertion adds starts at the insertion's
-anchor, and its PAM_gen follows the inserted-PAM rules (INSIDE); a target whose PAM an
-insertion adds right after a reference protospacer does not move, and its PAM_gen is the
-REF alignment's reading, as up to 2.8.1 (DUPS: on a tandem duplication of the PAM's bases,
-not created).
+anchor (INSIDE), and a PAM holding inserted bases, or a deletion's junction, is judged
+wherever in its repeat the VCF writes the indel (indel_snp_cis.pam_reference_place): a
+target whose PAM an insertion adds right after a reference protospacer does not move, and
+its PAM is not created on a tandem duplication of the PAM's bases or where the reference
+holds another PAM beside the protospacer (DUPS); the geometries where that rule reads
+another PAM than 2.10.0's first fixes did (PLACED: a repeat insertion moved off the PAM, the
+reference PAM beside the protospacer of a row that starts on its anchor, a deletion across
+a - strand PAM, Cas12a on both strands).
 
 Needs pandas and numpy (the analyzer imports them); intervaltree is stubbed when it is
 not installed. Run: python -m unittest test_indel_row_coordinates -v
@@ -190,10 +194,11 @@ class _PlantedInsertions(object):
 # base (2.10.0): the protospacer is reference bases up to the insertion's anchor, its last
 # base, and the insertion adds the PAM's bases right after it. (strand, the target as
 # shown, the reference's bases after the protospacer (forward), the expected PAM_gen.) The
-# row does not move, and its PAM is judged on its REF alignment, the reference from its
-# start, as up to 2.8.1: where the insertion copies the reference's own PAM there (a
-# tandem duplication) the REF alignment is the ALT, and the PAM is not created; another
-# valid PAM there is not created either; no PAM there, it is.
+# row does not move. Where the insertion copies the reference's own PAM there (a tandem
+# duplication) the REF alignment is the ALT, and a placement past it leaves the PAM on the
+# reference's own: not created; another valid PAM beside the protospacer: not created
+# either (the PAM's place beside the protospacer, whose last base is a reference one); no
+# PAM there, it is.
 DUPS = {
     "3p": [
         ("+", G20 + "TGG", "TGG", "n"),        # a tandem duplication: REF = ALT
@@ -229,6 +234,83 @@ class _PlantedDuplications(object):
                 strand=strand, shown=shown, fwd=fwd, start0=start0, pos1=anchor + 1,
                 ref=prot[-1], alt=prot[-1] + pam_fwd, pam_gen=pam_gen,
                 first_off=25 - (len(prot) - 1), sample="S%02d" % (len(self.sites) + 1)))
+            start0 += 600
+        self.ref = "".join(seq)
+
+    windows = _Planted.windows
+    engine_rows = _PlantedInsertions.engine_rows
+
+
+# PAMs judged wherever in its repeat the VCF writes the indel (2.10.0): (name, strand, the
+# reference bases put at the site, the record (offset of its VCF POS's base, 0-based, from
+# the site's first base; REF; ALT), the target as shown, the offset of its first base on the
+# haplotype carrying the record, the offset the row starts at, the expected PAM_gen). Each
+# one's PAM_gen differs from 2.10.0's first fixes' (in brackets), which judged a PAM holding
+# inserted bases, or a deletion's junction, where the VCF writes the indel.
+def _placed_sites():
+    rc20 = rc(G20)
+    f23 = rc(G23)
+    return {
+        "3p": [
+            # (-) C>CCTGC repeats the 4 bases after its anchor; the alignment that starts on
+            # the insertion's first base, its PAM CAG inserted bases, is moved off: n [CAG]
+            ("A2", "-", "GA" + "C" + rc20[2:] + "GGAA", (2, "C", "CCTGC"),
+             None, 3, 2, "n"),
+            # (+) a tandem duplication of a 27-base unit holding a target: the copy's target
+            # starts inside the insertion; moved one unit on, its PAM is the reference's: n
+            # [TGG]
+            ("A4", "+", "C" + "TT" + G20 + "TGG" + "AA" + "CGTACGTA",
+             (0, "C", "C" + "TT" + G20 + "TGG" + "AA"), G20 + "TGG", 3, 0, "n"),
+            # (-) C>CCA after a reference CTC (GAG on -), the row on the anchor: n [GCG
+            # window: CGC]
+            ("A1", "-", "CT" + "C" + rc20 + "TTAA", (2, "C", "CCA"), G20 + "TGG", 2, 2, "n"),
+            # (+) G[16:] + TGG inserted after G[15], no repeat: created [the window AGG: n]
+            ("A3", "+", G20[:16] + "TTTT" + "AGG" + "CATTAC",
+             (15, G20[15], G20[15] + G20[16:] + "TGG"), G20 + "TGG", 0, 0, "TGG"),
+            # (-) CA>C inside the PAM: the reference beside the protospacer CAG (CTG on -):
+            # created [the window CCA, TGG on -: n]
+            ("D1", "-", "CCAG" + rc20 + "TTGCA", (1, "CA", "C"), G20 + "CGG", 0, 0, "CGG"),
+            # (-) TTCCA after the anchor G, a target from its 3rd base, the PAM wholly
+            # inserted, the reference CCG (CGG on -) beside the protospacer: n [TGG]
+            ("W2", "-", "CCG" + rc20 + "TTGCA", (2, "G", "GTTCCA"), G20 + "TGG", 5, 2, "n"),
+        ],
+        "5p": [
+            # (+) T>TTT at the end of a T run (unnormalized): placed 3 bases left, the PAM
+            # TTTA is reference bases: n [the window TAGA: TTTA]
+            ("B1", "+", "CC" + "TT" + "T" + "A" + G23 + "GGCC", (4, "T", "TTT"),
+             "TTTA" + G23, 4, 4, "n"),
+            # (-) the spacer's last 4 forward bases and the PAM inserted, no repeat: created
+            # [the window TAAA, TTTA on -: n]
+            ("B3", "-", f23[:19] + "CCCC" + "TAAA" + "GTCAGT",
+             (18, f23[18], f23[18] + f23[19:] + "TAAA"), "TTTA" + G23, 0, 0, "TTTA"),
+        ],
+    }
+
+
+class _PlantedPlacements(object):
+    """One PAM side's _placed_sites: the reference, the records, their fake-indel windows
+    and engine rows."""
+
+    def __init__(self, side):
+        rng = random.Random(2100)
+        self.side = side
+        sites = _placed_sites()[side]
+        seq = [rng.choice("ACGT") for _ in range(3000 + 600 * len(sites))]
+        self.sites = []
+        start0 = 1000
+        for name, strand, put, (off, ref, alt), shown, first, at, pam_gen in sites:
+            for i, c in enumerate(put):
+                seq[start0 + i] = c
+            hap = "".join(seq[:start0 + off]) + alt + "".join(seq[start0 + off + len(ref):])
+            if shown is None:  # the alignment that starts on the first inserted base
+                shown = rc(hap[start0 + first:start0 + first + 23])
+            text = shown if strand == "+" else rc(shown)
+            assert hap[start0 + first:start0 + first + len(text)] == text, name
+            pos1 = start0 + off + 1
+            self.sites.append(dict(
+                name=name, strand=strand, shown=shown, pos1=pos1, ref=ref, alt=alt,
+                start=start0 + at, pam_gen=pam_gen, first_off=25 + first - off,
+                sample="S%02d" % (len(self.sites) + 1)))
             start0 += 600
         self.ref = "".join(seq)
 
@@ -392,11 +474,12 @@ class RowCoordinates(unittest.TestCase):
     def run_duplications(self, side, gate="1"):
         """A target whose PAM an insertion adds right after its protospacer, which is
         reference bases from the row's first base on: the row starts at that base (it does
-        not move), its REF text is the reference from there, and its PAM_gen is the REF
-        alignment's reading, as up to 2.8.1: NA where the insertion copies the reference's
-        own PAM (REF = ALT) or the reference holds another valid PAM there, the ALT's PAM
-        where it holds none. 2.10.0's first inserted-PAM rule took every such PAM for
-        created (TRAC, HGDP + 1000 Genomes: chr22:20586277 (+), REF = ALT)."""
+        not move), its REF text is the reference from there, and its PAM_gen is NA where
+        the insertion copies the reference's own PAM (REF = ALT) or the reference holds
+        another valid PAM beside the protospacer, the ALT's PAM where it holds none, as up
+        to 2.8.1, whose REF alignment read those bases. 2.10.0's first inserted-PAM rule
+        took every such PAM for created (TRAC, HGDP + 1000 Genomes: chr22:20586277 (+),
+        REF = ALT)."""
         p = _PlantedDuplications(side)
         got = self.analyze(p, side, gate)
         for s in p.sites:
@@ -413,6 +496,40 @@ class RowCoordinates(unittest.TestCase):
                 self.assertEqual(c[18].upper(), ref, where + ": REF text")
                 self.assertEqual(c[10], s["pam_gen"], where + ": PAM_gen")
                 self.assertEqual(c[12], s["sample"], where)
+
+    def run_placements(self, side, gate="1"):
+        """2.10.0: a PAM holding inserted bases, or a deletion's junction, is judged wherever
+        in its repeat the VCF writes the indel, through the shipped analyzer: each planted
+        row starts where it should and gets the PAM_gen of _placed_sites, which 2.10.0's
+        first fixes did not give it (a repeat insertion moved off the PAM, the reference PAM
+        beside the protospacer on a row that starts on a reference base or inside an
+        insertion, a deletion's junction on the - strand, Cas12a on both strands)."""
+        p = _PlantedPlacements(side)
+        got = self.analyze(p, side, gate)
+        for s in p.sites:
+            token = "%s_%d_%s_%s" % (CHROM, s["pos1"], s["ref"], s["alt"])
+            for suffix, by_token in got.items():
+                c = by_token[token]
+                where = "%s %s %s(%s) %s" % (side, s["name"], suffix, s["strand"], c[2])
+                self.assertEqual(c[2], s["shown"], where)
+                self.assertEqual(int(c[4]), s["start"], where + ": Start_coordinate")
+                self.assertEqual(c[10], s["pam_gen"], where + ": PAM_gen")
+                self.assertEqual(c[12], s["sample"], where)
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_pams_judged_wherever_the_vcf_writes_the_indel_three_prime_pam(self):
+        self.run_placements("3p")
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_pams_judged_wherever_the_vcf_writes_the_indel_five_prime_pam(self):
+        """Cas12a (TTTV): the PAM at the target's left end on the + strand, forward, and at
+        its right end on the - strand."""
+        self.run_placements("5p")
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_pams_judged_wherever_the_vcf_writes_the_indel_gate_off(self):
+        self.run_placements("3p", gate="0")
+        self.run_placements("5p", gate="0")
 
     @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
     def test_an_inserted_pam_on_a_row_that_does_not_move_three_prime_pam(self):

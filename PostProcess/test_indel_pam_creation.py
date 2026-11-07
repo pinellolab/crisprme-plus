@@ -15,20 +15,25 @@ Written as a unittest.TestCase so the project's `python -m unittest` CI harness
 collects it (a prior pytest-style module-level `def test_*` layout collected zero
 tests under unittest).
 
-The reference bases the predicate reads are those the row's PAM sits on, through the
-indel (_reference_pam). Up to 2.8.0 they were the REF alignment's, read from the row's
-start, so on the + strand with a 3' PAM (the - strand with a 5' one) a deletion or an
+The reference bases the predicate reads are those of the row's PAM's place on the reference,
+through the indel (_reference_pam). Up to 2.8.0 they were the REF alignment's, read from the
+row's start, so on the + strand with a 3' PAM (the - strand with a 5' one) a deletion or an
 insertion in the protospacer read bases len(REF) - len(ALT) away, and a PAM the reference
 already has was flagged as created: the WALK panel's rows chr2:10000 (rsW_J_del) and
 chr3:20000 (rsW_N_del + rsW_N14) showed PAM_creation TGG over a reference TGG.
 
-Since 2.10.0 a PAM holding bases an insertion adds follows the inserted-PAM rules (wholly
-inserted: created; partly: the reference PAM beside the protospacer) on a row that starts
-inside the insertion, at its anchor, and keeps the REF alignment's reading, as up to 2.8.1,
-on a row that starts on a reference base: on a tandem duplication of a PAM's bases the REF
-alignment is the ALT, and the PAM is not created. A row whose REF alignment is its ALT never
-has a created PAM. The first version of those rules took a wholly inserted PAM for created
-on every row (TRAC, HGDP + 1000 Genomes: chr22:20586277 (+), REF = ALT).
+Since 2.10.0 a PAM that holds bases an insertion adds, or a deletion's junction, is judged
+wherever in its repeat the VCF writes the indel (indel_snp_cis.pam_reference_place, whose
+own tests are in test_indel_snp_cis): the reference bases it sits on in a placement that
+leaves it on the reference; else the reference PAM beside the protospacer's base that
+touches the PAM, in a placement that leaves that base on the reference; else (an insertion
+holding that base wherever it is placed) created. A row whose REF alignment is its ALT never
+has a created PAM. 2.10.0's first fixes judged such a PAM where the VCF writes the indel:
+by the inserted-PAM rules on a row that starts inside an insertion (a repeat unit inserted
+next to a reference PAM read as created), and on the REF alignment's window on a row that
+starts on a reference base (the - strand's window is not the PAM beside the protospacer
+when the indel lies between them); and before them a wholly inserted PAM read as created on
+every row (TRAC, HGDP + 1000 Genomes: chr22:20586277 (+), REF = ALT).
 """
 
 import os
@@ -278,7 +283,7 @@ class IndelPamCreation(unittest.TestCase):
         ns = _ns(_row(g + "TGG", token, anchor), ref_aligned, genome=genome)
         self.assertEqual(ns["final_result"][PAM_GEN], "TGG")
 
-    # -- a PAM made of bases an insertion adds (2.10.0) ----------------------------------
+    # -- a PAM made of bases an insertion adds (2.10.0) ---------------------------------
 
     def test_a_wholly_inserted_pam_was_created_by_the_insertion(self):
         """- strand, 3' PAM (the oracle's Z2): the target's leftmost bases, its PAM CCA
@@ -347,7 +352,7 @@ class IndelPamCreation(unittest.TestCase):
             self.assertIsNone(ns["_reference_pam"](row, ref_aligned, hap))
             self.assertEqual(ns["final_result"][PAM_GEN], "TGG")
 
-    # -- a row that starts on a reference base keeps 2.8.1's reading (2.10.0) -------------
+    # -- a PAM an insertion adds after a reference protospacer (2.10.0) -----------------
 
     def test_a_tandem_duplication_of_the_pam_on_a_row_that_does_not_move(self):
         """+ strand, 3' PAM: G>GTGG after the protospacer copies the three bases after it,
@@ -357,7 +362,8 @@ class IndelPamCreation(unittest.TestCase):
         reference holds this very target there, with the same PAM, and the insertion
         created nothing. NA, as up to 2.8.1; 2.10.0's first version of the inserted-PAM rule
         took the PAM for created (TGG) wherever the row starts (TRAC, HGDP + 1000 Genomes:
-        chr22:20586277 (+), alternative alignments with REF = ALT)."""
+        chr22:20586277 (+), alternative alignments with REF = ALT). Placed 3 bases right, the
+        insertion leaves the PAM on the reference's own TGG."""
         g = self.GUIDE
         genome = "N" * 50 + g + "TGG" + "CATTAC" + "N" * 20
         token = "chr1_70_%s_%sTGG" % (g[19], g[19])
@@ -369,12 +375,13 @@ class IndelPamCreation(unittest.TestCase):
             self.assertEqual(ns["_reference_pam"](row, ref_aligned, hap), "TGG")
             self.assertEqual(ns["final_result"][PAM_GEN], "n")
 
-    def test_an_inserted_pam_on_a_row_that_does_not_move_reads_the_ref_alignment(self):
+    def test_an_inserted_pam_after_a_reference_protospacer_reads_the_pam_beside_it(self):
         """+ strand, 3' PAM: G>GTGG after the protospacer, the reference's next bases not
-        TGG. The row starts on a reference base, and its PAM, the bases the insertion adds,
-        is judged on its REF alignment, the reference from that start, as up to 2.8.1:
-        AGG there is a valid PAM at the PAM's place beside the protospacer (not created,
-        though REF and ALT differ); TCA is not (created)."""
+        TGG. The PAM is wholly inserted bases wherever the insertion sits (TGG cannot move
+        past AGG or TCA), and the protospacer's last base, the anchor, is a reference base:
+        the reference PAM beside it decides, as the REF alignment, read from the row's
+        start, did up to 2.8.1: AGG there is a valid PAM at the PAM's place beside the
+        protospacer (not created, though REF and ALT differ); TCA is not (created)."""
         g = self.GUIDE
         token = "chr1_70_%s_%sTGG" % (g[19], g[19])
         for after, made in (("AGG", "n"), ("TCA", "TGG")):
@@ -389,8 +396,10 @@ class IndelPamCreation(unittest.TestCase):
         """- strand, 5' PAM (TTTV; the Cas12a oracle's C6): the PAM is the target's right
         end, forward, and an insertion after the protospacer's last forward base copies the
         reference's TAAA (TTTA on -) there. The row starts on a reference base and its REF
-        alignment is its ALT: not created. Where the reference holds TAAT (ATTA) after the
-        protospacer, the inserted TTTA was created (the oracle's C4)."""
+        alignment is its ALT: not created (placed 4 bases right, the insertion leaves the
+        PAM on the reference's own TAAA). Where the reference holds TAAT (ATTA) after the
+        protospacer, the inserted TTTA was created (the oracle's C4): the insertion can move
+        three bases right, not past the PAM, and the PAM beside the protospacer is TAAT."""
         spacer = "ACGTTGCAACGTTGCAACGTAC"
         alt = "TTTA" + spacer
         fwd = _revcomp(alt)              # the protospacer's complement, then TAAA
@@ -406,32 +415,190 @@ class IndelPamCreation(unittest.TestCase):
             self.assertEqual(ns["_reference_pam"](row, ref_aligned, 50), _revcomp(after))
             self.assertEqual(ns["final_result"][PAM_GEN], made)
 
-    def test_a_partly_inserted_pam_on_a_row_that_does_not_move_reads_the_ref_alignment(self):
-        """The partly-inserted rule (the reference PAM beside the protospacer) is for rows
-        that start inside an insertion; a row starting on a reference base keeps its REF
-        alignment's window, as up to 2.8.1.
-          * + strand, 3' PAM: the insertion holds the protospacer's last two bases and the
-            PAM's first; the window holds TCA (created) or AGG (not created).
-          * - strand, 3' PAM, the row starting on the insertion's anchor C, the PAM's far
-            end (forward CCA: the anchor and the two bases C>CCA adds): the window is the
-            REF alignment's, read from the anchor (ACG on the - strand: created), not the
-            reference PAM beside the protospacer (forward CTC, GAG on the - strand)."""
+    def test_a_partly_inserted_pam_is_judged_wherever_the_vcf_writes_the_insertion(self):
+        """The partly-inserted rule on a row that starts on a reference base (2.10.0; up to
+        2.10.0's first fixes such a row read its REF alignment's window, a-review-r4's F1).
+          * + strand, 3' PAM: G>GGCT holds the protospacer's last two bases and the PAM's
+            first; placed one base right (the reference's next base is G) it still holds the
+            protospacer's last base, so no placement gives the PAM a place on the reference:
+            created whatever the reference holds after its own GG (the window read TCA,
+            created, or AGG, not created).
+          * - strand, 3' PAM, the row starting on the insertion's anchor C, the PAM's far end
+            (forward CCA: the anchor and the two bases C>CCA adds; no repeat): the
+            protospacer's touching base is a reference base, and the reference holds CTC
+            beside it (GAG on the - strand): not created. The window, read from the anchor,
+            was ACG on the - strand (created)."""
         g = self.GUIDE
         token = "chr1_68_%s_%s" % (g[17], g[17] + g[18:] + "T")
-        for after, made in (("TCA", "TGG"), ("AGG", "n")):
+        for after in ("TCA", "AGG"):
             genome = "N" * 50 + g[:18] + "GG" + after + "N" * 20
             ref_aligned = genome[50:73].lower()
             row = _row(g + "TGG", token, 50, "+")
             ns = _ns(row, ref_aligned, genome=genome, hap_start=50)
-            self.assertEqual(ns["_reference_pam"](row, ref_aligned, 50), after)
-            self.assertEqual(ns["final_result"][PAM_GEN], made)
+            self.assertIsNone(ns["_reference_pam"](row, ref_aligned, 50))
+            self.assertEqual(ns["final_result"][PAM_GEN], "TGG")
         genome = "N" * 47 + "CT" + "C" + _revcomp(g) + "TTAA" + "N" * 20
         ref_aligned = _revcomp(genome[49:72])
         self.assertEqual(ref_aligned[-3:], "ACG")
         row = _row(g + "TGG", "chr1_50_C_CCA", 49, "-")
         ns = _ns(row, ref_aligned, genome=genome, hap_start=49)
-        self.assertEqual(ns["_reference_pam"](row, ref_aligned, 49), "ACG")
-        self.assertEqual(ns["final_result"][PAM_GEN], "TGG")
+        self.assertEqual(ns["_reference_pam"](row, ref_aligned, 49), "GAG")
+        self.assertEqual(ns["final_result"][PAM_GEN], "n")
+
+    # -- the same PAM wherever the VCF writes the indel (2.10.0) ------------------------
+
+    def _case(self, genome, token, start, strand, alt, hap_start, pam="NRG", five=False):
+        """_reference_pam and PAM_gen of a row: its REF alignment read from the genome at
+        its start (alignRefFromVar's bases; case aside)."""
+        n = len(alt.replace("-", ""))
+        ref = genome[start:start + n]
+        ref_aligned = ref if strand == "+" else _revcomp(ref)
+        k = len(pam)
+        cut = (0, k) if five else (-k, None)
+        row = _row(alt, token, start, strand)
+        ns = _ns(row, ref_aligned, pam=pam, pam_begin=cut[0], pam_end=cut[1], genome=genome,
+                 five=five, hap_start=hap_start)
+        return ns["_reference_pam"](_row(alt, token, start, strand), ref_aligned,
+                                    hap_start), ns["final_result"][PAM_GEN]
+
+    def test_a_repeat_insertion_that_a_placement_moves_off_the_pam(self):
+        """A tandem duplication of a unit that holds a whole reference target: the VCF
+        writes the copy left of the reference's, and a target of the copy starts inside the
+        insertion, its PAM wholly inserted bases; placed one unit right, the insertion
+        leaves that PAM on the reference's own, which holds it: not created (2.10.0's first
+        fixes: created, the wholly inserted PAM of a row starting inside an insertion; the
+        repeat class of a-review-r4's F2: README 48 of 75 such flips genome-wide)."""
+        g = self.GUIDE
+        for strand in "+-":
+            fwd = g + "TGG" if strand == "+" else _revcomp(g + "TGG")
+            unit = "TT" + fwd + "AA"
+            genome = "N" * 40 + "C" + unit + "CGTACGTA" + "N" * 40
+            token = "chr1_41_C_C" + unit
+            pam, made = self._case(genome, token, 40, strand, g + "TGG", 40 + 1 + 2)
+            self.assertEqual((pam, made), ("TGG", "n"), strand)
+
+    def test_a_repeat_insertion_moved_off_a_partly_inserted_pam_on_the_minus_strand(self):
+        """- strand, 3' PAM (forward CCN at the target's left end), the SNP+indel oracle's
+        guide (forward GCCTGC...): C>CCTGC repeats the four bases after its anchor C. Where
+        the VCF writes it, it holds the PAM's two inner bases and the protospacer's first
+        two; placed two or more bases right, the PAM CCT (AGG on -) sits on the reference,
+        which holds it: not created. The alignment that starts on the insertion's first base
+        (forward CTG, CAG on -) is moved off its PAM too: not created (2.10.0's first fixes:
+        created, a wholly inserted PAM on a row starting inside the insertion; a-review-r4's
+        adversarial site A2)."""
+        g = "ACTGAAATCTGTAAGCAGGC"
+        genome = "N" * 28 + "GA" + "C" + _revcomp(g)[2:] + "GGAA" + "N" * 30
+        self.assertEqual(genome[31:35], "CTGC")
+        hap = genome[:31] + "CTGC" + genome[31:]
+        self.assertEqual(_revcomp(hap[30:53]), g + "AGG")  # the anchor C, then CT inserted
+        self.assertEqual(self._case(genome, "chr1_31_C_CCTGC", 30, "-", g + "AGG", 30),
+                         ("AGG", "n"))
+        alt = _revcomp(hap[31:54])                         # starts on the first added base
+        self.assertEqual(alt[-3:], "CAG")
+        self.assertEqual(self._case(genome, "chr1_31_C_CCTGC", 30, "-", alt, 31),
+                         ("CAG", "n"))
+
+    def test_a_repeat_insertion_that_holds_the_protospacers_end_wherever_it_is_placed(self):
+        """- strand, 3' PAM, a row starting on the insertion's anchor C (the PAM's far end,
+        forward): C>CCAG, whose first base the reference repeats after the anchor, can sit
+        there or one base right, and either way it holds the PAM's inner bases and the
+        protospacer's first forward base: no placement gives the PAM a place on the
+        reference, created, though the REF alignment's window, read from the anchor, holds
+        CCT (AGG on -: 2.10.0's first fixes, not created). The + strand's case is the known
+        limit's first one above (G>GGCT)."""
+        genome = "N" * 30 + "C" + "CTACGTTAGCAGTCAGTAGCAGG" + "N" * 30
+        hap = genome[:31] + "CAG" + genome[31:]
+        alt = _revcomp(hap[30:53])
+        self.assertEqual(alt[-3:], "TGG")                  # forward CCA: anchor, C, A
+        self.assertEqual(_revcomp(genome[30:33]), "AGG")   # the window, from the anchor
+        self.assertEqual(self._case(genome, "chr1_31_C_CCAG", 30, "-", alt, 30),
+                         (None, "TGG"))
+
+    def test_a_non_repeat_insertion_on_a_row_that_starts_on_its_anchor(self):
+        """- strand, 3' PAM, the row starting on its insertion's anchor C, the PAM's far end:
+        C>CCA (no repeat) makes the PAM CCA (TGG on -) of the anchor and the two added bases,
+        and the protospacer's first forward base is a reference one. The reference PAM beside
+        it decides: TTC there (GAA on -) lacks the motif, created, though the REF alignment's
+        window, read from the anchor, holds CCT (AGG on -; 2.10.0's first fixes: not
+        created); CTC (GAG) holds it, not created, though the window holds GCG (created
+        before)."""
+        rcg = "CTGCTTACAGATTTCAGTGC"                  # the protospacer, forward
+        alt = _revcomp("CCA" + rcg)
+        for beside, window, made in (("TT", "CCT", "TGG"), ("CT", "CCT", "n")):
+            genome = "N" * 47 + beside + "C" + rcg + "TTAA" + "N" * 20
+            self.assertEqual(genome[49:52], "C" + rcg[:2])
+            self.assertEqual(genome[49:52], window)
+            pam, got = self._case(genome, "chr1_50_C_CCA", 49, "-", alt, 49)
+            self.assertEqual((pam, got), (_revcomp(beside + "C"), made))
+        rcg = "GCGTTACAGATTTCAGTGCA"                  # window CGC: GCG on -, no NRG
+        alt = _revcomp("CCA" + rcg)
+        genome = "N" * 47 + "CT" + "C" + rcg + "TTAA" + "N" * 20
+        self.assertEqual(_revcomp(genome[49:52]), "GCG")
+        self.assertEqual(self._case(genome, "chr1_50_C_CCA", 49, "-", alt, 49), ("GAG", "n"))
+
+    def test_an_insertion_holding_the_protospacers_end_and_the_pam_plus_strand(self):
+        """+ strand, 3' PAM, a row starting on a reference base: G[16:] + TGG inserted after
+        G[15], no repeat: the protospacer's last four bases and the PAM are inserted bases
+        wherever the insertion sits: created, though the REF alignment's window, read from
+        the row's start, holds AGG (2.10.0's first fixes: not created; a-review-r4's A3;
+        genome-wide, chr9:111940926 (+))."""
+        g = self.GUIDE
+        genome = "N" * 50 + g[:16] + "TTTT" + "AGG" + "CATTAC" + "N" * 20
+        token = "chr1_66_%s_%s%sTGG" % (g[15], g[15], g[16:])
+        self.assertEqual(self._case(genome, token, 50, "+", g + "TGG", 50), (None, "TGG"))
+
+    def test_a_wholly_inserted_pam_beside_a_reference_protospacer_on_the_minus_strand(self):
+        """- strand, 3' PAM: TTCCA inserted after the protospacer's last base on the
+        reference side (forward: its anchor G, then the protospacer), so a target starts on
+        the third added base, its PAM CCA (TGG on -) the last three, and its protospacer the
+        reference bases after the insertion. No placement gives the PAM reference bases, but
+        the protospacer's touching base is a reference one, and the reference holds CCG
+        before it (CGG on -): the reference has this very protospacer with a valid PAM, not
+        created (2.10.0's first fixes: created, a wholly inserted PAM of a row starting
+        inside the insertion; TRAC, HGDP + 1000 Genomes: chr17:77419671 (-)). The mirror
+        geometry, + strand, is the oracle's T2: AGG beside an inserted TGG."""
+        rcg = _revcomp(self.GUIDE)
+        genome = "N" * 30 + "CCG" + rcg + "N" * 30
+        self.assertEqual(_revcomp(genome[30:53]), self.GUIDE + "CGG")
+        token = "chr1_33_G_GTTCCA"
+        self.assertEqual(self._case(genome, token, 32, "-", self.GUIDE + "TGG", 35),
+                         ("CGG", "n"))
+        genome = "N" * 30 + "CAG" + rcg + "N" * 30           # CTG on -: no PAM there
+        self.assertEqual(self._case(genome, token, 32, "-", self.GUIDE + "TGG", 35),
+                         ("CTG", "TGG"))
+
+    def test_a_deletion_across_the_pam_on_the_minus_strand(self):
+        """- strand, 3' PAM (forward CCN, left): CA>C deletes the A of CCAG before the
+        protospacer, and its junction is inside the PAM, CCG (CGG on -). The PAM's place
+        beside the protospacer on the reference is CAG (CTG on -): no PAM, created. Read
+        from the row's start (2.10.0's first fixes, 2.8.1), the window held CCA (TGG on -),
+        the reference's PAM of another protospacer one base on: not created (README guide,
+        HGDP + 1000 Genomes: chr11:72681739 (-))."""
+        rcg = _revcomp(self.GUIDE)
+        genome = "N" * 30 + "CCAG" + rcg + "N" * 30
+        self.assertEqual(self._case(genome, "chr1_32_CA_C", 30, "-", self.GUIDE + "CGG", 30),
+                         ("CTG", "CGG"))
+
+    def test_cas12a_pams_placed_on_the_reference(self):
+        """Cas12a (TTTV, 5' PAM):
+          * + strand (the PAM at the target's left end): T>TTT written at the end of a T run
+            (a record left unnormalized): placed three bases left, as bcftools norm would
+            write it, the insertion leaves the PAM TTTA on the reference: not created
+            (a-review-r4's B1; the REF alignment's window, from the row's start, read TA and
+            the spacer's first bases: created);
+          * - strand (the PAM at the target's right end, forward): an insertion after the
+            spacer's 16th forward base holds its last four and the PAM (TAAA, TTTA on -),
+            no repeat: created, though the window, read from the row's start, holds TAAA
+            (a-review-r4's B3)."""
+        spacer = "GATCCAGTCACGTTAGCATG"
+        genome = "C" * 28 + "TT" + "T" + "A" + spacer + "GGCC" + "C" * 30
+        self.assertEqual(self._case(genome, "chr1_31_T_TTT", 30, "+", "TTTA" + spacer, 30,
+                                    pam="TTTV", five=True), ("TTTA", "n"))
+        f = _revcomp(spacer)
+        genome = "N" * 40 + f[:16] + "CCCC" + "TAAA" + "GTCAGT" + "N" * 30
+        token = "chr1_56_%s_%s%sTAAA" % (f[15], f[15], f[16:])
+        self.assertEqual(self._case(genome, token, 40, "-", "TTTA" + spacer, 40, pam="TTTV",
+                                    five=True), (None, "TTTA"))
 
     def test_a_ref_alignment_equal_to_the_alt_is_not_created_on_a_row_that_moves(self):
         """+ strand, 3' PAM: an insertion after the guide's first base adds the guide and
