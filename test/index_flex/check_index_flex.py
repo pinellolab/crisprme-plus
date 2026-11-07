@@ -122,6 +122,15 @@ def engine_prunes():
         return "--prune-pam" in fh.read()
 
 
+def records_side(index_dir):
+    """What records the side of the guide index ``index_dir`` was built for, as
+    build-index-only names it: the header of its .bin files in index format 2 (CRISPRitz
+    2.10.0 and later: the magic CZI and 0xFE), else its .pam_build."""
+    tree = sorted(f for f in os.listdir(index_dir) if f.endswith(".bin") and not f.startswith("."))[0]
+    with open(os.path.join(index_dir, tree), "rb") as fh:
+        return "the header of its .bin files" if fh.read(4) == b"CZI\xfe" else "its .pam_build"
+
+
 def search(work, output, guide="g20.txt", pam="20bp-NRG-SpCas9.txt", bulges=(1, 1), variant=True,
            extra=(), samples=True, user=None, env=None, vcf="list_vcf.txt"):
     args = ["complete-search", "--genome", "Genomes/gx", "--guide", guide, "--pam", f"PAMs/{pam}",
@@ -460,9 +469,9 @@ def main(root):
                   "--bDNA", "1", "--bRNA", "1", "--thread", THREADS)
     say("E2: a 5' build beside a 3' index of the older name: built beside it, saying so",
         rc == 0 and sorted(os.listdir(lib)) == ["NNNN-20_2_gx", "NNNN_2_gx"]
-        and "NNNN_2_gx is an index for a PAM on the 3' side of the guide (as its .pam_build "
-            "records): it is left as it is, and this index is built beside it, as NNNN-20_2_gx."
-        in out, out[-600:])
+        and "NNNN_2_gx is an index for a PAM on the 3' side of the guide (as %s records): it "
+            "is left as it is, and this index is built beside it, as NNNN-20_2_gx."
+            % records_side(os.path.join(lib, "NNNN_2_gx")) in out, out[-600:])
     for cell, guide, pam, alone, index in (("3'", "g20_4.txt", "24bp-NNNN-3p.txt", alone3, "NNNN_2_gx"),
                                            ("5'", "g20_5p.txt", "24bp-NNNN-5p.txt", alone5, "NNNN-20_2_gx")):
         out = f"o_{cell[0]}"
