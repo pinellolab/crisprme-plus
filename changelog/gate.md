@@ -1,12 +1,14 @@
 <!-- gate track: [2.9.0] entries for CHANGELOG.md (the carrier gate, plan 2.3; decisions D1, D2,
-D3, D5, D6; the F2 and greedy-row fixes the 2.8.1 text promised for this release). -->
+D3, D5, D6; the F2 and greedy-row fixes the 2.8.1 text promised for this release, and the
+haploid-call fix that came with the first). -->
 
-**For the merge, not for the changelog.** 2.8.1's `### Known issues` entries on SNP rows that
-list a carrier whose haplotype holds an indel inside the target, and on the greedy rows of a
-`--per-sample` search on an index without the dict-less tiers, both say "fixed in the next
-release": the two `### Fixed` entries below are those fixes. The runs measured are of this
-branch's code in the 2.8.1 release image (CRISPRitz 2.9.1, the 2.8.1 indexes), beside the same
-searches with the 2.8.1 code; the harness check re-gated gate38a's arm C9 (the 2.8.1
+**For the merge, not for the changelog.** Two of 2.8.1's `### Changed` entries state known
+limits -- SNP rows that list a carrier whose haplotype holds an indel inside the target, and the
+greedy rows of a `--per-sample` search on an index without the dict-less tiers -- and say "fixed
+in the next release": the first and the last `### Fixed` entries below are those fixes (the
+second, on a male's chrX calls, fixes a defect no 2.8.1 entry names). The runs measured are of
+this branch's code in the 2.8.1 release image (CRISPRitz 2.9.1, the 2.8.1 indexes), beside the
+same searches with the 2.8.1 code; the harness check re-gated gate38a's arm C9 (the 2.8.1
 population-level run of the README guide).
 
 ### Added
@@ -161,21 +163,21 @@ population-level run of the README guide).
   last, as the indel rows read a second indel, so an indel that leaves the target's bases where
   they were (a tandem repeat's unit gained or lost) takes no carrier off; an indel at one of the
   row's SNPs, or over one (another allele of that base: a phasing artefact), does not either, nor
-  does an unphased call. A haploid call -- a male's on chrX outside PAR -- is his one haplotype's,
-  so his calls in a window are now read as that one haplotype (not as every subset of them, as an
-  unphased sample's are) and an indel of his that changes the target takes him off the row,
+  does an unphased call. A haploid call -- a male's on chrX outside PAR -- is his one haplotype's
+  (see the next entry), so an indel of his that changes the target takes him off the row,
   whatever else that haplotype holds. On the genome-wide per-sample search of the README guide
-  (HGDP + 1000 Genomes, NRG, 4 + 1 + 1) the three chrX alignments whose listed carriers were all
-  such males -- chrX:47797248(+) (1), chrX:51049628(-) (5) and chrX:87556768(+) (772) -- have no
-  carrier left and their rows are gone, 13 other chrX rows list 1,460 carrier listings fewer, and
-  of the 31 chrX rows that left 5 are replaced by another alignment of their row, so the search
-  returns 170,469 rows against the 170,495 of the same search with the fix on phased calls alone.
-  The gate run over its results (`--mode per-sample --prioritize-observed on`) then finds no C1
-  row, where it found those three. On chr22 of the HGDP + 1000 Genomes
-  panel (five guides, NRG, 4 + 1 + 1,
-  per sample), of the 22,628 SNP alignments of 2.8.1's 20,751 rows, 132 left their row (32,227
-  carrier listings): 127 have no carrier left, and 5 keep 8 of their carriers but, tied with
-  another alignment of their row, leave its place to the one with more carriers (the same SNP
+  (HGDP + 1000 Genomes, NRG, 4 + 1 + 1), 168 of 2.8.1's 170,660 rows have no carrier left and are
+  gone, 162 off chrX and 6 on it, among them the three whose listed carriers were all males with
+  such an indel: chrX:47797248(+) (1), chrX:51049628(-) (5) and chrX:87556768(+) (772). 5 more
+  are replaced by their carrier's own alignment, the SNP beside the indel, a base or two away, and
+  34 keep their place with another alignment of their row; in all 47,382 carrier listings leave
+  321 SNP alignments (46,593 of phased calls, 789 of males' haploid ones). The gate run over the
+  search's results (`--mode per-sample --prioritize-observed on`) finds no C1 row, where over
+  2.8.1's it ranks C1, `indel in the target`, the 207 rows whose highest-CFD alignment the fix
+  takes off: those 168, 5 and 34. On chr22 of the HGDP + 1000 Genomes panel (five guides, NRG,
+  4 + 1 + 1, per sample), of the 22,628 SNP alignments of 2.8.1's 20,751 rows, 132 left their row
+  (32,227 carrier listings): 127 have no carrier left, and 5 keep 8 of their carriers but, tied
+  with another alignment of their row, leave its place to the one with more carriers (the same SNP
   beside an indel, or another SNP) and are among the alternative alignments; at chr22:35633518(+)
   the row's highest-CFD alignment is now chr22_35633524_C_T with chr22_35633527_ATG_A (448
   carriers), and the SNP alone keeps 4 of 2.8.1's 451. 64 alignments list 4,214 carriers fewer; 15
@@ -183,6 +185,20 @@ population-level run of the README guide).
   where the one gone had merged two targets into one row), and the search returns 20,726 rows. Its
   SNP post-analysis took 18 min 45 s, the same search's with 2.8.1, run beside it, 17 min 2 s.
   Pre-existing, in 2.8.0 too. Covered by `PostProcess/test_haplotype_prioritizer.py`.
+- **A per-sample row on chrX no longer names a male whose one haplotype holds an allele inside
+  the target that the row does not.** On the dict-less tiers a male's calls on chrX outside PAR,
+  which are haploid, were read as an unphased sample's: every subset of his alleles in a window
+  was a haplotype he could have, so a row could list him for an alignment that holds some of them,
+  though his one haplotype holds them all and its sequence there is another. His calls in a
+  window are now that one haplotype, as the classic dictionaries read them already, and he is
+  listed for the alignment it has, or for none. On the genome-wide per-sample search of the
+  README guide (HGDP + 1000 Genomes, NRG, 4 + 1 + 1), 23 chrX rows whose listed carriers were all
+  such males, none of them with an indel that changes the target, are gone (at chrX:144234310(-)
+  all 171 also hold chrX:144234328 T, at chrX:19417344(+) all 85 chrX:19417355 A), 5 keep their
+  place with another alignment and 13 list 1,460 carriers fewer: in all 1,912 carrier listings
+  leave 48 SNP alignments. With the fix above, the search returns 170,469 rows against 2.8.1's
+  170,660 (chrX 8,220 against 8,249). Pre-existing, in 2.8.0 too. Covered by
+  `PostProcess/test_haplotype_prioritizer.py`.
 - **A `--per-sample` search of an index without the dict-less tiers no longer reports a dense
   window by its greedy worst-case alignment.** On the classic dictionaries a window denser than
   `CRISPRME_IUPAC_CAP` was reported by an alignment that took every allele matching the guide and
