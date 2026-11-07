@@ -320,6 +320,57 @@ class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):
                 self.assertIsNone(self.OLD_CLAIM.search(self.text(name)))
 
 
+class TheRealDataIndelCheckRunsOnTheSelfTest(unittest.TestCase):
+    """validate-benchmarks.yml runs scripts/check_indel_rows.py on the chr22 self-test output
+    complete-test just wrote: soundness of every benchmark with its own budget, then
+    completeness of cas9_sg1617, and a gating finding (exit 1) fails the job."""
+
+    NAME = '- name: "Independent real-data indel check on the chr22 self-test output'
+    SPEC = re.compile(r"(\w+):([\w.-]+\.txt):(\d+):(\d+):(\d+):(\d+):([\w.-]+\.txt)")
+
+    def step(self):
+        text = workflow("validate-benchmarks.yml")
+        start = text.index(self.NAME)
+        return text, text[start:text.index("- name:", start + 1)]
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_it_runs_after_validate_test(self):
+        text, _step = self.step()
+        self.assertLess(text.index("- name: validate-test (chr22)"), text.index(self.NAME))
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_it_checks_every_benchmark_with_its_own_budget(self):
+        _text, step = self.step()
+        specs = {m[0]: m[1:] for m in self.SPEC.findall(step)}
+        data = json.loads(read(REPO / "test/benchmark/benchmarks.json"))
+        self.assertEqual(set(specs), {b["name"] for b in data["benchmarks"]})
+        for b in data["benchmarks"]:
+            with self.subTest(benchmark=b["name"]):
+                t = dict(data["thresholds"], **b.get("thresholds", {}))
+                self.assertEqual(specs[b["name"]], (
+                    b["pam_name"], str(t["mm"]), str(t["bDNA"]), str(t["bRNA"]),
+                    str(t.get("max_total_edits", 6)), b["guide_file"]))
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_soundness_then_completeness_and_a_gating_finding_fails(self):
+        _text, step = self.step()
+        self.assertIn("set -euo pipefail", step)
+        self.assertNotIn("|| true", step)
+        self.assertNotIn("continue-on-error", step)
+        self.assertEqual(step.count("python3 scripts/check_indel_rows.py"), 2)
+        sound = step[:step.index("completeness (cas9_sg1617")]
+        comp = step[step.index("completeness (cas9_sg1617"):]
+        self.assertIn("--mode soundness", sound)
+        self.assertIn("--mode completeness", comp)
+        self.assertIn("crisprme-test-out_cas9_sg1617", comp)
+        self.assertIn("--max-total-edits 6", comp)
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_a_change_to_the_checker_starts_the_job(self):
+        self.assertTrue(listed("scripts/check_indel_rows.py",
+                               pull_request_paths("validate-benchmarks.yml")))
+
+
 class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
     """docs/RELEASE_CHECKLIST.md's local gate: the commands that run on the release image
     what CI cannot, with the only skips it allows named. Its checks are greps, so what

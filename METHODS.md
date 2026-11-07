@@ -1496,16 +1496,22 @@ own exhaustive aligner. **The truth is the VCF.** A slot is the reference with e
 allele its genotype puts there. Two alleles of one slot whose REF spans meet — a SNP at an
 insertion's own position, a SNP on a base a deletion removes, one complex allele split into
 overlapping records, two ALTs at one position phased onto one haplotype — describe one
-stretch twice, so the VCF gives no sequence there: every target touching such a stretch is
-counted under its own class (`limit-overlapping-records`), never judged. Where a call that
-touches the target has unknown phase (unphased, or a missing allele), the truth is the
-PUTATIVE rule of §4: the strongest target the sample's own alleles allow, the guide's base
-wherever it carries it, else the highest CFD. CRISPRme's documented reading of a carrier
-(§4: the one-indel window, the second indel read from either end of the target, the
-phasing artefact and the complex allele, the PUTATIVE carriers of MNVs and of multi-ALT
-alts the genotypes cannot tie, the last record of a split site) is re-implemented from this
-text only to classify a disagreement as a documented limit (counted, non-gating) or a
-failure. It runs two ways:
+stretch twice, so the VCF gives no sequence there: a carrier whose record meets such a
+stretch, where a target of the record reads (one in budget reads with the overlapping
+alleles left out), is counted under its own class (`limit-overlapping-records`), never
+judged. Where a call that touches the target has unknown phase (unphased, or a missing
+allele), the record's known slot is judged first — when no placement of those calls lets
+it hold the target (a phased second indel inside it, say), or every placement does — and
+otherwise the truth is the PUTATIVE rule of §4: the strongest target the sample's own
+alleles allow, the guide's base wherever it carries it, elsewhere (and at the PAM
+jointly) the alleles that maximize the alignment's CFD; CFD is a product, so where it is 0
+whatever the choice (a DNA bulge whose base the table scores 0, say) every choice is a
+strongest one. CRISPRme's documented reading of a carrier (§4: the one-indel window, the
+second indel read from either end of the target before any unphased call, the phasing
+artefact and the complex allele, the PUTATIVE carriers of MNVs and of multi-ALT alts the
+genotypes cannot tie, the last record of a split site) is re-implemented from this text
+only to classify a disagreement as a documented limit (counted, non-gating, a PUTATIVE tie
+included) or a failure. It runs two ways:
 
 - **Soundness.** Every row block of the integrated results (the highest-CFD, fewest
   mm+b and highest-CRISPR-Bulge blocks) and of the alternative alignments whose variant
@@ -1527,16 +1533,27 @@ failure. It runs two ways:
   alignment on both strands with the PAM that holds a base the record changes (for a pure
   deletion, the bases on both sides of it — a target wholly in a flank is reference or SNP
   sequence and gives no indel row) is mapped to the reference and required to be reported
-  for that sample: as a row with exactly that target and variants, or folded into a row
-  naming the same variants with the target's own carrier set at the same Cluster Position
-  (the merge keeps one row per position, variant list and carrier set, §4, and CRISPRitz's
-  Cluster Position, the start moved to the PAM's fixed end, is shared by every alignment of
-  one PAM site). A target touching a call of unknown phase is demanded as the sample's
-  strongest. A run that writes no alternative alignments (population-level, or
-  `--ci-cd-test`) keeps one row per merge cluster: there the target's cluster must be
-  reported with a fewest-mm+b block of no more edits than the target's best alignment and
-  a highest-CFD block of at least its CFD (the checker's CFD, from the tables, reproduces
-  every CFD the runs below printed; a SNP row prints the higher of its REF and ALT scores).
+  for that sample: as a row with exactly that target and variants, or folded into rows of
+  its site naming the same variants with the target's own carrier set that are no worse
+  than it — a fewest-mm+b block of no more edits by the first sorting criterion and a
+  highest-CFD block of at least its CFD — since the merge keeps, of the rows of one site,
+  variant list and carrier set, the best by each block's order (§4). The site is the
+  cluster position on the haplotype carrying the record: CRISPRitz's Cluster Position (the
+  start moved to the PAM's fixed end, shared by every alignment of one PAM site) plus the
+  rank of the row's first base among the bases an insertion adds, as the fix branch's
+  merge compares rows that start inside one insertion; a row whose own target is not at
+  its start stands for no other alignment. A target that needs a second indel-path record
+  is demanded exactly when the fake-indel window's own reading holds its bases from the
+  same first base (CRISPRme then keeps the carrier), and is the two-indel limit otherwise.
+  A target touching a call of unknown phase is demanded as the sample's strongest. A run
+  that writes no alternative alignments (population-level, or `--ci-cd-test`) keeps one row
+  per merge cluster: there the target's cluster — the integrated row with a block within
+  `--merge` bp of its Cluster Position, or of one that the in-budget alignments of the
+  enriched reference and of every indel record's window chain to it, each within `--merge`
+  bp of the next, as the merge clusters — must be reported with a fewest-mm+b block of no
+  more edits than the target's best alignment and a highest-CFD block of at least its CFD
+  (the checker's CFD, from the tables, reproduces every CFD the runs below printed; a SNP
+  row prints the higher of its REF and ALT scores).
 
 The documented limits — the last record of a split multi-allelic site, two indel-path
 records in one target, a PUTATIVE carrier listed for its strongest target, a site within
@@ -1546,31 +1563,37 @@ no VCF covers, a table line shorter than its header and a window holding N are r
 Measured on chr22 of the HGDP + 1000 Genomes panel (README guide, NRG, 4 mismatches, 1 DNA
 and 1 RNA bulge, both analysis modes): on 2.8.1 soundness reports exactly the four rows per
 mode whose first aligned base is one an insertion adds, and nothing else, and completeness
-reports their 1,306 carrier targets missing at the right coordinate; with the 2.8.2
-placement fix both pass in both modes, completeness listing 8 two-indel targets and 1
-split-site target as limits (the two-indel targets at 3 sites), and 29,956 of the
-chromosome's 240,557 indel records whose carriers' slots hold overlapping alleles where a
-target reads (23,520 of them two indels at one position phased onto one haplotype). On the
-2.8.0 run soundness reports 10,087 row blocks per sample, among them the alternative
-alignment at chr22:22322768 that paired an insertion's only carrier with SNP alleles other
-individuals carry. Genome-wide, soundness of the 2.8.1 runs of the README guide (per sample
-and population-level) and of TRAC reports only that inside-insertion class (1,111, 682 and
-1,332 row blocks), and completeness of the README run reports the same class again, as
-carrier targets missing at the right coordinate (59,639 carrier targets at 340 sites, each
-a carrier of a 2.8.1 row of the same record placed past its anchor), and nothing else that
-gates (64 min on 40 processes). On the HPRC chr22 panel (9,125 MNVs, 4.5% of its calls with
-a missing allele) and on a copy of it with every fourth sample unphased, the fixed release
-passes both checks in both modes; their limits are 3 row blocks of an MNV whose carrier
-CRISPRme resolves PUTATIVE, 6 two-indel targets, and 259 (unphased copy: 360) records with
-a carrier that has more than 10 calls of unknown phase within a target's reach, whose
-targets touching one are not enumerated. On the documented chr22 self-test it reports the
-two `cas9_sg1617` rows of 2.8.1 and passes every benchmark with the fix. On the synthetic
-oracle it finds one CRISPRme defect: the merge keys an indel row by Cluster Position,
-variant list and aligned target, not the aligned spacer, so an unphased carrier resolved on
-an alignment where its SNP falls in a DNA bulge (CFD picks the reference base there) is
-listed on another alignment of the same aligned target whose column there faces the guide's
-base, which the carrier carries — a weaker target than its strongest;
-`test/indel_snp_oracle/known_check_indel_rows.tsv` lists the two blocks.
+reports their 1,306 carrier targets missing at the right coordinate per sample (and,
+population-level, the one such row placed more than `--merge` bp past its cluster); with
+the 2.8.2 placement fix both pass in both modes, completeness listing 8 two-indel targets,
+1 split-site target and 3 records whose carriers' slots hold overlapping alleles where a
+target reads as limits (the two-indel targets at 3 sites), and so does the fix branch's
+later head e4dbb9c, whose merge compares rows that start inside one insertion on the
+haplotype (README guide in both modes, and TRAC). On the 2.8.0 run soundness reports 10,087
+row blocks per sample, among them the alternative alignment at chr22:22322768 that paired
+an insertion's only carrier with SNP alleles other individuals carry, and completeness
+1,418 carrier targets, 109 of them met only through a fold into a phantom row. Genome-wide,
+soundness of the 2.8.1 runs of the README guide (per sample and population-level) and of
+TRAC reports only that inside-insertion class (1,111, 682 and 1,332 row blocks), and
+completeness of the README run reports the same class again, as carrier targets missing at
+the right coordinate (63,651 carrier targets at 348 sites, each a carrier of a 2.8.1 row of
+the same record placed past its anchor), and nothing else that gates (78 min on 40
+processes of a loaded node). On the HPRC chr22 panel (9,125 MNVs, 4.5% of its calls with a
+missing allele) and on a copy of it with every fourth sample unphased, the d7a6fff fix
+passes soundness in both modes and completeness population-level; per sample, its merge
+loses 620 carrier targets that start inside one long insertion allele (up to 50 kb added,
+one carrier per allele) at another place than the row it kept, both at the anchor's Cluster
+Position, which the fix branch's later merge compares on the haplotype. Their limits are 3
+row blocks of an MNV whose carrier CRISPRme resolves PUTATIVE, 6 two-indel targets, and 259
+(unphased copy: 387) records with a carrier that has more than 10 calls of unknown phase
+within a target's reach, whose targets touching one are not enumerated. On the documented
+chr22 self-test it reports the two `cas9_sg1617` rows of 2.8.1 and passes every benchmark
+with the fix. On the synthetic oracle it finds one CRISPRme defect: the merge keys an indel
+row by Cluster Position, variant list and aligned target, not the aligned spacer, so an
+unphased carrier resolved on an alignment where its SNP falls in a DNA bulge (CFD picks the
+reference base there) is listed on another alignment of the same aligned target whose
+column there faces the guide's base, which the carrier carries — a weaker target than its
+strongest; `test/indel_snp_oracle/known_check_indel_rows.tsv` lists the two blocks.
 `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check`,
 `validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
 `docs/RELEASE_CHECKLIST.md` makes it a release gate.

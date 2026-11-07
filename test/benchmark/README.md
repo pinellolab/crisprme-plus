@@ -86,20 +86,24 @@ VCF 4.x defines a record), keeps its own map from haplotype bases to reference c
 and aligns with its own exhaustive dynamic-programming aligner (it imports and copies no
 CRISPRme code, only Python's standard library; the CFD tables are read as data). The truth
 is the VCF: a slot whose alleles overlap gives no sequence and is counted
-(`limit-overlapping-records`), and where a call touching a target has unknown phase the
-truth is METHODS section 4's PUTATIVE rule (the strongest target the sample's alleles
-allow). CRISPRme's documented reading of a carrier (a second indel read from either end,
-the one-indel window, the last record of a split multi-allelic site, the PUTATIVE carriers
-of MNVs) only classifies a disagreement as a limit, never decides one. **Soundness**: every
-indel/MNV row block of the integrated results and of the alternative alignments must be
-the given guide aligned to the reference with exactly its named variants, from its
-reported start, and its carriers must be the panel samples whose haplotypes hold it (or
-whose strongest target it is). **Completeness**: every in-budget alignment on a carrier's
-haplotypes that holds a base of an indel or MNV must be reported for that carrier, or
-merged by the documented key (Cluster Position, variant list, carrier set); a run that
-writes no alternative alignments -- a population-level run, or `complete-test`'s
-`--ci-cd-test` runs -- keeps one row per merge cluster, and there the cluster's row must be
-no worse than each target (fewest-mm+b edits, highest CFD).
+(`limit-overlapping-records`) where a target of its record reads, and where a call
+touching a target has unknown phase the record's known slot is judged first, then METHODS
+section 4's PUTATIVE rule (the strongest target the sample's alleles allow, by the
+alignment's CFD). CRISPRme's documented reading of a carrier (a second indel read from
+either end, the one-indel window, the last record of a split multi-allelic site, the
+PUTATIVE carriers of MNVs) only classifies a disagreement: every disagreement is a line,
+gating or a listed limit, and none passes in silence. **Soundness**: every indel/MNV row
+block of the integrated results and of the alternative alignments must be the given guide
+aligned to the reference with exactly its named variants, from its reported start, and its
+carriers must be the panel samples whose haplotypes hold it (or whose strongest target it
+is). **Completeness**: every in-budget alignment on a carrier's haplotypes that holds a
+base of an indel or MNV must be reported for that carrier, or folded by the documented
+merge into rows of its site (the cluster position on the record's haplotype) naming the
+same variants with its carrier set and no worse than it (fewest-mm+b edits, highest CFD);
+a run that writes no alternative alignments -- a population-level run, or
+`complete-test`'s `--ci-cd-test` runs -- keeps one row per merge cluster, and there the
+row of the target's cluster (rows chained within `--merge` bp by in-budget alignments,
+as the merge clusters) must be no worse than each target.
 `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check`,
 `validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
 `docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a real HGDP + 1000 Genomes

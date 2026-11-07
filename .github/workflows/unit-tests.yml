@@ -308,12 +308,17 @@ jobs:
         # (the 2.8.1 defect), one target base changed, the aligned spacer rewritten, a
         # carrier swapped, added or dropped (also when the same target sits elsewhere),
         # a named variant dropped, a cross-haplotype SNP, a phantom of the shape reported
-        # at chr22:22322768 on 2.8.0, and an MNV row and an unphased row with a phantom
-        # base. CRISPRme's documented limits (a split multi-allelic site, two indels in
-        # one target, a complex allele, a phasing artefact, a repeat unit at the
-        # target's edge) must come out under their own non-gating class, and the driver
-        # must never pass silently (a chromosome no VCF covers, one FASTA of several
-        # contigs). Stdlib only -- the checker imports no CRISPRme module, nor do they.
+        # at chr22:22322768 on 2.8.0, an MNV row and an unphased row with a phantom
+        # base, a merge that keeps the worse of two alignments of one site, a population-
+        # level cluster dropped beside another cluster's row, a row placed past an
+        # insertion's anchor, two targets inside one insertion folded into one, a long
+        # deletion's far junction, a second indel that keeps the target's bases, another
+        # guide's row. CRISPRme's documented limits (a split multi-allelic site, two
+        # indels in one target, a complex allele, a phasing artefact, a repeat unit at the
+        # target's edge, a PUTATIVE tie) must come out under their own non-gating class,
+        # and the driver must never pass silently (a chromosome no VCF covers, one FASTA
+        # of several contigs, a sites-only VCF; a tabix read yields each record once).
+        # Stdlib only -- the checker imports no CRISPRme module, nor do they.
         working-directory: PostProcess
         run: python -m unittest test_check_indel_rows -v
 

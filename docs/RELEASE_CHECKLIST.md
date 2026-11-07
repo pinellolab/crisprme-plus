@@ -130,7 +130,8 @@ for mode in per-sample population-level; do
     --gene_annotation Annotations/gencode.protein_coding.bed.gz --index-path genome_library \
     --mm 4 --bDNA 1 --bRNA 1 --thread 8 --output "gate_${mode}" --"$mode"
   #   soundness (every indel/MNV row real) and completeness (no real indel off-target
-  #   missed: per sample on the per-sample run; per merge cluster on the population-level
+  #   missed: per sample on the per-sample run, where a target the merge folds must sit
+  #   under a row of its site no worse than it; per merge cluster on the population-level
   #   run, which keeps one row per cluster -- its row must have no more edits than each
   #   target and at least its CFD; the checker reads the mode from Results/*/.alt_mode)
   for check in soundness completeness; do
@@ -155,15 +156,16 @@ for g in readme:guide.txt trac:guide_trac.txt; do
 done
 #     The gate is the exit status: 0 gating findings. Non-gating lines are documented
 #     CRISPRme limits (limit-last-alt-wins, limit-two-indels, limit-putative-carrier,
-#     limit-contig-end), slots whose VCF alleles overlap and so give no sequence
-#     (limit-overlapping-records), and windows the checker cannot judge (limit-n-bases,
-#     limit-putative-cap), each listed with its samples and target: read them, and say in
-#     the release notes if a class grew. A known upstream defect can
+#     limit-contig-end), slots whose VCF alleles overlap where a target of their record
+#     reads, so the VCF gives it no sequence (limit-overlapping-records: 3 records on
+#     chr22), and windows the checker cannot judge (limit-n-bases, limit-putative-cap),
+#     each listed with its samples and target: read them, and say in the release notes if
+#     a class grew. A known upstream defect can
 #     be listed with --known (class, chrom, start, strand, variants, samples, reason): it
 #     turns non-gating as known-defect, and a listed one that stops showing is reported as
-#     known-not-seen. Genome-wide COMPLETENESS (about 40 CPU-hours per guide: 64 min on
-#     40 processes of a busy node, a 1-GB TSV mostly of limit-overlapping-records lines) is
-#     not a release gate; chr22 above stands for it.
+#     known-not-seen. Genome-wide COMPLETENESS (at most about 52 CPU-hours per guide: 78 min
+#     on 40 processes of a loaded node, 6 GB, a TSV of about 23 MB) is not a release gate;
+#     chr22 above stands for it.
 
 # 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.
 docker run -d --rm --name gate-web -p 8090:8080 "$IMG" crisprme.py web-interface
