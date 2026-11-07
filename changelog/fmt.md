@@ -233,7 +233,52 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
   span, guarded where the reference comes back short), and an indel row lies wholly in its own
   fake-indel window, the windows being joined by one `N` (checked through the real CLI above).
 - **METHODS §9, `docs/PRECOMPUTED_INDEXES.md`, `docs/DYNAMIC_PAM_INDEX_COMPAT.md` and the README**
-  say which limits at contig ends and `N` runs are format 1's, what format 2 holds, and that the
-  equivalences of a PAM-less index with `--prune-pam` and of budgets hold between indexes built
-  for the same guide length (an index built for 20-nt guides holds sites at contig ends and `N`
-  runs that one built for 21-nt guides does not).
+  say which limits at contig ends and `N` runs are format 1's, and which were CRISPRitz 2.9.1's
+  alone: a − strand PAM at a contig's first base reported on the + strand, which 2.10.0 reports on
+  its own strand from an index of either format, and a + strand PAM on a contig's last bases found
+  by no search, which 2.10.0 finds without bulges and from an index of format 2, but not from one
+  of format 1 (`docs/PRECOMPUTED_INDEXES.md` said both of any search). They say what format 2
+  holds, and that the equivalences of a PAM-less index with `--prune-pam` and of budgets hold
+  between indexes built for the same guide length (an index built for 20-nt guides holds sites at
+  contig ends and `N` runs that one built for 21-nt guides does not).
+
+### Fixed
+- **An index folder that holds a macOS AppleDouble file is read by its own trees.** macOS `tar` and
+  `cp` leave an AppleDouble file `._<name>` beside each file they copy onto a volume without
+  extended attributes. Every reader of an index took `._NGG_chr22_1.bin`, which opens with no
+  magic, for one of its trees, of index format 1 and built for a 512-nt guide (its second int32).
+  So CRISPRme 2.8.1's `build-index-only` kept in place an index built for too short a guide:
+  over the NGG_3 index of hg38 chr22 built for 20-nt guides, with a 21-nt PAM file at 2 DNA + 1 RNA
+  bulges, it said `Reference index already present` (exit 0) with such files beside the trees, and
+  stopped without them (`... is already there, built for a 20-nt guide ...`); complete-search's
+  scan and the web took such an index as fitting any guide, and the search script did too where
+  the file system listed such a file before the trees. With index format 2 read, more went wrong:
+  a search of an index of format 2 beside such files stopped, saying it was put together from two
+  builds and to remove it (`ERROR: index 'NGG_3_hg22' (...) holds trees of index formats 1 and 2,
+  which no build writes together: it was put together from two builds: ... Remove it (rm -rf
+  '...') and run this search again ...`), under CRISPRitz 2.9.1 too, in place of the ERROR that
+  names its format; `build-index-only` and `publish-index` refused it the same way;
+  `build-index-only` recorded nothing of it, and of an index of format 1 it recorded the PAM `.` of
+  a 512-nt guide; and the `--prune-pam` note of a wide flank of format 2 was that of format 1. Every
+  reader now takes the index's trees alone, a `.bin` that is no dot file: the search script's
+  probes, `index_fit`, the coverage check and the check of a build. The reference and variant
+  searches hand the engine a view of those trees alone where such a file is there: CRISPRitz
+  2.10.0's `searchTST` stops on a folder that holds one (`ERROR: the .bin files in '...' are named
+  for more than one PAM ('.', 'NGG'): ... remove the others.`). `publish-index` leaves `._<name>`
+  files out of the archive, and has the `tar` of macOS add none of its own. With CRISPRitz 2.10.0
+  (`feat/2.10.0` 2d1f57b), on hg38 chr22 (`build-index-only` of NGG at 2 + 2 bulges, then
+  `complete-search` of `ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1 DNA + 1 RNA bulge), with a `._`
+  file beside each file of the index (its two trees, `.pam_build` and `.index_meta.json`): of an
+  index of format 2, the 779 rows of the index without them, byte for byte, where the search
+  stopped as above; the same of an index of those two trees alone, with no record beside them, which
+  the engine, handed the folder as it is, refuses; of an index of format 1, those 779 rows and the
+  note of format 1; and under CRISPRitz 2.9.1, the ERROR that names the format of the index of
+  format 2, and the 779 rows of the one of format 1, as CRISPRme 2.8.1 gives them. With the 21-nt
+  PAM file, `build-index-only` stops on either index as above (on 2.9.1, before: `Reference index
+  already present`); over either index found in place without its record, it records what it
+  holds (its format, NGG, the 3′ side, a 20-nt guide); the archive `publish-index` makes of the
+  index with the image's `tar` and `pigz` holds no `._` file (before: four); and a `--prune-pam`
+  NGG search off an 8-nt flank of format 2 so copied gives its row and no note. Each search and
+  build that does not stop ends with exit 0 and nothing on stderr. The INDELS search hands each
+  chromosome's sub-index to the engine as it is, as 2.8.1 does: CRISPRitz 2.10.0 stops on one that
+  holds such a file, with the ERROR above.
