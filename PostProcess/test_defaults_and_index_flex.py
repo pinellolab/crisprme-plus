@@ -584,6 +584,112 @@ class ASearchPrunesByItself(tir._ShippedScript):
                       self.params())
         self.assertNotIn("Prune_pam", self.params())
 
+    def test_a_search_with_no_bulges_records_the_variant_genome_it_scans(self):
+        """Its variant genome here whole, a search with no bulges scans it (STEP 3) and
+        opens no variant index: the record named one installed of its PAM all the same, with
+        the bulges it holds and, where the search prunes by itself, pruned at leaf time, and
+        the report's summary named it as the index searched. Only its INDELS index is."""
+        enriched = self.home / "Genomes" / f"hg38+{self.VCF}"
+        enriched.mkdir(parents=True)
+        (enriched / "chr1.enriched.fa").write_text(">chr1\nACGT\n")
+        self.install("NRR_3")
+        for pam, pruned in (("20bp-NRR-SpCas9", False), ("20bp-NGG-SpCas9", True)):
+            with self.subTest(pam=pam):
+                run = self.run_with_params(pam=pam, bulges=0)
+                variant_search = [c for c in run.calls if c[0] == "search"][-1]
+                # (the enriched genome, scanned: -r, no -index)
+                self.assertEqual((Path(variant_search[1]).name, "-r" in variant_search),
+                                 (f"hg38+{self.VCF}", True))
+                params = self.params()
+                self.assertIn(f"Variant_index:{self.VCF}\tnone: a search with no bulges scans "
+                              f"the variant genome; its indels: NRR_3_hg38+{self.VCF}_INDELS\n",
+                              params)
+                self.assertNotIn(f"NRR_3_hg38+{self.VCF} (in", params)
+                # the INDELS index, which the indel search reads, is pruned as the search is
+                self.assertEqual("Prune_pam\tauto\n" in params, pruned)
+        # without that genome, the variant index answers the search, and the record names it
+        shutil.rmtree(enriched)
+        run = self.run_with_params(pam="20bp-NRR-SpCas9", bulges=0)
+        self.assertEqual(Path([c for c in run.calls if c[0] == "search"][-1][1]).name,
+                         f"NRR_3_hg38+{self.VCF}")
+        self.assertIn(f"Variant_index:{self.VCF}\tNRR_3_hg38+{self.VCF} (in {self.library}): "
+                      "built for the PAM NRR on the 3' side", self.params())
+
+    def test_the_record_says_a_search_pruned_by_itself_wherever_it_was_decided(self):
+        """complete-search decides the pruning for a search of its own and passes the flag,
+        so the script's own decision never ran and the record held no Prune_pam line: a
+        command-line search and a web search of the same library left different records
+        (METHODS section 9 lists the line). complete-search says it took the flag itself
+        ("auto"), and the record says so for either."""
+        self.install("NRR_3", variant=False)
+        for passed, recorded in ((0, True), ("auto", True), (1, False)):
+            with self.subTest(prune=passed):
+                run = self.run_with_params(pam="20bp-NGG-SpCas9", variant=False, prune=passed)
+                self.assertEqual(run.searched(variant=False), ("NRR_3_hg38", True))
+                self.assertEqual("Prune_pam\tauto\n" in self.params(), recorded)
+        # (the script says it where it decides; complete-search has said so itself)
+        self.assertNotIn("as if it was given", run.stdout)
+
+
+class CompleteSearchSaysWhoTookThePruningFlag(unittest.TestCase):
+    """complete-search decides the pruning for its own search (_prune_on_its_own) and hands
+    the pipeline --prune-pam, so the script's own decision never ran and its record of the
+    indexes searched held no `Prune_pam auto` line, which METHODS section 9 lists and a web
+    search of the same library wrote. It tells the script which it was: "auto" where it took
+    the flag itself, "1" where it was given, "0" where the search prunes nothing."""
+
+    def launch(self, *extra, installed=("NRR_3_g",)):
+        """(the last argument of the pipeline command line complete-search builds for a
+        reference search of NGG with one bulge of each type, what it said on stdout), with
+        ``installed`` in the working directory's library."""
+        import test_bulge_cap as tbc
+        cm = tbc.crisprme
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / "Genomes" / "g").mkdir(parents=True)
+        (tmp / "Genomes" / "g" / "chr1.fa").write_text(">chr1\n" + "ACGTTGCAAC" * 60 + "\n")
+        (tmp / "PAMs").mkdir()
+        shutil.copy(_REPO / "PAMs" / "20bp-NGG-SpCas9.txt", tmp / "PAMs")
+        (tmp / "g.txt").write_text("ACTGAAATCTGTAAGCAGGC" + "N" * 3 + "\n")
+        _lib(tmp, *installed)
+        argv = ["crisprme.py", "complete-search", "--genome", "Genomes/g", "--guide", "g.txt",
+                "--pam", "PAMs/20bp-NGG-SpCas9.txt", "--mm", "4", "--bDNA", "1", "--bRNA", "1",
+                "--output", "o", "--thread", "1", *extra]
+        said, launched = io.StringIO(), []
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(tmp)
+        with mock.patch.object(cm, "input_args", argv), \
+                mock.patch.object(cm, "current_working_directory", f"{tmp}/"), \
+                mock.patch.object(cm, "warn_low_memory", lambda: None), \
+                mock.patch.object(cm, "_engine_prunes", return_value=True), \
+                mock.patch.object(cm.subprocess, "call",
+                                  side_effect=lambda cmd, **kw: launched.append(cmd) or 0), \
+                mock.patch.dict(os.environ, {"CRISPRME_SKIP_SCORER_ENV": "1",
+                                             "CRISPRME_SKIP_MEM_CHECK": "1"}), \
+                redirect_stdout(said):
+            cm.complete_search()
+        self.assertEqual(len(launched), 1, said.getvalue())
+        self.params = (Path(tmp) / "Results" / "o" / ".Params.txt").read_text()
+        return launched[0].split()[-1], said.getvalue()
+
+    def test_auto_where_it_took_the_flag_itself(self):
+        passed, said = self.launch()
+        self.assertEqual(passed, "auto")
+        self.assertIn("searching with --prune-pam, as if it was given", said)
+        self.assertIn("Prune_pam\tauto\n", self.params)
+
+    def test_one_where_it_was_given_and_none_where_nothing_prunes(self):
+        passed, said = self.launch("--prune-pam")
+        self.assertEqual(passed, "1")
+        self.assertNotIn("as if it was given", said)
+        self.assertIn("Prune_pam\tgiven\n", self.params)
+        # the PAM's own index serves it unpruned: no flag, and nothing said
+        passed, said = self.launch(installed=("NGG_3_g", "NRR_3_g"))
+        self.assertEqual(passed, "0")
+        self.assertNotIn("as if it was given", said)
+        self.assertNotIn("Prune_pam", self.params)
+
 
 @unittest.skipUnless(shutil.which("python") and tir._gnu_realpath(),
                      "runs the shipped search script as the image does (GNU realpath)")

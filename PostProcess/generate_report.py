@@ -1774,8 +1774,9 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     else:
         vc_note = (
             "the full list is in the integrated results in the result folder (its rows "
-            "whose <code>Not_found_in_REF</code> is <code>y</code>; <code>--report-full</code> "
-            "bundles them as <code>variant_created.tsv</code>, gzipped when large)."
+            "whose <code>Not_found_in_REF</code> is <code>y</code>; <code>--report-full</code>, "
+            "or Include the full report on the web form, bundles them as "
+            "<code>variant_created.tsv</code>, gzipped when large)."
         )
     ds = meta.get("datasets", "n/a")
     mm = meta.get("mm", "n/a")
@@ -3374,8 +3375,8 @@ def render_validation_panel(
             "or expanded for any assay budget." if raw_bundled else
             " The full threshold table above and the per-threshold subset files (bundled "
             "downloads), with the complete raw integrated results in the result folder "
-            "(<code>--report-full</code> bundles them too), let the panel be reviewed or "
-            "expanded for any assay budget."
+            "(<code>--report-full</code>, or Include the full report on the web form, "
+            "bundles them too), let the panel be reviewed or expanded for any assay budget."
         )
     )
     # A run that computed neither score (a nuclease of no SpCas9 family, a 5' PAM): every CFD
@@ -3400,8 +3401,9 @@ def render_validation_panel(
                 "expanded for any assay budget." if raw_bundled else
                 " The edit-distance table above and its subset files (bundled downloads), "
                 "with the complete raw integrated results in the result folder "
-                "(<code>--report-full</code> bundles them too), let the panel be reviewed "
-                "or expanded for any assay budget."
+                "(<code>--report-full</code>, or Include the full report on the web form, "
+                "bundles them too), let the panel be reviewed or expanded for any assay "
+                "budget."
             )
         )
     _panel_n = vp.get("panel_size", 0)
@@ -4323,8 +4325,8 @@ def _hvdr_where(hvdr_bundle_name=None, hvdr_n_regions=0, report_full=False):
         return (f"{where}, and for the windows near the top-ranked sites in the bundled "
                 f"<code>{_esc(hvdr_bundle_name)}</code>")
     if hvdr_n_regions and not report_full:
-        return (f"{where}, which <code>--report-full</code> bundles for the windows near the "
-                "top-ranked sites")
+        return (f"{where}, which <code>--report-full</code>, or Include the full report on "
+                "the web form, bundles for the windows near the top-ranked sites")
     return where
 
 
@@ -4699,8 +4701,9 @@ def render_html(
                 "<code>Observed</code> column &mdash; click it to see every worst-case "
                 "combination enumerated at that site. These are reconstructed from the "
                 "observed variants and are <strong>unphased</strong> (not confirmed on any "
-                "one individual&rsquo;s haplotype); run <code>--per-sample</code> to resolve "
-                "the true cis haplotypes and carriers."
+                "one individual&rsquo;s haplotype); re-run the search per-sample "
+                "(<code>--per-sample</code>, or Per-sample as the analysis on the web form) "
+                "to resolve the true cis haplotypes and carriers."
             ) + (
                 f" On {_untiered_named(untiered)}, <code>--per-sample</code> can still report "
                 "a dense window by its greedy worst-case alignments, whose listed carriers need "
@@ -4741,7 +4744,8 @@ def render_html(
             + (", plus the variant-created subset" if vc_bundled else "")
             + ") are bundled as curated-column TSVs so the panel can be expanded to any "
             "tier for review."
-            + (" <code>--report-full</code> adds the variant-created subset."
+            + (" <code>--report-full</code>, or Include the full report on the web form, "
+               "adds the variant-created subset."
                if n_variant and not vc_bundled and not tsv_gz_name else "")
         )
 

@@ -2387,7 +2387,9 @@ def _refuse_no_reference_index(index_path: str, genome: str, motif: str, want: i
         f"variants (hours on a human genome). Install one in that library (crisprme.py "
         f"download --what index --index-name {motif}_{max(want, 3)}_{genome} if it is "
         f"published, or crisprme.py build-index-only), or run "
-        f"without --index-path, where a search builds one from the genome (a search of the "
+        f"without --index-path, where a search takes an index of the working directory's "
+        f"library, pruned to this PAM where only such a one serves it, and builds one from "
+        f"the genome where none does (a search of the "
         f"reference genome alone, with --index-path, says what that library holds)"
     )
 
@@ -2579,14 +2581,18 @@ def _prune_note(index: str, motif: str) -> str:
             f"unpruned, and {os.path.basename(index)} ({os.path.dirname(index)}) serves it pruned "
             f"to it at leaf time: searching with --prune-pam, as if it was given. A dedicated "
             f"{motif} {which} index is searched faster: build one with build-index-only, or "
-            f"download a published one.")
+            f"download one if it is published.")
 
 
 def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[str]:
-    """What a search under --prune-pam should say of the all-N indexes ``indexes`` it reads,
-    whose stored flank is wider than the PAM ``motif`` (the others: nothing), one line each:
-    the sites such a flank cannot index (METHODS section 9), and, for an index built before
-    the engine kept a target whose flank holds an N (prune_flank), the sites it misses."""
+    """What a search under --prune-pam, given or taken by itself (_prune_on_its_own), should
+    say of the all-N indexes ``indexes`` it reads, whose stored flank is wider than the PAM
+    ``motif`` (the others: nothing), one line each: the sites such a flank cannot index
+    (METHODS section 9), and, for an index built before the engine kept a target whose flank
+    holds an N (prune_flank), the sites it misses and what serves the search whole: that
+    index built again, or a dedicated index of the PAM beside it, which the search takes
+    first (_index_the_search_takes). A search without --prune-pam and --index-path built a
+    dedicated index before 2.9.0; it now prunes from that same index by itself."""
     notes, seen = [], set()
     for index in indexes:
         pam = index_fit.index_pam(index)
@@ -2619,7 +2625,8 @@ def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[s
                 f"(CRISPRme 2.8.0 or earlier), which dropped such targets, and searched for the "
                 f"shorter PAM {motif} it misses the sites whose flank holds an N. Remove it and "
                 f"build it again with build-index-only (which keeps an index it finds in place), "
-                f"or search without --prune-pam and --index-path, which builds a dedicated index.")
+                f"or put a dedicated {motif} index beside it, which a search takes before it "
+                f"(build one with build-index-only, or download one if it is published).")
     return notes
 
 
@@ -2693,8 +2700,7 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
             that takes no reference index.
         pam: The PAM motif; with `prune` (--prune-pam) and `three_prime` (a 3' PAM),
             which indexes of the genome's name the search could take
-            (_index_serves_search). With `prune` the messages also say to run the
-            search again without --prune-pam.
+            (_index_serves_search).
         bdna, brna: The search's DNA and RNA bulges, given or taken by default, for the
             messages; `bulges` each when not given.
         guide_len: The search's guide length: the search takes no index that does not fit
@@ -3211,7 +3217,8 @@ def complete_search() -> None:
         if index_path != "_":
             advice = (f"Install an index of it in that library (crisprme.py download --what "
                       f"index, or crisprme.py build-index-only), or run without --index-path, "
-                      f"where a search with --bDNA/--bRNA builds one from the genome")
+                      f"where a search with --bDNA/--bRNA takes an index of the working "
+                      f"directory's library, or builds one from the genome")
         else:
             advice = "Pass --bDNA/--bRNA explicitly (a search builds an index it can build)"
         print(
@@ -3733,7 +3740,10 @@ def complete_search() -> None:
                 f"{gene_annotation} {void_mail} {base_start} {base_end} {base_set} "
                 f"{sorting_criteria_scoring} {sorting_criteria} {cicd_test} "
                 f"{vcf_filter_pass_values} {index_path} {max_total_edits} "
-                f"{1 if prune_pam else 0}"
+                # "auto" where this search took the flag by itself, so that the run's
+                # record of the indexes it searched says so, as it does for a web search,
+                # where the script decides it
+                f"{'auto' if prune_auto else 1 if prune_pam else 0}"
             )
             # The pipeline reads the annotation temp folders until it ends, so they are
             # not removed (_run_and_remove_annotation_tmpdirs) unless it is known to have

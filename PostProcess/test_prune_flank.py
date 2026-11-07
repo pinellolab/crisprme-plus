@@ -186,6 +186,34 @@ class TheSearch(_Dir):
             "WARNING [complete-search]: NNNNNNNN_4_g stores no N in the flank of any target "
             "where its genome has one: it was built before CRISPRitz 2.9.1"), notes)
 
+    def test_the_warning_names_a_route_that_serves_the_search_whole(self):
+        """Its advice was to "search without --prune-pam and --index-path, which builds a
+        dedicated index": since 2.9.0 such a search prunes by itself from that very index
+        (_prune_on_its_own) and builds none, so the advice sent the user round the same
+        warning. It names the two routes that serve the search whole: the index built
+        again, or a dedicated index of the PAM beside it, which the search takes first."""
+        from unittest import mock
+        old = self.index("NNNNNNNN_4_g", flanks=("ACGTACGT", "TTTTACGT"))
+        warning = self.crisprme._wider_flank_notes([old], "NRG", self.genome)[1]
+        self.assertNotIn("without --prune-pam", warning)
+        self.assertTrue(warning.endswith(
+            "Remove it and build it again with build-index-only (which keeps an index it "
+            "finds in place), or put a dedicated NRG index beside it, which a search takes "
+            "before it (build one with build-index-only, or download one if it is "
+            "published)."), warning)
+        # the search the older advice named takes that same index, pruning by itself (the
+        # library is the working directory's), and builds none; with a dedicated index
+        # beside it, that one answers it, unpruned
+        with mock.patch.object(self.crisprme, "current_working_directory", self.root), \
+                mock.patch.object(self.crisprme, "_engine_prunes", return_value=True):
+            self.assertEqual(
+                self.crisprme._prune_on_its_own("_", "g", [], "NRG", 2, True, 20, 1, 1), old)
+            dedicated = self.index("NRG_3_g", flanks=("TTT",))
+            self.assertIsNone(
+                self.crisprme._prune_on_its_own("_", "g", [], "NRG", 2, True, 20, 1, 1))
+        self.assertEqual(self.takes(prune=False), dedicated)
+        self.assertEqual(self.crisprme._wider_flank_notes([dedicated], "NRG", self.genome), [])
+
     def test_an_index_of_the_pams_width_says_nothing(self):
         for name in ("NNN_3_g", "NRG_3_g"):
             self.assertEqual(self.crisprme._wider_flank_notes(

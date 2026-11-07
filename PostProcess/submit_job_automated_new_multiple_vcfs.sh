@@ -95,8 +95,16 @@ max_total_edits="${26:-4}"  # default cap on total edits (mm+bulges); pruned in-
 # --prune-pam pass-through ($27, default "0"=off): when "1", the CRISPRitz -index
 # searches filter a PAM-less index down to $pam_file at leaf-emit (skip-before-write),
 # so one NNN index serves the requested PAM. OFF -> no flag added -> byte-identical
-# search. Needs a CRISPRitz build that supports --prune-pam.
+# search. Needs a CRISPRitz build that supports --prune-pam. "auto": the flag was not
+# given, and complete-search took it for this search (crisprme.py _prune_on_its_own), as
+# this script does below for a web search, which never passes it -- so that a search
+# records the same thing whichever launched it.
 prune_pam="${27:-0}"
+_pruned_here=
+if [ "$prune_pam" = "auto" ]; then
+	prune_pam=1
+	_pruned_here=1  # (the record of the indexes searched says so, below)
+fi
 prune_pam_flag=""
 [ "$prune_pam" = "1" ] && prune_pam_flag="--prune-pam"
 
@@ -1959,10 +1967,12 @@ while read vcf_f; do
 			[ "$_pruned_here" != 1 ] || printf "Prune_pam\tauto\n"
 		fi
 		if [ "$vcf_name" != "_" ]; then
-			if [ -d "$idx_var" ]; then
-				printf "Variant_index:%s\t%s" "$vcf_name" "$(_index_record "$idx_var")"
-			else
+			# (with the variant genome here whole, a search with no bulges scans it, STEP 3,
+			# and opens no variant index -- one installed of its PAM no more than another)
+			if [ "$_no_bulges" = 1 ] && _enriched_genome_whole; then
 				printf "Variant_index:%s\tnone: a search with no bulges scans the variant genome" "$vcf_name"
+			else
+				printf "Variant_index:%s\t%s" "$vcf_name" "$(_index_record "$idx_var")"
 			fi
 			printf "; its indels: %s\n" "$(basename "$indels_index_dir")"
 		fi

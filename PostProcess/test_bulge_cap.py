@@ -348,7 +348,9 @@ class TestCliBulgeCap(unittest.TestCase):
                     f"genome with the dataset's variants (hours on a human genome). Install one "
                     f"in that library (crisprme.py download --what index --index-name "
                     f"{_MOTIF}_{n}_{_REF} if it is published, or crisprme.py build-index-only), "
-                    f"or run without --index-path, where a search builds one from the genome (a "
+                    f"or run without --index-path, where a search takes an index of the working "
+                    f"directory's library, pruned to this PAM where only such a one serves it, "
+                    f"and builds one from the genome where none does (a "
                     f"search of the reference genome alone, with --index-path, says what that "
                     f"library holds)\n"))
         # a run building one there: the search script waits for it

@@ -55,9 +55,12 @@ building, as `test_index_resolution`'s
 of 2.8.1 or earlier, which builds in place, run in the same library at once, still can); wsearch N3
 (the plots' perfect-match legend with no star); FV :342's first two, whole: (1) the per-sample
 option of a dataset not indexed yet, and (2) both its halves, the sites-only note and Submit's
-refusal that cited `docs/DESIGN_mega_index.md`, and the report's per-sample advice, with the
-report's other advice that named commands alone (to get the tiers, to bundle a companion its slim
-zip left out); its other three are R4-4's names, P14 and N7, each recorded here. Of the audit's test
+refusal that cited `docs/DESIGN_mega_index.md`, with every piece of the report's advice that
+named a command a web search cannot pass: both sentences that say to re-run the search
+per-sample (the Search mode row and the caption of the variant combinations), the commands that
+get the tiers, and every sentence that names `--report-full` (the variant-created list and
+subset, the raw integrated results, the dense windows, the observed-haplotypes companion the
+slim zip leaves out); its other three are R4-4's names, P14 and N7, each recorded here. Of the audit's test
 additions (plan 4.5), the leftover INDELS folder (build-index-only's "Indels index already present"
 of an INDELS index without its sub-indexes: a behaviour, not a test). Of R6B: the cigate items F1
 (the scan guard that saw no skip of a method), F2 and F3 (the wiring guards a YAML comment
@@ -292,7 +295,14 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
 - **`--prune-pam` no longer needs `--index-path`**, and a search passes it by itself (see Added).
   The refusals that told a user to run again with `--prune-pam --index-path` now say, where the
   engine cannot prune, that an index serves the search pruned and the installed CRISPRitz cannot do
-  it; the advice to run without `--index-path` no longer says to drop `--prune-pam` too.
+  it; the advice to run without `--index-path` no longer says to drop `--prune-pam` too. The
+  warning of an all-`N` index built before CRISPRitz 2.9.1, which holds no target whose flank has
+  an `N`, said to "search without `--prune-pam` and `--index-path`, which builds a dedicated
+  index": such a search now prunes by itself from that very index and builds none, so the advice
+  led back to the same warning. It names the two routes that serve the search whole: the index
+  built again, or a dedicated index of the PAM beside it, which a search takes first. And the NOTE
+  of a search that prunes by itself offers a published index "if it is published", as the refusals
+  do — none is published for a genome of one's own, or for `TTTV`, `NGA` and most other PAMs.
 - **An index is named for its guide length and the side of its PAM (E2).** `<PAM>_<N>_<genome>`
   says neither, so a 3′ and a 5′ build of one motif, or builds for two guide lengths (Cas12a
   `TTTV` at 20 and 23 nt, as the rebuild adds), took one name, and the second build stopped on
@@ -393,8 +403,11 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   and `Variant_index:<dataset>`, each with its library, the PAM it was built for and its side of
   the guide, the guide length its trees were built for, its bulges and how the search narrows it
   to the search's PAM, the variant one with its INDELS index, or `none` for a search with no
-  bulges, which scans the genome; and `Prune_pam auto` for a search that pruned by itself
-  (complete-search records `Prune_pam`, `auto` or `given`, in its parameters). The report's
+  bulges, which scans the genome (and the variant genome, where it is here whole: the record then
+  names neither index, whatever is installed, only the INDELS index the indel search reads); and
+  `Prune_pam auto` for a search that pruned by itself, whichever decided it — complete-search,
+  which tells the search script that it took the flag (it records `Prune_pam`, `auto` or `given`,
+  in the parameters too), or the script, for a web search. The report's
   summary shows them, and its zip bundles the record as `indexes_searched.txt`; a run of an
   earlier release has none.
 - **The web form's PAM picker for a PAM-less index** (plan 2.7, DYNAMIC_PAM_INDEX_COMPAT §8). When an
@@ -423,7 +436,11 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   indels, `20-NGCG_1_hg38+hg38_HGDP1kGP_INDELS`, in 50 s with nothing on stderr, where 2.8.1 built
   `NGCG_1_hg38` and `NGCG_1_hg38+hg38_HGDP1kGP` as well (54 s); its record of the indexes searched
   says `Reference_index none` and `Variant_index:hg38_HGDP1kGP none`, each with why, the second
-  naming that index of its indels.
+  naming that index of its indels. The record says `none` for the variant index of such a search
+  wherever its enriched genome is whole, an installed index of the search's PAM beside it or not:
+  it named that index, with its bulges, as the index searched, and the report's summary with it,
+  though only the genome was scanned (every local or Settings build keeps its enriched genome, so
+  a web search with no bulges, "Max edits" at 0 bulges, is the common case).
 - **A search its input check refuses leaves its output folder empty.** A guide without its
   PAM's `N` padding, for one, is refused before the search starts, but the run had written
   `.command_line.txt`, `.version.txt`, `Params.txt` and `guides.txt` into `Results/<output>/`,
@@ -724,7 +741,10 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   bulges + 1: `NRR_2_hg38` for a search of 1 DNA and 1 RNA bulge, the default, where every index
   published is of N = 3, so the download it advised stopped on `No index 'NRR_2_hg38' found`. It
   names the one of N = 3 for up to 2 bulges (`NRR_3_hg38`), "if it is published", as the refusal
-  for want of a variant index does. On chr22 with HGDP + 1000 Genomes, both refusals of a search of
+  for want of a variant index does, and its other route, to run without `--index-path`, names
+  what such a search does since 2.9.0: it takes an index of the working directory's library,
+  pruned to the PAM where only such a one serves it, and builds one from the genome where none
+  does (it said that it builds one). On chr22 with HGDP + 1000 Genomes, both refusals of a search of
   1 + 1 bulge under an empty `--index-path` name `NRR_3_hg38`, which the Hub holds, and the Hub
   holds no `NRR_2_hg38` (`download` stops on it), nor an `NGCG_3_hg38`. Covered by
   `PostProcess/test_index_resolution.py` and `test_bulge_cap.py`.
@@ -842,13 +862,18 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   index has (docs/DESIGN_mega_index.md)", a file of the repository a web user cannot open; and
   the report of a population-level search said to re-run it with `--per-sample` alone, a flag a
   web search cannot pass (FV :342), as it named commands alone to get the tiers of a dataset
-  without them, and to bundle an observed-haplotypes companion its slim zip left out. The option
+  without them, and to bundle what its slim zip leaves out (the variant-created list and subset,
+  the complete raw integrated results, the windows near the top-ranked sites, an
+  observed-haplotypes companion over the size gate). The option
   says that the dataset's samples are not indexed yet, and to build its index in Settings; the
   note and the refusal name the hg38_mega index published on HuggingFace, which Settings
   downloads (under Download a prebuilt index); the report names the web form's Per-sample
-  analysis beside the flag, Settings' Build an index locally and Download a prebuilt index
+  analysis beside the flag in both sentences that tell the reader to re-run the search per-sample
+  (the Search mode row, and the caption of a population-level search's variant combinations),
+  Settings' Build an index locally and Download a prebuilt index
   beside the commands that get the tiers, and the form's Include the full report beside
-  `--report-full`. Covered by
+  `--report-full` in every sentence that names it (the website's example report with them).
+  Covered by
   `PostProcess/test_web_shell_safety.py`, `test_web_bulge_notes.py` and
   `test/web/test_settings_vcf_datasets.py` (in the image), and `test_generate_report.py`.
 - **build-index-only refuses an INDELS index in place that lacks the sub-indexes it builds.** It
