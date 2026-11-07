@@ -701,6 +701,28 @@ class AlignmentsStartingInsideOneInsertion(unittest.TestCase):
             self.assertEqual((len(best), len(alt)), (1, 0))
             self.assertEqual((best[0][DNA_COL], best[0][13]), (self.T1, "S1"))
 
+    def test_two_copies_are_created_when_either_copys_pam_is(self):
+        """Two copies of one target inside one insertion are one row (above), and the indel
+        post-analysis judges each copy's PAM on its own: the copy that a placement of the
+        insertion moves onto the reference's own PAM is not created ("n"), the copy the
+        insertion adds can be (its ALT PAM). The row is created when either copy is,
+        whichever the merge meets first (2.10.0; up to 50803b6 the first one met
+        was kept, and only the pre-merge sort's byte order, an upper-case PAM before "n",
+        put the created copy first: TRAC, HGDP + 1000 Genomes, chr22:50193928 (-))."""
+        ins = "AT" + self.T1 + "CA" + self.T1 + "TC"
+        rows = [self._inside(ins, 3, 23), self._inside(ins, 28, 23)]
+        rows[0][11], rows[1][11] = "n", "TGG"
+        for sort_order in ("score", "total"):
+            for order in (rows, rows[::-1]):
+                with self.subTest(sort_order=sort_order, first=order[0][11]):
+                    best, alt = self._merge([list(r) for r in order], sort_order)
+                    self.assertEqual((len(best), len(alt)), (1, 0))
+                    self.assertEqual((best[0][DNA_COL], best[0][11]), (self.T1, "TGG"))
+        # neither created: "n"
+        rows[1][11] = "n"
+        best, alt = self._merge([list(r) for r in rows])
+        self.assertEqual(best[0][11], "n")
+
     def test_bulged_alignments_of_one_target_still_fold(self):
         """A DNA-bulge alignment of the same target, one base longer and before the same
         PAM, starts one inserted base earlier: on the haplotype the same site (2.8.1: one

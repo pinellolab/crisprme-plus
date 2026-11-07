@@ -243,7 +243,19 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             if _holds_indel_token(ele[snp_info]):
                 key += (ele[2].upper(), ele[1].upper())
             if key in dict_var.keys():
-                _merge_row(dict_var[key][0], ele, snp_info)
+                kept = dict_var[key][0]
+                _merge_row(kept, ele, snp_info)
+                # Two copies of one target inside one insertion are this one row, and the
+                # indel post-analysis judges each copy's PAM on its own: one that a
+                # placement of the insertion moves onto the reference's own PAM is not
+                # created, the copy the insertion adds can be. The row is created when
+                # either copy is (METHODS, "PAM_creation"), in whatever order the copies
+                # come (2.10.0; the pre-merge sort's whole-line tie-break put a created
+                # copy, its PAM in upper case, before an "n" one). PAM_gen is the column
+                # after Total; one alignment's created PAM is the same string in every
+                # copy, its ALT PAM.
+                if len(key) == 4 and kept[total + 1] == "n" and ele[total + 1] != "n":
+                    kept[total + 1] = ele[total + 1]
             else:
                 dict_var[key] = [ele]
     # Alignments of one site naming the same variants with the same carriers are folded
