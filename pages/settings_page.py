@@ -31,6 +31,7 @@ from .pages_utils import (
     get_available_PAM,
     get_available_CAS,
     get_all_vcf_datasets,
+    vcf_reference_genome,
     get_custom_annotations,
     get_available_liftover_files,
     installed_assemblies,
@@ -64,6 +65,7 @@ from typing import List, Optional
 import subprocess
 import tarfile
 import tempfile
+import zipfile
 import string
 import random
 import re
@@ -132,10 +134,39 @@ def _unsafe_tar_member(tar: tarfile.TarFile, dest_dir: str) -> Optional[str]:
 def _genome_upload_assembly(name: str) -> str:
     """The genome an upload of the file ``name`` installs: its name less the FASTA or
     archive extension (Genomes/<assembly>/)."""
-    for ext in (".chromFa.tar.gz", ".fa.gz", ".fasta.gz", ".tar.gz", ".fa", ".fasta"):
+    for ext in (".chromFa.tar.gz", ".fa.gz", ".fasta.gz", ".tar.gz", ".tgz", ".fa", ".fasta"):
         if name.endswith(ext):
             return name[: -len(ext)]
     return name
+
+
+# What a genome upload goes in as (_install_uploaded_genome): a FASTA file, gzipped or not,
+# or a .tar.gz of them. Anything else, an NCBI Datasets .zip for one, was taken for a FASTA
+# file and refused only once whole, for its first line, the archive's bytes (WEB-9).
+_GENOME_UPLOAD_EXTENSIONS = (".fa", ".fasta", ".fa.gz", ".fasta.gz", ".tar.gz", ".tgz")
+
+
+def _genome_upload_kind_problem(name: str, head: bytes) -> Optional[str]:
+    """Why a genome upload of the file ``name``, whose first bytes are ``head``, cannot be
+    one: a name of no kind a genome goes in as, or bytes not of the kind its name says (a
+    gzip file for .gz and .tgz, FASTA text, a '>' header first, for .fa and .fasta). None
+    when it can be. Checked on the first chunk, before a multi-GB upload streams in."""
+    if not name.endswith(_GENOME_UPLOAD_EXTENSIONS):
+        return (f"{name} is not a file a genome goes in as: upload a FASTA file (.fa, .fasta, "
+                f".fa.gz or .fasta.gz) or a .tar.gz of them")
+    if name.endswith((".gz", ".tgz")):
+        if head[:2] != b"\x1f\x8b":
+            return f"{name} is not gzip-compressed, as its name says"
+    elif head.lstrip()[:1] != b">":
+        return f"{name} is not FASTA text: a FASTA file opens with a '>' header line"
+    return None
+
+
+# What an upload's finalize raises for what was sent, not for a failure of the server: the
+# client's to fix, as the refusals of its first chunk (its packing, its members, what it
+# holds; a bundle, what its metadata.json names), answered 400 with the reason (WEB-9).
+_UPLOAD_REFUSALS = (ValueError, EOFError, tarfile.TarError, zipfile.BadZipFile,
+                    gzip.BadGzipFile, personal_assembly.BundleError)
 
 
 def _built_on_genome(assembly: str) -> List[str]:
@@ -204,7 +235,16 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
             if f.endswith((".fa", ".fasta")) and not f.startswith(".")
         )
         if not fastas:
-            raise ValueError(f"no .fa or .fasta file in {name}")
+            # (an archive of gzipped FASTA files, as UCSC and the data repo serve them:
+            # say so, it was refused with no hint, M3)
+            gzipped = sorted(
+                f for _root, _dirs, files in os.walk(unpacked) for f in files
+                if f.endswith((".fa.gz", ".fasta.gz")) and not f.startswith("."))
+            raise ValueError(
+                f"no .fa or .fasta file in {name}"
+                + (f": it holds gzipped ones ({', '.join(gzipped[:3])}"
+                   f"{', ...' if len(gzipped) > 3 else ''}): gunzip them and pack the .fa "
+                   f"files, or upload one .fa.gz a sequence" if gzipped else ""))
         seen = {}  # the name each goes in under -> the file
         for fa in fastas:
             fname = os.path.splitext(os.path.basename(fa))[0] + ".fa"
@@ -383,6 +423,10 @@ def _settings_upload_chunk():
         verr = _genome_upload_problem(assembly)
         if verr:
             return (verr, 400)
+        # nor a file of a kind a genome does not go in as
+        verr = _genome_upload_kind_problem(name, request.get_data()[:64])
+        if verr:
+            return (verr, 400)
     if idx == 0 and target == "vcf":
         verr = _validate_name(dataset)
         if verr:
@@ -417,9 +461,9 @@ def _settings_upload_chunk():
         except Exception as e:
             if os.path.exists(part):
                 os.remove(part)
-            if isinstance(e, personal_assembly.BundleError):
-                # a bundle refused, saying why (its packing, its members, what its
-                # metadata.json names): the client's to fix, as the refusals above
+            if isinstance(e, _UPLOAD_REFUSALS):
+                # what was sent refused, saying why: the client's to fix, as the
+                # refusals above
                 return (str(e), 400)
             return (f"finalize failed: {e}", 500)
         return (f"complete:{result}", 200)
@@ -1445,9 +1489,22 @@ def _render_assembly_rows() -> List[str]:
     return rows
 
 
+def _index_listed(name: str) -> str:
+    """How the Installed indexes list and the Remove card name the index folder ``name``:
+    with the display name given it (its .display_label: build-index-only --name, or the
+    Display name of this page's build), which neither showed (P15.3), else as the folder."""
+    try:
+        with open(os.path.join(current_working_directory, "genome_library", name,
+                               ".display_label")) as fh:
+            shown = fh.read().strip()
+    except OSError:
+        shown = ""
+    return f"{shown} ({name})" if shown and shown != name else name
+
+
 def _render_all_tables() -> html.Div:
     genomes = [g["value"] for g in get_available_genomes()]
-    indexes = [i["value"] for i in get_available_indexes()]
+    indexes = [_index_listed(i["value"]) for i in get_available_indexes()]
     vcfs = [v["value"] for v in get_all_vcf_datasets()]
     anns = [a["value"] for a in get_custom_annotations()]
     cas = [c["label"] for c in get_available_CAS()]
@@ -1491,7 +1548,8 @@ def _deletable_options() -> List:
     for g in get_available_genomes():
         opts.append({"label": f"Genome: {g['value']}", "value": f"genome:{g['value']}"})
     for i in get_available_indexes():
-        opts.append({"label": f"Index: {i['value']}", "value": f"index:{i['value']}"})
+        opts.append({"label": f"Index: {_index_listed(i['value'])}",
+                     "value": f"index:{i['value']}"})
     for v in get_all_vcf_datasets():
         opts.append({"label": f"VCF dataset: {v['value']}", "value": f"vcf:{v['value']}"})
     for a in get_custom_annotations():
@@ -2658,6 +2716,38 @@ def add_index_hf(n, name):
     return _start(launch_settings_job(argv, "Download index"))
 
 
+def _dataset_genome(vcf: Optional[str]) -> Optional[str]:
+    """The genome VCF dataset ``vcf`` belongs to, as Settings recorded it when the dataset
+    was added (VCFs/.<dataset>.refgenome, read by vcf_reference_genome), or None without
+    a record: the search form pairs such a dataset with that genome alone. None too for a
+    value that is no dataset the build form offers: a request can send any, and it names
+    the record read, so './' and '../' reached a file outside the data folder."""
+    if (not vcf or vcf not in [v["value"] for v in get_all_vcf_datasets()]
+            or not os.path.isfile(
+                os.path.join(current_working_directory, "VCFs", f".{vcf}.refgenome"))):
+        return None
+    return vcf_reference_genome(vcf)
+
+
+@app.callback(
+    [Output("index-build-genome", "options"), Output("index-build-genome", "value")],
+    [Input("index-build-vcf", "value")],
+    [State("index-build-genome", "value")],
+    prevent_initial_call=True,
+)
+def build_genomes_of_dataset(vcf, genome):
+    """The genomes the build form offers: every one installed, but for a VCF dataset whose
+    genome Settings recorded (_dataset_genome) that genome alone, selected, as the search
+    form pairs them. It offered every genome, and a build of the dataset on another ended
+    in the enricher's crash (FV :328)."""
+    genomes = get_available_genomes()
+    own = _dataset_genome(vcf)
+    mine = [g for g in genomes if g["value"].replace(" ", "_") == own]
+    if mine:
+        return mine, mine[0]["value"]
+    return genomes, genome if genome in [g["value"] for g in genomes] else None
+
+
 @app.callback(
     [
         Output("settings-active-job", "data", allow_duplicate=True),
@@ -2685,6 +2775,15 @@ def build_index(n, genome, pam, bdna, brna, vcf, display_name):
         return no_update, no_update, "Select an installed genome and PAM."
     if vcf and vcf not in [v["value"] for v in get_all_vcf_datasets()]:
         return no_update, no_update, "Select an installed VCF dataset, or reference only."
+    own = _dataset_genome(vcf)
+    if own and own != genome.replace(" ", "_"):
+        # its VCFs are in another genome's coordinates: the enricher stopped on the first
+        # position past a chromosome's end (std::out_of_range, SIGABRT)
+        installed = own in [g["value"].replace(" ", "_") for g in get_available_genomes()]
+        return no_update, no_update, (
+            f"{vcf} is a VCF dataset of {own}, as recorded when it was added: build its "
+            f"index on {own}" + ("." if installed else f", which is not installed (add it "
+                                                      "under Reference genomes first)."))
     if int(bdna or 0) == 0 and int(brna or 0) == 0:
         # build-index-only no-ops for zero bulges; tell the user up front rather
         # than launching a job that reports "done" without producing an index.

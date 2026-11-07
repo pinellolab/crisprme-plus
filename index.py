@@ -28,7 +28,8 @@ _warnings.filterwarnings(
     "ignore", message=r".*importing Biopython from inside the source tree.*"
 )
 
-from app import URL, IPADDRESS, WEBADDRESS, ONLINE, current_working_directory, app, cache, pool_executor
+from app import (URL, IPADDRESS, WEBADDRESS, ONLINE, PORTLOCAL, current_working_directory, app,
+                 cache, pool_executor)
 from pages import (
     main_page,
     navbar_creation,
@@ -56,7 +57,7 @@ import os
 MODEFILE = ".mode_type.txt"  # running mode report file
 HOST = "0.0.0.0"  # server host
 PORTWEB = "80"  # website port
-PORTLOCAL = "8080"  # local server port
+# (the local server's port, PORTLOCAL: 8080, or crisprme.py web-interface --port's, from app)
 
 
 def _is_assembly_job(job_id: str) -> bool:

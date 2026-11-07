@@ -11,6 +11,7 @@ that names a dataset with no VCFs or no sample columns here among them.
 Run: python PostProcess/test_samplesid_overlisting.py
 """
 
+import unittest
 import gzip
 import os
 import tempfile
@@ -198,6 +199,14 @@ def test_panel_autofix_drops_phantoms():
     assert set(noop_meta) == set(all_meta)          # None -> byte-identical no-op
     assert set(filt_meta) == {"S1", "S2"}           # phantom dropped -> AN correct
 
+
+
+def load_tests(loader, tests, pattern):
+    """Under ``python -m unittest`` too, each test_ function above, which it found none of,
+    and said OK (suite P4)."""
+    return unittest.TestSuite(unittest.FunctionTestCase(fn) for name, fn in
+                              sorted(globals().items()) if name.startswith("test_")
+                              and callable(fn))
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

@@ -47,7 +47,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import safe_tar  # (PostProcess/: each archive is unpacked with safe modes, owned by this user)
-import index_fit  # (PostProcess/: the index format of an index, and whether this install reads it)
+import index_fit  # (PostProcess/: an index's format, whether this install reads it, its name's two forms)
 
 # Default HuggingFace dataset repo. Overridable per-invocation with --hf-repo or
 # the CRISPRME_HF_REPO environment variable (e.g. switch to a pinellolab org
@@ -94,6 +94,28 @@ _COMPONENT_LOCALDIR = {
     "index": "genome_library",
     "build-inputs": "Genomes",  # the enriched genome kit unpacks under Genomes/
 }
+
+
+# The PAM file of the default PAM (SpCas9 NRR since CRISPRme 2.9.0), which the README's
+# commands and the web form's default use. It ships with CRISPRme, in PAMs/ beside
+# PostProcess/, and a download of the pams component installs it when the data repo's
+# pams/ does not hold it (_install_default_pam): at 2.9.0's release that held the NGG, NNN
+# and NRG files only.
+DEFAULT_PAM_FILE = "20bp-NRR-SpCas9.txt"
+_SHIPPED_PAMS = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "PAMs")
+
+
+def _install_default_pam(local_dir: str) -> Optional[str]:
+    """Copies the shipped default PAM file (DEFAULT_PAM_FILE) into ``local_dir``, the
+    working directory's PAMs/, unless one of that name is there. Returns the file it
+    wrote, or None."""
+    src = os.path.join(_SHIPPED_PAMS, DEFAULT_PAM_FILE)
+    dest = os.path.join(local_dir, DEFAULT_PAM_FILE)
+    if os.path.exists(dest) or not os.path.isfile(src):
+        return None
+    shutil.copyfile(src, dest)
+    return dest
 
 
 # Publish-only markers a build may embed in the REF segment of an index dir name
@@ -222,7 +244,8 @@ def index_flank_width(index_name: str) -> Optional[int]:
     """
     if not index_name:
         return None
-    pam = canonical_index_name(index_name).split("_", 1)[0]
+    # (the PAM of either form of the name: index_fit.parse_index_name)
+    pam = index_fit.index_pam(canonical_index_name(index_name))
     if pam and set(pam) == {"N"}:
         return len(pam)
     return None
@@ -1553,7 +1576,7 @@ def download_component(
                 f"source VCFs of its prebuilt variant indexes as the datasets "
                 f"hg38_HGDP1kGP, hg38_HPRC and hg38_mega (e.g. --what vcf --dataset "
                 f"hg38_HGDP1kGP). A variant-aware search does not need them:  crisprme.py "
-                f"download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP  (the "
+                f"download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP  (the "
                 f"genotype store it ships covers carriers and per-sample output). To build "
                 f"an index from other VCFs, place them under VCFs/{dataset}/ yourself, or "
                 f"use --hf-repo to point at a repo that hosts '{remote_prefix}/{dataset}/'."
@@ -1677,19 +1700,26 @@ def download_component(
         # only with ALL of: its _INDELS companion (renamed into place by a SEPARATE
         # os.rename, so a main dir without it is an interrupted install); the shared
         # reference index (<pam>_<N>_<ref>, which travels once -- not inside each
-        # variant tarball); and, unless --no-genotypes, its Tier-1 genotype store
-        # (Dictionaries/genotypes_<vcf>/). Any missing piece falls through to the
-        # fetch/heal path below, which re-fetches only what is absent.
+        # variant tarball); the dictionaries a variant search reads, which its tarball
+        # brings (Dictionaries/registry_<vcf>/ or dictionaries_<vcf>/, and
+        # log_indels_<vcf>/: a search without them says to download the index again,
+        # which no-opped over the install, FR :163); and, unless --no-genotypes, its
+        # Tier-1 genotype store (Dictionaries/genotypes_<vcf>/). Any missing piece falls
+        # through to the fetch/heal path below, which re-fetches only what is absent.
         installed_name = canonical_index_name(index_name)
         installed_dir = os.path.join(local_dir, installed_name)
         _vcf = installed_name.partition("+")[2]
         _ref_index_dir = os.path.join(local_dir, installed_name.partition("+")[0])
-        _genotype_dir = os.path.join(workdir, "Dictionaries", f"genotypes_{_vcf}")
+        _dicts = os.path.join(workdir, "Dictionaries")
+        _genotype_dir = os.path.join(_dicts, f"genotypes_{_vcf}")
         _complete = os.path.isdir(installed_dir) and (
             not _vcf
             or (
                 os.path.isdir(f"{installed_dir}_INDELS")
                 and os.path.isdir(_ref_index_dir)
+                and os.path.isdir(os.path.join(_dicts, f"log_indels_{_vcf}"))
+                and any(os.path.isdir(os.path.join(_dicts, f"{_tier}_{_vcf}"))
+                        for _tier in ("registry", "dictionaries"))
                 and (not genotypes or os.path.isdir(_genotype_dir))
             )
         )
@@ -2074,6 +2104,9 @@ def download_component(
         if component == "annotations" and moved.endswith(".gz") and not moved.endswith(".bed.gz"):
             decompress_gz(moved)
     shutil.rmtree(staging, ignore_errors=True)
+    if component == "pams" and _install_default_pam(local_dir):
+        print(f"Installed the default PAM file {DEFAULT_PAM_FILE}, which CRISPRme ships "
+              f"and {repo} does not host, -> {local_dir}", flush=True)
     return local_dir
 
 
@@ -2328,6 +2361,12 @@ def publish_index(
             parts[1],
             parts[2],
         )
+    # A name of the 2.9.0 form says the guide length and the side of the PAM too
+    # (index_fit.parse_index_name): the manifest records them, and the PAM itself.
+    _named = index_fit.parse_index_name(index_name)
+    if _named and _named[3]:
+        manifest["pam"], manifest["guide_len"] = _named[0], _named[3]
+        manifest["pam_side"] = "3prime" if _named[4] == 3 else "5prime"
     # optional human-friendly name: explicit arg wins, else a .display_label sidecar
     # written at build time; travels in the manifest so download can restore it.
     if not display_name:

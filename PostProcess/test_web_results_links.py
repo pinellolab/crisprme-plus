@@ -39,16 +39,20 @@ try:  # page modules need the web stack (Dash); the light unit-test CI does not 
     import dash  # noqa: F401
     from dash.development.base_component import Component
 except ImportError:  # pragma: no cover
-    raise unittest.SkipTest("dash not installed: web page tests skipped")
+    dash = None
+# Without Dash each class skips, not the module: a SkipTest raised at import is a traceback
+# under `python -m unittest <module>` (skips D7).
+_NEEDS_DASH = unittest.skipUnless(dash, "dash not installed: web page tests skipped")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app object
 
-import pages.load_page as lp  # noqa: E402
-import pages.results_page as rp  # noqa: E402
-import index_fit  # noqa: E402
-from test_index_fit import _newer_index_refusal  # noqa: E402
+if dash:  # (the pages import Dash)
+    import pages.load_page as lp  # noqa: E402
+    import pages.results_page as rp  # noqa: E402
+    import index_fit  # noqa: E402
+    from test_index_fit import _newer_index_refusal  # noqa: E402
 
 GUIDE = "CTAACAGTTGCTTTTATCACNNN"
 CRITERIA = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
@@ -86,6 +90,7 @@ def _text(layout):
     return " ".join(out)
 
 
+@_NEEDS_DASH
 class _Tmp(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", ResourceWarning)  # files the page code leaves open
@@ -154,6 +159,7 @@ class _Tmp(unittest.TestCase):
             f.write("CFD")
 
 
+@_NEEDS_DASH
 class TestResultLinkWithoutResults(_Tmp):
     REFUSED = ("/data/Genomes/hg38+x is unfinished: a build-index-only run is writing it, "
                "or stopped before it was done. Let that run finish, or run build-index-only "
@@ -256,6 +262,7 @@ class TestResultLinkWithoutResults(_Tmp):
         self.assertIsNone(rp._result_not_ready("done"))
 
 
+@_NEEDS_DASH
 class TestDownloadLinks(_Tmp):
     def test_summary_by_sample_links_the_file_of_the_selected_criterion(self):
         job = "sbs_ABC"
@@ -305,6 +312,7 @@ class TestDownloadLinks(_Tmp):
                 )
 
 
+@_NEEDS_DASH
 class TestRiskCardPlots(_Tmp):
     def test_private_plot_is_drawn_from_the_private_targets(self):
         job = "card_ABC"
@@ -336,6 +344,7 @@ class TestRiskCardPlots(_Tmp):
         self.assertEqual(len(pd.read_csv(private, sep="\t")), 1)   # 1 of them only S1
 
 
+@_NEEDS_DASH
 class TestGraphicalReportsCaption(_Tmp):
     def _tab(self, job):
         return _text(rp.update_content_tab(
@@ -363,6 +372,47 @@ class TestGraphicalReportsCaption(_Tmp):
                       "mismatches and bulges: run the search again to draw them.", text)
 
 
+@_NEEDS_DASH
+class TestGraphicalReportsTotals(_Tmp):
+    """The Graphical Reports selector of the total of mismatches and bulges, which opens on
+    its largest. The search draws the population plots of totals 0 to its mismatches + DNA +
+    RNA bulges, and finds no site past its cap on them together (Max_total_edits). The
+    selector offered up to mismatches + Max_bulges, an index dimension, max(DNA, RNA) + 1 as
+    the web writes it and max(DNA, RNA) as complete-search does (WEB-4): a web job with no
+    bulges opened on a total with no plot ("No result found"), and one of 2 DNA and 2 RNA
+    bulges, or a complete-search one of 1 and 1, could not reach its sites of most edits."""
+
+    def _totals(self, job, params):
+        d = self._job(job, log="Job\tDone\tFri\n")
+        with open(os.path.join(d, ".Params.txt"), "w") as f:
+            f.write("".join(f"{k}\t{v}\n" for k, v in {
+                "Genome_selected": "hg38", "Genome_ref": "hg38",
+                "Genome_idx": "NRG_2_hg38+hg38_x", "Pam": "NRG", **params,
+                "Nuclease": "SpCas9", "Ref_comp": "True"}.items()))
+        dropdown = _by_id(rp.update_content_tab(
+            "tab-summary-graphical", [{"row": 0}], "CFD", [{"Guide": GUIDE}], f"?job={job}",
+            "both"), "mm-dropdown")
+        return [int(o["value"]) for o in dropdown.options], int(dropdown.value)
+
+    def test_the_totals_are_the_search_s(self):
+        for job, params, last in (
+                # the web: Max_bulges max(DNA, RNA) + 1
+                ("web400_ABC", {"Max_bulges": 1, "Mismatches": 4, "DNA": 0, "RNA": 0,
+                                "Max_total_edits": 4}, 4),
+                ("web422_ABC", {"Max_bulges": 3, "Mismatches": 4, "DNA": 2, "RNA": 2,
+                                "Max_total_edits": 8}, 8),
+                # complete-search: Max_bulges max(DNA, RNA), and a cap of 6 by default
+                ("cli411_ABC", {"Max_bulges": 1, "Mismatches": 4, "DNA": 1, "RNA": 1,
+                                "Max_total_edits": 6}, 6),
+                ("cli622_ABC", {"Max_bulges": 2, "Mismatches": 6, "DNA": 2, "RNA": 2,
+                                "Max_total_edits": 6}, 6),
+                # a job written before the DNA, RNA and Max_total_edits lines: as before
+                ("old_ABC", {"Max_bulges": 2, "Mismatches": 4}, 6)):
+            with self.subTest(job=job):
+                self.assertEqual(self._totals(job, params), (list(range(last + 1)), last))
+
+
+@_NEEDS_DASH
 class TestMatrixCaption(_Tmp):
     def test_variant_is_a_site_whose_reported_alignment_is_a_variant_one(self):
         # The caption under the matrix said VARIANT is a target that exists only because a
@@ -387,6 +437,7 @@ class TestMatrixCaption(_Tmp):
         self.assertNotIn("the target exists in the reference genome", text)
 
 
+@_NEEDS_DASH
 class TestStatusPageIds(unittest.TestCase):
     def test_no_id_twice(self):
         for name, layout in (("load_page", lp.load_page("x")),

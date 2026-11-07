@@ -51,28 +51,30 @@ other program a command runs), but not Hugging Face's folder: `HF_HOME` stays
 sends it). A `MPLCONFIGDIR`, `XDG_CACHE_HOME` or `HF_HOME` you set is used as it is.
 
 `docker run --read-only` makes `/tmp` read-only as well, so it needs a writable temporary folder:
-add `--tmpfs /tmp`, or set `CRISPRME_TMPDIR` to a folder of the mounted data folder. Without one,
-a search still ends, but the CRISPR-Bulge scorer and the report have nowhere to write: CRISPR-Bulge
-scores read -1, no report zip is written, and only a WARNING in the search's error log says so.
+add `--tmpfs /tmp`, or set `CRISPRME_TMPDIR` to a folder of the mounted data folder (or to that
+folder itself: `-w /DATA -e CRISPRME_TMPDIR=/DATA`). Without one,
+the CRISPR-Bulge scorer and the report have nowhere to write, and complete-search stops before
+it starts, saying so (until 2.9.0 the search ended with CRISPR-Bulge scores of -1, no report zip,
+and only a WARNING in its error log).
 
 ---
 
 ## 2. A genome-wide search needs a lot of disk — plan for it
 
 The default variant-aware install (`download --what all`, then
-`download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`) takes **~98 GB** on disk
-(measured: 97.9 GB) before any results:
+`download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP`) takes **~150 GB** on disk
+(measured: 150.0 GB) before any results:
 
 | Item | Approx size |
 |---|---|
 | Reference genome (hg38) | ~3 GB |
-| Reference + variant-aware indexes (`NRG_3_hg38`, `NRG_3_hg38+hg38_HGDP1kGP` and its indel index) | ~41 GB |
+| Reference + variant-aware indexes (`NRR_3_hg38`, `NRR_3_hg38+hg38_HGDP1kGP` and its indel index) | ~94 GB |
 | Its `Dictionaries/`: genotype store ~30 GB, allele-frequency registry ~8.5 GB, indel genotype store ~7.7 GB, indel logs ~6.5 GB (fetched by default; per-sample analysis, this index's default, reads the store) | ~52 GB |
-| Annotations | ~1 GB |
+| Annotations | ~0.1 GB |
 | Per-run results (grows with mismatches/bulges; larger for per-sample runs, the default on a phased index) | GB–tens of GB |
 
-The install peaks around 103 GB while the genotype store unpacks. Keep everything on a
-disk with **~150 GB free** before a first variant-aware run.
+The install peaks around 161 GB while the archives unpack. Keep everything on a
+disk with **~200 GB free** before a first variant-aware run.
 Use `CRISPRME_TMPDIR` (Section 1) on the same roomy disk.
 
 **Reclaiming space:** by default `complete-search` removes bulky intermediates when
@@ -107,7 +109,7 @@ the default on a genotyped + phased index (HGDP + 1000 Genomes, HPRC), and `--pe
 forces it on any other genotyped one.
 
 - `--per-sample` requires a **genotyped** index. It no-ops (with a warning) on a
-  sites-only index such as `NRG_3_hg38+hg38_mega`.
+  sites-only index such as `NRR_3_hg38+hg38_mega`.
 - Named carriers / personal risk cards come from the **genotype store** bundled with
   the index (`download --what index`, unless you pass `--no-genotypes`). Without it
   (and without the classic per-sample dictionaries) a search runs population-level,
@@ -147,7 +149,8 @@ due to initialization overhead.
 - **Get everything a reference scan needs:** `crisprme.py download --what all` fetches
   the genome, annotations, PAMs, sample lists, and the default reference index.
 - **Add a variant-aware index:** `crisprme.py download --what index --index-name
-  NRG_3_hg38+hg38_HGDP1kGP` (the recommended phased HGDP + 1000 Genomes default).
+  NRR_3_hg38+hg38_HGDP1kGP` (the recommended phased HGDP + 1000 Genomes default, of the
+  default SpCas9 NRR PAM).
 - The public repository ships **prebuilt indexes** that already encode the variants, so
   you do not need the VCFs to search the shipped datasets. It also hosts their source
   VCFs (`hg38_HGDP1kGP`, `hg38_HPRC`, `hg38_mega`), for building an index yourself:
@@ -208,14 +211,17 @@ from your data folder.
 Each of these names the index and what to do; none of them removes anything.
 
 - **`no variant index here serves this search (...)`.** The dataset's indexes are for another PAM or
-  fewer bulges, or need `--prune-pam`, and neither its VCFs nor its enriched genome are here to build
-  one. A download holds its own index only: `NRG_3_hg38+hg38_HGDP1kGP` searches NRG (and, with a
-  20-nt guide, up to 2 bulges of each type). Search with what the message lists, or install another
-  index ([Precomputed indexes](PRECOMPUTED_INDEXES.md)).
+  fewer bulges, and neither its VCFs nor its enriched genome are here to build one. A download holds
+  its own index only: `NRR_3_hg38+hg38_HGDP1kGP` searches NRR, and the PAMs NRR holds (NGG, NAG,
+  NGA, NRG), pruned to them (and, with a 20-nt guide, up to 2 bulges of each type). Search with what
+  the message lists, or install another index ([Precomputed indexes](PRECOMPUTED_INDEXES.md)).
 - **`index '...' is not installed, and this run cannot build it`.** The library is on a read-only
   mount, has no write permission or is full, and lacks the index this PAM and these bulges need. Make
   it writable, or run `build-index-only` where it is, or search with no bulges, which opens no index.
 - **`... was built for a 20-nt guide, and this search has a 23-nt guide ...: it stores too few bases
-  per site`.** An index name carries no guide length, and this search builds its own under that name.
-  Move that index aside, or run from another working directory. Any published index serves a 21-nt
-  guide at up to 1 bulge of each type.
+  per site`.** This search builds its own index under a name that says its guide length (since
+  2.9.0: `23-NGG_2_hg38`), and an index of that name is there, whose trees were built for another
+  guide (a folder renamed by hand). Name it for the guide it was built for, as the ERROR says (`mv
+  .../23-NGG_2_hg38 .../20-NGG_2_hg38`), or move it aside. An index of the older name
+  (`NGG_2_hg38`) built for another guide is left as it is, and the search builds its own beside it.
+  Any published index serves a 21-nt guide at up to 1 bulge of each type.

@@ -13,6 +13,11 @@ free; TROUBLESHOOTING gave ~3 + 40 + 50 GB and ~150 GB free. Measured with `du -
 0.72 GB), and the install peaks at ~103 GB while the genotype store unpacks beside its archive.
 So ~100 GB free was full before the first result was written.
 
+2.9.0 makes NRR the default index. Measured the same way on ml003 (2026-11-06), twice, with
+`NRR_3_hg38+hg38_HGDP1kGP`: 150,048,109,201 bytes (genome 3.27 GB, indexes 94.20 GB,
+Dictionaries/ 52.44 GB, annotations 0.13 GB), sampled every 10 s at a peak of 161.0 GB while
+the archives unpack; a ~70 GB download. So ~150 GB on disk, and ~200 GB free.
+
 Read as text. A re-measure changes the constants below and every surface together.
 """
 
@@ -22,8 +27,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-INSTALLED_GB = "98"   # the default variant-aware install, on disk
-FREE_GB = "150"       # what every surface asks a user to keep free for it
+INSTALLED_GB = "150"  # the default variant-aware install, on disk
+FREE_GB = "200"       # what every surface asks a user to keep free for it
 
 # Every surface that sizes the default variant-aware install.
 SURFACES = ("README.md", "docs/index.html", "docs/DOCKER_QUICKSTART.md", "docs/DATA_LAYOUT.md",
@@ -106,7 +111,7 @@ class EverySurfaceGivesTheMeasuredInstallSize(unittest.TestCase):
         for name in SURFACES:
             body = text(name)
             for stale in ("~85 GB", "≈ 100 GB", "~100 GB free", "~45 GB free",
-                          "store ~45 GB of data"):
+                          "store ~45 GB of data", "~98 GB", "~45 GB download"):
                 with self.subTest(surface=name, stale=stale):
                     self.assertNotIn(stale, body)
 

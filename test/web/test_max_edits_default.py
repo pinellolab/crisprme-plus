@@ -14,7 +14,9 @@ from pages import main_page  # noqa: E402
 # Stub the data-dependent lookups load_example_data makes, so it doesn't touch the
 # filesystem (the CI image has no installed PAMs/indexes).
 main_page._default_cas = lambda *a, **k: "SpCas9"
-main_page._default_pam = lambda *a, **k: "20bp-NRG-SpCas9"
+main_page._default_pam = lambda *a, **k: "20bp-NRR-SpCas9"
+# (Load Example selects the installed genome as it selects the PAM, since 2.9.0)
+main_page._default_genome = lambda *a, **k: "hg38"
 main_page.get_variant_dataset_options = lambda *a, **k: [{"value": "HGDP1kGP"}]
 main_page._preferred_variant = lambda *a, **k: "HGDP1kGP"
 

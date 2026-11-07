@@ -95,8 +95,16 @@ max_total_edits="${26:-4}"  # default cap on total edits (mm+bulges); pruned in-
 # --prune-pam pass-through ($27, default "0"=off): when "1", the CRISPRitz -index
 # searches filter a PAM-less index down to $pam_file at leaf-emit (skip-before-write),
 # so one NNN index serves the requested PAM. OFF -> no flag added -> byte-identical
-# search. Needs a CRISPRitz build that supports --prune-pam.
+# search. Needs a CRISPRitz build that supports --prune-pam. "auto": the flag was not
+# given, and complete-search took it for this search (crisprme.py _prune_on_its_own), as
+# this script does below for a web search, which never passes it -- so that a search
+# records the same thing whichever launched it.
 prune_pam="${27:-0}"
+_pruned_here=
+if [ "$prune_pam" = "auto" ]; then
+	prune_pam=1
+	_pruned_here=1  # (the record of the indexes searched says so, below)
+fi
 prune_pam_flag=""
 [ "$prune_pam" = "1" ] && prune_pam_flag="--prune-pam"
 
@@ -109,17 +117,19 @@ prune_pam_flag=""
 # CRISPRme pins a CRISPRitz version that supports this, but the pin is
 # overridable (CRISPRITZ_REF / an engine already on PATH), so check rather than
 # assume. Grep the installed script instead of comparing versions: it is the
-# thing that would drop the flag.
-if [ "$prune_pam" = "1" ]; then
+# thing that would drop the flag. (A search that turns pruning on by itself, below, does
+# not where the engine cannot: it takes its index as it did before.)
+_engine_prunes() {
 	_cz_path=$(command -v crispritz.py 2>/dev/null)
-	if [ -n "$_cz_path" ] && ! grep -q -- "--prune-pam" "$_cz_path" 2>/dev/null; then
-		printf "ERROR: --prune-pam was requested, but the installed CRISPRitz does not support it\n" >&2
-		printf "       (%s has no --prune-pam handling, so the flag would be dropped and the\n" "$_cz_path" >&2
-		printf "       search would run unpruned over the whole PAM-less index).\n" >&2
-		printf "       Install a CRISPRitz build with --prune-pam, or drop the flag and use a\n" >&2
-		printf "       dedicated index for this PAM.\n" >&2
-		exit 1
-	fi
+	[ -z "$_cz_path" ] || grep -q -- "--prune-pam" "$_cz_path" 2>/dev/null
+}
+if [ "$prune_pam" = "1" ] && ! _engine_prunes; then
+	printf "ERROR: --prune-pam was requested, but the installed CRISPRitz does not support it\n" >&2
+	printf "       (%s has no --prune-pam handling, so the flag would be dropped and the\n" "$_cz_path" >&2
+	printf "       search would run unpruned over the whole PAM-less index).\n" >&2
+	printf "       Install a CRISPRitz build with --prune-pam, or drop the flag and use a\n" >&2
+	printf "       dedicated index for this PAM.\n" >&2
+	exit 1
 fi
 
 # Whether to emit the alternative-alignments (altMerge / all_results_with_alternative_alignments)
@@ -143,18 +153,27 @@ rm -f $output_folder/queue.txt
 if [ $2 == "_" ]; then
 	echo -e "_" >>$output_folder/tmp_list_vcf.txt
 	vcf_list=$output_folder/tmp_list_vcf.txt
+else
+	# The --vcf list is read from a copy in the output folder, which gets the newline
+	# `while read` needs (below) and loses it at the end: the user's own file was edited in
+	# place, so a run that ended early left the newline in it, and a read-only one failed
+	# the write (RV4-1).
+	cp "$vcf_list" "$output_folder/.vcf_list_searched.txt" \
+		&& vcf_list="$output_folder/.vcf_list_searched.txt"
 fi
 echo >>$vcf_list
 # $6 is the samplefile, read below with `while read`, which drops a last line with no
-# newline: hence the one added here. A search with none (reference-only, or variant-aware
-# without --samplesID) is handed the install's shared empty placeholder
-# $starting_dir/vuoto.txt, which is never written: a newline added to it stayed there for
-# good whenever a run ended before stripping it again (no hits, an error, a Ctrl-C), one
-# more each time. It is told apart as that very file (-ef), not by its name, which a
-# samples list of the user's own may share. A real samplefile gets the trailing newline
-# only when it is writable, so a read-only one does not die with "Read-only file system".
-if [ $6 != "_" ] && [ ! "$6" -ef "$starting_dir/vuoto.txt" ] && [ -w "$6" ]; then
-	echo >>$6
+# newline: hence the one added here, to a copy in the output folder, as for the --vcf list
+# (the user's own file was edited in place, and a run that ended early left the newline in
+# it: RV4-1). A search with none (reference-only, or variant-aware without --samplesID) is
+# handed the install's shared empty placeholder $starting_dir/vuoto.txt, which is never
+# written: a newline added to it stayed there for good whenever a run ended before
+# stripping it again (no hits, an error, a Ctrl-C), one more each time. It is told apart as
+# that very file (-ef), not by its name, which a samples list of the user's own may share.
+if [ $6 != "_" ] && [ ! "$6" -ef "$starting_dir/vuoto.txt" ]; then
+	cp "$6" "$output_folder/.samplesID_list_searched.txt" \
+		&& sampleID="$output_folder/.samplesID_list_searched.txt" \
+		&& echo >>"$sampleID"
 fi
 
 # Genome layout guard: CRISPRme keys its chromosome list (and so all post-analysis)
@@ -754,11 +773,19 @@ while read vcf_f; do
 	# <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM). An index without one -- built by a
 	# search before 2.8.1, by crispritz.py itself, or downloaded (the published K=8
 	# archive has none) -- is taken for a 3' build, as every published one is
-	# (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. An index of format 2 (CRISPRitz
-	# 2.10.0 and later) records the side itself, in the header of its .bin files
-	# (_header_side), which is then read first. Silent on stderr, which is fatal to the stage.
+	# (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. A name of CRISPRme 2.9.0 or
+	# later that says the side (_index_name_parts: 20-NRR_3_hg38, NNNN-20_2_hg38) records
+	# it as .pam_build does, ahead of it, as crisprme.py and the web take it
+	# (index_fit.parse_index_name); an index of format 2 (CRISPRitz 2.10.0 and later)
+	# records the side itself, in the header of its .bin files (_header_side), which is read
+	# next. Silent on stderr, which is fatal to the stage.
 	_index_side() {
-		local _line=
+		local _line= _b=${1%/} _ip_pam _ip_n _ip_rest _ip_guide _ip_side
+		_index_name_parts "${_b##*/}"
+		if [ -n "$_ip_side" ]; then
+			echo "$_ip_side"
+			return 0
+		fi
 		_header_side "$1" && return 0
 		if [ -f "$1/.pam_build" ]; then
 			{ read -r _line <"$1/.pam_build"; } 2>/dev/null
@@ -973,6 +1000,67 @@ while read vcf_f; do
 		[ "$((_g + $2))" -ge "$((_guide + ${bDNA:-0} + (${bRNA:-0} > 0)))" ]
 	}
 
+	# The parts of index folder name $1 (a basename), into _ip_pam, _ip_n and _ip_rest (the
+	# name after <N>_: the genome, and +<dataset> for a variant index), and into _ip_guide and
+	# _ip_side, for a name of CRISPRme 2.9.0 or later that carries the guide (spacer) length and
+	# the side of the guide the PAM is on, in the order of the target on the strand:
+	# <guide>-<PAM>_<N>_... for a 3' PAM (20-NRR_3_hg38), <PAM>-<guide>_<N>_... for a 5' one
+	# (TTTV-23_3_hg38). An older name, <PAM>_<N>_..., says neither, and leaves both empty.
+	# PostProcess/index_fit.py parse_index_name, the same rule. Silent on stderr.
+	_index_name_parts() {
+		local _t=${1%%_*}
+		_ip_rest=${1#*_}; _ip_n=${_ip_rest%%_*}; _ip_rest=${_ip_rest#*_}
+		_ip_pam=$_t; _ip_guide=; _ip_side=
+		case "$_t" in
+			[0-9]*-?*) _ip_guide=${_t%%-*}; _ip_pam=${_t#*-}; _ip_side=3 ;;
+			?*-[0-9]*) _ip_pam=${_t%-*}; _ip_guide=${_t##*-}; _ip_side=5 ;;
+		esac
+		case "$_ip_guide$_ip_pam" in *-*) _ip_pam=$_t; _ip_guide=; _ip_side= ;; esac
+		case "$_ip_guide" in *[!0-9]*) _ip_pam=$_t; _ip_guide=; _ip_side= ;; esac
+		return 0
+	}
+
+	# Into variable $2, the bases IUPAC code $1 stands for as a 4-bit mask (A 1, C 2, G 4,
+	# T 8; N 15), or 0 for anything else.
+	_iupac_mask() {
+		local _m=0
+		case "$1" in
+			A) _m=1 ;; C) _m=2 ;; G) _m=4 ;; T) _m=8 ;; R) _m=5 ;; Y) _m=10 ;; S) _m=6 ;;
+			W) _m=9 ;; K) _m=12 ;; M) _m=3 ;; B) _m=14 ;; D) _m=13 ;; H) _m=11 ;; V) _m=7 ;;
+			N) _m=15 ;;
+		esac
+		printf -v "$2" '%s' "$_m"
+	}
+
+	# 0 when PAM $1, of a dedicated index, holds PAM $2: the two are as long, and at each
+	# position every base $2 stands for $1 stands for too (NRR holds NGG, NAG, NRG and NGA;
+	# NRG holds NGG and NAG). An index of $1 then stores every site of $2, and the engine
+	# prunes it to them at leaf time under --prune-pam, as it does an all-N index.
+	_pam_holds() {
+		local _i _x _y
+		[ -n "$2" ] && [ "${#1}" -eq "${#2}" ] || return 1
+		for ((_i = 0; _i < ${#1}; _i++)); do
+			_iupac_mask "${1:_i:1}" _x
+			_iupac_mask "${2:_i:1}" _y
+			[ "$_y" -gt 0 ] && [ $((_x & _y)) -eq "$_y" ] || return 1
+		done
+		return 0
+	}
+
+	# 0 when PAM $1 stands for fewer sequences than PAM $2 (IUPAC codes, of one length),
+	# or for as many and sorts before it: of two dedicated indexes that hold the search's
+	# PAM, the narrower stores fewer sites (NRG before NRR, for NGG). A rule, not glob order.
+	_pam_narrower() {
+		local _i _m _a=1 _b=1
+		for ((_i = 0; _i < ${#1}; _i++)); do
+			_iupac_mask "${1:_i:1}" _m
+			_a=$((_a * ((_m & 1) + (_m >> 1 & 1) + (_m >> 2 & 1) + (_m >> 3 & 1))))
+			_iupac_mask "${2:_i:1}" _m
+			_b=$((_b * ((_m & 1) + (_m >> 1 & 1) + (_m >> 2 & 1) + (_m >> 3 & 1))))
+		done
+		[ "$_a" -lt "$_b" ] || { [ "$_a" -eq "$_b" ] && [[ "$1" < "$2" ]]; }
+	}
+
 	# Pick which installed index serves this search.
 	#   $1 library dir   $2 requested PAM   $3 name suffix (<ref> or <ref>+<vcf>)
 	#   $4 requested bMax
@@ -985,11 +1073,14 @@ while read vcf_f; do
 	# search (_index_fits_guide). Among those, in order:
 	#   0. one in an index format this install searches, ahead of one it would stop on
 	#      (_unreadable_bin: an index built by a newer CRISPRitz than the one installed);
-	#   1. the requested PAM itself, ahead of any PAM-less index -- it needs neither
-	#      N-padding nor the post-search PAM filter to be right;
+	#   1. the requested PAM itself, ahead of any other -- it needs neither N-padding nor
+	#      the post-search PAM filter to be right; then, under --prune-pam, a dedicated
+	#      index of a PAM that holds it (_pam_holds: NRR_3 for an NGG search), whose
+	#      sites are a few of a PAM-less one's; then a PAM-less one;
 	#   2. an index built for this very guide length, ahead of one that fits only;
 	#   3. the smallest sufficient N, so a tighter index beats a wider one;
-	#   4. the narrowest PAM-less flank, so --prune-pam pads as little as possible.
+	#   4. the narrowest PAM-less flank, so --prune-pam pads as little as possible; of two
+	#      dedicated indexes of PAMs that hold the search's, the narrower (_pam_narrower).
 	# Every tie is settled by a rule, because glob order is not one: it follows
 	# LC_COLLATE, and NNNNNNNN_3_hg38 sorts BEFORE NNN_3_hg38 under LC_ALL=C (as inside
 	# the container) but after it under en_US.UTF-8. Leaving the choice to the glob
@@ -999,8 +1090,10 @@ while read vcf_f; do
 	# An index must also have been built for a PAM on the search PAM's side (below).
 	_resolve_index_dir() {
 		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4" _any_side="$5"
-		local _d _b _pam _n _exact _better _side _rec _len _g _read
+		local _d _b _pam _n _exact _better _side _rec _len _g _read _named
+		local _ip_pam _ip_n _ip_rest _ip_guide _ip_side
 		local _best="" _best_n="" _best_pam_len="" _best_exact="" _best_len="" _best_read=""
+		local _best_pam="" _best_named=""
 		for _d in "$_lib"/*_*_"$_suffix"; do
 			[ -d "$_d" ] || continue
 			case "$_d" in *_INDELS) continue ;; esac
@@ -1027,15 +1120,23 @@ while read vcf_f; do
 			# (Both skips are silent on purpose: this function's STDOUT is its return
 			# value, and a write to stderr is fatal to the enclosing stage.)
 			_b=$(basename "$_d")
-			_pam=${_b%%_*}          # <PAM>_<N>_<suffix>
-			_n=${_b#*_}
-			_n=${_n%%_*}
+			_index_name_parts "$_b"  # <PAM>_<N>_<suffix>, or <guide>-<PAM>_... / <PAM>-<guide>_...
+			_pam=$_ip_pam
+			_n=$_ip_n
 			case "$_n" in '' | *[!0-9]*) continue ;; esac
 			# The glob also matches the index of a genome whose name merely ends in
 			# _<suffix> (NRG_2_mini_hg38 for hg38): that index holds another genome.
-			[ "${_b#"${_pam}_${_n}_"}" = "$_suffix" ] || continue
+			[ "$_ip_rest" = "$_suffix" ] || continue
 			[ "$_n" -ge "$_want" ] || continue
+			_named=0
+			[ -z "$_ip_side" ] || _named=1
 			if [ "$_pam" = "$_pam_want" ]; then
+				_exact=2
+			elif [ -n "${_pam//N/}" ] && [ "${prune_pam:-0}" = "1" ] \
+				&& _pam_holds "$_pam" "$_pam_want"; then
+				# a dedicated index of a PAM that holds this one, as long: under --prune-pam
+				# the engine writes out only its sites of this PAM. Without it the search
+				# would report the other PAM's sites too, so it serves only pruned.
 				_exact=1
 			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ] \
 				&& [ "${#_pam}" -eq "${#_pam_want}" ]; then
@@ -1060,17 +1161,20 @@ while read vcf_f; do
 			else
 				continue            # a different dedicated PAM cannot stand in
 			fi
-			# An index serves only a PAM on the side it was built for, as the header of its
-			# .bin files or its .pam_build records it (_index_side). Without a record a
-			# dedicated index has no side to contradict, and an all-N one is a 3' build at
-			# the published widths, 3 and 8 (the K=8 archive has no .pam_build), or under
-			# the search PAM's own name, as 2.8.0 took it; at any other width a search
-			# before 2.8.1 may have built it from a 5' PAM file, and the search builds its
-			# dedicated index instead.
+			# An index serves only a PAM on the side it was built for, as its name says it
+			# since 2.9.0 (the order of the target in it, 20-NNNN_2_hg38 for a 3' PAM,
+			# NNNN-20_2_hg38 for a 5' one), or the header of its .bin files or its .pam_build
+			# records it (_index_side). Without a record a dedicated index has no side to
+			# contradict, and an all-N one is a 3' build at the published widths, 3 and 8
+			# (the K=8 archive has no .pam_build), or under the search PAM's own name, as
+			# 2.8.0 took it; at any other width a search before 2.8.1 may have built it from
+			# a 5' PAM file, and the search builds its dedicated index instead. A dedicated
+			# index of another PAM (_exact 1) serves a search of its own side only, as an
+			# all-N one does: a record, or else a 3' build of 3 nt, as every published one is.
 			if [ -z "$_any_side" ]; then
 				_rec=0
 				_side=$(_index_side "$_d") || _rec=1
-				if [ "$_rec" = 0 ] || [ -z "${_pam//N/}" ]; then
+				if [ "$_rec" = 0 ] || [ -z "${_pam//N/}" ] || [ "$_exact" = 1 ]; then
 					if [ "${pos:-1}" -gt 0 ]; then
 						[ "$_side" = 3 ] || continue
 						if [ "$_rec" = 1 ] && [ "$_pam" != "$_pam_want" ]; then
@@ -1104,14 +1208,71 @@ while read vcf_f; do
 						_better=1
 					elif [ "$_n" -eq "$_best_n" ] && [ "${#_pam}" -lt "$_best_pam_len" ]; then
 						_better=1
+					elif [ "$_n" -eq "$_best_n" ] && [ "$_exact" = 1 ] \
+						&& _pam_narrower "$_pam" "$_best_pam"; then
+						_better=1
+					elif [ "$_n" -eq "$_best_n" ] && [ "${#_pam}" -eq "$_best_pam_len" ] \
+						&& [ "$_pam" = "$_best_pam" ] && [ "$_named" -gt "$_best_named" ]; then
+						# the same index under both names, as after a rebuild: the newer name
+						_better=1
 					fi
 				fi
 			fi
 			if [ "$_better" = 1 ]; then
 				_best="$_d"; _best_n="$_n"; _best_pam_len=${#_pam}; _best_exact="$_exact"; _best_len="$_len"; _best_read="$_read"
+				_best_pam=$_pam; _best_named=$_named
 			fi
 		done
 		[ -n "$_best" ] && printf '%s\n' "$_best"
+	}
+
+	# Into variable $1, the name under which this run builds the index of PAM $2 with -bMax
+	# $3 for $4 (the genome, or <genome>+<dataset>): since 2.9.0 the form that says the guide
+	# length and the side of the guide the PAM is on, in the order of the target on the strand
+	# (_index_name_parts: 20-NRR_3_hg38, TTTV-23_3_hg38), so that the indexes of one PAM for the
+	# two sides, or for two guide lengths, live in one library, as build-index-only names them;
+	# the older <PAM>_<N>_<...> for a PAM file of its PAM alone, which says no guide length.
+	# PostProcess/index_fit.py index_name, the same rule.
+	_build_name() {
+		local _g=$(( ${#fullseqpam} - ${pos#-} ))
+		if [ "$_g" -le 0 ]; then
+			printf -v "$1" '%s_%s_%s' "$2" "$3" "$4"
+		elif [ "${pos:-1}" -gt 0 ]; then
+			printf -v "$1" '%s-%s_%s_%s' "$_g" "$2" "$3" "$4"
+		else
+			printf -v "$1" '%s-%s_%s_%s' "$2" "$_g" "$3" "$4"
+		fi
+	}
+
+	# Run the index build "${@:2}" (index-genome, or pool_index_indels.py) of the index whose
+	# build lock $1 this run holds, in a new folder of that lock, whose path goes into
+	# _build_work. The engine writes genome_library/<PAM>_<N>_<name> under the folder it runs
+	# in, the older name, and removes a folder of that name before it writes one: run in the
+	# working directory, it took an index of that name in place -- an earlier release's, for
+	# the other side of the guide or another guide length -- for its own, and removed it. In
+	# the lock, the build a run that dies leaves goes with the lock, or when a run takes the
+	# lock over (here), and no scan of the library sees it.
+	_build_in_lock() {
+		local _lock=$1
+		shift
+		rm -rf "$_lock"/build.*  # (a run's that died holding the lock)
+		_build_work=$(mktemp -d "$_lock/build.XXXXXX") || return 1
+		(cd "$_build_work" && "$@")
+	}
+
+	# Put the index _build_in_lock built in place as $1, and remove the folder it was built
+	# in. A folder $1 in place is no index (_lock_take -bin found it holds no .bin) and goes
+	# first. Nothing is put in place where the engine wrote nothing (an INDELS index of a
+	# dataset with no indel).
+	_build_into_place() {
+		local _built
+		for _built in "$_build_work"/genome_library/*; do
+			[ -d "$_built" ] || continue
+			rm -rf "$1"
+			mv "$_built" "$1"
+			break
+		done
+		rm -rf "$_build_work"
 	}
 
 	# Record on index $1, which this run has just built, the side of the guide its PAM
@@ -1127,15 +1288,43 @@ while read vcf_f; do
 		return 0
 	}
 
+	# What index $1 is, on stdout, for the run's record of the indexes it searched
+	# (.indexes_searched.txt): its name and library, the PAM it was built for and on which
+	# side of the guide (_index_side: as its .pam_build or its name records it), the guide its
+	# trees were built for, the bulges it holds, and how the search narrows it to this PAM
+	# when it is another's. Silent on stderr.
+	_index_record() {
+		local _b=${1##*/} _p _n _g _gl _ip_pam _ip_n _ip_rest _ip_guide _ip_side
+		_index_name_parts "$_b"
+		_p=$_ip_pam; _n=$_ip_n
+		_g=$(_index_guide_len "$1")
+		_gl="a guide of a length it does not record"
+		[ -z "$_g" ] || _gl="a $_g-nt guide"
+		printf "%s (in %s): built for the PAM %s on the %s' side of %s, with up to %s bulge(s) of each type" \
+			"$_b" "$(dirname "$1")" "$_p" "$(_index_side "$1")" "$_gl" "$((_n - 1))"
+		if [ "$_p" != "$true_pam" ]; then
+			if [ "${prune_pam:-0}" = 1 ]; then
+				printf ", pruned to %s at leaf time (--prune-pam)" "$true_pam"
+			else
+				printf ", its targets filtered to %s after the search" "$true_pam"
+			fi
+		fi
+	}
+
 	# Say on stderr why index $1 cannot serve this search, when it was built for the other
 	# side of the guide, and what records that side (_index_side).
 	_say_other_side() {
-		local _have _want=3 _why="as its .pam_build records" _n _p=${1##*/}
+		local _have _want=3 _why="as its .pam_build records" _n _p _g _ip_pam _ip_n _ip_rest _ip_guide _ip_side
+		local _ip_pam_and_rest
 		_have=$(_index_side "$1") \
 			|| _why="it records no side in a .pam_build, and an index that does not is taken for a 3' build"
 		_header_side "$1" >/dev/null && _why="as the header of its .bin files records"
 		[ "${pos:-1}" -gt 0 ] || _want=5
-		_p=${_p%%_*}
+		_index_name_parts "${1##*/}"
+		_p=$_ip_pam
+		_ip_pam_and_rest=${_ip_pam}_${_ip_n}_${_ip_rest}
+		# (a name that says its side records it: _index_side)
+		[ -z "$_ip_side" ] || _why="as its name says"
 		if [ "$_have" = "$_want" ]; then
 			# (nor, for a 3' PAM, a PAM-less one of a width but 3 and 8 that records no side)
 			{ _index_side "$1" >/dev/null || [ -n "${_p//N/}" ] || [ "$_p" = "$true_pam" ]; } \
@@ -1143,6 +1332,11 @@ while read vcf_f; do
 			case "${#_p}" in 3 | 8) return 0 ;; esac
 			printf "       %s is a PAM-less index that records no side of the guide in a .pam_build, and a search before 2.8.1 built one of that width from a 5' PAM file as well as from a 3' one, so it is not taken for a 3' PAM\n" \
 				"$(basename "$1")" >&2
+			# a name that says the side records it (since 2.9.0): the way to use one built
+			# for a 3' PAM, which build-index-only does not record over it (RV1-6)
+			_g=$(_index_guide_len "$1")
+			printf "       if it was built from a 3' PAM file, name it so: mv '%s' '%s', which records that%s\n" \
+				"$1" "$(dirname "$1")/${_g:-<guide length>}-$_ip_pam_and_rest" "${_g:+, for a guide of $_g nt}" >&2
 			return 0
 		fi
 		if [ -z "${_p//N/}" ]; then
@@ -1153,14 +1347,34 @@ while read vcf_f; do
 				"$(basename "$1")" "$_have" "$_why" "$pam_name" "$_want" >&2
 		fi
 		_index_side "$1" >/dev/null && return 0
-		_n=$(basename "$1"); _n=${_n#*_}; _n=${_n%%_*}
-		printf "       if it was built from a %s' PAM file, record that by running 'crisprme.py build-index-only' with that file, the same --genome (and --vcf) and --bDNA %s\n" \
-			"$_want" "$((_n - 1))" >&2
+		# (taken for a 3' build, it is refused for a 5' PAM: a name that says the side
+		# records it, as for a 3' one above)
+		_g=$(_index_guide_len "$1")
+		printf "       if it was built from a 5' PAM file, name it so: mv '%s' '%s', which records that%s\n" \
+			"$1" "$(dirname "$1")/${_ip_pam}-${_g:-<guide length>}_${_ip_n}_${_ip_rest}" "${_g:+, for a guide of $_g nt}" >&2
 	}
 
-	# A search builds its index under the name <PAM>_<bMax>_<suffix>, which says nothing of
-	# the side of the guide, so index $1 in place under that name, which the scan refused,
-	# may have been built for the other side: a search of it would find wrong targets, or
+	# Say on stderr why the PAM-less indexes of library $1 for $2 whose flank is wider than
+	# this 5' PAM cannot serve it, which the scan skips without a word: the engine reads a
+	# 5' PAM off a flank of its own width only (_resolve_index_dir).
+	_say_wider_flank() {
+		[ "${pos:-1}" -gt 0 ] && return 0
+		local _d _b _nn _ip_pam _ip_n _ip_rest _ip_guide _ip_side
+		printf -v _nn '%*s' "${#true_pam}" ''
+		for _d in "$1"/*_*_"$2"; do
+			[ -d "$_d" ] || continue
+			_b=${_d##*/}; _index_name_parts "$_b"
+			[ "$_ip_rest" = "$2" ] && [ -n "$_ip_pam" ] && [ -z "${_ip_pam//N/}" ] \
+				&& [ "${#_ip_pam}" -gt "${#true_pam}" ] || continue
+			printf "       %s is a PAM-less index whose flank is %s nt, and %s is a 5' PAM of %s nt: a 5' PAM is read off a flank of its own width only, so this search needs %s or %s, built for a 5' PAM\n" \
+				"$_b" "${#_ip_pam}" "$true_pam" "${#true_pam}" "${_nn// /N}_${bMax}_$2" "${true_pam}_${bMax}_$2" >&2
+		done
+	}
+
+	# A search builds its index under the name _build_name gives it, which says the side of
+	# the guide but for a PAM file of its PAM alone, whose index takes the older name,
+	# <PAM>_<bMax>_<suffix>: index $1 in place under that name, which the scan refused, may
+	# have been built for the other side, and a search of it would find wrong targets, or
 	# none, and exit 0. Stop instead. A dedicated index with no record has no side to
 	# contradict (an all-N one is taken for a 3' build). $2 is its _INDELS companion, for
 	# a variant index.
@@ -1188,21 +1402,34 @@ while read vcf_f; do
 			"$_b" "$(_index_guide_len "$1")" "$(( ${#fullseqpam} - ${pos#-} ))" "${bDNA:-0}" "${bRNA:-0}" >&2
 	}
 
-	# A search builds its index under the name <PAM>_<bMax>_<suffix>, which says nothing
-	# of the guide, so index $1 in place under that name, which the scan refused for a
-	# guide it does not fit, stands in the way of the build. Stop instead of searching it.
-	# Never removed: it is someone's, and answers its own guide. $2 is its _INDELS
-	# companion, for a variant index.
+	# A search builds its index under the name _build_name gives it, which says the guide
+	# length since 2.9.0: index $1 in place under that name, which the scan refused for a
+	# guide it does not fit, was built for another, whatever its name says, and stands in
+	# the way of the build. Stop instead of searching it. Never removed: it is someone's,
+	# and answers its own guide, under the name of that guide, which the ERROR gives when no
+	# folder has it. $2 is its _INDELS companion, for a variant index.
 	_refuse_short_index() {
-		local _n _b=${1##*/} _also=
+		local _n _b=${1##*/} _also= _g _own _rename= _ip_pam _ip_n _ip_rest _ip_guide _ip_side
 		_lock_built "$1" 1 || return 0
 		_n=${_b#*_}; _n=${_n%%_*}
 		_index_fits_guide "$1" "$_n" && return 0
 		[ -n "$2" ] && [ -d "$2" ] && _also=" and $(basename "$2")"
+		_index_name_parts "$_b"
+		_g=$(_index_guide_len "$1")
+		if [ "$(_index_side "$1")" = 5 ]; then
+			_own="$(dirname "$1")/${_ip_pam}-${_g}_${_ip_n}_${_ip_rest}"
+		else
+			_own="$(dirname "$1")/${_g}-${_ip_pam}_${_ip_n}_${_ip_rest}"
+		fi
+		if ! [ -e "$_own" ]; then
+			_rename="name it for the guide it was built for (mv '$1' '$_own'"
+			[ -z "$_also" ] || _rename="$_rename; mv '$2' '${_own}_INDELS'"
+			_rename="$_rename), "
+		fi
 		printf "ERROR: " >&2
 		_say_short_index "$1"
-		printf ". This search builds its index under that name: move it%s out of %s, or run this search from another working directory\n" \
-			"$_also" "$(dirname "$1")" >&2
+		printf ". This search builds its index under that name: %smove it%s out of %s, or run this search from another working directory\n" \
+			"$_rename" "$_also" "$(dirname "$1")" >&2
 		exit 1
 	}
 
@@ -1227,9 +1454,9 @@ while read vcf_f; do
 		for _lib in "${_libs[@]}"; do
 			for _d in "$_lib"/*_*_"$_set"; do
 				[ -d "$_d" ] || continue
-				_b=${_d##*/}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
+				_b=${_d##*/}; _index_name_parts "$_b"; _p=$_ip_pam; _n=$_ip_n
 				case "$_n" in '' | *[!0-9]*) continue ;; esac
-				[ "${_b#"${_p}_${_n}_"}" = "$_set" ] || continue  # another genome's (see _resolve_index_dir)
+				[ "$_ip_rest" = "$_set" ] || continue  # another genome's (see _resolve_index_dir)
 				_g=$(_index_guide_len "$_d")
 				_have="$_have${_have:+, }$_b (up to $((_n - 1)) bulge(s) of each type${_g:+, built for a $_g-nt guide})"
 				[ "$_p" = "$true_pam" ] && [ "$_n" -gt 1 ] && [ "$_n" -lt "$bMax" ] \
@@ -1237,14 +1464,16 @@ while read vcf_f; do
 			done
 		done
 		for _lib in "${_libs[@]}"; do
-			if [ -n "$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")" ]; then
-				_todo="Its dictionaries are not installed (Dictionaries/registry_${vcf_name} or dictionaries_${vcf_name}, and log_indels_${vcf_name}): download the index again. "
+			_at=$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")
+			if [ -n "$_at" ]; then
+				# (a download of an installed index brings what of it is missing, these too;
+				# Settings downloads none that is installed)
+				_todo="Its dictionaries are not installed (Dictionaries/registry_${vcf_name} or dictionaries_${vcf_name}, and log_indels_${vcf_name}): download the index again, which installs them (crisprme.py download --what index --index-name ${_at##*/}; in the web app, remove the index in Settings, then download it there). "
 				break
 			elif [ "${prune_pam:-0}" != 1 ]; then
+				# (a search prunes by itself where the engine can: here it cannot)
 				_wider=$(prune_pam=1; _resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")
-				_at=genome_library
-				[ "$_lib" -ef "$_home" ] || _at=$_lib
-				[ -z "$_wider" ] || { _todo="${_wider##*/} can serve it from the command line: run this search again with --prune-pam --index-path $_at. "; break; }
+				[ -z "$_wider" ] || { _todo="${_wider##*/} serves it pruned to this PAM at leaf time (--prune-pam), which the installed CRISPRitz cannot do: install a CRISPRitz build that supports --prune-pam (CRISPRme pins one). "; break; }
 			fi
 		done
 		# (the indexes published are of N = 3)
@@ -1256,6 +1485,7 @@ while read vcf_f; do
 			_other=$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax" any)
 			[ -z "$_other" ] || { _say_other_side "$_other"; break; }
 		done
+		for _lib in "${_libs[@]}"; do _say_wider_flank "$_lib" "$_set"; done
 		exit 1
 	}
 
@@ -1307,6 +1537,58 @@ while read vcf_f; do
 		done
 		return 0
 	}
+
+	# --prune-pam on its own. An index of another PAM serves this search only pruned to its
+	# PAM at leaf time (_resolve_index_dir): a PAM-less one wider than the PAM (the general
+	# K=8 index), and a dedicated one of a PAM that holds it (NRR_3 for an NGG search).
+	# When no installed index serves the search without pruning and one of those does, it
+	# prunes, as under --prune-pam, and says so first: it stopped for want of an index, or
+	# built one (hours on hg38). The variant index of each dataset, which only the
+	# dataset's VCFs build, and the reference one for a search with bulges, which opens
+	# it: decided once, for every dataset, as the first is searched. The web launches this
+	# script with pruning off, so a web search does the same (complete-search says so on
+	# its console, crisprme.py _prune_on_its_own, the same rule).
+	if [ -z "$_prune_decided" ] && [ "${prune_pam:-0}" != 1 ] && _engine_prunes; then
+		_pruned= _pruned_of=
+		_this_vcf=$vcf_name
+		while read -r _v; do
+			[ -n "$_v" ] && [ "$_v" != "_" ] || continue
+			vcf_name=$(basename "$_v")
+			if [ -z "$(_variant_index)" ]; then
+				_pruned=$(prune_pam=1; _variant_index)
+				[ -z "$_pruned" ] || { _pruned_of="variant index of ${ref_name}+${vcf_name}"; break; }
+			fi
+		done <"$vcf_list"
+		vcf_name=$_this_vcf
+		if [ -z "$_pruned" ] && { [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; } \
+			&& [ -z "$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")" ]; then
+			_pruned=$(prune_pam=1; _resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
+			_pruned_of="reference index of $ref_name"
+		fi
+		if [ -n "$_pruned" ]; then
+			prune_pam=1
+			prune_pam_flag="--prune-pam"
+			_pruned_here=1  # (the record of the indexes searched says so, below)
+			# (which index needs it: in a library of the PAM's own variant index and another
+			# PAM's reference index, the reference one alone)
+			echo "NOTE: no installed $_pruned_of serves PAM $true_pam unpruned, and ${_pruned##*/} serves it pruned to it at leaf time: searching with --prune-pam, as if it was given"
+			# and, of each index it reads so whose flank is wider than the PAM, what such a
+			# flank cannot index, and whether it was built before the engine kept a target
+			# whose flank holds an N: what complete-search says on its console of the
+			# indexes it takes for a search of its own (crisprme.py _wider_flank_notes)
+			_wide=()
+			{ [ "$bDNA" -eq 0 ] && [ "$bRNA" -eq 0 ]; } \
+				|| _wide+=("$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")")
+			while read -r _v; do
+				[ -n "$_v" ] && [ "$_v" != "_" ] || continue
+				vcf_name=$(basename "$_v")
+				_wide+=("$(_variant_index)")
+			done <"$vcf_list"
+			vcf_name=$_this_vcf
+			python "$starting_dir/prune_flank.py" "$true_pam" "$ref_folder" "${_wide[@]}"
+		fi
+	fi
+	_prune_decided=1
 
 	# ensure that fundamental folders are available (-p: a run that started
 	# together may make one between the test and the mkdir, and the "File exists"
@@ -1496,26 +1778,37 @@ while read vcf_f; do
 	# --prune-pam at leaf time and by the post-search PAM filter. An NGG_3 index
 	# therefore serves any search with max(bDNA,bRNA)<=2, which is why a
 	# batteries-included index is reused instead of triggering a rebuild.
-	idx_folder1="${ref_lib}/${true_pam}_${bMax}_${ref_name}"  # exact-N name, used only for the auto-build path below
-	idx_ref=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
+	# (exact-N, under the name of 2.9.0 that says the guide length and the side: _build_name;
+	# used only for the auto-build path below)
+	_build_name idx_folder1 "$true_pam" "$bMax" "$ref_name"
+	idx_folder1="${ref_lib}/$idx_folder1"
+	# A search with no bulges scans the genome's FASTA files (STEP 3) and opens no
+	# reference index: it neither looks for one nor builds one, with --index-path or
+	# without. It built <PAM>_1_<genome>, which nothing read (hours on hg38), and under
+	# --index-path stopped on a library that held none.
+	_no_bulges=0
+	[ "$bDNA" -eq 0 ] && [ "$bRNA" -eq 0 ] && _no_bulges=1
+	idx_ref=
+	[ "$_no_bulges" = 1 ] || idx_ref=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
 	# The scan skips an index whose build lock is there, and --index-path never builds
 	# one -- but another run may be building in that library (the working one, as
 	# usual). Wait for a lock whose owner is alive or cannot be checked, as a run that
 	# builds does, and look again. A dead or abandoned owner's lock guards a partial
 	# index, which the error below names. Only the lock of an index that could serve
 	# this search counts, by _resolve_index_dir's rule: a sufficient budget, and the
-	# requested PAM or an all-N one of its width -- or wider, under --prune-pam with a
-	# 3' PAM.
+	# requested PAM or an all-N one of its width -- or, under --prune-pam, a dedicated
+	# one of a PAM that holds it, or an all-N one wider, with a 3' PAM.
 	_dead_locks=()
-	while [ -z "$idx_ref" ] && [ "$index_path" != "_" ] && [ -n "$index_path" ]; do
+	while [ "$_no_bulges" = 0 ] && [ -z "$idx_ref" ] && [ "$index_path" != "_" ] && [ -n "$index_path" ]; do
 		_dead_locks=() _held=
 		for _l in "$ref_lib"/*_*_"$ref_name".lock; do
 			[ -d "$_l" ] || continue
-			_b=${_l##*/}; _b=${_b%.lock}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
+			_b=${_l##*/}; _b=${_b%.lock}; _index_name_parts "$_b"; _p=$_ip_pam; _n=$_ip_n
 			case "$_n" in '' | *[!0-9]*) continue ;; esac
-			[ "${_b#"${_p}_${_n}_"}" = "$ref_name" ] || continue  # another genome's (see _resolve_index_dir)
+			[ "$_ip_rest" = "$ref_name" ] || continue  # another genome's (see _resolve_index_dir)
 			[ "$_n" -ge "$bMax" ] || continue
-			if [ "$_p" != "$true_pam" ]; then
+			if [ "$_p" != "$true_pam" ] && ! { [ -n "${_p//N/}" ] \
+				&& [ "${prune_pam:-0}" = "1" ] && _pam_holds "$_p" "$true_pam"; }; then
 				{ [ -n "$_p" ] && [ -z "${_p//N/}" ]; } || continue
 				[ "${#_p}" -eq "${#true_pam}" ] || { [ "${#_p}" -gt "${#true_pam}" ] \
 					&& [ "${prune_pam:-0}" = "1" ] && [ "${pos:-1}" -gt 0 ]; } || continue
@@ -1534,7 +1827,11 @@ while read vcf_f; do
 	done
 
 	# use the existing (sufficient) index if the scan found one
-	if [ -n "$idx_ref" ]; then
+	if [ "$_no_bulges" = 1 ]; then
+		echo "No reference index needed: a search with no bulges scans the genome"
+		# (the step is done: the web's progress reads this line)
+		echo -e 'Index-genome Reference\tEnd\t'$(date) >>"$log"
+	elif [ -n "$idx_ref" ]; then
 		echo "Reference index present ($(basename "$idx_ref"))"
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>"$log"
 	elif [ "$index_path" != "_" ] && [ -n "$index_path" ]; then
@@ -1545,7 +1842,13 @@ while read vcf_f; do
 		# rebuilding (extra compute) -- point the user at the one-download fix.
 		for _l in "${_dead_locks[@]}"; do printf '%s\n' "$_l" >&2; done
 		printf "ERROR: no matching reference index under --index-path '%s'\n" "$ref_lib" >&2
-		_other=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax" any)
+		# (one a search would prune by itself counts, as without --prune-pam a search prunes
+		# where the engine can: a wider all-N index of no recorded side was not named)
+		if _engine_prunes; then
+			_other=$(prune_pam=1; _resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax" any)
+		else
+			_other=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax" any)
+		fi
 		if [ -n "$_other" ]; then
 			_say_other_side "$_other"
 			_n=${_other##*/}; _n=${_n#*_}; _n=${_n%%_*}
@@ -1555,30 +1858,36 @@ while read vcf_f; do
 				printf "\n" >&2
 			fi
 		fi
-		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s)\n" "$true_pam" "$ref_name" "$bMax" "$(basename "$idx_folder1")" >&2
-		printf "       re-run 'crisprme.py download --what index --index-name %s' (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$(basename "$idx_folder1")" >&2
+		_say_wider_flank "$ref_lib" "$ref_name"
+		# (the indexes published are named in the older form, and are of N = 3)
+		_pub="${true_pam}_$(( bMax > 3 ? bMax : 3 ))_${ref_name}"
+		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s, or %s as a build names it since 2.9.0)\n" "$true_pam" "$ref_name" "$bMax" "$_pub" "$(basename "$idx_folder1")" >&2
+		printf "       re-run 'crisprme.py download --what index --index-name %s' if it is published (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$_pub" >&2
 		exit 1
 	else
 		# no valid index found, compute it; use mkdir lock to prevent concurrent builds.
-		# A lock taken over from a run that died guards a half-written directory, which
-		# needs nothing extra here: index-genome removes the directory it is about to
-		# write and builds it whole. -bin: a directory with no .bin, which the scan
-		# skipped, is no index yet, and is rebuilt the same way.
+		# It is built in a folder of the lock (_build_in_lock), and put in place once whole:
+		# a run that dies leaves its partial build in the lock, which the run that takes the
+		# lock over clears. -bin: a directory with no .bin, which the scan skipped, is no
+		# index yet, and is replaced the same way.
 		_lock="${idx_folder1}.lock"
 		_lock_take -bin "$_lock" "indexing $idx_folder1" "$idx_folder1"
 		if [ $? != 1 ]; then
 			echo -e 'Index-genome Reference\tStart\t'$(date) >>$log
 			echo -e "Indexing reference genome"
 			# index reference genome using crispritz
-			crispritz.py index-genome "$ref_name" "$ref_folder/" "$pam_file" -bMax $bMax -th $ncpus
+			_build_in_lock "$_lock" crispritz.py index-genome "$ref_name" "$ref_folder/" "$pam_file" -bMax $bMax -th $ncpus
 			# taken over meanwhile: neither search nor remove what that run builds now
 			_lock_lost "$_lock" && exit 1
 			if [ -s $logerror ]; then
 				printf "ERROR: reference genome indexing failed\n" >&2
+				# (what is under its name is no index: one with no .bin, or the partial one of
+				# a run of an earlier release that built in place, whose lock this run took over)
 				[ -d "$idx_folder1" ] && rm -r "$idx_folder1"
 				_lock_release "$_lock"
 				exit 1
 			fi
+			_build_into_place "$idx_folder1"
 			_record_index_side "$idx_folder1"
 			_lock_release "$_lock" || exit 1
 		else
@@ -1605,7 +1914,10 @@ while read vcf_f; do
 		# ones included, so a batteries-included NGG_3_<ref>+<vcf> index serves a
 		# smaller bulge request without a rebuild.
 		basedir="${current_working_directory}/genome_library"
-		idx_folder1="${basedir}/${true_pam}_${bMax}_${ref_name}+${vcf_name}"  # exact-budget name, used only for the auto-build path below
+		# (exact-budget, under the name of 2.9.0: _build_name; used only for the auto-build
+		# path below)
+		_build_name idx_folder1 "$true_pam" "$bMax" "${ref_name}+${vcf_name}"
+		idx_folder1="${basedir}/$idx_folder1"
 		idx_var=$(_variant_index)
 
 		# use the existing (sufficient) variant index if the scan found one
@@ -1613,16 +1925,24 @@ while read vcf_f; do
 			echo "Variant index present ($(basename "$idx_var"))"
 			[ "$(dirname "$idx_var")" -ef "$basedir" ] || echo "Variant index library: $(dirname "$idx_var")"
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
+		elif [ "$_no_bulges" = 1 ] && _enriched_genome_whole; then
+			# ... nor a variant one, when the variant genome is here whole to scan. Its
+			# INDELS index, which the indel search reads at any bulges, keeps the name
+			# of the one a search builds (<name of the variant index>_INDELS), and is
+			# built below from the fake-indel genome when it is not there.
+			echo "No variant index needed: a search with no bulges scans the variant genome"
+			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
+			idx_var="$idx_folder1"
 		else
 			# no index found, compute it; use mkdir lock to prevent concurrent builds
-			# (a dead run's half-written directory is rebuilt whole, as for the reference)
+			# (in a folder of the lock, and put in place once whole, as for the reference)
 			_lock="${idx_folder1}.lock"
 			_lock_take -bin "$_lock" "indexing $idx_folder1" "$idx_folder1"
 			if [ $? != 1 ]; then
 				echo -e 'Index-genome Variant\tStart\t'$(date) >>$log
 				echo -e "Indexing variant genome"
 				# index alternative genome using crispritz
-				crispritz.py index-genome \
+				_build_in_lock "$_lock" crispritz.py index-genome \
 					"${ref_name}+${vcf_name}" \
 					"$current_working_directory/Genomes/${ref_name}+${vcf_name}/" \
 					"$pam_file" \
@@ -1630,10 +1950,11 @@ while read vcf_f; do
 				_lock_lost "$_lock" && exit 1  # taken over meanwhile, as for the reference
 				if [ -s "$logerror" ]; then
 					printf "ERROR: alternative genome indexing failed on %s\n" "$vcf_name" >&2
-					[ -d "$idx_folder1" ] && rm -r "$idx_folder1"
+					[ -d "$idx_folder1" ] && rm -r "$idx_folder1"  # (no index, as for the reference)
 					_lock_release "$_lock"
 					exit 1
 				fi
+				_build_into_place "$idx_folder1"
 				_record_index_side "$idx_folder1"
 				_lock_release "$_lock" || exit 1
 			else
@@ -1662,9 +1983,10 @@ while read vcf_f; do
 		# idx_var (instead of reconstructing ${true_pam}_${bMax}_..._INDELS) lets a
 		# precomputed/batteries index be found without an (impossible) rebuild.
 		idx_var_base=$(basename "$idx_var")
-		idx_prefix="${idx_var_base%"_${ref_name}+${vcf_name}"}"  # <PAM>_<N>
-		idx_pam="${idx_prefix%_*}"
-		idx_n="${idx_prefix##*_}"
+		# (its <PAM> and <N>, whichever form its name takes: _index_name_parts)
+		_index_name_parts "$idx_var_base"
+		idx_pam=$_ip_pam
+		idx_n=$_ip_n
 		indels_index_dir="$(dirname "$idx_var")/${idx_var_base}_INDELS"
 		indels_out="$current_working_directory/Genomes/${ref_name}+${vcf_name}_INDELS"
 
@@ -1681,9 +2003,12 @@ while read vcf_f; do
 			exit 1
 		elif [ -d "$indels_out" ]; then
 			# source fake-chrom genome present (on-demand enrichment path) -> build it.
-			# use mkdir lock to prevent concurrent builds. pool_index_indels.py runs
-			# index-genome per chromosome, which removes and rewrites each one, so a dead
-			# run's half-written directory is rebuilt whole.
+			# use mkdir lock to prevent concurrent builds. It is built in a folder of the lock
+			# (_build_in_lock), and put in place once whole, as the reference index is: the
+			# engine names it <PAM>_<N>_<genome>+<dataset>_INDELS whatever the name of the
+			# variant index it goes with, which may carry the guide length and the side
+			# (_index_name_parts), and in place it took the INDELS index of that older name, a
+			# variant index's of the other side or another guide length, for its own.
 			# Not while build-index-only puts the SNP codes on it in place, or after a run
 			# stopped as it did (its mark, crisprme.py _overlay_in_place): an INDELS index
 			# built from it would be blind to the SNPs on the FASTAs not coded yet, and
@@ -1704,24 +2029,43 @@ while read vcf_f; do
 						"$current_working_directory/Genomes/${ref_name}+${vcf_name}" \
 						"$current_working_directory/Dictionaries/log_indels_${vcf_name}"
 				fi
+				# A build-index-only run that began before the check of its mark above may put
+				# the SNP codes on the fake-indel genome while it is indexed: it marks the genome
+				# only just before the first FASTA it changes, and the index built meanwhile is
+				# blind to the SNPs of the FASTAs not coded yet, kept by every later run (R2-F1).
+				# So the index goes into place only if no FASTA of the genome changed since its
+				# build began, and the mark is not there once it is done.
+				_indels_began="$_lock/indels_began"
+				: >"$_indels_began"
 				if ! [ -s "$logerror" ]; then
-					"$starting_dir/pool_index_indels.py" \
+					# (the variant index by its path: it reads the PAM file of its build there)
+					_build_in_lock "$_lock" "$starting_dir/pool_index_indels.py" \
 						"$indels_out/" \
 						"$pam_file" \
 						"$idx_pam" \
 						"$ref_name" \
 						"$vcf_name" \
 						"$idx_n" \
-						"$ncpus"
+						"$ncpus" \
+						"$idx_var"
 				fi
 				_lock_lost "$_lock" && exit 1  # taken over meanwhile, as for the reference
 
 				if [ -s "$logerror" ]; then
 					printf "ERROR: indels indexing failed on %s\n" "$vcf_name" >&2
+					# (a partial one under its name, of a run that died, whose lock this run took over)
 					[ -d "$indels_index_dir" ] && rm -r "$indels_index_dir"
 					_lock_release "$_lock"
 					exit 1
 				fi
+				if [ -d "$indels_out/.building" ] \
+					|| [ -n "$(find -L "$indels_out" -name '*.fa' -newer "$_indels_began" 2>/dev/null | head -n 1)" ]; then
+					rm -rf "$_build_work"
+					printf "ERROR: %s changed while this search built %s from it: a build-index-only run puts the SNP codes on it, and the index would be blind to those not on yet, so it is not kept. Let that run finish, then run this search again\n" "$indels_out" "$(basename "$indels_index_dir")" >&2
+					_lock_release "$_lock"
+					exit 1
+				fi
+				_build_into_place "$indels_index_dir"
 
 				_lock_release "$_lock" || exit 1
 				echo -e 'Indexing Indels\tEnd\t'$(date) >>"$log"
@@ -1753,6 +2097,35 @@ while read vcf_f; do
 		exit 1
 	fi
 	# END STEP 2 - genome indexing
+
+	# Which index answers the search, as the indexes this run took, in .indexes_searched.txt
+	# beside the run's parameters: the report's summary names them. Genome_idx in the
+	# parameters says what was asked for, which another index may serve (NNNNNNNN_3 for an
+	# NGG_2 that is not there), or none, for a search with no bulges. Not in the parameters
+	# file itself: the web reuses an earlier job only when its .Params.txt is the one a new
+	# request writes, byte for byte. The reference once, then each dataset's.
+	[ -n "$_indexes_recorded" ] || : 2>/dev/null >"$output_folder/.indexes_searched.txt"
+	{
+		if [ -z "$_indexes_recorded" ]; then
+			if [ "$_no_bulges" = 1 ]; then
+				printf "Reference_index\tnone: a search with no bulges scans the genome\n"
+			else
+				printf "Reference_index\t%s\n" "$(_index_record "$idx_ref")"
+			fi
+			[ "$_pruned_here" != 1 ] || printf "Prune_pam\tauto\n"
+		fi
+		if [ "$vcf_name" != "_" ]; then
+			# (with the variant genome here whole, a search with no bulges scans it, STEP 3,
+			# and opens no variant index -- one installed of its PAM no more than another)
+			if [ "$_no_bulges" = 1 ] && _enriched_genome_whole; then
+				printf "Variant_index:%s\tnone: a search with no bulges scans the variant genome" "$vcf_name"
+			else
+				printf "Variant_index:%s\t%s" "$vcf_name" "$(_index_record "$idx_var")"
+			fi
+			printf "; its indels: %s\n" "$(basename "$indels_index_dir")"
+		fi
+	} 2>/dev/null >>"$output_folder/.indexes_searched.txt"
+	_indexes_recorded=1
 
 	# --- RAM safety guard on the search thread count ---------------------------
 	# A CRISPRitz search holds ~per-thread alignment state in RAM; a pamless
@@ -1799,7 +2172,7 @@ while read vcf_f; do
 					_searched=("$idx_var")
 				fi
 				for _idx in "${_searched[@]}"; do
-					_idx_pam=$(basename "$_idx"); _idx_pam=${_idx_pam%%_*}
+					_index_name_parts "$(basename "$_idx")"; _idx_pam=$_ip_pam
 					case "$_idx_pam" in
 						'' | *[!Nn]*) ;;
 						*) pamless=1; kind="pamless (memory-heavy) index $(basename "$_idx")" ;;
@@ -1896,13 +2269,20 @@ while read vcf_f; do
 		ln -s "$src"/*.bin "$view"/ 2>/dev/null
 		printf '%s' "$view"
 	}
+	# The views are the searches' alone: each goes as its search ends, whether it found
+	# targets or failed. They stayed in the result folder of every search of an index with
+	# a sidecar (a download, and since 2.8.1 every index a search builds: RV3-4, RV3-6).
+	_drop_bin_views() {
+		rm -rf "${output_folder}/.binview"
+	}
 
 	if ! [ -f "$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" ]; then
 		echo -e 'Search Reference Start'  # off-targets search on reference genome
 		if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # bulge-enabled: TST index search
 			idx_ref_view="$(_bin_only_view "$idx_ref")"
 			crispritz.py search "$idx_ref_view" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result --max-edits $max_total_edits $prune_pam_flag \
-				|| { echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
+				|| { _drop_bin_views; echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
+			_drop_bin_views
 		else  # no bulges: brute-force scan of the genome folder this run was given
 			# ($ref_folder, not Genomes/<its name>: a genome kept elsewhere -- an
 			# assembly-search haplotype -- has no folder there, and the engine then
@@ -1924,7 +2304,8 @@ while read vcf_f; do
 			if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ] || ! _enriched_genome_whole; then
 				idx_var_view="$(_bin_only_view "$idx_var")"
 				crispritz.py search "$idx_var_view" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result -var --max-edits $max_total_edits $prune_pam_flag \
-					|| { echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
+					|| { _drop_bin_views; echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
+				_drop_bin_views
 			else  # no bulges: brute-force scan
 				crispritz.py search "$current_working_directory/Genomes/${ref_name}+${vcf_name}/" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result \
 					|| { echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
@@ -1940,7 +2321,7 @@ while read vcf_f; do
 			cd $starting_dir
 			# TODO: REMOVE POOL SCRIPT FROM PROCESSING
 			# (a refused index or an uncaught error: it has said why on stderr)
-			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits" "$prune_pam" "$(dirname "$indels_index_dir")" || exit 1
+			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits" "$prune_pam" "$(dirname "$indels_index_dir")" "$idx_var_base" || exit 1
 			awk '($3 !~ "n") {print $0}' "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" >"$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp"
 			mv "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp" "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
 		else
@@ -2501,14 +2882,7 @@ fi
 echo -e 'Integrating results\tEnd\t'$(date) >>$log
 truncate -s -1 $guide_file
 truncate -s -1 $vcf_list
-# Strip the trailing newline from the empirical/sample file ONLY when it is a real,
-# non-empty, WRITABLE file. The "no empirical data" case passes the shipped read-only
-# placeholder ($starting_dir/vuoto.txt, told apart as that very file), which got no
-# newline; truncating it fails on a read-only install (e.g. an Apptainer/Singularity SIF)
-# and aborted assembly-search there (issue #143).
-if [ "$6" != "_" ] && [ ! "$6" -ef "$starting_dir/vuoto.txt" ] && [ -s "$6" ] && [ -w "$6" ]; then
-	truncate -s -1 "$6"
-fi
+# (the samplefile $6 is not touched: the newline went to the copy read above)
 # END STEP 8 - results integration
 
 # START STEP 9 - database creation

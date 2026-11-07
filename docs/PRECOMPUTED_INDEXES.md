@@ -1,16 +1,21 @@
 # Precomputed CRISPRme indexes on HuggingFace
 
 > **Reproducing the shipped production indexes.** The end-to-end recipes for the
-> released variant indexes — the phased default **`NRG_3_hg38+hg38_HGDP1kGP`** (HGDP +
-> 1000 Genomes), the HPRC pangenome
-> **`NRG_3_hg38+hg38_HPRC`**, and sites-only **`NRG_3_hg38+hg38_mega`** (5 sources) —
+> released variant indexes — the phased default **`NRR_3_hg38+hg38_HGDP1kGP`** (HGDP +
+> 1000 Genomes; NRR is the default PAM since 2.9.0, and the NRG and NGG indexes are built the
+> same way), the HPRC pangenome
+> **`NRR_3_hg38+hg38_HPRC`**, and sites-only **`NRR_3_hg38+hg38_mega`** (5 sources) —
 > live in [`seq_script/merge_panels/README.md`](../seq_script/merge_panels/README.md) (Mode 1,
 > the HPRC section with `hprc_build.sh`, and Mode 2, with the as-run `mega_gw_merge.sh` +
 > `mega_build_indels.sh` drivers). This page covers the generic single-dataset
 > build/publish/download flow. **Naming note:** `--dictless` is a *publish flag* (it drops the
 > ~152 GB per-sample SNP dictionaries; see below), **not** a name marker — the shipped index
-> names are simply `<pam>_<N>_<ref>+<vcf>` (`NRG_3_hg38+hg38_HGDP1kGP`,
-> `NRG_3_hg38+hg38_HPRC`, `NRG_3_hg38+hg38_mega`).
+> names are simply `<pam>_<N>_<ref>+<vcf>` (`NRR_3_hg38+hg38_HGDP1kGP`,
+> `NRG_3_hg38+hg38_HPRC`, `NRG_3_hg38+hg38_mega`). Since 2.9.0 an index is built under a name
+> that carries the guide length and the side of the PAM too, in the order of the target on the
+> strand (`20-NRR_3_hg38` for a 3′ PAM, `TTTV-23_3_hg38` for a 5′ one), and published under it;
+> CRISPRme reads both forms, takes one of the new form only for a search of its side, and of
+> one index under both names, the newer one.
 
 Bulge-enabled CRISPRme searches need a CRISPRitz **index** of the reference
 genome. Building it is the single most expensive one-time step of a search. That
@@ -31,7 +36,7 @@ separate samples download**:
   lists), so a downloaded variant index is self-complete.
 
 Throughout this page `<vcf>` is the variant-dataset token resolved from the index name's
-`+<vcf>` segment — for the recommended default `NRG_3_hg38+hg38_HGDP1kGP` it is
+`+<vcf>` segment — for the recommended default `NRR_3_hg38+hg38_HGDP1kGP` it is
 **`hg38_HGDP1kGP`**, so the folders are literally `registry_hg38_HGDP1kGP/`,
 `genotypes_hg38_HGDP1kGP/`, and `hg38_HGDP1kGP.samplesID.txt`. Substitute your own dataset's
 token where you see `<vcf>`, and note that the resolver expects these exact names.
@@ -41,19 +46,19 @@ Section 3.5 of the data-setup guide (`docs/crisprme_data_setup_051826.md`).
 
 ## The three production indexes
 
-SpCas9 **NRG** (NAG+NGG) variant indexes ship prebuilt on HuggingFace — pick
-by whether you want the broad fully-phased default, pangenome coverage, or the
-widest allele-frequency provenance. They are
-**complementary**, not alternatives:
+SpCas9 **NRR** (NAA, NAG, NGA, NGG; the default PAM since 2.9.0) variant indexes ship
+prebuilt on HuggingFace, as do the same panels for **NRG** (NAG + NGG, the default before) —
+pick by whether you want the broad fully-phased default, pangenome coverage, or the widest
+allele-frequency provenance. They are **complementary**, not alternatives:
 
 | Index name | Sources | Data model | Co-occurrence confidence |
 |---|---|---|---|
-| `NRG_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000 Genomes), jointly SHAPEIT5-re-phased | **sample-level genotypes, fully phased** | **CONFIRMED** phased cis throughout with **named carrier samples** + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) — the broadest fully-phased panel of real observed haplotypes |
-| `NRG_3_hg38+hg38_HPRC` | HPRC Release 2 pangenome `hprc-v2.0-mc-grch38` (232 assembly-derived genomes incl. CHM13) | **sample-level genotypes, phased** (graph-derived) | **CONFIRMED** phased cis with **named carrier samples** + exact joint AF; captures **pangenome-specific** variation absent from short-read panels |
-| `NRG_3_hg38+hg38_mega` | 5 sources — 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us | **sites-only** (allele frequencies, no shared samples) | **PUTATIVE** with a conservative **min-AF** joint bound + **per-dataset AF provenance** (`AF_1000G2021 … AF_AoU` + `AF_max`); a co-occurring haplotype here **may or may not exist in any real individual** — no carriers |
+| `NRR_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000 Genomes), jointly SHAPEIT5-re-phased | **sample-level genotypes, fully phased** | **CONFIRMED** phased cis throughout with **named carrier samples** + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) — the broadest fully-phased panel of real observed haplotypes |
+| `NRR_3_hg38+hg38_HPRC` | HPRC Release 2 pangenome `hprc-v2.0-mc-grch38` (232 assembly-derived genomes incl. CHM13) | **sample-level genotypes, phased** (graph-derived) | **CONFIRMED** phased cis with **named carrier samples** + exact joint AF; captures **pangenome-specific** variation absent from short-read panels |
+| `NRR_3_hg38+hg38_mega` | 5 sources — 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us | **sites-only** (allele frequencies, no shared samples) | **PUTATIVE** with a conservative **min-AF** joint bound + **per-dataset AF provenance** (`AF_1000G2021 … AF_AoU` + `AF_max`); a co-occurring haplotype here **may or may not exist in any real individual** — no carriers |
 
 **Choosing an index.** You only need **one**. For most use cases pick the **recommended
-default `NRG_3_hg38+hg38_HGDP1kGP`** — HGDP + 1000 Genomes (4,091 samples), jointly
+default `NRR_3_hg38+hg38_HGDP1kGP`** — HGDP + 1000 Genomes (4,091 samples), jointly
 SHAPEIT5-re-phased, so every reported co-occurrence is **CONFIRMED** cis with **named
 per-sample carriers** and exact joint AF throughout, including HGDP's seven genetic regions
 and with correct chrX PAR allele frequencies: the broadest fully-phased panel of real
@@ -70,9 +75,9 @@ co-occurring off-targets. Download the reference data once, then any index:
 
 ```bash
 crisprme.py download --what all  --path .                                                 # reference genome + annotations (once)
-crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP       --path .     # recommended default (phased HGDP + 1000 Genomes, 4,091 samples; carriers)
-crisprme.py download --what index --index-name NRG_3_hg38+hg38_HPRC           --path .     # HPRC pangenome (phased assemblies, carriers)
-crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega          --path .      # mega (sites-only, per-dataset AF provenance)
+crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP       --path .     # recommended default (phased HGDP + 1000 Genomes, 4,091 samples; carriers)
+crisprme.py download --what index --index-name NRR_3_hg38+hg38_HPRC           --path .     # HPRC pangenome (phased assemblies, carriers)
+crisprme.py download --what index --index-name NRR_3_hg38+hg38_mega          --path .      # mega (sites-only, per-dataset AF provenance)
 ```
 
 A first-time unauthenticated download of these many-small-file indexes can hit
@@ -87,18 +92,18 @@ Indexes live under `indexes/` in the CRISPRme dataset repo (default
 
 ```
 indexes/
-  NRG_3_hg38.tar.gz                              # SpCas9 (NRG = NAG+NGG) reference index of hg38, up-to-2-bulge (DEFAULT reference index)
-  NRG_3_hg38+hg38_HGDP1kGP.tar.gz           # SpCas9 (NRG) dict-less variant-aware index (HGDP + 1000 Genomes, 4,091 samples, phased), up-to-2-bulge (recommended default)
+  NRG_3_hg38.tar.gz                              # SpCas9 (NRG = NAG+NGG) reference index of hg38, up-to-2-bulge (the default reference index before 2.9.0)
+  NRG_3_hg38+hg38_HGDP1kGP.tar.gz           # SpCas9 (NRG) dict-less variant-aware index (HGDP + 1000 Genomes, 4,091 samples, phased), up-to-2-bulge
   genotypes_hg38_HGDP1kGP.tar.gz                     # SEPARATE Tier-1 genotype store companion for the HGDP1kGP index (rides along on download)
   NRG_3_hg38+hg38_HPRC.tar.gz                    # SpCas9 (NRG) HPRC pangenome variant index (232 phased assembly-derived genomes)
   genotypes_hg38_HPRC.tar.gz                          # SEPARATE Tier-1 genotype store companion for the HPRC index
   NRG_3_hg38+hg38_mega.tar.gz                    # SpCas9 (NRG) sites-only mega index (5 sources) — NO genotype companion (sites-only)
   NNN_3_hg38.tar.gz                              # PAM-LESS reference index of hg38, 3-nt flank — serves ANY 3-nt 3′ PAM with `--prune-pam`
   NNN_3_hg38+hg38_HGDP1kGP.tar.gz           # PAM-LESS variant-aware index (HGDP + 1000 Genomes, same variant data as the NRG one)
-  NGG_3_hg38.tar.gz                              # NGG-only reference index (NRG is the default; NGG cannot serve NAG off-targets)
+  NGG_3_hg38.tar.gz                              # NGG-only reference index (NGG cannot serve NAG or NGA off-targets)
   NGG_3_hg38+hg38_HGDP1kGP.tar.gz           # NGG-only variant index
-  NRR_3_hg38.tar.gz                              # NRR reference index
-  NRR_3_hg38+hg38_{HGDP1kGP,HPRC,mega}.tar.gz    # NRR variant indexes
+  NRR_3_hg38.tar.gz                              # SpCas9 (NRR = NAA, NAG, NGA, NGG) reference index (DEFAULT reference index since 2.9.0)
+  NRR_3_hg38+hg38_{HGDP1kGP,HPRC,mega}.tar.gz    # NRR variant indexes (HGDP1kGP: the recommended default)
   SHA256SUMS                                     # one SHA-256 per archive: `sha256sum -c --ignore-missing SHA256SUMS` inside indexes/
 ```
 
@@ -201,13 +206,15 @@ and phasing without scanning the multi-GB per-sample store — `HGDP1kGP` = **ge
 `HPRC` = **genotyped-phased**, `mega` = **sites-only**
 (a merged panel mixing phased and unphased sources would be **hybrid**).
 
-The **NRG** default matches SpCas9's broad recognition (NAG + NGG), so variant-created
-NAG off-targets (e.g. the CPS1 off-target from the CRISPRme paper) are found out of the
-box.
+The **NRR** default (since 2.9.0; NRG before) matches SpCas9's broad recognition (NAA, NAG,
+NGA and NGG), so variant-created NAG off-targets (e.g. the CPS1 off-target from the CRISPRme
+paper) and NGA ones are found out of the box. An NRR index serves an NGG, NAG, NRG or NGA
+search too, pruned to that PAM (`--prune-pam`, which the search passes by itself), and an
+NRG one an NGG or NAG search.
 
 **Two artifacts per variant index:**
 
-- **Main tarball** (`NRG_3_hg38+hg38_HGDP1kGP.tar.gz`) — the index
+- **Main tarball** (`NRR_3_hg38+hg38_HGDP1kGP.tar.gz`) — the index
   itself (`<name>/`), its `_INDELS` companion, the indel logs
   (`Dictionaries/log_indels_<vcf>/`), the Tier-0 `Dictionaries/registry_<vcf>/`,
   the samplesID lists (`samplesIDs/<vcf>.samplesID.txt` + the per-db
@@ -221,12 +228,15 @@ box.
 **Naming — `--dictless` is a flag, not a name marker.** `publish-index --dictless`
 controls *what goes in the tarball* (it drops the ~152 GB per-sample SNP
 dictionaries, keeping the compact Tier-0/Tier-1 stores), but it does **not** decorate
-the index name. A variant index is published and installed under the plain convention
-`<pam>_<N>_<ref>+<vcf>` — e.g. `NRG_3_hg38+hg38_HGDP1kGP`, extracting to
-`genome_library/NRG_3_hg38+hg38_HGDP1kGP/`. The search resolves an index by that
-same convention (the `<ref>` segment == the genome-folder basename; the `<vcf>` token after
-the `+` — e.g. `hg38_HGDP1kGP` — is shared verbatim with the Tier-1 `genotypes_<vcf>`
-companion, i.e. `genotypes_hg38_HGDP1kGP`). A reference-only index (no `+`)
+the index name. A variant index is published and installed under the name of the folder it
+was built in: the plain convention `<pam>_<N>_<ref>+<vcf>` for every index published so far
+— e.g. `NRG_3_hg38+hg38_HGDP1kGP`, extracting to `genome_library/NRG_3_hg38+hg38_HGDP1kGP/`
+— and, for an index built since 2.9.0, that name with its guide length and side, in the order
+of the target on the strand: `<guide>-<pam>_<N>_<ref>+<vcf>` for a 3′ PAM
+(`20-NRR_3_hg38+hg38_HGDP1kGP`), `<pam>-<guide>_<N>_<ref>+<vcf>` for a 5′ one. The search
+resolves an index by either convention (the `<ref>` segment == the genome-folder basename;
+the `<vcf>` token after the `+` — e.g. `hg38_HGDP1kGP` — is shared verbatim with the Tier-1
+`genotypes_<vcf>` companion, i.e. `genotypes_hg38_HGDP1kGP`). A reference-only index (no `+`)
 unpacks to a single `genome_library/<name>/` directory plus `manifest.json` and is used
 with no extra steps.
 
@@ -238,11 +248,11 @@ Build the variant-aware index with `--vcf` and `--samplesID`:
 
 ```bash
 crisprme.py build-index-only \
-  --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+  --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
   --bDNA 2 --bRNA 2 --thread 16 \
   --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs.config.txt \
   --path "$CRISPRME_DIR"
-# -> genome_library/NRG_3_hg38+hg38_HGDP1kGP/          (+ _INDELS companion)
+# -> genome_library/20-NRR_3_hg38+hg38_HGDP1kGP/       (+ _INDELS companion; the name says the guide length and the side)
 #    Dictionaries/registry_hg38_HGDP1kGP/              (Tier-0 allele-freq registry)
 #    Dictionaries/registry_hg38_HGDP1kGP/variant_count.json  (SNP + indel counts, for the report)
 #    Dictionaries/genotypes_hg38_HGDP1kGP/             (Tier-1 per-sample genotype store)
@@ -297,7 +307,7 @@ done
 #    (hypothetical 3-way merge — pick any name for the combined-panel folder)
 bcftools merge 1000G.norm.vcf.gz HGDP.norm.vcf.gz NewCohort.norm.vcf.gz -Oz -o VCFs/hg38_combined_panel/merged.vcf.gz
 # 3) build the dict-less index (emits registry + genotypes + variant_count.json + combined samplesID)
-crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
   --bDNA 2 --bRNA 2 --vcf VCFs/hg38_combined_panel --samplesID samplesIDs.config.txt --path "$CRISPRME_DIR"
 ```
 
@@ -325,8 +335,8 @@ Two things the build handles for you, which matter as new merged panels are adde
 
 ```bash
 export HF_TOKEN=hf_...        # your write token, in the shell only
-crisprme.py publish-index --index genome_library/NRG_3_hg38+hg38_HGDP1kGP --dictless
-# -> indexes/NRG_3_hg38+hg38_HGDP1kGP.tar.gz     (main: index + _INDELS + registry (+ variant_count.json) + indel logs + samplesIDs + manifest)
+crisprme.py publish-index --index genome_library/20-NRR_3_hg38+hg38_HGDP1kGP --dictless
+# -> indexes/20-NRR_3_hg38+hg38_HGDP1kGP.tar.gz  (main: index + _INDELS + registry (+ variant_count.json) + indel logs + samplesIDs + manifest)
 # -> indexes/genotypes_hg38_HGDP1kGP.tar.gz      (separate Tier-1 companion)
 ```
 
@@ -345,13 +355,15 @@ publishing is byte-for-byte the classic path plus these additive members.
 ```bash
 # fetch the variant-aware index (main tarball + genotype companion + bundled samplesIDs)
 crisprme.py download --what index \
-  --index-name NRG_3_hg38+hg38_HGDP1kGP --path "$CRISPRME_DIR"
-# installs under the canonical name genome_library/NRG_3_hg38+hg38_HGDP1kGP/
+  --index-name NRR_3_hg38+hg38_HGDP1kGP --path "$CRISPRME_DIR"
+# installs under the canonical name genome_library/NRR_3_hg38+hg38_HGDP1kGP/
 ```
 
-- The index installs under its plain `<pam>_<N>_<ref>+<vcf>` name so the search
-  resolves it (there is no name decoration to strip — `--dictless` only affected
-  what the maintainer put in the tarball).
+- The index installs under the name it was published under, which the search resolves:
+  here the plain `<pam>_<N>_<ref>+<vcf>` of every index published so far (an index
+  published from a 2.9.0 build carries its guide length and side, as
+  `20-NRR_3_hg38+hg38_HGDP1kGP`). There is no name decoration to strip — `--dictless` only
+  affected what the maintainer put in the tarball.
 - The **combined + per-db samplesID lists** are installed into
   `samplesIDs/` from the main tarball, so no `--what samples` / `--what all` is
   needed. (For a legacy index built before this bundling existed, download falls
@@ -373,7 +385,7 @@ Then search, pointing at that library (or just run from `$CRISPRME_DIR`):
 
 ```bash
 crisprme.py complete-search \
-  --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+  --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
   --guide my_guide.txt --mm 4 --bDNA 2 --bRNA 2 \
   --vcf list_vcf.txt --samplesID list_samplesID.txt \
   --index-path "$CRISPRME_DIR/genome_library" \
@@ -390,9 +402,9 @@ there without its `_INDELS` index beside it stops the search with a message.
 
 ## Building a new-PAM index for a published dataset (HGDP+1kGP, mega)
 
-The prebuilt indexes above cover the **NRG**, **NGG** and **NRR** PAMs (not each on every
+The prebuilt indexes above cover the **NRR**, **NRG** and **NGG** PAMs (not each on every
 panel) plus the PAM-less `NNN_3` / `NNNNNNNN_3` indexes, which serve other PAMs through
-`--prune-pam`. To screen a **different nuclease / PAM** with a dedicated index (SaCas9
+`--prune-pam`, as an NRR index serves the PAMs it holds. To screen a **different nuclease / PAM** with a dedicated index (SaCas9
 **NNGRRT**, Cas12a **TTTN**, any IUPAC motif, or NGG on mega, the one of these two panels it
 is not published for) against the same re-phased **HGDP+1kGP** or sites-only **mega** variant data, you build
 that one index once and reuse it for every later search — you do **not** re-derive the
@@ -409,7 +421,7 @@ Only the genome index itself is PAM-specific; everything derived from the varian
 | `Dictionaries/` (registry, genotypes, indel-GT, logs) | no | reuse (from the normal index download) |
 | `samplesIDs/` | no | reuse |
 
-> **Why you need an extra file.** The HuggingFace **index** tarball ships the *NRG* index + its
+> **Why you need an extra file.** The HuggingFace **index** tarball ships the index of its PAM + its
 > `Dictionaries/` + `samplesIDs/` — it does **not** contain the enriched genome, so it alone can't
 > build a different PAM. The PAM-independent **enriched-genome kit** is published separately under
 > **`build-inputs/<dataset>.tar.gz`** in the same repo (`lucapinello/crisprme-data`). Download it and you
@@ -439,6 +451,7 @@ Ready-made files already ship in `PAMs/`:
 
 | Nuclease | `PAMs/` file | Contents |
 |---|---|---|
+| SpCas9 (NRR = NAA, NAG, NGA, NGG; the default) | `20bp-NRR-SpCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNRR 3` |
 | SpCas9 (NGG) | `20bp-NGG-SpCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNGG 3` |
 | SpCas9 (NRG = NAG+NGG) | `20bp-NRG-SpCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNRG 3` |
 | SaCas9 (NNGRRT) | `21bp-NNGRRT-SaCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNNNGRRT 6` |
@@ -464,7 +477,7 @@ tar xzf build-inputs/hg38_HGDP1kGP.tar.gz
 Check the tarball against the `SHA256SUMS` shipped alongside it under `build-inputs/`. (For
 **mega**, substitute `hg38_mega`.) The PAM-independent `Dictionaries/` + `samplesIDs/` you need at
 **search** time come from the normal index download (`download --what index --index-name
-NRG_3_hg38+hg38_<ds>`).
+NRR_3_hg38+hg38_<ds>`).
 
 ### Step 3 — build the new-PAM index (reuse the enriched genome, skip enrichment)
 
@@ -488,8 +501,10 @@ Here `<PAM_MOTIF>` is the PAM region token itself — the IUPAC motif without th
 > **One-command alternative.** With the enriched genome already in place, `crisprme.py
 > build-index-only --genome Genomes/hg38 --pam PAMs/<NEW_PAM>.txt --bDNA 2 --bRNA 2 --vcf
 > VCFs/hg38_<ds> …` detects it (prints `Enriched genome already present`) and skips straight to the
-> same two indexes. Use it if you also have the dataset's `Dictionaries/`/`VCFs/` staged; otherwise
-> the two `crispritz`/`pool_index_indels` calls above need only the enriched kit.
+> same two indexes, which it names, since 2.9.0, for the guide length and the side
+> (`20-<PAM_MOTIF>_3_hg38+hg38_<ds>` and its `_INDELS` for a 20-nt guide and a 3′ PAM). Use it
+> if you also have the dataset's `Dictionaries/`/`VCFs/` staged; otherwise the two
+> `crispritz`/`pool_index_indels` calls above need only the enriched kit.
 
 ### Step 4 — search with the new-PAM index
 
@@ -575,14 +590,14 @@ bundle. Build and publish are the simple case:
 
 ```bash
 crisprme.py build-index-only \
-  --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+  --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
   --bDNA 2 --bRNA 2 --thread 16 --path "$CRISPRME_DIR"
-# -> genome_library/NRG_3_hg38/
+# -> genome_library/20-NRR_3_hg38/  (since 2.9.0 the name says the guide length and the side)
 
-crisprme.py publish-index --index genome_library/NRG_3_hg38
-# -> indexes/NRG_3_hg38.tar.gz
+crisprme.py publish-index --index genome_library/20-NRR_3_hg38
+# -> indexes/20-NRR_3_hg38.tar.gz
 
-crisprme.py download --what index --index-name NRG_3_hg38 --path "$CRISPRME_DIR"
+crisprme.py download --what index --index-name 20-NRR_3_hg38 --path "$CRISPRME_DIR"
 ```
 
 ## manifest.json
@@ -640,7 +655,7 @@ itself is what `complete-search` consumes.
 - An index is only valid for a matching `--genome`/`--pam`/`--bDNA`/`--bRNA`;
   a different PAM or a higher bulge count needs its own index.
 - Variant-enriched (genome + VCF) indexes are dataset-specific. The default
-  HGDP + 1000 Genomes enriched index (`NRG_3_hg38+hg38_HGDP1kGP`) is prebuilt and
+  HGDP + 1000 Genomes enriched index (`NRR_3_hg38+hg38_HGDP1kGP`) is prebuilt and
   hosted alongside the reference index; for any other cohort, build and publish the
   enriched index the same way (pass `--samplesID` so it is self-complete).
 - A published variant index is **self-complete**: the samplesID lists are

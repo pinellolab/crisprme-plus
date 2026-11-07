@@ -105,6 +105,11 @@ class ScorerRunner:
         env = dict(os.environ)
         env["CRISPRME_COMPUTE_BACKEND"] = self.device
         env.setdefault("PYTHONUNBUFFERED", "1")
+        # TensorFlow's autograph writes the code it generates to a module in the temporary
+        # folder ($TMPDIR, the data folder under CRISPRME_TMPDIR=/DATA), removed at exit,
+        # and its import left __pycache__/__autograph_generated_file*.pyc there, one a run
+        # (list_282.md, the focused review of f8dbe73)
+        env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
         # point the worker at the provisioned CRISPR-Bulge source+weights
         env.setdefault("CBULGE_REPO", scorer_env.default_cbulge_repo())
         # Bound the worker's CPU parallelism BEFORE it imports numpy/TF. compute_backend

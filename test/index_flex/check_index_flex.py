@@ -27,12 +27,16 @@ import sys
 G = "CTAACAGTTGCTTTTATCAC"
 PAMS = {
     "20bp-NRG-SpCas9.txt": "N" * 20 + "NRG 3\n",
+    "20bp-NRR-SpCas9.txt": "N" * 20 + "NRR 3\n",
     "20bp-NGG-SpCas9.txt": "N" * 20 + "NGG 3\n",
+    "20bp-NGA-SpCas9VQR.txt": "N" * 20 + "NGA 3\n",
     "21bp-NGG-X.txt": "N" * 21 + "NGG 3\n",
     "23bp-NGG-X.txt": "N" * 23 + "NGG 3\n",
     "20bp-NNNNNNNN-NO-PAM.txt": "N" * 28 + " 8\n",
     "20bp-NGCG-SpCas9VRER.txt": "N" * 20 + "NGCG 4\n",
     "24bp-NNNN-5p.txt": "N" * 24 + " -4\n",
+    "24bp-NNNN-3p.txt": "N" * 24 + " 4\n",
+    "24bp-VNNN-5p.txt": "VNNN" + "N" * 20 + " -4\n",
 }
 SAMPLES = ["S1", "S2", "S3", "S4", "S5", "S6"]
 THREADS = "2"
@@ -258,6 +262,7 @@ def main(root):
     seed = os.path.join(root, "seed")
     make_seed(seed)
     nrg2 = build(root, seed, "NRG_2", "20bp-NRG-SpCas9.txt", 1)
+    nrr2 = build(root, seed, "NRR_2", "20bp-NRR-SpCas9.txt", 1)
     ngg2 = build(root, seed, "NGG_2", "20bp-NGG-SpCas9.txt", 1)
     k8 = build(root, seed, "K8_3", "20bp-NNNNNNNN-NO-PAM.txt", 2)
     g21 = build(root, seed, "g21_N2", "21bp-NGG-X.txt", 1, variant=False)
@@ -292,26 +297,50 @@ def main(root):
     say("no --samplesID and no list: same results, no KeyError",
         rc == 0 and identical(table(w, "o2"), b11), out[-600:])
     # refused, it leaves its output folder empty: the corrected command, same --output, runs
+    # (NGA, which NRG does not hold: an NGG search of NRG runs, pruned)
     w = as_download(copy_of(root, nrg2, "no_samples_flag_refused"))
-    rc, out = search(w, "o", pam="20bp-NGG-SpCas9.txt", samples=False)
+    rc, out = search(w, "o", pam="20bp-NGA-SpCas9VQR.txt", samples=False)
     left = sorted(os.listdir(os.path.join(w, "Results", "o")))
     rc2, out2 = search(w, "o", samples=False)
     say("no --samplesID, refused: its output folder left empty, and the corrected command runs",
         rc != 0 and "no variant index here serves this search" in out and left == []
         and rc2 == 0 and identical(table(w, "o"), b11), f"left {left}: " + (out + out2)[-800:])
 
-    # another PAM or budget than the download holds: one clear ERROR, and nothing made
+    # another PAM or budget than the download holds: one clear ERROR, and nothing made (NGA,
+    # which NRG does not hold)
     w = as_download(copy_of(root, nrg2, "download_other_pam"))
     before = sorted(os.listdir(os.path.join(w, "Genomes")))
-    rc, out = search(w, "o", pam="20bp-NGG-SpCas9.txt")
+    rc, out = search(w, "o", pam="20bp-NGA-SpCas9VQR.txt")
     say("another PAM: refused, naming the PAM and the indexes there",
-        rc != 0 and "no variant index here serves this search" in out and "PAM NGG" in out
-        and "NRG_2_gx+gx_ds" in out and "cannot stat" not in out and "[OK] gx_ds:" not in out, out[-800:])
+        rc != 0 and "no variant index here serves this search" in out and "PAM NGA" in out
+        and "20-NRG_2_gx+gx_ds" in out and "cannot stat" not in out and "[OK] gx_ds:" not in out, out[-800:])
     say("another PAM: nothing made", sorted(os.listdir(os.path.join(w, "Genomes"))) == before)
+    # a PAM the download's own holds (NGG in NRG, NGG and NRG in NRR): pruned to it by
+    # itself, as a dedicated index of that PAM answers it (2.9.0)
+    ngg_truth = copy_of(root, ngg2, "truth_ngg")
+    search(ngg_truth, "b11", pam="20bp-NGG-SpCas9.txt")
+    for index, pam, truth in ((nrg2, "20bp-NGG-SpCas9.txt", table(ngg_truth, "b11")),
+                              (nrr2, "20bp-NGG-SpCas9.txt", table(ngg_truth, "b11")),
+                              (nrr2, "20bp-NRG-SpCas9.txt", b11)):
+        w = as_download(copy_of(root, index, f"download_{os.path.basename(index)}_{pam[5:8]}"))
+        rc, out = search(w, "o", pam=pam)
+        cell = f"{pam[5:8]} on a {os.path.basename(index)} download"
+        if engine_prunes():
+            say(f"{cell}: pruned by itself, same results as a dedicated index",
+                rc == 0 and "searching with --prune-pam, as if it was given" in out
+                and identical(table(w, "o"), truth), out[-600:])
+        else:
+            say(f"{cell} on an engine without --prune-pam: refused, saying what it needs",
+                rc != 0 and "which the installed CRISPRitz cannot do" in out, out[-800:])
     w = as_download(copy_of(root, k8, "download_k8"))
     rc, out = search(w, "o")
-    say("K=8 without --prune-pam: refused, naming the flags",
-        rc != 0 and "--prune-pam --index-path genome_library" in out, out[-800:])
+    if engine_prunes():
+        say("K=8 without --prune-pam: pruned by itself, same results as a dedicated index",
+            rc == 0 and "searching with --prune-pam, as if it was given" in out
+            and identical(table(w, "o"), b11), out[-600:])
+    else:
+        say("K=8 without --prune-pam on an engine without it: refused, saying what it needs",
+            rc != 0 and "which the installed CRISPRitz cannot do" in out, out[-800:])
     rc, out = search(w, "o2", extra=("--prune-pam", "--index-path", "genome_library"))
     if engine_prunes():
         say("K=8 with --prune-pam: same results as a dedicated index",
@@ -319,6 +348,129 @@ def main(root):
     else:
         say("K=8 with --prune-pam on an engine without it: refused, saying so", rc != 0
             and "does not support it" in result_log(w, "o2"), out[-600:])
+    rc, out = search(w, "o3", extra=("--prune-pam",))
+    if engine_prunes():
+        say("K=8 with --prune-pam and no --index-path: same results as a dedicated index",
+            rc == 0 and identical(table(w, "o3"), b11), out[-600:])
+
+    # build-index-only writes the name of 2.9.0, which carries the guide length and the side
+    # of the PAM (20-NRG_2_gx...: a 20-nt guide, a 3' PAM), the INDELS index's too. Under the
+    # older name, as a download or an earlier release has it, the same results; under the
+    # name of a 5' PAM, not taken for this 3' search
+    for prefix, cell in (("NRG", "the older name"), ("NRG-20", "a 5' PAM's name")):
+        w = as_download(copy_of(root, nrg2, f"download_named_{prefix}"))
+        lib = os.path.join(w, "genome_library")
+        for name in sorted(os.listdir(lib)):
+            os.rename(os.path.join(lib, name), os.path.join(lib, prefix + name[6:]))
+        rc, out = search(w, "o")
+        if prefix == "NRG":
+            say(f"an index under {cell} ({prefix}_2_gx...): same results",
+                rc == 0 and identical(table(w, "o"), b11), out[-600:])
+        else:
+            say(f"an index under {cell} ({prefix}_2_gx...): not taken for a 3' PAM",
+                rc != 0 and "no variant index here serves this search" in out, out[-800:])
+
+    # a PAM-less index under the 2.9.0 name with no .pam_build: the name records its side as
+    # the file does (an older name with none is a 3' build at widths 3 and 8 only), so under
+    # --index-path a 3'-named one of width 4 serves NGG, pruned by itself, and a 5'-named one a
+    # 5' PAM of its width; both were refused
+    ngg_ref = copy_of(root, ngg2, "truth_ngg_reference")
+    search(ngg_ref, "o", pam="20bp-NGG-SpCas9.txt", variant=False)
+    k4_3 = build(root, seed, "K4_3p", "24bp-NNNN-3p.txt", 1, variant=False)
+    w = copy_of(root, k4_3, "named_3p_unrecorded")
+    lib = os.path.join(w, "genome_library")
+    os.remove(os.path.join(lib, "20-NNNN_2_gx", ".pam_build"))
+    rc, out = search(w, "o", pam="20bp-NGG-SpCas9.txt", variant=False,
+                     extra=("--index-path", "genome_library"))
+    if engine_prunes():
+        say("a 3'-named PAM-less index of width 4 with no .pam_build (20-NNNN_2_gx): NGG pruned "
+            "by itself, same results as a dedicated index",
+            rc == 0 and identical(table(w, "o"), table(ngg_ref, "o")), out[-600:])
+    k4_5 = build(root, seed, "K4_5p", "24bp-NNNN-5p.txt", 1, variant=False)
+    truth = copy_of(root, k4_5, "truth_vnnn")
+    search(truth, "o", guide="g20_5p.txt", pam="24bp-VNNN-5p.txt", variant=False,
+           extra=("--index-path", "genome_library"))
+    w = copy_of(root, k4_5, "named_5p_unrecorded")
+    lib = os.path.join(w, "genome_library")
+    os.remove(os.path.join(lib, "NNNN-20_2_gx", ".pam_build"))
+    rc, out = search(w, "o", guide="g20_5p.txt", pam="24bp-VNNN-5p.txt", variant=False,
+                     extra=("--index-path", "genome_library"))
+    say("a 5'-named PAM-less index with no .pam_build (NNNN-20_2_gx): a 5' PAM of its width, "
+        "same results as the index with its record",
+        rc == 0 and identical(table(w, "o"), table(truth, "o")), out[-600:])
+
+    # E2: the indexes of one motif for the two sides of the guide, and for two guide lengths,
+    # built in one library, each searched as it would be alone. Under the older name, which
+    # says neither, the second build of each pair stopped on the first ("... is already there
+    # ... The index for that PAM file has the same name: build it in another working directory")
+    # and a search built its own over nothing it could use.
+    w = copy_of(root, seed, "both_sides_one_library")
+    rc3, out3 = cli(w, "build-index-only", "--genome", "Genomes/gx", "--pam", "PAMs/24bp-NNNN-3p.txt",
+                    "--bDNA", "1", "--bRNA", "1", "--thread", THREADS)
+    rc5, out5 = cli(w, "build-index-only", "--genome", "Genomes/gx", "--pam", "PAMs/24bp-NNNN-5p.txt",
+                    "--bDNA", "1", "--bRNA", "1", "--thread", THREADS)
+    built = sorted(os.listdir(os.path.join(w, "genome_library")))
+    say("E2: build-index-only of a 3' and a 5' NNNN file in one library: both built, each under "
+        "its name", rc3 == 0 and rc5 == 0 and built == ["20-NNNN_2_gx", "NNNN-20_2_gx"],
+        f"{built} " + (out3 + out5)[-800:])
+    alone3 = copy_of(root, k4_3, "both_sides_truth_3p")
+    alone5 = copy_of(root, k4_5, "both_sides_truth_5p")
+    for cell, guide, pam, alone, index in (
+            ("3'", "g20_4.txt", "24bp-NNNN-3p.txt", alone3, "20-NNNN_2_gx"),
+            ("5'", "g20_5p.txt", "24bp-NNNN-5p.txt", alone5, "NNNN-20_2_gx"),
+            ("5' TTTV-like (VNNN)", "g20_5p.txt", "24bp-VNNN-5p.txt", alone5, "NNNN-20_2_gx")):
+        out = f"o_{pam[5:9]}_{cell[0]}"
+        search(alone, out, guide=guide, pam=pam, variant=False)
+        rc, said = search(w, out, guide=guide, pam=pam, variant=False)
+        say(f"E2: a {cell} search of that library: the results of its index alone, from {index}",
+            rc == 0 and identical(table(w, out), table(alone, out))
+            and f"Reference_index\t{index} (in " in result_log(w, out, ".indexes_searched.txt")
+            and sorted(os.listdir(os.path.join(w, "genome_library"))) == built, said[-600:])
+    # two guide lengths of NGG, with their variant indexes: 20 nt and 23 nt
+    w = copy_of(root, seed, "two_lengths_one_library")
+    for pam in ("20bp-NGG-SpCas9.txt", "23bp-NGG-X.txt"):
+        rc, out = cli(w, "build-index-only", "--genome", "Genomes/gx", "--pam", f"PAMs/{pam}",
+                      "--bDNA", "1", "--bRNA", "1", "--thread", THREADS, "--vcf", "list_vcf.txt",
+                      "--samplesID", "list_samplesID.txt")
+        say(f"E2: build-index-only of {pam} beside the other length: built", rc == 0, out[-600:])
+    built = sorted(os.listdir(os.path.join(w, "genome_library")))
+    say("E2: the two lengths' indexes, each under its name, the INDELS ones too",
+        built == ["20-NGG_2_gx", "20-NGG_2_gx+gx_ds", "20-NGG_2_gx+gx_ds_INDELS", "23-NGG_2_gx",
+                  "23-NGG_2_gx+gx_ds", "23-NGG_2_gx+gx_ds_INDELS"], str(built))
+    alone23 = copy_of(root, build(root, seed, "NGG_2_23nt", "23bp-NGG-X.txt", 1), "truth_23nt")
+    search(alone23, "b11", guide="g23.txt", pam="23bp-NGG-X.txt")
+    for guide, pam, alone, index in (("g20.txt", "20bp-NGG-SpCas9.txt", ngg_truth, "20-NGG_2_gx"),
+                                     ("g23.txt", "23bp-NGG-X.txt", alone23, "23-NGG_2_gx")):
+        out = f"o{guide[1:3]}"
+        rc, said = search(w, out, guide=guide, pam=pam)
+        searched = result_log(w, out, ".indexes_searched.txt")
+        say(f"E2: a {guide[1:3]}-nt variant search of that library: the results of its index "
+            f"alone, from {index} and {index}+gx_ds",
+            rc == 0 and identical(table(w, out), table(alone, "b11"))
+            and f"Reference_index\t{index} (in " in searched
+            and f"Variant_index:gx_ds\t{index}+gx_ds (in " in searched
+            and f"its indels: {index}+gx_ds_INDELS" in searched
+            and sorted(os.listdir(os.path.join(w, "genome_library"))) == built, said[-600:])
+    # an index of the older name, as 2.8.1 built it, for the 3' side: a 5' build is put beside
+    # it, and each side's search takes its own
+    w = copy_of(root, k4_3, "older_name_beside")
+    lib = os.path.join(w, "genome_library")
+    os.rename(os.path.join(lib, "20-NNNN_2_gx"), os.path.join(lib, "NNNN_2_gx"))
+    rc, out = cli(w, "build-index-only", "--genome", "Genomes/gx", "--pam", "PAMs/24bp-NNNN-5p.txt",
+                  "--bDNA", "1", "--bRNA", "1", "--thread", THREADS)
+    say("E2: a 5' build beside a 3' index of the older name: built beside it, saying so",
+        rc == 0 and sorted(os.listdir(lib)) == ["NNNN-20_2_gx", "NNNN_2_gx"]
+        and "NNNN_2_gx is an index for a PAM on the 3' side of the guide (as its .pam_build "
+            "records): it is left as it is, and this index is built beside it, as NNNN-20_2_gx."
+        in out, out[-600:])
+    for cell, guide, pam, alone, index in (("3'", "g20_4.txt", "24bp-NNNN-3p.txt", alone3, "NNNN_2_gx"),
+                                           ("5'", "g20_5p.txt", "24bp-NNNN-5p.txt", alone5, "NNNN-20_2_gx")):
+        out = f"o_{cell[0]}"
+        rc, said = search(w, out, guide=guide, pam=pam, variant=False)
+        say(f"E2: beside the older name, a {cell} search: the results of its index alone, from {index}",
+            rc == 0 and identical(table(w, out), table(alone, f"o_{pam[5:9]}_{cell[0]}"))
+            and f"Reference_index\t{index} (in " in result_log(w, out, ".indexes_searched.txt"),
+            said[-600:])
 
     # a search that enriches a dataset itself codes the fake-indel genome
     w = copy_of(root, ngg2, "on_demand")
@@ -340,38 +492,48 @@ def main(root):
                                         "gt_indel_chr3.tsv.gz")),
         f"{rows_at(table(w, 'o'), 'chr3', 20000)} " + out[-600:])
 
-    # the guide length: served inside the rule, refused or built outside it
+    # the guide length: served inside the rule, built outside it
     dedicated = copy_of(root, g21, "g21_truth")
     search(dedicated, "o", guide="g21.txt", pam="21bp-NGG-X.txt", variant=False)
     w = copy_of(root, ref3, "g21_on_N3")
     rc, out = search(w, "o", guide="g21.txt", pam="21bp-NGG-X.txt", variant=False)
     say("a 21-nt guide at 1/1 on a 20-nt N=3 index: same results as a dedicated one",
         rc == 0 and identical(table(w, "o"), table(dedicated, "o")), out[-600:])
+    # (a 23-nt guide beside a 20-nt index, of the name a 2.8.1 build gave it, which the search
+    # built its own under: it stopped on it, as the 23-nt index took that name too)
     w = copy_of(root, ngg2, "g23_on_N2")
-    rc, out = search(w, "o", guide="g23.txt", pam="23bp-NGG-X.txt", variant=False)
-    say("a 23-nt guide with a 20-nt index of the name it builds: refused, naming both lengths",
-        rc != 0 and "NGG_2_gx was built for a 20-nt guide" in out and "a 23-nt guide" in out, out[-800:])
-    record = os.path.join(w, "genome_library", "NGG_2_gx", ".pam_build")
+    lib = os.path.join(w, "genome_library")
+    for name in sorted(os.listdir(lib)):
+        os.rename(os.path.join(lib, name), os.path.join(lib, name[3:]))
+    record = os.path.join(lib, "NGG_2_gx", ".pam_build")
     with open(record) as fh:
         before = fh.read()
+    dedicated = copy_of(root, seed, "g23_truth")
+    search(dedicated, "o", guide="g23.txt", pam="23bp-NGG-X.txt", variant=False)
+    rc, out = search(w, "o", guide="g23.txt", pam="23bp-NGG-X.txt", variant=False)
+    say("a 23-nt guide beside a 20-nt index of the older name: its own built beside it, same "
+        "results as a dedicated one", rc == 0 and identical(table(w, "o"), table(dedicated, "o"))
+        and os.path.isdir(os.path.join(lib, "23-NGG_2_gx")), out[-800:])
     rc, out = cli(w, "build-index-only", "--genome", "Genomes/gx", "--pam", "PAMs/23bp-NGG-X.txt",
                   "--bDNA", "1", "--bRNA", "1", "--thread", THREADS)
     with open(record) as fh:
-        say("build-index-only over it: refused, its record kept",
-            rc != 0 and "already present" not in out and fh.read() == before, out[-600:])
+        say("build-index-only of the 23-nt PAM file there: the 23-nt index already present, the "
+            "20-nt one's record kept", rc == 0 and "already present: " in out
+            and "23-NGG_2_gx" in out and fh.read() == before, out[-600:])
     w = copy_of(root, seed, "g23_guide_on_20_pam")
     rc, out = search(w, "o", guide="g23.txt", pam="20bp-NGG-SpCas9.txt", variant=False)
     say("a guide longer than its PAM file's spacer: refused", rc != 0 and "silently drop" in out, out[-600:])
 
-    # complete-test on a K=8 index, alone and beside the default
+    # complete-test on a K=8 index, alone and beside the default; on K=8 it searches the
+    # default PAM, NRR (NRG before 2.9.0)
     w = as_download(copy_of(root, k8, "complete_test_k8"))
     pams = sorted(os.listdir(os.path.join(w, "PAMs")))
     rc, out = cli(w, "complete-test", "--thread", THREADS)
     k8_table = table(w, "crisprme-test-out")
-    n = as_download(copy_of(root, nrg2, "complete_test_nrg"))
+    n = as_download(copy_of(root, nrr2, "complete_test_nrr"))
     rc2, out2 = cli(n, "complete-test", "--thread", THREADS)
     if engine_prunes():
-        say("complete-test on K=8: same results as on NRG, and no PAM file left",
+        say("complete-test on K=8: same results as on NRR, and no PAM file left",
             rc == 0 and rc2 == 0 and identical(k8_table, table(n, "crisprme-test-out"))
             and sorted(os.listdir(os.path.join(w, "PAMs"))) == pams, out[-800:])
     else:
@@ -383,7 +545,7 @@ def main(root):
         shutil.copytree(os.path.join(nrg2, "genome_library", name),
                         os.path.join(both, "genome_library", name), symlinks=True)
     rc, out = cli(both, "complete-test", "--chrom", "chr1", "--thread", THREADS)
-    say("complete-test with K=8 beside NRG takes NRG", rc == 0 and "'NRG_2_gx+gx_ds'" in out, out[-600:])
+    say("complete-test with K=8 beside NRG takes NRG", rc == 0 and "'20-NRG_2_gx+gx_ds'" in out, out[-600:])
 
     # a library the run cannot write to, as a user who may not write there
     ro = copy_of(root, ngg2, "read_only")
@@ -426,7 +588,7 @@ def main(root):
 
     # an index that lacks a chromosome's trees: refused, not searched as a whole one
     w = copy_of(root, nrg2, "index_lacking_a_chromosome")
-    os.remove(os.path.join(w, "genome_library", "NRG_2_gx", "NRG_chr2_1.bin"))
+    os.remove(os.path.join(w, "genome_library", "20-NRG_2_gx", "NRG_chr2_1.bin"))
     rc, out = search(w, "o", variant=False)
     say("a reference index lacking chr2's trees, with bulges: refused, naming it",
         rc != 0 and "lacks trees of FASTAs that hold sites of its PAM: chr2.fa" in out, out[-600:])
@@ -482,8 +644,8 @@ def main(root):
         shutil.copytree(os.path.join(w, "Dictionaries", f"{t}_gx_ds"),
                         os.path.join(w, "Dictionaries", f"{t}_gx_mega"))
     for suffix in ("", "_INDELS"):
-        shutil.copytree(os.path.join(w, "genome_library", f"NRG_2_gx+gx_ds{suffix}"),
-                        os.path.join(w, "genome_library", f"NRG_2_gx+gx_mega{suffix}"), symlinks=True)
+        shutil.copytree(os.path.join(w, "genome_library", f"20-NRG_2_gx+gx_ds{suffix}"),
+                        os.path.join(w, "genome_library", f"20-NRG_2_gx+gx_mega{suffix}"), symlinks=True)
     sites_only(w, "gx_mega")
     # its indel map names no carrier, as a sites-only VCF's (mega's) does
     logs = os.path.join(w, "Dictionaries", "log_indels_gx_mega")
@@ -510,16 +672,18 @@ def main(root):
             in result_log(w, "o", "log_verbose.txt"),
         f"mode {mode}: {rows_at(table(w, 'o'), 'chr3', 20000)} " + out[-600:])
 
-    # the NNNN_2 a 5' search of an earlier release leaves, with no record: not taken for NGCG
+    # the NNNN_2 a 5' search of an earlier release leaves, under the older name with no record:
+    # not taken for NGCG
     truth = copy_of(root, seed, "ngcg_truth")
     search(truth, "o", guide="g20_4.txt", pam="20bp-NGCG-SpCas9VRER.txt", variant=False)
     w = copy_of(root, seed, "unrecorded_5_prime_all_n")
     rc, out = search(w, "a", guide="g20_5p.txt", pam="24bp-NNNN-5p.txt", variant=False)
+    os.rename(os.path.join(w, "genome_library", "NNNN-20_2_gx"), os.path.join(w, "genome_library", "NNNN_2_gx"))
     os.remove(os.path.join(w, "genome_library", "NNNN_2_gx", ".pam_build"))
     rc, out = search(w, "o", guide="g20_4.txt", pam="20bp-NGCG-SpCas9VRER.txt", variant=False)
     say("an unrecorded 5' all-N index of width 4: an NGCG search builds its own, same results",
         rc == 0 and identical(table(w, "o"), table(truth, "o"))
-        and os.path.isdir(os.path.join(w, "genome_library", "NGCG_2_gx")), out[-600:])
+        and os.path.isdir(os.path.join(w, "genome_library", "20-NGCG_2_gx")), out[-600:])
 
     # build-index-only of a folder outside Genomes/ records it: another folder of its name is refused
     w = copy_of(root, seed, "outside_genomes")
@@ -531,7 +695,7 @@ def main(root):
                     "PAMs/20bp-NRG-SpCas9.txt", "--mm", "4", "--bDNA", "1", "--bRNA", "1",
                     "--output", "o", "--thread", THREADS)
     say("build-index-only of a folder outside Genomes/: recorded, and another folder of its name refused",
-        rc == 0 and os.path.isfile(os.path.join(w, "genome_library", "NRG_2_ref", ".genome_source"))
+        rc == 0 and os.path.isfile(os.path.join(w, "genome_library", "20-NRG_2_ref", ".genome_source"))
         and rc2 != 0 and "holds the genome in" in out2, out2[-600:])
 
     print(f"{len(failed)} cell(s) failed" if failed else "INDEX FLEX PASS", flush=True)

@@ -231,6 +231,49 @@ class TestGenerateReport(unittest.TestCase):
             return os.path.join(extract, name)
         return os.path.join(extract, "data", name)
 
+    def test_a_run_with_no_score_says_so_in_place_of_its_score_tables(self):
+        """A Cas12a search (a 5' PAM): neither CFD nor CRISPR-Bulge is computed, every score
+        is the -1 sentinel. The risk card printed its CFD bands, 0 each, and Section 4 its
+        CFD tiers, 0 each, and the CRISPR-Bulge and CFD prose of the recommended panel, read
+        as "no site at risk", though the panel was chosen by edit distance alone (cli5
+        D6). Each says that neither score is computed, in place of its tables; a scored
+        run is reported as before."""
+        scored = [_HEADER.index(c) for c in _HEADER if "CFD_score" in c
+                  or "CRISPR_BULGE_score" in c]
+        with open(self.tsv, "w") as handle:
+            handle.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                handle.write("\t".join("-1" if i in scored else v for i, v in enumerate(row))
+                             + "\n")
+        _, _, extract = self._build_and_extract(
+            params_override={"Nuclease": "Cas12a", "Pam": "TTTV"})
+        html = self._read(self._dpath(extract, "report.html"))
+        card = re.search(r'<div class="risk-card">.*?</div></div>', html, flags=re.S).group(0)
+        note = ("CFD and CRISPR-Bulge are defined for a 20-nt spacer with a 3&prime; "
+                "SpCas9-family PAM: neither is computed for this nuclease, so no site is scored, "
+                "and the validation panel is chosen by mismatches and bulges alone.")
+        self.assertIn(note, card)
+        self.assertNotIn("CFD ≥ 0.5", card)
+        self.assertEqual(html.count(note), 3)  # the card, Section 4's bridge and its table
+        for absent in ("<th>CFD threshold</th>", "Recommended default panel:</strong> validate "
+                       "every", "of those with CFD", "by worst-case severity across",
+                       'href="#risk-card-modal"'):
+            self.assertNotIn(absent, html)
+        self.assertIn("then fill up to 100 by fewest mismatches+bulges", html)
+        self.assertIn("With no score computed, every off-target with mismatches+bulges", html)
+        # the fixture as it is, scored: as before
+        with open(self.tsv, "w") as handle:
+            handle.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                handle.write("\t".join(row) + "\n")
+        __import__("shutil").rmtree(os.path.join(self.tmp, "extracted"))
+        _, _, extract = self._build_and_extract()
+        html = self._read(self._dpath(extract, "report.html"))
+        self.assertNotIn("neither is computed", html)
+        for present in ("<th>CFD threshold</th>", "Recommended default panel:</strong> validate "
+                        "every", "by worst-case severity across", "CFD ≥ 0.5"):
+            self.assertIn(present, html)
+
     def test_build_report_drop_maf_removes_maf_column(self):
         # Regression (crisprme.py generate-report --no-maf): the top-level CLI
         # silently ignored --no-maf, and the module-level MAF-drop path was itself
@@ -599,19 +642,21 @@ class TestGenerateReport(unittest.TestCase):
         for says in (
                 "the full list is in the integrated results in the result folder (its rows "
                 "whose <code>Not_found_in_REF</code> is <code>y</code>; "
-                "<code>--report-full</code> bundles them as <code>variant_created.tsv</code>, "
-                "gzipped when large).",
+                "<code>--report-full</code>, or Include the full report on the web form, "
+                "bundles them as <code>variant_created.tsv</code>, gzipped when large).",
                 "The full threshold table above and the per-threshold subset files (bundled "
                 "downloads), with the complete raw integrated results in the result folder "
-                "(<code>--report-full</code> bundles them too), let the panel be reviewed or "
-                "expanded for any assay budget.",
+                "(<code>--report-full</code>, or Include the full report on the web form, "
+                "bundles them too), let the panel be reviewed or expanded for any assay "
+                "budget.",
                 "Per-threshold subsets (CFD and mismatch+bulge tiers) are bundled as "
                 "curated-column TSVs so the panel can be expanded to any tier for review. "
-                "<code>--report-full</code> adds the variant-created subset.",
+                "<code>--report-full</code>, or Include the full report on the web form, "
+                "adds the variant-created subset.",
                 "the full variant set for each window is in the "
                 "<code>*high_variant_density_regions.bed</code> files of the result folder, "
-                "which <code>--report-full</code> bundles for the windows near the top-ranked "
-                "sites)."):
+                "which <code>--report-full</code>, or Include the full report on the web "
+                "form, bundles for the windows near the top-ranked sites)."):
             with self.subTest(slim_says=says[:60]):
                 self.assertIn(says, slim)
         for says in (
@@ -631,6 +676,62 @@ class TestGenerateReport(unittest.TestCase):
             with self.subTest(full_says=says[:60]):
                 self.assertIn(says, full)
         self.assertNotIn("adds the variant-created subset", full)
+
+    def test_every_flag_the_report_tells_the_reader_to_pass_names_the_web_forms_option(self):
+        """A search sent from the web form passes no flag, and its own report told the
+        reader to run --per-sample (the caption of a population-level search's variant
+        combinations) and that --report-full bundles what the slim zip leaves out (the
+        variant-created list and subset, the complete raw integrated results, the windows
+        near the top-ranked sites), naming the flag alone (FV :342). In the slim report of a
+        search with dense windows near its top-ranked sites, of a population-level one, of
+        one whose observed-haplotypes companion the zip leaves out, and of one with no
+        score, every such sentence names the web form's option beside the flag."""
+        rd = self._dense_window_run("advice_run")
+        reports = {"dense windows": gr.build_report(
+            result_dir=rd, samplesid_dir=self.sid_dir,
+            out_zip=os.path.join(self.tmp, "advice_dense.zip"))}
+        rd, itsv = self._oh_e2e_result_dir()
+        reports["population-level"] = self._oh_build(rd, itsv)[1]
+        with _env("CRISPRME_OH_SLIM_MAX_MB", "0.0000001"):
+            reports["companion left out"] = self._oh_build(rd, itsv)[1]
+        scored = [_HEADER.index(c) for c in _HEADER
+                  if "CFD_score" in c or "CRISPR_BULGE_score" in c]
+        with open(self.tsv, "w") as handle:
+            handle.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                handle.write("\t".join("-1" if i in scored else v
+                                       for i, v in enumerate(row)) + "\n")
+        reports["no score"] = self._build_and_extract(
+            params_override={"Nuclease": "Cas12a", "Pam": "TTTV"})[0]
+        said = {"--report-full": 0, "--per-sample": 0}
+        for what, report in reports.items():
+            if report.endswith(".zip"):
+                with zipfile.ZipFile(report) as zf:
+                    report = zf.read("report.html").decode("utf-8")
+            for at in re.finditer(r"<code>--report-full</code>", report):
+                said["--report-full"] += 1
+                with self.subTest(report=what, at=report[max(0, at.start() - 80):at.end()]):
+                    self.assertRegex(report[at.end():at.end() + 60],
+                                     r"^, or (with )?Include the full report on the web form,")
+            for at in re.finditer(r"<code>--per-sample</code>", report):
+                # its sentence (the report holds a megabyte of data URIs: no regex of two
+                # unbounded runs over all of it)
+                opens = max(report.rfind(stop, 0, at.start()) for stop in ".;")
+                closes = [p for p in (report.find(stop, at.end()) for stop in ".;")
+                          if p >= 0] or [len(report)]
+                advice = report[opens + 1:min(closes)]
+                # (a sentence that says to run the search with it; the others say what it
+                # gives)
+                if not re.search(r"\brun\b", advice):
+                    continue
+                said["--per-sample"] += 1
+                with self.subTest(report=what, advice=advice):
+                    self.assertIn("<code>--per-sample</code>, or Per-sample as the analysis "
+                                  "on the web form", advice)
+        # (each report gave some advice: four of --report-full in the first, the Search mode
+        # row in each and the caption in the two population-level ones)
+        self.assertGreaterEqual(said["--report-full"], 6, said)
+        self.assertGreaterEqual(said["--per-sample"], 4, said)
 
     def test_the_example_report_says_where_its_files_are(self):
         """The website's example report (docs/example-report.html, the slim report of a
@@ -1025,6 +1126,10 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("Population-level", html_pop)
         self.assertIn("NOT computed", html_pop)         # the carrier caveat
         self.assertIn("--per-sample", html_pop)          # points to the exact mode
+        # and to the web form's, for a search sent from there (it named the flag alone,
+        # which a web user cannot pass: FV :342)
+        self.assertIn("re-run the search per-sample (<code>--per-sample</code>, or Per-sample "
+                      "as the analysis on the web form)", html_pop)
         html_ps = gr.render_inputs_criteria({**base, "search_mode": "per-sample"})
         self.assertIn("observed haplotypes", html_ps)
         self.assertNotIn("NOT computed", html_ps)        # no caveat in per-sample mode
@@ -1089,9 +1194,10 @@ class TestGenerateReport(unittest.TestCase):
             "<code>High_complexity_region</code> "
             "(<code>High_variant_density_region</code> in the integrated results), whose listed "
             "carriers need not carry every variant in it. To get the tiers, rebuild the index "
-            "with <code>build-index-only --samplesID</code>, or download a prebuilt one "
-            "(<code>crisprme.py download --what index --index-name "
-            "NRG_3_hg38+hg38_HGDP1kGP</code>).")
+            "with <code>build-index-only --samplesID</code>, or with Build an index locally in "
+            "the web's Settings, or download a prebuilt one (<code>crisprme.py download --what "
+            "index --index-name NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index "
+            "in Settings).")
         two = row({**base, "untiered": ["hg38_1000G", "hg38_<x>"]})
         for said in ("named carrier samples only for <code>hg38_1000G</code>, "
                      "<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
@@ -1283,9 +1389,10 @@ class TestGenerateReport(unittest.TestCase):
             "give as 0, or not at all, has no frequency); where its variants are dense, it can "
             "still report a window by its greedy worst-case alignment, whose listed carriers "
             "need not carry every variant in it. To get the "
-            "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
-            "download a prebuilt one (<code>crisprme.py download --what index --index-name "
-            "NRG_3_hg38+hg38_HGDP1kGP</code>). ")))
+            "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or with "
+            "Build an index locally in the web's Settings, or download a prebuilt one "
+            "(<code>crisprme.py download --what index --index-name "
+            "NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index in Settings). ")))
         plural = cell({**base, "untiered": two}, "Search mode")
         for said in ("<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
                      "in either mode their variants' allele frequencies",
@@ -1333,8 +1440,10 @@ class TestGenerateReport(unittest.TestCase):
                              r'</p>', html, re.S).group(1)
 
         said = caption()
-        self.assertTrue(said.endswith("run <code>--per-sample</code> to resolve the true cis "
-                                      "haplotypes and carriers."), said)
+        # (the web form's option beside the flag, which a web search cannot pass: FV :342)
+        self.assertTrue(said.endswith(
+            "re-run the search per-sample (<code>--per-sample</code>, or Per-sample as the "
+            "analysis on the web form) to resolve the true cis haplotypes and carriers."), said)
         self.assertEqual(caption(untiered=[]), said)
         self.assertEqual(caption(untiered=one), said + (
             " On " + named + ", <code>--per-sample</code> can still report a dense window by "
@@ -1586,8 +1695,9 @@ class TestGenerateReport(unittest.TestCase):
                           gr.render_inputs_criteria({**base}, n_variant=3)):
             self.assertIn("the full list is in the integrated results in the result folder "
                           "(its rows whose <code>Not_found_in_REF</code> is <code>y</code>; "
-                          "<code>--report-full</code> bundles them as "
-                          "<code>variant_created.tsv</code>, gzipped when large).", html_slim)
+                          "<code>--report-full</code>, or Include the full report on the web "
+                          "form, bundles them as <code>variant_created.tsv</code>, gzipped "
+                          "when large).", html_slim)
             self.assertNotIn("bundled as <code>variant_created.tsv</code>", html_slim)
             self.assertNotIn("written to <code>variant_created.tsv</code>", html_slim)
         # full (bundled): the "bundled as" claim is correct
@@ -3113,16 +3223,17 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_pipeline_no_readonly_or_bare_relative_writes(self):
         """Regression guard for the read-only-container bug: the search pipeline must
-        not write a bare-relative dummy.txt nor append to $6 without a writability
-        guard (both crashed a reference-only run under Apptainer)."""
+        not write a bare-relative dummy.txt nor append to $6 (both crashed a
+        reference-only run under Apptainer; since 2.9.0 the script reads a copy of $6)."""
         p = os.path.join(os.path.dirname(__file__),
                          "submit_job_automated_new_multiple_vcfs.sh")
         src = open(p).read()
         # the fixed bare-relative dummy.txt write must be gone
         self.assertNotIn("echo -e \"dummy_file\" >dummy.txt", src)
         self.assertNotIn(">dummy.txt", src.replace('"${output_folder}/dummy.txt"', ""))
-        # appending to the samplefile $6 must be writability-guarded
-        self.assertIn('[ -w "$6" ]', src)
+        # the samplefile $6 is never written
+        self.assertNotIn("echo >>$6", src)
+        self.assertNotIn('truncate -s -1 "$6"', src)
 
     def test_persona_audit_report_additions(self):
         """Scores/columns legend (CFD/CRISPR-Bulge + citations + alignment notation),
@@ -3950,7 +4061,9 @@ class TestGenerateReport(unittest.TestCase):
             'href="data/observed_haplotypes.tsv"', html)
         # the modal shows the short degrade note in place of the download button
         self.assertIn("omitted from this slim report", html)
-        self.assertIn("--report-full", html)
+        # with what a web search does to bundle it too, which can pass no flag (FV :342)
+        self.assertIn("re-run with <code>--report-full</code>, or with Include the full "
+                      "report on the web form, or read it from the result directory.", html)
         # (d) the full companion STILL exists in the result dir
         self.assertTrue(
             os.path.isfile(os.path.join(rd, "observed_haplotypes.tsv")))
@@ -4109,27 +4222,40 @@ class TestGenerateReport(unittest.TestCase):
                           dict(self._PARAMS)),
             # an older folder with no .Params.txt: decided from the file name alone
             "ref_noparams": (ro_tsv, None),
+            # one haplotype of assembly-search: a search of a personal genome, as
+            # complete-search names its haplotype_genome_view, with no variant dataset. Its
+            # report said "reference genome only", and "Sites in the reference genome"
+            # (RV1-F2)
+            "ref_haplotype": (
+                f"{_GUIDE}+NRG_HG01255_paternal_5aeb0fc6+__6+3_integrated_results.tsv",
+                {**self._PARAMS, "Genome_selected": "HG01255_paternal_5aeb0fc6",
+                 "Genome_ref": "HG01255_paternal_5aeb0fc6",
+                 "Genome_idx": "NRG_4_HG01255_paternal_5aeb0fc6"}),
         }
         for name, (tsv_name, params) in cases.items():
             with self.subTest(name):
                 html, manifest, keys = self._job_report(
                     self._install_job(name, tsv_name, params))
+                genome = "HG01255_paternal_5aeb0fc6" if name == "ref_haplotype" else "hg38"
                 self.assertEqual(keys, ["Variant database(s)", "Off-target search criteria"])
                 for present in (
                     # the header row and the inputs card
-                    '<td class="k">Variant dataset(s)</td><td>none (reference genome only)<',
-                    '<td class="k">Variant database(s)</td><td>none (reference genome only)<',
-                    "Sites in the reference genome that differ from the guide by up to 6 "
-                    "mismatches",
+                    '<td class="k">Variant dataset(s)</td><td>none (no variant dataset '
+                    'searched)<',
+                    '<td class="k">Variant database(s)</td><td>none (no variant dataset '
+                    'searched)<',
+                    f"Sites in the genome searched ({genome}) that differ from the guide by "
+                    "up to 6 mismatches",
                     # every MAF is blank; the note says why instead of naming a panel
-                    "This search used the reference genome only",
+                    "This search used no variant dataset, so every MAF is blank.",
                 ):
                     self.assertTrue(present in html, f"{present!r} not in the {name} report")
                 for absent in ("Search mode", "Population-level", "NOT computed",
                                "Variants included", "Panel:", "all searched",
                                "Allele-frequency basis", "union panel",
                                "Variant-contributed sites", "accounting for human genetic",
-                               "NRG_4_hg38", "NRG_3_hg38", "NRG+hg38", "reference only<"):
+                               "NRG_4_hg38", "NRG_3_hg38", "NRG+hg38", "reference only<",
+                               "reference genome only", "Sites in the reference genome"):
                     self.assertFalse(absent in html, f"{absent!r} in the {name} report")
                 self.assertIsNone(manifest["variant_datasets"])
                 self.assertIsNone(manifest["database"])  # not the installed registry
@@ -4153,6 +4279,37 @@ class TestGenerateReport(unittest.TestCase):
         self.assertFalse("reference genome only" in html)
         self.assertEqual(manifest["variant_datasets"], "1000G")
         self.assertEqual(manifest["database"]["databases"], {"1000G": 2548})
+        # the copy of the --vcf list the search reads in the result folder names it alone:
+        # the same report
+        with open(os.path.join(rd, ".vcf_list_searched.txt"), "w") as fh:
+            fh.write("hg38_1000G\n")
+        self.assertEqual(self._job_report(rd)[1]["database"], manifest["database"])
+
+    def test_a_search_of_two_datasets_names_both(self):
+        """A search of two datasets (a --vcf list of two) names its results file after the
+        last one alone, and its report named that one, with its registry's panel and counts
+        (RV1-F1). The copy of the --vcf list the search reads in the result folder names
+        both: the report names both, as the manifest does, and credits neither registry,
+        each the panel of its own dataset's rows."""
+        self._install_registry("hg38_hgdpx", 4624, 383, {"hgdpx": 500})
+        rd = self._install_job(
+            "two", f"{_GUIDE}+NRG_hg38+hg38_hgdpx_6+3_integrated_results.tsv",
+            {**self._PARAMS, "Genome_idx": "NRG_4_hg38+hg38_1000G,NRG_4_hg38+hg38_hgdpx",
+             "Ref_comp": "True"}, variant_rows=True)
+        with open(os.path.join(rd, ".vcf_list_searched.txt"), "w") as fh:
+            fh.write("hg38_1000G\nhg38_hgdpx/\n")  # (a line may end in /)
+        html, manifest, _keys = self._job_report(rd)
+        for present in ('<td class="k">Variant dataset(s)</td><td>1000G, hgdpx<',
+                        '<td class="k">Variant database(s)</td><td>1000G, hgdpx<',
+                        "Minor/alternate allele frequency over the panel of the dataset each "
+                        "variant comes from, each of 1000G, hgdpx searched with its own",
+                        "here that of the dataset the variant comes from, each of 1000G, "
+                        "hgdpx searched with its own"):
+            self.assertTrue(present in html, f"{present!r} not in the report")
+        for absent in ("<td>hgdpx<", "4,624", "31,130", "all searched", "union panel"):
+            self.assertFalse(absent in html, f"{absent!r} in the report")
+        self.assertEqual(manifest["variant_datasets"], "1000G, hgdpx")
+        self.assertIsNone(manifest["database"])
 
     def test_variant_rows_are_never_reference_only(self):
         """No Params and a file name that gives no dataset: a table with a variant-created

@@ -24,6 +24,13 @@ ref_name = sys.argv[4]
 vcf_name = sys.argv[5]
 bMax = sys.argv[6]
 ncpus = sys.argv[7]
+# optional: the variant index this INDELS index goes with, whose .pam_build _own_pam reads:
+# its folder, or its name in genome_library/ (<true_pam>_<bMax>_<ref>+<vcf> or, since 2.9.0,
+# the form that carries the guide length and the side: index_fit.parse_index_name). A search
+# passes its folder: it runs this in a folder of the INDELS index's build lock, and puts what
+# it writes there in place (submit_job_automated_new_multiple_vcfs.sh _build_in_lock).
+variant_index = (sys.argv[8] if len(sys.argv) > 8
+                 else f"{true_pam}_{bMax}_{ref_name}+{vcf_name}")
 
 # The record of a chromosome's sub-index that buildTST built with no target, which
 # pool_search_indels.py reads. Its fake-indel genome holds indels, but no window of
@@ -83,7 +90,8 @@ def _own_pam():
     not record it). Else None.
 
     That variant index is then a PAM-less one standing in for the search's PAM (NNN_3
-    serving NRG, or NNNNNNNN_3 under --prune-pam, as complete-search resolves one), and
+    serving NRG, or NNNNNNNN_3 under --prune-pam, as complete-search resolves one), or
+    under --prune-pam a dedicated one of a PAM that holds it (NRR_3 serving NGG), and
     the search builds its INDELS index, when it is missing, with the PAM file of the
     search. index-genome names an index by the PAM of its PAM file, so that build went
     into <search PAM>_<N>_<ref>+<vcf>_INDELS, where the search does not look: finding no
@@ -101,8 +109,7 @@ def _own_pam():
     k = len(true_pam)
     guide, n, name = len(seq) - abs(size), (k if size > 0 else -k), None
     try:
-        with open(os.path.join("genome_library", f"{true_pam}_{bMax}_{ref_name}+{vcf_name}",
-                               ".pam_build")) as fh:
+        with open(os.path.join("genome_library", variant_index, ".pam_build")) as fh:
             built = fh.read().rsplit(None, 2)
         if len(built) == 3 and abs(int(built[2])) == k and int(built[1]) > k:
             name, guide, n = built[0], int(built[1]) - k, int(built[2])
@@ -251,7 +258,9 @@ if own:
             shutil.rmtree(own_dir, ignore_errors=True)
         sys.exit(1)
     build_pam_arg = shlex.quote(build_pam)
-    print(f"The variant index {true_pam}_{bMax}_{ref_name}+{vcf_name} is PAM-less and stands in "
+    # (a PAM-less one, or a dedicated one of a PAM that holds the search's: NRR for NGG)
+    _what = "PAM-less" if set(true_pam) == {"N"} else f"of the PAM {true_pam}"
+    print(f"The variant index {os.path.basename(variant_index)} is {_what} and stands in "
           f"for {_index_pam(pam_file)}: indexing the INDELs with its own PAM ({own[0]}"
           + (f", as {own[1]}" if own[1] else "") + ")", flush=True)
 

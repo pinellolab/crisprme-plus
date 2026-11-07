@@ -27,6 +27,14 @@ from .pages_utils import (
     get_available_PAM,
     get_available_CAS,
     index_max_bulges,
+    index_serves_pam,
+    pam_geometry,
+    pamless_index_geometry,
+    pamless_pam_problem,
+    pamless_presets,
+    installed_pam_file,
+    write_pamless_pam_file,
+    ENZYME_TABLE,
     pam_motif,
     reference_bulge_capacity,
     read_enabled_annotations,
@@ -54,6 +62,7 @@ from .pages_utils import (
 )
 # the URL fragment a reused job's status page is opened with (the page says so)
 from .load_page import REUSED_HASH
+import index_fit  # noqa: E402  (PostProcess/, on sys.path through pages_utils)
 # the one plain address a notification goes to (the standard library only)
 from .send_mail import plain_address
 from app import (
@@ -633,9 +642,6 @@ def _max_edits_offered(mms, dna, rna) -> int:
         State("assembly-individual", "value"),
         State("max-edits-slider", "value"),
         State("advanced-thresholds-collapse", "is_open"),
-        # the bulge dropdowns' options follow these, with the PAM (limit_bulges_to_index)
-        State("available-genome", "value"),
-        State("variant-dataset", "value"),
     ],
     prevent_initial_call=True,
 )
@@ -656,8 +662,6 @@ def submit_assembly_search_job(
     individual: str,
     max_edits_val: int,
     advanced_open: bool,
-    genome_selected: Optional[str] = None,
-    variant_choice: Optional[str] = None,
 ) -> Tuple:
     """Validates and launches a personal-assembly (paternal/maternal, no VCF)
     off-target search, submitted via `crisprme.py assembly-search`.
@@ -737,14 +741,13 @@ def submit_assembly_search_job(
     # form's range (its dropdown's, and the Max edits slider's when it governs), checked
     # before anything is written: they go into .Params.txt and the command, and a request
     # can send any value, which went into .Params.txt as sent, a line break too, before
-    # int() refused it and left a job folder that never ran. The bulge dropdowns offer what
-    # the genome, PAM and variant dataset selected allow (limit_bulges_to_index), more than
-    # the app's ceiling with an installed index deeper than it, and the slider's maximum
-    # follows them (sync_max_edits_bound): Submit takes them as the form offers them.
+    # int() refused it and left a job folder that never ran. The bulge dropdowns offer, on
+    # this tab, the app's ceiling, whatever the Reference tab's genome and variant dataset
+    # (limit_bulges_to_index, ASSEMBLY_BULGES), and the slider's maximum follows them
+    # (sync_max_edits_bound): Submit takes them as the form offers them.
     mms = _form_number(mms, 0, MAX_MMS - 1)
-    bulges = _bulges_offered(*_offered(genome_selected, pam, variant_choice))
-    dna = _form_number(dna, 0, bulges)
-    rna = _form_number(rna, 0, bulges)
+    dna = _form_number(dna, 0, ASSEMBLY_BULGES)
+    rna = _form_number(rna, 0, ASSEMBLY_BULGES)
     if mms is None:
         missing.append("mismatches")
     if dna is None:
@@ -979,10 +982,13 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
     example_variant = _preferred_variant(
         [o["value"] for o in get_variant_dataset_options("hg38")], "hg38"
     )
-    # Pick the installed default PAM dynamically (prefer NRG SpCas9) so the
+    # Pick the installed default PAM dynamically (prefer NRR SpCas9) so the
     # example never selects a PAM that isn't installed -- e.g. an NGG-only
-    # install. Falls back to the canonical NRG SpCas9 name.
-    example_pam = _default_pam(_default_cas()) or "20bp-NRG-SpCas9"
+    # install -- and the installed genome the same way (hg38 first). Falls back to
+    # the default names, which on a data folder with neither installed Submit says
+    # are missing, and where to add them (check_input).
+    example_pam = _default_pam(_default_cas()) or DEFAULT_PAM
+    example_genome = _default_genome() or "hg38"
     example_guide = "CTAACAGTTGCTTTTATCAC"  # 20 nt
     # window options span 1..guide_len (ints), matching update_base_editing_dropdown
     be_window_options = [
@@ -990,8 +996,8 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
     ]
     return [
         example_guide,  # guide to use
-        "20bp-NRG-SpCas9",  # PAM/enzyme to use
-        "hg38",  # ref genome to use
+        example_pam,  # PAM/enzyme to use (installed, chosen dynamically)
+        example_genome,  # ref genome to use (installed, chosen dynamically)
         example_variant,  # variant dataset (installed panel, chosen dynamically)
         4,  # MM (int, to match the dropdown option values)
         1,  # DNA bulges
@@ -1180,7 +1186,7 @@ def change_url(
     # with any values, which name the folders and files the search reads and go into its
     # command line (and its steps' shell commands): only what the form offers runs.
     if not _launchable(genome_selected, pam, variant_choice, mms, dna, rna, max_edits_val,
-                       advanced_open):
+                       advanced_open, (radio_be_value, be_start, be_stop, be_nt)):
         raise PreventUpdate
     mms = int(mms)
     # job start
@@ -1189,7 +1195,7 @@ def change_url(
     if (genome_selected is None) or (not genome_selected):
         genome_selected = "hg38_ref"  # use hg38 by default
     if (pam is None) or (not pam):
-        pam = "20bp-NRG-SpCas9"  # use Cas9 PAM
+        pam = DEFAULT_PAM  # use Cas9 PAM
         guide_seqlen = 20  # set guide length to 20
     else:
         for c in pam.split("-"):
@@ -1462,19 +1468,8 @@ def change_url(
     max_bulges = max(dna, rna) + 1
     assert isinstance(dna, int)
     assert isinstance(rna, int)
-    # base editing
-    if be_start is None or not bool(be_start) or radio_be_value == "N":
-        be_start = 1
-    else:
-        be_start = int(be_start)
-    if be_stop is None or not bool(be_stop) or radio_be_value == "N":
-        be_stop = 0
-    else:
-        be_stop = int(be_stop)
-    if be_nt is None or not bool(be_nt) or radio_be_value == "N":
-        be_nt = "none"
-    else:
-        assert be_nt in DNA_ALPHABET
+    # base editing (_launchable took the values before the job folder was made)
+    be_start, be_stop, be_nt = _base_editing(radio_be_value, be_start, be_stop, be_nt)
     assert isinstance(be_start, int)
     assert isinstance(be_stop, int)
     assert isinstance(be_nt, str)
@@ -1636,10 +1631,9 @@ def change_url(
                                     LOG_FILE,
                                 )
                             ) as handle_log:
-                                log_data = handle_log.read().strip()
+                                log_data = handle_log.read()
                                 if "Job\tDone" in log_data:
                                     adj_date = True
-                                    log_data = log_data.split("\n")
                                     date_new = subprocess.Popen(
                                         ["echo $(date)"],
                                         stdout=subprocess.PIPE,
@@ -1647,10 +1641,15 @@ def change_url(
                                         shell=True,
                                     )
                                     out, err = date_new.communicate()
-                                    log_to_write = "\n".join(log_data[:-1])
-                                    date_write = str(
-                                        f"{log_to_write}\nJob\tDone\t"
-                                        f"{out.decode('UTF-8').strip()}"
+                                    # its "Job Done" line takes today's date (the results
+                                    # are kept 3 days from it), and every other line stays
+                                    # as it is: it dropped the last line, the report's,
+                                    # which comes after it, and added a second "Job Done"
+                                    # with no line end (FV :335)
+                                    date_write = "".join(
+                                        f"Job\tDone\t{out.decode('UTF-8').strip()}\n"
+                                        if line.startswith("Job\tDone") else line
+                                        for line in log_data.splitlines(keepends=True)
                                     )
                         except OSError as e:
                             raise e
@@ -1812,7 +1811,7 @@ def change_url(
         )
     )
     # set sorting criteria for score and fewest
-    sorting_criteria_scoring = "mm+bulges"
+    sorting_criteria_scoring = "mm+bulges,mm"  # (complete-search's default)
     sorting_criteria = "mm+bulges,mm"
     # TODO: use functions rather than calling scripts
     run_job_sh = os.path.join(
@@ -1959,14 +1958,39 @@ def _notification_entry(address: str, job_id: str) -> str:
     return f"{address}\n{base}/load?job={job_id}\n{date}\n"
 
 
+def _base_editing(radio_be_value, be_start, be_stop,
+                  be_nt) -> Optional[Tuple[int, int, str]]:
+    """The base-editing window and nucleotide change_url hands the search: 1, 0 and "none"
+    with base editing off ("N") or for a value not given, else a window bound as a whole
+    number and a nucleotide of DNA_ALPHABET, as the form's dropdowns offer them; None for
+    a value they do not offer."""
+    if radio_be_value == "N":
+        return 1, 0, "none"
+    start = _form_number(be_start, 0, _BE_WINDOW_MAX) if be_start else 1
+    stop = _form_number(be_stop, 0, _BE_WINDOW_MAX) if be_stop else 0
+    if start is None or stop is None or (be_nt and be_nt not in DNA_ALPHABET):
+        return None
+    return start, stop, be_nt or "none"
+
+
+# The highest window position the base-editing dropdowns offer: a guide's length (the
+# longest guide a PAM file of the form names is far shorter).
+_BE_WINDOW_MAX = 1000
+
+
 def _launchable(genome: Optional[str], pam: Optional[str], variant_choice: Optional[str],
-                mms, dna, rna, max_edits, advanced_open) -> bool:
+                mms, dna, rna, max_edits, advanced_open,
+                base_editing=("N", None, None, None)) -> bool:
     """Whether change_url runs a search of these values: a genome and a PAM the form
     offers (installed), "ref" or a variant dataset it offers for the genome, whole
     numbers of mismatches and bulges, and, where the Max edits slider governs (Advanced
-    closed), no value or a whole number of the slider's range (_max_edits_offered).
-    change_url asks it before it makes the job folder: the Max edits value was converted
-    only after that, and one int() refused left a folder that never ran."""
+    closed), no value or a whole number of the slider's range (_max_edits_offered), and
+    base-editing values the form offers (_base_editing: the radio, the window's start and
+    stop, the nucleotide). change_url asks it before it makes the job folder: the Max
+    edits and the base-editing values were converted only after that, and one int()
+    refused left a folder that never ran."""
+    if _base_editing(*base_editing) is None:
+        return False
     if genome not in [g["value"] for g in get_available_genomes()]:
         return False
     if pam not in [p["value"] for p in get_available_PAM()]:
@@ -2122,7 +2146,7 @@ def check_input(
     miss_input_list = []  # recover missing inputs
     # display missing genome and PAM: none selected, or one selected that is not
     # installed (a fresh data folder has neither, and Load Example selects hg38 and
-    # 20bp-NRG-SpCas9 whatever is installed), with where to add one (_not_installed)
+    # its default PAM when none is installed), with where to add one (_not_installed)
     missing = _not_installed("Genome", genome_selected,
                              [g["value"] for g in get_available_genomes()],
                              "reference genome", "Add a reference genome")
@@ -2152,7 +2176,7 @@ def check_input(
         update_style = True
         miss_input_list.append("Bulge RNA size")
     if pam is None or not bool(pam):
-        pam = "20bp-NRG-SpCas9"
+        pam = DEFAULT_PAM
         len_guide_sequence = 20
     else:
         for e in pam.split("-"):
@@ -2649,8 +2673,13 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
     # cis co-occurrence is only PUTATIVE; a hybrid panel is CONFIRMED where phased.
     phased = False
     if not has_gt:
+        # (a genotyped panel whose index is not built yet, or was built without its sample
+        # list, is labelled so in the list of datasets: it needs that index, not another
+        # panel, FV :342)
         ps_label = (" Per-sample — resolve genotypes: named carriers & CONFIRMED cis "
-                    "(needs a genotyped panel)")
+                    + ("(its samples are not indexed yet: build its index in Settings)"
+                       if variant_dataset_data_type(genome_value, dataset_value)
+                       == "genotyped-unindexed" else "(needs a genotyped panel)"))
     else:
         _dt = variant_dataset_data_type(genome_value, dataset_value)
         phased = _dt == "genotyped-phased"
@@ -2750,15 +2779,18 @@ def update_prioritize_observed(dataset_value, genome_value, current):
         State("max-edits-slider", "value"),
         State("bulge-cap-memory", "data"),
     ],
+    [Input("genome-mode-tabs", "active_tab")],
     prevent_initial_call=True,
 )
 def limit_bulges_to_index(
-    genome, pam, variant_choice, cur_dna, cur_rna, mms=None, cur_edits=None, held=None
+    genome, pam, variant_choice, cur_dna, cur_rna, mms=None, cur_edits=None, held=None,
+    active_tab=None,
 ):
     genome, pam, variant_choice = _offered(genome, pam, variant_choice)
-    maxb = _bulges_offered(genome, pam, variant_choice)
+    assembly = active_tab == ASSEMBLY_TAB
+    maxb = ASSEMBLY_BULGES if assembly else _bulges_offered(genome, pam, variant_choice)
     opts = [{"label": i, "value": i} for i in range(0, maxb + 1)]
-    if not genome or not pam:
+    if not pam or not (genome or assembly):
         return opts, opts, no_update, no_update, no_update, no_update
     held = held or {}
     # What the cap lowered last time, unless DNA/RNA no longer show what it set them to
@@ -2832,37 +2864,46 @@ def _bulges_offered(genome: Optional[str], pam: Optional[str], variant_choice) -
     variant dataset as _offered gives them: the bulges a web search can reach here
     (_bulge_cap), more than the app's ceiling where an installed reference index is deeper
     than it, or, with no genome or PAM, that ceiling (AV_BULGES). limit_bulges_to_index
-    fills the dropdowns with them, and the Personal assembly tab's Submit takes no other
-    count (submit_assembly_search_job)."""
+    fills the dropdowns of the Reference tab with them (the Personal assembly tab's offer
+    ASSEMBLY_BULGES)."""
     if not genome or not pam:
         return MAX_BULGES - 1
     return _bulge_cap(genome, pam, variant_choice)
 
 
+# The Personal assembly tab of the search form (genome-mode-tabs). Its search indexes each
+# haplotype of the individual itself, the first time, with the PAM and bulges selected
+# (assembly-search), so it offers every PAM installed and the app's bulge ceiling, whatever
+# the Reference tab's genome and variant dataset: they limited it, from the hidden
+# dropdowns of that tab (OF-11).
+ASSEMBLY_TAB = "tab-personal-assembly"
+ASSEMBLY_BULGES = MAX_BULGES - 1
+
+
 def _index_installed(genome: str, pam: str, panel: Optional[str] = None) -> bool:
     """Whether genome_library holds an index of the genome (+ variant panel) that
-    index_max_bulges counts for this PAM, a 0-bulge one included: index_max_bulges
-    reports 0 for that and for none alike. A search that finds none builds one."""
+    index_max_bulges counts for this PAM (index_serves_pam), a 0-bulge one included:
+    index_max_bulges reports 0 for that and for none alike. A search that finds none
+    builds one."""
     motif = pam_motif(pam)
     if not motif or not genome:
         return False
     genome = genome.replace(" ", "_")
     lib = os.path.join(current_working_directory, "genome_library")
-    want = f"{genome}_{panel}" if panel else ""
+    want = f"{genome}+{genome}_{panel}" if panel else genome
+    _len, _pos = pam_geometry(pam)
+    three_prime = not (_pos is not None and _pos < 0)
     try:
         names = os.listdir(lib)
     except OSError:
         return False
     for d in names:
-        base, _, enriched = d.partition("+")
-        if enriched != want or d.endswith("_INDELS") or not base.endswith(f"_{genome}"):
+        parsed = index_fit.parse_index_name(d)  # either form of the name
+        if not parsed or parsed[2] != want or d.endswith("_INDELS"):
             continue
-        pam_name, sep, n_str = base[: -len(genome) - 1].partition("_")
-        if not sep or not n_str.isdigit():
-            continue
-        if pam_name == motif or (set(pam_name) == {"N"} and len(pam_name) == len(motif)):
-            if os.path.isdir(os.path.join(lib, d)):
-                return True
+        if os.path.isdir(os.path.join(lib, d)) and index_serves_pam(
+                os.path.join(lib, d), motif, three_prime):
+            return True
     return False
 
 
@@ -2893,7 +2934,8 @@ def _unsplit_vcf_refusal(genome: str, pam: str, panel: str) -> Optional[str]:
     chromosome from a '.chrN.' token in its name. A single multi-chromosome file has
     none: the search fails as it begins ("cannot open Genomes/<genome>/.fa"). Only a
     build of its index (build-index-only, as Settings runs it) splits it per chromosome;
-    this is that build's test (crisprme.py _ensure_per_chromosome_vcfs)."""
+    this is that build's test (crisprme.py _ensure_per_chromosome_vcfs). A file without
+    the token beside others is named: the folder is no single file."""
     genome = genome.replace(" ", "_")
     if _index_installed(genome, pam, panel):
         return None
@@ -2906,14 +2948,23 @@ def _unsplit_vcf_refusal(genome: str, pam: str, panel: str) -> Optional[str]:
                 if f.endswith(".vcf.gz")]
     except OSError:
         return None
-    if not vcfs or all(any("chr" in tok for tok in f.split(".")) for f in vcfs):
+    unnamed = sorted(f for f in vcfs if not any("chr" in tok for tok in f.split(".")))
+    if not unnamed:
         return None
+    if len(vcfs) == 1:
+        what = ("VCF is a single multi-chromosome file, which a search cannot prepare the "
+                "variant genome from: the file is")
+    else:
+        several = len(unnamed) > 1
+        what = (f"VCF folder holds {', '.join(unnamed)}, whose "
+                f"{'names say' if several else 'name says'} no chromosome (no '.chrN.' "
+                f"part), which a search cannot prepare the variant genome from: "
+                f"{'such files are' if several else 'such a file is'}")
     return (
-        f"No {panel} variant index for this PAM is installed yet, and the dataset's VCF is "
-        "a single multi-chromosome file, which a search cannot prepare the variant genome "
-        "from: the file is split per chromosome only when its index is built. Build its "
-        "index in Settings (Build an index locally) first, or remove the dataset in "
-        "Settings and add it again as one VCF file per chromosome (<name>.chrN.vcf.gz)."
+        f"No {panel} variant index for this PAM is installed yet, and the dataset's {what} "
+        "split per chromosome only when its index is built. Build its index in Settings "
+        "(Build an index locally) first, or remove the dataset in Settings and add it again "
+        "as one VCF file per chromosome (<name>.chrN.vcf.gz)."
     )
 
 
@@ -2949,10 +3000,15 @@ def _dataset_refusals(genome: str, pam: str, panel: str,
         Input("variant-dataset", "value"),
         Input("dna", "value"),
         Input("rna", "value"),
+        Input("genome-mode-tabs", "active_tab"),
     ],
 )
-def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
+def update_bulge_note(genome, pam, variant_choice, dna, rna, active_tab=None) -> str:
     genome, pam, variant_choice = _offered(genome, pam, variant_choice)
+    if active_tab == ASSEMBLY_TAB:
+        return (f"Up to {ASSEMBLY_BULGES} DNA/RNA bulge(s) available. A personal-assembly "
+                "search indexes each haplotype of the individual for the PAM and bulges "
+                "selected the first time, then reuses those indexes.") if pam else ""
     if not genome or not pam:
         return ""
     # a dataset whose search Submit refuses whatever the bulges: the note says what Submit
@@ -2990,8 +3046,8 @@ def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
             note = (
                 f"No {panel} variant index for this PAM is installed yet, so only a "
                 "0-bulge search is offered, and the first one prepares the variant "
-                "genome and a 0-bulge index of it, once (this can take hours on a full "
-                "genome)."
+                "genome and the index of its indels, once (this can take hours on a full "
+                "genome): a search with no bulges scans the variant genome itself."
             )
         else:
             # the search script refuses it (_refuse_no_variant_index), with what to do
@@ -3043,14 +3099,16 @@ def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
     ],
     [Input("available-genome", "value"), Input("variant-dataset", "value")],
     [State("available-pam", "value")],
+    [Input("genome-mode-tabs", "active_tab")],
     prevent_initial_call=True,
 )
-def update_pam_options(genome, variant_choice, current_pam):
+def update_pam_options(genome, variant_choice, current_pam, active_tab=None):
     """Restrict the PAM list to what is searchable for the current genome + variant
     selection: all PAMs for a reference-only search, but only PAMs with a variant
     index (pamless NNN counts for all) when a variant dataset is included. Keeps the
-    current PAM if it is still valid, else falls back to a sensible default."""
-    options = get_pam_options(genome, variant_choice)
+    current PAM if it is still valid, else falls back to a sensible default. On the
+    Personal assembly tab, every PAM, as for a reference-only search (ASSEMBLY_TAB)."""
+    options = get_pam_options(genome, "ref" if active_tab == ASSEMBLY_TAB else variant_choice)
     valid = {o["value"] for o in options}
     if current_pam in valid:
         value = current_pam
@@ -3061,10 +3119,129 @@ def update_pam_options(genome, variant_choice, current_pam):
     return options, value
 
 
+@app.callback(
+    [
+        Output("pamless-picker", "style"),
+        Output("pamless-picker-note", "children"),
+        Output("pamless-preset", "options"),
+    ],
+    [Input("available-genome", "value"), Input("variant-dataset", "value"),
+     Input("genome-mode-tabs", "active_tab")],
+)
+def update_pamless_picker(genome, variant_choice, active_tab=None):
+    """Show the PAM picker of a PAM-less index when one is installed for the genome (for a
+    variant search, the dataset) selected, with what it serves, and its enzyme presets:
+    those it cannot serve are disabled, with the reason (pamless_presets). Hidden otherwise,
+    and on the Personal assembly tab, whose search indexes the haplotypes: the PAM list
+    above is then all there is."""
+    hidden = {"display": "none", "width": "300px"}
+    if active_tab == ASSEMBLY_TAB:
+        return hidden, "", []
+    geometry = pamless_index_geometry(genome, variant_choice)
+    if not geometry:
+        return hidden, "", []
+    side = f"{geometry['side']}'"
+    note = (f"{geometry['name']} is a PAM-less index: it serves any {side} PAM of a "
+            f"{geometry['guide_len']}-nt guide up to {geometry['k']} nt"
+            + (" (as long as its flank, for a 5' PAM)" if geometry["side"] == 5 else "")
+            + ", pruned to it by the search (slower than an index of that PAM). Pick one by "
+            "enzyme, or type it, then Use this PAM."
+            + (" This server runs online and adds no PAM file: a PAM is used only where "
+               "its file is installed." if ONLINE else ""))
+    return ({"display": "block", "width": "300px"}, note,
+            pamless_presets(geometry, installed_only=ONLINE))
+
+
+@app.callback(
+    Output("pamless-custom-pam-feedback", "children"),
+    [Input("pamless-custom-pam", "value")],
+    [State("available-genome", "value"), State("variant-dataset", "value")],
+    prevent_initial_call=True,
+)
+def validate_pamless_custom_pam(custom_pam, genome, variant_choice):
+    """When the typed-PAM field is left (debounce): whether the PAM-less index serves it
+    (pamless_pam_problem), or why not."""
+    geometry = pamless_index_geometry(genome, variant_choice)
+    if not custom_pam or not geometry:
+        return ""
+    why = pamless_pam_problem(custom_pam, geometry)
+    if why:
+        return html.Span(f"Not on this index: {why}.", style={"color": "#c33"})
+    if ONLINE and installed_pam_file(custom_pam, geometry) is None:
+        return html.Span(_NO_PAM_FILE_ONLINE.format(pam=custom_pam.strip().upper()),
+                         style={"color": "#c33"})
+    return html.Span(f"{custom_pam.strip().upper()}: served by {geometry['name']}.",
+                     style={"color": "#2a6"})
+
+
+# What the picker says online of a PAM whose file is not installed: Settings changes nothing
+# of the data folder online (add_pam), and neither does the picker.
+_NO_PAM_FILE_ONLINE = ("{pam}: no PAM file of it is installed, and this server adds none (it "
+                       "runs online). Pick a PAM of the PAM list, or search {pam} with a "
+                       "CRISPRme of your own.")
+
+
+@app.callback(
+    [
+        Output("available-pam", "options", allow_duplicate=True),
+        Output("available-pam", "value", allow_duplicate=True),
+        Output("pamless-custom-pam-feedback", "children", allow_duplicate=True),
+    ],
+    [Input("pamless-use", "n_clicks")],
+    [
+        State("pamless-preset", "value"),
+        State("pamless-custom-pam", "value"),
+        State("available-genome", "value"),
+        State("variant-dataset", "value"),
+    ],
+    prevent_initial_call=True,
+)
+def use_pamless_pam(n_clicks, preset, custom_pam, genome, variant_choice):
+    """Use this PAM: writes the PAM file of the PAM typed (else of the preset picked) for
+    the PAM-less index's guide length and side into PAMs/ (write_pamless_pam_file, unless
+    one of that name is there), and selects it in the PAM list, where the search takes it
+    as any other. Only a PAM the index serves (pamless_pam_problem) and an enzyme of the
+    table are written: what the request names otherwise runs nothing. Online, where
+    Settings changes nothing of the data folder (add_pam), nothing is written: the PAM
+    file installed for that PAM is selected, where there is one (installed_pam_file)."""
+    geometry = pamless_index_geometry(genome, variant_choice)
+    if not n_clicks or not geometry:
+        raise PreventUpdate
+    enzyme = "Custom"
+    pam = (custom_pam or "").strip().upper()
+    if not pam and preset:
+        known = {f"{e['enzyme']}:{e['pam']}": e for e in ENZYME_TABLE}
+        entry = known.get(preset)
+        if entry is None or pamless_pam_problem(entry["pam"], geometry, entry["guide_len"],
+                                                entry["side"]):
+            raise PreventUpdate
+        enzyme, pam = entry["enzyme"], entry["pam"]
+    why = pamless_pam_problem(pam, geometry)
+    if why:
+        return (no_update, no_update,
+                html.Span(f"Not on this index: {why}.", style={"color": "#c33"}))
+    if ONLINE:
+        name = installed_pam_file(pam, geometry)
+        if name is None:
+            return (no_update, no_update,
+                    html.Span(_NO_PAM_FILE_ONLINE.format(pam=pam), style={"color": "#c33"}))
+        return (get_pam_options(genome, variant_choice), name,
+                html.Span(f"{pam} selected ({name}).", style={"color": "#2a6"}))
+    name = write_pamless_pam_file(pam, geometry, enzyme)
+    return (get_pam_options(genome, variant_choice), name,
+            html.Span(f"{pam} added to the PAM list and selected.", style={"color": "#2a6"}))
+
+
 def _default_genome() -> Optional[str]:
     """Sensible default genome: hg38 if installed, else the first available."""
     gs = [g["value"] for g in get_available_genomes()]
     return "hg38" if "hg38" in gs else (gs[0] if gs else None)
+
+
+# The PAM the search form selects by default, when it is installed (_default_pam), and
+# the one it falls back to when none is selected: SpCas9 NRR since CRISPRme 2.9.0 (NRG
+# before).
+DEFAULT_PAM = "20bp-NRR-SpCas9"
 
 
 def _default_cas() -> Optional[str]:
@@ -3074,9 +3251,11 @@ def _default_cas() -> Optional[str]:
 
 
 def _default_pam(cas: Optional[str]) -> Optional[str]:
-    """Default PAM for a nuclease: prefer an NRG PAM (NAG+NGG, the broad SpCas9
-    default that surfaces variant-created NAG off-targets), else fall back to the
-    canonical NGG, else the first available PAM for that Cas."""
+    """Default PAM for a nuclease: prefer an NRR PAM (NAA, NAG, NGA and NGG, the
+    default since CRISPRme 2.9.0: the broad SpCas9 screen recommended for an IND
+    package, which also surfaces variant-created NAG and NGA off-targets), else an NRG
+    PAM (NAG+NGG, the default before), else the canonical NGG, else the first available
+    PAM for that Cas."""
     if not cas:
         return None
     pams = [
@@ -3086,12 +3265,10 @@ def _default_pam(cas: Optional[str]) -> Optional[str]:
     ]
     if not pams:
         return None
-    for p in pams:  # prefer NRG (the new default)
-        if "-NRG-" in p:
-            return p
-    for p in pams:  # else the canonical NGG
-        if "-NGG-" in p:
-            return p
+    for motif in ("-NRR-", "-NRG-", "-NGG-"):  # the default first, then the earlier ones
+        for p in pams:
+            if motif in p:
+                return p
     return pams[0]
 
 
@@ -3113,7 +3290,7 @@ def index_page() -> html.Div:
 
     # begin main page construction
     final_list = []
-    # smart defaults, based on what is actually installed: hg38 + SpCas9/NRG +
+    # smart defaults, based on what is actually installed: hg38 + SpCas9/NRR +
     # 1000G variants + the standard 4/1/1 thresholds, so a non-expert can submit
     # a sensible search without configuring everything from scratch.
     _def_genome = _default_genome()
@@ -3223,6 +3400,29 @@ def index_page() -> html.Div:
                     id="available-pam",
                     style={"width": "300px"},
                 )
+            ),
+            # The PAM picker of a PAM-less index (update_pamless_picker): shown when one is
+            # installed for the genome or the dataset selected. It offers the PAMs that
+            # index serves (by enzyme, or typed, checked when the field is left), and
+            # "Use this PAM" adds the chosen one's PAM file to the list above and selects
+            # it (docs/DYNAMIC_PAM_INDEX_COMPAT.md §8).
+            html.Div(
+                [
+                    html.Div(id="pamless-picker-note",
+                             style={"fontSize": "1.3rem", "marginTop": "6px"}),
+                    dcc.Dropdown(id="pamless-preset", options=[], clearable=True,
+                                 placeholder="A PAM this index serves",
+                                 style={"width": "300px", "marginTop": "4px"}),
+                    dcc.Input(id="pamless-custom-pam", type="text", debounce=True,
+                              placeholder="or type one (IUPAC), e.g. NGN",
+                              style={"width": "300px", "marginTop": "4px"}),
+                    html.Div(id="pamless-custom-pam-feedback",
+                             style={"fontSize": "1.3rem"}),
+                    html.Button("Use this PAM", id="pamless-use", n_clicks=0,
+                                style={"marginTop": "4px"}),
+                ],
+                id="pamless-picker",
+                style={"display": "none", "width": "300px"},
             ),
         ],
     )
@@ -4155,10 +4355,18 @@ def update_base_editing_dropdown(
                     line_split = line.strip().split()
                     # line_split = re.split(r";|,|.|:|-| ", line.strip())
                     # print(line_split)
-                    seq_read = f"{line_split[0]}:{line_split[1]}-{line_split[2]}"
-                    seq_read = extract_seq.extractSequence(
-                        seqname, seq_read, genome.replace(" ", "_")
-                    )
+                    # (no genome selected, a line short of its three fields, no FASTA of
+                    # the sequence, coordinates past its end: the window offers nothing,
+                    # and Submit's dialog says what is wrong, as check_input does. Each was
+                    # an HTTP 500 of this callback: FR :89, :189)
+                    try:
+                        seq_read = f"{line_split[0]}:{line_split[1]}-{line_split[2]}"
+                        seq_read = extract_seq.extractSequence(
+                            seqname, seq_read, genome.replace(" ", "_")
+                        )
+                    except (AttributeError, OSError, IndexError,
+                            subprocess.CalledProcessError):
+                        return dropdown_options, dropdown_options
             else:
                 seq_read = "".join(seq.split()).strip()
             guides.append(seq_read)

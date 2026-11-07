@@ -283,8 +283,10 @@ class TestHeaderIsExactlyTheId(unittest.TestCase):
         self.assertEqual(self._readb("chr1.fa"), ">chr1\nACGT\n")
 
     def test_a_clean_genome_is_not_touched(self):
+        # (a last line with no LF is no clean file: the index build drops it, and a search
+        # lost its off-targets; TestCommandLine.test_a_last_line_with_no_line_end_...)
         for name in ("chr1.fa", "chr2.fa"):
-            self._writeb(name, f">{name[:-3]}\nACGT\nAC")  # (no last line end, as it was)
+            self._writeb(name, f">{name[:-3]}\nACGT\nAC\n")
         before = {n: os.stat(os.path.join(self.tmp, n)) for n in os.listdir(self.tmp)}
         self.assertEqual(gl.find_unclean_fastas(self.tmp, deep=True), {})
         self.assertEqual(gl.describe_header_problems(self.tmp), [])
@@ -300,7 +302,8 @@ class TestHeaderIsExactlyTheId(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.tmp)), ["NC_000913.3.fa", "chr1.fa", "chr2.fa"])
         self.assertEqual(self._readb("NC_000913.3.fa"), ">NC_000913.3\nACGT\nAC\n")
         self.assertEqual(self._readb("chr1.fa"), ">chr1\nACGT\n")
-        self.assertEqual(self._readb("chr2.fa"), ">chr2\nGG\nCC")  # no line end, as it had none
+        # (ended with LF, which it had none of: the index build drops a last line with none)
+        self.assertEqual(self._readb("chr2.fa"), ">chr2\nGG\nCC\n")
 
     def test_a_cr_further_on_is_for_the_deep_check_and_the_fix_to_find(self):
         self._writeb("chr1.fa", ">chr1\nACGT\nAC\r\nGG\n")
@@ -531,12 +534,22 @@ class TestCommandLine(unittest.TestCase):
 
     def test_split_flag_names_a_file_of_one_sequence_after_it(self):
         _write(os.path.join(self.tmp, "ecoli.fa"), ">NC_000913.3\nAC\n")
-        # the check a search runs is the same as before: one sequence a file
-        self.assertEqual(self._run(self.tmp).returncode, 0)
+        # the check a search runs first, and which a search that dropped all its rows says
+        # to run, passed it: a search of it finds that sequence's off-targets and drops
+        # them all (M1). It is refused, saying how to fix it
+        r = self._run(self.tmp)
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.stderr.splitlines()[:2], [
+            "ERROR: ecoli.fa: holds the sequence NC_000913.3 and is named otherwise. CRISPRme "
+            "reads a sequence from the file named after it (NC_000913.3.fa), so a search of "
+            "this folder finds that sequence's off-targets and then drops them all, with no "
+            "error. Name each file after its sequence with:",
+            f"    python PostProcess/genome_layout.py --split {self.tmp}"])
         r = self._run("--split", self.tmp)
         self.assertEqual(r.returncode, 0)
         self.assertEqual(r.stdout, f"Renamed ecoli.fa to NC_000913.3.fa in {self.tmp}\n")
         self.assertEqual(os.listdir(self.tmp), ["NC_000913.3.fa"])
+        self.assertEqual(self._run(self.tmp).returncode, 0)
 
     def test_a_header_of_more_than_the_id_exits_one_and_split_writes_it(self):
         # what a web search runs (the search script), which has no validator
@@ -553,6 +566,38 @@ class TestCommandLine(unittest.TestCase):
         self.assertEqual(self._run(self.tmp).returncode, 0)
         self.assertEqual(self._run("--split", self.tmp).stdout, "")
 
+    def test_a_last_line_with_no_line_end_exits_one_and_split_ends_it(self):
+        # the index build drops a last line with no LF, with no error: a sequence written
+        # on one line lost all its off-targets (LP unterminated-last-line-dropped)
+        _write(os.path.join(self.tmp, "chr1.fa"), ">chr1\nACGT\nACGTAC")
+        r = self._run(self.tmp)
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.stderr.splitlines()[:2], [
+            "ERROR: chr1.fa: its last line has no line end (LF). The index build drops a last "
+            "line with none, so every search of this folder loses the off-targets of its bases "
+            "(all of a sequence written on one line), with no error. End it with one with:",
+            f"    python PostProcess/genome_layout.py --split {self.tmp}"])
+        r = self._run("--split", self.tmp)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("Ended chr1.fa's last line with a line end (LF)", r.stdout)
+        self.assertIn("any CRISPRitz index built from the old layout must be rebuilt", r.stdout)
+        self.assertEqual(_read(os.path.join(self.tmp, "chr1.fa")), ">chr1\nACGT\nACGTAC\n")
+        self.assertEqual(self._run(self.tmp).returncode, 0)
+
+    def test_split_ends_lone_cr_lines_with_lf_and_each_piece_with_one(self):
+        # lone CRs past the first lines were deleted, which left one line of all the rest
+        # with no LF, which the index build dropped (LP unterminated-last-line-dropped)
+        with open(os.path.join(self.tmp, "chr1.fa"), "wb") as f:
+            f.write(b">chr1\nAC\nGT\rAC\rGG")
+        with open(os.path.join(self.tmp, "two.fa"), "wb") as f:
+            f.write(b">chr2\nAAA\n>chr3\nCCC")
+        r = self._run("--split", self.tmp)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(_read(os.path.join(self.tmp, "chr1.fa")), ">chr1\nAC\nGT\nAC\nGG\n")
+        self.assertEqual(_read(os.path.join(self.tmp, "chr2.fa")), ">chr2\nAAA\n")
+        self.assertEqual(_read(os.path.join(self.tmp, "chr3.fa")), ">chr3\nCCC\n")
+        self.assertEqual(self._run("--deep", self.tmp).returncode, 0)
+
     def test_deep_check_finds_a_cr_past_the_first_lines(self):
         with open(os.path.join(self.tmp, "chr1.fa"), "wb") as f:
             f.write(b">chr1\nAC\nGT\r\nAC\n")
@@ -567,28 +612,31 @@ class TestCommandLine(unittest.TestCase):
         # a PAM in the last bases of the sequence the build wrote warnings on stderr and a
         # search of the index crashed (SIGSEGV) or reported other rows, through the real
         # engine (integration round 2 review, F1). The two-line check refuses a CR in its two
-        # lines, --deep one anywhere, and --split writes the file with none
+        # lines, --deep one anywhere, and --split writes the file with none. A file whose
+        # last byte is a CR, its last line ending in no LF, the two-line check refuses too,
+        # since 2.9.0, for that (LP unterminated-last-line-dropped); --split ends it with LF
         path = os.path.join(self.tmp, "chr1.fa")
-        # (the file, refused by the two-line check, as --split writes it)
-        for text, fast, fixed in ((b">chr1\nAC\nGT\r\n", False, b">chr1\nAC\nGT\n"),
-                                  (b">chr1\nAC\nGT\n\r", False, b">chr1\nAC\nGT\n"),
-                                  (b">chr1\nAC\nGT\n\r\r\r", False, b">chr1\nAC\nGT\n"),
-                                  (b">chr1\nAC\nGT\r\n\r\n", False, b">chr1\nAC\nGT\n\n"),
-                                  (b">chr1\nAC\nGT\r\r\n", False, b">chr1\nAC\nGT\n"),
-                                  (b">chr1\nAC\nGT\r\n\n", False, b">chr1\nAC\nGT\n\n"),
-                                  (b">chr1\nAC\nGT\n\r\n", False, b">chr1\nAC\nGT\n\n"),
-                                  (b">chr1\nACGT\r\n", True, b">chr1\nACGT\n"),
-                                  (b">chr1\nACGT\r", True, b">chr1\nACGT"),
-                                  (b">chr1\nACGT\r\nAC\n", True, b">chr1\nACGT\nAC\n"),
-                                  (b">chr1\nAC\nGT\r\n\nAC\n", False, b">chr1\nAC\nGT\n\nAC\n")):
+        cr, lf = "ERROR: chr1.fa: its lines end in CR", "ERROR: chr1.fa: its last line has no"
+        # (the file, what the two-line check refuses it for, as --split writes it)
+        for text, fast, fixed in ((b">chr1\nAC\nGT\r\n", None, b">chr1\nAC\nGT\n"),
+                                  (b">chr1\nAC\nGT\n\r", lf, b">chr1\nAC\nGT\n"),
+                                  (b">chr1\nAC\nGT\n\r\r\r", lf, b">chr1\nAC\nGT\n"),
+                                  (b">chr1\nAC\nGT\r\n\r\n", None, b">chr1\nAC\nGT\n\n"),
+                                  (b">chr1\nAC\nGT\r\r\n", None, b">chr1\nAC\nGT\n"),
+                                  (b">chr1\nAC\nGT\r\n\n", None, b">chr1\nAC\nGT\n\n"),
+                                  (b">chr1\nAC\nGT\n\r\n", None, b">chr1\nAC\nGT\n\n"),
+                                  (b">chr1\nACGT\r\n", cr, b">chr1\nACGT\n"),
+                                  (b">chr1\nACGT\r", cr, b">chr1\nACGT\n"),
+                                  (b">chr1\nACGT\r\nAC\n", cr, b">chr1\nACGT\nAC\n"),
+                                  (b">chr1\nAC\nGT\r\n\nAC\n", None, b">chr1\nAC\nGT\n\nAC\n")):
             with open(path, "wb") as f:
                 f.write(text)
-            for options, refused in (((), fast), (("--deep",), True)):
+            for options, says in (((), fast), (("--deep",), cr)):
                 with self.subTest(text=text, options=options):
                     r = self._run(*options, self.tmp)
-                    if refused:
+                    if says:
                         self.assertEqual(r.returncode, 1, r.stderr)
-                        self.assertIn("ERROR: chr1.fa: its lines end in CR", r.stderr)
+                        self.assertIn(says, r.stderr)
                     else:
                         self.assertEqual((r.returncode, r.stderr), (0, ""))
             with self.subTest(text=text, check="complete-search's"):
@@ -812,20 +860,32 @@ class TestDownloadRefusesUnsafeArchive(unittest.TestCase):
                 self.assertEqual(_read(os.path.join(dest, "chr2.fa")), ">chr2\nGG\n")
 
     def test_an_archive_goes_in_as_the_settings_guide_says(self):
-        # docs/SETTINGS_DATA_MANAGER.md, Direct URL: each header written as >id; unlike an
-        # upload, a .fasta file that needs nothing stays so, and a hidden file goes in
-        # (the guide said once it was laid out as an upload is; change both together)
+        # docs/SETTINGS_DATA_MANAGER.md, Direct URL: each header written as >id, and laid
+        # out as an upload is: a .fasta file goes in as a .fa file, and a hidden file is
+        # left out. A .fasta file that needed nothing else stayed so, which no index or
+        # search reads, and the ._chr2.fa that macOS tar adds beside chr2.fa went in, with
+        # which a search stopped (plan 4.8, R6B direct-url-fasta-and-hidden-files)
         members = [self._file("asm/chr1.fasta"), self._file("asm/._chr2.fa", b"\0\5\26\7"),
                    self._file("asm/chr2.fa", b">chr2\nGG\n"),
                    self._file("asm/chr3.fa", b">chr3 3\nCC\n"),
-                   self._file("asm/hg38_chr4.fa", b">chr4\nTT\n")]
+                   self._file("asm/hg38_chr4.fa", b">chr4\nTT\n"),
+                   self._file("asm/hg38_chr5.fasta", b">chr5 5\nAA\n")]
         with mock.patch.object(utils, "download", self._fake_download(members)):
             dest = utils.download_reference_genome(
                 "uasm", self.genomes, source="url", url="http://x/asm.tar.gz")
         self.assertEqual(sorted(os.listdir(dest)),
-                         ["._chr2.fa", "chr1.fasta", "chr2.fa", "chr3.fa", "chr4.fa"])
+                         ["chr1.fa", "chr2.fa", "chr3.fa", "chr4.fa", "chr5.fa"])
+        self.assertEqual(_read(os.path.join(dest, "chr1.fa")), ">chr1\nACGT\n")
+        self.assertEqual(_read(os.path.join(dest, "chr2.fa")), ">chr2\nGG\n")
         self.assertEqual(_read(os.path.join(dest, "chr3.fa")), ">chr3\nCC\n")
         self.assertEqual(_read(os.path.join(dest, "chr4.fa")), ">chr4\nTT\n")
+        self.assertEqual(_read(os.path.join(dest, "chr5.fa")), ">chr5\nAA\n")
+        # what the settings guide says
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "docs", "SETTINGS_DATA_MANAGER.md")) as fh:
+            guide = " ".join(fh.read().split())
+        self.assertIn("As for an upload, a `.fasta` file goes in as a `.fa` file", guide)
+        self.assertNotIn("Unlike an upload", guide)
 
     def test_a_fasta_whose_only_cr_ends_it_goes_in_with_none(self):
         # files named after their sequence, with a plain header: only their CR is to write.
@@ -866,6 +926,18 @@ class TestDownloadRefusesUnsafeArchive(unittest.TestCase):
                       "to two genomes (the two haplotypes of an assembly, say), install each "
                       "under a name of its own.", message)
         self.assertEqual(os.listdir(self.genomes), ["udup"])  # (no staging folder left)
+        self.assertEqual(os.listdir(installed), ["chr9.fa"])
+        # chr1.fa and chr1.fasta: both go in as chr1.fa, as by an upload
+        both = [self._file("asm/chr1.fa", b">chr1\nAAAA\n"),
+                self._file("asm/chr1.fasta", b">chr1\nCCCC\n")]
+        with mock.patch.object(utils, "download", self._fake_download(both)):
+            with self.assertRaises(RuntimeError) as cm:
+                utils.download_reference_genome(
+                    "udup", self.genomes, source="url", url="http://x/asm.tar.gz")
+        self.assertTrue(str(cm.exception).startswith(
+            "The download holds two FASTA files that would both go in as chr1.fa (asm/chr1.fa, "
+            "asm/chr1.fasta), one replacing the other, so nothing was installed."),
+            str(cm.exception))
         self.assertEqual(os.listdir(installed), ["chr9.fa"])
         # one of each name goes in as before
         members[1] = self._file("asm/b/chr2.fa", b">chr2\nCCCC\n")
@@ -1013,8 +1085,17 @@ class TestValidator(unittest.TestCase):
         self.assertIn("3 sequences", errors[0].message)
         self.assertIn("genome_layout.py --split", errors[0].message)
 
-    def test_wrong_name_single_sequence_is_only_a_warning(self):
+    def test_wrong_name_single_sequence_is_refused(self):
+        # a search of it drops all chr1's off-targets, and its own check (genome_layout.py)
+        # refuses it now, as here: this was only a warning (M1). A .fasta file, which no
+        # search reads, is still only named
         _write(os.path.join(self.tmp, "NC_000001.fa"), ">chr1\nACGT\n")
+        issues, _ = vi.check_genome_fasta(self.tmp)
+        self.assertEqual([i.severity for i in issues], [vi.ERROR])
+        self.assertTrue(issues[0].message.startswith(
+            "NC_000001.fa: holds the sequence chr1 and is named otherwise."))
+        os.rename(os.path.join(self.tmp, "NC_000001.fa"), os.path.join(self.tmp, "NC_000001.fasta"))
+        _write(os.path.join(self.tmp, "chr2.fa"), ">chr2\nACGT\n")
         issues, _ = vi.check_genome_fasta(self.tmp)
         self.assertEqual([i.severity for i in issues], [vi.WARN])
         self.assertIn("chr1", issues[0].message)

@@ -117,9 +117,10 @@ def _perfect_match_sites(integrated_tsv):
 
     A guide with >1 perfect genomic match has no a-priori on-target -- each is an
     equally-efficient candidate cut site (a perfect-match off-target is the
-    highest-risk class). Reads ONLY the locus + mm+b columns so it is fast even on
-    a genome-wide result. Fully guarded: returns [] on any error (never blocks the
-    results page). Each entry is a (chrom, pos, strand) tuple.
+    highest-risk class). Reads ONLY the guide, locus + mm+b columns so it is fast
+    even on a genome-wide result. Fully guarded: returns [] on any error (never
+    blocks the results page). Each entry is a (guide, chrom, pos, strand) tuple:
+    in a search of several guides each guide has its own on-target.
     """
     try:
         import pandas as pd
@@ -132,18 +133,20 @@ def _perfect_match_sites(integrated_tsv):
                     return c
             return None
 
+        guide = _col("Spacer+PAM")
         mmb = _col("Mismatches+bulges_(highest_CFD)", "Mismatches+bulges")
         chrom = _col("Chromosome")
         pos = _col("Start_coordinate_(highest_CFD)", "Start_coordinate")
         strand = _col("Strand_(highest_CFD)", "Strand")
         if not mmb:
             return []
-        usecols = [c for c in (mmb, chrom, pos, strand) if c]
+        usecols = [c for c in (guide, mmb, chrom, pos, strand) if c]
         df = pd.read_csv(integrated_tsv, sep="\t", usecols=usecols, dtype=str)
         mask = pd.to_numeric(df[mmb], errors="coerce") == 0
         seen, out = set(), []
         for _, r in df[mask].iterrows():
             key = (
+                str(r.get(guide, "")),
                 str(r.get(chrom, "?")),
                 str(r.get(pos, "?")),
                 str(r.get(strand, "")),
@@ -154,6 +157,47 @@ def _perfect_match_sites(integrated_tsv):
         return out
     except Exception:
         return []
+
+
+def _perfect_match_alert(integrated_tsv, count_guides):
+    """The red banner of the guides with two or more perfect-match sites, or None.
+
+    The ambiguity is per guide, as in the report's banner
+    (generate_report.render_perfect_match_banner): a search of several guides with
+    one perfect match each has an on-target for each guide, not a warning.
+    """
+    sites_of = {}
+    for guide, chrom, pos, strand in _perfect_match_sites(integrated_tsv):
+        sites_of.setdefault(guide, []).append((chrom, pos, strand))
+    texts = []
+    for guide, sites in sites_of.items():
+        if len(sites) < 2:
+            continue
+        site_txt = ", ".join(f"{c}:{p}" for c, p, _s in sites[:10])
+        if len(sites) > 10:
+            site_txt += ", …"
+        who = f"Guide {guide}" if count_guides > 1 and guide else "This guide"
+        texts.append(
+            f"{who} matches {len(sites)} genomic sites with 0 mismatches and "
+            f"0 bulges ({site_txt}). "
+        )
+    if not texts:
+        return None
+    return dbc.Alert(
+        [
+            html.Strong(
+                f"⚠ Multiple perfect matches — no unambiguous "
+                f"on-target. "
+            ),
+            *texts,
+            f"Each is a candidate cut site — a perfect-match off-target cuts as "
+            f"efficiently as the intended one. All are placed at the top of the "
+            f"validation panel and flagged ",
+            html.Code("Perfect_match = Yes"),
+            " in the downloadable report.",
+        ],
+        color="danger",
+    )
 
 
 def _job_scorer_label(job_id: str) -> str:
@@ -494,29 +538,9 @@ def result_page(job_id: str) -> html.Div:
     # Multiple perfect matches (0 mm + 0 bulge) => no a-priori on-target. A
     # perfect-match OFF-target cuts as efficiently as the intended site, so warn
     # loudly and point to the report (where all are forced into the panel + flagged).
-    _perfect_sites = _perfect_match_sites(integrated_file_name)
-    if len(_perfect_sites) >= 2:
-        _site_txt = ", ".join(f"{c}:{p}" for c, p, _s in _perfect_sites[:10])
-        if len(_perfect_sites) > 10:
-            _site_txt += ", …"
-        final_list.append(
-            dbc.Alert(
-                [
-                    html.Strong(
-                        f"⚠ Multiple perfect matches — no unambiguous "
-                        f"on-target. "
-                    ),
-                    f"This guide matches {len(_perfect_sites)} genomic sites with "
-                    f"0 mismatches and 0 bulges ({_site_txt}). Each is a candidate "
-                    f"cut site — a perfect-match off-target cuts as efficiently "
-                    f"as the intended one. All are placed at the top of the "
-                    f"validation panel and flagged ",
-                    html.Code("Perfect_match = Yes"),
-                    " in the downloadable report.",
-                ],
-                color="danger",
-            )
-        )
+    _perfect_alert = _perfect_match_alert(integrated_file_name, count_guides)
+    if _perfect_alert is not None:
+        final_list.append(_perfect_alert)
     # Present the title according to which threshold control governed the search.
     # SIMPLE mode: show ONLY the single "Max edits" (mismatches + bulges) cap the user
     # set. The per-type mm/DNA/RNA caps are wide internal defaults (or the ones Load
@@ -3930,22 +3954,6 @@ def sample_page(job_id: str, hash_term: str) -> html.Div:
         0
     ]  # take the first element
     assert isinstance(integrated_fname, str)
-    file_to_grep = os.path.join(
-        current_working_directory,
-        RESULTS_DIR,
-        job_id,
-        f"{job_id}.bestMerge.txt.integrated_results.tsv",
-    )
-    sample_grep_result = os.path.join(
-        current_working_directory, RESULTS_DIR, job_id, f"{job_id}.{sample}.{guide}.txt"
-    )
-    integrated_sample_personal = os.path.join(
-        current_working_directory,
-        RESULTS_DIR,
-        job_id,
-        f"{job_id}.{sample}.{guide}.personal_targets.tsv",
-    )
-    integrated_sample_personal_zip = integrated_sample_personal.replace("tsv", "zip")
     final_list.append(
         html.Div(
             f"{job_id}.{sample}.{guide}.personal_targets",
@@ -6545,6 +6553,17 @@ def update_content_tab(
             nuclease = (next(s for s in params.split("\n") if "Nuclease" in s)).split(
                 "\t"
             )[-1]
+            # the bulges of each type the search took (DNA, RNA), and its cap on mismatches
+            # and bulges together (Max_total_edits): None for a job written before either
+            def _param_int(key):
+                try:
+                    return int(next(s.split("\t")[-1] for s in params.split("\n")
+                                    if s.startswith(key + "\t")))
+                except (StopIteration, ValueError):
+                    return None
+
+            bulge_dna, bulge_rna = _param_int("DNA"), _param_int("RNA")
+            max_total_edits = _param_int("Max_total_edits")
     except OSError as e:
         raise e
     # initialize page layout list
@@ -7289,7 +7308,18 @@ def update_content_tab(
                 )
             )
         )
-        total = int(mms) + int(max_bulges)
+        # The totals the search drew the population plots for, 0 to its mismatches + DNA +
+        # RNA bulges (submit_job_automated_new_multiple_vcfs.sh), up to its cap on them
+        # together, past which a site has none. It took mismatches + Max_bulges, an index
+        # dimension (max(DNA, RNA) + 1 from the web, max(DNA, RNA) from the CLI): a job with
+        # no bulges opened on a total with no plot, and one of 2 DNA and 2 RNA bulges could
+        # not reach its sites of 8 (WEB-4).
+        if bulge_dna is None or bulge_rna is None:
+            total = int(mms) + int(max_bulges)  # (a job written before the two)
+        else:
+            total = int(mms) + bulge_dna + bulge_rna
+        if max_total_edits is not None:
+            total = min(total, max_total_edits)
         opt_mm = [{"label": str(i), "value": str(i)} for i in range(total + 1)]
         opt_blg = [
             {"label": str(i), "value": str(i)} for i in range(int(max_bulges) + 1)

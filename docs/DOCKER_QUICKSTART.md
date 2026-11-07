@@ -59,16 +59,16 @@ Confirm how much memory Docker actually got before downloading anything:
 docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'
 ```
 
-> **Disk:** the batteries-included (variant-aware) setup is a **~45 GB download → ~98 GB
-> on disk** (measured: 97.9 GB; it peaks around 103 GB while the genotype store unpacks), so
-> keep **≈ 150 GB free** on the disk that holds your data folder. CRISPRme+ ships a
+> **Disk:** the batteries-included (variant-aware) setup is a **~70 GB download → ~150 GB
+> on disk** (measured: 150.0 GB; it peaks around 161 GB while the archives unpack), so
+> keep **≈ 200 GB free** on the disk that holds your data folder. CRISPRme+ ships a
 > **dict-less** variant index (no per-sample dictionaries). Installed, the genome is ~3 GB,
-> the reference + variant genome indexes (the indel index included) ~41 GB, the compact
+> the reference + variant genome indexes (the indel index included) ~94 GB, the compact
 > allele-frequency registry ~8.5 GB (shipped uncompressed for fast lookups), the genotype
 > store (for per-sample carrier annotation; `--no-genotypes` skips it) ~30 GB, the indel
 > genotype store ~7.7 GB and the indel logs ~6.5 GB. The
-> genotyped **HGDP + 1000 Genomes** (HGDP1kGP) index is a ~28 GB download; the sites-only **mega**
-> (five-source) index ~12 GB. A reference-only setup is far smaller (~25 GB).
+> genotyped **HGDP + 1000 Genomes** (HGDP1kGP) index is a ~43 GB download; the sites-only **mega**
+> (five-source) index ~25 GB. A reference-only setup is far smaller (~44 GB).
 
 Check Docker works, then pull the CRISPRme+ image:
 
@@ -135,20 +135,23 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 ## 4. Download a prebuilt index (one time, minutes — skips a long build)
 
 Bulge-enabled searches need a genome **index**. Building it yourself takes ~10
-minutes of CPU; instead, download the ready-made SpCas9 NRG (NGG+NAG) index.
+minutes of CPU; instead, download the ready-made SpCas9 NRR (NGG, NAG, NGA, NAA) index,
+the default PAM's since 2.9.0 (it was NRG = NGG + NAG).
 
 > **On hg38 you already have this one** — `--what all` in step 3 downloads
-> `NRG_3_hg38` for you. Change `--index-name` in the command below to add a
-> *different* index: another PAM's reference index (`NGG_3_hg38`, `NRR_3_hg38`), or a
-> PAM-less one that serves many PAMs from the command line with `--prune-pam`
-> (`NNN_3_hg38` with a 3-nt flank, `NNNNNNNN_3_hg38` with an 8-nt one). For any other
+> `NRR_3_hg38` for you. Change `--index-name` in the command below to add a
+> *different* index: another PAM's reference index (`NGG_3_hg38`, `NRG_3_hg38`), or a
+> PAM-less one that serves many PAMs (`NNN_3_hg38` with a 3-nt flank, `NNNNNNNN_3_hg38`
+> with an 8-nt one). The NRR index already serves an NGG, NAG, NRG or NGA search: a
+> search prunes an index to its PAM by itself when no installed index serves it unpruned
+> (one of that PAM, or a PAM-less one of its width), and says so (`--prune-pam`). For any other
 > PAM (e.g. a Cas12a one) or reference genome, build the index yourself (see
 > **"Installing more indexes"** at the bottom). Variant indexes are always a separate
 > download (see below).
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
+  crisprme.py download --what index --index-name NRR_3_hg38 --path /DATA
 ```
 
 For a variant-aware search (what the default web search uses), download one of the
@@ -161,16 +164,17 @@ complementary production indexes — the recommended default is the fully phased
 # joint AF throughout, including HGDP's seven genetic regions (per-sample analysis is this
 # phased index's default).
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
+  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 
 # Sites-only "mega" panel — five sources (1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + AoU),
 # per-dataset AF + cross-source AF_max. PUTATIVE haplotypes with a conservative min-AF bound.
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
+  crisprme.py download --what index --index-name NRR_3_hg38+hg38_mega --path /DATA
 ```
 
-The web interface picks these up automatically — a search that uses the default NRG PAM
-(SpCas9, recognizes NGG + NAG) with up to 2 bulges will reuse them instead of rebuilding.
+The web interface picks these up automatically — a search that uses the default NRR PAM
+(SpCas9: NGG, NAG, NGA and NAA) with up to 2 bulges will reuse them instead of rebuilding,
+and so does a search of NGG, NAG, NRG or NGA, pruned to that PAM.
 (Need a different nuclease? See **"Installing more indexes"** at the bottom.)
 
 > **Analysis mode (context-aware default) — per-sample vs population-level.** The axis is
@@ -190,7 +194,7 @@ The web interface picks these up automatically — a search that uses the defaul
 ## 5. (Optional, advanced) Add the raw source VCFs
 
 CRISPRme's superpower is finding off-targets created by genetic variants — and the
-`NRG_3_hg38+hg38_HGDP1kGP` index you downloaded in step 4 **already** makes the
+`NRR_3_hg38+hg38_HGDP1kGP` index you downloaded in step 4 **already** makes the
 default web search variant-aware. You do **not** need the raw VCFs for that.
 
 Sample-level analyses — named carriers, per-sample output, personal risk cards —
@@ -228,13 +232,13 @@ running, and open:
 ## 7. Run a search in the browser
 
 1. Enter a **guide/spacer** sequence (e.g. `CTAACAGTTGCTTTTATCAC`).
-2. Choose the **PAM** — the default **`20bp-NRG-SpCas9`** (NGG + NAG) matches the
+2. Choose the **PAM** — the default **`20bp-NRR-SpCas9`** (NGG, NAG, NGA, NAA) matches the
    shipped index and the **Load Example** button — and the **genome** (`hg38`).
 3. Leave the default **Maximum edits** slider (6) for a quick search — it caps the
    total mismatches + DNA/RNA bulges (the default resolves to 4 mismatches + 1 DNA +
    1 RNA bulge) — or open **Advanced options** to set
    mismatches / DNA bulges / RNA bulges individually (e.g. 4 / 1 / 1). The recommended
-   default variant index (**HGDP + 1000 Genomes**, `NRG_3_hg38+hg38_HGDP1kGP` — the one you
+   default variant index (**HGDP + 1000 Genomes**, `NRR_3_hg38+hg38_HGDP1kGP` — the one you
    downloaded in step 4) is pre-selected, so the search is variant-aware out of the box.
 4. Give the job a name and click **Submit**. (Optionally tick **Notify me by
    email** to be sent a results link when the job finishes — set your SMTP details
@@ -285,7 +289,7 @@ printf '%s\n' CTAACAGTTGCTTTTATCACNNN > my_guide.txt   # 20-nt spacer + NNN for 
 
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-search \
-    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
     --guide my_guide.txt \
     --vcf list_vcf.txt --samplesID list_samplesID.txt \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
@@ -344,7 +348,7 @@ complete-search, end to end:
 ```bash
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py complete-search \
-    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
     --guide my_guide.txt \
     --vcf list_vcf.txt --samplesID list_samplesID.txt \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
@@ -370,7 +374,7 @@ on CPU because of GPU initialization overhead.
 ```bash
 docker run --gpus all --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-search \
-    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
     --guide my_guide.txt \
     --vcf list_vcf.txt --samplesID list_samplesID.txt \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
@@ -390,7 +394,7 @@ interchangeable).
 
 ```bash
 # 1. pick a working folder, then build the image into it
-#    Needs room for the ~98 GB of data, the ~4-5 GB .sif and your results -- so ~150 GB
+#    Needs room for the ~150 GB of data, the ~4-5 GB .sif and your results -- so ~200 GB
 #    free. Any location works as long as it has that much space; check
 #    before you start, since home directories are often quota-limited. (On filesystems
 #    that bill allocated blocks rather than file sizes, expect the reported usage to be
@@ -409,7 +413,7 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 # Genomes), jointly SHAPEIT5-re-phased: CONFIRMED cis haplotypes with named per-sample
 # carriers + exact joint AF (per-sample analysis is this phased index's default).
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
+  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 # (The index above bundles its genotype store, so sample-level analyses / named
 #  carriers work too — no raw VCFs needed. The source VCFs are hosted too, for
 #  building an index yourself: --what vcf --dataset hg38_HGDP1kGP.)
@@ -421,7 +425,9 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 ```
 
 **Opening the interface from your own computer (SSH tunnel).** The server listens on
-port 8080 on whatever machine runs it, so from your laptop:
+port 8080 on whatever machine runs it (where another program holds 8080, as on a shared
+node, add `--port 8090`, or any free port, to `crisprme.py web-interface`, and use that
+port below), so from your laptop:
 
 ```bash
 # CRISPRme running on the login node you SSH into:
@@ -466,7 +472,7 @@ CRISPRme flags onto your `#SBATCH` directives:
 
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py complete-search \
-    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
     --guide my_guide.txt \
     --vcf list_vcf.txt --samplesID list_samplesID.txt \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
@@ -487,7 +493,7 @@ need by its **exact published name** — for example the five-source sites-only
 **mega** index (a useful complement to the default genotyped HGDP + 1000 Genomes index):
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRR_3_hg38+hg38_mega --path /DATA
 ```
 
 To see which indexes are published, browse the dataset repository
@@ -500,7 +506,7 @@ A web search builds a missing **reference** index itself, from the installed gen
 (about 20 to 35 minutes for hg38), before it searches. A **variant** index it does not
 build for bulges: the search form offers a variant panel only the bulges its installed
 index supports (0 when it has none yet, and that first 0-bulge search prepares the
-variant genome and a 0-bulge index of it from the panel's VCF files, one per chromosome,
+variant genome and the index of its indels from the panel's VCF files, one per chromosome,
 which can take hours on a full genome; a panel added as a single multi-chromosome VCF file
 is split only when its index is built, so the form has you build that one first; without
 the panel's VCF files or its enriched genome it stops and says what to do). Build
@@ -578,7 +584,7 @@ and deleting data you no longer need. See
   2. Reference-only selected — keep the pre-selected **variant** index (not **Reference
      only**) to get variant off-targets.
   3. Variant index not installed — re-run
-     `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA`
+     `crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA`
      (the recommended default panel).
   4. Confirm success: `Results/<name>/log_error_no_check.txt` is empty and
      `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its

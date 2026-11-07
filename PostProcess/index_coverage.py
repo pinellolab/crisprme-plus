@@ -58,7 +58,7 @@ def _five_prime(index_dir, five_prime_search):
         with open(os.path.join(index_dir, ".pam_build")) as fh:
             return int(fh.readline().split()[-1]) < 0
     except (OSError, ValueError, IndexError):
-        pam = os.path.basename(os.path.normpath(index_dir)).split("_")[0]
+        pam = index_fit.index_pam(os.path.normpath(index_dir))
         return five_prime_search and set(pam) != {"N"}
 
 
@@ -82,9 +82,8 @@ def problems(index_dir, genome_dir, five_prime_search=False, chroms=None):
     chromosomes ``chroms`` named ``<chromosome>.fa``) whose trees ``index_dir`` lacks: "no
     tree", or which trees. A FASTA this module cannot read as buildTST reads it, or an index
     whose guide length is not known, is left out (no answer is no refusal)."""
-    name = os.path.basename(os.path.normpath(index_dir))
-    pam, _, rest = name.partition("_")
-    n = rest.partition("_")[0]
+    parsed = index_fit.parse_index_name(os.path.normpath(index_dir))  # either form
+    pam, n = (parsed[0], str(parsed[1])) if parsed else ("", "")
     guide = index_fit.built_guide_len(index_dir)
     if not pam or not n.isdigit() or not guide:
         return []

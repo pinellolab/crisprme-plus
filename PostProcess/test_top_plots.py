@@ -151,6 +151,26 @@ class TestTopPlots(unittest.TestCase):
         self.assertNotIn(plots.PERFECT_MATCH_LABEL, seen["legend"])
         self.assertEqual(len(seen["layers"][0][0]), 5)  # the 1-edit sites stay
 
+    def test_no_star_and_no_legend_entry_where_the_score_is_not_computed(self):
+        # a non-SpCas9 run, or one without the scorer: the score columns hold -1. The stars
+        # went below the axes, and the legend named them (wsearch N3)
+        df = _sites()
+        for col in [c for c in df.columns if c.startswith(("CFD_score", "CRISPR_BULGE_score"))]:
+            df[col] = -1.0
+        for module, plot, term in (
+                (plots, plots.plot_with_CFD_score, "cfd"),
+                (plots, plots.plot_with_CRISPR_BULGE_score, "crispr_bulge"),
+                (personal, personal.plot_with_CFD_score, None),
+                (personal, personal.plot_with_CRISPR_BULGE_score, None)):
+            with self.subTest(plot=f"{module.__name__}.{plot.__name__}"):
+                table = plots.filter_table(df, term).copy() if term else df.copy()
+                seen = _drawn(plot, table, GUIDE)
+                self.assertEqual(seen["star_layers"], [])
+                self.assertNotIn(module.PERFECT_MATCH_LABEL, seen["legend"])
+        # the count of edits is there: starred, as before
+        seen = _drawn(plots.plot_with_MMvBUL, plots.filter_table(df, "mm+b").copy(), GUIDE)
+        self.assertEqual(sorted(p[1] for p in seen["star_layers"][0]), [0.0, 0.0])
+
     def test_personal_card_plots_draw_every_site(self):
         df = _sites()
         for plot in (personal.plot_with_CFD_score, personal.plot_with_CRISPR_BULGE_score,

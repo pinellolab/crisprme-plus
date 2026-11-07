@@ -48,7 +48,7 @@ crisprme.py --version
 
 *Estimated disk usage: ~410 GB total (~16 GB 1000G + ~390 GB HGDP + ~4 GB genome). Download time depends heavily on FTP server speed and your network; expect several hours.*
 
-Note that this from-scratch `crisprme.py setup` path builds the **legacy** 1000 Genomes Phase 3 (2,548) + HGDP (929) panel (~410 GB), which **differs** from the shipped re-phased HGDP1kGP (4,091-sample) default; for the default, use `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP` instead.
+Note that this from-scratch `crisprme.py setup` path builds the **legacy** 1000 Genomes Phase 3 (2,548) + HGDP (929) panel (~410 GB), which **differs** from the shipped re-phased HGDP1kGP (4,091-sample) default; for the default, use `crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP` instead.
 
 This section downloads the standard legacy bundle — hg38 genome, 1000 Genomes Phase 3 (~16 GB), and HGDP (~390 GB) — and builds all config and PAM files automatically via the built-in `setup` command. You run this once per machine, then skip straight to Section 3 for every search.
 
@@ -108,7 +108,7 @@ crisprme.py download --what all --path "$CRISPRME_DIR"
 
 # variant-aware search: fetch a prebuilt variant index (its bundled genotype store
 # also covers sample-level / named carriers — no raw VCFs needed)
-crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path "$CRISPRME_DIR"
+crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path "$CRISPRME_DIR"
 ```
 
 The default repository is `lucapinello/crisprme-data`; override it with `--hf-repo <org/name>` or the `CRISPRME_HF_REPO` environment variable. FASTA is decompressed automatically after download. The default repo hosts the reference bundle + prebuilt variant **indexes** (with their genotype stores) + the `build-inputs/` enrichment kits (`hg38_HGDP1kGP`, `hg38_mega`) + the source VCFs of its three variant panels: `download --what vcf --dataset <name>` fetches `hg38_HGDP1kGP`, `hg38_HPRC` or `hg38_mega` into `VCFs/<name>/`. For any other dataset, place its VCFs under `VCFs/<dataset>/` yourself (the `setup` path above), or point `--hf-repo` at a repo that hosts a `vcfs/<dataset>/` folder.
@@ -124,19 +124,19 @@ The default repository is `lucapinello/crisprme-data`; override it with `--hf-re
 
 ### 3a. Choose a PAM file
 
-The setup command pre-creates PAM files for 17 common nucleases in `PAMs/`. The examples in this guide use the default SpCas9 file (matching the default NRG index):
+The setup command pre-creates PAM files for 18 common nucleases in `PAMs/` (`download --what pams` fetches the hosted ones, with the default one). The examples in this guide use the default SpCas9 file (matching the default NRR index; NRR is the default PAM since 2.9.0, NRG before):
 
 ```
-PAMs/20bp-NRG-SpCas9.txt
+PAMs/20bp-NRR-SpCas9.txt
 ```
 
 Contents:
 
 ```
-NNNNNNNNNNNNNNNNNNNNNRG 3
+NNNNNNNNNNNNNNNNNNNNNRR 3
 ```
 
-The 20 leading `N`s define the spacer length; `NRG` is the PAM sequence (SpCas9 NGG+NAG); `3` is the PAM length in bp. To see all available files, run `ls PAMs/`. For a nuclease not covered, see Section 5 to create a custom PAM file.
+The 20 leading `N`s define the spacer length; `NRR` is the PAM sequence (SpCas9 NGG, NAG, NGA and NAA); `3` is the PAM length in bp. An NRR index serves an NGG, NAG, NRG or NGA search too: the search prunes it to that PAM by itself. To see all available files, run `ls PAMs/`. For a nuclease not covered, see Section 5 to create a custom PAM file.
 
 ### 3b. Write a guide file
 
@@ -163,7 +163,7 @@ OUTPUT_NAME="sg1617_search_1"
 
 crisprme.py complete-search \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NRG-SpCas9.txt \
+  --pam PAMs/20bp-NRR-SpCas9.txt \
   --guide "$GUIDE_FILE" \
   --vcf vcf.config.txt \
   --samplesID samplesIDs.config.txt \
@@ -207,7 +207,7 @@ printf '%s\n' "$GUIDE_SEQ" > "$GUIDE_FILE"
 # Rerun — no re-download, no re-index
 crisprme.py complete-search \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NRG-SpCas9.txt \
+  --pam PAMs/20bp-NRR-SpCas9.txt \
   --guide "$GUIDE_FILE" \
   --vcf vcf.config.txt \
   --samplesID samplesIDs.config.txt \
@@ -240,7 +240,7 @@ my_crisprme_run/
 ├── PAMs/
 │   ├── 20bp-NGG-SpCas9.txt
 │   ├── 20bp-NGC-SpCas9.txt
-│   └── ...                                  # 17 PAM files total (see Section 3a)
+│   └── ...                                  # 18 PAM files total (see Section 3a)
 ├── Results/
 │   ├── sg1617_search_1/
 │   └── sg_other_search_1/
@@ -266,7 +266,7 @@ my_crisprme_run/
 
 ## Section 3.5. Prebuild, reuse, and share the reference index
 
-Bulge-enabled searches need a CRISPRitz **index** of the reference genome. By default `complete-search` builds it on the first run — into `genome_library/<PAM>_<bulges+1>_<genome>` — and silently reuses it on later runs from the same working directory (that is why "Run another search" in Section 3d is fast: *no re-index*). Three commands let you control this explicitly, which matters for batch jobs, shared clusters, and skipping the build entirely.
+Bulge-enabled searches need a CRISPRitz **index** of the reference genome. By default `complete-search` builds it on the first run — into `genome_library/<guide>-<PAM>_<bulges+1>_<genome>` (`<PAM>-<guide>_…` for a 5′ PAM; e.g. `20-NRR_3_hg38`) — and silently reuses it on later runs from the same working directory (that is why "Run another search" in Section 3d is fast: *no re-index*). Three commands let you control this explicitly, which matters for batch jobs, shared clusters, and skipping the build entirely.
 
 ### Build the index once, ahead of time
 
@@ -275,7 +275,7 @@ Bulge-enabled searches need a CRISPRitz **index** of the reference genome. By de
 ```bash
 crisprme.py build-index-only \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NRG-SpCas9.txt \
+  --pam PAMs/20bp-NRR-SpCas9.txt \
   --bDNA 1 --bRNA 1 \
   --thread 16 \
   --path "$CRISPRME_DIR"
@@ -288,7 +288,7 @@ Add `--vcf <folder> --samplesID <listing>` to also pre-build the **variant-aware
 ```bash
 crisprme.py build-index-only \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NRG-SpCas9.txt \
+  --pam PAMs/20bp-NRR-SpCas9.txt \
   --bDNA 2 --bRNA 2 \
   --vcf VCFs/hg38_HGDP1kGP \
   --samplesID samplesIDs.config.txt \
@@ -312,10 +312,10 @@ Publish a locally built index so other machines (or collaborators) can skip the 
 
 ```bash
 # upload — needs an HF write token: export HF_TOKEN=...  (never commit it)
-crisprme.py publish-index --index genome_library/NRG_3_hg38
+crisprme.py publish-index --index genome_library/20-NRR_3_hg38
 
 # elsewhere: download it straight into genome_library/
-crisprme.py download --what index --index-name NRG_3_hg38 --path "$CRISPRME_DIR"
+crisprme.py download --what index --index-name 20-NRR_3_hg38 --path "$CRISPRME_DIR"
 ```
 
 Then run the search with `--index-path "$CRISPRME_DIR/genome_library"` (or simply from `$CRISPRME_DIR`) and it reuses the downloaded index. The index folder name encodes the PAM, bulge count and genome, so an index is only valid for a matching `--genome`/`--pam`/`--bDNA`/`--bRNA`.
@@ -383,7 +383,7 @@ The value in `samplesIDs.config` must exactly match the filename under `samplesI
 ```bash
 crisprme.py complete-search \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NRG-SpCas9.txt \
+  --pam PAMs/20bp-NRR-SpCas9.txt \
   --guide sg1617_guide.txt \
   --vcf vcf.config.MyCohort.txt \
   --samplesID samplesIDs.config.MyCohort.txt \
@@ -484,7 +484,7 @@ OUTPUT_NAME="sg1617_1KG2021_search_1"
 
 crisprme.py complete-search \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NRG-SpCas9.txt \
+  --pam PAMs/20bp-NRR-SpCas9.txt \
   --guide "$GUIDE_FILE" \
   --vcf vcf.config.1KG2021.txt \
   --samplesID samplesIDs.config.1KG2021.txt \
@@ -527,7 +527,7 @@ printf 'NNNNNNNNNNNNNNNNNNNNNGG 3\n' > PAMs/20bp-NGG-SpCas9.txt
 
 The 20 leading `N`s define the spacer length; `NGG` is the PAM; `3` is the PAM length in bp. For 5' PAM nucleases (e.g. Cas12a), the PAM bases come first and the position index is negative (e.g. `TTTV` + 20 `N`s with index `-4`). See `docs/INPUT_FORMATS.md` for the full PAM-file specification, including the filename convention (`<length>-<motif>-<Cas>.txt`) and the one-motif-per-file rule.
 
-> **Note (historical — bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`, and the default `NRG`) combined with bulges could trigger a crash (heap corruption, issue #105) in *older* CRISPRitz engines. The fix ships in the CRISPRitz engine CRISPRme+ pins (v2.10.0) on every install surface (Docker, source build, Bioconda `crispritz >=2.10.0,<2.11.0`), so the crash **cannot occur** on a supported CRISPRme+ install and no runtime warning is emitted. If you deliberately run CRISPRme against an older, unpinned CRISPRitz and hit this, either add one base to make the motif even-length or reduce bulges to 0.
+> **Note (historical — bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`, and the default `NRR`, as `NRG` before) combined with bulges could trigger a crash (heap corruption, issue #105) in *older* CRISPRitz engines. The fix ships in the CRISPRitz engine CRISPRme+ pins (v2.10.0) on every install surface (Docker, source build, Bioconda `crispritz >=2.10.0,<2.11.0`), so the crash **cannot occur** on a supported CRISPRme+ install and no runtime warning is emitted. If you deliberately run CRISPRme against an older, unpinned CRISPRitz and hit this, either add one base to make the motif even-length or reduce bulges to 0.
 
 If a **reference** index for a new PAM does not yet exist, the command-line search builds it on demand from the shipped genome. A **variant-aware** search (with `--vcf`) needs the dataset's dictionaries first: download a prebuilt index, or build it once with `crisprme.py build-index-only` (see Section 3.5); otherwise it stops with guidance to do so. With those in place, an index for another PAM or bulge budget that is not installed is built by the search from the dataset's VCFs (or its enriched genome, from the build-inputs kit); with neither here, the search stops and names the variant indexes installed. (The **web interface** offers a variant panel only the bulges its installed variant index supports: with none, only a 0-bulge search, whose first run prepares a 0-bulge index from the panel's VCF files, one per chromosome. Build the index first, in Settings under "Build an index locally", to search the panel with bulges, or at all for a panel added as a single multi-chromosome VCF file, which only that build splits per chromosome.)
 
@@ -539,7 +539,7 @@ Build the variant-aware index for your new PAM **once** (a variant index is neve
 
 ```bash
 # EDIT THESE
-PAM_FILE="PAMs/20bp-NRG-SpCas9.txt"   # replace with your new PAM file
+PAM_FILE="PAMs/20bp-NRR-SpCas9.txt"   # replace with your new PAM file
 GUIDE_FILE="my_guide.txt"
 OUTPUT_NAME="my_search_1"
 
@@ -589,11 +589,11 @@ CRISPRme writes to four directories during a search. Subfolders are created auto
 
 | Subfolder | Written when | Depends on |
 |---|---|---|
-| `{pam}_{bulge}_{ref}/` | First search with this PAM + bulge + ref | `--pam`, `--bDNA`/`--bRNA`, `--genome` |
-| `{pam}_{bulge}_{ref}+{vcf}/` | First search with this PAM + bulge + ref + VCF | `--pam`, `--bDNA`/`--bRNA`, `--genome`, `--vcf` |
-| `{pam}_{bulge}_{ref}+{vcf}_INDELS/` | First search with this PAM + bulge + ref + VCF | `--pam`, `--bDNA`/`--bRNA`, `--genome`, `--vcf` |
+| `{guide}-{pam}_{bulge}_{ref}/` | First search with this PAM + bulge + ref | `--pam`, `--bDNA`/`--bRNA`, `--genome` |
+| `{guide}-{pam}_{bulge}_{ref}+{vcf}/` | First search with this PAM + bulge + ref + VCF | `--pam`, `--bDNA`/`--bRNA`, `--genome`, `--vcf` |
+| `{guide}-{pam}_{bulge}_{ref}+{vcf}_INDELS/` | First search with this PAM + bulge + ref + VCF | `--pam`, `--bDNA`/`--bRNA`, `--genome`, `--vcf` |
 
-Where `{pam}` is the PAM sequence extracted from the PAM file (e.g. `NGG` for SpCas9), and `{bulge}` = `max(--bDNA, --bRNA) + 1` (e.g. `--bDNA 1 --bRNA 1` → `2`). The reference-only index (`{pam}_{bulge}_{ref}/`) is shared across all VCF datasets. `--mm` does not affect any folder name and never triggers reindexing.
+Where `{pam}` is the PAM sequence extracted from the PAM file (e.g. `NGG` for SpCas9), `{guide}` the guide length it is built for (the PAM file's `N`s: `20`), before the PAM for a PAM on the 3′ side of the guide and after it for one on the 5′ side (`TTTV-23_…` for Cas12a), and `{bulge}` = `max(--bDNA, --bRNA) + 1` (e.g. `--bDNA 1 --bRNA 1` → `2`). An index of the older name `{pam}_{bulge}_{ref}` (a download, or one an earlier release built) is used as it is. The reference-only index (`{guide}-{pam}_{bulge}_{ref}/`) is shared across all VCF datasets. `--mm` does not affect any folder name and never triggers reindexing.
 
 **`Dictionaries/`**
 
@@ -679,6 +679,7 @@ Writes PAM definition files for all supported nucleases to `PAMs/`. Each file is
 - `20bp-NGC-SpCas9.txt`
 - `20bp-NGK-SpCas9.txt`
 - `20bp-NRG-SpCas9.txt`
+- `20bp-NRR-SpCas9.txt` (the default since 2.9.0)
 - `20bp-NRCH-SpCas9.txt`
 - `20bp-NNGT-SpCas9.txt`
 - `20bp-NAA-iSpyMacCas9.txt`

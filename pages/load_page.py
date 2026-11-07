@@ -39,7 +39,15 @@ _NO_INDEX_REFUSALS = (
     "no variant index here serves this search",  # nor VCFs or an enriched genome to build one
     " lacks trees of FASTAs that hold sites of its PAM: ",  # an index missing a chromosome
     " was built by a newer CRISPRitz (",  # an index in a format this release does not read
+    # (pool_search_indels.py: the INDELS sub-index of a chromosome with indels, empty or not
+    # there, which an earlier release or a copy left: emptyidx F7)
+    " holds no .bin and no record that its build found no target there ",
+    ": the INDELS index is incomplete, and a search with bulges cannot do without it. ",
 )
+
+# What the search script's ERROR says of a genome folder it cannot search as it is, after
+# the ERROR lines of genome_layout.py, which say why and what to run.
+_LAYOUT_REFUSAL = " is not as a search needs it (see above)"
 
 
 def _failure_text(job_directory: str) -> str:
@@ -47,17 +55,27 @@ def _failure_text(job_directory: str) -> str:
     refused because build-index-only has not finished a part of its dataset (its
     "... is unfinished: ..." ERROR), or because no index here can serve it
     (_NO_INDEX_REFUSALS), says so, and what to do: submitted again, it fails the same
-    way until then. Any other failure gets the general text."""
+    way until then; one of a genome folder it cannot search as it is says what
+    genome_layout.py says of it. Any other failure gets the general text, which said
+    to submit again in each of those too."""
     try:
         with open(os.path.join(job_directory, "log_error.txt"), errors="replace") as fh:
-            for line in fh:
-                if line.startswith("ERROR: ") and (
-                        (" is unfinished: " in line
-                         and "build-index-only again to its end" in line)
-                        or any(said in line for said in _NO_INDEX_REFUSALS)):
-                    return f"The search was not run: {line[len('ERROR: '):].strip()}."
+            lines = fh.read().splitlines()
     except OSError:
-        pass
+        lines = []
+    for at, line in enumerate(lines):
+        if line.startswith("ERROR: ") and (
+                (" is unfinished: " in line
+                 and "build-index-only again to its end" in line)
+                or any(said in line for said in _NO_INDEX_REFUSALS)):
+            return f"The search was not run: {line[len('ERROR: '):].strip()}."
+        if line.startswith("ERROR: ") and _LAYOUT_REFUSAL in line:
+            # (the check runs first: what is before is its own, a fix command on a line of
+            # its own after its ERROR)
+            why = [said.strip()[len("ERROR: "):] if said.startswith("ERROR: ") else said.strip()
+                   for said in lines[:at] if said.strip()]
+            if why:
+                return f"The search was not run: {' '.join(why)}"
     return str(
         "The selected result encountered some errors, "
         "please remove it and try to submit again."

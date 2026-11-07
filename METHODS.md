@@ -52,7 +52,8 @@ index, lossless for detection) otherwise (sites-only/unphased/hybrid/reference-o
 Force the fast population-level mode with **`--population-level`**; force resolution
 with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-only
 index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
-catalog name `NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
+catalog name `NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.9.0; NRG
+before): 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
 jointly SHAPEIT5 re-phased — or `HPRC`. See
 [§5, Search-space control for high-variant-density regions](#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis).
 
@@ -221,7 +222,9 @@ The merge above is the **genotyped, cis-capable** mode (`merge_vcf_panels.sh` /
 feeds the genotype-counting Tier-0 registry. It is correct only when *every* merged
 source is genotyped, and it is what enables indel+SNP cis reconstruction.
 
-The **default** shipped index, **`NRG_3_hg38+hg38_HGDP1kGP`**, is built in this genotyped mode
+The **default** shipped index, **`NRR_3_hg38+hg38_HGDP1kGP`** (the SpCas9 NRR PAM's, the
+default since 2.9.0; the NRG and NGG indexes of the panel are built from the same data), is
+built in this genotyped mode
 from the gnomAD **v3.1.2 HGDP+1kGP** jointly-called callset (GRCh38; 4,091 samples = 925 HGDP +
 3,166 1000 Genomes), which CRISPRme+ **re-phases with SHAPEIT5** (`phase_common` scaffold +
 `phase_rare`). Re-phasing deliberately **keeps singletons** — the public `phased_haplotypes_v2`
@@ -573,12 +576,13 @@ haplotype** (`indel_snp_cis.resolve_target`):
 
 The co-occurrence companion `indel_snp_cooc.tsv` lists the SNP alts the indel
 post-analysis's rows **require** — the guide's own base at a spacer column, or a base that
-creates the PAM where the reference does not — with those rows' carriers: CONFIRMED when
-every carrier was resolved exactly, PUTATIVE otherwise. It is written before the merge
-picks each cluster's alignments, one line per engine alignment, required SNP set and phase
-(an alignment that needs no SNP writes no line), so a line can name an alignment the merge
-did not keep: a population-level run, which writes no alternative alignments, can have
-lines with no row in its tables. The resolution does not depend on the analysis mode (§5).
+creates the PAM where the reference does not — with those rows' carriers (a line counts them
+all and lists the first 50 by name): CONFIRMED when every carrier was resolved exactly,
+PUTATIVE otherwise. It is written before the merge picks each cluster's alignments, one line
+per engine alignment, required SNP set and phase (an alignment that needs no SNP writes no
+line), so a line can name an alignment the merge did not keep: a population-level run,
+which writes no alternative alignments, can have lines with no row in its tables. The
+resolution does not depend on the analysis mode (§5).
 A target with no code (every target of a classic, non-overlaid
 fake-indel genome) that holds the indel needs no resolution: its sequence is the one the
 engine found. An indel row's carriers belong to its sequence: two alignments of one site can
@@ -1274,10 +1278,10 @@ results. With the env or its weights missing or broken, `complete-search` stops
 before the search, naming the fix, unless `CRISPRME_SKIP_SCORER_ENV=1` is set, which
 runs it **CFD-only**; `targets-scoring` and searches started from the web interface do
 not check first, and complete **CFD-only**. A CFD-only run has the CRISPR-Bulge score at
-`-1` and a banner saying so in its log. The released **amd64** Docker image bundles the CUDA
-TensorFlow build, so `docker run --gpus all ... --compute-backend cuda` runs
-CRISPR-Bulge on an NVIDIA GPU with transparent CPU fallback; the **arm64** image
-stays CPU.
+`-1` and says so, a search in its `log_verbose.txt` and `targets-scoring` on stdout. The
+released **amd64** Docker image bundles the CUDA TensorFlow build, so
+`docker run --gpus all ... --compute-backend cuda` runs CRISPR-Bulge on an NVIDIA GPU with
+transparent CPU fallback; the **arm64** image stays CPU.
 
 The scorer environment is **architecture-aware** and yields **numerically
 identical** CRISPR-Bulge scores across CPU architectures: it installs the same
@@ -1326,8 +1330,8 @@ only the *SNP* worst-possible representative emission in `integrated_results.tsv
 the SNP+indel co-occurrence companion (`indel_snp_cooc.tsv`) is produced by the indel
 post-analysis' cis phasing pass over the genotype tiers, which the mode does not touch. Measured
 on the complete genome-wide matrix (2021 panel, same guide, default vs `--per-sample`): the two
-`indel_snp_cooc.tsv` files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full
-per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
+`indel_snp_cooc.tsv` files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, the
+same per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
 carries the indel and SNP together — is preserved identically in both analysis modes. Measured
 again with 2.8.1, whose companion holds only the SNPs the indel post-analysis's rows require, on
 the HGDP + 1000 Genomes index: the two modes give the same lines for each of two guides (339 and
@@ -1495,8 +1499,10 @@ assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 
 A CRISPRitz index is built for one PAM. The PAM is matched against the genome at build
 time, only the surviving sites enter the ternary search tree, and the PAM region itself is
-stored as a flank beside each guide. One index therefore answers one PAM: searching NGG
-and NRG over the same genome means building and storing two indexes.
+stored as a flank beside each guide. An index therefore answers its own PAM and, pruned
+(below), a PAM its own holds, and no other: an NRG index serves an NGG search, but an NGG
+index cannot serve an NRG one, so searching NRG and NGA over the same genome means building
+and storing two dedicated indexes, or one NRR index, or a PAM-less one.
 
 A **PAM-less** index is built with an all-`N` PAM (`PAMs/20bp-NNN-NO-PAM.txt`), which
 constrains nothing, so every guide-length window enters the tree and the stored flank is
@@ -1518,8 +1524,9 @@ index of format 1 without one is used
 as before. A PAM-less index without one is taken for a 3′ build at the published widths, 3 and 8
 (the K = 8 archive has no `.pam_build`), or under the search PAM's own name, and at no other
 width: a search before 2.8.1 built one of any width from a 5′ PAM file and recorded nothing. A
-search builds its index under a name an index for the other side may already have, and stops
-rather than search that one; `build-index-only` does not record a PAM file over an index
+search, and `build-index-only`, build an index under a name that says its side (since 2.9.0;
+**Index names** below), so an index of the older name for the other side is left beside it, and
+never searched for this side; `build-index-only` does not record a PAM file over an index
 recorded for the other side, nor a 3′ one over an unrecorded PAM-less index of another width.
 The search PAM is
 widened to *K* with `N`s on the distal side (the end for a 3′ PAM, the front for a 5′ PAM),
@@ -1528,6 +1535,48 @@ IUPAC codes share no nucleotide. Pad positions are not tested at all: they state
 requirement, and a stored genomic `N` intersects nothing, so testing one would reject a
 target that a dedicated index of the real width keeps. At *L = K*, on the same side, the
 pad is empty and the geometry is exactly a dedicated index's.
+
+**A dedicated index of a broader PAM.** A dedicated index stores, as its flank, the concrete
+bases of every site of its own PAM, so it holds every site of a PAM its own holds at each
+position: an NRR index those of NGG, NAG, NGA, NAA and NRG; an NRG index those of NGG and
+NAG. `--prune-pam` narrows it to the search PAM the same way (the two are as long, so there is
+no pad), and since 2.9.0 CRISPRme takes such an index for a search, under `--prune-pam`, as
+it takes a PAM-less one: the search PAM's own index first, then a dedicated one of a PAM that
+holds it (of two, the narrower PAM, NRG before NRR for NGG), then a PAM-less one. Of the
+PAM-less ones, the narrowest flank, as before. The side rule above applies to it as to a
+PAM-less index: a record, or else a 3′ build at the published widths.
+
+**Index names.** An index was named `<PAM>_<N>_<genome>[+<dataset>]`, which says neither the
+guide length it was built for nor the side of its PAM, so a 3′ and a 5′ build of one motif, or
+builds for two guide lengths, took one name, and the second stopped on the first. Since 2.9.0
+an index is built under a name that carries both, in the order of the target on the strand:
+`<guide>-<PAM>_<N>_…` for a 3′ PAM (`20-NRR_3_hg38`), `<PAM>-<guide>_<N>_…` for a 5′ one
+(`TTTV-23_3_hg38`), its INDELS index `<name>_INDELS`. `build-index-only` and a search name what
+they build so (the engine writes the older name, in a build folder, and the index is renamed
+into place). The name records the side as a `.pam_build` does, ahead of one, so such an index
+needs none: CRISPRme takes it only for a search of the side its name says, at any flank width
+the rules above allow on that side. It reads the guide length from the trees as before, and of
+one index under both names takes the newer. An index under the older name is read as before:
+`build-index-only` keeps one in place that records this side and this guide length (or no side,
+by the rules above), and builds beside one that records another, whose refusal of 2.8.1 said
+to build in another working directory; one whose side its record leaves open (an all-`N` one
+of a width but 3 and 8, for a 3′ PAM file) is refused, with the name of each side that
+records it.
+
+**Pruning by itself.** Since 2.9.0 a search prunes, as if `--prune-pam` was given, whenever
+no installed index serves it unpruned and one of these does: a wider all-`N` one, or a
+dedicated one of a PAM that holds the search's. It says so first, naming the index that needs
+it ("no installed reference index of hg38 serves PAM NGG unpruned, and NRR_3_hg38 serves it
+pruned to it at leaf time: searching with --prune-pam, as if it was given"): a search from the
+command line on its console, one from the web, which has none, in its `log_verbose.txt`. The
+run's record of the indexes it searched (`.indexes_searched.txt` in the result folder, beside
+the parameters: `Reference_index`, `Variant_index:<dataset>`, `Prune_pam auto`;
+`indexes_searched.txt` in the report's zip) and the report's summary say which index served
+it. Before, the search stopped for want of a variant index (and said to pass the flag), or
+built a reference index of its PAM from the genome: hours on hg38. Where an index serves the
+search unpruned (the PAM's own, or an all-`N` one of its width), the search runs as before,
+unpruned; pass `--prune-pam` to prune it anyway. A search with no bulges opens no reference
+index, so it neither prunes nor builds one (below).
 
 **Equivalence.** Pruning changes only which leaves are written out, never how a guide is
 aligned to the genome, so it cannot move an alignment or a score. Measured genome-wide
@@ -1552,8 +1601,9 @@ is indexed in the window at the contig's first base, which CRISPRitz 2.9.1's sea
 window of the + strand, as it read that of a − strand PAM at a contig's first base (below): it
 reported that PAM on the + strand at another coordinate. CRISPRitz 2.10.0's search reads it
 right, in an index of either format. A search that reads a flank of format 1 wider than its PAM
-says so on stdout and in the run's `Params.txt`; under CRISPRitz 2.9.1 it also says that PAM is
-reported on the + strand. N runs inside a contig are not affected by the width. An index of
+says so: from the command line on stdout and in the run's `Params.txt`, from the web in its
+`log_verbose.txt`; under CRISPRitz 2.9.1 it also says that PAM is reported on the + strand. N
+runs inside a contig are not affected by the width. An index of
 format 2 stores a PAM-less window whose flank runs off the contig, its
 bases off the contig as `N`, which matches no PAM base: with `--prune-pam` it returns the rows of
 a dedicated index of format 2 **built for the same guide length and budget**, for any 3′ PAM of
@@ -1580,9 +1630,9 @@ flank holds an `N`, and searched with `--prune-pam` for a PAM narrower than its 
 the sites whose flank holds an `N` past the PAM (3 of 36 rows on a synthetic genome, 2.6 % of
 the indel rows on chr22). Its `.pam_build` has the same format, but its trees tell: one built
 since stores an `N` (a 0 nibble) in the flank of a target beside one, and no earlier build does.
-A search that reads such an index wider than its PAM warns on stdout (it reads the smallest
-tree of a contig whose sequence holds an `N`, and of the INDELS index one of several indel
-windows), and goes on.
+A search that reads such an index wider than its PAM warns of it beside its note of the flank
+(it reads the smallest tree of a contig whose sequence holds an `N`, and of the INDELS index
+one of several indel windows), and goes on.
 
 **Contig ends and N runs.** CRISPRitz writes an index in one of two formats (its
 `docs/INDEX_FORMAT.md`). Up to 2.9.1 it writes **format 1**, which every index published until
@@ -1592,7 +1642,9 @@ side, the guide length and the budget. The limits of this paragraph are those of
 every index, dedicated or PAM-less, at any width. An index of format 1 of budget *N* holds a window of the guide, the PAM and *N* more bases, and the
 build drops a window that holds an `N` or runs past the contig's start, so it cannot report a
 site whose guide lies within *N − 1* bases of a contig start, a contig end or an `N` run, even a
-perfect match; a search without bulges, which scans the FASTA, reports it. A variant search
+perfect match; a search without bulges, which scans the FASTA, reports it (and, since 2.9.0,
+neither looks for nor builds a reference index, nor a variant index where the whole enriched
+genome is there to scan: it built `<PAM>_1_<genome>`, which nothing read). A variant search
 without bulges on an install without its whole enriched genome (a download) searches the variant
 index instead, so its SNP variant rows have this limit too: of such a site it reports the
 reference version, from the scan of the reference FASTA, when that is within the search's
@@ -1631,10 +1683,11 @@ Genomes variant index 110 GB against 28 GB (download sizes, GB = 10⁹ bytes). P
 happens at leaf time, so a PAM-less search is not faster than a dedicated one — the gain
 is that one index answers many PAMs.
 
-**Guide length.** An index name carries no guide length; each tree records the one it was
-built for, as the second int32 of its `.bin` in format 1 (written by `buildTST` since 2019,
-whoever built the index), and in its header in format 2. The engine reads that length only to
-offset coordinates and searches any guide it
+**Guide length.** An index name of the older form carries no guide length (one of the 2.9.0
+form says it, **Index names** above); each tree records the one it was built for, as the second
+int32 of its `.bin` in format 1 (written by `buildTST` since 2019, whoever built the index),
+and in its header in format 2, which is what CRISPRme reads. The engine reads that length only
+to offset coordinates and searches any guide it
 is given, so past what the tree stores it gives wrong alignments or loses targets, with exit 0.
 A search therefore takes an index only where
 
@@ -1649,10 +1702,12 @@ variant searches (SNP and indel rows, with no bulges too, through the index) and
 fall on the same side of the rule. So a published 20-nt N = 3 index serves a 21-nt guide at up
 to 1 bulge of each type, a 22-nt guide with one bulge of one type, a 23-nt guide with no bulge
 through the index, and no longer guide. An index built for this very guide is preferred to one
-that merely fits. With none that fits, a search builds its own under the name
-`<PAM>_<N>_<genome>`, or stops with an ERROR that names both lengths when an index of that
-name, built for another guide, is in the way; `build-index-only` does the same and leaves that
-index and its `.pam_build` as they are.
+that merely fits. With none that fits, a search builds its own under a name that says its guide
+length (`<guide>-<PAM>_<N>_<genome>`, **Index names** above), beside an index of the older name
+`<PAM>_<N>_<genome>` built for another guide, which it stopped on before 2.9.0, as
+`build-index-only` did; both leave that index and its `.pam_build` as they are. One of the new
+name whose trees were built for another guide than its name says stops either, with an ERROR
+that names both lengths and the name that records what it is.
 A longer build serves a shorter guide, but, like any deeper index of format 1, it does not hold a
 site next to an N run or a contig end that a shallower one does. The rule was measured on
 indexes of format 1; on one of format 2 the rows inside it are a dedicated index's away from
@@ -1663,13 +1718,15 @@ section 5.1, measures both). So every equivalence above holds between indexes bu
 guide length; for the rows of a guide length, search an index built for it, which the search
 prefers.
 
-**Limits.** `--prune-pam` requires `--index-path` and is command-line only: the web
-interface never passes the flag. (Its PAM picker prefers a PAM whose geometry matches the
-installed index, but falls back to offering every PAM when none matches, so it does not
-itself prevent an unusable pairing: the search does not take an all-`N` index of another
-width without the flag, or one built for the other side, and when no index serves it and
-neither the dataset's VCFs nor its enriched genome are there to build one, it stops with an
-ERROR that names what was asked, the variant indexes installed and what to do.) A shorter PAM
+**Limits.** The web interface never passes `--prune-pam` itself; its searches prune by
+themselves as above. (Before 2.9.0 the flag also required `--index-path`.) (Its PAM list
+prefers a PAM whose geometry matches the installed index, but falls back to offering every PAM
+when none matches, so it does not itself prevent an unusable pairing; the PAM picker of a
+PAM-less index offers only the PAMs that index serves. The search takes a wider all-`N` index
+for a 3′ PAM only pruned, which it then does by itself, and never one built for the other side,
+and when no index serves it and neither the dataset's VCFs nor its enriched genome are there to
+build one, it stops with an ERROR that names what was asked, the variant indexes installed and
+what to do.) A shorter PAM
 off a wider flank is supported for a 3′ PAM only; for a 5′ PAM the engine requires the flank width to equal the
 PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its
 `.pam_build` records (above). The published

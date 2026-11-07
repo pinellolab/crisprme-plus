@@ -44,8 +44,10 @@ except ImportError as e:
 # define website address -> DEPRECATED <-
 WEBADDRESS = "http://crisprme.di.univr.it"
 
-# define server IP address (local deployment)
-IPADDRESS = "127.0.0.1:8080"
+# define server IP address (local deployment): port 8080, or the one `crisprme.py
+# web-interface --port` gives the server it starts (C19)
+PORTLOCAL = os.environ.get("CRISPRME_PORT") or "8080"
+IPADDRESS = f"127.0.0.1:{PORTLOCAL}"
 
 # define server URL
 URL = ""

@@ -64,8 +64,8 @@ version is here.
 ### 2a. Get the data (one time)
 
 Make a folder for your data and results, then fast-download the reference data and
-a prebuilt SpCas9 NRG (NGG+NAG) index from the CRISPRme mirror (minutes, not the multi-hour
-legacy setup):
+a prebuilt SpCas9 NRR (NGG, NAG, NGA, NAA; the default PAM since 2.9.0) index from the
+CRISPRme mirror (minutes, not the multi-hour legacy setup):
 
 ```bash
 mkdir -p ~/crisprme && cd ~/crisprme
@@ -74,18 +74,18 @@ mkdir -p ~/crisprme && cd ~/crisprme
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
   crisprme.py download --what all --path /DATA
 
-# a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
+# a ready-made SpCas9 NRR reference index (skips a long index build)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
-  crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
+  crisprme.py download --what index --index-name NRR_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (HGDP + 1000 Genomes, 4,091 samples, re-phased)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
+  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 ```
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
-pre-downloaded `NRG_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
+pre-downloaded `NRR_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
 4,091 samples — the recommended default) already makes the default web
 search variant-aware. Sample-level analyses / named carriers / personal risk cards
 come from the **genotype store bundled with that index** (fetched by `download --what
@@ -280,7 +280,7 @@ columns, such as the hosted `hg38_mega` VCFs) is listed too, but **Submit** refu
 search of it, built here or not, and the note under the bulge options says why: a search
 reports its variants only through a per-dataset allele-frequency registry, which a build
 here does not make. To search the mega variants, download the published
-`NRG_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
+`NRR_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
 dataset whose sample list is missing too, and the note says so, with how to get one:
 removing a VCF dataset in Settings takes the list it wrote for it and leaves the variant
 index built from it, and the dataset stays listed here only if its name begins with the
@@ -316,8 +316,10 @@ Bulge searches need a genome index. If no installed **reference** index supports
 bulges you ask for, the search first builds one from the installed genome (once: about
 20 to 35 minutes for hg38), and later searches reuse it. A **variant** panel offers only
 the bulges its installed variant index supports: with no variant index yet, only a
-0-bulge search, and the first one prepares the variant genome and a 0-bulge index of it
-(this can take hours on a full genome), if the panel's VCF files, one per chromosome, or its
+0-bulge search, and the first one prepares the variant genome and the index of its indels
+(this can take hours on a full genome; a search with no bulges scans the variant genome
+itself, and since 2.9.0 builds no index of it, nor of the reference genome), if the panel's
+VCF files, one per chromosome, or its
 enriched genome are installed; without them the search stops and says what to do. A panel
 added as a single multi-chromosome VCF file is split per chromosome only when its index is
 built, so build that one first: until then **Submit** refuses its search. To search a panel with bulges, build its index
@@ -437,7 +439,8 @@ making it easier to locate a specific search in the Results listing.
 Once all required fields in Steps 1 and 2 are complete, click the **Submit** button
 at the bottom of the form. The interface validates the inputs and highlights any
 missing required fields in red. A genome or PAM selected that is not installed (a fresh
-data folder has none, though **Load Example** selects `hg38` and `20bp-NRG-SpCas9`), or a
+data folder has none, though **Load Example** then selects `hg38` and `20bp-NRR-SpCas9`; with
+them installed it selects those, or the genome and SpCas9 PAM that are), or a
 variant dataset that is not installed for the genome, is listed too, with where to add one
 in **Settings**. If validation passes, the job is
 queued and the interface navigates automatically to the Job Status page.
@@ -813,7 +816,9 @@ A quick reference for the terms and columns in the **Custom Ranking** tab and th
   **NA** on the sites-only *mega* index.
 
 **Key columns**
-- **REF/ALT_origin** — REF = present on the reference genome; ALT = created by a variant allele.
+- **REF/ALT_origin** — REF = the alignment reported is the reference genome's; ALT = it is a
+  variant one: a variant either creates the site (`Not_found_in_REF` `y`) or changes a
+  reference site, for example to fewer mismatches.
 - **Variant** — the variant(s) as `chrom;pos;ref;alt`.
 - **Observed (≥1 carrier)** — the haplotype is seen in ≥1 genotyped sample (vs a worst-case
   reconstruction).
@@ -877,7 +882,7 @@ variants.
 2. **Reference-only selected** — keep the pre-selected **variant** index (not **Reference
    only**) to get variant off-targets.
 3. **Variant index not installed** — re-run
-   `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA`
+   `crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA`
    (the recommended default panel).
 4. **Confirm success** — `Results/<name>/log_error_no_check.txt` is empty and
    `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its

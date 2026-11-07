@@ -4,6 +4,8 @@
 Run: python PostProcess/test_indel_snp_cis.py   (or via pytest)
 """
 
+import unittest
+
 import indel_snp_cis as isc
 
 
@@ -198,6 +200,14 @@ def test_offset_to_real_rna_bulge_column_is_none():
 def test_complement():
     assert isc.complement("A") == "T" and isc.complement("g") == "c"
     assert isc.complement("M") == "M"  # IUPAC/other unchanged
+
+
+def load_tests(loader, tests, pattern):
+    """Under ``python -m unittest`` too, each test_ function above, which it found none of,
+    and said OK (suite P4)."""
+    return unittest.TestSuite(unittest.FunctionTestCase(fn) for name, fn in
+                              sorted(globals().items()) if name.startswith("test_")
+                              and callable(fn))
 
 
 if __name__ == "__main__":

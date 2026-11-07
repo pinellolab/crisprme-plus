@@ -160,7 +160,8 @@ pam_char = pam_file.readline()
 (`crisprme.py`, in the `complete_search` PAM setup — a single `readline`.) So `complete-search`
 refuses a PAM file holding a second non-empty line, rather than search line 1 alone, in one line
 before it does anything (`Error: Only one PAM motif per file is supported; ...`, exit 1). It
-refuses one whose first line is not `<motif> <length>` the same way, with its own message
+refuses one whose first line is not `<motif> <length>`, the two fields one space apart (a blank
+first line, the length alone, or a third field), the same way, with its own message
 (`Error: The PAM file '...' must hold the motif and the PAM's length on its first line, ...`,
 exit 1).
 

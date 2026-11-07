@@ -13,6 +13,8 @@ remove_contiguous_samples.py and annotate_final_results.py.
 Run: python PostProcess/test_determinism.py   (or via unittest/pytest)
 """
 
+import unittest
+
 import merge_contiguous_targets as mct
 
 
@@ -35,6 +37,14 @@ def test_output_order_invariant_to_input_permutation():
     }
     assert outs == {"HG1,HG2,HG3"}, outs      # one deterministic result for all
 
+
+
+def load_tests(loader, tests, pattern):
+    """Under ``python -m unittest`` too, each test_ function above, which it found none of,
+    and said OK (suite P4)."""
+    return unittest.TestSuite(unittest.FunctionTestCase(fn) for name, fn in
+                              sorted(globals().items()) if name.startswith("test_")
+                              and callable(fn))
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
