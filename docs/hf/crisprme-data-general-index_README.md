@@ -101,9 +101,10 @@ A PAM-less index of flank *K* searched with `--prune-pam` and a 3′ PAM of leng
 *L ≤ K* produces the **same report as a dedicated index built for that PAM**, but for
 what a flank wider than the PAM cannot index at a contig's very end and start: a + strand
 PAM with 1 to *K − L* nt after it to the end, and a − strand PAM in the first *K − L* nt,
-are not indexed, and one exactly *K − L* nt from the start is reported on the + strand at
-another position. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites, none
-on a primary chromosome; CRISPRme+ says so when a search reads such a flank.
+are not indexed. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites, none
+on a primary chromosome; CRISPRme+ says so when a search reads such a flank. CRISPRitz
+2.9.1 (CRISPRme+ 2.8.1) also reports one exactly *K − L* nt from the start on the + strand
+at another position; CRISPRitz 2.10.0 (CRISPRme+ 2.9.0) reads it right.
 Measured genome-wide for guide `ACTGAAATCTGTAAGCAGGC` at `NRG` 4 mismatches + 1 DNA
 bulge + 1 RNA bulge over HGDP + 1000 Genomes with per-sample resolution: the flank-8 arm, the flank-3 arm and the
 dedicated `NRG_3` arm give **byte-identical** `integrated_results.tsv`

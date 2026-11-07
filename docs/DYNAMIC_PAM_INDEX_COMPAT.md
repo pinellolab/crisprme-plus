@@ -42,9 +42,9 @@ builds.
   i.e. **~+9%** (ref index ~134 GB → ~146 GB). Linear, not multiplicative.
 - **Measured:** NNN+`--prune-pam NGG` == a dedicated NGG index, identical loci (chr22 cross-check,
   `L = K`). With `K > L` the flank does not index a + strand PAM with 1..K−L nt after it to the
-  end of a contig, nor a − strand PAM in its first K−L nt, and reports one exactly K−L nt from the
-  start on the + strand (on hg38 at K = 8: 145 + 101 NGG and 308 + 241 NRG sites, none on a
-  primary chromosome; METHODS §9).
+  end of a contig, nor a − strand PAM in its first K−L nt (on hg38 at K = 8: 145 + 101 NGG and
+  308 + 241 NRG sites, none on a primary chromosome; METHODS §9), and CRISPRitz 2.9.1's search
+  reports one exactly K−L nt from the start on the + strand (2.10.0's reads it right).
 
 ## 2. Backward-compatibility contract (two independent layers)
 

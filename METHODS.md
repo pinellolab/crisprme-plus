@@ -1313,14 +1313,18 @@ NRR: 386,012 rows each (MD5 `f810dd76`) over a dedicated index, both PAM-less in
 with no site at a contig's very end or start, as this one has none. The build scans a contig
 for a PAM only where a whole window of *K* bases fits, so with *K > L* a + strand PAM with 1 to
 *K − L* bases after it to the contig's end, and a − strand PAM in the contig's first *K − L*
-bases, are not indexed, and a − strand PAM exactly *K − L* bases from the start is reported on
-the + strand at another coordinate. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG
+bases, are not indexed. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG
 sites (about 7.5 × 10⁻⁷ of all), none on a primary chromosome for those PAMs; in two
 whole-genome searches the 8-nt flank lost one row each against a dedicated index (27,215 of
 27,216 rows for a guide picked for its perfect match on `chr11_JH159136v1_alt`, and 216,977 of
-216,978 for VEGFA site 3 at 5 mismatches). A search that reads a flank of format 1 wider than its
-PAM says so on stdout and in the run's `Params.txt`. N runs inside a contig are not affected by
-the width. An index of format 2 stores a PAM-less window whose flank runs off the contig, its
+216,978 for VEGFA site 3 at 5 mismatches). A − strand PAM exactly *K − L* bases from the start
+is indexed in the window at the contig's first base, which CRISPRitz 2.9.1's search read as a
+window of the + strand, as it read that of a − strand PAM at a contig's first base (below): it
+reported that PAM on the + strand at another coordinate. CRISPRitz 2.10.0's search reads it
+right, in an index of either format. A search that reads a flank of format 1 wider than its PAM
+says so on stdout and in the run's `Params.txt`; under CRISPRitz 2.9.1 it also says that PAM is
+reported on the + strand. N runs inside a contig are not affected by the width. An index of
+format 2 stores a PAM-less window whose flank runs off the contig, its
 bases off the contig as `N`, which matches no PAM base: with `--prune-pam` it returns the rows of
 a dedicated index of format 2 **built for the same guide length and budget**, for any 3′ PAM of
 *L ≤ K*, contig ends included (CRISPRitz's `docs/INDEX_FORMAT.md`, section 8; through the real CLI
