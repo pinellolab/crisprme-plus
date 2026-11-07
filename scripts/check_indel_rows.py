@@ -237,7 +237,9 @@ the merge of ``remove_contiguous_samples.py``).
   last record of a split site) and the targets some carrier of an indel-path record holds
   (the per-carrier resolution gives no row for a raw target no carrier holds; a sites-only
   dataset's rows are the worst case of each alignment of its window), every record the
-  chain reaches read, up to 3 kb either side; there is no other fallback. That row must be
+  chain reaches read, up to 3 kb either side (a chain still going there with no row as
+  good as the target is this checker's coverage gap, coverage-chain-limit, not a miss);
+  there is no other fallback. That row must be
   as good as the target in both blocks: no more edits by the first sorting criterion (the
   merge picks between a cluster's reference and variant rows on mm+bulges, or the CFD,
   alone) and at least its CFD. A row's CFD is always recomputed from its aligned strings:
@@ -252,11 +254,14 @@ record's window: no target is aligned across it), limit-no-genotypes (a row of a
 sites-only dataset, which lists no carrier: the row itself is checked, one line per
 block; and in completeness one line per chromosome counting the records only sites-only
 VCFs hold, which no sample carries), and in the SNP-row report limit-snp-row-indel and
-limit-snp-row-unphased; variant-shadowed is a note. Two non-gating classes are this
+limit-snp-row-unphased; variant-shadowed is a note. Three non-gating classes are this
 checker's own COVERAGE GAPS, not CRISPRme limits: coverage-putative-cap (a carrier the
 PUTATIVE rule resolves with more than 10 positions within a target's reach of a record,
 off its REF span, where its alleles allow two bases: its targets that touch a call of
-unknown phase are not enumerated, 2^k choices each) and coverage-unindexed-long-ref
+unknown phase are not enumerated, 2^k choices each), coverage-chain-limit (a
+population-level cluster that runs past the 3 kb either side the chain follows, and
+holds no row as good as the target within them: its row may lie further) and
+coverage-unindexed-long-ref
 (a VCF read without a .tbi holds a record whose REF is longer than the 20 kb an unindexed
 read looks back: a deletion that long, starting further before a region, is not read
 there; give the VCF a .tbi).
@@ -3224,8 +3229,19 @@ def resolve(win, ctx, rep, reported, al, carriers, lids, demands, demand_of, pop
         if popmode:
             # one row per cluster: the cluster must hold a row as good as the target, for
             # every carrier CRISPRme's documented rules report it for
-            ok, why = reported.locus(guide, chrom, cl, d, lambda: cluster_chain(
+            ok, why, cut = reported.locus(guide, chrom, cl, d, lambda: cluster_chain(
                 win, ctx, guide, cl, reported.merge))
+            if not ok and cut:
+                # the cluster runs past the 3 kb either side the chain follows: its row
+                # may lie further, so this checker cannot tell (its own coverage gap)
+                rep.add(False, "coverage-chain-limit", row,
+                        "this checker's own coverage gap, not a CRISPRme limit: %d "
+                        "sample(s) hold this target, whose merge cluster runs past the 3 "
+                        "kb either side its chain follows, and %s: its row may lie "
+                        "further (%d of them listed on a row naming the record): %s"
+                        % (len(who), why, reported.on_rows(guide, who, tok0),
+                           ",".join(who[:12])), samples=",".join(who))
+                continue
             if d.kind == "second":
                 if not ok:
                     rep.add(False, "limit-two-indels", row,
@@ -3681,7 +3697,9 @@ def cluster_chain(win, ctx, guide, c0, merge, step=150, most=3000):
     write (chain_cps: the reference and SNP rows the mode allows, and each indel-path
     record's targets some carrier holds), each within ``merge`` bp of the next, from c0 on
     (CRISPRme clusters a guide's rows on a chromosome so, whatever their strand). The
-    window grows while the chain reaches its edge (up to ``most`` bp either side)."""
+    window grows while the chain reaches its edge (up to ``most`` bp either side).
+    Returns (members, cut): ``cut`` when the chain still reached the edge at that limit,
+    so the cluster may hold rows past what was followed."""
     full = ctx.full(guide)
     lo, hi = c0 - step, c0 + step
     wide = False
@@ -3698,8 +3716,9 @@ def cluster_chain(win, ctx, guide, c0, merge, step=150, most=3000):
                          panel=win.panel)
         cps = chain_cps(win, ctx, guide, full, a, b)
         members = chain_from(c0, cps, merge)
-        if (members[0] - merge > lo and members[-1] + merge < hi) or hi - lo >= 2 * most:
-            return members
+        inside = members[0] - merge > lo and members[-1] + merge < hi
+        if inside or hi - lo >= 2 * most:
+            return members, not inside
         lo -= step
         hi += step
 
@@ -4021,24 +4040,26 @@ class Reported(object):
         return out
 
     def locus(self, guide, chrom, c, d, chain):
-        """(ok, why) for a target of Cluster Position c in a run with one row per merge
-        cluster. The cluster's row is an integrated line with a block within --merge bp
-        of c, or of a Cluster Position chained to c (chain(): those of the rows CRISPRme
-        can write, each within --merge bp of the next); none is a miss. It must
-        have a fewest-mm+b block no worse than the target by the first sorting criterion
-        and a highest-CFD block of at least its CFD at the three decimals the merge sorts
-        on (the row's CFD recomputed from its aligned strings)."""
+        """(ok, why, cut) for a target of Cluster Position c in a run with one row per
+        merge cluster. The cluster's row is an integrated line with a block within
+        --merge bp of c, or of a Cluster Position chained to c (chain(): those of the
+        rows CRISPRme can write, each within --merge bp of the next); none is a miss. It
+        must have a fewest-mm+b block no worse than the target by the first sorting
+        criterion and a highest-CFD block of at least its CFD at the three decimals the
+        merge sorts on (the row's CFD recomputed from its aligned strings). ``cut``: the
+        chain stopped at its limit (cluster_chain)."""
         pos, lines = self.loci.get((guide, chrom), ([], []))
         near = self.near(pos, [c])
+        cut = False
         if not near:
-            members = chain()
+            members, cut = chain()
             near = self.near(pos, members)
             if not near:
                 return False, (
                     "no integrated row lies in its cluster (Cluster Positions %d..%d: the "
                     "rows CRISPRme can write there -- reference, SNP and the targets some "
                     "carrier of an indel-path record holds -- that chain with it within %d "
-                    "bp)" % (members[0], members[-1], self.merge))
+                    "bp)" % (members[0], members[-1], self.merge)), cut
         why = []
         crit = self.criterion
         for k in sorted(near):
@@ -4052,8 +4073,8 @@ class Reported(object):
                 why.append("the row at line %d has a highest-CFD block of %.3f (%.6f), "
                            "the target %.3f" % (ln, cfd3(r_cfd), r_cfd, cfd3(d.cfd)))
                 continue
-            return True, ""
-        return False, "; ".join(why)
+            return True, "", cut
+        return False, "; ".join(why), cut
 
 # --------------------------------------------------------------------------- #
 # driver

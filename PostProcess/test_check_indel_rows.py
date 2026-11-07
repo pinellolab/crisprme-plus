@@ -1140,15 +1140,19 @@ class ReviewRound2(Base):
             return C.Demand("exact", [], C.edits(total, 0), cfd, 0)
 
         def alone():
-            return [102]
+            return [102], False
         self.assertTrue(rep.locus(GUIDE, "chr21", 102, d(3, 0.2), alone)[0])
         self.assertFalse(rep.locus(GUIDE, "chr21", 102, d(1, 0.2), alone)[0])  # fewer edits
         self.assertFalse(rep.locus(GUIDE, "chr21", 102, d(3, 0.5), alone)[0])  # higher CFD
         # F2 (review 3): a row past --merge bp is the cluster's only through alignments
         # that chain to it, never as the nearest row
-        self.assertFalse(rep.locus(GUIDE, "chr21", 120, d(3, 0.2), lambda: [120])[0])
+        self.assertFalse(rep.locus(GUIDE, "chr21", 120, d(3, 0.2),
+                                   lambda: ([120], False))[0])
         self.assertTrue(rep.locus(GUIDE, "chr21", 120, d(3, 0.2),
-                                  lambda: [104, 107, 110, 113, 116, 118, 120])[0])
+                                  lambda: ([104, 107, 110, 113, 116, 118, 120], False))[0])
+        # a chain cut at its limit is said to be so (the caller lists a coverage gap)
+        self.assertEqual(rep.locus(GUIDE, "chr21", 120, d(3, 0.2),
+                                   lambda: ([120], True))[::2], (False, True))
         # N3: another guide's row is not this guide's cluster
         self.assertFalse(rep.locus("TTTTAAAATTTTAAAATTTT", "chr21", 102, d(3, 0.2),
                                    alone)[0])
@@ -2258,8 +2262,9 @@ class ReviewRound5(Base):
         ctx = C.Ctx(ns, "NGG", 3, False, ["G" * 20], None)
         win = C.Window(seq, "chr21", 0, 440, [C.Vcf(vcf)])
         self.assertEqual(win.snv_at, {})
-        members = C.cluster_chain(win, ctx, "G" * 20, 300, 3)
+        members, cut = C.cluster_chain(win, ctx, "G" * 20, 300, 3)
         self.assertGreater(max(members), 454 + 300, members[-5:])
+        self.assertFalse(cut)
 
     def test_a_long_ref_an_unindexed_read_meets_is_listed(self):
         """R5-F5.2: without a .tbi a read starts Vcf.LONGEST before its region, so a
@@ -2538,6 +2543,27 @@ class ReviewRound6(Base):
         self.assertEqual(sorted((f[1], f[3]) for f in gating(found)),
                          [("missing-putative-row", "S02"), ("missing-row", "S01")], found)
         self.assertNotIn("coverage-putative-cap", classes(found))
+
+    def test_a_cluster_past_the_chains_reach_is_a_coverage_gap_not_a_miss(self):
+        """The sweep: a population-level cluster in a 7 kb (AGG)n run is one merge
+        cluster, whose one row can lie past the 3 kb either side the chain follows: a
+        deletion of one unit in the middle has its row 3.6 kb away. The checker cannot
+        tell then (coverage-chain-limit, non-gating), where it reported missing-locus."""
+        g = "AGGAGGAGGAGGAGGAGGAG"
+        run = "AGG" * 2400
+        seq = LONG + "TTTC" + run + "TTTC" + POST
+        s0 = len(LONG) + 4
+        mid = s0 + 3 * 1200                 # a unit boundary in the middle of the run
+        rec = (mid, seq[mid - 1:mid + 3], seq[mid - 1], {"S01": "1|0"})
+        row = set_field(row_fields("chr21", s0, "+", g + "NNN", seq[s0:s0 + 23],
+                                   seq[s0:s0 + 23], seq[s0 + 20:s0 + 23], 0, 0, "X", "NA",
+                                   "NA", spacer=g + "NNN"), origin="ref")
+        case = Case(self.tmp, seq, [rec], [row])
+        with open(os.path.join(case.res, ".alt_mode"), "w") as fh:
+            fh.write("no-alt-alignments\n")
+        rc, found = case.run(mode="completeness", guide=g, budget=("0", "0", "0", "0"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("coverage-chain-limit", classes(found), found)
 
     # --- R6-F5: a row that lists only limit carriers ------------------------------ #
     def test_a_limit_line_says_how_many_of_its_carriers_a_row_lists(self):

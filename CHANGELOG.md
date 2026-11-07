@@ -146,8 +146,9 @@ and the `release-crisprme` skill.
     per sample, as with `--ci-cd-test`, only the haplotypes individuals hold) and the targets
     some carrier of an indel-path record holds (the per-carrier resolution gives no row for
     a raw target no carrier holds; a sites-only dataset's rows are the worst case of each
-    alignment of its window), every record the chain reaches read, up to 3 kb either side —
-    must be reported with a fewest-mm+b block of no more
+    alignment of its window), every record the chain reaches read, up to 3 kb either side
+    (a chain still going there with no row as good as the target is the checker's own
+    coverage gap, `coverage-chain-limit`, not a miss) — must be reported with a fewest-mm+b block of no more
     edits than the target's best alignment by the first sorting criterion (the merge picks
     between a cluster's reference and variant rows on mm+bulges, or on the CFD, alone) and a
     highest-CFD block of at least its CFD (each row's recomputed from its own aligned
@@ -172,11 +173,12 @@ and the `release-crisprme` skill.
     `limit-no-genotypes` (a sites-only dataset's row, which lists no carrier: the row itself
     is checked; in completeness, the count of records only sites-only VCFs hold) and, in the
     SNP-row report, `limit-snp-row-indel` and `limit-snp-row-unphased`; the note
-    `variant-shadowed`; and two coverage gaps of the checker itself, not CRISPRme limits:
+    `variant-shadowed`; and three coverage gaps of the checker itself, not CRISPRme limits:
     `coverage-putative-cap` (a carrier the PUTATIVE rule resolves with more than 10
     positions within a target's reach of the record, off its REF span, where its alleles
     allow two bases: its targets touching a call of unknown phase are not enumerated, 2^k
-    choices each) and
+    choices each), `coverage-chain-limit` (a population-level cluster that runs past the
+    3 kb either side the chain follows, with no row as good as the target within them) and
     `coverage-unindexed-long-ref` (a VCF read without a `.tbi` holds a record whose REF is
     longer than the 20 kb an unindexed read looks back, so a deletion that long starting
     further before a region is not read there: give it a `.tbi`).
@@ -344,7 +346,7 @@ and the `release-crisprme` skill.
     23 sites of chr22) list carriers for a target that does not hold the variant they carry
     (chr22:17368905 (−), chr22_17368909_G_C: HGDP01090, HGDP01405, NA19351), where the
     HGDP + 1000 Genomes run alone lists them on an alignment that holds it.
-  - Wired in: `PostProcess/test_check_indel_rows.py` (146 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (147 unit and mutation tests: a right
     row raises nothing gating; each corruption of it is caught — the start shifted by 1 and
     by an insertion's offset, a target base changed, the aligned spacer rewritten, a carrier
     swapped, added or dropped, also when the same target sits elsewhere, a named variant
@@ -367,8 +369,9 @@ and the `release-crisprme` skill.
     cluster joined to another only through a target no carrier holds, the SNP rows of each
     mode, two genotyped VCFs that share samples, calls of unknown phase on the record's REF
     span, a target only a call of unknown phase makes, a limit line that says how many of
-    its carriers a row lists; each documented limit, a PUTATIVE tie and each overlapping slot comes out under
-    its own class, the checker's two coverage gaps under their own; a chromosome no VCF
+    its carriers a row lists, a cluster that runs past the chain's reach; each documented
+    limit, a PUTATIVE tie and each overlapping slot comes out under
+    its own class, the checker's coverage gaps under their own; a chromosome no VCF
     covers, one FASTA of several contigs, a tabix-indexed VCF read once per record, a
     sites-only VCF alone or beside a genotyped one (either first; its SNP rows in the
     SNP-row report; a split site of it), a cluster chain that reaches past a work unit's

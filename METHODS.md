@@ -1596,7 +1596,8 @@ documents, and fails. It runs two ways:
   targets some carrier of an indel-path record holds (the per-carrier resolution gives no
   row for a raw target no carrier holds; a sites-only dataset's rows are the worst case of
   each alignment of its window), every record the chain reaches read, up to 3 kb either
-  side — must be reported with a fewest-mm+b block of no more
+  side (a chain still going there with no row as good as the target is the checker's own
+  coverage gap, `coverage-chain-limit`, not a miss) — must be reported with a fewest-mm+b block of no more
   edits than the target's best alignment by the first sorting criterion (the merge picks
   between a cluster's reference and variant rows on mm+bulges, or the CFD, alone) and a
   highest-CFD block of at least its CFD (each row's recomputed from its own aligned
@@ -1616,7 +1617,9 @@ one target of a contig's end — and the slots the VCF leaves without a sequence
 with their carriers under their own class and do not fail the check, as do the checker's
 own coverage gaps (a carrier the PUTATIVE rule resolves with more than 10 positions within
 a target's reach of the record, off its REF span, where its alleles allow two bases, whose
-targets touching a call of unknown phase it does not enumerate, `coverage-putative-cap`; a VCF read without a `.tbi` that holds a deletion longer than the
+targets touching a call of unknown phase it does not enumerate, `coverage-putative-cap`; a
+population-level cluster that runs past the 3 kb either side its chain follows,
+`coverage-chain-limit`; a VCF read without a `.tbi` that holds a deletion longer than the
 20 kb such a read looks back, `coverage-unindexed-long-ref`); a row on a chromosome no VCF
 covers, a table line shorter than its header and a window holding N are reported. A
 target all of whose carriers are documented limits is demanded of no one, so a row that

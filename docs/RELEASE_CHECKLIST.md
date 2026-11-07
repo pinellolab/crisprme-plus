@@ -169,7 +169,8 @@ done
 #     variant-shadowed, and the checker's own coverage gaps (coverage-putative-cap: a
 #     carrier resolved PUTATIVE with more than 10 positions near a record where its
 #     alleles allow two bases, whose targets touching a call of unknown phase are not
-#     enumerated, none on this phased panel;
+#     enumerated, none on this phased panel; coverage-chain-limit: a population-level
+#     cluster longer than the 3 kb either side its chain follows;
 #     coverage-unindexed-long-ref: a VCF without a .tbi holding a deletion longer than
 #     20 kb, which an unindexed read may miss: give it a .tbi), each listed with its
 #     samples and target: read them, and say in the release notes if a class grew. A
