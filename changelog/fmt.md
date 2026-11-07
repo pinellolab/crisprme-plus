@@ -26,10 +26,10 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
    `feat/2.10.0` 25ee50c and a8e52ef are CRISPRitz 2.10.0 before its tag, with Q (a8e52ef's
    `buildTST`, `searchTST`, `searchBruteForce` and `enricher` are 25ee50c's, byte for byte; its
    `add-variants` takes only the `.fa` and `.fasta` files of the genome folder); `feat/2.10.0`
-   8bda5bb and 7219b55, the engine lane's builds of the last runs, have a8e52ef's binaries, byte
-   for byte (7219b55 changes two comments, no engine source). None ran on the tag: Gate B step 4b
-   of `docs/RELEASE_CHECKLIST.md` runs `check_real_engine.py` and `check_boundary_rows.py` on the
-   release's own engine.
+   8bda5bb, 7219b55 and 2d1f57b, the engine lane's builds of the last runs, have a8e52ef's
+   binaries, byte for byte (7219b55 changes two comments, no engine source; 2d1f57b its CHANGELOG
+   and a doc). None ran on the tag: Gate B step 4b of `docs/RELEASE_CHECKLIST.md` runs
+   `check_real_engine.py` and `check_boundary_rows.py` on the release's own engine.
 3. [2.8.1]'s entries that say CRISPRme 2.8.1 refuses an index of format 2 ("the CRISPRitz planned
    as 2.9.2", "index format 1 only") stay as they are: they say what 2.8.1 does.
 4. The note of an index of format 1 says how to build it again where the install can, and never
@@ -183,6 +183,26 @@ CRISPRitz 2.10.0), to be merged with the other tracks' fragments. -->
   script on stub engines. The note `--prune-pam` gives of a flank wider than its PAM, and the
   warning of a flank built before CRISPRitz kept an `N` in it, are given of an index of format 1
   only.
+- **The `--prune-pam` note of a flank wider than its PAM says that a PAM is reported on the wrong
+  strand only under CRISPRitz 2.9.1.** Of an all-N index of format 1 whose flank of *K* nt is
+  wider than the PAM's *L*, the note, on stdout and in the run's `.Params.txt` (`Prune_pam_note`),
+  said that a − strand PAM exactly *K − L* nt from a contig's start `is reported on the + strand
+  at another position`. CRISPRitz 2.9.1's search does so: that PAM's window starts at the contig's
+  first base, which it reads as a window of the + strand. 2.10.0's reads it as the − strand window
+  it is, in an index of either format, as it reads that of a − strand PAM at a contig's first
+  base, so under 2.10.0 the note said it of a site the search reports right. It now says it only
+  under a CRISPRitz that reads index format 1 alone (2.9.1), and the PAMs such a flank does not
+  index under either. With CRISPRitz 2.10.0 (`feat/2.10.0` 2d1f57b), of an 8-nt-flank index that
+  CRISPRitz 2.9.1 built (`build-index-only` with a 28-nt all-`N` PAM file: index format 1) of a
+  contig holding an NGG site on the − strand whose PAM starts 5 nt from its start and one on the +
+  strand within it, a `--prune-pam` NGG search gives both on their own strands and at their own
+  positions, the two rows a dedicated NGG index gives under either engine, and the note without
+  that clause; with 2.9.1 it gives the − strand site at 2 on the + strand (the dedicated index: at
+  5 on the − strand), and the note with it. An 8-nt-flank index that 2.10.0 built (format 2) gives
+  the same two rows and no note. Each of these builds and searches ends with exit 0 and nothing on
+  stderr. METHODS §9, `docs/PRECOMPUTED_INDEXES.md`, `docs/DYNAMIC_PAM_INDEX_COMPAT.md` and the
+  general-index card in `docs/hf/` say that this misread is 2.9.1's, and `complete-search --help`
+  gives the limits of a wider flank as those of index format 1.
 - **The side of an index of format 2 is the one its header records.** The search script,
   complete-search, complete-test, the coverage check, `build-index-only` and the web read it there
   before `.pam_build`, which an index built by `crispritz.py` itself, or downloaded, may lack.
