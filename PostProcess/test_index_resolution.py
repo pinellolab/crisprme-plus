@@ -1435,20 +1435,22 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
 
     def assertNoMatchSaysWhy(self, run, note, pam, n=2, guide=20, side=3):
         """Under --index-path: the error, why the all-N index there was not used
-        (`note`, if any), and what would serve: the published name, and the one a build
-        gives it since 2.9.0, of a `guide`-nt guide on the `side` of the guide."""
+        (`note`, if any), and what would serve: the published name (the indexes published
+        are of N = 3), and the one a build gives it since 2.9.0, of a `guide`-nt guide on
+        the `side` of the guide."""
         lib = os.path.realpath(self.library)
         named = f"{guide}-{pam}" if side == 3 else f"{pam}-{guide}"
+        published = f"{pam}_{max(n, 3)}_hg38"
         self.assertIsNone(run.searched(variant=False))
         self.assertEqual(run.stderr,
                          f"ERROR: no matching reference index under --index-path '{lib}'\n"
                          + note +
                          f"       expected an index '{pam}_N_hg38' with N >= {n} "
-                         f"(e.g. {pam}_{n}_hg38, or {named}_{n}_hg38 as a build names it "
+                         f"(e.g. {published}, or {named}_{n}_hg38 as a build names it "
                          "since 2.9.0)\n"
                          f"       re-run 'crisprme.py download --what index --index-name "
-                         f"{pam}_{n}_hg38' (it fetches the shared reference index too), or "
-                         "build it with 'crisprme.py build-index-only'.\n")
+                         f"{published}' if it is published (it fetches the shared reference "
+                         "index too), or build it with 'crisprme.py build-index-only'.\n")
 
     def test_index_path_says_why_an_all_n_index_there_was_not_used(self):
         self.install("NNN_2", variant=False)
@@ -1505,8 +1507,12 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
             f"'{lib}/<guide length>-NNNN_2_hg38', which records that\n", "NGCG")
 
     def test_a_plain_miss_says_what_it_said(self):
+        # (but the index to download, of N = 3 for up to 2 bulges: it named the one of the
+        # search's N, bulges + 1, and no index of N = 2 is published)
         self.install("NGG_3", variant=False)
         self.assertNoMatchSaysWhy(self.run_pipeline(prune=1, variant=False), "", "NRG")
+        self.assertNoMatchSaysWhy(self.run_pipeline(prune=1, variant=False, bulges=3), "",
+                                  "NRG", n=4)
 
 
 class AnUnfinishedBuildIsNotSearched(_ShippedScript):

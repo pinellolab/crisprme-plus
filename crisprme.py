@@ -2379,13 +2379,14 @@ def _refuse_no_reference_index(index_path: str, genome: str, motif: str, want: i
         return
     if any(d.endswith(f"_{genome}.lock") for d in _listdir(index_path)):
         return
+    # (the indexes published are of N = 3, as _refuse_no_variant_index says)
     error(
         f"No reference index under --index-path {index_path} serves this search (genome "
         f"{genome}, PAM {motif}, {bdna} DNA and {brna} RNA bulge(s)), and a search builds "
         f"none there: it would stop on that after enriching the genome with the dataset's "
         f"variants (hours on a human genome). Install one in that library (crisprme.py "
-        f"download --what index "
-        f"--index-name {motif}_{want}_{genome}, or crisprme.py build-index-only), or run "
+        f"download --what index --index-name {motif}_{max(want, 3)}_{genome} if it is "
+        f"published, or crisprme.py build-index-only), or run "
         f"without --index-path, where a search builds one from the genome (a search of the "
         f"reference genome alone, with --index-path, says what that library holds)"
     )

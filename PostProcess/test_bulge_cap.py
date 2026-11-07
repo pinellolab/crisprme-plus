@@ -325,25 +325,32 @@ class TestCliBulgeCap(unittest.TestCase):
         _mkfile(os.path.join(vcfs, "x.chr22.vcf.gz"), "")
         refuse = crisprme._refuse_no_reference_index
 
-        def stop():
+        def stop(bulges=1):
             err = io.StringIO()
             with mock.patch.object(sys, "stderr", err):
                 try:
-                    refuse(shared, _REF, _MOTIF, 2, False, True, 20, 1, 1, [vcfs])
+                    refuse(shared, _REF, _MOTIF, bulges + 1, False, True, 20, bulges, bulges,
+                           [vcfs])
                 except SystemExit as exit_:
                     return exit_.code, err.getvalue()
             return None, err.getvalue()
 
-        code, said = stop()
-        self.assertEqual(code, 1)
-        self.assertEqual(said, (
-            f"Error: No reference index under --index-path {shared} serves this search (genome "
-            f"{_REF}, PAM {_MOTIF}, 1 DNA and 1 RNA bulge(s)), and a search builds none there: "
-            f"it would stop on that after enriching the genome with the dataset's variants "
-            f"(hours on a human genome). Install one in that library (crisprme.py download "
-            f"--what index --index-name {_MOTIF}_2_{_REF}, or crisprme.py build-index-only), or "
-            f"run without --index-path, where a search builds one from the genome (a search of "
-            f"the reference genome alone, with --index-path, says what that library holds)\n"))
+        # the index to download: the published one, of N = 3 for up to 2 bulges (it named
+        # the one of the search's N, bulges + 1, and no index of N = 2 is published)
+        for bulges, n in ((1, 3), (2, 3), (3, 4)):
+            with self.subTest(bulges=bulges):
+                code, said = stop(bulges)
+                self.assertEqual(code, 1)
+                self.assertEqual(said, (
+                    f"Error: No reference index under --index-path {shared} serves this search "
+                    f"(genome {_REF}, PAM {_MOTIF}, {bulges} DNA and {bulges} RNA bulge(s)), and "
+                    f"a search builds none there: it would stop on that after enriching the "
+                    f"genome with the dataset's variants (hours on a human genome). Install one "
+                    f"in that library (crisprme.py download --what index --index-name "
+                    f"{_MOTIF}_{n}_{_REF} if it is published, or crisprme.py build-index-only), "
+                    f"or run without --index-path, where a search builds one from the genome (a "
+                    f"search of the reference genome alone, with --index-path, says what that "
+                    f"library holds)\n"))
         # a run building one there: the search script waits for it
         os.makedirs(os.path.join(shared, f"{_MOTIF}_2_{_REF}.lock"))
         self.assertEqual(stop(), (None, ""))

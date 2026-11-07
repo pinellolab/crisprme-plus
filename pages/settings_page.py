@@ -2719,9 +2719,12 @@ def add_index_hf(n, name):
 def _dataset_genome(vcf: Optional[str]) -> Optional[str]:
     """The genome VCF dataset ``vcf`` belongs to, as Settings recorded it when the dataset
     was added (VCFs/.<dataset>.refgenome, read by vcf_reference_genome), or None without
-    a record: the search form pairs such a dataset with that genome alone."""
-    if not vcf or not os.path.isfile(
-            os.path.join(current_working_directory, "VCFs", f".{vcf}.refgenome")):
+    a record: the search form pairs such a dataset with that genome alone. None too for a
+    value that is no dataset the build form offers: a request can send any, and it names
+    the record read, so './' and '../' reached a file outside the data folder."""
+    if (not vcf or vcf not in [v["value"] for v in get_all_vcf_datasets()]
+            or not os.path.isfile(
+                os.path.join(current_working_directory, "VCFs", f".{vcf}.refgenome"))):
         return None
     return vcf_reference_genome(vcf)
 

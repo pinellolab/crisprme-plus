@@ -1700,9 +1700,10 @@ while read vcf_f; do
 			fi
 		fi
 		_say_wider_flank "$ref_lib" "$ref_name"
-		# (the indexes published are named in the older form)
-		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s, or %s as a build names it since 2.9.0)\n" "$true_pam" "$ref_name" "$bMax" "${true_pam}_${bMax}_${ref_name}" "$(basename "$idx_folder1")" >&2
-		printf "       re-run 'crisprme.py download --what index --index-name %s' (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "${true_pam}_${bMax}_${ref_name}" >&2
+		# (the indexes published are named in the older form, and are of N = 3)
+		_pub="${true_pam}_$(( bMax > 3 ? bMax : 3 ))_${ref_name}"
+		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s, or %s as a build names it since 2.9.0)\n" "$true_pam" "$ref_name" "$bMax" "$_pub" "$(basename "$idx_folder1")" >&2
+		printf "       re-run 'crisprme.py download --what index --index-name %s' if it is published (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$_pub" >&2
 		exit 1
 	else
 		# no valid index found, compute it; use mkdir lock to prevent concurrent builds.

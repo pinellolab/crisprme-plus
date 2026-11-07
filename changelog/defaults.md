@@ -508,7 +508,9 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   genome for a dataset whose genome Settings recorded when the dataset was added, and a build of
   the dataset on another genome ended in the enricher's crash (`std::out_of_range`, SIGABRT;
   FV :328). Choosing such a dataset selects its genome, the one the form then offers, and a
-  build of the dataset on another is refused, naming its genome.
+  build of the dataset on another is refused, naming its genome. The form reads that record for
+  a dataset it offers alone: a request can send any value. Covered by
+  `PostProcess/test_web_bulge_notes.py` and `test_web_shell_safety.py` (in the image).
 - **A job an identical search is sent to keeps its log.** Submit gave the finished job's "Job
   Done" line today's date (its results are kept 3 days from it) by writing the log back
   without its last line, the report's, and with a second "Job Done" and no line end
@@ -632,7 +634,14 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   dataset's VCFs here, no enriched genome, no variant index that serves the search). A
   reference search, which reaches the script's refusal at once and says what the library holds,
   is left to it, and so is a library where a run is building an index, which the script waits
-  for.
+  for. It names the index to download as the script's refusal now does (below).
+- **A search refused for want of a reference index under `--index-path` names one to download
+  that is published.** The refusal said to download `<PAM>_<N>_<genome>` with N the search's
+  bulges + 1: `NRR_2_hg38` for a search of 1 DNA and 1 RNA bulge, the default, where every index
+  published is of N = 3, so the download it advised stopped on `No index 'NRR_2_hg38' found`. It
+  names the one of N = 3 for up to 2 bulges (`NRR_3_hg38`), "if it is published", as the refusal
+  for want of a variant index does. Covered by `PostProcess/test_index_resolution.py` and
+  `test_bulge_cap.py`.
 - **A variant index of `--index-path` whose dictionaries are not in the working directory is
   named.** complete-search said "No prebuilt variant index found" for a dataset whose variant
   index the library held (IDX-17 c): it says that the index is there, that a search reads the

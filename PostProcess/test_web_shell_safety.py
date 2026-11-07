@@ -796,6 +796,52 @@ class TestSearchFormReadsItsOwnValues(_WebFolder):
 
 
 @NEEDS_DASH
+class TestTheSettingsBuildFormReadsItsOwnValues(_WebFolder):
+    """Settings' Build an index locally offers the genome Settings recorded for the VCF
+    dataset selected (build_genomes_of_dataset), a callback a request can call with any
+    dataset: it joined the value into the path of the record it reads
+    (VCFs/.<dataset>.refgenome), so './' and '../' reached a file <x>.refgenome beside a
+    folder <x> outside the data folder, and what that file held chose the genomes offered.
+    A value the form does not offer is answered as none is, and nothing outside is read;
+    a dataset it offers is answered as before."""
+
+    def setUp(self):
+        super().setUp()
+        p = patch.object(sp, "current_working_directory", self.data + os.sep)
+        p.start()
+        self.addCleanup(p.stop)
+        os.makedirs(os.path.join(self.data, "Genomes", "mm10"))
+        shutil.copy(os.path.join(self.data, "Genomes", "hg38", "chr1.fa"),
+                    os.path.join(self.data, "Genomes", "mm10"))
+        # a dataset Settings added for hg38, and outside the data folder a folder with a
+        # record of the other genome beside it
+        os.makedirs(os.path.join(self.data, "VCFs", "hg38_walk"))
+        os.makedirs(os.path.join(self.outside, "cohort"))
+        for record, genome in ((os.path.join(self.data, "VCFs", ".hg38_walk.refgenome"), "hg38"),
+                               (os.path.join(self.outside, "cohort.refgenome"), "mm10")):
+            with open(record, "w") as fh:
+                fh.write(genome + "\n")
+        self.before = self.outside_files()
+
+    def test_the_genome_offered(self):
+        none = sp.build_genomes_of_dataset(None, "hg38")
+        self.assertEqual((sorted(o["value"] for o in none[0]), none[1]), (["hg38", "mm10"], "hg38"))
+        # (up to / from VCFs/, for the record and the folder beside it)
+        up = "/.." * (os.path.realpath(self.data).count("/") + 2)
+        with _paths_read() as seen:
+            for vcf in ("." + up + os.path.realpath(self.outside) + "/cohort",
+                        "./../outside/cohort", "./../outside/nothing_here", "hg38_absent"):
+                with self.subTest(vcf=vcf):
+                    self.assertEqual(sp.build_genomes_of_dataset(vcf, "hg38"), none)
+        outside = os.path.realpath(self.outside) + os.sep
+        self.assertEqual([p for p in seen if p.startswith(outside)], [])
+        self.assertNothingRun()
+        # the dataset the form offers: the genome recorded for it alone, as before
+        options, value = sp.build_genomes_of_dataset("hg38_walk", "mm10")
+        self.assertEqual(([o["value"] for o in options], value), (["hg38"], "hg38"))
+
+
+@NEEDS_DASH
 class TestAssemblySearchLaunch(_WebFolder):
     """The Personal assembly tab's Submit (submit_assembly_search_job), which a request can
     call with any guides, PAM and six fields, and the search's look-up of each guide of the
