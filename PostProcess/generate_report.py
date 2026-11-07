@@ -1832,8 +1832,9 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
             "enumerating every per-sample haplotype. CFD is the <strong>exact worst case</strong>; "
             f"{scorer_label()} is a best-effort screen. <strong>Per-sample carriers, CONFIRMED cis phasing "
             "and exact joint allele frequency are NOT computed</strong> &mdash; re-run the search "
-            "with <code>--per-sample</code> for that per-sample resolution on a genotyped panel "
-            "(recommended for clinical validation). " + (
+            "per-sample (<code>--per-sample</code>, or Per-sample as the analysis on the web "
+            "form) for that per-sample resolution on a genotyped panel (recommended for "
+            "clinical validation). " + (
                 # which --per-sample cannot give on a dataset without the tiers
                 "On " + _untiered_named(_ut) + " (<code>Dictionaries/registry_&lt;vcf&gt;/</code> "
                 "and <code>genotypes_&lt;vcf&gt;/</code>), only the classic per-sample "

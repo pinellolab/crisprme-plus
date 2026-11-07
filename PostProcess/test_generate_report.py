@@ -1068,6 +1068,10 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("Population-level", html_pop)
         self.assertIn("NOT computed", html_pop)         # the carrier caveat
         self.assertIn("--per-sample", html_pop)          # points to the exact mode
+        # and to the web form's, for a search sent from there (it named the flag alone,
+        # which a web user cannot pass: FV :342)
+        self.assertIn("re-run the search per-sample (<code>--per-sample</code>, or Per-sample "
+                      "as the analysis on the web form)", html_pop)
         html_ps = gr.render_inputs_criteria({**base, "search_mode": "per-sample"})
         self.assertIn("observed haplotypes", html_ps)
         self.assertNotIn("NOT computed", html_ps)        # no caveat in per-sample mode

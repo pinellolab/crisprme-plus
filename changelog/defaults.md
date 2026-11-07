@@ -747,3 +747,11 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   only at a score of its own; the plot of the count of edits stars them as before. The
   results page's plots and the Personal Risk Cards' alike. Covered by
   `PostProcess/test_top_plots.py`.
+- **The web's per-sample option and the report's advice say what a web user can do.** The
+  search form disabled Per-sample for a genotyped dataset whose index is not built yet (listed
+  as "genotyped, samples not indexed") saying that it "needs a genotyped panel", and the
+  report of a population-level search said to re-run it with `--per-sample` alone, a flag a
+  web search cannot pass (FV :342). The option says that the dataset's samples are not
+  indexed yet, and to build its index in Settings; the report names the web form's Per-sample
+  analysis beside the flag. Covered by `PostProcess/test_web_shell_safety.py` (in the image)
+  and `test_generate_report.py`.

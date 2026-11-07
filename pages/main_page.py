@@ -2659,8 +2659,13 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
     # cis co-occurrence is only PUTATIVE; a hybrid panel is CONFIRMED where phased.
     phased = False
     if not has_gt:
+        # (a genotyped panel whose index is not built yet, or was built without its sample
+        # list, is labelled so in the list of datasets: it needs that index, not another
+        # panel, FV :342)
         ps_label = (" Per-sample — resolve genotypes: named carriers & CONFIRMED cis "
-                    "(needs a genotyped panel)")
+                    + ("(its samples are not indexed yet: build its index in Settings)"
+                       if variant_dataset_data_type(genome_value, dataset_value)
+                       == "genotyped-unindexed" else "(needs a genotyped panel)"))
     else:
         _dt = variant_dataset_data_type(genome_value, dataset_value)
         phased = _dt == "genotyped-phased"

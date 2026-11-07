@@ -692,6 +692,18 @@ class TestSearchFormReadsItsOwnValues(_WebFolder):
         self.assertNothingReadOutside(seen)
         options, _value = mp.update_search_mode_availability("walk", "hg38", "population-level")
         self.assertFalse(options[1]["disabled"])  # the genotype store of walk
+        # a genotyped dataset whose index is not built: per-sample needs that index, not
+        # another panel (FV :342); a sites-only one, a genotyped panel
+        _vcf(os.path.join(self.data, "VCFs", "hg38_unbuilt", "u.chr1.vcf.gz"), True)
+        _vcf(os.path.join(self.data, "VCFs", "hg38_sitesonly", "s.chr1.vcf.gz"), False)
+        for dataset, says in (("unbuilt", "(its samples are not indexed yet: build its index "
+                                          "in Settings)"),
+                              ("sitesonly", "(needs a genotyped panel)")):
+            with self.subTest(dataset=dataset):
+                options, _value = mp.update_search_mode_availability(
+                    dataset, "hg38", "population-level")
+                self.assertTrue(options[1]["disabled"])
+                self.assertTrue(options[1]["label"].endswith(says), options[1]["label"])
 
     def test_the_bulge_options(self):
         none = mp.limit_bulges_to_index(None, PAM, "ref", 1, 1, 4, 6, {})
