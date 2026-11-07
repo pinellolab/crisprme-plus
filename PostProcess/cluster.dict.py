@@ -45,7 +45,9 @@ import subprocess
 import os
 
 MAX_LIMIT = 50000000
-alphabet = "-RYSWKMBDHVryswkmbdhvACGTacgt"  # For forcing IUPAC before reference target
+# For forcing IUPAC before reference target (Q: a position whose reference base and SNP ALTs
+# hold all four bases)
+alphabet = "-RYSWKMBDHVQryswkmbdhvqACGTacgt"
 pam_at_end = True
 guides_to_check = set()  # Set of error guides, do not do computation on them
 if os.path.exists("./guides_error.txt"):

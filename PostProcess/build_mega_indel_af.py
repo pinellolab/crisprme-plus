@@ -41,12 +41,17 @@ def _is_indel(ref, alt):
     return not snp
 
 
-def _parse_af_max(info):
-    """Read INFO/AF_max (already computed by the merge). '.'/missing/garbage -> None."""
+def _parse_af_max(info, k=0, n_alts=1):
+    """Read INFO/AF_max (already computed by the merge) of ALT ``k`` of ``n_alts`` (a
+    record listing several ALTs gives one value per ALT). '.'/missing/garbage, or a
+    list of another length -> None."""
     for kv in info.split(";"):
         if kv.startswith("AF_max="):
+            values = kv[len("AF_max="):].split(",")
+            if len(values) != n_alts:
+                return None
             try:
-                v = float(kv[len("AF_max="):])
+                v = float(values[k])
             except ValueError:
                 return None
             return v if (0.0 < v <= 1.0 and v == v) else None
@@ -55,7 +60,8 @@ def _parse_af_max(info):
 
 def iter_indel_af_records(vcf, datasets, chrom=None):
     """Yield (pos:str, ref, alt, af_by_dataset:dict, af_max:float|None) for each
-    biallelic INDEL record of a sites-only merged VCF. Comma-ALT rows are skipped.
+    INDEL allele of a sites-only merged VCF: a record listing several ALTs on one line
+    is read one ALT at a time, each with its own AFs (the k-th of each list).
     ``chrom`` (optional) restricts to one contig (defends against a multi-contig VCF
     whose same-POS records on different chroms would otherwise collide by key)."""
     opener = gzip.open if vcf.endswith(".gz") else open
@@ -69,12 +75,14 @@ def iter_indel_af_records(vcf, datasets, chrom=None):
             c, pos, _vid, ref, alt, _q, _fl, info = f[:8]
             if chrom is not None and c != chrom:
                 continue
-            if "," in alt or not _is_indel(ref, alt):
-                continue
-            afs = _parse_info_afs(info, datasets)
-            if not afs:
-                continue
-            yield (pos, ref, alt, afs, _parse_af_max(info))
+            alts = alt.split(",")
+            for k, one in enumerate(alts):
+                if not _is_indel(ref, one):
+                    continue
+                afs = _parse_info_afs(info, datasets, k, len(alts))
+                if not afs:
+                    continue
+                yield (pos, ref, one, afs, _parse_af_max(info, k, len(alts)))
 
 
 def build_indel_af_store(vcf, chrom, out_dir, dataset_meta=None):

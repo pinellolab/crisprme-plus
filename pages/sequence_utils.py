@@ -12,21 +12,21 @@ import os
 
 GETFASTA = "bedtools getfasta"
 PAMDICT = {
-    "A": "ARWMDHV",
-    "C": "CYSMBHV",
-    "G": "GRSKBDV",
-    "T": "TYWKBDH",
-    "R": "ARWMDHVSKBG",
-    "Y": "CYSMBHVWKDT",
-    "S": "CYSMBHVKDRG",
-    "W": "ARWMDHVYKBT",
-    "K": "GRSKBDVYWHT",
-    "M": "ARWMDHVYSBC",
-    "B": "CYSMBHVRKDGWT",
-    "D": "ARWMDHVSKBGYT",
-    "H": "ARWMDHVYSBCKT",
-    "V": "ARWMDHVYSBCKG",
-    "N": "ACGTRYSWKMBDHV",
+    "A": "ARWMDHVQ",
+    "C": "CYSMBHVQ",
+    "G": "GRSKBDVQ",
+    "T": "TYWKBDHQ",
+    "R": "ARWMDHVSKBGQ",
+    "Y": "CYSMBHVWKDTQ",
+    "S": "CYSMBHVKDRGQ",
+    "W": "ARWMDHVYKBTQ",
+    "K": "GRSKBDVYWHTQ",
+    "M": "ARWMDHVYSBCQ",
+    "B": "CYSMBHVRKDGWTQ",
+    "D": "ARWMDHVSKBGYTQ",
+    "H": "ARWMDHVYSBCKTQ",
+    "V": "ARWMDHVYSBCKGQ",
+    "N": "ACGTRYSWKMBDHVQ",
 }
 GENOMES_DIR = "Genomes"
 

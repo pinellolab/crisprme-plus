@@ -246,6 +246,8 @@ iupac_code_set = {
     "d": {"A", "G", "T"},
     "h": {"A", "C", "T"},
     "v": {"A", "C", "G"},
+    "Q": {"A", "C", "G", "T"},
+    "q": {"A", "C", "G", "T"},
     "A": {"A"},
     "T": {"T"},
     "C": {"C"},
@@ -618,6 +620,8 @@ iupac_code = {
     "d": ("A", "G", "T"),
     "h": ("A", "C", "T"),
     "v": ("A", "C", "G"),
+    "Q": ("A", "C", "G", "T"),
+    "q": ("A", "C", "G", "T"),
     "N": ("A", "T", "C", "G"),
 }
 
@@ -629,11 +633,11 @@ iupac_code = {
 
 # Whole-genome IUPAC -> first-listed-allele map (fast str.translate), applied to
 # genomeStr once at load. Mirrors iupac_code's first entry: R->A Y->C S->G W->A K->G
-# M->A B->C D->A H->A V->A. 'N' is absent, so it survives for the existing N-guard.
+# M->A B->C D->A H->A V->A Q->A. 'N' is absent, so it survives for the existing N-guard.
 # genomeStr is the PLAIN reference chromosome (post_analisi_indel.sh passes
 # <ref>/<chrom>.fa), which holds no IUPAC code, so this is a no-op kept as a guard.
 _IUPAC_FIRST_ALLELE_TAB = str.maketrans(
-    "RYSWKMBDHVryswkmbdhv", "ACGAGACAAAacgagacaaa"
+    "RYSWKMBDHVQryswkmbdhvq", "ACGAGACAAAAacgagacaaaa"
 )
 
 
@@ -698,6 +702,8 @@ with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, 
         splitted = entry.strip().split("\t")
         fake_pos = splitted[5].strip().split(",")  # inizio,fine del fakechr
         # start       end fakechr          #pos_vera,samples,rsID,MAF,INDELinfo,start_fake,ref_seq
+        # (the rsID is the record's first ID: CRISPRitz add-variants writes no other into
+        # the indel log, whatever the number of ALTs; METHODS section 8)
         INDELS_tree[int(fake_pos[0]) : int(fake_pos[1])] = [
             splitted[0],
             splitted[1],
@@ -891,9 +897,10 @@ def _snp_record(pos1):
 
 def _snp_name(pos1, alt):
     """(rsID, MAF) of a SNP alt, formatted as the SNP path writes them: the
-    registry's, else the per-sample dictionary's, else ('.', '0')."""
+    registry's, else the per-sample dictionary's, else ('.', '0'); a ',' inside the
+    rsID (two IDs) reads ';', as on the SNP path."""
     if _reg is not None:
-        rs = _reg.rsid(pos1, alt) or "."
+        rs = (_reg.rsid(pos1, alt) or ".").replace(",", ";")
         try:
             grp = _reg.lookup(pos1, alt)
             af = grp["global"].allele_freq() if grp and "global" in grp else 0.0
@@ -903,6 +910,7 @@ def _snp_name(pos1, alt):
     if _dict_snps is not None:
         for (_r, a, rs, af, _c) in _dict_snps.get(pos1, ()):
             if a == alt:
+                rs = rs.replace(",", ";")
                 try:
                     return rs, "%.6g" % float(af)
                 except ValueError:

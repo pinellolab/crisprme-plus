@@ -286,6 +286,15 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_observed_haplotype_integration -v
 
+      - name: "Every allele of a position read the same way (2.9.0: a VCF line of several ALTs, two records of one REF>ALT, two ALTs on one haplotype slot, Q, rsID and AF in their variant's place)"
+        # CRISPRitz 2.10.0 codes every ALT of a split site and writes Q at a position of four
+        # bases. The real new_simple_analysis.py on tiers and dictionaries the repository's
+        # compilers build, the real remove_contiguous_samples.py, and every reader of
+        # variant codes (pam_filter, the SNP overlay, the indel resolver, crispritz_bins,
+        # twopass_find, the cluster sort).
+        working-directory: PostProcess
+        run: python -m unittest test_site_alleles -v
+
       - name: "AF panel denominator uses VCF-filtered genotyped samples"
         working-directory: PostProcess
         run: python -m unittest test_af_denominator_panel -v

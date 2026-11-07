@@ -318,21 +318,21 @@ def getGuides(extracted_seq, pam, len_guide, pam_begin):
     # dict
     len_guide = int(len_guide)
     pam_dict = {
-        "A": "ARWMDHV",
-        "C": "CYSMBHV",
-        "G": "GRSKBDV",
-        "T": "TYWKBDH",
-        "R": "ARWMDHVSKBG",
-        "Y": "CYSMBHVWKDT",
-        "S": "CYSMBHVKDRG",
-        "W": "ARWMDHVYKBT",
-        "K": "GRSKBDVYWHT",
-        "M": "ARWMDHVYSBC",
-        "B": "CYSMBHVRKDGWT",
-        "D": "ARWMDHVSKBGYT",
-        "H": "ARWMDHVYSBCKT",
-        "V": "ARWMDHVYSBCKG",
-        "N": "ACGTRYSWKMBDHV",
+        "A": "ARWMDHVQ",
+        "C": "CYSMBHVQ",
+        "G": "GRSKBDVQ",
+        "T": "TYWKBDHQ",
+        "R": "ARWMDHVSKBGQ",
+        "Y": "CYSMBHVWKDTQ",
+        "S": "CYSMBHVKDRGQ",
+        "W": "ARWMDHVYKBTQ",
+        "K": "GRSKBDVYWHTQ",
+        "M": "ARWMDHVYSBCQ",
+        "B": "CYSMBHVRKDGWTQ",
+        "D": "ARWMDHVSKBGYTQ",
+        "H": "ARWMDHVYSBCKTQ",
+        "V": "ARWMDHVYSBCKGQ",
+        "N": "ACGTRYSWKMBDHVQ",
     }
     list_prod = []
     for char in pam:
@@ -6561,9 +6561,13 @@ def print_help_gnomad_converter():
         "\t--keep, optional flag to retain all variants, regardless of their "
         "filter flag. By default, variants with a filter flag different from "
         "PASS are discarded\n"
-        "\t--multiallelic, optional flag to merge variants mapped to the "
-        "same position, creating multiallelic sites in the output VCFs. By "
-        "default, each site remains biallelic\n"
+        "\t--multiallelic, optional flag to join the SNP records of one position "
+        "into one line listing their ALTs, and its indel records into another "
+        "(bcftools norm -m+). The converter writes unphased genotypes, so a "
+        "population with two joined ALTs gets one such as 1/2. CRISPRme reads each "
+        "ALT of such a line with its own carriers, without phase, and gives each "
+        "ALT the line's first ID (rs1 of rs1;rs2). By default each record keeps one "
+        "ALT and its own ID, as the published panels are built\n"
         "\t--threads, used to set the number of threads used in the conversion "
         "process [default 8]\n"
     )

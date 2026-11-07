@@ -199,10 +199,11 @@ def incomplete_bins(directory):
 # The four bits buildTST gives a base of the genome (genome_bit_conversion, in
 # CRISPRitz's pamGenerator.cpp; N 0000) and of the PAM (pam_bit_conversion; N 1111):
 # a genome base matches a PAM base when their bits meet, so a genome N matches none.
-# Q, which the enricher of CRISPRitz 2.10.0 writes where a position's reference and SNP
-# ALTs hold all four bases, is any base (1111) and matches every PAM base.
-_BITS = dict(zip("ACGTRYSWKMBDHVQ", (1, 2, 4, 8, 5, 10, 6, 9, 12, 3, 14, 13, 11, 7, 15)))
+# Q, the code CRISPRitz 2.10.0 writes at a position whose reference base and SNP ALTs
+# hold all four bases, is 1111 in the genome: it meets every PAM base. A PAM holds no Q.
+_BITS = dict(zip("ACGTRYSWKMBDHV", (1, 2, 4, 8, 5, 10, 6, 9, 12, 3, 14, 13, 11, 7)))
 _PAM_BITS = dict(_BITS, N=15)
+_BITS["Q"] = 15
 _REVERSE = str.maketrans("ACGTRYMKHDBV", "TGCAYRKMDHVB")  # reversenuc, less the reversal
 # buildTST's TARG_IN_GROUP: it saves a contig's targets, sorted, this many a tree,
 # <PAM>_<contig>_1.bin to _<n>.bin, n their count over this, rounded up

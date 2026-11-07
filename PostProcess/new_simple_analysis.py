@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from math import trunc
 from operator import index
+import itertools
 import sys
 import json
 import gzip
@@ -32,6 +33,8 @@ except Exception:  # module absent in an old deploy -> no genotype tier
 # isolation). This module has no hard dependency on tier0_registry, so its import
 # cannot break the legacy path either.
 import simple_analysis_registry as _sar
+# One position's genotypes read against each ALT's own allele index (stdlib, pure).
+import site_alleles as _site
 # Position-aware CFD bulge penalty (2.8.0). Core dependency; if a very old deploy lacks
 # it, fall back to a trivial pass-through so scoring never breaks (bulges then revert to
 # the previous free-pass behaviour rather than raising).
@@ -110,6 +113,11 @@ _SCORER_SELECT = os.environ.get("CRISPRME_SCORER_SELECT", "crispr-bulge").lower(
 # Set CRISPRME_LOSSLESS_DENSE=0 to opt OUT (sites-only reverts to greedy-representative-only).
 _env_ld = os.environ.get("CRISPRME_LOSSLESS_DENSE")
 _LOSSLESS_DENSE = True if _env_ld is None else bool(int(_env_ld or "0"))
+# The co-located union takes one alt of a column: one union per choice of alt at the
+# columns that hold two or three, while that makes at most this many unions a window (a
+# sites-only dataset's) or a sample (a PUTATIVE sample's above CRISPRME_IUPAC_CAP
+# variants, observed_haplotypes).
+_MAX_UNIONS = 16
 # Accumulator for the ADDITIVE phase-confirmation companion TSV (one row per emitted
 # dict-less variant off-target: identity columns + CONFIRMED/PUTATIVE). Populated ONLY
 # on the ``mygt is not None`` branch; dead/empty on every legacy install so the
@@ -141,12 +149,18 @@ mygt = None
 # "NA") instead of dropping the site (#136). Default False keeps every other mode
 # (legacy, registry+dict, dictless-with-genotypes) byte-identical.
 registry_only_mode = False
+# A registry-only install whose registry is a sites-only one (the mega's), read from its
+# VCF rather than from what the enrichment coded. Computed with registry_only_mode.
+_sites_only_registry = False
 
 
 # For scoring of CFD And Doench
 tab = str.maketrans("ACTGRYSWMKHDBVactgryswmkhdbv", "TGACYRSWKMDHVBtgacyrswkmdhvb")
 
-iupac_nucleotides = set("RYSWKMBDHVryswkmbdhv")
+# The codes of a variant position in the enriched genome: the IUPAC ambiguity codes, and Q,
+# a position whose reference base and SNP ALTs hold all four bases (CRISPRitz 2.10.0; N
+# stays an assembly gap, which matches nothing and is never written for a variant).
+iupac_nucleotides = set("RYSWKMBDHVQryswkmbdhvq")
 iupac_code_set = {
     "R": {"A", "G"},
     "Y": {"C", "T"},
@@ -168,6 +182,8 @@ iupac_code_set = {
     "d": {"A", "G", "T"},
     "h": {"A", "C", "T"},
     "v": {"A", "C", "G"},
+    "Q": {"A", "C", "G", "T"},
+    "q": {"A", "C", "G", "T"},
     "A": {"A"},
     "T": {"T"},
     "C": {"C"},
@@ -201,6 +217,8 @@ iupac_code = {
     "d": ("A", "G", "T"),
     "h": ("A", "C", "T"),
     "v": ("A", "C", "G"),
+    "Q": ("A", "C", "G", "T"),
+    "q": ("A", "C", "G", "T"),
     "N": ("A", "T", "C", "G"),
 }
 
@@ -276,6 +294,41 @@ def _collect_variant_off_target(final_line):
     _variant_off_targets.append(rec)
 
 
+def _column_alleles(code, ref_base, alts, chr_pos=None):
+    """The alts of a position that the target's own column ``code`` stands for (#139).
+
+    The genotype sources return EVERY alt at a genomic position, but the column encodes
+    exactly the reference base and the alts CRISPRitz used for THIS off-target. At a
+    bulge boundary a position-keyed alt that the column does NOT permit would steer
+    the decomposition to the wrong allele and drop the real variant-bulge off-target,
+    so only alts representable by the code are kept. Where the alts are those the
+    enrichment coded -- the dictionary's, and the tiers compiled from it -- that is a
+    no-op at every non-bulge column. A sites-only registry is read from its VCF, every
+    record of it, so it lists alts the enrichment never coded: the legacy decomposition
+    takes all of them there, as up to 2.8.1, without this filter
+    (``_sites_only_registry``). A Q permits every base, so it says
+    nothing about which position it codes: its alts are kept only where the position
+    is one whose reference base and alts hold all four bases (the only position Q
+    codes), and none elsewhere. An ALT that no sample carries counts, as CRISPRitz
+    codes it: the dictionary lists it, and the Tier-0 registry, which holds no record
+    of it, lists the 0-based ``chr_pos`` as such a position itself
+    (``RegistryReader.four_base``). Q is the four bases, as every other code is the
+    bases it names: an ALT that is no base (the '*' of a spanning deletion, which the
+    dictionary of CRISPRitz 2.10.0 lists) is no allele of it. Never invents a carrier
+    -- only removes a target-inconsistent alt."""
+    if code in ("Q", "q"):
+        held = {str(ref_base).upper()} | {a.upper() for a in alts}
+        if {"A", "C", "G", "T"} <= held or (
+                myreg is not None and chr_pos is not None
+                and myreg.four_base(chr_pos + 1)):
+            return {a for a in alts if a in iupac_code_set[code]}
+        return set()
+    allowed = iupac_code_set.get(code)
+    if allowed is None:
+        return set(alts)
+    return {a for a in alts if a in allowed}
+
+
 def retrieveFromDict(chr_pos):
     """Return the 5-tuple (snp_list, sample_list, rsID_list, AF_list, snp_info_list)
     for a candidate off-target position.
@@ -325,6 +378,23 @@ def _aligned_mm(seq_prerevert, realTarget, guide_no_pam, revert):
         if i < len(guide_no_pam) and ch != "-" and ch.upper() != guide_no_pam[i]:
             mm += 1
     return mm
+
+
+def _aligned_pam_misses(seq_prerevert, realTarget, revert):
+    """Number of PAM positions of an ungapped, pre-revert candidate sequence whose base
+    the PAM does not allow, the sequence aligned as ``_aligned_mm`` aligns it (the
+    finalizer drops a candidate with any)."""
+    seq = (
+        reverse_complement_table("".join(seq_prerevert))
+        if revert
+        else "".join(seq_prerevert)
+    )
+    t = list(seq)
+    for pos, ch in enumerate(realTarget):
+        if ch == "-":
+            t.insert(pos, "-")
+    return sum(1 for i, ch in enumerate(t[pam_begin:pam_end])
+               if ch.upper() not in iupac_code_set[pam[i]])
 
 
 def _ref_with_bulges(refSeq_final, realTarget, guide_no_pam):
@@ -380,14 +450,18 @@ def _record_snp_snp_cooc(final_line, phase_state):
     joined for a multi-SNP haplotype); final_line[12] carries the carrier samples (or the
     "NA" sentinel on the registry-only path). We emit a row ONLY when >=2 DISTINCT SNP
     positions contribute -- a genuine SNP+SNP co-occurrence -- and report the min marginal
-    AF as the conservative joint-AF upper bound (see the companion module)."""
+    AF as the conservative joint-AF upper bound (see the companion module). Positions,
+    not variants: two alts of one position are no co-occurrence (one haplotype holds one
+    allele there)."""
     if myreg is None or _snpsnp_companion is None:
         return  # GATE: no registry -> not a 2.5.x variant install -> no companion
     try:
-        positions = str(final_line[17]).split(",")  # creating-SNP positions
+        positions = str(final_line[17]).split(",")  # creating SNPs, <chrom>_<pos>_<ref>_<alt>
         afs = str(final_line[16]).split(",")         # creating-SNP marginal AFs
-        # need >=2 DISTINCT, non-sentinel SNP positions to be a SNP+SNP co-occurrence
-        real_pos = [p for p in positions if p not in ("", "NA", ".", "n")]
+        # need >=2 DISTINCT, non-sentinel SNP positions to be a SNP+SNP co-occurrence; a
+        # token is split from the right, a contig name can hold '_'
+        real_pos = [p.rsplit("_", 3)[-3] if p.count("_") >= 3 else p
+                    for p in positions if p not in ("", "NA", ".", "n")]
         if len(set(real_pos)) < 2:
             return
         key = (final_line[3], final_line[4], final_line[6], final_line[1], final_line[2])
@@ -654,19 +728,12 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
         snpToReplace, sampleSet, rsID, AF_var, snpInfo = retrieveFromDict(
             pos_c + int(split[4])
         )
-        # #139: the dict-less registry returns EVERY alt at this genomic position
-        # (``alts_at``), but the target's own IUPAC column ``c`` encodes exactly the
-        # ref+alt CRISPRitz used for THIS off-target. At a bulge boundary a
-        # position-keyed alt that the target column does NOT permit would steer the
-        # enumerator to the wrong allele and drop the real variant-bulge off-target.
-        # Keep only alts representable by the column's IUPAC code (a no-op wherever the
-        # code already permits the alt, i.e. every non-bulge column). Never invents a
-        # carrier -- only removes a target-inconsistent alt.
-        _allowed = iupac_code_set.get(c)
-        alts, carrier_gts, alt_index, info, ps = [], [], [], [], None
+        # Every alt of the position, its carriers' genotypes read against its own
+        # allele index (a record listing several ALTs on one VCF line keeps its raw
+        # 1|2 under each; a Tier-1 store compiled by this release holds them read so
+        # already): "1" holds the alt.
+        gt_maps = []
         for i, elem in enumerate(snpToReplace):
-            if _allowed is not None and elem not in _allowed:
-                continue
             # tokens are "sampleID:gt"; split each on its FIRST ':' (never on '|').
             gt_map = {}
             for tok in sampleSet[i]:
@@ -675,15 +742,17 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                 else:
                     sid, gt = tok, ""
                 gt_map[sid.strip()] = gt.strip()
+            gt_maps.append((elem, gt_map))
+        gt_maps = _site.per_alt_entries(gt_maps)
+        # #139: only the alts the target's own column stands for (_column_alleles).
+        _admitted = _column_alleles(c, refSeq[pos_c], snpToReplace, pos_c + int(split[4]))
+        alts, carrier_gts, alt_index, info, ps = [], [], [], [], None
+        for i, elem in enumerate(snpToReplace):
+            if elem not in _admitted:
+                continue
             alts.append(elem)
-            carrier_gts.append(gt_map)
-            # Resolve THIS (pos, alt) record's alt-index token (multiallelic-safe)
-            # from its own carrier genotypes. Ploidy 2 is a safe upper bound for the
-            # token scan (parse_haplotypes just returns more slots; the classification
-            # only cares which non-ref token the record's carriers share).
-            alt_index.append(
-                _obshap._alt_index_for_record(gt_map.values(), parse_haplotypes, 2)
-            )
+            carrier_gts.append(gt_maps[i][1])
+            alt_index.append("1")
             info.append([rsID[i], AF_var[i], snpInfo[i]])
         positions.append({
             "pos_c": pos_c,
@@ -835,9 +904,24 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     #    legacy embedded-refSeq/sentinel-33 representation, which is present on every
     #    IUPAC candidate). The ``enumerate_observed_haplotypes`` contract never yields
     #    the empty/reference haplotype, so the reference row is our responsibility here.
+    #    Past _MAX_UNIONS unions, a PUTATIVE sample's one union takes, at a column where it
+    #    carries two or three alts, the one nearest the guide: one the PAM allows, then the
+    #    one with the fewest mismatches, on a tie the smaller.
+    _misses_alone = {}
+
+    def _nearest(pos_c, alts):
+        for alt in alts:
+            if (pos_c, alt) not in _misses_alone:
+                seq = list(refSeq)
+                seq[pos_c] = alt
+                _misses_alone[(pos_c, alt)] = (
+                    _aligned_pam_misses(seq, realTarget, revert),
+                    _aligned_mm(seq, realTarget, guide_no_pam, revert))
+        return min(alts, key=lambda alt: (_misses_alone[(pos_c, alt)], alt))
+
     haplotypes = _obshap.enumerate_observed_haplotypes(
         positions, refSeq, parse_haplotypes, ploidy_of, current_chr,
-        max_putative=IUPAC_CAP,
+        max_putative=IUPAC_CAP, max_unions=_MAX_UNIONS, choose=_nearest,
     )
 
     # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block).
@@ -948,7 +1032,25 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
             snpToReplace, sampleSet, rsID, AF_var, snpInfo = retrieveFromDict(
                 pos_c + int(split[4])
             )
+            # #139, as the observed path: only the alts the target's own column stands
+            # for, so the two paths agree (the dictionary lists the alts the enrichment
+            # coded at the position, and one the column does not hold is no allele of
+            # this off-target). Not on a sites-only registry: it lists every record of
+            # its VCF, the earlier records of a split site that an index built by
+            # CRISPRitz 2.9.1 or earlier never coded and non-PASS records included, each
+            # the panel's own allele at its own position, and this path substitutes
+            # every one, as up to 2.8.1 (the finalizer's budget and PAM gates decide the
+            # row). Filtered, a search of the published mega index lost them: on chr22,
+            # for five guides, the highest CFD of 114 sites fell (TRAC's
+            # chr22:22,900,049 from 0.524 to 0.127).
+            if _sites_only_registry:
+                _admitted = set(snpToReplace)
+            else:
+                _admitted = _column_alleles(c, refSeq[pos_c], snpToReplace,
+                                            pos_c + int(split[4]))
             for i, elem in enumerate(snpToReplace):
+                if elem not in _admitted:
+                    continue
                 listReplaceTarget = list(refSeq)
                 listReplaceTarget[pos_c] = elem
                 listInfo = [[rsID[i], AF_var[i], snpInfo[i]]]
@@ -1085,9 +1187,14 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                     if any_v is not None:
                         greedy_info = list(any_v[2])
                         greedy_samples = set(any_v[1])
-                totalDict[count][0] = {
-                    ("greedy", 0): [greedy_seq, greedy_samples, greedy_info]
-                }
+                # No column of the window admitted an alt (each code a neighbouring
+                # position's, #139): no variant row, as without the cap. On a
+                # registry-only install, where a row needs no carrier, an entry naming no
+                # variant stopped the post-analysis (IndexError below).
+                totalDict[count][0] = (
+                    {("greedy", 0): [greedy_seq, greedy_samples, greedy_info]}
+                    if greedy_info else {}
+                )
                 # WORST-CASE CFD representative (mirrors the observed fast path,
                 # new_simple_analysis.py:700). The min-mismatch greedy above does NOT
                 # maximize CFD (CFD is a position-WEIGHTED product -- a seed mismatch
@@ -1181,16 +1288,32 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 # lossless via the observed enumerator, and a per-sample union would risk
                 # phantom (trans-as-cis) haplotypes. Default OFF -> byte-identical.
                 if _LOSSLESS_DENSE and registry_only_mode:
-                    _union_seq = list(refSeq)
-                    _union_info = []
-                    for _pc, _cands in by_pos.items():
-                        for _elem, _v in _cands:
+                    # A haplotype holds one allele of a position: one union per choice of
+                    # alt at the columns holding two or three (CRISPRitz 2.10.0 codes every
+                    # ALT) while there are at most _MAX_UNIONS of them; past that, one
+                    # union with the alt the greedy representative took at each such
+                    # column (else the column's first).
+                    _cols = sorted(by_pos)
+                    _choices = [list(by_pos[_pc]) for _pc in _cols]
+                    _n = 1
+                    for _ch in _choices:
+                        _n *= len(_ch)
+                    if _n > _MAX_UNIONS:
+                        for _k, _pc in enumerate(_cols):
+                            if len(_choices[_k]) > 1:
+                                _took = [_cv for _cv in _choices[_k]
+                                         if _cv[0] == greedy_seq[_pc]]
+                                _choices[_k] = _took or _choices[_k][:1]
+                    for _u, _pick in enumerate(itertools.product(*_choices)):
+                        _union_seq = list(refSeq)
+                        _union_info = []
+                        for _pc, (_elem, _v) in zip(_cols, _pick):
                             _union_seq[_pc] = _elem
                             _union_info.extend(_v[2])
-                    if _union_seq != list(greedy_seq):
-                        totalDict[count][0][("lossless_hap", 2)] = [
-                            _union_seq, set(), _union_info
-                        ]
+                        if _union_seq != list(greedy_seq):
+                            totalDict[count][0][("lossless_hap", 2 + _u)] = [
+                                _union_seq, set(), _union_info
+                            ]
         if revert:
             refSeq = reverse_complement_table(refSeq)
         for count in totalDict:
@@ -2014,15 +2137,16 @@ if registry_only_mode:
         f"with degraded (NA) Samples -- no genotype tier to resolve carriers"
         f"{' (aggregate info_af registry; sample-less dict ignored)' if _aggregate_registry else ''}."
     )
+_sites_only_registry = registry_only_mode and (
+    _aggregate_registry or getattr(myreg, "manifest", {}).get("data_type") == "sites-only"
+)
 # A sites-only dataset has no genotypes for a per-sample search to resolve: its rows are
 # the population-level path's whatever the search's mode (each dataset of a search has a
 # post-analysis of its own). On the enumeration of the per-sample path, which joins
 # variants only through shared carriers, it lost its multi-variant worst cases: whole
 # sites and higher scores, in a search beside a genotyped dataset, where the mode is
 # per-sample by default, too.
-if registry_only_mode and _twopass_emit is not None and (
-    _aggregate_registry or getattr(myreg, "manifest", {}).get("data_type") == "sites-only"
-):
+if _sites_only_registry and _twopass_emit is not None:
     if not _FAST_MODE:
         print(f"Sites-only dataset on {current_chr}: population-level post-analysis.")
     _FAST_MODE = True

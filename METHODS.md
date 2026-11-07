@@ -304,7 +304,23 @@ an older index falls back to genotype-store presence. The shipped indexes are
 `HGDP1kGP` = **genotyped-phased** (the re-phased default, above), `HPRC` =
 **genotyped-phased**, and `mega` = **sites-only**;
 `hybrid` is the fourth possible value, for a merged panel mixing phased and unphased
-sources.
+sources. A registry compiled from a genotyped panel's dictionaries also lists, in its
+manifest (`four_base_positions`), the positions whose reference base and SNP ALTs hold all
+four bases, an ALT that no sample carries counted: CRISPRitz 2.10.0 codes such a position Q,
+any base, and codes an ALT that no sample carries as any other, but the registry holds no
+record of such an ALT (it has no group). The SNP post-analysis of a genotyped panel keeps, at a
+target's column, only the ALTs the column's code holds: its dictionary and the tiers compiled
+from it list what the enrichment coded, so an ALT the code does not hold is another
+position's. It reads a Q column's ALTs only at such a position (a Q at a bulge boundary can be
+a neighbouring position's), so on an index with the tiers alone it takes the position from
+this list. A sites-only registry is read from its VCF, every record of it, and lists ALTs the
+enrichment never coded: on an index built by CRISPRitz 2.9.1 or earlier, which codes the last
+PASS record of a split site alone (Homogenization, above), the site's earlier records, and on
+any index non-PASS records. Each is the panel's own allele at its own position, so the
+post-analysis of a sites-only dataset substitutes every ALT its registry lists at a variant
+column, whatever the column's code, a Q included, as up to 2.8.1. A target that only such an
+ALT brings within the search's budget is still not found on such an index; a mega index
+rebuilt by CRISPRitz 2.10.0 codes every PASS ALT.
 
 ### Re-indexing for a different PAM
 
@@ -427,7 +443,11 @@ input genotypes:
   individual could plausibly carry — bounded by `CRISPRME_IUPAC_CAP` (default **10**): an individual
   carrying more variants than the cap in a single window falls back to the union
   (the combinatorial blow-up is confined to that individual, and the dense window
-  is surfaced in the high-variant-density BED).
+  is surfaced in the high-variant-density BED). A haplotype holds one allele of a position,
+  so no subset and no union takes two ALTs of one: where the individual carries two or three
+  ALTs of a position (a `1/2` heterozygote, or a phased slot holding two), there is one union
+  per choice of ALT while that makes at most 16, and past that one union, holding at each such
+  position the ALT nearest the guide (one the PAM allows, then the fewest mismatches).
 - **Mixed data** (e.g. a merge of phased and unphased sources, or block-phased
   VCFs from WhatsHap/GATK/HapCUT2). Genotypes are handled conservatively:
   same-individual variant-sets are enumerated; combinations that would require
@@ -1204,16 +1224,31 @@ indel row when in budget). On chr22 of the HGDP + 1000 Genomes panel, per sample
 affects 2.2% of SNP row-blocks, and 545 have no carrier that holds the sequence. It only
 over-lists, 2.8.0 behaves the same, and it is fixed in the next release.
 On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists of the results
-tables are not in the order of its `Variant_info_genome`: the merge of a cluster's rows
-(`remove_contiguous_samples.py`) sorts the three lists each on its own, as text, and keeps
-each value once, so the n-th rsID or MAF need not be the n-th variant's, and two variants
-of one frequency show it once. On ACTGA (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per
-sample, genome-wide, HGDP + 1000 Genomes), 953 of 1,967 rows of two or more SNPs and 118 of
-293 rows of an indel and one or more SNPs list their rsIDs in another order than their
-variants (in the highest-CFD columns). The report's MAF, the lowest frequency of the list,
-does not depend on it; the rsIDs its `Variant` column gives after the variants, and the rsIDs
-and AFs of `observed_haplotypes.tsv` and of a site's haplotype table in the report, are in
-the list's order. 2.8.0 behaves the same, and it will be fixed in the next release.
+tables are in the order of its `Variant_info_genome`, one rsID and one AF a variant, and two
+variants of one frequency give it each: the merge of a cluster's rows
+(`remove_contiguous_samples.py`) keeps each variant with its own rsID and AF. A variant that
+two datasets of a search give with two rsIDs or frequencies lists both pairs, one after the
+other; an rsID field holding two IDs (a VCF ID `rs1;rs2`) reads `rs1;rs2`, one item. Up to
+2.8.1 the merge sorted the three lists each on its own, as text, and kept each value once: on
+ACTGA (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per sample, genome-wide, HGDP + 1000 Genomes)
+953 of 1,967 rows of two or more SNPs and 118 of 293 rows of an indel and one or more SNPs
+listed their rsIDs in another order than their variants. The report's MAF, the lowest
+frequency of the list, did not depend on it.
+An indel row gives its record's first ID, and so does each ALT of a VCF line that lists
+several ALTs: CRISPRitz `add-variants` writes the first ID alone into the indel log for every
+indel record, whatever the number of its ALTs, and into the per-sample dictionary for each
+ALT of a line of several, so no reader of either can recover the others. A SNP of a record of
+one ALT keeps the record's whole ID column, which CRISPRme gives as one item (`rs1;rs2`).
+So where the ID column lists one ID per ALT (`rs1;rs2`, as `bcftools norm -m+` and
+`gnomAD-converter --multiallelic` join them) the rows of the second and later ALTs give the
+first's (`rs1`); and a record of a VCF split with `bcftools norm -m -any`, as the published
+panels are, keeps the line's whole ID column, which its SNP rows give whole and its indel rows
+by the first ID. The mega's VCF lists two IDs for 68,017 of the 222,283 PASS indel records of
+chr22 (`22:22652455:TTATG:T;rs1372713682`, whose rows give `22:22652455:TTATG:T`), the
+HGDP + 1000 Genomes panel's for 8 of its 240,557; the sites-only (mega) registry builder,
+which names the mega's SNPs, gives each ALT of a line its own ID where the ID column lists one
+per ALT. The input validator says so where it finds a line of several ALTs (in each VCF's
+first 1,000 records on every run, anywhere with `--full_input_validate`).
 The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
 alignments may exceed it (the report surfaces the observed maximum), while an indel row,

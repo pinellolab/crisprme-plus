@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import math
 
+import site_alleles
 from tier0_registry import (
     Counts,
     derive_record_stats,
@@ -515,11 +516,30 @@ def summarize(pos_alts, tier0_reader, gt_reader, axis, ploidy_of, phased,
 
     # Per-pair carrier maps: sid -> gt string (alt-carriers only). A pair with a
     # missing record (no carriers on disk) has an EMPTY map -> zero combination
-    # carriers (an off-target no one carries).
+    # carriers (an off-target no one carries). Each read against its own alt's allele
+    # index among the position's alts (site_alleles.per_alt: a store compiled before
+    # this release keeps a multi-ALT line's raw 1|2). ``stacked[i]`` holds the samples
+    # a phased slot of which holds the pair's alt and another alt of its position:
+    # that slot is no haplotype, so such a carrier is decided without phase.
     pair_carriers = []
+    stacked = []
     for (pos, alt) in pos_alts:
-        recon = gt_reader.carriers(pos, alt)
-        pair_carriers.append(dict(recon) if recon else {})
+        site = {}
+        alts_at = getattr(gt_reader, "alts_at", None)
+        for a in (alts_at(pos) if alts_at is not None else [alt]):
+            recon = gt_reader.carriers(pos, a)
+            if recon:
+                site[a] = dict(recon)
+        if alt not in site:
+            recon = gt_reader.carriers(pos, alt)
+            site[alt] = dict(recon) if recon else {}
+        site = site_alleles.per_alt(site)
+        pair_carriers.append(site.get(alt, {}))
+        both = site_alleles.two_alts_on_a_slot(site) if len(site) > 1 else {}
+        own = site.get(alt, {})
+        stacked.append({s for s, slots in both.items()
+                        if any(site_alleles.gt_tokens(own.get(s, ""))[0][h:h + 1] == ["1"]
+                               for h in slots)})
 
     # The combination's candidate carriers are the INTERSECTION (by sample_id) of
     # all pairs' carrier sets: an individual must be an alt-carrier at EVERY pair.
@@ -588,7 +608,12 @@ def summarize(pos_alts, tier0_reader, gt_reader, axis, ploidy_of, phased,
 
         gts = [pair_carriers[i][sid] for i in range(k)]
 
-        if phased:
+        # Decided with phase only where every genotype of the carrier is phased and none
+        # of its slots holds two alts of one position: an unphased one ('/': a 1/0 whose
+        # slot the genotypes of a line of several ALTs cannot tell, or the merge of a
+        # phased and an unphased record of one REF>ALT) gives no slot order.
+        if phased and not any(sid in stacked[i] for i in range(k)) \
+                and not any(site_alleles.gt_tokens(g)[1] == "unphased" for g in gts):
             ac_haps, is_carrier, is_hom = _phased_decide(gts, ploidy, alt_index)
         else:
             ac_haps, is_carrier, is_hom = _unphased_decide(gts, ploidy, alt_index)

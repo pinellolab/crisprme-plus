@@ -31,6 +31,7 @@ test_indel_haplotype_resolution.py).
 import bisect
 import itertools
 
+import site_alleles
 from overlay_indel_snps import map_fake_offset_to_real
 
 CONFIRMED = "CONFIRMED"
@@ -109,62 +110,6 @@ def cis_cooccurrence(indel_gt_by_sample, snp_gts_by_sample):
     return cis_carriers, phase_state, ac
 
 
-def forward_snp_tokens(reg, chrom, used, global_group_id="global"):
-    """Build FORWARD-STRAND variant tokens / rsIDs / MAFs for the cis SNP(s).
-
-    Used by the INDEL post-analysis CONFIRMED-cis branch to enrich the indel row
-    with the full real-haplotype variant set (indel + co-occurring SNPs) so the
-    report's Variant column + observed_haplotypes companion list ALL the variants
-    the off-target actually uses, not the indel alone.
-
-    Args:
-      reg: a Tier-0 RegistryReader (duck-typed: ``alts_at(pos1)`` -> list[str],
-        ``ref(pos1, alt)`` -> forward-strand ref base, ``rsid(pos1, alt)`` ->
-        rsID or None, ``lookup(pos1, alt)`` -> {group_id: Counts} with
-        ``.allele_freq()``). All reads are FORWARD-strand by construction.
-      chrom: chromosome string for the token prefix.
-      used: the ``used_snps_for_target`` output -- a list of ``(real0, rsid, gt)``
-        tuples where ``real0`` is a 0-based reference position (registry key =
-        real0 + 1).
-      global_group_id: the registry's GLOBAL group id (default "global").
-
-    CRITICAL: the ``rsid``/``gt`` carried in ``used`` came from the caller's
-    ``snp_at`` closure, whose REF/ALT are strand-COMPLEMENTED to the target strand
-    (for the guide-vs-alt test only). We therefore re-read REF/ALT/rsID/AF straight
-    from the registry here so every token is the forward-strand
-    ``chrom_pos1_REF_ALT`` that resultIntegrator expects -- it splits the variant
-    column on ',' and strand-corrects each token itself. The token / rsID / MAF
-    format mirrors the SNP path EXACTLY
-    (simple_analysis_registry.retrieve_5tuple):
-      * token : ``chrom + "_" + str(pos1) + "_" + ref + "_" + alt``
-      * rsID  : ``reg.rsid(pos1, alt)`` or "." when missing
-      * MAF   : ``"%.6g" % global_allele_freq`` (same formatting as the SNP path)
-
-    Returns three POSITION-ALIGNED lists ``(tokens, rsids, mafs)`` so the caller can
-    append them 1:1 to the row's variant / rsID / MAF columns. A SNP whose registry
-    record is absent (defensive -- it was just read in this scope) is skipped from
-    all three lists together, so the 1:1 alignment is never broken.
-    """
-    tokens, rsids, mafs = [], [], []
-    for (real0, _rs, _g) in used:
-        pos1 = real0 + 1
-        alts = reg.alts_at(pos1)
-        if not alts:
-            continue
-        alt = alts[0]  # biallelic SNP position (same choice as the decode's snp_at)
-        ref = reg.ref(pos1, alt) or "N"
-        rsid = reg.rsid(pos1, alt)
-        if rsid is None:
-            rsid = "."
-        groups = reg.lookup(pos1, alt)
-        gcnt = groups.get(global_group_id) if groups else None
-        af = gcnt.allele_freq() if gcnt is not None else 0.0
-        tokens.append(chrom + "_" + str(pos1) + "_" + ref + "_" + alt)
-        rsids.append(rsid)
-        mafs.append("%.6g" % af)
-    return tokens, rsids, mafs
-
-
 def joint_af(ac, an):
     """Joint indel+SNP cis allele frequency (ac / an), or 0.0 if an falsy."""
     return (ac / an) if an else 0.0
@@ -184,8 +129,10 @@ def putative_joint_af(marginal_afs):
     return min(afs)
 
 
-# The IUPAC ambiguity chars an overlaid SNP position can carry in the target seq.
-_IUPAC = set("RYSWKMBDHVryswkmbdhv")
+# The IUPAC ambiguity chars an overlaid SNP position can carry in the target seq, and Q,
+# the code of a position whose reference base and SNP ALTs hold all four bases (N is a
+# gap, never a variant).
+_IUPAC = set("RYSWKMBDHVQryswkmbdhvq")
 
 _COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 
@@ -311,7 +258,7 @@ def used_snps_for_target(guide_seq, target_seq, offset_to_real, snp_at,
 _CODE = {
     "A": "A", "C": "C", "G": "G", "T": "T",
     "R": "AG", "Y": "CT", "S": "CG", "W": "AT", "K": "GT", "M": "AC",
-    "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG", "N": "ACGT",
+    "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG", "N": "ACGT", "Q": "ACGT",
 }
 _BASE_ORDER = "ACGT"
 
@@ -364,14 +311,9 @@ class SnpColumn(object):
         self.known = known
 
 
-def _gt_tokens(gt):
-    """(allele tokens, kind) of a genotype: kind is "phased" ('|'), "unphased" ('/')
-    or "haploid" (one token, e.g. a male chrX call)."""
-    if "|" in gt:
-        return gt.split("|"), "phased"
-    if "/" in gt:
-        return gt.split("/"), "unphased"
-    return [gt], "haploid"
+# (allele tokens, kind) of a genotype: kind is "phased" ('|'), "unphased" ('/') or
+# "haploid" (one token, e.g. a male chrX call)
+_gt_tokens = site_alleles.gt_tokens
 
 
 def kept_bases(ref, alt):
@@ -611,14 +553,9 @@ class IndelCarriers(object):
                 self.total_slots += len(islots)
 
 
-def _for_alt(gt, token):
-    """A genotype as "this alt or not": ``token``, the allele index of the alt, becomes
-    "1", any other allele "0"; a missing allele stays "."."""
-    toks, kind = _gt_tokens(gt)
-    norm = ["1" if t == token else ("." if t == "." else "0") for t in toks]
-    if kind == "haploid":
-        return norm[0]
-    return ("|" if kind == "phased" else "/").join(norm)
+# A genotype as "this alt or not": the alt's allele index becomes "1", any other allele
+# "0", a missing allele stays "."
+_for_alt = site_alleles.for_alt
 
 
 def biallelic_site(rec):
@@ -633,36 +570,9 @@ def biallelic_site(rec):
     A, 1|0 under T. Where the genotypes cannot say which index is the alt (every carrier
     of two alts is 1|2) no slot can be tied to it: "1/0", one copy on an unknown slot,
     so the carrier is resolved PUTATIVE on the alleles it does carry. A position with
-    no foreign index (split or biallelic records) comes back as it is."""
-    plain = ("0", "1", ".")
-    if all(t in plain for carriers in rec.values() for g in carriers.values()
-           for t in _gt_tokens(g)[0]):
-        return rec
-    shared = {}
-    for alt, carriers in rec.items():
-        common = None
-        for g in carriers.values():
-            toks = {t for t in _gt_tokens(g)[0] if t not in ("0", ".")}
-            common = toks if common is None else common & toks
-        shared[alt] = common or set()
-    settled = True
-    while settled:
-        settled = False
-        taken = {next(iter(c)) for c in shared.values() if len(c) == 1}
-        for alt, c in shared.items():
-            if len(c) > 1 and c & taken:
-                shared[alt] = c - taken
-                settled = True
-    out = {}
-    for alt, carriers in rec.items():
-        c = shared[alt]
-        if len(c) == 1:
-            token = next(iter(c))
-            out[alt] = {s: _for_alt(g, token) for s, g in carriers.items()}
-        else:
-            out[alt] = {s: "/".join(["1"] + ["0"] * (len(_gt_tokens(g)[0]) - 1))
-                        for s, g in carriers.items()}
-    return out
+    no foreign index (split or biallelic records) comes back as it is. The rule is
+    every reader's (site_alleles.per_alt)."""
+    return site_alleles.per_alt(rec)
 
 
 def resolve_carriers(columns, indel_gts, phase_known=True, others=()):
@@ -926,7 +836,8 @@ def parse_dict_value(value):
     """Parse one per-sample SNP dictionary value (``my_dict_<chrom>.json``): entries
     ``<sample:gt,...>;<ref>,<alt>;<rsID>;<AF>`` joined by '$', one per alt. Returns
     ``[(ref, alt, rsid, af, {sample: gt})]`` for the single-base ACGT alts (the SNPs
-    the overlay codes); malformed entries are skipped."""
+    the overlay codes), one per REF>ALT, each genotype read against its own alt's
+    allele index (site_alleles.read_records); malformed entries are skipped."""
     out = []
     for entry in str(value).split("$"):
         parts = entry.split(";")
@@ -942,11 +853,15 @@ def parse_dict_value(value):
         for tok in parts[0].split(","):
             sid, sep, gt = tok.strip().partition(":")
             if sid and sep:
-                carriers[sid] = gt.strip()
+                gt = gt.strip()
+                carriers[sid] = (site_alleles.merge_gt(carriers[sid], gt)
+                                 if sid in carriers else gt)
         rsid = parts[2].strip() or "."
         af = parts[3].strip() if len(parts) > 3 else ""
         out.append((ref, alt, rsid, af, carriers))
-    return out
+    # each genotype read against its own alt's allele index, two records of one REF>ALT
+    # merged (a slot carries the alt if either puts it there): site_alleles.read_records
+    return site_alleles.read_records(out)
 
 
 def load_dict_snps(dict_path, chrom, positions):

@@ -82,12 +82,69 @@ def _holds_indel_token(variants):
     return False
 
 
-def _merge_row(kept, ele, snp_info):
+def _triples(row, snp_info):
+    """(variant, rsID, AF) of each variant of a row as the post-analysis writes it, one
+    to one, in its order: AF None where the row has no AF (a sites-only dataset's, which
+    adjust_cols.py leaves empty). None where the lists are not one to one (no row the
+    post-analysis writes)."""
+    toks = row[snp_info].split(",")
+    n = len(toks)
+    rsids = row[snp_info - 2].split(",") if row[snp_info - 2] else ["."] * n
+    afs = row[snp_info - 1].split(",") if row[snp_info - 1] else [None] * n
+    if len(rsids) != n or len(afs) != n:
+        return None
+    return list(zip(toks, rsids, afs))
+
+
+def _write_variant_lists(row, snp_info, triples):
+    """A variant row's variant, rsID and AF columns from its (variant, rsID, AF)
+    triples, those of the rows merged into it included: each variant once, sorted as text
+    as before, and the rsID and AF lists made of the distinct triples, by variant, so
+    the n-th rsID and AF are those of the n-th variant wherever the row holds one rsID
+    and AF a variant (two datasets that give one variant two frequencies list both, one
+    after the other). Sorting each list on its own, as text, and keeping each value
+    once put an rsID or AF in another variant's place, and two variants of one frequency
+    showed it once. A dataset with no AF (sites-only) adds no AF item where the variant
+    has one from another dataset, nor an rsID item it repeats. A row whose lists are not
+    one to one keeps the old rule. Returns the triples written (None on the old rule)."""
+    if triples is None:
+        row[snp_info] = ",".join(sorted(set(row[snp_info].split(","))))
+        row[snp_info - 2] = ",".join(sorted(set(row[snp_info - 2].split(","))))
+        row[snp_info - 1] = ",".join(sorted(set(row[snp_info - 1].split(","))))
+        return None
+    pairs = {}
+    for tok, rsid, af in triples:
+        have = pairs.setdefault(tok, [])
+        if (rsid, af) not in have:
+            have.append((rsid, af))
+    any_af = any(af is not None for _tok, _rsid, af in triples)
+    out = []
+    for tok in sorted(pairs):
+        have = pairs[tok]
+        with_af = [p for p in have if p[1] is not None]
+        named = {p[0] for p in with_af}
+        kept = with_af + [p for p in have
+                          if p[1] is None and p[0] != "." and p[0] not in named]
+        for rsid, af in sorted(kept or have[:1], key=lambda p: (p[0], p[1] or "")):
+            out.append((tok, rsid, af))
+    row[snp_info] = ",".join(sorted(pairs))
+    row[snp_info - 2] = ",".join(rsid for _tok, rsid, _af in out)
+    row[snp_info - 1] = (",".join("NA" if af is None else af for _tok, _rsid, af in out)
+                         if any_af else "")
+    return out
+
+
+def _merge_row(kept, ele, snp_info, triples):
     """Add a merged row's samples, rsIDs and AFs to the row that stays (_merged_list: a
-    sites-only dataset's empty lists add no empty item)."""
+    sites-only dataset's empty lists add no empty item). ``triples`` holds, by row (id),
+    the (variant, rsID, AF) of the rows merged into it (_triples), which the merge
+    writes back one to one (_write_variant_lists)."""
     kept[true_guide - 2] = _merged_list(
         kept[true_guide - 2], ele[true_guide - 2]
     )  # true_guide - 2 points to samples column
+    mine = triples[id(kept)] if id(kept) in triples else _triples(kept, snp_info)
+    theirs = triples[id(ele)] if id(ele) in triples else _triples(ele, snp_info)
+    triples[id(kept)] = mine + theirs if mine is not None and theirs is not None else None
     kept[snp_info - 2] = _merged_list(
         kept[snp_info - 2], ele[snp_info - 2]
     )  # snp_info - 2 points to rsID column
@@ -96,7 +153,7 @@ def _merge_row(kept, ele, snp_info):
     )  # snp_info - 1 points to AF column
 
 
-def _fold_same_carriers(rows, fold_of, snp_info):
+def _fold_same_carriers(rows, fold_of, snp_info, triples):
     """Alignments of one site naming the same variants with the same carriers are one
     entry, as for every other row: the first of them in ``rows``, which is sorted by the
     file's own criterion, so the entry is the best by it. It takes the rsIDs and AFs of
@@ -111,13 +168,14 @@ def _fold_same_carriers(rows, fold_of, snp_info):
         if ident is None:
             out.append(row)
         elif ident in kept:
-            _merge_row(kept[ident], row, snp_info)
+            _merge_row(kept[ident], row, snp_info, triples)
         else:
             kept[ident] = row
             out.append(row)
     for row in kept.values():
-        for col in (true_guide - 2, snp_info - 2, snp_info - 1):
-            row[col] = ",".join(sorted(set(row[col].split(","))))
+        row[true_guide - 2] = ",".join(sorted(set(row[true_guide - 2].split(","))))
+        triples[id(row)] = _write_variant_lists(
+            row, snp_info, triples[id(row)] if id(row) in triples else _triples(row, snp_info))
     return out
 
 
@@ -128,6 +186,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     list_ref = []
     seen_ref = set()
     dict_var = {}
+    triples = {}  # a variant row (id) -> (variant, rsID, AF) of it and the rows merged in
     for ele in cluster:
         if ele[snp_info] == "n":
             # list (and count in #Seq_in_cluster) each reference alignment once. The
@@ -158,7 +217,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             if _holds_indel_token(ele[snp_info]):
                 key += (ele[2].upper(),)
             if key in dict_var.keys():
-                _merge_row(dict_var[key][0], ele, snp_info)
+                _merge_row(dict_var[key][0], ele, snp_info, triples)
             else:
                 dict_var[key] = [ele]
     # Alignments of one site naming the same variants with the same carriers are folded
@@ -190,13 +249,11 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     # for target in final_list_best_var:
     for target in final_list_best_var:
         # remove duplicates; sorted() keeps the order deterministic across
-        # processes (bare set() iteration is PYTHONHASHSEED-dependent).
-        # remove duplicates into snp info col
-        target[snp_info] = ",".join(sorted(set(target[snp_info].split(","))))
-        # remove duplicate into rsID col
-        target[snp_info - 2] = ",".join(sorted(set(target[snp_info - 2].split(","))))
-        # remove duplicate into AF col
-        target[snp_info - 1] = ",".join(sorted(set(target[snp_info - 1].split(","))))
+        # processes (bare set() iteration is PYTHONHASHSEED-dependent). The variant,
+        # rsID and AF columns go together, each rsID and AF in its variant's place.
+        triples[id(target)] = _write_variant_lists(
+            target, snp_info,
+            triples[id(target)] if id(target) in triples else _triples(target, snp_info))
         # remove duplicate into samples col
         target[true_guide - 2] = ",".join(sorted(set(target[true_guide - 2].split(","))))
         # append to temp list
@@ -531,7 +588,8 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         *_rep_tiebreak(x),
                     ),
                 )
-            final_list_best_var = _fold_same_carriers(final_list_best_var, fold_of, snp_info)
+            final_list_best_var = _fold_same_carriers(final_list_best_var, fold_of, snp_info,
+                                                     triples)
 
         if var_only:  # no ref found
             # count the residual targets in the list
@@ -807,7 +865,8 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         *_rep_tiebreak(x),
                     ),
                 )
-            final_list_best_var = _fold_same_carriers(final_list_best_var, fold_of, snp_info)
+            final_list_best_var = _fold_same_carriers(final_list_best_var, fold_of, snp_info,
+                                                     triples)
 
         if var_only:  # no ref found
             # count the residual targets in the list
