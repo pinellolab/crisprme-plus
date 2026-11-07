@@ -50,6 +50,8 @@ echo "Dockerfile header: $(grep -E '^# CRISPRme\+ ' Dockerfile)"
 echo "latest tag:  $(git tag --sort=-v:refname | head -1)"
 echo "latest release: $(gh release list --repo pinellolab/crisprme-plus -L1)"
 curl -sL https://raw.githubusercontent.com/bioconda/bioconda-recipes/master/recipes/crisprme/meta.yaml | grep -E 'set version|sha256|number:'
+# the version policy: the release X.Y.Z and its CRISPRitz pin share X.Y
+echo "CRISPRitz pin's major.minor, which must be the X.Y of the release: $(grep -E '^ARG crispritz_ref=' Dockerfile | sed -E 's/.*=v?([0-9]+\.[0-9]+)\..*/\1/')"
 ```
 
 Expected before a release: `crisprme.py`, the Dockerfile's header comment, the latest tag, and the recipe all show the **previous** version, consistent with each other, and the Dockerfile's `crispritz_ref` (a CRISPRitz version, never CRISPRme's) equals `install_from_source.sh`'s `CRISPRITZ_REF` default. If they disagree, fix that first. **Do not proceed with inconsistent state.**
