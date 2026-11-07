@@ -18,18 +18,22 @@ MNV on its slot changes, a carrier outside the samples list, an ALT
 block that lost its variants, a cluster dropped beside another cluster's row, a row
 placed past an insertion's anchor, two targets inside one insertion folded into one, a
 long deletion's far junction, a second indel that keeps the target's bases, another
-guide's row -- and assert that each one is reported, with its class. The truth is the
-VCF: a slot whose alleles overlap
-gives no sequence and is counted (limit-overlapping-records), never judged by CRISPRme's
-rules; those rules (a split multi-allelic site, two indels in one target, a second indel
+guide's row, a SNP named for a carrier whose slot overlaps the record and holds it nowhere,
+a slot read without its phasing artefact that lacks the target -- and assert that each one
+is reported, with its class. The truth is the VCF: a slot whose alleles overlap gives no
+sequence, so it is read without the alleles METHODS section 4 reads it without (the one
+reading that holds the record) and is otherwise counted (limit-overlapping-records), its
+named variants always required on a slot that can be the record's; CRISPRme's
+rules (a split multi-allelic site, two indels in one target, a second indel
 read up to the target's last base, the PUTATIVE carriers of an MNV) only turn a
 disagreement into a non-gating limit, and a tie their PUTATIVE rule leaves is a limit line,
 not silence. The PUTATIVE truth is the rule on the whole alignment's CFD (a product of 0
 ties every choice), after what a record's known slot says. The driver must never pass
 silently (a chromosome no VCF covers, one FASTA of several contigs, an indexed VCF read
 once per record, a sites-only VCF alone or beside a genotyped one, a deletion longer than
-an unindexed read looks back, a short table line, a window holding N), and the checker
-must hold no CRISPRme code.
+an unindexed read looks back, a short table line, a window holding N), must refuse a
+configuration it does not model (two genotyped datasets that share samples, inputs other
+than those the run records it searched with), and the checker must hold no CRISPRme code.
 
 Everything is built here: a small reference, a phased VCF (plain gzip, or BGZF with a
 tabix index written by this file's own writer), and rows in the column layout of
@@ -1139,20 +1143,27 @@ class ReviewRound2(Base):
         def d(total, cfd):
             return C.Demand("exact", [], C.edits(total, 0), cfd, 0)
 
-        def alone():
-            return [102], False
+        def alone(wide=False):
+            return [102], False, set()
         self.assertTrue(rep.locus(GUIDE, "chr21", 102, d(3, 0.2), alone)[0])
         self.assertFalse(rep.locus(GUIDE, "chr21", 102, d(1, 0.2), alone)[0])  # fewer edits
         self.assertFalse(rep.locus(GUIDE, "chr21", 102, d(3, 0.5), alone)[0])  # higher CFD
         # F2 (review 3): a row past --merge bp is the cluster's only through alignments
         # that chain to it, never as the nearest row
         self.assertFalse(rep.locus(GUIDE, "chr21", 120, d(3, 0.2),
-                                   lambda: ([120], False))[0])
-        self.assertTrue(rep.locus(GUIDE, "chr21", 120, d(3, 0.2),
-                                  lambda: ([104, 107, 110, 113, 116, 118, 120], False))[0])
+                                   lambda wide: ([120], False, set()))[0])
+        self.assertEqual(rep.locus(GUIDE, "chr21", 120, d(3, 0.2), lambda wide: (
+            [104, 107, 110, 113, 116, 118, 120], False, set()))[::3], (True, set()))
         # a chain cut at its limit is said to be so (the caller lists a coverage gap)
         self.assertEqual(rep.locus(GUIDE, "chr21", 120, d(3, 0.2),
-                                   lambda: ([120], True))[::2], (False, True))
+                                   lambda wide: ([120], True, set()))[::2], (False, True))
+        # R7-F2: a cluster that reaches its row only through rows CRISPRme may write or
+        # not is said to, with why (the caller counts it, never passes it as a cluster row)
+        self.assertEqual(rep.locus(GUIDE, "chr21", 120, d(3, 0.2), lambda wide: (
+            ([104, 107, 110, 113, 116, 118, 120], False, {"capped"}) if wide
+            else ([120], False, set())))[::3], (True, {"capped"}))
+        self.assertFalse(rep.locus(GUIDE, "chr21", 120, d(3, 0.2), lambda wide: (
+            ([120], False, set())))[0])
         # N3: another guide's row is not this guide's cluster
         self.assertFalse(rep.locus("TTTTAAAATTTTAAAATTTT", "chr21", 102, d(3, 0.2),
                                    alone)[0])
@@ -1638,8 +1649,9 @@ class ReviewRound3(Base):
         with open(os.path.join(case.res, ".Params.txt"), "w") as fh:
             fh.write("Mismatches\t4\nDNA\t1\nRNA\t1\nMax_total_edits\t1\n")
         self.assertIn("budget-exceeded", open_findings(C.main(argv), self.tmp))
-        self.assertNotIn("budget-exceeded", open_findings(
-            C.main(argv + ["--max-total-edits", "6"]), self.tmp))
+        # R7-F4's sweep: a cap other than the run's is not the search's: refused
+        self.assertEqual(C.main(argv + ["--max-total-edits", "6"]), 2)
+        self.assertEqual(C.main(argv + ["--max-total-edits", "1"]), 1)
 
 
 # --------------------------------------------------------------------------- #
@@ -1931,6 +1943,7 @@ class ReviewRound4(Base):
                          {("carrier-not-in-panel", "S02")}, found)
         with open(panel, "w") as fh:
             fh.write("NA12878\n")
+        os.remove(os.path.join(case.res, ".sampleID.txt"))   # (R7: else refused for that)
         rc, _found = case.run(mode="soundness", extra=["--samples", panel])
         self.assertEqual(rc, 2)
 
@@ -2262,7 +2275,7 @@ class ReviewRound5(Base):
         ctx = C.Ctx(ns, "NGG", 3, False, ["G" * 20], None)
         win = C.Window(seq, "chr21", 0, 440, [C.Vcf(vcf)])
         self.assertEqual(win.snv_at, {})
-        members, cut = C.cluster_chain(win, ctx, "G" * 20, 300, 3)
+        members, cut, _why = C.cluster_chain(win, ctx, "G" * 20, 300, 3)
         self.assertGreater(max(members), 454 + 300, members[-5:])
         self.assertFalse(cut)
 
@@ -2630,6 +2643,400 @@ def argparse_ns():
 # --------------------------------------------------------------------------- #
 # the driver never passes silently
 # --------------------------------------------------------------------------- #
+def world_phantom(art=None, s01="1|0", s_on=None):
+    """R7-F1: the deletion world, with S at spacer position 3 (S02's, 1|1, unless
+    ``s_on`` puts it on S01 too) and ``art``, an allele overlapping the deletion on S01:
+    'pos' (a SNV at its own position: a phasing artefact), 'deleted' (a SNV on the base it
+    deletes), 'complex' (an insertion at the next position). Returns (seq, records, the
+    row naming the deletion and S with S's base written in, the row naming the deletion
+    alone, the deletion)."""
+    seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+    pos1 = len(PRE) + 10
+    s_pos0 = len(PRE) + 3
+    s_alt = other(seq[s_pos0])
+    rec = (pos1, GUIDE[9] + "C", GUIDE[9], {"S01": s01, "S03": "0|1"})
+    snp_gts = {"S02": "1|1"}
+    if s_on:
+        snp_gts["S01"] = s_on
+    snp = (s_pos0 + 1, seq[s_pos0], s_alt, snp_gts)
+    recs = [rec, snp]
+    if art == "pos":
+        recs.append((pos1, GUIDE[9], other(GUIDE[9]), {"S01": "1|0"}))
+    elif art == "deleted":
+        recs.append((pos1 + 1, "C", "A", {"S01": "1|0"}))
+    elif art == "complex":
+        recs.append((pos1 + 1, "C", "CT", {"S01": "1|0"}))
+    start = len(PRE)
+    with_s = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                        GUIDE[:3] + s_alt.lower() + GUIDE[4:] + "TGG", "TGG", 1, 0, "X",
+                        "%s,%s" % (tok("chr21", rec), tok("chr21", snp)), "S01")
+    alone = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                       GUIDE + "TGG", "TGG", 0, 0, "X", tok("chr21", rec), "S01,S03")
+    return seq, recs, with_s, alone, rec
+
+
+def world_bridge_overlap(rows_kind, r2=None):
+    """R7-F2 (the review's adv_r7b): world_bridge's shape, with X held by S01's slot of
+    R and S. ``r2`` adds an allele on that slot overlapping R: 'complex' (a deletion of
+    R's anchor base: METHODS takes the slot off, so X has no row and T1 (S03's) and B are
+    two clusters), 'pos' (a SNV at R's own position: a phasing artefact, read without it,
+    so X keeps its row)."""
+    g = "AGGAGGAGGAGGAGGAGGAG"
+    ideal = list("AGG" * 16)
+    ideal[5] = "T"
+    ideal[24] = "T"
+    s0 = len(LONG) + len(PRE)
+    seq = LONG + PRE + "".join(ideal[:4] + ideal[5:]) + "TTTCATTTCA" + POST
+    r = (s0 + 4, seq[s0 + 3], seq[s0 + 3] + "G", {"S01": "1|0", "S03": "1|0"})
+    sp = s0 + 23
+    snv = (sp + 1, "T", "A", {"S02": "0|1", "S01": "1|0"})
+    recs = [r, snv]
+    if r2 == "complex":
+        recs.append((s0 + 3, seq[s0 + 2:s0 + 4], seq[s0 + 2], {"S01": "1|0"}))
+    elif r2 == "pos":
+        recs.append((s0 + 4, seq[s0 + 3], other(seq[s0 + 3]), {"S01": "1|0"}))
+    rows = []
+    if "T1" in rows_kind:
+        alt = "".join(ideal[0:23])
+        rows.append(row_fields("chr21", s0, "+", g + "NNN", seq[s0:s0 + 23],
+                               mark(g + "NNN", alt), alt[-3:], 1, 0, "X", tok("chr21", r),
+                               "S03", spacer=g + "NNN"))
+    if "B" in rows_kind:
+        b0 = s0 + 5
+        alt = seq[b0:sp] + "A" + seq[sp + 1:b0 + 23]
+        rows.append(row_fields("chr21", b0, "+", g + "NNN", seq[b0:b0 + 23], alt, alt[-3:],
+                               0, 0, "X", tok("chr21", snv), "S01,S02", spacer=g + "NNN"))
+    return seq, recs, rows, g, s0
+
+
+class ReviewRound7(Base):
+    def _ctx(self, guide, mm=0, cfd=None):
+        import argparse
+        ns = argparse.Namespace(mm=mm, bdna=0, brna=0, max_total_edits=mm)
+        return C.Ctx(ns, "NRG", 3, False, [guide], cfd)
+
+    def _popmode(self, case):
+        with open(os.path.join(case.res, ".alt_mode"), "w") as fh:
+            fh.write("no-alt-alignments\n")
+        with open(os.path.join(case.res, ".command_line.txt"), "w") as fh:
+            fh.write("input_command\tcrisprme.py complete-search --population-level\n")
+
+    # --- R7-F1: a carrier whose slot's alleles overlap the record ------------------ #
+    def test_a_phantom_snv_on_a_carrier_whose_slot_overlaps_is_caught(self):
+        """R7-F1 (the review's W1, W1b, W1c): the row names R and S and lists S01 alone,
+        who holds S on no slot. S01's slot of R also holds an allele overlapping R (a SNV
+        at R's position, a SNV on the base R deletes; R homozygous with that allele on one
+        slot): 'no sequence' excused it (limit-overlapping-records); a slot that holds a
+        named variant on no reading lacks the target whatever its overlaps."""
+        for art, s01 in (("pos", "1|0"), ("deleted", "1|0"), ("pos", "1|1"),
+                         ("complex", "1|0")):
+            seq, recs, with_s, _alone, _rec = world_phantom(art, s01)
+            rc, found = Case(self.tmp, seq, recs, [with_s]).run()
+            self.assertEqual(rc, 1, (art, s01, found))
+            self.assertTrue({(f[1], f[3]) for f in gating(found)} <= {
+                ("carrier-without-variants", "S01"), ("carrier-off-by-rule", "S01")},
+                (art, s01, found))
+        # the control: S on S01's slot of R, the same row is right (counted, not failed)
+        seq, recs, with_s, _alone, _rec = world_phantom("pos", "1|0", s_on="1|0")
+        rc, found = Case(self.tmp, seq, recs, [with_s]).run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual({(f[1], f[3]) for f in found},
+                         {("limit-overlapping-records", "S01")}, found)
+
+    def test_a_slot_read_without_its_artefact_must_hold_the_target(self):
+        """R7-F1: METHODS section 4 reads a slot with a phasing artefact (another allele
+        at the record's position) without it, and S01 stays listed for the target of
+        that reading. S01's slot holds S, inside the target: listed for the target without
+        S (the row naming R alone) it holds a variant the row does not name."""
+        seq, recs, with_s, alone, _rec = world_phantom("pos", "1|0", s_on="1|0")
+        rc, found = Case(self.tmp, seq, recs, [alone]).run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                         {("variant-missing", "S01")}, found)
+        # a variant only on a base the record deletes changes nothing: the same reading
+        seq, recs, with_s, alone, _rec = world_phantom("deleted", "1|0", s_on="1|0")
+        rc, found = Case(self.tmp, seq, recs, [alone]).run()
+        self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                         {("variant-missing", "S01")}, found)
+        rc, found = Case(self.tmp, seq, recs, [with_s]).run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_carrier_off_by_rule_vetoes_its_fold(self):
+        """R7-F1's sweep: S01's slot of the deletion holds an insertion overlapping it at
+        another position (a complex allele: METHODS takes the slot off), so a fold group
+        that lists S01 is not the target's own; S03, whose slot is clean, is required. A
+        slot read without a phasing artefact that holds the target is the truth's, so it
+        may be listed (it is never required)."""
+        seq, recs, _with_s, alone, rec = world_phantom("complex", "1|0")
+        case = Case(self.tmp, seq, recs, [alone])
+        win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(case.vcf)])
+        row = C.read_rows(os.path.join(case.res, os.listdir(case.res)[0]), "integrated")[0]
+        named = C.named_alleles(row, win, C.Report(), True)
+        tgt = C.row_target(win, row, named, named[0])[0]
+        lids = C.local_lines(win, tgt)
+        ctx = self._ctx(GUIDE)
+        self.assertEqual(C.truth_lists(win, ctx, tgt, "S01", lids), "clash")
+        self.assertEqual(C.documented(win, ctx, tgt, "S01", lids)[0], "off")
+        self.assertEqual(C.documented_carriers(win, ctx, tgt, {"S01", "S03"}, lids),
+                         (frozenset({"S03"}), frozenset()))
+        # a slot read without a phasing artefact that holds the target: the truth lists
+        # it (never required: not a gating demand), whatever the documented view says
+        seq, recs, _with_s, alone, rec = world_phantom("pos", "1|0")
+        case = Case(self.tmp, seq, recs, [alone])
+        win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(case.vcf)])
+        row = C.read_rows(os.path.join(case.res, os.listdir(case.res)[0]), "integrated")[0]
+        named = C.named_alleles(row, win, C.Report(), True)
+        tgt = C.row_target(win, row, named, named[0])[0]
+        lids = C.local_lines(win, tgt)
+        self.assertEqual(C.truth_lists(win, ctx, tgt, "S01", lids), "resolved")
+        self.assertEqual(C.documented_carriers(win, ctx, tgt, {"S01", "S03"}, lids),
+                         (frozenset({"S03"}), frozenset({"S01"})))
+
+    def test_an_overlap_explains_no_disagreement_outside_its_own_slot(self):
+        """R7-F1's sweep: a slot's overlap is judged where it is (the clash), so the causes
+        it gives never turn another disagreement into a limit."""
+        self.assertEqual(C.unexplained_or({"artefact"}), (True, "unexplained-disagreement"))
+        self.assertEqual(C.unexplained_or({"complex", "deleted"}),
+                         (True, "unexplained-disagreement"))
+        self.assertEqual(C.unexplained_or({"artefact", "putative"})[:2],
+                         (False, "limit-putative-carrier"))
+
+    def test_a_slot_with_no_reading_and_an_unknown_call_demands_nothing(self):
+        """R7-F1's sweep: S01's slot of the deletion holds a complex allele and S01 has an
+        unphased SNV in the target. The slot has no reading (METHODS takes it off), so no
+        PUTATIVE target is demanded of it -- 'cannot tell' made one, whose miss the
+        documented view could only call unexplained."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        pos1 = len(PRE) + 10
+        q = len(PRE) + 4
+        recs = [(pos1, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0"}),
+                (pos1 + 1, "C", "CT", {"S01": "1|0"}),
+                (q + 1, seq[q], other(seq[q]), {"S01": "0/1"})]
+        rc, found = Case(self.tmp, seq, recs, []).run(mode="completeness")
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        # the record unphased, the complex allele homozygous: it is on the record's slot,
+        # whichever that is (the perfect target, which only the record makes, is no
+        # PUTATIVE demand; the insertion alone makes none in this budget)
+        recs = [(pos1, GUIDE[9] + "C", GUIDE[9], {"S01": "0/1"}),
+                (pos1 + 1, "C", "CT", {"S01": "1/1"})]
+        rc, found = Case(self.tmp, seq, recs, []).run(mode="completeness",
+                                                      budget=("0", "0", "0", "0"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-overlapping-records", classes(found), found)
+
+    # --- R7-F2: the cluster chain through a slot whose alleles overlap ------------- #
+    def test_a_cluster_chains_through_no_slot_a_complex_allele_takes_off(self):
+        """R7-F2 (the review's adv_r7b): X is held only by S01's slot of R, which also holds
+        a deletion of R's anchor base (a complex allele: METHODS takes the slot off), so
+        CRISPRme writes no row for X and T1 and B are two clusters: a table that lost T1's
+        row has lost a cluster. Without that deletion, or with a phasing artefact in its
+        place (the slot read without it, as METHODS reads it), X joins them."""
+        for r2, kind, want in (("complex", ("T1", "B"), 0), ("complex", ("B",), 1),
+                               (None, ("B",), 0), ("pos", ("B",), 0)):
+            seq, recs, rows, g, _s0 = world_bridge_overlap(kind, r2)
+            case = Case(self.tmp, seq, recs, rows)
+            self._popmode(case)
+            rc, found = case.run(mode="completeness", guide=g, budget=("1", "0", "0", "1"))
+            self.assertEqual(rc, want, (r2, kind, found))
+            if want:
+                self.assertEqual([(f[1], f[3]) for f in gating(found)],
+                                 [("missing-locus", "S03")], found)
+
+    def test_the_rows_of_an_overlap_are_written_left_open_or_none(self):
+        """R7-F2: the Cluster Positions a record gives the chain from a slot whose alleles
+        overlap it: those of the slot read without a phasing artefact (CRISPRme writes
+        them), none for a complex allele (it takes the slot off), and those of the
+        one-record reading where nothing documents the overlap (a SNV on an MNV's second
+        base) as rows CRISPRme may write or not."""
+        g = "AGGAGGAGGAGGAGGAGGAG"
+        for r2, cps, maybe in ((None, {0, 3}, {}), ("complex", {0}, {}),
+                               ("pos", {0, 3}, {})):
+            seq, recs, _rows, _g, s0 = world_bridge_overlap(("B",), r2)
+            case = Case(self.tmp, seq, recs, [])
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(case.vcf)])
+            ctx = self._ctx(g, mm=1)
+            r = win.by_key[recs[0][:3]][0]
+            e = C.record_demands(win, ctx, r, {"S01", "S03"}, ctx.full(g),
+                                 max(0, r.lo - 80), r.hi + 80,
+                                 (r.edit_lo - 26, r.edit_hi + 26))
+            self.assertEqual(({c - s0 for c in e["cps"]},
+                              {c - s0: w for c, w in e["cps_open"].items()}),
+                             (cps, maybe), r2)
+        case, info = world_mnv(self.tmp)
+        mnv_pos1 = len(PRE) + 9
+        recs = [(mnv_pos1, "AC", GUIDE[8:10], {"S01": "1|0"}),
+                (mnv_pos1 + 1, "C", "T", {"S01": "1|0"})]
+        case = Case(self.tmp, info["seq"], recs, [])
+        win = C.Window(info["seq"], "chr21", 0, len(info["seq"]), [C.Vcf(case.vcf)])
+        ctx = self._ctx(GUIDE)
+        r = win.by_key[recs[0][:3]][0]
+        e = C.record_demands(win, ctx, r, {"S01"}, ctx.full(GUIDE), 0, len(info["seq"]),
+                             (r.edit_lo - 26, r.edit_hi + 26))
+        self.assertEqual((e["cps"], e["cps_open"]),
+                         (frozenset(), {info["start"]: frozenset({"overlap"})}), e)
+
+    def test_a_target_through_an_snv_the_stores_read_otherwise_is_an_open_row(self):
+        """R7-F2's sweep: S01's target holds the earlier record of a split SNV site, which
+        CRISPRme's stores do not hold (they read the last): it is a row CRISPRme may write
+        or not, so it chains a cluster only as such."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        pos1 = len(PRE) + 10
+        q = len(PRE) + 4
+        b = seq[q]
+        x1 = other(b)
+        x2 = next(c for c in "ACGT" if c not in (b, x1))
+        recs = [(pos1, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0"}),
+                (q + 1, b, x1, {"S01": "1|0"}), (q + 1, b, x2, {"S02": "1|0"})]
+        case = Case(self.tmp, seq, recs, [])
+        win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(case.vcf)])
+        ctx = self._ctx(GUIDE, mm=1)
+        r = win.by_key[recs[0][:3]][0]
+        e = C.record_demands(win, ctx, r, {"S01"}, ctx.full(GUIDE), 0, len(seq),
+                             (r.edit_lo - 26, r.edit_hi + 26))
+        start = len(PRE)   # the Cluster Position of a + target with a 3' PAM, no bulge
+        self.assertEqual(e["cps_open"].get(start), frozenset({"last-alt-wins"}), e)
+        self.assertNotIn(start, e["cps"])
+
+    # --- R7-N1: a capped window's greedy row (per-sample, classic path) ------------ #
+    def test_a_capped_windows_greedy_row_is_an_open_row_of_a_per_sample_chain(self):
+        """R7-N1: under --per-sample the classic dictionary path (an index built without
+        --samplesID, as the self-test's) still writes a capped window's greedy worst-case
+        row (METHODS section 5, known limit): eleven SNVs, each its own sample's, make the
+        guide's target only together. The per-sample chain holds it as a row CRISPRme may
+        write or not (a cluster that reaches its row only through it is counted); ten are
+        not a capped window."""
+        for n, want in ((11, True), (10, False)):
+            site = list(GUIDE + "TGG")
+            cols = list(range(0, 2 * n, 2))[:n] if n <= 10 else list(range(0, 20, 2)) + [19]
+            for i in cols:
+                site[i] = other(site[i])
+            seq = PRE + "".join(site) + POST
+            samples = ["T%02d" % i for i in range(len(cols))]
+            vcf = os.path.join(self.tmp, "v%d.vcf.gz" % n)
+            write_vcf(vcf, "chr21", [(len(PRE) + i + 1, site[i], GUIDE[i], {smp: "0|1"})
+                                     for i, smp in zip(cols, samples)], samples=samples)
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
+            ctx = self._ctx(GUIDE)
+            ctx.snp_union = False
+            rows, capped = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0, len(seq))
+            cp = len(PRE)
+            self.assertNotIn(cp, rows, n)
+            self.assertEqual(cp in capped, want, n)
+            ctx.snp_union = True
+            rows, capped = C.snp_row_cps(C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)]),
+                                         ctx, GUIDE, ctx.full(GUIDE), 0, len(seq))
+            self.assertIn(cp, rows, n)   # population-level: the union is a row
+            self.assertEqual(capped, set(), n)
+
+    # --- R7-F3: a haploid call against a diploid one -------------------------------- #
+    def test_a_haploid_snv_beside_a_diploid_record_leaves_the_reference(self):
+        """R7-F3 (the review's adv_r7c): S01 carries the deletion diploid (1|0) and a SNV
+        haploid ('1') whose alt is a mismatch. METHODS section 4 resolves a haploid call
+        against a diploid one PUTATIVE, its copies counted against the record's: the
+        reference stays possible, so the perfect target is S01's strongest and the row
+        listing S01 for it is right."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        pos1 = len(PRE) + 10
+        rec = (pos1, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0"})
+        snp = (len(PRE) + 6, GUIDE[5], other(GUIDE[5]), {"S01": "1"})
+        start = len(PRE)
+        rows = [row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                           GUIDE + "TGG", "TGG", 0, 0, "X", tok("chr21", rec), "S01")]
+        case = Case(self.tmp, seq, [rec, snp], rows)
+        for mode in ("soundness", "completeness"):
+            rc, found = case.run(mode=mode, budget=("1", "0", "0", "1"))
+            self.assertEqual((rc, gating(found)), (0, []), (mode, found))
+        win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(case.vcf)])
+        q = len(PRE) + 5
+        self.assertEqual(C.options(win, "S01", q), {other(GUIDE[5])})
+        self.assertEqual(C.options(win, "S01", q, ploidy=2), {other(GUIDE[5]), GUIDE[5]})
+        # a phantom: the row lists S01 for the SNV's alt it carries, and for the guide's
+        # base too -- but not for a base it does not carry
+        bad = [set_field(rows[0], alt=GUIDE[:5] + "t" + GUIDE[6:] + "TGG")]
+        if other(GUIDE[5]) != "T":
+            write_results(case.res, bad)
+            rc, found = case.run(budget=("1", "0", "0", "1"))
+            self.assertEqual(rc, 1, found)
+
+    # --- R7-F4: the run's own record of its inputs ------------------------------------ #
+    def test_a_run_given_other_vcfs_than_its_datasets_is_refused(self):
+        """R7-F4: the run's .Params.txt names the variant datasets it searched (Genome_idx):
+        a check given fewer VCFs of a chromosome (one of two datasets that share samples
+        passes or fails by which) or more (a dataset the search never read) is refused;
+        one VCF per dataset is checked."""
+        case, info = world_deletion(self.tmp)
+        params = os.path.join(case.res, ".Params.txt")
+        with open(params, "w") as fh:
+            fh.write("Genome_idx\tNRG_2_hg38+one,NRG_2_hg38+two\n")
+        rc, _found = case.run()
+        self.assertEqual(rc, 2)
+        with open(params, "w") as fh:
+            fh.write("Genome_idx\tNRG_2_hg38+one\n")
+        self.assertClean(case)
+        other_vcf = os.path.join(self.tmp, "w.vcf.gz")
+        write_vcf(other_vcf, "chr21", [info["rec"][:3] + ({"T01": "1|0"},)],
+                  samples=["T01", "T02"])
+        rc, _found = case.run(extra=["--vcf", other_vcf])
+        self.assertEqual(rc, 2)
+        with open(params, "w") as fh:
+            fh.write("Genome_idx\tNRG_2_hg38+one,NRG_2_hg38+two\n")
+        rc, found = case.run(extra=["--vcf", other_vcf])
+        self.assertNotEqual(rc, 2, found)
+
+    def test_inputs_other_than_the_searchs_are_refused(self):
+        """R7-F4's sweep: the budget, the PAM, the guides and the samples list the run
+        records (.Params.txt, .guides.txt, .sampleID.txt) must be the check's: any other is
+        refused (exit 2), never half-checked."""
+        case, _info = world_deletion(self.tmp)
+        params = os.path.join(case.res, ".Params.txt")
+        for text, want in (("Mismatches\t3\n", 2), ("DNA\t0\n", 2), ("RNA\t2\n", 2),
+                           ("Max_total_edits\t5\n", 2), ("Pam\tNGG\n", 2),
+                           ("Mismatches\t4\nDNA\t1\nRNA\t1\nMax_total_edits\t6\nPam\tNRG\n",
+                            0)):
+            with open(params, "w") as fh:
+                fh.write(text)
+            rc, _found = case.run()
+            self.assertEqual(rc, want, text)
+        with open(os.path.join(case.res, ".guides.txt"), "w") as fh:
+            fh.write("TTTTAAAATTTTAAAATTTTNNN\n")
+        self.assertEqual(case.run()[0], 2)
+        with open(os.path.join(case.res, ".guides.txt"), "w") as fh:
+            fh.write(GUIDE + "NNN\n")
+        self.assertClean(case)
+        # some of the run's guides: a check of those (rows are keyed by guide); the rows
+        # of the others are counted, not checked (they are no row of a guide given)
+        g2 = "TTTTAAAATTTTAAAATTTT"
+        with open(os.path.join(case.res, ".guides.txt"), "w") as fh:
+            fh.write(GUIDE + "NNN\n" + g2 + "NNN\n")
+        rows = [_info["rows"][0], set_field(_info["rows"][0], start=_info["start"] + 1)]
+        rows[1][0] = g2 + "NNN"
+        write_results(case.res, rows)
+        found = self.assertClean(case)
+        self.assertEqual([(f[1], f[2][:22]) for f in found],
+                         [("guide-not-given", "3 row block(s) of the ")], found)
+        write_results(case.res, _info["rows"])
+        sid = os.path.join(case.res, ".sampleID.txt")
+        with open(sid, "w") as fh:
+            fh.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+            fh.write("".join("%s\tP\tSP\tfemale\n" % x for x in SAMPLES))
+        panel = os.path.join(self.tmp, "panel.txt")
+        with open(panel, "w") as fh:
+            fh.write("".join("%s\n" % x for x in SAMPLES[:4]))
+        self.assertEqual(case.run(extra=["--samples", panel])[0], 2)
+        shutil.copy(sid, panel)
+        self.assertClean(case, extra=["--samples", panel])
+        # an analysis mode other than the one the run's command line says
+        with open(os.path.join(case.res, ".command_line.txt"), "w") as fh:
+            fh.write("input_command\tcrisprme.py complete-search --per-sample\n")
+        self.assertEqual(case.run(extra=["--analysis", "population-level"])[0], 2)
+        self.assertClean(case, extra=["--analysis", "per-sample"])
+
+    def assertClean(self, case, mode="soundness", **kw):
+        rc, found = case.run(mode=mode, **kw)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        return found
+
+
 class Driver(Base):
     def test_a_chromosome_no_vcf_covers_is_reported(self):
         """F11: an indexed VCF of chr21 and a row on chr20."""

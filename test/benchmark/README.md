@@ -87,11 +87,15 @@ coordinates and aligns with its own exhaustive dynamic-programming aligner (it i
 and copies no CRISPRme code, only Python's standard library; the CFD tables are read as
 data). The truth is the VCF: a slot holds a row's target when it reads its bases from
 the row's start through the record (each base the record puts in the target at its
-place), a slot whose alleles overlap gives no sequence and is counted
-(`limit-overlapping-records`) where a target of its record reads, and where a call
-touching a target has unknown phase the record's known slot is judged first, then
-METHODS section 4's PUTATIVE rule (the strongest target the sample's alleles allow, by
-the alignment's CFD). CRISPRme's documented reading of a carrier (the one-indel window
+place); a slot whose alleles overlap gives no sequence, so it is read without the alleles
+METHODS section 4 reads it without (a phasing artefact at the record's position, an
+allele only on bases it deletes, an MNV), the one reading that holds the record, and is
+otherwise counted (`limit-overlapping-records`) where a target of its record reads, a
+named variant it holds on no reading always failing a listed carrier; where a call
+touching a target has unknown phase (a haploid call against a diploid one included) the
+record's known slot is judged first, then METHODS section 4's PUTATIVE rule (the
+strongest target the sample's alleles allow, by the alignment's CFD, its copies counted
+against the record's). CRISPRme's documented reading of a carrier (the one-indel window
 resolved with the carrier's own SNP alleles, a second indel read from either end through
 the indel, the last record of a split multi-allelic site, the PUTATIVE carriers of MNVs)
 only classifies a disagreement, and a carrier it would list against the carrier's own
@@ -117,7 +121,11 @@ runs -- keeps one row per merge cluster, and there the row of the target's clust
 chained within `--merge` bp by the rows CRISPRme can write, as the merge clusters: the
 reference rows, the SNP rows of the mode -- population-level each alignment's worst case,
 per sample the haplotypes individuals hold -- and the targets some carrier of an indel
-record holds) must be no worse than each target. It does not check the CFD_REF/ALT, CFD risk
+record holds) must be no worse than each target; a cluster that reaches such a row only
+through rows CRISPRme may write or not, which no documented rule settles (a capped
+window's greedy row, which only the classic dictionary path of a `--ci-cd-test` index
+writes; the one-record reading of an undocumented overlap), is counted under its cause's
+class, not passed. It does not check the CFD_REF/ALT, CFD risk
 and CRISPR-Bulge scores (nor which row the CRISPR-Bulge block keeps),
 `Variant_info_spacer+PAM`, `PAM_creation`, the seed counts, MAF, rsID, `Other_motifs`,
 `Not_found_in_REF` or the annotations, nor the merge's keys after the sorting criteria and
@@ -126,7 +134,10 @@ alignments equal in all of these. Give each VCF a `.tbi` when the panel has dele
 than 20 kb (HPRC's does): a read without one looks back 20 kb, and the checker lists such a
 VCF under its own coverage class. Two genotyped datasets that share samples are refused
 (exit 2): CRISPRme resolves each dataset on its own genotypes and joins their rows, which
-the checker does not model; a sites-only dataset beside a genotyped one is checked.
+the checker does not model; a sites-only dataset beside a genotyped one is checked. So are
+inputs other than the search's where the run's own record of them says so (its
+`.Params.txt` budget, PAM and variant datasets -- one VCF per dataset for each chromosome
+checked --, its `.guides.txt`, `.sampleID.txt` and command line).
 `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check`,
 `validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
 `docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a real HGDP + 1000 Genomes

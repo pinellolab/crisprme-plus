@@ -1501,18 +1501,29 @@ start and the record lengthens the stretch and pushes some of them out of it, wh
 another target, one that needs two indel-path records). Two alleles of one slot whose REF
 spans meet — a SNP at an insertion's own position, a SNP on a base a deletion removes, one
 complex allele split into overlapping records, two ALTs at one position phased onto one
-haplotype — describe one stretch twice, so the VCF gives no sequence there: a carrier whose
-record meets such a stretch, where a target of the record reads (one in budget reads with
-the overlapping alleles left out), is counted under its own class
-(`limit-overlapping-records`), never judged. Where a call that touches the target has
-unknown phase (unphased, or a missing allele; one whose REF meets the record's would leave
-the slot with no sequence and is read on the other slot, as §4's multi-allelic
+haplotype — describe one stretch twice, so the VCF gives no sequence there. Where every
+allele that meets the record's REF is one §4 reads the slot without (another allele at the
+record's own position, an allele only on bases it deletes, an MNV) and no allele kept
+meets one left out, the slot is read without them: the one reading that holds the record,
+and so the one a row naming the record and not them can mean. A listed carrier must hold
+the target there, and one that does, or that the row leaves off while its slot holds it
+there (§4: it stays listed), is counted under its own class (`limit-overlapping-records`).
+Any other overlap of the record (an indel at another position, which §4 takes off, or a SNP
+there, which §4 does not cover), or alleles that overlap each other where the target reads,
+leave the slot no reading: its carrier is counted, and fails when listed against §4's rule
+(`carrier-off-by-rule`). Whatever its overlaps, a slot that holds a named variant on no
+reading (neither on it nor of unknown phase there) lacks the target. Where a call that
+touches the target has unknown phase (unphased, a missing allele, or fewer copies than the
+record's call — a haploid call against a diploid one; one whose REF meets the record's would
+leave the slot with no sequence and is read on the other slot, as §4's multi-allelic
 heterozygote), the record's known slot is judged first — when no placement of those calls
 lets it hold the target (a phased second indel inside it, say), or every placement does —
 and otherwise the truth is the PUTATIVE rule of §4: the strongest target the sample's own
 alleles allow, the guide's base wherever it carries it, elsewhere (and at the PAM jointly)
-the alleles that maximize the alignment's CFD; CFD is a product, so where it is 0 whatever
-the choice (a DNA bulge whose base the table scores 0, say) every choice is a strongest one.
+the alleles that maximize the alignment's CFD, its copies counted against the record's
+call (a haploid ALT call beside a diploid record leaves the reference possible); CFD is a
+product, so where it is 0 whatever the choice (a DNA bulge whose base the table scores 0,
+say) every choice is a strongest one.
 CRISPRme's documented reading of a carrier (§4: the one-indel window, resolved with each
 carrier's own SNP alleles, so that a row lists a carrier only where those give its target;
 the second indel read from either end of the target through the indel, each base the indel
@@ -1536,10 +1547,13 @@ documents, and fails. It runs two ways:
   start (the first aligned base's reference coordinate, the insertion's anchor for a base
   an insertion adds), and hold a base of its record. Each listed carrier must be a sample
   of the panel and hold the target on a haplotype at that start with every named variant —
-  or, its phase unknown there, be listed for its strongest target — and each carrier of
-  the record whose haplotype holds it (or whose strongest it is) must be listed: the merge
-  never moves a carrier off its sequence's row. An ALT-origin block that names no variant
-  is reported. A sites-only VCF genotypes nobody, and a sites-only dataset's rows list no
+  or, its phase unknown there, be listed for its strongest target; a carrier whose slot's
+  alleles overlap the record is held to the slot's one reading where §4 gives it, and to
+  the named variants on a slot that can be the record's always, and is otherwise counted —
+  and each carrier of the record whose haplotype holds it (or whose strongest it is) must
+  be listed: the merge never moves a carrier off its sequence's row. An ALT-origin block
+  that names no variant is reported. A sites-only VCF genotypes nobody, and a sites-only
+  dataset's rows list no
   carrier (§4): a row that lists none for a record a sites-only VCF holds is checked but
   for its carriers, each record deciding for itself, so that beside a genotyped dataset
   (the default index with `hg38_mega`) the genotyped dataset's rows are checked in full. A
@@ -1567,7 +1581,10 @@ documents, and fails. It runs two ways:
   target's own carrier set that are no worse — every carrier both the documented reading
   and its own haplotypes list for it, and besides them only carriers either lists or the
   reading leaves open (the documented reading only classifies: a carrier it would list
-  against the carrier's haplotypes vetoes no fold). The fold key holds no strand, while one
+  against the carrier's haplotypes vetoes no fold; a carrier whose slot overlaps the
+  record is never required, and allowed where its slot, read as §4 reads it, holds the
+  target, or, a slot with no reading, where the reading lists it or leaves it open). The
+  fold key holds no strand, while one
   target's alignments share theirs, so a fold group is taken on one strand: a fold across
   strands loses another target. The merge's later keys (the Cluster Position, the carrier
   count, the aligned text) only order alignments equal in all of these and are not
@@ -1595,15 +1612,28 @@ documents, and fails. It runs two ways:
   the worst case of each alignment over each dataset's SNP alleles that CRISPRme's stores
   hold, per sample — as with `--ci-cd-test` — only the haplotypes individuals hold) and the
   targets some carrier of an indel-path record holds (the per-carrier resolution gives no
-  row for a raw target no carrier holds; a sites-only dataset's rows are the worst case of
-  each alignment of its window), every record the chain reaches read, up to 3 kb either
-  side (a chain still going there with no row as good as the target is the checker's own
-  coverage gap, `coverage-chain-limit`, not a miss) — must be reported with a fewest-mm+b
-  block of no more edits than the target's best alignment by the first sorting criterion
+  row for a raw target no carrier holds; a slot whose overlap §4 reads it without gives
+  that reading's targets, one §4 takes off none; a sites-only dataset's rows are the worst
+  case of each alignment of its window), every record the chain reaches read, up to 3 kb
+  either side (a chain still going there with no row as good as the target is the
+  checker's own coverage gap, `coverage-chain-limit`, not a miss) — must be reported with
+  a fewest-mm+b block of no more edits than the target's best alignment by the first
+  sorting criterion
   (the merge picks between a cluster's reference and variant rows on mm+bulges, or the CFD,
   alone) and a highest-CFD block of at least its CFD (each row's recomputed from its own
-  aligned strings, the value the merge sorts on). A record only sites-only VCFs hold is
-  carried by nobody: it is counted, not demanded.
+  aligned strings, the value the merge sorts on). The rows CRISPRme may write or not, which
+  no documented rule settles (the one-record reading of an overlap §4 does not cover, a
+  target where two other alleles of a slot overlap, a target through an SNV its stores read
+  otherwise, and a per-sample run's capped windows' greedy rows, which §5's known limit
+  writes on the classic dictionary path only), are followed only when the rows it writes
+  reach no row as good as the target: a cluster reached only through them is counted under
+  their cause's class (`limit-capped-window` for the last), neither passed nor failed. A
+  record only sites-only VCFs hold is carried by nobody: it is counted, not demanded. The
+  check's inputs must be the search's: where the run's own record of them says otherwise
+  (its `.Params.txt` budget, PAM and variant datasets — one VCF per dataset must hold each
+  chromosome checked —, a guide its `.guides.txt` does not hold, a `--samples` other than
+  its `.sampleID.txt`, an `--analysis` other than its command line's), the run is refused
+  (exit 2), as is a search of two genotyped datasets that share samples.
 
 It does not check the `CFD_score_REF`/`_ALT`, `CFD_risk_score` and CRISPR-Bulge columns or
 which row the CRISPR-Bulge block keeps, `Variant_info_spacer+PAM`, `PAM_creation`, the seed
@@ -1675,15 +1705,27 @@ unphased copy, searched together) are refused (exit 2, nothing checked): CRISPRm
 each dataset on its own genotypes and its merge joins their rows, so a shared sample can be
 listed by either dataset's haplotypes, which the checker does not model; a sites-only
 dataset beside a genotyped one, and genotyped datasets with no sample in common, are
-checked. On three repeat-rich guides (VEGFA site 3 `GGTGAGTGAGTGTGTGCGTG`, EMX1
-`GAGTCCGAGCAGAAGAAGAA`, VEGFA site 1 `GGGTGGGGGGAGTTTGCTCC`; chr22, the same panel and
+checked. That search given only one of its two VCFs is refused too (its `.Params.txt`
+names both datasets): given only the unphased copy's, an earlier version passed it, and
+given only the phased one's, failed 21 right row blocks. On three repeat-rich guides
+(VEGFA site 3 `GGTGAGTGAGTGTGTGCGTG`, EMX1 `GAGTCCGAGCAGAAGAAGAA`, VEGFA site 1
+`GGGTGGGGGGAGTTTGCTCC`; chr22, the same panel and
 budget) e4dbb9c passes both checks per sample, and d7a6fff population-level; per sample
 d7a6fff fails completeness on the targets of one insertion its merge folds (54,154 carrier
-targets). Each of the 1,593 indel lines of that population-level table, dropped alone, is
-caught but 11: rows all of whose carriers are documented limits (9 whose slots hold
-overlapping alleles, 2 that need an earlier record of a split site), whose targets
-completeness does not demand. The checker's CFD of a row's own alignment is the
-`CFD_score_ALT` the runs printed on every one of their 46,626 indel row blocks, and on all
+targets). There a carrier whose slot's alleles overlap the record was once counted and not
+judged at all, so a row block naming one more SNV of the VCF inside its target and listing
+only such carriers, none of whom holds it, passed (5 of 6 such blocks): read as §4 reads
+the slot, and held to its named variants, each fails. Each of the 1,593 indel lines of that
+population-level table, dropped alone, is caught but 11: rows all of whose carriers are
+documented limits (9 whose slots hold overlapping alleles, 2 that need an earlier record of
+a split site), whose targets completeness does not demand. On a synthetic world searched
+through CRISPRme's real CLI (partly phased carriers, missing alleles, a haploid SNP call
+beside a diploid deletion call, long deletions, two indels at one position, a multi-ALT
+indel line), the checker passes every row but one, an instance of the merge defect below;
+an earlier version failed the rows of the mixed-ploidy carrier, whose reference base §4's
+rule for a haploid call against a diploid one allows. The checker's CFD of a row's own
+alignment is the `CFD_score_ALT` the runs printed on every one of their 46,626 indel row
+blocks, and on all
 but 14 of about 2.4 million SNP and REF blocks (each a value at a x.xxx5 rounding boundary,
 which the comparison gives the benefit of the doubt); the same input gives the same findings
 byte for byte. On the documented chr22 self-test it reports the two `cas9_sg1617` rows of

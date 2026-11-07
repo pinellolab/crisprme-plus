@@ -163,9 +163,13 @@ for g in readme:guide.txt trac:guide_trac.txt; do
 done
 #     The gate is the exit status: 0 gating findings. Non-gating lines are documented
 #     CRISPRme limits (limit-last-alt-wins, limit-two-indels, limit-putative-carrier,
-#     limit-contig-end), slots whose VCF alleles overlap where a target of their record
-#     reads, so the VCF gives it no sequence (limit-overlapping-records: 3 records on
-#     chr22), windows across N (limit-n-bases), a sites-only dataset's rows, which list no
+#     limit-contig-end; limit-capped-window: a cluster of a --ci-cd-test run reached only
+#     through a capped window's greedy row, which only the classic dictionary path
+#     writes), slots whose VCF alleles overlap where a target of their record reads, so
+#     the VCF gives it no sequence (limit-overlapping-records: 3 records on chr22; a
+#     carrier there is judged where METHODS section 4 reads the slot without the
+#     overlapping allele, and its named variants are always required), windows across N
+#     (limit-n-bases), a sites-only dataset's rows, which list no
 #     carrier (limit-no-genotypes: none here; to check a search of the default index beside
 #     hg38_mega, give both VCFs, --vcf "$VCF" --vcf <mega chr22 VCF>), the note
 #     variant-shadowed, and the checker's own coverage gaps (coverage-putative-cap: a
@@ -179,10 +183,16 @@ done
 #     known upstream defect can be listed with --known (class, chrom, start, strand,
 #     variants, samples, reason): it turns non-gating as known-defect, and a listed one
 #     that stops showing is reported as known-not-seen. Exit 2 is no verdict: a usage
-#     error, or a configuration the checker refuses (two genotyped datasets that share
-#     samples; check each dataset's search alone). Genome-wide COMPLETENESS (at most
-#     about 52 CPU-hours per guide: 53 to 78 min on 40 processes of a loaded node, 6 GB, a
-#     TSV of about 31 MB) is not a release gate; chr22 above stands for it.
+#     error, or a configuration the checker refuses -- two genotyped datasets that share
+#     samples (run and check each dataset's search alone), or inputs other than the ones
+#     the run records it searched with: its .Params.txt budget, PAM and variant datasets
+#     (give one VCF per dataset of the search for each chromosome: a two-dataset search
+#     given one VCF is refused), a guide its .guides.txt does not hold (a subset of its
+#     guides is checked; the others' rows are counted, guide-not-given), a --samples other
+#     than its .sampleID.txt, an --analysis other than its command line's. Genome-wide
+#     COMPLETENESS (at most about 52 CPU-hours per guide: 53 to 78 min on 40 processes of a
+#     loaded node, 6 GB, a TSV of about 31 MB) is not a release gate; chr22 above stands
+#     for it.
 
 # 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.
 docker run -d --rm --name gate-web -p 8090:8080 "$IMG" crisprme.py web-interface

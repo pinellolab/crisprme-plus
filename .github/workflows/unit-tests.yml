@@ -322,7 +322,14 @@ jobs:
         # the target, a carrier whose second indel puts an SNV's bases where it carries
         # none, a population-level cluster joined to another only through a target no
         # carrier holds, two genotyped VCFs that share samples (refused), calls of unknown
-        # phase on the record's REF span. CRISPRme's documented limits (a split
+        # phase on the record's REF span, a SNP named for a carrier whose slot's alleles
+        # overlap the record and that holds it on no slot, a slot read without its
+        # phasing artefact that lacks the row's target, a carrier off by rule in a fold
+        # group, a population-level cluster joined through a slot a complex allele takes
+        # off, a haploid SNP call beside a diploid record (the reference stays possible),
+        # a capped window's greedy row in a per-sample chain, and inputs other than the
+        # search's (its datasets, budget, PAM, guides, samples list, mode: refused).
+        # CRISPRme's documented limits (a split
         # multi-allelic site, two indels in one target, a complex allele, a phasing
         # artefact, a repeat unit at the target's edge, a PUTATIVE tie) must come out
         # under their own non-gating class, and the driver must never pass silently (a
