@@ -46,6 +46,11 @@ def _rep_tiebreak(x):
     after everything else ties, so no other choice of representative can change. It holds
     among rows with carriers only: the rows of a sites-only index (mega) have none and
     their REF alignment was never upper case, so their ties stay in the sort's order.
+
+    2.8.2: two alignments of one indel target string can share their aligned DNA too, since
+    the merge keys an indel row by its aligned spacer as well. Those with one carrier set are
+    folded into one entry (_fold_same_carriers), and an exact tie between them keeps the
+    input order, in which the merge kept the first of them before 2.8.2.
     """
     try:
         _samples = str(x[true_guide - 2])
@@ -201,8 +206,18 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             # can name the same variants with different carriers: an RNA-bulge alignment
             # does not reach the base a SNP sits on, so it holds carriers of that SNP
             # that the full alignment does not. So only rows with one sequence merge here.
+            # And only rows with one alignment of it (2.8.2): a carrier resolved PUTATIVE
+            # (phase unknown) gets the strongest target its own alleles allow on each
+            # alignment (indel_snp_cis.worst_case_bases): the guide's base where the
+            # alignment pairs a SNP's base with a guide base, the CFD's choice where it
+            # leaves that base as a DNA bulge. So two alignments of one target string can
+            # list it with different bases, and with the target alone as the key it went
+            # onto the other alignment with the first one's bases, a target weaker than its
+            # own there (the SNP+indel oracle's S19). Rows of one alignment still merge
+            # (one target from two VCF datasets); the alignments of a target with one
+            # carrier set are folded into the best below (_fold_same_carriers).
             if _holds_indel_token(ele[snp_info]):
-                key += (ele[2].upper(),)
+                key += (ele[2].upper(), ele[1].upper())
             if key in dict_var.keys():
                 _merge_row(dict_var[key][0], ele, snp_info)
             else:
@@ -212,7 +227,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     # being their cluster position on the haplotype carrying the indel.
     fold_of = {}
     for key in dict_var.keys():
-        if len(key) == 3:
+        if len(key) == 4:  # an indel or MNV row (its target and aligned spacer in the key)
             row = dict_var[key][0]
             fold_of[id(row)] = (_haplotype_cluster_position(row), key[1],
                                 frozenset(row[true_guide - 2].split(",")))

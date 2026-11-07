@@ -516,9 +516,10 @@ haplotype** (`indel_snp_cis.resolve_target`):
   a raw target that no individual carries gives no row;
 - an individual whose genotypes cannot put an allele on the indel's haplotype (an unphased
   call, a missing allele, no phased indel genotype, a haploid call against a diploid one)
-  gets the **strongest target its own alleles allow** (the guide's base wherever it carries
-  it; elsewhere, and at the PAM jointly, the alleles that maximize CFD among those the motif
-  allows), PUTATIVE in the co-occurrence companion: it is never listed for an allele it
+  gets the **strongest target its own alleles allow** on each alignment (the guide's base
+  wherever it carries it and the alignment pairs the position with a guide base; elsewhere, a
+  DNA bulge included, and at the PAM jointly, the alleles that maximize CFD among those the
+  motif allows), PUTATIVE in the co-occurrence companion: it is never listed for an allele it
   does not carry. The carriers of an equal-length multi-base record (an MNV, AC>TG), which
   CRISPRitz puts in a fake-indel window as it does an indel, are always in this case: the
   phased indel genotype store keeps only records whose REF and ALT differ in length. With
@@ -578,13 +579,19 @@ did not keep: a population-level run, which writes no alternative alignments, ca
 lines with no row in its tables. The resolution does not depend on the analysis mode (§5).
 A target with no code (every target of a classic, non-overlaid
 fake-indel genome) that holds the indel needs no resolution: its sequence is the one the
-engine found. An indel row's carriers belong to its sequence: two alignments of one site can
-name the same variants with different carriers (an RNA-bulge alignment does not reach the base a
-SNP sits on, so it lists that SNP's carriers under the indel alone), and the merge of a
-cluster's rows, which otherwise keeps one row per position and variant list, keeps one per
-carrier set there, so that no carrier is added to a sequence it does not have; of the
-alignments with one carrier set it keeps the best by the order that picks each block's
-representative (the score first in the CFD and CRISPR-Bulge blocks, then
+engine found. An indel row's carriers belong to its sequence and its alignment: two alignments
+of one site can name the same variants with different carriers (an RNA-bulge alignment does not
+reach the base a SNP sits on, so it lists that SNP's carriers under the indel alone; and a
+PUTATIVE carrier can have different bases on two alignments of one target string, the guide's
+base where one pairs the position with a guide base and the CFD's choice where the other leaves
+it as a DNA bulge), and the merge of a cluster's rows, which otherwise keeps one row per
+position and variant list, keeps one per carrier set there, so that no carrier is added to a
+sequence it does not have, nor to an alignment it was not resolved on (the merge keys an indel
+row by its aligned spacer as well as by its target, since 2.8.2: up to 2.8.1 the alignments of
+one target string were one entry whatever their carriers, and in the SNP+indel oracle's site U
+the unphased S19 was listed with the reference base on the alignment where its alleles give the
+guide's base); of the alignments with one carrier set it keeps the best by the order that picks
+each block's representative (the score first in the CFD and CRISPR-Bulge blocks, then
 `--sorting-criteria`). An MNV row is merged as an indel row is.
 
 An indel row is placed as the reference and SNP rows of the same alignment are: it starts at

@@ -28,7 +28,8 @@
         * every listed carrier really has the reported sequence: a phased carrier on
           one of its haplotypes, at the reported site, spanning the indel the row
           names, with every named variant on that haplotype; an unphased one carries
-          every allele the row names;
+          every allele the row names, and the row's target is the strongest its own
+          alleles allow on the row's alignment (PUTATIVE: putative_stronger);
       in the per-sample results, every SNP-only row's carriers have its target at its
       start (snp_rows.py: a carrier whose haplotype holding its SNPs also holds an indel
       inside the target has not);
@@ -49,6 +50,7 @@ Stdlib only, plus the release's own CFD scorer (PostProcess/bulge_cfd_penalty.py
 import csv
 import glob
 import io
+import itertools
 import json
 import os
 import random
@@ -857,6 +859,76 @@ def expected_pam_creation(ref, pos, k, n, strand, motif, side, alt):
     return "not" if ok else "created"
 
 
+def first_place(pos, k):
+    """The reference coordinate a row whose first base is at index ``k`` of a haplotype
+    starts at: that base's, or for a base an insertion adds, the insertion's anchor."""
+    p = pos[k]
+    if p is None:
+        p = next((q for q in reversed(pos[:k]) if q is not None), None)
+    return p
+
+
+def putative_stronger(truth, sample, f, held, motif, side, cfd_fn):
+    """An unphased carrier is listed PUTATIVE with the strongest target its own alleles
+    allow on the row's alignment: the row's aligned spacer and gaps, and at each target
+    base a SNP of the carrier sits on, one of its alleles there (the alt, and the reference
+    base too unless it is homozygous for the alt), the PAM kept in the motif. The strength is
+    the alignment's CFD for a 3' PAM, and its mismatches for a 5' one (no CFD: the guide's
+    base wins). Returns None when no such target is stronger than the row's own, else
+    (the row's strength, the strongest, that target). The occurrence that places the
+    target's bases is one of ``held`` at the row's start."""
+    alt = f["alt"]
+    stripped = alt.replace("-", "")
+    n = len(stripped)
+    occ = next(((pos, k) for _s, pos, k in held if first_place(pos, k) == f["start"]), None)
+    if occ is None:
+        return None  # the start check reports it
+    pos, k = occ
+    seg = pos[k:k + n]
+    cols = [j for j, c in enumerate(alt) if c != "-"]  # the column of each target base
+    recs = {}
+    for v, toks, _p in truth.gts.get(sample, ()):
+        if len(v["ref"]) == 1 and len(v["alt"]) == 1 and "1" in toks and v["pos1"] - 1 in seg:
+            recs.setdefault(v["pos1"] - 1, []).append((v, toks))
+    if not recs:
+        return None
+    choices = []  # (column, the bases the carrier's alleles allow there, target orientation)
+    for p0, rs in sorted(recs.items()):
+        bases = {v["alt"] for v, _t in rs}
+        if sum(t.count("1") for _v, t in rs) < 2:
+            bases.add(rs[0][0]["ref"])
+        i = seg.index(p0)
+        if f["strand"] == "-":
+            i, bases = n - 1 - i, {rc(b) for b in bases}
+        choices.append((cols[i], sorted(bases)))
+    kp = len(motif)
+    pam_cut = slice(-kp, None) if side == "3p" else slice(0, kp)
+    spacer_cut = slice(0, -kp) if side == "3p" else slice(kp, None)
+
+    def strength(target):
+        if side == "3p":
+            return cfd_fn(f["crrna"], target)
+        return -sum(1 for c in target[spacer_cut] if c.islower())
+
+    own = strength(alt)
+    best = None
+    for combo in itertools.product(*[b for _c, b in choices]):
+        t = list(alt)
+        for (c, _b), b in zip(choices, combo):
+            g = f["crrna"][c].upper()
+            t[c] = b if g in ("N", "-", b) else b.lower()
+        t = "".join(t)
+        pam = t.replace("-", "")[pam_cut].upper()
+        if not all(b in MOTIF_BASES[m] for b, m in zip(pam, motif)):
+            continue
+        s = strength(t)
+        if best is None or s > best[0]:
+            best = (s, t)
+    if best is not None and best[0] > own + 1e-9:
+        return own, best[0], best[1]
+    return None
+
+
 def _is_indel_token(tok):
     """A variant of the indel path: a REF or ALT longer than one base (an indel, or an
     equal-length multi-base record, an MNV, which CRISPRitz also puts in a fake-indel
@@ -1000,6 +1072,35 @@ def check(wd, pp, result_dirs):
             # the occurrences that hold every variant the row names (its indel spanned)
             held = [(s, pos, k) for s, _hap, pos, k, h in occ
                     if truth.holds_named(s, h, pos, k, len(seq), named)]
+            # every variant it names is a record of the VCF, and every carrier it lists has
+            # its sequence: a phased one at an occurrence that holds every variant the row
+            # names; an unphased one carries every allele the row names, and is listed
+            # PUTATIVE with the strongest target its own alleles allow on the row's alignment
+            # (putative_stronger). 75ff25b's rewrite of this loop kept the occurrences for
+            # the start only and dropped the first two checks; restored in 2.8.2 with the
+            # third, which up to 8d3f278 fails at site U: the merge keyed an indel row by its
+            # target alone, and S19, resolved with the reference base where that base is a
+            # DNA bulge of one alignment, went onto another alignment of the same target,
+            # where its own alleles give the guide's base.
+            for n in named:
+                if not truth.is_record(*n):
+                    fail("%s: %s is not a record of the VCF" % (where, "_".join(map(str, n))))
+            for s in samples:
+                if truth.phased(s):
+                    if not any(hs == s for hs, _pos, _k in held):
+                        fail("%s: %s is listed, and no haplotype of it has the sequence with "
+                             "every variant the row names" % (where, s))
+                    continue
+                lacks = ["%d_%s_%s" % n for n in named if not truth.carries_allele(s, *n)]
+                if lacks:
+                    fail("%s: %s is listed (unphased) without %s" % (where, s, ",".join(lacks)))
+                    continue
+                stronger = putative_stronger(truth, s, f, held, motif, side,
+                                             cfd_score_bulge_aware)
+                if stronger:
+                    fail("%s: %s (unphased, PUTATIVE) is listed with a target of strength "
+                         "%.4f where its own alleles give this alignment %s (%.4f)"
+                         % (where, s, stronger[0], stronger[2], stronger[1]))
             # the start is the reference coordinate of the target's first base on a
             # carrier's haplotype, or, for a base an insertion adds, the insertion's
             # anchor (up to 2.8.1 the base's place on the haplotype, past the anchor), of an

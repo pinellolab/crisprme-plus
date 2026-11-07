@@ -21,7 +21,10 @@ variant the row names, or, when that base is one an insertion adds, the insertio
 gapped as its target; every variant it names must be a record of the VCF, forward strand;
 every carrier it lists must have the sequence: a phased carrier on one of its haplotypes at
 that site, spanning the indel, with every variant the row names on that haplotype; an
-unphased one every allele the row names. Its `Variant_info_spacer+PAM` must number each
+unphased one every allele the row names, and its target must be the strongest its own alleles
+allow on the row's alignment (PUTATIVE: the guide's base where the alignment pairs the position
+with a guide base, else the alleles with the higher CFD; with a 5' PAM, fewer mismatches). Its
+`Variant_info_spacer+PAM` must number each
 variant as a SNP row numbers its variants on the reference, along the target on that
 haplotype (the distance from the target's first base to the variant's POS base, the first
 being 1; from the right on the - strand, len(aligned spacer) + 1 - distance, less a
@@ -45,7 +48,7 @@ pin who has which target:
 | D | deletion + a PAM-creating A>G SNP in cis (S10) | S10 CFD 1, CONFIRMED co-occurrence; S11 no target |
 | E, E2 | a SNP the guide needs at every base, no haplotype carrying them together | no indel row above CFD 0.5 |
 | F | deletion + a spacer SNP the guide needs, cis (S17) and trans (S18) | S17 CFD 1, CONFIRMED; S18 one mismatch |
-| U | F's geometry, unphased | S19 CFD 1, PUTATIVE; S20 one mismatch |
+| U | F's geometry, unphased | S19 CFD 1, PUTATIVE, and on each alignment it is listed on, the strongest target its alleles allow there (C where the SNP's base is a DNA bulge, the guide's A elsewhere); S20 one mismatch |
 | O | two deletions inside one target on S21's haplotype | S22 listed; S21 on no row |
 | M, M2 | deletion (+), insertion (-), and on S24's, S26's slot a SNP at the target's far-end base | S23, S25 CFD 1 alone; S24, S26 on a one-mismatch row, off the perfect one (an RNA-bulge alignment that does not reach that base lists them under the same variants) |
 | N, N2 | deletion + C>A,T on one VCF line, A the guide's base (2\|1, 2\|2, 0\|1) | the deletion slot's own allele: S28, S31 CFD 1; S27, S29, S32 T, one mismatch; S30 C |
@@ -108,7 +111,17 @@ failures on 43809d3, 8 and 4 on c3a75fe. The released image and d7a6fff read tho
 the REF alignment: NA, as now. In the genome-wide HGDP + 1000 Genomes search of the README
 guide (per-sample, 4 mismatches + 1 + 1) 229 highest-CFD rows of 2.8.1 start inside an
 insertion, up to 229 bases past the anchor; on 2.8.0, an alternative alignment of that guide
-started at chr22:22322768, the 7th base of G>GCAATCATTAT at 22322762.
+started at chr22:22322768, the 7th base of G>GCAATCATTAT at 22322762. From 75ff25b to 8d3f278
+the check did not test the carriers a row lists, only that the row starts where a listed
+carrier's occurrence does (75ff25b's rewrite of the start check dropped the test of every
+carrier, and of every variant being a record of the VCF); it does again, and tests an unphased
+carrier's target against the strongest its alleles allow on the row's alignment too. Up to
+8d3f278 the merge keyed an indel row by its target alone, so two alignments of one target were
+one entry, and that test fails twice, at site U, on every version before the fix (not counted
+above): S19, listed with C on the alignment that makes the SNP's base a DNA bulge (CFD 0.014;
+0 with A), went onto A-CTGAAATCTG…, which aligns that base with the guide's A, with C (CFD
+0.423, where its alleles give 0.93), in the highest-CFD block, and onto the alignment at 7999
+in the CRISPR-Bulge block.
 
 Not covered: split multi-allelic SNP records at one position. CRISPRitz add-variants
 keeps only the last of them in the enriched genome and in the dictionary, so the other
@@ -144,5 +157,7 @@ alignments of sites D, F, M, N, Q, R, J, Z3, Y1, Y3 and Y4 list the indel's cis 
 row blocks), S70, S72, S77 and S78 are on a SNP row, and Y2's row is CONFIRMED; and the
 `cas12a` profile 6 times: the SNP-only rows of C3 and C5 list S05 and S08, whose haplotypes
 holding the SNP hold the insertion or the deletion. These failures come on top of the
-indel-row failures counted above: the released v2.8.1 image fails the whole oracle 166 times
-(104 + 62) and the `cas12a` profile 53 times (47 + 6).
+indel-row failures counted above: the released v2.8.1 image fails those checks 166 times
+(104 + 62) and the `cas12a` profile 53 times (47 + 6), and the whole oracle, with site U's two
+failures of the check of an unphased carrier's target, 168 and 53 times (e4dbb9c 64 and 6,
+8d3f278 2 and 0).

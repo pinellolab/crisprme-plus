@@ -54,6 +54,10 @@ ASSERTS:
     of the insertion with one carrier set both stay, the site's row and an alternative
     alignment, on both strands; two copies of one target are one row; a bulged alignment
     of one target, before the same PAM, still folds into the best (as up to 2.8.1).
+  * Two alignments of one indel target string (2.8.2: the merge keys an indel row by its
+    aligned spacer too): a carrier resolved PUTATIVE stays on the alignment it was resolved
+    on (the SNP+indel oracle's site U, S19); one alignment from two VCF datasets is still
+    one entry; alignments of one target with one carrier set are one entry, the best.
 
 Run with:
     cd PostProcess && python3 -m unittest test_representative_tiebreak -v
@@ -476,6 +480,114 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
             self.assertEqual(len(best), 1)
             counts.add(len(alt))
         self.assertEqual(counts, {2})  # the carrier sets {S1}, {S1,S2}, {S2}
+
+
+class OneTargetTwoAlignments(unittest.TestCase):
+    """2.8.2: an indel row merges only with rows of its own alignment, its target and its
+    aligned spacer the same.
+
+    A carrier resolved PUTATIVE (phase unknown) is listed with the strongest target its own
+    alleles allow on each alignment (indel_snp_cis.worst_case_bases): the guide's base at a
+    spacer column, the CFD's choice in a DNA bulge. So two alignments of one target string
+    can list different carriers. The rows are the SNP+indel oracle's site U as the indel
+    post-analysis writes them: the deletion chr21:8010 TC>T, the SNP chr21:8006 C>A whose A
+    the guide needs, S19 0/1 for both, S20 0/1 for the deletion alone. The target
+    AC-TGA?ATCTGTAAGCAGGCTGG (? the SNP's base) has two alignments: A-CTGAAATCTG..., where ?
+    faces the guide's A (S19 with A, CFD 0.93; S20 with C, 0.423), and ACTGAA-ATCTG..., where
+    ? is a DNA bulge and the CFD takes C (r-:dG,7 0.059, r-:dT,7 0), so S19 and S20 with C
+    (0.014). Up to 8d3f278 the merge keyed an indel row by its target alone, and the two C
+    rows were one entry, the first in the file's order: the CFD 0.423 alignment, which then
+    listed S19 with C, where its alleles give that alignment A (0.93)."""
+
+    DEL, SNP = "chr21_8010_TC_T", "chr21_8006_C_A"
+    G = "ACTGAAATCTGTAAGCAGGCNNN"
+    BULGED_A = "A-CTGAAATCTGTAAGCAGGCNNN"  # the SNP's base faces the guide's A
+    BULGED_B = "ACTGAA-ATCTGTAAGCAGGCNNN"  # the SNP's base is a DNA bulge
+    REF = "ACTGACATCTCGTAAGCAGGCTGG"  # the reference from 8000 (the deleted C at 8010)
+
+    setUp = IndelRowsKeepTheirOwnCarriers.setUp
+    tearDown = IndelRowsKeepTheirOwnCarriers.tearDown
+    _merge = IndelRowsKeepTheirOwnCarriers._merge
+
+    def _u(self, crrna, dna, cfd, mm, samples, snp=False, rsid=".", af="0.0128205"):
+        bulges = crrna.count("-") + dna.count("-")
+        r = _row(dna, cfd=cfd, total=mm + bulges, cluster_pos=8000, position=8000,
+                 snp=(self.SNP + "," + self.DEL) if snp else self.DEL, chrom="chr21",
+                 guide=crrna, samples=samples)
+        ref = self.REF[:len(dna.replace("-", ""))]
+        for i, c in enumerate(dna):
+            if c == "-":
+                ref = ref[:i] + "-" + ref[i:]
+        r[0] = {0: "X", 1: "DNA" if "-" in crrna else "RNA"}.get(bulges, "RNA,DNA")
+        r[3], r[8], r[9] = ref, str(mm), str(bulges)
+        r[16], r[17] = (".,rs1" if snp else rsid), ("0.00641026," + af if snp else af)
+        return r
+
+    def _site_u(self):
+        return [self._u(self.G, "ACTGAAATCTGTAAGCAGGCTGG", "1.000", 0, "S19", snp=True),
+                self._u(self.BULGED_A, "AC-TGAAATCTGTAAGCAGGCTGG", "0.930", 0, "S19", snp=True),
+                self._u(self.BULGED_A, "AC-TGAcATCTGTAAGCAGGCTGG", "0.423", 1, "S20"),
+                self._u(self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG", "0.014", 2, "S19,S20")]
+
+    def _all(self, rows, sort_order):
+        best, alt = self._merge([list(r) for r in rows], sort_order)
+        return best + alt
+
+    def test_a_putative_carrier_stays_on_the_alignment_it_was_resolved_on(self):
+        """In the merge step's order of each file (CFD then mismatches + bulges, or
+        mismatches + bulges), and reversed: S19 is listed under the deletion alone only on
+        the alignment that makes the SNP's base a DNA bulge, and the other alignment of that
+        target lists S20 alone. One entry per carrier set and variant list: S19 under both
+        variants (the perfect alignment, A-CTGAAATCTG...'s A folded into it, as up to 2.8.1),
+        S20 and S19 + S20 under the deletion alone; the same three whatever the sort, so the
+        three files keep one row count."""
+        rows = self._site_u()
+        by_cfd = sorted(rows, key=lambda r: (-float(r[CFD_COL]), int(r[TOTAL_COL])))
+        by_total = sorted(rows, key=lambda r: int(r[TOTAL_COL]))
+        for sort_order, order in (("score", by_cfd), ("score", by_cfd[::-1]),
+                                  ("total", by_total), ("total", by_total[::-1])):
+            with self.subTest(sort_order=sort_order, first=order[0][1]):
+                out = self._all(order, sort_order)
+                got = {(r[1], r[DNA_COL]): (r[SNP_COL], r[13]) for r in out}
+                self.assertEqual(got, {
+                    (self.G, "ACTGAAATCTGTAAGCAGGCTGG"): (self.SNP + "," + self.DEL, "S19"),
+                    (self.BULGED_A, "AC-TGAcATCTGTAAGCAGGCTGG"): (self.DEL, "S20"),
+                    (self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG"): (self.DEL, "S19,S20")})
+
+    def test_one_alignment_from_two_datasets_is_still_merged(self):
+        """The same alignment from two VCF datasets (a carrier T01 of the second): one entry
+        with the carriers, rsIDs and AFs of both."""
+        one = self._u(self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG", "0.014", 2, "S19,S20")
+        two = self._u(self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG", "0.014", 2, "T01",
+                      rsid="rs7", af="0.2")
+        for sort_order in ("score", "total"):
+            out = self._all([one, two], sort_order)
+            self.assertEqual(len(out), 1)
+            self.assertEqual((out[0][13], out[0][16], out[0][17]),
+                             ("S19,S20,T01", ".,rs7", "0.0128205,0.2"))
+
+    def test_alignments_of_one_target_with_one_carrier_set_are_one_entry(self):
+        """Two alignments of one target string (ACTG-AcATCTG...) listing one carrier set
+        (S20, its slot's C facing the guide's A in both) are one entry, the best by the order
+        that picks each block's representative (the CFD on the score branch, whichever comes
+        first), with the other's rsID and AF; and the alignment of that target where the C
+        is a DNA bulge, which lists S19 too, stays an entry of its own."""
+        strong = self._u("ACT-GAAATCTGTAAGCAGGCNNN", "ACTG-AcATCTGTAAGCAGGCTGG", "0.042", 1,
+                         "S20", rsid="rs9", af="0.5")
+        weak = self._u("ACTGA-AATCTGTAAGCAGGCNNN", "ACTG-AcATCTGTAAGCAGGCTGG", "0.012", 1,
+                       "S20")
+        bulge = self._u(self.BULGED_B, "ACTG-ACATCTGTAAGCAGGCTGG", "0.019", 0, "S19,S20")
+        for sort_order in ("score", "total"):
+            for order in ((strong, weak, bulge), (weak, strong, bulge), (bulge, weak, strong)):
+                with self.subTest(sort_order=sort_order, first=order[0][1]):
+                    out = self._all(order, sort_order)
+                    self.assertEqual(len(out), 2)
+                    s20 = [r for r in out if r[13] == "S20"]
+                    self.assertEqual(len(s20), 1)
+                    self.assertEqual((s20[0][16], s20[0][17]), (".,rs9", "0.0128205,0.5"))
+                    if sort_order == "score":
+                        self.assertEqual(s20[0][1], strong[1])
+                    self.assertEqual([r[1] for r in out if r[13] == "S19,S20"], [bulge[1]])
 
 
 class AlignmentsStartingInsideOneInsertion(unittest.TestCase):

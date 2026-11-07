@@ -265,7 +265,49 @@ and the `release-crisprme` skill.
     (cis, trans, homozygous, unphased, a G run at the target's edge, an always-cis SNP). Without
     this fix that check fails 62 times (57 row blocks at 11 sites, and the Y sites'
     expectations) and 6 in the Cas12a profile (the SNP-only rows of C3 and C5), on top of the
-    indel-row checks above: the released v2.8.1 image fails the whole oracle 166 and 53 times.
+    indel-row checks above: the released v2.8.1 image fails the two 166 and 53 times (the whole
+    oracle, with the check the merge fix below adds, 168 and 53).
+- **A carrier resolved PUTATIVE is listed only on the alignment it was resolved on** (2.8.1;
+  indel and MNV rows, both modes).
+  - A carrier whose genotypes cannot put an allele on the indel's haplotype (an unphased call,
+    a missing allele, and every carrier of an MNV) gets the strongest target its own alleles
+    allow on each alignment: the guide's base at a position the alignment pairs with a guide
+    base, the base with the higher CFD at one it leaves as a DNA bulge. So two alignments of one
+    target string can list it with different bases. The merge keyed an indel or MNV row by its
+    cluster position, variants and upper-cased target, not by its aligned spacer: the two
+    alignments' rows were one entry, the first in the file's order, with the carriers of both.
+    Such a carrier could then be listed on an alignment where its own alleles give a stronger
+    target, and the alignment it was resolved on left both tables. SNP+indel oracle, site U (S19
+    0/1 for a deletion and for the SNP whose alt the guide needs): the target
+    AC-TGA?ATCTGTAAGCAGGCTGG aligned as A-CTGAAATCTG… gives S19 the guide's A (CFD 0.93), and
+    aligned as ACTGAA-ATCTG…, where that base is a DNA bulge, C (CFD 0.014; 0 with A); S19 was
+    listed with C on the first, CFD 0.423, the row of S20, who has C (an alternative alignment,
+    in the highest-CFD block; in the CRISPR-Bulge block S19 was listed so at 7999 too).
+  - The merge now keys such a row by its aligned spacer too. Rows of one alignment still merge
+    (one target from two VCF datasets, or two copies of one target inside an insertion), and
+    the alignments of a site that name the same variants with the same carriers are still one
+    entry, the best by the order that picks each block's representative (METHODS, "SNP+indel
+    off-targets: each carrier's own haplotype"). A phased carrier has a target string on every
+    alignment of it, so only alignments of one target string that list different carriers,
+    through a PUTATIVE one, now keep an entry each. At site U, S19 is listed under the deletion
+    alone only on alignments where the SNP's base is a DNA bulge, and A-CTGAAATCTG…, with C
+    facing the guide's A, lists S20 alone.
+  - chr22 of HGDP + 1000 Genomes, the searches above (README guide NRG per-sample and
+    population-level, NRR per-sample, TRAC guide per-sample): every table is byte-identical
+    with and without this fix. Of their groups of indel or MNV rows with one cluster position,
+    variant list and target string, 105 of 233 (NRG, both modes), 259 of 629 (NRR) and 131 of
+    300 (TRAC) hold two or more alignments, each group with one carrier set, and each still
+    kept as before. The real-data indel check (test/282-indel-realdata-check), which found the
+    defect, found no carrier listed so on chr22 of HGDP + 1000 Genomes, HPRC or an unphased
+    copy of HPRC.
+  - Covered by `test_representative_tiebreak` (site U's rows through the real merge; without
+    this fix S19 is on the CFD-0.423 alignment, or that alignment is gone) and by the SNP+indel
+    oracle. It checks again every carrier an indel row lists (a phased one at an occurrence of
+    the target holding every variant the row names, an unphased one carrying every allele it
+    names) and that every variant it names is a record of the VCF, which the stricter start
+    check above had stopped doing, and now also that an unphased carrier's target is the
+    strongest its own alleles allow on the row's alignment. Without this fix that check fails
+    twice, at site U.
 
 ## [2.8.1] - 2026-11-05
 
