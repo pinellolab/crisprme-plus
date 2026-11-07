@@ -816,7 +816,9 @@ A quick reference for the terms and columns in the **Custom Ranking** tab and th
   **NA** on the sites-only *mega* index.
 
 **Key columns**
-- **REF/ALT_origin** — REF = present on the reference genome; ALT = created by a variant allele.
+- **REF/ALT_origin** — REF = the alignment reported is the reference genome's; ALT = it is a
+  variant one: a variant either creates the site (`Not_found_in_REF` `y`) or changes a
+  reference site, for example to fewer mismatches.
 - **Variant** — the variant(s) as `chrom;pos;ref;alt`.
 - **Observed (≥1 carrier)** — the haplotype is seen in ≥1 genotyped sample (vs a worst-case
   reconstruction).

@@ -285,6 +285,29 @@ class TestRefusedDatasets(_Install):
                       self.note("dl"))
         self.assertEqual(self.submit("dl"), (True, []))
 
+    def test_a_vcf_named_for_no_chromosome_beside_others_is_named(self):
+        # beside VCFs named per chromosome, or beside another such file, the refusal said
+        # that the dataset's VCF was a single multi-chromosome file (RV1-WEB2-5): it names
+        # the file the search cannot read
+        rest = ("which a search cannot prepare the variant genome from: {} split per "
+                "chromosome only when its index is built. Build its index in Settings (Build "
+                "an index locally) first, or remove the dataset in Settings and add it again "
+                "as one VCF file per chromosome (<name>.chrN.vcf.gz).")
+        self.dataset("mix", ["walk.chr1.vcf.gz", "walk.chr2.vcf.gz", "merged.vcf.gz"])
+        note = self.note("mix")
+        self.assertEqual(note, "No mix variant index for this PAM is installed yet, and the "
+                               "dataset's VCF folder holds merged.vcf.gz, whose name says no "
+                               "chromosome (no '.chrN.' part), "
+                               + rest.format("such a file is"))
+        self.assertEqual(self.submit("mix"), (False, [note]))
+        self.dataset("two", ["b.vcf.gz", "a.vcf.gz"])
+        note = self.note("two")
+        self.assertEqual(note, "No two variant index for this PAM is installed yet, and the "
+                               "dataset's VCF folder holds a.vcf.gz, b.vcf.gz, whose names say "
+                               "no chromosome (no '.chrN.' part), "
+                               + rest.format("such files are"))
+        self.assertEqual(self.submit("two"), (False, [note]))
+
     def test_sites_only_dataset_with_or_without_its_index(self):
         # Submit refuses a search of a sites-only dataset, which has no sample list, and
         # building its index does not change that; the note offered a 0-bulge search and a

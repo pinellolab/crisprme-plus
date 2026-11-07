@@ -483,8 +483,7 @@ Verify the installation; it prints the installed version, `v2.8.1`:
 crisprme.py --version
 ```
 
-(A bare `crisprme.py` prints its list of commands, exits 1, and creates the CRISPRme folders,
-`Genomes/`, `Results/` and the rest, in the current directory.)
+(A bare `crisprme.py` prints its list of commands and exits 1; it creates no folder.)
 
 #### 1.1.3 Updating CRISPRme
 ---
@@ -1061,8 +1060,8 @@ its purpose and usage:
   (Apple Silicon, self-tests and falls back to CPU). `complete-search` refuses to start while
   the cbulge scorer env or its weights are missing or broken: fix it with
   `crisprme.py scorer-env create` (diagnose with `crisprme.py scorer-env doctor`), or set
-  `CRISPRME_SKIP_SCORER_ENV=1` to run CFD-only (the CRISPR-Bulge columns read `-1`). In Docker,
-  the default `pinellolab/crisprme:latest` image is
+  `CRISPRME_SKIP_SCORER_ENV=1` to run CFD-only (the CRISPR-Bulge scores read `-1`, and its risk
+  score `0`). In Docker, the default `pinellolab/crisprme:latest` image is
   GPU-capable — add `--gpus all` to `docker run` on an NVIDIA host and pass
   `--compute-backend cuda`; it falls back to CPU when no GPU is present. See
   [GPU acceleration](#2210-reference-index-and-data-distribution-commands) for details.
@@ -1175,14 +1174,14 @@ feature; both are bundled into the report ZIP):
     - **Contents**: Off-targets requiring **both** a nearby SNP **and** an
     indel in the same protospacer window — chrom, indel pos/ref/alt, off-target start,
     strand, SNP positions + rsIDs, phase (`CONFIRMED`/`PUTATIVE`), joint AF, cis-carrier
-    count, and carrier samples. The indel post-analysis writes the file before the merge
-    picks each cluster's alignments, one line per engine alignment, required SNP set
-    and phase (an alignment that needs no SNP writes no line). The SNPs are the alts
-    the alignment's rows require (the guide's own base at a protospacer position, or a
-    base that creates the PAM), and the carriers are those rows': individuals whose
-    own haplotype holds the indel and those SNP alts (PUTATIVE: phase unknown, or no
-    genotypes). A population-level run, which writes no alternative alignments, can
-    have lines with no row in its tables.
+    count (of every carrier), and carrier samples (the first 50 by name). The indel
+    post-analysis writes the file before the merge picks each cluster's alignments, one
+    line per engine alignment, required SNP set and phase (an alignment that needs no SNP
+    writes no line). The SNPs are the alts the alignment's rows require (the guide's own
+    base at a protospacer position, or a base that creates the PAM), and the carriers are
+    those rows': individuals whose own haplotype holds the indel and those SNP alts
+    (PUTATIVE: phase unknown, or no genotypes). A population-level run, which writes no
+    alternative alignments, can have lines with no row in its tables.
 
     - **Purpose**: Surfaces SNP+indel co-occurring off-targets, which the classic
     two-independent-passes search could not see.

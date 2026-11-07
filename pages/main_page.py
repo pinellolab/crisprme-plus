@@ -2891,7 +2891,8 @@ def _unsplit_vcf_refusal(genome: str, pam: str, panel: str) -> Optional[str]:
     chromosome from a '.chrN.' token in its name. A single multi-chromosome file has
     none: the search fails as it begins ("cannot open Genomes/<genome>/.fa"). Only a
     build of its index (build-index-only, as Settings runs it) splits it per chromosome;
-    this is that build's test (crisprme.py _ensure_per_chromosome_vcfs)."""
+    this is that build's test (crisprme.py _ensure_per_chromosome_vcfs). A file without
+    the token beside others is named: the folder is no single file."""
     genome = genome.replace(" ", "_")
     if _index_installed(genome, pam, panel):
         return None
@@ -2904,14 +2905,23 @@ def _unsplit_vcf_refusal(genome: str, pam: str, panel: str) -> Optional[str]:
                 if f.endswith(".vcf.gz")]
     except OSError:
         return None
-    if not vcfs or all(any("chr" in tok for tok in f.split(".")) for f in vcfs):
+    unnamed = sorted(f for f in vcfs if not any("chr" in tok for tok in f.split(".")))
+    if not unnamed:
         return None
+    if len(vcfs) == 1:
+        what = ("VCF is a single multi-chromosome file, which a search cannot prepare the "
+                "variant genome from: the file is")
+    else:
+        several = len(unnamed) > 1
+        what = (f"VCF folder holds {', '.join(unnamed)}, whose "
+                f"{'names say' if several else 'name says'} no chromosome (no '.chrN.' "
+                f"part), which a search cannot prepare the variant genome from: "
+                f"{'such files are' if several else 'such a file is'}")
     return (
-        f"No {panel} variant index for this PAM is installed yet, and the dataset's VCF is "
-        "a single multi-chromosome file, which a search cannot prepare the variant genome "
-        "from: the file is split per chromosome only when its index is built. Build its "
-        "index in Settings (Build an index locally) first, or remove the dataset in "
-        "Settings and add it again as one VCF file per chromosome (<name>.chrN.vcf.gz)."
+        f"No {panel} variant index for this PAM is installed yet, and the dataset's {what} "
+        "split per chromosome only when its index is built. Build its index in Settings "
+        "(Build an index locally) first, or remove the dataset in Settings and add it again "
+        "as one VCF file per chromosome (<name>.chrN.vcf.gz)."
     )
 
 

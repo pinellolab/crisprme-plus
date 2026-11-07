@@ -904,8 +904,8 @@ class TestIndelZeroBulgeRouting(unittest.TestCase):
 class TestUnwritableWorkingFolder(unittest.TestCase):
     """complete-search, assembly-search and build-index-only ended in a raw OSError traceback
     when a folder of the working directory, or the output folder, could not be created (a
-    read-only mount, no write permission); now one line says so and what to do. crisprme.py
-    with no arguments still prints its help there."""
+    read-only mount, no write permission); now one line says so and what to do. (crisprme.py
+    with no arguments makes no folder: test_complete_search_flags.TestTheHelpMakesNoFolder.)"""
 
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="unwritable_")
@@ -937,9 +937,6 @@ class TestUnwritableWorkingFolder(unittest.TestCase):
         said = self.stops(lambda: crisprme._check_output(["--output", "job"]))
         self.assertEqual(said, f"Error: cannot create {self.root}/Results/job: Read-only file "
                                "system. Run CRISPRme from a working folder you can write to.\n")
-
-    def test_the_help_is_not_stopped(self):
-        crisprme.check_crisprme_dirtree(strict=False)  # (no SystemExit)
 
     def test_a_tree_in_place_needs_nothing_made(self):
         # the read-only use that works: every folder there, an --output elsewhere

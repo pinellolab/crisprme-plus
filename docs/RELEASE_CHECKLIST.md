@@ -263,7 +263,7 @@ crisprme.py download --what vcf --dataset hg38_HGDP1kGP        # the matched bui
 printf 'hg38_HGDP1kGP.samplesID.txt\n' > hgdp1kgp.samplesID.listing.txt
 crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NNN-NO-PAM.txt \
     --bDNA 2 --bRNA 2 --thread 16 --vcf VCFs/hg38_HGDP1kGP --samplesID hgdp1kgp.samplesID.listing.txt
-# -> genome_library/NNN_3_hg38+hg38_HGDP1kGP{,_INDELS}  (reuses the enriched genome + Dictionaries on a rebuild)
+# -> genome_library/20-NNN_3_hg38+hg38_HGDP1kGP{,_INDELS}  (reuses the enriched genome + Dictionaries on a rebuild)
 # 3. search it
 crisprme.py complete-search --pam PAMs/20bp-NNN-NO-PAM.txt --index-path genome_library … --guide guides.txt …
 ```
@@ -276,7 +276,8 @@ directly.
       record counts vs `variant_count.json`); the canonical matched path recorded in the reproducibility folder.
 - [ ] **Inputs on HF** — `vcfs/<dataset>/` + samplesID + the PAM file uploaded; `download --what vcf --dataset <ds>`
       resolves (closes T-21); size + SHA256 recorded.
-- [ ] **PAM honored end-to-end (T-34)** — no hardcoded PAM/dest literals in the build path; index named `<MOTIF>_<N>_…`.
+- [ ] **PAM honored end-to-end (T-34)** — no hardcoded PAM/dest literals in the build path; index named
+      `<guide>-<MOTIF>_<N>_…` (`<MOTIF>-<guide>_<N>_…` for a 5′ PAM; `<MOTIF>_<N>_…` by a release before 2.9.0).
 - [ ] **New index documented** — added to `docs/PRECOMPUTED_INDEXES.md` + the reproducibility table (dataset,
       PAM, upstream, exact command, checksums) + the HF dataset card; `BUILDING_INDEXES`/§3 build command shown.
 - [ ] **Smoke** — a real `complete-search` on the new index renders a report; for a non-NGG PAM confirm the

@@ -423,15 +423,15 @@ def getGuides(extracted_seq, pam, len_guide, pam_begin):
     # return guides for when adding to app.py
 
 
-def check_crisprme_dirtree(strict: bool = True) -> None:
+def check_crisprme_dirtree() -> None:
     """Ensures that the working directory contains the required CRISPRme folder 
     structure.
     
     Checks for the existence of each expected directory and creates any that are 
     missing. One that cannot be created (a read-only working folder, no write permission)
     stops the run with one line that says to run from a folder you can write to, rather
-    than a traceback; with ``strict`` False (crisprme.py with no arguments, which prints
-    the help) it is left as it is.
+    than a traceback. (crisprme.py with no arguments, which prints the help, makes no
+    folder: C14.)
     """
     # check that working folder respect crisprme's directory tree structure
     for directory in CRISPRMEDIRS:
@@ -442,8 +442,7 @@ def check_crisprme_dirtree(strict: bool = True) -> None:
             try:
                 os.makedirs(crisprmedir, exist_ok=True)
             except OSError as e:
-                if strict:
-                    _unwritable(crisprmedir, e)
+                _unwritable(crisprmedir, e)
 
 def _unwritable(path: str, exc: OSError) -> NoReturn:
     """Stops a run that cannot create ``path`` in the working directory, in one line."""
@@ -699,7 +698,7 @@ def print_help_complete_search() -> None:
         "start while the cbulge scorer env or its weights are missing or broken: fix it "
         "with `crisprme.py scorer-env create` (diagnose with `crisprme.py scorer-env "
         "doctor`), or set CRISPRME_SKIP_SCORER_ENV=1 to run CFD-only (the CRISPR-Bulge "
-        "columns read -1) [OPTIONAL]\n"
+        "scores read -1, and its risk score 0) [OPTIONAL]\n"
         "\t--report-full, build the FULL (non-slim) shareable report: in addition to the "
         "human-facing layer, bundle the heavy redundant data (complete "
         "integrated_results.tsv.gz, raw snp_snp_cooc.tsv.gz, the variant_created per-tier "

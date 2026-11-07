@@ -217,12 +217,15 @@ NRG one an NGG or NAG search.
 **Naming — `--dictless` is a flag, not a name marker.** `publish-index --dictless`
 controls *what goes in the tarball* (it drops the ~152 GB per-sample SNP
 dictionaries, keeping the compact Tier-0/Tier-1 stores), but it does **not** decorate
-the index name. A variant index is published and installed under the plain convention
-`<pam>_<N>_<ref>+<vcf>` — e.g. `NRG_3_hg38+hg38_HGDP1kGP`, extracting to
-`genome_library/NRG_3_hg38+hg38_HGDP1kGP/`. The search resolves an index by that
-same convention (the `<ref>` segment == the genome-folder basename; the `<vcf>` token after
-the `+` — e.g. `hg38_HGDP1kGP` — is shared verbatim with the Tier-1 `genotypes_<vcf>`
-companion, i.e. `genotypes_hg38_HGDP1kGP`). A reference-only index (no `+`)
+the index name. A variant index is published and installed under the name of the folder it
+was built in: the plain convention `<pam>_<N>_<ref>+<vcf>` for every index published so far
+— e.g. `NRG_3_hg38+hg38_HGDP1kGP`, extracting to `genome_library/NRG_3_hg38+hg38_HGDP1kGP/`
+— and, for an index built since 2.9.0, that name with its guide length and side, in the order
+of the target on the strand: `<guide>-<pam>_<N>_<ref>+<vcf>` for a 3′ PAM
+(`20-NRR_3_hg38+hg38_HGDP1kGP`), `<pam>-<guide>_<N>_<ref>+<vcf>` for a 5′ one. The search
+resolves an index by either convention (the `<ref>` segment == the genome-folder basename;
+the `<vcf>` token after the `+` — e.g. `hg38_HGDP1kGP` — is shared verbatim with the Tier-1
+`genotypes_<vcf>` companion, i.e. `genotypes_hg38_HGDP1kGP`). A reference-only index (no `+`)
 unpacks to a single `genome_library/<name>/` directory plus `manifest.json` and is used
 with no extra steps.
 
@@ -238,7 +241,7 @@ crisprme.py build-index-only \
   --bDNA 2 --bRNA 2 --thread 16 \
   --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs.config.txt \
   --path "$CRISPRME_DIR"
-# -> genome_library/NRR_3_hg38+hg38_HGDP1kGP/          (+ _INDELS companion)
+# -> genome_library/20-NRR_3_hg38+hg38_HGDP1kGP/       (+ _INDELS companion; the name says the guide length and the side)
 #    Dictionaries/registry_hg38_HGDP1kGP/              (Tier-0 allele-freq registry)
 #    Dictionaries/registry_hg38_HGDP1kGP/variant_count.json  (SNP + indel counts, for the report)
 #    Dictionaries/genotypes_hg38_HGDP1kGP/             (Tier-1 per-sample genotype store)
@@ -321,8 +324,8 @@ Two things the build handles for you, which matter as new merged panels are adde
 
 ```bash
 export HF_TOKEN=hf_...        # your write token, in the shell only
-crisprme.py publish-index --index genome_library/NRR_3_hg38+hg38_HGDP1kGP --dictless
-# -> indexes/NRR_3_hg38+hg38_HGDP1kGP.tar.gz     (main: index + _INDELS + registry (+ variant_count.json) + indel logs + samplesIDs + manifest)
+crisprme.py publish-index --index genome_library/20-NRR_3_hg38+hg38_HGDP1kGP --dictless
+# -> indexes/20-NRR_3_hg38+hg38_HGDP1kGP.tar.gz  (main: index + _INDELS + registry (+ variant_count.json) + indel logs + samplesIDs + manifest)
 # -> indexes/genotypes_hg38_HGDP1kGP.tar.gz      (separate Tier-1 companion)
 ```
 
@@ -345,9 +348,11 @@ crisprme.py download --what index \
 # installs under the canonical name genome_library/NRR_3_hg38+hg38_HGDP1kGP/
 ```
 
-- The index installs under its plain `<pam>_<N>_<ref>+<vcf>` name so the search
-  resolves it (there is no name decoration to strip — `--dictless` only affected
-  what the maintainer put in the tarball).
+- The index installs under the name it was published under, which the search resolves:
+  here the plain `<pam>_<N>_<ref>+<vcf>` of every index published so far (an index
+  published from a 2.9.0 build carries its guide length and side, as
+  `20-NRR_3_hg38+hg38_HGDP1kGP`). There is no name decoration to strip — `--dictless` only
+  affected what the maintainer put in the tarball.
 - The **combined + per-db samplesID lists** are installed into
   `samplesIDs/` from the main tarball, so no `--what samples` / `--what all` is
   needed. (For a legacy index built before this bundling existed, download falls
@@ -369,7 +374,7 @@ Then search, pointing at that library (or just run from `$CRISPRME_DIR`):
 
 ```bash
 crisprme.py complete-search \
-  --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+  --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
   --guide my_guide.txt --mm 4 --bDNA 2 --bRNA 2 \
   --vcf list_vcf.txt --samplesID list_samplesID.txt \
   --index-path "$CRISPRME_DIR/genome_library" \
@@ -461,7 +466,7 @@ tar xzf build-inputs/hg38_HGDP1kGP.tar.gz
 Check the tarball against the `SHA256SUMS` shipped alongside it under `build-inputs/`. (For
 **mega**, substitute `hg38_mega`.) The PAM-independent `Dictionaries/` + `samplesIDs/` you need at
 **search** time come from the normal index download (`download --what index --index-name
-NRG_3_hg38+hg38_<ds>`).
+NRR_3_hg38+hg38_<ds>`).
 
 ### Step 3 — build the new-PAM index (reuse the enriched genome, skip enrichment)
 
@@ -485,8 +490,10 @@ Here `<PAM_MOTIF>` is the PAM region token itself — the IUPAC motif without th
 > **One-command alternative.** With the enriched genome already in place, `crisprme.py
 > build-index-only --genome Genomes/hg38 --pam PAMs/<NEW_PAM>.txt --bDNA 2 --bRNA 2 --vcf
 > VCFs/hg38_<ds> …` detects it (prints `Enriched genome already present`) and skips straight to the
-> same two indexes. Use it if you also have the dataset's `Dictionaries/`/`VCFs/` staged; otherwise
-> the two `crispritz`/`pool_index_indels` calls above need only the enriched kit.
+> same two indexes, which it names, since 2.9.0, for the guide length and the side
+> (`20-<PAM_MOTIF>_3_hg38+hg38_<ds>` and its `_INDELS` for a 20-nt guide and a 3′ PAM). Use it
+> if you also have the dataset's `Dictionaries/`/`VCFs/` staged; otherwise the two
+> `crispritz`/`pool_index_indels` calls above need only the enriched kit.
 
 ### Step 4 — search with the new-PAM index
 

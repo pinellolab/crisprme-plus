@@ -392,7 +392,8 @@ crisprme.py build-index-only --genome <hg38/> --pam 20bp-NRG-SpCas9.txt \
 NRG (NAG+NGG) SpCas9 PAM; 2 DNA + 2 RNA bulges; RAW (uncompressed) registry and SNP+indel
 co-occurrence ON — consistent with the other production indexes (bulges are a build parameter;
 mismatches are a search-time parameter, run at `--mm 6`). Output
-`genome_library/NRG_3_hg38+hg38_HGDP1kGP` (+ `_INDELS`) + `Dictionaries/{registry,genotypes,
+`genome_library/NRG_3_hg38+hg38_HGDP1kGP` (+ `_INDELS`; CRISPRme 2.9.0 and later name it for
+its guide length and side, `20-NRG_3_hg38+hg38_HGDP1kGP`) + `Dictionaries/{registry,genotypes,
 indel_genotypes,log_indels}_hg38_HGDP1kGP` + `variant_count.json` (**125,180,264 SNPs +
 17,192,381 indels**; `phased:true`); every `reg_<chrom>.idx` carries `data_type=genotyped-phased`.
 

@@ -35,7 +35,9 @@
 #    PAR AN=8182 (all diploid). Verified: every gnomAD-male is hom on non-PAR (0 hets) so the
 #    collapse is unambiguous; the 3 het-phased-male/metadata-female edge samples stay diploid.
 #
-# OUTPUT: genome_library/NRG_3_hg38+hg38_HGDP1kGP (+ _INDELS) + Dictionaries/{registry,genotypes,
+# OUTPUT: genome_library/NRG_3_hg38+hg38_HGDP1kGP (+ _INDELS; 20-NRG_3_hg38+hg38_HGDP1kGP when the
+# SIF holds CRISPRme 2.9.0 or later, whose index names say the guide length and the side of the PAM)
+# + Dictionaries/{registry,genotypes,
 # indel_genotypes,log_indels}_hg38_HGDP1kGP + variant_count.json + samplesIDs/hg38_HGDP1kGP.samplesID.txt.
 # Registry RAW (CRISPRME_REGISTRY_COMPRESS=0), SNP+indel co-occurrence ON (CRISPRME_INDEL_SNP) --
 # consistent with the other production indexes. The v2.6.2 SIF already stamps the data_type/phased
@@ -119,4 +121,8 @@ run "export CRISPRME_REGISTRY_COMPRESS=0 CRISPRME_INDEL_SNP=1; cd $B; \
      crisprme.py build-index-only --genome $GENOME --pam $PAM --bDNA 2 --bRNA 2 --thread $THREADS \
        --vcf $B/VCFs/hg38_HGDP1kGP --samplesID $B/hgdp1kgp.samplesID.config.txt --path $B"
 echo "BUILD_EXIT=$? $(date +%H:%M:%S)"
-echo "index: $B/genome_library/NRG_3_hg38+hg38_HGDP1kGP (+ _INDELS)"
+# the index as the SIF's CRISPRme names it: NRG_3_hg38+hg38_HGDP1kGP before 2.9.0, the name with the
+# guide length and the side from 2.9.0 on (20-NRG_3_hg38+hg38_HGDP1kGP), the PAM's for another PAM=
+for idx in "$B"/genome_library/*_3_hg38+hg38_HGDP1kGP; do
+  [ -d "$idx" ] && echo "index: $idx (+ _INDELS)"
+done

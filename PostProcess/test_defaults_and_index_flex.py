@@ -18,6 +18,7 @@ run with their data lookups stubbed, as test_samplesid_emit does.
 import ast
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1552,6 +1553,170 @@ class OnePerfectMatchPerGuideIsNoWarning(unittest.TestCase):
         self.assertIn("This guide matches 2 genomic sites with 0 mismatches and 0 bulges "
                       "(chr2:200, chr5:300). Each is a candidate cut site", text)
         self.assertIsNone(self.alert(rows[:1], 1))
+
+
+def _fenced_blocks(text):
+    """The fenced code blocks of the Markdown ``text``, each as its text, a line that goes
+    on past a backslash joined to the next."""
+    blocks, block = [], None
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            if block is not None:
+                blocks.append("\n".join(block).replace("\\\n", " "))
+            block = None if block is not None else []
+        elif block is not None:
+            block.append(line)
+    return blocks
+
+
+class TheDocsNameTheFolderABuildWrites(unittest.TestCase):
+    """build-index-only names an index for its guide length and side since 2.9.0 (E2:
+    20-NRR_3_hg38+hg38_HGDP1kGP), and publish-index publishes the folder it is given.
+    PRECOMPUTED_INDEXES' dict-less flow said that its build wrote NRR_3_hg38+hg38_HGDP1kGP,
+    so its publish-index of that folder stopped on "Index directory ... does not exist"; the
+    release checklist's build said NNN_3_hg38+hg38_HGDP1kGP; and the panel recipes printed
+    the older name after their build, whichever CRISPRme their SIF holds."""
+
+    DOCS = ("README.md", "docs/PRECOMPUTED_INDEXES.md", "docs/crisprme_data_setup_051826.md",
+            "docs/RELEASE_CHECKLIST.md", "docs/SETTINGS_DATA_MANAGER.md")
+
+    @staticmethod
+    def built(command):
+        """The folder that ``command``, a build-index-only of a PAM file of PAMs/, writes, as
+        crisprme.py names it (index_fit.index_name)."""
+        import index_fit
+        words = command.split()
+        flag = dict(zip(words, words[1:]))
+        pam_file = _REPO / flag["--pam"]
+        motif, length = pam_file.read_text().split()[:2]
+        length = int(length)
+        rest = Path(flag["--genome"]).name
+        if "--vcf" in flag:
+            rest += "+" + Path(flag["--vcf"]).name
+        n = max(int(flag.get("--bDNA", 0)), int(flag.get("--bRNA", 0))) + 1
+        return index_fit.index_name(motif[-length:] if length > 0 else motif[:-length], n,
+                                    rest, index_fit.pam_file_spacer(pam_file), length > 0)
+
+    def test_a_documented_build_names_the_folder_it_writes(self):
+        checked = 0
+        for doc in self.DOCS:
+            for block in _fenced_blocks((_REPO / doc).read_text()):
+                builds = [line for line in block.splitlines()
+                          if "crisprme.py build-index-only" in line]
+                said = re.findall(r"->\s*genome_library/([^\s/{]+)", block)
+                if len(builds) != 1 or not said:
+                    continue
+                want = self.built(builds[0])
+                for name in said:
+                    with self.subTest(doc=doc, name=name):
+                        self.assertIn(name, (want, want + "_INDELS"))
+                    checked += 1
+        self.assertGreaterEqual(checked, 3)  # PRECOMPUTED_INDEXES' two, the checklist's
+
+    def test_a_documented_publish_names_a_folder_a_build_writes(self):
+        import index_fit
+        checked = 0
+        for doc in self.DOCS:
+            for line in (_REPO / doc).read_text().splitlines():
+                for name in re.findall(r"publish-index --index genome_library/([^\s`<]+)", line):
+                    with self.subTest(doc=doc, name=name):
+                        # (a placeholder, genome_library/<name>, is no name)
+                        self.assertIsNotNone(index_fit.parse_index_name(name)[3], line)
+                    checked += 1
+        self.assertGreaterEqual(checked, 5)
+
+    def test_the_panel_recipes_print_the_folder_their_build_wrote(self):
+        # as an older SIF's CRISPRme names it (the as-run ones), and as 2.9.0 does, for the
+        # PAM the recipe takes by default or another one (PAM=...)
+        for recipe, ds in (("hgdp1kgp_build.sh", "hg38_HGDP1kGP"),
+                           ("hprc_build.sh", "hg38_HPRC"),
+                           ("onekg2021_build.sh", "hg38_1000G2021")):
+            script = (_REPO / "seq_script" / "merge_panels" / recipe).read_text()
+            after_build = script[script.index('echo "BUILD_EXIT='):]
+            for name in (f"NRG_3_hg38+{ds}", f"20-NRG_3_hg38+{ds}", f"20-NRR_3_hg38+{ds}"):
+                with self.subTest(recipe=recipe, name=name), \
+                        tempfile.TemporaryDirectory() as build:
+                    for folder in (name, name + "_INDELS"):
+                        os.makedirs(os.path.join(build, "genome_library", folder))
+                    run = subprocess.run(["bash", "-c", after_build], capture_output=True,
+                                         text=True, env={**os.environ, "B": build})
+                    self.assertEqual(run.stdout.splitlines()[1:],
+                                     [f"index: {build}/genome_library/{name} (+ _INDELS)"])
+                    self.assertEqual(run.stderr, "")
+
+    def test_the_mega_indels_recipe_says_which_name_to_set(self):
+        # its guard stops on an INDELS index of another name than IDXNAME says, and named
+        # the older form alone, <MOTIF>_<N>, which a 2.9.0 checkout does not write
+        script = (_REPO / "seq_script" / "merge_panels" / "mega_build_indels.sh").read_text()
+        guard = script[script.index("if [ ! -d \"$W/genome_library/$IDXDIR\" ]"):]
+        guard = guard[:guard.index("continue")]
+        self.assertIn("<guide>-<MOTIF>_<N>", guard)
+        self.assertIn("e.g. 20-NRG_3", guard)
+
+
+class TheDocsSayWhatARunWrites(unittest.TestCase):
+    """Texts of the backlog (plan 4.8) that said what a run does not write: the web user
+    guide called every ALT row "created by a variant allele" (RV1-WEB2-3), METHODS put
+    targets-scoring's CFD-only banner "in its log" (D3R3-3), the README and the help of
+    complete-search said that "the CRISPR-Bulge columns read -1" in a CFD-only run, whose
+    CRISPR-Bulge risk score reads 0 (D3R3-2), and no text said that a line of the SNP+indel
+    companion names 50 carriers at most (LP RV4-cooc-carrier-cap)."""
+
+    @staticmethod
+    def text(path):
+        return " ".join((_REPO / path).read_text().split())
+
+    def says(self, text, phrase, where):
+        self.assertTrue(phrase in text, f"{where} does not say {phrase!r}")
+
+    def says_not(self, text, phrase, where):
+        self.assertFalse(phrase in text, f"{where} still says {phrase!r}")
+
+    def test_an_alt_row_is_a_variant_alignment(self):
+        # as the results page's caption says: an ALT row is a variant alignment, of a site
+        # a variant creates (Not_found_in_REF y) or of a reference site it changes
+        self.says(self.text("pages/results_page.py"),
+                  "a variant either creates the site or changes a reference", "results_page")
+        guide = self.text("docs/crisprme_web_interface_user_guide.md")
+        self.says_not(guide, "ALT = created by a variant allele", "the user guide")
+        self.says(guide, "a variant either creates the site (`Not_found_in_REF` `y`) or "
+                         "changes a reference site", "the user guide")
+
+    def test_targets_scoring_says_cfd_only_on_stdout(self):
+        # scorer_runner prints the banner on stdout: a search's log_verbose.txt holds it,
+        # and targets-scoring writes no log
+        self.says(self.text("PostProcess/scorer_runner.py"), "print(banner, flush=True)",
+                  "scorer_runner")
+        methods = self.text("METHODS.md")
+        self.says_not(methods, "a banner saying so in its log", "METHODS")
+        self.says(methods, "a search in its `log_verbose.txt` and `targets-scoring` on stdout",
+                  "METHODS")
+
+    def test_a_cfd_only_run_reads_0_for_the_crispr_bulge_risk_score(self):
+        # add_risk_score.py writes ALT less REF: -1 less -1
+        tree = ast.parse((_REPO / "crisprme.py").read_text())
+        helper = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "print_help_complete_search")
+        help_text = " ".join(" ".join(node.value for node in ast.walk(helper)
+                                      if isinstance(node, ast.Constant)
+                                      and isinstance(node.value, str)).split())
+        for where, text, said in (
+                ("README.md", self.text("README.md"),
+                 "(the CRISPR-Bulge scores read `-1`, and its risk score `0`)"),
+                ("complete-search's help", help_text,
+                 "(the CRISPR-Bulge scores read -1, and its risk score 0)")):
+            with self.subTest(where=where):
+                self.says_not(text, "CRISPR-Bulge columns read", where)
+                self.says(text, said, where)
+
+    def test_the_cooc_companion_says_it_names_50_carriers(self):
+        # n_cis counts every carrier, cis_samples names the first 50 (analisi_indels_NNN.py)
+        self.says(self.text("PostProcess/analisi_indels_NNN.py"),
+                  'str(len(samples)) + "\\t" + ",".join(sorted(samples)[:50])',
+                  "analisi_indels_NNN.py")
+        for doc in ("README.md", "METHODS.md"):
+            with self.subTest(doc=doc):
+                self.says(self.text(doc), "the first 50 by name", doc)
 
 
 if __name__ == "__main__":

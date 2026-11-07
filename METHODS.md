@@ -543,12 +543,13 @@ haplotype** (`indel_snp_cis.resolve_target`):
 
 The co-occurrence companion `indel_snp_cooc.tsv` lists the SNP alts the indel
 post-analysis's rows **require** — the guide's own base at a spacer column, or a base that
-creates the PAM where the reference does not — with those rows' carriers: CONFIRMED when
-every carrier was resolved exactly, PUTATIVE otherwise. It is written before the merge
-picks each cluster's alignments, one line per engine alignment, required SNP set and phase
-(an alignment that needs no SNP writes no line), so a line can name an alignment the merge
-did not keep: a population-level run, which writes no alternative alignments, can have
-lines with no row in its tables. The resolution does not depend on the analysis mode (§5).
+creates the PAM where the reference does not — with those rows' carriers (a line counts them
+all and lists the first 50 by name): CONFIRMED when every carrier was resolved exactly,
+PUTATIVE otherwise. It is written before the merge picks each cluster's alignments, one line
+per engine alignment, required SNP set and phase (an alignment that needs no SNP writes no
+line), so a line can name an alignment the merge did not keep: a population-level run,
+which writes no alternative alignments, can have lines with no row in its tables. The
+resolution does not depend on the analysis mode (§5).
 A target with no code (every target of a classic, non-overlaid
 fake-indel genome) that holds the indel needs no resolution: its sequence is the one the
 engine found. An indel row's carriers belong to its sequence: two alignments of one site can
@@ -1060,10 +1061,10 @@ results. With the env or its weights missing or broken, `complete-search` stops
 before the search, naming the fix, unless `CRISPRME_SKIP_SCORER_ENV=1` is set, which
 runs it **CFD-only**; `targets-scoring` and searches started from the web interface do
 not check first, and complete **CFD-only**. A CFD-only run has the CRISPR-Bulge score at
-`-1` and a banner saying so in its log. The released **amd64** Docker image bundles the CUDA
-TensorFlow build, so `docker run --gpus all ... --compute-backend cuda` runs
-CRISPR-Bulge on an NVIDIA GPU with transparent CPU fallback; the **arm64** image
-stays CPU.
+`-1` and says so, a search in its `log_verbose.txt` and `targets-scoring` on stdout. The
+released **amd64** Docker image bundles the CUDA TensorFlow build, so
+`docker run --gpus all ... --compute-backend cuda` runs CRISPR-Bulge on an NVIDIA GPU with
+transparent CPU fallback; the **arm64** image stays CPU.
 
 The scorer environment is **architecture-aware** and yields **numerically
 identical** CRISPR-Bulge scores across CPU architectures: it installs the same
@@ -1112,8 +1113,8 @@ only the *SNP* worst-possible representative emission in `integrated_results.tsv
 the SNP+indel co-occurrence companion (`indel_snp_cooc.tsv`) is produced by the indel
 post-analysis' cis phasing pass over the genotype tiers, which the mode does not touch. Measured
 on the complete genome-wide matrix (2021 panel, same guide, default vs `--per-sample`): the two
-`indel_snp_cooc.tsv` files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full
-per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
+`indel_snp_cooc.tsv` files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, the
+same per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
 carries the indel and SNP together — is preserved identically in both analysis modes. Measured
 again with 2.8.1, whose companion holds only the SNPs the indel post-analysis's rows require, on
 the HGDP + 1000 Genomes index: the two modes give the same lines for each of two guides (339 and

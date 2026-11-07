@@ -38,7 +38,12 @@ upload); of the focused review of f8dbe73 (the last bullet of list_282.md's fina
 bfddb59), INPUT_FORMATS §4's first lines (the length alone, a third field, a blank line: refused as
 it says) and CRISPR-Bulge's autograph `.pyc` files, left in the temporary folder by every scoring
 run; the stale test comment of plan 4.5's coverage gaps (test_web_bulge_notes, FR's
-W3-none-selected-changed: a comment, with no test of its own).
+W3-none-selected-changed: a comment, with no test of its own); of plan 4.8's docs and wording,
+RV1-WEB2-3 (the web user guide's ALT rows), RV1-WEB2-5 (the web's refusal of a VCF folder with a
+file named for no chromosome beside others), D3R3-2 (a CFD-only run's CRISPR-Bulge risk score),
+D3R3-3 (targets-scoring's banner, on stdout), LP RV4-cooc-carrier-cap (the SNP+indel companion
+names 50 carriers at most) and D3R3-4 (a test docstring's count of the release candidate: a
+docstring, with no test of its own).
 
 *Found fixed already (checked on this branch):* P12 (exit 2 since 2.8.1); t31 P6 (C3 of 2.8.1: every
 folder named, exit 2, and the banner says reference when the smoke runs reference-only); R2-F3;
@@ -49,12 +54,22 @@ warning); install P10's pandas FutureWarning (validate.py reads by position, run
 `-W error`); the environment.yml web pins; the self-test's 404 lines (t31 P9's noise); RV4-4 and
 R4-7 (web-e2e's in-image step runs test_index_resolution; no `ps` there is its one allowed skip);
 text N1 to N3; P14 (the results page's Group by opens on CFD_score); the older list's first-paint
-label (Gate B walk 2b and the 38a7c4e walk's step 9 passed); A6 (the alleles track); results F2 (the
-gate track); the stderr fixtures of a runner with less memory than memory_check asks for
-(list_282.md, "Found 2026-11-04": CRISPRME_SKIP_MEM_CHECK): with memory_check reading the 15.6 GB of
-GitHub's runner, so that every complete-search and complete-test that does not skip it warns, every
-step of unit-tests.yml passes in the CI image, and web-e2e's in-image tests in the image (b648227's
-fix of the one fixture that compared it was the one needed).
+label (Gate B walk 2b and the 38a7c4e walk's step 9 passed); the stderr fixtures of a runner with
+less memory than memory_check asks for (list_282.md, "Found 2026-11-04": CRISPRME_SKIP_MEM_CHECK):
+with memory_check reading the 15.6 GB of GitHub's runner, so that every complete-search and
+complete-test that does not skip it warns, every step of unit-tests.yml passes in the CI image,
+and web-e2e's in-image tests in the image (b648227's fix of the one fixture that compared it was
+the one needed). And fixed in 2.8.1: `/load`'s Show full log (`show_full_log` and
+`show_assembly_full_log` take the job folder through `results_job_dir`); F4 of the docs review
+(the release skill says that the only pin is `crisprme.py`); the [2.8.0] date (2026-10-24); the
+CHANGELOG's unit-tests.yml 20-minute sentence (it gives GitHub's 14 min 50 s and 13 min 55 s); the
+1e-5 wording (the README, METHODS and the report say that no floor is applied);
+DOC-PAMCREATE-LEFT-COUNTS (the PAM_creation entry counts the other 55, 186 in all); M4 (the entry
+names the hidden samplesIDs files; whether its disclosure goes under Fixed or Changed was the docs
+track's call); C18, the FutureWarning (install P10's, above); LP RV4-3 (its case, a sites-only
+dataset searched with a phased one, runs per-sample since 2.8.1, with no population-level banner;
+of sites-only datasets alone, the banner's advice is for a genotyped panel, which the review found
+not wrong). D3R3-7 is moot: no `{{EQUIVALENCE_NUMBERS}}` placeholder is left in the tree to fill.
 
 *Left: design questions, or the PI's or an owner's call.*
 - Plan 4.1, every item: two cis indels in one protospacer; CRISPR-Bulge's batch noise; the one-row
@@ -118,33 +133,34 @@ fix of the one fixture that compared it was the one needed).
   choice. N2 (fixed caption text), N3 (a legend entry with no star at -1) and N5 (a short window)
   are cosmetic and the web track's, with N7 above.
 
-*Left: other tracks' work.* The served-mode security items (A1's names placed by hand, `/load`'s
-Show full log: the security track); the report's RV1-F1, RV1-F2, cli5 D6, the 1e-5 wording, P8, the
-classic path's MAF of an NA allele (FR :438, :531), the mega IUPAC rows, the Risk Card sort, the
-radar chart's guide-length guard (#39, closed as user error) and the "observed haplotypes" wording
-left on purpose (FR :558); the engine's AF-by-first-record and 5′ last-window items, its contig-end
-and N-run windows (the roadmap's), the Bioconda enricher, PKG1 and the on-demand index check (format
-2: the engine and fmt tracks, whose builds check what they write); the mega indels' AF (the
-rebuild); download's check of the dictionaries (FR :163: the HF track's); contigs with "_" (bio11.3
-and R6B's RV1-2/RV2-2/R3-1..6: the indel pipeline's naming); R2-F1, M5, R4-6 (the build tracks'
-locks and marks); the 2.8.2 correctness items of list_282.md (fix/282-indel-alignment,
-test/282-indel-realdata-check, the SNP rows whose carriers all have an indel: their branches, to
-forward-port); the CRISPRitz items of plan 4.4's added block (the engine); INT N2 (an indel-free
-dataset installed without its enriched genome: the search must tell a dataset with no indels from a
-broken INDELS index, the emptyidx area); FV :342's wording of the web's labels and notes (the web
-and report tracks' texts).
+*Left: other tracks' work.* The served-mode security item left (A1's names placed by hand: the
+security track); A6 (the rsID and MAF lists of a multi-variant row, sorted apart from its variants:
+the alleles track's, with the multi-allelic work, as decided: "document now, fix next") and results
+F2 (a SNP row that lists a carrier whose haplotype holds an indel in the target: the gate track's
+carrier gate); the report's RV1-F1, RV1-F2, cli5 D6, P8, the classic path's MAF of an NA allele (FR
+:438, :531), the mega IUPAC rows, the Risk Card sort, the radar chart's guide-length guard (#39,
+closed as user error) and the "observed haplotypes" wording left on purpose (FR :558); the engine's
+AF-by-first-record and 5′ last-window items, its contig-end and N-run windows (the roadmap's), the
+Bioconda enricher, PKG1 and the on-demand index check (format 2: the engine and fmt tracks, whose
+builds check what they write); the mega indels' AF (the rebuild); download's check of the
+dictionaries (FR :163: the HF track's); contigs with "_" (bio11.3 and R6B's RV1-2/RV2-2/R3-1..6: the
+indel pipeline's naming); R2-F1, M5, R4-6 (the build tracks' locks and marks); the 2.8.2 correctness
+items of list_282.md (fix/282-indel-alignment, test/282-indel-realdata-check, the SNP rows whose
+carriers all have an indel: their branches, to forward-port); the CRISPRitz items of plan 4.4's
+added block (the engine); INT N2 (an indel-free dataset installed without its enriched genome: the
+search must tell a dataset with no indels from a broken INDELS index, the emptyidx area); FV :342's
+wording of the web's labels and notes (the web and report tracks' texts).
 
 *Left: not reproduced, or nothing to change.* RV1-F6 (it names no item of its own: it confirms items
-of the list, each named here); C18 (the FutureWarning: found fixed, above); C17 (a banner) and the
-older list's validate-test hint and scope (no detail kept in the sources: the list names them
-alone); t31 P4 (VirtioFS: not reproduced on 38a7c4e); the bulge note counting a merged panel's list
-as made (FR2: only a failed write at Submit, which then says why, parts them); the older list's code
-comments (no behaviour); bio11.2 (a flake recorded with no detail); the T-31 flock trigger (flock
-works on Docker Desktop and on Linux; no ENOTTY host to test on); the conda-build warnings of
-install P10 (the Bioconda recipe's, not this repository's); R6B cr-past-first-lines
-(build-index-only reads each file whole and refuses it since 2.8.1; a search that builds its own
-index checks two lines a file, and reading every file whole on each search, seconds on hg38, is the
-owner's trade to weigh).
+of the list, each named here); C17 (a banner) and the older list's validate-test hint and scope (no
+detail kept in the sources: the list names them alone); t31 P4 (VirtioFS: not reproduced on
+38a7c4e); the bulge note counting a merged panel's list as made (FR2: only a failed write at Submit,
+which then says why, parts them); the older list's code comments (no behaviour); bio11.2 (a flake
+recorded with no detail); the T-31 flock trigger (flock works on Docker Desktop and on Linux; no
+ENOTTY host to test on); the conda-build warnings of install P10 (the Bioconda recipe's, not this
+repository's); R6B cr-past-first-lines (build-index-only reads each file whole and refuses it since
+2.8.1; a search that builds its own index checks two lines a file, and reading every file whole on
+each search, seconds on hg38, is the owner's trade to weigh).
 
 *Left: tests and CI.* Suite P5 (tests that import the web app write `PostProcess/Cache/`, the app's
 cache folder relative to the working directory, ignored by git: moving it is the web track's call);
@@ -156,11 +172,9 @@ sized small to medium, with no failing behaviour behind them; R6B's cigate items
 budget, the wiring guards' comments, the SKIP_HEAVY wording, the inert chr22 ALT-PAM step, a
 registry stamped by its aggregation alone) and FFR D3R3-6 and RV1-WEB2-6: the CI track's.
 
-*Left: docs and wording.* RV1-F3, N4, F4, F5, RV4-2, the 2.7.10 entry, M4, the [2.8.0] date, text
-N2, the CHANGELOG's unit-tests.yml 20-minute sentence (now measured), R6B's three changelog
-wordings, the FFR docs items (RV1-WEB2-3, RV1-WEB2-5, D3R3-2, D3R3-3, D3R3-4, D3R3-7,
-DOC-PAMCREATE-LEFT-COUNTS) and LP RV4-3 and RV4-cooc-carrier-cap: they touch other tracks'
-fragments, or the docs track's merge of 2.8.1's.
+*Left: docs and wording.* RV1-F3, N4, F5, RV4-2, the 2.7.10 entry and R6B's three changelog
+wordings: each is the wording of an entry of the released CHANGELOG (2.8.1's, the CFD entry
+2.7.10's), whose correction this track leaves to the release manager.
 
 *Left: public actions.* t31 P9 (host the 1000G chr22 VCF on the Hub), the HF Xet report, and the
 deprecated pinellolab/CRISPRme site's installers (another repository): each needs Luca's go.
@@ -225,12 +239,20 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   the name of what it is. A search's refusal of an unrecorded index for a 5′ PAM names that `mv`
   too (it said to run `build-index-only` with that file, which still records it). An index is
   published under its folder's name, so one built by this release under the new one. An earlier
-  release does not read the new form, and builds its own. Covered by
+  release does not read the new form, and builds its own. The documented builds and publishes name
+  the folder a build writes: PRECOMPUTED_INDEXES' dict-less flow, which the rebuild follows, said
+  that its build wrote `NRR_3_hg38+hg38_HGDP1kGP`, and its `publish-index` of that folder stopped
+  on `Index directory ... does not exist`, and the release checklist's build said
+  `NNN_3_hg38+hg38_HGDP1kGP`; the panel recipes (`seq_script/merge_panels/`) print the index their
+  build wrote, of either form, as the CRISPRme they run names it, and the mega INDELS recipe's
+  stop on an unexpected name says which to set (`20-NRG_3` from 2.9.0 on). Covered by
   `PostProcess/test_build_index_only_atomic.py` (both sides and two guide lengths built in one
   library, the variant and INDELS indexes too, an index of the older name kept or built beside,
   each refusal and its `mv`), `test_index_resolution.py` (a search builds its own under the new
   name beside an index of the older name for the other side or another guide length, which it
-  stopped on), `test_defaults_and_index_flex.py` (every reader takes both forms alike) and, through
+  stopped on), `test_defaults_and_index_flex.py` (every reader takes both forms alike; every
+  documented build and publish names the folder of its build, and each recipe prints the one its
+  build wrote) and, through
   the real engine, `check_index_flex.py`: the 3′ and 5′ `NNNN` indexes, and the 20- and 23-nt
   `NGG` ones with their variant and INDELS indexes, built in one library, each searched with the
   results of that index alone, byte for byte; an index under the older name gives the same
@@ -613,4 +635,23 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   search from the folder that holds them.
 - **`crisprme.py` with no argument makes no folder.** It prints the help, and made the seven
   folders of a data folder (`Annotations/`, `Dictionaries/`, `Genomes/`, `PAMs/`, `Results/`,
-  `VCFs/`, `samplesIDs/`) wherever one ran it to read it (C14).
+  `VCFs/`, `samplesIDs/`) wherever one ran it to read it (C14); README §1.1.2, which said so,
+  says that it makes none. Covered by `PostProcess/test_complete_search_flags.py`.
+- **The web form names the VCF file a search cannot read in a folder of several.** A search of a
+  dataset with no variant index for the PAM prepares the variant genome from its VCF folder, which
+  takes each file's chromosome from a `.chrN.` part of its name, and the note under the bulges and
+  Submit refused a folder with any file named otherwise, saying that "the dataset's VCF is a single
+  multi-chromosome file", also of `walk.chr1.vcf.gz` and `walk.chr2.vcf.gz` beside `merged.vcf.gz`
+  (RV1-WEB2-5). They say that the folder holds `merged.vcf.gz`, whose name says no chromosome; a
+  dataset of one such file is refused as before. Covered by `PostProcess/test_web_bulge_notes.py`
+  (in the image).
+- **The docs say what a run writes.** The web user guide defined an ALT row (`REF/ALT_origin`) as
+  one "created by a variant allele", which the results page's caption contradicts: it is a variant
+  alignment, of a site a variant creates (`Not_found_in_REF` `y`) or of a reference site it
+  changes (RV1-WEB2-3). METHODS put targets-scoring's CFD-only banner "in its log", which it
+  prints on stdout, where a search's `log_verbose.txt` holds it (D3R3-3). The README and
+  complete-search's help said that "the CRISPR-Bulge columns read -1" in a CFD-only run, whose
+  CRISPR-Bulge risk score, ALT less REF, reads 0 (D3R3-2). And no text said that a line of the
+  SNP+indel companion (`indel_snp_cooc.tsv`) lists the first 50 of its carriers by name, which
+  its count takes all of: the README and METHODS say so (LP RV4-cooc-carrier-cap). Covered by
+  `PostProcess/test_defaults_and_index_flex.py`.
