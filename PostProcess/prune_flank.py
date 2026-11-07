@@ -173,7 +173,10 @@ def wider_flank_notes(indexes, motif, genome_dir, who=None):
         if not pam or set(pam) != {"N"} or len(pam) <= len(motif) or index in seen:
             continue
         seen.add(index)
-        if not notes and 1 in index_fit.bin_formats(index):
+        # (of format 1, or of no format its trees tell, as of an index not there; one of
+        # format 2 holds those sites)
+        formats = index_fit.bin_formats(index)
+        if not notes and (1 in formats or not formats):
             d = len(pam) - len(motif)
             # (a - strand PAM d nt from the start: its window is at index 0, which CRISPRitz
             # 2.9.1's search read as a + strand one)

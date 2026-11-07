@@ -315,14 +315,23 @@ class TheCapCountsBits(_PostAnalysis):
         self.assertEqual(
             hvdr[1:],
             [["chrT", str(self.start), str(self.start + 23), CRRNA, "7", "S1,S2",
-              self.window, "11.09", "0", "1"]])
+              self.window, "11.09", "0", "0"]])
         self.assertIn("High-variant-density windows of chrT: 1 spell more than 2^10 "
                       "sequences (dense: over CRISPRME_IUPAC_CAP), 0 spell 2^20 or more "
                       "(hyperdense)", said)
-        # so the dictionary path reports it by its greedy worst-case alignment: the ALTs
-        # that match the guide at 2, 8 and 14, under S1, who carries them
+        # so, per sample, the dictionary path reports it by the haplotypes its carriers have,
+        # since the carrier gate (whose test of the cap counts bits as this one does), not by
+        # its greedy worst case: S1's own, all seven first ALTs, beside the reference row
         self.assertEqual([(r[2], r[7], r[12], r[17]) for r in rows],
-                         [(GUIDE + "TGG", "0", "S1", self.snps(2, 8, 14))])
+                         [("CTgACAGTcGCTTTaATCACTGG", "3", "n", "n"),
+                          ("CTAAaAGTTGtTTTTAaCcCTGG", "4", "S1",
+                           self.snps(2, 4, 8, 10, 14, 16, 18))])
+        # population-level, by its greedy worst-case alignment: the ALTs that match the guide
+        # at 2, 8 and 14, under S1, who carries them
+        rows, said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE="1")
+        self.assertEqual([line[9] for line in hvdr[1:]], ["1"])
+        self.assertIn((GUIDE + "TGG", "0", "S1", self.snps(2, 8, 14)),
+                      [(r[2], r[7], r[12], r[17]) for r in rows])
         # a cap of 12 bits holds them: every combination its carriers hold is enumerated, and
         # S1's own haplotype, all seven first ALTs, is reported
         rows, said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE="0", CRISPRME_IUPAC_CAP="12")
@@ -415,12 +424,13 @@ class AWindowOfFourAllelePositions(_PostAnalysis):
     def test_it_is_listed_and_its_four_allele_positions_counted(self):
         # the BED gives a minus-strand window's protospacer on the forward strand
         forward = self.q_only[::-1].translate(str.maketrans("ACGT", "TGCA"))
-        # where the post-analysis reads Q, the dictionary path reports a window of Q alone by
-        # its greedy worst case, as any dense window; where it reads none, no decomposition
-        # ran on it, and no greedy alignment stands for it
+        # where the post-analysis reads Q, a population-level search reports a window of Q
+        # alone by its greedy worst case, as any dense window, and a per-sample one by the
+        # haplotypes its carriers have, on the dictionaries too since the carrier gate; where
+        # it reads none, no decomposition ran on it, and no greedy alignment stands for it
         reads_q = "Q" in _load_pure_functions({})["iupac_nucleotides"]
-        alone = "1" if reads_q else "0"
         for fast in ("0", "1"):
+            alone = "1" if reads_q and fast == "1" else "0"
             with self.subTest(fast=fast):
                 _rows, said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE=fast)
                 self.assertEqual(
@@ -428,7 +438,7 @@ class AWindowOfFourAllelePositions(_PostAnalysis):
                     sorted([["chrT", str(self.starts[0]), str(self.starts[0] + 23), CRRNA,
                              "12", ".", self.q_only, "24.00", "12", alone],
                             ["chrT", str(self.starts[1]), str(self.starts[1] + 23), CRRNA,
-                             "13", "S1", self.q_and_w, "25.00", "12", "1"],
+                             "13", "S1", self.q_and_w, "25.00", "12", fast],
                             ["chrT", str(self.starts[2]), str(self.starts[2] + 23), CRRNA,
                              "12", ".", forward, "24.00", "12", alone]]))
                 self.assertIn("High-variant-density windows of chrT: 3 spell more than 2^10 "
@@ -468,9 +478,16 @@ class AHyperdenseWindowWithinTheCap(_PostAnalysis):
         self.assertEqual(
             [(r[7], r[17]) for r in rows if r[12] == "S1"],
             [("1", "chrT_%d_G_A,chrT_%d_C_T" % (self.start + 3, self.start + 9))])
-        # at the default cap the dictionary path reports it by its greedy worst case
-        _rows, _said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE="0")
-        self.assertEqual([line[9] for line in hvdr[1:]], ["1"])
+        # at the default cap, per sample, the dictionary path reports it by the haplotypes its
+        # carriers have too since the carrier gate; population-level, by its greedy worst case
+        for fast, greedy in (("0", "0"), ("1", "1")):
+            with self.subTest(fast=fast):
+                rows, _said, hvdr, _q = self.analyse(CRISPRME_FAST_MODE=fast)
+                self.assertEqual([line[9] for line in hvdr[1:]], [greedy])
+                if fast == "0":  # S1's own haplotype, as within the cap
+                    self.assertEqual(
+                        [(r[7], r[17]) for r in rows if r[12] == "S1"],
+                        [("1", "chrT_%d_G_A,chrT_%d_C_T" % (self.start + 3, self.start + 9))])
 
 
 class MaxDegeneracy(_PostAnalysis):

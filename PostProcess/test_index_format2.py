@@ -1347,23 +1347,42 @@ class BuildIndexOnlyTakesTheSideInTheHeader(atomic._Fixture):
             "build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", pam,
             "--bDNA", "1", "--bRNA", "1", "--thread", "2", "--path", self.work]))
 
-    def test_a_pam_file_of_the_other_side_is_refused_and_not_recorded(self):
+    def test_a_pam_file_of_the_other_side_is_not_recorded_on_it(self):
+        """Since the names of 2.10.0 (the defaults track's E2) a PAM file that says its guide
+        length builds its own index beside it, under the name that says its side; one of its
+        PAM alone, which says none and so takes the older name, is still refused. Either says
+        that the header records the other side, and neither records the PAM file on it."""
         index = self.in_place("NNN_2_hg38", at_start=True)
-        # (with no .pam_build, and with the 3' one this run recorded over it)
+        alone = self.path("PAMs", "3bp-NNN-alone.txt")
+        atomic._write(alone, "NNN 3\n")
+        # (with no .pam_build, and with the 3' one a run of 2.8.1 recorded over it)
         for record in (None, "20bp-NNN-NO-PAM 23 3\n"):
             with self.subTest(record=record):
                 if record:
                     atomic._write(os.path.join(index, ".pam_build"), record)
+                shutil.rmtree(self.lib("20-NNN_2_hg38"), ignore_errors=True)
                 rc, out, err = self.build(self.PAM_3P)
+                self.assertEqual((rc, err), (0, ""), out)
+                self.assertIn(
+                    f"{index} is an index for a PAM on the 5' side of the guide (as the header of "
+                    "its .bin files records): it is left as it is, and this index is built beside "
+                    "it, as 20-NNN_2_hg38.\n", out)
+                self.assertNotIn(f"already present: {index}", out)
+                rc, out, err = self.build(alone)
                 self.assertEqual(rc, 1, out)
+                mv = f"mv '{index}' '{self.lib('NNN-20_2_hg38')}'"
                 self.assertEqual(err, (
                     f"Error: {index} is already there, a PAM-less index for a PAM on the 5' side "
-                    "of the guide (as the header of its .bin files records), and "
-                    f"{self.PAM_3P} puts the PAM on the 3' side. The index for that PAM file has "
-                    "the same name: build it in another working directory (--path).\n"))
+                    f"of the guide (as the header of its .bin files records), and {alone} puts "
+                    "the PAM on the 3' side. 3bp-NNN-alone.txt says no guide length, so the index "
+                    f"for it takes the same name: name this one for what it is ({mv}), which "
+                    "records it, or build it in another working directory (--path).\n"))
                 self.assertNotIn("already present", out)
-                self.assertEqual(os.path.exists(os.path.join(index, ".pam_build")), bool(record))
-                self.assertEqual(self.calls(), [])
+                if record:
+                    with open(os.path.join(index, ".pam_build")) as fh:
+                        self.assertEqual(fh.read(), record)
+                else:
+                    self.assertFalse(os.path.exists(os.path.join(index, ".pam_build")))
 
     def test_one_of_the_side_its_header_records_is_kept_and_recorded(self):
         index = self.in_place("NNNN_2_hg38", at_start=False)
