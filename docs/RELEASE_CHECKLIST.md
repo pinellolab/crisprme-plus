@@ -167,14 +167,17 @@ done
 #     carrier (limit-no-genotypes: none here; to check a search of the default index beside
 #     hg38_mega, give both VCFs, --vcf "$VCF" --vcf <mega chr22 VCF>), the note
 #     variant-shadowed, and the checker's own coverage gaps (coverage-putative-cap: a
-#     carrier with more than 10 calls of unknown phase near a record, whose targets
-#     touching one are not enumerated, none on this phased panel;
+#     carrier resolved PUTATIVE with more than 10 positions near a record where its
+#     alleles allow two bases, whose targets touching a call of unknown phase are not
+#     enumerated, none on this phased panel;
 #     coverage-unindexed-long-ref: a VCF without a .tbi holding a deletion longer than
 #     20 kb, which an unindexed read may miss: give it a .tbi), each listed with its
 #     samples and target: read them, and say in the release notes if a class grew. A
 #     known upstream defect can be listed with --known (class, chrom, start, strand,
 #     variants, samples, reason): it turns non-gating as known-defect, and a listed one
-#     that stops showing is reported as known-not-seen. Genome-wide COMPLETENESS (at most
+#     that stops showing is reported as known-not-seen. Exit 2 is no verdict: a usage
+#     error, or a configuration the checker refuses (two genotyped datasets that share
+#     samples; check each dataset's search alone). Genome-wide COMPLETENESS (at most
 #     about 52 CPU-hours per guide: 56 to 78 min on 40 processes of a loaded node, 6 GB, a
 #     TSV of about 31 MB) is not a release gate; chr22 above stands for it.
 

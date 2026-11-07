@@ -36,13 +36,19 @@ and the `release-crisprme` skill.
     writes each sample's haplotypes itself from the VCF 4.x definition of a record (every
     SNV, MNV and indel of a slot), keeps its own map from haplotype bases to reference
     coordinates and aligns with its own exhaustive dynamic-programming aligner.
-  - **The truth is the VCF.** Two alleles of one slot whose REF spans meet — a SNP at an
+  - **The truth is the VCF.** A slot holds a row's target when it reads the target's bases
+    from the row's start through the row's record: each base the record puts in the target
+    at its place, and the base after them (a second insertion between the start and the
+    record lengthens the stretch and pushes some of them out of it: another target, which
+    needs two indel-path records). Two alleles of one slot whose REF spans meet — a SNP at an
     insertion's own position, a SNP on a base a deletion removes, one complex allele split
     into overlapping records, two ALTs at one position phased onto one haplotype — give no
     sequence; a carrier whose record meets such a stretch is counted under its own class,
     `limit-overlapping-records`, never judged, and only where a target of the record reads
     there (one in budget reads with the overlapping alleles left out). Where a call touching
-    the target has unknown phase (unphased, or a missing allele), what the record's known
+    the target has unknown phase (unphased, or a missing allele; one whose REF meets the
+    record's would leave the slot with no sequence, and is read on the other slot, as the
+    documented multi-allelic heterozygote), what the record's known
     slot says comes first — when no placement of those calls lets it hold the target (a
     phased second indel inside it, say), or every placement does, the slot is judged — and
     otherwise the truth is METHODS section 4's PUTATIVE rule: the strongest target the
@@ -51,7 +57,9 @@ and the `release-crisprme` skill.
     whatever the choice, as with a DNA bulge whose base the table scores 0, every choice is
     a strongest one), never an allele it does not carry. CRISPRme's documented reading of a
     carrier (METHODS section 4 and the 2.8.1 Known limits: one indel per fake-indel window,
-    a second indel read from either end of the target before any unphased call, the phasing
+    resolved with each carrier's own SNP alleles, so that a row lists a carrier only where
+    those give its target; a second indel read from either end of the target through the
+    indel, each base the indel puts in the target at its place, before any unphased call; the phasing
     artefact and the complex allele, MNVs and untied multi-ALT alts resolved PUTATIVE, only
     the last record of a split multi-allelic SNP site searched) is re-implemented from that
     text and only classifies a disagreement: a documented limit (non-gating, listed with its
@@ -86,8 +94,10 @@ and the `release-crisprme` skill.
     is checked with it; a sites-only VCF's split sites are not read as shadowed at all (the
     mega index holds earlier records of some).
   - **Completeness** (the real-data brute force): for every indel and MNV record in the
-    region, each carrier's slots around it are written (a call of unknown phase is tried
-    both ways, and a target touching one is demanded as the carrier's strongest), identical
+    region, each carrier's known slots around it are written with their known alleles (a
+    target touching a call of unknown phase is demanded as the carrier's strongest, a
+    position on the record's own REF span no choice; no other target depends on where such a
+    call is), identical
     sequences aligned once, and every in-budget alignment on both strands with the PAM that
     holds a base the record changes (for a pure deletion, the bases on both sides of it)
     must be reported for that sample **by rows no worse than its best alignment** by the
@@ -102,7 +112,10 @@ and the `release-crisprme` skill.
     into the first by each file's order: a row with exactly that target and variants whose
     fold group (the rows of its site naming those variants with its carrier set: two
     alignments of one target always share it) is no worse, or rows of its site naming the
-    same variants with the target's own carrier set that are no worse. CRISPRme's fold key
+    same variants with the target's own carrier set that are no worse — every carrier both
+    the documented reading and its own haplotypes list for it, and besides them only
+    carriers either lists or the reading leaves open (the reading only classifies: a carrier
+    it would list against the carrier's haplotypes vetoes no fold). CRISPRme's fold key
     holds no strand, while one target's alignments share theirs, so the rows that stand for
     a target are taken on its strand: a fold across strands loses another target. The
     merge's keys after those (the Cluster Position, the carrier count, the aligned text)
@@ -119,16 +132,22 @@ and the `release-crisprme` skill.
     it compares the Cluster Position alone, which folds two targets of one insertion); a row
     whose own target is not at its own start (2.8.1's rows placed past an anchor, a phantom
     row) stands for no other alignment. A target that needs a second indel-path record is
-    demanded exactly when the fake-indel window's own reading holds its bases from the same
-    first base (CRISPRme then keeps the carrier), and is the two-indel limit otherwise. A
+    demanded, as the window's target of the same bases, start and variants, exactly when
+    CRISPRme's reading of the slot against that target holds (from its first base on or up
+    to its last, through the record: it then keeps the carrier), and is the two-indel limit
+    otherwise. A
     run that writes no alternative alignments (`.alt_mode` = `no-alt-alignments`: a
     population-level run, or the `--ci-cd-test` runs of the chr22 self-test) keeps one row
     per merge cluster: the target's cluster — the integrated row with a block within
-    `--merge` bp of its Cluster Position, or of one the in-budget alignments of the enriched
-    reference and of every indel record's window chain to it, each within `--merge` bp of
-    the next, as CRISPRme clusters (no nearest-row fallback; the enriched reference holds
-    the last record of a split site, as CRISPRme's does; every record the chain reaches is
-    read, up to 3 kb either side) — must be reported with a fewest-mm+b block of no more
+    `--merge` bp of its Cluster Position, or of one the rows CRISPRme can write chain to it,
+    each within `--merge` bp of the next, as CRISPRme clusters (no nearest-row fallback): its
+    reference rows, its SNP rows (population-level the worst case of each alignment over
+    each dataset's SNP alleles that CRISPRme's stores hold, the last record of a split site;
+    per sample, as with `--ci-cd-test`, only the haplotypes individuals hold) and the targets
+    some carrier of an indel-path record holds (the per-carrier resolution gives no row for
+    a raw target no carrier holds; a sites-only dataset's rows are the worst case of each
+    alignment of its window), every record the chain reaches read, up to 3 kb either side —
+    must be reported with a fewest-mm+b block of no more
     edits than the target's best alignment by the first sorting criterion (the merge picks
     between a cluster's reference and variant rows on mm+bulges, or on the CFD, alone) and a
     highest-CFD block of at least its CFD (each row's recomputed from its own aligned
@@ -154,8 +173,10 @@ and the `release-crisprme` skill.
     is checked; in completeness, the count of records only sites-only VCFs hold) and, in the
     SNP-row report, `limit-snp-row-indel` and `limit-snp-row-unphased`; the note
     `variant-shadowed`; and two coverage gaps of the checker itself, not CRISPRme limits:
-    `coverage-putative-cap` (more than 10 positions of unknown phase around one record for
-    one carrier: those targets are not enumerated, 2^k haplotypes each) and
+    `coverage-putative-cap` (a carrier the PUTATIVE rule resolves with more than 10
+    positions within a target's reach of the record, off its REF span, where its alleles
+    allow two bases: its targets touching a call of unknown phase are not enumerated, 2^k
+    choices each) and
     `coverage-unindexed-long-ref` (a VCF read without a `.tbi` holds a record whose REF is
     longer than the 20 kb an unindexed read looks back, so a deletion that long starting
     further before a region is not read there: give it a `.tbi`).
@@ -216,9 +237,11 @@ and the `release-crisprme` skill.
     sample completeness fails on the 686 carrier targets the d7a6fff merge folds away
     (below). Their limits are 3 row blocks of an MNV (chr22:18890857 TG>GT) whose phased
     carrier CRISPRme resolves PUTATIVE, as it documents for MNVs, 6 two-indel targets, 1
-    record with overlapping alleles and 15 (28) windows across N; the checker's coverage gap
-    is 259 (unphased copy: 387) records with a carrier that has more than 10 calls of
-    unknown phase within a target's reach. No carrier is listed there for a sequence an MNV
+    record with overlapping alleles and 15 (25) windows across N; the checker's coverage gap
+    is none on HPRC and 21 records on the unphased copy, carriers resolved PUTATIVE with more
+    than 10 positions of two possible bases within a target's reach (earlier versions counted
+    259 and 387: almost all a cap on the placements of a known slot's calls of unknown phase,
+    which change no demand, and positions on the record's own REF span). No carrier is listed there for a sequence an MNV
     on its slot changes. Read without a `.tbi`, as these were, each HPRC run lists its VCF
     once under `coverage-unindexed-long-ref` (582 records of chr22 delete more than 20 kb,
     the longest 65,463 bp). The fix branch's e4dbb9c (c3a75fe's merge) passes per-sample
@@ -234,8 +257,33 @@ and the `release-crisprme` skill.
     4 hold a row of `hg38_mega` as good). Before the checker read a sites-only VCF record by
     record, it failed those runs on 6,762, 277 and 6,756 row blocks: each carrier-less row
     as `no-carrier-listed`, and the 9 (population-level 3) that name chr22:25093750 C>G, the
-    earlier record of a split site of `hg38_mega`'s VCF, as `variant-shadowed`. Genome-wide
-    soundness of the 2.8.1 runs reports that inside-insertion class and nothing else that
+    earlier record of a split site of `hg38_mega`'s VCF, as `variant-shadowed`. Two genotyped
+    datasets that share samples are refused (exit 2, nothing checked): CRISPRme resolves each
+    dataset on its own genotypes and its merge joins their rows, so a shared sample can be
+    listed by either dataset's haplotypes, which the checker does not model. On HPRC chr22
+    searched beside its copy with every fourth sample unphased (the same 232 individuals;
+    README guide, per sample, e4dbb9c), read as one panel the checker had passed a table
+    that lost carrier HG00099 at chr22:39328801 (and another drop), and failed 27 row
+    blocks on the two datasets' calls read as one haplotype set; it now refuses the run in
+    both modes, and both drops with it. On three repeat-rich
+    guides (VEGFA site 3 `GGTGAGTGAGTGTGTGCGTG`, EMX1 `GAGTCCGAGCAGAAGAAGAA`, VEGFA site 1
+    `GGGTGGGGGGAGTTTGCTCC`; chr22, the same panel and budget, searched for the review),
+    e4dbb9c passes both checks per sample, and d7a6fff population-level; d7a6fff per sample
+    fails completeness on 54,154 carrier targets of insertions its merge folds. There the
+    checker had failed 20 right row blocks and 734 carrier targets: five tandem-repeat sites
+    where a carrier's second insertion upstream pushes most of the record's added bases out
+    of the target (chr22:17799944 (−), chr22_17799961_C_CAC...: HGDP00985 holds 2 of the 6
+    the row's target holds), which CRISPRme rightly lists on the other insertion's row; and
+    a carrier read through its own second deletion for a target that names an SNV it does
+    not carry (chr22:32030641-45, HG01094), whose wrong listing then vetoed the fold of every
+    true carrier of the target. Each of the 1,593 indel lines of the population-level table,
+    dropped alone, is caught but 11 (29 before: 18 were joined to another cluster's row
+    through alignments of an indel window that only SNV alleles no carrier holds make): rows
+    all of whose carriers are documented limits (9 whose slots hold overlapping alleles, 2
+    that need an earlier record of a split site), which completeness does not demand: each
+    limit line now says how many of its carriers a row naming the record lists, so such a
+    loss changes the findings, without failing the check. Genome-wide soundness of the 2.8.1
+    runs reports that inside-insertion class and nothing else that
     gates: for the README guide per sample 1,111 row blocks (233 integrated rows and 151
     alternative ones, the count the investigation of the chr22:22322768 report made),
     population-level 682 (232 rows), and for TRAC 1,332 (256 integrated, 204 alternative
@@ -296,7 +344,7 @@ and the `release-crisprme` skill.
     23 sites of chr22) list carriers for a target that does not hold the variant they carry
     (chr22:17368905 (−), chr22_17368909_G_C: HGDP01090, HGDP01405, NA19351), where the
     HGDP + 1000 Genomes run alone lists them on an alignment that holds it.
-  - Wired in: `PostProcess/test_check_indel_rows.py` (136 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (146 unit and mutation tests: a right
     row raises nothing gating; each corruption of it is caught — the start shifted by 1 and
     by an insertion's offset, a target base changed, the aligned spacer rewritten, a carrier
     swapped, added or dropped, also when the same target sits elsewhere, a named variant
@@ -313,7 +361,13 @@ and the `release-crisprme` skill.
     tied with the target's best alignment on mm+bulges and worse on mm, a highest-CFD block
     tied at three decimals with more edits, a fold across strands, a carrier-less row of a
     record no sites-only VCF holds, a sample listed for a record only a sites-only VCF
-    holds; each documented limit, a PUTATIVE tie and each overlapping slot comes out under
+    holds, a carrier whose second insertion pushes the record's bases out of the target, a
+    carrier whose second indel puts an SNV's bases where it carries none, a carrier the
+    documented reading lists against its haplotypes in a fold group, a population-level
+    cluster joined to another only through a target no carrier holds, the SNP rows of each
+    mode, two genotyped VCFs that share samples, calls of unknown phase on the record's REF
+    span, a target only a call of unknown phase makes, a limit line that says how many of
+    its carriers a row lists; each documented limit, a PUTATIVE tie and each overlapping slot comes out under
     its own class, the checker's two coverage gaps under their own; a chromosome no VCF
     covers, one FASTA of several contigs, a tabix-indexed VCF read once per record, a
     sites-only VCF alone or beside a genotyped one (either first; its SNP rows in the

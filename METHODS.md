@@ -1494,21 +1494,28 @@ writes from them), the guide, the PAM file, the search budget and the result fol
 tables are read as data) — and it writes each sample's haplotypes itself from the VCF 4.x
 definition of a record, keeps its own map from haplotype bases to reference coordinates, and
 aligns with its own exhaustive aligner. **The truth is the VCF.** A slot is the reference
-with every ALT allele its genotype puts there. Two alleles of one slot whose REF spans meet
+with every ALT allele its genotype puts there, and it holds a row's target when it reads
+the target's bases from the row's start through the row's record: each base the record
+puts in the target at its place, and the base after them (a second insertion between the
+start and the record lengthens the stretch and pushes some of them out of it, which makes
+another target, one that needs two indel-path records). Two alleles of one slot whose REF spans meet
 — a SNP at an insertion's own position, a SNP on a base a deletion removes, one complex
 allele split into overlapping records, two ALTs at one position phased onto one haplotype —
 describe one stretch twice, so the VCF gives no sequence there: a carrier whose record meets
 such a stretch, where a target of the record reads (one in budget reads with the overlapping
 alleles left out), is counted under its own class (`limit-overlapping-records`), never
 judged. Where a call that touches the target has unknown phase (unphased, or a missing
-allele), the record's known slot is judged first — when no placement of those calls lets it
+allele; one whose REF meets the record's would leave the slot with no sequence and is read
+on the other slot, as §4's multi-allelic heterozygote), the record's known slot is judged first — when no placement of those calls lets it
 hold the target (a phased second indel inside it, say), or every placement does — and
 otherwise the truth is the PUTATIVE rule of §4: the strongest target the sample's own
 alleles allow, the guide's base wherever it carries it, elsewhere (and at the PAM jointly)
 the alleles that maximize the alignment's CFD; CFD is a product, so where it is 0 whatever
 the choice (a DNA bulge whose base the table scores 0, say) every choice is a strongest one.
-CRISPRme's documented reading of a carrier (§4: the one-indel window, the second indel read
-from either end of the target before any unphased call, the phasing artefact and the complex
+CRISPRme's documented reading of a carrier (§4: the one-indel window, resolved with each
+carrier's own SNP alleles, so that a row lists a carrier only where those give its target;
+the second indel read from either end of the target through the indel, each base the indel
+puts in the target at its place, before any unphased call; the phasing artefact and the complex
 allele, the PUTATIVE carriers of MNVs and of multi-ALT alts the genotypes cannot tie, the
 last record of a split site) is re-implemented from this text only to classify a
 disagreement as a documented limit (counted, non-gating, a PUTATIVE tie included) or a
@@ -1538,8 +1545,10 @@ documents, and fails. It runs two ways:
   row that names an earlier SNP record of a split site, which the documented limit says
   the stores do not hold, is a note: the record is real and the target is checked with it.
 - **Completeness (the real-data brute force).** For every indel and MNV record of the VCF
-  in the checked region, each carrier's slots around it are written (a call of unknown
-  phase is tried both ways), identical sequences are aligned once, and every in-budget
+  in the checked region, each carrier's known slots around it are written with their
+  known alleles (a target that touches a call of unknown phase is the PUTATIVE rule's, and
+  no other target depends on where such a call is), identical sequences are aligned once,
+  and every in-budget
   alignment on both strands with the PAM that holds a base the record changes (for a pure
   deletion, the bases on both sides of it — a target wholly in a flank is reference or SNP
   sequence and gives no indel row) is mapped to the reference and required to be reported
@@ -1554,7 +1563,10 @@ documents, and fails. It runs two ways:
   order (§4): a row with exactly that target and variants whose fold group (the rows of
   its site naming those variants with its carrier set, which two alignments of one target
   always share) is no worse, or rows of its site naming the same variants with the
-  target's own carrier set that are no worse. The fold key holds no strand, while one
+  target's own carrier set that are no worse — every carrier both the documented reading
+  and its own haplotypes list for it, and besides them only carriers either lists or the
+  reading leaves open (the documented reading only classifies: a carrier it would list
+  against the carrier's haplotypes vetoes no fold). The fold key holds no strand, while one
   target's alignments share theirs, so a fold group is taken on one strand: a fold across
   strands loses another target. The merge's later keys (the Cluster Position, the carrier
   count, the aligned text) only order alignments equal in all of these and are not
@@ -1568,16 +1580,23 @@ documents, and fails. It runs two ways:
   alignment of one PAM site) plus the rank of the row's first base among the bases an
   insertion adds, as the fix branch's merge compares rows that start inside one insertion;
   a row whose own target is not at its start stands for no other alignment. A target that
-  needs a second indel-path record is demanded exactly when the fake-indel window's own
-  reading holds its bases from the same first base (CRISPRme then keeps the carrier), and
-  is the two-indel limit otherwise. A target touching a call of unknown phase is demanded
-  as the sample's strongest. A run that writes no alternative alignments
+  needs a second indel-path record is demanded, as the window's target of the same bases,
+  start and variants, exactly when CRISPRme's reading of the slot against that target holds
+  (from its first base on or up to its last, through the record: it then keeps the
+  carrier), and is the two-indel limit otherwise. A target touching a call of unknown phase
+  is demanded as the sample's strongest (a position on the record's own REF span is no
+  choice: an allele there would describe the record's bases twice, or lie on bases it
+  deletes). A run that writes no alternative alignments
   (population-level, or `--ci-cd-test`) keeps one row per merge cluster: there the
   target's cluster — the integrated row with a block within `--merge` bp of its Cluster
-  Position, or of one that the in-budget alignments of the enriched reference (the SNP
-  alleles CRISPRme's stores hold) and of every indel record's window chain to it, each
-  within `--merge` bp of the next, as the merge clusters (every record the chain reaches
-  is read, up to 3 kb either side) — must be reported with a fewest-mm+b block of no more
+  Position, or of one that the rows CRISPRme can write chain to it, each within `--merge`
+  bp of the next, as the merge clusters: its reference rows, its SNP rows (population-level
+  the worst case of each alignment over each dataset's SNP alleles that CRISPRme's stores
+  hold, per sample — as with `--ci-cd-test` — only the haplotypes individuals hold) and the
+  targets some carrier of an indel-path record holds (the per-carrier resolution gives no
+  row for a raw target no carrier holds; a sites-only dataset's rows are the worst case of
+  each alignment of its window), every record the chain reaches read, up to 3 kb either
+  side — must be reported with a fewest-mm+b block of no more
   edits than the target's best alignment by the first sorting criterion (the merge picks
   between a cluster's reference and variant rows on mm+bulges, or the CFD, alone) and a
   highest-CFD block of at least its CFD (each row's recomputed from its own aligned
@@ -1595,11 +1614,16 @@ The documented limits — the last record of a split multi-allelic site, two ind
 records in one target, a PUTATIVE carrier listed for its strongest target, a site within
 one target of a contig's end — and the slots the VCF leaves without a sequence are listed
 with their carriers under their own class and do not fail the check, as do the checker's
-own coverage gaps (a carrier with more than 10 calls of unknown phase within a target's
-reach of a record, whose targets touching one it does not enumerate,
-`coverage-putative-cap`; a VCF read without a `.tbi` that holds a deletion longer than the
+own coverage gaps (a carrier the PUTATIVE rule resolves with more than 10 positions within
+a target's reach of the record, off its REF span, where its alleles allow two bases, whose
+targets touching a call of unknown phase it does not enumerate, `coverage-putative-cap`; a VCF read without a `.tbi` that holds a deletion longer than the
 20 kb such a read looks back, `coverage-unindexed-long-ref`); a row on a chromosome no VCF
-covers, a table line shorter than its header and a window holding N are reported. Measured
+covers, a table line shorter than its header and a window holding N are reported. A
+target all of whose carriers are documented limits is demanded of no one, so a row that
+lists only them is not missed when it is lost: each completeness limit line says how many
+of its carriers a row naming the record lists, and that count changes then, without
+failing the check (the documented reading of those slots, "stays listed" and "the last
+record", is not modeled into a gating demand). Measured
 on chr22 of the HGDP + 1000 Genomes panel (README guide, NRG, 4 mismatches, 1 DNA and 1
 RNA bulge, both analysis modes): on 2.8.1 soundness reports exactly the four rows per mode
 whose first aligned base is one an insertion adds, and nothing else, and completeness
@@ -1635,12 +1659,26 @@ inside one long insertion allele (up to 50 kb added, one carrier per allele) at 
 place than the row it kept, both at the anchor's Cluster Position (620 listed by no row,
 66 by rows of their site left without one of the two blocks), which the fix branch's later
 merge compares on the haplotype. Their limits are 3 row blocks of an MNV whose carrier
-CRISPRme resolves PUTATIVE and 6 two-indel targets; the checker's coverage gap is 259
-(unphased copy: 387) records with a carrier that has more than 10 calls of unknown phase
-within a target's reach, whose targets touching one are not enumerated; read without a
+CRISPRme resolves PUTATIVE and 6 two-indel targets; the checker's coverage gap is none on
+HPRC and 21 records on the unphased copy (a carrier resolved PUTATIVE with more than 10
+positions of two possible bases within a target's reach; earlier versions of the checker
+counted 259 and 387, almost all a cap on the placements of a known slot's calls of unknown
+phase, which change no demand, and positions on the record's own REF span); read without a
 `.tbi`, each HPRC run lists its VCF under `coverage-unindexed-long-ref` (582 records of
 chr22 delete more than 20 kb). The fix branch's e4dbb9c passes per-sample completeness on
-both copies. The checker's CFD of a row's own alignment is the `CFD_score_ALT` the runs
+both copies. Two genotyped datasets that share samples (that HPRC panel beside its
+unphased copy, searched together) are refused (exit 2, nothing checked): CRISPRme resolves
+each dataset on its own genotypes and its merge joins their rows, so a shared sample can be
+listed by either dataset's haplotypes, which the checker does not model; a sites-only
+dataset beside a genotyped one, and genotyped datasets with no sample in common, are
+checked. On three repeat-rich guides (VEGFA site 3 `GGTGAGTGAGTGTGTGCGTG`, EMX1
+`GAGTCCGAGCAGAAGAAGAA`, VEGFA site 1 `GGGTGGGGGGAGTTTGCTCC`; chr22, the same panel and
+budget) e4dbb9c passes both checks per sample, and d7a6fff population-level; per sample
+d7a6fff fails completeness on the targets of one insertion its merge folds (54,154 carrier
+targets). Each of the 1,593 indel lines of that population-level table, dropped alone, is
+caught but 11: rows all of whose carriers are documented limits (9 whose slots hold
+overlapping alleles, 2 that need an earlier record of a split site), whose targets
+completeness does not demand. The checker's CFD of a row's own alignment is the `CFD_score_ALT` the runs
 printed on every one of their 46,626 indel row blocks, and on all but 14 of about 2.4
 million SNP and REF blocks (each a value at a x.xxx5 rounding boundary, which the
 comparison gives the benefit of the doubt); the same input gives the same findings byte

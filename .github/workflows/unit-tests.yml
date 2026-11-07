@@ -318,13 +318,17 @@ jobs:
         # level cluster dropped beside another cluster's row, a row placed past an
         # insertion's anchor, two targets inside one insertion folded into one, a long
         # deletion's far junction, a second indel that keeps the target's bases, another
-        # guide's row. CRISPRme's documented limits (a split multi-allelic site, two
-        # indels in one target, a complex allele, a phasing artefact, a repeat unit at the
-        # target's edge, a PUTATIVE tie) must come out under their own non-gating class,
-        # and the driver must never pass silently (a chromosome no VCF covers, one FASTA
-        # of several contigs, a sites-only VCF alone or beside a genotyped one, whose
-        # rows list no carrier; a deletion longer than an unindexed read looks back; a
-        # tabix read yields each record once).
+        # guide's row, a carrier whose second insertion pushes the record's bases out of
+        # the target, a carrier whose second indel puts an SNV's bases where it carries
+        # none, a population-level cluster joined to another only through a target no
+        # carrier holds, two genotyped VCFs that share samples (refused), calls of unknown
+        # phase on the record's REF span. CRISPRme's documented limits (a split
+        # multi-allelic site, two indels in one target, a complex allele, a phasing
+        # artefact, a repeat unit at the target's edge, a PUTATIVE tie) must come out
+        # under their own non-gating class, and the driver must never pass silently (a
+        # chromosome no VCF covers, one FASTA of several contigs, a sites-only VCF alone
+        # or beside a genotyped one, whose rows list no carrier; a deletion longer than
+        # an unindexed read looks back; a tabix read yields each record once).
         # Stdlib only -- the checker imports no CRISPRme module, nor do they.
         working-directory: PostProcess
         run: python -m unittest test_check_indel_rows -v
