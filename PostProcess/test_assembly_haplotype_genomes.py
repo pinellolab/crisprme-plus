@@ -40,7 +40,7 @@ These tests pin:
     each refusal, followed as it says, runs the search with the bulges it was refused
     with (given none, a search takes the bulges the indexes installed allow), and
     under --index-path, which the pipeline builds no index in, without it (--prune-pam,
-    which needed it before 2.9.0, stays);
+    which needed it before 2.10.0, stays);
   * the record names a folder of the machine that built the index: publish-index
     leaves it out of the archive, with and without pigz, and download drops it;
   * runs that start together: a stale index both find is taken away from its name in
@@ -797,7 +797,7 @@ class _FakePipeline:
     """Stands in for `subprocess.call` of submit_job_automated_new_multiple_vcfs.sh,
     keeping what decides which sequence a reference search reads: with bulges, the
     index of the genome's NAME (<PAM>_<N>_<name>, or 20-<PAM>_<N>_<name> as it builds one
-    since 2.9.0, the guide length and the side of the PAM in its name; N at least the
+    since 2.10.0, the guide length and the side of the PAM in its name; N at least the
     budget, the smallest first, then the newer name), in --index-path or genome_library/,
     built from the folder only when there is none, with the log line the pipeline prints
     then -- under --index-path, which it builds none in, it fails instead, with the
@@ -1043,12 +1043,12 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
     def test_under_prune_pam_it_says_to_run_again_without_index_path_alone(self):
         # without --index-path, the search builds the index of its name for the PAM
         # itself, which --prune-pam leaves as it is (it said to drop --prune-pam too,
-        # which needed --index-path before 2.9.0)
+        # which needed --index-path before 2.10.0)
         self.search("a", "projA/ref")
         ip = ("--index-path", "genome_library", "--prune-pam")
         with self.assertRaises(SystemExit):
             self.search("b", "projB/ref", 1, *ip)
-        # (--prune-pam no longer needs --index-path, since 2.9.0, and stays)
+        # (--prune-pam no longer needs --index-path, since 2.10.0, and stays)
         self.assertIn("Then run this search again without --index-path and with --bDNA 1 "
                       "--bRNA 1 (given no --bDNA/--bRNA, this search may then take no bulges): "
                       "it builds the index of its name from this folder.", self.err)

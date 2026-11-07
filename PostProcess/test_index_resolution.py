@@ -1078,7 +1078,7 @@ class _ShippedScript(unittest.TestCase):
             vcfs.write_text(self.VCF + "\n")
             samples.write_text("")
         samples = given or samples
-        # complete-search refused --prune-pam without --index-path before 2.9.0; a run
+        # complete-search refused --prune-pam without --index-path before 2.10.0; a run
         # given the flag names the working directory's own genome_library, as one did
         if index_path is None:
             index_path = self.library if prune else "_"
@@ -1159,7 +1159,7 @@ class EveryScanInTheShippedScript(_ShippedScript):
         self.assertServedBy(self.run_pipeline(prune=0), "NNN_3", prune=0)
 
     def test_a_wide_flank_alone_is_searched_pruned(self):
-        # without --prune-pam the search prunes by itself (2.9.0): it stopped for want of
+        # without --prune-pam the search prunes by itself (2.10.0): it stopped for want of
         # a variant index, and said to pass the flag
         self.install("NNNNNNNN_3")
         self.assertServedBy(self.run_pipeline(prune=1), "NNNNNNNN_3", prune=1)
@@ -1315,7 +1315,7 @@ _PAM_5P_3 = ("23bp-NNN-5p", "N" * 23 + " -3\n")
 
 class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
     """The side of the guide an all-N index was built for is known from its name since
-    2.9.0, and else only from its .pam_build (_index_side). A search that built one wrote
+    2.10.0, and else only from its .pam_build (_index_side). A search that built one wrote
     none, so a 5' PAM-less index a search had built was taken for a 3' build and refused by
     every later 5' search under --index-path, which --prune-pam needs: TTTV with
     --prune-pam on the NNNN_2 a 27bp-NNNN-5p search had built stopped with "no matching
@@ -1373,7 +1373,7 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
                           f"NNNN-23_2_hg38+{self.VCF}_INDELS"])
 
     def assertBuiltBeside(self, run, index, built, pam_file, variant=False, record=None):
-        """The run built and searched its own index `built`, under the name of 2.9.0,
+        """The run built and searched its own index `built`, under the name of 2.10.0,
         beside `index`, an index of the older name for the other side, which it neither
         searched nor changed (its .pam_build stays `record`): 2.8.1 stopped on it as in the
         way of the index it built under that name."""
@@ -1401,7 +1401,7 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
                                 env={"STUB_BUILD_WRITES": "1"})
         self.assertBuiltBeside(run, "NNN_2_hg38", "NNN-20_2_hg38", "23bp-NNN-5p")
         self.assertFalse((self.library / "NNN_2_hg38" / ".pam_build").exists())
-        # one in place recorded for its side is searched, and one of the 2.9.0 name ahead of it
+        # one in place recorded for its side is searched, and one of the 2.10.0 name ahead of it
         built_for(self.library / "NNN_2_hg38", -3)
         shutil.rmtree(self.library / "NNN-20_2_hg38")
         run = self.run_pipeline(pam=pam, pam_text=text, variant=False)
@@ -1436,7 +1436,7 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
     def assertNoMatchSaysWhy(self, run, note, pam, n=2, guide=20, side=3):
         """Under --index-path: the error, why the all-N index there was not used
         (`note`, if any), and what would serve: the published name (the indexes published
-        are of N = 3), and the one a build gives it since 2.9.0, of a `guide`-nt guide on
+        are of N = 3), and the one a build gives it since 2.10.0, of a `guide`-nt guide on
         the `side` of the guide."""
         lib = os.path.realpath(self.library)
         named = f"{guide}-{pam}" if side == 3 else f"{pam}-{guide}"
@@ -1447,7 +1447,7 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
                          + note +
                          f"       expected an index '{pam}_N_hg38' with N >= {n} "
                          f"(e.g. {published}, or {named}_{n}_hg38 as a build names it "
-                         "since 2.9.0)\n"
+                         "since 2.10.0)\n"
                          f"       re-run 'crisprme.py download --what index --index-name "
                          f"{published}' if it is published (it fetches the shared reference "
                          "index too), or build it with 'crisprme.py build-index-only'.\n")
@@ -1496,7 +1496,7 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
         self.assertEqual([c[1] for c in plain.builds], ["hg38"])
         self.assertEqual(plain.searched(variant=False), ("20-NGCG_2_hg38", False))
         lib = os.path.realpath(self.library)
-        # (and, since 2.9.0, how to use one built for a 3' PAM: a name that says its side,
+        # (and, since 2.10.0, how to use one built for a 3' PAM: a name that says its side,
         # here for the guide length its trees say, which these stand-ins do not)
         self.assertNoMatchSaysWhy(
             self.run_pipeline(pam="20bp-NGCG-SpCas9VRER", prune=1, variant=False),
@@ -2719,7 +2719,7 @@ sys.exit(rc if rc >= 0 else 128 - rc)
 
 class BuildLocksInTheShippedScript(_ShippedScript):
     """The same locks, taken by whole runs of the shipped script. A reference-only
-    search with no index installed builds 20-NRG_2_hg38 (since 2.9.0 a name that says the
+    search with no index installed builds 20-NRG_2_hg38 (since 2.10.0 a name that says the
     guide length and the side) under genome_library/20-NRG_2_hg38.lock, in a folder of that
     lock (_build_in_lock); STUB_HOLD_BUILD keeps that build running until the test kills or
     interrupts the run."""
@@ -3317,7 +3317,7 @@ class BuildLocksInTheShippedScript(_ShippedScript):
     def test_a_build_leaves_nothing_under_its_name_and_touches_no_index_of_the_older_one(self):
         # The engine writes an index under the older name, <PAM>_<N>_<genome>, and removes
         # a folder of that name first. It runs in a folder of the build lock, and its index
-        # is renamed into place, under the name of 2.9.0, once whole: an index of the older
+        # is renamed into place, under the name of 2.10.0, once whole: an index of the older
         # name in place (here one of the other side, which 2.8.1 stopped on, as in the way)
         # is never touched, and a build killed partway leaves its part in the lock, which
         # the run that takes the lock over clears.
@@ -3846,7 +3846,7 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
 
     def test_an_index_that_serves_with_its_dictionaries_gone_says_so(self):
         # and how to download it again: a download of an installed index brings what of it
-        # is missing, the dictionaries too since 2.9.0 (FR :163), and Settings downloads
+        # is missing, the dictionaries too since 2.10.0 (FR :163), and Settings downloads
         # none that is installed
         self.install("NRG_3")
         shutil.rmtree(self.home / "Dictionaries" / f"registry_{self.VCF}")
@@ -4058,7 +4058,7 @@ class AnIndexBuiltForAnotherGuideInTheScript(_ShippedScript):
         self.assertEqual(run.searched(variant=True), (f"23-NGG_2_hg38+{self.VCF}", False))
         self.assertTrue((self.library / f"NGG_2_hg38+{self.VCF}" / "chr1.bin").exists())
 
-    def test_an_index_of_the_2_9_0_name_built_for_another_guide_stops_the_search(self):
+    def test_an_index_of_the_2_10_0_name_built_for_another_guide_stops_the_search(self):
         # one named for a 23-nt guide whose trees were built for a 20-nt one (a rename by
         # hand) is in the way of the index this search builds under that name: refused, with
         # the name of what it is

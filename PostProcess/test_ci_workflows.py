@@ -501,7 +501,7 @@ class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
 
     def test_its_index_flex_grep_fails_an_engine_without_prune_pam(self):
         # that engine's run passes every cell, the three K=8 ones by refusing, saying so (a
-        # search with no --prune-pam prunes by itself where the engine can, since 2.9.0)
+        # search with no --prune-pam prunes by itself where the engine can, since 2.10.0)
         flex = read(REPO / "test/index_flex/check_index_flex.py")
         refused = re.findall(r'say\(\s*"((?:K=8|complete-test on K=8)[^"]*engine without[^"]*)"',
                              flex)

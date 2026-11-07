@@ -124,7 +124,7 @@ The default repository is `lucapinello/crisprme-data`; override it with `--hf-re
 
 ### 3a. Choose a PAM file
 
-The setup command pre-creates PAM files for 18 common nucleases in `PAMs/` (`download --what pams` fetches the hosted ones, with the default one). The examples in this guide use the default SpCas9 file (matching the default NRR index; NRR is the default PAM since 2.9.0, NRG before):
+The setup command pre-creates PAM files for 18 common nucleases in `PAMs/` (`download --what pams` fetches the hosted ones, with the default one). The examples in this guide use the default SpCas9 file (matching the default NRR index; NRR is the default PAM since 2.10.0, NRG before):
 
 ```
 PAMs/20bp-NRR-SpCas9.txt
@@ -679,7 +679,7 @@ Writes PAM definition files for all supported nucleases to `PAMs/`. Each file is
 - `20bp-NGC-SpCas9.txt`
 - `20bp-NGK-SpCas9.txt`
 - `20bp-NRG-SpCas9.txt`
-- `20bp-NRR-SpCas9.txt` (the default since 2.9.0)
+- `20bp-NRR-SpCas9.txt` (the default since 2.10.0)
 - `20bp-NRCH-SpCas9.txt`
 - `20bp-NNGT-SpCas9.txt`
 - `20bp-NAA-iSpyMacCas9.txt`

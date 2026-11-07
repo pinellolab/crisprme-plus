@@ -972,7 +972,7 @@ class TheSideOfAFormat2IndexIsItsHeaders(_Index):
     def test_the_web_serves_a_search_of_the_side_in_the_header(self):
         """The web's rule of the side an index serves (pages_utils._index_side_serves, as
         crisprme.py's _side_serves and the search script's _index_side) read a name that says
-        the side (2.9.0), then .pam_build, and not the header: a 5' PAM-less index of format 2
+        the side (2.10.0), then .pam_build, and not the header: a 5' PAM-less index of format 2
         with no .pam_build, of the published width 3, was offered to a 3' search, as a 3'
         build, and not to a 5' one. The header is read after the name, as the others read it."""
         import test_bulge_cap

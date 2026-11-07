@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every allele of a variant position, read the same way by every reader (CRISPRme 2.9.0).
+"""Every allele of a variant position, read the same way by every reader (CRISPRme 2.10.0).
 
 CRISPRitz 2.10.0 codes every ALT of a split multi-allelic site (up to 2.9.1 only the last
 record's), lists each in the per-sample dictionary with its own record's carriers, and

@@ -3,7 +3,7 @@
 # "real-haplotypes" single-source panel NRG_3_hg38+hg38_1000G2021 (RETIRED in 2.8.0 / removed from HuggingFace;
 # this recipe rebuilds it from source for reproducibility only. The recommended variant
 # default is the SHAPEIT5 re-phased HGDP + 1000 Genomes panel, NRR_3_hg38+hg38_HGDP1kGP since
-# 2.9.0, NRG_3_hg38+hg38_HGDP1kGP before).
+# 2.10.0, NRG_3_hg38+hg38_HGDP1kGP before).
 #
 # WHAT THIS IS: a standard CRISPRme variant-aware index built by ENRICHING hg38 with the
 # 1000 Genomes 2021 high-coverage (30x) NYGC/IGSR callset (CCDG_14151_B01_GRM_WGS_2020-08-05,
@@ -26,7 +26,7 @@
 # (the known samplesID-over-listing bug); AN must be 2x the genotyped panel = 6,404.
 #
 # OUTPUT: genome_library/NRG_3_hg38+hg38_1000G2021 (+ _INDELS; 20-NRG_3_hg38+hg38_1000G2021 when
-# the overlay holds CRISPRme 2.9.0 or later, whose index names say the guide length and the side
+# the overlay holds CRISPRme 2.10.0 or later, whose index names say the guide length and the side
 # of the PAM) + Dictionaries/{registry,
 # genotypes,indel_genotypes,log_indels}_hg38_1000G2021 + samplesIDs/hg38_1000G2021.samplesID.txt.
 # Registry is RAW (CRISPRME_REGISTRY_COMPRESS=0), SNP+indel co-occurrence ON (CRISPRME_INDEL_SNP)
@@ -94,8 +94,8 @@ run "export CRISPRME_REGISTRY_COMPRESS=0 CRISPRME_INDEL_SNP=1; cd $B; \
      crisprme.py build-index-only --genome $GENOME --pam $PAM --bDNA 2 --bRNA 2 --thread $THREADS \
        --vcf $B/VCFs/hg38_1000G2021 --samplesID $B/onekg.samplesID.config.txt --path $B"
 echo "BUILD_EXIT=$? $(date +%H:%M:%S)"
-# the index as the CRISPRme of $OV names it: NRG_3_hg38+hg38_1000G2021 before 2.9.0, the name with
-# the guide length and the side from 2.9.0 on (20-NRG_3_hg38+hg38_1000G2021), the PAM's for another PAM=
+# the index as the CRISPRme of $OV names it: NRG_3_hg38+hg38_1000G2021 before 2.10.0, the name with
+# the guide length and the side from 2.10.0 on (20-NRG_3_hg38+hg38_1000G2021), the PAM's for another PAM=
 for idx in "$B"/genome_library/*_3_hg38+hg38_1000G2021; do
   [ -d "$idx" ] && echo "index: $idx (+ _INDELS)"
 done

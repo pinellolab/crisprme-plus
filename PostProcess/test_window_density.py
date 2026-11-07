@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The ambiguity budget of a variant search (2.9.0): how many sequences a window of the
+"""The ambiguity budget of a variant search (2.10.0): how many sequences a window of the
 variant genome spells, and how many of its ambiguous columns a reported row rests on.
 
 Coding every allele of a split multi-allelic site, and a four-allele position as Q, makes
@@ -707,7 +707,7 @@ def _gnu_cut():
 @unittest.skipUnless(_gnu_cut(), "resultIntegrator.py needs GNU cut --complement")
 class TheIntegratedRow(unittest.TestCase):
     """The real resultIntegrator.py on bestMerge rows at chrT 1000, 2000, 3000, 4000 and 5000,
-    beside the post-analysis's BEDs: a dense window over 1000 (2.9.0's BED), one over 4000
+    beside the post-analysis's BEDs: a dense window over 1000 (2.10.0's BED), one over 4000
     (2.8.1's), a hyperdense one over 5000 that no greedy alignment stands for, and four-allele
     positions in the windows at 1000 and 2000, and just past the one at 3000."""
 
@@ -791,7 +791,7 @@ class TheIntegratedRow(unittest.TestCase):
     def test_the_run_s_report(self):
         """The report the search script builds next (generate_report.py --result-dir, with
         --report-full) of a run with --max-degeneracy 1, in either mode, from the result folder
-        as it is then: these integrated results, the post-analysis's BEDs of 2.9.0, and the
+        as it is then: these integrated results, the post-analysis's BEDs of 2.10.0, and the
         Params.txt complete-search wrote. It states the cap, counts the rows in a hyperdense
         window and in one holding a four-allele position, says what stands for a dense window
         (TheReport.test_the_legend_says_what_stands_for_a_dense_window), and bundles the windows
@@ -863,7 +863,7 @@ class TheReport(unittest.TestCase):
         self.assertEqual(self.cell("NA"), gr.CURATED_MISSING)
 
     def test_a_four_allele_position_alone_is_no_dense_window(self):
-        """A --per-sample report of untiered datasets, of a search before 2.9.0 (no carrier
+        """A --per-sample report of untiered datasets, of a search before 2.10.0 (no carrier
         gate sidecar: _GREEDY_DENSE), reads a dense window's row of two or more SNPs as its
         greedy worst-case alignment (_greedy_union): not a row whose window only holds a
         four-allele position."""
@@ -882,7 +882,7 @@ class TheReport(unittest.TestCase):
         """With CRISPRME_IUPAC_CAP=-1 (or a cap the window is within) a per-sample search on
         untiered datasets enumerates a hyperdense window's combinations: its row is a
         carrier's own haplotype, whose cis carriers the Observed cell names, as 2.8.1's did
-        (in the results of a search before 2.9.0, the only ones that can hold a greedy row
+        (in the results of a search before 2.10.0, the only ones that can hold a greedy row
         under --per-sample: _GREEDY_DENSE)."""
         saved = gr._PER_SAMPLE, gr._UNTIERED, gr._GREEDY_DENSE
         self.addCleanup(setattr, gr, "_GREEDY_DENSE", saved[2])
@@ -977,17 +977,17 @@ class TheReport(unittest.TestCase):
 
     def test_the_legend_says_what_stands_for_a_dense_window(self):
         """A greedy worst-case alignment in a population-level report, and in a --per-sample
-        one whose datasets all lack the dict-less tiers, of a search before 2.9.0 (no carrier
+        one whose datasets all lack the dict-less tiers, of a search before 2.10.0 (no carrier
         gate sidecar: _GREEDY_DENSE), where the carrier gate's _hvdr_how names them; a row in a
         hyperdense window there seldom exists in any one genome. In any other --per-sample
         report a dense window's rows are its carriers' own haplotypes, as any window's (the
-        rows' notes say so), on the classic dictionaries too since 2.9.0, and no worst case is
+        rows' notes say so), on the classic dictionaries too since 2.10.0, and no worst case is
         doubted, as in the inputs card."""
         saved = gr._PER_SAMPLE, gr._UNTIERED, gr._GREEDY_DENSE
         self.addCleanup(setattr, gr, "_GREEDY_DENSE", saved[2])
         self.addCleanup(setattr, gr, "_UNTIERED", saved[1])
         self.addCleanup(setattr, gr, "_PER_SAMPLE", saved[0])
-        for per_sample, untiered, before_2_9_0, rows, doubt in (
+        for per_sample, untiered, before_2_10_0, rows, doubt in (
                 (False, False, True, self.GREEDY, True),
                 (False, False, False, self.GREEDY, True),
                 (True, True, True, self.OWN, True),
@@ -995,14 +995,14 @@ class TheReport(unittest.TestCase):
                 (True, False, True, self.OWN, False),
                 (True, False, False, self.OWN, False)):
             with self.subTest(per_sample=per_sample, untiered=untiered,
-                              before_2_9_0=before_2_9_0):
+                              before_2_10_0=before_2_10_0):
                 gr._PER_SAMPLE, gr._UNTIERED = per_sample, untiered
-                gr._GREEDY_DENSE = before_2_9_0
+                gr._GREEDY_DENSE = before_2_10_0
                 clauses = gr._dense_greedy_clauses(untiered=["ds"] if untiered else None)
                 legend = gr.build_annotation_legend_html(hvdr_how=gr._hvdr_how(clauses=clauses))
                 self.assertIn(rows, legend)
                 self.assertNotIn(self.OWN if rows == self.GREEDY else self.GREEDY, legend)
-                self.assertEqual(self.UNTIERED in legend, per_sample and untiered and before_2_9_0)
+                self.assertEqual(self.UNTIERED in legend, per_sample and untiered and before_2_10_0)
                 self.assertIn("it matches nearly any guide somewhere%s <code>1 four-allele "
                               "position</code>" % (self.DOUBT if doubt else "."), legend)
 

@@ -686,7 +686,7 @@ class WhatTheSmokeSearchesWith(_SmokeDir):
 
     def test_the_published_wider_pam_less_index_is_searched_for_nrr_with_prune(self):
         # it has no .pam_build, as the published archives have none; NRR is the default
-        # PAM (it was NRG before 2.9.0)
+        # PAM (it was NRG before 2.10.0)
         line, seq, search, prune, five, pam = self.inputs("NNNNNNNN_3_hg38")
         self.assertEqual(line, "N" * 20 + "NRR 3")
         self.assertEqual(seq, "CTAACAGTTGCTTTTATCACNNN")
@@ -762,7 +762,7 @@ class WhatTheSmokeSearchesWith(_SmokeDir):
 
     def test_a_shorter_3_nt_index_with_no_record_is_taken_for_3_prime(self):
         # NAA_3_hg38 has none, and no shipped PAM file holds NAA (NRR stood in here until
-        # its file shipped, with 2.9.0)
+        # its file shipped, with 2.10.0)
         line, _, _, _, five, _ = self.inputs("NAA_3_hg38")
         self.assertEqual((line, five), ("N" * 20 + "NAA 3", False))
         self.assertNoPamWritten()

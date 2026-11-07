@@ -42,7 +42,7 @@ Type an assembly name and pick a source:
   that genome as it was. As for an upload, a `.fasta` file goes in as a `.fa` file (the
   files an index and a search read), so `chr1.fa` and `chr1.fasta` are two of one name, and
   the hidden files of an archive are left out (the `._chr1.fa` that macOS `tar` adds beside
-  `chr1.fa`). Before 2.9.0 the two went in as they were.
+  `chr1.fa`). Before 2.10.0 the two went in as they were.
   Like an upload, it is refused while indexes or variant genomes built on a genome of that
   name are installed, and the page says so before anything is fetched: the link can hold
   another genome than the one they were built from. Download it under another name, or

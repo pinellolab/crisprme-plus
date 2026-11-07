@@ -64,7 +64,7 @@ version is here.
 ### 2a. Get the data (one time)
 
 Make a folder for your data and results, then fast-download the reference data and
-a prebuilt SpCas9 NRR (NGG, NAG, NGA, NAA; the default PAM since 2.9.0) index from the
+a prebuilt SpCas9 NRR (NGG, NAG, NGA, NAA; the default PAM since 2.10.0) index from the
 CRISPRme mirror (minutes, not the multi-hour legacy setup):
 
 ```bash
@@ -318,7 +318,7 @@ bulges you ask for, the search first builds one from the installed genome (once:
 the bulges its installed variant index supports: with no variant index yet, only a
 0-bulge search, and the first one prepares the variant genome and the index of its indels
 (this can take hours on a full genome; a search with no bulges scans the variant genome
-itself, and since 2.9.0 builds no index of it, nor of the reference genome), if the panel's
+itself, and since 2.10.0 builds no index of it, nor of the reference genome), if the panel's
 VCF files, one per chromosome, or its
 enriched genome are installed; without them the search stops and says what to do. A panel
 added as a single multi-chromosome VCF file is split per chromosome only when its index is

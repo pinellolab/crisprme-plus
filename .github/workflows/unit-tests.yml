@@ -286,7 +286,7 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_observed_haplotype_integration -v
 
-      - name: "Every allele of a position read the same way (2.9.0: a VCF line of several ALTs, two records of one REF>ALT, two ALTs on one haplotype slot, Q, rsID and AF in their variant's place)"
+      - name: "Every allele of a position read the same way (2.10.0: a VCF line of several ALTs, two records of one REF>ALT, two ALTs on one haplotype slot, Q, rsID and AF in their variant's place)"
         # CRISPRitz 2.10.0 codes every ALT of a split site and writes Q at a position of four
         # bases. The real new_simple_analysis.py on tiers and dictionaries the repository's
         # compilers build, the real remove_contiguous_samples.py, and every reader of
@@ -295,7 +295,7 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_site_alleles -v
 
-      - name: "Carrier gate (2.9.0: a population-level row's variants checked against phased haplotypes, ranked after the others when none carries them together, never dropped) + the per-sample rows (no carrier whose haplotype has an indel in the target; no greedy row of a dense window on the dictionaries) + download --what genotype-oracle"
+      - name: "Carrier gate (2.10.0: a population-level row's variants checked against phased haplotypes, ranked after the others when none carries them together, never dropped) + the per-sample rows (no carrier whose haplotype has an indel in the target; no greedy row of a dense window on the dictionaries) + download --what genotype-oracle"
         # haplotype_prioritizer.py's tiers on stores the repository's own writers build (the
         # phased SNP store, the phased indel store, a VCF line with two ALTs), the command
         # the search runs (the integrated results left byte for byte as they were), the report
@@ -480,7 +480,7 @@ jobs:
           test_iupac_collapse_consistency test_hf_sha256sums
           test_indel_empty_chromosome -v
 
-      - name: "The default PAM and index are NRR, and which index serves a search (2.9.0)"
+      - name: "The default PAM and index are NRR, and which index serves a search (2.10.0)"
         # The NRR PAM file ships and a download of the PAM files installs it, the web form
         # and its Load Example select it (pages/main_page.py, AST-extracted, no Dash), and
         # the advice names its index. A search with no bulges builds no index: the shipped
@@ -553,7 +553,7 @@ jobs:
           test_build_mega_registry test_build_mega_indel_af test_lossless_dense
           test_memory_check -v
 
-      - name: "The ambiguity budget (2.9.0): CRISPRME_IUPAC_CAP in bits, hyperdense windows and four-allele positions flagged, --max-degeneracy"
+      - name: "The ambiguity budget (2.10.0): CRISPRME_IUPAC_CAP in bits, hyperdense windows and four-allele positions flagged, --max-degeneracy"
         # A three-allele column of a split site coded with every allele weighs log2(3) bits
         # of the cap, a four-allele one (Q) 2, where the cap counted positions; a window of
         # 2^20 sequences or more goes to the high-variant-density BED whatever the cap. The

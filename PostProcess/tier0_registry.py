@@ -1806,7 +1806,7 @@ class RegistryReader(object):
         Q. The registry holds no record of an ALT no sample carries (it has no group),
         so ``alts_at`` cannot tell; the manifest lists these positions, sorted
         (``four_base_positions``, written by ``tier0_compile.compile_from_dict``).
-        False on a registry without the list (compiled before CRISPRme 2.9.0, or a
+        False on a registry without the list (compiled before CRISPRme 2.10.0, or a
         sites-only one)."""
         listed = self.manifest.get("four_base_positions")
         if not listed:

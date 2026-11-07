@@ -3239,7 +3239,7 @@ def _default_genome() -> Optional[str]:
 
 
 # The PAM the search form selects by default, when it is installed (_default_pam), and
-# the one it falls back to when none is selected: SpCas9 NRR since CRISPRme 2.9.0 (NRG
+# the one it falls back to when none is selected: SpCas9 NRR since CRISPRme 2.10.0 (NRG
 # before).
 DEFAULT_PAM = "20bp-NRR-SpCas9"
 
@@ -3252,7 +3252,7 @@ def _default_cas() -> Optional[str]:
 
 def _default_pam(cas: Optional[str]) -> Optional[str]:
     """Default PAM for a nuclease: prefer an NRR PAM (NAA, NAG, NGA and NGG, the
-    default since CRISPRme 2.9.0: the broad SpCas9 screen recommended for an IND
+    default since CRISPRme 2.10.0: the broad SpCas9 screen recommended for an IND
     package, which also surfaces variant-created NAG and NGA off-targets), else an NRG
     PAM (NAG+NGG, the default before), else the canonical NGG, else the first available
     PAM for that Cas."""

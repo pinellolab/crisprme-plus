@@ -500,7 +500,7 @@ def describe_name_problems(genomedir: str, reported=()) -> List[str]:
 def _indexes_of(library: str, genome: str) -> List[str]:
     """The folders of the genome library named as an index of ``genome``:
     ``<PAM>_<N>_<genome>``, or ``<PAM>_<N>_<genome>+<dataset>`` of a variant one, or a
-    name of the form a build writes since 2.9.0, which carries the guide length and the
+    name of the form a build writes since 2.10.0, which carries the guide length and the
     side (``20-NRR_3_<genome>``, ``TTTV-23_3_<genome>``: index_fit.parse_index_name)."""
     try:
         names = sorted(os.listdir(library))

@@ -1598,8 +1598,8 @@ class TestGenerateReport(unittest.TestCase):
         for name in tsvs:
             self.assertEqual(unknown[name], tiered[name], name)
 
-    def test_a_search_since_2_9_0_has_no_greedy_row(self):
-        """Since 2.9.0 a per-sample search gives a window denser than CRISPRME_IUPAC_CAP on
+    def test_a_search_since_2_10_0_has_no_greedy_row(self):
+        """Since 2.10.0 a per-sample search gives a window denser than CRISPRME_IUPAC_CAP on
         the classic dictionaries as the haplotypes its carriers have, as on the dict-less
         tiers (new_simple_analysis.py), and its pipeline writes the carrier gate's sidecar
         (.carrier_gate.json), whatever the gate did. So in its report the flagged two-SNP row
@@ -2438,9 +2438,9 @@ class TestGenerateReport(unittest.TestCase):
         window of the search's high_variant_density_regions.bed that a greedy worst-case
         alignment is reported there. So it is in a population-level search, but under
         --per-sample a genotyped dataset's dense window is the haplotypes its carriers have
-        (on the dict-less tiers since 2.7.10, on the classic dictionaries since 2.9.0): its
+        (on the dict-less tiers since 2.7.10, on the classic dictionaries since 2.10.0): its
         rows, and the window's reference row, say that now. A row that names no carrier, a
-        sites-only dataset's, is the population-level analysis's in either mode. Since 2.9.0
+        sites-only dataset's, is the population-level analysis's in either mode. Since 2.10.0
         the window's BED line says whether a greedy worst case stands for it (its greedy
         column: 1 in a population-level search, 0 in a per-sample one), and gives its bits;
         a BED of 2.8.1, which has neither, keeps what 2.8.1 said of every window."""
@@ -3224,7 +3224,7 @@ class TestGenerateReport(unittest.TestCase):
     def test_pipeline_no_readonly_or_bare_relative_writes(self):
         """Regression guard for the read-only-container bug: the search pipeline must
         not write a bare-relative dummy.txt nor append to $6 (both crashed a
-        reference-only run under Apptainer; since 2.9.0 the script reads a copy of $6)."""
+        reference-only run under Apptainer; since 2.10.0 the script reads a copy of $6)."""
         p = os.path.join(os.path.dirname(__file__),
                          "submit_job_automated_new_multiple_vcfs.sh")
         src = open(p).read()

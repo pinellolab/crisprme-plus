@@ -52,7 +52,7 @@ index, lossless for detection) otherwise (sites-only/unphased/hybrid/reference-o
 Force the fast population-level mode with **`--population-level`**; force resolution
 with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-only
 index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
-catalog name `NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.9.0; NRG
+catalog name `NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.10.0; NRG
 before): 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
 jointly SHAPEIT5 re-phased — or `HPRC`. See
 [§5, Search-space control for high-variant-density regions](#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis).
@@ -223,7 +223,7 @@ feeds the genotype-counting Tier-0 registry. It is correct only when *every* mer
 source is genotyped, and it is what enables indel+SNP cis reconstruction.
 
 The **default** shipped index, **`NRR_3_hg38+hg38_HGDP1kGP`** (the SpCas9 NRR PAM's, the
-default since 2.9.0; the NRG and NGG indexes of the panel are built from the same data), is
+default since 2.10.0; the NRG and NGG indexes of the panel are built from the same data), is
 built in this genotyped mode
 from the gnomAD **v3.1.2 HGDP+1kGP** jointly-called callset (GRCh38; 4,091 samples = 925 HGDP +
 3,166 1000 Genomes), which CRISPRme+ **re-phases with SHAPEIT5** (`phase_common` scaffold +
@@ -413,7 +413,7 @@ haplotypes is bounded by ≈2×(number of carriers) rather than 2^*k*, so it is
 efficient, and each enumerated haplotype carries its **exact set of carriers**
 (which in turn yields its exact frequency, Section 3). Cross-individual chimeras
 — combinations assembled from variants carried by *different* people — are
-**excluded** by construction. Since 2.9.0 a SNP row's carriers are also read against the
+**excluded** by construction. Since 2.10.0 a SNP row's carriers are also read against the
 index's phased indel genotypes (`Dictionaries/indel_genotypes_<vcf>/`): an individual whose
 only phased haplotypes holding the row's SNPs (and no other SNP of the window) also hold an
 indel that changes the bases the target covers is not listed, as its own sequence there is
@@ -441,7 +441,7 @@ input genotypes:
   known, so a per-individual, per-chromosome variant-set is a **confirmed** cis
   haplotype: that individual carries exactly those variants together on one
   chromosome. A **haploid** call (one allele, no separator: a male's on chrX
-  outside PAR) is read the same way since 2.9.0 — it is his one haplotype's, so
+  outside PAR) is read the same way since 2.10.0 — it is his one haplotype's, so
   there is nothing to phase — and a missing call (`.`) carries nothing.
 - **Unphased data** (alleles separated by `/`). The cis/trans configuration is
   unknown, so **every** cis/trans arrangement of the individual's carried variants
@@ -697,13 +697,13 @@ complementary controls:
 - **Density reporting + transparency.** Every dense window, and every hyperdense one, is
   written to a `high_variant_density_regions.bed` sidecar (region span; variant count,
   every variant column of the window, a four-allele one too; carriers; the full IUPAC
-  protospacer; and, since 2.9.0, its bits, its number of four-allele positions, and
+  protospacer; and, since 2.10.0, its bits, its number of four-allele positions, and
   whether a greedy worst-case alignment stands for it, as it does in a population-level
   search), and each affected off-target carries a `High_variant_density_region` column in
   `integrated_results.tsv` giving the window's variant count and sequences and the full
   IUPAC sequence so a user can dig into them, and noting how the window was reported:
   where a greedy worst-case alignment stands for it, that one is reported and additional
-  haplotype alignments may exist; under `--per-sample` (since 2.9.0) that the haplotypes
+  haplotype alignments may exist; under `--per-sample` (since 2.10.0) that the haplotypes
   its carriers have are reported (below), but for a row that names no carrier, a sites-only
   dataset's, whose rows are the population-level analysis's in either mode and keep the
   first note. Nothing is silently truncated — the bound, the representative, and the
@@ -759,7 +759,7 @@ Under `--per-sample` a capped window emits no greedy representative at all (sinc
 the representative unions the carriers of alleles that different individuals carry, so it
 can be a haplotype no single one has, and the window is reported by its observed haplotypes,
 its reference row and its BED line (which says that no greedy worst case stands for it).
-That is the observed-haplotype path, which reads the index's dict-less tiers; since 2.9.0 a
+That is the observed-haplotype path, which reads the index's dict-less tiers; since 2.10.0 a
 capped window on an index without them (one built without `--samplesID`, such as the one the
 benchmark `complete-test` builds) goes the same path, reading the same genotypes in the
 classic per-sample dictionaries. Up to 2.8.1 such an index's classic dictionary path still
@@ -774,10 +774,10 @@ each, CFD at most 0.001). They name 102 individuals as carriers 114 times (some 
 one row), and each time the carrier lacks one of its row's variants: 342 of the run's 56,730
 SNP-row carrier listings (a row lists its carriers once for each of its three alignments).
 After `build-index-only --samplesID` the same search returned exactly those 5 rows fewer, and
-every carrier it lists has all of its row's variants on one phased haplotype; since 2.9.0 the
+every carrier it lists has all of its row's variants on one phased haplotype; since 2.10.0 the
 index without the tiers gives the same rows (560 against 565, the five rows above gone). The
 2.8.1 report said so of a 2.8.1 search's results, and still does when it reads them again (a
-search since 2.9.0 writes the carrier gate's sidecar, `.carrier_gate.json`, in either mode).
+search since 2.10.0 writes the carrier gate's sidecar, `.carrier_gate.json`, in either mode).
 
 ### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
@@ -909,7 +909,7 @@ A population-level row is a window's worst case: its alignment takes, column by 
 allele that matches the guide best, and on a genotyped panel it lists every sample that carries
 any of those alleles. Two or more of them can sit on no one haplotype, so that no individual has
 the sequence the row reports, and such a row, being the best-matching, ranks first. A sites-only
-panel (`mega`) has no genotypes at all, and its rows are built the same way. Since 2.9.0 the
+panel (`mega`) has no genotypes at all, and its rows are built the same way. Since 2.10.0 the
 search checks each row's variant combination against phased haplotypes after it has written the
 integrated results (`haplotype_prioritizer.py`), and the report ranks by the result. Detection is
 unchanged: the gate adds and drops no row, and the integrated results are byte for byte those of
@@ -1420,7 +1420,7 @@ leaves out equal-length multi-base records (MNVs), so their carriers are resolve
 phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
 among its 195,813 indel-search records. Up to 2.8.1 a SNP row's carriers were resolved from
 SNP genotypes only, so an individual whose haplotype holding the row's SNPs also carries an
-indel inside the target was still listed; since 2.9.0 the phased indel genotypes take it off
+indel inside the target was still listed; since 2.10.0 the phased indel genotypes take it off
 (§4), but for an unphased call of either, which keeps it.
 On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists of the results
 tables are in the order of its `Variant_info_genome`, one rsID and one AF a variant, and two
@@ -1524,7 +1524,7 @@ index of format 1 without one is used
 as before. A PAM-less index without one is taken for a 3′ build at the published widths, 3 and 8
 (the K = 8 archive has no `.pam_build`), or under the search PAM's own name, and at no other
 width: a search before 2.8.1 built one of any width from a 5′ PAM file and recorded nothing. A
-search, and `build-index-only`, build an index under a name that says its side (since 2.9.0;
+search, and `build-index-only`, build an index under a name that says its side (since 2.10.0;
 **Index names** below), so an index of the older name for the other side is left beside it, and
 never searched for this side; `build-index-only` does not record a PAM file over an index
 recorded for the other side, nor a 3′ one over an unrecorded PAM-less index of another width.
@@ -1540,7 +1540,7 @@ pad is empty and the geometry is exactly a dedicated index's.
 bases of every site of its own PAM, so it holds every site of a PAM its own holds at each
 position: an NRR index those of NGG, NAG, NGA, NAA and NRG; an NRG index those of NGG and
 NAG. `--prune-pam` narrows it to the search PAM the same way (the two are as long, so there is
-no pad), and since 2.9.0 CRISPRme takes such an index for a search, under `--prune-pam`, as
+no pad), and since 2.10.0 CRISPRme takes such an index for a search, under `--prune-pam`, as
 it takes a PAM-less one: the search PAM's own index first, then a dedicated one of a PAM that
 holds it (of two, the narrower PAM, NRG before NRR for NGG), then a PAM-less one. Of the
 PAM-less ones, the narrowest flank, as before. The side rule above applies to it as to a
@@ -1548,7 +1548,7 @@ PAM-less index: a record, or else a 3′ build at the published widths.
 
 **Index names.** An index was named `<PAM>_<N>_<genome>[+<dataset>]`, which says neither the
 guide length it was built for nor the side of its PAM, so a 3′ and a 5′ build of one motif, or
-builds for two guide lengths, took one name, and the second stopped on the first. Since 2.9.0
+builds for two guide lengths, took one name, and the second stopped on the first. Since 2.10.0
 an index is built under a name that carries both, in the order of the target on the strand:
 `<guide>-<PAM>_<N>_…` for a 3′ PAM (`20-NRR_3_hg38`), `<PAM>-<guide>_<N>_…` for a 5′ one
 (`TTTV-23_3_hg38`), its INDELS index `<name>_INDELS`. `build-index-only` and a search name what
@@ -1563,7 +1563,7 @@ to build in another working directory; one whose side its record leaves open (an
 of a width but 3 and 8, for a 3′ PAM file) is refused, with the name of each side that
 records it.
 
-**Pruning by itself.** Since 2.9.0 a search prunes, as if `--prune-pam` was given, whenever
+**Pruning by itself.** Since 2.10.0 a search prunes, as if `--prune-pam` was given, whenever
 no installed index serves it unpruned and one of these does: a wider all-`N` one, or a
 dedicated one of a PAM that holds the search's. It says so first, naming the index that needs
 it ("no installed reference index of hg38 serves PAM NGG unpruned, and NRR_3_hg38 serves it
@@ -1636,13 +1636,13 @@ one of several indel windows), and goes on.
 
 **Contig ends and N runs.** CRISPRitz writes an index in one of two formats (its
 `docs/INDEX_FORMAT.md`). Up to 2.9.1 it writes **format 1**, which every index published until
-the rebuild for CRISPRme 2.9.0 is; from 2.10.0, which CRISPRme 2.9.0 installs, it writes
+the rebuild for CRISPRme 2.10.0 is; from 2.10.0, which CRISPRme 2.10.0 installs, it writes
 **format 2**, whose `.bin` files open with a header that records the format, the build PAM, its
 side, the guide length and the budget. The limits of this paragraph are those of format 1, for
 every index, dedicated or PAM-less, at any width. An index of format 1 of budget *N* holds a window of the guide, the PAM and *N* more bases, and the
 build drops a window that holds an `N` or runs past the contig's start, so it cannot report a
 site whose guide lies within *N − 1* bases of a contig start, a contig end or an `N` run, even a
-perfect match; a search without bulges, which scans the FASTA, reports it (and, since 2.9.0,
+perfect match; a search without bulges, which scans the FASTA, reports it (and, since 2.10.0,
 neither looks for nor builds a reference index, nor a variant index where the whole enriched
 genome is there to scan: it built `<PAM>_1_<genome>`, which nothing read). A variant search
 without bulges on an install without its whole enriched genome (a download) searches the variant
@@ -1670,7 +1670,7 @@ format-1 one and 1,827 and 5,512 more, all next to an `N` run (CRISPRitz's `docs
 section 11). An index of format 1 keeps the first and the last limit until it is built again
 (a search without bulges, which scans the FASTA, finds the last PAM of a contig at once), and a
 search of one by CRISPRitz 2.10.0 says so on stdout. CRISPRme 2.8.1 refuses an index of format 2, and
-2.8.0 aborts on one; CRISPRme 2.9.0 searches it where the installed CRISPRitz reads it (2.10.0
+2.8.0 aborts on one; CRISPRme 2.10.0 searches it where the installed CRISPRitz reads it (2.10.0
 and later: the `INDEX_FORMAT` of its `crispritz.py`), and refuses it, naming both, under
 CRISPRitz 2.9.1. Which sites a contig holds, which CRISPRme checks to tell a lost `.bin` from a
 contig with no site, follows the format the index was built in, read from its own `.bin` files;
@@ -1683,7 +1683,7 @@ Genomes variant index 110 GB against 28 GB (download sizes, GB = 10⁹ bytes). P
 happens at leaf time, so a PAM-less search is not faster than a dedicated one — the gain
 is that one index answers many PAMs.
 
-**Guide length.** An index name of the older form carries no guide length (one of the 2.9.0
+**Guide length.** An index name of the older form carries no guide length (one of the 2.10.0
 form says it, **Index names** above); each tree records the one it was built for, as the second
 int32 of its `.bin` in format 1 (written by `buildTST` since 2019, whoever built the index),
 and in its header in format 2, which is what CRISPRme reads. The engine reads that length only
@@ -1704,7 +1704,7 @@ to 1 bulge of each type, a 22-nt guide with one bulge of one type, a 23-nt guide
 through the index, and no longer guide. An index built for this very guide is preferred to one
 that merely fits. With none that fits, a search builds its own under a name that says its guide
 length (`<guide>-<PAM>_<N>_<genome>`, **Index names** above), beside an index of the older name
-`<PAM>_<N>_<genome>` built for another guide, which it stopped on before 2.9.0, as
+`<PAM>_<N>_<genome>` built for another guide, which it stopped on before 2.10.0, as
 `build-index-only` did; both leave that index and its `.pam_build` as they are. One of the new
 name whose trees were built for another guide than its name says stops either, with an ERROR
 that names both lengths and the name that records what it is.
@@ -1719,7 +1719,7 @@ guide length; for the rows of a guide length, search an index built for it, whic
 prefers.
 
 **Limits.** The web interface never passes `--prune-pam` itself; its searches prune by
-themselves as above. (Before 2.9.0 the flag also required `--index-path`.) (Its PAM list
+themselves as above. (Before 2.10.0 the flag also required `--index-path`.) (Its PAM list
 prefers a PAM whose geometry matches the installed index, but falls back to offering every PAM
 when none matches, so it does not itself prevent an unusable pairing; the PAM picker of a
 PAM-less index offers only the PAMs that index serves. The search takes a wider all-`N` index

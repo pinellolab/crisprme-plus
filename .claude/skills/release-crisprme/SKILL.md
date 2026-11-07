@@ -149,7 +149,7 @@ Edit `recipes/crisprme/meta.yaml`:
 - `{% set version = "X.Y.Z" %}`  ← bump
 - `source.sha256:` ← the hash from above
 - `build.number: 0`  ← RESET to 0 (only INCREMENT, keeping version, for a same-version rebuild)
-- `crispritz >=A.B.C,<…`  ← keep it BOUNDED below the next CRISPRitz that changes the index format or the enricher (`>=2.10.0,<2.11.0` for 2.9.0; `docs/RELEASING.md`), and move it when `crispritz_ref` moves
+- `crispritz >=A.B.C,<…`  ← keep it BOUNDED below the next CRISPRitz that changes the index format or the enricher (`>=2.10.0,<2.11.0` for 2.10.0; `docs/RELEASING.md`), and move it when `crispritz_ref` moves
 - Do NOT edit `source.url` — it uses `{{ version }}` and resolves automatically.
 
 ```bash

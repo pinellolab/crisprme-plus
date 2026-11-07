@@ -54,7 +54,7 @@ sends it). A `MPLCONFIGDIR`, `XDG_CACHE_HOME` or `HF_HOME` you set is used as it
 add `--tmpfs /tmp`, or set `CRISPRME_TMPDIR` to a folder of the mounted data folder (or to that
 folder itself: `-w /DATA -e CRISPRME_TMPDIR=/DATA`). Without one,
 the CRISPR-Bulge scorer and the report have nowhere to write, and complete-search stops before
-it starts, saying so (until 2.9.0 the search ended with CRISPR-Bulge scores of -1, no report zip,
+it starts, saying so (until 2.10.0 the search ended with CRISPR-Bulge scores of -1, no report zip,
 and only a WARNING in its error log).
 
 ---
@@ -91,7 +91,7 @@ Some releases before 2.7.10 printed this at the start of a search:
 > bulges. This combination can crash the underlying search engine (issue #105 ...)`
 
 CRISPRme+ no longer prints it. The crash it warned about was fixed in CRISPRitz 2.7.1,
-and every supported install pins a later CRISPRitz (2.10.0 for CRISPRme+ 2.9.0). Only if
+and every supported install pins a later CRISPRitz (2.10.0 for CRISPRme+ 2.10.0). Only if
 you run CRISPRme against an older, unpinned CRISPRitz and a search **aborts with a memory
 error** while using a degenerate PAM (`NRG`, `NNN`, …) *with* bulges, either:
 
@@ -220,7 +220,7 @@ Each of these names the index and what to do; none of them removes anything.
   it writable, or run `build-index-only` where it is, or search with no bulges, which opens no index.
 - **`... was built for a 20-nt guide, and this search has a 23-nt guide ...: it stores too few bases
   per site`.** This search builds its own index under a name that says its guide length (since
-  2.9.0: `23-NGG_2_hg38`), and an index of that name is there, whose trees were built for another
+  2.10.0: `23-NGG_2_hg38`), and an index of that name is there, whose trees were built for another
   guide (a folder renamed by hand). Name it for the guide it was built for, as the ERROR says (`mv
   .../23-NGG_2_hg38 .../20-NGG_2_hg38`), or move it aside. An index of the older name
   (`NGG_2_hg38`) built for another guide is left as it is, and the search builds its own beside it.

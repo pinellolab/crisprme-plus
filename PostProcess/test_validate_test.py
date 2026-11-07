@@ -401,18 +401,18 @@ class EveryInstallFindsTheFiveEditReferences(unittest.TestCase):
             copy = os.path.join(dest, os.path.basename(http_url))
             shutil.copyfile(ref, copy)
             return copy
-        for tag_there, base in ((True, main.replace("/main/", "/v2.9.0/")), (False, main)):
+        for tag_there, base in ((True, main.replace("/main/", "/v2.10.0/")), (False, main)):
             with self.subTest(tag_there=tag_there), \
                     mock.patch.object(validate, "_url_exists", return_value=tag_there) as asked:
                 path, fetched = self.in_the_bioconda_layout(bench["reference"], bench["md5"],
-                                                            fetch, base=main, version="2.9.0")
+                                                            fetch, base=main, version="2.10.0")
                 self.assertEqual(fetched.kwargs["http_url"], base + bench["reference"])
                 self.assertEqual(asked.call_args.args,
-                                 (main.replace("/main/", "/v2.9.0/") + bench["reference"],))
+                                 (main.replace("/main/", "/v2.10.0/") + bench["reference"],))
         # the registry's fallback names main as refs/heads/main
         self.assertEqual(validate.release_base_url(
-            validate._FALLBACK_BENCHMARKS["reference_base_url"], "2.9.0"),
-            "https://raw.githubusercontent.com/pinellolab/crisprme-plus/v2.9.0/test/benchmark/")
+            validate._FALLBACK_BENCHMARKS["reference_base_url"], "2.10.0"),
+            "https://raw.githubusercontent.com/pinellolab/crisprme-plus/v2.10.0/test/benchmark/")
         self.assertIsNone(validate.release_base_url(main, None))
 
     def test_every_committed_reference_has_its_registered_md5(self):

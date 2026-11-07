@@ -327,7 +327,7 @@ _PER_SAMPLE = False
 # dense windows come as their observed haplotypes, flagged there too, no row reads so.
 _UNTIERED = False
 
-# False for a search that wrote the carrier gate's sidecar (.carrier_gate.json: 2.9.0 and
+# False for a search that wrote the carrier gate's sidecar (.carrier_gate.json: 2.10.0 and
 # later, in either mode): its per-sample post-analysis gives a window denser than
 # CRISPRME_IUPAC_CAP on the classic dictionaries as the haplotypes its carriers have, as on
 # the tiers, so none of its rows is a greedy alignment (_greedy_union) and the texts that
@@ -567,7 +567,7 @@ def _greedy_union(row, cols):
     """True for a row of a --per-sample report whose named roster can be the union of its
     variants' carriers rather than its cis carriers: one flagged in High_complexity_region
     as a dense window's greedy alignment (_greedy_note), when no dataset of the search has
-    the dict-less tiers (_UNTIERED), in a search before 2.9.0 (_GREEDY_DENSE), with >=2
+    the dict-less tiers (_UNTIERED), in a search before 2.10.0 (_GREEDY_DENSE), with >=2
     variants and no indel (an indel row is resolved per carrier haplotype in both modes). Its
     Observed cell and its per-site link read as in a population-level report."""
     if not (_PER_SAMPLE and _UNTIERED and _GREEDY_DENSE and "complex_region" in cols
@@ -1636,7 +1636,7 @@ def _parse_results_filename(tsv_path):
 REFERENCE_ONLY_DATASETS = "none (no variant dataset searched)"
 
 # The record of the indexes a search took, which the search script writes into its result
-# folder (since 2.9.0), bundled as indexes_searched.txt beside Params.txt.
+# folder (since 2.10.0), bundled as indexes_searched.txt beside Params.txt.
 INDEXES_SEARCHED_FILE = ".indexes_searched.txt"
 
 
@@ -1735,7 +1735,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     datasets = fn.get("datasets")
     vcf_name = fn.get("vcf")
     # Every variant dataset the search searched, from the copy of the --vcf list the search
-    # script reads in its result folder (.vcf_list_searched.txt, since 2.9.0; none for a
+    # script reads in its result folder (.vcf_list_searched.txt, since 2.10.0; none for a
     # reference-only search): the results file is named after the last one alone, so a
     # search of two or more was reported as one of the last, with its registry's panel
     # and counts (RV1-F1). Each was searched with its own panel and registry, so none is
@@ -1805,7 +1805,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
 
     n_hyperdense_rows, n_four_allele_rows = _density_counts(df, cols)
 
-    # The indexes the search took (the search script records them since 2.9.0, in
+    # The indexes the search took (the search script records them since 2.10.0, in
     # .indexes_searched.txt beside the parameters, which the web compares byte for byte to
     # reuse a job): which answered it, and how, where Genome_idx says what was asked for,
     # which another index may have served, or none. A run of an earlier release has none.
@@ -1834,7 +1834,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         # the VCF folder name the results file carries (None when it names no dataset, or
         # the search searched more than one)
         "vcf_name": vcf_name,
-        # every VCF folder the search searched, when its result folder says (2.9.0 on)
+        # every VCF folder the search searched, when its result folder says (2.10.0 on)
         "vcf_names": vcf_names,
         "mm": str(mm),
         "mm_int": mm_int,
@@ -4504,7 +4504,7 @@ def _asset_data_uri(name):
 # What the legend's High_complexity_region entry says of the rows of a hyperdense window
 # (build_annotation_legend_html), after _hvdr_how has said how the search reported a dense
 # one: where a greedy worst-case alignment stands for a dense window -- a population-level
-# report, and a --per-sample one before 2.9.0 (_GREEDY_DENSE) whose datasets all lack the
+# report, and a --per-sample one before 2.10.0 (_GREEDY_DENSE) whose datasets all lack the
 # dict-less tiers (_UNTIERED) -- one in a hyperdense window seldom exists in any one genome;
 # in any other --per-sample report a dense window's rows are its carriers' own haplotypes, as
 # any window's, and only a sites-only dataset's rows (the population-level analysis's, whose
@@ -4794,9 +4794,9 @@ def _hvdr_where(hvdr_bundle_name=None, hvdr_n_regions=0, report_full=False):
 def _dense_greedy_clauses(df=None, cols=None, untiered=None):
     """Where a --per-sample search can still report a window denser than
     CRISPRME_IUPAC_CAP by its greedy worst-case alignment, each as a clause: on its datasets
-    without the dict-less tiers, in a search before 2.9.0 (_GREEDY_DENSE), and at a flagged
+    without the dict-less tiers, in a search before 2.10.0 (_GREEDY_DENSE), and at a flagged
     row that names no carrier, a sites-only dataset's (its rows are the population-level
-    analysis's whatever the mode). Since 2.9.0 a genotyped dataset's dense window is the
+    analysis's whatever the mode). Since 2.10.0 a genotyped dataset's dense window is the
     haplotypes its carriers have, as any window (new_simple_analysis.py). [] for a
     population-level search, which reports every window by its greedy worst case."""
     if not _PER_SAMPLE:
@@ -6475,7 +6475,7 @@ def build_report(
         if _hvdr_files:
             _hvdr_path = os.path.join(staging, "high_variant_density_regions.bed")
             _hvdr_seen = set()  # dedup: per-chrom beds carry duplicate region rows
-            # the beds' own header: 2.9.0 added the window's bits and four-allele positions
+            # the beds' own header: 2.10.0 added the window's bits and four-allele positions
             _hvdr_header = (
                 "#chrom\tstart\tend\tguide\tn_variants\t"
                 "samples_with_alt\tiupac_protospacer\n"

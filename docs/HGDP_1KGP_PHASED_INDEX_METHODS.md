@@ -392,7 +392,7 @@ crisprme.py build-index-only --genome <hg38/> --pam 20bp-NRG-SpCas9.txt \
 NRG (NAG+NGG) SpCas9 PAM; 2 DNA + 2 RNA bulges; RAW (uncompressed) registry and SNP+indel
 co-occurrence ON — consistent with the other production indexes (bulges are a build parameter;
 mismatches are a search-time parameter, run at `--mm 6`). Output
-`genome_library/NRG_3_hg38+hg38_HGDP1kGP` (+ `_INDELS`; CRISPRme 2.9.0 and later name it for
+`genome_library/NRG_3_hg38+hg38_HGDP1kGP` (+ `_INDELS`; CRISPRme 2.10.0 and later name it for
 its guide length and side, `20-NRG_3_hg38+hg38_HGDP1kGP`) + `Dictionaries/{registry,genotypes,
 indel_genotypes,log_indels}_hg38_HGDP1kGP` + `variant_count.json` (**125,180,264 SNPs +
 17,192,381 indels**; `phased:true`); every `reg_<chrom>.idx` carries `data_type=genotyped-phased`.
@@ -554,7 +554,7 @@ the same on a window of two-allele columns), and the default cap is 10 (METHODS.
   chr14:106770868 that nobody actually carries; the real observed haplotypes there are ≤2 variants,
   CFD ≈ 0). Per the per-sample contract — report an off-target only when ≥1 real individual carries it —
   the chimera is suppressed; the window surfaces only its real observed haplotypes. This is the path
-  of an index with the dict-less tiers, such as this one; since 2.9.0 an index built without
+  of an index with the dict-less tiers, such as this one; since 2.10.0 an index built without
   `--samplesID`, which has none, goes the same path, reading the same genotypes in its classic
   per-sample dictionaries (up to 2.8.1 it still reported a capped window by its greedy worst-case
   alignment, whose listed carriers need not carry every variant in it; METHODS.md §5).

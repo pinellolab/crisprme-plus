@@ -1588,7 +1588,7 @@ def pam_geometry(pam_value: str) -> "tuple":
 
 def index_build_pam(index_dir: str) -> "tuple":
     """Provenance of the PAM an index was built with: the guide length and side its name
-    says (since 2.9.0), else the geometry its .bin headers record, else its ``.pam_build``
+    says (since 2.10.0), else the geometry its .bin headers record, else its ``.pam_build``
     sidecar.
 
     ``build-index-only`` / the search pipeline write ``.pam_build`` into each index
@@ -1601,7 +1601,7 @@ def index_build_pam(index_dir: str) -> "tuple":
     len(motif), pos = len(motif)) when neither is there — correct for the shipped indexes
     and any index built the standard way. Returns ``(pam_name_or_None, seq_len, pam_pos)``.
     """
-    # A name that says the guide and the side (since 2.9.0: index_fit.parse_index_name)
+    # A name that says the guide and the side (since 2.10.0: index_fit.parse_index_name)
     # records them ahead of the sidecar, as the search script's _index_side reads the side.
     parsed = index_fit.parse_index_name(index_dir)
     named = None
@@ -1705,7 +1705,7 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     for d in os.listdir(lib):
         if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
             continue
-        # "<motif>_<N>_<genome>[+<enriched>]", or the 2.9.0 form that carries the guide
+        # "<motif>_<N>_<genome>[+<enriched>]", or the 2.10.0 form that carries the guide
         # length and the side (index_fit.parse_index_name)
         parsed = index_fit.parse_index_name(d)
         if not parsed:
@@ -1739,7 +1739,7 @@ def _index_side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) 
     either, any side for a dedicated index of the motif, and 3' for any other at the
     published widths, 3 and 8, or an all-N one of the motif's own name (a search before
     2.8.1 built one of another width from a 5' PAM file with no record). crisprme.py's
-    _side_serves, the same rule; a name that says its side (since 2.9.0:
+    _side_serves, the same rule; a name that says its side (since 2.10.0:
     index_fit.parse_index_name) says it first."""
     parsed = index_fit.parse_index_name(index_dir)
     if parsed and parsed[4]:
@@ -2427,7 +2427,7 @@ def get_pam_options(genome: str, variant_choice: Optional[str]) -> List:
                 continue
             if not any(d.endswith(sfx) for sfx in suffixes):
                 continue
-            # <motif>_<N>_<genome>+<vcf_folder>, or the 2.9.0 form of the name
+            # <motif>_<N>_<genome>+<vcf_folder>, or the 2.10.0 form of the name
             motif = index_fit.index_pam(d)
             if motif == "N" * len(motif):
                 # PAMLESS index: it serves any PAM SEQUENCE, but only of the SAME

@@ -41,7 +41,7 @@ Driving ``iupac_decomposition`` directly with synthetic fixtures:
     maximal combo, every sample on every sub-combo (cis unverifiable).
   * PHASED TRANS (alts on alternating haplotypes of one sample): variants on
     different haplotypes do NOT fully combine (no false cis attribution).
-  * >cap dense window: since 2.9.0 the haplotypes its carriers have, beside its
+  * >cap dense window: since 2.10.0 the haplotypes its carriers have, beside its
     reference row (up to 2.8.1 one greedy representative per haplotype, which could
     take alleles of different samples).
 
@@ -283,7 +283,7 @@ class DenseWindowOverCap(unittest.TestCase):
     """A per-sample window denser than IUPAC_CAP on the dictionary: up to 2.8.1 it took
     the greedy high-variant-density path (one level-0 representative per haplotype, no
     combination, no peel), whose alignment took each column's best allele and listed the
-    carriers of any of them, so that nobody need carry it; since 2.9.0 it is enumerated as
+    carriers of any of them, so that nobody need carry it; since 2.10.0 it is enumerated as
     the haplotypes its carriers have, as on the dict-less tiers, beside the window's
     reference row. (N=4 with cap=2 -> countIUPAC (4) > cap (2).)"""
 

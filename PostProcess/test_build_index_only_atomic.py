@@ -2730,7 +2730,7 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
     Settings page). On such an index its banner promised them all the same. (Up to 2.8.1
     its post-analysis also reported a dense window by its greedy worst-case alignment, with
     the carriers of any of the variants that alignment takes, and the banner said so;
-    since 2.9.0 it gives the haplotypes the window's carriers have.) The search records
+    since 2.10.0 it gives the haplotypes the window's carriers have.) The search records
     the datasets it names so (.untiered_datasets), for the report's Search mode row
     (test_generate_report), which cannot tell from the results; and beside them every
     dataset it searches (.variant_datasets), as no column of a row says its dataset. A
@@ -3407,7 +3407,7 @@ class AnAllNIndexInPlaceKeepsItsSide(_Fixture):
     was given on it, so a 5' all-N PAM file over a 3' build relabelled it: searches on
     its real side then refused it, and searches on the other side found nothing. 2.8.1
     stopped first, saying to build in another working directory, as the index for that
-    file took the same name. Since 2.9.0 an index is named for its guide length and side
+    file took the same name. Since 2.10.0 an index is named for its guide length and side
     (index_fit.index_name), so the one for the other side, or for another guide length, is
     built beside the one in place, which keeps its record (E2)."""
 
@@ -4085,9 +4085,9 @@ def _crisprme_version():
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix: but for the
-    names of the indexes, which since 2.9.0 say the guide length and the side (BEFORE is
+    names of the indexes, which since 2.10.0 say the guide length and the side (BEFORE is
     the record of the code before the fix with NRG_2_hg38 named 20-NRG_2_hg38, which a
-    --record of 2.9.0 gives, byte for byte)."""
+    --record of 2.10.0 gives, byte for byte)."""
 
     maxDiff = None
 

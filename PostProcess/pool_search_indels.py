@@ -197,7 +197,7 @@ prune_pam_flag = "--prune-pam" if prune_pam == "1" else ""
 # index beside it -- a library given with --index-path, or the working directory's
 index_library = (sys.argv[16] if len(sys.argv) > 16
                  else os.path.join(current_working_directory, "genome_library"))
-# optional: that variant index's name, <true_pam>_<bMax>_<ref>+<vcf> or, since 2.9.0, the
+# optional: that variant index's name, <true_pam>_<bMax>_<ref>+<vcf> or, since 2.10.0, the
 # form that carries the guide length and the side (<guide>-<PAM>_... for a 3' PAM,
 # <PAM>-<guide>_... for a 5' one: index_fit.parse_index_name); its INDELS index is
 # <name>_INDELS. The sub-indexes in it keep the engine's names, <true_pam>_<bMax>_fake<chrom>.

@@ -162,7 +162,7 @@ def wider_flank_notes(indexes, motif, genome_dir, who=None):
     engine kept a target whose flank holds an N, the sites it misses and what serves the
     search whole: that index built again, or a dedicated index of the PAM beside it, which
     the search takes first. A search without --prune-pam
-    and --index-path built a dedicated index before 2.9.0; it now prunes from that same index
+    and --index-path built a dedicated index before 2.10.0; it now prunes from that same index
     by itself. ``who``: "complete-search", which says them on its console for a search of its
     own; None for the search script, which says them in its log for a search it prunes by
     itself, one the web launched, and so names the web app's route beside the command."""

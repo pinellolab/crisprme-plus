@@ -13,7 +13,7 @@ free; TROUBLESHOOTING gave ~3 + 40 + 50 GB and ~150 GB free. Measured with `du -
 0.72 GB), and the install peaks at ~103 GB while the genotype store unpacks beside its archive.
 So ~100 GB free was full before the first result was written.
 
-2.9.0 makes NRR the default index. Measured the same way on ml003 (2026-11-06), twice, with
+2.10.0 makes NRR the default index. Measured the same way on ml003 (2026-11-06), twice, with
 `NRR_3_hg38+hg38_HGDP1kGP`: 150,048,109,201 bytes (genome 3.27 GB, indexes 94.20 GB,
 Dictionaries/ 52.44 GB, annotations 0.13 GB), sampled every 10 s at a peak of 161.0 GB while
 the archives unpack; a ~70 GB download. So ~150 GB on disk, and ~200 GB free.

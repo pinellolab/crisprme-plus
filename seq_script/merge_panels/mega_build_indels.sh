@@ -25,8 +25,8 @@ SCR=${SCR:-/srv/local/lp698/mega_gw_indel_scratch} # per-chr scratch builds
 PAM=${PAM:-$(find /srv/local/lp698 -name "20bp-NRG-SpCas9.txt" 2>/dev/null | head -1)}
 PAMBASE=$(basename "$PAM")                          # PAM filename copied into each per-chr workdir
 # Index-name prefix the build assigns for $PAM: <MOTIF>_<N> (e.g. NRG_3 for 20bp-NRG + bMax giving N=3)
-# with a $CK before CRISPRme 2.9.0, <guide>-<MOTIF>_<N> (20-NRG_3) from 2.9.0 on, whose index names say
-# the guide length and the side of the PAM. Override IDXNAME to match a non-NRG PAM or a 2.9.0 $CK (e.g.
+# with a $CK before CRISPRme 2.10.0, <guide>-<MOTIF>_<N> (20-NRG_3) from 2.10.0 on, whose index names say
+# the guide length and the side of the PAM. Override IDXNAME to match a non-NRG PAM or a 2.10.0 $CK (e.g.
 # IDXNAME=NGG_3 PAM=/path/20bp-NGG-SpCas9.txt). A mismatch is caught loudly after the first build (the
 # expected dir is verified against what the build produced).
 IDXNAME=${IDXNAME:-NRG_3}
@@ -70,8 +70,8 @@ for c in $CHRS; do
   if [ ! -d "$W/genome_library/$IDXDIR" ]; then
     echo "[$c] ERROR: expected index dir '$IDXDIR' not produced; the build made:" \
          "$(ls -1 "$W"/genome_library/ 2>/dev/null | grep '_mega_INDELS$' | tr '\n' ' ')" \
-         "-- set IDXNAME to the prefix of that name for $PAMBASE (<MOTIF>_<N> before CRISPRme 2.9.0," \
-         "<guide>-<MOTIF>_<N> from 2.9.0 on, e.g. 20-NRG_3) and rerun." >&2
+         "-- set IDXNAME to the prefix of that name for $PAMBASE (<MOTIF>_<N> before CRISPRme 2.10.0," \
+         "<guide>-<MOTIF>_<N> from 2.10.0 on, e.g. 20-NRG_3) and rerun." >&2
     continue
   fi
   strip_and_place "$c" "$W" && rm -rf "$W/Genomes/run_"* "$W"/genome_library/*_hg38 2>/dev/null

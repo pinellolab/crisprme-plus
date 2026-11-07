@@ -281,13 +281,13 @@ class TestDocumentedCommandsPassTheFlagChecks(unittest.TestCase):
 
 
 class TestNoDocumentedCommandIsABareCrisprme(unittest.TestCase):
-    """A bare ``crisprme.py`` prints its list of commands and exits 1 (before 2.9.0 it
+    """A bare ``crisprme.py`` prints its list of commands and exits 1 (before 2.10.0 it
     first created the CRISPRme folders, ``Genomes/``, ``Results/`` and five more, in the
     directory it ran in: TestTheHelpMakesNoFolder). README §1.1.2 gave it to check an
     install, and §3.1 to show the help; ``--version`` exits 0."""
 
     def test_the_readme_says_what_a_bare_crisprme_py_does(self):
-        # it said that one creates the CRISPRme folders, which 2.9.0's makes none of (C14)
+        # it said that one creates the CRISPRme folders, which 2.10.0's makes none of (C14)
         text = " ".join(pathlib.Path(REPO, "README.md").read_text(encoding="utf-8").split())
         self.assertFalse("creates the CRISPRme folders" in text,
                          "README still says a bare crisprme.py creates the CRISPRme folders")

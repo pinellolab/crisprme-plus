@@ -316,7 +316,7 @@ def main(root):
         and "20-NRG_2_gx+gx_ds" in out and "cannot stat" not in out and "[OK] gx_ds:" not in out, out[-800:])
     say("another PAM: nothing made", sorted(os.listdir(os.path.join(w, "Genomes"))) == before)
     # a PAM the download's own holds (NGG in NRG, NGG and NRG in NRR): pruned to it by
-    # itself, as a dedicated index of that PAM answers it (2.9.0)
+    # itself, as a dedicated index of that PAM answers it (2.10.0)
     ngg_truth = copy_of(root, ngg2, "truth_ngg")
     search(ngg_truth, "b11", pam="20bp-NGG-SpCas9.txt")
     for index, pam, truth in ((nrg2, "20bp-NGG-SpCas9.txt", table(ngg_truth, "b11")),
@@ -353,7 +353,7 @@ def main(root):
         say("K=8 with --prune-pam and no --index-path: same results as a dedicated index",
             rc == 0 and identical(table(w, "o3"), b11), out[-600:])
 
-    # build-index-only writes the name of 2.9.0, which carries the guide length and the side
+    # build-index-only writes the name of 2.10.0, which carries the guide length and the side
     # of the PAM (20-NRG_2_gx...: a 20-nt guide, a 3' PAM), the INDELS index's too. Under the
     # older name, as a download or an earlier release has it, the same results; under the
     # name of a 5' PAM, not taken for this 3' search
@@ -370,7 +370,7 @@ def main(root):
             say(f"an index under {cell} ({prefix}_2_gx...): not taken for a 3' PAM",
                 rc != 0 and "no variant index here serves this search" in out, out[-800:])
 
-    # a PAM-less index under the 2.9.0 name with no .pam_build: the name records its side as
+    # a PAM-less index under the 2.10.0 name with no .pam_build: the name records its side as
     # the file does (an older name with none is a 3' build at widths 3 and 8 only), so under
     # --index-path a 3'-named one of width 4 serves NGG, pruned by itself, and a 5'-named one a
     # 5' PAM of its width; both were refused
@@ -525,7 +525,7 @@ def main(root):
     say("a guide longer than its PAM file's spacer: refused", rc != 0 and "silently drop" in out, out[-600:])
 
     # complete-test on a K=8 index, alone and beside the default; on K=8 it searches the
-    # default PAM, NRR (NRG before 2.9.0)
+    # default PAM, NRR (NRG before 2.10.0)
     w = as_download(copy_of(root, k8, "complete_test_k8"))
     pams = sorted(os.listdir(os.path.join(w, "PAMs")))
     rc, out = cli(w, "complete-test", "--thread", THREADS)

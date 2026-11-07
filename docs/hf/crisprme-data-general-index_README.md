@@ -73,7 +73,7 @@ at any width: use a dedicated index, which `crisprme.py build-index-only` builds
 
 ```bash
 # the genome, annotations, PAMs and sample lists (plus the default reference index:
-# NRR_3_hg38 since CRISPRme+ 2.9.0, NRG_3_hg38 before)
+# NRR_3_hg38 since CRISPRme+ 2.10.0, NRG_3_hg38 before)
 crisprme.py download --what all --path .
 
 # fetch the general index (routes here automatically on flank width)
@@ -94,7 +94,7 @@ Run the search from the folder you downloaded into: `download` writes
 PAM position (`NNN` for a 3-nt PAM).
 
 CRISPRme+ 2.8.1's `--prune-pam` is **CLI-only**: its web form does not pass the flag, so a
-general index cannot be used from its web interface. Since CRISPRme+ 2.9.0 a search prunes
+general index cannot be used from its web interface. Since CRISPRme+ 2.10.0 a search prunes
 by itself, from the command line or the web, whenever no installed index serves its PAM
 unpruned, and says so; `--prune-pam` and `--index-path` are then not needed.
 
@@ -107,7 +107,7 @@ PAM with 1 to *K − L* nt after it to the end, and a − strand PAM in the firs
 are not indexed. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites, none
 on a primary chromosome; CRISPRme+ says so when a search reads such a flank. CRISPRitz
 2.9.1 (CRISPRme+ 2.8.1) also reports one exactly *K − L* nt from the start on the + strand
-at another position; CRISPRitz 2.10.0 (CRISPRme+ 2.9.0) reads it right.
+at another position; CRISPRitz 2.10.0 (CRISPRme+ 2.10.0) reads it right.
 Measured genome-wide for guide `ACTGAAATCTGTAAGCAGGC` at `NRG` 4 mismatches + 1 DNA
 bulge + 1 RNA bulge over HGDP + 1000 Genomes with per-sample resolution: the flank-8 arm, the flank-3 arm and the
 dedicated `NRG_3` arm give **byte-identical** `integrated_results.tsv`

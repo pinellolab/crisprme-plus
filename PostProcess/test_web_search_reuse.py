@@ -193,7 +193,7 @@ class TestSearchReuse(unittest.TestCase):
 @_NEEDS_DASH
 class TestReuseOnceTheSearchHasRun(unittest.TestCase):
     """An identical request is sent to an earlier job that the search has run to its end,
-    as the job left its folder. 2.9.0's first cut had the search record the indexes it took
+    as the job left its folder. 2.10.0's first cut had the search record the indexes it took
     in the job's .Params.txt, which change_url compares byte for byte with a new request's,
     so every identical resubmission started a new search: the record is a file of its own.
     The search the image runs, its script and its engine, on a small genome."""

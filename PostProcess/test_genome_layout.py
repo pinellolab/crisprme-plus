@@ -614,7 +614,7 @@ class TestCommandLine(unittest.TestCase):
         # engine (integration round 2 review, F1). The two-line check refuses a CR in its two
         # lines, --deep one anywhere, and --split writes the file with none. A file whose
         # last byte is a CR, its last line ending in no LF, the two-line check refuses too,
-        # since 2.9.0, for that (LP unterminated-last-line-dropped); --split ends it with LF
+        # since 2.10.0, for that (LP unterminated-last-line-dropped); --split ends it with LF
         path = os.path.join(self.tmp, "chr1.fa")
         cr, lf = "ERROR: chr1.fa: its lines end in CR", "ERROR: chr1.fa: its last line has no"
         # (the file, what the two-line check refuses it for, as --split writes it)

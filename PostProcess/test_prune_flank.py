@@ -191,7 +191,7 @@ class TheSearch(_Dir):
 
     def test_the_warning_names_a_route_that_serves_the_search_whole(self):
         """Its advice was to "search without --prune-pam and --index-path, which builds a
-        dedicated index": since 2.9.0 such a search prunes by itself from that very index
+        dedicated index": since 2.10.0 such a search prunes by itself from that very index
         (_prune_on_its_own) and builds none, so the advice sent the user round the same
         warning. It names the two routes that serve the search whole: the index built
         again, or a dedicated index of the PAM beside it, which the search takes first."""

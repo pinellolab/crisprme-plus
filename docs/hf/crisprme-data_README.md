@@ -42,11 +42,11 @@ hours to minutes.
 ```
 crisprme-data/
 ├── indexes/                        # PRECOMPUTED search indexes (genome_library tarballs)
-│   ├── NRR_3_hg38.tar.gz                       # reference-only (no variants), NRR: the default PAM since CRISPRme+ 2.9.0
+│   ├── NRR_3_hg38.tar.gz                       # reference-only (no variants), NRR: the default PAM since CRISPRme+ 2.10.0
 │   ├── NRR_3_hg38+hg38_HGDP1kGP.tar.gz         # ← recommended variant DEFAULT
 │   ├── NRR_3_hg38+hg38_HPRC.tar.gz             # HPRC pangenome panel
 │   ├── NRR_3_hg38+hg38_mega.tar.gz             # sites-only aggregate (worst-case fallback)
-│   ├── NRG_3_hg38{,+hg38_HGDP1kGP,+hg38_HPRC,+hg38_mega}.tar.gz   # NRG PAM (the default before 2.9.0)
+│   ├── NRG_3_hg38{,+hg38_HGDP1kGP,+hg38_HPRC,+hg38_mega}.tar.gz   # NRG PAM (the default before 2.10.0)
 │   ├── NGG_3_hg38{,+hg38_HGDP1kGP}.tar.gz      # NGG PAM (cannot serve NAG off-targets)
 │   ├── NNN_3_hg38{,+hg38_HGDP1kGP}.tar.gz      # PAM-LESS 3-nt flank — serves ANY 3-nt 3′ PAM
 │   ├── genotypes_hg38_{HGDP1kGP,HPRC}.tar.gz   # per-sample genotype companions
@@ -68,10 +68,10 @@ crisprme-data/
 
 ## Precomputed indexes
 
-**NRR** is the recommended PAM since CRISPRme+ 2.9.0 (the SpCas9 `NGG`, `NAG`, `NGA` and
+**NRR** is the recommended PAM since CRISPRme+ 2.10.0 (the SpCas9 `NGG`, `NAG`, `NGA` and
 `NAA` superset — the conservative choice for off-target screening; it was **NRG**, `NGG` +
 `NAG`, before); NRR and NRG are published on all three variant panels, NGG and a PAM-less
-index on HGDP + 1000 Genomes only. CRISPRme+ 2.9.0 and later search an NRR index for NGG,
+index on HGDP + 1000 Genomes only. CRISPRme+ 2.10.0 and later search an NRR index for NGG,
 NAG, NRG or NGA, and an NRG one for NGG or NAG, pruning it to that PAM by itself. All are scored with
 **CFD + CRISPR-Bulge**. Every index here stores a **3-nt PAM region**, which is
 what any CRISPRme release reads for a 3-nt PAM, so any CRISPRme release can read
@@ -93,7 +93,7 @@ The two genotyped panels ship a `genotypes_hg38_*` companion that enables
 
 | PAM | Indexes | When to use |
 |---|---|---|
-| `NRG` | `NRG_3_hg38`, `+hg38_HGDP1kGP`, `+hg38_HPRC`, `+hg38_mega` | the default before CRISPRme+ 2.9.0 (`NAG`/`NGG`); a narrower, faster screen than NRR |
+| `NRG` | `NRG_3_hg38`, `+hg38_HGDP1kGP`, `+hg38_HPRC`, `+hg38_mega` | the default before CRISPRme+ 2.10.0 (`NAG`/`NGG`); a narrower, faster screen than NRR |
 | `NGG` | `NGG_3_hg38`, `+hg38_HGDP1kGP` | canonical SpCas9 PAM only. **NGG cannot serve NAG or NGA off-targets**, so NRR is preferred for a safety screen |
 | `NNN` (PAM-less) | `NNN_3_hg38`, `+hg38_HGDP1kGP` | one index for ANY 3-nt 3′ PAM, selected at search time with `--prune-pam`. Larger (71 GB / 110 GB downloads, GB = 10⁹ bytes) but removes the per-PAM rebuild |
 
@@ -148,7 +148,7 @@ The indexes are fetched automatically:
 
 ```bash
 # one-shot: genome + annotations + PAMs + sample lists + the default reference index
-# (NRR_3_hg38 since CRISPRme+ 2.9.0, NRG_3_hg38 before)
+# (NRR_3_hg38 since CRISPRme+ 2.10.0, NRG_3_hg38 before)
 crisprme.py download --what all --path .
 
 # then the recommended variant default (or any other index by name)

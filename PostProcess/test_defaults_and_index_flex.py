@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The default PAM and index, and which index serves a search (CRISPRme 2.9.0).
+"""The default PAM and index, and which index serves a search (CRISPRme 2.10.0).
 
 SpCas9 NRR (NAA, NAG, NGA, NGG) replaced NRG as the default PAM and index: the PAM file
 ships in PAMs/, the web form and its Load Example select it when it is installed, a
@@ -69,7 +69,7 @@ class TheDefaultIsNRR(unittest.TestCase):
         for installed, want in (
                 (("20bp-NGG-SpCas9", "20bp-NRG-SpCas9", "20bp-NRR-SpCas9"), "20bp-NRR-SpCas9"),
                 (("20bp-NRR-SpCas9", "20bp-NRG-SpCas9"), "20bp-NRR-SpCas9"),
-                # an install from before 2.9.0: what it selected then
+                # an install from before 2.10.0: what it selected then
                 (("20bp-NGG-SpCas9", "20bp-NRG-SpCas9"), "20bp-NRG-SpCas9"),
                 (("20bp-NAG-SpCas9", "20bp-NGG-SpCas9"), "20bp-NGG-SpCas9"),
                 (("20bp-NAG-SpCas9",), "20bp-NAG-SpCas9")):
@@ -560,7 +560,7 @@ class ASearchPrunesByItself(tir._ShippedScript):
         """complete-search says, of an all-N index wider than the PAM that a search reads
         pruned, what such a flank cannot index, and warns of one built before CRISPRitz 2.9.1
         (crisprme.py _wider_flank_notes), on its console. A web search, which prunes by
-        itself since 2.9.0, said neither: the script says both in its log, where it decides.
+        itself since 2.10.0, said neither: the script says both in its log, where it decides.
         Given "auto", complete-search has said them."""
         import test_prune_flank as tpf
         (self.home / "Genomes" / "hg38" / "chr1.fa").write_text(
@@ -753,7 +753,7 @@ class CompleteSearchSaysWhoTookThePruningFlag(unittest.TestCase):
 @unittest.skipUnless(shutil.which("python") and tir._gnu_realpath(),
                      "runs the shipped search script as the image does (GNU realpath)")
 class AnIndexNameMayCarryItsGuideAndSide(unittest.TestCase):
-    """A name of the 2.9.0 form carries the guide (spacer) length and the side of the PAM, in
+    """A name of the 2.10.0 form carries the guide (spacer) length and the side of the PAM, in
     the order of the target on the strand: <guide>-<PAM>_<N>_... for a 3' PAM, <PAM>-<guide>_...
     for a 5' one, so two builds that took one name (a 20- and a 23-nt Cas12a guide; a 3' and
     a 5' PAM of one motif) can lie side by side. Every reader takes both forms, and of the same
@@ -913,7 +913,7 @@ class AnIndexNameMayCarryItsGuideAndSide(unittest.TestCase):
 @unittest.skipUnless(shutil.which("python") and tir._gnu_realpath(),
                      "runs the shipped search script as the image does (GNU realpath)")
 class TheSearchScriptTakesTheNewName(tir._ShippedScript):
-    """A variant index and its INDELS index under the 2.9.0 name: the scans take them, the
+    """A variant index and its INDELS index under the 2.10.0 name: the scans take them, the
     searches are handed them, and the indel search is told the name."""
 
     def test_a_download_of_the_new_name_is_searched(self):
@@ -1675,7 +1675,7 @@ class TheCrisprBulgeBenchmarkDoesNothingOnImport(unittest.TestCase):
 class TheDesignDocSaysWhatShips(unittest.TestCase):
     """DYNAMIC_PAM_INDEX_COMPAT.md called a search that prunes by itself, the web's pruning
     and the PAM picker *planned*, and its CLI section described what the CLI did not do
-    (IDX-22): 2.9.0 does them, and the sections say so, and how it differs."""
+    (IDX-22): 2.10.0 does them, and the sections say so, and how it differs."""
 
     def test_the_shipped_sections_are_not_planned(self):
         text = (_REPO / "docs" / "DYNAMIC_PAM_INDEX_COMPAT.md").read_text()
@@ -1683,12 +1683,12 @@ class TheDesignDocSaysWhatShips(unittest.TestCase):
             section = text[text.index(heading):].split("\n## ", 1)[0]
             with self.subTest(heading=heading):
                 self.assertNotIn("*planned*", section)
-                self.assertIn("2.9.0", section)
+                self.assertIn("2.10.0", section)
 
-    def test_no_sentence_says_what_2_9_0_no_longer_does(self):
+    def test_no_sentence_says_what_2_10_0_no_longer_does(self):
         # one index for one PAM (an NRG index serves NGG pruned), no all-N index of another
         # width without the flag (a search prunes by itself), every PAM no index serves
-        # refused (a search builds one where it can); and what 2.9.0 does not do: the picker
+        # refused (a search builds one where it can); and what 2.10.0 does not do: the picker
         # reads no tree (its geometry is index_build_pam's), an all-N index as wide as the PAM
         # serves unpruned, with no note, and the PAM list is what offers every PAM
         for doc, gone in (("METHODS.md", "One index therefore answers one PAM"),
@@ -1768,7 +1768,7 @@ def _fenced_blocks(text):
 
 
 class TheDocsNameTheFolderABuildWrites(unittest.TestCase):
-    """build-index-only names an index for its guide length and side since 2.9.0 (E2:
+    """build-index-only names an index for its guide length and side since 2.10.0 (E2:
     20-NRR_3_hg38+hg38_HGDP1kGP), and publish-index publishes the folder it is given.
     PRECOMPUTED_INDEXES' dict-less flow said that its build wrote NRR_3_hg38+hg38_HGDP1kGP,
     so its publish-index of that folder stopped on "Index directory ... does not exist"; the
@@ -1824,7 +1824,7 @@ class TheDocsNameTheFolderABuildWrites(unittest.TestCase):
         self.assertGreaterEqual(checked, 5)
 
     def test_the_panel_recipes_print_the_folder_their_build_wrote(self):
-        # as a CRISPRme before 2.9.0 names it (the as-run SIFs and overlay), and as 2.9.0
+        # as a CRISPRme before 2.10.0 names it (the as-run SIFs and overlay), and as 2.10.0
         # does, for the PAM the recipe takes by default or another one (PAM=...)
         for recipe, ds in (("hgdp1kgp_build.sh", "hg38_HGDP1kGP"),
                            ("hprc_build.sh", "hg38_HPRC"),
@@ -1844,7 +1844,7 @@ class TheDocsNameTheFolderABuildWrites(unittest.TestCase):
 
     def test_the_mega_indels_recipe_says_which_name_to_set(self):
         # its guard stops on an INDELS index of another name than IDXNAME says, and named
-        # the older form alone, <MOTIF>_<N>, which a 2.9.0 checkout does not write
+        # the older form alone, <MOTIF>_<N>, which a 2.10.0 checkout does not write
         script = (_REPO / "seq_script" / "merge_panels" / "mega_build_indels.sh").read_text()
         guard = script[script.index("if [ ! -d \"$W/genome_library/$IDXDIR\" ]"):]
         guard = guard[:guard.index("continue")]

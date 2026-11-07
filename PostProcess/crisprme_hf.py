@@ -96,10 +96,10 @@ _COMPONENT_LOCALDIR = {
 }
 
 
-# The PAM file of the default PAM (SpCas9 NRR since CRISPRme 2.9.0), which the README's
+# The PAM file of the default PAM (SpCas9 NRR since CRISPRme 2.10.0), which the README's
 # commands and the web form's default use. It ships with CRISPRme, in PAMs/ beside
 # PostProcess/, and a download of the pams component installs it when the data repo's
-# pams/ does not hold it (_install_default_pam): at 2.9.0's release that held the NGG, NNN
+# pams/ does not hold it (_install_default_pam): at 2.10.0's release that held the NGG, NNN
 # and NRG files only.
 DEFAULT_PAM_FILE = "20bp-NRR-SpCas9.txt"
 _SHIPPED_PAMS = os.path.join(
@@ -2361,7 +2361,7 @@ def publish_index(
             parts[1],
             parts[2],
         )
-    # A name of the 2.9.0 form says the guide length and the side of the PAM too
+    # A name of the 2.10.0 form says the guide length and the side of the PAM too
     # (index_fit.parse_index_name): the manifest records them, and the PAM itself.
     _named = index_fit.parse_index_name(index_name)
     if _named and _named[3]:

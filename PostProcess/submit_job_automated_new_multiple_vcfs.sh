@@ -773,7 +773,7 @@ while read vcf_f; do
 	# <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM). An index without one -- built by a
 	# search before 2.8.1, by crispritz.py itself, or downloaded (the published K=8
 	# archive has none) -- is taken for a 3' build, as every published one is
-	# (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. A name of CRISPRme 2.9.0 or
+	# (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. A name of CRISPRme 2.10.0 or
 	# later that says the side (_index_name_parts: 20-NRR_3_hg38, NNNN-20_2_hg38) records
 	# it as .pam_build does, ahead of it, as crisprme.py and the web take it
 	# (index_fit.parse_index_name); an index of format 2 (CRISPRitz 2.10.0 and later)
@@ -1002,7 +1002,7 @@ while read vcf_f; do
 
 	# The parts of index folder name $1 (a basename), into _ip_pam, _ip_n and _ip_rest (the
 	# name after <N>_: the genome, and +<dataset> for a variant index), and into _ip_guide and
-	# _ip_side, for a name of CRISPRme 2.9.0 or later that carries the guide (spacer) length and
+	# _ip_side, for a name of CRISPRme 2.10.0 or later that carries the guide (spacer) length and
 	# the side of the guide the PAM is on, in the order of the target on the strand:
 	# <guide>-<PAM>_<N>_... for a 3' PAM (20-NRR_3_hg38), <PAM>-<guide>_<N>_... for a 5' one
 	# (TTTV-23_3_hg38). An older name, <PAM>_<N>_..., says neither, and leaves both empty.
@@ -1162,7 +1162,7 @@ while read vcf_f; do
 				continue            # a different dedicated PAM cannot stand in
 			fi
 			# An index serves only a PAM on the side it was built for, as its name says it
-			# since 2.9.0 (the order of the target in it, 20-NNNN_2_hg38 for a 3' PAM,
+			# since 2.10.0 (the order of the target in it, 20-NNNN_2_hg38 for a 3' PAM,
 			# NNNN-20_2_hg38 for a 5' one), or the header of its .bin files or its .pam_build
 			# records it (_index_side). Without a record a dedicated index has no side to
 			# contradict, and an all-N one is a 3' build at the published widths, 3 and 8
@@ -1227,7 +1227,7 @@ while read vcf_f; do
 	}
 
 	# Into variable $1, the name under which this run builds the index of PAM $2 with -bMax
-	# $3 for $4 (the genome, or <genome>+<dataset>): since 2.9.0 the form that says the guide
+	# $3 for $4 (the genome, or <genome>+<dataset>): since 2.10.0 the form that says the guide
 	# length and the side of the guide the PAM is on, in the order of the target on the strand
 	# (_index_name_parts: 20-NRR_3_hg38, TTTV-23_3_hg38), so that the indexes of one PAM for the
 	# two sides, or for two guide lengths, live in one library, as build-index-only names them;
@@ -1332,7 +1332,7 @@ while read vcf_f; do
 			case "${#_p}" in 3 | 8) return 0 ;; esac
 			printf "       %s is a PAM-less index that records no side of the guide in a .pam_build, and a search before 2.8.1 built one of that width from a 5' PAM file as well as from a 3' one, so it is not taken for a 3' PAM\n" \
 				"$(basename "$1")" >&2
-			# a name that says the side records it (since 2.9.0): the way to use one built
+			# a name that says the side records it (since 2.10.0): the way to use one built
 			# for a 3' PAM, which build-index-only does not record over it (RV1-6)
 			_g=$(_index_guide_len "$1")
 			printf "       if it was built from a 3' PAM file, name it so: mv '%s' '%s', which records that%s\n" \
@@ -1403,7 +1403,7 @@ while read vcf_f; do
 	}
 
 	# A search builds its index under the name _build_name gives it, which says the guide
-	# length since 2.9.0: index $1 in place under that name, which the scan refused for a
+	# length since 2.10.0: index $1 in place under that name, which the scan refused for a
 	# guide it does not fit, was built for another, whatever its name says, and stands in
 	# the way of the build. Stop instead of searching it. Never removed: it is someone's,
 	# and answers its own guide, under the name of that guide, which the ERROR gives when no
@@ -1778,7 +1778,7 @@ while read vcf_f; do
 	# --prune-pam at leaf time and by the post-search PAM filter. An NGG_3 index
 	# therefore serves any search with max(bDNA,bRNA)<=2, which is why a
 	# batteries-included index is reused instead of triggering a rebuild.
-	# (exact-N, under the name of 2.9.0 that says the guide length and the side: _build_name;
+	# (exact-N, under the name of 2.10.0 that says the guide length and the side: _build_name;
 	# used only for the auto-build path below)
 	_build_name idx_folder1 "$true_pam" "$bMax" "$ref_name"
 	idx_folder1="${ref_lib}/$idx_folder1"
@@ -1861,7 +1861,7 @@ while read vcf_f; do
 		_say_wider_flank "$ref_lib" "$ref_name"
 		# (the indexes published are named in the older form, and are of N = 3)
 		_pub="${true_pam}_$(( bMax > 3 ? bMax : 3 ))_${ref_name}"
-		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s, or %s as a build names it since 2.9.0)\n" "$true_pam" "$ref_name" "$bMax" "$_pub" "$(basename "$idx_folder1")" >&2
+		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s, or %s as a build names it since 2.10.0)\n" "$true_pam" "$ref_name" "$bMax" "$_pub" "$(basename "$idx_folder1")" >&2
 		printf "       re-run 'crisprme.py download --what index --index-name %s' if it is published (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$_pub" >&2
 		exit 1
 	else
@@ -1914,7 +1914,7 @@ while read vcf_f; do
 		# ones included, so a batteries-included NGG_3_<ref>+<vcf> index serves a
 		# smaller bulge request without a rebuild.
 		basedir="${current_working_directory}/genome_library"
-		# (exact-budget, under the name of 2.9.0: _build_name; used only for the auto-build
+		# (exact-budget, under the name of 2.10.0: _build_name; used only for the auto-build
 		# path below)
 		_build_name idx_folder1 "$true_pam" "$bMax" "${ref_name}+${vcf_name}"
 		idx_folder1="${basedir}/$idx_folder1"

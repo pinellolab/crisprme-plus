@@ -174,7 +174,7 @@ class TestBulgeNote(_Install):
 
     def test_a_panel_the_search_prunes_an_index_of_offers_its_bulges(self):
         # a wider PAM-less index, or a dedicated one of a PAM that holds NRG (NRR): the
-        # search prunes it to NRG by itself since 2.9.0, from the web too, so the panel
+        # search prunes it to NRG by itself since 2.10.0, from the web too, so the panel
         # offers the bulges of that index (it offered none, and said none was installed)
         self.index("NRG_2_hg38")
         for name in ("NNNNNNNN_3_hg38+hg38_k8", "NRR_3_hg38+hg38_nrr"):
@@ -825,11 +825,11 @@ class TestAnIndexOnlyDatasetIsOfferedAsItIs(_Install):
     removed in Settings) is offered from its index's name: an index of another genome, of a
     dataset named after this one, was offered too (FR :278), each underscore of the
     dataset's name showed as " + ", as for a merged panel of two datasets (FR :286), and the
-    PAM of an index named in the 2.9.0 form as its name's first field ("20-NRR")."""
+    PAM of an index named in the 2.10.0 form as its name's first field ("20-NRR")."""
 
     def test_under_its_own_genome_and_by_its_name(self):
         for name in ("NRG_2_hg19+hg38_other", "NRG_2_hg38+hg38_my_vcf",
-                     "20-NRR_3_hg38+hg38_named"):  # (and the 2.9.0 form of the name)
+                     "20-NRR_3_hg38+hg38_named"):  # (and the 2.10.0 form of the name)
             self.index(name)
         offered = {o["value"]: o["label"] for o in pu.get_variant_dataset_options("hg38")}
         self.assertNotIn("other", offered)
@@ -928,7 +928,7 @@ class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
 
     def test_load_example_then_submit_on_a_fresh_data_folder(self):
         guide, pam, genome, variant, mms, dna, rna = mp.load_example_data(1)[:7]
-        # nothing installed: the default names (NRR since 2.9.0)
+        # nothing installed: the default names (NRR since 2.10.0)
         self.assertEqual((genome, pam), ("hg38", mp.DEFAULT_PAM))
         self.assertEqual(mp.DEFAULT_PAM, "20bp-NRR-SpCas9")
         # the PAM dropdown, which offers nothing, can lose the value Load Example set

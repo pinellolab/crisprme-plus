@@ -25,7 +25,7 @@ vcf_name = sys.argv[5]
 bMax = sys.argv[6]
 ncpus = sys.argv[7]
 # optional: the variant index this INDELS index goes with, whose .pam_build _own_pam reads:
-# its folder, or its name in genome_library/ (<true_pam>_<bMax>_<ref>+<vcf> or, since 2.9.0,
+# its folder, or its name in genome_library/ (<true_pam>_<bMax>_<ref>+<vcf> or, since 2.10.0,
 # the form that carries the guide length and the side: index_fit.parse_index_name). A search
 # passes its folder: it runs this in a folder of the INDELS index's build lock, and puts what
 # it writes there in place (submit_job_automated_new_multiple_vcfs.sh _build_in_lock).

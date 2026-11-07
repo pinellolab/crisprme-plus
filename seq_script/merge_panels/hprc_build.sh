@@ -20,7 +20,7 @@
 # 1000G-2021+HGDP index), unlike the sites-only mega.
 #
 # OUTPUT: genome_library/NRG_3_hg38+hg38_HPRC (+ _INDELS; 20-NRG_3_hg38+hg38_HPRC when the SIF
-# holds CRISPRme 2.9.0 or later, whose index names say the guide length and the side of the PAM)
+# holds CRISPRme 2.10.0 or later, whose index names say the guide length and the side of the PAM)
 # + Dictionaries/{registry,genotypes,
 # indel_genotypes,log_indels}_hg38_HPRC + samplesIDs/hg38_HPRC.samplesID.txt. Registry is RAW
 # (uncompressed, CRISPRME_REGISTRY_COMPRESS=0) and SNP+indel co-occurrence is ON
@@ -84,8 +84,8 @@ run "export CRISPRME_REGISTRY_COMPRESS=0 CRISPRME_INDEL_SNP=1; cd $B; \
      crisprme.py build-index-only --genome $GENOME --pam $PAM --bDNA 2 --bRNA 2 --thread $THREADS \
        --vcf $B/VCFs/hg38_HPRC --samplesID $B/hprc.samplesID.config.txt --path $B"
 echo "BUILD_EXIT=$? $(date +%H:%M:%S)"
-# the index as the SIF's CRISPRme names it: NRG_3_hg38+hg38_HPRC before 2.9.0, the name with the
-# guide length and the side from 2.9.0 on (20-NRG_3_hg38+hg38_HPRC), the PAM's for another PAM=
+# the index as the SIF's CRISPRme names it: NRG_3_hg38+hg38_HPRC before 2.10.0, the name with the
+# guide length and the side from 2.10.0 on (20-NRG_3_hg38+hg38_HPRC), the PAM's for another PAM=
 for idx in "$B"/genome_library/*_3_hg38+hg38_HPRC; do
   [ -d "$idx" ] && echo "index: $idx (+ _INDELS)"
 done

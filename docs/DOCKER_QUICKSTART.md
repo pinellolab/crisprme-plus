@@ -136,7 +136,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 
 Bulge-enabled searches need a genome **index**. Building it yourself takes ~10
 minutes of CPU; instead, download the ready-made SpCas9 NRR (NGG, NAG, NGA, NAA) index,
-the default PAM's since 2.9.0 (it was NRG = NGG + NAG).
+the default PAM's since 2.10.0 (it was NRG = NGG + NAG).
 
 > **On hg38 you already have this one** — `--what all` in step 3 downloads
 > `NRR_3_hg38` for you. Change `--index-name` in the command below to add a

@@ -625,7 +625,7 @@ class TestWebReferenceBulgeCapacity(unittest.TestCase):
 
     def test_a_wider_pamless_index_counts_for_a_3_prime_pam(self):
         """The web never passes --prune-pam, and the search shell prunes by itself when
-        only a WIDER all-N index serves (since 2.9.0): it counts for a 3' PAM, as an
+        only a WIDER all-N index serves (since 2.10.0): it counts for a 3' PAM, as an
         all-N one of the PAM's width does, and never for a 5' one."""
         _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
         _mkfile(os.path.join(self.root, "PAMs", "TTTV-20bp-X.txt"), "TTTV" + "N" * 20 + " -4\n")

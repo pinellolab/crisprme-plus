@@ -2080,7 +2080,7 @@ def _check_sorting_criteria_scoring(args: List[str], sorting_criteria: bool) -> 
     """
     if not sorting_criteria:
         # what the CFD and CRISPR-Bulge merges have used: --sorting-criteria's default (they
-        # took --sorting-criteria, whatever this flag said, until 2.9.0: wset N1)
+        # took --sorting-criteria, whatever this flag said, until 2.10.0: wset N1)
         return "mm+bulges,mm"
     try:
         sorting_criteria_scoring = args[args.index("--sorting-criteria-scoring") + 1]
@@ -2236,14 +2236,14 @@ def _recorded_three_prime(index_dir: str) -> "Optional[bool]":
 def _side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) -> bool:
     """Whether index ``index_dir``, of PAM ``pam``, was built for the side of the guide where
     a search for ``motif`` (a 3' PAM with ``three_prime``) puts its PAM, as the search
-    script's _resolve_index_dir takes it: as its name says (since 2.9.0), else as the header
+    script's _resolve_index_dir takes it: as its name says (since 2.10.0), else as the header
     of its .bin files records (index format 2), else its .pam_build; without any, any side
     for a dedicated index of the search's PAM, and 3' for an all-N one, or a dedicated one
     of a PAM that holds the search's (index_fit.pam_holds), at the published widths, 3 and
     8, or an all-N one under the search PAM's own name (a search before 2.8.1 built one of
     another width from a 5' PAM file with no record)."""
     parsed = index_fit.parse_index_name(index_dir)
-    if parsed and parsed[4]:  # a name that says its side (since 2.9.0)
+    if parsed and parsed[4]:  # a name that says its side (since 2.10.0)
         return (parsed[4] == 3) == three_prime
     recorded = _recorded_three_prime(index_dir)
     if recorded is not None:
@@ -2308,7 +2308,7 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         # stored flank of width K serves a shorter 3' PAM by N-padding it, and the engine
         # refuses a shorter 5' PAM (index_fit.pam_serves).
         # An index serves only a PAM on the side it was built for, which its name says
-        # (since 2.9.0), else the header of its .bin files (index format 2), else its
+        # (since 2.10.0), else the header of its .bin files (index format 2), else its
         # .pam_build ("<name> <seq_len> <pam_pos>", pam_pos < 0 for 5'); without any, a
         # dedicated index of the motif any, and another a 3' PAM at widths 3 and 8, or an
         # all-N one of its own name (_side_serves).
@@ -2329,7 +2329,7 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
                 for d in _listdir(lib):
                     if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
                         continue
-                    # <PAM>_<N>_<genome>[+<dataset>], or the 2.9.0 form that carries the
+                    # <PAM>_<N>_<genome>[+<dataset>], or the 2.10.0 form that carries the
                     # guide length and the side (index_fit.parse_index_name)
                     parsed = index_fit.parse_index_name(d)
                     if not parsed or want_plus != ("+" in parsed[2]):
@@ -3168,7 +3168,7 @@ def complete_search() -> None:
     # shorter 5' PAM off a wider flank is refused. A search prunes by itself when only
     # such an index serves it (_prune_on_its_own, below), so the flag is needed only to
     # prune where an index serves unpruned too (an all-N one of the PAM's width).
-    # (Before 2.9.0 it needed --index-path, and a search did not prune by itself.)
+    # (Before 2.10.0 it needed --index-path, and a search did not prune by itself.)
     prune_pam = "--prune-pam" in args
 
     # cap on TOTAL edits per alignment (--max-total-edits, issue #107): prevents
@@ -3702,7 +3702,7 @@ def complete_search() -> None:
     # the AF that CRISPRitz add-variants copied into them from the VCF (in either mode; an
     # indel has the AF it copied into the indel log, as on any index; none for a record
     # whose INFO has AF at another place than the VCF's first record: METHODS section 8),
-    # and no more. (Since 2.9.0 their per-sample post-analysis gives a window denser than
+    # and no more. (Since 2.10.0 their per-sample post-analysis gives a window denser than
     # CRISPRME_IUPAC_CAP as the haplotypes its carriers have, as on the tiers, no longer by
     # a greedy alignment: new_simple_analysis.py.) (each dataset once: a --vcf list may
     # name one twice) A sites-only dataset without them (its VCFs have no sample columns)
@@ -4183,7 +4183,7 @@ def _index_to_build(library: str, pam: str, n: int, rest: str, pamfile: str,
     ``three_prime``) with -bMax ``n``, for ``rest`` (the genome, and +<dataset> for a
     variant index).
 
-    Since 2.9.0 an index is built under the name that says its guide length and its side
+    Since 2.10.0 an index is built under the name that says its guide length and its side
     (index_fit.index_name: 20-NRR_3_hg38, TTTV-23_3_hg38), as a search builds one: under
     the older name, <PAM>_<N>_<genome>, the indexes of one PAM for the two sides of the
     guide, or for two guide lengths, took one name, and the build of one stopped on the
@@ -4234,7 +4234,7 @@ def _older_index_differs(index_dir: str, guide: int, three_prime: bool) -> "Opti
 
 
 def _own_index_name(index_dir: str, three_prime: bool, guide: int = 0) -> str:
-    """The folder beside it that index ``index_dir`` takes under the name of 2.9.0
+    """The folder beside it that index ``index_dir`` takes under the name of 2.10.0
     (index_fit.index_name), which records what it is: the guide length its .bin files were
     built for (``guide`` where they record none), and the side of the guide its PAM is on,
     3' with ``three_prime``. ``index_dir`` itself where neither length is known."""
@@ -4245,7 +4245,7 @@ def _own_index_name(index_dir: str, three_prime: bool, guide: int = 0) -> str:
 
 
 def _rename_advice(index_dir: str, three_prime: bool, guide: int = 0) -> str:
-    """``mv '<index_dir>' '<its name of 2.9.0>'`` (_own_index_name) for a message, or "" where
+    """``mv '<index_dir>' '<its name of 2.10.0>'`` (_own_index_name) for a message, or "" where
     that name says no more than its own, or another folder has it."""
     own = _own_index_name(index_dir, three_prime, guide)
     if own == index_dir or os.path.lexists(own):
@@ -4263,7 +4263,7 @@ def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
     PAM. build-index-only keeps an index it finds in place and records ``pamfile`` on it
     (_write_pam_build), so recording a 5' file on a 3' build, or the reverse, would make a
     search on its real side refuse it and one on the other side search it wrong. A name of
-    2.9.0 says the side (index_fit.parse_index_name), and a search reads it ahead of the
+    2.10.0 says the side (index_fit.parse_index_name), and a search reads it ahead of the
     header and the .pam_build: one whose header or .pam_build records the other side was
     named (or recorded, by its .pam_build) for the wrong one. Under the older name, which
     says none, an index of format 1 with no usable .pam_build records no side to
@@ -4292,7 +4292,7 @@ def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
     # where that is recorded: the header of its .bin files (index format 2), else .pam_build
     where = ("the header of its .bin files" if index_fit.built_five_prime(index_dir) is not None
              else "its .pam_build")
-    named = {3: True, 5: False}.get(parsed[4])  # the side its name says (since 2.9.0)
+    named = {3: True, 5: False}.get(parsed[4])  # the side its name says (since 2.10.0)
     what = "a PAM-less index" if set(parsed[0]) == {"N"} else "an index"
     if named is not None:  # (of this side: _index_to_build names it so)
         if recorded is not None and recorded != named:
@@ -4351,7 +4351,7 @@ def _refuse_short_build(index_dir: str, pamfile: str, bdna: int, brna: int) -> N
     the length). build-index-only keeps an index it finds in place and, before this check,
     said "already present" and recorded ``pamfile`` on it (_write_pam_build), which left a
     record that contradicts the index and a search of it that reports wrong alignments.
-    Since 2.9.0 it builds under a name that says the guide length (_index_to_build), and
+    Since 2.10.0 it builds under a name that says the guide length (_index_to_build), and
     keeps one of the older name built for another length beside it, so the one in the
     way is under that name, built for another guide than its name says: named for that
     one (_rename_advice), it is out of the way. Never removed here. Nor is one in an index
@@ -5078,7 +5078,7 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
     """Runs index command ``cmd``, which writes ``./genome_library/<engine_name>`` under
     its working directory (``name`` by default), and puts that in
     ``<workdir>/genome_library/<name>`` only once the command has succeeded. The engine
-    names an index <PAM>_<N>_<name>, and an index is named since 2.9.0 in the form that
+    names an index <PAM>_<N>_<name>, and an index is named since 2.10.0 in the form that
     says the guide length and the side too (_index_to_build): it is renamed into place.
 
     Every later run takes an index directory that is there for a finished one, so
@@ -5276,7 +5276,7 @@ def build_index_only() -> None:
             pam_char = pam_char.split(" ")[0][end_idx * (-1):]
     genome_ref = os.path.basename(genomedir)
     library = os.path.join(workdir, "genome_library")
-    # complete-search indexes with bMax+1 ("for alignments starting with gaps"), since 2.9.0
+    # complete-search indexes with bMax+1 ("for alignments starting with gaps"), since 2.10.0
     # under the name that says the guide length and the side; one of the older name in
     # place that is this index is kept (_index_to_build)
     idx_folder = _index_to_build(library, pam_char, bMax + 1, genome_ref, pamfile, idx_val > 0)

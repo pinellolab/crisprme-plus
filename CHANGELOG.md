@@ -664,7 +664,7 @@ and the `release-crisprme` skill.
   on `Index directory ... does not exist`, and the release checklist's build said
   `NNN_3_hg38+hg38_HGDP1kGP`; the panel recipes (`seq_script/merge_panels/`) print the index their
   build wrote, of either form, as the CRISPRme they run names it, and the mega INDELS recipe's
-  stop on an unexpected name says which to set (`20-NRG_3` from 2.9.0 on). On chr22 with HGDP +
+  stop on an unexpected name says which to set (`20-NRG_3` from 2.10.0 on). On chr22 with HGDP +
   1000 Genomes, the documented build wrote `20-NRR_3_hg38`, `20-NRR_3_hg38+hg38_HGDP1kGP` and its
   `_INDELS`, with nothing on stderr; the documented `publish-index` of the variant one went past
   its folder to the token it asks for (none was given), where the older name stops on the missing
@@ -995,7 +995,7 @@ and the `release-crisprme` skill.
   pre-flight now say, for example, that `NNNNNNNN_2_hg38 is a PAM-less index whose flank is 8
   nt, and TTTV is a 5' PAM of 4 nt`, and that the search needs `NNNN_2_hg38` or `TTTV_2_hg38`.
 - **docs/DYNAMIC_PAM_INDEX_COMPAT.md says what the release does.** Its CLI, web and PAM-picker
-  sections called planned what 2.9.0 now does, and described a CLI that took any PAM inside an
+  sections called planned what 2.10.0 now does, and described a CLI that took any PAM inside an
   index's own and passed `--prune-pam` by itself, which 2.8.1 did not (IDX-22); they now say
   what ships and how it differs from the design, and that a search no installed index serves
   builds an index of its PAM where it can, as before (it said every one was refused). METHODS
@@ -1153,7 +1153,7 @@ and the `release-crisprme` skill.
   taken for a 3′ PAM (a search before 2.8.1 built one of any width from a 5′ PAM file), and
   `build-index-only` records no side over it, so one really built for a 3′ PAM could only be
   rebuilt (R6B RV1-6); without `--prune-pam` the refusal did not name it at all. It names it
-  either way, and says that a name of the 2.9.0 form records the side: `mv
+  either way, and says that a name of the 2.10.0 form records the side: `mv
   .../NNNN_3_hg38 .../20-NNNN_3_hg38`, for the guide length its trees were built for, after
   which the search takes it.
 - **complete-search stops at once when no temporary folder can be written.** With none
@@ -1210,7 +1210,7 @@ and the `release-crisprme` skill.
   published is of N = 3, so the download it advised stopped on `No index 'NRR_2_hg38' found`. It
   names the one of N = 3 for up to 2 bulges (`NRR_3_hg38`), "if it is published", as the refusal
   for want of a variant index does, and its other route, to run without `--index-path`, names
-  what such a search does since 2.9.0: it takes an index of the working directory's library,
+  what such a search does since 2.10.0: it takes an index of the working directory's library,
   pruned to the PAM where only such a one serves it, and builds one from the genome where none
   does (it said that it builds one). On chr22 with HGDP + 1000 Genomes, both refusals of a search of
   1 + 1 bulge under an empty `--index-path` name `NRR_3_hg38`, which the Hub holds, and the Hub

@@ -327,11 +327,11 @@ for count, line in enumerate(inEmpiricalResults):
 # can be flagged when it lands in a dense window. In a population-level search such a
 # window is reported by its greedy worst-case alignment and ADDITIONAL haplotype
 # alignments may exist; under --per-sample a genotyped dataset's dense window is the
-# haplotypes its carriers have, as any window (new_simple_analysis.py; since 2.9.0 on the
+# haplotypes its carriers have, as any window (new_simple_analysis.py; since 2.10.0 on the
 # classic dictionaries too), and a row that names no carrier, a sites-only dataset's, is
 # still the population-level analysis's -- the bed carries the region span, variant count,
 # carriers and the FULL IUPAC protospacer, surfaced verbatim so an interested user can dig
-# into the other alignments, and (2.9.0) the window's bits: log2 of the sequences it spells,
+# into the other alignments, and (2.10.0) the window's bits: log2 of the sequences it spells,
 # and whether a greedy worst-case alignment stands for it (greedy 0: its rows are its
 # carriers' own haplotypes, as a per-sample search reports any window).
 hvdr_by_chrom = {}
@@ -364,7 +364,7 @@ try:
 except Exception as _hvdr_err:  # never break integration on a bad/missing bed
     print("high-variant-density BED join skipped:", _hvdr_err)
 
-# Four-allele positions (2.9.0): <out>.four_allele_positions.bed, 0-based, lists each
+# Four-allele positions (2.10.0): <out>.four_allele_positions.bed, 0-based, lists each
 # position of the windows the search reported where the variant genome writes Q (the
 # reference base and three ALTs cover A, C, G and T). A row whose window holds one is
 # flagged in the same column as a dense window.
@@ -1232,7 +1232,7 @@ for nline, line in enumerate(inCrispritzResults):
     # #144: flag this off-target if it lands in a high-variant-density window
     # (chrom=target[4], highest-CFD start=target[5]); "NA" otherwise. A per-sample row
     # names its carriers (target[13]; "NA" for a reference row), but a sites-only
-    # dataset's, which names none. And (2.9.0) if its window (the highest-CFD alignment's,
+    # dataset's, which names none. And (2.10.0) if its window (the highest-CFD alignment's,
     # target[2]) holds a four-allele position.
     try:
         saveDict["High_variant_density_region"] = _hvdr_note(

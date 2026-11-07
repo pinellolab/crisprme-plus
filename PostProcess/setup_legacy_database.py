@@ -110,8 +110,8 @@ PAM_DEFINITIONS: Dict[str, Tuple[str, int]] = {
     "20bp-NGG-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNGG", 3),
     "20bp-NGC-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNGC", 3),
     "20bp-NGK-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNGNK", 3),  # K = G/T
-    "20bp-NRG-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNRG", 3),  # R = A/G, i.e. NAG+NGG (SpCas9 broad recognition; the default before 2.9.0)
-    "20bp-NRR-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNRR", 3),  # NAA, NAG, NGA, NGG (the default since 2.9.0)
+    "20bp-NRG-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNRG", 3),  # R = A/G, i.e. NAG+NGG (SpCas9 broad recognition; the default before 2.10.0)
+    "20bp-NRR-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNRR", 3),  # NAA, NAG, NGA, NGG (the default since 2.10.0)
     "20bp-NRCH-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNRCH", 4),  # NRCH (xCas9)
     "20bp-NNGT-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNNNGT", 4),  # NNGT (SpCas9-NG)
     # ---- iSpyMacCas9

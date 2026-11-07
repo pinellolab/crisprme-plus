@@ -152,7 +152,7 @@ def require_prebuilt_index() -> str:
 
 
 def _recorded_five_prime(index_dir: str) -> Optional[bool]:
-    """Whether an index records a 5' PAM: its name, which says the side since 2.9.0
+    """Whether an index records a 5' PAM: its name, which says the side since 2.10.0
     (index_fit.parse_index_name: NNNN-20_2_hg38 for a 5' PAM), else the header of its .bin
     files (index format 2), else its .pam_build ("<name> <seq_len> <pam_pos>", a negative
     pam_pos), as the search script's _index_side reads them. None without any."""
@@ -747,7 +747,7 @@ def write_samplesids_config(dataset: str) -> str:
 
 def _parse_index_name(index_name: str):
     """Parse a CRISPRme index directory name ``<PAM>_<bMax>_<ref>[+<variant>]``, or the
-    form that carries the guide length and the side since 2.9.0
+    form that carries the guide length and the side since 2.10.0
     (index_fit.parse_index_name).
 
     Returns (pam_token, ref_genome, is_variant) or None if it does not parse.
