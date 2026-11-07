@@ -74,9 +74,11 @@ and the `release-crisprme` skill.
     NRG per-sample, without the SNP-row fix: the 1,292 samples listed on 21052642 count one
     target and one created PAM fewer (the row joined 21052638's site, and its PAM is not
     created, below), and the other 2,799 samples one target fewer in their population or
-    super-population. The co-occurrence companions and `observed_haplotypes.tsv` of the chr22
-    searches above are unchanged; in the SNP+indel oracle the 197 co-occurrence lines of Z3,
-    which starts inside an insertion, go from 15702, 15703 and 15704 to 15699.
+    super-population; the co-occurrence companions and `observed_haplotypes.tsv` of the chr22
+    searches above are unchanged (with the SNP-row fix below, `observed_haplotypes.tsv`, and
+    with the TRAC guide the SNP+SNP co-occurrence companion, follow the carriers it takes off).
+    In the SNP+indel oracle the 197 co-occurrence lines of Z3, which starts inside an insertion,
+    go from 15702, 15703 and 15704 to 15699.
 
 ### Fixed
 - **An indel row whose first base is one an insertion adds is placed at the insertion**
@@ -188,8 +190,8 @@ and the `release-crisprme` skill.
   protospacer that copies the reference's own PAM, or adds one before another reference PAM:
   not created), and has a Cas12a profile (5′ PAM TTTV, both strands, rows starting inside an
   insertion, PAMs wholly and partly inserted, a tandem duplication of a PAM (C6), a SNP past a
-  deletion). The released v2.8.1 image fails it 104 times (SpCas9) and 47 times (Cas12a); with
-  2.8.2's first fix alone (rows at the anchor) 60 and 24. Unit tests:
+  deletion). The released v2.8.1 image fails these checks 104 times (SpCas9) and 47 times
+  (Cas12a); with 2.8.2's first fix alone (rows at the anchor) 60 and 24. Unit tests:
   `test_indel_variant_positions` (the real integrator), `test_indel_pam_creation`,
   `test_indel_row_coordinates` (rows starting inside an insertion, rows whose PAM an insertion
   adds after a reference protospacer, 3′ and 5′ PAMs, both strands), `test_indel_snp_cis` and
@@ -234,8 +236,22 @@ and the `release-crisprme` skill.
     is 2, as in 2.8.1, not the 3 it is without this fix: 21052639 (the row 2.8.1 placed at
     21052642, now at its insertion's anchor) takes the place of the SNP-only alignment of
     21052641 G>A. One row (24441929 (+)) and 3 alternative alignments list fewer carriers. The
-    summaries by guide and by sample, `observed_haplotypes` and `phase_confirmation` follow;
-    the dense-window BED and the co-occurrence tables are unchanged.
+    summaries by guide and by sample, `observed_haplotypes_raw`, `observed_haplotypes.tsv` and
+    `phase_confirmation` follow; the dense-window BED and the co-occurrence companions are
+    unchanged. NRR, per-sample: 3,987 → 3,982 integrated rows and 11,581 → 11,577 alternative
+    alignments (without this fix, 3,985 and 11,583): the same rows and alignments go, and two
+    more alternative alignments, 27795809 (−), another alignment of 27795808's SNP, and
+    47366716 (−), the highest-CRISPR-Bulge alignment of its site's row, whose block now shows
+    the site's reference alignment; 5 alignments list fewer carriers (27782673 (+): 1 of 17).
+    TRAC guide, per-sample: 2,803 → 2,796 and 7,508 → 7,504 (without this fix, 2,800 and
+    7,509): the rows at 22629803 (+), 23029103 (−), 29864083 (−) and 42909550 (−) and 5
+    alternative alignments go (CFD at most 0.031), 3 alignments list fewer carriers, and so do
+    the SNP+SNP co-occurrence companion's 6 lines of 46177780 (−) (729 → 726 carriers; its
+    `MinAF_bound` is the pair's marginal bound and does not change). Population-level searches
+    give the same tables with and without this fix (2,198 → 2,197 rows, by the fix above).
+    Where rows go, the CRISPR-Bulge score of another alignment scored in the same batch can
+    move in its last printed digit (NRR 38558318 (−): 3.56555e-16 → 3.56556e-16; 3 alignments
+    in these searches); no block's choice of alignment changes.
   - Cost (per-sample searches only): the SNP post-analysis reads the indels of the store near
     each chromosome's SNP targets (839,234 of its 17.2 million genome-wide, 3 to 46 s a
     chromosome, in parallel) and reads a carrier's bases only where it holds one that changes a
@@ -246,8 +262,10 @@ and the `release-crisprme` skill.
     38 s).
   - Covered by `PostProcess/test_snp_row_indel_carriers.py` and the SNP+indel oracle, which now
     checks every per-sample SNP row's carriers against their haplotypes and plants sites Y1-Y4
-    (cis, trans, homozygous, unphased, a G run at the target's edge, an always-cis SNP): d7a6fff
-    fails it 62 times (57 row blocks at 11 sites, and the Y sites' expectations).
+    (cis, trans, homozygous, unphased, a G run at the target's edge, an always-cis SNP). Without
+    this fix that check fails 62 times (57 row blocks at 11 sites, and the Y sites'
+    expectations) and 6 in the Cas12a profile (the SNP-only rows of C3 and C5), on top of the
+    indel-row checks above: the released v2.8.1 image fails the whole oracle 166 and 53 times.
 
 ## [2.8.1] - 2026-11-05
 

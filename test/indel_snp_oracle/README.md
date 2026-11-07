@@ -139,6 +139,10 @@ panel 78 samples):
 | Y3 | Y1's SNP, the PAM TGG followed by a G, and on S76's SNP slot a 1-bp deletion in that G run | S76 on the CFD-1 SNP row (the run puts the G back) |
 | Y4 | a minus-strand SNP target whose SNP is in cis with a 2-bp insertion inside it on every haplotype (S77, S78) | no SNP row lists them |
 
-On d7a6fff the check fails 62 times: the SNP-only alignments of sites D, F, M, N, Q, R, J, Z3,
-Y1, Y3 and Y4 list the indel's cis carriers (57 row blocks), S70, S72, S77 and S78 are on a SNP
-row, and Y2's row is CONFIRMED; on v2.8.1, 89 times (with the 27 start failures above).
+Without this fix (fix/282-indel-alignment at e4dbb9c) the check fails 62 times: the SNP-only
+alignments of sites D, F, M, N, Q, R, J, Z3, Y1, Y3 and Y4 list the indel's cis carriers (57
+row blocks), S70, S72, S77 and S78 are on a SNP row, and Y2's row is CONFIRMED; and the
+`cas12a` profile 6 times: the SNP-only rows of C3 and C5 list S05 and S08, whose haplotypes
+holding the SNP hold the insertion or the deletion. These failures come on top of the
+indel-row failures counted above: the released v2.8.1 image fails the whole oracle 166 times
+(104 + 62) and the `cas12a` profile 53 times (47 + 6).
