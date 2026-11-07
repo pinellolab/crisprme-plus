@@ -366,6 +366,21 @@ class TheRealDataIndelCheckRunsOnTheSelfTest(unittest.TestCase):
         self.assertIn("--max-total-edits 6", comp)
 
     @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_every_benchmark_is_checked_before_the_step_fails(self):
+        """A gating finding of one benchmark is recorded (fail=1) and the step fails once
+        all are checked, so the uploaded findings hold every benchmark's (set -e stopped
+        at the first, and the artifact lacked the others')."""
+        _text, step = self.step()
+        self.assertIn("fail=0", step)
+        self.assertEqual(step.count("|| fail=1"), 2)
+        self.assertEqual(step.count("python3 scripts/check_indel_rows.py"), 2)
+        for call in step.split("python3 scripts/check_indel_rows.py")[1:]:
+            self.assertIn("|| fail=1", call.split("\n          [a-z]")[0])
+        tail = step[step.rindex("|| fail=1"):]
+        self.assertIn('if [ "$fail" -ne 0 ]', tail)
+        self.assertIn("exit 1", tail)
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
     def test_a_change_to_the_checker_starts_the_job(self):
         self.assertTrue(listed("scripts/check_indel_rows.py",
                                pull_request_paths("validate-benchmarks.yml")))

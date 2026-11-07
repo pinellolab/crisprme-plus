@@ -283,12 +283,15 @@ jobs:
         # more edits than each target and at least its CFD); the per-sample
         # completeness gate is the release checklist's step 4c on a real panel, and the
         # SNP+indel oracle above. Non-gating limit lines (documented CRISPRme limits)
-        # are printed and uploaded on failure; any gating line fails the step.
+        # are printed and uploaded on failure; any gating line fails the step, once every
+        # benchmark has been checked (fail=1 records it), so the uploaded findings hold
+        # them all.
         run: |
           set -euo pipefail
           ref=work/Genomes/hg38_chr22
           vcf=$(ls work/VCFs/hg38_1000G/*.vcf.gz | head -1)
           [ -d "$ref" ] && [ -n "$vcf" ] || { echo "FAIL: no self-test genome/VCF"; exit 1; }
+          fail=0
           # name:PAM:mm:bDNA:bRNA:max-total-edits:guide file, from test/benchmark/benchmarks.json
           for spec in cas9_sg1617:20bp-NGG-SpCas9.txt:4:1:1:6:sg1617_test_guide.txt \
                       cas12a_hbg:TTTV-20bp-Cas12a.txt:4:1:1:6:hbg_cas12a_test_guide.txt \
@@ -304,14 +307,18 @@ jobs:
             python3 scripts/check_indel_rows.py --results "$d" --reference "$ref" \
               --vcf "$vcf" --pam "work/PAMs/$pam" --guide "work/$gf" --mm "$mm" --bDNA "$bd" \
               --bRNA "$br" --max-total-edits "$mt" --chrom chr22 --mode soundness \
-              --out "check_indel_rows_$name.tsv"
+              --out "check_indel_rows_$name.tsv" || fail=1
           done
           echo "=== check_indel_rows completeness (cas9_sg1617, chr22)"
           python3 scripts/check_indel_rows.py \
             --results work/Results/crisprme-test-out_cas9_sg1617 --reference "$ref" \
             --vcf "$vcf" --pam work/PAMs/20bp-NGG-SpCas9.txt --guide work/sg1617_test_guide.txt \
             --mm 4 --bDNA 1 --bRNA 1 --max-total-edits 6 --chrom chr22 --mode completeness \
-            --jobs 4 --out check_indel_rows_completeness.tsv
+            --jobs 4 --out check_indel_rows_completeness.tsv || fail=1
+          if [ "$fail" -ne 0 ]; then
+            echo "FAIL: a gating finding (the check_indel_rows_*.tsv findings are uploaded)"
+            exit 1
+          fi
 
       - name: Upload the indel-check findings on failure
         if: failure()

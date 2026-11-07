@@ -96,14 +96,20 @@ gating or a listed limit, and none passes in silence. **Soundness**: every indel
 block of the integrated results and of the alternative alignments must be the given guide
 aligned to the reference with exactly its named variants, from its reported start, and its
 carriers must be the panel samples whose haplotypes hold it (or whose strongest target it
-is). **Completeness**: every in-budget alignment on a carrier's haplotypes that holds a
-base of an indel or MNV must be reported for that carrier, or folded by the documented
-merge into rows of its site (the cluster position on the record's haplotype) naming the
-same variants with its carrier set and no worse than it (fewest-mm+b edits, highest CFD);
-a run that writes no alternative alignments -- a population-level run, or
-`complete-test`'s `--ci-cd-test` runs -- keeps one row per merge cluster, and there the
-row of the target's cluster (rows chained within `--merge` bp by in-budget alignments,
-as the merge clusters) must be no worse than each target.
+is), within the samples list the search read. **Completeness**: every in-budget alignment
+on a carrier's haplotypes that holds a base of an indel or MNV must be reported for that
+carrier by rows no worse than its best alignment (fewest-mm+b edits, and the highest CFD
+at the three decimals the merge sorts on, recomputed from each row's strings): a row of
+exactly that target whose fold group -- the rows of its site (the cluster position on the
+record's haplotype) naming the same variants with the same carriers, which the documented
+merge folds into the best by each block's order -- is no worse, or such rows with the
+target's own carrier set; a run that writes no alternative alignments -- a
+population-level run, or `complete-test`'s `--ci-cd-test` runs -- keeps one row per merge
+cluster, and there the row of the target's cluster (rows chained within `--merge` bp by
+in-budget alignments, as the merge clusters) must be no worse than each target. It does
+not check the CFD_REF/ALT, CFD risk and CRISPR-Bulge scores (nor which row the
+CRISPR-Bulge block keeps), `Variant_info_spacer+PAM`, `PAM_creation`, the seed counts,
+MAF, rsID, `Other_motifs`, `Not_found_in_REF` or the annotations.
 `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check`,
 `validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
 `docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a real HGDP + 1000 Genomes

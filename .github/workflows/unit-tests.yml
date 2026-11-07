@@ -309,7 +309,10 @@ jobs:
         # carrier swapped, added or dropped (also when the same target sits elsewhere),
         # a named variant dropped, a cross-haplotype SNP, a phantom of the shape reported
         # at chr22:22322768 on 2.8.0, an MNV row and an unphased row with a phantom
-        # base, a merge that keeps the worse of two alignments of one site, a population-
+        # base, a merge that keeps the worse of two alignments of one site or of one
+        # target (fewest block, CFD block, a CFD only three decimals tell apart: three
+        # real rows of chr22), a carrier listed for a sequence its MNV changes, a carrier
+        # outside the samples list, an ALT block that lost its variants, a population-
         # level cluster dropped beside another cluster's row, a row placed past an
         # insertion's anchor, two targets inside one insertion folded into one, a long
         # deletion's far junction, a second indel that keeps the target's bases, another
