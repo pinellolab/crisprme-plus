@@ -2250,15 +2250,16 @@ def samplesid_problem(vcf_folder: str, dataset: str) -> Optional[str]:
     vdir = os.path.join(current_working_directory, VCFS_DIR, vcf_folder)
     if _vcf_folder_has_samples(vdir) is False:
         # no list comes from a VCF that names no sample, and no build makes the
-        # registry its variants need (docs/DESIGN_mega_index.md)
+        # registry its variants need (docs/DESIGN_mega_index.md). The note names the
+        # index that has one as a web user gets it, not that file (FV :342)
         return (
             f"The variant dataset '{dataset}' is sites-only: its VCFs have no sample "
             f"columns, so it has no sample list (samplesIDs/{vcf_folder}.samplesID.txt), "
             "and a search with it fails at its end without one. A search reports the "
             "variants of a sites-only VCF only through a per-dataset allele-frequency "
-            "registry, as the shipped hg38_mega index has (docs/DESIGN_mega_index.md); "
-            "building its index does not make one. Search the reference genome, or a "
-            "VCF dataset with samples."
+            "registry, as the hg38_mega index published on HuggingFace has (Settings "
+            "downloads it, under Download a prebuilt index); building its index does not "
+            "make one. Search the reference genome, or a VCF dataset with samples."
         )
     # a merged panel's list (1000G_HGDP's) is the union of its datasets' (hg38_1000G's and
     # hg38_HGDP's), which Submit makes when they are all there: one of them is what is

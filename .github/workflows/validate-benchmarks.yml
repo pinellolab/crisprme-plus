@@ -265,8 +265,10 @@ jobs:
           if [ "${#tables[@]}" -eq 0 ]; then echo "FAIL: no integrated results under work/Results"; exit 1; fi
           python3 scripts/check_alt_pam.py "${tables[@]}"
 
+      # also when the job is cancelled: up to three tries of complete-test, each of every
+      # benchmark, can reach timeout-minutes, which cancels the job, and its logs were lost
       - name: Upload logs on failure
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: crisprme-test-out-logs

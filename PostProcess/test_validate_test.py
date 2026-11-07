@@ -209,7 +209,7 @@ class ABenchmarkOffItsReferenceIsSkipped(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_the_opt_out_leaves_out_the_bulge_2_benchmarks_saying_so(self):
-        # CRISPRME_SKIP_HEAVY=1, for a very small machine, on complete-test and validate-test
+        # CRISPRME_SKIP_HEAVY=1, to save time on a slow machine, on complete-test and validate-test
         code, lines, compared = self.run_validation("chr22", self.LIGHT, skip_heavy=True)
         self.assertEqual(compared, self.LIGHT)
         heavy = [n for n in self.every() if n not in self.LIGHT]

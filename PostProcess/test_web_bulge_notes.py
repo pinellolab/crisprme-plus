@@ -321,6 +321,13 @@ class TestRefusedDatasets(_Install):
                 self.assertEqual(note, pu.samplesid_problem("hg38_sites", "sites"))
                 self.assertTrue(note.startswith("The variant dataset 'sites' is sites-only"))
                 self.assertNotIn("Build an index locally", note)
+                # the index that has a registry is one a web user can get, from Settings:
+                # the note cited a file of the repository, which a web user cannot open
+                # (FV :342)
+                self.assertIn("as the hg38_mega index published on HuggingFace has "
+                              "(Settings downloads it, under Download a prebuilt index); "
+                              "building its index does not make one.", note)
+                self.assertNotIn(".md", note)
                 self.assertEqual(self.submit("sites"), (False, [note]))
         # a single multi-chromosome sites-only file: the sites-only message alone, as a
         # build does not make it searchable

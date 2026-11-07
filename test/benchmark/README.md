@@ -20,7 +20,8 @@ alignment instead of CRISPRme's TST index search).
   default search slider. These are marked `"heavy": true`: they build a bulge-2
   (NGG_3/TTTV_3) index over the variant-enriched genome. They run by default, locally and
   in CI: the whole set fits a 16 GiB, 4-CPU runner with no swap (measured peak 3.66 GB of
-  RAM). `CRISPRME_SKIP_HEAVY=1` leaves them out, an opt-out for very small machines.
+  RAM). `CRISPRME_SKIP_HEAVY=1` leaves them out, which saves time on a slow machine, not
+  memory: the peak is the variant enrichment, which every benchmark needs.
 - `max-edits-5/` — references for the same two guides at **5 total edits**
   (`cas9_sg1617_n5`, `cas12a_hbg_n5`, also `"heavy": true`): chr22, the same bulge-2
   indexes, a binding `--max-total-edits 5`, with **381 and 92 sites**, 271 and 55 of them

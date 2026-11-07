@@ -178,6 +178,10 @@ elif sys.argv[1] == "add-variants":
         write(os.path.join(snps, "log%s.txt" % chrom),
               "%s\n%s_0-60_1\tS2\trs_%s_26\t0.25\t%s_26_%s_%sT\t0,%d\t%s\n"
               % (LOG_HEADER, chrom, chrom, chrom, seq[25], seq[25], len(fake), seq[:60]))
+        if chrom in os.environ.get("STUB_SNP_ONLY", "").split(","):
+            # a chromosome with no indel: its log and its fake genome are headers alone
+            fake = ""
+            write(os.path.join(snps, "log%s.txt" % chrom), "%s\n" % LOG_HEADER)
         if os.environ.get("STUB_BIG_FAKE") == chrom:
             fake += "N" * 1000000
         os.makedirs(os.path.join("variants_genome", "fake_%s_%s" % (vcf, chrom)))
@@ -2294,6 +2298,51 @@ class TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes(_Fixture):
                                   "default), which finishes its SNP codes.\n")
             self.assertEqual(tree(self.lib(INDELS)), clean)
             self.assert_searched()
+
+
+class AnIndelsIndexInPlaceIsTheOneItBuilds(_Fixture):
+    """build-index-only said "Indels index already present", and then "Variant index
+    ready" at exit 0, of any INDELS index in place under its name: one where a search
+    before 2.8.1 had put the sub-indexes of a PAM-less index it served (NNN_<N>_fake<chr>
+    in <PAM>_<N>_<genome>+<dataset>_INDELS), or one copied in part, which every search
+    with bulges then refuses (pool_search_indels._missing_index). It looks for the
+    sub-index of each chromosome whose fake-indel genome holds indels now (the index
+    audit's leftover INDELS folder)."""
+
+    def test_one_without_the_sub_indexes_it_builds_is_refused(self):
+        for case, change, missing in (
+                ("another PAM's", lambda d: [os.rename(os.path.join(d, f"NRG_2_fake{c}"),
+                                                       os.path.join(d, f"NNN_2_fake{c}"))
+                                             for c in ("chr1", "chr2")],
+                 "chr1, chr2 (NRG_2_fakechr1, NRG_2_fakechr2): it holds NNN_2_fakechr1, "
+                 "NNN_2_fakechr2, which no search of it reads (a search before 2.8.1 put "
+                 "there the sub-indexes of a PAM-less index it served)"),
+                ("copied in part", lambda d: shutil.rmtree(os.path.join(d, "NRG_2_fakechr2")),
+                 "chr2 (NRG_2_fakechr2): it is a partial copy, or a build stopped partway")):
+            with self.subTest(case):
+                self.fresh()
+                rc, out, err = self.run_bio()
+                self.assertEqual(rc, 0, err)
+                change(self.lib(INDELS))
+                left = tree(self.path())
+                rc, out, err = self.run_bio()
+                self.assertEqual(rc, 1, out)
+                self.assertEqual(err, f"Error: The INDELS index {self.lib(INDELS)} has no "
+                                      f"sub-index for {missing}, and a search with bulges "
+                                      f"refuses it. Remove it (rm -rf '{self.lib(INDELS)}') and "
+                                      f"run build-index-only again.\n")
+                self.assertNotIn("Indels index already present", out)
+                self.assertNotIn("Variant index ready", out)
+                self.assertEqual(tree(self.path()), left)
+
+    def test_one_of_a_chromosome_with_no_indel_needs_none(self):
+        # its fake-indel genome is headers alone, and no build gives it a sub-index
+        rc, out, err = self.run_bio(STUB_SNP_ONLY="chr2")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted(os.listdir(self.lib(INDELS))), ["NRG_2_fakechr1"])
+        rc, out, err = self.run_bio(STUB_SNP_ONLY="chr2")
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"Indels index already present: {self.lib(INDELS)}\n", out)
 
 
 class AStoppedRunsTiersAreNotSearched(_Fixture):

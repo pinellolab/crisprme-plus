@@ -126,8 +126,8 @@ class DispatchContract(unittest.TestCase):
 
     def test_a_heavy_benchmark_runs_unless_the_opt_out_is_set(self):
         """A "heavy" (bulge-2) benchmark is part of the self-test: the whole set fits a
-        16 GiB, 4-CPU runner. CRISPRME_SKIP_HEAVY=1 leaves it out on a very small machine,
-        and only it."""
+        16 GiB, 4-CPU runner. CRISPRME_SKIP_HEAVY=1 leaves it out, to save time on a slow
+        machine, and only it."""
         registry = dict(_REGISTRY, benchmarks=[
             _REGISTRY["benchmarks"][0], dict(_REGISTRY["benchmarks"][1], heavy=True)])
         heavy_dir = f"{ct.COMPLETETESTRESDIR}_{registry['benchmarks'][1]['name']}"

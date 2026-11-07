@@ -63,7 +63,9 @@ scoring without full 2^k-IUPAC haplotype enumeration.
 per-score **worst-possible** reconstruction. The min-edit lower bound is proven for
 SNP + bulge + single-indel, but **BREAKS** (verified false-negative even at k=0) for ≥2 cis indels in
 a protospacer and for equal-length MNVs — a size-aware slack / flag-all-multi-indel-windows / `norm -a`
-fix is needed; multi-indel-in-cis is common (~17–19% of real indel off-targets). CFD worst-case is
+fix is needed; multi-indel-in-cis is common in raw counts (~17–19% of real indel off-targets), most
+of it in STR/VNTR repeats: ~1–2% of indel loci after repeat-masking, and ~0.1–0.2% of indel
+off-targets genuinely missed (METHODS §8). CFD worst-case is
 already exact via factorization (`twopass_cfd_exact.py`, 0-ULP verified); CRISPR-Bulge would be
 shortlist-only.
 

@@ -1133,6 +1133,39 @@ class TheChecklistsHpcRouteIsANewUsersRun(unittest.TestCase):
         self.assertIn("after step 1, build the sandbox again from the SIF", route)
 
 
+class TheArchiveGateSaysWhereAnEmptyIndelsIndexComesFrom(unittest.TestCase):
+    """RELEASE_CHECKLIST's gate on the published archives (T-40) said that a present-but-empty
+    `_INDELS` is always a broken build. A dataset whose every indel is on a contig with an
+    underscore in its name, which no build gives a sub-index (pool_index_indels.py says so),
+    gets one from a build that ends well (R6B emptyidx RV1-2, RV2-2, R3-1); download refuses
+    it as it refuses a broken one, so the gate's verdict, not to publish it, holds."""
+
+    def test_it_names_both(self):
+        text = " ".join((_REPO / "docs" / "RELEASE_CHECKLIST.md").read_text().split())
+        gate = text[text.index("**Every published variant archive can find indels"):]
+        gate = gate[:gate.index("- [ ]")]
+        self.assertNotIn("always a broken build", gate)
+        self.assertIn("A present-but-empty `_INDELS` is a broken build (a dataset with no indels "
+                      "gets no `_INDELS` at all), or that of a dataset whose every indel is on a "
+                      "contig with an underscore in its name, which no build gives a sub-index: "
+                      "publish neither, as download refuses both.", gate)
+
+
+class FutureWorkSaysTheShareOfIndelsInCisAsMethodsDoes(unittest.TestCase):
+    """FUTURE_WORK §3 said that two or more indels in cis are common, "~17-19% of real indel
+    off-targets": the raw count, mostly repeats, of which METHODS §8 gives ~1-2% of indel loci
+    after repeat-masking, and ~0.1-0.2% of indel off-targets missed (plan 4.1)."""
+
+    def test_the_raw_share_is_said_raw_beside_the_masked_one(self):
+        text = " ".join((_REPO / "docs" / "FUTURE_WORK.md").read_text().split())
+        self.assertIn("common in raw counts (~17–19% of real indel off-targets), most of it in "
+                      "STR/VNTR repeats: ~1–2% of indel loci after repeat-masking, and ~0.1–0.2% "
+                      "of indel off-targets genuinely missed (METHODS §8)", text)
+        methods = " ".join((_REPO / "METHODS.md").read_text().split())
+        self.assertIn("falling to **~1–2%** of indel loci after repeat-masking", methods)
+        self.assertIn("**~0.1–0.2%** of indel off-targets", methods)
+
+
 class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):
     """A genome folder with a space in its path failed later with a misleading path: the
     search takes it into shell commands unquoted (IDX-19), and the working directory's too.

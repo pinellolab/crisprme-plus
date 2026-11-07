@@ -42,54 +42,66 @@ run; the stale test comment of plan 4.5's coverage gaps (test_web_bulge_notes, F
 W3-none-selected-changed: a comment, with no test of its own); of plan 4.8's docs and wording,
 RV1-WEB2-3 (the web user guide's ALT rows), RV1-WEB2-5 (the web's refusal of a VCF folder with a
 file named for no chromosome beside others), D3R3-2 (a CFD-only run's CRISPR-Bulge risk score),
-D3R3-3 (targets-scoring's banner, on stdout), LP RV4-cooc-carrier-cap (the SNP+indel companion
-names 50 carriers at most) and D3R3-4 (a test docstring's count of the release candidate: a
-docstring, with no test of its own); WEB-4 (the Graphical Reports selector's totals); of plan
-4.2's report items, RV1-F1 (a search of two or more datasets), RV1-F2 (a haplotype's report) and
-cli5 D6 (a run with no score); FR :163 (download's check of an index's dictionaries); R2-F1 (an
-INDELS index built while the fake-indel genome changed); R4-6 (a haplotype result reused after
-its FASTA files changed); M5 (by E2's builds in the build lock: a search puts an index under its
-name only whole, its `.bin` files in it, so the ERROR of a folder with no `.bin` can no longer
-name one a search is building, as `test_index_resolution`'s
-`test_a_build_leaves_nothing_under_its_name_and_touches_no_index_of_the_older_one` shows; a
-search of 2.8.1 or earlier, which builds in place, run in the same library at once, still can);
-wsearch N3 (the plots' perfect-match legend with no star); FV :342's first two (the per-sample
-option of a dataset not indexed yet, the report's per-sample advice; its other three are R4-4's
-names, P14 and N7, each recorded here).
+D3R3-3 (targets-scoring's banner, on stdout), LP RV4-cooc-carrier-cap (the SNP+indel companion names
+50 carriers at most) and D3R3-4 (a test docstring's count of the release candidate: a docstring,
+with no test of its own); WEB-4 (the Graphical Reports selector's totals); of plan 4.2's report
+items, RV1-F1 (a search of two or more datasets), RV1-F2 (a haplotype's report) and cli5 D6 (a run
+with no score); FR :163 (download's check of an index's dictionaries); R2-F1 (an INDELS index built
+while the fake-indel genome changed); R4-6 (a haplotype result reused after its FASTA files
+changed); M5 (by E2's builds in the build lock: a search puts an index under its name only whole,
+its `.bin` files in it, so the ERROR of a folder with no `.bin` can no longer name one a search is
+building, as `test_index_resolution`'s
+`test_a_build_leaves_nothing_under_its_name_and_touches_no_index_of_the_older_one` shows; a search
+of 2.8.1 or earlier, which builds in place, run in the same library at once, still can); wsearch N3
+(the plots' perfect-match legend with no star); FV :342's first two, whole: (1) the per-sample
+option of a dataset not indexed yet, and (2) both its halves, the sites-only note and Submit's
+refusal that cited `docs/DESIGN_mega_index.md`, and the report's per-sample advice, with the
+report's other advice that named commands alone (to get the tiers, to bundle a companion its slim
+zip left out); its other three are R4-4's names, P14 and N7, each recorded here. Of the audit's test
+additions (plan 4.5), the leftover INDELS folder (build-index-only's "Indels index already present"
+of an INDELS index without its sub-indexes: a behaviour, not a test). Of R6B: the cigate items F1
+(the scan guard that saw no skip of a method), F2 and F3 (the wiring guards a YAML comment
+satisfied, and the logs of a job its time limit cancels) and F4 (the SKIP_HEAVY wording), with FFR
+RV1-WEB2-6 (a test helper's open file); emptyidx RV1-2, RV2-2 and R3-1 (T-40's "always a broken
+build"). Plan 4.1's FUTURE_WORK figure (~17–19%, a raw count, beside METHODS §8's).
 
 *Found fixed already (checked on this branch):* P8 (fixed in 2.8.1: the tier path writes the REF
 protospacer's mismatches in lower case, as the dictionary path does, CHANGELOG [2.8.1], covered by
-`test_tier_ref_columns`, which unit-tests.yml runs); P12 (exit 2 since 2.8.1); t31 P6 (C3 of
-2.8.1: every folder named, exit 2, and the banner says reference when the smoke runs
-reference-only); R2-F3;
-R4-5; WEB-8; cli5 D5 (= IDX-7); IDX-20 (2.8.1 runs a store-less install population-level and says
-why); F3 of the docs review (a wrong-side all-N variant index is named by the search script's
-refusal since 2.8.1); F6 of the docs review (DYNAMIC_PAM §1 says a 3′ PAM); install P4 (Biopython's
-warning); install P10's pandas FutureWarning (validate.py reads by position, run in the image with
-`-W error`); the environment.yml web pins; the self-test's 404 lines (t31 P9's noise); RV4-4 and
-R4-7 (web-e2e's in-image step runs test_index_resolution; no `ps` there is its one allowed skip);
-text N1 to N3; P14 (the results page's Group by opens on CFD_score); the older list's first-paint
-label (Gate B walk 2b and the 38a7c4e walk's step 9 passed); the stderr fixtures of a runner with
-less memory than memory_check asks for (list_282.md, "Found 2026-11-04": CRISPRME_SKIP_MEM_CHECK):
-with memory_check reading the 15.6 GB of GitHub's runner, so that every complete-search and
-complete-test that does not skip it warns, every step of unit-tests.yml passes in the CI image,
-and web-e2e's in-image tests in the image (b648227's fix of the one fixture that compared it was
-the one needed). And fixed in 2.8.1: `/load`'s Show full log (`show_full_log` and
-`show_assembly_full_log` take the job folder through `results_job_dir`); F4 of the docs review
-(the release skill says that the only pin is `crisprme.py`); the [2.8.0] date (2026-10-24); the
+`test_tier_ref_columns`, which unit-tests.yml runs); P12 (exit 2 since 2.8.1); t31 P6 (C3 of 2.8.1:
+every folder named, exit 2, and the banner says reference when the smoke runs reference-only);
+R2-F3; R4-5; WEB-8; of plan 4.5's test additions from the audit, the smoke test that knows the
+geometry (2.8.1's I7, with IDX-9, OF-9 and cli5 D8: the prebuilt-index smoke searches each index's
+own PAM on its side, the guide padded for it); cli5 D5 (= IDX-7); IDX-20 (2.8.1 runs a store-less
+install population-level and says why); F3 of the docs review (a wrong-side all-N variant index is
+named by the search script's refusal since 2.8.1); F6 of the docs review (DYNAMIC_PAM §1 says a 3′
+PAM); install P4 (Biopython's warning); install P10's pandas FutureWarning (validate.py reads by
+position, run in the image with `-W error`); the environment.yml web pins; the self-test's 404 lines
+(t31 P9's noise); RV4-4 and R4-7 (web-e2e's in-image step runs test_index_resolution; no `ps` there
+is its one allowed skip); text N1 to N3; P14 (the results page's Group by opens on CFD_score); the
+older list's first-paint label (Gate B walk 2b and the 38a7c4e walk's step 9 passed); the stderr
+fixtures of a runner with less memory than memory_check asks for (list_282.md, "Found 2026-11-04":
+CRISPRME_SKIP_MEM_CHECK): with memory_check reading the 15.6 GB of GitHub's runner, so that every
+complete-search and complete-test that does not skip it warns, every step of unit-tests.yml passes
+in the CI image, and web-e2e's in-image tests in the image (b648227's fix of the one fixture that
+compared it was the one needed). And fixed in 2.8.1: `/load`'s Show full log (`show_full_log` and
+`show_assembly_full_log` take the job folder through `results_job_dir`); F4 of the docs review (the
+release skill says that the only pin is `crisprme.py`); the [2.8.0] date (2026-10-24); the
 CHANGELOG's unit-tests.yml 20-minute sentence (it gives GitHub's 14 min 50 s and 13 min 55 s); the
 1e-5 wording (the README, METHODS and the report say that no floor is applied);
 DOC-PAMCREATE-LEFT-COUNTS (the PAM_creation entry counts the other 55, 186 in all); M4 (the entry
 names the hidden samplesIDs files; whether its disclosure goes under Fixed or Changed was the docs
 track's call); C18, the FutureWarning (install P10's, above); LP RV4-3 (its case, a sites-only
-dataset searched with a phased one, runs per-sample since 2.8.1, with no population-level banner;
-of sites-only datasets alone, the banner's advice is for a genotyped panel, which the review found
-not wrong). D3R3-7 is moot: no `{{EQUIVALENCE_NUMBERS}}` placeholder is left in the tree to fill.
+dataset searched with a phased one, runs per-sample since 2.8.1, with no population-level banner; of
+sites-only datasets alone, the banner's advice is for a genotyped panel, which the review found not
+wrong). D3R3-7 is moot: no `{{EQUIVALENCE_NUMBERS}}` placeholder is left in the tree to fill.
 
 *Left: design questions, or the PI's or an owner's call.*
-- Plan 4.1, every item: two cis indels in one protospacer; CRISPR-Bulge's batch noise; the one-row
-  drops; phasing against trio truth; phase sets; #77; the calibration edge; the HPRC and HG01255
-  runs; the documented limits. Each is science or a measurement, not a code fix.
+- Plan 4.1, every item but FUTURE_WORK's figure (fixed, above): two cis indels in one protospacer;
+  CRISPR-Bulge's batch noise; the one-row drops; phasing against trio truth; phase sets; #77; the
+  calibration edge; the HPRC and HG01255 runs. Each is science or a measurement, not a code fix.
+  And its documented limits, which the plan lists with no fix planned: the code-fix option it
+  gives the fourth, `resolve_carriers` following phase (FFR OLD-UNPHASED-OVERRIDE), would change
+  who an indel row lists on a partly phased panel, an option the plan did not take.
 - IDX-17 (d) (a dataset downloaded to another folder: the search reads its dictionaries, sample
   list and VCF folder from the working directory, and the input check says its VCF folder is not
   there): `--index-path` covering a dataset's data is plan 2.7's "medium" item, not taken by E1.
@@ -104,14 +116,25 @@ not wrong). D3R3-7 is moot: no `{{EQUIVALENCE_NUMBERS}}` placeholder is left in 
   each shows, with the carrier gate's display), WEB-11 (Hide Reference Targets ticked by default
   since 2021: a default); P7 (what the
   slim report shows); the 0-1-edit sites of the shareable report and N7; the CRISPR-Bulge of
-  reconciled assembly rows; the annotation copies of a web search (the #97 trade); Settings builds
-  without the tiers' RAM; W1 (deliberately not added); FR :107 (deliberate); the stderr gate of the
-  pipeline stages (exit codes instead: 44 gates); build locks across hosts; the undetected damage of
+  reconciled assembly rows; the annotation copies of a web search (the #97 trade), and Submit's
+  stall while it makes them; Settings builds without the tiers' RAM, and two things that follow,
+  each documented in 2.8.1 (CHANGELOG, SETTINGS_DATA_MANAGER): a dataset built there before 2.8.1
+  has no tiers until it is built there again, and a sample list put there after its build reaches
+  them only once its registry and genotypes are removed and it is built again (a build that
+  replaced tiers in place by itself would take the RAM above unasked); W1 (deliberately not
+  added); FR :107 (deliberate); the stderr gate of the pipeline stages (exit codes instead: 44
+  gates); the build locks of plan 4.4, each 2.8.1's design, whose CHANGELOG says why and what to
+  do: a lock held from another host or container is taken over only after 15 minutes without a
+  refresh, a 2.8.0 lock, which has no owner record, is never broken by age (a 2.8.0 run may still
+  be building under it), and a build directory left in another PID namespace or on another host
+  is not reclaimed (its owner cannot be checked from here); the undetected damage of
   earlier releases (each needs a stamp those releases never wrote, and each CHANGELOG entry gives
   its manual fix); the genome-folder name collisions of plan 4.3; source installs enriched before
   CRISPRitz 2.9.1 (documented, re-enrich); FV :180 (the Hub's cache keeps a copy in $HOME: it spares
   a re-download, and TROUBLESHOOTING says HF_HOME moves it); the dash interrupt of plan 4.4 (a
-  signal to crisprme.py alone) and c3's signal nits (a process-scan race, SIGHUP to the caller's
+  signal to crisprme.py alone, which leaves the pipeline running and keeps its annotation
+  temporary folders)
+  and c3's signal nits (a process-scan race, SIGHUP to the caller's
   group, two signals): c3's signal design (the image now stops by SIGINT); `targets-scoring` and web
   searches without the scorer env (documented in 2.8.1: refusing them, as complete-search does,
   or warning on the web form, decides what an install without that env can still do, CFD-only
@@ -138,12 +161,17 @@ not wrong). D3R3-7 is moot: no `{{EQUIVALENCE_NUMBERS}}` placeholder is left in 
 - The IUPAC letters of a sites-only (mega) row's DNA: no haplotype resolves its codes into one
   allele, and printing one would print a sequence no individual is known to carry; how such a
   row shows its alleles is plan 2.6's degeneracy flags, a design.
-- Contigs with "_" in their name (bio11.3, and R6B's RV1-2/RV2-2/R3-1..6 around it): every reader
-  of the fake-indel genome (the INDELS build, the SNP overlay, the indel post-analysis, the
-  search script) takes the chromosome off the engine's folder name `fake_<vcf>_<chrom>` after
-  its last `_`; whether the engine's naming changes, with index format 2, or every reader does,
-  is a design question. INPUT_FORMATS documents the rename that avoids it, and no published
-  index has such a contig.
+- Contigs with "_" in their name (bio11.3, and around it R6B emptyidx's RV1-4, RV2-3 and R3-2 to
+  R3-4, plan 4.8's list: no word at search time that the bulged indel off-targets of such a
+  contig were not searched, the raw shell errors of a search without its fake-indel genome, the
+  crash of a variant there in the integrator, and the "Indexing INDELs in KI270302v1" line of a
+  build; and the empty `_INDELS` of a dataset whose every indel is on such contigs, which
+  download refuses, as T-40 now says, above): every reader of the fake-indel genome
+  (the INDELS build, the SNP overlay, the indel post-analysis, the search script) takes the
+  chromosome off the engine's folder name `fake_<vcf>_<chrom>` after its last `_`; whether the
+  engine's naming changes, with index format 2, or every reader does, is a design question.
+  INPUT_FORMATS documents the rename that avoids it, and no published index has such a contig.
+  (R3-5 is emptyidx F6, fixed here, and R3-6 a wording of 2.8.1's CHANGELOG, below.)
 - INT N2 (an indel-free dataset installed without its enriched genome: every search says to
   download its INDELS index again): telling a dataset with no indel from an INDELS index lost or
   never built needs a record of the dataset's indels that an install may not hold, a design of
@@ -181,10 +209,12 @@ lanes (`changelog/alleles.md`, `changelog/gate.md`); the engine's AF-by-first-re
 contig's last bases (the 5′ last-window item), its contig-end and N-run windows, the Bioconda
 enricher (its recipe installs it), PKG1 and the on-demand index check: the engine and fmt lanes'
 (CRISPRitz 2.10.0, index format 2, whose builds check what they write), with the CRISPRitz items
-of plan 4.4's added block; the mega indels' AF: the rebuild's (plan 2.5); the 2.8.2 correctness
-items of list_282.md (fix/282-indel-alignment, test/282-indel-realdata-check, the SNP rows whose
-carriers all have an indel): their branches, forward-ported at the integration (the plan's
-status log).
+of plan 4.4's added block; the mega indels' AF: the rebuild's (plan 2.5); the chr22 ALT-PAM step
+of validate-benchmarks, which cannot fail on the split multi-allelic sites (R6B indel
+RV2-chr22-gate-inert): the release gates', whose G4 (plan 2.10) checks every allele by brute force
+on the rebuild's machine (plan 2.5's phase 5); the 2.8.2 correctness items of list_282.md
+(fix/282-indel-alignment, test/282-indel-realdata-check, the SNP rows whose carriers all have an
+indel): their branches, forward-ported at the integration (the plan's status log).
 
 *Left: not reproduced, or nothing to change.* RV1-F6 (it names no item of its own: it confirms items
 of the list, each named here); the radar chart's guide-length guard (#39, closed as user error);
@@ -198,7 +228,10 @@ detail kept in the sources: the list names them alone); t31 P4 (VirtioFS: not re
 which then says why, parts them); the older list's code comments (no behaviour); bio11.2 (a flake
 recorded with no detail); the T-31 flock trigger (flock works on Docker Desktop and on Linux; no
 ENOTTY host to test on); the conda-build warnings of install P10 (the Bioconda recipe's, not this
-repository's); R6B cr-past-first-lines (build-index-only reads each file whole and refuses it since
+repository's); the README's apptainer note, which list_282.md's HPC item would have say so too
+(its "consider"): the host environment that reached the container changed nothing, as the image
+sets its own `MAMBA_*`, `PATH` and `LANG`, and the checklist runs clean so that its gate is a new
+user's run; R6B cr-past-first-lines (build-index-only reads each file whole and refuses it since
 2.8.1; a search that builds its own index checks two lines a file, and reading every file whole on
 each search, seconds on hg38, is the owner's trade to weigh).
 
@@ -207,17 +240,23 @@ cache folder relative to the working directory, ignored by git: where the app ke
 choice of its layout); R2-F4, R2-F5, wset N3, RV1-F4, N6, text F2, the value tests of plan 4.5
 (resultIntegrator's columns, add_risk_score's fields, the CB sentinels, resolve_phased's
 manifest), the recovery route of a missing INDELS sub-index, the audit's test additions (a 5′-PAM
-synthetic case, `complete-test --index-name`, a published test archive, a leftover INDELS folder):
-coverage of code that works, where a new test must fail before its fix and none has a failing
-behaviour to fix; R6B's cigate items (the retry loop's time budget against the job's limit, which
-guards a YAML comment satisfies, the SKIP_HEAVY wording, the chr22 ALT-PAM step that plan 2.10's
-multi-allelic gate G4 replaces, a registry stamped by its aggregation alone), FFR D3R3-6 (a
-fragment test skips fenced code, which no fragment holds) and RV1-WEB2-6 (a test helper's open
-file, a ResourceWarning): the workflows' own design, with no wrong result.
+synthetic case with brute-force truth, a published test archive) and LP RV4-1 (a registry that
+says sites-only by its aggregation alone, as the real mega's does): coverage of code that works,
+where a new test must fail before its fix and none has a failing behaviour to fix. The audit's
+`complete-test --index-name` and a per-kind example guide (plan 4.5, from the audit's roadmap):
+features of the smoke, not a fix of it, which since 2.8.1 (I7) tests the index it ranks first in
+that index's own geometry, and takes a run with no site for a pass only on another nuclease's
+index. R6B cigate F3's retry loop (each of up to three tries runs every benchmark, against the
+job's 120 minutes): the job ends red, never with a false pass, and its logs now go up when the
+limit cancels it (above); whether a try that wrote results is tried again is the workflow's
+choice. FFR D3R3-6 (the fragment test skips fenced code, which merge_changelog.py reads): no
+fragment holds any, so the two read every fragment alike.
 
-*Left: docs and wording.* RV1-F3, N4, F5, RV4-2, the 2.7.10 entry and R6B's three changelog
-wordings: each is the wording of an entry of the released CHANGELOG (2.8.1's, the CFD entry
-2.7.10's), whose correction this track leaves to the release manager.
+*Left: docs and wording.* RV1-F3, N4, F5, RV4-2, the 2.7.10 entry, R6B's three changelog wordings
+and R6B emptyidx RV1-3, RV2-4 and R3-6 (the "(or `NNNNNNNN_...`)" of the F3 entry's What to do,
+which no job of an earlier release can show): each is the wording of an entry of the released
+CHANGELOG (2.8.1's, the CFD entry 2.7.10's), whose correction this track leaves to the release
+manager.
 
 *Left: public actions.* t31 P9 (host the 1000G chr22 VCF on the Hub), the HF Xet report, and the
 deprecated pinellolab/CRISPRme site's installers (another repository): each needs Luca's go.
@@ -795,11 +834,55 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   results page's plots and the Personal Risk Cards' alike: the CFD plot of the Cas12a search above,
   whose one site is its on-target, names no perfect match. Covered by
   `PostProcess/test_top_plots.py`.
-- **The web's per-sample option and the report's advice say what a web user can do.** The
-  search form disabled Per-sample for a genotyped dataset whose index is not built yet (listed
-  as "genotyped, samples not indexed") saying that it "needs a genotyped panel", and the
-  report of a population-level search said to re-run it with `--per-sample` alone, a flag a
-  web search cannot pass (FV :342). The option says that the dataset's samples are not
-  indexed yet, and to build its index in Settings; the report names the web form's Per-sample
-  analysis beside the flag. Covered by `PostProcess/test_web_shell_safety.py` (in the image)
-  and `test_generate_report.py`.
+- **The web's per-sample option, its word on a sites-only dataset and the report's advice say
+  what a web user can do.** The search form disabled Per-sample for a genotyped dataset whose
+  index is not built yet (listed as "genotyped, samples not indexed") saying that it "needs a
+  genotyped panel"; the note under its bulge options, and Submit's refusal, said of a sites-only
+  dataset that only an allele-frequency registry reports its variants, "as the shipped hg38_mega
+  index has (docs/DESIGN_mega_index.md)", a file of the repository a web user cannot open; and
+  the report of a population-level search said to re-run it with `--per-sample` alone, a flag a
+  web search cannot pass (FV :342), as it named commands alone to get the tiers of a dataset
+  without them, and to bundle an observed-haplotypes companion its slim zip left out. The option
+  says that the dataset's samples are not indexed yet, and to build its index in Settings; the
+  note and the refusal name the hg38_mega index published on HuggingFace, which Settings
+  downloads (under Download a prebuilt index); the report names the web form's Per-sample
+  analysis beside the flag, Settings' Build an index locally and Download a prebuilt index
+  beside the commands that get the tiers, and the form's Include the full report beside
+  `--report-full`. Covered by
+  `PostProcess/test_web_shell_safety.py`, `test_web_bulge_notes.py` and
+  `test/web/test_settings_vcf_datasets.py` (in the image), and `test_generate_report.py`.
+- **build-index-only refuses an INDELS index in place that lacks the sub-indexes it builds.** It
+  said "Indels index already present", then "Variant index ready" at exit 0, of any INDELS index
+  under its name: one copied in part, or one where a search before 2.8.1 had put the sub-indexes
+  of a PAM-less index it served (`NNN_2_fakechr1` in `NRG_2_<genome>+<dataset>_INDELS`), each of
+  which every search with bulges refuses (the index audit's leftover INDELS folder, plan 4.5).
+  It now looks for the sub-index of each chromosome whose fake-indel genome holds indels (none is
+  due for a contig with an underscore in its name, or a genome of headers alone), and stops with
+  an ERROR that names the ones missing, what the folder holds, and how to build it again. With
+  the real engine on a synthetic dataset, a run over that folder of `NNN_2_fakechr1` and
+  `NNN_2_fakechr2`, or with `NRG_2_fakechr2` gone, ended 0 before and ends 1 now, and a search
+  with bulges refuses the same folder; once it is removed, the build makes it whole. Covered by
+  `PostProcess/test_build_index_only_atomic.py`.
+- **CI keeps the logs of a job its time limit cancels, and the checks of what the workflows run
+  read no comment and see every skip.** validate-benchmarks uploaded its logs on `failure()`
+  alone, so a job that up to three tries of every benchmark took past its 120 minutes, which
+  cancels it, kept no log of what failed (R6B cigate F3): it uploads them on `cancelled()` too.
+  `test_ci_workflows`' checks that every test module is named in a workflow, and that each
+  function-based one runs as a script, read the workflows' comments too, where unit-tests.yml's
+  paths comment names a dozen modules: with the line that runs `test_dash_output_props` gone, the
+  first still passed (R6B cigate F2). Its check that the light job runs the flag-gate scans looked
+  at a skip of their classes alone, and passed with one of their tests skipped (R6B cigate F1).
+  Both fail on those now. And `test_history_page_assembly` reads the page with its file closed
+  (it printed six ResourceWarnings: FFR RV1-WEB2-6). Covered by `PostProcess/test_ci_workflows.py`.
+- **The docs say what the self-test's opt-out saves, where an empty `_INDELS` comes from, and how
+  common two indels in cis are.** The README, the benchmark README and the registry called
+  `CRISPRME_SKIP_HEAVY=1` an opt-out "for very small machines", which reads as one for a machine
+  short of memory: the run's peak is the variant enrichment, which every benchmark needs, so it
+  saves time on a slow machine, not memory, as they now say (R6B cigate F4). RELEASE_CHECKLIST's
+  archive gate (T-40) said that a present-but-empty `_INDELS` is always a broken build; a dataset
+  whose every indel is on a contig with an underscore in its name gets one from a build that ends
+  well, and the gate names it beside the broken build, neither to be published (R6B emptyidx
+  RV1-2, RV2-2, R3-1). FUTURE_WORK §3 called two or more indels in cis common, "~17–19% of real
+  indel off-targets": it says that this is the raw count, mostly repeats, and gives METHODS §8's
+  ~1–2% of indel loci after repeat-masking (plan 4.1). Covered by
+  `PostProcess/test_ci_workflows.py` and `test_defaults_and_index_flex.py`.

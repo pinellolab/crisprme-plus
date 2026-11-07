@@ -354,6 +354,16 @@ def _hap_label(n, head=False, greedy=False):
     return (base + " (worst-case)") if head else base
 
 
+# How the tiers of a dataset without them are got, by the command line and by the web, whose
+# user can pass no flag and run no command (FV :342)
+_GET_THE_TIERS = (
+    "rebuild the index with <code>build-index-only --samplesID</code>, or with Build an index "
+    "locally in the web's Settings, or download a prebuilt one (<code>crisprme.py download "
+    "--what index --index-name NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index "
+    "in Settings)"
+)
+
+
 def _untiered_named(untiered):
     """The datasets a search resolved without the dict-less tiers (meta["untiered"], from
     .untiered_datasets), named as each text that qualifies a claim for them names them:
@@ -1814,9 +1824,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
             "still be reported by its greedy worst-case alignment, flagged in "
             "<code>High_complexity_region</code> (<code>High_variant_density_region</code> in "
             "the integrated results), whose listed carriers need not carry every variant in "
-            "it. To get the tiers, rebuild the index with <code>build-index-only "
-            "--samplesID</code>, or download a prebuilt one (<code>crisprme.py download --what "
-            "index --index-name NRR_3_hg38+hg38_HGDP1kGP</code>)."
+            "it. To get the tiers, " + _GET_THE_TIERS + "."
         )
     elif meta.get("search_mode") == "per-sample":
         sm_note = (
@@ -1848,9 +1856,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
                 f"where {'its' if _one else 'their'} "
                 "variants are dense, it can still report a window by its greedy worst-case "
                 "alignment, whose listed carriers need not carry every variant in it. To get the "
-                "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
-                "download a prebuilt one (<code>crisprme.py download --what index --index-name "
-                "NRR_3_hg38+hg38_HGDP1kGP</code>). " if _ut else ""
+                "tiers, " + _GET_THE_TIERS + ". " if _ut else ""
             ) + "For sites-only (aggregate) panels there are no "
             "per-sample genotypes, so this loses nothing (<code>--per-sample</code> is a no-op "
             "there). " + (
@@ -5795,8 +5801,8 @@ def build_report(
         observed_haplotypes_omitted_note = (
             "Full observed-haplotypes companion "
             "(<code>observed_haplotypes.tsv</code>) omitted from this slim report "
-            "(size &gt; limit); re-run with <code>--report-full</code> or read it "
-            "from the result directory."
+            "(size &gt; limit); re-run with <code>--report-full</code>, or with Include the "
+            "full report on the web form, or read it from the result directory."
         )
     # Per-site modals accumulate here (side effect of build_table_html), shared across
     # the CFD + CRISPR-Bulge tables so a site shown in both emits ONE modal.

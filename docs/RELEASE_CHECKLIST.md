@@ -34,8 +34,10 @@ Every user-facing surface must agree on **version · default index · scorer · 
   each `indexes/*+*.tar.gz` (download it, or stage it before upload), list its members and
   confirm: every `<index>_INDELS/<sub-index>/` holds at least one `.bin`, or the `.no_targets` record of a build that found no target, unless that chromosome's
   `Dictionaries/log_indels_<vcf>/log<chr>.txt.gz` is header-only (a SNP-only chromosome), and the
-  `log_indels_<vcf>` logs are not all header-only. A present-but-empty `_INDELS` is always a broken
-  build: a dataset with no indels gets no `_INDELS` at all. Also confirm every archive built on a
+  `log_indels_<vcf>` logs are not all header-only. A present-but-empty `_INDELS` is a broken build
+  (a dataset with no indels gets no `_INDELS` at all), or that of a dataset whose every indel is on
+  a contig with an underscore in its name, which no build gives a sub-index: publish neither, as
+  download refuses both. Also confirm every archive built on a
   panel bundles the `Dictionaries/` and `samplesIDs/` the published NRG archive of that panel
   installs, **by content, member by member** (SHA-256 of every member; an install REPLACES each
   directory, so a mismatch means whichever archive was installed last wins). Names and sizes are

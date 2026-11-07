@@ -5291,6 +5291,30 @@ def build_index_only() -> None:
                 pass
         return _bases
 
+    def _indels_subindexes():
+        # each chromosome's fake-indel genome, and the directory of the INDELS index it is
+        # indexed into, as pool_index_indels.py indexes them (it indexes no contig with an
+        # underscore in its name, and says which, nor a genome of headers alone: no indel)
+        _subs = []
+        for _fk in sorted(os.listdir(indels_out)):
+            if ("chr" in _fk and os.path.isdir(os.path.join(indels_out, _fk))
+                    and "_" not in _fk[len(f"fake_{vcf_name}_"):]):
+                _subs.append((os.path.join(indels_out, _fk),
+                              f"{pam_char}_{bMax + 1}_fake{_fk.split('_')[-1]}"))
+        return _subs
+
+    def _holds_indels(fake_dir):
+        # whether a chromosome's fake-indel genome holds the window of an indel
+        try:
+            for _fa in os.listdir(fake_dir):
+                if _fa.endswith((".fa", ".fasta")):
+                    with open(os.path.join(fake_dir, _fa)) as _fh:
+                        if any(_ln.strip() and not _ln.startswith(">") for _ln in _fh):
+                            return True
+        except (OSError, UnicodeDecodeError):
+            pass
+        return False
+
     # STEP 1: enrich the genome with the VCF (crispritz add-variants). add-variants
     # writes a fixed-name variants_genome/ in its cwd, so run it in a hidden build
     # directory of Genomes/ (_in_build_dir; never one of the search's run_*), then
@@ -6065,15 +6089,8 @@ def build_index_only() -> None:
                 os.path.basename(indels_idx),
                 "Indels indexing failed",
                 engine_name=f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}_INDELS",
-                # each chromosome's fake-indel genome, into its directory of the index,
-                # as pool_index_indels.py indexes them (it indexes no contig with an
-                # underscore in its name, and says which)
-                indexed=(pamfile, bMax + 1, [
-                    (os.path.join(indels_out, _fk),
-                     f"{pam_char}_{bMax + 1}_fake{_fk.split('_')[-1]}")
-                    for _fk in sorted(os.listdir(indels_out)) if "chr" in _fk
-                    and os.path.isdir(os.path.join(indels_out, _fk))
-                    and "_" not in _fk[len(f"fake_{vcf_name}_"):]]),
+                # each chromosome's fake-indel genome, into its directory of the index
+                indexed=(pamfile, bMax + 1, _indels_subindexes()),
             )
     else:
         # nor one a newer CRISPRitz built, as the reference and variant indexes are not
@@ -6081,6 +6098,27 @@ def build_index_only() -> None:
         # and leaves it, beside indexes of format 1. It is looked at here, where it is
         # kept: one built while the SNP codes went on was removed above, to be built again.
         _refuse_newer_build(indels_idx)
+        # nor one without the sub-index of a chromosome whose fake-indel genome holds
+        # indels, which every search with bulges refuses (pool_search_indels'
+        # _missing_index): one copied in part, or one where a search before 2.8.1 put the
+        # sub-indexes of a PAM-less index it served (NNN_<N>_fake<chr>), under the name of
+        # the PAM it searched. This run said it was present, and the variant index ready.
+        _lacking = [(_fk.split("_")[-1], _sub) for _fk, _sub in _indels_subindexes()
+                    if not os.path.isdir(os.path.join(indels_idx, _sub)) and _holds_indels(_fk)]
+        if _lacking:
+            _held = sorted(_d for _d in os.listdir(indels_idx)
+                           if os.path.isdir(os.path.join(indels_idx, _d))
+                           and not _d.startswith((".", f"{pam_char}_{bMax + 1}_fake")))
+            error(
+                f"The INDELS index {indels_idx} has no sub-index for "
+                f"{', '.join(_c for _c, _ in _lacking)} "
+                f"({', '.join(_sub for _, _sub in _lacking)}): "
+                + (f"it holds {', '.join(_held)}, which no search of it reads (a search "
+                   f"before 2.8.1 put there the sub-indexes of a PAM-less index it served)"
+                   if _held else "it is a partial copy, or a build stopped partway")
+                + f", and a search with bulges refuses it. Remove it (rm -rf '{indels_idx}') "
+                f"and run build-index-only again."
+            )
         print(f"Indels index already present: {indels_idx}", flush=True)
     _write_pam_build(snp_idx, pamfile)
     _write_display_label(snp_idx, display_name)

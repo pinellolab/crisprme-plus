@@ -1136,9 +1136,10 @@ class TestGenerateReport(unittest.TestCase):
             "<code>High_complexity_region</code> "
             "(<code>High_variant_density_region</code> in the integrated results), whose listed "
             "carriers need not carry every variant in it. To get the tiers, rebuild the index "
-            "with <code>build-index-only --samplesID</code>, or download a prebuilt one "
-            "(<code>crisprme.py download --what index --index-name "
-            "NRR_3_hg38+hg38_HGDP1kGP</code>).")
+            "with <code>build-index-only --samplesID</code>, or with Build an index locally in "
+            "the web's Settings, or download a prebuilt one (<code>crisprme.py download --what "
+            "index --index-name NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index "
+            "in Settings).")
         two = row({**base, "untiered": ["hg38_1000G", "hg38_<x>"]})
         for said in ("named carrier samples only for <code>hg38_1000G</code>, "
                      "<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
@@ -1330,9 +1331,10 @@ class TestGenerateReport(unittest.TestCase):
             "give as 0, or not at all, has no frequency); where its variants are dense, it can "
             "still report a window by its greedy worst-case alignment, whose listed carriers "
             "need not carry every variant in it. To get the "
-            "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
-            "download a prebuilt one (<code>crisprme.py download --what index --index-name "
-            "NRR_3_hg38+hg38_HGDP1kGP</code>). ")))
+            "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or with "
+            "Build an index locally in the web's Settings, or download a prebuilt one "
+            "(<code>crisprme.py download --what index --index-name "
+            "NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index in Settings). ")))
         plural = cell({**base, "untiered": two}, "Search mode")
         for said in ("<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
                      "in either mode their variants' allele frequencies",
@@ -3865,7 +3867,9 @@ class TestGenerateReport(unittest.TestCase):
             'href="data/observed_haplotypes.tsv"', html)
         # the modal shows the short degrade note in place of the download button
         self.assertIn("omitted from this slim report", html)
-        self.assertIn("--report-full", html)
+        # with what a web search does to bundle it too, which can pass no flag (FV :342)
+        self.assertIn("re-run with <code>--report-full</code>, or with Include the full "
+                      "report on the web form, or read it from the result directory.", html)
         # (d) the full companion STILL exists in the result dir
         self.assertTrue(
             os.path.isfile(os.path.join(rd, "observed_haplotypes.tsv")))

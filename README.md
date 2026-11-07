@@ -1387,9 +1387,10 @@ function, including detailed explanations and default behaviors:
 >   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G
 > crisprme.py validate-test --chrom chr22
 > ```
-> It fits in 16 GB of RAM (measured peak 3.66 GB). On a very small machine,
-> `CRISPRME_SKIP_HEAVY=1` on `complete-test` leaves out the bulge-2 benchmarks, and
-> `validate-test` then ends `2 passed, 0 failed, 4 skipped`.
+> It fits in 16 GB of RAM (measured peak 3.66 GB, in the variant enrichment that every
+> benchmark needs). `CRISPRME_SKIP_HEAVY=1` on `complete-test` leaves out the bulge-2
+> benchmarks, which saves time on a slow machine, not memory, and `validate-test` then
+> ends `2 passed, 0 failed, 4 skipped`.
 
 ##### Output Data Overview
 ---

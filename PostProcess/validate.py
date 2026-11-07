@@ -275,8 +275,8 @@ def run_test_validation(chrom: str, version: Optional[str] = None) -> None:
     registry = load_benchmarks()
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
     base_url = registry["reference_base_url"]
-    # Mirror complete_test.py: with CRISPRME_SKIP_HEAVY=1, the opt-out for a very small
-    # machine, the "heavy" bulge-2 benchmarks are not run, so don't try to validate them
+    # Mirror complete_test.py: with CRISPRME_SKIP_HEAVY=1, the opt-out that saves time on a
+    # slow machine, the "heavy" bulge-2 benchmarks are not run, so don't try to validate them
     # (avoids a misleading "targets not found" skip). Unset, all cases validate.
     skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
     validated = failed = skipped = 0

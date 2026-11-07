@@ -64,6 +64,20 @@ def function_based_modules():
     return found
 
 
+def uncommented(text):
+    """``text`` without its comment lines: what a comment names, no job runs (unit-tests.yml's
+    paths comment names a dozen test modules)."""
+    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+
+
+def skipped_tests(case):
+    """The names of the tests of TestCase ``case`` that skip, run here, and how many it has:
+    a skip of the class, of a method, or one a test asks for as it runs."""
+    result = unittest.TestResult()
+    unittest.defaultTestLoader.loadTestsFromTestCase(case).run(result)
+    return [test.id().rsplit(".", 1)[-1] for test, _why in result.skipped], result.testsRun
+
+
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
 class TheUnitTestsJobHasTheTimeToFinish(unittest.TestCase):
     """Its limit was 10 minutes. The hosted job took 523 s of those 600 at aa9c54b, and
@@ -156,13 +170,32 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
         # through these scans. A change to one does not start web-e2e, so unit-tests, which
         # lists them, must run the scans, not skip them, or no job would check the change
         import test_complete_search_flags as flag_gate
-        steps = "\n".join(ln for ln in workflow("unit-tests.yml").splitlines()
-                          if not ln.lstrip().startswith("#"))
+        steps = uncommented(workflow("unit-tests.yml"))
         self.assertRegex(steps, r"python -m unittest (?:[\w.]+\s+)*?test_complete_search_flags(?![\w.])")
+        # each scan run here: a skip of one of its methods went unseen, as only a skip of
+        # the class was looked at (R6B cigate F1)
         for scan in ("TestCallersUseAcceptedFlags", "TestDocumentedCommandsPassTheFlagChecks",
                      "TestNoDocumentedCommandIsABareCrisprme"):
             with self.subTest(scan=scan):
-                self.assertFalse(getattr(getattr(flag_gate, scan), "__unittest_skip__", False))
+                skipped, tests = skipped_tests(getattr(flag_gate, scan))
+                self.assertGreater(tests, 0)
+                self.assertEqual(skipped, [])
+
+    def test_a_skip_of_one_method_is_seen(self):
+        class Scan(unittest.TestCase):
+            def test_runs(self):
+                pass
+
+            @unittest.skipUnless(False, "a dependency missing")
+            def test_skipped(self):
+                pass
+
+            def test_skips_as_it_runs(self):
+                self.skipTest("nothing to scan")
+
+        self.assertEqual(skipped_tests(Scan), (["test_skipped", "test_skips_as_it_runs"], 3))
+        self.assertEqual(skipped_tests(unittest.skip("all")(Scan))[0],
+                         ["test_runs", "test_skipped", "test_skips_as_it_runs"])
 
     def test_web_e2e_runs_on_every_repository_module_the_pages_import(self):
         # the web unit tests and the browser tests load the pages, and so all they import
@@ -236,14 +269,24 @@ class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
         self.assertEqual(self.guard(log), 0)
 
     def test_every_test_module_is_named_in_a_workflow(self):
-        text = "\n".join(read(p) for p in WORKFLOWS.glob("*.yml"))
+        # not in a comment, which runs nothing: a module whose run line went, and which the
+        # paths comment of unit-tests.yml names, passed (R6B cigate F2)
+        text = "\n".join(uncommented(read(p)) for p in WORKFLOWS.glob("*.yml"))
         unnamed = [p.stem for p in sorted((REPO / "PostProcess").glob("test_*.py"))
                    if not re.search(rf"\b{p.stem}\b", text)]
         self.assertEqual(unnamed, [])
 
+    def test_a_module_a_comment_names_is_not_taken_for_one_a_job_runs(self):
+        text = uncommented("    paths:\n"
+                           "      # test_listed reads assets/ (a comment of its paths)\n"
+                           "      - \"assets/**\"\n"
+                           "        run: python -m unittest test_run -v\n")
+        self.assertIn("test_run", text)
+        self.assertNotIn("test_listed", text)
+
     def test_a_function_based_module_runs_as_a_script(self):
         # `python -m unittest` finds no test in these, and says OK: 0 tests, a false pass
-        text = "\n".join(read(p) for p in WORKFLOWS.glob("*.yml"))
+        text = "\n".join(uncommented(read(p)) for p in WORKFLOWS.glob("*.yml"))
         modules = function_based_modules()
         self.assertTrue(modules)
         for name in modules:
@@ -264,7 +307,8 @@ class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):
     """Every documented self-test and the CI job set CRISPRME_SKIP_HEAVY=1, on the claim
     that the bulge-2 index builds need more than 16 GB, so each left out what it could have
     checked. Measured: 3.66 GB peak RSS, and a pass in 16 GiB, 4 CPUs, no swap. The variable
-    stays as an opt-out for very small machines, so it may be named, not put in a command."""
+    stays as an opt-out that saves time on a slow machine, so it may be named, not put in a
+    command."""
 
     SURFACES = ("README.md", "docs/DOCKER_QUICKSTART.md", "crisprme.py", "install_from_source.sh",
                 "PostProcess/validate.py", "test/benchmark/README.md")
@@ -302,6 +346,32 @@ class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):
                 (Path(d) / "validate-test.log").write_text(f"\nValidation summary: {summary}\nEnjoy CRISPRme!\n")
                 got = subprocess.run(["bash", "-e", "-c", check], cwd=d, capture_output=True, text=True)
                 self.assertEqual(got.returncode, status, got.stdout)
+
+    def test_the_opt_out_is_said_to_save_time_not_memory(self):
+        # the run's peak is the variant enrichment, which every benchmark needs, and the
+        # bulge-2 builds and searches stay under it: "an opt-out for very small machines"
+        # read as one for a machine short of memory, which it does not help (R6B cigate F4)
+        for name in ("README.md", "test/benchmark/README.md", "test/benchmark/benchmarks.json",
+                     "PostProcess/complete_test.py", "PostProcess/validate.py"):
+            with self.subTest(surface=name):
+                text = " ".join(self.text(name).replace("#", " ").replace(">", " ").split())
+                self.assertNotIn("small machine", text)
+                self.assertRegex(text, r"CRISPRME_SKIP_HEAVY=1[^.]*save[^.]*time on a slow machine")
+        for name in ("README.md", "test/benchmark/README.md", "test/benchmark/benchmarks.json"):
+            with self.subTest(surface=name):
+                self.assertRegex(" ".join(self.text(name).replace(">", " ").split()),
+                                 r"slow machine, not memory")
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_a_job_its_time_limit_ends_uploads_its_logs(self):
+        # each try of complete-test runs every benchmark, and up to three tries can reach the
+        # job's time limit, which cancels it: the upload ran on failure() alone, so such a
+        # job kept no log of what failed (R6B cigate F3)
+        text = workflow("validate-benchmarks.yml")
+        start = text.index("- name: Upload logs on failure")
+        end = text.find("- name:", start + 1)
+        step = text[start:end if end > 0 else len(text)]
+        self.assertRegex(step, r"\n\s+if: failure\(\) \|\| cancelled\(\)\n")
 
     def test_the_expected_output_is_every_benchmark_passed(self):
         expected = f"{len(self.benchmarks())} passed, 0 failed, 0 skipped"

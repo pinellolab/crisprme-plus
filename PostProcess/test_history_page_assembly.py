@@ -43,7 +43,8 @@ _NAMES = [
 
 
 def _load_functions():
-    src = open(_HISTORY_PAGE).read()
+    with open(_HISTORY_PAGE) as fh:  # (left open, it printed a ResourceWarning)
+        src = fh.read()
     tree = ast.parse(src)
     # PARAMS_FILE/GUIDES_FILE are module-level constants history_page.py
     # imports from pages_utils.py, which itself needs a live Dash `app` --
@@ -311,7 +312,8 @@ def _load_history_table():
     """construct_history_summary and history_table_body_, with what they call, from
     pages/history_page.py, the html components replaced by _Tag (no Dash here), and the
     form of a job's id, from pages/pages_utils.py."""
-    src = open(_HISTORY_PAGE).read()
+    with open(_HISTORY_PAGE) as fh:  # (left open, it printed a ResourceWarning)
+        src = fh.read()
     ns = {
         "os": os, "sys": __import__("sys"), "pd": pd, "datetime": datetime, "Dict": Dict,
         "List": __import__("typing").List, "Optional": Optional,
