@@ -1575,7 +1575,7 @@ class TheDocsNameTheFolderABuildWrites(unittest.TestCase):
     PRECOMPUTED_INDEXES' dict-less flow said that its build wrote NRR_3_hg38+hg38_HGDP1kGP,
     so its publish-index of that folder stopped on "Index directory ... does not exist"; the
     release checklist's build said NNN_3_hg38+hg38_HGDP1kGP; and the panel recipes printed
-    the older name after their build, whichever CRISPRme their SIF holds."""
+    the older name after their build, whichever CRISPRme they run."""
 
     DOCS = ("README.md", "docs/PRECOMPUTED_INDEXES.md", "docs/crisprme_data_setup_051826.md",
             "docs/RELEASE_CHECKLIST.md", "docs/SETTINGS_DATA_MANAGER.md")
@@ -1626,8 +1626,8 @@ class TheDocsNameTheFolderABuildWrites(unittest.TestCase):
         self.assertGreaterEqual(checked, 5)
 
     def test_the_panel_recipes_print_the_folder_their_build_wrote(self):
-        # as an older SIF's CRISPRme names it (the as-run ones), and as 2.9.0 does, for the
-        # PAM the recipe takes by default or another one (PAM=...)
+        # as a CRISPRme before 2.9.0 names it (the as-run SIFs and overlay), and as 2.9.0
+        # does, for the PAM the recipe takes by default or another one (PAM=...)
         for recipe, ds in (("hgdp1kgp_build.sh", "hg38_HGDP1kGP"),
                            ("hprc_build.sh", "hg38_HPRC"),
                            ("onekg2021_build.sh", "hg38_1000G2021")):

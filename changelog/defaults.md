@@ -245,7 +245,12 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   on `Index directory ... does not exist`, and the release checklist's build said
   `NNN_3_hg38+hg38_HGDP1kGP`; the panel recipes (`seq_script/merge_panels/`) print the index their
   build wrote, of either form, as the CRISPRme they run names it, and the mega INDELS recipe's
-  stop on an unexpected name says which to set (`20-NRG_3` from 2.9.0 on). Covered by
+  stop on an unexpected name says which to set (`20-NRG_3` from 2.9.0 on). On chr22 with HGDP +
+  1000 Genomes, the documented build wrote `20-NRR_3_hg38`, `20-NRR_3_hg38+hg38_HGDP1kGP` and its
+  `_INDELS`, with nothing on stderr; the documented `publish-index` of the variant one went past
+  its folder to the token it asks for (none was given), where the older name stops on the missing
+  folder; the HGDP + 1000 Genomes recipe's lines after its build printed that folder; and the
+  page's search under `--index-path` took both indexes. Covered by
   `PostProcess/test_build_index_only_atomic.py` (both sides and two guide lengths built in one
   library, the variant and INDELS indexes too, an index of the older name kept or built beside,
   each refusal and its `mv`), `test_index_resolution.py` (a search builds its own under the new
