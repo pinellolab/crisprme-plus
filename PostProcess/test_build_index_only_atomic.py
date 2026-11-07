@@ -2315,8 +2315,8 @@ class AnIndelsIndexInPlaceIsTheOneItBuilds(_Fixture):
                                                        os.path.join(d, f"NNN_2_fake{c}"))
                                              for c in ("chr1", "chr2")],
                  "chr1, chr2 (NRG_2_fakechr1, NRG_2_fakechr2): it holds NNN_2_fakechr1, "
-                 "NNN_2_fakechr2, which no search of it reads (a search before 2.8.1 put "
-                 "there the sub-indexes of a PAM-less index it served)"),
+                 "NNN_2_fakechr2, which no search of it reads (as a search before 2.8.1 "
+                 "could leave those of a PAM-less index it served)"),
                 ("copied in part", lambda d: shutil.rmtree(os.path.join(d, "NRG_2_fakechr2")),
                  "chr2 (NRG_2_fakechr2): it is a partial copy, or a build stopped partway")):
             with self.subTest(case):

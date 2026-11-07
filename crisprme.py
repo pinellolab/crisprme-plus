@@ -5296,7 +5296,11 @@ def build_index_only() -> None:
         # indexed into, as pool_index_indels.py indexes them (it indexes no contig with an
         # underscore in its name, and says which, nor a genome of headers alone: no indel)
         _subs = []
-        for _fk in sorted(os.listdir(indels_out)):
+        try:
+            _fakes = sorted(os.listdir(indels_out))
+        except OSError:
+            _fakes = []
+        for _fk in _fakes:
             if ("chr" in _fk and os.path.isdir(os.path.join(indels_out, _fk))
                     and "_" not in _fk[len(f"fake_{vcf_name}_"):]):
                 _subs.append((os.path.join(indels_out, _fk),
@@ -6113,8 +6117,8 @@ def build_index_only() -> None:
                 f"The INDELS index {indels_idx} has no sub-index for "
                 f"{', '.join(_c for _c, _ in _lacking)} "
                 f"({', '.join(_sub for _, _sub in _lacking)}): "
-                + (f"it holds {', '.join(_held)}, which no search of it reads (a search "
-                   f"before 2.8.1 put there the sub-indexes of a PAM-less index it served)"
+                + (f"it holds {', '.join(_held)}, which no search of it reads (as a search "
+                   f"before 2.8.1 could leave those of a PAM-less index it served)"
                    if _held else "it is a partial copy, or a build stopped partway")
                 + f", and a search with bulges refuses it. Remove it (rm -rf '{indels_idx}') "
                 f"and run build-index-only again."

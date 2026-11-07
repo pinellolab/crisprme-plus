@@ -861,8 +861,10 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   an ERROR that names the ones missing, what the folder holds, and how to build it again. With
   the real engine on a synthetic dataset, a run over that folder of `NNN_2_fakechr1` and
   `NNN_2_fakechr2`, or with `NRG_2_fakechr2` gone, ended 0 before and ends 1 now, and a search
-  with bulges refuses the same folder; once it is removed, the build makes it whole. Covered by
-  `PostProcess/test_build_index_only_atomic.py`.
+  with bulges refuses the same folder; once it is removed, the build makes it whole. On chr22 of
+  HGDP1kGP, the published `NRR_3_hg38+hg38_HGDP1kGP` with its `NRR_3_fakechr22` renamed
+  `NNN_3_fakechr22`, or gone, is refused the same way, as a search with bulges refuses it, and is
+  present again once named back. Covered by `PostProcess/test_build_index_only_atomic.py`.
 - **CI keeps the logs of a job its time limit cancels, and the checks of what the workflows run
   read no comment and see every skip.** validate-benchmarks uploaded its logs on `failure()`
   alone, so a job that up to three tries of every benchmark took past its 120 minutes, which
