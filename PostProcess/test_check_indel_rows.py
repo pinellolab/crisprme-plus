@@ -12,8 +12,9 @@ individuals carry), an MNV row and an unphased row each with a phantom base, an 
 carrier listed on a weaker target than its strongest, an indel block labelled REF origin,
 a population-level cluster whose row is worse than a carrier's target, a merge that keeps
 the worse of two alignments of one site or of one target (fewest block, CFD block, a CFD
-only the three printed decimals tell apart: three real rows of chr22), a carrier listed
-for a sequence an MNV on its slot changes, a carrier outside the samples list, an ALT
+only the three printed decimals tell apart: three real rows of chr22; one worse only by the
+merge's next sorting criterion), a fold across strands, a carrier listed for a sequence an
+MNV on its slot changes, a carrier outside the samples list, an ALT
 block that lost its variants, a cluster dropped beside another cluster's row, a row
 placed past an insertion's anchor, two targets inside one insertion folded into one, a
 long deletion's far junction, a second indel that keeps the target's bases, another
@@ -26,8 +27,9 @@ disagreement into a non-gating limit, and a tie their PUTATIVE rule leaves is a 
 not silence. The PUTATIVE truth is the rule on the whole alignment's CFD (a product of 0
 ties every choice), after what a record's known slot says. The driver must never pass
 silently (a chromosome no VCF covers, one FASTA of several contigs, an indexed VCF read
-once per record, a sites-only VCF, a short table line, a window holding N), and the
-checker must hold no CRISPRme code.
+once per record, a sites-only VCF alone or beside a genotyped one, a deletion longer than
+an unindexed read looks back, a short table line, a window holding N), and the checker
+must hold no CRISPRme code.
 
 Everything is built here: a small reference, a phased VCF (plain gzip, or BGZF with a
 tabix index written by this file's own writer), and rows in the column layout of
@@ -87,6 +89,17 @@ def write_vcf(path, chrom, records, samples=SAMPLES):
     """``records``: (pos1, ref, alt, {sample: gt}), written as a plain gzip stream."""
     with gzip.open(path, "wt") as fh:
         fh.write(vcf_text(chrom, records, samples))
+
+
+def write_sites_only_vcf(path, chrom, records):
+    """A sites-only VCF (eight columns: no FORMAT, no sample), as hg38_mega's: the
+    records' (pos1, ref, alt[, ...])."""
+    body = ["##fileformat=VCFv4.2", "##contig=<ID=%s>" % chrom,
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"]
+    for r in records:
+        body.append("\t".join([chrom, str(r[0]), ".", r[1], r[2], ".", "PASS", "AF=0.1"]))
+    with gzip.open(path, "wt") as fh:
+        fh.write("\n".join(body) + "\n")
 
 
 def _bgzf_block(data):
@@ -1519,19 +1532,22 @@ class ReviewRound3(Base):
     # --- N1, N2, N3, N4, N5 ------------------------------------------------------ #
     def test_a_sites_only_vcf_checks_the_rows_themselves(self):
         """N1: an eight-column VCF (no FORMAT, no genotypes): its records are read, the
-        row's strings, target and variants are checked, the carriers are not."""
+        row's strings, target and variants are checked; it lists no carrier, as a
+        sites-only dataset's rows do (CHANGELOG 2.8.1), and a sample it lists is one
+        no genotype carries (R5-F1)."""
         case, info = world_deletion(self.tmp)
         rec = info["rec"]
-        with gzip.open(case.vcf, "wt") as fh:
-            fh.write("##fileformat=VCFv4.2\n##contig=<ID=chr21>\n#CHROM\tPOS\tID\tREF\tALT"
-                     "\tQUAL\tFILTER\tINFO\nchr21\t%d\t.\t%s\t%s\t.\tPASS\tAF=0.1\n"
-                     % (rec[0], rec[1], rec[2]))
-        for samples in ("NA", "S01,S02"):
-            write_results(case.res, [set_field(info["rows"][0], samples=samples)])
-            rc, found = case.run(mode="both")
-            self.assertEqual((rc, gating(found)), (0, []), found)
-            self.assertIn("limit-no-genotypes", classes(found))
-        write_results(case.res, [set_field(info["rows"][0], start=info["start"] + 1)])
+        write_sites_only_vcf(case.vcf, "chr21", [rec])
+        write_results(case.res, [set_field(info["rows"][0], samples="NA")])
+        rc, found = case.run(mode="both")
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual(sorted(f[1] for f in found), ["limit-no-genotypes"] * 4, found)
+        write_results(case.res, [set_field(info["rows"][0], samples="S01,S02")])
+        rc, found = case.run(mode="both")
+        self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                         {("carrier-without-indel", "S01,S02")}, found)
+        write_results(case.res, [set_field(info["rows"][0], start=info["start"] + 1,
+                                           samples="NA")])
         rc, found = case.run()
         self.assertIn("start-not-on-variant-sequence", classes(gating(found)), found)
 
@@ -1958,6 +1974,320 @@ class ReviewRound4(Base):
             self.assertEqual(sets[places.index((8, 0))], frozenset("AT"))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class ReviewRound5(Base):
+    # --- R5-F1: a sites-only VCF beside a genotyped one ------------------------ #
+    def _mixed(self, deletion_in_genotyped, sites_first=False):
+        """world_deletion with two VCFs, as a search of the default index with hg38_mega
+        reads them: a genotyped one (the eight samples; the deletion's carriers S01 and
+        S02 when ``deletion_in_genotyped``, else only an unrelated SNV of S03) and a
+        sites-only one holding the deletion. Returns (case, info, the other VCF's
+        argv)."""
+        case, info = world_deletion(self.tmp)
+        seq = info["seq"]
+        recs = [(5, seq[4], other(seq[4]), {"S03": "0|1"})]
+        if deletion_in_genotyped:
+            recs.append(info["rec"])
+        write_vcf(case.vcf, "chr21", recs)
+        sites = os.path.join(self.tmp, "sites.vcf.gz")
+        write_sites_only_vcf(sites, "chr21", [info["rec"]])
+        if sites_first:
+            genotyped, case.vcf = case.vcf, sites
+            return case, info, ["--vcf", genotyped]
+        return case, info, ["--vcf", sites]
+
+    def test_a_sites_only_record_beside_a_genotyped_vcf_lists_no_carrier(self):
+        """R5-F1 (the review's adv_r5a case 1): the record is in the sites-only VCF alone,
+        so its row is the sites-only dataset's and lists no carrier, which CRISPRme
+        documents (CHANGELOG 2.8.1): the row is checked, a non-gating limit-no-genotypes
+        line says its carriers are not, and completeness counts the record. Whichever
+        VCF comes first. A sample it lists carries nothing; a wrong start still fails."""
+        for sites_first in (False, True):
+            case, info, extra = self._mixed(False, sites_first)
+            write_results(case.res, [set_field(info["rows"][0], samples="")])
+            rc, found = case.run(mode="both", extra=extra)
+            self.assertEqual((rc, gating(found)), (0, []), (sites_first, found))
+            lines = [f for f in found if f[1] == "limit-no-genotypes"]
+            self.assertEqual(len(lines), 4, found)   # three blocks, one completeness count
+            self.assertTrue(any("1 indel/MNV record(s) of chr21 are held only by "
+                                "sites-only VCF(s)" in f[2] for f in lines), lines)
+            write_results(case.res, [set_field(info["rows"][0], samples="S01")])
+            rc, found = case.run(extra=extra)
+            self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                             {("carrier-without-indel", "S01")}, (sites_first, found))
+            self.assertIn("only sites-only VCF(s) hold the record", gating(found)[0][2])
+            write_results(case.res, [set_field(info["rows"][0], samples="",
+                                               start=info["start"] + 1)])
+            rc, found = case.run(extra=extra)
+            self.assertIn("start-not-on-variant-sequence", classes(gating(found)), found)
+            self.assertNotIn("limit-no-genotypes", classes(found), found)
+
+    def test_a_record_both_vcfs_hold_keeps_its_genotyped_carriers(self):
+        """R5-F1: a record the genotyped VCF holds too. The genotyped dataset's row lists
+        its carriers, and they are checked (one left off is missing). The sites-only
+        dataset's carrier-less row of it is a limit, and completeness still demands the
+        carriers' own row: a table with only the carrier-less row misses them."""
+        for sites_first in (False, True):
+            case, info, extra = self._mixed(True, sites_first)
+            rc, found = case.run(mode="both", extra=extra)
+            self.assertEqual((rc, found), (0, []), (sites_first, found))
+            write_results(case.res, [set_field(info["rows"][0], samples="S01")])
+            rc, found = case.run(extra=extra)
+            self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                             {("carrier-missing", "S02")}, (sites_first, found))
+            bare = set_field(info["rows"][0], samples="NA")
+            write_results(case.res, [info["rows"][0], bare])
+            rc, found = case.run(mode="both", extra=extra)
+            self.assertEqual((rc, gating(found)), (0, []), found)
+            self.assertTrue(all("demanded by completeness" in f[2] for f in found), found)
+            write_results(case.res, [bare])
+            rc, found = case.run(mode="completeness", extra=extra)
+            self.assertEqual({(f[1], f[3]) for f in gating(found)
+                              if "this target at %d " % info["start"] in f[2]},
+                             {("missing-row", "S01"), ("missing-row", "S02")}, found)
+
+    def test_a_carrier_less_row_of_a_genotyped_record_still_fails(self):
+        """R5-F1: the decision is the record's: a row that lists no carrier for a record
+        only the genotyped VCF holds is no sites-only dataset's row."""
+        case, info = world_deletion(self.tmp)
+        sites = os.path.join(self.tmp, "sites.vcf.gz")
+        write_sites_only_vcf(sites, "chr21", [(5, info["seq"][4], other(info["seq"][4]))])
+        write_results(case.res, [set_field(info["rows"][0], samples="")])
+        rc, found = case.run(extra=["--vcf", sites])
+        self.assertEqual(sorted(f[1] for f in gating(found)), ["no-carrier-listed"] * 3,
+                         found)
+
+    def test_an_earlier_record_of_a_split_site_is_a_note(self):
+        """R5-F1 follow-up, found on the real two-dataset run: the mega index's rows name
+        earlier records of split sites (chr22:25093750 C>G before C>T), which the
+        documented limit says the stores never hold. The record is real and the target
+        reads with it, so naming it is no wrong row: a genotyped VCF's earlier record is a
+        non-gating note (variant-shadowed), and a sites-only VCF's is not read as shadowed
+        at all (which of them the index holds cannot be read off the VCF's order)."""
+        case, info = world_indel_snp(self.tmp)
+        recs = info["recs"]
+        snv = recs[0]
+        later = (snv[0], snv[1], other(snv[2]) if other(snv[2]) != snv[1] else "T", {})
+        geno = [snv, later, recs[1]]
+        write_vcf(case.vcf, "chr21", geno)
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual(sorted(f[1] for f in found), ["variant-shadowed"] * 3, found)
+        write_sites_only_vcf(case.vcf, "chr21", geno)
+        write_results(case.res, [set_field(info["rows"][0], samples="")])
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual(sorted(f[1] for f in found), ["limit-no-genotypes"] * 3, found)
+
+    def test_a_sites_only_datasets_snp_row_is_out_of_the_snp_report(self):
+        """R5-F1 follow-up: beside a genotyped dataset, a sites-only one's SNP rows are
+        population-level rows (a worst-case union, out of scope): the SNP-row report says
+        so in one line per block, and still reads the genotyped dataset's rows."""
+        seq = PRE + GUIDE[:5] + other(GUIDE[5]) + GUIDE[6:] + "TGG" + POST
+        snp = len(PRE) + 6
+        rec = (snp, other(GUIDE[5]), GUIDE[5], {"S01": "1|0"})
+        start = len(PRE)
+        bare = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                          GUIDE + "TGG", "TGG", 0, 0, "X", tok("chr21", rec), "")
+        case = Case(self.tmp, seq, [(5, seq[4], other(seq[4]), {"S03": "0|1"})], [bare])
+        sites = os.path.join(self.tmp, "sites.vcf.gz")
+        write_sites_only_vcf(sites, "chr21", [rec])
+        rc, found = case.run(extra=("--snp-rows", "report", "--vcf", sites))
+        self.assertEqual(sorted(f[1] for f in found), ["limit-no-genotypes"] * 3, found)
+        self.assertIn("population-level one", found[0][2])
+        write_vcf(case.vcf, "chr21", [rec])   # the genotyped dataset holds it, S01 carries
+        listed = set_field(bare, samples="S01")
+        write_results(case.res, [listed])
+        rc, found = case.run(extra=("--snp-rows", "report", "--vcf", sites))
+        self.assertEqual((rc, found), (0, []), found)
+
+    # --- R5-F2: "no worse" is the merge's whole sort key ------------------------ #
+    def _two_targets_one_site(self):
+        """The review's adv_r5b world: one deletion's site holds a 24-mer (0 mm + 1 DNA
+        bulge: 1 edit, 0 mm) and a 23-mer (1 mm: 1 edit, 1 mm) with the same variants and
+        carriers, so the merge folds them, and its fewest file, sorted on mm+bulges and
+        then mm (crisprme.py's default --sorting-criteria), keeps the 24-mer."""
+        core = "AC" + "C" + GUIDE[2:12] + "G" + GUIDE[12:] + "TGG"
+        seq = PRE + core + POST
+        dpos1 = len(PRE) + 13
+        anchor0 = dpos1 - 1
+        rec = (dpos1, seq[anchor0] + "G", seq[anchor0], {"S01": "1|0", "S02": "0|1"})
+        var = tok("chr21", rec)
+        hap = seq[:anchor0 + 1] + seq[anchor0 + 2:]
+        full = GUIDE + "NRG"
+        als = ([(len(PRE), a) for a in C.align_pairs(full, hap[len(PRE):len(PRE) + 24],
+                                                     4, 1, 1, 6, 3, False)]
+               + [(len(PRE) + 1, a) for a in C.align_pairs(
+                   full, hap[len(PRE) + 1:len(PRE) + 24], 4, 1, 1, 6, 3, False)])
+        cfd = C.Cfd(C.default_cfd_dir())
+
+        def few_key(x):
+            _s, (_sa, _ta, mm, dn, rn) = x
+            return (mm + dn + rn, mm)
+
+        def cfd_key(x):
+            _s, (sa, ta, mm, dn, rn) = x
+            return (-C.cfd3(cfd.score(sa, ta, 3)), mm + dn + rn, mm)
+
+        def block(x):
+            start, (sa, ta, mm, dn, rn) = x
+            ref = list(seq[start:start + len(ta.replace("-", ""))])
+            for i, ch in enumerate(ta):
+                if ch == "-":
+                    ref.insert(i, "-")
+            bt = ",".join(t for t, c in (("RNA", rn), ("DNA", dn)) if c) or "X"
+            return row_fields("chr21", start, "+", sa.replace("NRG", "NNN"), "".join(ref),
+                              mark(sa, ta), ta[-3:], mm, dn + rn, bt, var, "S01,S02")
+        right_few = min(als, key=few_key)
+        right_cfd = min(als, key=cfd_key)
+        tied = [x for x in als if few_key(x)[0] == few_key(right_few)[0]
+                and few_key(x) > few_key(right_few)]
+        return seq, rec, block, right_few, right_cfd, tied
+
+    def test_a_fewest_block_worse_by_the_next_sorting_criterion_is_caught(self):
+        """R5-F2 (adv_r5b): the fewest-mm+b block holds the 23-mer, tied with the 24-mer
+        on mm+bulges and worse on mm. The merge's next key decides, so the 24-mer is lost
+        (and the 22-mer the site's RNA-bulge alignment holds, which folds there too). With
+        --sorting-criteria mm+bulges alone the tie is the merge's to keep."""
+        seq, rec, block, right_few, right_cfd, tied = self._two_targets_one_site()
+        self.assertEqual((right_few[0], right_few[1][2:]), (len(PRE), (0, 1, 0)))
+        self.assertEqual(tied[0][1][2:], (1, 0, 0))
+        case = Case(self.tmp, seq, [rec], [blocks_row([block(right_cfd), block(right_few),
+                                                       block(right_cfd)])])
+        rc, found = case.run(mode="both")
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        write_results(case.res, [blocks_row([block(right_cfd), block(tied[0]),
+                                             block(right_cfd)])])
+        rc, found = case.run(mode="completeness")
+        hits = [f for f in gating(found) if "this target at %d " % len(PRE) in f[2]]
+        self.assertEqual(sorted((f[1], f[3]) for f in hits),
+                         [("missing-best-alignment", "S01"),
+                          ("missing-best-alignment", "S02")], found)
+        self.assertIn("fewest-mm+b block of 1 mm+bulges, 1 mm, the target 1 mm+bulges, "
+                      "0 mm (worse by the merge's next sorting criterion", hits[0][2])
+        with open(os.path.join(case.res, ".command_line.txt"), "w") as fh:
+            fh.write("crisprme.py complete-search --sorting-criteria mm+bulges\n")
+        rc, found = case.run(mode="completeness")
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_cfd_tie_is_broken_by_the_sorting_criteria(self):
+        """R5-F2: the CFD file sorts on the CFD at three decimals, then on the sorting
+        criteria: a fold group whose highest-CFD block ties the target's best CFD at
+        three decimals with more edits than the target's alignment of that CFD has kept
+        the worse; one of a higher CFD, or within a rounding step of a boundary, has
+        not."""
+        reported = C.Reported([], argparse_ns_ctx(), criterion="mm+bulges,mm")
+
+        def entry(block, mm, bul, cfd):
+            return C.Entry({"block": block, "mm": str(mm), "bulges": str(bul),
+                            "cfd": "%.6f" % cfd, "crrna": "", "alt": ""}, frozenset(), 0)
+        d = C.Best(C.edits(2, 0), 0.5001)
+        d.add(C.edits(4, 0), 0.4)
+        few = entry("fewest_mm+b", 2, 0, 0.5001)
+        self.assertIsNone(reported.worse([few, entry("highest_CFD", 2, 0, 0.5001)], d))
+        why = reported.worse([few, entry("highest_CFD", 2, 1, 0.5003)], d)
+        self.assertIn("a tie at three decimals, which the merge breaks on "
+                      "--sorting-criteria mm+bulges,mm", why)
+        self.assertIsNone(reported.worse([few, entry("highest_CFD", 3, 1, 0.501)], d))
+        d2 = C.Best(C.edits(2, 0), 0.5005)   # prints 0.500 or 0.501: not surely a tie
+        self.assertIsNone(reported.worse([few, entry("highest_CFD", 3, 1, 0.5005)], d2))
+        # a summary of several alignments gives no key: only real alignments do
+        d3 = C.Demand("exact", [], C.edits(0, 0), 0.9, 0)
+        self.assertEqual(d3.keys, set())
+
+    # --- R5-F4: a fold across strands loses a target ---------------------------- #
+    def test_a_fold_across_strands_is_a_lost_target(self):
+        """R5-F4: a deletion makes one 23-mer that reads as a target on both strands at
+        one Cluster Position (a perfect + target, a 1-mismatch - target) with the same
+        variants and carriers. CRISPRme's fold key holds no strand, so a merge that
+        folds them keeps one row for two targets: the other strand's is reported lost,
+        not accepted as an alignment of the kept one."""
+        x = "CCAGTACGATCAGATCGTACTGG"     # x and rc(x) differ at their 12th base only
+        g = x[:20]
+        seq = PRE + x[:15] + "G" + x[15:] + POST
+        s = len(PRE)
+        rec = (s + 15, x[14] + "G", x[14], {"S01": "1|0", "S02": "0|1"})
+        var = tok("chr21", rec)
+        ref = seq[s:s + 23]
+        plus = row_fields("chr21", s, "+", g + "NNN", ref, x, "TGG", 0, 0, "X", var,
+                          "S01,S02", spacer=g + "NNN")
+        minus = row_fields("chr21", s, "-", g + "NNN", C.rc(ref), mark(g + "NNN", C.rc(x)),
+                           "TGG", 1, 0, "X", var, "S01,S02", spacer=g + "NNN")
+        case = Case(self.tmp, seq, [rec], [plus, minus])
+        budget = ("1", "0", "0", "1")
+        rc, found = case.run(mode="both", budget=budget, guide=g)
+        self.assertEqual((rc, found), (0, []), found)
+        write_results(case.res, [plus])
+        rc, _found = case.run(mode="completeness", budget=budget, guide=g)
+        lines = read_tsv(os.path.join(self.tmp, "fail.tsv"))
+        self.assertEqual(rc, 1, lines)
+        self.assertEqual(sorted((r["class"], r["strand"], r["samples"]) for r in lines),
+                         [("missing-row", "-", "S01"), ("missing-row", "-", "S02")], lines)
+
+    # --- R5-F5: the read windows ---------------------------------------------------- #
+    def test_the_cluster_chain_reads_the_records_it_reaches(self):
+        """R5-F5.1: a population-level cluster chains through a gap only the SNVs of the
+        enriched genome bridge; a window that stops before them (a tile's) is read again
+        as far as the chain can reach."""
+        seq = "A" * 50 + "G" * 400 + "ATAT" + "G" * 400 + "A" * 50
+        tmp = self.tmp
+        vcf = os.path.join(tmp, "v.vcf.gz")
+        write_vcf(vcf, "chr21", [(p + 1, seq[p], "G", {"S01": "0|1"})
+                                 for p in range(450, 454)])
+        import argparse
+        ns = argparse.Namespace(mm=0, bdna=0, brna=0, max_total_edits=0)
+        ctx = C.Ctx(ns, "NGG", 3, False, ["G" * 20], None)
+        win = C.Window(seq, "chr21", 0, 440, [C.Vcf(vcf)])
+        self.assertEqual(win.snv_at, {})
+        members = C.cluster_chain(win, ctx, "G" * 20, 300, 3)
+        self.assertGreater(max(members), 454 + 300, members[-5:])
+
+    def test_a_long_ref_an_unindexed_read_meets_is_listed(self):
+        """R5-F5.2: without a .tbi a read starts Vcf.LONGEST before its region, so a
+        longer deletion that starts further before is not read there: completeness lists
+        each VCF whose reads met such a record (its own coverage gap, non-gating); with a
+        .tbi there is nothing to list."""
+        import random
+        rnd = random.Random(7)
+        dele = "".join(rnd.choice("ACGT") for _ in range(1500))
+        seq = PRE + GUIDE[:10] + dele + GUIDE[10:] + "TGG" + POST + LONG
+        a = len(PRE) + 9
+        drec = (a + 1, GUIDE[9] + dele, GUIDE[9], {"S01": "1|0"})
+        s = len(PRE)
+        row = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23], GUIDE + "TGG", "TGG",
+                         0, 0, "X", tok("chr21", drec), "S01")
+        case = Case(self.tmp, seq, [drec], [row])
+        bg = os.path.join(self.tmp, "idx.vcf.gz")
+        write_bgzf_tabix(bg, vcf_text("chr21", [drec]))
+        case.vcf = bg
+        old = C.Vcf.LONGEST
+        try:
+            C.Vcf.LONGEST = 1000
+            rc, found = case.run(mode="both", budget=("0", "0", "0", "0"))
+            self.assertEqual((rc, gating(found)), (0, []), found)
+            self.assertNotIn("coverage-unindexed-long-ref", classes(found))
+            os.remove(bg + ".tbi")
+            rc, found = case.run(mode="both", budget=("0", "0", "0", "0"))
+            self.assertEqual((rc, gating(found)), (0, []), found)
+            lines = [f for f in found if f[1] == "coverage-unindexed-long-ref"]
+            self.assertEqual(len(lines), 1, found)
+            self.assertIn("holds a record whose REF spans 1501 bp", lines[0][2])
+        finally:
+            C.Vcf.LONGEST = old
+
+
+def argparse_ns_ctx():
+    """A Ctx for Reported (a 3' NGG PAM, no CFD tables: rows keep their printed CFD)."""
+    import argparse
+    ns = argparse.Namespace(mm=4, bdna=1, brna=1, max_total_edits=6)
+    return C.Ctx(ns, "NRG", 3, False, [GUIDE], None)
+
+
+def read_tsv(path):
+    with open(path) as fh:
+        head = fh.readline().rstrip("\n").split("\t")
+        return [dict(zip(head, line.rstrip("\n").split("\t"))) for line in fh]
 
 
 def open_findings(_rc, tmp):

@@ -95,7 +95,10 @@ TWO MODES.
     * its REF text is the reference read from the start, gapped as the target;
     * every listed carrier is a sample of the panel (--samples) and holds it, and no
       carrier is missing (CARRIERS).
-  An ALT-origin block that names no variant is reported (alt-without-variant).
+  An ALT-origin block that names no variant is reported (alt-without-variant). A row that
+  names an earlier SNP record of a split site, which the documented limit says CRISPRme's
+  stores do not hold, is a note (variant-shadowed, non-gating): the record is real and the
+  target is checked with it.
 
   COMPLETENESS (no real indel off-target is missed -- the real-data brute force). For
   every indel and MNV record of the VCF in the checked region: each carrier's haplotypes
@@ -155,7 +158,18 @@ the merge of ``remove_contiguous_samples.py``).
   named variants, or whose strongest PUTATIVE target it is, fails when the row omits it,
   unless the documented view leaves it off (a limit). The merge never moves a carrier off
   its sequence's row (same position, variants and aligned target merge carriers; equal
-  carrier sets fold to the best alignment), so the row itself must list it.
+  carrier sets fold to the best alignment), so the row itself must list it. A
+  SITES-ONLY VCF (eight columns, no sample) genotypes nobody, and a sites-only dataset's
+  rows list no carrier (CHANGELOG 2.8.1; its post-analysis is the population-level one, its
+  rows the worst case of each window): so a row that lists no carrier for a record a
+  sites-only VCF holds is that dataset's, and its strings, target and variants are checked,
+  its carriers not (limit-no-genotypes, one line per row block). The decision is the
+  record's, not the run's: beside a genotyped dataset, as the default index with
+  hg38_mega, the genotyped dataset's rows list their carriers and are checked as above, and
+  a record both hold is demanded for its genotyped carriers by completeness. A row that
+  lists no carrier for a record no sites-only VCF holds fails (no-carrier-listed), and a
+  sample listed for a record only sites-only VCFs hold carries nothing
+  (carrier-without-indel).
 
   Merge (completeness). The pipeline clusters a guide's rows on a chromosome with Cluster
   Positions within --merge bp (3) of the previous, chained, whatever the strand.
@@ -164,18 +178,26 @@ the merge of ``remove_contiguous_samples.py``).
   one), which every alignment of one PAM site shares. Inside a cluster, variant rows of
   one (Cluster Position, variant list) -- and for an indel/MNV row one aligned target --
   merge their carriers, and the rows of one site, variant list and carrier set fold into
-  the best of them by each file's order: the first sorting criterion (mm+bulges by
-  default) in the fewest-mm+b block, the CFD in the highest-CFD block (as the analysis
-  writes it, to three decimals). Two alignments of one target share its start, variants,
-  carriers and site, so they always fold. The site is the cluster position on the
-  haplotype carrying the record: the Cluster Position plus the rank of the row's first
-  base among the bases an insertion adds (0 on any other base), as the fix branch's merge
-  compares rows that start inside one insertion (c3a75fe; at d7a6fff it compared the
-  Cluster Position alone, which folds two targets of one insertion). A fold group is
-  NO WORSE than a target when its fewest-mm+b block has no more edits than the target's
-  best alignment by the first sorting criterion, and its highest-CFD block, its CFD
-  recomputed from its own aligned strings, scores at least the target's best CFD at the
-  three decimals the merge sorts on. So a (sample, target) is satisfied by a row reporting
+  the first of them in each file's order: the fewest file sorts on the sorting criteria in
+  turn (--sorting-criteria, crisprme.py's default mm+bulges,mm), the CFD file on the CFD
+  (as the analysis writes it, to three decimals) and then on the same criteria
+  (merge_close_targets_cfd.sh hands both files --sorting-criteria). Two alignments of one
+  target share its start, variants, carriers and site, so they always fold. The site is the
+  cluster position on the haplotype carrying the record: the Cluster Position plus the
+  rank of the row's first base among the bases an insertion adds (0 on any other base), as
+  the fix branch's merge compares rows that start inside one insertion (c3a75fe; at
+  d7a6fff it compared the Cluster Position alone, which folds two targets of one
+  insertion). CRISPRme's fold key holds no strand, while the alignments of one target
+  share theirs: rows of the other strand are other targets, which a fold across strands
+  would lose, so a fold group is taken on one strand. A fold group is NO WORSE than a
+  target when its fewest-mm+b block's key under the sorting criteria is at most the least
+  key of the target's alignments, and its highest-CFD block, its CFD recomputed from its
+  own aligned strings, scores at least the target's best CFD at the three decimals the
+  merge sorts on -- and, where the two surely print the same three decimals, has a key no
+  greater than the least key of the target's alignments of that CFD. (Not compared: the
+  merge's keys after the criteria -- the Cluster Position, the carrier count, the aligned
+  text -- which only order alignments equal in all of these.) So a (sample, target) is
+  satisfied by a row reporting
   exactly it with its variants whose fold group (the rows of its site naming those
   variants with its carrier set) is no worse than it, or by the rows of its site naming
   the same variants whose carrier set is the target's own as CRISPRme writes it (every
@@ -188,8 +210,11 @@ the merge of ``remove_contiguous_samples.py``).
   a target is the integrated row with a block within --merge bp of its Cluster Position,
   or of one the in-budget alignments of the enriched reference (the SNP alleles its stores
   hold: the last record of a split site) and of the record's window chain to it, each
-  within --merge bp of the next; there is no other fallback. That row must be as good as
-  the target in both blocks. A row's CFD is always recomputed from its aligned strings:
+  within --merge bp of the next (every record the chain reaches is read, up to 3 kb
+  either side); there is no other fallback. That row must be as good as the target in
+  both blocks: no more edits by the first sorting criterion (the merge picks between a
+  cluster's reference and variant rows on mm+bulges, or the CFD, alone) and at least its
+  CFD. A row's CFD is always recomputed from its aligned strings:
   the merge sorts on the CFD of a row's own alignment (CFD_score_ALT), while CFD_score
   prints the higher of its REF and ALT scores.
 
@@ -197,12 +222,17 @@ LIMITS (non-gating, counted per class, one TSV line per row block or per (record
 target)): limit-last-alt-wins, limit-two-indels, limit-overlapping-records,
 limit-putative-carrier (all above), limit-contig-end (a record within one target of a
 contig's end, or a row whose REF text runs past it), limit-n-bases (a stretch of N in a
-record's window: no target is aligned across it), limit-no-genotypes (a sites-only VCF:
-the rows themselves are checked, no carrier), and in the SNP-row report
-limit-snp-row-indel and limit-snp-row-unphased. One non-gating class is this checker's
-own COVERAGE GAP, not a CRISPRme limit: coverage-putative-cap (a carrier with more than
-10 positions of unknown phase within a target's reach of a record: its targets that touch
-one are not enumerated, 2^k haplotypes each).
+record's window: no target is aligned across it), limit-no-genotypes (a row of a
+sites-only dataset, which lists no carrier: the row itself is checked, one line per
+block; and in completeness one line per chromosome counting the records only sites-only
+VCFs hold, which no sample carries), and in the SNP-row report limit-snp-row-indel and
+limit-snp-row-unphased; variant-shadowed is a note. Two non-gating classes are this
+checker's own COVERAGE GAPS, not CRISPRme limits: coverage-putative-cap (a carrier with
+more than 10 positions of unknown phase within a target's reach of a record: its targets
+that touch one are not enumerated, 2^k haplotypes each) and coverage-unindexed-long-ref
+(a VCF read without a .tbi holds a record whose REF is longer than the 20 kb an unindexed
+read looks back: a deletion that long, starting further before a region, is not read
+there; give the VCF a .tbi).
 Rows on a chromosome no VCF covers, or with no reference sequence, and table lines shorter
 than their header are reported (gating): nothing is skipped silently.
 
@@ -221,7 +251,13 @@ stands for no demand of another.
 VCF ACCESS. A .tbi beside a VCF makes every read a seek. Without one, each VCF is read
 once into an in-memory block index (nothing is written), which costs one decompression of
 the file; a canonical install (one VCF per chromosome, 28 GB) is then feasible with
---jobs. ``--jobs N`` splits the work by region over N processes.
+--jobs. An unindexed read starts 20 kb before its region, so give a .tbi for a panel
+with deletions longer than that (HPRC's chr22 has 582; completeness lists each VCF whose
+reads met one, coverage-unindexed-long-ref). Several VCFs are read as one panel: a
+genotyped one beside a sites-only one is the default index with hg38_mega. A sites-only
+VCF's split sites are not read as shadowed: CRISPRme's mega index holds earlier records
+of some (its rows name them), so which it holds cannot be read off the VCF's order.
+``--jobs N`` splits the work by region over N processes.
 """
 
 import argparse
@@ -443,6 +479,7 @@ class Vcf(object):
 
     def __init__(self, path):
         self.path = path
+        self.long_ref = 0      # the longest REF an unindexed read met (0: none longer)
         self.samples = []
         self.contigs = set()
         self.tbi = None
@@ -586,6 +623,10 @@ class Vcf(object):
                 if r == "past":
                     break
                 if r:
+                    if len(r["ref"]) > self.LONGEST:
+                        # such a deletion is not read where a region starts more than
+                        # LONGEST after it: noted (coverage-unindexed-long-ref)
+                        self.long_ref = max(self.long_ref, len(r["ref"]))
                     yield r
         finally:
             bg.close()
@@ -828,6 +869,7 @@ class Window(object):
         self.end = end
         self.needed = needed
         self.panel = panel
+        self.vcfs = vcfs
         self.samples = []
         self.alleles = []
         self.by_key = defaultdict(list)
@@ -835,6 +877,7 @@ class Window(object):
         self.line_hi = []
         self.line_alleles = []  # line id -> [Allele or None per ALT]
         self.calls = []         # line id -> {sample: (allele numbers, phased)}
+        self.line_sites_only = []  # line id -> whether its VCF has no sample columns
         self.shadowed = set()
         self.untied = set()
         self.snv_at = defaultdict(list)  # reference coordinate -> SNV alleles there
@@ -866,6 +909,7 @@ class Window(object):
                 self.line_hi.append(hi)
                 self.line_alleles.append(als)
                 self.calls.append(parse_calls(r["format"], r["tail"], names))
+                self.line_sites_only.append(not v.samples)
                 for a in als:
                     if a is None:
                         continue
@@ -879,7 +923,11 @@ class Window(object):
                     if len(snvs) > 1:
                         self._untie(lid)
             for lids in snv_lines.values():
-                if len(lids) < 2:
+                if len(lids) < 2 or not v.samples:
+                    # a sites-only VCF's split sites are not read as shadowed: the mega
+                    # index CRISPRme ships holds earlier records of some (its rows name
+                    # them, as chr22:25093750 C>G before C>T), so which ones it holds
+                    # cannot be read off the order of the VCF given
                     continue
                 last = {a.key for a in self.line_alleles[lids[-1]] if a is not None}
                 for lid in lids[:-1]:
@@ -929,6 +977,15 @@ class Window(object):
 
     def call(self, allele, sample):
         return self.calls[allele.line].get(sample)
+
+    def sites_only(self, key):
+        """Whether a sites-only VCF (no sample columns) holds the record ``key``: the
+        rows a sites-only dataset gives of it list no carrier (CHANGELOG 2.8.1)."""
+        return any(self.line_sites_only[a.line] for a in self.by_key.get(key, ()))
+
+    def genotyped(self, key):
+        """Whether a VCF with sample columns holds the record ``key``."""
+        return any(not self.line_sites_only[a.line] for a in self.by_key.get(key, ()))
 
     def carriers(self, allele):
         """The samples whose call holds the allele on some slot."""
@@ -1435,14 +1492,16 @@ def result_tables(resdir):
 
 
 def run_kind(resdir):
-    """(analysis mode, alternative alignments written, merge window, first sorting
-    criterion of the fewest block, total-edits cap or None) of a run, from its own
-    markers. A population-level run writes no alternative alignments by design, nor does
-    a run made with --ci-cd-test (the documented chr22 self-test): both keep one row per
-    cluster (.alt_mode = no-alt-alignments). The cap is the one the search used
-    (.Params.txt's Max_total_edits, else --max-total-edits in .command_line.txt)."""
+    """(analysis mode, alternative alignments written, merge window, the sorting
+    criteria of the fewest block (--sorting-criteria, crisprme.py's default
+    'mm+bulges,mm' when the command line gives none), total-edits cap or None) of a run,
+    from its own markers. A population-level run writes no alternative alignments by
+    design, nor does a run made with --ci-cd-test (the documented chr22 self-test): both
+    keep one row per cluster (.alt_mode = no-alt-alignments). The cap is the one the
+    search used (.Params.txt's Max_total_edits, else --max-total-edits in
+    .command_line.txt)."""
     mode = alt = cap = None
-    merge, criterion = 3, "mm+bulges"
+    merge, criterion = 3, "mm+bulges,mm"
     p = os.path.join(resdir, ".alt_mode")
     if os.path.exists(p):
         with open(p) as fh:
@@ -1461,7 +1520,7 @@ def run_kind(resdir):
             merge = int(m.group(1))
         m = re.search(r"--sorting-criteria\s+(\S+)", v)
         if m:
-            criterion = m.group(1).split(",")[0]
+            criterion = m.group(1)
         m = re.search(r"--max-total-edits\s+(-?\d+)", v)
         if m:
             cap = int(m.group(1))
@@ -1681,9 +1740,12 @@ def named_alleles(row, win, rep, gating):
             return None
         if any(x in win.shadowed for x in found) and not any(
                 x not in win.shadowed for x in found):
-            rep.add(gating, "variant-shadowed", row,
-                    "%s is an earlier SNP record of a split site, which CRISPRme's stores "
-                    "never hold" % t)
+            # the record is real, so the row is not wrong for naming it (its target is
+            # checked against it); what it contradicts is a documented limit: a note
+            rep.add(False, "variant-shadowed", row,
+                    "%s is an earlier SNP record of a split site, which the documented "
+                    "limit says CRISPRme's stores do not hold (CHANGELOG 2.8.1 Known "
+                    "limits): this index holds it" % t)
         named.append(found[0])
     return named
 
@@ -2266,6 +2328,10 @@ def carrier_verdict(win, ctx, tgt, sample, listed, lids):
     tv = truth(win, tgt, sample, lids)
     kind = tv[0]
     if kind == "none":
+        if listed and not win.genotyped(tgt.main.key):
+            return (True, "carrier-without-indel",
+                    "only sites-only VCF(s) hold the record: nobody's genotype carries it, "
+                    "and a sites-only dataset's rows list no carrier")
         return (True, "carrier-without-indel") if listed else None
     if kind == "exact":
         holds, info = tv[1], tv[2]
@@ -2365,10 +2431,21 @@ def check_row(row, win, ctx, rep, gating=True):
             rep.add(gating, "variant-outside-target", row,
                     "%s changes no base of the target (%d..%d)"
                     % (a.token(win.chrom), tgt.span[0], tgt.span[1]))
-    if not win.samples:
-        return  # a sites-only VCF: no genotype to judge a carrier by (noted once by main)
     samples = samples_of(row)
+    tok = main.token(win.chrom)
     if not samples:
+        if win.sites_only(main.key):
+            # a row of a sites-only dataset (no genotypes): CRISPRme documents no carrier
+            # on it, so its strings, target and variants are all there is to check. The
+            # decision is the record's, not the run's: beside a genotyped dataset (the
+            # default index with hg38_mega) that dataset's rows still list carriers
+            rep.add(False, "limit-no-genotypes", row,
+                    "%s is a record of a sites-only VCF (no sample columns), whose "
+                    "dataset's rows list no carrier (CHANGELOG 2.8.1): the row's strings, "
+                    "target and variants are checked, no carrier is%s"
+                    % (tok, "; the record's carriers in the genotyped VCF(s) are "
+                            "demanded by completeness" if win.genotyped(main.key) else ""))
+            return
         rep.add(gating, "no-carrier-listed", row, "the row lists no carrier")
         return
     lids = local_lines(win, tgt)
@@ -2394,7 +2471,6 @@ def check_row(row, win, ctx, rep, gating=True):
             out[v[:2]].append(s)
             if len(v) > 2 and v[2]:
                 why[v[:2]].add(v[2])
-    tok = main.token(win.chrom)
     for (g, cls), who in sorted(out.items(), key=lambda kv: kv[0][1]):
         extra = sorted(why.get((g, cls), ()))
         detail = "%d sample(s) %s%s: %s" % (
@@ -2410,12 +2486,22 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
     strings, its target, every listed carrier, and the carriers it leaves out -- a sample
     whose phased slot holds exactly the named SNPs inside the target is listed on a row
     of this site naming them (``snp_listed``: (guide, chromosome, Cluster Position,
-    variants) -> the samples SNP rows there list; such rows merge their carriers)."""
+    variants) -> the samples SNP rows there list; such rows merge their carriers). A row
+    that lists no carrier and names only records a sites-only VCF holds is a sites-only
+    dataset's, whose SNP post-analysis is the population-level one whatever the search's
+    mode (CHANGELOG 2.8.1): a worst-case union, out of scope, so one line says so."""
     if not alignment_checks(row, ctx, rep, False):
         return
     ref_text_check(row, win, rep, False)
     named = named_alleles(row, win, rep, False)
     if named is None:
+        return
+    if not samples_of(row) and named and all(win.sites_only(a.key) for a in named):
+        rep.add(False, "limit-no-genotypes", row,
+                "a SNP row of a sites-only dataset (no carrier; %s held by a sites-only "
+                "VCF): its post-analysis is the population-level one, a documented "
+                "worst-case union, which the SNP-row report leaves out"
+                % ",".join(a.token(win.chrom) for a in named))
         return
     hap = None
     stripped = row["alt"].replace("-", "").upper()
@@ -2528,21 +2614,27 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
 # --------------------------------------------------------------------------- #
 class Best(object):
     """The best of a target's alignments: ``best`` the fewest mismatches+bulges,
-    mismatches and bulges (each on its own), ``cfd`` the highest CFD (None without CFD):
-    what the rows standing for the target after the merge must match."""
+    mismatches and bulges (each on its own), ``cfd`` the highest CFD (None without CFD),
+    and ``keys`` every alignment's (mismatches, bulges, CFD), which the merge's sort keys
+    are read from: what the rows standing for the target after the merge must match.
+    ``real`` is False for a summary of several alignments (its minima are no one
+    alignment's, so they give no key)."""
 
-    __slots__ = ("best", "cfd")
+    __slots__ = ("best", "cfd", "keys")
 
-    def __init__(self, best, cfd):
+    def __init__(self, best, cfd, real=True):
         self.best = dict(best)
         self.cfd = cfd
+        self.keys = {(best["mm"], best["bulges"], cfd)} if real else set()
 
-    def add(self, best, cfd):
+    def add(self, best, cfd, real=True):
         for c, v in best.items():
             if v < self.best[c]:
                 self.best[c] = v
         if cfd is not None and (self.cfd is None or cfd > self.cfd):
             self.cfd = cfd
+        if real:
+            self.keys.add((best["mm"], best["bulges"], cfd))
 
 
 class Demand(Best):
@@ -2556,7 +2648,7 @@ class Demand(Best):
     __slots__ = ("kind", "alts", "k", "own", "aligned")
 
     def __init__(self, kind, alts, best, cfd, k):
-        Best.__init__(self, best, cfd)
+        Best.__init__(self, best, cfd, real=False)   # add_alt notes each alignment
         self.kind = kind
         self.alts = alts  # [(Target, variant tokens frozenset)]
         self.k = k
@@ -2568,13 +2660,14 @@ class Demand(Best):
         return self.best["mm+bulges"]
 
     def add(self, best, cfd, k=None):
-        Best.add(self, best, cfd)
+        Best.add(self, best, cfd, real=False)
         if k is not None:
             self.k = min(self.k, k)
 
     def add_alt(self, t, toks, best, cfd):
         """One alignment of alternative ``t`` (its own best, and the demand's)."""
         key = (t.strand, t.start, t.probe, toks)
+        self.keys.add((best["mm"], best["bulges"], cfd))
         b = self.own.get(key)
         if b is None:
             self.own[key] = Best(best, cfd)
@@ -2600,10 +2693,12 @@ def edits(mm, bulges):
     return {"mm+bulges": mm + bulges, "mm": mm, "bulges": bulges}
 
 
-def completeness(win, ctx, rep, reported, region, popmode):
-    """The real-data brute force over the indel and MNV records of ``region``."""
+def completeness(win, ctx, rep, reported, region, popmode, stats=None):
+    """The real-data brute force over the indel and MNV records of ``region``. ``stats``
+    counts the records only sites-only VCFs hold (no sample carries them: nothing to
+    demand, and they are counted, not skipped in silence)."""
     lo_r, hi_r = region
-    for guide in ctx.guides:
+    for gi, guide in enumerate(ctx.guides):
         full = ctx.full(guide)
         one = len(full) + max(ctx.bdna, ctx.brna) + 2   # one target and its bulges
         reach = 2 * one + 20
@@ -2616,6 +2711,8 @@ def completeness(win, ctx, rep, reported, region, popmode):
             for a in win.by_key[al.key]:
                 carriers.update(win.carriers(a))
             if not carriers:
+                if gi == 0 and stats is not None and not win.genotyped(al.key):
+                    stats["sites_only"] = stats.get("sites_only", 0) + 1
                 continue
             lo = max(0, al.lo - reach)
             hi = min(len(win.refseq), al.hi + reach)
@@ -3038,8 +3135,8 @@ def resolve(win, ctx, rep, reported, al, carriers, lids, demands, demand_of, pop
                     if fold_sets[fk] not in sets:
                         sets.append(fold_sets[fk])
                 for cm, pm in sets:
-                    ok, why = reported.folded(guide, s, hcl, toks, cm | set(who), pm,
-                                              d.best_of(t, toks), first_k)
+                    ok, why = reported.folded(guide, s, hcl, t.strand, toks, cm | set(who),
+                                              pm, d.best_of(t, toks), first_k)
                     if ok:
                         hit = True
                         break
@@ -3266,10 +3363,19 @@ def cluster_chain(win, ctx, guide, c0, merge, step=150, most=3000):
     window grows while the chain reaches its edge (up to ``most`` bp either side)."""
     full = ctx.full(guide)
     lo, hi = c0 - step, c0 + step
+    wide = False
     while True:
         cps = set()
         a = max(0, lo - len(full) - 10)
         b = min(len(win.refseq), hi + len(full) + 10)
+        if not wide and (win.needed is not None or a < win.beg or b > win.end):
+            # the chain reaches past what the window read (a tile's reads a pad around
+            # the tile): every record it can still reach is read, once
+            wide = True
+            win = Window(win.refseq, win.chrom,
+                         min(win.beg, max(0, c0 - most - step - len(full) - 10)),
+                         max(win.end, c0 + most + step + len(full) + 10), win.vcfs,
+                         panel=win.panel)
         for sets, places in enriched_windows(win, a, b):
             cps |= feasible_cps(ctx, full, sets, places)
         members = chain_from(c0, cps, merge)
@@ -3319,6 +3425,23 @@ def cfd_below(a, b):
     return cfd3(a + 1e-9) < cfd3(b - 1e-9) and b - a > 1e-9
 
 
+def cfd_same(a, b):
+    """Whether CFDs ``a`` and ``b`` surely print the same three decimals (neither within
+    1e-9 of a rounding boundary): only then does the merge's CFD file go on to its next
+    sort key for them."""
+    return len({cfd3(a - 1e-9), cfd3(a + 1e-9), cfd3(b - 1e-9), cfd3(b + 1e-9)}) == 1
+
+
+def crit_key(crits, mm, bulges):
+    """An alignment's key in the merge's sort on the sorting criteria ``crits``."""
+    e = edits(mm, bulges)
+    return tuple(e[c] for c in crits)
+
+
+def crit_text(crits, key):
+    return ", ".join("%d %s" % (v, c) for v, c in zip(key, crits))
+
+
 def row_first_k(win, row):
     """The rank of a reported row's first base among the bases its insertion adds (0 when
     it is any other base), read from the row's own target on the reference with its named
@@ -3360,7 +3483,7 @@ class Reported(object):
     guide -- its carriers, its Cluster Position, its block's edits and CFD -- and every
     integrated line's clusters, edits and CFD (runs with one row per cluster)."""
 
-    def __init__(self, rows, ctx, loci=None, merge=3, criterion="mm+bulges"):
+    def __init__(self, rows, ctx, loci=None, merge=3, criterion="mm+bulges,mm"):
         self.exact = set()
         self.exact_any = set()           # (guide, sample, strand, start, + reading)
         self.by_var = defaultdict(list)  # (guide, variants) -> [Entry]
@@ -3368,10 +3491,15 @@ class Reported(object):
         self.at = set()                  # (guide, sample, cluster, record token)
         self.ctx = ctx
         self.merge = merge
-        self.criterion = (criterion if criterion in ("mm+bulges", "mm", "bulges")
-                          else "mm+bulges")
+        # the sorting criteria, in order: the merge sorts the fewest file on them and the
+        # CFD file on the CFD, then on them (merge_close_targets_cfd.sh hands both files
+        # --sorting-criteria); the first alone is compared where the reference row and
+        # the variant row of one cluster are chosen between (on mm+bulges or CFD only)
+        self.criteria = tuple(c for c in criterion.split(",")
+                              if c in ("mm+bulges", "mm", "bulges")) or ("mm+bulges", "mm")
+        self.criterion = self.criteria[0]
         self._k = {}
-        self._groups = {}                # (guide, variants) -> {(carriers, site): [Entry]}
+        self._groups = {}   # (guide, variants) -> {(strand, carriers, site): [Entry]}
         self.loci = {}
         for gk, lines in (loci or {}).items():
             pos = sorted((c, k) for k, ln in enumerate(lines) for c in ln[1])
@@ -3407,18 +3535,21 @@ class Reported(object):
             self._k[key] = row_first_k(win, row)
         return self._k[key]
 
-    def group(self, guide, var, carriers, site, first_k):
-        """The rows the merge folds into one entry: those naming ``var`` with the carrier
-        set ``carriers`` whose target starts at haplotype cluster position ``site`` (a row
-        whose target is not at its own start belongs to none)."""
+    def group(self, guide, var, carriers, site, strand, first_k):
+        """The rows that stand for one target's alignments after the merge's fold: those
+        naming ``var`` with the carrier set ``carriers`` on ``strand`` whose target starts
+        at haplotype cluster position ``site`` (a row whose target is not at its own start
+        belongs to none). CRISPRme's fold key holds no strand, but the alignments of one
+        target share it: a row of the other strand is another target, which a fold would
+        lose, so it stands for none of this one's."""
         groups = self._groups.get((guide, var))
         if groups is None:
             groups = self._groups[(guide, var)] = defaultdict(list)
             for e in self.by_var.get((guide, var), ()):
                 k = first_k(e.row)
                 if k is not None:
-                    groups[(e.carriers, e.cp + k)].append(e)
-        return groups.get((carriers, site), [])
+                    groups[(e.row["strand"], e.carriers, e.cp + k)].append(e)
+        return groups.get((strand, carriers, site), [])
 
     def exact_groups(self, guide, t, toks, best, first_k):
         """[(carriers, why)] for every row block reporting target ``t`` exactly (its
@@ -3437,25 +3568,28 @@ class Reported(object):
                     seen[key] = "its row's target is not at its own start"
                 else:
                     seen[key] = self.worse(self.group(guide, toks, e.carriers, e.cp + k,
-                                                      first_k), best)
+                                                      t.strand, first_k), best)
                 out.append((e.carriers, seen[key]))
         return out
 
-    def folded(self, guide, sample, hcl, var, exact_who, putative_who, d, first_k):
+    def folded(self, guide, sample, hcl, strand, var, exact_who, putative_who, d,
+               first_k):
         """(ok, why): a row of the same site naming the same variants whose carriers are
         the target's own, and no worse than it in each block: the merge folds those rows
-        into the best of them by each block's order (_fold_same_carriers) -- the first
-        sorting criterion in the fewest-mm+b block, CFD in the highest-CFD block. The site
+        into the first of them by each file's order (_fold_same_carriers), which worse()
+        compares on the merge's sort keys. The site
         is the cluster position on the haplotype carrying the record, ``hcl``: the
         Cluster Position plus the rank of the first base among an insertion's added
         bases (first_k of a row), which is the Cluster Position itself on any row that
         does not start inside an insertion. (On d7a6fff the merge compares rows at their
         Cluster Position alone, so it folds two targets that start on different bases of
-        one insertion; the fix branch's c3a75fe compares them on the haplotype.)"""
+        one insertion; the fix branch's c3a75fe compares them on the haplotype.) The rows
+        are on the target's ``strand``: CRISPRme's fold key holds none, and a fold across
+        strands loses another target."""
         allowed = set(exact_who) | set(putative_who)
         groups = defaultdict(list)
         for e in self.by_var.get((guide, var), ()):
-            if e.cp > hcl or sample not in e.carriers:
+            if e.cp > hcl or sample not in e.carriers or e.row["strand"] != strand:
                 continue
             if not (exact_who <= e.carriers <= allowed):
                 continue
@@ -3472,21 +3606,38 @@ class Reported(object):
         return False, why
 
     def worse(self, es, d):
-        """None when one fold group's rows ``es`` are no worse than ``d`` (a Best) in the
-        fewest-mm+b block (the first sorting criterion) and in the highest-CFD block,
-        else why. A group the run lists has a row in each block (each file keeps one per
-        group). A row's CFD is recomputed from its aligned strings and compared at the
-        three decimals the merge sorts on."""
-        crit = self.criterion
+        """None when one fold group's rows ``es`` are no worse than ``d`` (a Best) by the
+        merge's sort keys in each block, else why. The fewest file sorts on the sorting
+        criteria in order (mm+bulges, then mm, by default); the CFD file on the CFD at
+        the three decimals the analysis writes, then on the same criteria. So the
+        fewest-mm+b block's key must be at most the least key of the target's alignments,
+        and the highest-CFD block's CFD at least the target's best -- and, where the two
+        surely print the same three decimals, its key at most the least key of the
+        target's alignments of that CFD. A group the run lists has a row in each block
+        (each file keeps one per group). A row's CFD is recomputed from its aligned
+        strings. Not compared: the keys after the criteria (the Cluster Position, the
+        carrier count, the aligned text), which only order alignments equal in all of
+        these."""
+        crits = self.criteria
         few_rows = [e for e in es if e.block == "fewest_mm+b"]
         cfd_rows = [e for e in es if e.block == "highest_CFD"]
         if not few_rows or not cfd_rows:
             return "no %s block of its site lists its carriers" % (
                 "fewest-mm+b" if not few_rows else "highest-CFD")
-        few = [e.crit[crit] for e in few_rows if crit in e.crit]
-        if few and min(few) > d.best[crit]:
-            return ("the row of its site with its carriers has a fewest-mm+b block of %d "
-                    "(%s), the target %d" % (min(few), crit, d.best[crit]))
+        keys = sorted(d.keys, key=lambda k: (k[0], k[1], -1.0 if k[2] is None else k[2]))
+        few = [tuple(e.crit[c] for c in crits) for e in few_rows
+               if all(c in e.crit for c in crits)]
+        if few and keys:
+            rk = min(few)
+            tk = min(crit_key(crits, mm, b) for mm, b, _c in keys)
+            if rk > tk:
+                if rk[0] > tk[0]:
+                    return ("the row of its site with its carriers has a fewest-mm+b block "
+                            "of %d (%s), the target %d" % (rk[0], crits[0], tk[0]))
+                return ("the row of its site with its carriers has a fewest-mm+b block of "
+                        "%s, the target %s (worse by the merge's next sorting criterion, "
+                        "--sorting-criteria %s)"
+                        % (crit_text(crits, rk), crit_text(crits, tk), ",".join(crits)))
         cfd = [e for e in cfd_rows if e.cfd is not None]   # none: no CFD column
         if cfd and d.cfd is not None:
             top = max(cfd, key=lambda e: e.cfd)
@@ -3495,6 +3646,26 @@ class Reported(object):
                         "%.3f (%.6f, printed %s), the target %.3f (%.6f)"
                         % (cfd3(top.cfd), top.cfd, top.row.get("cfd", "") or "nothing",
                            cfd3(d.cfd), d.cfd))
+            tied = [crit_key(crits, mm, b) for mm, b, c in keys
+                    if c is not None and cfd_same(c, d.cfd)]
+            if tied:
+                tk = min(tied)
+                ok = False
+                for e in cfd:
+                    if cfd_below(e.cfd, d.cfd):
+                        continue
+                    if (not cfd_same(e.cfd, d.cfd) or not all(c in e.crit for c in crits)
+                            or tuple(e.crit[c] for c in crits) <= tk):
+                        ok = True   # a higher (or not surely equal) CFD, or no worse key
+                        break
+                if not ok:
+                    rk = min(tuple(e.crit[c] for c in crits) for e in cfd
+                             if cfd_same(e.cfd, d.cfd))
+                    return ("the row of its site with its carriers has a highest-CFD block "
+                            "of %.3f with %s, the target %.3f with %s (a tie at three "
+                            "decimals, which the merge breaks on --sorting-criteria %s)"
+                            % (cfd3(top.cfd), crit_text(crits, rk), cfd3(d.cfd),
+                               crit_text(crits, tk), ",".join(crits)))
         return None
 
     def listed_at(self, guide, sample, cluster, tok):
@@ -3664,10 +3835,12 @@ def row_span(r, pad):
 
 
 def run_unit(unit):
-    """One work unit: ('sound' | 'comp', chrom, lo, hi, rows). Returns the findings."""
+    """One work unit: ('sound' | 'comp', chrom, lo, hi, rows). Returns (the findings, the
+    unit's counts: {'sites_only': records only sites-only VCFs hold})."""
     kind, ch, tlo, thi, rows = unit
     ctx = G["ctx"]
     rep = Report()
+    stats = {"chrom": ch}
     refseq = G["ref"].seq(ch)
     pad = 2 * (len(ctx.guides[0]) + ctx.pam_len) + 1000
     vcfs = G["vcfs_for"][ch]
@@ -3694,10 +3867,11 @@ def run_unit(unit):
                   or [0]) + 2 * one + 20   # the far end of what comp_record writes
         if far > win.end:
             win = Window(refseq, ch, max(0, tlo - pad), far + pad, vcfs, panel=ctx.panel)
-        if G.get("no_genotypes"):
-            return rep.rows
-        completeness(win, ctx, rep, G["reported"][ch], (tlo, thi), G["popmode"])
-    return rep.rows
+        completeness(win, ctx, rep, G["reported"][ch], (tlo, thi), G["popmode"], stats)
+    for v in vcfs:
+        if v.long_ref:
+            stats.setdefault("long_ref", {})[v.path] = v.long_ref
+    return rep.rows, stats
 
 
 def default_cfd_dir():
@@ -3855,8 +4029,14 @@ def main(argv=None):
                          ".sampleID.txt): every sample of the VCF(s) is a panel sample\n")
     if no_genotypes:
         sys.stderr.write("check_indel_rows: the VCF(s) hold no genotypes (a sites-only "
-                         "panel): carriers are not checked, only the rows themselves, and "
-                         "completeness has no haplotype to enumerate\n")
+                         "panel): a row's carriers are not checked, only the row itself, "
+                         "and completeness has no haplotype to enumerate\n")
+    elif any(not v.samples for v in vcfs_all):
+        sys.stderr.write("check_indel_rows: %d of the %d VCF(s) hold no genotypes (a "
+                         "sites-only dataset beside a genotyped one): a row that lists no "
+                         "carrier for a record such a VCF holds is that dataset's, and its "
+                         "strings, target and variants are checked, not its carriers\n"
+                         % (sum(1 for v in vcfs_all if not v.samples), len(vcfs_all)))
     todo = [v for v in vcfs_all if v.tbi is None and v.bgzf]
     if todo:
         sys.stderr.write("check_indel_rows: %d VCF(s) without a .tbi: reading each once "
@@ -3943,10 +4123,6 @@ def main(argv=None):
                 r["start"], r["strand"], len(t), len(r["spacer_col"]), pam_5prime),
                 frozenset(x for x in r["var"].split(",") if x and x != "NA"))].update(
                     samples_of(r))
-    if no_genotypes:
-        rep.add(False, "limit-no-genotypes", {"table": "completeness"},
-                "the VCF(s) hold no genotypes (a sites-only panel): no carrier is checked "
-                "and completeness has no haplotype to enumerate")
 
     units = []
     tile = args.tile
@@ -3967,7 +4143,7 @@ def main(argv=None):
                 units.append(("comp", ch, t, min(chi, t + tile), []))
                 t += tile
     G.update(ctx=ctx, ref=ref, vcfs_for=vcfs_for, reported=reported, popmode=popmode,
-             snp_listed=snp_listed, no_genotypes=no_genotypes)
+             snp_listed=snp_listed)
     done = 0
     # each unit's findings are appended to <out>.partial as it ends, so a long run that is
     # stopped keeps what it found; the sorted TSV replaces it at the end
@@ -3978,8 +4154,15 @@ def main(argv=None):
                             extrasaction="ignore")
         pw.writeheader()
 
-    def keep(found):
+    sites_only = defaultdict(int)   # chromosome -> records only sites-only VCFs hold
+    long_ref = {}                   # unindexed VCF -> the longest REF its reads met
+
+    def keep(result):
+        found, stats = result
         rep.rows.extend(found)
+        sites_only[stats["chrom"]] += stats.get("sites_only", 0)
+        for path, n in stats.get("long_ref", {}).items():
+            long_ref[path] = max(n, long_ref.get(path, 0))
         if partial is not None:
             for r in found:
                 pw.writerow(r)
@@ -4003,6 +4186,21 @@ def main(argv=None):
                 sys.stderr.write("  %s %d/%d unit(s), %d finding(s)\n"
                                  % (u[1], done, len(units), len(rep.rows)))
                 sys.stderr.flush()
+    for ch in sorted(c for c, n in sites_only.items() if n):
+        rep.add(False, "limit-no-genotypes", {"table": "completeness", "chrom": ch},
+                "%d indel/MNV record(s) of %s%s are held only by sites-only VCF(s) (no "
+                "sample columns): no sample carries them, so there is no haplotype to "
+                "enumerate and nothing to demand (a sites-only dataset's rows list no "
+                "carrier; soundness checks those rows themselves)"
+                % (sites_only[ch], ch, "" if lo is None else " in the region"))
+    for path in sorted(long_ref):
+        rep.add(False, "coverage-unindexed-long-ref", {"table": ""},
+                "this checker's own coverage gap, not a CRISPRme limit: %s has no .tbi "
+                "and holds a record whose REF spans %d bp; a read without an index starts "
+                "%d bp before its region, so a deletion longer than that which starts "
+                "further before a region is not read there (its carriers' haplotypes there "
+                "lack it). Index the VCF (tabix -p vcf, on a copy or a link in a folder of "
+                "your own) and run again" % (path, long_ref[path], Vcf.LONGEST))
     if args.known:
         modes = {"soundness", "completeness"} if args.mode == "both" else {args.mode}
         apply_known(rep, load_known(args.known), chroms, modes)

@@ -82,39 +82,47 @@ It does **not** check:
 
 **`scripts/check_indel_rows.py` is the check for that part**, on real data: it writes
 each sample's haplotypes itself from the VCF the search read (every allele of a slot, as
-VCF 4.x defines a record), keeps its own map from haplotype bases to reference coordinates
-and aligns with its own exhaustive dynamic-programming aligner (it imports and copies no
-CRISPRme code, only Python's standard library; the CFD tables are read as data). The truth
-is the VCF: a slot whose alleles overlap gives no sequence and is counted
-(`limit-overlapping-records`) where a target of its record reads, and where a call
-touching a target has unknown phase the record's known slot is judged first, then METHODS
-section 4's PUTATIVE rule (the strongest target the sample's alleles allow, by the
-alignment's CFD). CRISPRme's documented reading of a carrier (a second indel read from
-either end, the one-indel window, the last record of a split multi-allelic site, the
-PUTATIVE carriers of MNVs) only classifies a disagreement: every disagreement is a line,
-gating or a listed limit, and none passes in silence. **Soundness**: every indel/MNV row
-block of the integrated results and of the alternative alignments must be the given guide
-aligned to the reference with exactly its named variants, from its reported start, and its
-carriers must be the panel samples whose haplotypes hold it (or whose strongest target it
-is), within the samples list the search read. **Completeness**: every in-budget alignment
+VCF 4.x defines a record), keeps its own map from haplotype bases to reference
+coordinates and aligns with its own exhaustive dynamic-programming aligner (it imports
+and copies no CRISPRme code, only Python's standard library; the CFD tables are read as
+data). The truth is the VCF: a slot whose alleles overlap gives no sequence and is
+counted (`limit-overlapping-records`) where a target of its record reads, and where a
+call touching a target has unknown phase the record's known slot is judged first, then
+METHODS section 4's PUTATIVE rule (the strongest target the sample's alleles allow, by
+the alignment's CFD). CRISPRme's documented reading of a carrier (a second indel read
+from either end, the one-indel window, the last record of a split multi-allelic site, the
+PUTATIVE carriers of MNVs) only classifies a disagreement: every disagreement it checks
+for is a line, gating or a listed limit, and none passes in silence (what it does not
+check is listed below). **Soundness**: every indel/MNV row block of the integrated
+results and of the alternative alignments must be the given guide aligned to the
+reference with exactly its named variants, from its reported start, and its carriers must
+be the panel samples whose haplotypes hold it (or whose strongest target it is), within
+the samples list the search read; a row of a sites-only dataset (a VCF with no sample
+columns, as `hg38_mega`, alone or beside a genotyped one) lists no carrier, and only its
+own strings, target and variants are checked. **Completeness**: every in-budget alignment
 on a carrier's haplotypes that holds a base of an indel or MNV must be reported for that
-carrier by rows no worse than its best alignment (fewest-mm+b edits, and the highest CFD
-at the three decimals the merge sorts on, recomputed from each row's strings): a row of
-exactly that target whose fold group -- the rows of its site (the cluster position on the
-record's haplotype) naming the same variants with the same carriers, which the documented
-merge folds into the best by each block's order -- is no worse, or such rows with the
-target's own carrier set; a run that writes no alternative alignments -- a
-population-level run, or `complete-test`'s `--ci-cd-test` runs -- keeps one row per merge
-cluster, and there the row of the target's cluster (rows chained within `--merge` bp by
-in-budget alignments, as the merge clusters) must be no worse than each target. It does
-not check the CFD_REF/ALT, CFD risk and CRISPR-Bulge scores (nor which row the
-CRISPR-Bulge block keeps), `Variant_info_spacer+PAM`, `PAM_creation`, the seed counts,
-MAF, rsID, `Other_motifs`, `Not_found_in_REF` or the annotations.
-`test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check`,
-`validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
-`docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a real HGDP + 1000 Genomes
-chr22 search in both modes and genome-wide. Its unit and mutation tests are
-`PostProcess/test_check_indel_rows.py`.
+carrier by rows no worse than its best alignment by the merge's own sort keys (the
+fewest-mm+b block's key under `--sorting-criteria`, mm+bulges then mm by default; the
+highest CFD at the three decimals the merge sorts on, recomputed from each row's strings,
+then those criteria): a row of exactly that target whose fold group -- the rows of its
+site (the cluster position on the record's haplotype) and strand naming the same variants
+with the same carriers, which the documented merge folds into the first by each block's
+order -- is no worse, or such rows with the target's own carrier set; a run that writes
+no alternative alignments -- a population-level run, or `complete-test`'s `--ci-cd-test`
+runs -- keeps one row per merge cluster, and there the row of the target's cluster (rows
+chained within `--merge` bp by in-budget alignments, as the merge clusters) must be no
+worse than each target. It does not check the CFD_REF/ALT, CFD risk and CRISPR-Bulge
+scores (nor which row the CRISPR-Bulge block keeps), `Variant_info_spacer+PAM`,
+`PAM_creation`, the seed counts, MAF, rsID, `Other_motifs`, `Not_found_in_REF` or the
+annotations, nor the merge's keys after the sorting criteria and the CFD (the Cluster
+Position, the carrier count, the aligned text), which only order alignments equal in all
+of these. Give each VCF a `.tbi` when the panel has deletions longer than 20 kb (HPRC's
+does): a read without one looks back 20 kb, and the checker lists such a VCF under its
+own coverage class. `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py
+check`, `validate-benchmarks.yml` runs it on the chr22 self-test output after
+`validate-test`, and `docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a
+real HGDP + 1000 Genomes chr22 search in both modes and genome-wide. Its unit and
+mutation tests are `PostProcess/test_check_indel_rows.py`.
 
 ## Reproducible generation pipeline
 ```bash

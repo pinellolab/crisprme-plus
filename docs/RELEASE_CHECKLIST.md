@@ -131,12 +131,14 @@ for mode in per-sample population-level; do
     --mm 4 --bDNA 1 --bRNA 1 --thread 8 --output "gate_${mode}" --"$mode"
   #   soundness (every indel/MNV row real) and completeness (no real indel off-target
   #   missed: per sample on the per-sample run, where every carrier target must be
-  #   reported for its carrier by rows of its site no worse than its best alignment --
-  #   the fold group of the row that lists it, or the rows a fold puts it under; per merge
-  #   cluster on the population-level run, which keeps one row per cluster -- its row must
-  #   have no more edits than each target and at least its CFD, at the three decimals the
-  #   merge sorts on; the checker reads the mode from Results/*/.alt_mode, the cap from
-  #   .Params.txt and the panel from .sampleID.txt, or give --samples)
+  #   reported for its carrier by rows of its site and strand no worse than its best
+  #   alignment by the merge's sort keys (--sorting-criteria, then the CFD at three
+  #   decimals and the criteria again) -- the fold group of the row that lists it, or the
+  #   rows a fold puts it under; per merge cluster on the population-level run, which keeps
+  #   one row per cluster -- its row must have no more edits than each target and at least
+  #   its CFD, at the three decimals the merge sorts on; the checker reads the mode from
+  #   Results/*/.alt_mode, the cap from .Params.txt, the criteria from .command_line.txt
+  #   and the panel from .sampleID.txt, or give --samples)
   for check in soundness completeness; do
     python3 "$SRC/scripts/check_indel_rows.py" --results "$D22/Results/gate_${mode}" \
       --reference "$D22/Genomes/hg38" --vcf "$VCF" --pam "$D22/PAMs/20bp-NRG-SpCas9.txt" \
@@ -161,16 +163,20 @@ done
 #     CRISPRme limits (limit-last-alt-wins, limit-two-indels, limit-putative-carrier,
 #     limit-contig-end), slots whose VCF alleles overlap where a target of their record
 #     reads, so the VCF gives it no sequence (limit-overlapping-records: 3 records on
-#     chr22), windows across N (limit-n-bases), and the checker's own coverage gap
-#     (coverage-putative-cap: a carrier with more than 10 calls of unknown phase near a
-#     record, whose targets touching one are not enumerated; none on this phased panel),
-#     each listed with its samples and target: read them, and say in the release notes if
-#     a class grew. A known upstream defect can
-#     be listed with --known (class, chrom, start, strand, variants, samples, reason): it
-#     turns non-gating as known-defect, and a listed one that stops showing is reported as
-#     known-not-seen. Genome-wide COMPLETENESS (at most about 52 CPU-hours per guide: 60 to
-#     78 min on 40 processes of a loaded node, 6 GB, a TSV of about 31 MB) is not a release
-#     gate; chr22 above stands for it.
+#     chr22), windows across N (limit-n-bases), a sites-only dataset's rows, which list no
+#     carrier (limit-no-genotypes: none here; to check a search of the default index beside
+#     hg38_mega, give both VCFs, --vcf "$VCF" --vcf <mega chr22 VCF>), the note
+#     variant-shadowed, and the checker's own coverage gaps (coverage-putative-cap: a
+#     carrier with more than 10 calls of unknown phase near a record, whose targets
+#     touching one are not enumerated, none on this phased panel;
+#     coverage-unindexed-long-ref: a VCF without a .tbi holding a deletion longer than
+#     20 kb, which an unindexed read may miss: give it a .tbi), each listed with its
+#     samples and target: read them, and say in the release notes if a class grew. A
+#     known upstream defect can be listed with --known (class, chrom, start, strand,
+#     variants, samples, reason): it turns non-gating as known-defect, and a listed one
+#     that stops showing is reported as known-not-seen. Genome-wide COMPLETENESS (at most
+#     about 52 CPU-hours per guide: 60 to 78 min on 40 processes of a loaded node, 6 GB, a
+#     TSV of about 31 MB) is not a release gate; chr22 above stands for it.
 
 # 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.
 docker run -d --rm --name gate-web -p 8090:8080 "$IMG" crisprme.py web-interface
