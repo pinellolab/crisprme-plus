@@ -10,10 +10,11 @@ no sequence to a window.
 F, a window's bits: log2 of the number of sequences its letters spell, the product of the
 bases each letter stands for (1 for A, C, G, T and N, 2 for R, Y, S, W, K and M, 3 for B, D,
 H and V, 4 for Q). A window of more than 2^CRISPRME_IUPAC_CAP sequences is dense, as the
-report and the docs have called it since 2.8.1: the post-analysis of an index without the
-dict-less tiers reports it by its greedy worst-case alignment instead of every combination
-of its alleles (a population-level search does so of every window; a per-sample one on the
-tiers gives its carriers' own haplotypes). One of 2^HYPERDENSE_BITS sequences or more is
+report and the docs have called it since 2.8.1: a per-sample search of an index without the
+dict-less tiers reports it by the haplotypes its carriers have, read from the dictionaries as
+the tiers' path reads them, instead of every combination of its alleles (a population-level
+search reports every window by its greedy worst-case alignment; a per-sample one on the tiers
+any window by its carriers' own haplotypes). One of 2^HYPERDENSE_BITS sequences or more is
 hyperdense: it matches nearly any guide somewhere, and is flagged whatever
 CRISPRME_IUPAC_CAP is.
 
@@ -32,8 +33,8 @@ import math
 HYPERDENSE_BITS = 20
 
 # CRISPRME_IUPAC_CAP's default, in bits: above 2^10 sequences the dictionary path reports a
-# window by its greedy worst-case alignment. That is ten two-allele columns, which the cap
-# allowed when it counted ambiguous positions, up to 2.8.1.
+# window by the haplotypes its carriers have, not every combination of its alleles. That is ten
+# two-allele columns, which the cap allowed when it counted ambiguous positions, up to 2.8.1.
 DEFAULT_IUPAC_CAP = 10
 
 # The letter of a four-allele position in a variant genome (CRISPRitz 2.10.0 and later).
