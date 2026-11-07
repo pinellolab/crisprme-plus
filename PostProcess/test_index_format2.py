@@ -502,11 +502,11 @@ def _shell():
 
 
 class _Index(_Engine):
-    def index(self, name, fmt=2, guide=20, at_start=False, contigs=("chr1",), mb=None):
-        """An index folder ``name`` (<PAM>_<N>_<genome>), each contig a whole .bin of one
-        target, in index format ``fmt``."""
+    def index(self, name, fmt=2, guide=20, at_start=False, contigs=("chr1",), mb=None, lib=None):
+        """An index folder ``name`` (<PAM>_<N>_<genome>) in library ``lib`` (tmp/lib), each
+        contig a whole .bin of one target, in index format ``fmt``."""
         pam, n = name.split("_")[:2]
-        folder = os.path.join(self.tmp, "lib", name)
+        folder = os.path.join(lib or os.path.join(self.tmp, "lib"), name)
         for c in contigs:
             one_target_bin(os.path.join(folder, f"{pam}_{c}_1.bin"), pam, guide,
                            int(n) if mb is None else mb, at_start, fmt)
@@ -611,12 +611,16 @@ class AFormat2IndexIsReadNotRefused(_Index):
                 self.assertIsNone(index_fit.built_guide_len(folder))
 
     def test_a_format_1_index_is_searched_with_a_note_once_the_engine_writes_format_2(self):
-        old = self.index("NGG_2_g", fmt=1)
+        # (of the working directory's genome_library; one of the --index-path library:
+        # TheNoteMovesOnlyAnIndexThisInstallBuildsAgain)
+        work = os.path.join(self.tmp, "work")
+        old = self.index("NGG_2_g", fmt=1, lib=os.path.join(work, "genome_library"))
         self.engine(None)
-        out = self.shell('_check_index_format "$1"; echo went on', old)
+        call = f'current_working_directory="{work}"\n_check_index_format "$1"; echo went on'
+        out = self.shell(call, old)
         self.assertEqual((out.returncode, out.stdout, out.stderr), (0, "went on\n", ""))
         self.engine(2)
-        out = self.shell('_check_index_format "$1"; echo went on', old)
+        out = self.shell(call, old)
         self.assertEqual((out.returncode, out.stderr), (0, ""))
         # (build-index-only keeps an index it finds in place, and download installs the
         # archives published until the rebuild, of format 1: AFormat1IndexIsBuiltAgain)
@@ -629,6 +633,19 @@ class AFormat2IndexIsReadNotRefused(_Index):
             "went on\n"))
 
 
+def _replaced(folder, source=None, without=None):
+    """The end of the note of index ``folder``, of format 1, of an --index-path library: replace
+    it with one built again (from ``source``); with ``without``, or run the search without
+    --index-path ("prune": and without --prune-pam)."""
+    return ("A search builds no index in the --index-path library: to search them, replace "
+            f"{folder} with one built again by crisprme.py build-index-only"
+            + (f" from {source}" if source else "")
+            + " (which builds into the genome_library folder of its --path, and keeps an index it "
+            "finds there in place)"
+            + (", or run this search without --index-path" if without else "")
+            + (" and --prune-pam (which needs it)" if without == "prune" else "") + ".")
+
+
 class TheNoteMovesOnlyAnIndexThisInstallBuildsAgain(_Index):
     """The note of an index of format 1 said, of a variant and an INDELS index as of a
     reference one, to move it out of the way and build it again with build-index-only. On an
@@ -638,7 +655,18 @@ class TheNoteMovesOnlyAnIndexThisInstallBuildsAgain(_Index):
     first. The note now sends an index out of the way only where this install builds it again
     from what it holds -- the genome folder, or the enriched genomes in place and the dataset's
     VCFs -- and says elsewhere what building it again takes, and that the dataset's archives
-    rebuilt in format 2 hold those sites."""
+    rebuilt in format 2 hold those sites.
+
+    And only an index of the working directory's genome_library, where build-index-only builds
+    it again. A search takes one of the --index-path library first -- its reference index from
+    there alone, its INDELS index from beside its variant index -- and of an index there the
+    note said the same: built again as it said, it was not searched, and the next search
+    stopped ("no matching reference index under --index-path", "INDELS index ... is not beside
+    its variant index"). Of an index there the note says to replace it with one built again,
+    or, where the search then builds every index it needs, to run it without --index-path (and
+    --prune-pam, which needs it): a reference search, or a variant one with the dataset's
+    VCFs, enriched genome and fake-indel genome in place (AFormat1IndexIsBuiltAgain follows
+    each through the CLI)."""
 
     PREFIX = ("NOTE: {} is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks the "
               "sites whose guide lies within a few bases of a contig end or an N run, which an "
@@ -650,17 +678,24 @@ class TheNoteMovesOnlyAnIndexThisInstallBuildsAgain(_Index):
         super().setUp()
         self.engine(2)
         self.work = os.path.join(self.tmp, "work")
-        self.ref = self.index("NGG_2_hg38", fmt=1)
-        self.var = self.index("NGG_2_hg38+ds", fmt=1)
-        self.indels = os.path.join(self.tmp, "lib", "NGG_2_hg38+ds_INDELS")
-        one_target_bin(os.path.join(self.indels, "NGG_2_fakechr1", "NGG_fakechr1_1.bin"), "NGG",
-                       fmt=1)
+        # the three in the working directory's genome_library, and in an --index-path library
+        # outside it, of another name (tmp/lib)
+        for lib, names in ((os.path.join(self.work, "genome_library"), ("ref", "var", "indels")),
+                           (None, ("lref", "lvar", "lindels"))):
+            ref = self.index("NGG_2_hg38", fmt=1, lib=lib)
+            var = self.index("NGG_2_hg38+ds", fmt=1, lib=lib)
+            indels = var + "_INDELS"
+            one_target_bin(os.path.join(indels, "NGG_2_fakechr1", "NGG_fakechr1_1.bin"), "NGG",
+                           fmt=1)
+            for name, folder in zip(names, (ref, var, indels)):
+                setattr(self, name, folder)
 
     def install(self, *parts):
         """The working directory of the search holds these of the dataset: "vcfs" (its VCFs),
         "enriched" (its enriched genome), "unfinished" (that genome, marked unfinished by a
         build-index-only run), "fake" (its fake-indel genome)."""
-        shutil.rmtree(self.work, ignore_errors=True)
+        for top in ("VCFs", "Genomes"):
+            shutil.rmtree(os.path.join(self.work, top), ignore_errors=True)
         os.makedirs(os.path.join(self.work, "VCFs"))
         if "vcfs" in parts:
             os.makedirs(os.path.join(self.work, "VCFs", "ds"))
@@ -670,11 +705,13 @@ class TheNoteMovesOnlyAnIndexThisInstallBuildsAgain(_Index):
             if part in parts:
                 os.makedirs(os.path.join(self.work, "Genomes", folder), exist_ok=True)
 
-    def note(self, folder):
+    def note(self, folder, vcf="ds", prune=0):
         """The search script's note of index ``folder``, run as the search runs it, in the
-        working directory install() made: on stdout, and nothing on stderr."""
-        out = self.shell(f'ref_name=hg38\nvcf_name=ds\ncurrent_working_directory="{self.work}"\n'
-                         f'vcf_folder="{self.work}/VCFs/ds"\n_check_index_format "$1"', folder)
+        working directory install() made, a search of dataset ``vcf`` ("_": a reference search),
+        under --prune-pam with ``prune``: on stdout, and nothing on stderr."""
+        out = self.shell(f'ref_name=hg38\nvcf_name={vcf}\ncurrent_working_directory="{self.work}"\n'
+                         f'vcf_folder="{self.work}/VCFs/{vcf}"\n_check_index_format "$1"', folder,
+                         prune=prune)
         self.assertEqual((out.returncode, out.stderr), (0, ""))
         prefix = self.PREFIX.format(os.path.basename(folder))
         self.assertTrue(out.stdout.startswith(prefix) and out.stdout.endswith("\n"), out.stdout)
@@ -689,36 +726,60 @@ class TheNoteMovesOnlyAnIndexThisInstallBuildsAgain(_Index):
         # (the README's Quickstart: download --what index, VCFs/ empty, no enriched genome)
         self.install()
         self.assertEqual(self.note(self.ref), self.moved(self.ref))
-        for folder in (self.var, self.indels):
+        for folder in (self.var, self.indels, self.lvar, self.lindels):
             self.assertEqual(self.note(folder),
                              self.ARCHIVES + "VCFs (VCFs/ds), which this install does not hold.")
+        # (a search without --index-path would find no variant index, and build none)
+        self.assertEqual(self.note(self.lref), _replaced(self.lref))
 
     def test_with_the_vcfs_and_no_enriched_genome_the_whole_dataset_is_enriched_again(self):
         for parts in (("vcfs",), ("vcfs", "fake"), ("vcfs", "enriched", "unfinished", "fake")):
             with self.subTest(parts=parts):
                 self.install(*parts)
-                for folder in (self.var, self.indels):
+                for folder in (self.var, self.indels, self.lvar, self.lindels):
                     self.assertEqual(self.note(folder), self.ARCHIVES + (
                         "enriched genome (Genomes/hg38+ds), which this install does not hold, or "
                         "else its VCFs (VCFs/ds), from which the whole dataset is enriched again "
                         "first."))
                 self.assertEqual(self.note(self.ref), self.moved(self.ref))
+                self.assertEqual(self.note(self.lref), _replaced(self.lref))
 
     def test_from_the_enriched_genomes_in_place_with_the_vcfs(self):
         self.install("vcfs", "enriched", "fake")
         self.assertEqual(self.note(self.var), self.moved(self.var, "Genomes/hg38+ds"))
         self.assertEqual(self.note(self.indels), self.moved(self.indels, "Genomes/hg38+ds_INDELS"))
+        # of the --index-path library: replaced there, or the search run without it, which then
+        # builds the three here
+        self.assertEqual(self.note(self.lref), _replaced(self.lref, without=True))
+        self.assertEqual(self.note(self.lvar),
+                         _replaced(self.lvar, "Genomes/hg38+ds", without=True))
+        self.assertEqual(self.note(self.lindels),
+                         _replaced(self.lindels, "Genomes/hg38+ds_INDELS", without=True))
         # the INDELS index is built from the fake-indel genome, which build-index-only makes
-        # only as it enriches the dataset: with the enriched genome in place, it does not
+        # only as it enriches the dataset: with the enriched genome in place, it does not (and a
+        # search without --index-path builds no INDELS index then)
         self.install("vcfs", "enriched")
         self.assertEqual(self.note(self.var), self.moved(self.var, "Genomes/hg38+ds"))
-        self.assertEqual(self.note(self.indels), self.ARCHIVES + (
-            "fake-indel genome (Genomes/hg38+ds_INDELS), which this install does not hold."))
+        self.assertEqual(self.note(self.lvar), _replaced(self.lvar, "Genomes/hg38+ds"))
+        self.assertEqual(self.note(self.lref), _replaced(self.lref))
+        for folder in (self.indels, self.lindels):
+            self.assertEqual(self.note(folder), self.ARCHIVES + (
+                "fake-indel genome (Genomes/hg38+ds_INDELS), which this install does not hold."))
         # and build-index-only takes the dataset's VCFs, whatever is in place
         self.install("enriched", "fake")
-        for folder in (self.var, self.indels):
+        for folder in (self.var, self.indels, self.lvar, self.lindels):
             self.assertEqual(self.note(folder),
                              self.ARCHIVES + "VCFs (VCFs/ds), which this install does not hold.")
+
+    def test_of_a_reference_search(self):
+        # a reference search without --index-path builds its index in genome_library; under
+        # --prune-pam, which complete-search refuses without --index-path, without that too
+        self.install()
+        for prune in (0, 1):
+            with self.subTest(prune=prune):
+                self.assertEqual(self.note(self.ref, "_", prune), self.moved(self.ref))
+                self.assertEqual(self.note(self.lref, "_", prune),
+                                 _replaced(self.lref, without="prune" if prune else True))
 
 
 def _load_crisprme():
@@ -1253,22 +1314,53 @@ class AFormat1IndexIsBuiltAgain(atomic._Fixture):
     out of the way first, where this install builds it again; that done, build-index-only
     builds the three in format 2, and the next search notes none. An install of downloaded
     indexes holds no VCFs and no enriched genome, from which build-index-only builds the
-    variant and INDELS indexes: their notes say so, and send neither out of the way."""
+    variant and INDELS indexes: their notes say so, and send neither out of the way. Of an
+    index of an --index-path library other than the working directory's genome_library, which
+    a search takes before one built again there, a note says to replace it with one built
+    again, or to run the search without --index-path where the search then builds them."""
+
+    PREFIX = TheNoteMovesOnlyAnIndexThisInstallBuildsAgain.PREFIX
+    ARCHIVES = TheNoteMovesOnlyAnIndexThisInstallBuildsAgain.ARCHIVES
 
     @classmethod
     def setUpClass(cls):
         atomic.setUpModule()  # (its stub Bio package, which crisprme.py imports)
         cls.addClassCleanup(atomic.tearDownModule)
 
-    def notes(self):
-        """The notes a search gives of an index of format 1, on its stdout (log_verbose.txt)."""
-        self.run_search()
-        with open(self.path("Results", "search", "log_verbose.txt")) as fh:
-            return [line for line in fh.read().splitlines()
-                    if line.startswith("NOTE: ") and " is in index format 1 " in line]
+    def notes(self, *options, vcf=True):
+        """The notes a search gives of an index of format 1, on its stdout (log_verbose.txt): a
+        variant search with options, or without vcf a reference one."""
+        if vcf:
+            self.run_search(*options)
+        else:
+            shutil.rmtree(self.path("Results", "search"), ignore_errors=True)
+            atomic._write(self.path("guides.txt"), atomic.GENOME["chr1"][:20] + "NNN\n")
+            self.finish(self.start(command=[
+                "complete-search", "--genome", self.path("Genomes", "hg38"), "--guide",
+                self.path("guides.txt"), "--pam", atomic.PAM, "--mm", "4", "--bDNA", "1",
+                "--bRNA", "1", "--output", "search", "--thread", "2", *options],
+                CRISPRME_SKIP_SCORER_ENV="1"))
+        return [line for line in self.search_log("log_verbose.txt").splitlines()
+                if line.startswith("NOTE: ") and " is in index format 1 " in line]
 
-    def formats(self, name):
-        return {index_fit.bin_format(os.path.join(self.lib(name), b)) for b in self.bins(name)}
+    def search_log(self, name):
+        """The last search's log ``name``, empty where complete-search launched none."""
+        path = self.path("Results", "search", name)
+        if not os.path.isfile(path):
+            return ""
+        with open(path) as fh:
+            return fh.read()
+
+    def stopped(self):
+        """Where the last search stopped: '' at the stub's search, past every check of its
+        indexes, else what it said (its log_error.txt, then complete-search's stderr)."""
+        log = self.search_log("log_error.txt")
+        return "" if "stub crispritz.py: no search here" in log else log + self.stderr()
+
+    def formats(self, name, lib=None):
+        top = os.path.join(lib, name) if lib else self.lib(name)
+        return {index_fit.bin_format(os.path.join(d, f))
+                for d, _, fs in os.walk(top) for f in fs if f.endswith(".bin")}
 
     def format1_install(self):
         """The three indexes as CRISPRme 2.8.1 built them, with CRISPRitz 2.9.1 (index format
@@ -1353,6 +1445,115 @@ class AFormat1IndexIsBuiltAgain(atomic._Fixture):
             prefix.format(name) + archives + "enriched genome (Genomes/hg38+ds), which this "
             "install does not hold, or else its VCFs (VCFs/ds), from which the whole dataset is "
             "enriched again first." for name in (atomic.VAR, atomic.INDELS)])
+
+
+    def library(self, *names):
+        """An --index-path library outside the working directory, not named genome_library,
+        holding the indexes ``names`` names, moved there."""
+        lib = os.path.realpath(os.path.join(self.root, "staged"))
+        os.makedirs(lib, exist_ok=True)
+        for name in names:
+            os.rename(self.lib(name), os.path.join(lib, name))
+        return lib
+
+    def test_of_an_index_path_library_each_is_replaced_there(self):
+        """A search takes its reference index only from the --index-path library, and its INDELS
+        index only from beside its variant index there: built again in the working directory, as
+        the note said, neither was searched, and the next search stopped."""
+        names = (atomic.REF, atomic.VAR, atomic.INDELS)
+        self.format1_install()
+        lib = self.library(*names)
+        notes = self.notes("--index-path", lib)
+        self.assertEqual(self.stopped(), "")
+        self.assertEqual(notes, [self.PREFIX.format(name) + _replaced(
+            os.path.join(lib, name), source, True) for name, source in (
+                (atomic.REF, None), (atomic.VAR, "Genomes/hg38+ds"),
+                (atomic.INDELS, "Genomes/hg38+ds_INDELS"))])
+        # as the note said: each moved out of the way, and build-index-only run here, which
+        # builds the three in format 2 into the working directory's genome_library
+        away = os.path.join(self.root, "format1")
+        os.makedirs(away)
+        os.rename(os.path.join(lib, atomic.REF), os.path.join(away, atomic.REF))
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual([self.formats(n) for n in names], [{2}] * 3)
+        self.notes("--index-path", lib)
+        self.assertIn("ERROR: no matching reference index under --index-path", self.stopped())
+        os.rename(os.path.join(away, atomic.REF), os.path.join(lib, atomic.REF))
+        os.rename(os.path.join(lib, atomic.INDELS), os.path.join(away, atomic.INDELS))
+        self.notes("--index-path", lib)
+        self.assertIn(f"ERROR: INDELS index '{atomic.INDELS}' is not beside its variant index in "
+                      f"'{lib}' (--index-path), and a search builds no index there.",
+                      self.stopped())
+        # as it says now: each replaced with the one built again
+        os.rename(os.path.join(away, atomic.INDELS), os.path.join(lib, atomic.INDELS))
+        for name in names:
+            shutil.rmtree(os.path.join(lib, name))
+            os.rename(self.lib(name), os.path.join(lib, name))
+        self.assertEqual([self.formats(n, lib) for n in names], [{2}] * 3)
+        self.assertEqual(self.notes("--index-path", lib), [])
+        self.assertEqual(self.stopped(), "")
+
+    def test_of_an_index_path_library_or_searched_without_it(self):
+        names = (atomic.REF, atomic.VAR, atomic.INDELS)
+        self.format1_install()
+        lib = self.library(*names)
+        notes = self.notes("--index-path", lib)
+        self.assertEqual([note.endswith(", or run this search without --index-path.")
+                          for note in notes], [True] * 3, notes)
+        # without --index-path, the search builds the three in format 2 here, from the
+        # genome folder, the enriched genome and the fake-indel genome
+        self.assertEqual(self.notes(), [])
+        self.assertEqual(self.stopped(), "")
+        self.assertEqual([self.formats(n) for n in names], [{2}] * 3)
+
+    def test_of_an_index_path_library_of_a_download_only_the_reference_index_is_replaced(self):
+        """The README's staged library, of downloaded indexes: the working directory holds the
+        dictionaries, and no VCFs and no enriched genome."""
+        names = (atomic.REF, atomic.VAR, atomic.INDELS)
+        self.format1_install()
+        shutil.move(self.path("VCFs", "ds"), os.path.join(self.root, "VCFs.ds"))
+        for genome in ("hg38+ds", "hg38+ds_INDELS"):
+            shutil.rmtree(self.path("Genomes", genome))
+        lib = self.library(*names)
+        notes = self.notes("--index-path", lib)
+        self.assertEqual(self.stopped(), "")
+        self.assertEqual(notes, [
+            self.PREFIX.format(atomic.REF) + _replaced(os.path.join(lib, atomic.REF)),
+            self.PREFIX.format(atomic.VAR) + self.ARCHIVES + "VCFs (VCFs/ds), which this install "
+            "does not hold.",
+            self.PREFIX.format(atomic.INDELS) + self.ARCHIVES + "VCFs (VCFs/ds), which this "
+            "install does not hold."])
+        # (without --index-path the search has no variant index, and builds none)
+        self.notes()
+        self.assertIn("Error: no variant index here serves this search", self.stopped())
+        # the reference index, replaced with one build-index-only builds again
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual((rc, err), (0, ""))
+        shutil.rmtree(os.path.join(lib, atomic.REF))
+        os.rename(self.lib(atomic.REF), os.path.join(lib, atomic.REF))
+        self.assertEqual([self.formats(n, lib) for n in names], [{2}, {1}, {1}])
+        self.assertEqual(self.notes("--index-path", lib), notes[1:])
+        self.assertEqual(self.stopped(), "")
+
+    def test_of_an_index_path_library_in_a_reference_search(self):
+        self.format1_install()
+        lib = self.library(atomic.REF)
+        note = self.PREFIX.format(atomic.REF) + _replaced(os.path.join(lib, atomic.REF),
+                                                          without=True)
+        self.assertEqual(self.notes("--index-path", lib, vcf=False), [note])
+        self.assertEqual(self.stopped(), "")
+        # without --index-path, the search builds it in format 2 here
+        self.assertEqual(self.notes(vcf=False), [])
+        self.assertEqual(self.stopped(), "")
+        self.assertEqual(self.formats(atomic.REF), {2})
+        # (which the search with --index-path does not take)
+        self.assertEqual(self.notes("--index-path", lib, vcf=False), [note])
+        # or replaced with it
+        shutil.rmtree(os.path.join(lib, atomic.REF))
+        os.rename(self.lib(atomic.REF), os.path.join(lib, atomic.REF))
+        self.assertEqual(self.notes("--index-path", lib, vcf=False), [])
+        self.assertEqual(self.stopped(), "")
 
 
 class AnArchiveSaysItsFormat(_Index):
@@ -1446,4 +1647,3 @@ class AnArchiveSaysItsFormat(_Index):
                 self.assertEqual(f"WARNING: {installed} was built by a newer CRISPRitz" in
                                  out.getvalue(), warned, out.getvalue())
                 self.assertIn("index format 2", err.getvalue() if not warned else out.getvalue())
-

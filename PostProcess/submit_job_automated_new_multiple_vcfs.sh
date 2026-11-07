@@ -861,40 +861,51 @@ while read vcf_f; do
 
 	# How the sites that index $1, of index format 1, lacks are searched, on stdout: the end
 	# of the NOTE _check_index_format gives of it. build-index-only builds an index again in
-	# format 2, but keeps one it finds in place, so the note says to move it out of the way
-	# first -- only where this install holds what build-index-only builds it from: for a
-	# reference index, the genome folder this search reads; for a variant index, the
-	# dataset's enriched genome (Genomes/<ref>+<vcf>), and for its INDELS index the
-	# fake-indel genome (Genomes/<ref>+<vcf>_INDELS), in place, with the dataset's VCFs
-	# (VCFs/<vcf>), which build-index-only takes too, and from which alone it enriches the
-	# whole dataset again first. A download installs neither the VCFs nor those genomes, and
-	# the archives published until the rebuild are of format 1: the dataset's archives
-	# rebuilt in format 2 hold those sites. Silent on stderr.
+	# format 2, into the genome_library of its --path, but keeps one it finds in place, so the
+	# note says to move it out of the way first -- only where this install holds what
+	# build-index-only builds it from: for a reference index, the genome folder this search
+	# reads; for a variant index, the dataset's enriched genome (Genomes/<ref>+<vcf>), and for
+	# its INDELS index the fake-indel genome (Genomes/<ref>+<vcf>_INDELS), in place, with the
+	# dataset's VCFs (VCFs/<vcf>), which build-index-only takes too, and from which alone it
+	# enriches the whole dataset again first. A download installs neither the VCFs nor those
+	# genomes, and the archives published until the rebuild are of format 1: the dataset's
+	# archives rebuilt in format 2 hold those sites. And only of an index in the working
+	# directory's genome_library: a search takes one of the --index-path library before any
+	# there -- the reference index from that library alone, and the INDELS index from beside
+	# its variant index. Of an index of that library the note says to replace it with one built
+	# again, or to run the search without --index-path (and --prune-pam, which needs it) where
+	# the search then builds every index it needs: the reference one from the genome folder,
+	# and a variant search's from the dataset's VCFs, enriched genome and fake-indel genome in
+	# place. Silent on stderr.
 	_how_built_again() {
-		local _g="Genomes/${ref_name}+${vcf_name}" _from _vcfs
+		local _g="Genomes/${ref_name}+${vcf_name}" _from= _vcfs _have= _also=
 		case "${1##*/}" in
 		*+*_INDELS) _from="${_g}_INDELS" ;;
 		*+*) _from=$_g ;;
-		*)
-			printf 'To search them, move %s out of the way and build it again with crisprme.py build-index-only (which keeps an index it finds in place).' "$1"
-			return 0
-			;;
 		esac
 		_vcfs=("$vcf_folder"/*.vcf.gz)
-		if [ -e "${_vcfs[0]}" ] && [ -d "$current_working_directory/$_g" ] \
-			&& ! [ -d "$current_working_directory/$_g/.building" ] \
-			&& [ -d "$current_working_directory/$_from" ]; then
-			printf 'To search them, move %s out of the way and build it again with crisprme.py build-index-only (which keeps an index it finds in place), from %s.' "$1" "$_from"
+		[ -e "${_vcfs[0]}" ] && [ -d "$current_working_directory/$_g" ] \
+			&& ! [ -d "$current_working_directory/$_g/.building" ] && _have=1
+		if [ -n "$_from" ] && ! { [ -n "$_have" ] && [ -d "$current_working_directory/$_from" ]; }; then
+			printf "Where %s is published, its archives rebuilt in index format 2 hold them: building it again with crisprme.py build-index-only takes the dataset's " "$vcf_name"
+			if ! [ -e "${_vcfs[0]}" ]; then
+				printf 'VCFs (VCFs/%s), which this install does not hold.' "$vcf_name"
+			elif ! [ -d "$current_working_directory/$_g" ] || [ -d "$current_working_directory/$_g/.building" ]; then
+				printf 'enriched genome (%s), which this install does not hold, or else its VCFs (VCFs/%s), from which the whole dataset is enriched again first.' "$_g" "$vcf_name"
+			else
+				printf 'fake-indel genome (%s), which this install does not hold.' "$_from"
+			fi
 			return 0
 		fi
-		printf "Where %s is published, its archives rebuilt in index format 2 hold them: building it again with crisprme.py build-index-only takes the dataset's " "$vcf_name"
-		if ! [ -e "${_vcfs[0]}" ]; then
-			printf 'VCFs (VCFs/%s), which this install does not hold.' "$vcf_name"
-		elif ! [ -d "$current_working_directory/$_g" ] || [ -d "$current_working_directory/$_g/.building" ]; then
-			printf 'enriched genome (%s), which this install does not hold, or else its VCFs (VCFs/%s), from which the whole dataset is enriched again first.' "$_g" "$vcf_name"
-		else
-			printf 'fake-indel genome (%s), which this install does not hold.' "$_from"
+		if [ "$(dirname "$1")" -ef "$current_working_directory/genome_library" ]; then
+			printf 'To search them, move %s out of the way and build it again with crisprme.py build-index-only (which keeps an index it finds in place)%s.' "$1" "${_from:+, from $_from}"
+			return 0
 		fi
+		if [ "$vcf_name" = _ ] || { [ -n "$_have" ] && [ -d "$current_working_directory/${_g}_INDELS" ]; }; then
+			_also=", or run this search without --index-path"
+			[ "${prune_pam:-0}" != 1 ] || _also="$_also and --prune-pam (which needs it)"
+		fi
+		printf 'A search builds no index in the --index-path library: to search them, replace %s with one built again by crisprme.py build-index-only%s (which builds into the genome_library folder of its --path, and keeps an index it finds there in place)%s.' "$1" "${_from:+ from $_from}" "$_also"
 	}
 
 	# Stop, with one ERROR, before the search reads index $1 when it is in an index format
