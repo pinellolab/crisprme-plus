@@ -396,17 +396,17 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   flag, gets the same: the search script decides it for the search it runs, and the form's bulge
   cap and PAM list count those indexes. Of an all-`N` index wider than the PAM that it reads so, a
   web search also says in its log what such a flank cannot index at a contig's ends, and warns of
-  one built before CRISPRitz 2.9.1, as complete-search says both on its console and in
-  `.Params.txt` (one text, `prune_flank.wider_flank_notes`; the web's names Settings beside
-  `build-index-only`). Before, a search that only a K = 8 index served stopped for want
-  of a variant index (or, for the reference index, built one), and said to pass the flag. Where an
-  index serves the search unpruned, as an all-`N` one of the PAM's width does, nothing changes. On
-  chr22 with HGDP + 1000 Genomes (CRISPRitz 2.10.0), an `NGG` search whose variant index was
-  `NGG`'s own and whose reference index only the `NRR` one, under its older name or as
-  `20-NRR_3_hg38` with no `.pam_build`, said `no installed reference index of hg38`, and wrote
-  the same 2,023 rows, byte for byte, as the dedicated `NGG` indexes. On chr22 with HGDP + 1000
-  Genomes and the `NRR` indexes alone (CRISPRitz 2.9.1), an `NGG` search with one bulge of each type
-  said it on the console from the command line, and nothing of it in its `log_verbose.txt`; the same
+  one built before CRISPRitz 2.9.1, as complete-search says both on its console and in `.Params.txt`
+  (one text, `prune_flank.wider_flank_notes`; the web search's warning names Settings beside
+  `build-index-only`). Before, a search that only a K = 8 index served stopped for want of a variant
+  index (or, for the reference index, built one), and said to pass the flag. Where an index serves
+  the search unpruned, as an all-`N` one of the PAM's width does, nothing changes. On chr22 with
+  HGDP + 1000 Genomes (CRISPRitz 2.10.0), an `NGG` search whose variant index was `NGG`'s own and
+  whose reference index only the `NRR` one, under its older name or as `20-NRR_3_hg38` with no
+  `.pam_build`, said `no installed reference index of hg38`, and wrote the same 2,023 rows, byte for
+  byte, as the dedicated `NGG` indexes. On chr22 with HGDP + 1000 Genomes and the `NRR` indexes
+  alone (CRISPRitz 2.9.1), an `NGG` search with one bulge of each type said that it pruned by itself
+  on the console from the command line, and wrote nothing of it in its `log_verbose.txt`; the same
   search sent with the web form's Submit (`change_url`) said it in its `log_verbose.txt`. Both
   recorded `Prune_pam auto` and wrote the same 2,023 rows, byte for byte, with nothing on stderr. On
   a 30 kb genome whose `20-NNNN_2_gn` was built before an N run was put into it, an `NGG` search
