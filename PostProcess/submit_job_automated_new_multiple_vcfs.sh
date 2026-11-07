@@ -1873,6 +1873,14 @@ while read vcf_f; do
 						"$current_working_directory/Genomes/${ref_name}+${vcf_name}" \
 						"$current_working_directory/Dictionaries/log_indels_${vcf_name}"
 				fi
+				# A build-index-only run that began before the check of its mark above may put
+				# the SNP codes on the fake-indel genome while it is indexed: it marks the genome
+				# only just before the first FASTA it changes, and the index built meanwhile is
+				# blind to the SNPs of the FASTAs not coded yet, kept by every later run (R2-F1).
+				# So the index goes into place only if no FASTA of the genome changed since its
+				# build began, and the mark is not there once it is done.
+				_indels_began="$_lock/indels_began"
+				: >"$_indels_began"
 				if ! [ -s "$logerror" ]; then
 					# (the variant index by its path: it reads the PAM file of its build there)
 					_build_in_lock "$_lock" "$starting_dir/pool_index_indels.py" \
@@ -1891,6 +1899,13 @@ while read vcf_f; do
 					printf "ERROR: indels indexing failed on %s\n" "$vcf_name" >&2
 					# (a partial one under its name, of a run that died, whose lock this run took over)
 					[ -d "$indels_index_dir" ] && rm -r "$indels_index_dir"
+					_lock_release "$_lock"
+					exit 1
+				fi
+				if [ -d "$indels_out/.building" ] \
+					|| [ -n "$(find -L "$indels_out" -name '*.fa' -newer "$_indels_began" 2>/dev/null | head -n 1)" ]; then
+					rm -rf "$_build_work"
+					printf "ERROR: %s changed while this search built %s from it: a build-index-only run puts the SNP codes on it, and the index would be blind to those not on yet, so it is not kept. Let that run finish, then run this search again\n" "$indels_out" "$(basename "$indels_index_dir")" >&2
 					_lock_release "$_lock"
 					exit 1
 				fi

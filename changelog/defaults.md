@@ -720,3 +720,11 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   folder and the fingerprint of its FASTA files, as an index records it), and a run reuses it
   only while the genome is that one; a result of CRISPRme 2.8.1 or earlier, which records
   none, is searched again. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+- **A search keeps no INDELS index it built while build-index-only put the SNP codes on the
+  fake-indel genome.** build-index-only marks that genome unfinished only just before the
+  first FASTA it changes, so a search past its check of the mark before then built its INDELS
+  index from the FASTAs not coded yet, and every later run kept it, blind to a SNP beside an
+  indel on them (R2-F1). An INDELS index during whose build a FASTA of the genome changed, or
+  after which the mark is there, is not put in place: the search stops, saying to let that
+  run finish and to run the search again, which builds it from the coded genome. Covered by
+  `PostProcess/test_index_resolution.py`.

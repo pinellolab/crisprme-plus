@@ -1584,6 +1584,52 @@ class AnUnfinishedBuildIsNotSearched(_ShippedScript):
                                      "this search again\n")
         self.assertEqual(run.calls, [])
 
+    def test_an_indels_index_built_while_its_fake_indel_genome_changed_is_not_kept(self):
+        """build-index-only marks the fake-indel genome only just before the first FASTA it
+        changes as it puts the SNP codes on it in place: a search past its check of the mark
+        before then built its INDELS index from the FASTAs not coded yet, blind to their
+        SNPs, and every later run kept it (R2-F1). An INDELS index during whose build a
+        FASTA of the genome changed, or after which the mark is there, is not kept."""
+        self.install("NRG_3")
+        indels = self.library / f"NRG_3_hg38+{self.VCF}_INDELS"
+        shutil.rmtree(indels)
+        genome = self.home / "Genomes" / f"hg38+{self.VCF}_INDELS"
+        fake = genome / f"fake_{self.VCF}_chr1" / "fakechr1.fa"
+        fake.parent.mkdir(parents=True)
+        fake.write_text(">fakechr1\nACGTACGTACGTACGTACGTACGTACGT\n")
+        for overlay in ("coded a FASTA", "is at it"):
+            with self.subTest(overlay=overlay):
+                built = self.root / f"built {overlay}"
+                launched = self.launch(env={"STUB_BUILD_UNTIL": str(built),
+                                            "STUB_BUILD_WRITES": "1"})
+                _wait_for(lambda: any(c[0] == "index-genome" for c in launched.calls()), 60,
+                          "the INDELS build")
+                if overlay == "coded a FASTA":  # as overlay_fake_chromosome writes one
+                    staged = fake.parent / ".overlay-x"
+                    staged.mkdir()
+                    (staged / "fakechr1.fa.tmp").write_text(
+                        ">fakechr1\nACGTACGTACGTRCGTACGTACGTACGT\n")
+                    os.replace(staged / "fakechr1.fa.tmp", fake)
+                    staged.rmdir()
+                else:
+                    (genome / ".building").mkdir()
+                built.touch()
+                run = self.finish(launched)
+                self.assertEqual(launched.proc.returncode, 1)
+                self.assertEqual(run.stderr, (
+                    f"ERROR: {genome} changed while this search built NRG_3_hg38+{self.VCF}"
+                    "_INDELS from it: a build-index-only run puts the SNP codes on it, and the "
+                    "index would be blind to those not on yet, so it is not kept. Let that run "
+                    "finish, then run this search again\n"))
+                self.assertFalse(indels.exists())
+                self.assertFalse(Path(f"{indels}.lock").exists())
+                self.assertIsNone(run.searched(variant=True))
+                shutil.rmtree(genome / ".building", ignore_errors=True)
+        # with nothing changed meanwhile, it is kept and searched, as before
+        run = self.run_pipeline(env={"STUB_BUILD_WRITES": "1"})
+        self.assertTrue(indels.is_dir())
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Variant failed")
+
     def test_the_indel_genotype_store_is_not_refused_when_it_is_not_read(self):
         # CRISPRME_INDEL_SNP=0: no SNP+indel co-occurrence, so the store is not read
         self.install("NRG_3")
