@@ -231,6 +231,49 @@ class TestGenerateReport(unittest.TestCase):
             return os.path.join(extract, name)
         return os.path.join(extract, "data", name)
 
+    def test_a_run_with_no_score_says_so_in_place_of_its_score_tables(self):
+        """A Cas12a search (a 5' PAM): neither CFD nor CRISPR-Bulge is computed, every score
+        is the -1 sentinel. The risk card printed its CFD bands, 0 each, and Section 4 its
+        CFD tiers, 0 each, and the CRISPR-Bulge and CFD prose of the recommended panel, read
+        as "no site at risk", though the panel was chosen by edit distance alone (cli5
+        D6). Each says that neither score is computed, in place of its tables; a scored
+        run is reported as before."""
+        scored = [_HEADER.index(c) for c in _HEADER if "CFD_score" in c
+                  or "CRISPR_BULGE_score" in c]
+        with open(self.tsv, "w") as handle:
+            handle.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                handle.write("\t".join("-1" if i in scored else v for i, v in enumerate(row))
+                             + "\n")
+        _, _, extract = self._build_and_extract(
+            params_override={"Nuclease": "Cas12a", "Pam": "TTTV"})
+        html = self._read(self._dpath(extract, "report.html"))
+        card = re.search(r'<div class="risk-card">.*?</div></div>', html, flags=re.S).group(0)
+        note = ("CFD and CRISPR-Bulge are defined for a 20-nt spacer with a 3&prime; "
+                "SpCas9-family PAM: neither is computed for this nuclease, so no site is scored, "
+                "and the validation panel is chosen by mismatches and bulges alone.")
+        self.assertIn(note, card)
+        self.assertNotIn("CFD ≥ 0.5", card)
+        self.assertEqual(html.count(note), 3)  # the card, Section 4's bridge and its table
+        for absent in ("<th>CFD threshold</th>", "Recommended default panel:</strong> validate "
+                       "every", "of those with CFD", "by worst-case severity across",
+                       'href="#risk-card-modal"'):
+            self.assertNotIn(absent, html)
+        self.assertIn("then fill up to 100 by fewest mismatches+bulges", html)
+        self.assertIn("With no score computed, every off-target with mismatches+bulges", html)
+        # the fixture as it is, scored: as before
+        with open(self.tsv, "w") as handle:
+            handle.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                handle.write("\t".join(row) + "\n")
+        __import__("shutil").rmtree(os.path.join(self.tmp, "extracted"))
+        _, _, extract = self._build_and_extract()
+        html = self._read(self._dpath(extract, "report.html"))
+        self.assertNotIn("neither is computed", html)
+        for present in ("<th>CFD threshold</th>", "Recommended default panel:</strong> validate "
+                        "every", "by worst-case severity across", "CFD ≥ 0.5"):
+            self.assertIn(present, html)
+
     def test_build_report_drop_maf_removes_maf_column(self):
         # Regression (crisprme.py generate-report --no-maf): the top-level CLI
         # silently ignored --no-maf, and the module-level MAF-drop path was itself
@@ -3977,27 +4020,40 @@ class TestGenerateReport(unittest.TestCase):
                           dict(self._PARAMS)),
             # an older folder with no .Params.txt: decided from the file name alone
             "ref_noparams": (ro_tsv, None),
+            # one haplotype of assembly-search: a search of a personal genome, as
+            # complete-search names its haplotype_genome_view, with no variant dataset. Its
+            # report said "reference genome only", and "Sites in the reference genome"
+            # (RV1-F2)
+            "ref_haplotype": (
+                f"{_GUIDE}+NRG_HG01255_paternal_5aeb0fc6+__6+3_integrated_results.tsv",
+                {**self._PARAMS, "Genome_selected": "HG01255_paternal_5aeb0fc6",
+                 "Genome_ref": "HG01255_paternal_5aeb0fc6",
+                 "Genome_idx": "NRG_4_HG01255_paternal_5aeb0fc6"}),
         }
         for name, (tsv_name, params) in cases.items():
             with self.subTest(name):
                 html, manifest, keys = self._job_report(
                     self._install_job(name, tsv_name, params))
+                genome = "HG01255_paternal_5aeb0fc6" if name == "ref_haplotype" else "hg38"
                 self.assertEqual(keys, ["Variant database(s)", "Off-target search criteria"])
                 for present in (
                     # the header row and the inputs card
-                    '<td class="k">Variant dataset(s)</td><td>none (reference genome only)<',
-                    '<td class="k">Variant database(s)</td><td>none (reference genome only)<',
-                    "Sites in the reference genome that differ from the guide by up to 6 "
-                    "mismatches",
+                    '<td class="k">Variant dataset(s)</td><td>none (no variant dataset '
+                    'searched)<',
+                    '<td class="k">Variant database(s)</td><td>none (no variant dataset '
+                    'searched)<',
+                    f"Sites in the genome searched ({genome}) that differ from the guide by "
+                    "up to 6 mismatches",
                     # every MAF is blank; the note says why instead of naming a panel
-                    "This search used the reference genome only",
+                    "This search used no variant dataset, so every MAF is blank.",
                 ):
                     self.assertTrue(present in html, f"{present!r} not in the {name} report")
                 for absent in ("Search mode", "Population-level", "NOT computed",
                                "Variants included", "Panel:", "all searched",
                                "Allele-frequency basis", "union panel",
                                "Variant-contributed sites", "accounting for human genetic",
-                               "NRG_4_hg38", "NRG_3_hg38", "NRG+hg38", "reference only<"):
+                               "NRG_4_hg38", "NRG_3_hg38", "NRG+hg38", "reference only<",
+                               "reference genome only", "Sites in the reference genome"):
                     self.assertFalse(absent in html, f"{absent!r} in the {name} report")
                 self.assertIsNone(manifest["variant_datasets"])
                 self.assertIsNone(manifest["database"])  # not the installed registry
@@ -4021,6 +4077,37 @@ class TestGenerateReport(unittest.TestCase):
         self.assertFalse("reference genome only" in html)
         self.assertEqual(manifest["variant_datasets"], "1000G")
         self.assertEqual(manifest["database"]["databases"], {"1000G": 2548})
+        # the copy of the --vcf list the search reads in the result folder names it alone:
+        # the same report
+        with open(os.path.join(rd, ".vcf_list_searched.txt"), "w") as fh:
+            fh.write("hg38_1000G\n")
+        self.assertEqual(self._job_report(rd)[1]["database"], manifest["database"])
+
+    def test_a_search_of_two_datasets_names_both(self):
+        """A search of two datasets (a --vcf list of two) names its results file after the
+        last one alone, and its report named that one, with its registry's panel and counts
+        (RV1-F1). The copy of the --vcf list the search reads in the result folder names
+        both: the report names both, as the manifest does, and credits neither registry,
+        each the panel of its own dataset's rows."""
+        self._install_registry("hg38_hgdpx", 4624, 383, {"hgdpx": 500})
+        rd = self._install_job(
+            "two", f"{_GUIDE}+NRG_hg38+hg38_hgdpx_6+3_integrated_results.tsv",
+            {**self._PARAMS, "Genome_idx": "NRG_4_hg38+hg38_1000G,NRG_4_hg38+hg38_hgdpx",
+             "Ref_comp": "True"}, variant_rows=True)
+        with open(os.path.join(rd, ".vcf_list_searched.txt"), "w") as fh:
+            fh.write("hg38_1000G\nhg38_hgdpx/\n")  # (a line may end in /)
+        html, manifest, _keys = self._job_report(rd)
+        for present in ('<td class="k">Variant dataset(s)</td><td>1000G, hgdpx<',
+                        '<td class="k">Variant database(s)</td><td>1000G, hgdpx<',
+                        "Minor/alternate allele frequency over the panel of the dataset each "
+                        "variant comes from, each of 1000G, hgdpx searched with its own",
+                        "here that of the dataset the variant comes from, each of 1000G, "
+                        "hgdpx searched with its own"):
+            self.assertTrue(present in html, f"{present!r} not in the report")
+        for absent in ("<td>hgdpx<", "4,624", "31,130", "all searched", "union panel"):
+            self.assertFalse(absent in html, f"{absent!r} in the report")
+        self.assertEqual(manifest["variant_datasets"], "1000G, hgdpx")
+        self.assertIsNone(manifest["database"])
 
     def test_variant_rows_are_never_reference_only(self):
         """No Params and a file name that gives no dataset: a table with a variant-created

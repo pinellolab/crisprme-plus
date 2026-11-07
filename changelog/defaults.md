@@ -679,3 +679,26 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   + RNA, up to the cap on them together (Max edits, `--max-total-edits`), and opens on that; a
   job written before the DNA and RNA lines of its parameters is shown as before. Covered by
   `PostProcess/test_web_results_links.py` (in the image).
+- **The report of a search of two or more variant datasets names them all.** A search of a
+  `--vcf` list of two names its results file after the last dataset alone, and its report
+  named that one in its header, inputs card and run manifest, with that dataset's registry
+  panel and counts (RV1-F1). The report reads the datasets from the copy of the list the
+  search keeps in its result folder: it names each (`1000G, hgdpx`), credits no one registry
+  with the run's counts (its panel is the samples the search ran with, each under its
+  dataset), and says that each variant's frequency is that of its own dataset's panel, as
+  each dataset is searched with its own. A search of one dataset, or a result folder of an
+  earlier release, is reported as before. Covered by `PostProcess/test_generate_report.py`.
+- **The report of a search with no variant dataset fits a personal haplotype too.** It said
+  `none (reference genome only)` and "Sites in the reference genome", also in the report of
+  each haplotype of assembly-search, a search of a personal genome (RV1-F2): it says `none
+  (no variant dataset searched)`, and "Sites in the genome searched (hg38)", or
+  (`HG01255_paternal_5aeb0fc6`), the genome the search names. Covered by
+  `PostProcess/test_generate_report.py`.
+- **The report of a search that computed no score says so in place of its score tables.** A
+  Cas12a search, or one of any PAM on the 5′ side, computes neither CFD nor CRISPR-Bulge, and
+  its report printed the risk card's CFD bands and Section 4's CFD tiers, each 0, and the
+  CRISPR-Bulge and CFD sentences of the recommended panel: read as "no site at risk", where
+  the panel was chosen by mismatches and bulges alone (cli5 D6). The card and Section 4 say
+  that neither score is computed for the nuclease and that the panel is chosen by mismatches
+  and bulges, and the panel's note says how; assembly-search's combined report too. A scored
+  search's report is unchanged. Covered by `PostProcess/test_generate_report.py`.

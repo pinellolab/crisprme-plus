@@ -740,6 +740,16 @@ def _in_range(series):
     return s.where((s >= 0.0) & (s <= 1.0))
 
 
+# What the risk card and the validation panel say, in place of their score tables, of a run
+# that computed neither score (a Cas12a or other non-SpCas9 nuclease, a 5' PAM): its tables
+# all read 0, as "no site at risk" (cli5 D6).
+NO_SCORE_NOTE = (
+    "CFD and CRISPR-Bulge are defined for a 20-nt spacer with a 3&prime; SpCas9-family "
+    "PAM: neither is computed for this nuclease, so no site is scored, and the "
+    "validation panel is chosen by mismatches and bulges alone."
+)
+
+
 def cfd_computed(df, cols):
     """True when the CFD column exists AND has >=1 in-range [0,1] value (i.e. real
     scores, not the all-(-1) sentinel emitted for out-of-CFD-regime nucleases)."""
@@ -1265,6 +1275,16 @@ def _normalize_genome(genome):
 MULTI_GUIDE_TOKEN = "Multiple_spacers"
 
 
+def _dataset_label(vcf, genome):
+    """The label of the VCF folder ``vcf`` of a search of ``genome``: its name after the
+    genome's ("hg38_1000G_HGDP" -> "1000G+HGDP"), or "" for none (a reference-only search
+    names it "_", or "<genome>_ref", whose bare "ref"/"reference" is no dataset)."""
+    vcf_tokens = vcf.split("_")
+    if vcf_tokens and vcf_tokens[0] == genome:
+        vcf_tokens = vcf_tokens[1:]
+    return "+".join(t for t in vcf_tokens if t and t.lower() not in ("ref", "reference"))
+
+
 def _parse_results_filename(tsv_path):
     """Fallback summary from ``<guide>+<pam>_<ref>+<vcf>_<mm>+<bmax>_integrated_results.tsv``.
 
@@ -1306,17 +1326,9 @@ def _parse_results_filename(tsv_path):
         if "+" in genome_vcf:
             info["genome"], vcf = genome_vcf.split("+", 1)
             info["genome"] = _normalize_genome(info["genome"])
-            # vcf like "hg38_1000G_HGDP" -> datasets after the ref token
-            vcf_tokens = vcf.split("_")
-            if vcf_tokens and vcf_tokens[0] == info["genome"]:
-                vcf_tokens = vcf_tokens[1:]
-            # drop a bare "ref"/"reference" marker (reference-only web/CLI runs
-            # name the vcf token "<genome>_ref" -> it must NOT become a dataset)
-            vcf_tokens = [
-                t for t in vcf_tokens if t and t.lower() not in ("ref", "reference")
-            ]
-            if vcf_tokens:
-                info["datasets"] = "+".join(vcf_tokens)
+            label = _dataset_label(vcf, info["genome"])
+            if label:
+                info["datasets"] = label
                 info["vcf"] = vcf
             # else: leave datasets unset (a reference-only search names the vcf "_")
         else:
@@ -1329,8 +1341,10 @@ def _parse_results_filename(tsv_path):
 
 
 # The "Variant dataset(s)" label of a reference-only search, which searched no variant
-# dataset (build_summary_meta then also sets meta["reference_only"]).
-REFERENCE_ONLY_DATASETS = "none (reference genome only)"
+# dataset (build_summary_meta then also sets meta["reference_only"]). It said "none
+# (reference genome only)", of a haplotype of assembly-search too, whose search is one of
+# a personal genome with no variant dataset (RV1-F2).
+REFERENCE_ONLY_DATASETS = "none (no variant dataset searched)"
 
 # The record of the indexes a search took, which the search script writes into its result
 # folder (since 2.9.0), bundled as indexes_searched.txt beside Params.txt.
@@ -1430,6 +1444,25 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     n_offtarget = n_total - n_ontarget
 
     datasets = fn.get("datasets")
+    vcf_name = fn.get("vcf")
+    # Every variant dataset the search searched, from the copy of the --vcf list the search
+    # script reads in its result folder (.vcf_list_searched.txt, since 2.9.0; none for a
+    # reference-only search): the results file is named after the last one alone, so a
+    # search of two or more was reported as one of the last, with its registry's panel
+    # and counts (RV1-F1). Each was searched with its own panel and registry, so none is
+    # the run's: the counts of no registry are credited to it (_registry_variant_count).
+    vcf_names = []
+    if result_dir:
+        try:
+            with open(os.path.join(result_dir, ".vcf_list_searched.txt")) as _vl:
+                vcf_names = list(dict.fromkeys(
+                    os.path.basename(os.path.normpath(_l.strip())) for _l in _vl
+                    if _l.strip() and _l.strip() != "_"))
+        except OSError:
+            pass
+    if len(vcf_names) > 1:
+        datasets = ", ".join(_dataset_label(_v, genome) or _v for _v in vcf_names)
+        vcf_name = None
     # A reference-only search (no --vcf; "reference only" on the web form) searched no
     # variant dataset. Both .Params.txt writers (crisprme.py and the web) record
     # Ref_comp False exactly then. A folder without that key falls back to the names:
@@ -1506,8 +1539,11 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "genome": genome,
         "datasets": datasets,
         "indexes": indexes,
-        # the VCF folder name the results file carries (None when it names no dataset)
-        "vcf_name": fn.get("vcf"),
+        # the VCF folder name the results file carries (None when it names no dataset, or
+        # the search searched more than one)
+        "vcf_name": vcf_name,
+        # every VCF folder the search searched, when its result folder says (2.9.0 on)
+        "vcf_names": vcf_names,
         "mm": str(mm),
         "mm_int": mm_int,
         "bdna": bdna,
@@ -1699,7 +1735,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     so that no SNP+indel co-occurrence table was written; a registry this report does
     not find (results read away from their install) is not that.
     A reference-only search (``meta["reference_only"]``) gets only the database row
-    ("none") and its search criteria against the reference genome.
+    ("none") and its search criteria against the genome it searched.
     """
     def _card(rows, caption=""):
         body = "".join(f'<tr><td class="k">{k}</td><td>{v}</td></tr>' for k, v in rows)
@@ -1738,13 +1774,14 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     max_edits = meta.get("max_edits", "n/a")
     if meta.get("reference_only"):
         # no variant database, analysis mode, panel or allele frequency to state, and
-        # no variant-contributed site: the criteria are the reference genome's alone
+        # no variant-contributed site: the criteria are the genome's alone, the one the
+        # search named (a personal haplotype of assembly-search too)
         return _card([
             ("Variant database(s)", _esc(REFERENCE_ONLY_DATASETS)),
             ("Off-target search criteria",
-             f"Sites in the reference genome that differ from the guide by up to "
-             f"{_esc(mm)} mismatches and DNA/RNA bulges up to {_esc(bulges)} (max "
-             f"total edits {_esc(max_edits)})."),
+             f"Sites in the genome searched ({_esc(meta.get('genome', 'n/a'))}) that differ "
+             f"from the guide by up to {_esc(mm)} mismatches and DNA/RNA bulges up to "
+             f"{_esc(bulges)} (max total edits {_esc(max_edits)})."),
         ])
     # The mode that ran, not how it was chosen: .search_mode does not record whether it was
     # the index's default (per-sample on a genotyped + phased index) or asked for
@@ -1829,10 +1866,15 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
          "and intergenic, SNPs and insertions/deletions (indels)."
          + panel_and_variants_note(dataset_counts, variant_count)),
         ("Allele-frequency basis",
-         f"Combined-panel minor/alternate allele frequency over the merged "
-         f"{_esc(ds)} panel: for genotyped databases this is AC/AN across the "
-         f"panel; a frequency-only database contributes its reported population "
-         f"allele frequency directly. "
+         (f"Minor/alternate allele frequency over the panel of the dataset each variant "
+          f"comes from, each of {_esc(ds)} searched with its own: for genotyped databases "
+          f"this is AC/AN across that panel; a frequency-only database contributes its "
+          f"reported population allele frequency directly. "
+          if len(meta.get("vcf_names") or []) > 1 else
+          f"Combined-panel minor/alternate allele frequency over the merged "
+          f"{_esc(ds)} panel: for genotyped databases this is AC/AN across the "
+          f"panel; a frequency-only database contributes its reported population "
+          f"allele frequency directly. ")
          + (f"For {_untiered_named(_ut)}, it is instead the <code>AF</code> of "
             f"{'its' if _one else 'their'} classic per-sample dictionaries (an indel's, of the "
             "index's indel log), which <code>add-variants</code> copied from "
@@ -2246,7 +2288,8 @@ def _registry_variant_count(result_dir, meta):
     ``None`` for a reference-only search, which searched no registry: the single
     installed one picked below must not be credited to it."""
     try:
-        if not result_dir or meta.get("reference_only"):
+        # (nor for a search of two or more datasets, each with a registry of its own)
+        if not result_dir or meta.get("reference_only") or len(meta.get("vcf_names") or []) > 1:
             return None
         dict_dir = None
         for cand in (
@@ -3104,6 +3147,7 @@ def build_validation_panel(df, cols):
         "n_variant_cfd": n_variant_cfd,
         "n_offtarget": int((~ontarget).sum()),
         "has_crispr_bulge": has_crispr_bulge,
+        "has_cfd": cfd_computed(df, cols),
         "n_ml_na": n_ml_na,
         "n_ot_total": n_ot_total,
         "n_panel_demoted": n_panel_demoted,
@@ -3327,6 +3371,32 @@ def render_validation_panel(
             "expanded for any assay budget."
         )
     )
+    # A run that computed neither score (a nuclease of no SpCas9 family, a 5' PAM): every CFD
+    # and CRISPR-Bulge count is 0, and every sentence about them reads as "no site at risk"
+    # (cli5 D6), so the tables, the bridge and the note say what the panel is chosen by.
+    no_score = not vp.get("has_cfd", True) and not vp.get("has_crispr_bulge")
+    if no_score:
+        note = (
+            f"How the panel was chosen (~{PANEL_CAP} sites &mdash; may be more when many "
+            f"sites are hard-included). With no score computed, every off-target with "
+            f"mismatches+bulges &le; {PANEL_FLOOR_MMB}, and every one of 0 mismatches with "
+            f"&ge;1 bulge, is hard-included and always kept; the remaining slots up to "
+            f"{PANEL_CAP} go to the sites of fewest mismatches and bulges."
+            + (
+                " There is NO category quota: variant-created sites qualify through "
+                "the same floors and ranks as reference sites."
+                if show_variant_row else ""
+            )
+            + (
+                " The edit-distance table above, its subset files, and the complete raw "
+                "integrated results (bundled downloads) let the panel be reviewed or "
+                "expanded for any assay budget." if raw_bundled else
+                " The edit-distance table above and its subset files (bundled downloads), "
+                "with the complete raw integrated results in the result folder "
+                "(<code>--report-full</code> bundles them too), let the panel be reviewed "
+                "or expanded for any assay budget."
+            )
+        )
     _panel_n = vp.get("panel_size", 0)
     _panel_dl_n = f"~{PANEL_CAP} sites" + (
         f", {_panel_n:,} here" if _panel_n > PANEL_CAP else ""
@@ -3356,8 +3426,9 @@ def render_validation_panel(
     _variant_rows = (
         f"<tr><td>Variant-created off-targets (Not_found_in_REF)</td><td class='num'>"
         f"{_tier_count_link('variant_created', vp['n_variant'])}</td></tr>"
-        f"<tr><td>&hellip; of those with CFD &ge; {PANEL_VARIANT_CFD_MIN}</td>"
-        f"<td class='num'>{vp['n_variant_cfd']:,}</td></tr>"
+        + ("" if no_score else
+           f"<tr><td>&hellip; of those with CFD &ge; {PANEL_VARIANT_CFD_MIN}</td>"
+           f"<td class='num'>{vp['n_variant_cfd']:,}</td></tr>")
     ) if show_variant_row else ""
     _panel_variant_note = (
         f" of the selected sites, <strong>{vp['panel_variant']:,}</strong> "
@@ -3400,13 +3471,27 @@ def render_validation_panel(
         "sites both scores are out of their validated domain, so those stay listed but demoted "
         "(CRISPR-Bulge is N/A and CFD is an uncalibrated over-call). See the risk card and "
         "METHODS &sect;3.5.")
+    cfd_table_block = (
+        '<div>\n    <table class="thr-table"><thead><tr><th>CFD threshold</th><th>Candidates '
+        '&mdash; all gaps (&le;1-gap calibrated)</th></tr></thead>\n'
+        f'    <tbody>{cfd_rows}</tbody></table>\n  </div>'
+    )
+    _hard = (f"{scorer_label()} {cbop.sensitive_label_html()} OR mm+b &le; {PANEL_FLOOR_MMB}\n"
+             f"      OR CFD &ge; {PANEL_RESCUE_CFD} at 0 bulges OR CFD &ge; {PANEL_HIGH_CFD} at 1 "
+             f"bulge OR a clean\n      0-mismatch bulge; a &ge;2-bulge site high on CFD alone is "
+             f"kept too but demoted to the end),\n      then fill up to {PANEL_CAP} by worst-case "
+             f"severity across {metric_list}")
+    if no_score:
+        _bridge = (
+            "These are candidates to <strong>assay</strong>, enumerated worst-case over all gap "
+            f"counts; they are not predicted true off-targets. {NO_SCORE_NOTE}")
+        cfd_table_block = f'<div><p class="caption">{NO_SCORE_NOTE}</p></div>'
+        _hard = (f"mm+b &le; {PANEL_FLOOR_MMB} OR a clean 0-mismatch bulge), then fill up to "
+                 f"{PANEL_CAP} by fewest mismatches+bulges")
     return f"""
 <p class="caption">{_bridge}</p>
 <div class="panel-grid">
-  <div>
-    <table class="thr-table"><thead><tr><th>CFD threshold</th><th>Candidates &mdash; all gaps (&le;1-gap calibrated)</th></tr></thead>
-    <tbody>{cfd_rows}</tbody></table>
-  </div>
+  {cfd_table_block}
   {crispr_bulge_table_block}
   <div>
     <table class="thr-table"><thead><tr><th>Edit-distance threshold</th><th>Candidates (download)</th></tr></thead>
@@ -3418,10 +3503,7 @@ def render_validation_panel(
     <tr><td>{_off_label}</td><td class="num">{vp['n_offtarget']:,}</td></tr>
     {_variant_rows}
     <tr class="panel-hi"><td><strong>{_panel_hdr}</strong><br>
-      <span class="caption">hard-include ({scorer_label()} {cbop.sensitive_label_html()} OR mm+b &le; {PANEL_FLOOR_MMB}
-      OR CFD &ge; {PANEL_RESCUE_CFD} at 0 bulges OR CFD &ge; {PANEL_HIGH_CFD} at 1 bulge OR a clean
-      0-mismatch bulge; a &ge;2-bulge site high on CFD alone is kept too but demoted to the end),
-      then fill up to {PANEL_CAP} by worst-case severity across {metric_list};{_panel_variant_note}</span></td>
+      <span class="caption">hard-include ({_hard};{_panel_variant_note}</span></td>
       <td class="num"><strong>{_tier_count_link('panel', vp['panel_size'])}</strong></td></tr>
   </tbody>
 </table>
@@ -3569,21 +3651,26 @@ def _linkify_bundled_filenames(html, names):
 # INFO/AF; add-variants looks for the AF key in the VCF's first record only and reads
 # every record's AF at that place in INFO, so a record that has it elsewhere gets none
 # (METHODS section 8): the note says "the index's", not "the VCF's".
-def maf_footnote(datasets=None, reference_only=False, untiered=None):
+def maf_footnote(datasets=None, reference_only=False, untiered=None, several=False):
+    """``several``: the search searched two or more datasets (``datasets`` names them),
+    each with its own panel."""
     if reference_only:
         return (
             "MAF = minor/alternate allele frequency of the variant behind an off-target. "
             "MAF blank (&mdash;) = reference off-target (no variant). This search used "
-            "the reference genome only, with no variant dataset, so every MAF is blank."
+            "no variant dataset, so every MAF is blank."
         )
     ds = datasets or "the variant panel"
     return (
-        "MAF = combined-panel minor/alternate allele frequency. "
+        ("MAF = minor/alternate allele frequency over the panel of its dataset. " if several
+         else "MAF = combined-panel minor/alternate allele frequency. ") +
         "MAF blank (&mdash;) = reference off-target (no variant), a SNP not in the "
         "frequency panel, or an indel whose <code>AF</code> the index's indel log gives "
         "as 0, or not at all; for SNP variant off-targets the frequency is AC/AN over the "
-        f"genotyped panel &mdash; here the merged {ds} union panel (the combined global "
-        "AF), not a single ancestry. "
+        + (f"genotyped panel &mdash; here that of the dataset the variant comes from, each of "
+           f"{ds} searched with its own, not a single ancestry. " if several else
+           f"genotyped panel &mdash; here the merged {ds} union panel (the combined global "
+           "AF), not a single ancestry. ") +
         # as analisi_indels_NNN.py has done in every release: an indel row takes the AF of
         # the index's indel log (final_result[16] = indel_data[3]), in either mode and with
         # or without the tiers (the SNPs beside it take the registry's, else the
@@ -3739,7 +3826,7 @@ def build_observed_haplotypes_modals_html(oh_modals):
 
 def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
                      oh_modals=None, oh_download_name=None, oh_omitted_note="",
-                     reference_only=False, untiered=None):
+                     reference_only=False, untiered=None, several=False):
     """Scrollable inline top-N table, sorted by CFD desc (opens offline).
 
     The ONLY interactivity is the per-site observed-haplotype modal: when ``site_map``
@@ -3758,7 +3845,8 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
     The aligned protospacer+PAM cell is wrapped in <code>; the MAF em-dash keeps
     its footnote (``reference_only`` gives the footnote of a search with no variant
     dataset; ``untiered``, the one of a search with datasets without the dict-less
-    tiers). Extra columns don't break the scroll box / sticky header.
+    tiers; ``several``, of a search of two or more datasets, each with its own panel).
+    Extra columns don't break the scroll box / sticky header.
     """
     curated = build_curated_frame(top_df, cols, has_crispr_bulge, start_rank=1)
     headers = list(curated.columns)
@@ -3819,7 +3907,8 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
 
     footnote = ""
     if maf_missing_seen:
-        footnote = f'<p class="caption">{maf_footnote(datasets, reference_only, untiered)}</p>'
+        footnote = (f'<p class="caption">'
+                    f'{maf_footnote(datasets, reference_only, untiered, several)}</p>')
 
     table = (
         '<div class="ottable-wrap"><table class="ottable">'
@@ -5522,14 +5611,17 @@ def build_report(
         _bul = _to_int_series(df[cols["bulges"]])
         _offt = _mmb > 0                                   # off-targets (exclude perfect)
         # CFD is calibrated on <=1-gap; the Bulges column is the CFD-alignment's gap count.
-        _cfd_sc = _to_float_series(df[cols["cfd"]])[_offt & (_bul <= 1)].dropna().tolist()
+        # (None when it was not computed: the card then says why it has no score)
+        _cfd_sc = (_to_float_series(df[cols["cfd"]])[_offt & (_bul <= 1)].dropna().tolist()
+                   if cfd_computed(df, cols) else None)
         # CRISPR-Bulge: do NOT reuse the CFD-alignment gap count -- the CB score belongs to
         # the CB alignment, whose <=1-gap domain is encoded by score>=0 (>=2-gap -> -1). Pass
         # all off-target CB values; the card keeps only the in-band (>=0.2) ones.
         _cb_sc = (_to_float_series(df[cols["crispr_bulge"]])[_offt].dropna().tolist()
                   if has_crispr_bulge and "crispr_bulge" in cols else None)
         _nperf = int((_mmb == 0).sum())
-        _card_html, risk_modal_html = _rc.render_risk_card(meta, _cfd_sc, _cb_sc, _nperf)
+        _card_html, risk_modal_html = _rc.render_risk_card(meta, _cfd_sc, _cb_sc, _nperf,
+                                                           no_score_note=NO_SCORE_NOTE)
         if _card_html:
             # place the risk card BELOW the run inputs + MM/B matrix (reads more naturally)
             summary_matrix_html = summary_matrix_html + _card_html
@@ -5717,6 +5809,7 @@ def build_report(
             oh_download_name=observed_haplotypes_bundle_name,
             oh_omitted_note=observed_haplotypes_omitted_note,
             reference_only=meta.get("reference_only", False), untiered=untiered,
+            several=len(meta.get("vcf_names") or []) > 1,
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
@@ -5735,6 +5828,7 @@ def build_report(
                     oh_download_name=observed_haplotypes_bundle_name,
                     oh_omitted_note=observed_haplotypes_omitted_note,
                     reference_only=meta.get("reference_only", False), untiered=untiered,
+                    several=len(meta.get("vcf_names") or []) > 1,
                 )
                 # (the CRISPR-Bulge top-1000 is surfaced in the Section-5 top-1000 row next
                 # to the CFD one by render_html, not appended to the per-tier list here.)
@@ -7586,13 +7680,18 @@ def _build_combined_risk_card(pooled_df, pooled_cols, guide_display):
         mmb = _to_int_series(pooled_df[pooled_cols["mmb"]])
         bul = _to_int_series(pooled_df[pooled_cols["bulges"]])
         offt = mmb > 0                                             # off-targets (exclude perfect)
-        cfd_sc = _to_float_series(
+        # (neither score computed, as for a 5' PAM: the card says so in place of its bands)
+        scored = (cfd_computed(pooled_df, pooled_cols)
+                  or crispr_bulge_computed(pooled_df, pooled_cols))
+        cfd_sc = (_to_float_series(
             pooled_df[pooled_cols["cfd"]])[offt & (bul <= 1)].dropna().tolist()
+            if scored else None)
         cb_sc = (_to_float_series(pooled_df[pooled_cols["crispr_bulge"]])[offt].dropna().tolist()
-                 if "crispr_bulge" in pooled_cols else None)
+                 if scored and "crispr_bulge" in pooled_cols else None)
         nperf = int((mmb == 0).sum())
         card, modal = _rc.render_risk_card(
-            {"guide_display": guide_display, "nuclease": "", "pam": ""}, cfd_sc, cb_sc, nperf)
+            {"guide_display": guide_display, "nuclease": "", "pam": ""}, cfd_sc, cb_sc, nperf,
+            no_score_note=NO_SCORE_NOTE)
         note = ""
         if card and "_pv_category" in pooled_df and \
                 pooled_df["_pv_category"].astype(str).str.startswith("Reconciled").any():
