@@ -116,16 +116,21 @@ then those criteria): a row of exactly that target whose fold group -- the rows 
 site (the cluster position on the record's haplotype) and strand naming the same variants
 with the same carriers, which the documented merge folds into the first by each block's
 order -- is no worse, or such rows with the target's own carrier set; a run that writes
-no alternative alignments -- a population-level run, or `complete-test`'s `--ci-cd-test`
-runs -- keeps one row per merge cluster, and there the row of the target's cluster (rows
-chained within `--merge` bp by the rows CRISPRme can write, as the merge clusters: the
-reference rows, the SNP rows of the mode -- population-level each alignment's worst case,
-per sample the haplotypes individuals hold -- and the targets some carrier of an indel
-record holds) must be no worse than each target; a cluster that reaches such a row only
-through rows CRISPRme may write or not, which no documented rule settles (a capped
-window's greedy row, which only the classic dictionary path of a `--ci-cd-test` index
-writes; the one-record reading of an undocumented overlap), is counted under its cause's
-class, not passed. It does not check the CFD_REF/ALT, CFD risk
+no alternative alignments -- by default a population-level one, as `complete-test`'s runs
+are (their `.search_mode` says so; `--ci-cd-test` chooses no mode) -- keeps one row per
+merge cluster, and there the row of the target's cluster (rows chained within `--merge`
+bp by the rows CRISPRme can write, as the merge clusters: the reference rows, the SNP rows
+of the mode the run ran -- population-level each alignment's worst case, per sample the
+haplotypes individuals hold -- and the targets some carrier of an indel record holds, none
+that needs two indel records) must be no worse than each target; a cluster that reaches
+such a row only through rows CRISPRme may write or not, which no documented rule settles
+(a per-sample run's capped window's greedy row, which only the classic dictionary path
+writes; the one-record reading of an undocumented overlap; a target two overlapping
+alleles of a slot change), is counted under its cause's class, not passed. A slot whose
+VCF alleles overlap is read as METHODS section 4 reads it where it says how, and judged
+on every reading of the rest (a carrier whose slot holds the target on all of them, or on
+none, is judged so); where its readings part, a listed carrier METHODS' rules take off
+the target fails, and any other is counted. It does not check the CFD_REF/ALT, CFD risk
 and CRISPR-Bulge scores (nor which row the CRISPR-Bulge block keeps),
 `Variant_info_spacer+PAM`, `PAM_creation`, the seed counts, MAF, rsID, `Other_motifs`,
 `Not_found_in_REF` or the annotations, nor the merge's keys after the sorting criteria and
@@ -137,7 +142,10 @@ VCF under its own coverage class. Two genotyped datasets that share samples are 
 the checker does not model; a sites-only dataset beside a genotyped one is checked. So are
 inputs other than the search's where the run's own record of them says so (its
 `.Params.txt` budget, PAM and variant datasets -- one VCF per dataset for each chromosome
-checked --, its `.guides.txt`, `.sampleID.txt` and command line).
+checked --, its `.guides.txt`, `.sampleID.txt` and `.search_mode`, the mode it ran), a run
+whose records contradict each other, and one that does not record what the check needs
+(whether it wrote alternative alignments and, where it wrote none, its mode, which
+`--analysis` can give).
 `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check`,
 `validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
 `docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a real HGDP + 1000 Genomes

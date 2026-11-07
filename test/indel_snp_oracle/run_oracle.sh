@@ -50,10 +50,12 @@ python3 -I "$here/oracle.py" check "$wd" "$pp" Results/orc_per Results/orc_pop |
 # haplotype builder and exhaustive aligner, driven only by what a user has. Soundness in
 # both modes, and completeness in both: per sample every (sample, target) must be
 # reported, while the population-level run (one row per cluster, no alternative
-# alignments) is checked per cluster -- the checker reads that from the run's .alt_mode.
-# On the oracle the planted two-indel sites O and Q (and the second records of W and V)
-# come out as limit-two-indels and site P's phasing artefact as limit-overlapping-records,
-# non-gating; every gating finding fails the oracle, as oracle.py's do, except the ones
+# alignments) is checked per cluster -- the checker reads that from the run's .alt_mode,
+# and its mode from its .search_mode. On the oracle the planted two-indel sites O and Q
+# (and the second records of W and V) come out as limit-two-indels and site P's phasing
+# artefact as the note overlap-reading-agrees (soundness) and limit-overlapping-records
+# (completeness), non-gating; every gating finding fails the oracle, as oracle.py's do,
+# except the ones
 # known_check_indel_rows.tsv lists (a CRISPRme defect reported upstream: they print as
 # known-defect, and as known-not-seen once fixed).
 chk=$here/../../scripts/check_indel_rows.py

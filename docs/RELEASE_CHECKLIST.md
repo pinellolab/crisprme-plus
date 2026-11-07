@@ -163,19 +163,26 @@ for g in readme:guide.txt trac:guide_trac.txt; do
 done
 #     The gate is the exit status: 0 gating findings. Non-gating lines are documented
 #     CRISPRme limits (limit-last-alt-wins, limit-two-indels, limit-putative-carrier,
-#     limit-contig-end; limit-capped-window: a cluster of a --ci-cd-test run reached only
-#     through a capped window's greedy row, which only the classic dictionary path
-#     writes), slots whose VCF alleles overlap where a target of their record reads, so
-#     the VCF gives it no sequence (limit-overlapping-records: 3 records on chr22; a
-#     carrier there is judged where METHODS section 4 reads the slot without the
-#     overlapping allele, and its named variants are always required), windows across N
+#     limit-contig-end; limit-capped-window: a cluster of a per-sample run without
+#     alternative alignments reached only through a capped window's greedy row, which only
+#     the classic dictionary path writes), slots whose VCF alleles overlap where a target
+#     of their record reads, so the VCF gives it no sequence (limit-overlapping-records: 4
+#     records on chr22; a carrier there is judged where METHODS section 4 reads the slot
+#     without the overlapping allele -- a listed one that so holds the target is the note
+#     overlap-reading-agrees --, and on every reading of two other alleles that overlap
+#     each other, where all agree; a listed carrier whose slot has no reading and that
+#     METHODS' rules take off the target fails, carrier-off-by-rule; its named variants
+#     are always required), windows across N
 #     (limit-n-bases), a sites-only dataset's rows, which list no
 #     carrier (limit-no-genotypes: none here; to check a search of the default index beside
 #     hg38_mega, give both VCFs, --vcf "$VCF" --vcf <mega chr22 VCF>), the note
 #     variant-shadowed, and the checker's own coverage gaps (coverage-putative-cap: a
 #     carrier resolved PUTATIVE with more than 10 positions near a record where its
 #     alleles allow two bases, whose targets touching a call of unknown phase are not
-#     enumerated, none on this phased panel; coverage-chain-limit: a population-level
+#     enumerated, none on this phased panel; coverage-overlap-cap: a slot whose overlap
+#     zones near a record have more than 1024 readings, of which each allele alone is read
+#     for the targets only such readings hold (counted, never demanded; 2 records, one
+#     carrier, on chr22); coverage-chain-limit: a population-level
 #     cluster longer than the 3 kb either side its chain follows;
 #     coverage-unindexed-long-ref: a VCF without a .tbi holding a deletion longer than
 #     20 kb, which an unindexed read may miss: give it a .tbi), each listed with its
@@ -188,8 +195,11 @@ done
 #     the run records it searched with: its .Params.txt budget, PAM and variant datasets
 #     (give one VCF per dataset of the search for each chromosome: a two-dataset search
 #     given one VCF is refused), a guide its .guides.txt does not hold (a subset of its
-#     guides is checked; the others' rows are counted, guide-not-given), a --samples other
-#     than its .sampleID.txt, an --analysis other than its command line's. Genome-wide
+#     guides is checked; the others are counted, guide-not-given), a --samples other than
+#     its .sampleID.txt, an --analysis other than its .search_mode (the mode the search
+#     ran), a run whose records contradict each other, or one that does not record what
+#     the check needs (whether it wrote alternative alignments and, where it wrote none,
+#     its mode: --ci-cd-test chooses none; --analysis can give it). Genome-wide
 #     COMPLETENESS (at most about 52 CPU-hours per guide: 53 to 78 min on 40 processes of a
 #     loaded node, 6 GB, a TSV of about 31 MB) is not a release gate; chr22 above stands
 #     for it.

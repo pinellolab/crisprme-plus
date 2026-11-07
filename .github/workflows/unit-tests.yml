@@ -327,8 +327,18 @@ jobs:
         # phasing artefact that lacks the row's target, a carrier off by rule in a fold
         # group, a population-level cluster joined through a slot a complex allele takes
         # off, a haploid SNP call beside a diploid record (the reference stays possible),
-        # a capped window's greedy row in a per-sample chain, and inputs other than the
-        # search's (its datasets, budget, PAM, guides, samples list, mode: refused).
+        # a capped window's greedy row in a per-sample chain, inputs other than the
+        # search's (its datasets, budget, PAM, guides, samples list, mode: refused), a
+        # run read in the mode it ran (its .search_mode, not --ci-cd-test, which chooses
+        # none: a population-level cluster joined only by a worst-case SNP row; a run that
+        # records no mode, or contradictory ones, refused), a listed carrier whose slot
+        # has no one sequence and that METHODS' rules take off (a second deletion with a
+        # SNV on the base it deletes; both alts of a split site), two overlapping alleles
+        # that change no base of the target (the carrier judged: an unnamed SNV, a
+        # carrier left off, a dropped row), a carrier whose slot has no reading counted and
+        # never demanded, a slot read without its artefact that chains no target needing a
+        # second indel record, and a completeness check of some of a run's guides naming
+        # the others.
         # CRISPRme's documented limits (a split
         # multi-allelic site, two indels in one target, a complex allele, a phasing
         # artefact, a repeat unit at the target's edge, a PUTATIVE tie) must come out

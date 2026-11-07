@@ -277,10 +277,13 @@ jobs:
         # runner, stdlib only, no image (the CFD tables in PostProcess/ are read as data).
         # Soundness on each benchmark with its own budget (test/benchmark/benchmarks.json),
         # then completeness of cas9_sg1617 on the whole of chr22 (about 3 min on 4
-        # processes; the step about 4 min). complete-test runs with --ci-cd-test, which
-        # writes no alternative alignments (.alt_mode = no-alt-alignments), so
-        # completeness is checked per merge cluster here (the cluster's row must have no
-        # more edits than each target and at least its CFD); the per-sample
+        # processes; the step about 4 min). complete-test's searches run in
+        # complete-search's default mode, population-level on the index it builds (their
+        # .search_mode; --ci-cd-test chooses no mode, it keeps the intermediate files), and
+        # write no alternative alignments (.alt_mode = no-alt-alignments), so completeness
+        # is checked per merge cluster here, its SNP rows each alignment's worst case (the
+        # cluster's row must have no more edits than each target and at least its CFD); the
+        # per-sample
         # completeness gate is the release checklist's step 4c on a real panel, and the
         # SNP+indel oracle above. Non-gating limit lines (documented CRISPRme limits)
         # are printed and uploaded on failure; any gating line fails the step, once every

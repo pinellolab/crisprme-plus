@@ -12,9 +12,11 @@ indel check (`scripts/check_indel_rows.py`, which imports no code of `oracle.py`
 and shares only boilerplate with `oracle.py`: the table's column names, an indel-token test
 and the reverse complement) on both results, soundness and completeness; the population-level run, which
 writes no alternative alignments, is checked per merge cluster, the planted two-indel sites
-come out as non-gating `limit-two-indels` lines and site P's phasing artefact as
-`limit-overlapping-records` (S45's slot, read without the alleles at the insertion's own
-position as METHODS section 4 reads it, holds its row's target).
+come out as non-gating `limit-two-indels` lines and site P's phasing artefact as the note
+`overlap-reading-agrees` in soundness (S45's slot, read without the alleles at the
+insertion's own position as METHODS section 4 reads it, holds its row's target, which
+lists S45) and `limit-overlapping-records` in completeness (such a reading is counted,
+not demanded).
 `known_check_indel_rows.tsv` lists the two alternative-alignment blocks of the per-sample
 run where CRISPRme's merge lists the unphased S19 on an alignment weaker than its strongest
 (a CRISPRme defect found by the checker, not fixed on this branch): they print as
