@@ -43,9 +43,19 @@ RV1-WEB2-3 (the web user guide's ALT rows), RV1-WEB2-5 (the web's refusal of a V
 file named for no chromosome beside others), D3R3-2 (a CFD-only run's CRISPR-Bulge risk score),
 D3R3-3 (targets-scoring's banner, on stdout), LP RV4-cooc-carrier-cap (the SNP+indel companion
 names 50 carriers at most) and D3R3-4 (a test docstring's count of the release candidate: a
-docstring, with no test of its own).
+docstring, with no test of its own); WEB-4 (the Graphical Reports selector's totals); of plan
+4.2's report items, RV1-F1 (a search of two or more datasets), RV1-F2 (a haplotype's report) and
+cli5 D6 (a run with no score); FR :163 (download's check of an index's dictionaries); R2-F1 (an
+INDELS index built while the fake-indel genome changed); R4-6 (a haplotype result reused after
+its FASTA files changed); M5 (by E2's builds in the build lock: a search puts an index under its
+name only whole, its `.bin` files in it, so the ERROR of a folder with no `.bin` can no longer
+name one a search is building, as `test_index_resolution`'s
+`test_a_build_leaves_nothing_under_its_name_and_touches_no_index_of_the_older_one` shows; a
+search of 2.8.1 or earlier, which builds in place, run in the same library at once, still can).
 
-*Found fixed already (checked on this branch):* P12 (exit 2 since 2.8.1); t31 P6 (C3 of 2.8.1: every
+*Found fixed already (checked on this branch):* P8 (fixed in 2.8.1: the tier path writes the REF
+protospacer's mismatches in lower case, as the dictionary path does, CHANGELOG [2.8.1], covered by
+`test_tier_ref_columns`, which unit-tests.yml runs); P12 (exit 2 since 2.8.1); t31 P6 (C3 of 2.8.1: every
 folder named, exit 2, and the banner says reference when the smoke runs reference-only); R2-F3;
 R4-5; WEB-8; cli5 D5 (= IDX-7); IDX-20 (2.8.1 runs a store-less install population-level and says
 why); F3 of the docs review (a wrong-side all-N variant index is named by the search script's
@@ -85,7 +95,9 @@ not wrong). D3R3-7 is moot: no `{{EQUIVALENCE_NUMBERS}}` placeholder is left in 
 - FR :171 and FR :207 (a dataset removed in Settings is offered only if its name begins with its
   genome's, and a stale page then names the wrong one): 2.8.1 documents the rule; offering more
   removed datasets would offer searches Submit refuses (their list went with them).
-- WEB-4 (the Graphical Reports selector's total), WEB-7 (plan 2.6), WEB-11 (a default); P7 (what the
+- WEB-7 (the analysis mode on the results page, History and the Risk Cards: plan 2.6 designs what
+  each shows, with the carrier gate's display), WEB-11 (Hide Reference Targets ticked by default
+  since 2021: a default); P7 (what the
   slim report shows); the 0-1-edit sites of the shareable report and N7; the CRISPR-Bulge of
   reconciled assembly rows; the annotation copies of a web search (the #97 trade); Settings builds
   without the tiers' RAM; W1 (deliberately not added); FR :107 (deliberate); the stderr gate of the
@@ -728,3 +740,10 @@ deprecated pinellolab/CRISPRme site's installers (another repository): each need
   after which the mark is there, is not put in place: the search stops, saying to let that
   run finish and to run the search again, which builds it from the coded genome. Covered by
   `PostProcess/test_index_resolution.py`.
+- **The top-1000 plots of a run with no score name no perfect match they do not star.** Where
+  the score was not computed (a nuclease of no SpCas9 family, or a run without the scorer),
+  its column holds -1, and the stars of the perfect matches were drawn there, below the axes,
+  while the legend listed them (wsearch N3). A perfect match is starred, and in the legend,
+  only at a score of its own; the plot of the count of edits stars them as before. The
+  results page's plots and the Personal Risk Cards' alike. Covered by
+  `PostProcess/test_top_plots.py`.

@@ -36,13 +36,16 @@ PERFECT_MATCH_LABEL = "Perfect match (0 mismatches+bulges)"
 
 def mark_perfect_matches(ax, df, mmb_col, y_col):
     """Star the plotted sites with 0 mismatches+bulges at y_col (their best score,
-    or their edit count). Returns the legend handle, or None when there are none."""
-    perfect = pd.to_numeric(df[mmb_col], errors="coerce") == 0
+    or their edit count). Returns the legend handle, or None when there are none: none
+    either where y_col holds no value of theirs, as a score not computed holds -1, whose
+    star was drawn below the axes, the legend entry alone showing (wsearch N3)."""
+    y = pd.to_numeric(df[y_col], errors="coerce")
+    perfect = (pd.to_numeric(df[mmb_col], errors="coerce") == 0) & (y >= 0)
     if not perfect.any():
         return None
     ax.scatter(
         df.loc[perfect, "index"],
-        pd.to_numeric(df.loc[perfect, y_col], errors="coerce"),
+        y[perfect],
         marker="*",
         s=45,
         c="black",
