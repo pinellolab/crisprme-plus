@@ -1385,9 +1385,9 @@ flank holds an `N`, and searched with `--prune-pam` for a PAM narrower than its 
 the sites whose flank holds an `N` past the PAM (3 of 36 rows on a synthetic genome, 2.6 % of
 the indel rows on chr22). Its `.pam_build` has the same format, but its trees tell: one built
 since stores an `N` (a 0 nibble) in the flank of a target beside one, and no earlier build does.
-A search that reads such an index wider than its PAM warns of it in the same places (it reads
-the smallest tree of a contig whose sequence holds an `N`, and of the INDELS index one of
-several indel windows), and goes on.
+A search that reads such an index wider than its PAM warns of it beside its note of the flank
+(it reads the smallest tree of a contig whose sequence holds an `N`, and of the INDELS index
+one of several indel windows), and goes on.
 
 **Contig ends and N runs.** These limits hold for every index, dedicated or PAM-less, at any
 width. An index of budget *N* holds a window of the guide, the PAM and *N* more bases, and the

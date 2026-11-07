@@ -113,8 +113,12 @@ flank-tagged + distinct (e.g. `NNNNNNNN_3_<genome>`, K=8) so it is never confuse
   --vcf` build unchanged.
 
 ## 5. Web (2.9.0; in 2.8.1 the web interface never pruned)
-The search script prunes by itself for a web search as for one on the command line. The PAM
-picker is section 8: it reads the index's name and `.pam_build`, not a sidecar.
+A web search prunes by itself as one from the command line does, by the same rule: the search
+script decides it (complete-search decides it for its own, and tells the script it took the
+flag). It says so in the search's `log_verbose.txt`, and, of an all-N index wider than the PAM
+that it reads, what such a flank cannot index, with a warning of one built before CRISPRitz
+2.9.1, as complete-search says them on its console. The PAM picker is section 8: it reads the
+index's name and `.pam_build`, not a sidecar.
 
 ## 6. NNN index publish plan (*superseded*)
 2.8.1 publishes `NNN_3` in `lucapinello/crisprme-data` and the 8-nt-flank indexes in

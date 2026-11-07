@@ -20,6 +20,7 @@ import io
 import os
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import types
@@ -220,6 +221,47 @@ class TheSearch(_Dir):
         for name in ("NNN_3_g", "NRG_3_g"):
             self.assertEqual(self.crisprme._wider_flank_notes(
                 [self.index(name, flanks=("TTT",))], "NRG", self.genome), [])
+
+
+class TheSearchScriptsCommand(_Dir):
+    """The search script runs prune_flank.py for a search it prunes by itself (one the web
+    launched, which never passes --prune-pam): the notes complete-search says on its console,
+    on stdout, with the web app's route in the warning's advice, and nothing on stderr, which
+    fails the stage, whatever it is handed (an index or a genome that is not there, none)."""
+
+    def run_it(self, *args):
+        return subprocess.run([sys.executable, os.path.join(HERE, "prune_flank.py"), *args],
+                              capture_output=True, text=True)
+
+    def test_its_notes_on_stdout_and_nothing_on_stderr(self):
+        genome = self.path("Genomes", "g")
+        os.makedirs(genome)
+        with open(os.path.join(genome, "chrN.fa"), "w") as fh:
+            fh.write(">chrN\n" + "ACGT" * 20 + "N" * 30 + "ACGT" * 20 + "\n")
+        old = self.path("genome_library", "NNNNNNNN_3_g")
+        tree(os.path.join(old, "NNNNNNNN_chrN_1.bin"), 8, ["ACGTACGT", "TTTTACGT"])
+        run = self.run_it("NGG", genome, old, "", old)  # (once each; "": none taken)
+        self.assertEqual((run.returncode, run.stderr), (0, ""))
+        lines = run.stdout.splitlines()
+        self.assertEqual(len(lines), 2, run.stdout)
+        self.assertTrue(lines[0].startswith(
+            "NOTE: --prune-pam serves the 3-nt PAM NGG from NNNNNNNN_3_g, whose stored flank is "
+            "8 nt"), lines[0])
+        self.assertTrue(lines[1].startswith(
+            "WARNING: NNNNNNNN_3_g stores no N in the flank of any target where its genome has "
+            "one"), lines[1])
+        self.assertIn("(build one with crisprme.py build-index-only or in the web app's "
+                      "Settings, or download one if it is published)", lines[1])
+        # an index and a genome that are not there: the flank, from the index's name, alone
+        run = self.run_it("NGG", self.path("none"), self.path("genome_library", "NNNNNNNN_3_x"),
+                          self.path("genome_library", "NNNNNNNN_3_x+ds"))
+        self.assertEqual((run.returncode, run.stderr), (0, ""))
+        self.assertEqual(len(run.stdout.splitlines()), 1, run.stdout)
+        # none handed, or none wider than the PAM: nothing
+        for args in (("NGG", genome), ("NGG", genome, "", self.path("genome_library", "NNN_3_g"))):
+            with self.subTest(args=args[2:]):
+                run = self.run_it(*args)
+                self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""))
 
 
 if __name__ == "__main__":
