@@ -7,8 +7,11 @@ A living, run-every-release gate. It has two halves:
    check that catches it. **Append to this list whenever a release pass finds a new problem**,
    so the same class of bug can never ship twice.
 
-> Versioning is **stingy** — stay in the `2.x` line (patch bumps) unless the change is a true
-> CRISPRme-3 break. Never cut a tag on anything less than all-green CI.
+> Versioning follows [`RELEASING.md`](RELEASING.md#version-policy)'s version policy: CRISPRme
+> shares its major.minor with CRISPRitz, a breaking change in either package (an index format,
+> the enricher's output, a command line or a file one package reads of the other) bumps the
+> minor of both, and any other change bumps only the patch of the package it changes. Never cut
+> a tag on anything less than all-green CI.
 
 ---
 
