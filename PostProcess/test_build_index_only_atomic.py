@@ -3238,9 +3238,9 @@ BEFORE = {
             "acc7f66ace5d0084  Dictionaries/genotypes_ds/gt_chr2.idx",
             "dir  Dictionaries/indel_genotypes_ds/",
             "a3f726ac65dbc9e4  Dictionaries/indel_genotypes_ds/gt_indel_chr1.tsv.gz",
-            "4355a46b19d348dc  Dictionaries/indel_genotypes_ds/gt_indel_chr1.tsv.gz.done",
+            "f241d8830c69dc31  Dictionaries/indel_genotypes_ds/gt_indel_chr1.tsv.gz.done",
             "8e3f9e931ce698b8  Dictionaries/indel_genotypes_ds/gt_indel_chr2.tsv.gz",
-            "4355a46b19d348dc  Dictionaries/indel_genotypes_ds/gt_indel_chr2.tsv.gz.done",
+            "f241d8830c69dc31  Dictionaries/indel_genotypes_ds/gt_indel_chr2.tsv.gz.done",
             "dir  Dictionaries/log_indels_ds/",
             "5717b5bb7539d559  Dictionaries/log_indels_ds/logchr1.txt.gz",
             "0004c31cfbfba66d  Dictionaries/log_indels_ds/logchr2.txt.gz",
@@ -3330,9 +3330,9 @@ BEFORE = {
             "acc7f66ace5d0084  Dictionaries/genotypes_ds/gt_chr2.idx",
             "dir  Dictionaries/indel_genotypes_ds/",
             "a3f726ac65dbc9e4  Dictionaries/indel_genotypes_ds/gt_indel_chr1.tsv.gz",
-            "4355a46b19d348dc  Dictionaries/indel_genotypes_ds/gt_indel_chr1.tsv.gz.done",
+            "f241d8830c69dc31  Dictionaries/indel_genotypes_ds/gt_indel_chr1.tsv.gz.done",
             "8e3f9e931ce698b8  Dictionaries/indel_genotypes_ds/gt_indel_chr2.tsv.gz",
-            "4355a46b19d348dc  Dictionaries/indel_genotypes_ds/gt_indel_chr2.tsv.gz.done",
+            "f241d8830c69dc31  Dictionaries/indel_genotypes_ds/gt_indel_chr2.tsv.gz.done",
             "dir  Dictionaries/log_indels_ds/",
             "5717b5bb7539d559  Dictionaries/log_indels_ds/logchr1.txt.gz",
             "0004c31cfbfba66d  Dictionaries/log_indels_ds/logchr2.txt.gz",
@@ -4082,12 +4082,41 @@ def _crisprme_version():
         return re.search(r'^version = "([^"]+)"', fh.read(), re.M).group(1)
 
 
+class AStoreOfAnEarlierReleaseIsWrittenAgain(_Fixture):
+    """A re-run resumes a chromosome's phased indel genotypes written whole, but not those
+    written before 2.10.0, whose .done marker holds the record count alone: they may hold
+    the indels of records whose FILTER the search skips (neither PASS nor '.'), which no
+    fake-indel window holds, and a search would take a carrier off a row for one
+    (build_indel_genotypes.store_is_current)."""
+
+    def test_written_again_on_the_next_run(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        store = self.path("Dictionaries", "indel_genotypes_ds", "gt_indel_chr1.tsv.gz")
+        with gzip.open(store, "rt") as fh:
+            whole = fh.read()
+        # as 2.8.1 left it from a VCF that also gives an indel a LowQual FILTER
+        with gzip.open(store, "wt") as fh:
+            fh.write(whole + "40_CA_C\tS1:1|0\n")
+        _write(store + ".done", "2\n")
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("[indel-snp] building phased indel GT for 1 chromosome(s) with 1 "
+                      "parallel worker(s)", out)
+        with gzip.open(store, "rt") as fh:
+            self.assertEqual(fh.read(), whole)
+        with open(store + ".done") as fh:
+            self.assertEqual(fh.read().splitlines()[1:], ["FILTER\tPASS,."])
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix: but for the
     names of the indexes, which since 2.10.0 say the guide length and the side (BEFORE is
     the record of the code before the fix with NRG_2_hg38 named 20-NRG_2_hg38, which a
-    --record of 2.10.0 gives, byte for byte)."""
+    --record of 2.10.0 gives, byte for byte), and the .done marker of each chromosome's
+    phased indel genotypes, which since 2.10.0 says, after its record count, that the store
+    holds only records whose FILTER is PASS or '.' (build_indel_genotypes.FILTER_MARK)."""
 
     maxDiff = None
 

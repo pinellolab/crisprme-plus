@@ -49,6 +49,7 @@ import sys
 import tempfile
 import unittest
 
+import build_indel_genotypes as big
 import overlay_indel_snps as ov
 import tier0_registry as t0
 import tier1_genotypes as t1
@@ -470,7 +471,7 @@ class _Fixture(object):
     """Write the world as a data folder and run the shipped analyzer on it."""
 
     def __init__(self, tmp, world, tiers=("registry", "tier1", "indelgt"), env=None,
-                 max_total=None, indel_af=None):
+                 max_total=None, indel_af=None, store_marker=True):
         self.tmp = tmp
         self.world = world
         d = os.path.join(tmp, "Dictionaries")
@@ -523,6 +524,9 @@ class _Fixture(object):
                 for p, r, a, _rs, g in world.indels:
                     fh.write("%d_%s_%s\t%s\n" % (p, r, a, ",".join(
                         "%s:%s" % kv for kv in sorted(g.items()))))
+            if store_marker:  # (as build_indel_genotypes marks a store of 2.10.0)
+                with open(os.path.join(igd, "gt_indel_%s.tsv.gz.done" % CHROM), "w") as fh:
+                    fh.write("%d\n%s\n" % (len(world.indels), big.FILTER_MARK))
         if indel_af is not None:
             iad = os.path.join(d, "indel_af_" + VCF)
             os.makedirs(iad)
@@ -846,6 +850,23 @@ class OtherInstalls(_Base):
         self.assertEqual(d["S08"]["dna"][3], "c")
         lines = [c for c in fx.cooc() if c[1] == "510"]
         self.assertEqual(sorted(set(c[8] for c in lines)), ["PUTATIVE"])
+
+    def test_a_store_of_an_earlier_release_is_noted(self):
+        """A phased indel store written before 2.10.0 (its .done marker without the FILTER
+        rule) may hold the indels of records whose FILTER the search skips: the search says
+        so in its log, once per chromosome, and reads it as before; one of 2.10.0 says
+        nothing."""
+        note = ("NOTE [indel-snp]: the phased indel genotype store of %s on %s was written "
+                "before CRISPRme 2.10.0" % (VCF, CHROM))
+        fx = self.run_analyzer()
+        self.assertNotIn("NOTE [indel-snp]", fx.proc.stdout)
+        tmp2 = tempfile.mkdtemp(prefix="indel_overlaid_rows_old_store_")
+        self.addCleanup(shutil.rmtree, tmp2, ignore_errors=True)
+        old = _Fixture(tmp2, self.world, store_marker=False)
+        self.assertEqual((old.proc.returncode, old.proc.stderr), (0, ""))
+        self.assertEqual(old.proc.stdout.count(note), 1, old.proc.stdout[-2000:])
+        key = lambda r: (r["dna"], r["start"], r["strand"], r["samples"], r["var"], r["cfd"])  # noqa: E731
+        self.assertEqual(sorted(map(key, old.rows())), sorted(map(key, fx.rows())))
 
     def test_sites_only_joint_frequency(self):
         """No genotypes: the joint frequency of a PAM-creating SNP and the indel is bounded

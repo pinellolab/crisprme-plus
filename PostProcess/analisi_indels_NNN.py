@@ -756,6 +756,14 @@ if _indel_snp:
                            "gt_indel_" + current_chr + ".tsv.gz")
         if os.path.isfile(_ig):
             _indelgt = _big.IndelGenotypeReader(_ig)
+            if not _indelgt.reads_filter:
+                # (stdout, so in the search's log_verbose.txt: the run's own record of it)
+                print(f"NOTE [indel-snp]: the phased indel genotype store of {_vcf} on "
+                      f"{current_chr} was written before CRISPRme 2.10.0: it holds the indels "
+                      "of the VCF's records whatever their FILTER, where the search reads only "
+                      "those whose FILTER is PASS or '.', so a carrier can be taken off a row "
+                      "for an indel no fake-indel window holds. build-index-only with the "
+                      "dataset's VCFs writes it again.", flush=True)
     except Exception:  # noqa: BLE001 - phased indel GT optional (-> PUTATIVE)
         _indelgt = None
     if _reg is not None:

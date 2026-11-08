@@ -138,9 +138,10 @@ def test_compile_is_atomic_and_marks_done():
         assert not os.path.exists(store + ".tmp")           # atomic: no temp residue
         marker = big._done_marker(store)
         assert os.path.isfile(marker)
-        with open(marker) as m:
-            assert m.read().strip() == "3"                  # marker carries the count
+        with open(marker) as m:                             # the count, then the FILTER rule
+            assert m.read().splitlines() == ["3", big.FILTER_MARK]
         assert big.store_is_complete(store) is True
+        assert big.store_is_current(store) is True
     finally:
         _cleanup(store)
         os.remove(vcf)
@@ -187,6 +188,70 @@ def test_store_is_complete_rejects_absent_and_empty():
         assert big.store_is_complete(store) is False
     finally:
         _cleanup(store)
+
+
+_VCF_FILTER = """\
+##fileformat=VCFv4.2
+##contig=<ID=chr22>
+##FILTER=<ID=LowQual,Description="Low quality">
+#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\tHG3
+chr22\t100\trs1\tAT\tA\t.\tPASS\t.\tGT\t1|0\t0|1\t0|0
+chr22\t150\trs4\tCAG\tC\t.\tLowQual\t.\tGT\t1|0\t0|0\t0|1
+chr22\t200\trs2\tG\tGATAA\t.\t.\t.\tGT\t0|1\t1|1\t0|0
+chr22\t250\trs5\tT\tTA,TAA\t.\tLowQual;ExcHet\t.\tGT\t1|2\t0|0\t2|0
+chr22\t260\trs6\tGC\tG\t.\tpass\t.\tGT\t1|1\t0|0\t0|0
+"""
+
+
+def test_a_record_whose_filter_is_not_pass_or_dot_is_not_stored():
+    # CRISPRitz's enricher skips a line whose FILTER is neither 'PASS' nor '.' (exact
+    # strings): no fake-indel window holds its indel, so the store must not hold it either,
+    # or a carrier is taken off a row for an indel no window holds (2.10.0)
+    fd, vcf = tempfile.mkstemp(suffix=".vcf.gz")
+    os.close(fd)
+    with gzip.open(vcf, "wt") as fh:
+        fh.write(_VCF_FILTER)
+    store = _mkstore()
+    try:
+        keys = {(p, r, a) for p, r, a, _car in big.iter_indel_genotypes(vcf)}
+        assert keys == {(100, "AT", "A"), (200, "G", "GATAA")}, keys
+        assert big.compile_indel_genotypes(vcf, store) == 2
+        r = big.IndelGenotypeReader(store)
+        assert r.indels() == [(100, "AT", "A"), (200, "G", "GATAA")]
+        assert r.carriers(150, "CAG", "C") == ""            # LowQual
+        assert r.carriers(250, "T", "TAA") == ""            # LowQual;ExcHet, a multi-ALT line
+        assert r.carriers(260, "GC", "G") == ""             # 'pass' is not 'PASS'
+        assert r.reads_filter is True
+    finally:
+        _cleanup(store)
+        os.remove(vcf)
+
+
+def test_a_store_written_before_the_filter_rule_is_complete_but_not_current():
+    # a store of 2.8.x: its .done marker holds the record count alone, and it may hold the
+    # indels of records of any FILTER; a build writes it again (store_is_current), and a
+    # reader says which it read (reads_filter)
+    vcf = _write_vcf(gz=True)
+    store = _mkstore()
+    try:
+        big.compile_indel_genotypes(vcf, store)
+        with open(big._done_marker(store), "w") as m:
+            m.write("3\n")
+        assert big.store_is_complete(store) is True
+        assert big.store_reads_filter(store) is False
+        assert big.store_is_current(store) is False
+        assert big.IndelGenotypeReader(store).reads_filter is False
+        os.remove(big._done_marker(store))                  # adopted without a marker
+        assert big.store_is_complete(store) is True
+        assert big.store_is_current(store) is False
+        big.compile_indel_genotypes(vcf, store)             # written again: current
+        assert big.store_is_current(store) is True
+        # a marker older than its store marks no rule (as it marks no completeness)
+        os.utime(big._done_marker(store), (1, 1))
+        assert big.store_reads_filter(store) is False
+    finally:
+        _cleanup(store)
+        os.remove(vcf)
 
 
 def test_compile_leaves_no_partial_final_on_kill(monkeypatch=None):

@@ -534,7 +534,8 @@ haplotype** (`indel_snp_cis.resolve_target`):
   allows), PUTATIVE in the co-occurrence companion: it is never listed for an allele it
   does not carry. The carriers of an equal-length multi-base record (an MNV, AC>TG), which
   CRISPRitz puts in a fake-indel window as it does an indel, are always in this case: the
-  phased indel genotype store keeps only records whose REF and ALT differ in length. With
+  phased indel genotype store keeps only records whose REF and ALT differ in length (and, since
+  2.10.0, whose FILTER is `PASS` or `.`, as the enricher reads: §8). With
   **no genotypes at all** (a sites-only panel such as `mega`) the row
   holds that worst case over the code's alleles, keeps the carriers the indel log lists,
   and its co-occurrence is rung 3 above (PUTATIVE, min-AF bound); with no SNP genotypes
@@ -1430,7 +1431,14 @@ builds, as every one rebuilt for CRISPRme 2.10.0, has the `AF` of each record th
 The phased indel genotype store
 leaves out equal-length multi-base records (MNVs), so their carriers are resolved with the
 phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
-among its 195,813 indel-search records. Up to 2.8.1 a SNP row's carriers were resolved from
+among its 195,813 indel-search records. Since 2.10.0 it holds only the indels of records whose
+FILTER is `PASS` or `.`, the records CRISPRitz's enricher reads (no other is in a fake-indel
+window, a dictionary or a tier); up to 2.8.1 it held every indel of the VCF, so on a VCF with
+records of another FILTER a carrier was taken off an indel row, for a second indel in its
+target, or off a SNP row, for an indel no window holds. A store written so is written again by
+`build-index-only` where its VCFs are (its `.done` marker does not record the FILTER rule), and
+a search that reads one says so in its `log_verbose.txt`; the panels published hold no such
+record. Up to 2.8.1 a SNP row's carriers were resolved from
 SNP genotypes only, so an individual whose haplotype holding the row's SNPs also carries an
 indel inside the target was still listed; since 2.10.0 the phased indel genotypes take it off
 (§4), but for an unphased call of either, which keeps it.

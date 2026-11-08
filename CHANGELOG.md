@@ -1433,6 +1433,26 @@ and the `release-crisprme` skill.
   indel off-targets": it says that this is the raw count, mostly repeats, and gives METHODS §8's
   ~1–2% of indel loci after repeat-masking (plan 4.1). Covered by
   `PostProcess/test_ci_workflows.py` and `test_defaults_and_index_flex.py`.
+- **A carrier is no longer taken off a row for an indel whose FILTER the search skips.** The
+  phased indel genotype store (`Dictionaries/indel_genotypes_<vcf>/`, `build_indel_genotypes.py`)
+  streamed the VCF without reading FILTER and kept every indel of it, while CRISPRitz's enricher
+  skips each record whose FILTER is neither `PASS` nor `.` (those exact strings): no fake-indel
+  window, dictionary or tier holds such a record. The indel rows' carrier resolution (a second
+  indel inside a target, an overlapping one) and the SNP rows' (a carrier whose haplotype holds an
+  indel in the target), and the carrier gate, read that store, so on a VCF with records of another
+  FILTER a carrier was taken off a row for an indel no window holds: on the SNP+indel oracle's
+  world with such records marked `LowQual`, an indel row left out the carrier of a second
+  deletion inside its target, and a SNP row the carriers of an insertion in it. The store now
+  holds only the records the enricher reads, and its `.done` marker says so after the record
+  count (`FILTER	PASS,.`). A store written before has no such line: `build-index-only`, and a
+  search that enriches a dataset itself, write it again where the dataset's VCFs are, and a search
+  that reads one says so in its `log_verbose.txt`, once per chromosome (`NOTE [indel-snp]: the
+  phased indel genotype store of <vcf> on <chrom> was written before CRISPRme 2.10.0 ...`), and
+  reads it as before. Every panel published (HGDP + 1000 Genomes and HPRC: FILTER `.`; the self-test's
+  1000 Genomes chr22: `PASS`) holds no such record, so their stores are unchanged. Covered by
+  `PostProcess/test_indel_genotypes.py`, `test_search_indel_snp.py`,
+  `test_build_index_only_atomic.py` (a store of 2.8.1 written again) and
+  `test_indel_overlaid_rows.py` (the note, with the real `analisi_indels_NNN.py`).
 
 ## [2.8.1] - 2026-11-05
 

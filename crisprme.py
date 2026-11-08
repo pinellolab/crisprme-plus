@@ -6040,11 +6040,13 @@ def build_index_only() -> None:
             _n_ig = 0
 
             def _ig_written(_igt_out):
-                return os.path.isfile(_igt_out) and _big.store_is_complete(_igt_out)
+                return os.path.isfile(_igt_out) and _big.store_is_current(_igt_out)
 
             # Build (vcf, out, keep) jobs; detect chrom from the first data line (the
             # filename may not carry it). Skip chromosomes already built so a restart
-            # resumes instead of re-streaming 20GB VCFs.
+            # resumes instead of re-streaming 20GB VCFs -- but not a store written before
+            # 2.10.0, which holds the indels whose FILTER the search skips too
+            # (build_indel_genotypes.store_is_current): it is written again.
             _ig_jobs = []
             for _vf in sorted(_glob(os.path.join(vcfdir, "*.vcf.gz"))
                               + _glob(os.path.join(vcfdir, "*.vcf"))):
