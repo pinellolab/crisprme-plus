@@ -471,7 +471,7 @@ and the `release-crisprme` skill.
   index's own name; the web takes the index's geometry from its header, the PAM name of
   `.pam_build` only where that record's geometry is the header's, and offers the index to a
   search of that side alone; and a search that refuses an index for its side says which of the
-  two it read. With CRISPRitz 2.10.0 (`feat/2.10.0` 2647aa1's build) and this release's code
+  two it read. With CRISPRitz 2.10.0 (`feat/2.10.0` 881f761's build) and this release's code
   (cb550f1) on a genome of three contigs: of a 5′ PAM-less index that `crispritz.py index-genome`
   built (`NNN_2_bx`), the web reads `(None, 23, -3)` and offers it to a 5′ search, not a 3′ one;
   `build-index-only` with the shipped 3′ PAM file says `NNN_2_bx is an index for a PAM on the 5'
