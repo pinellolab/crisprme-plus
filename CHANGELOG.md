@@ -541,83 +541,107 @@ and the `release-crisprme` skill.
     the run; without that line (no `log_verbose.txt`, or a dataset its SNP post-analysis
     never read), a run made with `--population-level` or no mode flag records nothing else
     that tells it apart, and is not to be checked.
-  - Measured on this release's code (its post-analysis files over the released 2.8.1
-    image, searched through the README's apptainer route), chr22 of HGDP + 1000 Genomes,
-    the README guide, NRG, 4 mismatches + 1 + 1: soundness and completeness pass in both
-    modes (soundness 6 to 9 s, completeness of the whole chromosome about 2.5 min with
-    `--jobs 16`; limits: 8 two-indel targets, 4 records with overlapping alleles, 1
-    split-site target, and the checker's coverage gap for one carrier's slot near two
-    records). So do NRR and the TRAC guide per sample, the README guide and
-    ACTGAAATCTGTAAGCAGGC without bulges, three repeat-rich guides (VEGFA site 3, EMX1, VEGFA
-    site 1) in both modes, HPRC chr22 (9,125 MNVs, 4.5% of its calls with a missing allele)
-    and a copy of it with every fourth sample unphased in both modes, and the default index
-    beside the sites-only `hg38_mega` in both modes (6,747 and 274 row blocks of
-    `hg38_mega` list no carrier and are checked as rows; completeness counts the 127,735
-    indel records only `hg38_mega` holds and the 32,178 whose FILTER the search skips). The
-    SNP+indel oracle with records marked `LowQual` (a SNP and a deletion, and the second
-    deletions, an insertion inside a SNP target and an MNV the phased indel store reads or
-    not) passes in both modes. On the documented chr22 self-test
-    (`complete-test`, as CI runs it) every benchmark passes soundness, `cas9_sg1617` and
-    `cas12a_hbg` completeness, and removing `cas9_sg1617`'s 5 indel rows is caught at each
-    of their 5 clusters; CI's step, replayed verbatim, passes there (about 4 min) and fails
-    on 2.8.1's self-test. The SNP+indel oracle passes in both profiles and both modes.
-    Corrupting 8 rows of the README per-sample run per class — the start moved by one, a REF
-    base, the bulge count, a carrier added, a carrier dropped, the strand flipped, a target
-    base — is caught on all 8, in the integrated table and in the alternative alignments.
-    On 2.8.1 soundness reports exactly the 4 rows per mode whose first aligned base is one
-    an insertion adds (12 row blocks) and nothing else, and completeness their 1,306 carrier
-    targets per sample (population-level the one such row placed more than `--merge` bp
-    past its cluster); on 2.8.0, 10,093 row blocks per sample (4,661 targets that are not
-    the reference with their named variants, the row at chr22:22322768 among them, 4,292
-    REF texts, 1,071 PAMs) and 1,931 population-level, and 1,425 missing carrier targets.
-    Genome-wide, soundness of the 2.8.1 README per-sample, population-level and TRAC runs
-    reports that inside-insertion class only (1,111, 682 and 1,332 row blocks, 70 to 100 s
-    each with `--jobs 24`); completeness of the README per-sample run reports it again
-    (63,651 carrier targets at 348 records, and 4 whose target at the anchor lost its
-    highest-CFD block to such a row) and nothing else that gates, in about an hour on 40
-    processes (a background job, not the release gate). The SNP-row report finds nothing
-    the documented rules do not explain on this release's per-sample runs but beside
-    `hg38_mega` (below); on 2.8.1 and d7a6fff it reports 30 row blocks that list carriers
-    whose slot of the SNP holds an indel that changes the target, which this release drops.
-  - **Found with it**: on the SNP+indel oracle, the merge listed the unphased S19 on two
-    alternative alignments weaker than its strongest: it keyed an indel row by Cluster
-    Position, variant list and aligned target, not the aligned spacer, so the row of the
-    alignment on which S19 was resolved with C (its SNP's base in a DNA bulge) was merged
-    into an alignment whose column there faces the guide's A, which S19 carries. Fixed in
-    this release (the merge keys an indel or MNV row by its aligned spacer too, below); a
-    synthetic world of partly phased carriers searched through the real CLI (a deletion
-    phased, the SNP it needs unphased) failed on the earlier merge key and passes on this
-    release's, and `test/indel_snp_oracle/known_check_indel_rows.tsv` lists nothing. Not
-    fixed, reported: `CFD_score` is, as documented, the higher of the REF and ALT scores,
-    while the merge sorts on the ALT's (on an indel row the REF text is the reference read
-    from its start, not a target: its score is the one printed on 99, 41 and 60 indel row
-    blocks of the 2.8.1 genome-wide README per-sample, population-level and TRAC runs); the
-    published `hg38_mega` index's SNP rows read its VCF otherwise than CRISPRitz's enricher
-    does: they name an earlier record at 58 split sites of chr22 against the last at 131 (57
-    of them a `PASS` record before a later `PASS` one, as chr22:11337076 G>C before G>T) and
-    SNVs whose FILTER is not `PASS` (chr22:11574550 C>G, `LOW_VQSLOD`; its registry holds
-    all 78,116 such SNVs of chr22), so a sites-only VCF's split site is not read as shadowed
-    by its SNP rows and its SNVs outside `PASS` are rows CRISPRme may write or not, while its
-    indel rows follow the enricher (the last record at 279 split sites, and at
-    chr22:25093750 the `PASS` C>G before the `LOW_VQSLOD` C>T), as does its indel log
-    (exactly its 222,283 `PASS` indels of chr22); CRISPRme's phased indel store keeps every
-    indel of a VCF whatever its FILTER, so on a VCF with records outside `PASS` and `.` a
-    carrier is taken off an indel row's target, and off a SNP row, for an indel no
-    fake-indel window of the search holds (the oracle with its sites O, Q and Y1 marked
-    `LowQual`), which nothing documents; a search whose targets reach 27 nt (SaCas9: a
-    21-nt guide and a 6-nt PAM) loses those that start at a fake-indel window's first base
-    (on chr22 of HGDP + 1000 Genomes, `CACTTTGGGAGGCCGAGGCGG` with `NNGRRT`, 2 mismatches,
-    per sample: 2,103 carrier targets at 6 records, 2,088 of them the insertion
-    chr22:17325232 A>AT's, the same on two fresh searches; an SpCas9 target, 24 nt at most
-    in these searches, never starts there holding its record); and beside
-    `hg38_mega` the merge, whose key for a SNP row is its Cluster Position and variant list,
-    keeps `hg38_mega`'s worst-case alignment of a site under the HGDP + 1000 Genomes
-    carriers of the same variants: 60 SNP row blocks (28 lines of the alternative
-    alignments, at 23 sites of chr22) list carriers for a target that holds more variant
-    bases than the SNP they carry (chr22:17368905 (−), chr22_17368909_G_C: HGDP01090,
-    HGDP01405, NA19351), where the HGDP + 1000 Genomes run alone lists them on an alignment
-    that holds it (report-only).
-  - Wired in: `PostProcess/test_check_indel_rows.py` (204 unit and mutation tests: a right
+  - Measured on this release itself (its code over the 2.8.1 image with CRISPRitz 2.10.0,
+    every index built by `build-index-only` with it, of format 2, each search from a clean
+    environment), chr22 of HGDP + 1000 Genomes (4,091 samples), the README guide, NRG, 4
+    mismatches + 1 + 1: soundness and completeness pass in both modes (both, with the
+    per-sample run's SNP-row report, about 2.5 min with `--jobs 16`; limits: 8 two-indel
+    targets, 4 records with overlapping alleles and the checker's coverage gap for one
+    carrier's slot near two records; no split-site target, every allele being coded). So do
+    NRR and the TRAC guide per sample (19 and 20 two-indel targets, 8 overlapping records
+    each), SaCas9's `CACTTTGGGAGGCCGAGGCGG` with `NNGRRT` per sample at 2 mismatches without
+    bulges (the 2,103 targets at a fake-indel window's first base reported) and at 4 + 1 + 1
+    (16 records whose carriers hold a target that runs past its window,
+    `limit-window-reach`, 2,121 carrier listings), three repeat-rich guides (VEGFA site 3,
+    EMX1, VEGFA site 1) in both modes, HPRC chr22 (9,125 MNVs, 4.5% of its calls with a
+    missing allele) and a copy of it with every fourth sample unphased in both modes, and
+    the default index beside the sites-only `hg38_mega` in both modes (2,254,806 and 666 row
+    blocks of `hg38_mega` list no carrier and are checked as rows, per sample 615,803 lines
+    of the alternative alignments at one (AT)n repeat of chr22; completeness counts the
+    127,735 indel records only `hg38_mega` holds and the 32,178 whose FILTER the search
+    skips), each read as a run of 2.10.0 from its records, as is the README per-sample
+    search with this release's code on the indexes of CRISPRitz 2.9.1 (format 1, the last
+    record of a split site, a store of every FILTER), which passes too (4
+    `limit-last-alt-wins` lines). That search takes 6.5 min there and 97 min on the indexes
+    this release built, its SNP post-analysis 1 min against 76, in the windows every allele
+    coded makes dense (7,493 on chr22, 7,255 hyperdense). The SNP+indel oracle with the
+    second deletions of its sites O and Q, the insertion of Y1 and an MNV marked `LowQual`
+    passes in both modes, and fails where the run read a store of every FILTER (14 and 6
+    gating findings); the same world searched with `CRISPRME_INDEL_SNP=0` is refused
+    (2.8.2's checker gave 166 and 77 gating findings there). On the documented chr22
+    self-test (`complete-test`, as CI runs it) every benchmark passes soundness and
+    `cas9_sg1617` completeness: CI's step, replayed verbatim, passes (about 4 min). The
+    SNP+indel oracle passes in both profiles and both modes. The released 2.8.1's README
+    searches give exactly the 4 rows per mode whose first aligned base is one an insertion
+    adds (12 row blocks) and nothing else, and completeness their 1,306 carrier targets per
+    sample (population-level the one such row placed more than `--merge` bp past its
+    cluster), as they did to the checker of 2.8.2's code, with which the rest was measured
+    (its post-analysis over the released 2.8.1 image, indexes of format 1): `cas12a_hbg`
+    completeness on the self-test, removing `cas9_sg1617`'s 5 indel rows caught at each of
+    their 5 clusters, CI's step failing on 2.8.1's self-test, the README guide and
+    ACTGAAATCTGTAAGCAGGC without bulges passing. Corrupting 8 rows of the README per-sample
+    run per class — the start moved by one, a REF base, the bulge count, a carrier added, a
+    carrier dropped, the strand flipped, a target base — is caught on all 8, in the
+    integrated table and in the alternative alignments. On 2.8.0, 10,093 row blocks per
+    sample (4,661 targets that are not the reference with their named variants, the row at
+    chr22:22322768 among them, 4,292 REF texts, 1,071 PAMs) and 1,931 population-level, and
+    1,425 missing carrier targets. Genome-wide, soundness of the 2.8.1 README per-sample,
+    population-level and TRAC runs reports that inside-insertion class only (1,111, 682 and
+    1,332 row blocks, 70 to 100 s each with `--jobs 24`); completeness of the README
+    per-sample run reports it again (63,651 carrier targets at 348 records, and 4 whose
+    target at the anchor lost its highest-CFD block to such a row) and nothing else that
+    gates, in about an hour on 40 processes (a background job, not the release gate). The
+    SNP-row report finds nothing the documented rules do not explain on this release's
+    per-sample runs but beside `hg38_mega` (below); on 2.8.1 and d7a6fff it reports 30 row
+    blocks that list carriers whose slot of the SNP holds an indel that changes the target,
+    which this release drops.
+  - **Found with it**: three CRISPRme defects, each fixed in this release. On the SNP+indel
+    oracle, the merge listed the unphased S19 on two alternative alignments weaker than its
+    strongest: it keyed an indel row by Cluster Position, variant list and aligned target,
+    not the aligned spacer, so the row of the alignment on which S19 was resolved with C
+    (its SNP's base in a DNA bulge) was merged into an alignment whose column there faces
+    the guide's A, which S19 carries (the merge keys an indel or MNV row by its aligned
+    spacer too, below); a synthetic world of partly phased carriers searched through the
+    real CLI (a deletion phased, the SNP it needs unphased) failed on the earlier merge key
+    and passes on this release's, and `test/indel_snp_oracle/known_check_indel_rows.tsv`
+    lists nothing. A search whose targets reach 27 nt (SaCas9: a 21-nt guide and a 6-nt PAM)
+    lost, on an INDELS index of format 1 (CRISPRitz 2.9.1), those that start at a fake-indel
+    window's first base (on chr22 of HGDP + 1000 Genomes, `CACTTTGGGAGGCCGAGGCGG` with
+    `NNGRRT`, 2 mismatches, per sample: 2,103 carrier targets at 6 records, 2,088 of them
+    the insertion chr22:17325232 A>AT's, the same on two fresh searches; an SpCas9 target,
+    24 nt at most in these searches, never starts there holding its record): an index of
+    format 2 holds them, and the same search of indexes CRISPRitz 2.10.0 built reports them
+    all (its row at chr22:17325206 (+) lists the insertion's 2,088 carriers). CRISPRme's
+    phased indel store kept every indel of a VCF whatever its FILTER, so on a VCF with
+    records outside `PASS` and `.` a carrier was taken off an indel row's target, and off a
+    SNP row, for an indel no fake-indel window of the search holds (the oracle with its
+    sites O, Q and Y1 marked `LowQual`; Fixed, below). Not fixed, reported: `CFD_score` is,
+    as documented, the higher of the REF and ALT scores, while the merge sorts on the ALT's
+    (on an indel row the REF text is the reference read from its start, not a target: its
+    score is the one printed on 99, 41 and 60 indel row blocks of the 2.8.1 genome-wide
+    README per-sample, population-level and TRAC runs); the published `hg38_mega` index's
+    SNP rows read its VCF otherwise than CRISPRitz's enricher does: they name SNVs whose
+    FILTER is not `PASS` (chr22:11574550 C>G, `LOW_VQSLOD`; its registry holds all 78,116
+    such SNVs of chr22) and an earlier record at 58 split sites of chr22 against the last at
+    131 (57 of them a `PASS` record before a later `PASS` one, as chr22:11337076 G>C before
+    G>T), so its SNVs outside `PASS` are rows CRISPRme may write or not, while its indel
+    rows follow the enricher (the last record at 279 split sites, and at chr22:25093750 the
+    `PASS` C>G before the `LOW_VQSLOD` C>T), as does its indel log (exactly its 222,283
+    `PASS` indels of chr22); the variant genome CRISPRitz 2.10.0 builds from that VCF holds
+    none of those SNVs, but its registry lists every ALT of a position and a sites-only
+    dataset's SNP row substitutes each, so the fresh per-sample search beside it names one
+    of the 74,025 SNVs of chr22 outside `PASS` that no passing record of either VCF holds in
+    1 integrated row and 3,434 alternative alignments (chr22:12810728 (−),
+    chr22_12810729_T_C, `ExcHet`, beside the `PASS` T>A the genome codes), the
+    population-level one in none; and beside `hg38_mega` the merge, whose key for a SNP row
+    is its Cluster Position and variant list, keeps `hg38_mega`'s worst-case alignment of a
+    site under the HGDP + 1000 Genomes carriers of the same variants: 144 SNP row blocks of
+    the per-sample run (65 lines of the alternative alignments, at 51 sites of chr22; 60 at
+    23 sites on the indexes of CRISPRitz 2.9.1) list carriers for a target that holds more
+    variant bases than the SNP they carry (chr22:11333697 (−), chr22_11333716_T_G: HG00271,
+    HG00318, HG00369, HG00379, HG00864, NA06991, NA06993, NA18547), where the HGDP + 1000
+    Genomes run alone lists them on an alignment that holds it (report-only).
+  - Wired in: `PostProcess/test_check_indel_rows.py` (205 unit and mutation tests: a right
     row raises nothing gating, each corruption of it is caught, each documented limit and
     overlapping slot comes out under its own class, the checker's coverage gaps under
     theirs; the refusals; each release's reading of the data, told from a run's records;
