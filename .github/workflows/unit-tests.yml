@@ -337,8 +337,16 @@ jobs:
         # that change no base of the target (the carrier judged: an unnamed SNV, a
         # carrier left off, a dropped row), a carrier whose slot has no reading counted and
         # never demanded, a slot read without its artefact that chains no target needing a
-        # second indel record, and a completeness check of some of a run's guides naming
-        # the others.
+        # second indel record, a completeness check of some of a run's guides naming the
+        # others, a PUTATIVE rule offered no choice on the record's own REF span (its
+        # anchor) and, in a search that scores no CFD, the reference base then A, C, G, T,
+        # a record's chain holding its sites-only dataset's rows whoever reads it first
+        # and no coded anchor, a search without bulges read from its --vcf list, and the
+        # SNP-row report (report-only) reading a SNP row's carriers as METHODS section 4
+        # does: a named variant outside the target, the 2.10.0 drop of a carrier whose slot
+        # holds an indel that changes the target (read through a repeat at its edge, an
+        # unreadable slot dropped), a carrier the merge joins from another alignment of the
+        # site, and an unphased individual listed for every subset of its variants.
         # CRISPRme's documented limits (a split
         # multi-allelic site, two indels in one target, a complex allele, a phasing
         # artefact, a repeat unit at the target's edge, a PUTATIVE tie) must come out

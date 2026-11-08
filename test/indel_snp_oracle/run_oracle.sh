@@ -51,25 +51,24 @@ python3 -I "$here/oracle.py" check "$wd" "$pp" Results/orc_per Results/orc_pop |
 # both modes, and completeness in both: per sample every (sample, target) must be
 # reported, while the population-level run (one row per cluster, no alternative
 # alignments) is checked per cluster -- the checker reads that from the run's .alt_mode,
-# and its mode from its .search_mode. On the oracle the planted two-indel sites O and Q
-# (and the second records of W and V) come out as limit-two-indels and site P's phasing
-# artefact as the note overlap-reading-agrees (soundness) and limit-overlapping-records
-# (completeness), non-gating; every gating finding fails the oracle, as oracle.py's do,
-# except the ones
+# and its mode from its .search_mode. Both profiles, each with its own PAM file (a 5'
+# PAM scores no CFD, and the checker's PUTATIVE choice follows METHODS section 4's rule
+# for that). On the oracle the planted two-indel sites (and the second records of W and
+# V) come out as limit-two-indels and site P's phasing artefact as the note
+# overlap-reading-agrees (soundness) and limit-overlapping-records (completeness),
+# non-gating; every gating finding fails the oracle, as oracle.py's do, except the ones
 # known_check_indel_rows.tsv lists (a CRISPRme defect reported upstream: they print as
-# known-defect, and as known-not-seen once fixed).
+# known-defect, and as known-not-seen once fixed; none since the merge keys an indel row
+# by its aligned spacer, which put the unphased S19 of site U back on its own alignment).
 chk=$here/../../scripts/check_indel_rows.py
 if [ -f "$chk" ]; then
 	for mode in soundness completeness; do
 		for out in orc_per orc_pop; do
-			echo "=== check_indel_rows --$mode $out $(date -u)"
-			known=()
-			# the listed defect is in the per-sample run's alternative alignments
-			[ "$out/$mode" = orc_per/soundness ] && known=(--known "$here/known_check_indel_rows.tsv")
+			echo "=== check_indel_rows --$mode $out ($profile) $(date -u)"
 			python3 -I "$chk" --results "Results/$out" --reference Genomes/synth \
-				--vcf VCFs/synth_vcf/synth.chr21.vcf.gz --pam PAMs/20bp-NRG-SpCas9.txt \
+				--vcf VCFs/synth_vcf/synth.chr21.vcf.gz --pam "$pam" \
 				--guide guides.txt --mm 4 --bDNA 1 --bRNA 1 --max-total-edits 6 \
-				--chrom chr21 --mode "$mode" "${known[@]}" \
+				--chrom chr21 --mode "$mode" --known "$here/known_check_indel_rows.tsv" \
 				--out "check_${out}_${mode}.tsv" || rc=1
 		done
 	done

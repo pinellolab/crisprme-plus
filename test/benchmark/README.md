@@ -94,8 +94,10 @@ otherwise counted (`limit-overlapping-records`) where a target of its record rea
 named variant it holds on no reading always failing a listed carrier; where a call
 touching a target has unknown phase (a haploid call against a diploid one included) the
 record's known slot is judged first, then METHODS section 4's PUTATIVE rule (the
-strongest target the sample's alleles allow, by the alignment's CFD, its copies counted
-against the record's). CRISPRme's documented reading of a carrier (the one-indel window
+strongest target the sample's alleles allow on the row's alignment, by the alignment's
+CFD, or, in a search that scores no CFD, the reference base, else the first of A, C, G, T;
+its copies counted against the record's; a choice only at the fake-indel window's code
+columns, never on the record's own REF span). CRISPRme's documented reading of a carrier (the one-indel window
 resolved with the carrier's own SNP alleles, a second indel read from either end through
 the indel, the last record of a split multi-allelic site, the PUTATIVE carriers of MNVs)
 only classifies a disagreement, and a carrier it would list against the carrier's own
@@ -121,12 +123,15 @@ are (their `.search_mode` says so; `--ci-cd-test` chooses no mode) -- keeps one 
 merge cluster, and there the row of the target's cluster (rows chained within `--merge`
 bp by the rows CRISPRme can write, as the merge clusters: the reference rows, the SNP rows
 of the mode the run ran -- population-level each alignment's worst case, per sample the
-haplotypes individuals hold -- and the targets some carrier of an indel record holds, none
-that needs two indel records) must be no worse than each target; a cluster that reaches
-such a row only through rows CRISPRme may write or not, which no documented rule settles
-(a per-sample run's capped window's greedy row, which only the classic dictionary path
-writes; the one-record reading of an undocumented overlap; a target two overlapping
-alleles of a slot change), is counted under its cause's class, not passed. A slot whose
+haplotypes individuals hold -- the targets some carrier of an indel record holds, none
+that needs two indel records, and a sites-only dataset's worst case of each window, its
+ALT written verbatim) must be no worse than each target; a cluster that reaches such a
+row only through rows CRISPRme may write or not, which no documented rule settles (a
+per-sample run's capped window's greedy row, which only the classic dictionary path
+writes; a per-sample SNP target of a slot that also holds an indel touching it, which
+2.10.0 writes only where its reading of the slot keeps the carrier; the one-record
+reading of an undocumented overlap; a target two overlapping alleles of a slot change),
+is counted under its cause's class, not passed. A slot whose
 VCF alleles overlap is read as METHODS section 4 reads it where it says how, and judged
 on every reading of the rest (a carrier whose slot holds the target on all of them, or on
 none, is judged so); where its readings part, a listed carrier METHODS' rules take off
@@ -142,11 +147,19 @@ VCF under its own coverage class. Two genotyped datasets that share samples are 
 the checker does not model; a sites-only dataset beside a genotyped one is checked. So are
 inputs other than the search's where the run's own record of them says so (its
 `.Params.txt` budget, PAM and variant datasets -- one VCF per dataset for each chromosome
-checked --, its `.guides.txt`, `.sampleID.txt` and `.search_mode`, the mode it ran), a run
+checked; a search without bulges records `Genome_idx None`, and its `--vcf` list says
+them --, its `.guides.txt`, `.sampleID.txt` and `.search_mode`, the mode it ran), a run
 whose records contradict each other, and one that does not record what the check needs
 (whether it wrote alternative alignments and, where it wrote none, its mode, which
-`--analysis` can give).
-`test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check`,
+`--analysis` can give). It models a search that read each genotyped dataset's genotypes
+(its genotype store, or classic dictionaries): an install made with `--no-genotypes`
+lists every carrier of an indel on a SNP+indel row, which its result folder does not
+record, and is not to be checked. `--snp-rows report` adds, report-only, the SNP-only rows
+of a per-sample run, their carriers read as METHODS section 4 reads them (an unphased
+individual listed for every subset of its variants, the merge joining a site's SNP rows of
+one variant list, and since 2.10.0 a carrier dropped whose slot holds an indel of the
+phased store that changes the target).
+`test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check` (both profiles),
 `validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
 `docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a real HGDP + 1000 Genomes
 chr22 search in both modes and genome-wide. Its unit and mutation tests are

@@ -67,15 +67,23 @@ haploid call against a diploid one), which of its alleles share the record's hap
 unknown: when the record's slot is known and no placement of those calls lets it hold the
 target (a phased second indel inside it, say), or every placement does, the slot is
 judged so; otherwise the truth is CRISPRme's documented PUTATIVE rule (METHODS section
-4): the sample is listed for the strongest target its own alleles allow -- the guide's
-base wherever it carries it; elsewhere, and at the PAM jointly, the alleles that maximize
-the alignment's CFD among those the motif allows (a product: where it is 0 for every
-choice, a column no choice changes scoring 0, every choice is a strongest one) -- and
-never for an allele it does not carry; its copies are counted against the record's call
-(a haploid ALT call beside a diploid record leaves the reference possible). A call of
-unknown phase whose REF meets the record's would leave the record's slot with no
-sequence: the one reading that gives it one (the documented multi-allelic heterozygote,
-one allele per haplotype) puts it on the other slot.
+4): the sample is listed for the strongest target its own alleles allow on the row's
+alignment -- the guide's base wherever it carries it and the alignment pairs the position
+with a guide base; elsewhere (a DNA bulge included), and at the PAM jointly, the alleles
+that maximize the alignment's CFD among those the motif allows (a product: where it is 0
+for every choice, a column no choice changes scoring 0, every choice is a strongest one;
+METHODS orders no CFD tie, so a tie is left open); a search that scores no CFD (a 5' PAM,
+or a guide or PAM not 20 and 3 nt long) takes there the reference base where the alleles
+(and, at the PAM, the motif) allow it, else the first of A, C, G, T they allow, read in
+the target's orientation -- and never for an allele it does not carry; its copies are
+counted against the record's call (a haploid ALT call beside a diploid record leaves the
+reference possible). The rule chooses only at the fake-indel window's code columns: a
+reference base of the target off the record's own REF span. The window writes the ALT
+verbatim, the anchor included, and its overlay codes flank bases only, so a base on the
+record's REF span is never a choice, whatever SNV the VCF holds there: a call of unknown
+phase whose REF meets the record's would leave the record's slot with no sequence, and the
+one reading that gives it one (the documented multi-allelic heterozygote, one allele per
+haplotype) puts it on the other slot.
 
 THE DOCUMENTED VIEW ONLY CLASSIFIES. Where CRISPRme's output and the truth part, the
 rules CRISPRme documents for reading a carrier (METHODS section 4, CHANGELOG 2.8.1 Known
@@ -151,8 +159,9 @@ TWO MODES.
   the same site, variant list and carrier set are no worse than it -- or merged into a row
   of the same site by the documented merge into a row no worse than it. A target that
   touches a call of unknown phase is demanded as the strongest target the sample's alleles
-  allow there (the PUTATIVE rule; a position on the record's own REF span is no choice:
-  an allele there would describe the record's bases twice, or lie on bases it deletes).
+  allow there (the PUTATIVE rule; a base on the record's own REF span is no choice: the
+  window writes the ALT verbatim, the anchor included, and an allele there would describe
+  the record's bases twice, or lie on bases it deletes).
   A run that writes no alternative alignments (.alt_mode = no-alt-alignments: by default
   a population-level run, as the documented chr22 self-test's, which --ci-cd-test does
   not make per-sample) keeps one row per merge cluster, so there each target's cluster
@@ -259,7 +268,9 @@ the merge of ``remove_contiguous_samples.py``).
   or, a slot with no reading (no one sequence in the VCF), where the view lists it or
   leaves it open. A PUTATIVE target is the carrier's own: it is
   held to the alignments under which the rule picks it for that carrier (the choice is
-  the alignment's highest CFD), and one the rule ties with others to its own best. The
+  the alignment's highest CFD; CRISPRme's merge keys an indel or MNV row by its aligned
+  spacer as well as its target, so a PUTATIVE carrier stays on the alignment it was
+  resolved on), and one the rule ties with others to its own best. The
   verdicts depend on nothing but the input (no set's order). In a run with one row per
   cluster, the cluster of
   a target is the integrated row with a block within --merge bp of its Cluster Position,
@@ -273,7 +284,9 @@ the merge of ``remove_contiguous_samples.py``).
   needs two indel-path records; a slot whose overlapping alleles METHODS reads it without
   is read so, as a clean slot: its exact targets and the window's targets a second
   indel-path record leaves readable; one it takes off -- a complex allele -- gives none;
-  a sites-only dataset's rows are the worst case of each alignment of its window), every
+  a sites-only dataset's rows are the worst case of each alignment of its window, the
+  record's ALT written verbatim and an SNV coded only off its REF span, and a record a
+  genotyped and a sites-only dataset both hold gives the rows of both), every
   record the chain reaches read, up to 3 kb either side (a chain still going there with no
   row as good as the target is this checker's coverage gap, coverage-chain-limit, not a
   miss); there is no other fallback. The rows CRISPRme may write or not, which no
@@ -282,13 +295,17 @@ the merge of ``remove_contiguous_samples.py``).
   reading with none of them, or with some written: the window reads the stores' alleles
   there), a target of a slot read without its overlap that touches a call of unknown phase
   (resolved PUTATIVE), a target through an earlier record of a split site or an untied
-  multi-ALT alt (its stores read another allele there), and a per-sample run's capped
+  multi-ALT alt (its stores read another allele there), a per-sample run's capped
   windows' greedy worst-case rows (METHODS section 5's known limit: only the classic
-  dictionary path writes them, and a run does not say which path it took) -- are followed
-  only when the rows it writes reach no row as good as the target, and never one that
-  needs a second indel-path record: a cluster that reaches one only through them is
+  dictionary path writes them, and a run does not say which path it took), and a
+  per-sample SNP target of a slot that also holds an indel of the phased store touching
+  it (since 2.10.0 CRISPRme drops such a carrier from a SNP row unless its reading of the
+  slot through a repeat keeps the target's bases, which the chain does not model) -- are
+  followed only when the rows it writes reach no row as good as the target, and never one
+  that needs a second indel-path record: a cluster that reaches one only through them is
   counted under the class of their cause (limit-overlapping-records, limit-last-alt-wins,
-  limit-putative-carrier, limit-capped-window), neither passed nor failed. That row must be
+  limit-putative-carrier, limit-capped-window, coverage-snp-row-indel), neither passed nor
+  failed. That row must be
   as good as the target in both blocks: no more edits by the first sorting criterion (the
   merge picks between a cluster's reference and variant rows on mm+bulges, or the CFD,
   alone) and at least its CFD. A row's CFD is always recomputed from its aligned strings:
@@ -305,10 +322,12 @@ contig's end, or a row whose REF text runs past it), limit-n-bases (a stretch of
 record's window: no target is aligned across it), limit-no-genotypes (a row of a
 sites-only dataset, which lists no carrier: the row itself is checked, one line per
 block; and in completeness one line per chromosome counting the records only sites-only
-VCFs hold, which no sample carries), and in the SNP-row report limit-snp-row-indel and
+VCFs hold, which no sample carries), and in the SNP-row report limit-snp-row-mnv (a
+listed carrier whose slot of the row's SNPs holds an MNV that changes the target: the
+phased indel store CRISPRme reads a SNP row's carriers against holds no MNV) and
 limit-snp-row-unphased; variant-shadowed and overlap-reading-agrees (a listed carrier
 whose slot, read as METHODS section 4 reads a slot whose alleles overlap the record,
-holds the target: the row agrees with it) are notes. Four non-gating classes are this
+holds the target: the row agrees with it) are notes. Five non-gating classes are this
 checker's own COVERAGE GAPS, not CRISPRme limits: coverage-overlap-cap (a carrier whose
 slot's overlap zones within a target's reach of a record have more than 1024 readings:
 only each of their alleles alone is read for the targets only such readings hold, which
@@ -318,8 +337,11 @@ PUTATIVE rule resolves with more than 10 positions within a target's reach of a 
 off its REF span, where its alleles allow two bases: its targets that touch a call of
 unknown phase are not enumerated, 2^k choices each), coverage-chain-limit (a
 population-level cluster that runs past the 3 kb either side the chain follows, and
-holds no row as good as the target within them: its row may lie further) and
-coverage-unindexed-long-ref
+holds no row as good as the target within them: its row may lie further),
+coverage-snp-row-indel (a cluster of a per-sample run without alternative alignments that
+reaches a row as good as the target only through a SNP target of a slot that also holds
+an indel touching it, a row CRISPRme writes only where its reading of the slot through a
+repeat keeps the carrier, above) and coverage-unindexed-long-ref
 (a VCF read without a .tbi holds a record whose REF is longer than the 20 kb an unindexed
 read looks back: a deletion that long, starting further before a region, is not read
 there; give the VCF a .tbi).
@@ -338,7 +360,10 @@ a configuration it does not model, below: nothing is checked then). The check's 
 must be the search's: where the run's own record of them says otherwise -- its
 .Params.txt (Mismatches, DNA, RNA, Max_total_edits, Pam, and Genome_idx, the variant
 datasets it searched: one VCF per dataset must hold each chromosome checked, no fewer and
-no more), its .guides.txt (a guide it did not search; some of its guides are a check of
+no more; a search without bulges records 'Genome_idx None' whatever it searched, and its
+datasets are then the lines of the --vcf list its command line names, read in its
+working directory, the folder that holds Results/<output>), its .guides.txt (a guide it
+did not search; some of its guides are a check of
 those, and the others are counted, one guide-not-given line each: their rows are not
 checked and completeness demands none of their targets), its .sampleID.txt (against
 --samples) and its .search_mode, else its command line's mode flag (against --analysis)
@@ -354,8 +379,21 @@ self-test's index), which --analysis can give; the SNP-row report needs the mode
 ``--known`` lists findings already reported upstream: they turn non-gating
 (known-defect), and a listed one that no longer shows is reported (known-not-seen).
 SNP-only rows of a per-sample run can be checked in report-only mode
-(``--snp-rows report``: their strings, target and listed carriers, and the phased
-carriers a SNP row of their site leaves out); population-level SNP rows are a documented
+(``--snp-rows report``: their strings, their target and that every named variant is in
+it, their listed carriers, and the phased carriers a SNP row of their site leaves out). A
+carrier is read as CRISPRme's SNP rows read it (METHODS section 4): one with an SNV call
+of unknown phase in the target ('/', homozygous too, or haploid) is listed for every
+non-empty subset of its variants there (limit-snp-row-unphased); the merge joins the
+carriers of a site's SNP rows of one variant list (its key for a SNP row is the Cluster
+Position and the variants, no alignment), so a carrier may be listed for another
+alignment of the site that its slot holds; and since 2.10.0 a carrier whose slot of the
+row's SNPs holds an indel of the phased store that changes the target is dropped, unless
+its own bases, read from the target's first base on or up to its last through the row's
+SNPs, still are the target's, or the indel's call cannot be tied to the slot (kept,
+PUTATIVE), or it sits at a named SNP's position (a phasing artefact) -- a slot whose
+bases cannot be read (an indel near whose slot is unknown, two records of one base)
+leaves the row. Listing a carrier the rule drops is reported (snp-row-indel-carrier); an
+MNV the store does not hold, limit-snp-row-mnv. Population-level SNP rows are a documented
 worst-case union and are out of scope, as are a sites-only dataset's SNP rows, which are
 population-level whatever the search's mode (one limit-no-genotypes line each). Without
 --max-total-edits the cap is the run's own
@@ -363,6 +401,14 @@ population-level whatever the search's mode (one limit-no-genotypes line each). 
 panel is the run's
 .sampleID.txt, else every sample of the VCF(s). Rows are keyed by guide: one guide's row
 stands for no demand of another.
+
+PRECONDITION. The search read each genotyped dataset's genotypes (its Tier-1 genotype
+store, or classic dictionaries), as every index CRISPRme installs or builds with
+--samplesID does: it resolves each carrier of an indel row on its own haplotypes, which
+is what this checker models. An install without them (download --what index
+--no-genotypes) searches population-level and lists every carrier of the indel on a
+SNP+indel row, with or without its SNPs (CHANGELOG 2.8.1); its result folder records
+nothing that tells it apart, so check only runs made with the genotypes the VCF holds.
 
 VCF ACCESS. A .tbi beside a VCF makes every read a seek. Without one, each VCF is read
 once into an in-memory block index (nothing is written), which costs one decompression of
@@ -1938,9 +1984,15 @@ def run_mismatch(resdir, args, pam_motif, pam_5prime, guides):
 
 
 def run_datasets(resdir):
-    """The variant datasets the run searched, from its .Params.txt (Genome_idx: one
-    '<PAM>_<bulges>_<genome>+<dataset>' item per dataset, comma-separated; an item with no
-    '+' is the reference alone), or None when the run does not say."""
+    """(datasets, where read): the variant datasets the run searched, or (None, why not)
+    when the run does not say. A search with bulges records them in its .Params.txt
+    (Genome_idx: one '<PAM>_<bulges>_<genome>+<dataset>' item per dataset,
+    comma-separated; an item with no '+' is the reference alone). A search without bulges
+    reads no index and records 'Genome_idx None' whatever it searched (crisprme.py): its
+    datasets are then the lines of the --vcf list its command line names (a dataset
+    folder per line), read where complete-search read it -- its working directory, which
+    holds Results/<output> (an absolute path as given); none when the command line gives
+    no --vcf (the reference alone)."""
     for name in (".Params.txt", "Params.txt"):
         p = os.path.join(resdir, name)
         if not os.path.exists(p):
@@ -1949,9 +2001,38 @@ def run_datasets(resdir):
             for line in fh:
                 f = line.rstrip("\n").split("\t")
                 if len(f) == 2 and f[0] == "Genome_idx":
-                    return [x.split("+", 1)[1] for x in f[1].split(",") if "+" in x]
-        return None
-    return None
+                    if f[1].strip() == "None":
+                        return _datasets_of_command_line(resdir)
+                    return ([x.split("+", 1)[1] for x in f[1].split(",") if "+" in x],
+                            "Genome_idx in its .Params.txt")
+        return None, "its .Params.txt has no Genome_idx"
+    return None, "it has no .Params.txt"
+
+
+def _datasets_of_command_line(resdir):
+    """run_datasets for a run whose .Params.txt says 'Genome_idx None' (no bulges)."""
+    p = os.path.join(resdir, ".command_line.txt")
+    if not os.path.isfile(p):
+        return None, "Genome_idx None (a search without bulges) and no .command_line.txt"
+    with open(p) as fh:
+        text = fh.read()
+    m = re.search(r"(?:^|\s)--vcf\s+(\S+)", text)
+    if not m:
+        return [], "its command line gives no --vcf"
+    given = m.group(1)
+    path = given if os.path.isabs(given) else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(resdir))), given)
+    if not os.path.isfile(path):
+        return None, ("Genome_idx None (a search without bulges) and its --vcf list %s is "
+                      "not at %s" % (given, path))
+    names = []
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                names.append(os.path.basename(line.rstrip("/")))
+    return names, "the --vcf list %s its command line names (Genome_idx None: a search " \
+                  "without bulges)" % path
 
 
 def samples_of(row):
@@ -2048,8 +2129,12 @@ class Ctx(object):
         self.pam_len = pam_len
         self.pam_5prime = pam_5prime
         self.guides = guides  # [guide without PAM]
-        self.cfd = cfd if cfd is not None and guides and Cfd.applies(
-            len(guides[0]), pam_len, pam_5prime) else None
+        # whether the search scores CFD (CRISPRme's indel path does only for a 20-nt guide
+        # and a 3-nt 3' PAM: elsewhere its PUTATIVE rule takes the reference base, else
+        # the first of A, C, G, T); the tables missing here leave such a choice open
+        self.cfd_applies = bool(guides) and Cfd.applies(len(guides[0]), pam_len,
+                                                        pam_5prime)
+        self.cfd = cfd if cfd is not None and self.cfd_applies else None
         self.panel = None     # the search's samples (a set), None for every VCF sample
         # the SNP rows a merge cluster can hold (snp_row_sets): a population-level run's are
         # the worst case of each alignment (every allele an option), a per-sample run's the
@@ -2174,7 +2259,15 @@ class Target(object):
     """A target holding ``main`` (the row's indel-path record): its + reading ``probe``,
     the places of its bases (on the sequence that makes it), the reference coordinates it
     spans, its SNV code columns (base index, coordinate), the window the checks write
-    haplotypes over and the row's aligned strings (None in completeness when unknown)."""
+    haplotypes over and the row's aligned strings (None in completeness when unknown).
+
+    The code columns are those of CRISPRme's fake-indel window, the only places its
+    PUTATIVE rule chooses a base at: a reference base of the target, off the record's own
+    REF span, where an SNV of the VCF lies. The window writes the record's ALT verbatim and
+    its overlay codes flank bases only (METHODS section 4), so a base on the record's REF
+    span -- an indel's anchor, the bases an unnormalized record keeps -- is never a choice,
+    whatever SNV the VCF holds there (a multi-allelic heterozygote's other allele, one per
+    haplotype)."""
 
     __slots__ = ("main", "named", "probe", "strand", "start", "place", "span", "codes",
                  "lo", "hi", "crrna", "aligned", "n", "src")
@@ -2190,7 +2283,8 @@ class Target(object):
         self.start = place[0][0]
         self.span = span_of(place)
         self.codes = [(i, pl[0]) for i, (pl, s) in enumerate(zip(place, src))
-                      if pl[1] == 0 and s is not main and win.snv_at.get(pl[0])]
+                      if pl[1] == 0 and s is not main and win.snv_at.get(pl[0])
+                      and not (main is not None and main.lo <= pl[0] < main.hi)]
         self.lo = max(0, min(self.span[0], main.lo) - 2 * self.n - 60)
         self.hi = min(len(win.refseq), max(self.span[1], main.hi) + 2 * self.n + 60)
         self.crrna = crrna
@@ -2486,19 +2580,27 @@ def options(win, sample, q, visible_only=False, ploidy=0):
     return alts
 
 
-def strongest(ctx, tgt, opts_by_code):
+def strongest(ctx, tgt, opts_by_code, refseq=None):
     """The documented PUTATIVE choice (METHODS section 4) over the target's code columns:
     {base index: set of allowed bases (+ orientation)} for the spacer columns, and the set
     of allowed tuples for the PAM's code columns (jointly), plus whether every choice is
-    determined. The guide's base wins wherever it is an option; elsewhere, and at the PAM,
-    the options that maximize the CFD of the whole alignment. CFD is a product of one
-    factor per spacer column and the PAM's factor, so where the best product is above 0
-    each column takes its own best options; where it is 0 (a column no choice changes
-    scores 0, as a DNA bulge whose base the table gives 0, or every option of a column
-    does, or every PAM the motif allows) every choice ties at 0 and each is a strongest
-    one. Without CFD (it does not apply) every option ties."""
+    determined. The guide's base wins wherever it is an option and the alignment pairs
+    the column with a guide base; elsewhere (a DNA bulge included), and at the PAM, the
+    options that maximize the CFD of the whole alignment. CFD is a product of one factor
+    per spacer column and the PAM's factor, so where the best product is above 0 each
+    column takes its own best options; where it is 0 (a column no choice changes scores
+    0, as a DNA bulge whose base the table gives 0, or every option of a column does, or
+    every PAM the motif allows) every choice ties at 0 and each is a strongest one (METHODS
+    documents no order among CFD ties: the choice is left open). A search that scores no
+    CFD (a 5' PAM, or a guide or PAM not 20 and 3 nt long) takes there the reference base
+    where the carrier's alleles allow it (at a PAM column, and the motif), else the first
+    of A, C, G, T they allow, read in the target's orientation (METHODS section 4): one
+    choice. ``refseq``: the reference, for that rule (without it every option ties). A
+    search that scores CFD checked without the CFD tables leaves its choices open."""
     if tgt.crrna is None or tgt.aligned is None:
         return None
+    if getattr(ctx, "cfd_applies", True):
+        refseq = None   # a CFD search: without the tables, its choices are left open
     n_cols = len(tgt.crrna)
     cols = base_columns(tgt.aligned, tgt.strand)
     pam = set(ctx.pam_cols(n_cols))
@@ -2511,6 +2613,15 @@ def strongest(ctx, tgt, opts_by_code):
     pam_codes = []
     code_cols = set()
     fixed = 1.0       # the factors no choice changes
+    def first(q, opts, ok=lambda b: True):
+        # no CFD: the reference base where it is allowed, else the first of A, C, G, T
+        # (target orientation); None when no option is allowed
+        good = [b for b in opts if ok(b)]
+        if refseq is not None and refseq[q].upper() in good:
+            return refseq[q].upper()
+        return min(good, key=lambda b: "ACGT".find(ori(b))) if good else None
+
+    at_q = dict(tgt.codes)
     for i, _q in tgt.codes:
         opts = opts_by_code[i]
         col = cols[i]
@@ -2524,7 +2635,7 @@ def strongest(ctx, tgt, opts_by_code):
             allowed[i] = {o_opts[g]}   # the guide's base wins (a factor of 1)
             continue
         if cfd is None:
-            allowed[i] = set(opts)
+            allowed[i] = {first(at_q[i], opts)} if refseq is not None else set(opts)
             continue
         scores[i] = {b: cfd.factor(g, ori(b), positions[col]) for b in opts}
     if cfd is not None:
@@ -2550,13 +2661,24 @@ def strongest(ctx, tgt, opts_by_code):
             score = cfd.pam.get(pseq[-2:], 0.0) if cfd is not None else 0.0
             combos.append((score, combo))
         pam_top = max((s for s, _c in combos), default=0.0)
+        if cfd is None and refseq is not None:
+            # no CFD: each PAM column on its own, the reference base where its alleles and
+            # the motif allow it, else the first of A, C, G, T they allow
+            n_t = len(target_bases)
+
+            def motif_ok(i):
+                k = at(i) if ctx.pam_5prime else at(i) - (n_t - ctx.pam_len)
+                return lambda b: iupac_match(ctx.pam_motif[k], ori(b))
+            pick = tuple(first(at_q[i], opts_by_code[i], motif_ok(i)) for i in pam_codes)
+            combos = [(0.0, pick)] if None not in pick and any(
+                c == pick for _s, c in combos) else []
     elif cfd is not None:
         tail = tgt.aligned.replace("-", "").upper()
         pam_top = cfd.pam.get((tail[-ctx.pam_len:])[-2:], 0.0)
     best = fixed * pam_top
     for sc in scores.values():
         best *= max(sc.values())
-    tie = cfd is None or best <= 0.0
+    tie = (cfd is None and refseq is None) or (cfd is not None and best <= 0.0)
     for i, sc in scores.items():
         top = max(sc.values())
         allowed[i] = set(sc) if tie else {b for b, v in sc.items() if v >= top - 1e-12}
@@ -2582,7 +2704,7 @@ def putative_check(win, ctx, tgt, sample, visible_only=False):
     opts = {i: options(win, sample, q, visible_only, ploidy) for i, q in tgt.codes}
     row = {i: tgt.probe[i] for i, _q in tgt.codes}
     allowed = all(row[i] in opts[i] for i in opts)
-    st = strongest(ctx, tgt, opts)
+    st = strongest(ctx, tgt, opts, win.refseq)
     if st is None:
         return allowed, allowed, False
     per, pam_codes, pam_ok, determined = st
@@ -2797,7 +2919,8 @@ CARRIER_TEXT = {
     "carrier-not-strongest": "listed (phase unknown there) for a weaker target than the "
                              "strongest their alleles allow, with %s (METHODS section 4: "
                              "the guide's base wherever they carry it, else the highest "
-                             "CFD)",
+                             "CFD; a search that scores no CFD the reference base, else "
+                             "the first of A, C, G, T)",
     "carrier-off-by-rule": "listed, while their slot of %s has no one sequence in the VCF "
                            "where the target reads (alleles that overlap) and CRISPRme's "
                            "documented rules take it off this target (METHODS section 4: "
@@ -3017,16 +3140,226 @@ def check_row(row, win, ctx, rep, gating=True):
         rep.add(g and gating, cls, row, detail, samples=",".join(who))
 
 
+# the reasons a listed carrier of a SNP row lacks its target, a documented limit first
+SNP_ROW_ORDER = ("limit-snp-row-unphased", "limit-snp-row-mnv", "limit-overlapping-records",
+                 "limit-last-alt-wins", "snp-row-indel-carrier")
+
+
+def snp_unphased(win, calls, span, kinds=("snv",)):
+    """Whether a carrier's calls at a SNP row's target spanning ``span`` leave its
+    sequence there of unknown phase. ``kinds`` ('snv'): an SNV alt it carries inside the
+    target written unphased ('/', homozygous too) or as one allele (a haploid call) --
+    CRISPRme's SNP rows then take it for an unphased individual, listed for every
+    non-empty subset of the variants it carries there (METHODS section 4, "Behavior by
+    phasing status"). ('indel', 'mnv'): an indel or MNV it carries inside the target with
+    an unphased heterozygous call, which cannot be tied to a slot (an indel there keeps it
+    listed, PUTATIVE: METHODS section 8). A missing allele of a phased call leaves its slot
+    without the alt. Phase sets (PS) are not read: a '|' call is phased along the
+    chromosome, as CRISPRme reads one with no PS."""
+    for lid, c in calls.items():
+        if win.line_lo[lid] > span[1] or win.line_hi[lid] - 1 < span[0]:
+            continue
+        for a in win.line_alleles[lid]:
+            if a is None or a.kind not in kinds or a.number not in c[0] or \
+                    not touches(a, span[0], span[1]):
+                continue
+            if a.kind == "snv" and (not c[1] or len(c[0]) == 1):
+                return True
+            if a.kind != "snv" and not c[1] and len(set(c[0])) > 1:
+                return True
+    return False
+
+
+def snp_slot_on(win, a, sample, h, missing=None):
+    """Whether slot h of the sample holds allele ``a``, as CRISPRme's SNP path reads a
+    genotype for a slot (METHODS section 4): True where every copy of its call is the
+    allele (homozygous, or haploid) or a phased call puts it on h; False where it does not
+    carry it, or a phased call puts another allele on h; ``missing`` where a phased call
+    has a missing allele on h (an SNV's allele there is unknown, None; the phased indel
+    store reads it as not the indel, False); None where the call cannot be tied to a slot
+    (unphased)."""
+    c = win.calls[a.line].get(sample)
+    if c is None:
+        return False
+    alle, phased = c
+    if a.number not in alle:
+        return False
+    if all(x == a.number for x in alle):
+        return True
+    if phased and h < len(alle):
+        if alle[h] is None:
+            return missing
+        return alle[h] == a.number
+    return None
+
+
+def snp_row_keeps(win, sample, h, start, probe, named, lids):
+    """Whether CRISPRme keeps slot h of the sample on a per-sample SNP row whose target is
+    ``probe`` (+ reading) at ``start`` and names the SNPs ``named``, by the rule METHODS
+    section 4 gives since 2.10.0 (CRISPRME_INDEL_SNP=1, the default). The slot is read
+    against the phased indel store (the records whose REF and ALT lengths differ: no
+    MNV): with no indel of it on the slot that changes the target's bases -- deletes or
+    replaces a base of its span or inserts between two of them; one at a named SNP's
+    position is another allele of that base, a phasing artefact, and changes nothing --
+    it stays (also where such an indel's call cannot be tied to the slot: PUTATIVE).
+    Otherwise it stays only where its own bases still read the target at its place, from
+    the target's first base on or up to its last (a repeat unit gained or lost at the edge
+    leaves them), the base of every named SNP in the stretch: written with every store
+    indel on the slot that reaches the stretch read, over the target's length either side
+    and the bases those indels add or lose, and with the slot's own SNP alleles outside
+    the target (the row's inside it). A way that meets an indel whose call cannot be tied
+    to the slot, two records of one base (two indels whose REFs share a base, a SNP of the
+    slot on a base of an indel's REF), or a base whose allele the slot's calls leave
+    unknown, reads nothing; with neither way holding, the carrier leaves the row."""
+    n = len(probe)
+    lo, hi = start, start + n - 1
+    row = {a.lo: a.body for a in named}
+
+    def indels_in(a, b):
+        return [x for lid in win.lines_in(max(0, a), b + 1) for x in win.line_alleles[lid]
+                if x is not None and x.kind == "indel" and x.lo not in row]
+    mine = [a for a in indels_in(lo - 1, hi + 1)
+            if touches(a, lo, hi) and snp_slot_on(win, a, sample, h, False)]
+    if not mine:
+        return True
+    margin = n + sum(abs((a.hi - a.lo) - len(a.key[2])) for a in mine)
+    first, last = lo - margin, hi + margin
+    store = indels_in(first, last)
+
+    def value(q):
+        # the slot's base at q as CRISPRme's SNP stores give it: the row's allele inside
+        # the target; outside, the slot's own SNP allele (the last record of a split site;
+        # None where its slot cannot be told, an untied multi-ALT alt included)
+        if lo <= q <= hi:
+            return row.get(q, win.refseq[q])
+        got = None
+        for x in win.snv_at.get(q, ()):
+            if x in win.shadowed:
+                continue
+            o = snp_slot_on(win, x, sample, h, None)
+            if o is not False and x in win.untied:
+                return None
+            if o is None:
+                return None
+            if o:
+                if got is not None:
+                    return None
+                got = x.body
+        return got or win.refseq[q]
+
+    for side in (0, 1):
+        held, bad = list(mine), False
+        for a in store:
+            if a in mine or not (a.hi > first and a.lo <= last):
+                continue
+            if not ((a.hi - 1 >= lo) if side == 0 else (a.lo <= hi)):
+                continue   # a way reads the indels that reach its stretch
+            o = snp_slot_on(win, a, sample, h, False)
+            if o is None:
+                bad = True
+                break
+            if o:
+                held.append(a)
+        if bad:
+            continue
+        if any(value(q) != win.refseq[q] for a in held for q in range(a.lo, a.hi)):
+            continue   # a SNP allele on a base of an indel's REF: two records of one base
+        spans = sorted((a.lo, a.hi) for a in held)
+        if any(y[0] < x[1] for x, y in zip(spans, spans[1:])):
+            continue   # two indels whose REFs share a base
+        m2 = n + sum(abs((a.hi - a.lo) - len(a.key[2])) for a in held)
+        hap = make_hap(win.refseq, held, max(0, lo - m2), hi + m2 + 1)
+        if side == 0:
+            a0 = bisect.bisect_left(hap.place, (lo, 0))
+        else:
+            a0 = bisect.bisect_right(hap.place, (hi, 0)) - n
+        if a0 < 0 or a0 + n > len(hap.place):
+            continue
+        places = hap.place[a0:a0 + n]
+        if not all((q, 0) in places for q in row):
+            continue   # a named SNP pushed out of the stretch, or its base deleted
+        good = True
+        for k in range(n):
+            pl, src = places[k], hap.src[a0 + k]
+            base = hap.seq[a0 + k] if src is not None else (
+                value(pl[0]) if pl[1] == 0 else None)
+            if base is None or base.upper() != probe[k].upper():
+                good = False
+                break
+        if good:
+            return True
+    return False
+
+
+def snp_merged_on(win, ctx, sample, h, keys, row, cp, lo, hi, lids):
+    """Whether the slot of the sample with the alleles ``keys`` holds another alignment of
+    the SNP row's site -- the same Cluster Position, an in-budget alignment of the row's
+    guide whose target names exactly the row's variants (the SNP alts in it) -- that
+    CRISPRme keeps it on (snp_row_keeps): the merge joins the carriers of a site's SNP rows
+    of one variant list (its key for a SNP row is the Cluster Position and the variants,
+    no alignment), so the row lists it as rightly as that alignment's row would."""
+    guide = row.get("guide") or ""
+    if not guide:
+        return False
+    full = ctx.full(guide)
+    var = {t for t in row["var"].split(",") if t and t != "NA"}
+    snvs = [a for a in keys if a.kind == "snv"]
+    one = len(full) + max(ctx.bdna, ctx.brna) + 2
+    hv = make_hap(win.refseq, snvs, max(0, lo), min(len(win.refseq), hi))
+    seg_lo = bisect.bisect_left(hv.place, (cp - 2 * one, 0))
+    seg_hi = bisect.bisect_left(hv.place, (cp + 2 * one, 0))
+    seg = hv.seq[seg_lo:seg_hi]
+    for strand, off, sa, ta, _mm, _dn, _rn in scan_sequence(
+            full, seg, ctx.mm, ctx.bdna, ctx.brna, ctx.cap, ctx.pam_len, ctx.pam_5prime):
+        w = len(ta.replace("-", ""))
+        i = seg_lo + off
+        place = hv.place[i:i + w]
+        if cluster_of(place[0][0], strand, w, len(full), ctx.pam_5prime) != cp:
+            continue
+        got = [x for x in hv.src[i:i + w] if x is not None]
+        if {x.token(win.chrom) for x in got} != var:
+            continue
+        if snp_row_keeps(win, sample, h, place[0][0], hv.seq[i:i + w], got, lids):
+            return True
+    return False
+
+
+def snp_slot_reads(hap, start, probe, want):
+    """Whether a slot's haplotype ``hap`` has a SNP row's target as CRISPRme reads a SNP
+    row's carrier since 2.10.0 (METHODS section 4): the slot's bases read from the
+    target's first base on, or up to its last, are the target's -- a repeat unit gained or
+    lost at the target's edge leaves them as they are -- with the base of every SNP the row
+    names (``want``: their keys) in the stretch read (an indel that pushes a named SNP
+    out, or deletes its base, gives the target thanks to the indel, not the SNP)."""
+    n = len(probe)
+
+    def through(i):
+        got = {x.key for x in hap.src[i:i + n] if x is not None}
+        return want <= got
+
+    if any(through(i) for i in reads_at(hap, start, probe)):
+        return True
+    j = hap.index((start + n - 1, 0))
+    return (j is not None and j - n + 1 >= 0 and hap.seq[j - n + 1:j + 1] == probe
+            and through(j - n + 1))
+
+
 def check_snp_row(row, win, ctx, rep, snp_listed=None):
-    """The same checks on a SNP-only row of a per-sample run, report-only (CHANGELOG
-    2.8.1 Known limits: a SNP row lists carriers from SNP genotypes only): its own
-    strings, its target, every listed carrier, and the carriers it leaves out -- a sample
-    whose phased slot holds exactly the named SNPs inside the target is listed on a row
-    of this site naming them (``snp_listed``: (guide, chromosome, Cluster Position,
-    variants) -> the samples SNP rows there list; such rows merge their carriers). A row
-    that lists no carrier and names only records a sites-only VCF holds is a sites-only
-    dataset's, whose SNP post-analysis is the population-level one whatever the search's
-    mode (CHANGELOG 2.8.1): a worst-case union, out of scope, so one line says so."""
+    """The same checks on a SNP-only row of a per-sample run, report-only: its own
+    strings, its target, every named variant inside it, every listed carrier, and the
+    carriers it leaves out -- a sample whose phased slot holds exactly the named SNPs
+    inside the target, and no indel that changes it, is listed on a row of this site
+    naming them (``snp_listed``: (guide, chromosome, Cluster Position, variants) -> the
+    samples SNP rows there list; such rows merge their carriers). Since 2.10.0 a
+    per-sample SNP row does not list a carrier whose haplotype holding its SNPs also holds
+    an indel of the phased indel store that changes the target's bases, read through a
+    repeat at its edge (METHODS section 4): listing one is a defect
+    (snp-row-indel-carrier); an MNV there (in no store), an indel at a named SNP's
+    position (a phasing artefact) and an unphased call are the documented exceptions. A
+    row that lists no carrier and names only records a sites-only VCF holds is a
+    sites-only dataset's, whose SNP post-analysis is the population-level one whatever
+    the search's mode (CHANGELOG 2.8.1): a worst-case union, out of scope, so one line
+    says so."""
     if not alignment_checks(row, ctx, rep, False):
         return
     ref_text_check(row, win, rep, False)
@@ -3054,8 +3387,21 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
                 % row["start"])
         return
     span = span_of(hap.place[hits[0]:hits[0] + n])
+    src = hap.src[hits[0]:hits[0] + n]
+    for a in named:
+        if not any(s is a for s in src):
+            rep.add(False, "variant-outside-target", row,
+                    "%s changes no base of the target (%d..%d)"
+                    % (a.token(win.chrom), span[0], span[1]))
+    # the target's own SNPs: a slot holds the target with them (a named variant outside
+    # it is the row's own fault, reported above)
+    want = {a.key for a in named if any(s is a for s in src)}
     lids = win.lines_in(lo, hi)
     out = defaultdict(list)
+    var = frozenset(x for x in row["var"].split(",") if x and x != "NA")
+    cp = cluster_of(row["start"], row["strand"], n, len(row["spacer_col"]),
+                    ctx.pam_5prime)
+    inside = [a for a in named if a.key in want]
     for s in samples_of(row):
         if ctx.panel is not None and s not in ctx.panel:
             out["carrier-not-in-panel"].append(s)
@@ -3064,43 +3410,68 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
         if not calls:
             out["carrier-without-target"].append(s)
             continue
-        ploidies = {len(c[0]) for c in calls.values()}
-        touching = [lid for lid in calls if win.line_lo[lid] <= span[1]
-                    and win.line_hi[lid] - 1 >= span[0]]
-        if len(ploidies) > 1 or any(
-                (not calls[lid][1] and len(set(calls[lid][0])) > 1)
-                or None in calls[lid][0] for lid in touching):
+        if snp_unphased(win, calls, span):
             out["limit-snp-row-unphased"].append(s)
             continue
-        ploidy = ploidies.pop()
-        ok, why = False, None
+        ploidy = max(len(c[0]) for c in calls.values())
+        ok, whys = False, set()
         for h in range(ploidy):
             keys = [a for lid, c in calls.items() for a in win.line_alleles[lid]
-                    if a is not None and c[0][h] == a.number]
+                    if a is not None and len(c[0]) > h and c[0][h] == a.number]
             if not all(any(a is k for k in keys) or any(a.key == k.key for k in keys)
                        for a in named):
                 continue
             hh = make_hap(win.refseq, keys, lo, hi)
-            if reads_at(hh, row["start"], probe):
+            hv = make_hap(win.refseq, [a for a in keys if a.kind == "snv"], lo, hi)
+            if snp_slot_reads(hv, row["start"], probe, want):
+                # the slot's SNP alleles give the target (the haplotype SNP rows list a
+                # carrier for); since 2.10.0 CRISPRme reads the slot against the phased
+                # indel store as METHODS section 4 says (snp_row_keeps), which is then
+                # the truth of its bases -- but for an MNV, in no store CRISPRme reads,
+                # and an indel or MNV inside the target whose call cannot be tied to the
+                # slot (kept, PUTATIVE: its sequence there is not known)
+                if snp_row_keeps(win, s, h, row["start"], probe, inside, lids):
+                    if snp_unphased(win, calls, span, ("indel", "mnv")):
+                        whys.add("limit-snp-row-unphased")
+                        continue
+                    if snp_slot_reads(hh, row["start"], probe, want):
+                        ok = True
+                        break
+                    if any(a.kind == "mnv" and touches(a, span[0], span[1]) for a in keys):
+                        whys.add("limit-snp-row-mnv")
+                    elif any(touches(a, span[0], span[1]) for a in zone_alleles(hh)):
+                        # two records of one base (an indel at a named SNP's position: a
+                        # phasing artefact, which the rule keeps listed)
+                        whys.add("limit-overlapping-records")
+                    else:
+                        ok = True   # read through a repeat at the edge, as the rule reads
+                        break
+                    continue
+                if snp_merged_on(win, ctx, s, h, keys, row, cp, lo, hi, lids):
+                    ok = True   # listed through another alignment of the site (below)
+                    break
+                whys.add("snp-row-indel-carrier")
+                continue
+            if snp_merged_on(win, ctx, s, h, keys, row, cp, lo, hi, lids):
+                # the merge joins the carriers of a site's SNP rows of one variant list
+                # (its key for a SNP row is the Cluster Position and the variants, no
+                # alignment): the slot holds another alignment of this site with these
+                # SNPs, which it is listed for
                 ok = True
                 break
-            inside = [a for a in keys if touches(a, span[0], span[1])
-                      and all(a.key != x.key for x in named)]
-            if any(a.kind != "snv" for a in inside):
-                why = why or "limit-snp-row-indel"
-            elif any(a in win.shadowed for a in inside):
-                why = why or "limit-last-alt-wins"
+            extra = [a for a in keys if touches(a, span[0], span[1])
+                     and all(a.key != x.key for x in named)]
+            if any(a in win.shadowed for a in extra):
+                whys.add("limit-last-alt-wins")
             elif any(touches(a, span[0], span[1]) for a in zone_alleles(hh)):
-                why = why or "limit-overlapping-records"
+                whys.add("limit-overlapping-records")
         if not ok:
-            out[why or "carrier-without-target"].append(s)
+            # a documented limit on some slot explains the listing; else a defect
+            out[next((c for c in SNP_ROW_ORDER if c in whys),
+                     "carrier-without-target")].append(s)
     # the carriers it leaves out (phased calls only: an unphased carrier is listed for
     # every subset it may hold, METHODS section 4, which is not checked here)
-    var = frozenset(x for x in row["var"].split(",") if x and x != "NA")
-    cp = cluster_of(row["start"], row["strand"], n, len(row["spacer_col"]),
-                    ctx.pam_5prime)
     site = (snp_listed or {}).get((row.get("guide", ""), row["chrom"], cp, var), set())
-    want = {a.key for a in named}
     pool = set()
     for a in named:
         for x in win.by_key.get(a.key, ()):
@@ -3108,31 +3479,43 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
     pool -= set(samples_of(row)) | set(site)
     for s in sorted(pool):
         calls = {lid: win.calls[lid][s] for lid in lids if s in win.calls[lid]}
-        ploidies = {len(c[0]) for c in calls.values()}
+        if not calls or snp_unphased(win, calls, span):
+            continue
         touching = [lid for lid in calls if win.line_lo[lid] <= span[1]
                     and win.line_hi[lid] - 1 >= span[0]]
-        if len(ploidies) != 1 or any(
-                (not calls[lid][1] and len(set(calls[lid][0])) > 1)
-                or None in calls[lid][0] for lid in touching):
-            continue
-        for h in range(ploidies.pop()):
+        ploidy = max(len(c[0]) for c in calls.values())
+        for h in range(ploidy):
             snvs = [a for lid in touching for a in win.line_alleles[lid]
-                    if a is not None and a.kind == "snv" and calls[lid][0][h] == a.number
-                    and touches(a, span[0], span[1])]
+                    if a is not None and a.kind == "snv" and len(calls[lid][0]) > h
+                    and calls[lid][0][h] == a.number and touches(a, span[0], span[1])]
             if {a.key for a in snvs} != want or any(a in win.shadowed for a in snvs):
                 continue
-            if reads_at(make_hap(win.refseq, snvs, lo, hi), row["start"], probe):
-                out["carrier-missing"].append(s)
-                break
-    text = {"limit-snp-row-indel": "hold an indel (or MNV) inside the target on the slot "
-                                   "of the row's SNPs: a SNP row's carriers come from SNP "
-                                   "genotypes only (CHANGELOG 2.8.1, Known limits)",
+            if not snp_slot_reads(make_hap(win.refseq, snvs, lo, hi), row["start"], probe,
+                                  want):
+                continue
+            # CRISPRme (2.10.0) drops a carrier whose slot holds an indel of the phased
+            # store that changes the target, as METHODS section 4 reads the slot
+            if not snp_row_keeps(win, s, h, row["start"], probe, inside, lids):
+                continue
+            out["carrier-missing"].append(s)
+            break
+    text = {"snp-row-indel-carrier": "hold, on the slot of the row's SNPs, an indel that "
+                                     "changes the target's bases (read through a repeat at "
+                                     "its edge): their sequence there is the indel's, and "
+                                     "since 2.10.0 a per-sample SNP row does not list such a "
+                                     "carrier (METHODS section 4; report-only)",
+            "limit-snp-row-mnv": "hold, on the slot of the row's SNPs, an MNV that changes "
+                                 "the target: the phased indel store CRISPRme reads a SNP "
+                                 "row's carriers against holds no MNV (METHODS section 8)",
             "carrier-missing": "are not listed, nor on another row of this site naming "
                                "these SNPs, and their phased slot holds exactly these SNPs "
-                               "inside the target, which it reads (report-only)",
+                               "inside the target, which it reads, with no indel that "
+                               "changes it (report-only)",
             "limit-last-alt-wins": "hold an earlier SNP record of a split site inside the "
                                    "target (CRISPRme reads the last record)",
-            "limit-overlapping-records": "hold overlapping alleles inside the target",
+            "limit-overlapping-records": "hold overlapping alleles inside the target (an "
+                                         "indel at a named SNP's position on its slot is a "
+                                         "phasing artefact, which CRISPRme keeps listed)",
             "limit-snp-row-unphased": "have a call of unknown phase inside the target: a "
                                       "SNP row lists every subset a carrier may hold "
                                       "(METHODS section 4), not checked here",
@@ -3594,7 +3977,10 @@ def comp_record(win, ctx, rep, reported, al, carriers, guide, full, lo, hi, popm
     e = win.enum.pop((guide, al.key), None)
     if e is None:
         e = record_demands(win, ctx, al, carriers, full, lo, hi, reach)
-        win.cps[(guide, al.key)] = (e["cps"], e["cps_open"])
+        # the record's rows as a cluster chain reads them: its carriers' targets and, for
+        # a record a sites-only dataset holds too, that dataset's worst-case rows (kept
+        # whole, so that no chain depends on which record the work met first)
+        record_cps(win, ctx, guide, al, e=e)
     demands, demand_of, lids = e["demands"], e["demand_of"], e["lids"]
     clash_who, clash_how, capped, skipped = (e["clash_who"], e["clash_how"], e["capped"],
                                              e["skipped"])
@@ -4124,30 +4510,48 @@ CHUNK = 64   # the cluster chain reads the reference's SNP rows a piece this siz
 
 def snp_row_sets(win, ctx, lo, hi):
     """[lo, hi) of the reference as the reference and SNP rows CRISPRme can write there see
-    it: base-set sequences (any base of a set, as CRISPRitz reads an IUPAC code). A
-    population-level run's SNP rows are the worst case of each engine alignment over the
-    SNP alleles of the enriched genome (new_simple_analysis's worst-case representative),
-    so every allele of a dataset is an option at its position -- one dataset at a time, as
-    a search enriches each apart; a per-sample run reports only a haplotype some
-    individual holds (its PER-SAMPLE CONTRACT): a phased slot's own alleles, and at a call
-    of unknown phase either of the sample's alleles (an unphased individual is listed for
-    every subset of its alleles), beside the reference rows; a sites-only dataset's SNP
-    rows are population-level whatever the mode (CHANGELOG 2.8.1). Only the alleles
-    CRISPRme's stores hold count (not an earlier record of a split site)."""
+    it: base-set sequences (snp_row_seqs, whatever indels may take a per-sample row's
+    carriers off)."""
+    return [sets for sets, _drops in snp_row_seqs(win, ctx, lo, hi)]
+
+
+def snp_row_seqs(win, ctx, lo, hi):
+    """[(sets, drops)]: [lo, hi) of the reference as the reference and SNP rows CRISPRme can
+    write there see it: base-set sequences (any base of a set, as CRISPRitz reads an IUPAC
+    code). A population-level run's SNP rows are the worst case of each engine alignment
+    over the SNP alleles of the enriched genome (new_simple_analysis's worst-case
+    representative), so every allele of a dataset is an option at its position -- one
+    dataset at a time, as a search enriches each apart; a per-sample run reports only a
+    haplotype some individual holds (its PER-SAMPLE CONTRACT): a phased slot's own
+    alleles, and at a call of unknown phase either of the sample's alleles (an unphased
+    individual is listed for every subset of its alleles), beside the reference rows; a
+    sites-only dataset's SNP rows are population-level whatever the mode (CHANGELOG
+    2.8.1). Only the alleles CRISPRme's stores hold count (not an earlier record of a split
+    site). ``drops``: the indels of a per-sample slot's own dataset that its call puts on
+    that slot (phased, or homozygous): since 2.10.0 a per-sample SNP row does not list a
+    carrier whose haplotype holding its SNPs holds an indel of the phased indel store that
+    changes the target's bases (METHODS section 4; one whose indel call is unphased
+    stays), so the slot's targets such an indel touches are rows CRISPRme may write or not
+    (a repeat read through keeps the carrier), and the rest rows it writes. A sequence
+    some slot gives with no such indel has none (empty)."""
     base = [frozenset((b,)) for b in win.refseq[lo:hi]]
-    out = {tuple(base)}
+    out = {tuple(base): {frozenset()}}
     by_vcf = defaultdict(list)
-    for lid in win.lines_in(lo, hi):
+    indels = defaultdict(list)   # dataset -> its indels whose REF meets [lo - 1, hi)
+    for lid in win.lines_in(max(0, lo - 1), hi):
         for a in win.line_alleles[lid]:
-            if a is not None and a.kind == "snv" and lo <= a.lo < hi and \
-                    a not in win.shadowed:
+            if a is None:
+                continue
+            if a.kind == "snv" and lo <= a.lo < hi and a not in win.shadowed:
                 by_vcf[win.line_vcf[lid]].append(a)
+            elif a.kind == "indel" and a.lo < hi and a.hi > lo - 1:
+                indels[win.line_vcf[lid]].append(a)
     for vi, als in sorted(by_vcf.items()):
         if ctx.snp_union or not win.vcfs[vi].samples:
             sets = list(base)
             for a in als:
                 sets[a.lo - lo] = sets[a.lo - lo] | {a.body}
-            out.add(tuple(sets))
+            out.setdefault(tuple(sets), set()).add(frozenset())
             continue
         at = defaultdict(list)    # position -> the dataset's alleles there
         for a in als:
@@ -4180,8 +4584,25 @@ def snp_row_sets(win, ctx, lo, hi):
                         sets[q - lo] = frozenset((by_slot[h],))
                 for q, opts in open_.items():
                     sets[q - lo] = opts
-                out.add(tuple(sets))
-    return [list(x) for x in sorted(out, key=lambda x: [sorted(y) for y in x])]
+                # the slot's own indels (Track B): on it by a phased call of the sample's
+                # ploidy, or a homozygous one; an unphased call keeps the carrier listed
+                drops = []
+                for a in indels.get(vi, ()):
+                    c = win.calls[a.line].get(s)
+                    if c is None or len(c[0]) != ploidy or None in c[0]:
+                        continue
+                    if all(x == a.number for x in c[0]) or (c[1] and c[0][h] == a.number):
+                        drops.append(a)
+                out.setdefault(tuple(sets), set()).add(frozenset(drops))
+    res = []
+    for x in sorted(out, key=lambda x: [sorted(y) for y in x]):
+        ds = out[x]
+        if frozenset() in ds:
+            res.append((list(x), frozenset()))
+        else:
+            for d in sorted(ds, key=lambda d: sorted(a.key for a in d)):
+                res.append((list(x), d))
+    return res
 
 
 def capped_sets(win, ctx, lo, hi):
@@ -4212,42 +4633,76 @@ def capped_sets(win, ctx, lo, hi):
 
 
 def snp_row_cps(win, ctx, guide, full, a, b):
-    """(certain, capped): the Cluster Positions of the in-budget alignments of the guide,
-    both strands, on [a, b) of the reference as its reference and SNP rows see it
-    (snp_row_sets), and those of a per-sample run's capped windows' greedy worst-case rows
-    (capped_sets: alignments over more than CRISPRME_IUPAC_CAP variant positions), read a
-    piece at a time -- each piece reaching one target and its bulges into the next, so that
-    every alignment lies whole in the piece where it starts -- and kept on the window."""
+    """(certain, capped, dropped): the Cluster Positions of the in-budget alignments of the
+    guide, both strands, on [a, b) of the reference as its reference and SNP rows see it
+    (snp_row_seqs), those of a per-sample run's capped windows' greedy worst-case rows
+    (capped_sets: alignments over more than CRISPRME_IUPAC_CAP variant positions), and
+    those of a per-sample slot's SNP targets that an indel of the slot touches (rows
+    CRISPRme writes only where its reading of the slot through a repeat keeps the
+    carrier), read a piece at a time -- each piece reaching one target and its bulges into
+    the next, so that every alignment lies whole in the piece where it starts -- and kept
+    on the window."""
     span = len(full) + max(ctx.bdna, ctx.brna) + 2
-    out, capped = set(), set()
+    out, capped, dropped = set(), set(), set()
     for c in range(max(0, a) // CHUNK, max(a, b - 1) // CHUNK + 1):
         got = win.snpcps.get((guide, c))
         if got is None:
             lo = c * CHUNK
             hi = min(len(win.refseq), lo + CHUNK + span)
             places = [(q, 0) for q in range(lo, hi)]
-            rows = set()
-            for sets in snp_row_sets(win, ctx, lo, hi):
-                rows |= feasible_cps(ctx, full, sets, places)
+            rows, maybe = set(), set()
+            for sets, drops in snp_row_seqs(win, ctx, lo, hi):
+                if drops:
+                    sure, touched = feasible_cps(ctx, full, sets, places, drops=drops)
+                    rows |= sure
+                    maybe |= touched
+                else:
+                    rows |= feasible_cps(ctx, full, sets, places)
             dense = set()
             for sets in capped_sets(win, ctx, lo, hi):
                 dense |= feasible_cps(ctx, full, sets, places, dense=IUPAC_CAP)
-            got = win.snpcps[(guide, c)] = (rows, dense - rows)
+            got = win.snpcps[(guide, c)] = (rows, dense - rows, maybe - rows)
         out |= got[0]
         capped |= got[1]
-    return out, capped - out
+        dropped |= got[2]
+    return out, capped - out, dropped - out
 
 
-def record_cps(win, ctx, guide, al):
+def sites_only_cps(win, ctx, full, al, lo, hi):
+    """The Cluster Positions of the rows a sites-only dataset that holds record ``al``
+    writes for it: the worst case of each alignment of its fake-indel window over that
+    dataset's SNP alleles (CHANGELOG 2.8.1), the window being the reference over [lo, hi)
+    with the record's ALT written verbatim and an SNV's alleles coded at a flank base --
+    a reference base off the record's REF span: the overlay codes no base of the ALT, the
+    anchor included (METHODS section 4), so an SNV at the record's own position is in no
+    row of the window."""
+    out = set()
+    for vi in sorted({win.line_vcf[a.line] for a in win.by_key.get(al.key, ())
+                      if win.line_sites_only[a.line]}):
+        hap = make_hap(win.refseq, [al], lo, hi)
+        sets = []
+        for b, pl, src in zip(hap.seq, hap.place, hap.src):
+            opts = {b}
+            if src is None and pl[1] == 0 and not al.lo <= pl[0] < al.hi:
+                opts.update(x.body for x in win.snv_at.get(pl[0], ())
+                            if win.line_vcf[x.line] == vi and x not in win.shadowed)
+            sets.append(frozenset(opts))
+        out |= feasible_cps(ctx, full, sets, hap.place)
+    return out
+
+
+def record_cps(win, ctx, guide, al, e=None):
     """(certain, open): the Cluster Positions of the rows CRISPRme writes for record
     ``al``, whatever the mode -- a genotyped dataset's are the targets its carriers'
     haplotypes hold (record_demands: the per-carrier resolution gives no row for a raw
     target no carrier holds, METHODS section 4; a slot whose alleles overlap the record
     gives its targets as METHODS reads it); a sites-only dataset's, the worst case of each
-    alignment of its fake-indel window over that dataset's SNP alleles (CHANGELOG 2.8.1)
-    -- and {Cluster Position: why} of the rows it may write or not, which no documented
-    rule settles (record_demands' 'cps_open'). A record within one target of the contig's
-    end has none (completeness lists it)."""
+    alignment of its fake-indel window over that dataset's SNP alleles (sites_only_cps),
+    both for a record both datasets hold -- and {Cluster Position: why} of the rows it may
+    write or not, which no documented rule settles (record_demands' 'cps_open'). ``e``:
+    record_demands' enumeration of the record, when completeness made it already (the
+    value kept for the record holds both parts whoever computed it first). A record
+    within one target of the contig's end has none (completeness lists it)."""
     key = (guide, al.key)
     got = win.cps.get(key)
     if got is not None:
@@ -4258,30 +4713,22 @@ def record_cps(win, ctx, guide, al):
     out, opened = set(), defaultdict(set)
     if al.lo - one >= 0 and al.hi + one <= len(win.refseq):
         lo, hi = max(0, al.lo - reach), min(len(win.refseq), al.hi + reach)
-        for vi in sorted({win.line_vcf[a.line] for a in win.by_key.get(al.key, ())
-                          if win.line_sites_only[a.line]}):
-            hap = make_hap(win.refseq, [al], lo, hi)
-            sets = []
-            for b, pl, src in zip(hap.seq, hap.place, hap.src):
-                opts = {b}
-                if src is None and pl[1] == 0:
-                    opts.update(x.body for x in win.snv_at.get(pl[0], ())
-                                if win.line_vcf[x.line] == vi and x not in win.shadowed)
-                sets.append(frozenset(opts))
-            out |= feasible_cps(ctx, full, sets, hap.place)
-        carriers = set()
-        for a in win.by_key.get(al.key, ()):
-            carriers.update(win.carriers(a))
-        if carriers:
-            w, x = win, al
-            if lo < win.beg or hi > win.end:
-                w = Window(win.refseq, win.chrom, max(0, lo - 1000), hi + 1000, win.vcfs,
-                           panel=win.panel)
-                x = w.by_key[al.key][0]
-            e = record_demands(w, ctx, x, carriers, full, lo, hi,
-                               (x.edit_lo - one, x.edit_hi + one))
-            if w is win:
-                win.enum[key] = e
+        out |= sites_only_cps(win, ctx, full, al, lo, hi)
+        if e is None:
+            carriers = set()
+            for a in win.by_key.get(al.key, ()):
+                carriers.update(win.carriers(a))
+            if carriers:
+                w, x = win, al
+                if lo < win.beg or hi > win.end:
+                    w = Window(win.refseq, win.chrom, max(0, lo - 1000), hi + 1000,
+                               win.vcfs, panel=win.panel)
+                    x = w.by_key[al.key][0]
+                e = record_demands(w, ctx, x, carriers, full, lo, hi,
+                                   (x.edit_lo - one, x.edit_hi + one))
+                if w is win:
+                    win.enum[key] = e
+        if e is not None:
             out |= e["cps"]
             for c, why in e["cps_open"].items():
                 opened[c] |= why
@@ -4298,7 +4745,8 @@ def record_cps(win, ctx, guide, al):
 OPEN_CLASS = (("overlap", "limit-overlapping-records"),
               ("last-alt-wins", "limit-last-alt-wins"),
               ("putative-untied", "limit-putative-carrier"),
-              ("capped", "limit-capped-window"))
+              ("capped", "limit-capped-window"),
+              ("snp-row-indel", "coverage-snp-row-indel"))
 OPEN_TEXT = {
     "overlap": "the rows of a slot whose alleles overlap, which no documented rule says "
                "CRISPRme writes or not (the one-record reading of a slot whose record meets "
@@ -4311,7 +4759,12 @@ OPEN_TEXT = {
                        "which CRISPRme resolves PUTATIVE",
     "capped": "a capped window's greedy worst-case row, which a per-sample run writes only "
               "on the classic dictionary path (an index built without --samplesID; METHODS "
-              "section 5, known limit), and the run does not say which it took"}
+              "section 5, known limit), and the run does not say which it took",
+    "snp-row-indel": "a per-sample SNP row of a haplotype whose slot also holds an indel "
+                     "that touches the target: CRISPRme drops such a carrier unless its "
+                     "reading of the slot through a repeat keeps the target's bases "
+                     "(METHODS section 4, 2.10.0), which this checker's cluster chain does "
+                     "not model (its own coverage gap)"}
 
 
 def chain_cps(win, ctx, guide, full, a, b):
@@ -4320,11 +4773,13 @@ def chain_cps(win, ctx, guide, full, a, b):
     touches it (record_cps; a merge cluster holds the rows of every record, and the
     alleles of one multi-allelic site put their targets a few bases apart) -- and
     {Cluster Position: why} of the rows it may write or not (OPEN_CLASS)."""
-    rows, capped = snp_row_cps(win, ctx, guide, full, a, b)
+    rows, capped, dropped = snp_row_cps(win, ctx, guide, full, a, b)
     out = set(rows)
     opened = defaultdict(set)
     for c in capped:
         opened[c].add("capped")
+    for c in dropped:
+        opened[c].add("snp-row-indel")
     seen = set()
     for lid in win.lines_in(a, b):
         for x in win.line_alleles[lid]:
@@ -4337,10 +4792,11 @@ def chain_cps(win, ctx, guide, full, a, b):
     return out, {c: w for c, w in opened.items() if c not in out}
 
 
-def feasible_cps(ctx, full, sets, places, dense=None):
+def feasible_cps(ctx, full, sets, places, dense=None, drops=None):
     """The Cluster Positions of the PAM sites of ``sets`` (both strands) where some
     alignment of the guide is in budget (with ``dense``, only alignments over more than
-    that many positions of several options: a capped window)."""
+    that many positions of several options: a capped window). With ``drops`` (alleles),
+    (those of alignments whose target no allele of ``drops`` touches, those of the rest)."""
     n = len(full)
     pam_len, p5 = ctx.pam_len, ctx.pam_5prime
     motif = full[:pam_len] if p5 else full[n - pam_len:]
@@ -4350,7 +4806,7 @@ def feasible_cps(ctx, full, sets, places, dense=None):
     motif_sets = [_MATCHES.get(c.upper(), frozenset()) for c in motif]
     size = len(sets)
     rc_sets = [frozenset(comp(x) for x in s) for s in reversed(sets)]
-    out = set()
+    out, touched = set(), set()
     for strand, ss in (("+", sets), ("-", rc_sets)):
         many = [0]
         for x in ss:
@@ -4372,7 +4828,14 @@ def feasible_cps(ctx, full, sets, places, dense=None):
                                       ctx.brna, ctx.cap, pam_first, pam_last, p5):
                     continue
                 off = beg if strand == "+" else size - end
-                out.add(cluster_of(places[off][0], strand, end - beg, n, p5))
+                cp = cluster_of(places[off][0], strand, end - beg, n, p5)
+                if drops and any(touches(x, places[off][0], places[off + end - beg - 1][0])
+                                 for x in drops):
+                    touched.add(cp)
+                else:
+                    out.add(cp)
+    if drops is not None:
+        return out, touched - out
     return out
 
 
@@ -5271,21 +5734,25 @@ def main(argv=None):
     # against the others' panel (a run of two datasets that share samples, given one of
     # them, passes or fails by which); with more, a dataset the search never read is
     # demanded of it. Either way the run would be modeled partially: it is refused
-    datasets = run_datasets(args.results)
+    datasets, datasets_from = run_datasets(args.results)
+    if datasets is None:
+        sys.stderr.write("check_indel_rows: the run does not say which variant datasets it "
+                         "searched (%s): the VCF(s) given are taken for the search's own\n"
+                         % datasets_from)
     if datasets is not None:
         for ch in sorted(chroms):
             here = [v for v in vcfs_for.get(ch, ()) if v.holds(ch)]
             if not here or len(here) == len(datasets):
                 continue   # (a chromosome no VCF holds is reported above, row-not-checked)
             sys.stderr.write(
-                "ERROR: the run searched %d variant dataset(s) (Genome_idx in its "
-                ".Params.txt: %s), and %d of the VCF(s) given hold %s (%s). Give the VCF "
+                "ERROR: the run searched %d variant dataset(s) (%s: %s), and %d of the "
+                "VCF(s) given hold %s (%s). Give the VCF "
                 "of %s of every dataset the search read, one per dataset, and no other: "
                 "%s, so the run would be modeled partially, and it is not checked (if a "
                 "dataset of the search has no VCF for %s, check the other chromosomes with "
                 "--chrom).\n"
-                % (len(datasets), ", ".join(datasets) or "the reference alone", len(here),
-                   ch, ", ".join(v.path for v in here), ch,
+                % (len(datasets), datasets_from, ", ".join(datasets) or "the reference alone",
+                   len(here), ch, ", ".join(v.path for v in here), ch,
                    "with fewer, the rows of a dataset left out are read against the "
                    "others' panel" if len(here) < len(datasets) else
                    "with more, a dataset the search never read is demanded of it", ch))

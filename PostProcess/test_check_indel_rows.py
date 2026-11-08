@@ -875,10 +875,12 @@ class Limits(Base):
 
 
 class SnpRowsReport(Base):
-    def test_a_snp_row_carrier_with_an_indel_in_the_target_is_the_documented_limit(self):
-        """--snp-rows report: a SNP row lists carriers from SNP genotypes only, so a
-        carrier whose haplotype holding the SNP also holds an indel inside the target is
-        listed (CHANGELOG 2.8.1, Known limits). Reported, never gating."""
+    def test_a_snp_row_carrier_with_an_indel_in_the_target_is_a_defect_report(self):
+        """--snp-rows report: since 2.10.0 a per-sample SNP row does not list a carrier
+        whose haplotype holding its SNPs also holds an indel of the phased store that
+        changes the target (METHODS section 4, Track B): listing S02, whose slot of the
+        SNP deletes a base of the target, is a CRISPRme defect, reported
+        (snp-row-indel-carrier), never gating."""
         seq = PRE + GUIDE[:5] + other(GUIDE[5]) + GUIDE[6:] + "TGG" + POST
         snp = len(PRE) + 6
         dele = len(PRE) + 12
@@ -891,8 +893,182 @@ class SnpRowsReport(Base):
         case = Case(self.tmp, seq, recs, rows)
         rc, found = case.run(extra=("--snp-rows", "report"))
         self.assertEqual((rc, gating(found)), (0, []), found)
-        self.assertIn("limit-snp-row-indel", classes(found), found)
-        self.assertTrue(any("S02" in f[3] for f in found), found)
+        self.assertEqual(classes(found), {"snp-row-indel-carrier"}, found)
+        self.assertTrue(all(f[3] == "S02" for f in found), found)
+        # the row without S02, as CRISPRme 2.10.0 writes it: nothing to report, and S02,
+        # left off, is not missing (its slot's indel changes the target)
+        write_results(case.res, [set_field(rows[0], samples="S01")])
+        rc, found = case.run(extra=("--snp-rows", "report"))
+        self.assertEqual((rc, found), (0, []), found)
+
+    def test_the_documented_exceptions_of_the_snp_row_drop(self):
+        """The carriers 2.10.0 keeps on a SNP row though an indel or MNV of their slot
+        changes the target: an MNV (in no store CRISPRme reads: limit-snp-row-mnv), an
+        indel at the named SNP's own position (another allele of that base, a phasing
+        artefact: limit-overlapping-records) and an unphased indel call
+        (limit-snp-row-unphased). Reported, never gating; none is a defect."""
+        seq = PRE + GUIDE[:5] + other(GUIDE[5]) + GUIDE[6:] + "TGG" + POST
+        snp = len(PRE) + 6
+        q = len(PRE) + 12          # 1-based: an MNV of two bases inside the target
+        mnv = (q, seq[q - 1:q + 1], other(seq[q - 1]) + other(seq[q]), {"S02": "1|0"})
+        art = (snp, seq[snp - 1], seq[snp - 1] + "T", {"S03": "1|0"})
+        dele = (len(PRE) + 15, seq[len(PRE) + 14:len(PRE) + 16], seq[len(PRE) + 14],
+                {"S04": "0/1"})
+        recs = [(snp, other(GUIDE[5]), GUIDE[5],
+                 {"S01": "1|0", "S02": "1|0", "S03": "1|0", "S04": "1|0"}), art, mnv, dele]
+        recs.sort(key=lambda r: (r[0], len(r[1]), r[2]))
+        start = len(PRE)
+        rows = [row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                           GUIDE + "TGG", "TGG", 0, 0, "X",
+                           tok("chr21", (snp, other(GUIDE[5]), GUIDE[5])),
+                           "S01,S02,S03,S04")]
+        case = Case(self.tmp, seq, recs, rows)
+        rc, found = case.run(extra=("--snp-rows", "report"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        who = {f[1]: f[3] for f in found}
+        self.assertEqual(who, {"limit-snp-row-mnv": "S02",
+                               "limit-overlapping-records": "S03",
+                               "limit-snp-row-unphased": "S04"}, found)
+
+    def test_a_repeat_unit_lost_at_the_targets_edge_keeps_the_snp_row_carrier(self):
+        """Track B reads a carrier's slot through a repeat at the target's edge: S02's
+        slot of the SNP also loses one CAG unit of a run the VCF writes at its left end,
+        inside the target. Where the run stops at the target's end (the control), the
+        deletion changes the target's bases: listing S02 is reported
+        (snp-row-indel-carrier). Where the run goes on past the target's end, the bases
+        read from the target's first base on are the target's: 2.10.0 keeps S02 (nothing
+        to report), and S03, holding the SNP alone and left off, is missing."""
+        unit = "CAG"
+        start = len(PRE)
+        snp = start + 6                  # 1-based POS of the SNP (the target's 6th base)
+        recs_snp = (snp, other(GUIDE[5]), GUIDE[5])
+        for runs_on, guide, body, after in (
+                (False, GUIDE[:11] + unit * 3, GUIDE[:11] + unit * 3, "TGG" + "CAGTGG"),
+                (True, GUIDE[:8] + unit * 4, GUIDE[:8] + unit * 4, unit * 3)):
+            ref_t = body[:5] + other(body[5]) + body[6:]
+            seq = PRE + ref_t + after + POST
+            pam = (after[:3])
+            d1 = start + len(body) - 3 * (4 if runs_on else 3)   # 0-based: the run's start
+            dele = (d1, seq[d1 - 1] + unit, seq[d1 - 1], {"S02": "1|0"})
+            self.assertEqual(seq[d1:d1 + 3], unit)
+            recs = [recs_snp + ({"S01": "1|0", "S02": "1|0", "S03": "1|0"},), dele]
+            row = row_fields("chr21", start, "+", guide + "NNN", seq[start:start + 23],
+                             guide + pam, pam, 0, 0, "X", tok("chr21", recs_snp),
+                             "S01,S02" if not runs_on else "S01,S02,S03",
+                             spacer=guide + "NNN")
+            tmp = os.path.join(self.tmp, "w%d" % runs_on)
+            os.makedirs(tmp)
+            case = Case(tmp, seq, recs, [row])
+            rc, found = case.run(guide=guide, extra=("--snp-rows", "report"))
+            want = {("snp-row-indel-carrier", "S02")} if not runs_on else set()
+            got = {(f[1], f[3]) for f in found if f[1] != "carrier-missing"}
+            self.assertEqual(got, want, (runs_on, found))
+            write_results(case.res, [set_field(row, samples="S01,S02")])
+            rc, found = case.run(guide=guide, extra=("--snp-rows", "report"))
+            self.assertEqual({f[3] for f in found if f[1] == "carrier-missing"},
+                             {"S03"}, (runs_on, found))
+
+    def test_a_carrier_merged_from_another_alignment_of_the_site_is_listed_rightly(self):
+        """CRISPRme's merge keys a SNP row by its Cluster Position and variants, with no
+        alignment, so the carriers of a site's SNP rows of one variant list are joined:
+        the row is a DNA-bulge alignment whose first base S02's slot changes (an SNV the
+        shorter alignment of the same site does not reach); S02 holds that shorter
+        alignment, which names the same SNP -- listed rightly, nothing to report. S03,
+        listed and carrying nothing, is reported."""
+        g = GUIDE
+        x = other(g[5])
+        seq = PRE + g[0] + "T" + g[1:5] + x + g[6:] + "TGG" + POST
+        s0 = len(PRE)
+        snp = (s0 + 7, x, g[5])                    # the guide's base at its column 5
+        first = (s0 + 1, g[0], other(g[0]))         # only the bulged alignment reads it
+        recs = [first + ({"S02": "1|0"},), snp + ({"S01": "1|0", "S02": "1|0"},)]
+        t = g[0] + "T" + g[1:] + "TGG"
+        bulged = row_fields("chr21", s0, "+", g[0] + "-" + g[1:] + "NNN", seq[s0:s0 + 24],
+                            t, "TGG", 0, 1, "DNA", tok("chr21", snp), "S01,S02,S03")
+        case = Case(self.tmp, seq, recs, [bulged])
+        rc, found = case.run(extra=("--snp-rows", "report"))
+        self.assertEqual({(f[1], f[3]) for f in found}, {("carrier-without-target", "S03")},
+                         found)
+
+    def test_an_unphased_carrier_listed_for_a_subset_of_its_variants_is_documented(self):
+        """METHODS section 4: an unphased individual (a '/' call, homozygous too) is listed
+        for every non-empty subset of the variants it carries in the target, also one that
+        leaves out a variant it is homozygous for: limit-snp-row-unphased, not
+        carrier-without-target."""
+        g = GUIDE
+        x, y = other(g[5]), other(g[9])
+        seq = PRE + g[:5] + x + g[6:9] + y + g[10:] + "TGG" + POST
+        a = (len(PRE) + 6, x, g[5])
+        b = (len(PRE) + 10, y, g[9])
+        recs = [a + ({"S01": "1/1"},), b + ({"S01": "1/1"},)]
+        s0 = len(PRE)
+        t = g[:9] + y + g[10:] + "TGG"     # a only: leaves out b, which S01 is 1/1 for
+        row = row_fields("chr21", s0, "+", g + "NNN", seq[s0:s0 + 23], mark(g + "NNN", t),
+                         "TGG", 1, 0, "X", tok("chr21", a), "S01")
+        rc, found = Case(self.tmp, seq, recs, [row]).run(extra=("--snp-rows", "report"))
+        self.assertEqual({(f[1], f[3]) for f in found}, {("limit-snp-row-unphased", "S01")},
+                         found)
+
+    def test_a_slot_the_documented_reading_cannot_read_leaves_the_snp_row(self):
+        """METHODS section 4 (2.10.0): a slot whose store indel changes the target stays
+        on the SNP row only where its own bases still read the target, from the target's
+        first base on (from the first base the haplotype keeps, where an indel removes
+        it) or up to its last. In a GA run that goes on past the target, S02's slot of
+        the SNP loses the run's first unit, the target's first two bases: read from the
+        next base on, its bases are the target's -- kept, nothing to report. An unphased
+        insertion inside the target beside it leaves the slot unreadable (its slot cannot
+        be told): CRISPRme drops S02, and listing it is reported; S03, holding the SNP
+        alone and left off, is missing."""
+        lo = len(PRE) + 1
+        run = list("GA" * 14)
+        run[10] = "T"                        # the reference breaks the run; the SNP mends it
+        seq = PRE + "T" + "".join(run) + POST
+        g = "GA" * 10                        # the target GAGA... and its PAM GAG (NRG)
+        snp = (lo + 11, "T", "G")
+        dele = (lo, "TGA", "T")              # POS = the base before the run: its 1st unit
+        ins = (lo + 7, seq[lo + 6], seq[lo + 6] + "TT")
+        t = "GA" * 11 + "G"
+        s0 = lo
+        self.assertEqual((seq[s0 + 10], seq[lo - 1:lo + 2]), ("T", "TGA"))
+        for with_ins in (False, True):
+            recs = [dele + ({"S02": "1|0"},),
+                    snp + ({"S01": "1|0", "S02": "1|0", "S03": "0|1"},)]
+            if with_ins:
+                recs.append(ins + ({"S02": "0/1"},))
+            recs.sort(key=lambda r: r[0])
+            row = row_fields("chr21", s0, "+", g + "NNN", seq[s0:s0 + 23], t, t[-3:], 0,
+                             0, "X", tok("chr21", snp), "S01,S02", spacer=g + "NNN")
+            tmp = os.path.join(self.tmp, "w%d" % with_ins)
+            os.makedirs(tmp)
+            case = Case(tmp, seq, recs, [row])
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(case.vcf)])
+            keeps = C.snp_row_keeps(win, "S02", 0, s0, t, [win.by_key[snp][0]],
+                                    win.lines_in(0, len(seq)))
+            self.assertEqual(keeps, not with_ins)
+            rc, found = case.run(guide=g, extra=("--snp-rows", "report"))
+            got = {(f[1], f[3]) for f in found}
+            want = {("carrier-missing", "S03")}
+            if with_ins:
+                want.add(("snp-row-indel-carrier", "S02"))
+            self.assertEqual(got, want, (with_ins, found))
+
+    def test_a_snp_row_naming_a_variant_outside_its_target_is_reported(self):
+        """R9-F5 (the review's adv_r9a): the report runs the variant-outside-target check
+        of an indel row: a SNP row naming an SNV 10 bases past its PAM, its carrier holding
+        both, is reported (non-gating); the carrier, who holds the target with its own
+        SNP, is not."""
+        seq = PRE + GUIDE[:5] + other(GUIDE[5]) + GUIDE[6:] + "TGG" + POST
+        snp = len(PRE) + 6
+        far = len(PRE) + 23 + 10
+        recs = [(snp, other(GUIDE[5]), GUIDE[5], {"S01": "1|0"}),
+                (far + 1, seq[far], other(seq[far]), {"S01": "1|0"})]
+        s = len(PRE)
+        var = "%s,%s" % (tok("chr21", recs[0]), tok("chr21", recs[1]))
+        rows = [row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23], GUIDE + "TGG",
+                           "TGG", 0, 0, "X", var, "S01")]
+        rc, found = Case(self.tmp, seq, recs, rows).run(extra=("--snp-rows", "report"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual(classes(found), {"variant-outside-target"}, found)
 
 
 class Edges(Base):
@@ -2978,13 +3154,15 @@ class ReviewRound7(Base):
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
             ctx = self._ctx(GUIDE)
             ctx.snp_union = False
-            rows, capped = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0, len(seq))
+            rows, capped, _drop = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+                                                len(seq))
             cp = len(PRE)
             self.assertNotIn(cp, rows, n)
             self.assertEqual(cp in capped, want, n)
             ctx.snp_union = True
-            rows, capped = C.snp_row_cps(C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)]),
-                                         ctx, GUIDE, ctx.full(GUIDE), 0, len(seq))
+            rows, capped, _drop = C.snp_row_cps(
+                C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)]), ctx, GUIDE,
+                ctx.full(GUIDE), 0, len(seq))
             self.assertIn(cp, rows, n)   # population-level: the union is a row
             self.assertEqual(capped, set(), n)
 
@@ -3383,6 +3561,354 @@ class ReviewRound8(Base):
         self.assertEqual([(f[1], f[2][:44]) for f in found if f[1] == "guide-not-given"],
                          [("guide-not-given",
                            "completeness demands none of the targets of ")], found)
+
+    def assertClean(self, case, mode="soundness", **kw):
+        rc, found = case.run(mode=mode, **kw)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        return found
+
+
+def world_anchor_snv(kind):
+    """R9-F1 (the review's adv_r9b2 / adv_r9c): an SNV A at an indel's own POS, its alt the
+    guide's base at the anchor (whose reference base mismatches the guide), and a call of
+    unknown phase inside the target, so that the truth is the PUTATIVE rule. CRISPRme's
+    fake-indel window writes the ALT verbatim, the anchor included, and codes flank bases
+    only: the anchor is never a PUTATIVE choice, whatever A is. 'deletion': S01 holds the
+    deletion D, A and an SNV X unphased (0/1 each); 'insertion': S01 holds the insertion
+    1|0, A phased on its other haplotype (0|1) and an SNV Y with a missing allele (.|1).
+    Returns (seq, records, the right row, its start, the anchor's coordinate)."""
+    G = GUIDE
+    if kind == "deletion":
+        anchor_ref, x_ref = other(G[9]), other(G[3])
+        seq = PRE + G[:3] + x_ref + G[4:9] + anchor_ref + "C" + G[10:] + "TGG" + POST
+        p_del, p_x = len(PRE) + 10, len(PRE) + 4
+        D = (p_del, anchor_ref + "C", anchor_ref, {"S01": "0/1"})
+        A = (p_del, anchor_ref, G[9], {"S01": "0/1", "S03": "0|1"})
+        X = (p_x, x_ref, G[3], {"S01": "0/1"})
+        recs = sorted([D, A, X], key=lambda r: (r[0], len(r[1])))
+        s = len(PRE)
+        tgt = G[:9] + anchor_ref + G[10:] + "TGG"
+        row = row_fields("chr21", s, "+", G + "NNN", seq[s:s + 23],
+                         mark(G + "NNN", tgt), "TGG", 1, 0, "X",
+                         "%s,%s" % (tok("chr21", D), tok("chr21", X)), "S01")
+        return seq, recs, row, s, p_del - 1
+    pre, post = LONG + PRE, POST + LONG
+    X0 = other(G[0])
+    y_ref = other(G[12])
+    seq = pre + X0 + G[5:12] + y_ref + G[13:] + "TGG" + post
+    a0 = len(pre)
+    I = (a0 + 1, X0, X0 + G[1:5], {"S01": "1|0"})
+    A = (a0 + 1, X0, G[0], {"S01": "0|1", "S03": "1|0"})
+    Y = (a0 + 1 + 7 + 1, y_ref, G[12], {"S01": ".|1"})
+    recs = sorted([I, A, Y], key=lambda r: (r[0], -len(r[2])))
+    tgt = X0 + G[1:] + "TGG"
+    row = row_fields("chr21", a0, "+", G + "NNN", seq[a0:a0 + 23], mark(G + "NNN", tgt),
+                     "TGG", 1, 0, "X", "%s,%s" % (tok("chr21", I), tok("chr21", Y)), "S01")
+    return seq, recs, row, a0, a0
+
+
+def world_sites_only_chain(genotyped_r=True, anchor_snv=False, t1_row=False):
+    """R9-F2 / R9-F4 (the review's adv_r9f / adv_r9e): an (AGG)n run, guide AGGAGG...,
+    NRG, a population-level run without alternative alignments beside a sites-only VCF.
+    The reference lacks ideal[4] (R, an insertion anchored on ideal[3], puts it back);
+    ideal[20] = T (S, T>G: S02's SNP row B, 0 edits, the table's one row). T1 (R's target,
+    S01's, Cluster Position s) and B are one merge cluster only through W, the sites-only
+    dataset's worst-case row of R's window with S (both in the sites-only VCF), at s+3.
+    With ``anchor_snv``: ideal[3] = C (one mismatch on T1; budget 1 mismatch), and the
+    sites-only VCF holds A, an SNV at R's own POS whose alt is the guide's base: a window
+    coded at its anchor would hold a target CRISPRme's window (anchor uncoded) cannot."""
+    g = "AGGAGGAGGAGGAGGAGGAG"
+    ideal = list("AGG" * 16)
+    if anchor_snv:
+        ideal[3] = "C"
+    ideal[20] = "T"
+    s0 = len(LONG) + len(PRE)
+    seq = LONG + PRE + "".join(ideal[:4] + ideal[5:]) + "TTTCATTTCA" + POST
+    anchor = s0 + 3
+    R = (anchor + 1, seq[anchor], seq[anchor] + "G", {"S01": "1|0"})
+    S = (s0 + 20, "T", "G", {"S02": "0|1"})
+    b0 = s0 + 5
+    balt = seq[b0:s0 + 19] + "G" + seq[s0 + 20:b0 + 23]
+    row_b = row_fields("chr21", b0, "+", g + "NNN", seq[b0:b0 + 23], balt, balt[-3:], 0, 0,
+                       "X", tok("chr21", S), "S02", spacer=g + "NNN")
+    rows = [row_b]
+    if t1_row:
+        t1 = "".join(ideal[0:23])
+        rows.insert(0, row_fields("chr21", s0, "+", g + "NNN", seq[s0:s0 + 23],
+                                  mark(g + "NNN", t1), t1[-3:], int(anchor_snv), 0, "X",
+                                  tok("chr21", R), "S01", spacer=g + "NNN"))
+    recs = [S] + ([R] if genotyped_r else [])
+    mega = [R[:3], (anchor + 1, "C", "A")] if anchor_snv else [R[:3], S[:3]]
+    budget = ("1", "0", "0", "1") if anchor_snv else ("0", "0", "0", "0")
+    return g, seq, recs, rows, mega, budget, R
+
+
+class ReviewRound9(Base):
+    # --- R9-F1: no PUTATIVE choice on the record's own REF span ------------------------ #
+    def test_the_putative_rule_has_no_choice_on_the_records_own_span(self):
+        """R9-F1: the anchor of D carries no code column (CRISPRme's window writes the ALT
+        verbatim, and an SNV at the record's POS is the other allele of a multi-allelic
+        heterozygote, on the other haplotype): the row CRISPRme documents -- D and X, the
+        reference anchor, 1 mismatch, listing S01 -- is right (it failed carrier-not-
+        strongest three times), and one that writes A's alt at the anchor is no sequence
+        of D and X. The insertion world (A phased on S01's other haplotype) likewise."""
+        for kind in ("deletion", "insertion"):
+            seq, recs, row, s, anchor = world_anchor_snv(kind)
+            tmp = os.path.join(self.tmp, kind)
+            os.makedirs(tmp)
+            case = Case(tmp, seq, recs, [row])
+            self.assertClean(case)
+            rows = C.read_rows(results_table(case), "integrated")
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(case.vcf)])
+            named = [win.by_key[(p, r, a)][0] for p, r, a in
+                     (C.parse_token(t)[1:] for t in rows[0]["var"].split(","))]
+            main = next(a for a in named if a.kind != "snv")
+            tgt = C.row_target(win, rows[0], named, main)[0]
+            self.assertTrue(all(q != anchor for _i, q in tgt.codes), (kind, tgt.codes))
+            self.assertTrue(tgt.codes, kind)       # the SNV in the flank is still a code
+            G = GUIDE
+            alt = row[2 + C.BLOCKS.index("highest_CFD") * 13 + 4]
+            i = anchor - s
+            wrong = alt[:i] + (G[i] if kind == "deletion" else G[0]) + alt[i + 1:]
+            write_results(case.res, [set_field(row, alt=wrong, mm=0)])
+            rc, found = case.run()
+            self.assertEqual(rc, 1, (kind, found))
+
+    def test_the_best_alignments_putative_demand_is_kept(self):
+        """R9-F1, completeness: the best alignment's PUTATIVE demand no longer disappears
+        (no choice at the anchor), so the target reported only by a worse alignment is
+        missing-best-alignment, and the best alignment's row satisfies it."""
+        seq, recs, row, s, _anchor = world_anchor_snv("deletion")
+        G = GUIDE
+        tgt = G[:9] + other(G[9]) + G[10:] + "TGG"
+        als = sorted(C.align_pairs(G + "NRG", tgt, 4, 1, 1, 6, 3, False),
+                     key=lambda x: (x[2] + x[3] + x[4], x[2]))
+        best = als[0]
+        worse = next(a for a in als if a[2] + a[3] + a[4] > sum(best[2:5]))
+
+        def mkrow(a):
+            sa, ta, mm, dn, rn = a
+            ref = list(seq[s:s + len(ta.replace("-", ""))])
+            for k, c in enumerate(ta):
+                if c == "-":
+                    ref.insert(k, "-")
+            bt = ",".join([t for t, c in (("RNA", rn), ("DNA", dn)) if c]) or "X"
+            return row_fields("chr21", s, "+", sa[:-3] + "NNN", "".join(ref),
+                              mark(sa[:-3] + "NNN", ta), ta.replace("-", "")[-3:], mm,
+                              dn + rn, bt, row[2 + 11], "S01")
+        case = Case(self.tmp, seq, recs, [mkrow(worse)])
+        rc, found = case.run(mode="completeness")
+        self.assertTrue(any(f[1] == "missing-best-alignment" and f[3] == "S01"
+                            for f in gating(found)), found)
+        write_results(case.res, [mkrow(best)])
+        rc, found = case.run(mode="completeness")
+        self.assertFalse(any(f[1] == "missing-best-alignment" for f in found), found)
+        # (S01's targets of other alignments -- under which its strongest bases differ --
+        # are demanded too, and this one-row table lacks them: only the best one's is
+        # asked about here)
+        self.assertFalse(any("best %d edits" % sum(best[2:5]) in f[2]
+                             for f in gating(found)), found)
+
+    # --- R9-F2 / R9-F4: a record's chain beside a sites-only dataset ----------------- #
+    def test_a_records_chain_holds_its_sites_only_rows_whoever_reads_it_first(self):
+        """R9-F2 (adv_r9f): a record both a genotyped and a sites-only VCF hold chains
+        the sites-only dataset's worst-case rows of its window too, whichever record's
+        work reads it first: the right table (B only, as good as T1) passes; R in the
+        sites-only VCF alone passes too (control)."""
+        for genotyped_r in (True, False):
+            g, seq, recs, rows, mega, budget, _R = world_sites_only_chain(genotyped_r)
+            tmp = os.path.join(self.tmp, str(genotyped_r))
+            os.makedirs(tmp)
+            case = Case(tmp, seq, recs, rows)
+            run_markers(case.res, "population-level", alt=False)
+            so = os.path.join(tmp, "mega.vcf.gz")
+            write_sites_only_vcf(so, "chr21", mega)
+            rc, found = case.run(mode="completeness", guide=g, budget=budget,
+                                 extra=("--vcf", so))
+            self.assertEqual((rc, gating(found)), (0, []), (genotyped_r, found))
+
+    def test_a_sites_only_window_codes_no_base_of_its_record(self):
+        """R9-F4 (adv_r9d, adv_r9e): a sites-only dataset's window writes its record's ALT
+        verbatim and codes flank bases only, so an SNV at the record's own POS is in no
+        row of it: such a window gives no Cluster Position there, and a dropped T1 that
+        only such a phantom would chain to B is missing-locus; T1's row, reported,
+        passes."""
+        g, seq, recs, rows, mega, budget, R = world_sites_only_chain(anchor_snv=True)
+        so = os.path.join(self.tmp, "mega.vcf.gz")
+        write_sites_only_vcf(so, "chr21", mega)
+        win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(so)])
+
+        class A(object):
+            mm, bdna, brna, max_total_edits = 1, 0, 0, 1
+        ctx = C.Ctx(A(), "NRG", 3, False, [g])
+        rd = win.by_key[R[:3]][0]
+        cps = C.record_cps(win, ctx, g, rd)[0]
+        anchor = R[0] - 1
+        self.assertNotIn(anchor - 3 + 3, cps)    # X, the anchor-coded phantom (s + 3)
+        case = Case(self.tmp, seq, recs, rows)
+        run_markers(case.res, "population-level", alt=False)
+        rc, found = case.run(mode="completeness", guide=g, budget=budget,
+                             extra=("--vcf", so))
+        self.assertEqual(rc, 1, found)
+        self.assertIn("missing-locus", classes(gating(found)), found)
+        _g, _seq, _recs, rows2, _m, _b, _R = world_sites_only_chain(anchor_snv=True,
+                                                                     t1_row=True)
+        write_results(case.res, rows2)
+        rc, found = case.run(mode="completeness", guide=g, budget=budget,
+                             extra=("--vcf", so))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    # --- R9-F3: a search without bulges records Genome_idx None ---------------------- #
+    def test_a_search_without_bulges_reads_its_datasets_from_its_vcf_list(self):
+        """R9-F3: crisprme.py writes 'Genome_idx None' for every search without bulges,
+        whatever it searched; its datasets are its --vcf list's lines, read in its working
+        directory (the folder holding Results/<output>). One dataset, one VCF: checked
+        (it was refused, 'the reference alone'); a list of two: refused; no --vcf: the
+        reference alone, refused; a list not found: the VCFs given are taken."""
+        case, info = world_deletion(self.tmp)
+        work = os.path.join(self.tmp, "work")
+        os.makedirs(os.path.join(work, "Results"))
+        dest = os.path.join(work, "Results", "b0")
+        shutil.move(case.res, dest)
+        case.res = dest
+        with open(os.path.join(dest, ".Params.txt"), "w") as fh:
+            fh.write("Genome_idx\tNone\nMismatches\t0\nDNA\t0\nRNA\t0\n"
+                     "Max_total_edits\t0\n")
+        b0 = ("0", "0", "0", "0")
+
+        def cmd(text):
+            with open(os.path.join(dest, ".command_line.txt"), "w") as fh:
+                fh.write("input_command\t/opt/conda/bin/crisprme.py complete-search "
+                         "--genome Genomes/hg38 %s--mm 0 --bDNA 0 --bRNA 0 --output b0 "
+                         "--per-sample\n" % text)
+        lv = os.path.join(work, "lv.txt")
+        with open(lv, "w") as fh:
+            fh.write("VCFs/hg38_one/\n")
+        cmd("--vcf lv.txt ")
+        self.assertEqual(C.run_datasets(dest)[0], ["hg38_one"])
+        for mode in ("soundness", "completeness"):
+            self.assertClean(case, mode=mode, budget=b0)
+        with open(lv, "w") as fh:
+            fh.write("VCFs/hg38_one\nVCFs/hg38_two\n")
+        rc, _found = case.run(budget=b0)
+        self.assertEqual(rc, 2)
+        cmd("")
+        self.assertEqual(C.run_datasets(dest)[0], [])
+        rc, _found = case.run(budget=b0)
+        self.assertEqual(rc, 2)
+        cmd("--vcf elsewhere/lv.txt ")
+        self.assertIsNone(C.run_datasets(dest)[0])
+        self.assertClean(case, budget=b0)
+
+    # --- the PUTATIVE rule of a search that scores no CFD ---------------------------- #
+    def test_without_cfd_the_putative_choice_is_the_reference_then_acgt(self):
+        """METHODS section 4: a search that scores no CFD (here a 19-nt guide) takes, where
+        the guide's base does not decide, the reference base where the carrier's alleles
+        allow it, else the first of A, C, G, T they allow. S01 (unphased deletion and SNV,
+        neither allele the guide's) is listed for the reference base; a row listing it
+        for the SNV's alt fails carrier-not-strongest, and with the row lost completeness
+        demands the reference-base target. With the CFD tables missing for a search that
+        scores CFD, the choice stays open (ReviewRound3's tie test)."""
+        g = GUIDE[1:]
+        r = other(g[4])
+        b = next(x for x in "ACGT" if x not in (r, g[4]))
+        seq = PRE + g[:4] + r + g[5:9] + "C" + g[9:] + "TGG" + POST
+        D = (len(PRE) + 9, g[8] + "C", g[8], {"S01": "0/1", "S02": "1|0"})
+        X = (len(PRE) + 5, r, b, {"S01": "0/1"})
+        s = len(PRE)
+
+        def row(base, var, who):
+            t = g[:4] + base + g[5:] + "TGG"
+            return row_fields("chr21", s, "+", g + "NNN", seq[s:s + 22], mark(g + "NNN", t),
+                              "TGG", 1, 0, "X", var, who, spacer=g + "NNN")
+        right = [row(r, tok("chr21", D), "S01,S02")]
+        case = Case(self.tmp, seq, [X, D], right)
+        budget = ("1", "0", "0", "1")
+        self.assertClean(case, budget=budget, guide=g)
+        self.assertClean(case, mode="completeness", budget=budget, guide=g)
+        wrong = [row(r, tok("chr21", D), "S02"),
+                 row(b, "%s,%s" % (tok("chr21", X), tok("chr21", D)), "S01")]
+        write_results(case.res, wrong)
+        rc, found = case.run(budget=budget, guide=g)
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                         {("carrier-not-strongest", "S01"), ("carrier-missing", "S01")},
+                         found)
+        rc, found = case.run(mode="completeness", budget=budget, guide=g)
+        self.assertIn("missing-putative-row", classes(gating(found)), found)
+        # where the reference base is not an allele of S01 (1/2: two alts), the first of
+        # A, C, G, T the alleles allow, in the target's orientation
+        b2 = next(x for x in "ACGT" if x not in (r, g[4], b))
+        X2 = (len(PRE) + 5, r, "%s,%s" % (b, b2), {"S01": "1/2"})
+        first = min(b, b2)
+        case = Case(self.tmp, seq, [X2, D],
+                    [row(first, "%s,%s" % (tok("chr21", (X2[0], r, first)),
+                                           tok("chr21", D)), "S01"),
+                     row(r, tok("chr21", D), "S02")])
+        self.assertClean(case, budget=budget, guide=g)
+
+    def test_without_cfd_the_choice_reads_bases_in_the_targets_orientation(self):
+        """The no-CFD order (the reference base, else A, C, G, T) is read in the target's
+        orientation, as CRISPRme's code columns are: on the - strand the + alleles A and
+        T read T and A, so A (+ T) comes first."""
+        class Ctx0(object):
+            cfd = None
+            cfd_applies = False
+            pam_len = 3
+            pam_5prime = False
+            pam_motif = "NRG"
+
+            @staticmethod
+            def pam_cols(n):
+                return range(n - 3, n)
+
+        class T0(object):
+            pass
+        t = T0()
+        t.codes = [(5, 105)]
+        t.crrna = GUIDE + "NNN"
+        t.strand = "-"
+        t.aligned = GUIDE + "TGG"
+        refseq = "G" * 200
+        # - strand: base 5 faces the guide's G (column 17); + A and T read T and A
+        per = C.strongest(Ctx0(), t, {5: {"A", "T"}}, refseq)[0]
+        self.assertEqual(per[5], {"T"})
+        t.strand = "+"     # base 5 faces the guide's A (column 5): C and T read as they are
+        per = C.strongest(Ctx0(), t, {5: {"C", "T"}}, refseq)[0]
+        self.assertEqual(per[5], {"C"})
+        per = C.strongest(Ctx0(), t, {5: {"C", "G"}}, refseq)[0]
+        self.assertEqual(per[5], {"G"})     # the reference base where allowed
+
+    # --- Track B in the per-sample chain --------------------------------------------- #
+    def test_a_per_sample_snp_row_whose_slot_holds_a_changing_indel_is_open(self):
+        """2.10.0 drops a per-sample SNP row's carrier whose slot of its SNPs holds an
+        indel that changes the target (METHODS section 4): in a per-sample chain the SNP
+        target of such a slot is a row CRISPRme may write or not (a repeat read through
+        keeps the carrier), never a certain one -- unless another slot holds the SNP
+        without the indel."""
+        seq = PRE + GUIDE[:5] + other(GUIDE[5]) + GUIDE[6:] + "TGG" + POST
+        snp = (len(PRE) + 6, other(GUIDE[5]), GUIDE[5])
+        dele = len(PRE) + 12
+        drec = (dele, seq[dele - 1:dele + 1], seq[dele - 1])
+        cp = C.cluster_of(len(PRE), "+", 23, 23, False)
+        for extra, sure in (({}, False), ({"S03": "1|0"}, True)):
+            vcf = os.path.join(self.tmp, "v%d.vcf.gz" % sure)
+            write_vcf(vcf, "chr21", [snp + (dict({"S02": "1|0"}, **extra),),
+                                     drec + ({"S02": "1|0"},)])
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
+
+            class A(object):
+                mm, bdna, brna, max_total_edits = 0, 0, 0, 0
+            ctx = C.Ctx(A(), "NRG", 3, False, [GUIDE])
+            ctx.snp_union = False
+            rows, _capped, dropped = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+                                                   len(seq))
+            self.assertEqual((cp in rows, cp in dropped), (sure, not sure), extra)
+            ctx.snp_union = True    # population-level: unchanged
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
+            rows, _capped, dropped = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+                                                   len(seq))
+            self.assertEqual((cp in rows, dropped), (True, set()), extra)
 
     def assertClean(self, case, mode="soundness", **kw):
         rc, found = case.run(mode=mode, **kw)

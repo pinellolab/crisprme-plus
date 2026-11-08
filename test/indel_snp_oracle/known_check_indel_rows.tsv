@@ -1,3 +1,7 @@
+# Findings of scripts/check_indel_rows.py on the SNP+indel oracle that are CRISPRme
+# defects already reported upstream: run_oracle.sh passes this list with --known, so a
+# match prints as known-defect (non-gating) and an entry no longer found as known-not-seen.
+# Empty: the two carrier-not-strongest blocks of site U (the unphased S19 on an alignment
+# weaker than its strongest) are gone since the merge keys an indel row by its aligned
+# spacer (rel/2.8.2, dc6e70e).
 class	chrom	start	strand	variants	samples	reason
-carrier-not-strongest	chr21	8000	+	chr21_8010_TC_T	S19	CRISPRme merge (remove_contiguous_samples) keys an indel row by Cluster Position, variants and aligned target, not the aligned spacer: the unphased S19 resolved on the alignment ACTGAA-ATCTG... (its base at chr21:8005 in a DNA bulge, C by CFD) is merged onto an alignment whose column there faces the guide A, which S19 carries (METHODS section 4 lists it for A there); reported in refix-r2, not fixed on this branch
-carrier-not-strongest	chr21	7999	+	chr21_8010_TC_T	S19	CRISPRme merge (remove_contiguous_samples) keys an indel row by Cluster Position, variants and aligned target, not the aligned spacer: the unphased S19 resolved on the alignment ACTGAA-ATCTG... (its base at chr21:8005 in a DNA bulge, C by CFD) is merged onto an alignment whose column there faces the guide A, which S19 carries (METHODS section 4 lists it for A there); reported in refix-r2, not fixed on this branch

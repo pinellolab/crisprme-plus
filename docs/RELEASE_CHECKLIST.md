@@ -120,8 +120,10 @@ python3 "$SRC/scripts/check_alt_pam.py" "$GATE"/heavy/Results/crisprme-test-out_
 #     aligns with its own exhaustive aligner; it imports and copies no CRISPRme code and
 #     needs only Python's standard library (the repository's CFD tables are read as data).
 #     $D22 is a chr22-only HGDP + 1000 Genomes install (Genomes/hg38, VCFs/hg38_HGDP1kGP,
-#     genome_library, Dictionaries), $VCF its chr22 VCF (a .tbi beside it makes reads seeks;
-#     without one the VCF is read once into an in-memory index, nothing is written).
+#     genome_library, Dictionaries with its genotype store: the checker models a search that
+#     read the genotypes, so not an install made with --no-genotypes), $VCF its chr22 VCF (a
+#     .tbi beside it makes reads seeks; without one the VCF is read once into an in-memory
+#     index, nothing is written).
 #     Run the README guide, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, in BOTH modes first:
 for mode in per-sample population-level; do
   docker run --rm -v "$D22:/DATA" -w /DATA "$IMG" crisprme.py complete-search --genome Genomes/hg38 \
@@ -162,12 +164,13 @@ for g in readme:guide.txt trac:guide_trac.txt; do
     || echo GATE_FAILED
 done
 #     The gate is the exit status: 0 gating findings. Non-gating lines are documented
-#     CRISPRme limits (limit-last-alt-wins, limit-two-indels, limit-putative-carrier,
-#     limit-contig-end; limit-capped-window: a cluster of a per-sample run without
-#     alternative alignments reached only through a capped window's greedy row, which only
-#     the classic dictionary path writes), slots whose VCF alleles overlap where a target
-#     of their record reads, so the VCF gives it no sequence (limit-overlapping-records: 4
-#     records on chr22; a carrier there is judged where METHODS section 4 reads the slot
+#     CRISPRme limits (limit-last-alt-wins, limit-two-indels: 8 targets on chr22 with
+#     2.10.0's code, limit-putative-carrier, limit-contig-end; limit-capped-window: a cluster
+#     of a per-sample run without alternative alignments reached only through a capped
+#     window's greedy row, which only the classic dictionary path writes), slots whose VCF
+#     alleles overlap where a target of their record reads, so the VCF gives it no sequence
+#     (limit-overlapping-records: 4 records on chr22; a carrier there is judged where
+#     METHODS section 4 reads the slot
 #     without the overlapping allele -- a listed one that so holds the target is the note
 #     overlap-reading-agrees --, and on every reading of two other alleles that overlap
 #     each other, where all agree; a listed carrier whose slot has no reading and that
@@ -183,7 +186,10 @@ done
 #     zones near a record have more than 1024 readings, of which each allele alone is read
 #     for the targets only such readings hold (counted, never demanded; 2 records, one
 #     carrier, on chr22); coverage-chain-limit: a population-level
-#     cluster longer than the 3 kb either side its chain follows;
+#     cluster longer than the 3 kb either side its chain follows; coverage-snp-row-indel: a
+#     per-sample cluster without alternative alignments reached only through a SNP target
+#     of a slot that also holds an indel touching it, which 2.10.0 writes only where its
+#     reading of the slot through a repeat keeps the carrier;
 #     coverage-unindexed-long-ref: a VCF without a .tbi holding a deletion longer than
 #     20 kb, which an unindexed read may miss: give it a .tbi), each listed with its
 #     samples and target: read them, and say in the release notes if a class grew. A
@@ -194,7 +200,9 @@ done
 #     samples (run and check each dataset's search alone), or inputs other than the ones
 #     the run records it searched with: its .Params.txt budget, PAM and variant datasets
 #     (give one VCF per dataset of the search for each chromosome: a two-dataset search
-#     given one VCF is refused), a guide its .guides.txt does not hold (a subset of its
+#     given one VCF is refused; a search without bulges records Genome_idx None, and its
+#     datasets are read from the --vcf list its command line names, in the folder that
+#     holds its Results), a guide its .guides.txt does not hold (a subset of its
 #     guides is checked; the others are counted, guide-not-given), a --samples other than
 #     its .sampleID.txt, an --analysis other than its .search_mode (the mode the search
 #     ran), a run whose records contradict each other, or one that does not record what

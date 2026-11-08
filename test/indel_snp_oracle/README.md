@@ -10,19 +10,19 @@ below), and runs the ALT-PAM and no-N release gate
 (`scripts/check_alt_pam.py`) on both results. It then runs the independent real-data
 indel check (`scripts/check_indel_rows.py`, which imports no code of `oracle.py` or CRISPRme
 and shares only boilerplate with `oracle.py`: the table's column names, an indel-token test
-and the reverse complement) on both results, soundness and completeness; the population-level run, which
-writes no alternative alignments, is checked per merge cluster, the planted two-indel sites
-come out as non-gating `limit-two-indels` lines and site P's phasing artefact as the note
-`overlap-reading-agrees` in soundness (S45's slot, read without the alleles at the
-insertion's own position as METHODS section 4 reads it, holds its row's target, which
-lists S45) and `limit-overlapping-records` in completeness (such a reading is counted,
-not demanded).
-`known_check_indel_rows.tsv` lists the two alternative-alignment blocks of the per-sample
-run where CRISPRme's merge lists the unphased S19 on an alignment weaker than its strongest
-(a CRISPRme defect found by the checker, not fixed on this branch): they print as
-`known-defect`, and as `known-not-seen` once fixed. It exits non-zero on any other failure;
-CI runs it in `validate-benchmarks.yml`, with both profiles: SpCas9 (3' PAM NRG, the sites
-below) and `cas12a` (5' PAM TTTV, the C sites further below).
+and the reverse complement) on both results, soundness and completeness, with the profile's
+own PAM file; the population-level run, which writes no alternative alignments, is checked
+per merge cluster, the planted two-indel sites come out as non-gating `limit-two-indels`
+lines and site P's phasing artefact as the note `overlap-reading-agrees` in soundness (S45's
+slot, read without the alleles at the insertion's own position as METHODS section 4 reads
+it, holds its row's target, which lists S45) and `limit-overlapping-records` in
+completeness (such a reading is counted, not demanded). `known_check_indel_rows.tsv` lists
+the CRISPRme defects the checker found that are reported upstream and not yet fixed, which
+print as `known-defect` (and as `known-not-seen` once fixed): none, since the merge keys an
+indel row by its aligned spacer and so keeps the unphased S19 of site U on the alignment it
+was resolved on (the checker had found it there as `carrier-not-strongest`). It exits
+non-zero on any other failure; CI runs it in `validate-benchmarks.yml`, with both profiles:
+SpCas9 (3' PAM NRG, the sites below) and `cas12a` (5' PAM TTTV, the C sites further below).
 
 Every such row of the integrated results and of the alternative alignments, in all
 three blocks, must show a concrete PAM of the searched motif; its CFD must be the CFD of its
