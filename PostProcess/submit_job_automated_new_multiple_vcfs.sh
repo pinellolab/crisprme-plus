@@ -905,10 +905,10 @@ while read vcf_f; do
 	# directory's genome_library: a search takes one of the --index-path library before any
 	# there -- the reference index from that library alone, and the INDELS index from beside
 	# its variant index. Of an index of that library the note says to replace it with one built
-	# again, or to run the search without --index-path (and --prune-pam, which needs it) where
-	# the search then builds every index it needs: the reference one from the genome folder,
-	# and a variant search's from the dataset's VCFs, enriched genome and fake-indel genome in
-	# place. Silent on stderr.
+	# again, or to run the search without --index-path (--prune-pam kept: since 2.10.0 it needs
+	# no --index-path) where the search then builds every index it needs: the reference one from
+	# the genome folder, and a variant search's from the dataset's VCFs, enriched genome and
+	# fake-indel genome in place. Silent on stderr.
 	_how_built_again() {
 		local _g="Genomes/${ref_name}+${vcf_name}" _from= _vcfs _have= _also=
 		case "${1##*/}" in
@@ -935,7 +935,6 @@ while read vcf_f; do
 		fi
 		if [ "$vcf_name" = _ ] || { [ -n "$_have" ] && [ -d "$current_working_directory/${_g}_INDELS" ]; }; then
 			_also=", or run this search without --index-path"
-			[ "${prune_pam:-0}" != 1 ] || _also="$_also and --prune-pam (which needs it)"
 		fi
 		printf 'A search builds no index in the --index-path library: to search them, replace %s with one built again by crisprme.py build-index-only%s (which builds into the genome_library folder of its --path, and keeps an index it finds there in place)%s.' "$1" "${_from:+ from $_from}" "$_also"
 	}

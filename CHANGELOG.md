@@ -405,11 +405,12 @@ and the `release-crisprme` skill.
   --index-path library: to search them, replace <path> with one built again by crisprme.py
   build-index-only (which builds into the genome_library folder of its --path, and keeps an index it
   finds there in place)` (with `from Genomes/<ref>+<vcf>` after `build-index-only` for a variant or
-  INDELS index), and `, or run this search without --index-path` (` and --prune-pam (which needs
-  it)` under `--prune-pam`) where the search then builds every index it needs: a reference search,
-  or a variant one with the dataset's VCFs, enriched genome and fake-indel genome in place; without
-  them it finds no variant index, and stops (`Error: no variant index here serves this search ...`).
-  With CRISPRitz 2.10.0 (`feat/2.10.0` 7219b55), of indexes CRISPRitz 2.9.1 built, in a library
+  INDELS index), and `, or run this search without --index-path` (under `--prune-pam` too, which
+  no longer needs `--index-path`: an entry below) where the search then builds every index it
+  needs: a reference search, or a variant one with the dataset's VCFs, enriched genome and
+  fake-indel genome in place; without them it finds no variant index, and stops (`Error: no
+  variant index here serves this search ...`). With CRISPRitz 2.10.0 (`feat/2.10.0` 7219b55), of
+  indexes CRISPRitz 2.9.1 built, in a library
   outside the working directory: a reference search (NGG, 2 mismatches + 1 DNA + 1 RNA bulge; two
   contigs, each with a perfect match from an `N` run's edge) with `--index-path` gives the 2 rows of
   format 1 and that note; with the index moved out of the way and built again in the working
@@ -425,11 +426,16 @@ and the `release-crisprme` skill.
   dictionaries, no VCFs and no enriched genome), the reference index's note offers no search without
   `--index-path`, which stops (exit 1, `Error: no variant index here serves this search`), and the
   notes of the variant and INDELS indexes are those above; with the reference index replaced as its
-  note says, those two remain. Each of these searches that does not stop ends with exit 0 and
-  nothing on stderr. `test_index_format2` does the same through `build-index-only` and the search
-  script on stub engines. The note `--prune-pam` gives of a flank wider than its PAM, and the
-  warning of a flank built before CRISPRitz kept an `N` in it, are given of an index of format 1
-  only.
+  note says, those two remain. Under `--prune-pam` (CRISPRitz 2.10.0, `feat/2.10.0` 881f761's
+  build; a 3 kb genome holding one site of the README's guide, its `NGG_2` index built by
+  CRISPRitz 2.9.1 in such a library; NGG, 2 mismatches + 1 DNA + 1 RNA bulge), the note ends as it
+  does without it, where it said `, or run this search without --index-path and --prune-pam
+  (which needs it)`, and the search it names, without `--index-path` and with `--prune-pam`,
+  builds the index in format 2 and gives the same row, with no note. Each of these searches that
+  does not stop ends with exit 0 and nothing on stderr. `test_index_format2` does the same through
+  `build-index-only` and the search script on stub engines. The note `--prune-pam` gives of a
+  flank wider than its PAM, and the warning of a flank built before CRISPRitz kept an `N` in it,
+  are given of an index of format 1 only.
 - **The `--prune-pam` note of a flank wider than its PAM says that a PAM is reported on the wrong
   strand only under CRISPRitz 2.9.1.** Of an all-N index of format 1 whose flank of *K* nt is
   wider than the PAM's *L*, the note, on stdout and in the run's `.Params.txt` (`Prune_pam_note`),

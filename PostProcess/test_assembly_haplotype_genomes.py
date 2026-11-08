@@ -1003,8 +1003,8 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
     # that an index in the way gave it, the same command run again once that index was
     # removed, or the folder renamed, took none. Under --index-path the pipeline builds
     # no index, so the same command run again once the index was removed failed; under
-    # --prune-pam, which complete-search refuses without --index-path, the command run
-    # again without --index-path alone stopped at once.
+    # --prune-pam, which complete-search refused without --index-path before 2.10.0, the
+    # command run again without --index-path alone stopped at once.
 
     def test_followed_as_it_says_a_refused_search_keeps_its_bulges(self):
         self.search("a", "projA/ref")

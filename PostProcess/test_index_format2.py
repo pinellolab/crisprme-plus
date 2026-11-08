@@ -663,14 +663,13 @@ class AFormat2IndexIsReadNotRefused(_Index):
 def _replaced(folder, source=None, without=None):
     """The end of the note of index ``folder``, of format 1, of an --index-path library: replace
     it with one built again (from ``source``); with ``without``, or run the search without
-    --index-path ("prune": and without --prune-pam)."""
+    --index-path (under --prune-pam too, which needs no --index-path since 2.10.0)."""
     return ("A search builds no index in the --index-path library: to search them, replace "
             f"{folder} with one built again by crisprme.py build-index-only"
             + (f" from {source}" if source else "")
             + " (which builds into the genome_library folder of its --path, and keeps an index it "
             "finds there in place)"
-            + (", or run this search without --index-path" if without else "")
-            + (" and --prune-pam (which needs it)" if without == "prune" else "") + ".")
+            + (", or run this search without --index-path" if without else "") + ".")
 
 
 class TheNoteMovesOnlyAnIndexThisInstallBuildsAgain(_Index):
@@ -690,10 +689,11 @@ class TheNoteMovesOnlyAnIndexThisInstallBuildsAgain(_Index):
     note said the same: built again as it said, it was not searched, and the next search
     stopped ("no matching reference index under --index-path", "INDELS index ... is not beside
     its variant index"). Of an index there the note says to replace it with one built again,
-    or, where the search then builds every index it needs, to run it without --index-path (and
-    --prune-pam, which needs it): a reference search, or a variant one with the dataset's
-    VCFs, enriched genome and fake-indel genome in place (AFormat1IndexIsBuiltAgain follows
-    each through the CLI)."""
+    or, where the search then builds every index it needs, to run it without --index-path: a
+    reference search, or a variant one with the dataset's VCFs, enriched genome and fake-indel
+    genome in place (AFormat1IndexIsBuiltAgain follows each through the CLI). Under
+    --prune-pam it said to run it without --prune-pam too, "which needs it": since 2.10.0
+    --prune-pam needs no --index-path, and the search keeps it."""
 
     PREFIX = ("NOTE: {} is in index format 1 (built by CRISPRitz 2.9.1 or earlier): it lacks the "
               "sites whose guide lies within a few bases of a contig end or an N run, which an "
@@ -799,14 +799,15 @@ class TheNoteMovesOnlyAnIndexThisInstallBuildsAgain(_Index):
                              self.ARCHIVES + "VCFs (VCFs/ds), which this install does not hold.")
 
     def test_of_a_reference_search(self):
-        # a reference search without --index-path builds its index in genome_library; under
-        # --prune-pam, which complete-search refuses without --index-path, without that too
+        # a reference search without --index-path builds its index in genome_library, under
+        # --prune-pam too, which complete-search refused without --index-path before 2.10.0
+        # (the note said to drop it as well)
         self.install()
         for prune in (0, 1):
             with self.subTest(prune=prune):
                 self.assertEqual(self.note(self.ref, "_", prune), self.moved(self.ref))
                 self.assertEqual(self.note(self.lref, "_", prune),
-                                 _replaced(self.lref, without="prune" if prune else True))
+                                 _replaced(self.lref, without=True))
 
 
 def _load_crisprme():
@@ -1647,6 +1648,28 @@ class AFormat1IndexIsBuiltAgain(atomic._Fixture):
         os.rename(self.lib(atomic.REF), os.path.join(lib, atomic.REF))
         self.assertEqual(self.notes("--index-path", lib, vcf=False), [])
         self.assertEqual(self.stopped(), "")
+
+    def test_of_an_index_path_library_under_prune_pam_the_search_keeps_it(self):
+        """Under --prune-pam the note said to run the search without --index-path "and
+        --prune-pam (which needs it)": since 2.10.0 --prune-pam needs no --index-path, and the
+        search without --index-path alone builds the index in format 2 here, and prunes."""
+        self.format1_install()
+        with open(os.path.join(self.bin, "crispritz.py"), "a") as fh:
+            fh.write("# takes --prune-pam (the search refuses to prune with an engine whose source "
+                     "never names it)\n")
+        lib = self.library(atomic.REF)
+        note = self.PREFIX.format(atomic.REF) + _replaced(os.path.join(lib, atomic.REF),
+                                                          without=True)
+        self.assertEqual(self.notes("--index-path", lib, "--prune-pam", vcf=False), [note])
+        self.assertEqual(self.stopped(), "")
+        # as it says: without --index-path, --prune-pam kept
+        self.assertEqual(self.notes("--prune-pam", vcf=False), [])
+        self.assertEqual(self.stopped(), "")
+        self.assertEqual(self.formats(atomic.REF), {2})
+        with open(self.log) as fh:  # (the engine is handed the index, or a view of its trees)
+            searches = [line.split() for line in fh if line.startswith("search ")]
+        self.assertEqual(os.path.basename(searches[-1][1].rstrip("/")), atomic.REF)
+        self.assertIn("--prune-pam", searches[-1])
 
 
 class AnArchiveSaysItsFormat(_Index):
