@@ -39,7 +39,11 @@ silently (a chromosome no VCF covers, one FASTA of several contigs, an indexed V
 once per record, a sites-only VCF alone or beside a genotyped one, a deletion longer than
 an unindexed read looks back, a short table line, a window holding N), must refuse a
 configuration it does not model (two genotyped datasets that share samples, inputs other
-than those the run records it searched with), and the checker must hold no CRISPRme code.
+than those the run records it searched with, a search that says it read no genotype
+store: its log, or a --per-sample search run population-level), must read a VCF's FILTER as CRISPRme's
+stores do (a record outside PASS and '.' is no record of the search, but a genotyped
+dataset's indels stay on their carriers' haplotypes, as the phased indel store keeps
+them), and the checker must hold no CRISPRme code.
 
 Everything is built here: a small reference, a phased VCF (plain gzip, or BGZF with a
 tabix index written by this file's own writer), and rows in the column layout of
@@ -88,26 +92,31 @@ def vcf_text(chrom, records, samples=SAMPLES):
     body = ["##fileformat=VCFv4.2", "##contig=<ID=%s>" % chrom,
             '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">',
             "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(samples)]
-    for pos1, ref, alt, gts in records:
-        row = [chrom, str(pos1), ".", ref, alt, ".", "PASS", "AC=1", "GT"]
+    for rec in records:
+        pos1, ref, alt, gts = rec[:4]
+        filt = rec[4] if len(rec) > 4 else "PASS"
+        row = [chrom, str(pos1), ".", ref, alt, ".", filt, "AC=1", "GT"]
         row += [gts.get(s, "0|0") for s in samples]
         body.append("\t".join(row))
     return "\n".join(body) + "\n"
 
 
 def write_vcf(path, chrom, records, samples=SAMPLES):
-    """``records``: (pos1, ref, alt, {sample: gt}), written as a plain gzip stream."""
+    """``records``: (pos1, ref, alt, {sample: gt}[, FILTER]), written as a plain gzip
+    stream (FILTER PASS where a record gives none)."""
     with gzip.open(path, "wt") as fh:
         fh.write(vcf_text(chrom, records, samples))
 
 
 def write_sites_only_vcf(path, chrom, records):
     """A sites-only VCF (eight columns: no FORMAT, no sample), as hg38_mega's: the
-    records' (pos1, ref, alt[, ...])."""
+    records' (pos1, ref, alt[, FILTER]) (PASS where a record gives none; a fourth item that
+    is not a string is ignored)."""
     body = ["##fileformat=VCFv4.2", "##contig=<ID=%s>" % chrom,
             "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"]
     for r in records:
-        body.append("\t".join([chrom, str(r[0]), ".", r[1], r[2], ".", "PASS", "AF=0.1"]))
+        filt = r[3] if len(r) > 3 and isinstance(r[3], str) else "PASS"
+        body.append("\t".join([chrom, str(r[0]), ".", r[1], r[2], ".", filt, "AF=0.1"]))
     with gzip.open(path, "wt") as fh:
         fh.write("\n".join(body) + "\n")
 
@@ -2317,12 +2326,14 @@ class ReviewRound5(Base):
                          found)
 
     def test_an_earlier_record_of_a_split_site_is_a_note(self):
-        """R5-F1 follow-up, found on the real two-dataset run: the mega index's rows name
-        earlier records of split sites (chr22:25093750 C>G before C>T), which the
+        """R5-F1 follow-up: a row naming an earlier record of a split site, which the
         documented limit says the stores never hold. The record is real and the target
-        reads with it, so naming it is no wrong row: a genotyped VCF's earlier record is a
-        non-gating note (variant-shadowed), and a sites-only VCF's is not read as shadowed
-        at all (which of them the index holds cannot be read off the VCF's order)."""
+        reads with it, so naming it is no wrong row: a non-gating note (variant-shadowed),
+        a genotyped VCF's and, on an indel row, a sites-only VCF's alike -- the fake-indel
+        windows hold the last record whose FILTER passes (R10-F1: the mega's indel rows
+        name it at every split site they name on chr22, the last PASS one at
+        chr22:25093750, whose last record C>T is LOW_VQSLOD; its SNP rows, which name
+        earlier records, are no indel rows)."""
         case, info = world_indel_snp(self.tmp)
         recs = info["recs"]
         snv = recs[0]
@@ -2336,7 +2347,8 @@ class ReviewRound5(Base):
         write_results(case.res, [set_field(info["rows"][0], samples="")])
         rc, found = case.run()
         self.assertEqual((rc, gating(found)), (0, []), found)
-        self.assertEqual(sorted(f[1] for f in found), ["limit-no-genotypes"] * 3, found)
+        self.assertEqual(sorted(f[1] for f in found),
+                         ["limit-no-genotypes"] * 3 + ["variant-shadowed"] * 3, found)
 
     def test_a_sites_only_datasets_snp_row_is_out_of_the_snp_report(self):
         """R5-F1 follow-up: beside a genotyped dataset, a sites-only one's SNP rows are
@@ -3154,13 +3166,13 @@ class ReviewRound7(Base):
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
             ctx = self._ctx(GUIDE)
             ctx.snp_union = False
-            rows, capped, _drop = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+            rows, capped, _drop, _filt = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
                                                 len(seq))
             cp = len(PRE)
             self.assertNotIn(cp, rows, n)
             self.assertEqual(cp in capped, want, n)
             ctx.snp_union = True
-            rows, capped, _drop = C.snp_row_cps(
+            rows, capped, _drop, _filt = C.snp_row_cps(
                 C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)]), ctx, GUIDE,
                 ctx.full(GUIDE), 0, len(seq))
             self.assertIn(cp, rows, n)   # population-level: the union is a row
@@ -3901,14 +3913,364 @@ class ReviewRound9(Base):
                 mm, bdna, brna, max_total_edits = 0, 0, 0, 0
             ctx = C.Ctx(A(), "NRG", 3, False, [GUIDE])
             ctx.snp_union = False
-            rows, _capped, dropped = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+            rows, _capped, dropped, _filt = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
                                                    len(seq))
             self.assertEqual((cp in rows, cp in dropped), (sure, not sure), extra)
             ctx.snp_union = True    # population-level: unchanged
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
-            rows, _capped, dropped = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+            rows, _capped, dropped, _filt = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
                                                    len(seq))
             self.assertEqual((cp in rows, dropped), (True, set()), extra)
+
+    def assertClean(self, case, mode="soundness", **kw):
+        rc, found = case.run(mode=mode, **kw)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        return found
+
+
+def world_filter_pam(filt):
+    """R10-F1 (review-r10's LowQual world, site A): world_deletion's perfect target (D on
+    S01's slot 0 and S02's slot 1) and P, a G>A SNV at the PAM's last base on S02's D
+    slot, its FILTER ``filt``. CRISPRitz's enricher skips a line whose FILTER is not
+    PASS or '.': with P LowQual no store CRISPRme reads holds it, and the row lists S02
+    (CRISPRme does); with P PASS it does not."""
+    seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+    p = len(PRE)
+    D = (p + 10, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "0|1"})
+    P = (p + 24, "G", "A", {"S02": "0|1"}, filt)
+    row = row_fields("chr21", p, "+", GUIDE + "NNN", seq[p:p + 23], GUIDE + "TGG", "TGG",
+                     0, 0, "X", tok("chr21", D), "S01,S02")
+    return seq, [D, P], row, D, P
+
+
+def world_filter_second(filt):
+    """R10-F1, the phased indel store: world_deletion's D (S01's slot 0, S02's slot 1) and
+    J, a 1-bp deletion inside the perfect target on S01's D slot, its FILTER ``filt``.
+    CRISPRme's phased indel store (build_indel_genotypes) keeps every indel of the VCF,
+    whatever its FILTER, and its carrier resolution reads it as a second indel: S01 is
+    taken off D's perfect target, which lists S02 alone (as the oracle's site O, with its
+    second deletion LowQual, lists S22 alone)."""
+    seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+    p = len(PRE)
+    D = (p + 10, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "0|1"})
+    J = (p + 4, GUIDE[3:5], GUIDE[3], {"S01": "1|0"}, filt)
+    row = row_fields("chr21", p, "+", GUIDE + "NNN", seq[p:p + 23], GUIDE + "TGG", "TGG",
+                     0, 0, "X", tok("chr21", D), "S02")
+    return seq, sorted([D, J], key=lambda r: r[0]), row, D, J
+
+
+class ReviewRound10(Base):
+    # --- R10-F1: the FILTER CRISPRitz's enricher reads ---------------------------------- #
+    def test_a_window_reads_filter_as_crisprme_s_stores_do(self):
+        """R10-F1: a genotyped line outside PASS and '.' (the exact strings CRISPRitz's
+        enricher keeps: 'PASS;LowQual' is skipped too) keeps only its indels, unsearched
+        (the phased indel store's: on their carriers' haplotypes, carrying no row);
+        its SNVs and MNVs are in no store CRISPRme reads. A sites-only line keeps its
+        SNVs (hg38_mega's index holds them) and drops its indels and MNVs."""
+        seq = PRE + GUIDE + "TGG" + POST
+        p = len(PRE)
+        geno = os.path.join(self.tmp, "g.vcf.gz")
+        recs = [(p + 2, seq[p + 1], "T" if seq[p + 1] != "T" else "A", {"S01": "1|0"},
+                 "LowQual"),
+                (p + 4, seq[p + 3:p + 5], seq[p + 3], {"S01": "1|0"}, "LowQual"),
+                (p + 6, seq[p + 5], seq[p + 5] + "T," + other(seq[p + 5]),
+                 {"S02": "1|2", "S03": "2|0"}, "PASS;LowQual"),
+                (p + 8, seq[p + 7:p + 9], other(seq[p + 7]) + other(seq[p + 8]),
+                 {"S04": "1|0"}, "VQSRTrancheSNP99.00to100.00"),
+                (p + 11, seq[p + 10], other(seq[p + 10]), {"S05": "1|0"}, "."),
+                (p + 13, seq[p + 12:p + 14], seq[p + 12], {"S06": "0|1"}, "PASS")]
+        write_vcf(geno, "chr21", recs)
+        sites = os.path.join(self.tmp, "s.vcf.gz")
+        write_sites_only_vcf(sites, "chr21", [
+            (p + 15, seq[p + 14], other(seq[p + 14]), "LOW_VQSLOD"),
+            (p + 17, seq[p + 16:p + 18], seq[p + 16], "ExcHet"),
+            (p + 19, seq[p + 18], seq[p + 18] + "G", "PASS")])
+        win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(geno), C.Vcf(sites)])
+        key = lambda r: (r[0], r[1], r[2])  # noqa: E731
+        # the genotyped LowQual SNV: in no store, read as the reference
+        self.assertNotIn(key(recs[0]), win.by_key)
+        self.assertEqual(win.filtered_keys[key(recs[0])], "LowQual")
+        # the genotyped LowQual deletion: on S01's haplotype, unsearched, no carrier
+        d = win.by_key[key(recs[1])][0]
+        self.assertEqual((d.searched, d.filtered), (False, "LowQual"))
+        self.assertEqual(win.carriers(d), [])
+        self.assertEqual(C.main_call(win, d.key, "S01"), (None, None))
+        self.assertFalse(win.searched(d.key))
+        self.assertTrue(C.on_slot(((1, 0), True), 0, win.calls[d.line]["S01"], d.number)
+                        == "yes")
+        # 'PASS;LowQual' is not PASS: the insertion stays (unsearched), the SNV alt goes
+        ins = win.by_key[(p + 6, seq[p + 5], seq[p + 5] + "T")][0]
+        self.assertFalse(ins.searched)
+        self.assertNotIn((p + 6, seq[p + 5], other(seq[p + 5])), win.by_key)
+        self.assertIsNone(win.line_alleles[ins.line][1])
+        # the genotyped non-PASS MNV: in no store
+        self.assertNotIn(key(recs[3]), win.by_key)
+        # '.' and PASS: read as ever
+        self.assertTrue(win.by_key[key(recs[4])][0].searched)
+        self.assertIsNone(win.by_key[key(recs[4])][0].filtered)
+        self.assertEqual(win.carriers(win.by_key[key(recs[5])][0]), ["S06"])
+        # sites-only: the LOW_VQSLOD SNV kept (searched, flagged), the ExcHet deletion
+        # dropped, the PASS insertion kept
+        snv = win.by_key[(p + 15, seq[p + 14], other(seq[p + 14]))][0]
+        self.assertEqual((snv.searched, snv.filtered), (True, "LOW_VQSLOD"))
+        self.assertNotIn((p + 17, seq[p + 16:p + 18], seq[p + 16]), win.by_key)
+        self.assertIn((p + 17, seq[p + 16:p + 18], seq[p + 16]), win.filtered_keys)
+        self.assertTrue(win.sites_only((p + 19, seq[p + 18], seq[p + 18] + "G")))
+
+    def test_a_snp_the_search_skips_leaves_its_carrier_listed(self):
+        """R10-F1 (review-r10's site A): P LowQual, the row listing S02 -- as CRISPRme
+        lists it -- passes in both modes (it failed variant-missing); P PASS, the same
+        row fails for S02; a row naming P fails variant-filtered: no store CRISPRme's
+        search reads holds it."""
+        seq, recs, row, D, P = world_filter_pam("LowQual")
+        case = Case(self.tmp, seq, recs, [row])
+        self.assertClean(case)
+        found = self.assertClean(case, mode="completeness")
+        self.assertNotIn("limit-filtered-record", classes(found), found)  # an SNV
+        tmp2 = os.path.join(self.tmp, "pass")
+        os.makedirs(tmp2)
+        seq, recs2, row2, _D, _P = world_filter_pam("PASS")
+        case2 = Case(tmp2, seq, recs2, [row2])
+        rc, found = case2.run()
+        self.assertEqual(rc, 1, found)
+        self.assertTrue(all(f[3] == "S02" for f in gating(found)), found)
+        write_results(case.res, [set_field(row, var="%s,%s" % (tok("chr21", D),
+                                                                 tok("chr21", P)))])
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertIn("variant-filtered", classes(gating(found)), found)
+
+    def test_an_indel_the_search_skips_stays_on_its_carriers_haplotypes(self):
+        """R10-F1, the phased indel store: J LowQual. CRISPRme lists S02 alone on D's
+        perfect target (its store reads J on S01's slot: as the oracle's sites O and Q
+        with their second deletions LowQual), and that row passes in both modes; a
+        blanket drop of non-PASS records would demand S01 there. J's own targets are
+        demanded of no one (no fake-indel window holds it): one limit-filtered-record
+        line. Listing S01 fails; a row naming J fails variant-filtered."""
+        seq, recs, row, _D, J = world_filter_second("LowQual")
+        case = Case(self.tmp, seq, recs, [row])
+        self.assertClean(case)
+        found = self.assertClean(case, mode="completeness")
+        lines = [f for f in found if f[1] == "limit-filtered-record"]
+        self.assertEqual(len(lines), 1, found)
+        self.assertTrue(lines[0][2].startswith("1 indel/MNV record(s)"), lines)
+        self.assertFalse(any(f[3] == "S01" and f[1] in ("missing-row", "carrier-missing")
+                             for f in found), found)
+        write_results(case.res, [set_field(row, samples="S01,S02")])
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertTrue(all(f[3] == "S01" for f in gating(found)), found)
+        write_results(case.res, [set_field(row, var=tok("chr21", J), samples="S01")])
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertIn("variant-filtered", classes(gating(found)), found)
+
+    def test_track_b_reads_an_indel_the_search_skips(self):
+        """R10-F1, Track B (review-r10's LowQual world, the oracle's Y1): a SNP row's
+        carrier whose slot of the SNP also holds an insertion inside the target is dropped
+        by CRISPRme whatever the insertion's FILTER (its phased indel store keeps it): the
+        row listing S02 and S03 -- S01, in cis, dropped -- is nothing to report, LowQual
+        or PASS."""
+        seq = PRE + GUIDE[:5] + other(GUIDE[5]) + GUIDE[6:] + "TGG" + POST
+        p = len(PRE)
+        snp = (p + 6, other(GUIDE[5]), GUIDE[5], {"S01": "1|0", "S02": "1|0", "S03": "1|0"})
+        start = p
+        row = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                         GUIDE + "TGG", "TGG", 0, 0, "X", tok("chr21", snp), "S02,S03")
+        for filt in ("LowQual", "PASS"):
+            tmp = os.path.join(self.tmp, filt)
+            os.makedirs(tmp)
+            ins = (p + 13, seq[p + 12], seq[p + 12] + "TT", {"S01": "1|0", "S02": "0|1"},
+                   filt)
+            case = Case(tmp, seq, [snp, ins], [row])
+            rc, found = case.run(extra=("--snp-rows", "report"))
+            self.assertEqual((rc, found), (0, []), (filt, found))
+
+    def test_a_sites_only_records_filter(self):
+        """R10-F1, sites-only: the hg38_mega index's indel log holds exactly its PASS
+        indels, so a sites-only indel outside PASS and '.' is in no row: a carrier-less row
+        naming it fails (variant-filtered), and completeness counts it as
+        limit-filtered-record, not limit-no-genotypes. The dataset's fake-indel windows
+        code what CRISPRitz's overlay codes, its SNVs whose FILTER passes (the mega's indel
+        rows name none other): a carrier-less row of a PASS sites-only deletion through a
+        LOW_VQSLOD SNV fails variant-filtered, through the same SNV PASS it passes, and
+        through an SNV of another dataset it fails variant-not-in-dataset."""
+        case, info = world_deletion(self.tmp)
+        seq, start, rec = info["seq"], info["start"], info["rec"]
+        q = start + 2                         # a protospacer base, reference = GUIDE[2]
+        y_alt = other(GUIDE[2])
+        X = (start + 40, seq[start + 39:start + 41], seq[start + 39], "ExcHet")
+        tgt = GUIDE[:2] + y_alt + GUIDE[3:] + "TGG"
+        Y = (q + 1, seq[q], y_alt)
+        mega_row = row_fields("chr21", start, "+", GUIDE + "NNN", info["ref_text"],
+                              mark(GUIDE + "NNN", tgt), "TGG", 1, 0, "X",
+                              "%s,%s" % (info["var"], tok("chr21", Y)), "")
+        write_results(case.res, info["rows"] + [mega_row])
+        so = os.path.join(self.tmp, "mega.vcf.gz")
+        for filt, want in (("PASS", None), ("LOW_VQSLOD", "variant-filtered")):
+            write_sites_only_vcf(so, "chr21", sorted([rec[:3], Y + (filt,), X],
+                                                     key=lambda r: r[0]))
+            rc, found = case.run(extra=("--vcf", so))
+            if want is None:
+                self.assertEqual((rc, gating(found)), (0, []), (filt, found))
+            else:
+                self.assertEqual(rc, 1, (filt, found))
+                self.assertEqual(classes(gating(found)), {want}, (filt, found))
+        # Y only in the genotyped VCF: no record of the sites-only dataset's window
+        write_sites_only_vcf(so, "chr21", sorted([rec[:3], X], key=lambda r: r[0]))
+        write_vcf(case.vcf, "chr21", sorted([rec, Y + ({"S05": "1|0"},)],
+                                            key=lambda r: r[0]))
+        rc, found = case.run(extra=("--vcf", so))
+        self.assertEqual(classes(gating(found)), {"variant-not-in-dataset"}, found)
+        write_vcf(case.vcf, "chr21", [rec])
+        write_results(case.res, info["rows"])
+        found = self.assertClean(case, mode="completeness", extra=("--vcf", so))
+        lines = [f for f in found if f[1] == "limit-filtered-record"]
+        self.assertEqual(len(lines), 1, found)
+        self.assertFalse(any(f[1] == "limit-no-genotypes" for f in found), found)
+        # a carrier-less row naming X (its strings are D's row's: X is read first)
+        x_row = set_field(info["rows"][0], var=tok("chr21", X), samples="")
+        write_results(case.res, info["rows"] + [x_row])
+        rc, found = case.run(extra=("--vcf", so))
+        self.assertEqual(rc, 1, found)
+        self.assertIn("variant-filtered", classes(gating(found)), found)
+
+    def test_a_sites_only_snv_outside_pass_and_the_cluster_chain(self):
+        """R10-F1, the cluster chain. A sites-only dataset's SNP rows read its SNVs
+        whatever their FILTER (hg38_mega's SNP rows name such SNVs; an index CRISPRitz's
+        enricher builds does not hold them): a SNP row through one is a row CRISPRme may
+        write or not, apart from the certain ones (snp_row_cps' fourth part). Its
+        fake-indel windows code its PASS SNVs only: world_sites_only_chain's W, the
+        dataset's worst-case row of R's window with S, is no row with S LOW_VQSLOD, so
+        T1, which only W chains to B, is missed in the table holding B alone
+        (missing-locus) and passes with its own row."""
+        seq = PRE + GUIDE[:5] + other(GUIDE[5]) + GUIDE[6:] + "TGG" + POST
+        p = len(PRE)
+        so = os.path.join(self.tmp, "so.vcf.gz")
+
+        class A(object):
+            mm, bdna, brna, max_total_edits = 0, 0, 0, 0
+        ctx = C.Ctx(A(), "NRG", 3, False, [GUIDE])
+        cp = C.cluster_of(p, "+", 23, 23, False)
+        for filt in ("PASS", "LOW_VQSLOD"):
+            write_sites_only_vcf(so, "chr21", [(p + 6, other(GUIDE[5]), GUIDE[5], filt)])
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(so)])
+            rows, _capped, _drop, filt_cps = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE),
+                                                           0, len(seq))
+            self.assertEqual((cp in rows, cp in filt_cps), (filt == "PASS",
+                                                            filt != "PASS"), filt)
+        g, seq, recs, rows, mega, budget, _R = world_sites_only_chain(True)
+        case = Case(self.tmp, seq, recs, rows)
+        run_markers(case.res, "population-level", alt=False)
+        write_sites_only_vcf(so, "chr21", [mega[0], mega[1] + ("LOW_VQSLOD",)])
+        rc, found = case.run(mode="completeness", guide=g, budget=budget,
+                             extra=("--vcf", so))
+        self.assertEqual(rc, 1, found)
+        self.assertIn("missing-locus", classes(gating(found)), found)
+        _g, _seq, _recs, rows2, _m, _b, _R2 = world_sites_only_chain(True, t1_row=True)
+        write_results(case.res, rows2)
+        rc, found = case.run(mode="completeness", guide=g, budget=budget,
+                             extra=("--vcf", so))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_sites_only_window_codes_the_last_passing_record_of_a_split_site(self):
+        """R10-F1, a sites-only dataset's fake-indel window (sites_only_cps): CRISPRitz's
+        overlay codes the enriched genome's SNVs, the last record of a split site whose
+        FILTER passes. D (a PASS deletion) has a perfect target only with E, the earlier
+        of two SNV records at one flank base: with the later record L PASS, the window
+        holds L, and no row of D's window is there; with L LOW_VQSLOD, E is the last record
+        the window holds, and the row is."""
+        G = GUIDE
+        x = other(G[2])
+        seq = PRE + G[:2] + x + G[3:10] + "C" + G[10:] + "TGG" + POST
+        p = len(PRE)
+        D = (p + 10, G[9] + "C", G[9])
+        E = (p + 3, x, G[2])
+        y = next(b for b in "ACGT" if b not in (x, G[2]))
+        so = os.path.join(self.tmp, "so.vcf.gz")
+
+        class A(object):
+            mm, bdna, brna, max_total_edits = 0, 0, 0, 0
+        ctx = C.Ctx(A(), "NRG", 3, False, [G])
+        cp = C.cluster_of(p, "+", 23, 23, False)
+        for filt, held in (("PASS", False), ("LOW_VQSLOD", True)):
+            write_sites_only_vcf(so, "chr21", [E, (p + 3, x, y, filt), D])
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(so)])
+            d = win.by_key[D][0]
+            got = C.sites_only_cps(win, ctx, ctx.full(G), d, 0, len(seq))
+            self.assertEqual(cp in got, held, (filt, sorted(got)))
+
+    # --- R10-F2: --per-sample without the genotype store ------------------------------ #
+    def test_a_per_sample_run_without_its_genotype_store_is_refused(self):
+        """R10-F2: complete-search runs --per-sample population-level, and records it
+        (.search_mode population-level beside --per-sample), where a genotyped dataset has
+        no genotype store and no classic dictionaries (download --what index
+        --no-genotypes): with a genotyped VCF given the run is refused (exit 2). Not so
+        with --population-level or no mode flag (which record nothing that tells such an
+        install apart), nor where every VCF is sites-only (the other case of that pair)."""
+        case, info = world_deletion(self.tmp)
+
+        def run(flag, vcf=None):
+            run_markers(case.res, "population-level", alt=False)
+            with open(os.path.join(case.res, ".command_line.txt"), "w") as fh:
+                fh.write("input_command\t/opt/conda/bin/crisprme.py complete-search "
+                         "--genome Genomes/hg38 --vcf list_vcf.txt --mm 4 --bDNA 1 "
+                         "--bRNA 1 --output r %s\n" % flag)
+            if vcf is not None:
+                saved, case.vcf = case.vcf, vcf
+            try:
+                return case.run()
+            finally:
+                if vcf is not None:
+                    case.vcf = saved
+                for name in (".search_mode", ".alt_mode", ".command_line.txt"):
+                    os.remove(os.path.join(case.res, name))
+        rc, _found = run("--per-sample")
+        self.assertEqual(rc, 2)
+        self.assertTrue(C.per_sample_downgraded(case.res) is False)  # (files removed)
+        for flag in ("--population-level", ""):
+            rc, found = run(flag)
+            self.assertEqual((rc, gating(found)), (0, []), (flag, found))
+        so = os.path.join(self.tmp, "so.vcf.gz")
+        write_sites_only_vcf(so, "chr21", [info["rec"][:3]])
+        write_results(case.res, [set_field(info["rows"][0], samples="")])
+        rc, found = run("--per-sample", vcf=so)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_run_whose_log_says_it_had_no_genotype_store_is_refused(self):
+        """R10-F2, any mode: the run's log_verbose.txt (the pipeline's stdout, in the
+        result folder) records a genotyped dataset searched without its genotype store
+        ('Registry-only install for chr21: ... no genotype tier to resolve carriers.', as
+        new_simple_analysis.py prints it), so with --population-level or no mode flag too
+        the run is refused; the same line of an aggregate registry (hg38_mega's, marked
+        '(aggregate info_af registry; ...') is not one, and a folder without the log is
+        checked (the PRECONDITION)."""
+        case, _info = world_deletion(self.tmp)
+        log = os.path.join(case.res, "log_verbose.txt")
+        plain = ("Registry-only install for chr21: emitting variant off-targets with "
+                 "degraded (NA) Samples -- no genotype tier to resolve carriers.\n")
+        agg = ("Registry-only install for chr21: emitting variant off-targets with "
+               "degraded (NA) Samples -- no genotype tier to resolve carriers (aggregate "
+               "info_af registry; sample-less dict ignored).\n")
+        for flag in ("--population-level", "", "--per-sample"):
+            for text, refused in ((plain, True), (agg, False), (None, False)):
+                if text is None:
+                    if os.path.exists(log):
+                        os.remove(log)
+                else:
+                    with open(log, "w") as fh:
+                        fh.write("Analysis of chr21\n" + text)
+                run_markers(case.res, "population-level" if flag != "--per-sample"
+                            else "per-sample", alt=flag == "--per-sample")
+                with open(os.path.join(case.res, ".command_line.txt"), "w") as fh:
+                    fh.write("input_command\t/opt/conda/bin/crisprme.py complete-search "
+                             "--genome Genomes/hg38 --output r %s\n" % flag)
+                rc, found = case.run()
+                self.assertEqual(rc, 2 if refused else 0, (flag, text, found))
+        self.assertEqual(C.registry_only_logged(case.res), None)
+        with open(log, "w") as fh:
+            fh.write(plain + agg)
+        self.assertEqual(C.registry_only_logged(case.res), ["chr21"])
 
     def assertClean(self, case, mode="soundness", **kw):
         rc, found = case.run(mode=mode, **kw)

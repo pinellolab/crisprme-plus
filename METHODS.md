@@ -1493,8 +1493,9 @@ samples list (the samplesID files; by default the run's `.sampleID.txt`, which C
 writes from them), the guide, the PAM file, the search budget and the result folder (the CFD
 tables are read as data) — and it writes each sample's haplotypes itself from the VCF 4.x
 definition of a record, keeps its own map from haplotype bases to reference coordinates, and
-aligns with its own exhaustive aligner. **The truth is the VCF.** A slot is the reference
-with every ALT allele its genotype puts there, and it holds a row's target when it reads
+aligns with its own exhaustive aligner. **The truth is the VCF, as the search read it.** A
+slot is the reference with every ALT allele its genotype puts there of the records CRISPRme
+reads (FILTER, below), and it holds a row's target when it reads
 the target's bases from the row's start through the row's record: each base the record
 puts in the target at its place, and the base after them (a second insertion between the
 start and the record lengthens the stretch and pushes some of them out of it, which makes
@@ -1538,6 +1539,34 @@ only at the fake-indel window's code columns, the target's reference bases off t
 record's own REF span: the window writes the ALT verbatim, the anchor included, and codes
 flank bases only, so a SNV the VCF holds at the record's position (the other allele of a
 multi-allelic heterozygote, one per haplotype) is never a choice there.
+CRISPRitz's enricher reads only the VCF lines whose FILTER is `PASS` or `.` (those exact
+strings; `PostProcess/validate_inputs.py`'s full check says the others "will be excluded
+from enrichment"): no other line
+is in the enriched genome, its dictionaries, registry and genotype store, the indel log or
+the fake-indel windows. The phased indel store (`build_indel_genotypes.py`) streams the VCF
+without reading FILTER and keeps every indel, and §4's carrier resolution reads it: a second
+indel or an overlapping one on a carrier's slot takes the carrier off a target, and a SNP row
+drops a carrier for an indel of its slot, whatever that indel's FILTER (the SNP+indel oracle,
+the second deletions of its sites O and Q and the insertion of Y1 marked `LowQual`, lists its
+carriers so). So of a genotyped dataset a line outside `PASS` and `.` keeps its indels, on
+their carriers' haplotypes as the store has them — no fake-indel window holds one, so a row
+naming one fails (`variant-filtered`) and completeness demands none of its targets (one
+`limit-filtered-record` line per chromosome counts them) — and its SNVs and MNVs are read as
+the reference: a carrier of such a SNP stays listed for a target the SNP would change (the
+oracle's site A, its PAM SNP marked `LowQual`, lists its cis carrier). Of a sites-only
+dataset such a line's indels and MNVs are dropped (the `hg38_mega` index's indel log holds
+exactly the 222,283 `PASS` indels of its chr22 VCF, none of its 40,840 others), and its SNVs
+are read by its SNP rows whatever their FILTER: `hg38_mega`'s registry holds all 838,025
+SNVs of its chr22 VCF, the 78,116 outside `PASS` among them, and its SNP rows name some
+(chr22:11574550 C>G, `LOW_VQSLOD`), while an index CRISPRitz's enricher builds from a
+sites-only VCF holds none of them, and a run does not say which it read, so a SNP row
+through one is a row CRISPRme may write or not (below). Its fake-indel windows code what
+CRISPRitz's overlay codes from the enriched genome: its SNVs whose FILTER passes, the last
+record of a split site (on chr22, `hg38_mega`'s indel rows name the last record at 279 split
+sites and, at chr22:25093750, the `PASS` C>G before the `LOW_VQSLOD` C>T, and no other), so a
+row of a sites-only dataset (no carrier) must name SNVs of that dataset's VCF whose FILTER
+passes (`variant-not-in-dataset`, `variant-filtered`; an earlier record of a split site is
+the note `variant-shadowed`).
 CRISPRme's documented reading of a carrier (§4: the one-indel window, resolved with each
 carrier's own SNP alleles, so that a row lists a carrier only where those give its target;
 the second indel read from either end of the target through the indel, each base the indel
@@ -1553,7 +1582,8 @@ documents, and fails. It runs two ways:
 - **Soundness.** Every row block of the integrated results (the highest-CFD, fewest mm+b
   and highest-CRISPR-Bulge blocks) and of the alternative alignments whose variant list
   names an indel or an MNV must be labelled ALT, name one indel-path record (and SNPs),
-  all records of the VCF; its aligned spacer must be the guide with its PAM, its
+  all records of the VCF the search read (one whose FILTER it skips is
+  `variant-filtered`); its aligned spacer must be the guide with its PAM, its
   mismatches, bulge types and sizes and totals must recount within the budget, no gap may
   fall in the PAM, the PAM must match the searched motif and the REF text must be the
   reference read from the row's start, gapped as the target; its target (gaps removed, PAM
@@ -1644,14 +1674,16 @@ documents, and fails. It runs two ways:
   an overlap zone of two other alleles of a slot changes, on any reading of the zone, a
   target of a slot read without its overlap that touches a call of unknown phase, a target
   through an SNV its stores read otherwise, a per-sample run's capped windows' greedy rows,
-  which §5's known limit writes on the classic dictionary path only, and a per-sample SNP
+  which §5's known limit writes on the classic dictionary path only, a per-sample SNP
   target of a slot that also holds an indel touching it, which 2.10.0 writes only where its
-  reading of the slot through a repeat keeps the carrier), are followed only when the rows
-  it writes reach no row as good as the target, and never one that needs a second
-  indel-path record: a cluster reached only through them is counted under their cause's
-  class (`limit-capped-window` and the checker's `coverage-snp-row-indel` for the last
-  two), neither passed nor failed. A record only sites-only VCFs hold is carried by nobody:
-  it is counted, not demanded.
+  reading of the slot through a repeat keeps the carrier, and a sites-only dataset's row
+  through one of its SNVs outside `PASS` and `.`), are followed only when the rows it
+  writes reach no row as good as the target, and never one that needs a second indel-path
+  record: a cluster reached only through them is counted under their cause's class
+  (`limit-capped-window`, the checker's `coverage-snp-row-indel` and
+  `limit-filtered-record` for the last three), neither passed nor failed. A record only
+  sites-only VCFs hold is carried by nobody: it is counted, not demanded; so is one whose
+  FILTER the search skips (`limit-filtered-record`).
 
 The check's inputs must be the search's: where the run's own record of them says otherwise
 (its `.Params.txt` budget, PAM and variant datasets — one VCF per dataset must hold each
@@ -1666,8 +1698,18 @@ where it wrote none, its mode, which `--analysis` can give). It models a search 
 each genotyped dataset's genotypes (its genotype store, or classic dictionaries), as every
 index CRISPRme installs or builds with `--samplesID` does; an install without them
 (`download --what index --no-genotypes`) searches population-level and lists every carrier
-of an indel on a SNP+indel row, with or without its SNPs (§4), which its result folder does
-not record: such a run is not to be checked.
+of an indel on a SNP+indel row, with or without its SNPs (§4). Such a search records it:
+in any mode its `log_verbose.txt`, the pipeline's stdout kept in the result folder, holds
+the SNP post-analysis's `Registry-only install for <chrom>: ...` line for the dataset
+(`hg38_mega`'s aggregate registry prints that line too, marked `(aggregate info_af
+registry`, and is not counted), and one made with `--per-sample` writes `.search_mode`
+population-level beside `--per-sample`, which `complete-search` does only there or where
+every dataset it searches is sites-only; given a genotyped VCF, the check refuses either
+(exit 2). Without that line (a result folder without its `log_verbose.txt`, or a dataset
+its SNP post-analysis never read), a run made with `--population-level` or no mode flag
+records nothing else that tells it apart (its `.search_mode`, `.command_line.txt` and
+`.Params.txt` read as a search that read the store; the warning goes to the terminal only):
+such a run is not to be checked.
 
 The SNP-only rows of a per-sample run can be checked report-only (`--snp-rows report`):
 their strings, their target and that each named variant lies in it, their listed carriers,
@@ -1695,7 +1737,8 @@ run it accepts it is every sample of the VCF.
 
 The documented limits — the last record of a split multi-allelic site, two indel-path
 records in one target, a PUTATIVE carrier listed for its strongest target, a site within
-one target of a contig's end — and the slots the VCF leaves without a sequence are listed
+one target of a contig's end, a record whose FILTER the search skips — and the slots the
+VCF leaves without a sequence are listed
 with their carriers under their own class and do not fail the check, as do the checker's
 own coverage gaps (a carrier the PUTATIVE rule resolves with more than 10 positions within
 a target's reach of the record, off its REF span, where its alleles allow two bases, whose
@@ -1733,8 +1776,16 @@ it documents; 6 two-indel targets; 17 and 26 windows across N; the checker's cov
 for 21 records of the unphased copy, carriers resolved PUTATIVE with more than 10
 positions of two possible bases within a target's reach), and the default index beside
 the sites-only `hg38_mega`, both modes (6,747 and 274 row blocks of `hg38_mega` list no
-carrier and are checked as rows; completeness counts the indel and MNV records of chr22
-only `hg38_mega` holds). On the documented chr22 self-test (`complete-test`, as CI runs
+carrier and are checked as rows, each naming SNVs of `hg38_mega`'s VCF whose FILTER passes;
+completeness counts the 127,735 indel records of chr22 only `hg38_mega` holds and the 32,178
+the search skips for their FILTER, and its verdicts are those it gave reading every record:
+the single drop of each of the runs' 146 and 147 integrated indel lines is caught, or
+passes, alike). The genotyped panels of these configurations have no FILTER other than `.`
+(HGDP + 1000 Genomes, HPRC) or `PASS` (the self-test's 1000 Genomes); the SNP+indel oracle
+with a SNP, a deletion, two second deletions, an insertion and an MNV marked `LowQual`
+(review-r10's pair, and four records the phased indel store reads), searched through the
+real CLI, passes in both modes, and failed before on what the enricher skips (12 and 8
+gating findings, 6 and 5). On the documented chr22 self-test (`complete-test`, as CI runs
 it) soundness passes every benchmark, the 5′ Cas12a PAM included, completeness of
 `cas9_sg1617` and `cas12a_hbg` passes (population-level, their `.search_mode`), and
 removing the 5 indel rows of `cas9_sg1617` is caught at each of their 5 clusters; CI's
@@ -1781,10 +1832,20 @@ spacer, so an unphased carrier resolved on an alignment where its SNP falls in a
 target whose column there faces the guide's base, which the carrier carries — a weaker
 target than its strongest (the SNP+indel oracle's site U, S19; and in a synthetic world of
 partly phased carriers searched through the real CLI, a carrier phased for the deletion
-and unphased for the SNP, which 2.10.0's code passes). `test/indel_snp_oracle/run_oracle.sh`
-runs it beside `oracle.py check` in both profiles, `validate-benchmarks.yml` runs it on the
-chr22 self-test output after `validate-test`, and `docs/RELEASE_CHECKLIST.md` makes it a
-release gate.
+and unphased for the SNP, which 2.10.0's code passes). It also shows a defect 2.10.0 does
+not fix: a search whose targets reach 27 nt (SaCas9's 21-nt guide and 6-nt PAM) loses those
+that start at a fake-indel window's first base (chr22, `CACTTTGGGAGGCCGAGGCGG` with
+`NNGRRT`, 2 mismatches, per sample: 2,103 carrier targets at 6 records, 2,088 of them the
+insertion chr22:17325232 A>AT's; an SpCas9 target, 24 nt at most here, never starts there
+holding its record); and two readings no text documents: `hg38_mega`'s SNP rows name SNVs
+whose FILTER is not `PASS` and earlier records of split sites (58 split sites of chr22, 57
+of them a `PASS` record before a later `PASS` one), where its indel rows and indel log
+follow CRISPRitz's enricher; and the phased indel store keeps every indel whatever its
+FILTER, so a carrier is taken off a target, and off a SNP row, for an indel no fake-indel
+window of the search holds.
+`test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check` in both profiles,
+`validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
+`docs/RELEASE_CHECKLIST.md` makes it a release gate.
 
 This establishes that the engine **does not miss** off-targets relative to
 exhaustive search. It does **not** validate the *scoring* models' predictive

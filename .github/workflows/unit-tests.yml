@@ -341,7 +341,15 @@ jobs:
         # others, a PUTATIVE rule offered no choice on the record's own REF span (its
         # anchor) and, in a search that scores no CFD, the reference base then A, C, G, T,
         # a record's chain holding its sites-only dataset's rows whoever reads it first
-        # and no coded anchor, a search without bulges read from its --vcf list, and the
+        # and no coded anchor, a search without bulges read from its --vcf list, a VCF's
+        # FILTER read as CRISPRme's stores read it (a genotyped record outside PASS and
+        # '.' is no record of the search, but its indels stay on their carriers'
+        # haplotypes, as the phased indel store keeps them: a SNP the search skips leaves
+        # its carrier listed, an indel it skips still takes one off a target and off a SNP
+        # row; a sites-only one's indels dropped, its SNVs open rows of its SNP rows'
+        # chain and none of its fake-indel windows, whose rows must name the dataset's own
+        # PASS SNVs), a search that says it read no genotype store (its log_verbose.txt, or
+        # a --per-sample search run population-level: refused), and the
         # SNP-row report (report-only) reading a SNP row's carriers as METHODS section 4
         # does: a named variant outside the target, the 2.10.0 drop of a carrier whose slot
         # holds an indel that changes the target (read through a repeat at its edge, an

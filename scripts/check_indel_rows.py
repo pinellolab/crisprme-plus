@@ -28,8 +28,31 @@ coordinate, its aligned strings, its REF/ALT text, its variants, its carriers an
 alternative-alignment table are never checked against an independent truth on real data.
 This is that check.
 
-THE TRUTH IS THE VCF. A sample's haplotype is the reference with every ALT allele its
-genotype puts on that slot, each in place of its REF bases (VCF 4.x). A slot holds a row's
+THE TRUTH IS THE VCF, AS THE SEARCH READ IT. A sample's haplotype is the reference with
+every ALT allele its genotype puts on that slot, each in place of its REF bases (VCF 4.x),
+of the records CRISPRme reads. CRISPRitz's enricher skips every line whose FILTER is
+neither PASS nor '.' (those exact strings): no such line is in the enriched genome, its
+dictionaries, registry and genotype store, the indel log or the fake-indel windows. The
+phased indel store (build_indel_genotypes) streams the VCF without reading FILTER and keeps
+every indel of it, and CRISPRme's carrier resolution reads that store: a second indel or
+an overlapping one on a carrier's slot takes it off a target, and Track B drops a SNP
+row's carrier for an indel of its slot, whatever that indel's FILTER (the oracle's sites
+O, Q and Y1 with their indels marked LowQual are resolved so). So of a genotyped dataset
+such a line keeps its indels, on their carriers' haplotypes as the store has them; they
+are no record of the search (no fake-indel window holds one: a row naming one fails,
+variant-filtered, and completeness demands none of their targets, limit-filtered-record),
+and its SNVs and MNVs are read as the reference. Of a sites-only dataset such a line keeps
+its SNVs for its SNP rows: the hg38_mega index's SNP rows read them whatever their FILTER
+(its registry holds every SNV of its VCF, and its SNP rows name some: chr22:11574550 C>G,
+LOW_VQSLOD), while an index CRISPRitz's enricher builds from a sites-only VCF does not
+hold them, and a run does not say which it read -- so a SNP row through one is a row
+CRISPRme may write or not (below). Its fake-indel windows code what CRISPRitz's overlay
+codes from the enriched genome, its SNVs whose FILTER passes and the last record of a
+split site (the mega's indel rows name no other: at chr22:25093750 the PASS C>G, before
+the LOW_VQSLOD C>T), so a row of it (no carrier) names SNVs of its own VCF whose FILTER
+passes (else variant-not-in-dataset, variant-filtered; an earlier record of a split site
+is the note variant-shadowed). Its indels and MNVs outside PASS and '.' are dropped
+(hg38_mega's indel log holds exactly the PASS indels of its VCF). A slot holds a row's
 target when it reads the target's bases from the row's start THROUGH the record: each
 base of the target the record's ALT puts there at its place (and the base after them), as
 the row's target has it -- a second insertion between the start and the record that
@@ -130,8 +153,8 @@ TWO MODES.
   results (highest-CFD, fewest mm+b, highest CRISPR-Bulge) and of the alternative
   alignments whose variant list names an indel or an MNV:
     * is labelled REF/ALT_origin alt, names exactly one indel-path record (an indel or an
-      MNV) and SNPs, every one a record of the VCF, forward strand, on the row's
-      chromosome;
+      MNV) and SNPs, every one a record of the VCF the search read (FILTER: a record it
+      skips is variant-filtered), forward strand, on the row's chromosome;
     * its aligned spacer, gaps removed, is the guide (--guide, never the table's own
       column) followed (or, for a 5' PAM, preceded) by the PAM; its mismatches, bulge
       types and sizes and their total recount exactly, within the budget; no gap falls in
@@ -322,7 +345,11 @@ contig's end, or a row whose REF text runs past it), limit-n-bases (a stretch of
 record's window: no target is aligned across it), limit-no-genotypes (a row of a
 sites-only dataset, which lists no carrier: the row itself is checked, one line per
 block; and in completeness one line per chromosome counting the records only sites-only
-VCFs hold, which no sample carries), and in the SNP-row report limit-snp-row-mnv (a
+VCFs hold, which no sample carries), limit-filtered-record (in completeness one line per
+chromosome counting the indel and MNV records whose FILTER the search skips, none of whose
+targets is demanded; and a cluster reached only through a sites-only dataset's SNP row
+through one of its SNVs outside PASS and '.', above), and in the SNP-row report
+limit-snp-row-mnv (a
 listed carrier whose slot of the row's SNPs holds an MNV that changes the target: the
 phased indel store CRISPRme reads a SNP row's carriers against holds no MNV) and
 limit-snp-row-unphased; variant-shadowed and overlap-reading-agrees (a listed carrier
@@ -370,7 +397,9 @@ checked and completeness demands none of their targets), its .sampleID.txt (agai
 -- the run is refused (exit 2): it would be modeled partially. So is a run whose own
 records contradict each other (a .search_mode per-sample beside --population-level, an
 .alt_mode against --alt-alignments or --no-alt-alignments: no search writes them
-together), and one that does not record what the check needs to model it: completeness
+together), a search of a genotyped dataset without its genotype store that says so
+(its log_verbose.txt, or a --per-sample search that ran population-level: PRECONDITION),
+and one that does not record what the check needs to model it: completeness
 needs whether the run wrote alternative alignments (its .alt_mode, else its command line)
 and, where it wrote none, the mode it ran (its .search_mode, else --per-sample or
 --population-level on its command line; --ci-cd-test chooses no mode: complete-test's
@@ -407,8 +436,20 @@ store, or classic dictionaries), as every index CRISPRme installs or builds with
 --samplesID does: it resolves each carrier of an indel row on its own haplotypes, which
 is what this checker models. An install without them (download --what index
 --no-genotypes) searches population-level and lists every carrier of the indel on a
-SNP+indel row, with or without its SNPs (CHANGELOG 2.8.1); its result folder records
-nothing that tells it apart, so check only runs made with the genotypes the VCF holds.
+SNP+indel row, with or without its SNPs (CHANGELOG 2.8.1). A search of it made with
+--per-sample records that (its .search_mode population-level beside --per-sample on its
+command line: complete-search writes that pair only where every dataset it searches is
+sites-only or where a genotyped one has no genotype store), and with a genotyped VCF
+given it is REFUSED (exit 2). In any mode the run's log_verbose.txt, the pipeline's
+stdout kept in the result folder, records it too: its SNP post-analysis says
+'Registry-only install for <chrom>: ...' for such a dataset (hg38_mega's aggregate
+registry says so as well, marked '(aggregate info_af registry'; not counted), and with a
+genotyped VCF given the run is REFUSED (exit 2). Without that line (a result folder
+without its log_verbose.txt, or a dataset its SNP post-analysis never read), a run made
+with --population-level or no mode flag records nothing else that tells it apart (its
+.search_mode, .command_line.txt and .Params.txt read as a search that read the store;
+complete-search's warning goes to the terminal only): check only runs made with the
+genotypes the VCF holds.
 
 VCF ACCESS. A .tbi beside a VCF makes every read a seek. Without one, each VCF is read
 once into an in-memory block index (nothing is written), which costs one decompression of
@@ -423,9 +464,10 @@ that share a sample of the panel are REFUSED (exit 2): CRISPRme resolves each da
 its own genotypes and its merge joins their rows, so a shared sample can be listed by
 either dataset's haplotypes, which this checker does not model (run a search of each
 dataset alone and check each: such a run given one of its VCFs is refused too, OUTPUT). A
-sites-only VCF's split sites are not read as shadowed: CRISPRme's mega
-index holds earlier records of some (its rows name them), so which it holds cannot be read
-off the VCF's order.
+sites-only VCF's split sites are not read as shadowed by its SNP rows: CRISPRme's mega
+index holds earlier records of some (its SNP rows name them, as chr22:11337076 G>C before
+G>T, both PASS), so which it holds cannot be read off the VCF's order; its fake-indel
+windows hold the last record whose FILTER passes (above).
 ``--jobs N`` splits the work by region over N processes.
 """
 
@@ -446,6 +488,11 @@ import zlib
 from collections import defaultdict
 
 COMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
+# the FILTER values CRISPRitz's enricher reads (Enrichment/enricher.py and enricher.cpp:
+# `if line[6] not in ('PASS', '.')`, the line skipped; PostProcess/validate_inputs.py's
+# ENRICHER_PASS_VALUES): no line outside them is in the enriched genome, its dictionaries,
+# its registry and genotype store, its indel log or its fake-indel windows
+PASS_FILTERS = ("PASS", ".")
 IUPAC = {
     "A": "A", "C": "C", "G": "G", "T": "T", "U": "T",
     "R": "AG", "Y": "CT", "S": "CG", "W": "AT", "K": "GT", "M": "AC",
@@ -814,7 +861,7 @@ class Vcf(object):
     def _parse(self, line, chrom, beg, end):
         """A record as a dict; the genotype columns stay unsplit (only the lines a window
         keeps are split). A sites-only line (eight columns, no FORMAT) is a record with no
-        genotypes."""
+        genotypes. Its FILTER is kept as written (Window reads it: PASS_FILTERS)."""
         if not line or line.startswith("#"):
             return None
         head, sep, tail = line.rstrip("\n").partition("\t")
@@ -830,8 +877,9 @@ class Vcf(object):
         if pos1 - 1 + len(ref) <= beg:
             return None
         return {"chrom": head, "pos1": pos1, "id": f[1], "ref": ref,
-                "alts": [a.upper() for a in f[3].split(",")], "info": f[6],
-                "format": f[7] if len(f) > 7 else "", "tail": f[8] if len(f) > 8 else ""}
+                "alts": [a.upper() for a in f[3].split(",")], "filter": f[5],
+                "info": f[6], "format": f[7] if len(f) > 7 else "",
+                "tail": f[8] if len(f) > 8 else ""}
 
 
 # --------------------------------------------------------------------------- #
@@ -913,9 +961,12 @@ class Allele(object):
     reference bases [edit_lo, edit_hi) with ``body``."""
 
     __slots__ = ("key", "lo", "hi", "line", "number", "edit_lo", "edit_hi", "body",
-                 "kind", "_bases")
+                 "kind", "_bases", "searched", "filtered")
 
     def __init__(self, pos1, ref, alt, line, number):
+        self.searched = True    # False: an indel CRISPRme's search skips (FILTER) and only
+                                # its phased indel store holds (Window)
+        self.filtered = None    # the FILTER of a line outside PASS_FILTERS that is kept
         self.key = (pos1, ref, alt)
         self.lo = pos1 - 1
         self.hi = self.lo + len(ref)
@@ -1064,8 +1115,14 @@ class Window(object):
         self.snpcps = {}        # (guide, piece) -> those of the reference and SNP rows, and
                                 # of a per-sample run's capped windows (snp_row_cps)
         self.shadowed = set()
+        self.so_shadowed = set()  # a sites-only VCF's earlier records of a split site,
+                                  # which its fake-indel windows do not hold (below)
         self.untied = set()
         self.snv_at = defaultdict(list)  # reference coordinate -> SNV alleles there
+        self.filtered_keys = {}  # record key -> the FILTER of a line of it outside
+                                 # PASS_FILTERS (kept or not)
+        self.dropped = []        # (0-based start, key, kind, sites-only) of the alleles of
+                                 # such lines that no store CRISPRme reads holds
         self._order = None
         seen = set()
         for vi, v in enumerate(vcfs):
@@ -1082,12 +1139,30 @@ class Window(object):
                     continue
                 lid = len(self.line_lo)
                 als = []
+                passing = r["filter"] in PASS_FILTERS
                 for k, alt in enumerate(r["alts"]):
                     if (not alt or alt in (".", "*") or alt.startswith("<")
                             or set(alt) - set("ACGTN")):
                         als.append(None)
                         continue
-                    als.append(Allele(r["pos1"], r["ref"], alt, lid, k + 1))
+                    a = Allele(r["pos1"], r["ref"], alt, lid, k + 1)
+                    if not passing:
+                        # CRISPRitz's enricher skips the line (PASS_FILTERS). Of a
+                        # genotyped dataset only the indels stay, on their carriers'
+                        # haplotypes: the phased indel store CRISPRme's carrier resolution
+                        # reads keeps every indel of the VCF; of a sites-only dataset the
+                        # SNVs, which hg38_mega's SNP rows read whatever their FILTER (its
+                        # fake-indel windows do not: sites_only_cps). The rest is in no
+                        # store CRISPRme reads: read as the reference
+                        keep = a.kind == ("indel" if v.samples else "snv")
+                        self.filtered_keys.setdefault(a.key, r["filter"])
+                        if not keep:
+                            self.dropped.append((a.lo, a.key, a.kind, not v.samples))
+                            als.append(None)
+                            continue
+                        a.filtered = r["filter"]
+                        a.searched = not v.samples
+                    als.append(a)
                 if not any(a is not None for a in als):
                     continue
                 self.line_lo.append(lo)
@@ -1109,11 +1184,25 @@ class Window(object):
                     if len(snvs) > 1:
                         self._untie(lid)
             for lids in snv_lines.values():
-                if len(lids) < 2 or not v.samples:
-                    # a sites-only VCF's split sites are not read as shadowed: the mega
-                    # index CRISPRme ships holds earlier records of some (its rows name
-                    # them, as chr22:25093750 C>G before C>T), so which ones it holds
-                    # cannot be read off the order of the VCF given
+                if len(lids) < 2:
+                    continue
+                if not v.samples:
+                    # a sites-only VCF's split sites are not read as shadowed by its SNP
+                    # rows: the mega index CRISPRme ships holds earlier records of some
+                    # (its SNP rows name them, as chr22:11337076 G>C before G>T), so which
+                    # it holds cannot be read off the order of the VCF given. Its
+                    # fake-indel windows hold what CRISPRitz's overlay codes from the
+                    # enriched genome, the last record whose FILTER passes (the mega's
+                    # indel rows name it at all 280 split sites they name on chr22, the
+                    # last PASS one at chr22:25093750, whose last record is LOW_VQSLOD)
+                    ok = [lid for lid in lids if all(
+                        a is None or a.filtered is None for a in self.line_alleles[lid])]
+                    if len(ok) > 1:
+                        last = {a.key for a in self.line_alleles[ok[-1]] if a is not None}
+                        for lid in ok[:-1]:
+                            for a in self.line_alleles[lid]:
+                                if a is not None and a.key not in last:
+                                    self.so_shadowed.add(a)
                     continue
                 last = {a.key for a in self.line_alleles[lids[-1]] if a is not None}
                 for lid in lids[:-1]:
@@ -1170,11 +1259,22 @@ class Window(object):
         return any(self.line_sites_only[a.line] for a in self.by_key.get(key, ()))
 
     def genotyped(self, key):
-        """Whether a VCF with sample columns holds the record ``key``."""
-        return any(not self.line_sites_only[a.line] for a in self.by_key.get(key, ()))
+        """Whether a VCF with sample columns holds the record ``key`` on a line
+        CRISPRme's search reads (PASS_FILTERS)."""
+        return any(not self.line_sites_only[a.line] and a.searched
+                   for a in self.by_key.get(key, ()))
+
+    def searched(self, key):
+        """Whether CRISPRme's search reads the record ``key`` (a line of it passes its
+        FILTER, PASS_FILTERS): an indel only the phased indel store holds is on its
+        carriers' haplotypes, and no fake-indel window holds it."""
+        return any(a.searched for a in self.by_key.get(key, ()))
 
     def carriers(self, allele):
-        """The samples whose call holds the allele on some slot."""
+        """The samples whose call holds the allele on some slot (none for an allele
+        CRISPRme's search does not read: no row of it lists a carrier)."""
+        if not allele.searched:
+            return []
         return [s for s, (alle, _p) in self.calls[allele.line].items()
                 if allele.number in alle]
 
@@ -1916,6 +2016,48 @@ def run_kind(resdir):
     return mode, alt, merge, criterion, scoring, cap, source, flagless
 
 
+def per_sample_downgraded(resdir):
+    """Whether the run asked for --per-sample (its .command_line.txt) and ran
+    population-level (its .search_mode). complete-search writes that pair in two cases
+    only (crisprme.py): every dataset it searches is sites-only, with no genotypes to
+    resolve; or a genotyped one has no genotype store (Dictionaries/genotypes_<vcf>/) and
+    no classic per-sample dictionaries -- an install made with download --what index
+    --no-genotypes --, whose SNP+indel rows list every carrier of the indel. With a
+    genotyped VCF of the search given, it is the second."""
+    p = os.path.join(resdir, ".search_mode")
+    q = os.path.join(resdir, ".command_line.txt")
+    if not (os.path.isfile(p) and os.path.isfile(q)):
+        return False
+    with open(p) as fh:
+        mode = fh.read().strip()
+    with open(q) as fh:
+        text = fh.read()
+    return mode == "population-level" and _flag(text, "--per-sample")
+
+
+REGISTRY_ONLY = "Registry-only install for "
+
+
+def registry_only_logged(resdir):
+    """The chromosomes for which the run's SNP post-analysis logged, in its
+    log_verbose.txt (the pipeline's stdout, kept in the result folder), that a dataset it
+    read had a Tier-0 registry and neither a genotype store nor classic per-sample
+    dictionaries (new_simple_analysis.py: 'Registry-only install for <chrom>: ... no
+    genotype tier to resolve carriers.') -- an install made with download --what index
+    --no-genotypes --, leaving out an aggregate registry's line (the sites-only
+    hg38_mega's, which says '(aggregate info_af registry; ...' on it): a sorted list, or
+    None when the folder holds no log_verbose.txt."""
+    p = os.path.join(resdir, "log_verbose.txt")
+    if not os.path.isfile(p):
+        return None
+    out = set()
+    with open(p, errors="replace") as fh:
+        for line in fh:
+            if line.startswith(REGISTRY_ONLY) and "aggregate info_af registry" not in line:
+                out.add(line[len(REGISTRY_ONLY):].split(":", 1)[0].strip())
+    return sorted(out)
+
+
 def run_params(resdir):
     """The run's .Params.txt as {key: value} (empty when it has none)."""
     out = {}
@@ -2236,9 +2378,22 @@ def named_alleles(row, win, rep, gating):
             rep.add(gating, "variant-unparseable", row, t)
             return None
         found = win.by_key.get((p, r, a)) if c == row["chrom"] else None
+        if found and not any(x.searched for x in found):
+            rep.add(gating, "variant-filtered", row,
+                    "%s has FILTER %s, which CRISPRitz's enricher skips (only PASS and '.' "
+                    "are read): no fake-indel window, indel log or SNP store holds it (the "
+                    "phased indel store keeps it, for its carriers' other targets), so no "
+                    "row names it" % (t, found[0].filtered))
+            return None
         if not found:
-            rep.add(gating, "variant-not-in-vcf", row,
-                    "%s is not a record of the VCF (forward strand)" % t)
+            if c == row["chrom"] and (p, r, a) in win.filtered_keys:
+                rep.add(gating, "variant-filtered", row,
+                        "%s has FILTER %s, which CRISPRitz's enricher skips (only PASS and "
+                        "'.' are read): no store CRISPRme's search reads holds it"
+                        % (t, win.filtered_keys[(p, r, a)]))
+            else:
+                rep.add(gating, "variant-not-in-vcf", row,
+                        "%s is not a record of the VCF (forward strand)" % t)
             return None
         if any(x in win.shadowed for x in found) and not any(
                 x not in win.shadowed for x in found):
@@ -2248,7 +2403,7 @@ def named_alleles(row, win, rep, gating):
                     "%s is an earlier SNP record of a split site, which the documented "
                     "limit says CRISPRme's stores do not hold (CHANGELOG 2.8.1 Known "
                     "limits): this index holds it" % t)
-        named.append(found[0])
+        named.append(next((x for x in found if x.searched), found[0]))
     return named
 
 
@@ -2337,8 +2492,12 @@ def row_target(win, row, named, main):
 # the truth: the sample's haplotypes, as its calls give them
 # --------------------------------------------------------------------------- #
 def main_call(win, key, sample):
-    """(the line's allele of ``key``, the sample's call) where the sample carries it."""
+    """(the line's allele of ``key``, the sample's call) where the sample carries it on a
+    line CRISPRme's search reads (a row's record: the dataset that skips the line lists
+    none of its carriers)."""
     for a in win.by_key.get(key, ()):
+        if not a.searched:
+            continue
         c = win.call(a, sample)
         if c is not None and a.number in c[0]:
             return a, c
@@ -3105,6 +3264,32 @@ def check_row(row, win, ctx, rep, gating=True):
                     "target and variants are checked, no carrier is%s"
                     % (tok, "; the record's carriers in the genotyped VCF(s) are "
                             "demanded by completeness" if win.genotyped(main.key) else ""))
+            # its SNVs are those its fake-indel window codes: the dataset's own, whose
+            # FILTER passes, the last record of a split site (sites_only_cps)
+            vis = {win.line_vcf[a.line] for a in win.by_key.get(main.key, ())
+                   if win.line_sites_only[a.line]}
+            for a in named:
+                if a.kind != "snv":
+                    continue
+                own = [x for x in win.by_key.get(a.key, ())
+                       if win.line_sites_only[x.line] and win.line_vcf[x.line] in vis]
+                if not own:
+                    rep.add(gating, "variant-not-in-dataset", row,
+                            "%s is no record of the sites-only VCF that holds %s, whose "
+                            "fake-indel window codes that dataset's SNVs only"
+                            % (a.token(win.chrom), tok))
+                elif all(x.filtered is not None for x in own):
+                    rep.add(gating, "variant-filtered", row,
+                            "%s has FILTER %s in the sites-only VCF that holds %s: its "
+                            "fake-indel window codes the enriched genome's SNVs, which "
+                            "CRISPRitz's enricher keeps only where FILTER is PASS or '.'"
+                            % (a.token(win.chrom), own[0].filtered, tok))
+                elif all(x in win.so_shadowed for x in own if x.filtered is None):
+                    rep.add(False, "variant-shadowed", row,
+                            "%s is an earlier SNP record of a split site of the sites-only "
+                            "VCF that holds %s, whose fake-indel window codes the last "
+                            "(CHANGELOG 2.8.1 Known limits): this index holds it"
+                            % (a.token(win.chrom), tok))
             return
         rep.add(gating, "no-carrier-listed", row, "the row lists no carrier")
         return
@@ -3616,8 +3801,18 @@ def edits(mm, bulges):
 def completeness(win, ctx, rep, reported, region, popmode, stats=None):
     """The real-data brute force over the indel and MNV records of ``region``. ``stats``
     counts the records only sites-only VCFs hold (no sample carries them: nothing to
-    demand, and they are counted, not skipped in silence)."""
+    demand, and they are counted, not skipped in silence) and those CRISPRme's search
+    skips for their FILTER (PASS_FILTERS: no fake-indel window holds them, so no row of
+    theirs is demanded; counted too)."""
     lo_r, hi_r = region
+    if stats is not None:
+        skipped = {key for lo, key, kind, _so in win.dropped
+                   if kind != "snv" and lo_r <= lo < hi_r}
+        skipped |= {a.key for a in win.alleles
+                    if a.kind != "snv" and not a.searched and lo_r <= a.lo < hi_r}
+        n = sum(1 for key in skipped if not win.searched(key))
+        if n:
+            stats["filtered"] = stats.get("filtered", 0) + n
     for gi, guide in enumerate(ctx.guides):
         full = ctx.full(guide)
         one = len(full) + max(ctx.bdna, ctx.brna) + 2   # one target and its bulges
@@ -3627,6 +3822,11 @@ def completeness(win, ctx, rep, reported, region, popmode, stats=None):
                 continue
             if win.by_key[al.key][0] is not al:
                 continue  # one record per key (a second line of it is the same record)
+            if not win.searched(al.key):
+                # an indel only the phased indel store holds (counted above): on its
+                # carriers' haplotypes, a second indel-path record of their other
+                # targets; no row of its own
+                continue
             carriers = set()
             for a in win.by_key[al.key]:
                 carriers.update(win.carriers(a))
@@ -4549,7 +4749,10 @@ def snp_row_seqs(win, ctx, lo, hi):
     for vi, als in sorted(by_vcf.items()):
         if ctx.snp_union or not win.vcfs[vi].samples:
             sets = list(base)
-            for a in als:
+            # a sites-only dataset's SNV outside PASS_FILTERS is a row CRISPRme may write or
+            # not (filtered_sets): hg38_mega's index holds such SNVs, one CRISPRitz's
+            # enricher builds does not
+            for a in [a for a in als if a.filtered is None]:
                 sets[a.lo - lo] = sets[a.lo - lo] | {a.body}
             out.setdefault(tuple(sets), set()).add(frozenset())
             continue
@@ -4632,18 +4835,45 @@ def capped_sets(win, ctx, lo, hi):
     return out
 
 
+def filtered_sets(win, ctx, lo, hi):
+    """[(sets, alleles)]: [lo, hi) of the reference as a sites-only dataset's SNP rows see
+    it with its SNVs whose FILTER is outside PASS_FILTERS (``alleles``) among the options:
+    the hg38_mega index holds such SNVs (its registry holds every one of them, and its rows
+    name them: chr22:11574550 C>G, LOW_VQSLOD), an index CRISPRitz's enricher builds from a
+    sites-only VCF does not, and a run does not say which it read -- so an alignment
+    through one is a row CRISPRme may write or not."""
+    by_vcf = defaultdict(list)
+    for lid in win.lines_in(lo, hi):
+        if not win.line_sites_only[lid]:
+            continue
+        for a in win.line_alleles[lid]:
+            if a is not None and a.kind == "snv" and lo <= a.lo < hi:
+                by_vcf[win.line_vcf[lid]].append(a)
+    out = []
+    for _vi, als in sorted(by_vcf.items()):
+        filt = [a for a in als if a.filtered is not None]
+        if not filt:
+            continue
+        sets = [frozenset((b,)) for b in win.refseq[lo:hi]]
+        for a in als:
+            sets[a.lo - lo] = sets[a.lo - lo] | {a.body}
+        out.append((sets, filt))
+    return out
+
+
 def snp_row_cps(win, ctx, guide, full, a, b):
-    """(certain, capped, dropped): the Cluster Positions of the in-budget alignments of the
+    """(certain, capped, dropped, filtered): the Cluster Positions of the in-budget alignments of the
     guide, both strands, on [a, b) of the reference as its reference and SNP rows see it
     (snp_row_seqs), those of a per-sample run's capped windows' greedy worst-case rows
     (capped_sets: alignments over more than CRISPRME_IUPAC_CAP variant positions), and
     those of a per-sample slot's SNP targets that an indel of the slot touches (rows
     CRISPRme writes only where its reading of the slot through a repeat keeps the
-    carrier), read a piece at a time -- each piece reaching one target and its bulges into
-    the next, so that every alignment lies whole in the piece where it starts -- and kept
-    on the window."""
+    carrier), and those of a sites-only dataset's SNP rows through one of its SNVs whose
+    FILTER is outside PASS_FILTERS (filtered_sets), read a piece at a time -- each piece
+    reaching one target and its bulges into the next, so that every alignment lies whole
+    in the piece where it starts -- and kept on the window."""
     span = len(full) + max(ctx.bdna, ctx.brna) + 2
-    out, capped, dropped = set(), set(), set()
+    out, capped, dropped, filtered = set(), set(), set(), set()
     for c in range(max(0, a) // CHUNK, max(a, b - 1) // CHUNK + 1):
         got = win.snpcps.get((guide, c))
         if got is None:
@@ -4661,11 +4891,15 @@ def snp_row_cps(win, ctx, guide, full, a, b):
             dense = set()
             for sets in capped_sets(win, ctx, lo, hi):
                 dense |= feasible_cps(ctx, full, sets, places, dense=IUPAC_CAP)
-            got = win.snpcps[(guide, c)] = (rows, dense - rows, maybe - rows)
+            filt = set()
+            for sets, als in filtered_sets(win, ctx, lo, hi):
+                filt |= feasible_cps(ctx, full, sets, places, drops=als)[1]
+            got = win.snpcps[(guide, c)] = (rows, dense - rows, maybe - rows, filt - rows)
         out |= got[0]
         capped |= got[1]
         dropped |= got[2]
-    return out, capped - out, dropped - out
+        filtered |= got[3]
+    return out, capped - out, dropped - out, filtered - out
 
 
 def sites_only_cps(win, ctx, full, al, lo, hi):
@@ -4675,7 +4909,8 @@ def sites_only_cps(win, ctx, full, al, lo, hi):
     with the record's ALT written verbatim and an SNV's alleles coded at a flank base --
     a reference base off the record's REF span: the overlay codes no base of the ALT, the
     anchor included (METHODS section 4), so an SNV at the record's own position is in no
-    row of the window."""
+    row of the window. The overlay codes the enriched genome's SNVs: those whose FILTER
+    passes (PASS_FILTERS), the last record of a split site (so_shadowed)."""
     out = set()
     for vi in sorted({win.line_vcf[a.line] for a in win.by_key.get(al.key, ())
                       if win.line_sites_only[a.line]}):
@@ -4685,7 +4920,8 @@ def sites_only_cps(win, ctx, full, al, lo, hi):
             opts = {b}
             if src is None and pl[1] == 0 and not al.lo <= pl[0] < al.hi:
                 opts.update(x.body for x in win.snv_at.get(pl[0], ())
-                            if win.line_vcf[x.line] == vi and x not in win.shadowed)
+                            if win.line_vcf[x.line] == vi and x not in win.shadowed
+                            and x.filtered is None and x not in win.so_shadowed)
             sets.append(frozenset(opts))
         out |= feasible_cps(ctx, full, sets, hap.place)
     return out
@@ -4746,6 +4982,7 @@ OPEN_CLASS = (("overlap", "limit-overlapping-records"),
               ("last-alt-wins", "limit-last-alt-wins"),
               ("putative-untied", "limit-putative-carrier"),
               ("capped", "limit-capped-window"),
+              ("filtered", "limit-filtered-record"),
               ("snp-row-indel", "coverage-snp-row-indel"))
 OPEN_TEXT = {
     "overlap": "the rows of a slot whose alleles overlap, which no documented rule says "
@@ -4760,6 +4997,9 @@ OPEN_TEXT = {
     "capped": "a capped window's greedy worst-case row, which a per-sample run writes only "
               "on the classic dictionary path (an index built without --samplesID; METHODS "
               "section 5, known limit), and the run does not say which it took",
+    "filtered": "a row of a sites-only dataset through one of its SNVs whose FILTER is "
+                "not PASS or '.': the hg38_mega index holds such SNVs, an index CRISPRitz's "
+                "enricher builds does not, and a run does not say which it read",
     "snp-row-indel": "a per-sample SNP row of a haplotype whose slot also holds an indel "
                      "that touches the target: CRISPRme drops such a carrier unless its "
                      "reading of the slot through a repeat keeps the target's bases "
@@ -4773,13 +5013,15 @@ def chain_cps(win, ctx, guide, full, a, b):
     touches it (record_cps; a merge cluster holds the rows of every record, and the
     alleles of one multi-allelic site put their targets a few bases apart) -- and
     {Cluster Position: why} of the rows it may write or not (OPEN_CLASS)."""
-    rows, capped, dropped = snp_row_cps(win, ctx, guide, full, a, b)
+    rows, capped, dropped, filtered = snp_row_cps(win, ctx, guide, full, a, b)
     out = set(rows)
     opened = defaultdict(set)
     for c in capped:
         opened[c].add("capped")
     for c in dropped:
         opened[c].add("snp-row-indel")
+    for c in filtered:
+        opened[c].add("filtered")
     seen = set()
     for lid in win.lines_in(a, b):
         for x in win.line_alleles[lid]:
@@ -5378,7 +5620,8 @@ def row_span(r, pad):
 
 def run_unit(unit):
     """One work unit: ('sound' | 'comp', chrom, lo, hi, rows). Returns (the findings, the
-    unit's counts: {'sites_only': records only sites-only VCFs hold})."""
+    unit's counts: {'sites_only': records only sites-only VCFs hold, 'filtered': records
+    the search skips for their FILTER})."""
     kind, ch, tlo, thi, rows = unit
     ctx = G["ctx"]
     rep = Report()
@@ -5603,6 +5846,34 @@ def main(argv=None):
     ref.keep_all = args.jobs > 1  # loaded once in this process, shared with the workers
     vcfs_all = [Vcf(p) for p in vcf_paths]
     no_genotypes = not any(v.samples for v in vcfs_all)
+    logged = registry_only_logged(args.results) if not no_genotypes else None
+    if logged:
+        # a genotyped dataset searched without its genotype store, in any mode: the run's
+        # own log says so (PRECONDITION), and it is refused
+        sys.stderr.write(
+            "ERROR: the run's log_verbose.txt says that a dataset it searched had neither a "
+            "genotype store (Dictionaries/genotypes_<vcf>/) nor classic per-sample "
+            "dictionaries ('%s%s: ...', not an aggregate registry's), as after download "
+            "--what index --no-genotypes, and the VCF(s) given hold genotypes. Such a "
+            "search lists every carrier of an indel on its SNP+indel rows, which this "
+            "checker does not model (it models a search that read the genotypes the VCF "
+            "holds: install the index with its genotype store and search again); the run "
+            "is not checked\n" % (REGISTRY_ONLY, ", ".join(logged)))
+        return 2
+    if not no_genotypes and per_sample_downgraded(args.results):
+        # --per-sample on a genotyped dataset without its genotype store: the run records it
+        # (the PRECONDITION's one case a result folder tells apart), and it is refused
+        sys.stderr.write(
+            "ERROR: the run asked for --per-sample and ran population-level (its "
+            ".search_mode), which complete-search does where every dataset it searches is "
+            "sites-only or where a genotyped one has no genotype store "
+            "(Dictionaries/genotypes_<vcf>/) and no classic per-sample dictionaries (an "
+            "install made with download --what index --no-genotypes); the VCF(s) given hold "
+            "genotypes, so it is the second. Such a run lists every carrier of an indel on "
+            "its SNP+indel rows, which this checker does not model (it models a search that "
+            "read the genotypes the VCF holds: install the index with its genotype store "
+            "and search again); the run is not checked\n")
+        return 2
     # the panel: the samplesID files given, else the run's .sampleID.txt, else every
     # sample of the VCF(s); CRISPRme lists no carrier outside it
     panel_from = args.samples
@@ -5832,12 +6103,14 @@ def main(argv=None):
         pw.writeheader()
 
     sites_only = defaultdict(int)   # chromosome -> records only sites-only VCFs hold
+    filtered = defaultdict(int)     # chromosome -> records the search skips for FILTER
     long_ref = {}                   # unindexed VCF -> the longest REF its reads met
 
     def keep(result):
         found, stats = result
         rep.rows.extend(found)
         sites_only[stats["chrom"]] += stats.get("sites_only", 0)
+        filtered[stats["chrom"]] += stats.get("filtered", 0)
         for path, n in stats.get("long_ref", {}).items():
             long_ref[path] = max(n, long_ref.get(path, 0))
         if partial is not None:
@@ -5870,6 +6143,15 @@ def main(argv=None):
                 "enumerate and nothing to demand (a sites-only dataset's rows list no "
                 "carrier; soundness checks those rows themselves)"
                 % (sites_only[ch], ch, "" if lo is None else " in the region"))
+    for ch in sorted(c for c, n in filtered.items() if n):
+        rep.add(False, "limit-filtered-record", {"table": "completeness", "chrom": ch},
+                "%d indel/MNV record(s) of %s%s have a FILTER other than PASS or '.', which "
+                "CRISPRitz's enricher skips: no fake-indel window or indel log holds them, "
+                "so no row of theirs is demanded. A genotyped dataset's indels among them "
+                "stay on their carriers' haplotypes, as CRISPRme's phased indel store, "
+                "which keeps every indel of the VCF, reads them (a second indel-path record "
+                "of the targets they change)" % (filtered[ch], ch,
+                                                 "" if lo is None else " in the region"))
     for path in sorted(long_ref):
         rep.add(False, "coverage-unindexed-long-ref", {"table": ""},
                 "this checker's own coverage gap, not a CRISPRme limit: %s has no .tbi "

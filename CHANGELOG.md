@@ -56,7 +56,23 @@ and the `release-crisprme` skill.
     copies counted against the record's call. The rule chooses only at the fake-indel
     window's code columns, the target's reference bases off the record's own REF span: the
     window writes the ALT verbatim, the anchor included, so a SNV at the record's position
-    is never a choice. CRISPRme's documented reading of a carrier (METHODS section 4 and the
+    is never a choice. The records are those the search read: CRISPRitz's enricher skips
+    every VCF line whose FILTER is neither `PASS` nor `.` (no such line is in the enriched
+    genome, its dictionaries and stores, the indel log or the fake-indel windows), while
+    the phased indel store keeps every indel whatever its FILTER and the carrier resolution
+    reads it (a second or overlapping indel takes a carrier off a target, and a SNP row
+    drops a carrier for an indel of its slot). So a genotyped dataset's line outside `PASS`
+    and `.` keeps its indels on their carriers' haplotypes, as no record of the search (a
+    row naming one fails, `variant-filtered`; completeness demands none of their targets,
+    `limit-filtered-record`), and its SNVs and MNVs are read as the reference; a sites-only
+    dataset's keeps its SNVs for its SNP rows (the `hg38_mega` index's hold them: its
+    registry holds all 78,116 of chr22 outside `PASS`, and its SNP rows name some), a SNP
+    row through one being a row CRISPRme may write or not, while its fake-indel windows
+    code its `PASS` SNVs only, the last record of a split site (as CRISPRitz's overlay
+    does: a carrier-less row naming another fails, `variant-filtered`, as does one naming
+    an SNV of another dataset, `variant-not-in-dataset`), and it drops its indels and MNVs
+    (`hg38_mega`'s indel log holds exactly its `PASS` indels).
+    CRISPRme's documented reading of a carrier (METHODS section 4 and the
     2.8.1 Known limits: one indel per window, resolved with each carrier's own SNP alleles;
     a second indel read from either end of the target through the indel; the phasing
     artefact and the complex allele; MNVs and untied multi-ALT alts resolved PUTATIVE; only
@@ -65,8 +81,9 @@ and the `release-crisprme` skill.
     its cause, a PUTATIVE tie included) or a failure.
   - **Soundness**: every indel/MNV row block of the integrated results (the three blocks)
     and of the alternative alignments must be labelled ALT, name one indel-path record (and
-    SNPs), all VCF records; have an aligned spacer that is the guide with its PAM, counts
-    and a bulge type that recount, no gap in the PAM, a PAM the search matched and a REF
+    SNPs), all records of the VCF the search read; have an aligned spacer that is the guide
+    with its PAM, counts and a bulge type that recount, no gap in the PAM, a PAM the search
+    matched and a REF
     text read from its start; and have a target that is the reference with exactly its named
     variants, read from its start under the placement convention below, holding a base of
     its record. Each listed carrier must be a sample of the panel and hold the target on a
@@ -110,7 +127,8 @@ and the `release-crisprme` skill.
     touching it), are followed only where the rows it writes reach no row as good as the
     target: a cluster reached only through them is counted under their cause's class,
     neither passed nor failed. Records only sites-only VCFs hold are counted, one
-    `limit-no-genotypes` line per chromosome.
+    `limit-no-genotypes` line per chromosome, and those whose FILTER the search skips, one
+    `limit-filtered-record` line.
   - **The SNP-row report** (`--snp-rows report`, per-sample runs, report-only): the same
     checks of a SNP row's strings, target and named variants (each must lie in the target),
     its listed carriers and the phased carriers a SNP row of its site leaves out, each read
@@ -136,11 +154,13 @@ and the `release-crisprme` skill.
     `variant-missing`, `carrier-not-strongest`, `carrier-missing`, `carrier-not-in-panel`,
     `carrier-off-by-rule`, `missing-row`, `missing-putative-row`, `missing-best-alignment`,
     `missing-locus`, `origin-not-alt`, `alt-without-variant`, `row-unreadable`,
-    `row-not-checked`, ...); non-gating ones, each listed with its samples, are CRISPRme's
-    documented limits (`limit-last-alt-wins`, `limit-two-indels`, `limit-putative-carrier`,
-    `limit-overlapping-records`, `limit-capped-window`, `limit-contig-end`, `limit-n-bases`,
-    `limit-no-genotypes`, and in the SNP-row report `limit-snp-row-mnv` and
-    `limit-snp-row-unphased`), the notes `variant-shadowed`, `overlap-reading-agrees` and
+    `row-not-checked`, `variant-filtered`, `variant-not-in-dataset`, ...); non-gating ones,
+    each listed with its samples, are CRISPRme's documented limits (`limit-last-alt-wins`,
+    `limit-two-indels`, `limit-putative-carrier`, `limit-overlapping-records`,
+    `limit-capped-window`, `limit-contig-end`, `limit-n-bases`, `limit-no-genotypes`,
+    `limit-filtered-record`, and in the SNP-row report `limit-snp-row-mnv` and
+    `limit-snp-row-unphased`), the notes
+    `variant-shadowed`, `overlap-reading-agrees` and
     `guide-not-given`, the SNP-row report's own findings (report-only: its
     `snp-row-indel-carrier` and the classes above), and five coverage gaps of the checker
     itself, not CRISPRme limits (`coverage-overlap-cap`, `coverage-putative-cap`,
@@ -153,14 +173,21 @@ and the `release-crisprme` skill.
     records `Genome_idx None` whatever it searched, and its datasets are then its `--vcf`
     list's lines, read in its working directory), a guide its `.guides.txt` does not hold, a
     `--samples` other than its `.sampleID.txt`, an `--analysis` other than its
-    `.search_mode` —, a run whose own records contradict each other, and one that does not
-    record what the check needs (whether it wrote alternative alignments and, where it wrote
-    none, its mode; `--analysis` can give it). `--chrom` / `--region`, `--jobs N`,
-    `--known` (findings already reported upstream turn non-gating, and a listed one that
-    stops showing is reported). It models a search that read each genotyped dataset's
+    `.search_mode` —, a run whose own records contradict each other, a search of a
+    genotyped dataset without its genotype store that says so (below), and one that does
+    not record what the check needs (whether it wrote alternative alignments
+    and, where it wrote none, its mode; `--analysis` can give it). `--chrom` / `--region`,
+    `--jobs N`, `--known` (findings already reported upstream turn non-gating, and a listed
+    one that stops showing is reported). It models a search that read each genotyped dataset's
     genotypes (its genotype store, or classic dictionaries): an install without them
     (`download --what index --no-genotypes`) lists every carrier of an indel on a SNP+indel
-    row, which its result folder does not record, and is not to be checked.
+    row. Such a search records it — its `log_verbose.txt` holds the SNP post-analysis's
+    `Registry-only install for <chrom>` line for the dataset (`hg38_mega`'s aggregate
+    registry's, marked so, is not counted), and a `--per-sample` one writes `.search_mode`
+    population-level beside `--per-sample` — and given a genotyped VCF the check refuses
+    the run; without that line (no `log_verbose.txt`, or a dataset its SNP post-analysis
+    never read), a run made with `--population-level` or no mode flag records nothing else
+    that tells it apart, and is not to be checked.
   - Measured on this release's code (its post-analysis files over the released 2.8.1
     image, searched through the README's apptainer route), chr22 of HGDP + 1000 Genomes,
     the README guide, NRG, 4 mismatches + 1 + 1: soundness and completeness pass in both
@@ -172,7 +199,11 @@ and the `release-crisprme` skill.
     site 1) in both modes, HPRC chr22 (9,125 MNVs, 4.5% of its calls with a missing allele)
     and a copy of it with every fourth sample unphased in both modes, and the default index
     beside the sites-only `hg38_mega` in both modes (6,747 and 274 row blocks of
-    `hg38_mega` list no carrier and are checked as rows). On the documented chr22 self-test
+    `hg38_mega` list no carrier and are checked as rows; completeness counts the 127,735
+    indel records only `hg38_mega` holds and the 32,178 whose FILTER the search skips). The
+    SNP+indel oracle with records marked `LowQual` (a SNP and a deletion, and the second
+    deletions, an insertion inside a SNP target and an MNV the phased indel store reads or
+    not) passes in both modes. On the documented chr22 self-test
     (`complete-test`, as CI runs it) every benchmark passes soundness, `cas9_sg1617` and
     `cas12a_hbg` completeness, and removing `cas9_sg1617`'s 5 indel rows is caught at each
     of their 5 clusters; CI's step, replayed verbatim, passes there (about 4 min) and fails
@@ -208,10 +239,24 @@ and the `release-crisprme` skill.
     while the merge sorts on the ALT's (on an indel row the REF text is the reference read
     from its start, not a target: its score is the one printed on 99, 41 and 60 indel row
     blocks of the 2.8.1 genome-wide README per-sample, population-level and TRAC runs); the
-    published `hg38_mega` index reads its VCF's split sites otherwise than the documented
-    split-site limit says (its carrier-less SNP rows name the earlier record of 62 split
-    sites of chr22, against the last of 131, and its indel rows that of one, chr22:25093750
-    C>G before C>T), so a sites-only VCF's split site is not read as shadowed; and beside
+    published `hg38_mega` index's SNP rows read its VCF otherwise than CRISPRitz's enricher
+    does: they name an earlier record at 58 split sites of chr22 against the last at 131 (57
+    of them a `PASS` record before a later `PASS` one, as chr22:11337076 G>C before G>T) and
+    SNVs whose FILTER is not `PASS` (chr22:11574550 C>G, `LOW_VQSLOD`; its registry holds
+    all 78,116 such SNVs of chr22), so a sites-only VCF's split site is not read as shadowed
+    by its SNP rows and its SNVs outside `PASS` are rows CRISPRme may write or not, while its
+    indel rows follow the enricher (the last record at 279 split sites, and at
+    chr22:25093750 the `PASS` C>G before the `LOW_VQSLOD` C>T), as does its indel log
+    (exactly its 222,283 `PASS` indels of chr22); CRISPRme's phased indel store keeps every
+    indel of a VCF whatever its FILTER, so on a VCF with records outside `PASS` and `.` a
+    carrier is taken off an indel row's target, and off a SNP row, for an indel no
+    fake-indel window of the search holds (the oracle with its sites O, Q and Y1 marked
+    `LowQual`), which nothing documents; a search whose targets reach 27 nt (SaCas9: a
+    21-nt guide and a 6-nt PAM) loses those that start at a fake-indel window's first base
+    (on chr22 of HGDP + 1000 Genomes, `CACTTTGGGAGGCCGAGGCGG` with `NNGRRT`, 2 mismatches,
+    per sample: 2,103 carrier targets at 6 records, 2,088 of them the insertion
+    chr22:17325232 A>AT's, the same on two fresh searches; an SpCas9 target, 24 nt at most
+    in these searches, never starts there holding its record); and beside
     `hg38_mega` the merge, whose key for a SNP row is its Cluster Position and variant list,
     keeps `hg38_mega`'s worst-case alignment of a site under the HGDP + 1000 Genomes
     carriers of the same variants: 60 SNP row blocks (28 lines of the alternative
@@ -219,7 +264,7 @@ and the `release-crisprme` skill.
     bases than the SNP they carry (chr22:17368905 (−), chr22_17368909_G_C: HGDP01090,
     HGDP01405, NA19351), where the HGDP + 1000 Genomes run alone lists them on an alignment
     that holds it (report-only).
-  - Wired in: `PostProcess/test_check_indel_rows.py` (182 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (191 unit and mutation tests: a right
     row raises nothing gating, each corruption of it is caught, each documented limit and
     overlapping slot comes out under its own class, the checker's coverage gaps under
     theirs; the refusals; the same verdict under every hash seed; and the checker holds no

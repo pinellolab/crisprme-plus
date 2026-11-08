@@ -121,7 +121,8 @@ python3 "$SRC/scripts/check_alt_pam.py" "$GATE"/heavy/Results/crisprme-test-out_
 #     needs only Python's standard library (the repository's CFD tables are read as data).
 #     $D22 is a chr22-only HGDP + 1000 Genomes install (Genomes/hg38, VCFs/hg38_HGDP1kGP,
 #     genome_library, Dictionaries with its genotype store: the checker models a search that
-#     read the genotypes, so not an install made with --no-genotypes), $VCF its chr22 VCF (a
+#     read the genotypes, so not an install made with --no-genotypes, whose searches it
+#     refuses where they say so), $VCF its chr22 VCF (a
 #     .tbi beside it makes reads seeks; without one the VCF is read once into an in-memory
 #     index, nothing is written).
 #     Run the README guide, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, in BOTH modes first:
@@ -178,7 +179,10 @@ done
 #     are always required), windows across N
 #     (limit-n-bases), a sites-only dataset's rows, which list no
 #     carrier (limit-no-genotypes: none here; to check a search of the default index beside
-#     hg38_mega, give both VCFs, --vcf "$VCF" --vcf <mega chr22 VCF>), the note
+#     hg38_mega, give both VCFs, --vcf "$VCF" --vcf <mega chr22 VCF>), the records whose
+#     FILTER (neither PASS nor '.') CRISPRitz's enricher skips (limit-filtered-record: none
+#     on this panel, whose FILTER is '.'; 32,178 indels of hg38_mega's chr22 beside it),
+#     the note
 #     variant-shadowed, and the checker's own coverage gaps (coverage-putative-cap: a
 #     carrier resolved PUTATIVE with more than 10 positions near a record where its
 #     alleles allow two bases, whose targets touching a call of unknown phase are not
@@ -205,7 +209,10 @@ done
 #     holds its Results), a guide its .guides.txt does not hold (a subset of its
 #     guides is checked; the others are counted, guide-not-given), a --samples other than
 #     its .sampleID.txt, an --analysis other than its .search_mode (the mode the search
-#     ran), a run whose records contradict each other, or one that does not record what
+#     ran), a run whose records contradict each other, a search of a genotyped dataset
+#     without its genotype store that says so (its log_verbose.txt's "Registry-only
+#     install" line, or a --per-sample search run population-level), or one that does not
+#     record what
 #     the check needs (whether it wrote alternative alignments and, where it wrote none,
 #     its mode: --ci-cd-test chooses none; --analysis can give it). Genome-wide
 #     COMPLETENESS (at most about 52 CPU-hours per guide: 53 to 78 min on 40 processes of a

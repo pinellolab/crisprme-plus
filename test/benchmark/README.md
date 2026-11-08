@@ -153,12 +153,24 @@ whose records contradict each other, and one that does not record what the check
 (whether it wrote alternative alignments and, where it wrote none, its mode, which
 `--analysis` can give). It models a search that read each genotyped dataset's genotypes
 (its genotype store, or classic dictionaries): an install made with `--no-genotypes`
-lists every carrier of an indel on a SNP+indel row, which its result folder does not
-record, and is not to be checked. `--snp-rows report` adds, report-only, the SNP-only rows
-of a per-sample run, their carriers read as METHODS section 4 reads them (an unphased
-individual listed for every subset of its variants, the merge joining a site's SNP rows of
-one variant list, and since 2.10.0 a carrier dropped whose slot holds an indel of the
-phased store that changes the target).
+lists every carrier of an indel on a SNP+indel row; its search says so (its
+`log_verbose.txt` holds the SNP post-analysis's `Registry-only install for <chrom>` line,
+not counting an aggregate registry's such as `hg38_mega`'s, and a `--per-sample` one
+records `.search_mode` population-level beside `--per-sample`), and given a genotyped VCF
+the check refuses it (exit 2); without that line (no `log_verbose.txt`, or a dataset its
+SNP post-analysis never read), a run made with `--population-level` or no mode flag records
+nothing else that tells it apart, and is not to be checked. The VCF is read as the search
+read it: CRISPRitz's enricher skips every line whose FILTER is neither `PASS` nor
+`.`, so a genotyped dataset's such line is read as the reference but for its indels,
+which stay on their carriers' haplotypes as no record of the search (the phased indel
+store keeps them, and CRISPRme's carrier resolution reads them: a row naming one fails,
+none of their targets is demanded, `limit-filtered-record`); a sites-only dataset's such
+indels are dropped, and its SNVs read by its SNP rows only (`hg38_mega` holds them, an index
+the enricher builds does not: a row CRISPRme may write or not). `--snp-rows report` adds,
+report-only, the SNP-only rows of a per-sample run, their carriers read as METHODS section 4
+reads them (an unphased individual listed for every subset of its variants, the merge
+joining a site's SNP rows of one variant list, and since 2.10.0 a carrier dropped whose slot
+holds an indel of the phased store that changes the target).
 `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check` (both profiles),
 `validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
 `docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a real HGDP + 1000 Genomes
