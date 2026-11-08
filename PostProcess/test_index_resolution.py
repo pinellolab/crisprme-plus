@@ -3964,6 +3964,21 @@ class TheSnpCodesOfASearchsOwnEnrichment(_ShippedScript):
         with gzip.open(self.store / "gt_indel_chr1.tsv.gz", "rt") as fh:
             self.assertEqual(fh.read(), "kept\n")
 
+    def test_the_opt_out_is_in_the_runs_log(self):
+        """CRISPRME_INDEL_SNP=0 changes the rows of every dataset (2.8.1's two passes), and
+        nothing in the results says so: the search's stdout, its log_verbose.txt, does,
+        once per variant dataset (the real-data indel check refuses such a run on it)."""
+        note = ("NOTE: the SNP+indel co-occurrence is off (CRISPRME_INDEL_SNP=0): every SNP "
+                f"code of the fake-indel genome of {self.VCF} reads as the reference base")
+        self.install("NRG_2", variant=False)
+        self.vcfs()
+        run = self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1",
+                                     "CRISPRME_INDEL_SNP": "0"})
+        self.assertEqual(run.stdout.count(note), 1, run.stdout)
+        self.assertFalse(self.store.exists())
+        run = self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"})
+        self.assertNotIn("SNP+indel co-occurrence is off", run.stdout)
+
     def test_a_store_of_an_earlier_release_in_place_is_written_again(self):
         # its marker (or none) does not say that it leaves out the records whose FILTER the
         # search skips, which no fake-indel window holds (build_indel_genotypes)

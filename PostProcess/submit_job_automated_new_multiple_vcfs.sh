@@ -687,6 +687,15 @@ while read vcf_f; do
 	#folder_of_folders=$(dirname $1)
 	vcf_name=$(basename $vcf_f)
 	echo "STARTING ANALYSIS FOR $vcf_name"
+	# The opt-out of the SNP+indel co-occurrence, in the run's own log (its stdout is
+	# log_verbose.txt): what it changes in the rows is said nowhere else in the results
+	case "${CRISPRME_INDEL_SNP-1}" in
+	1 | true | True | yes) ;;
+	*)
+		[ "$vcf_name" = "_" ] ||
+			echo "NOTE: the SNP+indel co-occurrence is off (CRISPRME_INDEL_SNP=0): every SNP code of the fake-indel genome of $vcf_name reads as the reference base, so an indel row names no SNP and lists every carrier of its indel, and a SNP row keeps a carrier whose haplotype holds an indel in the target (METHODS section 4)"
+		;;
+	esac
 	# echo $vcf_name
 	guide_name=$(basename $3)
 	pam_name=$(basename $4)
