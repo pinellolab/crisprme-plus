@@ -3954,13 +3954,29 @@ class TheSnpCodesOfASearchsOwnEnrichment(_ShippedScript):
                          sorted(["hg38", f"hg38+{self.VCF}", f"hg38+{self.VCF}_INDELS"]))
 
     def test_a_store_in_place_is_kept(self):
+        # one of 2.10.0, whose .done marker says it holds the records of PASS and '.'
         self.install("NRG_2", variant=False)
         self.vcfs()
         self.store.mkdir()
         (self.store / "gt_indel_chr1.tsv.gz").write_bytes(gzip.compress(b"kept\n"))
+        (self.store / "gt_indel_chr1.tsv.gz.done").write_text("1\nFILTER\tPASS,.\n")
         self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"})
         with gzip.open(self.store / "gt_indel_chr1.tsv.gz", "rt") as fh:
             self.assertEqual(fh.read(), "kept\n")
+
+    def test_a_store_of_an_earlier_release_in_place_is_written_again(self):
+        # its marker (or none) does not say that it leaves out the records whose FILTER the
+        # search skips, which no fake-indel window holds (build_indel_genotypes)
+        self.install("NRG_2", variant=False)
+        self.vcfs()
+        self.store.mkdir()
+        (self.store / "gt_indel_chr1.tsv.gz").write_bytes(gzip.compress(b"old\n"))
+        (self.store / "gt_indel_chr1.tsv.gz.done").write_text("1\n")
+        run = self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"})
+        with gzip.open(self.store / "gt_indel_chr1.tsv.gz", "rt") as fh:
+            self.assertIn("S2", fh.read(), run.stdout + run.stderr)
+        self.assertEqual((self.store / "gt_indel_chr1.tsv.gz.done").read_text().splitlines()[1:],
+                         ["FILTER\tPASS,."])
 
     def test_a_fake_genome_in_place_is_coded_before_its_index_is_built(self):
         # one a search before 2.8.1 enriched, or that came another way
