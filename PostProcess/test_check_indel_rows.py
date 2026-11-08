@@ -1438,20 +1438,27 @@ class ReviewRound2(Base):
         self.assertIn("limit-n-bases", classes(found), found)
 
     def test_the_checker_holds_no_crisprme_code(self):
-        """F1: no import of CRISPRme's variant or indel modules, and none of the helper
-        names of PostProcess/indel_snp_cis.py (a regression guard against copying)."""
+        """F1: no import of CRISPRme's variant or indel modules, none of the helper names of
+        PostProcess/indel_snp_cis.py or site_alleles.py, and no function of site_alleles
+        named as the source of a rule (a regression guard against copying: R-B1's
+        merge_call was site_alleles.merge_gt under another name)."""
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
                                "scripts", "check_indel_rows.py")) as fh:
             src = fh.read()
         for mod in ("indel_snp_cis", "analisi_indels", "overlay_indel", "resultIntegrator",
                     "remove_contiguous_samples", "observed_haplotypes", "cfd_score",
-                    "bulge_cfd_penalty"):
+                    "bulge_cfd_penalty", "site_alleles", "tier0_compile", "tier1_genotypes",
+                    "simple_analysis_registry", "population_summary", "new_simple_analysis",
+                    "haplotype_prioritizer"):
             self.assertNotRegex(src, r"(?m)^\s*(from|import)\s+%s" % mod)
         for name in ("kept_bases", "shared_tail", "changes_span", "target_ref_span",
                      "holds_indel", "local_haplotype", "target_pairs", "biallelic_site",
                      "resolve_carriers", "worst_case_bases", "_for_alt", "reference_start",
-                     "window_place", "holds_target_bases"):
+                     "window_place", "holds_target_bases", "snp_target_held", "merge_gt",
+                     "merge_carriers", "read_records", "per_alt_entries", "per_alt",
+                     "alt_tokens", "for_alt", "gt_tokens", "two_alts_on_a_slot"):
             self.assertNotRegex(src, r"\bdef %s\b" % name)
+        self.assertNotRegex(src, r"site_alleles\.(?!py\b)\w")
 
 
 # --------------------------------------------------------------------------- #
@@ -4809,11 +4816,13 @@ class ReleaseTwoTen(Base):
 
     def test_two_alts_of_one_position_on_a_slot_are_putative(self):
         """Every allele coded, a slot can hold two ALTs of one position (split records
-        phased one by one): no haplotype, so no truth there, and CRISPRme resolves the
-        carrier PUTATIVE (METHODS section 4). S01's D slot holds the deletion and both ALTs
+        phased one by one): no haplotype, and CRISPRme resolves the carrier PUTATIVE
+        (METHODS section 4, decision B4), the rule it resolves a call of unknown phase by,
+        which so is the truth there (R-B2). S01's D slot holds the deletion and both ALTs
         of a spacer position, one of them the guide's base: listed for the guide's base,
-        the row passes; a row listing S01 for the other ALT's weaker target fails
-        (carrier-off-by-rule: the rule lists it for its strongest one)."""
+        the row passes; a row that leaves S01 out fails (carrier-missing: it was counted
+        as an overlap, never required), and one listing S01 for the other ALT's weaker
+        target fails (carrier-not-strongest)."""
         seq = PRE + GUIDE[:5] + "C" + GUIDE[6:10] + "C" + GUIDE[10:] + "TGG" + POST
         dpos, spos = len(PRE) + 10, len(PRE) + 6
         third = next(x for x in "ACGT" if x not in ("C", GUIDE[5]))
@@ -4827,6 +4836,11 @@ class ReleaseTwoTen(Base):
         case = as_2100(Case(self.tmp, seq, recs, [row]))
         rc, found = case.run()
         self.assertEqual((rc, gating(found)), (0, []), found)
+        write_results(case.res, [set_field(row, samples="S02")])
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("carrier-missing", "S01")},
+                         found)
         weak = list(GUIDE + "TGG")
         weak[5] = third.lower()
         var3 = "%s,%s" % (tok("chr21", recs[2]), tok("chr21", recs[1]))
@@ -4836,7 +4850,7 @@ class ReleaseTwoTen(Base):
         rc, found = case.run()
         self.assertEqual(rc, 1, found)
         self.assertEqual({(f[1], f[3]) for f in gating(found)},
-                         {("carrier-off-by-rule", "S01")}, found)
+                         {("carrier-not-strongest", "S01")}, found)
 
     def test_two_alts_of_one_slot_leave_the_reference_out(self):
         """The PUTATIVE rule counts a carrier's copies against the record's call (METHODS
@@ -4844,7 +4858,8 @@ class ReleaseTwoTen(Base):
         reference base is the guide's, so its two ALT copies fill its two slots and the
         reference is no option there, as CRISPRme 2.10.0 resolves it (candidates C and G,
         not A). Listed for the stronger ALT's target, the row passes; listed for the weaker
-        one's, or for the perfect target, it fails."""
+        one's (completeness then misses the stronger one's row), or for the perfect target,
+        it fails."""
         seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
         dpos, spos = len(PRE) + 10, len(PRE) + 6
         alts = [x for x in "ACGT" if x != GUIDE[5]][:2]
@@ -4867,39 +4882,142 @@ class ReleaseTwoTen(Base):
                                        "".join(weak), "TGG", 1, 0, "X", "%s,%s" % (
                                            dtok, tok("chr21", recs[alt_k])), "S01"))
             case = as_2100(Case(tmp, seq, recs, rows))
-            return [case.run(mode=m) for m in ("soundness", "completeness")]
+            # (one mismatch, no bulge: the rows written are every target in that budget)
+            return [case.run(mode=m, budget=("1", "0", "0", "1"))
+                    for m in ("soundness", "completeness")]
 
         verdicts = []
         for k in (0, 1):
             (rc_s, found_s), (rc_c, found_c) = run("S02", k)
-            self.assertEqual((rc_c, gating(found_c)), (0, []), found_c)
-            verdicts.append((rc_s, sorted({(f[1], f[3]) for f in gating(found_s)})))
-        self.assertEqual(sorted(verdicts), [(0, []), (1, [("carrier-off-by-rule", "S01")])],
-                         verdicts)
+            verdicts.append((rc_s, sorted({(f[1], f[3]) for f in gating(found_s)}),
+                             rc_c, sorted({(f[1], f[3]) for f in gating(found_c)})))
+        self.assertEqual(sorted(verdicts),
+                         [(0, [], 0, []),
+                          (1, [("carrier-not-strongest", "S01")], 1,
+                           [("missing-putative-row", "S01")])], verdicts)
         (rc, found), _ = run("S01,S02")
         self.assertEqual(rc, 1, found)
         self.assertEqual({(f[1], f[3]) for f in gating(found)},
-                         {("carrier-off-by-rule", "S01")}, found)
+                         {("carrier-without-allele", "S01")}, found)
 
     def test_two_records_of_one_snv_are_one_allele(self):
         """Every allele coded, two lines of one SNV REF>ALT are one allele, their calls
-        merged as CRISPRme 2.10.0 merges them: phased slot by slot, a slot holding the ALT
-        if either line puts it there; otherwise unphased with the larger copy count. On
-        the genome of the last record (no semantics given) they stay two lines."""
+        merged as CRISPRitz 2.10.0's enricher merges them into the allele's one dictionary
+        entry (its CHANGELOG, docs/MULTIALLELIC_ENRICHMENT.md section 2.3; R-B1): phased
+        alike, slot by slot, a slot holding the ALT if either line puts it there; otherwise
+        the call with more copies of the ALT, the earlier one on a tie, as it is. On the
+        genome of the last record (no semantics given) they stay two lines."""
         seq = "ACGT" * 20
         vcf = os.path.join(self.tmp, "v.vcf.gz")
-        write_vcf(vcf, "chr21", [(5, "A", "C", {"S01": "1|0", "S02": "1|0", "S03": "0/1"}),
-                                 (5, "A", "C", {"S01": "0|1", "S02": "1|0", "S03": "1|0"})])
+        write_vcf(vcf, "chr21", [(5, "A", "C", {"S01": "1|0", "S02": "1|0", "S03": "0/1",
+                                                "S04": "1|0", "S05": "1", "S06": "0/1"}),
+                                 (5, "A", "C", {"S01": "0|1", "S02": "1|0", "S03": "1|0",
+                                                "S04": "0/1", "S05": "0|1", "S06": "1|1"})])
         sem = C.Semantics(True, {(None, None): {"all_alleles": True, "store_filter": True,
                                                 "indels": (2, 2)}}, {})
         win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)], sem=sem)
         self.assertEqual(len(win.by_key[(5, "A", "C")]), 1)
         a = win.by_key[(5, "A", "C")][0]
-        self.assertEqual(win.call(a, "S01"), ((1, 1), True))
-        self.assertEqual(win.call(a, "S02"), ((1, 0), True))
-        self.assertEqual(win.call(a, "S03"), ((1, 0), False))
+        self.assertEqual({s: win.call(a, s) for s in ("S01", "S02", "S03", "S04", "S05",
+                                                      "S06")},
+                         {"S01": ((1, 1), True), "S02": ((1, 0), True), "S03": ((0, 1), False),
+                          "S04": ((1, 0), True), "S05": ((1,), True), "S06": ((1, 1), True)})
+        self.assertEqual(C.merge_call(((1, None), True), ((None, 0), True)), ((1, 0), True))
+        self.assertEqual(C.merge_call(((None, None), True), ((None, 0), True)),
+                         ((None, 0), True))
         old = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
         self.assertEqual(len(old.by_key[(5, "A", "C")]), 2)
+
+    def test_a_phased_call_beside_an_unphased_one_of_its_allele_stays_phased(self):
+        """R-B1, through the check: S01 is 1|0 on the first line of a SNV and 0/1 on a
+        second line of the same REF>ALT, both beside the deletion D on its first slot.
+        CRISPRitz 2.10.0's dictionary entry keeps 1|0 (the calls are not phased alike, and
+        their copies tie), so CRISPRme lists S01 for D's target through the SNV, its slot's
+        own sequence. Read with the calls made unphased (CRISPRme's own reader merge,
+        site_alleles.merge_gt, which never sees such an entry), the check demanded the
+        PUTATIVE rule's strongest target, the reference base there, and failed the row."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dpos, spos = len(PRE) + 10, len(PRE) + 6
+        alt_b = other(GUIDE[5])
+        recs = [(spos, GUIDE[5], alt_b, {"S01": "1|0"}),
+                (spos, GUIDE[5], alt_b, {"S01": "0/1"}),
+                (dpos, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "1|0"})]
+        start = len(PRE)
+        ref23 = seq[start:start + 23]
+        dtok = tok("chr21", recs[2])
+        snp = list(GUIDE + "TGG")
+        snp[5] = alt_b.lower()
+        rows = [row_fields("chr21", start, "+", GUIDE + "NNN", ref23, GUIDE + "TGG", "TGG",
+                           0, 0, "X", dtok, "S02"),
+                row_fields("chr21", start, "+", GUIDE + "NNN", ref23, "".join(snp), "TGG", 1,
+                           0, "X", "%s,%s" % (dtok, tok("chr21", recs[0])), "S01")]
+        case = as_2100(Case(self.tmp, seq, recs, rows))
+        for mode in ("soundness", "completeness"):
+            rc, found = case.run(mode=mode, budget=("1", "0", "0", "1"))
+            self.assertEqual((rc, gating(found)), (0, []), (mode, found))
+
+    def test_the_last_record_of_one_snv_drops_the_earlier_lines_carriers(self):
+        """R-B3: on a genome of the last record (CRISPRitz 2.9.1 and earlier), whose
+        dictionary entry of a position was the last line's, two lines of one SNV REF>ALT
+        are read so too: the earlier line's carriers are lost (S05, here), its ALT coded
+        by the later line (S03). The SNV restores the guide's base, beside the deletion D.
+        CRISPRme lists S03 for the perfect target and S05 for D's target on the reference:
+        the documented limit (limit-last-alt-wins), no failure; a row that leaves S03 out
+        fails. S04, on both lines and the same slot, holds the ALT once: listed with S03,
+        it agrees; left out, it fails (it was a slot of two records of one base)."""
+        seq = PRE + GUIDE[:5] + other(GUIDE[5]) + GUIDE[6:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dpos, spos = len(PRE) + 10, len(PRE) + 6
+        ref_b = other(GUIDE[5])
+        recs = [(spos, ref_b, GUIDE[5], {"S05": "1|0", "S04": "1|0"}),
+                (spos, ref_b, GUIDE[5], {"S03": "1|0", "S04": "1|0"}),
+                (dpos, GUIDE[9] + "C", GUIDE[9],
+                 {"S02": "1|0", "S03": "1|0", "S04": "1|0", "S05": "1|0"})]
+        start = len(PRE)
+        ref23 = seq[start:start + 23]
+        dtok = tok("chr21", recs[2])
+        on_ref = list(GUIDE + "TGG")
+        on_ref[5] = ref_b.lower()
+
+        def rows(perfect):
+            return [row_fields("chr21", start, "+", GUIDE + "NNN", ref23, GUIDE + "TGG", "TGG",
+                               0, 0, "X", "%s,%s" % (dtok, tok("chr21", recs[1])), perfect),
+                    row_fields("chr21", start, "+", GUIDE + "NNN", ref23, "".join(on_ref),
+                               "TGG", 1, 0, "X", dtok, "S02,S05")]
+
+        case = Case(self.tmp, seq, recs, rows("S03,S04"))
+        for mode in ("soundness", "completeness"):
+            rc, found = case.run(mode=mode, budget=("1", "0", "0", "1"))
+            self.assertEqual((rc, gating(found)), (0, []), (mode, found))
+            self.assertIn("limit-last-alt-wins", classes(found), (mode, found))
+        for perfect, gone in (("S04", "S03"), ("S03", "S04")):
+            write_results(case.res, rows(perfect))
+            rc, found = case.run(budget=("1", "0", "0", "1"))
+            self.assertEqual(rc, 1, found)
+            self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("carrier-missing", gone)},
+                             found)
+
+    def test_two_lines_of_one_snv_count_their_copies_once(self):
+        """R-B3, the PUTATIVE rule: two lines of one SNV REF>ALT that put the ALT on one slot
+        of S06 (1|0 on both) give one copy of it, not two. S06's call of the deletion D is
+        unphased, so it is listed for the strongest target its alleles allow: the guide's
+        base at the SNV's position (its other slot holds the reference there), D's perfect
+        target, as CRISPRme resolves it from the last line: the row agrees with S06, no line
+        of either mode names it. Counted twice, the copies left the reference out, and the
+        row listing S06 failed (or, beside the shadowed line, it was a PUTATIVE limit)."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dpos, spos = len(PRE) + 10, len(PRE) + 6
+        alt_b = other(GUIDE[5])
+        recs = [(spos, GUIDE[5], alt_b, {"S06": "1|0"}),
+                (spos, GUIDE[5], alt_b, {"S06": "1|0"}),
+                (dpos, GUIDE[9] + "C", GUIDE[9], {"S06": "0/1", "S02": "1|0"})]
+        start = len(PRE)
+        row = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                         GUIDE + "TGG", "TGG", 0, 0, "X", tok("chr21", recs[2]), "S02,S06")
+        case = Case(self.tmp, seq, recs, [row])
+        for mode in ("soundness", "completeness"):
+            rc, found = case.run(mode=mode, budget=("1", "0", "0", "1"))
+            self.assertEqual((rc, gating(found)), (0, []), (mode, found))
+            self.assertFalse([f for f in found if "S06" in f[3].split(",")], (mode, found))
 
     def test_a_target_at_the_window_edge_follows_the_indels_index_format(self):
         """R10-N1: a 27-nt SaCas9 target that starts at its fake-indel window's first base.

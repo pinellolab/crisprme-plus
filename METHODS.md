@@ -193,7 +193,14 @@ Each source VCF is normalized so that variant records are directly comparable:
   one CRISPRme 2.10.0 installs, codes every ALT of such a site (`Q`, any base, where
   the reference base and its ALTs cover A, C, G and T) and lists each in the
   dictionaries with its own record's carriers, rsID and AF, so an index it builds, as
-  every one rebuilt for CRISPRme 2.10.0, holds them all.
+  every one rebuilt for CRISPRme 2.10.0, holds them all. Two records of one REF>ALT at
+  a position (362 alleles in the published panels, 351 of them pure duplicates) are one
+  allele there: CRISPRitz 2.10.0 lists it once, with the carriers of both, a sample both
+  list carrying the ALT on every haplotype slot where either puts it when its two calls
+  are phased alike (as many alleles, every separator `|`: `0|1` and `1|0` give `1|1`),
+  and otherwise keeping the call with more copies of the ALT, the earlier record's on a
+  tie, as it is (CRISPRitz's `docs/MULTIALLELIC_ENRICHMENT.md` §2.3). Up to 2.9.1 the
+  later record's entry replaced the earlier one, whose carriers were lost.
 - **Consistent coordinates and contigs** (reference build, chromosome naming)
   across datasets.
 
@@ -1793,7 +1800,10 @@ split site, the PUTATIVE rule) fails (`carrier-off-by-rule`), any other is count
 Whatever its overlaps, a slot that holds a named variant on no reading (neither on it nor
 of unknown phase there) lacks the target. Where a call that touches the target has unknown
 phase (unphased, a missing allele, or fewer copies than the record's call — a haploid call
-against a diploid one), the record's known slot is judged first — when no placement of
+against a diploid one), or the record's slot holds two SNV ALTs of one position that the
+search's stores both read (split records phased one by one, every allele coded: the slot has
+no one sequence in the VCF there, and §4 resolves such a carrier PUTATIVE, decision B4), the
+record's known slot is judged first — when no placement of
 those calls lets it hold the target (a phased second indel inside it, say), or every
 placement does — and otherwise the truth is the PUTATIVE rule of §4: the strongest target
 the sample's own alleles allow on the row's alignment, the guide's base wherever it
@@ -1852,8 +1862,12 @@ its `.bin` headers, or where its enriched genome (`Genomes/<genome>+<dataset>/` 
 working directory) codes an earlier record's ALT at a split site of the VCF, and the last
 record alone where that index is of format 1, or the enriched genome holds the last ALT
 alone, or an index of format 2 flags no Q while the VCF has a position of four bases; with
-every allele coded, two lines of one SNV REF>ALT are one allele, their calls merged as §4
-merges them, and a slot holding two ALTs of one position is resolved PUTATIVE (§4). The
+every allele coded, two lines of one SNV REF>ALT are one allele, their calls merged as
+CRISPRitz 2.10.0 merges them into the allele's one dictionary entry, which the search reads
+(§2: taken from CRISPRitz's documentation, not from CRISPRme's code), and a slot holding two
+ALTs of one position is resolved PUTATIVE (§4), the truth there (above); with the last record
+alone coded, an earlier line of the same REF>ALT is an earlier record of the site, whose
+carriers that dictionary lost (its entry was the last line's: `limit-last-alt-wins`). The
 INDELS index's format is that of its `.bin` files, else the run's format-1 NOTE of it
 (§9). The phased indel store holds only the records whose FILTER passes but where the run's
 `log_verbose.txt` notes a store written before 2.10.0 for the dataset and chromosome (without
@@ -2066,7 +2080,8 @@ samples), the README guide, NRG, 4 mismatches, 1 DNA and 1 RNA bulge: soundness 
 completeness pass in both analysis modes (the two, with the per-sample run's SNP-row
 report, about 2.5 min with `--jobs 16`), its limits 8 two-indel targets, 4 records whose
 carriers' slots hold overlapping alleles where a target reads and the checker's coverage
-gap for one carrier's slot near two records (`coverage-overlap-cap`), and no split-site
+gap for one carrier's slot near two records (`coverage-putative-cap`: in the IGL locus, it
+holds two ALTs of one position at more than 10 positions there), and no split-site
 target, every allele of a split site being coded; so do NRR and the TRAC guide per sample
 (19 and 20 two-indel targets, 8 overlapping records each), SaCas9's 21-nt
 `CACTTTGGGAGGCCGAGGCGG` with `NNGRRT` per sample at 2 mismatches without bulges (the 2,103
@@ -2077,8 +2092,8 @@ fake-indel window, a 27-nt target with a DNA bulge, held by no index and counted
 alleles at 22), three repeat-rich guides (VEGFA site 3 `GGTGAGTGAGTGTGTGCGTG`, EMX1
 `GAGTCCGAGCAGAAGAAGAA`, VEGFA site 1 `GGGTGGGGGGAGTTTGCTCC`) per sample and
 population-level (per sample 8,289 notes where a listed carrier's slot, read as §4 reads
-it, holds the target, 1,082 row blocks and 1,458 records with overlapping alleles, 1,284
-two-indel targets; population-level 160 notes, 67 row blocks and the same 1,458 records,
+it, holds the target, 1,082 row blocks and 1,457 records with overlapping alleles, 1,284
+two-indel targets; population-level 160 notes, 67 row blocks and the same 1,457 records,
 271 two-indel targets), the HPRC chr22 panel (9,125 MNVs, 4.5% of its calls with a missing
 allele) and a copy of it with every fourth sample unphased, both modes (3 row blocks of an
 MNV whose carrier CRISPRme resolves PUTATIVE, as it documents; 6 two-indel targets; 17 and

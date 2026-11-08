@@ -14,11 +14,11 @@ WHAT IT IS. A second opinion on the indel path, built only from what a user has:
 reference FASTA, the VCF(s) the search read, the samples list, the guide, the PAM file,
 the search budget and the result folder. It imports nothing but Python's standard
 library and no code of CRISPRme's variant or indel machinery
-(``PostProcess/indel_snp_cis.py``, ``analisi_indels_NNN.py``, ``overlay_indel_snps*``,
-``resultIntegrator``, ``remove_contiguous_samples``, the CRISPRitz enricher, the
-dictionaries, the indel log or the fake contigs), and none of it is copied here. It
-reads the VCF with its own BGZF + tabix reader, writes each sample's haplotypes itself
-from the VCF 4.x definition of a record, keeps its own map from haplotype bases to
+(``PostProcess/indel_snp_cis.py``, ``site_alleles.py``, ``analisi_indels_NNN.py``,
+``overlay_indel_snps*``, ``resultIntegrator``, ``remove_contiguous_samples``, the CRISPRitz
+enricher, the dictionaries, the indel log or the fake contigs), and none of it is copied
+here. It reads the VCF with its own BGZF + tabix reader, writes each sample's haplotypes
+itself from the VCF 4.x definition of a record, keeps its own map from haplotype bases to
 reference coordinates and aligns the guide with its own exhaustive aligner. The CFD
 tables CRISPRme ships (``PostProcess/cfd_*_scores.json``) are read as data.
 
@@ -90,7 +90,10 @@ no reading (neither on it nor of unknown phase there) lacks the target. A sample
 are on known slots when its calls are phased ('|', or haploid). Where a call that touches
 the target is unphased, has a missing allele, or has fewer copies than the record's (a
 haploid call against a diploid one), which of its alleles share the record's haplotype is
-unknown: when the record's slot is known and no placement of those calls lets it hold the
+unknown -- and so is it where the record's slot holds two SNV ALTs of one position that
+CRISPRme's stores both read (every allele of a split site coded; split records phased one by
+one), which have no one sequence in the VCF and CRISPRme resolves PUTATIVE (decision B4): when
+the record's slot is known and no placement of those calls lets it hold the
 target (a phased second indel inside it, say), or every placement does, the slot is judged
 so; otherwise the truth is CRISPRme's documented PUTATIVE rule (METHODS section 4): the
 sample is listed for the strongest target its own alleles allow on the row's alignment --
@@ -117,10 +120,11 @@ limits), re-implemented here from that text, say whether the difference is a doc
 limit (counted and listed under its own class, non-gating) or not (gating):
   * the fake-indel window holds one indel-path record (an indel or an MNV) and the SNPs of
     the enriched genome -- every allele of a split site on a genome of CRISPRitz 2.10.0,
-    where a slot holding two ALTs of one position is resolved PUTATIVE
-    (limit-putative-carrier), and two records of one REF>ALT are one allele; on one of 2.9.1
-    or earlier, only the last of several SNP records at one position (limit-last-alt-wins)
-    (RELEASES) --, and 25 reference bases before the record's first REF base and 27 after
+    where a slot holding two ALTs of one position has no sequence and is resolved PUTATIVE
+    (the truth there, as for a call of unknown phase: THE TRUTH), and two records of one
+    REF>ALT are one allele; on one of 2.9.1 or earlier, only the last of several SNP records
+    at one position, of the same REF>ALT too (limit-last-alt-wins) (RELEASES) --, and 25
+    reference bases before the record's first REF base and 27 after
     its last: a target that runs past them is held by no index (limit-window-reach; a
     27-nt target with a DNA bulge, SaCas9's say), and one whose guide's far end lies within
     the INDELS index's budget of the window's edge by none of format 1 (limit-window-edge,
@@ -458,8 +462,14 @@ working directory) codes an earlier record's ALT at a split site of the VCF; the
 record alone where that index is of format 1, or the enriched genome holds the last ALT
 alone there, or an index of format 2 flags no Q while the VCF has a position of four bases
 (refused where nothing tells and the VCF has a split site); every allele coded, two lines of
-one SNV REF>ALT are one allele, their calls merged as CRISPRme 2.10.0 merges them, and a
-slot holding two ALTs of one position is resolved PUTATIVE (METHODS section 4). The INDELS
+one SNV REF>ALT are one allele, their calls merged as CRISPRitz 2.10.0's enricher merges them
+into the allele's one dictionary entry, which CRISPRme reads (its CHANGELOG and its
+docs/MULTIALLELIC_ENRICHMENT.md section 2.3: phased alike -- as many alleles, both phased --
+a slot holds the ALT where either line puts it; otherwise the call with more copies of the
+ALT, the earlier line's on a tie, as it is), and a slot holding two ALTs of one position is
+resolved PUTATIVE (METHODS section 4), the truth there; with the last record alone coded, an
+earlier line of the same REF>ALT is read as shadowed too (the dictionary entry was the last
+line's, the earlier line's carriers lost: limit-last-alt-wins). The INDELS
 index's format is that of its .bin files, else its log's format-1 NOTE of it (refused
 where neither tells and a target of the guide, PAM and budget can lie at a window's edge).
 The phased indel store holds only the records whose FILTER passes but where the run's
@@ -1118,21 +1128,18 @@ _HOMREF = frozenset(("0|0", "0/0", "0", "0|0|0", "0/0/0"))
 
 
 def merge_call(a, b):
-    """One sample's call of one SNV ALT that two lines give, as CRISPRme 2.10.0 merges them
-    (site_alleles.merge_gt): phased calls (or haploid ones) of one ploidy slot by slot, a
-    slot holding the ALT (1) if either puts it there; otherwise the slot is unknown, and the
-    call reads unphased with the larger of the two copy counts."""
+    """One sample's call of one SNV ALT (1, every other called allele 0) that two lines
+    give, ``a`` the earlier line's: the one call CRISPRitz 2.10.0's enricher writes into the
+    allele's one dictionary entry, which CRISPRme reads (CRISPRitz's CHANGELOG and its
+    docs/MULTIALLELIC_ENRICHMENT.md section 2.3). Phased alike -- as many alleles, both
+    phased ('|', or haploid) --, a slot holds the ALT where either call puts it there, else
+    a called allele (0) where either has one; otherwise, as unphased slots cannot be
+    matched up, the call with more copies of the ALT, the earlier one on a tie, as it is."""
     (xa, pa), (xb, pb) = a, b
     if pa and pb and len(xa) == len(xb):
-        out = []
-        for x, y in zip(xa, xb):
-            out.append(1 if 1 in (x, y) else 0 if 0 in (x, y) else None)
-        return tuple(out), True
-    ploidy = max(len(xa), len(xb))
-    copies = min(ploidy, max(xa.count(1), xb.count(1)))
-    if ploidy == 1:
-        return (1 if copies else 0,), True
-    return tuple([1] * copies + [0] * (ploidy - copies)), False
+        return tuple(1 if 1 in (x, y) else (0 if (x, y) != (None, None) else None)
+                     for x, y in zip(xa, xb)), True
+    return b if xb.count(1) > xa.count(1) else a
 
 
 def merge_calls(into, more):
@@ -1164,11 +1171,13 @@ def parse_calls(fmt, tail, names):
 class Window(object):
     """The VCF lines of one region: their ALT alleles and the samples' calls.
 
-    ``shadowed`` and ``untied`` belong to the documented view only: the SNV alleles
-    CRISPRme's enriched genome and SNP stores never see (an earlier line of a split
-    multi-allelic site: only the last is kept, CHANGELOG 2.8.1 Known limits), and the
-    alts of a multi-ALT SNV line whose allele number the genotypes cannot tell CRISPRme
-    (METHODS section 4: their carriers are resolved as unphased ones).
+    ``shadowed`` and ``untied`` belong to the documented view only: the SNV alleles whose
+    carriers CRISPRme's SNP stores never see (an earlier line of a split multi-allelic
+    site: only the last is kept, CHANGELOG 2.8.1 Known limits -- its entry replaced the
+    earlier's in CRISPRitz 2.9.1's dictionary, of the same REF>ALT too, whose ALT the
+    genome still codes), and the alts of a multi-ALT SNV line whose allele number the
+    genotypes cannot tell CRISPRme (METHODS section 4: their carriers are resolved as
+    unphased ones).
 
     ``panel`` (a set, or None for every sample): the samples of the search's panel; the
     calls of any other sample are not read (CRISPRme lists no carrier outside it).
@@ -1176,10 +1185,9 @@ class Window(object):
     ``sem`` (Semantics, or None for the readings of CRISPRme and CRISPRitz before 2.10.0)
     says, by VCF, how the run read the lines: with every allele of a split SNP site coded
     (CRISPRitz 2.10.0) no earlier record is shadowed, two lines of one SNV REF>ALT are one
-    allele, their calls merged as CRISPRme 2.10.0 merges them (site_alleles.merge_gt: a
-    slot holds the ALT if either line puts it there; calls of unknown or unlike phase read
-    unphased, with the larger copy count); with the phased indel store of CRISPRme 2.10.0
-    a genotyped line outside PASS_FILTERS keeps no indel either."""
+    allele, their calls merged as CRISPRitz 2.10.0's enricher merges them into the allele's
+    one dictionary entry (merge_call); with the phased indel store of CRISPRme 2.10.0 a
+    genotyped line outside PASS_FILTERS keeps no indel either."""
 
     def __init__(self, refseq, chrom, beg, end, vcfs, needed=None, panel=None, sem=None):
         self.chrom = chrom
@@ -1261,8 +1269,8 @@ class Window(object):
                     continue
                 calls = parse_calls(r["format"], r["tail"], names)
                 if all_alleles and len(als) == 1 and als[0].kind == "snv" and passing:
-                    # two lines of one SNV REF>ALT are one allele (CRISPRme 2.10.0,
-                    # site_alleles.read_records): the later line's calls go into the first
+                    # two lines of one SNV REF>ALT are one allele, one dictionary entry
+                    # (CRISPRitz 2.10.0): the later line's calls go into the first
                     first = snv_line_of.get(als[0].key)
                     if first is not None:
                         merge_calls(self.calls[first], calls)
@@ -1307,10 +1315,12 @@ class Window(object):
                                 if a is not None and a.key not in last:
                                     self.so_shadowed.add(a)
                     continue
-                last = {a.key for a in self.line_alleles[lids[-1]] if a is not None}
+                # the last record's entry replaced every earlier one in CRISPRitz 2.9.1's
+                # dictionary: an earlier line of the same REF>ALT too, whose carriers are
+                # lost though the genome codes its ALT (CRISPRitz 2.10.0's CHANGELOG)
                 for lid in lids[:-1]:
                     for a in self.line_alleles[lid]:
-                        if a is not None and a.key not in last:
+                        if a is not None:
                             self.shadowed.add(a)
 
     def _wanted(self, lo, hi):
@@ -2182,10 +2192,12 @@ class Semantics(object):
 
       all_alleles  the variant genome codes every allele of a split SNP site (CRISPRitz
                    2.10.0: no earlier record is read as the reference, two records of one
-                   REF>ALT are one allele, and a slot holding two ALTs of one position
-                   is resolved PUTATIVE, METHODS section 4), or only the last record's
-                   (CRISPRitz 2.9.1 and earlier, every index published until the rebuild
-                   for 2.10.0: limit-last-alt-wins);
+                   REF>ALT are one allele, their calls merged as its enricher merges them,
+                   and a slot holding two ALTs of one position is resolved PUTATIVE,
+                   METHODS section 4), or only the last record's (CRISPRitz 2.9.1 and
+                   earlier, every index published until the rebuild for 2.10.0, whose
+                   dictionary kept the last record's entry of a position, of the same
+                   REF>ALT too: limit-last-alt-wins);
       store_filter the phased indel genotype store holds only the indels of records whose
                    FILTER CRISPRitz's enricher reads (CRISPRme 2.10.0), or every indel of
                    the VCF (a store written before);
@@ -2815,7 +2827,9 @@ def named_alleles(row, win, rep, gating):
                     "%s is an earlier SNP record of a split site, which the documented "
                     "limit says CRISPRme's stores do not hold (CHANGELOG 2.8.1 Known "
                     "limits): this index holds it" % t)
-        named.append(next((x for x in found if x.searched), found[0]))
+        # (of two lines of one REF>ALT, the one CRISPRme's stores read)
+        named.append(next((x for x in found if x.searched and x not in win.shadowed),
+                          next((x for x in found if x.searched), found[0])))
     return named
 
 
@@ -2949,8 +2963,26 @@ def on_slot(call_main, h, call, number):
     return "yes" if x == number else "no"
 
 
+def one_per_key(win, alleles):
+    """``alleles`` with each REF>ALT once: of two lines of one (a split site read as its
+    last record, on a genome of CRISPRitz 2.9.1), the one CRISPRme's stores read (not
+    shadowed). The VCF says the same allele twice there, not two alleles of one base."""
+    best = {}
+    for a in alleles:
+        b = best.get(a.key)
+        if b is None or (b in win.shadowed and a not in win.shadowed):
+            best[a.key] = a
+    return [a for a in alleles if best[a.key] is a]
+
+
 def slot_alleles(win, sample, main_al, call_main, h, lids):
-    """(alleles the slot holds, alleles it may hold) among the lines ``lids``."""
+    """(alleles the slot holds, alleles it may hold) among the lines ``lids``, each REF>ALT
+    once (one_per_key). Two or more SNV ALTs of one position that the slot holds (split
+    records phased one by one), each read by CRISPRme's stores (none shadowed: every allele
+    coded) and none on the record's REF span, are alleles it may hold: the slot has no one
+    sequence in the VCF there, and CRISPRme resolves such a carrier PUTATIVE (METHODS section
+    4, decision B4), the rule it resolves a call of unknown phase by -- which so is the
+    truth there."""
     present, unknown = [], []
     for lid in lids:
         call = win.calls[lid].get(sample)
@@ -2966,6 +2998,17 @@ def slot_alleles(win, sample, main_al, call_main, h, lids):
                 present.append(a)
             elif r == "?":
                 unknown.append(a)
+    present = one_per_key(win, present)
+    held = {a.key for a in present}
+    unknown = [a for a in one_per_key(win, unknown) if a.key not in held]
+    at = defaultdict(list)
+    for a in present:
+        if a.kind == "snv" and a not in win.shadowed and not meets_ref(a, main_al):
+            at[a.lo].append(a)
+    two = {id(a) for alts in at.values() if len(alts) > 1 for a in alts}
+    if two:
+        unknown = unknown + [a for a in present if id(a) in two]
+        present = [a for a in present if id(a) not in two]
     return present, unknown
 
 
@@ -3131,10 +3174,12 @@ def options(win, sample, q, visible_only=False, ploidy=0):
     METHODS section 4 resolves 'a haploid call against a diploid one' PUTATIVE, so a
     haploid ALT call beside a diploid record leaves the reference possible on the other
     copy. ``visible_only``: as CRISPRme's stores see them (an earlier line of a split site
-    reads as the reference)."""
+    reads as the reference). Two lines of one REF>ALT (a split site read as its last record)
+    give one allele, its copies those of their calls merged (merge_call), not their sum."""
     alts = set()
     copies = 0
     missing = False
+    calls = {}   # REF>ALT -> (allele, the sample's call of it: 1 the ALT, 0 another allele)
     for a in win.snv_at.get(q, ()):
         call = win.call(a, sample)
         if call is None:
@@ -3143,8 +3188,12 @@ def options(win, sample, q, visible_only=False, ploidy=0):
         ploidy = max(ploidy, len(alle))
         if visible_only and a in win.shadowed:
             continue
+        mine = (tuple(None if x is None else int(x == a.number) for x in alle), call[1])
+        seen = calls.get(a.key)
+        calls[a.key] = (a, mine if seen is None else merge_call(seen[1], mine))
+    for a, (alle, _phased) in calls.values():
         for x in alle:
-            if x == a.number:
+            if x == 1:
                 alts.add(a.body)
                 copies += 1
             elif x is None:
@@ -4764,6 +4813,16 @@ def slot_allows(win, t, main_al, named, slot_sets):
     return False
 
 
+def allele_of(win, sample, q, body):
+    """The SNV allele at reference coordinate q whose ALT is ``body`` that the sample's call
+    holds: of two lines of one REF>ALT (a split site read as its last record), the one
+    CRISPRme's stores read where the sample is on it, else the line it is on."""
+    alts = [a for a in win.snv_at[q] if a.body == body]
+    held = [a for a in alts if a.number in (win.call(a, sample) or ((), False))[0]]
+    pool = held or alts
+    return next((a for a in pool if a not in win.shadowed), pool[0])
+
+
 def putative_targets(win, ctx, _unused, al, main_al, s, members, lids, lo, hi, full, known,
                      cache, skipped, demands, demand_of, capped, reach=None, resolved=False,
                      cut=None):
@@ -4824,13 +4883,13 @@ def putative_targets(win, ctx, _unused, al, main_al, s, members, lids, lo, hi, f
         if len(opts) == 1:
             b = next(iter(opts))
             if b != win.refseq[q]:
-                fixed.append(next(a for a in win.snv_at[q] if a.body == b))
+                fixed.append(allele_of(win, s, q, b))
     groups = defaultdict(dict)  # alignment -> {probe: (Target, mm, bulges)}
     for combo in itertools.product(*[opts for _q, opts in choice]):
         chosen = list(fixed)
         for (q, _opts), b in zip(choice, combo):
             if b != win.refseq[q]:
-                chosen.append(next(a for a in win.snv_at[q] if a.body == b))
+                chosen.append(allele_of(win, s, q, b))
         hap = make_hap(win.refseq, [main_al] + chosen, lo, hi)
         for strand, off, sa, ta, mm, dn, rn in scan_cached(cache, ctx, full, hap.seq,
                                                            skipped):

@@ -366,8 +366,10 @@ and the `release-crisprme` skill.
     with no reading gives no truth, so METHODS' rules are the only model there: a listed
     carrier they take off the target for a documented cause fails (`carrier-off-by-rule`),
     any other is counted. Where a call touching the target has unknown phase (unphased, a
-    missing allele, or fewer copies than the record's call), what the record's known slot
-    says comes first, and otherwise the truth is METHODS section 4's PUTATIVE rule: the
+    missing allele, or fewer copies than the record's call), or the record's slot holds two
+    SNV ALTs of one position that the search's stores both read (every allele coded: no
+    sequence, and CRISPRme resolves such a carrier PUTATIVE, decision B4), what the record's
+    known slot says comes first, and otherwise the truth is METHODS section 4's PUTATIVE rule: the
     strongest target the sample's own alleles allow on the row's alignment — the guide's
     base wherever it carries it and the alignment pairs the position with a guide base;
     elsewhere (a DNA bulge included), and at the PAM jointly, the alleles that maximize the
@@ -401,10 +403,12 @@ and the `release-crisprme` skill.
     a second indel read from either end of the target through the indel; the phasing
     artefact and the complex allele; MNVs and untied multi-ALT alts resolved PUTATIVE, and
     from this release a slot holding two ALTs of one position; on a genome of CRISPRitz
-    2.9.1 or earlier only the last record of a split multi-allelic SNP site searched, on one
-    of 2.10.0 every allele, two lines of one SNV REF>ALT one allele) is re-implemented from
-    that text and only classifies a disagreement: a documented limit (non-gating, listed
-    with its cause, a PUTATIVE tie included) or a failure.
+    2.9.1 or earlier only the last record of a split multi-allelic SNP site searched, an
+    earlier record of the same REF>ALT too, whose carriers its dictionary lost, on one of
+    2.10.0 every allele, two lines of one SNV REF>ALT one allele, their calls merged by the
+    rule CRISPRitz's own documentation gives its enricher) is re-implemented from that text
+    and only classifies a disagreement: a documented limit (non-gating, listed with its
+    cause, a PUTATIVE tie included) or a failure.
   - **Releases**: where CRISPRme's and CRISPRitz's releases read the data otherwise, the
     check reads which one made the run from the run's own records and prints the reading
     it took (`read as a run of CRISPRme 2.10.0 or later (<dataset> on <chrom>: every allele,
@@ -860,14 +864,16 @@ and the `release-crisprme` skill.
 
 - **Two VCF records of one REF>ALT at a position are one allele: their carriers are merged, a
   haplotype slot carrying the ALT if either record puts it there, with the rsID and AF of the more
-  frequent record (decision B2).** CRISPRitz 2.10.0 merges them in the dictionary; CRISPRme's
-  dictionary readers (the Tier-0 and Tier-1 compiles, the dictionary path of the SNP
-  post-analysis, the indel path) merge, by the same rule, two entries of one ALT, or a sample
-  listed twice in one entry, that reach them from another enrichment. Up to 2.8.1 two entries of
-  one ALT stopped the Tier-1 compile of the whole chromosome (`duplicate (pos, alt) record`), and
-  up to CRISPRitz 2.9.1 the later record's entry replaced the earlier's. A sample that the merge
-  leaves with two ALTs of the position on one slot is resolved without phase (see Fixed). Covered
-  by `PostProcess/test_site_alleles.py`.
+  frequent record (decision B2).** CRISPRitz 2.10.0 merges them in the dictionary, slot by slot
+  where a sample's two calls are phased alike, and otherwise keeping the call with more copies of
+  the ALT (the earlier on a tie) as it is; CRISPRme's dictionary readers (the Tier-0 and Tier-1
+  compiles, the dictionary path of the SNP post-analysis, the indel path) merge two entries of one
+  ALT, or a sample listed twice in one entry, that reach them from another enrichment, slot by slot
+  where the calls are phased alike, and otherwise read the sample without phase, with the larger
+  copy count. Up to 2.8.1 two entries of one ALT stopped the Tier-1 compile of the whole chromosome
+  (`duplicate (pos, alt) record`), and up to CRISPRitz 2.9.1 the later record's entry replaced the
+  earlier's. A sample that the merge leaves with two ALTs of the position on one slot is resolved
+  without phase (see Fixed). Covered by `PostProcess/test_site_alleles.py`.
 - **The input validator says what CRISPRme does with a VCF line that lists several ALTs, and with
   positions that hold several records, and looks for such lines on every run.** It warned only at 10
   ALTs or more, in the opt-in `--full_input_validate`, of an allele-index substring match the

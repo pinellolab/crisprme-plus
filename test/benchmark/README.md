@@ -93,15 +93,18 @@ METHODS section 4 reads it without (a phasing artefact at the record's position,
 allele only on bases it deletes, an MNV), the one reading that holds the record, and is
 otherwise counted (`limit-overlapping-records`) where a target of its record reads, a
 named variant it holds on no reading always failing a listed carrier; where a call
-touching a target has unknown phase (a haploid call against a diploid one included) the
-record's known slot is judged first, then METHODS section 4's PUTATIVE rule (the
+touching a target has unknown phase (a haploid call against a diploid one included), or the
+record's slot holds two SNV ALTs of one position (every allele coded), the record's known
+slot is judged first, then METHODS section 4's PUTATIVE rule (the
 strongest target the sample's alleles allow on the row's alignment, by the alignment's
 CFD, or, in a search that scores no CFD, the reference base, else the first of A, C, G, T;
 its copies counted against the record's; a choice only at the fake-indel window's code
 columns, never on the record's own REF span). CRISPRme's documented reading of a carrier (the one-indel window
 resolved with the carrier's own SNP alleles, a second indel read from either end through
 the indel, every allele of a split multi-allelic site on an index CRISPRitz 2.10.0 built (a
-slot holding two ALTs of one position PUTATIVE) and its last record on one of 2.9.1, the
+slot holding two ALTs of one position PUTATIVE; two lines of one REF>ALT one allele, their
+calls merged as CRISPRitz's own documentation says its enricher merges them) and its last
+record on one of 2.9.1 (an earlier line of the same REF>ALT too), the
 PUTATIVE carriers of MNVs, the window of 25 bases before a record and 27 after it, whose
 edge an INDELS index of format 1 does not hold) only classifies a disagreement, and a carrier it would list against the carrier's own
 haplotypes vetoes no fold: every disagreement it checks

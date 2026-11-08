@@ -176,7 +176,9 @@ def read_records(records):
     dictionary entry in its order. Each entry's genotypes are read against its own
     allele index (``per_alt_entries``), then two records of one REF>ALT become one:
     their carriers merged (``merge_carriers``), with the rsID and AF of the more frequent
-    record (on a tie, the earlier), as CRISPRitz 2.10.0's enricher merges them. Returns
+    record (on a tie, the earlier), as CRISPRitz 2.10.0's enricher takes them (its merge of
+    a sample's two calls that are not phased alike keeps the call with more copies, the
+    earlier on a tie, where ``merge_gt`` reads the sample without phase). Returns
     the same shape, one record per REF>ALT in first-seen order: ``records`` itself when
     the position is plain and repeats no REF>ALT."""
     keys = [(r[0], r[1]) for r in records]

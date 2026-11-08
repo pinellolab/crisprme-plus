@@ -179,8 +179,9 @@ done
 #     records how its release read the data (its stdout says so: "read as a run of
 #     CRISPRme 2.10.0 or later (... every allele, store of PASS and '.', INDELS format 2)"
 #     on an index this release built). Non-gating lines are documented CRISPRme limits
-#     (limit-two-indels, limit-putative-carrier -- a slot holding two ALTs of one position
-#     too --, limit-contig-end; limit-window-reach: a target that runs past its fake-indel
+#     (limit-two-indels, limit-putative-carrier -- where the PUTATIVE rule ties two targets;
+#     a slot holding two ALTs of one position is read by that rule, which there is the
+#     truth --, limit-contig-end; limit-window-reach: a target that runs past its fake-indel
 #     window, 25 bases before the record and 27 after, a 27-nt target with a DNA bulge;
 #     limit-window-edge and limit-last-alt-wins on an index CRISPRitz 2.9.1 built, of format
 #     1; limit-max-degeneracy under --max-degeneracy; limit-capped-window on a per-sample run
@@ -202,10 +203,11 @@ done
 #     variant-shadowed, and the checker's own coverage gaps (coverage-putative-cap: a
 #     carrier resolved PUTATIVE with more than 10 positions near a record where its
 #     alleles allow two bases, whose targets touching a call of unknown phase are not
-#     enumerated, none on this phased panel; coverage-overlap-cap: a slot whose overlap
-#     zones near a record have more than 1024 readings, of which each allele alone is read
-#     for the targets only such readings hold (counted, never demanded; 2 records, one
-#     carrier, on chr22); coverage-chain-limit: a population-level
+#     enumerated: 2 records, one carrier, on chr22, whose slot holds two ALTs of one
+#     position at more than 10 positions of the IGL locus; coverage-overlap-cap: a slot
+#     whose overlap zones near a record have more than 1024 readings, of which each allele
+#     alone is read for the targets only such readings hold (counted, never demanded; none
+#     here, every allele being coded); coverage-chain-limit: a population-level
 #     cluster longer than the 3 kb either side its chain follows; coverage-snp-row-indel: a
 #     per-sample cluster without alternative alignments reached only through a SNP target
 #     of a slot that also holds an indel touching it, which 2.10.0 writes only where its
