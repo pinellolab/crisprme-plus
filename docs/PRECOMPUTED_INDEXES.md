@@ -165,9 +165,9 @@ variant index. Choose one when you expect to search several PAMs over the same g
 flank; [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)). Every index
 published here was built by CRISPRitz 2.9.1 or earlier, in index format 1. CRISPRitz 2.10.0,
 which CRISPRme 2.10.0 installs, writes format 2, which holds these sites, and reads a − strand PAM
-at a contig's first base right in either format; CRISPRme 2.10.0 reads both formats, and says on
-stdout when a search takes an index of format 1 (2.8.1 refuses an index of format 2, and 2.8.0
-aborts on one). An index of format 1 of
+at a contig's first base right in either format; CRISPRme 2.10.0 reads both formats, and says in
+the search's `log_verbose.txt` when it takes an index of format 1 (2.8.1 refuses an index of
+format 2, and 2.8.0 aborts on one). An index of format 1 of
 budget N cannot report a site whose guide lies within N − 1 nt of a contig start, a contig end or
 an `N` run, even a perfect match, which a search without bulges (a scan of the FASTA) does
 report; but a variant search without bulges on an install without its whole enriched genome (a

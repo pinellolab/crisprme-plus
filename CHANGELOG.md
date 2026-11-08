@@ -382,7 +382,8 @@ and the `release-crisprme` skill.
   search script's scan and complete-search's now rank an index the installed CRISPRitz reads
   first, and take the other only where none serves.
 - **A search of an index of format 1 by CRISPRitz 2.10.0 says what it lacks, and how those sites are
-  searched.** On stdout, once for each index it takes (a variant search with bulges takes three: the
+  searched.** In the search's `log_verbose.txt` (the search script's stdout: not on the console of
+  `complete-search`), once for each index it takes (a variant search with bulges takes three: the
   reference, variant and INDELS indexes): `NOTE: <index> is in index format 1 (built by CRISPRitz
   2.9.1 or earlier): it lacks the sites whose guide lies within a few bases of a contig end or an N
   run, which an index built by CRISPRitz 2.10.0 or later holds (METHODS section 9).` It goes on `To

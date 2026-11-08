@@ -1681,13 +1681,13 @@ the contig's own bases. On hg38 chr22 and chr1 a format-2 NGG index returns ever
 format-1 one and 1,827 and 5,512 more, all next to an `N` run (CRISPRitz's `docs/INDEX_FORMAT.md`,
 section 11). An index of format 1 keeps the first and the last limit until it is built again
 (a search without bulges, which scans the FASTA, finds the last PAM of a contig at once), and a
-search of one by CRISPRitz 2.10.0 says so on stdout. CRISPRme 2.8.1 refuses an index of format 2, and
-2.8.0 aborts on one; CRISPRme 2.10.0 searches it where the installed CRISPRitz reads it (2.10.0
-and later: the `INDEX_FORMAT` of its `crispritz.py`), and refuses it, naming both, under
-CRISPRitz 2.9.1. Which sites a contig holds, which CRISPRme checks to tell a lost `.bin` from a
-contig with no site, follows the format the index was built in, read from its own `.bin` files;
-an index CRISPRme builds records it, with the build PAM, side, flank and guide length, in its
-`.index_meta.json` (a sub-index with no `.bin` has no other record of it).
+search of one by CRISPRitz 2.10.0 says so in its `log_verbose.txt`. CRISPRme 2.8.1 refuses an index
+of format 2, and 2.8.0 aborts on one; CRISPRme 2.10.0 searches it where the installed CRISPRitz
+reads it (2.10.0 and later: the `INDEX_FORMAT` of its `crispritz.py`), and refuses it, naming
+both, under CRISPRitz 2.9.1. Which sites a contig holds, which CRISPRme checks to tell a lost
+`.bin` from a contig with no site, follows the format the index was built in, read from its own
+`.bin` files; an index CRISPRme builds records it, with the build PAM, side, flank and guide
+length, in its `.index_meta.json` (a sub-index with no `.bin` has no other record of it).
 
 **Cost.** A PAM-less index is much larger, because no site is excluded at build time: the
 reference index is 71 GB against 9 GB for a dedicated NRG index, and the HGDP + 1000
