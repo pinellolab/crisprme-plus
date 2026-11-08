@@ -106,8 +106,11 @@ and the `release-crisprme` skill.
   alignments) in the dataset's own phased genotypes, SNPs and indels
   (`Dictionaries/genotypes_<vcf>/`, `indel_genotypes_<vcf>/`;
   `PostProcess/haplotype_prioritizer.py`), and gives each a tier: **A**, two or more variants one
-  phased haplotype carries together (states `one haplotype`, and `phase not known` where only
-  unphased calls, or two ALTs of one position on one slot, show it), or that a haplotype reaches
+  phased haplotype carries together, with no indel of the store on that slot that takes the
+  target's bases off it, as a per-sample SNP row reads its carriers (Fixed): one whose REF holds a
+  variant's base at another position does, one at a variant's own position, a phasing artefact,
+  does not (states `one haplotype`, and `phase not known` where only unphased calls, or two ALTs of
+  one position on one slot, show it), or that a haplotype reaches
   the alignment's CFD without (states `same score`, `same score, phase not known` and `same score
   as the reference`): an allele the worst case takes can leave the CFD the row reports (its three
   decimals), the alignment's mismatches and its PAM as they are -- one at a PAM base the search's
@@ -1288,13 +1291,20 @@ and the `release-crisprme` skill.
     by its haplotype (an indel on the other haplotype takes nothing off); one homozygous for an
     indel that changes the bases leaves the row; one whose indel call is unphased cannot be tied
     to a haplotype and stays, PUTATIVE. An indel at the position of a SNP the row names is
-    another allele of that base, a phasing artefact, and takes no carrier off. A haploid call
-    -- a male's on chrX outside PAR -- is his one haplotype's (see the next entry), so an indel
-    of his that changes the target takes him off the row, whatever else that haplotype holds.
-    A row left with no carrier is not reported. Population-level searches are unchanged (their rows are
-    worst-case composites), and so is a search with `CRISPRME_INDEL_SNP=0`, the opt-out of the
-    SNP+indel co-occurrence: it does not read the store, and its SNP rows list their carriers
-    as 2.8.1's do.
+    another allele of that base, a phasing artefact, and takes no carrier off; one whose REF
+    holds the base of a SNP the row names at another position puts two records of that base on
+    the carrier's slot, whose bases then cannot be read, and the carrier leaves the row, as the
+    carrier gate reads such a slot (Added). (The integration's first stage read that indel as a
+    phasing artefact too, and kept such carriers: on the genome-wide search below, 89 listings
+    more, among them the whole row chr5:4507931 (+), whose 57 carriers all hold chr5:4507932
+    CTTTCA>C on its slot; on chr22, TRAC's 46177780 (−) listed HG02652, HG02653 and HG04056,
+    whose slot of its 46177786 G>C and 46177787 C>T holds 46177784 AGGC>A.) A haploid call --
+    a male's on chrX outside PAR -- is his one haplotype's (see the next entry), so an indel of
+    his that changes the target takes him off the row, whatever else that haplotype holds. A
+    row left with no carrier is not reported. Population-level searches are unchanged (their
+    rows are worst-case composites), and so is a search with `CRISPRME_INDEL_SNP=0`, the opt-out
+    of the SNP+indel co-occurrence: it does not read the store, and its SNP rows list their
+    carriers as 2.8.1's do.
   - README guide, HGDP + 1000 Genomes, NRG, 4 mismatches + 1 + 1, per-sample (2.8.1 output,
     checked against haplotypes rebuilt from the phased VCF): genome-wide, 280 of 65,184
     highest-CFD SNP rows of the integrated results listed such carriers (28,700 listings,

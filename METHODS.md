@@ -1168,10 +1168,15 @@ the search without it (`--no-prioritize-observed`).
   highest CRISPR-Bulge):
   - **A**: two or more variants that one phased haplotype of the panel carries together — on
     one slot of a phased sample, with no indel of the store on that slot that takes the
-    target's bases off it (as for the per-sample rows, §4, read on the search's reference).
-    States: `one haplotype` when a single one does; `phase not known` when only samples whose
-    genotypes cannot say which haplotype holds which variant carry them all (an unphased
-    call, or two ALTs of one position on one slot, the PUTATIVE rule).
+    target's bases off it, as for the per-sample rows (§4), read on the search's reference
+    and the row's variants: one that changes the target's bases does, unless they are where
+    they were (a repeat unit gained or lost at the target's edge), and so does one whose REF
+    holds a variant's base at another position (two records of one base, whose bases cannot
+    be read); one at a variant's own position, another allele of that base, takes nothing
+    off (a phasing artefact). States: `one haplotype` when a single one does; `phase not
+    known` when only samples whose genotypes cannot say which haplotype holds which variant
+    carry them all (an unphased call, or two ALTs of one position on one slot, the PUTATIVE
+    rule; an indel at a variant's own position on the slot is such an ALT).
 
     **A also where a haplotype reaches the alignment's CFD without every variant.** The
     worst case takes the best-matching allele in every column, and some of those alleles
@@ -1205,7 +1210,8 @@ the search without it (`--no-prioritize-observed`).
   - **C1**: two or more variants, each in the panel, that none of its haplotypes carries
     together and none of which reaches the alignment's CFD without (above); or variants (one
     or more, a single one too) every phased haplotype carrying which also holds an
-    indel that changes the target (state `indel in the target`). A zero means something only where
+    indel that takes the target's bases off it, as A reads one (state `indel in the
+    target`). A zero means something only where
     some were expected: E, the panel haplotypes expected to carry the variants together if
     they were independent (the panel's haplotypes times the product of the variants' panel
     frequencies; linkage is not modelled), is given, and below a threshold (3 by default,

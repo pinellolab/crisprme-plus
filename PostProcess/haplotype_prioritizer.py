@@ -39,18 +39,20 @@ a sites-only dataset (the genotype oracle, opt-in) -- and gives the alignment a 
 
 A haplotype holds a row only when it holds the row's target: on a phased slot that carries
 the row's SNPs, an indel of the store that changes the bases the target covers means the slot
-does not have the row's sequence -- but an indel another of the slot's alleles makes
-impossible (one at a listed SNP's own position, or one whose REF covers it: a phasing
-artefact), and one that leaves the target's bases where they were, read on the reference
-from the target's first base on or up to its last (a tandem repeat's unit gained or lost),
-change nothing. An unphased call keeps the carrier ("phase not known"), as a slot that
-holds two ALTs at one position does (the PUTATIVE rule for two ALTs on one slot).
+does not have the row's sequence, as a per-sample SNP row reads its carriers (METHODS section
+4) -- one whose REF holds a listed SNP's base at another position too (the slot holds two
+records of that base, so its bases cannot be read). One at a listed SNP's own position is
+another allele of that base (a phasing artefact: it takes nothing off, and the slot holds two
+alleles of one position, "phase not known"), and one that leaves the target's bases where
+they were, read on the reference from the target's first base on or up to its last (a
+tandem repeat's unit gained or lost), changes nothing. An unphased call keeps the carrier
+("phase not known"), as a slot that holds two ALTs at one position does (the PUTATIVE rule
+for two ALTs on one slot).
 
 The gate changes no row and drops none: it writes a companion TSV (<results>_carrier_gate.tsv,
 one line per alignment that uses a variant) and a sidecar the report reads
 (.carrier_gate.json). The report ranks the C1 rows after the others, in a tier of their own,
-with the factual label of each tier. The same helpers drop, in the per-sample SNP
-post-analysis (new_simple_analysis.py), a carrier slot that holds such an indel.
+with the factual label of each tier.
 
 STDLIB ONLY (with the repository's tier readers).
 """
@@ -415,43 +417,6 @@ def support(variant_gts, breakers=(), rivals=()):
     return haps, cis, unknown, carrying
 
 
-def slots_holding(variant_gts, others=(), breakers=()):
-    """(held, broken) for ONE sample: of its slots that hold every allele of
-    ``variant_gts`` ([genotype], each read against its allele) and none of ``others`` (its
-    other alleles in the window: such a slot is another haplotype), the number with no
-    breaker (an indel that changes the target, ``breakers``: [genotype]) and the number with
-    one. None when the genotypes cannot put the alleles on slots (an unphased or a missing
-    call, haploid against diploid): such a carrier stays listed. A breaker whose call cannot
-    be put on a slot takes no slot off. A haploid sample (a male's chrX calls) has one
-    slot and no other: an allele of ``others`` on it leaves nowhere else for the target,
-    so a breaker there breaks it whatever else the slot holds."""
-    parsed = [_tokens(g) for g in variant_gts]
-    n = _exact(parsed)
-    if n is None:
-        return None
-    haploid = all(kind == "haploid" for _toks, kind in parsed)
-    other = [_tokens(g) for g in others]
-    if other and _exact(parsed + other) != n:
-        return None
-    held = broken = 0
-    for h in range(n):
-        if not all(toks[h] == "1" for toks, _kind in parsed):
-            continue
-        if not haploid and any(toks[h] == "1" for toks, _kind in other):
-            continue
-        hit = False
-        for g in breakers:
-            bt = _tokens(g)
-            if _exact(parsed + [bt]) == n and bt[0][h] == "1":
-                hit = True
-                break
-        if hit:
-            broken += 1
-        else:
-            held += 1
-    return held, broken
-
-
 # --------------------------------------------------------------------------- #
 # A panel's phased store on one chromosome
 # --------------------------------------------------------------------------- #
@@ -531,16 +496,22 @@ def changing_indels(index, lo, hi):
 
 def breakers_of(changing, alleles, lo, hi, seq_at=None, own=()):
     """{sample: genotype} of each of ``changing`` (changing_indels) that takes a target's
-    bases lo..hi off a haplotype holding the SNP alleles ``alleles`` ({POS: base}): not one
-    of ``own``, not one at a SNP's position or over it (another allele of that base: a slot
-    phased with both is a phasing artefact), and, given the reference (``seq_at``), not one
-    that leaves the target's bases where they were (holds_target: a tandem repeat's unit
-    gained or lost). Without the reference, every other indel that changes the bases."""
+    bases lo..hi off a haplotype holding the SNP alleles ``alleles`` ({POS: base}), as a
+    per-sample SNP row's carrier is read (METHODS section 4): not one of ``own``, not one at
+    a SNP's position (another allele of that base: a slot phased with both is a phasing
+    artefact, which support() reads among the rivals), and, given the reference
+    (``seq_at``), not one that leaves the target's bases where they were (holds_target: a
+    tandem repeat's unit gained or lost) -- but one whose REF holds a SNP's base at another
+    position whatever the reference says: a slot holding both holds two records of that
+    base, whose bases cannot be read. Without the reference, every other indel that
+    changes the bases."""
     out = []
     for p, r, a, g in changing:
-        if (p, r, a) in own or any(p <= q <= p + len(r) - 1 for q in alleles):
+        if (p, r, a) in own or p in alleles:
             continue
-        if seq_at is not None and holds_target(seq_at, lo, hi, alleles, (p, r, a)):
+        over = any(p < q <= p + len(r) - 1 for q in alleles)
+        if not over and seq_at is not None and holds_target(seq_at, lo, hi, alleles,
+                                                            (p, r, a)):
             continue
         out.append(g)
     return out

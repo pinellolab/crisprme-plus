@@ -108,15 +108,6 @@ class TestParseAndSupport(unittest.TestCase):
         self.assertFalse(hp.holds_target(lambda a, b: plain[max(a, 0):b], 2, 17, {},
                                          (8, "CAA", "C")))
 
-    def test_a_haploid_slot_holding_a_breaker_is_broken(self):
-        # a male's chrX calls are his one haplotype's: an indel of his that changes the
-        # target takes it off, whatever else that haplotype holds (RV3-3)
-        self.assertEqual(hp.slots_holding(["1"], [], ["1"]), (0, 1))
-        self.assertEqual(hp.slots_holding(["1"], ["1"], ["1"]), (0, 1))
-        self.assertEqual(hp.slots_holding(["1"], ["1"], []), (1, 0))
-        # a diploid sample has another slot for the target, and keeps the row
-        self.assertEqual(hp.slots_holding(["1|0"], ["1|0"], ["1|0"]), (0, 0))
-
     def test_two_alts_on_one_slot_is_unknown(self):
         alt_g = {"S1": "1|0", "S2": "1|0"}
         alt_t = {"S1": "1|0"}  # S1's first slot holds G and T at one position
@@ -239,6 +230,36 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(hp.classify([v(100, "A", "G")], [p], span=(90, 112)).tier, "B")
         only_s02 = self.panel([(100, "A", "G", {"S02": "1|0"})], indels)
         self.assertEqual(hp.classify([v(100, "A", "G")], [only_s02], span=(90, 112)).tier, "B")
+
+    def test_an_indel_over_the_snps_takes_the_slot(self):
+        """F1: a deletion whose REF holds the row's SNPs' bases at other positions (TRAC's
+        chr22:46177784 AGGC>A under 46177786 G>C and 46177787 C>T) puts two records of each
+        base on a slot that holds them all: its bases cannot be read, and the slot does not
+        hold the row, as a per-sample row reads its carriers (METHODS section 4). S00 holds
+        the SNPs and the deletion on its first slot, S01 the SNPs alone; S02's slot holds a
+        deletion at the first SNP's own position, a phasing artefact."""
+        snps = [(106, "G", "C", {"S00": "1|0", "S01": "1|0", "S02": "1|0"}),
+                (107, "C", "T", {"S00": "1|0", "S01": "1|0"})]
+        indels = [(104, "AGGC", "A", {"S00": "1|0"}), (106, "GC", "G", {"S02": "1|0"})]
+        ref = "ACGT" * 26 + "AGGCTTCA" + "ACGT" * 8
+        p = self.panel(snps, indels)
+        for seq_at in (None, lambda a, b: ref[max(a, 0):max(b, 0)]):
+            p.seq_at = seq_at
+            pair = hp.classify([v(106, "G", "C"), v(107, "C", "T")], [p], span=(100, 122))
+            self.assertEqual((pair.tier, pair.state, pair.haplotypes, pair.samples),
+                             ("A", hp.ONE_HAPLOTYPE, 1, ("S01",)))
+        alone = self.panel([(106, "G", "C", {"S00": "1|0"})], indels[:1])
+        ver = hp.classify([v(106, "G", "C")], [alone], span=(100, 122))
+        self.assertEqual((ver.tier, ver.state, ver.haplotypes), ("C1", hp.INDEL_IN_TARGET, 1))
+        changing = hp.changing_indels(p.indels, 99, 121)
+        self.assertEqual(hp.breakers_of(changing, {106: "C", 107: "T"}, 99, 121),
+                         [{"S00": "1|0"}])
+        # the artefact at a SNP's own position takes nothing off, and S02's slot holds two
+        # alleles of 106: phase not known
+        self.assertEqual(hp.breakers_of(changing, {106: "C"}, 99, 121), [{"S00": "1|0"}])
+        only_s02 = self.panel([(106, "G", "C", {"S02": "1|0"})], indels[1:])
+        self.assertEqual(hp.classify([v(106, "G", "C")], [only_s02], span=(100, 122)).tier,
+                         "B")
 
     def test_multi_alt_genotypes_are_read_per_alt(self):
         # one VCF line with two ALTs: S00 is G on slot 0 and T on slot 1 (1|2), listed under
