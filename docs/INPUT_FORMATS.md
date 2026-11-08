@@ -320,13 +320,14 @@ For a variant-aware search, each VCF record needs:
 
 - a **`FILTER`** value — use `PASS` (records not marked `PASS` may be dropped by
   filtering);
-- **`INFO/AF`** — a **numeric** allele frequency, at **one place in `INFO` in every record**:
-  CRISPRitz `add-variants` reads each record's `AF` where the first record has it, so a record
-  that has it elsewhere gets none: its indel has no frequency, nor, on an index without the
-  dict-less tiers, its SNP (a known limit, to be fixed in the next CRISPRitz release:
+- **`INFO/AF`** — a **numeric** allele frequency. CRISPRitz 2.10.0, which CRISPRme 2.10.0
+  installs, finds each record's `AF` by its key. Up to 2.9.1 `add-variants` reads each record's
+  `AF` where the first record has it, so on an index such a CRISPRitz built a record that has it
+  elsewhere gets none: its indel has no frequency, nor, on an index without the dict-less tiers,
+  its SNP (a known limit:
   [METHODS §8](../METHODS.md#8-off-target-scoring-assumptions-and-limitations)). A VCF merged
   with `seq_script/merge_panels/merge_vcf_panels.sh` has such records; this prints one line for
-  a VCF that has none:
+  a VCF that has `AF` at one place in `INFO` in every record:
 
   ```bash
   bcftools query -f '%INFO\n' your.vcf.gz \

@@ -1131,6 +1131,13 @@ class TestCheckVcfFullScan(unittest.TestCase):
             self.assertEqual(len(issues), 1)
             self.assertEqual(issues[0].severity, vi.WARN)
             self.assertIn("AF field position varies", issues[0].message)
+            # (a limit of the CRISPRitz up to 2.9.1, which 2.10.0, the one this CRISPRme
+            # installs, does not have: it said a later record "now safely reads as a blank AF")
+            self.assertIn("CRISPRitz 2.9.1 and earlier read every record's AF at the first "
+                          "record's position", issues[0].message)
+            self.assertIn("CRISPRitz 2.10.0, which this CRISPRme installs, finds each record's "
+                          "AF by its key", issues[0].message)
+            self.assertNotIn("blank AF", issues[0].message)
 
     def test_zero_pass_rate_errors(self):
         # unlike the partial <10% case below, 0% is a total, guaranteed

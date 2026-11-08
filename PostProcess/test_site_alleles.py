@@ -980,5 +980,48 @@ class TheMegaIndelAfOfALineOfSeveralAlts(unittest.TestCase):
                                ("100", "CA", "G", {"HGDP": 0.3}, 0.3)])
 
 
+# --------------------------------------------------------------------------- #
+# The texts give the last-ALT limit as that of CRISPRitz 2.9.1 and its indexes
+# --------------------------------------------------------------------------- #
+class TheTextsGiveTheLastAltLimitAsCrispritz291s(unittest.TestCase):
+    """2.8.1 stated a known limit of CRISPRitz add-variants, to be "fixed, with rebuilt
+    indexes, in the next release": at a position of several SNP records only the last
+    record's ALT reaches the enriched genome, the dictionaries and the stores compiled from
+    them. CRISPRitz 2.10.0, the one this release installs, codes and lists every ALT, and
+    every index is rebuilt with it; METHODS sections 2 and 8, the README,
+    docs/INDEX_PROVENANCE.md and docs/PRECOMPUTED_INDEXES.md still gave the limit as this
+    release's, to be fixed in one to come. Each now gives it as that of an index CRISPRitz
+    2.9.1 or earlier built, every one published until the rebuild."""
+
+    @staticmethod
+    def _text(*parts):
+        with open(os.path.join(os.path.dirname(HERE), *parts), encoding="utf-8") as fh:
+            return " ".join(fh.read().split())
+
+    def test_each_text_gives_it_as_crispritz_2_9_1s(self):
+        methods, readme, provenance, precomputed = (self._text(*p) for p in (
+            ("METHODS.md",), ("README.md",), ("docs", "INDEX_PROVENANCE.md"),
+            ("docs", "PRECOMPUTED_INDEXES.md")))
+        for name, text in (("METHODS.md", methods), ("README.md", readme),
+                           ("docs/INDEX_PROVENANCE.md", provenance)):
+            self.assertNotIn("with rebuilt indexes, in the next release", text, name)
+        # METHODS section 2 (Homogenization) and section 8
+        self.assertIn("*Known limit (engine), up to CRISPRitz 2.9.1.* The enricher of CRISPRitz "
+                      "2.9.1 and earlier writes one IUPAC code a position", methods)
+        self.assertIn("CRISPRitz 2.10.0, the one CRISPRme 2.10.0 installs, codes every ALT of "
+                      "such a site", methods)
+        self.assertIn("On an index CRISPRitz 2.9.1 or earlier built (every one published until "
+                      "the rebuild for CRISPRme 2.10.0), two SNP records at one position (a split "
+                      "multi-allelic site) keep only the last record's alt", methods)
+        self.assertIn("Split multi-allelic SNP sites are the exception on an index CRISPRitz "
+                      "2.9.1 or earlier built, as every one published until the rebuild for "
+                      "2.10.0", readme)
+        self.assertIn("(CRISPRitz up to 2.9.1, both enricher ports, since 2.6.0 in 2021;",
+                      provenance)
+        self.assertIn("CRISPRitz 2.10.0 codes every ALT of such a site", provenance)
+        self.assertIn("split multi-allelic SNP sites aside on an index CRISPRitz 2.9.1 or "
+                      "earlier built (METHODS §8)", precomputed)
+
+
 if __name__ == "__main__":
     unittest.main()

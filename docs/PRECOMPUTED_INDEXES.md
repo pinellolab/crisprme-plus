@@ -702,7 +702,8 @@ codes** onto the fake-indel genome flanks before indexing the `_INDELS` companio
 the indel search can match SNP+indel haplotypes. Post-analysis resolves each indel
 target on its carriers' own haplotypes (each gets the SNP alleles it carries, so a row
 lists only the individuals that have its sequence, or, where the phase is unknown, those
-whose own alleles allow it, PUTATIVE, split multi-allelic SNP sites aside (METHODS §8);
+whose own alleles allow it, PUTATIVE, split multi-allelic SNP sites aside on an index
+CRISPRitz 2.9.1 or earlier built (METHODS §8);
 on an install without SNP genotypes, as after `download --what index --no-genotypes`,
 every carrier of the indel, PUTATIVE; a sequence no individual has is dropped; since
 2.8.1), then emits, per co-occurring

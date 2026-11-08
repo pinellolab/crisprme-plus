@@ -3700,8 +3700,9 @@ def complete_search() -> None:
     # either -- built without --samplesID, as the benchmark complete-test builds its own --
     # has only the classic per-sample dictionaries, which name the carriers, each SNP with
     # the AF that CRISPRitz add-variants copied into them from the VCF (in either mode; an
-    # indel has the AF it copied into the indel log, as on any index; none for a record
-    # whose INFO has AF at another place than the VCF's first record: METHODS section 8),
+    # indel has the AF it copied into the indel log, as on any index; none, on an index
+    # CRISPRitz 2.9.1 or earlier built, for a record whose INFO has AF at another place
+    # than the VCF's first record: METHODS section 8),
     # and no more. (Since 2.10.0 their per-sample post-analysis gives a window denser than
     # CRISPRME_IUPAC_CAP as the haplotypes its carriers have, as on the tiers, no longer by
     # a greedy alignment: new_simple_analysis.py.) (each dataset once: a --vcf list may

@@ -1436,13 +1436,15 @@ def check_vcf_full_scan(
       chromosome implied by the filename (`chrN` token) — a stray record for
       a different chromosome, e.g. from a bad VCF subset/split, wouldn't be
       caught by the filename-only lightweight check.
-    - AF field-position consistency: `enricher.py` caches the AF field's
-      position from the *first* record only and reuses it for every later
-      record (`enricher.py:387-400`). If INFO field ordering isn't constant
+    - AF field-position consistency: up to CRISPRitz 2.9.1 `enricher.py`
+      caches the AF field's position from the *first* record only and reuses
+      it for every later record. If INFO field ordering isn't constant
       record-to-record, older crispritz versions could silently read the
       wrong field at that position; as of CRISPRitz PR #36 the extraction
-      re-verifies the key on every record, so this now degrades to a blank
-      AF for the affected records rather than a wrong value.
+      re-verifies the key on every record, so this degrades to a blank AF
+      for the affected records rather than a wrong value. CRISPRitz 2.10.0,
+      which this CRISPRme installs, finds each record's AF by its key, so the
+      warning says whose limit it is.
     - FILTER PASS ratio: warns if effectively no variants will survive
       enrichment, against the values the installed crispritz actually
       hardcodes (`ENRICHER_PASS_VALUES`), not `--vcf-filter-pass-values`
@@ -1661,13 +1663,11 @@ def check_vcf_full_scan(
             Issue(
                 WARN,
                 f"{fname}: AF field position varies across records "
-                f"({sorted(af_positions_seen)}) — crispritz caches the "
-                "position from the first record only. Once CRISPRitz PR #36 "
-                "has shipped, a later record whose INFO layout puts a "
-                "different field at that cached position now safely reads as "
-                "a blank AF (the fixed extraction re-verifies the key on "
-                "every record rather than trusting the cached position "
-                "blindly) rather than silently using the wrong value",
+                f"({sorted(af_positions_seen)}) — CRISPRitz 2.9.1 and earlier "
+                "read every record's AF at the first record's position, so an "
+                "index they build has no AF for a record that has it elsewhere "
+                "(its MAF is blank); CRISPRitz 2.10.0, which this CRISPRme "
+                "installs, finds each record's AF by its key",
             )
         )
     if pass_count == 0:

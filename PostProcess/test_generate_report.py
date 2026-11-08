@@ -2704,12 +2704,13 @@ class TestGenerateReport(unittest.TestCase):
                       "VCF's `INFO/AF` (§3), and §8 gives when they hold none.", methods)
 
     def test_no_text_ties_an_indels_or_snps_frequency_to_what_its_vcf_gives(self):
-        """A known limit, to be fixed in the next CRISPRitz release (METHODS section 8): CRISPRitz
-        add-variants, which writes the index's indel log and classic per-sample dictionaries,
-        looks for the AF key in the VCF's first record only and reads every record's AF at that
-        place in INFO (enricher.py _af_value, enricher.cpp afValue), so a record that has it
-        elsewhere gets none. A VCF merged with seq_script/merge_panels/merge_vcf_panels.sh has
-        such records, a site of one source having fewer keys before AF than a site of two: the
+        """A known limit of CRISPRitz up to 2.9.1, and of every index it built (METHODS section
+        8): its add-variants, which writes the index's indel log and classic per-sample
+        dictionaries, looks for the AF key in the VCF's first record only and reads every
+        record's AF at that place in INFO (enricher.py _af_value, enricher.cpp afValue), so a
+        record that has it elsewhere gets none. A VCF merged with
+        seq_script/merge_panels/merge_vcf_panels.sh has such records, a site of one source
+        having fewer keys before AF than a site of two: the
         retired NRG_3_hg38+hg38_1000G2021_HGDP index, built from such a merge, has no AF for
         14,567,429 of its 15,583,931 indels; of the shipped indexes, HPRC's chrY log has none
         for 91,950 of its 102,665; and the mega's VCF has no INFO/AF at all. So these texts said
@@ -2734,8 +2735,10 @@ class TestGenerateReport(unittest.TestCase):
         which sorted a row whose AF is empty by its REF score, and told no HPRC user to run the
         search again; the text fragment's notes for the merge change the three. And the limit's
         headline said that every variant of such a record has no frequency, a SNP too on an
-        index with the tiers. When CRISPRitz is fixed and the logs rebuilt, this test changes
-        with METHODS."""
+        index with the tiers. CRISPRitz 2.10.0 finds each record's AF by its key, and every
+        index is rebuilt with it for this release: the texts said the limit "will be fixed in
+        the next CRISPRitz release", and now say it is that of CRISPRitz 2.9.1 and earlier, and
+        of the indexes it built, the ones published until the rebuild."""
         import glob
         import html as htmlmod
         import shutil
@@ -2919,39 +2922,56 @@ class TestGenerateReport(unittest.TestCase):
             ("seq_script", "merge_panels", "merge_vcf_panels.sh"),
             ("seq_script", "merge_panels", "README.md"), ("docs", "INPUT_FORMATS.md"),
             ("seq_script", "merge_panels", "merge_mega_sites.sh")))
-        self.assertIn("**`INFO/AF`** — a **numeric** allele frequency, at **one place in `INFO` "
-                      "in every record**: CRISPRitz `add-variants` reads each record's `AF` where "
-                      "the first record has it, so a record that has it elsewhere gets none",
-                      formats)
-        self.assertIn("`add-variants` looks for `AF` in the VCF's first record only and reads "
-                      "every record's at that place in `INFO`, so a record that has it elsewhere "
-                      "gets none: its indel has no frequency on any index, nor its SNP on an "
-                      "index without the tiers. Of the shipped indexes this affects only HPRC's "
-                      "chrY;", readme)
+        # (the limit of CRISPRitz up to 2.9.1, and of every index it built, the published ones
+        # until the rebuild for 2.10.0: CRISPRitz 2.10.0 finds each record's AF by its key)
+        self.assertIn("**`INFO/AF`** — a **numeric** allele frequency. CRISPRitz 2.10.0, which "
+                      "CRISPRme 2.10.0 installs, finds each record's `AF` by its key. Up to 2.9.1 "
+                      "`add-variants` reads each record's `AF` where the first record has it, so "
+                      "on an index such a CRISPRitz built a record that has it elsewhere gets "
+                      "none", formats)
+        self.assertIn("`add-variants` up to CRISPRitz 2.9.1 looks for `AF` in the VCF's first "
+                      "record only and reads every record's at that place in `INFO`, so a record "
+                      "that has it elsewhere gets none: its indel has no frequency on any index "
+                      "such a CRISPRitz built, nor its SNP on one without the tiers. Of the "
+                      "indexes published until the rebuild for 2.10.0 this affects only HPRC's "
+                      "chrY", readme)
+        self.assertIn("CRISPRitz 2.10.0 finds each record's `AF` by its key.", readme)
         self.assertIn("it names the carrier samples only, with the `AF` of the classic per-sample "
                       "dictionaries (an indel's, of the index's indel log), which CRISPRitz "
                       "`add-variants` copied from the VCF (see the MAF column below)", readme)
-        self.assertIn("`add-variants` also looks for the `AF` key in the VCF's first record "
-                      "only, and reads every record's `AF` at that place in `INFO`: a record that "
-                      "has it at another place gets none, in the index's indel log and in its "
-                      "classic per-sample dictionaries.", methods)
+        self.assertIn("`add-variants` up to CRISPRitz 2.9.1 also looks for the `AF` key in the "
+                      "VCF's first record only, and reads every record's `AF` at that place in "
+                      "`INFO`: a record that has it at another place gets none, in the index's "
+                      "indel log and in its classic per-sample dictionaries.", methods)
         for said in ("has no `AF` for 14,567,429 of its 15,583,931 indels (224,981 of the "
-                     "232,384 of chr22). Of the shipped indexes only HPRC's chrY is affected,",
+                     "232,384 of chr22). Of the indexes published until the rebuild only HPRC's "
+                     "chrY is affected,",
                      "its log has none for 91,950 of its 102,665 indels.",
-                     "2.8.0 behaves the same; it will be fixed in the next CRISPRitz release "
-                     "(HPRC's chrY log needs rebuilding with it)."):
+                     "CRISPRitz 2.10.0 finds each record's `AF` by its key, so an index it "
+                     "builds, as every one rebuilt for CRISPRme 2.10.0, has the `AF` of each "
+                     "record that has one."):
             self.assertIn(said, methods)
+        # (2.8.1 said it "will be fixed in the next CRISPRitz release": 2.10.0 is that one)
+        for name, text in (("README.md", readme), ("METHODS.md", methods),
+                           ("docs/INPUT_FORMATS.md", formats), ("merge_vcf_panels.sh", recipe),
+                           ("merge_mega_sites.sh", mega_recipe)):
+            self.assertNotIn("next CRISPRitz release", text, name)
         # (a SNP has the same limit only where the dictionaries give its frequency: METHODS
         # section 3, and the report's texts for datasets without the tiers)
         self.assertIn("a SNP has the `AF` of the classic per-sample dictionaries, which "
                       "`add-variants` also copied from the VCF's `INFO/AF`, as rounded there, "
                       "with the same limit as an indel's (§8).", methods)
         self.assertNotIn("it reads INFO/AF by EXACT key, so it selects the pooled AF", recipe)
-        self.assertIn("BUT it looks for that key in the VCF's FIRST record only, and reads every "
-                      "later record's AF at the same place in INFO; a record whose INFO has AF at "
-                      "another place gets NO AF", recipe)
-        self.assertIn("But `add-variants` looks for the key in the VCF's first record only and "
-                      "reads every record's `AF` at that place in `INFO`", recipe_doc)
+        self.assertIn("BUT up to CRISPRitz 2.9.1 it looks for that key in the VCF's FIRST record "
+                      "only, and reads every later record's AF at the same place in INFO; a "
+                      "record whose INFO has AF at another place gets NO AF", recipe)
+        self.assertIn("A known limit (METHODS section 8) of CRISPRitz 2.9.1 and earlier: 2.10.0 "
+                      "finds each record's AF by its key.", recipe)
+        self.assertIn("But `add-variants` up to CRISPRitz 2.9.1 looks for the key in the VCF's "
+                      "first record only and reads every record's `AF` at that place in `INFO`",
+                      recipe_doc)
+        self.assertIn("CRISPRitz 2.10.0 finds each record's `AF` by its key, so an index it "
+                      "builds from this merge has the pooled `AF` of every record.", recipe_doc)
         # merge_mega_sites.sh writes AF after the site's AF_<src> keys and AF_max, so its
         # place moves with the number of sources at the site: its plain AF reaches only the
         # indels whose site has as many sources as the first record's
@@ -2965,13 +2985,16 @@ class TestGenerateReport(unittest.TestCase):
                       "indel's site has as many sources as the VCF's first record: CRISPRitz "
                       "`add-variants` reads each record's `AF` at the place in `INFO` where the "
                       "first record has it (a known limit, METHODS section 8)", design)
+        self.assertIn("That is CRISPRitz 2.9.1 and earlier: 2.10.0 finds each record's `AF` by "
+                      "its key, so on an index it builds every indel would get it.", design)
         self.assertIn("`mega_gw_merge.sh` (read by `mega_build_indels.sh`), writes only "
                       "`AF_<src>` and `AF_max`, with no plain `INFO/AF`, so the shipped mega's "
                       "indel logs hold no AF", design)
         self.assertNotIn("so INDEL off-targets carry the global AF_max through the existing path",
                          mega_recipe)
-        self.assertIn("BUT add-variants looks for the AF key in the VCF's FIRST record only, and "
-                      "reads every later record's AF at the same place in INFO. Here AF comes "
+        self.assertIn("BUT up to CRISPRitz 2.9.1 add-variants looks for the AF key in the VCF's "
+                      "FIRST record only, and reads every later record's AF at the same place in "
+                      "INFO. Here AF comes "
                       "after the site's AF_<src> keys and AF_max, and the number of AF_<src> keys "
                       "is the number of sources that hold the site, so only an indel whose site "
                       "has as many sources as the first record's gets the global AF_max through "

@@ -164,15 +164,17 @@ Each source VCF is normalized so that variant records are directly comparable:
   and `.` is missing. This prevents a `1|2` genotype from being miscounted as
   two copies of alt `1`.
 
-  *Known limit (engine).* The enricher writes one IUPAC code a position and one
-  SNP entry a position, rebuilt from the reference base by each record, so at a
-  position with several biallelic SNP records only the **last** record's ALT is
-  searched: an earlier record's ALT is in neither the enriched genome nor the
-  dictionaries nor the Tier-0 registry nor the Tier-1 genotype store, and an
-  off-target that needs it is not found, or is reported at a lower score, without
-  its carriers (a VCF line that lists several ALTs itself is coded with all of them).
-  It is not new in 2.8.1: every release behaves the same (the SNP dictionaries have
-  always kept one record a position, the enriched genome since CRISPRitz 2.6.0).
+  *Known limit (engine), up to CRISPRitz 2.9.1.* The enricher of CRISPRitz 2.9.1 and
+  earlier writes one IUPAC code a position and one SNP entry a position, rebuilt from
+  the reference base by each record, so at a position with several biallelic SNP
+  records an index it built, as every index published until the rebuild for CRISPRme
+  2.10.0, searches only the **last** record's ALT: an earlier record's ALT is in neither
+  the enriched genome nor the dictionaries nor the Tier-0 registry nor the Tier-1
+  genotype store, and an off-target that needs it is not found, or is reported at a
+  lower score, without its carriers (a VCF line that lists several ALTs itself is coded
+  with all of them). Every release up to 2.8.1 behaves the same (the SNP dictionaries
+  kept one record a position, the enriched genome since CRISPRitz 2.6.0), and so does
+  2.10.0 on such an index.
   On the HGDP + 1000 Genomes panel, 2,486,165 of its 127,666,429 SNP records
   (1.95 %), at 2,441,139 positions, are not coded for this reason. Per guide (NRG, 4
   mismatches + 1 DNA + 1 RNA bulge, per-sample, genome-wide) this leaves 3 to 7 sites
@@ -187,8 +189,11 @@ Each source VCF is normalized so that variant records are directly comparable:
   at six such positions (the three with the highest AC on chr22, two at AC 82 and 257,
   and chr20:12296886): each earlier ALT, up to AC = 8,179 (`rs807755` T>A at
   chr22:19142014), is absent from the enriched genome's code and from all three
-  stores, and only the last record's ALT (AC 1 to 3) is held. It will be fixed, with
-  rebuilt indexes, in the next release.
+  stores, and only the last record's ALT (AC 1 to 3) is held. CRISPRitz 2.10.0, the
+  one CRISPRme 2.10.0 installs, codes every ALT of such a site (`Q`, any base, where
+  the reference base and its ALTs cover A, C, G and T) and lists each in the
+  dictionaries with its own record's carriers, rsID and AF, so an index it builds, as
+  every one rebuilt for CRISPRme 2.10.0, holds them all.
 - **Consistent coordinates and contigs** (reference build, chromosome naming)
   across datasets.
 
@@ -360,7 +365,8 @@ The Tier-0 registry holds SNPs only. An indel has, in either mode, the `AF` of t
 index's indel log, which CRISPRitz `add-variants` copied from the VCF's `INFO/AF` when
 it built the index, as rounded there; one whose `AF` the log gives as 0, or not at all,
 has no frequency. The log holds none for a record whose `INFO` has `AF` at another place
-than the VCF's first record (a known limit of `add-variants`, §8), and none for any
+than the VCF's first record on an index built by CRISPRitz 2.9.1 or earlier (a known limit
+of its `add-variants`, §8), and none for any
 indel of the sites-only mega, whose VCF has no `INFO/AF` (only `AF_<dataset>` and
 `AF_max`, §2): a mega indel's per-dataset frequencies are in the `indel_af.tsv`
 companion.
@@ -1392,30 +1398,34 @@ of indel off-targets — all at the edit-budget ceiling (the weakest, ≈0-CFD t
 carrying ≥ 2 cis indels **can** be flag-all'd for conservative (lossless over-reporting)
 treatment — a design option the min-edit primitive supports (proven lossless in
 `test_twopass_lynchpin_counterexamples`), **not yet wired into the production indel search**.
-Two SNP records at one position (a split multi-allelic site) keep only the last record's
-alt in the enriched genome and its dictionaries (a CRISPRitz `add-variants` property), so
-a carrier of an earlier record's alt is read as reference there, in the SNP and the indel
-post-analysis alike, however common that alt: on the HGDP + 1000 Genomes panel
-chr8:4174067 T>C (8,170 copies) is read as reference because T>G (1 copy) is the later
-record. That is 1.95 % of the panel's SNP records, whose effect §2 gives as measured; it
-will be fixed, with rebuilt indexes, in the next release. `add-variants` also looks for the
-`AF` key in the VCF's first record only, and reads every record's `AF` at that place in
-`INFO`: a record that has it at another place gets none, in the index's indel log and in its
-classic per-sample dictionaries. Its indel then has no frequency on any index (§3), nor its
-SNP on an index without the dict-less tiers (the registry, which gives a SNP's frequency with
-them, counts AC/AN from the genotypes, or on the mega reads each source's `AF_<dataset>` by
-its key), and the report's MAF leaves it out. A VCF merged with
-`seq_script/merge_panels/merge_vcf_panels.sh` has such records, since a site of one source has
-fewer keys before `AF` than a site of two: the retired `NRG_3_hg38+hg38_1000G2021_HGDP` index
-(1000 Genomes 2021 + HGDP, built from such a merge, retired in 2.7.8) has no `AF` for
-14,567,429 of its 15,583,931 indels (224,981 of the 232,384 of chr22). Of the shipped indexes only HPRC's chrY is affected,
+On an index CRISPRitz 2.9.1 or earlier built (every one published until the rebuild for
+CRISPRme 2.10.0), two SNP records at one position (a split multi-allelic site) keep only the
+last record's alt in the enriched genome and its dictionaries (a property of its
+`add-variants`), so a carrier of an earlier record's alt is read as reference there, in the
+SNP and the indel post-analysis alike, however common that alt: on the HGDP + 1000 Genomes
+panel chr8:4174067 T>C (8,170 copies) is read as reference because T>G (1 copy) is the later
+record. That is 1.95 % of the panel's SNP records, whose effect §2 gives as measured.
+CRISPRitz 2.10.0 codes every alt of such a site and lists each in the dictionaries (§2), so an
+index it builds, as every one rebuilt for CRISPRme 2.10.0, holds them all. `add-variants` up
+to CRISPRitz 2.9.1 also looks for the `AF` key in the VCF's first record only, and reads every
+record's `AF` at that place in `INFO`: a record that has it at another place gets none, in the
+index's indel log and in its classic per-sample dictionaries. Its indel then has no frequency
+on any index such a CRISPRitz built (§3), nor its SNP on one without the dict-less tiers (the
+registry, which gives a SNP's frequency with them, counts AC/AN from the genotypes, or on the
+mega reads each source's `AF_<dataset>` by its key), and the report's MAF leaves it out. A VCF
+merged with `seq_script/merge_panels/merge_vcf_panels.sh` has such records, since a site of one
+source has fewer keys before `AF` than a site of two: the retired
+`NRG_3_hg38+hg38_1000G2021_HGDP` index (1000 Genomes 2021 + HGDP, built from such a merge,
+retired in 2.7.8) has no `AF` for 14,567,429 of its 15,583,931 indels (224,981 of the 232,384
+of chr22). Of the indexes published until the rebuild only HPRC's chrY is affected,
 whose VCF has `AF` at five places in `INFO`, after one to five other keys: its log has none for
 91,950 of its 102,665 indels. The HGDP1kGP index and HPRC's other chromosomes have an `AF` for
 each of their 17,192,381 and 12,000,599 indels, as the self-test's 1000 Genomes index (chr22)
 has for its 64,528 indels and 993,880 SNPs; the mega's VCF has no `INFO/AF` at all (§2), so
 none of its 13,853,761 indels has one, and their per-dataset frequencies are in the
-`indel_af.tsv` companion. 2.8.0 behaves the same; it will be fixed in the next CRISPRitz
-release (HPRC's chrY log needs rebuilding with it). The phased indel genotype store
+`indel_af.tsv` companion. CRISPRitz 2.10.0 finds each record's `AF` by its key, so an index it
+builds, as every one rebuilt for CRISPRme 2.10.0, has the `AF` of each record that has one.
+The phased indel genotype store
 leaves out equal-length multi-base records (MNVs), so their carriers are resolved with the
 phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
 among its 195,813 indel-search records. Up to 2.8.1 a SNP row's carriers were resolved from

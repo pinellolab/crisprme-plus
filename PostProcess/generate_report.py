@@ -2094,7 +2094,8 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         # their classic per-sample dictionaries name the carriers, each SNP with the AF that
         # CRISPRitz add-variants copied into them from the VCF (an indel has the AF it copied
         # into the indel log, as on any index), none for a record whose INFO has AF at
-        # another place than the VCF's first record (METHODS section 8; maf_footnote), and
+        # another place than the VCF's first record on an index CRISPRitz 2.9.1 or earlier
+        # built (METHODS section 8; maf_footnote), and
         # their post-analysis still reports a window denser than CRISPRME_IUPAC_CAP by its
         # greedy worst-case alignment, listing the carriers of any of the variants it takes
         sm_note = (
@@ -4075,9 +4076,10 @@ def _linkify_bundled_filenames(html, names):
 # ``untiered``: the datasets a search resolved without the dict-less tiers, whose
 # SNP rows carry the AF of their classic per-sample dictionaries, not AC/AN, in either
 # mode. An AF the index holds is the one CRISPRitz add-variants copied from the VCF's
-# INFO/AF; add-variants looks for the AF key in the VCF's first record only and reads
-# every record's AF at that place in INFO, so a record that has it elsewhere gets none
-# (METHODS section 8): the note says "the index's", not "the VCF's".
+# INFO/AF; add-variants up to CRISPRitz 2.9.1 looks for the AF key in the VCF's first
+# record only and reads every record's AF at that place in INFO, so on an index it built a
+# record that has it elsewhere gets none (METHODS section 8; CRISPRitz 2.10.0 finds it by
+# its key): the note says "the index's", not "the VCF's".
 def maf_footnote(datasets=None, reference_only=False, untiered=None, several=False):
     """``several``: the search searched two or more datasets (``datasets`` names them),
     each with its own panel."""
@@ -4102,8 +4104,8 @@ def maf_footnote(datasets=None, reference_only=False, untiered=None, several=Fal
         # the index's indel log (final_result[16] = indel_data[3]), in either mode and with
         # or without the tiers (the SNPs beside it take the registry's, else the
         # dictionary's). The log holds no AF for any indel of the sites-only mega (its VCF
-        # has no INFO/AF), nor for one whose record has AF elsewhere in INFO than the
-        # VCF's first record
+        # has no INFO/AF), nor, on an index CRISPRitz 2.9.1 or earlier built, for one
+        # whose record has AF elsewhere in INFO than the VCF's first record
         "An indel, which the SNP-only frequency registry does not hold, has the "
         "<code>AF</code> of the index's indel log, which CRISPRitz "
         "<code>add-variants</code> copied from the VCF's <code>INFO/AF</code>, as rounded "

@@ -133,7 +133,9 @@ from a **separate sites-only sidecar**:
   the indel's site has as many sources as the VCF's first record: CRISPRitz
   `add-variants` reads each record's `AF` at the place in `INFO` where the first record
   has it (a known limit, METHODS section 8), and this `AF`'s place moves with the number
-  of sources at the site, so every other indel would get none. The as-run genome-wide
+  of sources at the site, so every other indel would get none. That is CRISPRitz 2.9.1
+  and earlier: 2.10.0 finds each record's `AF` by its key, so on an index it builds
+  every indel would get it. The as-run genome-wide
   merge that made the shipped mega's VCFs, `mega_gw_merge.sh` (read by
   `mega_build_indels.sh`), writes only `AF_<src>` and `AF_max`, with no plain `INFO/AF`,
   so the shipped mega's indel logs hold no AF (for none of its 13,853,761 indels,

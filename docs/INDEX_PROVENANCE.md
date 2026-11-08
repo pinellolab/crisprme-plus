@@ -354,14 +354,16 @@ compiled into `buildTST`, so it cannot affect index content.
   through `gnomAD-converter --multiallelic`. The fix does not retroactively touch
   an already-built store, and nothing invalidates one.
 - **At a position carrying more than one SNP record, only the last record's ALT
-  reaches the enriched genome** (CRISPRitz, both enricher ports, since 2.6.0 in 2021;
-  the SNP dict has always kept one entry a position; in CRISPRitz 2.9.1's Known issues). Normalising a VCF splits a multiallelic site into
+  reaches the enriched genome** (CRISPRitz up to 2.9.1, both enricher ports, since 2.6.0
+  in 2021; the SNP dict kept one record's entry a position up to then; in CRISPRitz 2.9.1's
+  Known issues). Normalising a VCF splits a multiallelic site into
   biallelic records, and each record rebuilds the position's IUPAC code from the
   reference base and overwrites the SNP dict entry, so an earlier record's ALT is in
   neither the enriched genome nor the dict, and an off-target that needs it is not
   found, or is reported at a lower score, without its carriers (a VCF line that lists
-  several ALTs itself is coded with all of them). It applies to any index enriched
-  from a VCF with such sites. Measured for HGDP + 1000 Genomes: 2,486,165 of the
+  several ALTs itself is coded with all of them). It applies to any index CRISPRitz 2.9.1
+  or earlier enriched from a VCF with such sites, every archive above among them.
+  Measured for HGDP + 1000 Genomes: 2,486,165 of the
   panel's 127,666,429 SNP records (1.95 %), at 2,441,139 positions, are not coded for
   this reason; per guide (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample,
   genome-wide) this leaves 3 to 7 sites whose true CFD puts them in the top-1000 out
@@ -380,21 +382,22 @@ compiled into `buildTST`, so it cannot affect index content.
   held. Two examples: chr22:19142014 has `rs807755` T>A at AC = 8,179 and T>G at
   AC = 1, and the enriched genome reads `K` (G/T), the stores hold G alone;
   chr20:12296886 has `rs6109350` G>A at AC = 1,451 and G>C at AC = 2, the code is
-  `S` (C/G), and the stores hold C alone. A fix changes the enriched genomes, and
-  with them every affected index: it will be fixed, with rebuilt indexes, in the next
-  release.
+  `S` (C/G), and the stores hold C alone. The fix changes the enriched genomes, and
+  with them every affected index: CRISPRitz 2.10.0 codes every ALT of such a site (`Q`
+  where the reference base and its ALTs cover A, C, G and T) and lists each in the dict,
+  and every index is rebuilt with it for CRISPRme 2.10.0.
 - **A record whose `INFO` has `AF` at another place than the VCF's first record gets
-  no `AF`** (CRISPRitz `add-variants`, both enricher ports: it looks for the `AF` key
-  in the first record only and reads every record's `AF` at that place). Of the
+  no `AF`** (CRISPRitz `add-variants` up to 2.9.1, both enricher ports: it looks for the
+  `AF` key in the first record only and reads every record's `AF` at that place). Of the
   published indexes it affects HPRC's chrY alone (the NRG and NRR archives install the
   same logs), whose VCF has `AF` at five places: its indel log has no `AF` for 91,950
   of its 102,665 indels, which the report then shows with no MAF; its SNPs, whose
   frequencies the registry counts from the genotypes, are not affected. HPRC's other
   chromosomes and HGDP1kGP have an `AF` for each of their 12,000,599 and 17,192,381
   indels. The mega's VCF has no `INFO/AF` at all, so none of its 13,853,761 indels has
-  one there, by design: their per-dataset frequencies are in `indel_af.tsv`. It will
-  be fixed in the next CRISPRitz release, and HPRC's chrY log needs rebuilding with it
-  (METHODS section 8).
+  one there, by design: their per-dataset frequencies are in `indel_af.tsv`. CRISPRitz
+  2.10.0 finds each record's `AF` by its key, and HPRC's chrY log is rebuilt with it for
+  CRISPRme 2.10.0 (METHODS section 8).
 
 ## How to re-run these measurements
 
