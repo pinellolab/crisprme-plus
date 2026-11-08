@@ -151,14 +151,19 @@ above): S19, listed with C on the alignment that makes the SNP's base a DNA bulg
 0.423, where its alleles give 0.93), in the highest-CFD block, and onto the alignment at 7999
 in the CRISPR-Bulge block.
 
-Not covered: split multi-allelic SNP records at one position. CRISPRitz add-variants
-keeps only the last of them in the enriched genome and in the dictionary, so the other
-alt is invisible to every stage; `PostProcess/test_indel_haplotype_resolution.py` covers
-a position whose genotype source knows both alts. (Several alts on one VCF line reach
-every stage: sites N and N2.) Nor an MNV carrier heterozygous for a SNP its target
-covers: the phased indel genotype store holds only records whose REF and ALT differ in
-length, so an MNV's phase is unknown to the post-analysis, and such a carrier gets the
-strongest target its own alleles allow, PUTATIVE, as an unphased carrier does (site U).
+Not covered: split multi-allelic SNP records at one position; the oracle plants none.
+CRISPRitz 2.10.0, the engine CRISPRme 2.10.0 installs, codes every allele of such a site
+(`Q` where the reference base and its ALTs hold all four bases) and lists each in the
+dictionary with its own record's carriers, where up to 2.9.1 add-variants kept only the
+last record in the enriched genome and the dictionary, the other alt invisible to every
+stage. `PostProcess/test_indel_haplotype_resolution.py` covers a position whose genotype
+source knows both alts (a slot holding two of them resolved PUTATIVE), and the real-data
+check's tests (`PostProcess/test_check_indel_rows.py`) such sites through the check.
+(Several alts on one VCF line reach every stage: sites N and N2.) Nor an MNV carrier
+heterozygous for a SNP its target covers: the phased indel genotype store holds only
+records whose REF and ALT differ in length, so an MNV's phase is unknown to the
+post-analysis, and such a carrier gets the strongest target its own alleles allow,
+PUTATIVE, as an unphased carrier does (site U).
 
 ## SNP rows (2.10.0, `snp_rows.py`)
 

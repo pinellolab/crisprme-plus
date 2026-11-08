@@ -537,10 +537,11 @@ def generate(wd):
     var("QV", "cpx", 21602, "TG", "C", {"S89": "1|0"})
     expect["QV"] = {"perfect": ["S89"], "pam_creation": {"S89": "TGG"}}
 
-    # (No split multi-allelic SNP records here: CRISPRitz add-variants keeps only the
-    # last of two records at one position in the enriched genome and the dictionary,
-    # so the other alt is invisible to every stage. PostProcess/
-    # test_indel_haplotype_resolution.py covers a position whose source knows both.
+    # (No split multi-allelic SNP records here: CRISPRitz 2.10.0 codes every allele of
+    # such a site, where up to 2.9.1 add-variants kept only the last of two records at one
+    # position in the enriched genome and the dictionary. PostProcess/
+    # test_indel_haplotype_resolution.py covers a position whose source knows both, and
+    # PostProcess/test_check_indel_rows.py such sites through the real-data check.
     # No MNV carrier heterozygous for a SNP its target covers either: the phased indel
     # store holds only records whose REF and ALT differ in length, so an MNV's phase is
     # unknown to the post-analysis and such a carrier gets its PUTATIVE worst case.)
