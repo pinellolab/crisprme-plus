@@ -1767,7 +1767,7 @@ sequence only where they can change what it says of the target — one of them i
 changes a base read from the target's start —: every reading of such zones (any of their
 alleles no two of which meet, none included) is tried, and where all agree the slot is
 judged so; a zone wholly before or after the stretch read changes none of its bases. Where
-the readings part, the slot has no reading. There the VCF gives no truth, and §4's rules
+the readings part, the slot has no reading. There the VCF holds no truth, and §4's rules
 are the only model: a listed carrier they take off the target for a documented cause (a
 complex allele, a second indel the slot cannot be read through, the last record of a
 split site, the PUTATIVE rule) fails (`carrier-off-by-rule`), any other is counted.
