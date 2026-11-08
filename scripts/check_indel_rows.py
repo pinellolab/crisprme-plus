@@ -6763,14 +6763,27 @@ def main(argv=None):
                 "carrier; soundness checks those rows themselves)"
                 % (sites_only[ch], ch, "" if lo is None else " in the region"))
     for ch in sorted(c for c, n in filtered.items() if n):
+        # what a genotyped dataset's such indels are, by the phased indel store the run read
+        rules = {sem.store_filter(v, ch) for v in vcfs_for.get(ch, ()) if v.samples}
+        store = {
+            frozenset([True]): " A genotyped dataset's indels among them are read as the "
+                               "reference too: the phased indel store of CRISPRme 2.10.0 "
+                               "skips them, as the enricher does.",
+            frozenset([False]): " A genotyped dataset's indels among them stay on their "
+                                "carriers' haplotypes, as the phased indel store the run read "
+                                "(written before CRISPRme 2.10.0), which keeps every indel of "
+                                "the VCF, reads them (a second indel-path record of the "
+                                "targets they change).",
+            frozenset([True, False]): " A genotyped dataset's indels among them are read as "
+                                      "the reference where the run read a phased indel store "
+                                      "of CRISPRme 2.10.0, and stay on their carriers' "
+                                      "haplotypes where it read one written before.",
+        }.get(frozenset(rules), "")
         rep.add(False, "limit-filtered-record", {"table": "completeness", "chrom": ch},
                 "%d indel/MNV record(s) of %s%s have a FILTER other than PASS or '.', which "
                 "CRISPRitz's enricher skips: no fake-indel window or indel log holds them, "
-                "so no row of theirs is demanded. A genotyped dataset's indels among them "
-                "stay on their carriers' haplotypes, as CRISPRme's phased indel store, "
-                "which keeps every indel of the VCF, reads them (a second indel-path record "
-                "of the targets they change)" % (filtered[ch], ch,
-                                                 "" if lo is None else " in the region"))
+                "so no row of theirs is demanded.%s" % (
+                    filtered[ch], ch, "" if lo is None else " in the region", store))
     for path in sorted(long_ref):
         rep.add(False, "coverage-unindexed-long-ref", {"table": ""},
                 "this checker's own coverage gap, not a CRISPRme limit: %s has no .tbi "

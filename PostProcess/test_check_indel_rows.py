@@ -4702,6 +4702,28 @@ class ReleaseTwoTen(Base):
         rc, _found = case.run()
         self.assertEqual(rc, 2)
 
+    def test_the_filtered_record_line_says_what_the_store_did(self):
+        """The limit-filtered-record line says what a genotyped dataset's indel outside PASS
+        and '.' was to the run: on its carriers' haplotypes where the run read a store of
+        every FILTER (an earlier CRISPRme's), the reference where it read one of 2.10.0."""
+        seq, recs, row, _D, _J = world_filter_second("LowQual")
+        os.makedirs(os.path.join(self.tmp, "old"))
+        case = Case(os.path.join(self.tmp, "old"), seq, recs, [row])
+        rc, found = case.run(mode="completeness")
+        lines = [f[2] for f in found if f[1] == "limit-filtered-record"]
+        self.assertEqual(rc, 0, found)
+        self.assertEqual(len(lines), 1, found)
+        self.assertIn("stay on their carriers' haplotypes", lines[0])
+        os.makedirs(os.path.join(self.tmp, "new"))
+        case = as_2100(Case(os.path.join(self.tmp, "new"), seq, recs,
+                            [set_field(row, samples="S01,S02")]))
+        rc, found = case.run(mode="completeness")
+        lines = [f[2] for f in found if f[1] == "limit-filtered-record"]
+        self.assertEqual(rc, 0, found)
+        self.assertEqual(len(lines), 1, found)
+        self.assertIn("are read as the reference too", lines[0])
+        self.assertNotIn("stay on their carriers' haplotypes", lines[0])
+
     def test_every_allele_of_a_split_site_is_read(self):
         """CRISPRitz 2.10.0 codes every allele of a split site: S01's target through the
         earlier record's ALT (the guide's base) is demanded -- a missing row fails --,
