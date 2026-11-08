@@ -233,9 +233,10 @@ class TestDocumentedCommandsPassTheFlagChecks(unittest.TestCase):
     checks of its flags, or a user who copies it gets an error and nothing else.
 
     The general-index Hugging Face card's only example ran ``--prune-pam`` without
-    ``--index-path``, which complete-search refuses up front ("--prune-pam requires
-    --index-path"). The scan reads the fenced code blocks of the README, METHODS and
-    docs/ (the Hugging Face cards included) and follows backslash continuations.
+    ``--index-path``, which complete-search refused up front before 2.10.0 ("--prune-pam
+    requires --index-path"); since 2.10.0 it takes the flag alone (CHANGELOG, Changed). The
+    scan reads the fenced code blocks of the README, METHODS and docs/ (the Hugging Face
+    cards included) and follows backslash continuations.
     """
 
     IGNORE = frozenset({"--help"})
@@ -272,12 +273,6 @@ class TestDocumentedCommandsPassTheFlagChecks(unittest.TestCase):
                      for flag in sorted(flags - allowed)]
         self.assertEqual(offenders, [], "documented complete-search flags no code "
                                         "accepts: " + ", ".join(offenders))
-
-    def test_prune_pam_is_always_given_with_index_path(self):
-        offenders = sorted({str(path) for path, flags in self._commands()
-                            if "--prune-pam" in flags and "--index-path" not in flags})
-        self.assertEqual(offenders, [], "--prune-pam without --index-path, which "
-                                        "complete-search refuses: " + ", ".join(offenders))
 
 
 class TestNoDocumentedCommandIsABareCrisprme(unittest.TestCase):
