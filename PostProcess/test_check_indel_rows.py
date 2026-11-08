@@ -3166,13 +3166,13 @@ class ReviewRound7(Base):
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
             ctx = self._ctx(GUIDE)
             ctx.snp_union = False
-            rows, capped, _drop, _filt = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+            rows, capped, _drop, _filt, _deg = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
                                                 len(seq))
             cp = len(PRE)
             self.assertNotIn(cp, rows, n)
             self.assertEqual(cp in capped, want, n)
             ctx.snp_union = True
-            rows, capped, _drop, _filt = C.snp_row_cps(
+            rows, capped, _drop, _filt, _deg = C.snp_row_cps(
                 C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)]), ctx, GUIDE,
                 ctx.full(GUIDE), 0, len(seq))
             self.assertIn(cp, rows, n)   # population-level: the union is a row
@@ -3913,12 +3913,12 @@ class ReviewRound9(Base):
                 mm, bdna, brna, max_total_edits = 0, 0, 0, 0
             ctx = C.Ctx(A(), "NRG", 3, False, [GUIDE])
             ctx.snp_union = False
-            rows, _capped, dropped, _filt = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+            rows, _capped, dropped, _filt, _deg = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
                                                    len(seq))
             self.assertEqual((cp in rows, cp in dropped), (sure, not sure), extra)
             ctx.snp_union = True    # population-level: unchanged
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
-            rows, _capped, dropped, _filt = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+            rows, _capped, dropped, _filt, _deg = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
                                                    len(seq))
             self.assertEqual((cp in rows, dropped), (True, set()), extra)
 
@@ -4155,7 +4155,7 @@ class ReviewRound10(Base):
         for filt in ("PASS", "LOW_VQSLOD"):
             write_sites_only_vcf(so, "chr21", [(p + 6, other(GUIDE[5]), GUIDE[5], filt)])
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(so)])
-            rows, _capped, _drop, filt_cps = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE),
+            rows, _capped, _drop, filt_cps, _deg = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE),
                                                            0, len(seq))
             self.assertEqual((cp in rows, cp in filt_cps), (filt == "PASS",
                                                             filt != "PASS"), filt)
@@ -4579,6 +4579,364 @@ class Pieces(unittest.TestCase):
             self.assertEqual(g.number, 2)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------- #
+# a run of CRISPRme 2.10.0: what its own records say of how it read its data
+# --------------------------------------------------------------------------- #
+G21 = "GATTACAGTCCATGCATGGCT"   # a 21-nt guide (SaCas9: NNGRRT, a 27-nt target)
+SA_PAM = "N" * 21 + "NNGRRT 6"
+
+
+def write_bin(path, fmt, flags=0, guide_len=20, pam="NRG", budget=2):
+    """A CRISPRitz .bin's opening bytes, as its index format writes them (CRISPRitz's
+    docs/INDEX_FORMAT.md): format 2 its magic and header (flags: 4 = a target holds Q),
+    format 1 its leaf count and guide length; a few body bytes after."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        if fmt == 2:
+            fh.write(b"CZI\xfe" + struct.pack("=6i", 2, 28 + len(pam), flags, guide_len,
+                                              len(pam), budget) + pam.encode())
+        else:
+            fh.write(struct.pack("=ii", 100, guide_len))
+        fh.write(b"\0" * 64)
+
+
+def as_2100(case, log="", var_flags=4, var_format=2, indels_format=2, enriched=None,
+            budget=2, guide_len=20, pam="NRG"):
+    """Lay ``case`` out as a run of CRISPRme 2.10.0 of dataset v: its results folder moved
+    to work/Results/run, with .Params.txt (Genome_idx), .indexes_searched.txt and (``log``
+    not None) log_verbose.txt; the variant index and the INDELS index it names in
+    work/genome_library, a .bin of the format given each (``var_format`` None: no variant
+    index, as for a search without bulges); ``enriched``: the variant genome, written as
+    work/Genomes/hg38+v/chr21.enriched.fa."""
+    work = os.path.join(case.tmp, "work")
+    lib = os.path.join(work, "genome_library")
+    res = os.path.join(work, "Results", "run")
+    os.makedirs(os.path.dirname(res), exist_ok=True)
+    shutil.move(case.res, res)
+    case.res = res
+    var = "%d-%s_%d_hg38+v" % (guide_len, pam, budget)
+    if var_format is not None:
+        write_bin(os.path.join(lib, var, "%s_chr21_1.bin" % pam), var_format, var_flags,
+                  guide_len, pam, budget)
+    write_bin(os.path.join(lib, var + "_INDELS", "%s_%d_fakechr21" % (pam, budget),
+                           "%s_fakechr21_1.bin" % pam), indels_format, 0, guide_len, pam,
+              budget)
+    with open(os.path.join(res, ".Params.txt"), "w") as fh:
+        fh.write("Genome_ref\thg38\nGenome_idx\t%s_%d_hg38+v\n" % (pam, budget))
+    with open(os.path.join(res, ".indexes_searched.txt"), "w") as fh:
+        fh.write("Reference_index\t%d-%s_%d_hg38 (in %s): built for the PAM %s\n"
+                 % (guide_len, pam, budget, lib, pam))
+        fh.write("Variant_index:v\t%s (in %s): built for the PAM %s on the 3' side of a "
+                 "%d-nt guide, with up to %d bulge(s) of each type; its indels: %s_INDELS\n"
+                 % (var, lib, pam, guide_len, budget - 1, var))
+    if log is not None:
+        with open(os.path.join(res, "log_verbose.txt"), "w") as fh:
+            fh.write(log)
+    if enriched is not None:
+        os.makedirs(os.path.join(work, "Genomes", "hg38+v"), exist_ok=True)
+        write_fasta(os.path.join(work, "Genomes", "hg38+v", "chr21.enriched.fa"), enriched)
+    return case
+
+
+def world_window_edge(tmp, bulged=False):
+    """R10-N1 in miniature: an insertion of a T after the anchor A makes a SaCas9 target
+    (G21 + ACGAA + the T, PAM NNGRRT) that starts at its fake-indel window's first base, 25
+    bases before the anchor (the reference reads ACGAAC there: no PAM). S01 carries it.
+    ``bulged``: the target holds one base more than the guide (a DNA bulge), and starts a
+    base before the window."""
+    head = G21[:10] + ("C" if bulged else "") + G21[10:]
+    left = head + "ACGAA"
+    seq = PRE + left + "CTTGGACCATGG" + POST
+    anchor = len(PRE) + len(left)          # VCF POS of the anchor A
+    rec = (anchor, "A", "AT", {"S01": "1|0"})
+    return seq, [rec], len(PRE)
+
+
+class ReleaseTwoTen(Base):
+    """2.10.0: the run's records say how its CRISPRme and CRISPRitz read the data."""
+
+    def test_an_opt_out_run_is_refused(self):
+        """R11-F1: CRISPRME_INDEL_SNP=0 (its search notes it in log_verbose.txt): every SNP
+        code reads as the reference, an indel row lists every carrier of its indel, and the
+        per-carrier resolution this checker models does not apply: refused (exit 2), in
+        every mode; the same run without the note is checked."""
+        case, _ = world_indel_snp(self.tmp)
+        as_2100(case, log="STARTING ANALYSIS FOR v\nNOTE: the SNP+indel co-occurrence is off "
+                          "(CRISPRME_INDEL_SNP=0): every SNP code of the fake-indel genome of "
+                          "v reads as the reference base, so ...\n")
+        for mode in ("soundness", "completeness", "both"):
+            rc, _found = case.run(mode=mode)
+            self.assertEqual(rc, 2, mode)
+        with open(os.path.join(case.res, "log_verbose.txt"), "w") as fh:
+            fh.write("STARTING ANALYSIS FOR v\n")
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_store_of_2_10_0_holds_no_indel_the_search_skips(self):
+        """The store's FILTER rule (2.10.0): J, a LowQual deletion inside D's target on
+        S01's D slot, is in no store, so S01 is listed for D's perfect target beside S02. A
+        row listing S02 alone fails (S01 missing); the row listing both passes. With the
+        log's note of a store written before 2.10.0 (which keeps J), S02 alone passes, as
+        before; a run of 2.10.0 with no log_verbose.txt cannot say: refused."""
+        seq, recs, row, _D, J = world_filter_second("LowQual")
+        case = as_2100(Case(self.tmp, seq, recs, [row]))
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertTrue(gating(found) and all(f[3] == "S01" for f in gating(found)), found)
+        write_results(case.res, [set_field(row, samples="S01,S02")])
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        rc, found = case.run(mode="completeness")
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        with open(os.path.join(case.res, "log_verbose.txt"), "w") as fh:
+            fh.write("NOTE [indel-snp]: the phased indel genotype store of v on chr21 was "
+                     "written before CRISPRme 2.10.0: it holds ...\n")
+        write_results(case.res, [row])
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        os.remove(os.path.join(case.res, "log_verbose.txt"))
+        rc, _found = case.run()
+        self.assertEqual(rc, 2)
+
+    def test_every_allele_of_a_split_site_is_read(self):
+        """CRISPRitz 2.10.0 codes every allele of a split site: S01's target through the
+        earlier record's ALT (the guide's base) is demanded -- a missing row fails --,
+        where on a genome of the last record (2.9.1) it is limit-last-alt-wins. The variant
+        index's Q flag says so; failing that, its enriched genome's code at the site."""
+        seq = PRE + GUIDE[:4] + other(GUIDE[4]) + GUIDE[5:10] + "C" + GUIDE[10:] + "TGG" + POST
+        pos1, snp = len(PRE) + 10, len(PRE) + 5
+        ref_b = seq[snp - 1]
+        third = next(x for x in "ACGT" if x not in (ref_b, GUIDE[4]))
+        recs = [(pos1, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0"}),
+                (snp, ref_b, GUIDE[4], {"S01": "1|0"}),
+                (snp, ref_b, third, {"S02": "1|0"})]
+        budget = ("0", "0", "0", "0")
+        old = Case(os.path.join(self.tmp, "old") if os.makedirs(
+            os.path.join(self.tmp, "old")) is None else None, seq, recs, [])
+        rc, found = old.run(mode="completeness", budget=budget)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-last-alt-wins", classes(found), found)
+        code = {frozenset("AC"): "M", frozenset("AG"): "R", frozenset("AT"): "W",
+                frozenset("CG"): "S", frozenset("CT"): "Y", frozenset("GT"): "K",
+                frozenset("ACG"): "V", frozenset("ACT"): "H", frozenset("AGT"): "D",
+                frozenset("CGT"): "B"}
+        for tag, kw in (("q", dict(var_flags=4)),
+                        ("fa", dict(var_flags=0, enriched=seq[:snp - 1] + code[frozenset(
+                            (ref_b, GUIDE[4], third))] + seq[snp:]))):
+            tmp = os.path.join(self.tmp, tag)
+            os.makedirs(tmp)
+            case = as_2100(Case(tmp, seq, recs, []), **kw)
+            rc, found = case.run(mode="completeness", budget=budget)
+            self.assertEqual(rc, 1, (tag, found))
+            self.assertIn("missing-row", classes(gating(found)), (tag, found))
+            self.assertNotIn("limit-last-alt-wins", classes(found), (tag, found))
+        # the enriched genome codes the last record alone (and the index flags no Q): a
+        # genome of 2.9.1's reading, the limit again
+        tmp = os.path.join(self.tmp, "last")
+        os.makedirs(tmp)
+        case = as_2100(Case(tmp, seq, recs, []), var_flags=0, enriched=seq[:snp - 1]
+                       + code[frozenset((ref_b, third))] + seq[snp:])
+        rc, found = case.run(mode="completeness", budget=budget)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-last-alt-wins", classes(found), found)
+        # neither tells (no Q, no enriched genome, no four-base position): refused
+        tmp = os.path.join(self.tmp, "none")
+        os.makedirs(tmp)
+        case = as_2100(Case(tmp, seq, recs, []), var_flags=0)
+        rc, _found = case.run(mode="completeness", budget=budget)
+        self.assertEqual(rc, 2)
+
+    def test_two_alts_of_one_position_on_a_slot_are_putative(self):
+        """Every allele coded, a slot can hold two ALTs of one position (split records
+        phased one by one): no haplotype, so no truth there, and CRISPRme resolves the
+        carrier PUTATIVE (METHODS section 4). S01's D slot holds the deletion and both ALTs
+        of a spacer position, one of them the guide's base: listed for the guide's base,
+        the row passes; a row listing S01 for the other ALT's weaker target fails
+        (carrier-off-by-rule: the rule lists it for its strongest one)."""
+        seq = PRE + GUIDE[:5] + "C" + GUIDE[6:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dpos, spos = len(PRE) + 10, len(PRE) + 6
+        third = next(x for x in "ACGT" if x not in ("C", GUIDE[5]))
+        recs = [(spos, "C", GUIDE[5], {"S01": "1|0", "S02": "1|0"}),
+                (spos, "C", third, {"S01": "1|0"}),
+                (dpos, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "1|0"})]
+        start = len(PRE)
+        var = "%s,%s" % (tok("chr21", recs[2]), tok("chr21", recs[0]))
+        row = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                         GUIDE + "TGG", "TGG", 0, 0, "X", var, "S01,S02")
+        case = as_2100(Case(self.tmp, seq, recs, [row]))
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        weak = list(GUIDE + "TGG")
+        weak[5] = third.lower()
+        var3 = "%s,%s" % (tok("chr21", recs[2]), tok("chr21", recs[1]))
+        row3 = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                          "".join(weak), "TGG", 1, 0, "X", var3, "S01")
+        write_results(case.res, [row, row3])
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                         {("carrier-off-by-rule", "S01")}, found)
+
+    def test_two_records_of_one_snv_are_one_allele(self):
+        """Every allele coded, two lines of one SNV REF>ALT are one allele, their calls
+        merged as CRISPRme 2.10.0 merges them: phased slot by slot, a slot holding the ALT
+        if either line puts it there; otherwise unphased with the larger copy count. On
+        the genome of the last record (no semantics given) they stay two lines."""
+        seq = "ACGT" * 20
+        vcf = os.path.join(self.tmp, "v.vcf.gz")
+        write_vcf(vcf, "chr21", [(5, "A", "C", {"S01": "1|0", "S02": "1|0", "S03": "0/1"}),
+                                 (5, "A", "C", {"S01": "0|1", "S02": "1|0", "S03": "1|0"})])
+        sem = C.Semantics(True, {(None, None): {"all_alleles": True, "store_filter": True,
+                                                "indels": (2, 2)}}, {})
+        win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)], sem=sem)
+        self.assertEqual(len(win.by_key[(5, "A", "C")]), 1)
+        a = win.by_key[(5, "A", "C")][0]
+        self.assertEqual(win.call(a, "S01"), ((1, 1), True))
+        self.assertEqual(win.call(a, "S02"), ((1, 0), True))
+        self.assertEqual(win.call(a, "S03"), ((1, 0), False))
+        old = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
+        self.assertEqual(len(old.by_key[(5, "A", "C")]), 2)
+
+    def test_a_target_at_the_window_edge_follows_the_indels_index_format(self):
+        """R10-N1: a 27-nt SaCas9 target that starts at its fake-indel window's first base.
+        An INDELS index of format 1 drops it (the separator N in its pad):
+        limit-window-edge, not demanded; one of format 2 holds it: demanded, a missing row
+        fails. A run that says neither (no index found, no format-1 NOTE) is refused."""
+        seq, recs, _start = world_window_edge(self.tmp)
+        budget = ("2", "0", "0", "2")
+        for fmt in (1, 2):
+            tmp = os.path.join(self.tmp, "f%d" % fmt)
+            os.makedirs(tmp)
+            case = as_2100(Case(tmp, seq, recs, [], pam=SA_PAM), indels_format=fmt, budget=1,
+                           guide_len=21, pam="NNGRRT")
+            rc, found = case.run(mode="completeness", budget=budget, guide=G21)
+            if fmt == 1:
+                self.assertEqual((rc, gating(found)), (0, []), found)
+                self.assertIn("limit-window-edge", classes(found), found)
+            else:
+                self.assertEqual(rc, 1, found)
+                self.assertIn("missing-row", classes(gating(found)), found)
+        tmp = os.path.join(self.tmp, "gone")
+        os.makedirs(tmp)
+        case = as_2100(Case(tmp, seq, recs, [], pam=SA_PAM), budget=1, guide_len=21,
+                       pam="NNGRRT")
+        shutil.rmtree(os.path.join(tmp, "work", "genome_library"))
+        rc, _found = case.run(mode="completeness", budget=budget, guide=G21)
+        self.assertEqual(rc, 2)
+
+    def test_a_target_past_the_window_is_not_demanded(self):
+        """A target that runs past its record's fake-indel window (here a DNA-bulged
+        SaCas9 target, 28 bases from a base before the window to the inserted T) is held
+        by no index, whatever its format: limit-window-reach, never demanded."""
+        seq, recs, _start = world_window_edge(self.tmp, bulged=True)
+        case = as_2100(Case(self.tmp, seq, recs, [], pam=SA_PAM), budget=2, guide_len=21,
+                       pam="NNGRRT")
+        rc, found = case.run(mode="completeness", budget=("2", "1", "0", "3"), guide=G21)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-window-reach", classes(found), found)
+
+    def test_window_cut(self):
+        """window_cut on its own: 25 reference bases before the record's first REF base and
+        27 after its last; the edge rule only on an INDELS index of format 1, on the
+        guide's far end (+ strand, 3' PAM: the left end), within the index's budget."""
+        class Win(object):
+            chrom = "chr21"
+            vcfs = ["v"]
+            line_vcf = [0]
+        win = Win()
+        al_ = C.Allele(100, "A", "AT", 0, 1)   # first REF base 99 (0-based)
+        ctx = type("Ctx", (), {"bdna": 0, "brna": 0, "pam_5prime": False})()
+        win.sem = None
+        place = [(q, 0) for q in range(74, 100)] + [(99, 1)]   # 74 = 99 - 25
+        self.assertIsNone(C.window_cut(win, ctx, al_, place, "+"))
+        self.assertEqual(C.window_cut(win, ctx, al_, [(73, 0)] + place, "+"), "reach")
+        self.assertIsNone(C.window_cut(win, ctx, al_, [(99, 1)] + [(q, 0) for q in
+                                                                range(100, 127)], "+"))
+        self.assertEqual(C.window_cut(win, ctx, al_, [(99, 1)] + [(q, 0) for q in
+                                                               range(100, 128)], "+"),
+                         "reach")   # 127: past the 27 bases after the REF's last, 99
+        for fmt, want in ((1, "edge"), (2, None)):
+            win.sem = C.Semantics(True, {(None, None): {"indels": (fmt, 1)}}, {})
+            self.assertEqual(C.window_cut(win, ctx, al_, place, "+"), want)
+            # the - strand's guide is on the right: the left end is its PAM's
+            self.assertIsNone(C.window_cut(win, ctx, al_, place, "-"))
+
+    def test_a_run_of_2_10_0_writes_no_capped_greedy_row(self):
+        """A per-sample run of 2.10.0 reports a window over CRISPRME_IUPAC_CAP by the
+        haplotypes its carriers have, on the classic dictionaries too: no greedy row a
+        cluster can chain through (capped_sets), which a run of 2.8.1 may write."""
+        seq = "ACGTTGCAAG" * 8
+        vcf = os.path.join(self.tmp, "v.vcf.gz")
+        write_vcf(vcf, "chr21", [(3 + 2 * i, seq[2 + 2 * i], other(seq[2 + 2 * i]),
+                                  {"S01": "1|0"}) for i in range(C.IUPAC_CAP + 2)])
+        ctx = type("Ctx", (), {"snp_union": False, "sem": None})()
+        win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
+        self.assertTrue(C.capped_sets(win, ctx, 0, len(seq)))
+        ctx.sem = C.Semantics(True, {}, {})
+        self.assertEqual(C.capped_sets(win, ctx, 0, len(seq)), [])
+
+    def test_max_degeneracy_opens_a_snp_row_over_its_cap(self):
+        """--max-degeneracy K (2.10.0; the run's .Params.txt Max_degeneracy): a SNP row
+        resting on more than K ambiguous columns is cut back or left out (METHODS section
+        5), so a population-level alignment over more than K positions of several options
+        is a row CRISPRme may write or not (snp_row_cps' fifth set), never one the chain
+        counts on; without the cap it is a row."""
+        site = list(GUIDE + "TGG")
+        for i in (3, 8):
+            site[i] = other(site[i])
+        seq = PRE + "".join(site) + POST
+        vcf = os.path.join(self.tmp, "v.vcf.gz")
+        write_vcf(vcf, "chr21", [(len(PRE) + i + 1, site[i], GUIDE[i], {"S01": "0|1"})
+                                 for i in (3, 8)])
+
+        class A(object):
+            mm, bdna, brna, max_total_edits = 0, 0, 0, 0
+        ctx = C.Ctx(A(), "NRG", 3, False, [GUIDE])
+        ctx.snp_union = True
+        cp = C.cluster_of(len(PRE), "+", 23, 23, False)
+        for k, want in ((None, (True, False)), (1, (False, True)), (2, (True, False))):
+            ctx.max_degeneracy = k
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
+            rows, _c, _d, _f, deg = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0, len(seq))
+            self.assertEqual((cp in rows, cp in deg), want, k)
+
+    def test_the_semantics_of_a_run(self):
+        """run_semantics: no .indexes_searched.txt, a run before 2.10.0 (the last record,
+        stores of every FILTER, INDELS format 1); with it, the INDELS index's format and
+        budget from its .bin, the store's rule from the log (an older store's note), none
+        with no log."""
+        seq, recs, row, _D, _J = world_filter_second("PASS")
+        case = Case(self.tmp, seq, recs, [row])
+        vcfs = [C.Vcf(case.vcf)]
+        sem, why = C.run_semantics(case.res, vcfs, ["chr21"], None, "hg38")
+        self.assertIsNone(why)
+        self.assertFalse(sem.release2100)
+        self.assertEqual((sem.all_alleles(vcfs[0], "chr21"), sem.store_filter(vcfs[0], "chr21"),
+                          sem.indels(vcfs[0], "chr21")), (False, False, (1, None)))
+        self.assertTrue(sem.capped)
+        as_2100(case, log="", indels_format=2, budget=3)
+        sem, why = C.run_semantics(case.res, vcfs, ["chr21"], ["v"], "hg38")
+        self.assertTrue(sem.release2100)
+        self.assertFalse(sem.capped)
+        self.assertEqual((sem.all_alleles(vcfs[0], "chr21"), sem.store_filter(vcfs[0], "chr21"),
+                          sem.indels(vcfs[0], "chr21")), (True, True, (2, 3)))
+        with open(os.path.join(case.res, "log_verbose.txt"), "w") as fh:
+            fh.write("NOTE [indel-snp]: the phased indel genotype store of v on chr21 was "
+                     "written before CRISPRme 2.10.0: ...\n")
+        sem, _why = C.run_semantics(case.res, vcfs, ["chr21"], ["v"], "hg38")
+        self.assertFalse(sem.store_filter(vcfs[0], "chr21"))
+        os.remove(os.path.join(case.res, "log_verbose.txt"))
+        sem, _why = C.run_semantics(case.res, vcfs, ["chr21"], ["v"], "hg38")
+        self.assertIsNone(sem.values[("v", "chr21")]["store_filter"])
+        lib = os.path.join(case.tmp, "work", "genome_library")
+        shutil.rmtree(os.path.join(lib, "20-NRG_3_hg38+v_INDELS"))
+        with open(os.path.join(case.res, "log_verbose.txt"), "w") as fh:
+            fh.write("NOTE: 20-NRG_3_hg38+v_INDELS is in index format 1 (built by CRISPRitz "
+                     "2.9.1 or earlier): it lacks ...\n")
+        sem, _why = C.run_semantics(case.res, vcfs, ["chr21"], ["v"], "hg38")
+        self.assertEqual(sem.indels(vcfs[0], "chr21"), (1, 3))
 
 
 if __name__ == "__main__":

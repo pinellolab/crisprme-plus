@@ -535,8 +535,18 @@ so the co-occurrence signal is never silently dropped for lack of genotypes.
 
 ### SNP+indel off-targets: each carrier's own haplotype
 Off-targets that need an indel are searched on the **fake-indel genome**: one short window
-per indel (25 bp of reference, the indel's ALT, then reference), onto which the build
-writes the IUPAC code of every SNP of the enriched genome. The search engine matches a code
+per indel (25 bp of reference, the indel's ALT, then 27 bp of reference, an `N` between two
+windows), onto which the build writes the IUPAC code of every SNP of the enriched genome.
+A target that runs past its window cannot be searched, whatever the index: a known limit
+for targets longer than SpCas9's with bulges — a 27-nt one (SaCas9's 21-nt guide and
+`NNGRRT`, SaCas9-KKH, Cas12a `TTTV`/`TTTN` at 23 nt) with a DNA bulge, from an insertion's
+first added base, needs 26 bases before it (from 3% to 20% of the indel-holding alignment
+slots of those enzymes at 1 to 3 DNA bulges; SaCas9 4.2% at one), while every target of up
+to 27 bases fits, SpCas9's 23-nt ones with their bulges among them. An index of format 1 (CRISPRitz 2.9.1) also lost a target whose
+guide's far end lies within its budget of the window's edge, the `N` in its pad: every
+budget of a 27-nt motif, so for SaCas9 the targets that start at a window's first base
+(2,103 carrier targets at 6 records on chr22 of HGDP + 1000 Genomes for one guide,
+2 mismatches, no bulge); an index of format 2 (§9) holds them. The search engine matches a code
 when **any** of its alleles fits the guide (or the PAM), so one raw indel target stands for
 every combination of the window's SNP alleles at once; only the genotypes say which of them
 exist. The indel post-analysis therefore resolves each such target **per carrier
@@ -1794,15 +1804,18 @@ CRISPRitz's enricher reads only the VCF lines whose FILTER is `PASS` or `.` (tho
 strings; `PostProcess/validate_inputs.py`'s full check says the others "will be excluded
 from enrichment"): no other line
 is in the enriched genome, its dictionaries, registry and genotype store, the indel log or
-the fake-indel windows. The phased indel store (`build_indel_genotypes.py`) streams the VCF
-without reading FILTER and keeps every indel, and §4's carrier resolution reads it: a second
-indel or an overlapping one on a carrier's slot takes the carrier off a target, and a SNP row
-drops a carrier for an indel of its slot, whatever that indel's FILTER (the SNP+indel oracle,
-the second deletions of its sites O and Q and the insertion of Y1 marked `LowQual`, lists its
-carriers so). So of a genotyped dataset a line outside `PASS` and `.` keeps its indels, on
-their carriers' haplotypes as the store has them — no fake-indel window holds one, so a row
-naming one fails (`variant-filtered`) and completeness demands none of its targets (one
-`limit-filtered-record` line per chromosome counts them) — and its SNVs and MNVs are read as
+the fake-indel windows. The phased indel store (`build_indel_genotypes.py`) holds the same
+records since 2.10.0; one written before streamed the VCF without reading FILTER and kept
+every indel, and §4's carrier resolution reads the store: a second indel or an overlapping
+one on a carrier's slot takes the carrier off a target, and a SNP row drops a carrier for an
+indel of its slot, whatever that indel's FILTER (the SNP+indel oracle, the second deletions
+of its sites O and Q and the insertion of Y1 marked `LowQual`, lists its carriers so on such
+a store). So of a genotyped dataset a line outside `PASS` and `.` is read as the reference,
+but for its indels where the run read a store written before 2.10.0 (its `log_verbose.txt`
+says so: the releases, below), which stay on their carriers' haplotypes as that store has
+them; either way no fake-indel window holds one, so a row naming one fails
+(`variant-filtered`) and completeness demands none of its targets (one
+`limit-filtered-record` line per chromosome counts them), and its SNVs and MNVs are read as
 the reference: a carrier of such a SNP stays listed for a target the SNP would change (the
 oracle's site A, its PAM SNP marked `LowQual`, lists its cis carrier). Of a sites-only
 dataset such a line's indels and MNVs are dropped (the `hg38_mega` index's indel log holds
@@ -1812,12 +1825,42 @@ SNVs of its chr22 VCF, the 78,116 outside `PASS` among them, and its SNP rows na
 (chr22:11574550 C>G, `LOW_VQSLOD`), while an index CRISPRitz's enricher builds from a
 sites-only VCF holds none of them, and a run does not say which it read, so a SNP row
 through one is a row CRISPRme may write or not (below). Its fake-indel windows code what
-CRISPRitz's overlay codes from the enriched genome: its SNVs whose FILTER passes, the last
-record of a split site (on chr22, `hg38_mega`'s indel rows name the last record at 279 split
-sites and, at chr22:25093750, the `PASS` C>G before the `LOW_VQSLOD` C>T, and no other), so a
-row of a sites-only dataset (no carrier) must name SNVs of that dataset's VCF whose FILTER
-passes (`variant-not-in-dataset`, `variant-filtered`; an earlier record of a split site is
-the note `variant-shadowed`).
+CRISPRitz's overlay codes from the enriched genome: its SNVs whose FILTER passes, every
+allele of a split site on a genome of CRISPRitz 2.10.0 and the last record of one on a genome
+of 2.9.1 or earlier (on chr22, the published `hg38_mega`'s indel rows name the last record at
+279 split sites and, at chr22:25093750, the `PASS` C>G before the `LOW_VQSLOD` C>T, and no
+other), so a row of a sites-only dataset (no carrier) must name SNVs of that dataset's VCF
+whose FILTER passes (`variant-not-in-dataset`, `variant-filtered`; on a genome of 2.9.1 an
+earlier record of a split site is the note `variant-shadowed`).
+**Releases.** Where CRISPRme's and CRISPRitz's releases read the data otherwise, the check
+reads which one did from the run's own records, and refuses (exit 2) a run whose records do
+not tell where its data makes it matter. A run of CRISPRme 2.10.0 or later writes
+`.indexes_searched.txt` (the indexes that served it); one without it is an earlier
+CRISPRme's, which read indexes CRISPRitz 2.9.1 or earlier built (format 1, the last record
+of a split site) and a phased indel store of every FILTER. Of a run of 2.10.0: the variant
+genome codes every allele of a split site where the variant index that served it flags Q in
+its `.bin` headers, or where its enriched genome (`Genomes/<genome>+<dataset>/` of the run's
+working directory) codes an earlier record's ALT at a split site of the VCF, and the last
+record alone where that index is of format 1, or the enriched genome holds the last ALT
+alone, or an index of format 2 flags no Q while the VCF has a position of four bases; with
+every allele coded, two lines of one SNV REF>ALT are one allele, their calls merged as §4
+merges them, and a slot holding two ALTs of one position is resolved PUTATIVE (§4). The
+INDELS index's format is that of its `.bin` files, else the run's format-1 NOTE of it
+(§9). The phased indel store holds only the records whose FILTER passes but where the run's
+`log_verbose.txt` notes a store written before 2.10.0 for the dataset and chromosome (without
+the log, a run whose genotyped VCF holds an indel record of another FILTER is refused). A
+per-sample run of 2.10.0 writes no greedy row of a window over `CRISPRME_IUPAC_CAP`, so none
+joins a cluster; its `--max-degeneracy K` (§5) cuts back or leaves out a SNP row resting on
+more than K ambiguous columns, so in a cluster chain an alignment over more than K positions
+of several options is a row CRISPRme may write or not (`limit-max-degeneracy`); an indel row
+is not cut. The carrier gate (§5) ranks and labels population-level rows in its companion
+and the report and leaves the integrated results and their alternative alignments as they
+are, so it changes nothing the check reads. A run made with the SNP+indel co-occurrence off
+(`CRISPRME_INDEL_SNP=0`, which a search of 2.10.0 notes in its `log_verbose.txt`) is
+refused: every SNP code of its fake-indel genomes read as the reference, its indel rows name
+no SNP and list every carrier of their indel, and its SNP rows keep a carrier whose
+haplotype holds an indel in the target, none of the per-carrier resolution modeled here (a
+run of an earlier CRISPRme made so records nothing that tells it).
 CRISPRme's documented reading of a carrier (§4: the one-indel window, resolved with each
 carrier's own SNP alleles, so that a row lists a carrier only where those give its target;
 the second indel read from either end of the target through the indel, each base the indel

@@ -33,88 +33,98 @@ every ALT allele its genotype puts on that slot, each in place of its REF bases 
 of the records CRISPRme reads. CRISPRitz's enricher skips every line whose FILTER is
 neither PASS nor '.' (those exact strings): no such line is in the enriched genome, its
 dictionaries, registry and genotype store, the indel log or the fake-indel windows. The
-phased indel store (build_indel_genotypes) streams the VCF without reading FILTER and keeps
-every indel of it, and CRISPRme's carrier resolution reads that store: a second indel or
-an overlapping one on a carrier's slot takes it off a target, and Track B drops a SNP
-row's carrier for an indel of its slot, whatever that indel's FILTER (the oracle's sites
-O, Q and Y1 with their indels marked LowQual are resolved so). So of a genotyped dataset
-such a line keeps its indels, on their carriers' haplotypes as the store has them; they
-are no record of the search (no fake-indel window holds one: a row naming one fails,
-variant-filtered, and completeness demands none of their targets, limit-filtered-record),
-and its SNVs and MNVs are read as the reference. Of a sites-only dataset such a line keeps
-its SNVs for its SNP rows: the hg38_mega index's SNP rows read them whatever their FILTER
-(its registry holds every SNV of its VCF, and its SNP rows name some: chr22:11574550 C>G,
-LOW_VQSLOD), while an index CRISPRitz's enricher builds from a sites-only VCF does not
-hold them, and a run does not say which it read -- so a SNP row through one is a row
-CRISPRme may write or not (below). Its fake-indel windows code what CRISPRitz's overlay
-codes from the enriched genome, its SNVs whose FILTER passes and the last record of a
-split site (the mega's indel rows name no other: at chr22:25093750 the PASS C>G, before
-the LOW_VQSLOD C>T), so a row of it (no carrier) names SNVs of its own VCF whose FILTER
-passes (else variant-not-in-dataset, variant-filtered; an earlier record of a split site
-is the note variant-shadowed). Its indels and MNVs outside PASS and '.' are dropped
-(hg38_mega's indel log holds exactly the PASS indels of its VCF). A slot holds a row's
-target when it reads the target's bases from the row's start THROUGH the record: each
-base of the target the record's ALT puts there at its place (and the base after them), as
-the row's target has it -- a second insertion between the start and the record that
-lengthens the stretch and pushes some of the record's bases out of it makes another
-target, which needs two indel-path records. Two alleles of one slot whose REF spans meet
-(a SNP at an insertion's own position, a SNP on a base a deletion removes, a complex
-allele split into overlapping records, two ALTs at one position phased onto one
-haplotype) describe one stretch twice: the VCF gives no sequence there. Where every allele
-that meets the record's REF is one METHODS section 4 reads the record's slot without --
-another allele at the record's own position (a phasing artefact), an allele only on bases
-the record deletes, an MNV (in no store CRISPRme reads beside the record) -- and no allele
-kept meets one left out, the slot is read without them: the one reading of it that holds
-the record, so the one a row naming the record (and not them) can mean. A listed carrier
-must hold the target there, and is a note when it does (overlap-reading-agrees); a carrier
-left off whose slot holds it there is counted (limit-overlapping-records: METHODS says
-such carriers stay listed; not turned into a failure). Any other overlap of the record (an
-indel or a SNV at another position: a complex allele, which METHODS takes off, or an
-undocumented one) leaves the slot no reading. Two other alleles of the slot whose REFs
-meet (an overlap zone) leave it no sequence only where they can change what it says of
-the target -- one of them is named, or changes a base read from the target's start (no
-margin: a zone wholly before or after that stretch changes none of its bases) --: every
-reading of such zones (any of their alleles no two of which meet, none included) is tried,
-and where all of them agree the slot is judged so (a carrier whose slot holds the target
-on every reading is required, one whose slot holds it on none fails when listed); where
-they part, the slot has no reading. A slot with no reading gives no truth there, so
-CRISPRme's documented rules are the only model: a listed carrier they take off this
-target for a documented cause (a complex allele, a second indel the slot cannot be read
-through, the last record of a split site, the PUTATIVE rule) fails (carrier-off-by-rule),
-and any other is counted (limit-overlapping-records). Whatever its overlaps, a slot that
-holds a named variant on no reading (neither on it nor of unknown phase there) lacks the
-target. A sample's alleles
+phased indel store (build_indel_genotypes) holds the same records since CRISPRme 2.10.0;
+one written before streamed the VCF without reading FILTER and kept every indel of it, and
+CRISPRme's carrier resolution reads that store: a second indel or an overlapping one on a
+carrier's slot takes it off a target, and Track B drops a SNP row's carrier for an indel
+of its slot, whatever that indel's FILTER (the oracle's sites O, Q and Y1 with their
+indels marked LowQual are resolved so by a store of 2.8.x). So of a genotyped dataset such
+a line is read as the reference, but for its indels where the run read a store written
+before 2.10.0 (RELEASES, below), which stay on their carriers' haplotypes as the store has
+them; either way they are no record of the search (no fake-indel window holds one: a row
+naming one fails, variant-filtered, and completeness demands none of their targets,
+limit-filtered-record), and its SNVs and MNVs are read as the reference. Of a sites-only
+dataset such a line keeps its SNVs for its SNP rows: the hg38_mega index's SNP rows read
+them whatever their FILTER (its registry holds every SNV of its VCF, and its SNP rows name
+some: chr22:11574550 C>G, LOW_VQSLOD), while an index CRISPRitz's enricher builds from a
+sites-only VCF does not hold them, and a run does not say which it read -- so a SNP row
+through one is a row CRISPRme may write or not (below). Its fake-indel windows code what
+CRISPRitz's overlay codes from the enriched genome, its SNVs whose FILTER passes: every
+allele of a split site on a genome of CRISPRitz 2.10.0, the last record of one on a genome
+of 2.9.1 or earlier (the published mega's indel rows name no other: at chr22:25093750 the
+PASS C>G, before the LOW_VQSLOD C>T), so a row of it (no carrier) names SNVs of its own
+VCF whose FILTER passes (else variant-not-in-dataset, variant-filtered; on a genome of
+2.9.1, an earlier record of a split site is the note variant-shadowed). Its indels and
+MNVs outside PASS and '.' are dropped (hg38_mega's indel log holds exactly the PASS indels
+of its VCF). A slot holds a row's target when it reads the target's bases from the row's
+start THROUGH the record: each base of the target the record's ALT puts there at its place
+(and the base after them), as the row's target has it -- a second insertion between the
+start and the record that lengthens the stretch and pushes some of the record's bases out
+of it makes another target, which needs two indel-path records. Two alleles of one slot
+whose REF spans meet (a SNP at an insertion's own position, a SNP on a base a deletion
+removes, a complex allele split into overlapping records, two ALTs at one position phased
+onto one haplotype) describe one stretch twice: the VCF gives no sequence there. Where
+every allele that meets the record's REF is one METHODS section 4 reads the record's slot
+without -- another allele at the record's own position (a phasing artefact), an allele
+only on bases the record deletes, an MNV (in no store CRISPRme reads beside the record) --
+and no allele kept meets one left out, the slot is read without them: the one reading of
+it that holds the record, so the one a row naming the record (and not them) can mean. A
+listed carrier must hold the target there, and is a note when it does
+(overlap-reading-agrees); a carrier left off whose slot holds it there is counted
+(limit-overlapping-records: METHODS says such carriers stay listed; not turned into a
+failure). Any other overlap of the record (an indel or a SNV at another position: a
+complex allele, which METHODS takes off, or an undocumented one) leaves the slot no
+reading. Two other alleles of the slot whose REFs meet (an overlap zone) leave it no
+sequence only where they can change what it says of the target -- one of them is named, or
+changes a base read from the target's start (no margin: a zone wholly before or after that
+stretch changes none of its bases) --: every reading of such zones (any of their alleles
+no two of which meet, none included) is tried, and where all of them agree the slot is
+judged so (a carrier whose slot holds the target on every reading is required, one whose
+slot holds it on none fails when listed); where they part, the slot has no reading. A slot
+with no reading gives no truth there, so CRISPRme's documented rules are the only model: a
+listed carrier they take off this target for a documented cause (a complex allele, a
+second indel the slot cannot be read through, the last record of a split site, the
+PUTATIVE rule) fails (carrier-off-by-rule), and any other is counted
+(limit-overlapping-records). Whatever its overlaps, a slot that holds a named variant on
+no reading (neither on it nor of unknown phase there) lacks the target. A sample's alleles
 are on known slots when its calls are phased ('|', or haploid). Where a call that touches
 the target is unphased, has a missing allele, or has fewer copies than the record's (a
 haploid call against a diploid one), which of its alleles share the record's haplotype is
 unknown: when the record's slot is known and no placement of those calls lets it hold the
-target (a phased second indel inside it, say), or every placement does, the slot is
-judged so; otherwise the truth is CRISPRme's documented PUTATIVE rule (METHODS section
-4): the sample is listed for the strongest target its own alleles allow on the row's
-alignment -- the guide's base wherever it carries it and the alignment pairs the position
-with a guide base; elsewhere (a DNA bulge included), and at the PAM jointly, the alleles
-that maximize the alignment's CFD among those the motif allows (a product: where it is 0
-for every choice, a column no choice changes scoring 0, every choice is a strongest one;
-METHODS orders no CFD tie, so a tie is left open); a search that scores no CFD (a 5' PAM,
-or a guide or PAM not 20 and 3 nt long) takes there the reference base where the alleles
-(and, at the PAM, the motif) allow it, else the first of A, C, G, T they allow, read in
-the target's orientation -- and never for an allele it does not carry; its copies are
-counted against the record's call (a haploid ALT call beside a diploid record leaves the
-reference possible). The rule chooses only at the fake-indel window's code columns: a
-reference base of the target off the record's own REF span. The window writes the ALT
-verbatim, the anchor included, and its overlay codes flank bases only, so a base on the
-record's REF span is never a choice, whatever SNV the VCF holds there: a call of unknown
-phase whose REF meets the record's would leave the record's slot with no sequence, and the
-one reading that gives it one (the documented multi-allelic heterozygote, one allele per
-haplotype) puts it on the other slot.
+target (a phased second indel inside it, say), or every placement does, the slot is judged
+so; otherwise the truth is CRISPRme's documented PUTATIVE rule (METHODS section 4): the
+sample is listed for the strongest target its own alleles allow on the row's alignment --
+the guide's base wherever it carries it and the alignment pairs the position with a guide
+base; elsewhere (a DNA bulge included), and at the PAM jointly, the alleles that maximize
+the alignment's CFD among those the motif allows (a product: where it is 0 for every
+choice, a column no choice changes scoring 0, every choice is a strongest one; METHODS
+orders no CFD tie, so a tie is left open); a search that scores no CFD (a 5' PAM, or a
+guide or PAM not 20 and 3 nt long) takes there the reference base where the alleles (and,
+at the PAM, the motif) allow it, else the first of A, C, G, T they allow, read in the
+target's orientation -- and never for an allele it does not carry; its copies are counted
+against the record's call (a haploid ALT call beside a diploid record leaves the reference
+possible). The rule chooses only at the fake-indel window's code columns: a reference base
+of the target off the record's own REF span. The window writes the ALT verbatim, the
+anchor included, and its overlay codes flank bases only, so a base on the record's REF
+span is never a choice, whatever SNV the VCF holds there: a call of unknown phase whose
+REF meets the record's would leave the record's slot with no sequence, and the one reading
+that gives it one (the documented multi-allelic heterozygote, one allele per haplotype)
+puts it on the other slot.
 
 THE DOCUMENTED VIEW ONLY CLASSIFIES. Where CRISPRme's output and the truth part, the
 rules CRISPRme documents for reading a carrier (METHODS section 4, CHANGELOG 2.8.1 Known
 limits), re-implemented here from that text, say whether the difference is a documented
 limit (counted and listed under its own class, non-gating) or not (gating):
   * the fake-indel window holds one indel-path record (an indel or an MNV) and the SNPs of
-    the enriched genome, which keeps only the last of several SNP records at one position
-    (limit-last-alt-wins);
+    the enriched genome -- every allele of a split site on a genome of CRISPRitz 2.10.0,
+    where a slot holding two ALTs of one position is resolved PUTATIVE
+    (limit-putative-carrier), and two records of one REF>ALT are one allele; on one of 2.9.1
+    or earlier, only the last of several SNP records at one position (limit-last-alt-wins)
+    (RELEASES) --, and 25 reference bases before the record's first REF base and 27 after
+    its last: a target that runs past them is held by no index (limit-window-reach; a
+    27-nt target with a DNA bulge, SaCas9's say), and one whose guide's far end lies within
+    the INDELS index's budget of the window's edge by none of format 1 (limit-window-edge,
+    an index of CRISPRitz 2.9.1 or earlier: 2.10.0's format 2 holds it);
   * the window's target is resolved with each slot's own SNP alleles (a row lists the
     haplotypes left with its sequence and names the SNP alts they hold), so a slot is a
     candidate for a row only where its own alleles give the row's target; a second phased
@@ -337,7 +347,11 @@ the merge of ``remove_contiguous_samples.py``).
 
 LIMITS (non-gating, counted per class, one TSV line per row block or per (record,
 target)): limit-last-alt-wins, limit-two-indels, limit-overlapping-records,
-limit-putative-carrier (all above), limit-capped-window (a cluster of a per-sample run
+limit-putative-carrier (all above), limit-window-reach (in completeness, per record: the
+carriers of a target in budget that runs past its fake-indel window, held by no index),
+limit-window-edge (the same, of a target an INDELS index of format 1 does not hold, at the
+window's edge), limit-max-degeneracy (a cluster reached only through a SNP row over the
+run's --max-degeneracy), limit-capped-window (a cluster of a per-sample run of 2.8.x
 without alternative alignments reached only through a capped window's greedy row,
 above),
 limit-contig-end (a record within one target of a
@@ -431,6 +445,43 @@ panel is the run's
 .sampleID.txt, else every sample of the VCF(s). Rows are keyed by guide: one guide's row
 stands for no demand of another.
 
+RELEASES. Where CRISPRme's and CRISPRitz's releases read the data otherwise, the run's own
+records say which read it (Semantics, run_semantics), and a run whose records do not tell,
+where its data makes it matter, is REFUSED (exit 2). A run of CRISPRme 2.10.0 or later
+writes .indexes_searched.txt (the indexes that served it; and .carrier_gate.json); a run
+without them is an earlier CRISPRme's, whose CRISPRitz (2.9.1 or earlier) coded the last
+record of a split SNP site and built indexes of format 1, and whose phased indel store
+kept the indels of every FILTER. Of a run of 2.10.0: the variant genome codes every allele
+of a split site where the variant index the record names flags Q in its .bin headers, or
+where its enriched genome (Genomes/<genome>+<dataset>/<chrom>.enriched.fa of the run's
+working directory) codes an earlier record's ALT at a split site of the VCF; the last
+record alone where that index is of format 1, or the enriched genome holds the last ALT
+alone there, or an index of format 2 flags no Q while the VCF has a position of four bases
+(refused where nothing tells and the VCF has a split site); every allele coded, two lines of
+one SNV REF>ALT are one allele, their calls merged as CRISPRme 2.10.0 merges them, and a
+slot holding two ALTs of one position is resolved PUTATIVE (METHODS section 4). The INDELS
+index's format is that of its .bin files, else its log's format-1 NOTE of it (refused
+where neither tells and a target of the guide, PAM and budget can lie at a window's edge).
+The phased indel store holds only the records whose FILTER passes but where the run's
+log_verbose.txt notes a store written before 2.10.0, for its dataset and chromosome
+(refused without the log, where a genotyped VCF holds an indel record of another FILTER).
+A per-sample run of 2.10.0 reports a window over CRISPRME_IUPAC_CAP by its carriers'
+haplotypes on the classic dictionaries too, so no greedy row of a capped window chains a
+cluster (limit-capped-window is 2.8.x's). --max-degeneracy K (2.10.0; its .Params.txt
+Max_degeneracy) cuts back or leaves out a SNP row resting on more than K ambiguous
+columns, so in a cluster chain an alignment over more than K positions of several options
+is a row CRISPRme may write or not (limit-max-degeneracy); an indel row is not cut. The
+carrier gate (2.10.0) ranks a population-level row and labels it in its companion and the
+report, leaving the integrated results and their alternative alignments as they are: it
+changes nothing this checker reads. The VCF lines that list several ALTs are read as
+before (an alt whose number no genotype ties is resolved PUTATIVE: untied), now by every
+reader of CRISPRme 2.10.0. A run whose log says that the SNP+indel co-occurrence was off
+(CRISPRME_INDEL_SNP=0, the search's NOTE since 2.10.0) is REFUSED: every SNP code of its
+fake-indel genomes read as the reference, its indel rows name no SNP and list every
+carrier of their indel, and its SNP rows keep a carrier whose haplotype holds an indel in
+the target -- none of the per-carrier resolution modeled here (a run of an earlier CRISPRme
+made so records nothing that tells it: check only runs made with the default).
+
 PRECONDITION. The search read each genotyped dataset's genotypes (its Tier-1 genotype
 store, or classic dictionaries), as every index CRISPRme installs or builds with
 --samplesID does: it resolves each carrier of an indel row on its own haplotypes, which
@@ -467,7 +518,8 @@ dataset alone and check each: such a run given one of its VCFs is refused too, O
 sites-only VCF's split sites are not read as shadowed by its SNP rows: CRISPRme's mega
 index holds earlier records of some (its SNP rows name them, as chr22:11337076 G>C before
 G>T, both PASS), so which it holds cannot be read off the VCF's order; its fake-indel
-windows hold the last record whose FILTER passes (above).
+windows hold every record whose FILTER passes on a genome of CRISPRitz 2.10.0, the last such
+record on one of 2.9.1 or earlier (above).
 ``--jobs N`` splits the work by region over N processes.
 """
 
@@ -499,6 +551,10 @@ IUPAC = {
     "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG", "N": "ACGT",
 }
 BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
+# the fake-indel window CRISPRitz's enricher writes for a record (enricher.py: the bases
+# genome[POS-26 : POS+26+len(REF)], the REF in it replaced by the ALT): 25 reference bases
+# before the record's first REF base and 27 after its last, a separator N on either side
+WINDOW_BEFORE, WINDOW_AFTER = 25, 27
 PUTATIVE_CAP = 10  # positions of unknown phase enumerated per carrier and record
 IUPAC_CAP = 10     # CRISPRME_IUPAC_CAP's default: a window over it is capped (METHODS 5)
 NO_VARIANT = ("", "NA", "n")
@@ -1061,6 +1117,30 @@ def parse_gt(gt):
 _HOMREF = frozenset(("0|0", "0/0", "0", "0|0|0", "0/0/0"))
 
 
+def merge_call(a, b):
+    """One sample's call of one SNV ALT that two lines give, as CRISPRme 2.10.0 merges them
+    (site_alleles.merge_gt): phased calls (or haploid ones) of one ploidy slot by slot, a
+    slot holding the ALT (1) if either puts it there; otherwise the slot is unknown, and the
+    call reads unphased with the larger of the two copy counts."""
+    (xa, pa), (xb, pb) = a, b
+    if pa and pb and len(xa) == len(xb):
+        out = []
+        for x, y in zip(xa, xb):
+            out.append(1 if 1 in (x, y) else 0 if 0 in (x, y) else None)
+        return tuple(out), True
+    ploidy = max(len(xa), len(xb))
+    copies = min(ploidy, max(xa.count(1), xb.count(1)))
+    if ploidy == 1:
+        return (1 if copies else 0,), True
+    return tuple([1] * copies + [0] * (ploidy - copies)), False
+
+
+def merge_calls(into, more):
+    """Merge ``more`` ({sample: call} of a later line of one SNV REF>ALT) into ``into``."""
+    for s, c in more.items():
+        into[s] = merge_call(into[s], c) if s in into else c
+
+
 def parse_calls(fmt, tail, names):
     """{sample: (allele numbers, phased)} of every sample whose call is not all reference
     (GT must be the first FORMAT key, as VCF 4.x requires when it is present). A sample
@@ -1091,10 +1171,19 @@ class Window(object):
     (METHODS section 4: their carriers are resolved as unphased ones).
 
     ``panel`` (a set, or None for every sample): the samples of the search's panel; the
-    calls of any other sample are not read (CRISPRme lists no carrier outside it)."""
+    calls of any other sample are not read (CRISPRme lists no carrier outside it).
 
-    def __init__(self, refseq, chrom, beg, end, vcfs, needed=None, panel=None):
+    ``sem`` (Semantics, or None for the readings of CRISPRme and CRISPRitz before 2.10.0)
+    says, by VCF, how the run read the lines: with every allele of a split SNP site coded
+    (CRISPRitz 2.10.0) no earlier record is shadowed, two lines of one SNV REF>ALT are one
+    allele, their calls merged as CRISPRme 2.10.0 merges them (site_alleles.merge_gt: a
+    slot holds the ALT if either line puts it there; calls of unknown or unlike phase read
+    unphased, with the larger copy count); with the phased indel store of CRISPRme 2.10.0
+    a genotyped line outside PASS_FILTERS keeps no indel either."""
+
+    def __init__(self, refseq, chrom, beg, end, vcfs, needed=None, panel=None, sem=None):
         self.chrom = chrom
+        self.sem = sem
         self.refseq = refseq
         self.beg = max(0, beg)
         self.end = end
@@ -1126,6 +1215,9 @@ class Window(object):
         self._order = None
         seen = set()
         for vi, v in enumerate(vcfs):
+            all_alleles, store_filter = (False, False) if sem is None else (
+                sem.all_alleles(v, chrom), sem.store_filter(v, chrom))
+            snv_line_of = {}  # a biallelic SNV line's key -> its line id (all_alleles)
             names = [s if panel is None or s in panel else None for s in v.samples]
             for s in names:
                 if s is not None and s not in seen:
@@ -1148,13 +1240,15 @@ class Window(object):
                     a = Allele(r["pos1"], r["ref"], alt, lid, k + 1)
                     if not passing:
                         # CRISPRitz's enricher skips the line (PASS_FILTERS). Of a
-                        # genotyped dataset only the indels stay, on their carriers'
-                        # haplotypes: the phased indel store CRISPRme's carrier resolution
-                        # reads keeps every indel of the VCF; of a sites-only dataset the
-                        # SNVs, which hg38_mega's SNP rows read whatever their FILTER (its
-                        # fake-indel windows do not: sites_only_cps). The rest is in no
-                        # store CRISPRme reads: read as the reference
-                        keep = a.kind == ("indel" if v.samples else "snv")
+                        # genotyped dataset the indels stay, on their carriers' haplotypes,
+                        # where its phased indel store keeps every indel of the VCF (as up
+                        # to 2.8.1; since 2.10.0 it skips them too: store_filter); of a
+                        # sites-only dataset the SNVs, which hg38_mega's SNP rows read
+                        # whatever their FILTER (its fake-indel windows do not:
+                        # sites_only_cps). The rest is in no store CRISPRme reads: read as
+                        # the reference
+                        keep = (a.kind == "indel" and not store_filter) if v.samples \
+                            else a.kind == "snv"
                         self.filtered_keys.setdefault(a.key, r["filter"])
                         if not keep:
                             self.dropped.append((a.lo, a.key, a.kind, not v.samples))
@@ -1165,10 +1259,19 @@ class Window(object):
                     als.append(a)
                 if not any(a is not None for a in als):
                     continue
+                calls = parse_calls(r["format"], r["tail"], names)
+                if all_alleles and len(als) == 1 and als[0].kind == "snv" and passing:
+                    # two lines of one SNV REF>ALT are one allele (CRISPRme 2.10.0,
+                    # site_alleles.read_records): the later line's calls go into the first
+                    first = snv_line_of.get(als[0].key)
+                    if first is not None:
+                        merge_calls(self.calls[first], calls)
+                        continue
+                    snv_line_of[als[0].key] = lid
                 self.line_lo.append(lo)
                 self.line_hi.append(hi)
                 self.line_alleles.append(als)
-                self.calls.append(parse_calls(r["format"], r["tail"], names))
+                self.calls.append(calls)
                 self.line_sites_only.append(not v.samples)
                 self.line_vcf.append(vi)
                 for a in als:
@@ -1184,8 +1287,8 @@ class Window(object):
                     if len(snvs) > 1:
                         self._untie(lid)
             for lids in snv_lines.values():
-                if len(lids) < 2:
-                    continue
+                if len(lids) < 2 or all_alleles:
+                    continue   # (every allele of the site coded: none shadowed)
                 if not v.samples:
                     # a sites-only VCF's split sites are not read as shadowed by its SNP
                     # rows: the mega index CRISPRme ships holds earlier records of some
@@ -2058,6 +2161,310 @@ def registry_only_logged(resdir):
     return sorted(out)
 
 
+INDEXES_SEARCHED = ".indexes_searched.txt"
+# the search's own record that the SNP+indel co-occurrence was off (the search script,
+# 2.10.0)
+OPT_OUT = "NOTE: the SNP+indel co-occurrence is off (CRISPRME_INDEL_SNP=0)"
+# the indel post-analysis' record of a phased indel store written before 2.10.0 (one line
+# per dataset and chromosome), which holds the indels of every FILTER
+OLD_STORE = re.compile(r"NOTE \[indel-snp\]: the phased indel genotype store of (\S+) on "
+                       r"(\S+) was written before CRISPRme 2\.10\.0")
+# the search script's record of an index of format 1 it took (CRISPRitz 2.10.0 or later)
+FORMAT1_NOTE = re.compile(r"^NOTE: (\S+) is in index format 1 \(built by CRISPRitz 2\.9\.1 "
+                          r"or earlier\)", re.M)
+CZI_MAGIC = b"CZI\xfe"   # the first bytes of a .bin of index format 2 (CRISPRitz 2.10.0)
+FLAG_FOUR_ALLELE = 4     # its header flag: a target of the file holds Q
+
+
+class Semantics(object):
+    """How the CRISPRme and CRISPRitz that made a run read its data, where their releases
+    differ, read from the run's own records (run_semantics), by dataset and chromosome:
+
+      all_alleles  the variant genome codes every allele of a split SNP site (CRISPRitz
+                   2.10.0: no earlier record is read as the reference, two records of one
+                   REF>ALT are one allele, and a slot holding two ALTs of one position
+                   is resolved PUTATIVE, METHODS section 4), or only the last record's
+                   (CRISPRitz 2.9.1 and earlier, every index published until the rebuild
+                   for 2.10.0: limit-last-alt-wins);
+      store_filter the phased indel genotype store holds only the indels of records whose
+                   FILTER CRISPRitz's enricher reads (CRISPRme 2.10.0), or every indel of
+                   the VCF (a store written before);
+      indels       the INDELS index's format and pad (its budget, bMax): an index of format
+                   1 does not hold a target whose guide's far end lies within bMax bases
+                   of its fake-indel window's edge (the separator N in its pad), which one
+                   of format 2 holds (CRISPRitz 2.10.0);
+      capped       whether a per-sample run may report a window over CRISPRME_IUPAC_CAP by
+                   its greedy worst-case row (the classic dictionaries up to 2.8.1; 2.10.0
+                   enumerates the carriers' haplotypes there).
+
+    ``values`` maps (dataset or None, chromosome or None) to a dict of those, None for one
+    the records do not tell; ``dataset_of`` maps a VCF path to its dataset."""
+
+    def __init__(self, release2100, values, dataset_of):
+        self.release2100 = release2100
+        self.values = values
+        self.dataset_of = dataset_of
+
+    def _get(self, vcf, chrom, what):
+        ds = self.dataset_of.get(getattr(vcf, "path", vcf))
+        for key in ((ds, chrom), (ds, None), (None, chrom), (None, None)):
+            v = self.values.get(key)
+            if v is not None and what in v:
+                return v[what]
+        return None
+
+    def all_alleles(self, vcf, chrom):
+        return bool(self._get(vcf, chrom, "all_alleles"))
+
+    def store_filter(self, vcf, chrom):
+        return bool(self._get(vcf, chrom, "store_filter"))
+
+    def indels(self, vcf, chrom):
+        """(format, pad) of the INDELS index of the VCF's dataset on ``chrom``."""
+        return self._get(vcf, chrom, "indels") or (None, None)
+
+    @property
+    def capped(self):
+        return not self.release2100
+
+
+def _read_log(resdir):
+    p = os.path.join(resdir, "log_verbose.txt")
+    if not os.path.isfile(p):
+        return None
+    with open(p, errors="replace") as fh:
+        return fh.read()
+
+
+def indexes_searched(resdir):
+    """{dataset: (variant index directory or None, INDELS index name)} of the run's
+    .indexes_searched.txt (CRISPRme 2.10.0: 'Variant_index:<dataset>\t<name> (in <dir>):
+    built for ...; its indels: <name>', or 'none: a search with no bulges ...'), None when
+    the run has none (a CRISPRme before 2.10.0)."""
+    p = os.path.join(resdir, INDEXES_SEARCHED)
+    if not os.path.isfile(p):
+        return None
+    out = {}
+    with open(p, errors="replace") as fh:
+        for line in fh:
+            if not line.startswith("Variant_index:"):
+                continue
+            head, _tab, rest = line.rstrip("\n").partition("\t")
+            ds = head[len("Variant_index:"):]
+            indels = rest.rpartition("; its indels: ")[2].strip() or None
+            m = re.match(r"(\S+) \(in (.*?)\): built for ", rest)
+            out[ds] = (os.path.join(m.group(2), m.group(1)) if m else None, indels)
+    return out
+
+
+def bin_header(path):
+    """(index format, four-allele flag) of a CRISPRitz .bin, read from its first bytes
+    (CRISPRitz's docs/INDEX_FORMAT.md: format 2 opens with the magic 'CZI'+0xFE, then the
+    version, the header length and the flags; format 1 with its leaf count), None when it
+    cannot be read."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(16)
+    except OSError:
+        return None
+    if head[:4] == CZI_MAGIC and len(head) >= 16:
+        version, _hlen, flags = struct.unpack("=3i", head[4:16])
+        return version, bool(flags & FLAG_FOUR_ALLELE)
+    return (1, False) if len(head) >= 8 else None
+
+
+def _bins_of(index_dir, chrom):
+    """The .bin files of ``index_dir`` (or of its sub-indexes, an INDELS index's) for
+    ``chrom``: <PAM>_<chrom>_<n>.bin, or the sub-index of <chrom>'s fake-indel genome."""
+    out = []
+    if not index_dir or not os.path.isdir(index_dir):
+        return out
+    for name in sorted(os.listdir(index_dir)):
+        path = os.path.join(index_dir, name)
+        if os.path.isdir(path) and name.endswith("fake" + chrom):
+            out.extend(os.path.join(path, x) for x in sorted(os.listdir(path))
+                       if x.endswith(".bin") and not x.startswith("."))
+        elif name.endswith(".bin") and not name.startswith(".") and \
+                "_%s_" % chrom in name:
+            out.append(path)
+    return out
+
+
+def _budget_of(name):
+    """The budget (bMax) in an index's name (<guide>-<PAM>_<N>_<genome>, <PAM>_<N>_...)."""
+    m = re.search(r"_(\d+)_", os.path.basename(name or ""))
+    return int(m.group(1)) if m else None
+
+
+def _enriched_reads_all(path, sites):
+    """Whether the variant genome at ``path`` (a FASTA of one sequence) codes every allele
+    of the split SNP sites ``sites`` ([(0-based position, REF, {ALT, ...})]): True where
+    a site's code holds an earlier record's ALT beside the last one's, False where every
+    site's holds the last record's alone, None where no site tells them apart."""
+    try:
+        with open(path, "rb") as fh:
+            header = fh.readline()
+            first = fh.readline()
+            width = len(first.rstrip(b"\r\n"))
+            eol = len(first) - width
+            if width <= 0:
+                return None
+            verdict = None
+            for q, ref, alts, last in sites:
+                fh.seek(len(header) + (q // width) * (width + eol) + q % width)
+                code = fh.read(1).decode("ascii", "replace").upper()
+                got = set(IUPAC.get(code, code)) if code != "Q" else set("ACGT")
+                earlier = alts - {last}
+                if not earlier:
+                    continue
+                if earlier & got:
+                    return True
+                if last in got:
+                    verdict = False
+            return verdict
+    except OSError:
+        return None
+
+
+def split_sites(vcf, chrom, most=12):
+    """Up to ``most`` split SNP sites of ``vcf`` on ``chrom``: [(0-based position, REF,
+    {ALT}, the last line's ALT)], two or more biallelic SNV lines at one position whose
+    FILTER passes, with different ALTs."""
+    out = []
+    pos = None
+    group = []
+
+    def flush():
+        alts = [a for _r, a in group]
+        if len(set(alts)) > 1:
+            out.append((pos - 1, group[0][0], set(alts), alts[-1]))
+
+    for r in vcf.records(chrom, 0, 1 << 31):
+        if r["filter"] not in PASS_FILTERS or len(r["ref"]) != 1 or len(r["alts"]) != 1 \
+                or len(r["alts"][0]) != 1:
+            continue
+        if r["pos1"] != pos:
+            if group:
+                flush()
+                if len(out) >= most:
+                    return out
+            pos, group = r["pos1"], []
+        group.append((r["ref"], r["alts"][0]))
+    if group:
+        flush()
+    return out
+
+
+def run_semantics(resdir, vcfs, chroms, datasets, genome):
+    """(Semantics, why not) of a run, from its own records -- or (None, why) for one whose
+    opt-out of the SNP+indel co-occurrence they record (refused). A run of CRISPRme 2.10.0
+    or later writes .indexes_searched.txt (and .carrier_gate.json); a run without either is
+    an earlier CRISPRme's, which read every index with CRISPRitz 2.9.1 or earlier (format
+    1, the last record of a split site) and a phased indel store of every FILTER. Of a run
+    of 2.10.0: the INDELS index's format is its .bin files' (the index its
+    .indexes_searched.txt names), else its log's format-1 NOTE; the variant genome codes
+    every allele where its variant index's .bin files flag Q, or where its enriched genome
+    (Genomes/<genome>+<dataset>/<chrom>.enriched.fa in the run's working directory) holds
+    an earlier record's ALT at a split site, and the last only where an index of format 1
+    served it, or where the enriched genome holds the last ALT alone there, or where its
+    index of format 2 flags no Q while its VCF has four bases at a position; the phased
+    indel store applies the FILTER rule but where the run's log notes an older store
+    (none where the log is gone). What none of them tells is None: main refuses the run
+    where it matters."""
+    log = _read_log(resdir)
+    if log is not None and OPT_OUT in log:
+        return None, "opt-out"
+    release2100 = (os.path.isfile(os.path.join(resdir, INDEXES_SEARCHED))
+                   or os.path.isfile(os.path.join(resdir, ".carrier_gate.json")))
+    workdir = os.path.dirname(os.path.dirname(os.path.abspath(resdir)))
+    dataset_of = {}
+    for v in vcfs:
+        parent = os.path.basename(os.path.dirname(os.path.abspath(v.path)))
+        if datasets and parent in datasets:
+            dataset_of[v.path] = parent
+        elif datasets and len(datasets) == 1:
+            dataset_of[v.path] = datasets[0]
+    values = {}
+    if not release2100:
+        values[(None, None)] = {"all_alleles": False, "store_filter": False,
+                                "indels": (1, None)}
+        return Semantics(False, values, dataset_of), None
+    old = set()
+    format1 = set()
+    if log is not None:
+        old = {(m.group(1), m.group(2)) for m in OLD_STORE.finditer(log)}
+        format1 = {os.path.basename(m.group(1).rstrip("/"))
+                   for m in FORMAT1_NOTE.finditer(log)}
+    searched = indexes_searched(resdir) or {}
+    by_ds = defaultdict(list)
+    for v in vcfs:
+        by_ds[dataset_of.get(v.path)].append(v)
+    libs = [os.path.join(workdir, "genome_library")]
+    p = os.path.join(resdir, ".command_line.txt")
+    if os.path.isfile(p):
+        with open(p, errors="replace") as fh:
+            m = re.search(r"--index-path\s+(\S+)", fh.read())
+        if m:
+            libs.append(m.group(1) if os.path.isabs(m.group(1))
+                        else os.path.join(workdir, m.group(1)))
+    for ds, vs in by_ds.items():
+        var_dir, indels_name = searched.get(ds, (None, None)) if ds else (None, None)
+        indels_dir = None
+        if indels_name:
+            where = [os.path.dirname(var_dir)] if var_dir else []
+            for lib in where + libs:
+                if os.path.isdir(os.path.join(lib, indels_name)):
+                    indels_dir = os.path.join(lib, indels_name)
+                    break
+        for ch in chroms:
+            val = {}
+            val["store_filter"] = None if log is None else (ds, ch) not in old
+            fmt = None
+            heads = [bin_header(b) for b in _bins_of(indels_dir, ch)]
+            heads = [h for h in heads if h is not None]
+            if heads:
+                fmt = 2 if all(h[0] == 2 for h in heads) else 1
+            elif indels_name and indels_name in format1:
+                fmt = 1
+            val["indels"] = (fmt, _budget_of(indels_name))
+            alls = None
+            var_heads = [h for h in (bin_header(b) for b in _bins_of(var_dir, ch)) if h]
+            if var_heads and all(h[0] == 1 for h in var_heads):
+                alls = False
+            elif var_heads and any(h[1] for h in var_heads):
+                alls = True
+            if alls is None and ds:
+                fa = os.path.join(workdir, "Genomes", "%s+%s" % (genome, ds),
+                                  ch + ".enriched.fa")
+                if os.path.isfile(fa):
+                    sites = []
+                    for v in vs:
+                        if v.covers(ch) is not False:
+                            sites.extend(split_sites(v, ch))
+                    alls = _enriched_reads_all(fa, sites)
+            if alls is None and var_heads and all(h[0] == 2 for h in var_heads) and \
+                    any(four_base_position(v, ch) for v in vs):
+                alls = False   # format 2 with no Q while the VCF has four bases somewhere
+            val["all_alleles"] = alls
+            values[(ds, ch)] = val
+    return Semantics(True, values, dataset_of), None
+
+
+def four_base_position(vcf, chrom):
+    """Whether ``vcf`` has a position on ``chrom`` whose reference base and the SNV ALTs of
+    its lines that pass their FILTER hold A, C, G and T (CRISPRitz 2.10.0 codes it Q)."""
+    pos, held = None, set()
+    for r in vcf.records(chrom, 0, 1 << 31):
+        if r["filter"] not in PASS_FILTERS or len(r["ref"]) != 1:
+            continue
+        if r["pos1"] != pos:
+            pos, held = r["pos1"], {r["ref"].upper()}
+        held |= {a.upper() for a in r["alts"] if len(a) == 1}
+        if held >= set("ACGT"):
+            return True
+    return False
+
+
 def run_params(resdir):
     """The run's .Params.txt as {key: value} (empty when it has none)."""
     out = {}
@@ -2282,6 +2689,11 @@ class Ctx(object):
         # the worst case of each alignment (every allele an option), a per-sample run's the
         # haplotypes individuals hold
         self.snp_union = True
+        # how the run's CRISPRme and CRISPRitz read its data (run_semantics), or None for
+        # the readings before 2.10.0
+        self.sem = None
+        # the run's --max-degeneracy (its .Params.txt's Max_degeneracy, 2.10.0), or None
+        self.max_degeneracy = None
 
     def full(self, guide):
         return (self.pam_motif + guide) if self.pam_5prime else (guide + self.pam_motif)
@@ -2942,6 +3354,13 @@ def documented(win, ctx, tgt, sample, lids):
                     if a in win.shadowed:
                         causes.add("last-alt-wins")
                         continue
+                    if any(x.lo == a.lo for x in snvs):
+                        # two ALTs of one position on the slot (split records phased one
+                        # by one): no haplotype, and CRISPRme resolves the carrier
+                        # PUTATIVE (METHODS section 4; every allele coded since 2.10.0)
+                        puts = puts or "putative-two-alts"
+                        snvs = [x for x in snvs if x.lo != a.lo]
+                        continue
                     snvs.append(a)
                 elif a.kind == "indel":
                     if r == "?":
@@ -3048,6 +3467,7 @@ LIMIT_OF = (("last-alt-wins", "limit-last-alt-wins"),
             ("mnv-unseen", "limit-two-indels"),   # only where the carrier is left off
             ("putative-mnv", "limit-putative-carrier"),
             ("putative-untied", "limit-putative-carrier"),
+            ("putative-two-alts", "limit-putative-carrier"),
             ("putative", "limit-putative-carrier"),
             ("complex", "limit-overlapping-records"),
             ("undocumented", "limit-overlapping-records"),
@@ -3340,7 +3760,10 @@ def snp_unphased(win, calls, span, kinds=("snv",)):
     an unphased heterozygous call, which cannot be tied to a slot (an indel there keeps it
     listed, PUTATIVE: METHODS section 8). A missing allele of a phased call leaves its slot
     without the alt. Phase sets (PS) are not read: a '|' call is phased along the
-    chromosome, as CRISPRme reads one with no PS."""
+    chromosome, as CRISPRme reads one with no PS. ('snv') A phased slot holding two ALTs of
+    one position (every allele of a split site coded, 2.10.0) is no haplotype either: the
+    observed path resolves its sample PUTATIVE, every combination of one ALT a position."""
+    held = defaultdict(set)   # (position, slot) -> the SNV ALTs a phased call puts there
     for lid, c in calls.items():
         if win.line_lo[lid] > span[1] or win.line_hi[lid] - 1 < span[0]:
             continue
@@ -3352,7 +3775,11 @@ def snp_unphased(win, calls, span, kinds=("snv",)):
                 return True
             if a.kind != "snv" and not c[1] and len(set(c[0])) > 1:
                 return True
-    return False
+            if a.kind == "snv" and a not in win.shadowed:
+                for h, x in enumerate(c[0]):
+                    if x == a.number:
+                        held[(a.lo, h)].add(a.body)
+    return any(len(v) > 1 for v in held.values())
 
 
 def snp_slot_on(win, a, sample, h, missing=None):
@@ -3899,6 +4326,36 @@ def one_record_reading(win, main_al, slot_hap, alleles, t, toks, lo, hi, unknown
     return None
 
 
+def window_cut(win, ctx, main_al, place, strand):
+    """Why CRISPRme's search cannot hold a target of record ``main_al`` whose bases lie at
+    ``place`` on a haplotype carrying it, or None: 'reach' for one that runs past the
+    record's fake-indel window (WINDOW_BEFORE reference bases before its first REF base,
+    WINDOW_AFTER after its last: the separator N lies beyond, whatever the index), 'edge'
+    for one an INDELS index of format 1 leaves out: the far end of its guide (the end away
+    from the PAM, where a bulged alignment's pad lies) within the index's budget of the
+    window's edge, the separator N in the pad (CRISPRitz 2.9.1 drops such a site at build
+    time; 2.10.0, format 2, keeps it). Only where the run's records say the format (main
+    refuses a run where they do not and it matters)."""
+    lo_w = main_al.lo - WINDOW_BEFORE
+    hi_w = main_al.hi + WINDOW_AFTER     # exclusive
+    first, last = place[0], place[-1]
+    if (first[1] == 0 and first[0] < lo_w) or last[0] >= hi_w:
+        return "reach"
+    sem = win.sem
+    if sem is None:
+        return None
+    fmt, pad = sem.indels(win.vcfs[win.line_vcf[main_al.line]], win.chrom)
+    if fmt != 1:
+        return None
+    pad = pad or (max(ctx.bdna, ctx.brna) + 1)
+    left = (strand == "+") != ctx.pam_5prime      # the guide's far end on the left
+    if left:
+        d = first[0] - lo_w if first[1] == 0 else WINDOW_BEFORE
+    else:
+        d = hi_w - 1 - last[0]
+    return "edge" if d < pad else None
+
+
 def slot_targets(win, ctx, full, cache, main_al, use, unknown, lo, hi, reach, skipped):
     """([(kind, Cluster Position, payload)], capped): the in-budget targets of record
     ``main_al`` on a slot of its carriers read with ``use`` (the slot's other known
@@ -3921,11 +4378,13 @@ def slot_targets(win, ctx, full, cache, main_al, use, unknown, lo, hi, reach, sk
                   variants holds (one_record_reading): the target is that one
       'second'    another indel-path record changes it and that reading does not hold:
                   never a row of CRISPRme's (one record per fake-indel window)
-    (payload of the last three: Target, variant tokens, strand, + reading, mm, dna, rna,
-    aligned spacer, aligned target). ``capped``: the zones in reach had more readings than
-    READINGS_CAP, and only each of their alleles alone was read (no demand depends on the
-    other readings: their targets are counted, and are rows a merge cluster may chain
-    through)."""
+      'cut'       CRISPRme's search cannot hold it (window_cut): past the fake-indel
+                  window, or at its edge in an INDELS index of format 1 (payload: why)
+    (payload of 'exact', 'window' and 'second': Target, variant tokens, strand, + reading,
+    mm, dna, rna, aligned spacer, aligned target). ``capped``: the zones in reach had more
+    readings than READINGS_CAP, and only each of their alleles alone was read (no demand
+    depends on the other readings: their targets are counted, and are rows a merge cluster
+    may chain through)."""
     out = []
     hap = make_hap(win.refseq, [main_al] + use, lo, hi)
     zone = zone_alleles(hap)
@@ -3971,6 +4430,13 @@ def slot_targets(win, ctx, full, cache, main_al, use, unknown, lo, hi, reach, sk
                 continue
             probe = hr.seq[off:off + width]
             toks, others = demand_tokens(win, main_al, place, src, alleles)
+            # (a target no other indel-path record of the slot changes is read on the
+            # record's own window, as are its places; one that needs another is no row of
+            # it whatever its reach: the two-indel limit)
+            cut = None if others else window_cut(win, ctx, main_al, place, strand)
+            if cut:
+                out.append(("cut", None, cut))
+                continue
             if hit:
                 out.append(("zone-noted" if others else "zone", cp, hit))
                 continue
@@ -3983,6 +4449,10 @@ def slot_targets(win, ctx, full, cache, main_al, use, unknown, lo, hi, reach, sk
                     kind = "second"
                 else:
                     kind, t = "window", w
+                    cut = window_cut(win, ctx, main_al, w.place, strand)
+                    if cut:
+                        out.append(("cut", None, cut))
+                        continue
             out.append((kind, cp, (t, toks, strand, probe, mm, dn, rn, sa, ta)))
     return out, capped
 
@@ -4027,6 +4497,7 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
     open_cps = defaultdict(set)   # rows it may write or not -> why (OPEN_CLASS)
     capped = set()
     zone_capped = set()
+    cut = {}   # why (window_cut) -> the samples one of whose targets CRISPRme cannot hold
 
     def unread_overlap(members, main_al, present, unknown, kinds):
         """A slot whose record overlaps an allele no documented reading leaves out: no
@@ -4041,6 +4512,10 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
         rest = [a for a in present if id(a) not in over]
         got, zc = slot_targets(win, ctx, full, cache, main_al, rest, unknown, lo, hi,
                                reach, skipped)
+        for kind, _c, why in got:
+            if kind == "cut":
+                cut.setdefault(why, set()).update(members)
+        got = [x for x in got if x[0] != "cut"]
         if zc:
             zone_capped.update(members)
         if got:
@@ -4087,6 +4562,10 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
             need_putative = need_putative or (in_reach and not left)
             got, zc = slot_targets(win, ctx, full, cache, main_al, use, unknown, lo, hi,
                                    reach, skipped)
+            for kind, _c, why in got:
+                if kind == "cut":
+                    cut.setdefault(why, set()).update(members)
+            got = [x for x in got if x[0] != "cut"]
             if zc:
                 zone_capped.update(members)
             if left:
@@ -4135,7 +4614,8 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
                             target_cfd(ctx, sa, ta))
         if need_putative:
             putative_targets(win, ctx, None, al, main_al, s, members, lids, lo, hi, full,
-                             known, cache, skipped, demands, demand_of, capped, reach)
+                             known, cache, skipped, demands, demand_of, capped, reach,
+                             cut=cut)
         if resolved_unknown:
             # the PUTATIVE choices of a slot read without its overlap: rows CRISPRme may
             # write or not (its reading of such a slot is not turned into a demand)
@@ -4164,7 +4644,7 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
                     cps.add(c)
     return {"demands": demands, "demand_of": demand_of, "clash_who": clash_who,
             "clash_how": clash_how, "capped": capped, "zone_capped": zone_capped,
-            "skipped": skipped, "lids": lids, "cps": frozenset(cps),
+            "skipped": skipped, "lids": lids, "cps": frozenset(cps), "cut": cut,
             "cps_open": {c: frozenset(w) for c, w in open_cps.items() if c not in cps}}
 
 
@@ -4223,6 +4703,28 @@ def comp_record(win, ctx, rep, reported, al, carriers, guide, full, lo, hi, popm
             "table": "completeness", "chrom": chrom, "start": al.lo, "var": tok},
             "%d window(s) around %s hold an N and are not aligned (no base pairs with N)"
             % (len(skipped), tok))
+    cut = e.get("cut") or {}
+    if cut.get("reach"):
+        who = sorted(cut["reach"])
+        rep.add(False, "limit-window-reach", {
+            "table": "completeness", "chrom": chrom, "start": al.lo, "var": tok},
+            "%d sample(s) hold a target of %s in budget that runs past its fake-indel "
+            "window (%d bases before the record's first REF base, %d after its last: a "
+            "target of a %d-nt guide and PAM with a DNA bulge, say), which no index holds "
+            "(METHODS section 4): not demanded (%d of them listed on a row naming the "
+            "record): %s" % (len(who), tok, WINDOW_BEFORE, WINDOW_AFTER, len(full),
+                             reported.on_rows(guide, who, tok), ",".join(who[:12])),
+            samples=",".join(who))
+    if cut.get("edge"):
+        who = sorted(cut["edge"])
+        rep.add(False, "limit-window-edge", {
+            "table": "completeness", "chrom": chrom, "start": al.lo, "var": tok},
+            "%d sample(s) hold a target of %s whose guide's far end lies within the INDELS "
+            "index's budget of its fake-indel window's edge, which an index of format 1 "
+            "(CRISPRitz 2.9.1 or earlier, the run's) does not hold and one of format 2 "
+            "does (METHODS section 9): not demanded (%d of them listed on a row naming the "
+            "record): %s" % (len(who), tok, reported.on_rows(guide, who, tok),
+                             ",".join(who[:12])), samples=",".join(who))
 
 
 def keep_demand(demand_of, key, t, toks, best, cfd):
@@ -4260,7 +4762,8 @@ def slot_allows(win, t, main_al, named, slot_sets):
 
 
 def putative_targets(win, ctx, _unused, al, main_al, s, members, lids, lo, hi, full, known,
-                     cache, skipped, demands, demand_of, capped, reach=None, resolved=False):
+                     cache, skipped, demands, demand_of, capped, reach=None, resolved=False,
+                     cut=None):
     """The PUTATIVE demands of one carrier group: every in-budget target its own alleles
     allow with the record (any choice at each SNV position: the documented rule ignores
     phase), grouped by alignment; the strongest choice of each is demanded. With the
@@ -4334,6 +4837,11 @@ def putative_targets(win, ctx, _unused, al, main_al, s, members, lids, lo, hi, f
             place = hap.place[off:off + width]
             s0, s1 = span_of(place)
             if known and not any(touches(a, s0, s1) for a in unknown_all):
+                continue
+            why = window_cut(win, ctx, main_al, place, strand)
+            if why:
+                if cut is not None:
+                    cut.setdefault(why, set()).update(members)
                 continue
             probe = hap.seq[off:off + width]
             gap = "".join("-" if c == "-" else "x" for c in ta)
@@ -4773,8 +5281,14 @@ def snp_row_seqs(win, ctx, lo, hi):
                     cs_at[q] = cs
             ploidy = max([len(c[0]) for cs in cs_at.values() for _a, c in cs] or [1])
             known, open_ = {}, {}
+            # a phased slot holding two ALTs of one position (every allele coded) is no
+            # haplotype: the sample is PUTATIVE in the piece, each of its positions open
+            two = any(sum(1 for a, c in cs
+                          if c[1] and len(c[0]) > h and c[0][h] == a.number) > 1
+                      for cs in cs_at.values() for h in range(ploidy))
             for q, cs in cs_at.items():
-                if all(c[1] and None not in c[0] and len(c[0]) == ploidy for _a, c in cs):
+                if not two and all(c[1] and None not in c[0] and len(c[0]) == ploidy
+                                   for _a, c in cs):
                     known[q] = {h: a.body for a, c in cs for h, x in enumerate(c[0])
                                 if x == a.number}
                 else:
@@ -4815,8 +5329,10 @@ def capped_sets(win, ctx, lo, hi):
     the mismatch count, METHODS section 5). Under --per-sample a capped window emits it
     only on the classic dictionary path (an index built without --samplesID, as the
     benchmark's complete-test builds; a documented known limit), which a run does not say
-    it took: these rows are ones CRISPRme may write or not."""
-    if ctx.snp_union:
+    it took: these rows are ones CRISPRme may write or not. A run of CRISPRme 2.10.0 writes
+    none (Semantics.capped): its classic dictionaries' per-sample windows over the cap are
+    the haplotypes their carriers have, as on the tiers."""
+    if ctx.snp_union or (ctx.sem is not None and not ctx.sem.capped):
         return []
     by_vcf = defaultdict(list)
     for lid in win.lines_in(lo, hi):
@@ -4873,33 +5389,50 @@ def snp_row_cps(win, ctx, guide, full, a, b):
     reaching one target and its bulges into the next, so that every alignment lies whole
     in the piece where it starts -- and kept on the window."""
     span = len(full) + max(ctx.bdna, ctx.brna) + 2
-    out, capped, dropped, filtered = set(), set(), set(), set()
+    out, capped, dropped, filtered, degenerate = set(), set(), set(), set(), set()
     for c in range(max(0, a) // CHUNK, max(a, b - 1) // CHUNK + 1):
         got = win.snpcps.get((guide, c))
         if got is None:
             lo = c * CHUNK
             hi = min(len(win.refseq), lo + CHUNK + span)
             places = [(q, 0) for q in range(lo, hi)]
-            rows, maybe = set(), set()
+            rows, maybe, degen = set(), set(), set()
+            k = ctx.max_degeneracy
             for sets, drops in snp_row_seqs(win, ctx, lo, hi):
+                # --max-degeneracy K: a SNP row resting on more than K ambiguous columns is
+                # cut back or left out (METHODS section 5), so an alignment over more than
+                # K positions of several options is a row CRISPRme may write or not
+                cut = k is not None and any(len(x) > 1 for x in sets)
                 if drops:
                     sure, touched = feasible_cps(ctx, full, sets, places, drops=drops)
+                    if cut:
+                        keep, _t = feasible_cps(ctx, full, sets, places, drops=drops,
+                                                sparse=k)
+                        degen |= sure - keep
+                        sure = keep
                     rows |= sure
                     maybe |= touched
                 else:
-                    rows |= feasible_cps(ctx, full, sets, places)
+                    got_rows = feasible_cps(ctx, full, sets, places)
+                    if cut:
+                        keep = feasible_cps(ctx, full, sets, places, sparse=k)
+                        degen |= got_rows - keep
+                        got_rows = keep
+                    rows |= got_rows
             dense = set()
             for sets in capped_sets(win, ctx, lo, hi):
                 dense |= feasible_cps(ctx, full, sets, places, dense=IUPAC_CAP)
             filt = set()
             for sets, als in filtered_sets(win, ctx, lo, hi):
                 filt |= feasible_cps(ctx, full, sets, places, drops=als)[1]
-            got = win.snpcps[(guide, c)] = (rows, dense - rows, maybe - rows, filt - rows)
+            got = win.snpcps[(guide, c)] = (rows, dense - rows, maybe - rows, filt - rows,
+                                            degen - rows)
         out |= got[0]
         capped |= got[1]
         dropped |= got[2]
         filtered |= got[3]
-    return out, capped - out, dropped - out, filtered - out
+        degenerate |= got[4]
+    return out, capped - out, dropped - out, filtered - out, degenerate - out
 
 
 def sites_only_cps(win, ctx, full, al, lo, hi):
@@ -4910,7 +5443,8 @@ def sites_only_cps(win, ctx, full, al, lo, hi):
     a reference base off the record's REF span: the overlay codes no base of the ALT, the
     anchor included (METHODS section 4), so an SNV at the record's own position is in no
     row of the window. The overlay codes the enriched genome's SNVs: those whose FILTER
-    passes (PASS_FILTERS), the last record of a split site (so_shadowed)."""
+    passes (PASS_FILTERS): every allele of a split site on a genome of CRISPRitz 2.10.0, the
+    last record of one on a genome of 2.9.1 or earlier (so_shadowed)."""
     out = set()
     for vi in sorted({win.line_vcf[a.line] for a in win.by_key.get(al.key, ())
                       if win.line_sites_only[a.line]}):
@@ -4958,7 +5492,7 @@ def record_cps(win, ctx, guide, al, e=None):
                 w, x = win, al
                 if lo < win.beg or hi > win.end:
                     w = Window(win.refseq, win.chrom, max(0, lo - 1000), hi + 1000,
-                               win.vcfs, panel=win.panel)
+                               win.vcfs, panel=win.panel, sem=win.sem)
                     x = w.by_key[al.key][0]
                 e = record_demands(w, ctx, x, carriers, full, lo, hi,
                                    (x.edit_lo - one, x.edit_hi + one))
@@ -4983,6 +5517,7 @@ OPEN_CLASS = (("overlap", "limit-overlapping-records"),
               ("putative-untied", "limit-putative-carrier"),
               ("capped", "limit-capped-window"),
               ("filtered", "limit-filtered-record"),
+              ("degeneracy", "limit-max-degeneracy"),
               ("snp-row-indel", "coverage-snp-row-indel"))
 OPEN_TEXT = {
     "overlap": "the rows of a slot whose alleles overlap, which no documented rule says "
@@ -5000,6 +5535,9 @@ OPEN_TEXT = {
     "filtered": "a row of a sites-only dataset through one of its SNVs whose FILTER is "
                 "not PASS or '.': the hg38_mega index holds such SNVs, an index CRISPRitz's "
                 "enricher builds does not, and a run does not say which it read",
+    "degeneracy": "a SNP row resting on more ambiguous columns than the run's "
+                  "--max-degeneracy, which CRISPRme cuts back to one within it or leaves "
+                  "out (METHODS section 5)",
     "snp-row-indel": "a per-sample SNP row of a haplotype whose slot also holds an indel "
                      "that touches the target: CRISPRme drops such a carrier unless its "
                      "reading of the slot through a repeat keeps the target's bases "
@@ -5013,9 +5551,11 @@ def chain_cps(win, ctx, guide, full, a, b):
     touches it (record_cps; a merge cluster holds the rows of every record, and the
     alleles of one multi-allelic site put their targets a few bases apart) -- and
     {Cluster Position: why} of the rows it may write or not (OPEN_CLASS)."""
-    rows, capped, dropped, filtered = snp_row_cps(win, ctx, guide, full, a, b)
+    rows, capped, dropped, filtered, degenerate = snp_row_cps(win, ctx, guide, full, a, b)
     out = set(rows)
     opened = defaultdict(set)
+    for c in degenerate:
+        opened[c].add("degeneracy")
     for c in capped:
         opened[c].add("capped")
     for c in dropped:
@@ -5034,10 +5574,11 @@ def chain_cps(win, ctx, guide, full, a, b):
     return out, {c: w for c, w in opened.items() if c not in out}
 
 
-def feasible_cps(ctx, full, sets, places, dense=None, drops=None):
+def feasible_cps(ctx, full, sets, places, dense=None, drops=None, sparse=None):
     """The Cluster Positions of the PAM sites of ``sets`` (both strands) where some
     alignment of the guide is in budget (with ``dense``, only alignments over more than
-    that many positions of several options: a capped window). With ``drops`` (alleles),
+    that many positions of several options: a capped window; with ``sparse``, only those
+    over at most that many: a row --max-degeneracy cannot cut). With ``drops`` (alleles),
     (those of alignments whose target no allele of ``drops`` touches, those of the rest)."""
     n = len(full)
     pam_len, p5 = ctx.pam_len, ctx.pam_5prime
@@ -5062,6 +5603,8 @@ def feasible_cps(ctx, full, sets, places, dense=None, drops=None):
                 if beg < 0 or end > size:
                     continue
                 if dense is not None and many[end] - many[beg] <= dense:
+                    continue
+                if sparse is not None and many[end] - many[beg] > sparse:
                     continue
                 piece = ss[beg:end]
                 if any("N" in x for x in piece):
@@ -5116,7 +5659,7 @@ def cluster_chain(win, ctx, guide, c0, merge, wide=False, step=150, most=3000):
             win = Window(win.refseq, win.chrom,
                          min(win.beg, max(0, c0 - most - step - len(full) - 10)),
                          max(win.end, c0 + most + step + len(full) + 10), win.vcfs,
-                         panel=win.panel)
+                         panel=win.panel, sem=win.sem)
         rows, opened = chain_cps(win, ctx, guide, full, a, b)
         cps = (rows | set(opened)) if wide else rows
         members = chain_from(c0, cps, merge)
@@ -5637,21 +6180,23 @@ def run_unit(unit):
             else:
                 needed.append((a, b))
         win = Window(refseq, ch, needed[0][0], needed[-1][1], vcfs, needed=needed,
-                     panel=ctx.panel)
+                     panel=ctx.panel, sem=ctx.sem)
         for r in sorted(rows, key=lambda x: x["start"]):
             if any(is_indel_token(x) for x in r["var"].split(",")):
                 check_row(r, win, ctx, rep)
             else:
                 check_snp_row(r, win, ctx, rep, G.get("snp_listed", {}))
     else:
-        win = Window(refseq, ch, max(0, tlo - pad), thi + pad, vcfs, panel=ctx.panel)
+        win = Window(refseq, ch, max(0, tlo - pad), thi + pad, vcfs, panel=ctx.panel,
+                     sem=ctx.sem)
         # a record of the tile whose REF runs far (a long deletion) has its targets'
         # haplotypes written past what was read: read again, to its far end
         one = max(len(ctx.full(g)) for g in ctx.guides) + max(ctx.bdna, ctx.brna) + 2
         far = max([a.hi for a in win.alleles if a.kind != "snv" and tlo <= a.lo < thi]
                   or [0]) + 2 * one + 20   # the far end of what comp_record writes
         if far > win.end:
-            win = Window(refseq, ch, max(0, tlo - pad), far + pad, vcfs, panel=ctx.panel)
+            win = Window(refseq, ch, max(0, tlo - pad), far + pad, vcfs, panel=ctx.panel,
+                         sem=ctx.sem)
         completeness(win, ctx, rep, G["reported"][ch], (tlo, thi), G["popmode"], stats)
     for v in vcfs:
         if v.long_ref:
@@ -6053,6 +6598,75 @@ def main(argv=None):
                     % (v.path, w.path, len(both), ch, ",".join(sorted(both)[:6]),
                        ", ..." if len(both) > 6 else ""))
                 return 2
+    # how the run's CRISPRme and CRISPRitz read its data, where their releases differ
+    # (Semantics): read from its own records, and refused where they do not tell and the
+    # data makes it matter
+    genome = os.path.basename(os.path.normpath(run_params(args.results).get(
+        "Genome_ref", run_params(args.results).get("Genome_selected", "")))) or "hg38"
+    sem, why = run_semantics(args.results, vcfs_all, sorted(chroms), datasets, genome)
+    if sem is None:
+        sys.stderr.write(
+            "ERROR: the run's log_verbose.txt says the SNP+indel co-occurrence was off "
+            "('%s'): every SNP code of its fake-indel genomes read as the reference base, "
+            "so its indel rows name no SNP and list every carrier of their indel, its SNP "
+            "rows keep a carrier whose haplotype holds an indel in the target, and none of "
+            "the per-carrier resolution this checker models applies (METHODS section 4); "
+            "the run is not checked\n" % OPT_OUT)
+        return 2
+    ctx.sem = sem
+    try:
+        ctx.max_degeneracy = int(run_params(args.results)["Max_degeneracy"])
+    except (KeyError, ValueError):
+        m = None
+        p = os.path.join(args.results, ".command_line.txt")
+        if os.path.isfile(p):
+            with open(p) as fh:
+                m = re.search(r"--max-degeneracy\s+(\d+)", fh.read())
+        ctx.max_degeneracy = int(m.group(1)) if m else None
+    full_n = len(ctx.full(guides[0]))
+    unknown = []
+    for ch in sorted(chroms):
+        for v in vcfs_for.get(ch, ()):
+            ds = sem.dataset_of.get(v.path)
+            val = sem.values.get((ds, ch)) or sem.values.get((None, None)) or {}
+            if v.samples and val.get("store_filter") is None and any(
+                    r["filter"] not in PASS_FILTERS and any(
+                        len(a) != len(r["ref"]) for a in r["alts"])
+                    for r in v.records(ch, 0, 1 << 31)):
+                unknown.append("which indels the phased indel genotype store of %s held "
+                               "on %s (since 2.10.0 only those of records whose FILTER is "
+                               "PASS or '.', which its log tells; the run has no "
+                               "log_verbose.txt), and %s holds indel records of another "
+                               "FILTER there" % (ds or v.path, ch, v.path))
+            if val.get("all_alleles") is None and split_sites(v, ch, most=1):
+                unknown.append("whether the variant genome of %s on %s codes every allele "
+                               "of a split SNP site (CRISPRitz 2.10.0) or the last "
+                               "record's (2.9.1 and earlier) -- neither its variant index, "
+                               "nor its enriched genome in the working directory, tells "
+                               "-- and %s has such sites there"
+                               % (ds or v.path, ch, v.path))
+            fmt, pad = val.get("indels") or (None, None)
+            if fmt is None and v.samples is not None and \
+                    WINDOW_BEFORE + 2 - (full_n + args.bdna) < (pad or max(args.bdna,
+                                                                        args.brna) + 1):
+                unknown.append("the index format of the INDELS index of %s on %s (its "
+                               "%s names no index found, and its log no format-1 NOTE of "
+                               "it), and a target of this guide, PAM and budget can lie at "
+                               "a fake-indel window's edge, which an index of format 1 "
+                               "drops and one of format 2 holds" % (ds or v.path, ch,
+                                                                      INDEXES_SEARCHED))
+    if unknown:
+        sys.stderr.write("ERROR: the run's own records do not say %s: the run is not "
+                         "checked\n" % "; nor ".join(dict.fromkeys(unknown)))
+        return 2
+    sys.stderr.write("check_indel_rows: read as a run of CRISPRme %s (%s)\n" % (
+        "2.10.0 or later" if sem.release2100 else "2.8.1 or earlier",
+        "; ".join("%s%s: %s, store %s, INDELS format %s" % (
+            k[0] or "every dataset", " on %s" % k[1] if k[1] else "",
+            "every allele" if v.get("all_alleles") else "the last record of a split site",
+            "of PASS and '.'" if v.get("store_filter") else "of every FILTER",
+            (v.get("indels") or (None,))[0]) for k, v in sorted(
+                sem.values.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))))))
     if not ref.keep_all:
         ref.cache = {}
     reported = {}

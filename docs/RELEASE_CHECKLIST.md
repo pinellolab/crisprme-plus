@@ -175,11 +175,16 @@ for g in readme:guide.txt trac:guide_trac.txt; do
     --max-total-edits 6 --mode soundness --jobs 24 --out "$GATE/indelrows_gw_${g%%:*}.tsv" \
     || echo GATE_FAILED
 done
-#     The gate is the exit status: 0 gating findings. Non-gating lines are documented
-#     CRISPRme limits (limit-last-alt-wins, limit-two-indels: 8 targets on chr22 with
-#     2.10.0's code, limit-putative-carrier, limit-contig-end; limit-capped-window: a cluster
-#     of a per-sample run without alternative alignments reached only through a capped
-#     window's greedy row, which only the classic dictionary path writes), slots whose VCF
+#     The gate is the exit status: 0 gating findings. The check reads from the run's own
+#     records how its release read the data (its stdout says so: "read as a run of
+#     CRISPRme 2.10.0 or later (... every allele, store of PASS and '.', INDELS format 2)"
+#     on an index this release built). Non-gating lines are documented CRISPRme limits
+#     (limit-two-indels, limit-putative-carrier -- a slot holding two ALTs of one position
+#     too --, limit-contig-end; limit-window-reach: a target that runs past its fake-indel
+#     window, 25 bases before the record and 27 after, a 27-nt target with a DNA bulge;
+#     limit-window-edge and limit-last-alt-wins on an index CRISPRitz 2.9.1 built, of format
+#     1; limit-max-degeneracy under --max-degeneracy; limit-capped-window on a per-sample run
+#     of 2.8.x, whose classic dictionaries wrote a capped window's greedy row), slots whose VCF
 #     alleles overlap where a target of their record reads, so the VCF gives it no sequence
 #     (limit-overlapping-records: 4 records on chr22; a carrier there is judged where
 #     METHODS section 4 reads the slot
@@ -222,7 +227,12 @@ done
 #     its .sampleID.txt, an --analysis other than its .search_mode (the mode the search
 #     ran), a run whose records contradict each other, a search of a genotyped dataset
 #     without its genotype store that says so (its log_verbose.txt's "Registry-only
-#     install" line, or a --per-sample search run population-level), or one that does not
+#     install" line, or a --per-sample search run population-level), a search made with
+#     CRISPRME_INDEL_SNP=0 (its log_verbose.txt's "SNP+indel co-occurrence is off" NOTE),
+#     one whose records do not say how its release read data that makes it matter (a split
+#     SNP site where nothing tells every allele from the last record, an INDELS index of
+#     no known format where a target can lie at a window's edge, a store's FILTER rule
+#     with no log_verbose.txt beside an indel of another FILTER), or one that does not
 #     record what
 #     the check needs (whether it wrote alternative alignments and, where it wrote none,
 #     its mode: --ci-cd-test chooses none; --analysis can give it). Genome-wide

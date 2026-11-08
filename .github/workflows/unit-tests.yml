@@ -343,13 +343,24 @@ jobs:
         # a record's chain holding its sites-only dataset's rows whoever reads it first
         # and no coded anchor, a search without bulges read from its --vcf list, a VCF's
         # FILTER read as CRISPRme's stores read it (a genotyped record outside PASS and
-        # '.' is no record of the search, but its indels stay on their carriers'
-        # haplotypes, as the phased indel store keeps them: a SNP the search skips leaves
-        # its carrier listed, an indel it skips still takes one off a target and off a SNP
-        # row; a sites-only one's indels dropped, its SNVs open rows of its SNP rows'
-        # chain and none of its fake-indel windows, whose rows must name the dataset's own
-        # PASS SNVs), a search that says it read no genotype store (its log_verbose.txt, or
-        # a --per-sample search run population-level: refused), and the
+        # '.' is no record of the search, and its indels stay on their carriers'
+        # haplotypes only where the run read a phased indel store written before 2.10.0,
+        # which kept them: a SNP the search skips leaves its carrier listed, an indel it
+        # skips takes one off a target and off a SNP row on such a store only; a sites-only
+        # one's indels dropped, its SNVs open rows of its SNP rows' chain and none of its
+        # fake-indel windows, whose rows must name the dataset's own PASS SNVs), a search
+        # that says it read no genotype store (its log_verbose.txt, or a --per-sample
+        # search run population-level: refused), a run's release read from its records
+        # (2.10.0's .indexes_searched.txt; every allele of a split site from the variant
+        # index's Q flag or its enriched genome, so its target is demanded; two lines of
+        # one SNV REF>ALT one allele; a slot holding two ALTs of one position PUTATIVE; the
+        # store's FILTER rule from the log; the INDELS index's format from its .bin, a
+        # 27-nt target at its fake-indel window's first base left out by format 1,
+        # limit-window-edge, and demanded of format 2; a target past the window,
+        # limit-window-reach; no capped greedy row in a 2.10.0 run's chain; a SNP row over
+        # --max-degeneracy a row it may write or not; refused where the records do not
+        # tell and it matters), a search with CRISPRME_INDEL_SNP=0 (its log's NOTE:
+        # refused), and the
         # SNP-row report (report-only) reading a SNP row's carriers as METHODS section 4
         # does: a named variant outside the target, the 2.10.0 drop of a carrier whose slot
         # holds an indel that changes the target (read through a repeat at its edge, an

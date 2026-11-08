@@ -100,8 +100,10 @@ CFD, or, in a search that scores no CFD, the reference base, else the first of A
 its copies counted against the record's; a choice only at the fake-indel window's code
 columns, never on the record's own REF span). CRISPRme's documented reading of a carrier (the one-indel window
 resolved with the carrier's own SNP alleles, a second indel read from either end through
-the indel, the last record of a split multi-allelic site, the PUTATIVE carriers of MNVs)
-only classifies a disagreement, and a carrier it would list against the carrier's own
+the indel, every allele of a split multi-allelic site on an index CRISPRitz 2.10.0 built (a
+slot holding two ALTs of one position PUTATIVE) and its last record on one of 2.9.1, the
+PUTATIVE carriers of MNVs, the window of 25 bases before a record and 27 after it, whose
+edge an INDELS index of format 1 does not hold) only classifies a disagreement, and a carrier it would list against the carrier's own
 haplotypes vetoes no fold: every disagreement it checks
 for is a line, gating or a listed limit, and none passes in silence (what it does not
 check is listed below). **Soundness**: every indel/MNV row block of the integrated
@@ -150,7 +152,12 @@ inputs other than the search's where the run's own record of them says so (its
 `.Params.txt` budget, PAM and variant datasets -- one VCF per dataset for each chromosome
 checked; a search without bulges records `Genome_idx None`, and its `--vcf` list says
 them --, its `.guides.txt`, `.sampleID.txt` and `.search_mode`, the mode it ran), a run
-whose records contradict each other, and one that does not record what the check needs
+whose records contradict each other, a search made with `CRISPRME_INDEL_SNP=0` (its
+`log_verbose.txt` notes it since 2.10.0: none of the per-carrier resolution applies), one
+whose records do not say how its release read data that makes it matter (every allele of a
+split site or the last record, the INDELS index's format, the phased indel store's FILTER
+rule: the check reads them from `.indexes_searched.txt`, the indexes' `.bin` headers, the
+enriched genome and `log_verbose.txt`), and one that does not record what the check needs
 (whether it wrote alternative alignments and, where it wrote none, its mode, which
 `--analysis` can give). It models a search that read each genotyped dataset's genotypes
 (its genotype store, or classic dictionaries): an install made with `--no-genotypes`
@@ -162,10 +169,11 @@ the check refuses it (exit 2); without that line (no `log_verbose.txt`, or a dat
 SNP post-analysis never read), a run made with `--population-level` or no mode flag records
 nothing else that tells it apart, and is not to be checked. The VCF is read as the search
 read it: CRISPRitz's enricher skips every line whose FILTER is neither `PASS` nor
-`.`, so a genotyped dataset's such line is read as the reference but for its indels,
-which stay on their carriers' haplotypes as no record of the search (the phased indel
-store keeps them, and CRISPRme's carrier resolution reads them: a row naming one fails,
-none of their targets is demanded, `limit-filtered-record`); a sites-only dataset's such
+`.`, so a genotyped dataset's such line is read as the reference (its indels too: the
+phased indel store of 2.10.0 skips them; where the run's log notes a store written before,
+they stay on their carriers' haplotypes as no record of the search, as that store keeps
+them and CRISPRme's carrier resolution reads them); a row naming one fails, none of their
+targets is demanded (`limit-filtered-record`); a sites-only dataset's such
 indels are dropped, and its SNVs read by its SNP rows only (`hg38_mega` holds them, an index
 the enricher builds does not: a row CRISPRme may write or not). `--snp-rows report` adds,
 report-only, the SNP-only rows of a per-sample run, their carriers read as METHODS section 4
