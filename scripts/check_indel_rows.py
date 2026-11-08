@@ -3122,15 +3122,18 @@ def placements(win, tgt, main_al, present, unk, named, cap=PUTATIVE_CAP):
 
 def options(win, sample, q, visible_only=False, ploidy=0):
     """The bases the sample's own alleles allow at reference coordinate q: the ALT of every
-    SNV allele there it carries, and the reference base unless each of its slots holds an
-    ALT there (a missing allele may be the reference). Its slots are as many as the most
-    copies any of its calls there has, or ``ploidy`` (the record's call, or the most its
-    calls around have) when that is more: METHODS section 4 resolves 'a haploid call
-    against a diploid one' PUTATIVE, so a haploid ALT call beside a diploid record leaves
-    the reference possible on the other copy. ``visible_only``: as CRISPRme's stores see
-    them (an earlier line of a split site reads as the reference)."""
+    SNV allele there it carries, and the reference base unless its ALT copies there are as
+    many as its slots (a missing allele may be the reference): its copies counted against
+    the record's call, as METHODS section 4 counts them, so two ALTs of one position phased
+    onto one slot, which the VCF gives no sequence, leave the reference out as they do in
+    CRISPRme. Its slots are as many as the most copies any of its calls there has, or
+    ``ploidy`` (the record's call, or the most its calls around have) when that is more:
+    METHODS section 4 resolves 'a haploid call against a diploid one' PUTATIVE, so a
+    haploid ALT call beside a diploid record leaves the reference possible on the other
+    copy. ``visible_only``: as CRISPRme's stores see them (an earlier line of a split site
+    reads as the reference)."""
     alts = set()
-    held = set()
+    copies = 0
     missing = False
     for a in win.snv_at.get(q, ()):
         call = win.call(a, sample)
@@ -3140,13 +3143,13 @@ def options(win, sample, q, visible_only=False, ploidy=0):
         ploidy = max(ploidy, len(alle))
         if visible_only and a in win.shadowed:
             continue
-        for h, x in enumerate(alle):
+        for x in alle:
             if x == a.number:
                 alts.add(a.body)
-                held.add(h)
+                copies += 1
             elif x is None:
                 missing = True
-    if missing or len(held) < max(ploidy, 1):
+    if missing or copies < max(ploidy, 1):
         alts.add(win.refseq[q])
     return alts
 
@@ -6663,10 +6666,12 @@ def main(argv=None):
         "2.10.0 or later" if sem.release2100 else "2.8.1 or earlier",
         "; ".join("%s%s: %s, store %s, INDELS format %s" % (
             k[0] or "every dataset", " on %s" % k[1] if k[1] else "",
-            "every allele" if v.get("all_alleles") else "the last record of a split site",
+            {True: "every allele", False: "the last record of a split site"}.get(
+                v.get("all_alleles"), "no split SNP site to tell"),
             "of PASS and '.'" if v.get("store_filter") else "of every FILTER",
             (v.get("indels") or (None,))[0]) for k, v in sorted(
-                sem.values.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))))))
+                sem.values.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))))
+        or "no chromosome to read it for"))
     if not ref.keep_all:
         ref.cache = {}
     reported = {}

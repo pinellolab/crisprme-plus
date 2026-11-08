@@ -326,11 +326,19 @@ class PerHaplotypeCases(unittest.TestCase):
         self.assertEqual(got, [("A", 0, ("S1",)), ("c", 1, ("S3",)), ("t", 1, ("S1", "S2"))])
 
     def test_two_alts_on_one_slot_is_not_a_haplotype(self):
+        """Two ALTs of one position on the indel's slot: PUTATIVE, among those ALTs -- its
+        two ALT copies fill a diploid's slots, so the reference is no option (METHODS
+        section 4); the indel on the other slot, which holds the reference, is exact."""
         guide = GUIDE + "NNN"
         target = GUIDE[:5] + "y" + GUIDE[6:] + "TGG"
         cols = [_col(5, "C", {"A": {"S1": "1|0"}, "T": {"S1": "1|0"}}, "Y")]
         rows = _resolve(guide, target, cols, {"S1": "1|0"})
         self.assertEqual([r["phase"] for r in rows], [isc.PUTATIVE])
+        cols = [_col(5, "C", {"A": {"S1": "1|0", "S2": "1|0"},
+                              "T": {"S1": "1|0", "S2": "1|0"}}, "Y")]
+        exact, putative = isc.resolve_carriers(cols, {"S1": "1|0", "S2": "0|1"})
+        self.assertEqual(putative, {(frozenset("AT"),): {"S1"}})
+        self.assertEqual(exact, {("C",): [{"S2"}, 1]})
 
     def test_changes_span(self):
         cs = isc.changes_span

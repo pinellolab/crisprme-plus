@@ -564,14 +564,17 @@ haplotype** (`indel_snp_cis.resolve_target`):
   recounted on the concrete sequence, exceed `--mm` or `--max-total-edits`, is **dropped**:
   a raw target that no individual carries gives no row;
 - an individual whose genotypes cannot put an allele on the indel's haplotype (an unphased
-  call, a missing allele, no phased indel genotype, a haploid call against a diploid one)
-  gets the **strongest target its own alleles allow** on each alignment (the guide's base
-  wherever it carries it and the alignment pairs the position with a guide base; elsewhere, a
-  DNA bulge included, and at the PAM jointly, the alleles that maximize CFD among those the
-  motif allows; a search that scores no CFD, with a 5′ PAM or a guide or PAM not 20 and 3 nt
-  long, takes there the reference base where its alleles and the motif allow it, else the first
-  of A, C, G, T they allow), PUTATIVE in the co-occurrence companion: it is never listed for an
-  allele it does not carry. The carriers of an equal-length multi-base record (an MNV, AC>TG),
+  call, a missing allele, no phased indel genotype, a haploid call against a diploid one, two
+  ALTs of one position on the indel's slot, which is no haplotype) gets the **strongest target
+  its own alleles allow** on each alignment (the guide's base wherever it carries it and the
+  alignment pairs the position with a guide base; elsewhere, a DNA bulge included, and at the
+  PAM jointly, the alleles that maximize CFD among those the motif allows; a search that
+  scores no CFD, with a 5′ PAM or a guide or PAM not 20 and 3 nt long, takes there the
+  reference base where its alleles and the motif allow it, else the first of A, C, G, T they
+  allow), PUTATIVE in the co-occurrence companion: it is never listed for an allele it does
+  not carry, its ALT copies at a position counted against its call (the reference stays
+  possible unless they fill its slots: two ALT copies of a diploid leave it out). The carriers
+  of an equal-length multi-base record (an MNV, AC>TG),
   which CRISPRitz puts in a fake-indel window as it does an indel, are always in this case: the
   phased indel genotype store keeps only records whose REF and ALT differ in length (and,
   since 2.10.0, whose FILTER is `PASS` or `.`, as the enricher reads: §8). With
@@ -2119,24 +2122,27 @@ that changes the target, which 2.10.0 drops. The checker's CFD of a row's own al
 the `CFD_score_ALT` the runs printed on every one of their 46,626 indel row blocks, and on
 all but 14 of about 2.4 million SNP and REF blocks (each a value at a x.xxx5 rounding
 boundary, which the comparison gives the benefit of the doubt); the same input gives the
-same findings byte for byte. It found one CRISPRme defect that 2.10.0 fixes: the merge
+same findings byte for byte. It found three CRISPRme defects that 2.10.0 fixes. The merge
 keyed an indel row by Cluster Position, variant list and aligned target, not the aligned
 spacer, so an unphased carrier resolved on an alignment where its SNP falls in a DNA bulge
 (CFD picks the reference base there) was listed on another alignment of the same aligned
 target whose column there faces the guide's base, which the carrier carries — a weaker
 target than its strongest (the SNP+indel oracle's site U, S19; and in a synthetic world of
 partly phased carriers searched through the real CLI, a carrier phased for the deletion
-and unphased for the SNP, which 2.10.0's code passes). It also shows a defect 2.10.0 does
-not fix: a search whose targets reach 27 nt (SaCas9's 21-nt guide and 6-nt PAM) loses those
-that start at a fake-indel window's first base (chr22, `CACTTTGGGAGGCCGAGGCGG` with
-`NNGRRT`, 2 mismatches, per sample: 2,103 carrier targets at 6 records, 2,088 of them the
-insertion chr22:17325232 A>AT's; an SpCas9 target, 24 nt at most here, never starts there
-holding its record); and two readings no text documents: `hg38_mega`'s SNP rows name SNVs
-whose FILTER is not `PASS` and earlier records of split sites (58 split sites of chr22, 57
-of them a `PASS` record before a later `PASS` one), where its indel rows and indel log
-follow CRISPRitz's enricher; and the phased indel store keeps every indel whatever its
-FILTER, so a carrier is taken off a target, and off a SNP row, for an indel no fake-indel
-window of the search holds.
+and unphased for the SNP, which 2.10.0's code passes). A search whose targets reach 27 nt
+(SaCas9's 21-nt guide and 6-nt PAM) lost, on an INDELS index of format 1, those that start
+at a fake-indel window's first base (chr22, `CACTTTGGGAGGCCGAGGCGG` with `NNGRRT`, 2
+mismatches, per sample: 2,103 carrier targets at 6 records, 2,088 of them the insertion
+chr22:17325232 A>AT's; an SpCas9 target, 24 nt at most here, never starts there holding
+its record), which an index of format 2 holds: the same search of indexes 2.10.0 built
+reports them all, its row at chr22:17325206 (+) listing the insertion's 2,088 carriers.
+And the phased indel store kept every indel whatever its FILTER, so a carrier was taken
+off a target, and off a SNP row, for an indel no fake-indel window of the search holds
+(the oracle's sites O, Q and Y1 above). It also shows a reading no text documents:
+`hg38_mega`'s SNP rows name SNVs whose FILTER is not `PASS`, where its indel rows and
+indel log follow CRISPRitz's enricher (and, on indexes of CRISPRitz 2.9.1, earlier records
+of split sites: 58 split sites of chr22, 57 of them a `PASS` record before a later `PASS`
+one, against the last record its indel rows code).
 `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check` in both profiles,
 `validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
 `docs/RELEASE_CHECKLIST.md` makes it a release gate.

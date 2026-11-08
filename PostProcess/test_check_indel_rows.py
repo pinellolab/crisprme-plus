@@ -50,7 +50,9 @@ tabix index written by this file's own writer), and rows in the column layout of
 ``integrated_results.tsv``. No CRISPRme module is imported, as the checker imports none.
 """
 
+import contextlib
 import gzip
+import io
 import os
 import shutil
 import struct
@@ -4748,6 +4750,41 @@ class ReleaseTwoTen(Base):
         rc, _found = case.run(mode="completeness", budget=budget)
         self.assertEqual(rc, 2)
 
+    def test_the_reading_taken_is_printed(self):
+        """The check prints how it read the run: of a run of 2.10.0 whose VCF has no split
+        SNP site, that nothing told the allele coding apart (it changes nothing there), not
+        the last record's reading; of one with a split site and a variant index that flags
+        Q, every allele; of a run without .indexes_searched.txt, an earlier CRISPRme's; and
+        where soundness has no row to check, that there was nothing to read it for."""
+        def said(case, **kw):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                case.run(**kw)
+            return [x for x in err.getvalue().splitlines() if "read as a run of" in x]
+
+        plain = os.path.join(self.tmp, "plain")
+        os.makedirs(plain)
+        case, _ = world_indel_snp(plain)
+        self.assertEqual(said(case), ["check_indel_rows: read as a run of CRISPRme 2.8.1 or "
+                                      "earlier (every dataset: the last record of a split "
+                                      "site, store of every FILTER, INDELS format 1)"])
+        as_2100(case, var_flags=0)
+        self.assertEqual(said(case), ["check_indel_rows: read as a run of CRISPRme 2.10.0 or "
+                                      "later (v on chr21: no split SNP site to tell, store "
+                                      "of PASS and '.', INDELS format 2)"])
+        seq = PRE + GUIDE[:4] + other(GUIDE[4]) + GUIDE[5:10] + "C" + GUIDE[10:] + "TGG" + POST
+        snp, ref_b = len(PRE) + 5, seq[len(PRE) + 4]
+        third = next(x for x in "ACGT" if x not in (ref_b, GUIDE[4]))
+        recs = [(len(PRE) + 10, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0"}),
+                (snp, ref_b, GUIDE[4], {"S01": "1|0"}), (snp, ref_b, third, {"S02": "1|0"})]
+        os.makedirs(os.path.join(self.tmp, "split"))
+        case = as_2100(Case(os.path.join(self.tmp, "split"), seq, recs, []))
+        self.assertEqual(said(case), ["check_indel_rows: read as a run of CRISPRme 2.10.0 or "
+                                      "later (no chromosome to read it for)"])
+        self.assertEqual(said(case, mode="completeness", budget=("0", "0", "0", "0")),
+                         ["check_indel_rows: read as a run of CRISPRme 2.10.0 or later (v on "
+                          "chr21: every allele, store of PASS and '.', INDELS format 2)"])
+
     def test_two_alts_of_one_position_on_a_slot_are_putative(self):
         """Every allele coded, a slot can hold two ALTs of one position (split records
         phased one by one): no haplotype, so no truth there, and CRISPRme resolves the
@@ -4775,6 +4812,49 @@ class ReleaseTwoTen(Base):
                           "".join(weak), "TGG", 1, 0, "X", var3, "S01")
         write_results(case.res, [row, row3])
         rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                         {("carrier-off-by-rule", "S01")}, found)
+
+    def test_two_alts_of_one_slot_leave_the_reference_out(self):
+        """The PUTATIVE rule counts a carrier's copies against the record's call (METHODS
+        section 4): S01's D slot holds the deletion and two ALTs of a spacer position whose
+        reference base is the guide's, so its two ALT copies fill its two slots and the
+        reference is no option there, as CRISPRme 2.10.0 resolves it (candidates C and G,
+        not A). Listed for the stronger ALT's target, the row passes; listed for the weaker
+        one's, or for the perfect target, it fails."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dpos, spos = len(PRE) + 10, len(PRE) + 6
+        alts = [x for x in "ACGT" if x != GUIDE[5]][:2]
+        recs = [(spos, GUIDE[5], alts[0], {"S01": "1|0"}),
+                (spos, GUIDE[5], alts[1], {"S01": "1|0"}),
+                (dpos, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "1|0"})]
+        start = len(PRE)
+        ref23 = seq[start:start + 23]
+        dtok = tok("chr21", recs[2])
+
+        def run(samples_perfect, alt_k=None):
+            tmp = os.path.join(self.tmp, "%s_%s" % (samples_perfect, alt_k))
+            os.makedirs(tmp)
+            rows = [row_fields("chr21", start, "+", GUIDE + "NNN", ref23, GUIDE + "TGG", "TGG",
+                               0, 0, "X", dtok, samples_perfect)]
+            if alt_k is not None:
+                weak = list(GUIDE + "TGG")
+                weak[5] = alts[alt_k].lower()
+                rows.append(row_fields("chr21", start, "+", GUIDE + "NNN", ref23,
+                                       "".join(weak), "TGG", 1, 0, "X", "%s,%s" % (
+                                           dtok, tok("chr21", recs[alt_k])), "S01"))
+            case = as_2100(Case(tmp, seq, recs, rows))
+            return [case.run(mode=m) for m in ("soundness", "completeness")]
+
+        verdicts = []
+        for k in (0, 1):
+            (rc_s, found_s), (rc_c, found_c) = run("S02", k)
+            self.assertEqual((rc_c, gating(found_c)), (0, []), found_c)
+            verdicts.append((rc_s, sorted({(f[1], f[3]) for f in gating(found_s)})))
+        self.assertEqual(sorted(verdicts), [(0, []), (1, [("carrier-off-by-rule", "S01")])],
+                         verdicts)
+        (rc, found), _ = run("S01,S02")
         self.assertEqual(rc, 1, found)
         self.assertEqual({(f[1], f[3]) for f in gating(found)},
                          {("carrier-off-by-rule", "S01")}, found)

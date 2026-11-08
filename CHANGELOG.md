@@ -376,27 +376,59 @@ and the `release-crisprme` skill.
     window writes the ALT verbatim, the anchor included, so a SNV at the record's position
     is never a choice. The records are those the search read: CRISPRitz's enricher skips
     every VCF line whose FILTER is neither `PASS` nor `.` (no such line is in the enriched
-    genome, its dictionaries and stores, the indel log or the fake-indel windows), while
-    the phased indel store keeps every indel whatever its FILTER and the carrier resolution
-    reads it (a second or overlapping indel takes a carrier off a target, and a SNP row
-    drops a carrier for an indel of its slot). So a genotyped dataset's line outside `PASS`
-    and `.` keeps its indels on their carriers' haplotypes, as no record of the search (a
-    row naming one fails, `variant-filtered`; completeness demands none of their targets,
-    `limit-filtered-record`), and its SNVs and MNVs are read as the reference; a sites-only
+    genome, its dictionaries and stores, the indel log or the fake-indel windows), and so,
+    from this release, does the phased indel store the carrier resolution reads (Fixed,
+    below); a store written before kept every indel whatever its FILTER (a second or
+    overlapping indel took a carrier off a target, and a SNP row dropped a carrier for an
+    indel of its slot), and a search that reads one says so in its log. So a genotyped
+    dataset's line outside `PASS` and `.` is read as the reference, but for its indels where
+    the run read a store written before 2.10.0, which stay on their carriers' haplotypes;
+    either way no record of the search holds it (a row naming one fails, `variant-filtered`;
+    completeness demands none of their targets, `limit-filtered-record`); a sites-only
     dataset's keeps its SNVs for its SNP rows (the `hg38_mega` index's hold them: its
     registry holds all 78,116 of chr22 outside `PASS`, and its SNP rows name some), a SNP
     row through one being a row CRISPRme may write or not, while its fake-indel windows
-    code its `PASS` SNVs only, the last record of a split site (as CRISPRitz's overlay
-    does: a carrier-less row naming another fails, `variant-filtered`, as does one naming
-    an SNV of another dataset, `variant-not-in-dataset`), and it drops its indels and MNVs
+    code its `PASS` SNVs only, every allele of a split site on a genome CRISPRitz 2.10.0
+    built and the last record's on one of 2.9.1 or earlier (as CRISPRitz's overlay does: a
+    carrier-less row naming another fails, `variant-filtered`, as does one naming an SNV of
+    another dataset, `variant-not-in-dataset`), and it drops its indels and MNVs
     (`hg38_mega`'s indel log holds exactly its `PASS` indels).
     CRISPRme's documented reading of a carrier (METHODS section 4 and the
     2.8.1 Known limits: one indel per window, resolved with each carrier's own SNP alleles;
     a second indel read from either end of the target through the indel; the phasing
-    artefact and the complex allele; MNVs and untied multi-ALT alts resolved PUTATIVE; only
-    the last record of a split multi-allelic SNP site searched) is re-implemented from that
-    text and only classifies a disagreement: a documented limit (non-gating, listed with
-    its cause, a PUTATIVE tie included) or a failure.
+    artefact and the complex allele; MNVs and untied multi-ALT alts resolved PUTATIVE, and
+    from this release a slot holding two ALTs of one position; on a genome of CRISPRitz
+    2.9.1 or earlier only the last record of a split multi-allelic SNP site searched, on one
+    of 2.10.0 every allele, two lines of one SNV REF>ALT one allele) is re-implemented from
+    that text and only classifies a disagreement: a documented limit (non-gating, listed
+    with its cause, a PUTATIVE tie included) or a failure.
+  - **Releases**: where CRISPRme's and CRISPRitz's releases read the data otherwise, the
+    check reads which one made the run from the run's own records and prints the reading
+    it took (`read as a run of CRISPRme 2.10.0 or later (<dataset> on <chrom>: every allele,
+    store of PASS and '.', INDELS format 2)`). A run of 2.10.0 writes `.indexes_searched.txt`
+    (and `.carrier_gate.json`); one without them is an earlier CRISPRme's (CRISPRitz 2.9.1
+    or earlier: index format 1, the last record of a split site, a store of every FILTER).
+    Of a run of 2.10.0, the variant genome codes every allele where its variant index's
+    `.bin` headers flag Q, or its enriched genome in the working directory codes an earlier
+    record's ALT at a split site, and the last record's where that index is of format 1, or
+    the enriched genome holds the last ALT alone, or an index of format 2 flags no Q while
+    the VCF has a position of four bases; the INDELS index's format is its `.bin` files',
+    else the log's format-1 NOTE of it; the store applies the FILTER rule but where the log
+    notes a store written before. A run whose records do not tell, where its data makes it
+    matter (a split SNP site; a target of the guide, PAM and budget that can lie at a
+    fake-indel window's edge; a genotyped VCF with an indel record of another FILTER and no
+    log), is refused (exit 2), and so is a run made with the SNP+indel co-occurrence off
+    (`CRISPRME_INDEL_SNP=0`, which a search of this release notes in its `log_verbose.txt`):
+    every SNP code of its fake-indel genomes reads as the reference, so its indel rows name
+    no SNP and list every carrier of their indel, none of the per-carrier resolution the
+    check models (the check of 2.8.2's code gave 166 and 77 gating findings on the
+    SNP+indel oracle's world searched so, per sample and population-level). A target that
+    runs past its fake-indel window (25 bases before the record's first REF base, 27 after
+    its last) is held by no index: its carriers are counted (`limit-window-reach`), as are,
+    on an INDELS index of format 1, those of a target whose guide's far end lies within the
+    budget of the window's edge (`limit-window-edge`), which an index of format 2 holds. A
+    cluster reached only through a SNP row over the run's `--max-degeneracy` is
+    `limit-max-degeneracy`; the carrier gate changes nothing the check reads.
   - **Soundness**: every indel/MNV row block of the integrated results (the three blocks)
     and of the alternative alignments must be labelled ALT, name one indel-path record (and
     SNPs), all records of the VCF the search read; have an aligned spacer that is the guide
@@ -476,7 +508,8 @@ and the `release-crisprme` skill.
     each listed with its samples, are CRISPRme's documented limits (`limit-last-alt-wins`,
     `limit-two-indels`, `limit-putative-carrier`, `limit-overlapping-records`,
     `limit-capped-window`, `limit-contig-end`, `limit-n-bases`, `limit-no-genotypes`,
-    `limit-filtered-record`, and in the SNP-row report `limit-snp-row-mnv` and
+    `limit-filtered-record`, `limit-window-reach`, `limit-window-edge`,
+    `limit-max-degeneracy`, and in the SNP-row report `limit-snp-row-mnv` and
     `limit-snp-row-unphased`), the notes
     `variant-shadowed`, `overlap-reading-agrees` and
     `guide-not-given`, the SNP-row report's own findings (report-only: its
@@ -492,7 +525,9 @@ and the `release-crisprme` skill.
     list's lines, read in its working directory), a guide its `.guides.txt` does not hold, a
     `--samples` other than its `.sampleID.txt`, an `--analysis` other than its
     `.search_mode` —, a run whose own records contradict each other, a search of a
-    genotyped dataset without its genotype store that says so (below), and one that does
+    genotyped dataset without its genotype store that says so (below), a run made with the
+    SNP+indel co-occurrence off, one whose records do not say how its release read the data
+    where that matters (Releases, above), and one that does
     not record what the check needs (whether it wrote alternative alignments
     and, where it wrote none, its mode; `--analysis` can give it). `--chrom` / `--region`,
     `--jobs N`, `--known` (findings already reported upstream turn non-gating, and a listed
@@ -582,11 +617,12 @@ and the `release-crisprme` skill.
     bases than the SNP they carry (chr22:17368905 (−), chr22_17368909_G_C: HGDP01090,
     HGDP01405, NA19351), where the HGDP + 1000 Genomes run alone lists them on an alignment
     that holds it (report-only).
-  - Wired in: `PostProcess/test_check_indel_rows.py` (191 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (204 unit and mutation tests: a right
     row raises nothing gating, each corruption of it is caught, each documented limit and
     overlapping slot comes out under its own class, the checker's coverage gaps under
-    theirs; the refusals; the same verdict under every hash seed; and the checker holds no
-    CRISPRme code) runs in `unit-tests.yml`, and `test_ci_workflows.py` pins the CI step;
+    theirs; the refusals; each release's reading of the data, told from a run's records;
+    the same verdict under every hash seed; and the checker holds no CRISPRme code) runs in
+    `unit-tests.yml`, and `test_ci_workflows.py` pins the CI step;
     `validate-benchmarks.yml` runs the checker on the chr22 self-test output after
     `validate-test` (soundness of the six benchmarks, completeness of `cas9_sg1617` on
     chr22, about 4 min; a gating finding fails the step once every benchmark is checked, so
@@ -1049,29 +1085,29 @@ and the `release-crisprme` skill.
     adds no step per inserted base. HPRC holds 402 insertions of 53.9 to 54.4 kb at
     chr22:10690626, and the README guide's chr22 search puts 16,058 rows inside them, now all at
     their anchor (2.8.1: at most 760 rows at one cluster position). On that index, the released
-    2.8.1 image and 2.10.0 side by side on one host, per-sample: each of the three merges takes
-    4.4 to 4.6 s against 3.1 to 3.5 s, and the merge step, which is mostly sorting, 77 to 80 s
-    against 54 to 56 s (its sorts by cluster position now meet those rows at one place: the
-    highest-CFD file, shuffled, sorts in 15.3 s against 9.8 s); population-level 4.6 and 77 s
-    against 3.4 and 53 s; TRAC guide, per-sample, 3.8 to 4.0 s and 53 s against 3.0 to 3.1 s and
-    50 s. On chr22 of HGDP + 1000 Genomes every merge of the searches below takes under a
+    2.8.1 image and 2.10.0's post-analysis on it side by side on one host, per-sample: each of the
+    three merges takes 4.4 to 4.6 s against 3.1 to 3.5 s, and the merge step, which is mostly
+    sorting, 77 to 80 s against 54 to 56 s (its sorts by cluster position now meet those rows at one
+    place: the highest-CFD file, shuffled, sorts in 15.3 s against 9.8 s); population-level 4.6 and
+    77 s against 3.4 and 53 s; TRAC guide, per-sample, 3.8 to 4.0 s and 53 s against 3.0 to 3.1 s
+    and 50 s. On chr22 of HGDP + 1000 Genomes every merge of the searches below takes under a
     second, as in 2.8.1. Covered by `test_indel_snp_cis` (the sliced reading against the
-    base-by-base one on 4,000 random rows; the Python lines it runs do not grow with the
-    insertion) and `test_representative_tiebreak` (one target's 20 alignments inside a 54 kb
-    insertion: one reading).
-  - The same search on chr22, released 2.8.1 image against 2.10.0 without the SNP-row fix (the
-    last entry below, which gives the counts with it): per-sample, 1,574 → 1,573 integrated
-    rows and 3,756 → 3,757 alternative alignments (21052642 joins 21052638's site; that site's
-    two alternative alignments go 1 → 2 and the moved row, now one of them, loses
-    `Not_found_in_REF`, its site having a reference row); population-level, 2,198 → 2,197 rows
-    (a population-level run writes no alternative alignments). NRR, per-sample: 3,987 → 3,985
-    and 11,581 → 11,583, 21052642 and 33175772 (+), now 33175769, joining the reference rows'
-    sites at 21052638 (−) and 33175766 (+), whose `Other_motifs` go 2 → 3 and 9 → 10, their
-    alternatives' 1 → 2 and 8 → 9. TRAC guide, per-sample: 2,803 → 2,800 and 7,508 → 7,509.
-    37564129 (+) and 36738101 (−), now 37564118 and 36738081, join the reference rows' sites at
-    37564117 (+) and 36738082 (−); 49196655 and 49196663 (−), two alleles of one insertion, are
-    one site at its anchor, 49196609; an alternative alignment of 49196601 (−) that starts
-    inside another insertion is now the row of a site of its own, at that one's anchor,
+    base-by-base one on 4,000 random rows; the Python lines it runs do not grow with the insertion)
+    and `test_representative_tiebreak` (one target's 20 alignments inside a 54 kb insertion: one
+    reading).
+  - The same search on chr22, released 2.8.1 image against 2.10.0's post-analysis on it (CRISPRitz
+    2.9.1, index format 1) without the SNP-row fix (the last entry below, which gives the counts
+    with it): per-sample, 1,574 → 1,573 integrated rows and 3,756 → 3,757 alternative alignments
+    (21052642 joins 21052638's site; that site's two alternative alignments go 1 → 2 and the moved
+    row, now one of them, loses `Not_found_in_REF`, its site having a reference row);
+    population-level, 2,198 → 2,197 rows (a population-level run writes no alternative alignments).
+    NRR, per-sample: 3,987 → 3,985 and 11,581 → 11,583, 21052642 and 33175772 (+), now 33175769,
+    joining the reference rows' sites at 21052638 (−) and 33175766 (+), whose `Other_motifs` go 2 →
+    3 and 9 → 10, their alternatives' 1 → 2 and 8 → 9. TRAC guide, per-sample: 2,803 → 2,800 and
+    7,508 → 7,509. 37564129 (+) and 36738101 (−), now 37564118 and 36738081, join the reference
+    rows' sites at 37564117 (+) and 36738082 (−); 49196655 and 49196663 (−), two alleles of one
+    insertion, are one site at its anchor, 49196609; an alternative alignment of 49196601 (−) that
+    starts inside another insertion is now the row of a site of its own, at that one's anchor,
     49196564; and 50193998 (−) is a second copy (above).
   - The outputs built from the rows follow these changes and the fixes below: the summaries by
     guide and by sample, the report (its counts and top-1000 tables),
@@ -1172,8 +1208,10 @@ and the `release-crisprme` skill.
   co-occurrence companion counts positions, not variants, so two ALTs of one position are no
   co-occurrence; and a sites-only dataset's co-located union takes one ALT of a position (one union
   per choice, at most 16 a window). The phase label is per row, so a row such a sample shares reads
-  PUTATIVE for all its carriers. Covered by `PostProcess/test_observed_haplotypes.py` and
-  `PostProcess/test_site_alleles.py`.
+  PUTATIVE for all its carriers. An indel row resolves a carrier whose indel's slot holds two ALTs
+  of a position PUTATIVE too, among those ALTs: its ALT copies there fill its slots, so the
+  reference is no option (METHODS section 4). Covered by `PostProcess/test_observed_haplotypes.py`,
+  `PostProcess/test_site_alleles.py` and `PostProcess/test_indel_haplotype_resolution.py`.
 - **The dictionary path keeps only the ALTs a target's own column holds, as the observed path does
   (#139); a sites-only dataset substitutes every ALT its registry lists, as up to 2.8.1.** The
   dictionary path, and a genotyped panel's registry read alone (`download --no-genotypes`),
@@ -1242,31 +1280,31 @@ and the `release-crisprme` skill.
     (highest CFD 0.049). chr22 alone: 3 rows and 7 alternative alignments. After the fix,
     checked the same way genome-wide: none, but for 2 listings whose indel sits at the position
     of the row's SNP (a phasing artefact, kept as at an indel row's own position).
-  - The same search on chr22, released 2.8.1 image against 2.10.0, per-sample: 1,574 → 1,570
-    integrated rows and 3,756 → 3,753 alternative alignments (without this fix, 1,573 and
-    3,757). This fix takes off the rows at 26806221 (−), 27144006 (+) and 30569221 (−), and the
-    alternative alignments at 21052638 (−), 27795808 (−), 42848613 (−) and 44756100 (+), whose
-    `Other_motifs` go down by one; none of their listed carriers has the target. At 21052638 it
-    is 2, as in 2.8.1, not the 3 it is without this fix: 21052639 (the row 2.8.1 placed at
-    21052642, now at its insertion's anchor) takes the place of the SNP-only alignment of
-    21052641 G>A. One row (24441929 (+)) and 3 alternative alignments list fewer carriers. The
-    summaries by guide and by sample, `observed_haplotypes_raw`, `observed_haplotypes.tsv` and
-    `phase_confirmation` follow; the dense-window BED and the co-occurrence companions are
-    unchanged. NRR, per-sample: 3,987 → 3,982 integrated rows and 11,581 → 11,577 alternative
-    alignments (without this fix, 3,985 and 11,583): the same rows and alignments go, and two
-    more alternative alignments, 27795809 (−), another alignment of 27795808's SNP, and
-    47366716 (−), the highest-CRISPR-Bulge alignment of its site's row, whose block now shows
-    the site's reference alignment; 5 alignments list fewer carriers (27782673 (+): 1 of 17).
-    TRAC guide, per-sample: 2,803 → 2,796 and 7,508 → 7,504 (without this fix, 2,800 and
-    7,509): the rows at 22629803 (+), 23029103 (−), 29864083 (−) and 42909550 (−) and 5
-    alternative alignments go (CFD at most 0.031), 3 alignments list fewer carriers, and so do
-    the SNP+SNP co-occurrence companion's 6 lines of 46177780 (−) (729 → 726 carriers; its
-    `MinAF_bound` is the pair's marginal bound and does not change). Population-level searches
-    give the same tables with and without this fix (2,198 → 2,197 rows, by the fix above).
-    Where rows go, the CRISPR-Bulge score of another alignment scored in the same batch can
-    move in its last printed digits (NRR 38558318 (−): 3.56555e-16 → 3.56556e-16; 3 alignments
-    in these searches); that changes no block's choice of alignment (the one block that
-    changes, NRR 47366716 (−) above, changes because its alignment went).
+  - The same search on chr22, released 2.8.1 image against 2.10.0's post-analysis on it (CRISPRitz
+    2.9.1, index format 1), per-sample: 1,574 → 1,570 integrated rows and 3,756 → 3,753 alternative
+    alignments (without this fix, 1,573 and 3,757). This fix takes off the rows at 26806221 (−),
+    27144006 (+) and 30569221 (−), and the alternative alignments at 21052638 (−), 27795808 (−),
+    42848613 (−) and 44756100 (+), whose `Other_motifs` go down by one; none of their listed
+    carriers has the target. At 21052638 it is 2, as in 2.8.1, not the 3 it is without this fix:
+    21052639 (the row 2.8.1 placed at 21052642, now at its insertion's anchor) takes the place of
+    the SNP-only alignment of 21052641 G>A. One row (24441929 (+)) and 3 alternative alignments list
+    fewer carriers. The summaries by guide and by sample, `observed_haplotypes_raw`,
+    `observed_haplotypes.tsv` and `phase_confirmation` follow; the dense-window BED and the
+    co-occurrence companions are unchanged. NRR, per-sample: 3,987 → 3,982 integrated rows and
+    11,581 → 11,577 alternative alignments (without this fix, 3,985 and 11,583): the same rows and
+    alignments go, and two more alternative alignments, 27795809 (−), another alignment of
+    27795808's SNP, and 47366716 (−), the highest-CRISPR-Bulge alignment of its site's row, whose
+    block now shows the site's reference alignment; 5 alignments list fewer carriers (27782673 (+):
+    1 of 17). TRAC guide, per-sample: 2,803 → 2,796 and 7,508 → 7,504 (without this fix, 2,800 and
+    7,509): the rows at 22629803 (+), 23029103 (−), 29864083 (−) and 42909550 (−) and 5 alternative
+    alignments go (CFD at most 0.031), 3 alignments list fewer carriers, and so do the SNP+SNP
+    co-occurrence companion's 6 lines of 46177780 (−) (729 → 726 carriers; its `MinAF_bound` is the
+    pair's marginal bound and does not change). Population-level searches give the same tables with
+    and without this fix (2,198 → 2,197 rows, by the fix above). Where rows go, the CRISPR-Bulge
+    score of another alignment scored in the same batch can move in its last printed digits (NRR
+    38558318 (−): 3.56555e-16 → 3.56556e-16; 3 alignments in these searches); that changes no
+    block's choice of alignment (the one block that changes, NRR 47366716 (−) above, changes because
+    its alignment went).
   - Cost (per-sample searches only): the SNP post-analysis reads the indels of the store near
     each chromosome's SNP targets (839,234 of its 17.2 million genome-wide, 3 to 46 s a
     chromosome, in parallel) and reads a carrier's bases only where it holds one that changes a
@@ -1835,16 +1873,19 @@ and the `release-crisprme` skill.
   indel inside a target, an overlapping one) and the SNP rows' (a carrier whose haplotype holds an
   indel in the target), and the carrier gate, read that store, so on a VCF with records of another
   FILTER a carrier was taken off a row for an indel no window holds: on the SNP+indel oracle's
-  world with such records marked `LowQual`, an indel row left out the carrier of a second
-  deletion inside its target, and a SNP row the carriers of an insertion in it. The store now
-  holds only the records the enricher reads, and its `.done` marker says so after the record
+  world with the second deletions of its sites O and Q and the insertion of Y1 marked `LowQual`,
+  searched through the real CLI with CRISPRitz 2.10.0, a store of every FILTER took S21 and S39
+  off the indel rows of O and Q in both modes, and S70 and S72 off Y1's per-sample SNP row (the
+  real-data indel check reports the two indel rows' carriers, 14 and 6 gating findings). The
+  store now holds only the records the enricher reads (on that world the rows list S21, S39, S70
+  and S72, and the check passes in both modes), and its `.done` marker says so after the record
   count (`FILTER	PASS,.`). A store written before has no such line: `build-index-only`, and a
   search that enriches a dataset itself, write it again where the dataset's VCFs are, and a search
   that reads one says so in its `log_verbose.txt`, once per chromosome (`NOTE [indel-snp]: the
   phased indel genotype store of <vcf> on <chrom> was written before CRISPRme 2.10.0 ...`), and
-  reads it as before. Every panel published (HGDP + 1000 Genomes and HPRC: FILTER `.`; the self-test's
-  1000 Genomes chr22: `PASS`) holds no such record, so their stores are unchanged. Covered by
-  `PostProcess/test_indel_genotypes.py`, `test_search_indel_snp.py`,
+  reads it as before. Every panel published (HGDP + 1000 Genomes and HPRC: FILTER `.`; the
+  self-test's 1000 Genomes chr22: `PASS`) holds no such record, so their stores are unchanged.
+  Covered by `PostProcess/test_indel_genotypes.py`, `test_search_indel_snp.py`,
   `test_build_index_only_atomic.py` (a store of 2.8.1 written again) and
   `test_indel_overlaid_rows.py` (the note, with the real `analisi_indels_NNN.py`).
 - **An indel row whose first base is one an insertion adds is placed at the insertion**
@@ -1864,19 +1905,19 @@ and the `release-crisprme` skill.
     per-sample, 229 highest-CFD rows (233 rows in any block) of 170,660 started so, a median of
     8 and up to 229 bases past the anchor, 95 of them on a tandem duplication; none at CFD ≥ 0.2
     (highest 0.155); and 151 of 468,715 alternative alignments. Population-level: 232 rows.
-    chr22 alone, released 2.8.1 image against 2.10.0: NRG, per-sample, 4 rows move to their
-    anchor (17434488 (+) → 17434485, 21052642 (−) → 21052639, 29300189 (+) → 29300175, 32435001
-    (−) → 32434998), their REF alignment and REF seed and non-seed counts with them, and at
-    32434998 `CRISPR_BULGE_score_REF` and `CRISPR_BULGE_risk_score`; population-level 3,
-    21052642 joining 21052638's site (above); NRR, per-sample, 11 (8 integrated rows and 3
-    alternative alignments, among them 44115947 (+), which now starts at 44115944 or 44115946,
-    the anchors of two long insertions it lies in). Every other row is unchanged but for the
-    columns the other fixes and the merge above change, a gene distance that moves with a
-    start, and the SNP rows and carriers the SNP-row fix below takes off. The self-test
-    (`complete-test --chrom chr22 --vcf_dataset 1000G`, then `validate-test`: 6 passed, 0
-    failed, 0 skipped): in `cas9_sg1617` 2 of 632 rows move (21052642 → 21052639, whose SNP
-    goes 24 → 22, and 17434488 → 17434485); its other 630 rows and the other benchmarks'
-    tables are unchanged.
+    chr22 alone, released 2.8.1 image against 2.10.0's post-analysis on it (CRISPRitz 2.9.1, index
+    format 1): NRG, per-sample, 4 rows move to their anchor (17434488 (+) → 17434485, 21052642 (−) →
+    21052639, 29300189 (+) → 29300175, 32435001 (−) → 32434998), their REF alignment and REF seed
+    and non-seed counts with them, and at 32434998 `CRISPR_BULGE_score_REF` and
+    `CRISPR_BULGE_risk_score`; population-level 3, 21052642 joining 21052638's site (above); NRR,
+    per-sample, 11 (8 integrated rows and 3 alternative alignments, among them 44115947 (+), which
+    now starts at 44115944 or 44115946, the anchors of two long insertions it lies in). Every other
+    row is unchanged but for the columns the other fixes and the merge above change, a gene distance
+    that moves with a start, and the SNP rows and carriers the SNP-row fix below takes off. The
+    self-test (`complete-test --chrom chr22 --vcf_dataset 1000G`, then `validate-test`: 6 passed, 0
+    failed, 0 skipped): in `cas9_sg1617` 2 of 632 rows move (21052642 → 21052639, whose SNP goes 24
+    → 22, and 17434488 → 17434485); its other 630 rows and the other benchmarks' tables are
+    unchanged.
   - Found from a 2.8.0 alternative alignment at chr22:22322768, the 7th base of
     G>GCAATCATTAT at 22322762. That row also paired the insertion's only carrier with four SNP
     alleles other individuals carry, which 2.8.1 already fixed: the row is gone.
@@ -1896,15 +1937,15 @@ and the `release-crisprme` skill.
     keeps 1 on the + strand, the last on the − strand. chr22:21052639 (−) above: its SNP
     G>A at 21052641 is numbered 22 (the target's 21st base: on the − strand an RNA
     bulge adds one, as on SNP rows), which 2.8.1 clamped to 24.
-  - chr22, README guide, released 2.8.1 image against 2.10.0: NRG per-sample 2 rows (21052639 (−)
-    and 33013162 (−), a deletion and two SNPs past it: 17, 13 → 18, 14), population-level 1
-    (33013162), NRR per-sample 6 (also SNPs past a deletion at 12298466 (−), 32526400 (+),
-    25271097 (+) and 34192005 (+), the last one read 26 in a 24-column target, now 21).
-    Genome-wide, 2.8.1's tables of the NRG searches numbered as 2.10.0 numbers them: README
-    guide, per-sample, of the 5,951 rows whose highest-CFD alignment holds an indel, 239 change
-    (165 with a SNP past a deletion, 57 past an insertion, 17 starting inside one), and 81 of
-    2,710 such alternative alignments; population-level, 231 of 5,923; TRAC guide, per-sample,
-    135 of 2,949 and 34 of 1,885. No SNP or MNV row changes.
+  - chr22, README guide, released 2.8.1 image against 2.10.0's post-analysis on it (CRISPRitz 2.9.1,
+    index format 1): NRG per-sample 2 rows (21052639 (−) and 33013162 (−), a deletion and two SNPs
+    past it: 17, 13 → 18, 14), population-level 1 (33013162), NRR per-sample 6 (also SNPs past a
+    deletion at 12298466 (−), 32526400 (+), 25271097 (+) and 34192005 (+), the last one read 26 in a
+    24-column target, now 21). Genome-wide, 2.8.1's tables of the NRG searches numbered as 2.10.0
+    numbers them: README guide, per-sample, of the 5,951 rows whose highest-CFD alignment holds an
+    indel, 239 change (165 with a SNP past a deletion, 57 past an insertion, 17 starting inside
+    one), and 81 of 2,710 such alternative alignments; population-level, 231 of 5,923; TRAC guide,
+    per-sample, 135 of 2,949 and 34 of 1,885. No SNP or MNV row changes.
 - **`PAM_creation` of an indel row whose PAM holds bases an insertion adds, or a deletion's
   junction, is judged wherever in its repeat the VCF writes the indel** (every release; both
   modes, any PAM).
@@ -1949,21 +1990,20 @@ and the `release-crisprme` skill.
     alignment as its site's reference row); a PAM wholly inserted after a protospacer of
     reference bases is created only where the reference lacks a PAM beside that protospacer
     (an inserted TGG before the reference's AGG: NA).
-  - chr22, released 2.8.1 image against 2.10.0: README guide NRG per-sample 2 alignments,
-    21052639 (−) (TGG → NA; above, now one of the alternative alignments of 21052638's site)
-    and the row of 21056178 (−) (NA → AGG); population-level the row of 21056178 (−); NRR
-    per-sample 4, 21052639 (TGG → NA) and the three alignments of 44115947 (+), now the row of
-    44115944 and alternative alignments at 44115944 and 44115946 (NA → TAA). TRAC guide,
-    per-sample: the row of 28013783 (+), wholly inside an insertion (NA → CAG), and at
-    50193928 (−) the alternative alignments of three 48-base alleles that differ from the
-    reference's unit there, so that no placement moves them off the PAM (NA → GAG). The two
-    96-base alleles there hold the alignment twice, and 2.8.1 listed each copy (NA at
-    50193950, GAG at 50193998); each allele is now one alternative alignment at the anchor,
-    GAG: one allele's copies are both created, and the other's left copy, which a placement
-    further right puts on the reference's own PAM, is not, but its right copy is, and the row
-    of two copies is created when either is. The row of 50193928 (−) and its alternative
-    alignment of the 48-base allele that repeats the unit exactly keep NA, as 49196564 (−)
-    does. In the SNP+indel oracle Z2 (wholly
+  - chr22, released 2.8.1 image against 2.10.0's post-analysis on it (CRISPRitz 2.9.1, index format
+    1): README guide NRG per-sample 2 alignments, 21052639 (−) (TGG → NA; above, now one of the
+    alternative alignments of 21052638's site) and the row of 21056178 (−) (NA → AGG);
+    population-level the row of 21056178 (−); NRR per-sample 4, 21052639 (TGG → NA) and the three
+    alignments of 44115947 (+), now the row of 44115944 and alternative alignments at 44115944 and
+    44115946 (NA → TAA). TRAC guide, per-sample: the row of 28013783 (+), wholly inside an insertion
+    (NA → CAG), and at 50193928 (−) the alternative alignments of three 48-base alleles that differ
+    from the reference's unit there, so that no placement moves them off the PAM (NA → GAG). The two
+    96-base alleles there hold the alignment twice, and 2.8.1 listed each copy (NA at 50193950, GAG
+    at 50193998); each allele is now one alternative alignment at the anchor, GAG: one allele's
+    copies are both created, and the other's left copy, which a placement further right puts on the
+    reference's own PAM, is not, but its right copy is, and the row of two copies is created when
+    either is. The row of 50193928 (−) and its alternative alignment of the 48-base allele that
+    repeats the unit exactly keep NA, as 49196564 (−) does. In the SNP+indel oracle Z2 (wholly
     inserted) reads TGG, Z4 NA and Z5 TGG (partly inserted), T, T2, PR, PM, QN, QW, QZ and the
     Cas12a profile's C6 and CB1 NA, and QC, QD, QA, QX, QY, QV and CB3 created (below).
   - Genome-wide, 2.8.1's tables with each row's `PAM_creation` computed by 2.10.0's code
