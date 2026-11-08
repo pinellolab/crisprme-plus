@@ -2,7 +2,8 @@
 """Release gate: no ALT-origin off-target may display a PAM the search did not match, and
 no reported target may hold an N.
 
-usage: check_alt_pam.py [--motif NRG] <integrated_results.tsv | results dir> ...
+usage: check_alt_pam.py [--motif NRG] [--genome DIR|FASTA]
+                        <integrated_results.tsv | results dir> ...
 
 ALT PAM. For every row of an integrated results table, and for each of its three blocks
 (highest CFD, fewest mismatches+bulges, highest CRISPR-Bulge), an ALT-origin block's
@@ -32,12 +33,26 @@ drops a target with an N in its guide region and matches an N to no PAM base. A 
 target with an N means that guard gave way, and the genome's gaps could come out as
 off-targets. An empty or NA cell (the ALT of a REF row) holds no target.
 
+One exception (2.10.0): the REF text of an indel row (an ALT-origin block whose
+Variant_info_genome names a variant whose REF and ALT differ in length) is the reference at
+the row's coordinates, as many bases as its target holds, and next to an assembly gap it can
+run into the gap while the target, on the haplotype carrying the indel, holds none (on
+HPRC's chr22, the README guide's rows at chr22:11978143 (-) and 11980225 (+)). Such an N
+passes where the reference genome itself holds an N at that position, read from the row's
+start and strand (the - strand reverse-complemented) and the text's gaps; any other N in it,
+every N of an ALT text, and every N of a REF-origin block's REF text (the reported target
+itself, whatever its Variant_info_genome names) still fails. The genome is ``--genome`` (a
+folder of <chromosome>.fa files, as Genomes/hg38, or one FASTA file), else the run's own:
+Genomes/<Genome_ref of the run's Params.txt> beside its Results folder. Without one, such an
+N fails, as before.
+
 Exit status 0 when every block passes both checks, 1 on any violation (each listed on
 stdout), 2 on a usage error.
 """
 
 import csv
 import glob
+import gzip
 import os
 import sys
 
@@ -102,12 +117,109 @@ def check(path, motif):
     return rows, checked, bad
 
 
-def check_no_n(path):
-    """(targets checked, [violations]) for one integrated results table: every
-    ``Aligned_protospacer+PAM_REF`` and ``_ALT`` cell of each block that holds a target
-    must hold no N or n."""
+def _params(result_dir, key):
+    for name in ("Params.txt", ".Params.txt"):
+        path = os.path.join(result_dir, name)
+        if os.path.isfile(path):
+            with open(path) as fh:
+                for line in fh:
+                    k, _, value = line.rstrip("\n").partition("\t")
+                    if k == key and value:
+                        return value.strip()
+    return None
+
+
+class Genome(object):
+    """The reference genome an indel row's REF text is read from, one chromosome at a time:
+    a folder of <chromosome>.fa (.fasta, .fa.gz) files or one FASTA file."""
+
+    def __init__(self, path):
+        self.path = path
+        self.name = None
+        self.seq = None
+
+    def _files(self, chrom):
+        if os.path.isdir(self.path):
+            for ext in (".fa", ".fasta", ".fa.gz", ".fasta.gz"):
+                f = os.path.join(self.path, chrom + ext)
+                if os.path.isfile(f):
+                    return [f]
+            return []
+        return [self.path]
+
+    def chromosome(self, chrom):
+        """The chromosome's sequence (upper case), or None when the genome lacks it."""
+        if chrom == self.name:
+            return self.seq
+        self.name, self.seq = chrom, None
+        whole = os.path.isdir(self.path)  # a file per chromosome: all of it
+        for f in self._files(chrom):
+            op = gzip.open if f.endswith(".gz") else open
+            parts, inside = [], whole
+            with op(f, "rt") as fh:
+                for line in fh:
+                    if line.startswith(">"):
+                        if whole:
+                            continue
+                        if inside:
+                            break  # the next chromosome of one FASTA file
+                        inside = line[1:].split()[0] == chrom
+                        continue
+                    if inside:
+                        parts.append(line.strip())
+            if parts:
+                self.seq = "".join(parts).upper()
+        return self.seq
+
+
+def run_genome(table):
+    """The genome of the run a table belongs to: Genomes/<Genome_ref> beside its Results
+    folder (<data>/Results/<job>/table), or None."""
+    result_dir = os.path.dirname(os.path.abspath(table))
+    name = _params(result_dir, "Genome_ref") or _params(result_dir, "Genome_selected")
+    if not name:
+        return None
+    path = os.path.join(result_dir, "..", "..", "Genomes", name)
+    return Genome(path) if os.path.isdir(path) else None
+
+
+def _names_indel(variants):
+    for tok in variants.split(","):
+        p = tok.rsplit("_", 3)
+        if len(p) == 4 and len(p[2]) != len(p[3]):
+            return True
+    return False
+
+
+def n_where_the_reference_has_n(seq, start, strand, chrom, genome):
+    """True iff every N (or n) of an indel row's REF text ``seq`` sits where the genome
+    holds an N: the text's bases, gaps aside, are the reference from ``start`` on, in the
+    target's orientation (reverse-complemented on the - strand)."""
+    if genome is None:
+        return False
+    ref = genome.chromosome(chrom)
+    if ref is None:
+        return False
+    bases = [c for c in seq if c != "-"]
+    nb = len(bases)
+    for j, c in enumerate(bases):
+        if c.upper() != "N":
+            continue
+        q = start + j if strand == "+" else start + nb - 1 - j
+        if not 0 <= q < len(ref) or ref[q] != "N":
+            return False
+    return True
+
+
+def check_no_n(path, genome=None):
+    """(targets checked, [violations], REF texts of indel rows that hold an N only where the
+    reference does) for one integrated results table: every ``Aligned_protospacer+PAM_REF``
+    and ``_ALT`` cell of each block that holds a target must hold no N or n, but the REF
+    text of an indel row (an ALT-origin block naming an indel) may where the reference
+    genome itself holds an N (n_where_the_reference_has_n). A REF-origin block's REF text
+    is the reported target itself, and never may."""
     csv.field_size_limit(1 << 30)
-    checked = 0
+    checked = accepted = 0
     bad = []
     with open(path, newline="") as fh:
         reader = csv.reader(fh, delimiter="\t")
@@ -118,31 +230,46 @@ def check_no_n(path):
             for side in ("REF", "ALT"):
                 try:
                     cells.append((b, side, col["Aligned_protospacer+PAM_%s_(%s)" % (side, b)],
-                                  col["Start_coordinate_(%s)" % b], col["Strand_(%s)" % b]))
+                                  col["Start_coordinate_(%s)" % b], col["Strand_(%s)" % b],
+                                  col.get("Variant_info_genome_(%s)" % b),
+                                  col.get("REF/ALT_origin_(%s)" % b)))
                 except KeyError:
                     continue
         if not cells:
             raise ValueError("%s: no Aligned_protospacer+PAM columns -- not an integrated "
                              "results table" % path)
         for row in reader:
-            for b, side, i_seq, i_start, i_strand in cells:
+            for b, side, i_seq, i_start, i_strand, i_var, i_origin in cells:
                 seq = row[i_seq]
                 if seq in ("", "NA"):
                     continue
                 checked += 1
-                if "N" in seq.upper():
-                    bad.append((b, side, row[col.get("Chromosome", 1)], row[i_start],
-                                row[i_strand], seq))
-    return checked, bad
+                if "N" not in seq.upper():
+                    continue
+                chrom = row[col.get("Chromosome", 1)]
+                if (side == "REF" and i_var is not None and i_origin is not None
+                        and row[i_origin] == "alt" and _names_indel(row[i_var])
+                        and n_where_the_reference_has_n(seq, int(row[i_start]), row[i_strand],
+                                                        chrom, genome)):
+                    accepted += 1
+                    continue
+                bad.append((b, side, chrom, row[i_start], row[i_strand], seq))
+    return checked, bad, accepted
 
 
 def main(argv):
     motif = None
+    genome_path = None
     paths = []
     it = iter(argv[1:])
     for arg in it:
         if arg == "--motif":
             motif = next(it, None)
+        elif arg == "--genome":
+            genome_path = next(it, None)
+            if not genome_path or not os.path.exists(genome_path):
+                print("check_alt_pam: --genome %s: no such file or folder" % genome_path)
+                return 2
         elif arg in ("-h", "--help"):
             print(__doc__)
             return 0
@@ -162,6 +289,7 @@ def main(argv):
         else:
             tables.append(p)
     failed = 0
+    given = Genome(genome_path) if genome_path else None
     for t in tables:
         m = motif or _motif_from_params(os.path.dirname(os.path.abspath(t)))
         if not m:
@@ -175,13 +303,19 @@ def main(argv):
             print("    %s %s:%s(%s) %s PAM %s" % b)
         if len(bad) > 50:
             print("    ... %d more" % (len(bad) - 50))
-        targets, with_n = check_no_n(t)
-        print("%s  %s: %d reported targets (REF and ALT, every block), %d with an N"
-              % ("FAIL" if with_n else "PASS", t, targets, len(with_n)))
+        genome = given or run_genome(t)
+        targets, with_n, accepted = check_no_n(t, genome)
+        print("%s  %s: %d reported targets (REF and ALT, every block), %d with an N%s"
+              % ("FAIL" if with_n else "PASS", t, targets, len(with_n),
+                 "; %d indel rows' REF texts hold an N only where the reference genome does"
+                 % accepted if accepted else ""))
         for b in with_n[:50]:
             print("    %s %s %s:%s(%s) %s" % b)
         if len(with_n) > 50:
             print("    ... %d more" % (len(with_n) - 50))
+        if with_n and genome is None and any(side == "REF" for _b, side, *_r in with_n):
+            print("    (no reference genome to read an indel row's REF text against: pass "
+                  "--genome, or run this on a results folder inside its data folder)")
         failed += bool(bad) or bool(with_n)
     return 1 if failed else 0
 

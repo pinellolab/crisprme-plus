@@ -62,7 +62,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 
 #### The local gate: nothing stays skipped
 
-Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. So step 4b runs here, on the release's own engine, the three engine checks CI runs only on that published image: `test/index_flex/check_index_flex.py`, `test/indel_snp_oracle/run_oracle.sh` and `scripts/check_alt_pam.py`, and the two no CI job runs, which need the engine the release installs: `test/index_format2/check_real_engine.py` (CRISPRme's reader of the index files the engine writes, and its rule for a contig's sites, against the engine's own) and `test/index_format2/check_boundary_rows.py` (rows at contig ends and `N` runs through the CLI). It needs Docker, git-lfs, and network to Docker Hub, Hugging Face, EBI, GitHub, MCR, PyPI (step 5) and the Debian package mirror (step 2). 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them. Step 4b adds about 16 min on the Mac (index_flex 14, the oracle under 2) and 30 to 40 min on a busy amd64 node (index_flex 28 to 37, the oracle 3); its index_flex and oracle need nothing from step 4 and can run beside it.
+Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. So step 4b runs here, on the release's own engine, the three engine checks CI runs only on that published image: `test/index_flex/check_index_flex.py`, `test/indel_snp_oracle/run_oracle.sh` and `scripts/check_alt_pam.py`, and the two no CI job runs, which need the engine the release installs: `test/index_format2/check_real_engine.py` (CRISPRme's reader of the index files the engine writes, and its rule for a contig's sites, against the engine's own) and `test/index_format2/check_boundary_rows.py` (rows at contig ends and `N` runs through the CLI). It needs Docker, git-lfs, and network to Docker Hub, Hugging Face, EBI, GitHub, MCR, PyPI (step 5) and the Debian package mirror (step 2). 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them. Step 4b adds about 16 min on the Mac (index_flex 14, the oracle under 2) and 30 to 40 min on a busy amd64 node (index_flex 28 to 37, the oracle 3); its index_flex and oracle need nothing from step 4 and can run beside it. Step 4c, the independent real-data indel check, needs a chr22 HGDP + 1000 Genomes install and the genome-wide per-sample runs of the README guide and TRAC; the two chr22 searches are about 5 min each on 8 threads, the four chr22 checks a few minutes in all with `--jobs 24` (soundness 10 to 15 s; completeness of the whole chromosome 100 to 180 s depending on the node's load, about 40 CPU-minutes), and genome-wide soundness under 2 min per guide with `--jobs 24` once the VCFs have a `.tbi` (each unindexed VCF is first read once into an in-memory index).
 
 **Three skips are allowed, and only these**, each run elsewhere in the gate: `no TensorFlow here` (`test_crispr_bulge_fidelity`, the CRISPR-Bulge fidelity gate, runs in its own env in step 3), `en_US.UTF-8 is not installed` (`test_index_resolution`'s locale tests, step 2) and `no ps here to compare` (`test_index_resolution`, runs in the `unit-tests` job, whose runner has `ps`).
 
@@ -123,6 +123,113 @@ grep -q "^all passed" "$GATE/fmt2_engine.log" || echo GATE_FAILED
 docker run --rm "$IMG" python3 /opt/conda/opt/crisprme/test/index_format2/check_boundary_rows.py /tmp/fmt2_rows 2>&1 | tee "$GATE/fmt2_rows.log"
 grep -q "^all passed" "$GATE/fmt2_rows.log" || echo GATE_FAILED
 
+# 4c. The independent real-data indel check (scripts/check_indel_rows.py), on a REAL panel:
+#     validate-test compares only the engine's sites on the reference and the SNV-only chr22
+#     1000 Genomes genome, so no indel row's coordinate, REF text, variants or carriers are
+#     ever checked against an independent truth (test/benchmark/README.md). The checker
+#     writes each sample's haplotypes from the VCF itself (every allele of a slot) and
+#     aligns with its own exhaustive aligner; it imports and copies no CRISPRme code and
+#     needs only Python's standard library (the repository's CFD tables are read as data).
+#     $D22 is a chr22-only HGDP + 1000 Genomes install (Genomes/hg38, VCFs/hg38_HGDP1kGP,
+#     genome_library, Dictionaries with its genotype store: the checker models a search that
+#     read the genotypes, so not an install made with --no-genotypes, whose searches it
+#     refuses where they say so), $VCF its chr22 VCF (a
+#     .tbi beside it makes reads seeks; without one the VCF is read once into an in-memory
+#     index, nothing is written).
+#     Run the README guide, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, in BOTH modes first:
+for mode in per-sample population-level; do
+  docker run --rm -v "$D22:/DATA" -w /DATA "$IMG" crisprme.py complete-search --genome Genomes/hg38 \
+    --pam PAMs/20bp-NRG-SpCas9.txt --guide guide.txt --vcf list_vcf.txt --samplesID list_samplesID.txt \
+    --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+    --gene_annotation Annotations/gencode.protein_coding.bed.gz --index-path genome_library \
+    --mm 4 --bDNA 1 --bRNA 1 --thread 8 --output "gate_${mode}" --"$mode"
+  #   soundness (every indel/MNV row real) and completeness (no real indel off-target
+  #   missed: per sample on the per-sample run, where every carrier target must be
+  #   reported for its carrier by rows of its site and strand no worse than its best
+  #   alignment by the merge's sort keys (--sorting-criteria, then the CFD at three
+  #   decimals and the criteria again) -- the fold group of the row that lists it, or the
+  #   rows a fold puts it under; per merge cluster on the population-level run, which keeps
+  #   one row per cluster -- its row must have no more edits than each target and at least
+  #   its CFD, at the three decimals the merge sorts on; the checker reads the mode from
+  #   Results/*/.alt_mode, the cap from .Params.txt, the criteria from .command_line.txt
+  #   and the panel from .sampleID.txt, or give --samples)
+  for check in soundness completeness; do
+    python3 "$SRC/scripts/check_indel_rows.py" --results "$D22/Results/gate_${mode}" \
+      --reference "$D22/Genomes/hg38" --vcf "$VCF" --pam "$D22/PAMs/20bp-NRG-SpCas9.txt" \
+      --guide "$D22/guide.txt" --mm 4 --bDNA 1 --bRNA 1 --max-total-edits 6 --chrom chr22 \
+      --mode "$check" --jobs 24 --out "$GATE/indelrows_${mode}_${check}.tsv" || echo GATE_FAILED
+  done
+done
+#     Genome-wide SOUNDNESS of the README guide and of TRAC: $GW is a genome-wide HGDP + 1000
+#     Genomes install whose Results/readme and Results/trac are the release's per-sample
+#     searches of guide.txt (README) and guide_trac.txt (TRAC), NRG, 4 + 1 + 1. --vcf-dir
+#     is the panel's VCF folder; give it a .tbi per VCF (in a folder you can write: link
+#     the VCFs there and run `tabix -p vcf`), or let the checker index each one in memory
+#     (one decompression of the file, about 28 GB for this panel: the README run took
+#     388 s and 8.3 GB so on 24 processes of a node at load 250 to 300, against 89 s and
+#     4.5 GB with a .tbi).
+for g in readme:guide.txt trac:guide_trac.txt; do
+  python3 "$SRC/scripts/check_indel_rows.py" --results "$GW/Results/${g%%:*}" \
+    --reference "$GW/Genomes/hg38" --vcf-dir "$GW/VCFs/hg38_HGDP1kGP" \
+    --pam "$GW/PAMs/20bp-NRG-SpCas9.txt" --guide "$GW/${g#*:}" --mm 4 --bDNA 1 --bRNA 1 \
+    --max-total-edits 6 --mode soundness --jobs 24 --out "$GATE/indelrows_gw_${g%%:*}.tsv" \
+    || echo GATE_FAILED
+done
+#     The gate is the exit status: 0 gating findings. Non-gating lines are documented
+#     CRISPRme limits (limit-last-alt-wins, limit-two-indels: 8 targets on chr22 with
+#     2.10.0's code, limit-putative-carrier, limit-contig-end; limit-capped-window: a cluster
+#     of a per-sample run without alternative alignments reached only through a capped
+#     window's greedy row, which only the classic dictionary path writes), slots whose VCF
+#     alleles overlap where a target of their record reads, so the VCF gives it no sequence
+#     (limit-overlapping-records: 4 records on chr22; a carrier there is judged where
+#     METHODS section 4 reads the slot
+#     without the overlapping allele -- a listed one that so holds the target is the note
+#     overlap-reading-agrees --, and on every reading of two other alleles that overlap
+#     each other, where all agree; a listed carrier whose slot has no reading and that
+#     METHODS' rules take off the target fails, carrier-off-by-rule; its named variants
+#     are always required), windows across N
+#     (limit-n-bases), a sites-only dataset's rows, which list no
+#     carrier (limit-no-genotypes: none here; to check a search of the default index beside
+#     hg38_mega, give both VCFs, --vcf "$VCF" --vcf <mega chr22 VCF>), the records whose
+#     FILTER (neither PASS nor '.') CRISPRitz's enricher skips (limit-filtered-record: none
+#     on this panel, whose FILTER is '.'; 32,178 indels of hg38_mega's chr22 beside it),
+#     the note
+#     variant-shadowed, and the checker's own coverage gaps (coverage-putative-cap: a
+#     carrier resolved PUTATIVE with more than 10 positions near a record where its
+#     alleles allow two bases, whose targets touching a call of unknown phase are not
+#     enumerated, none on this phased panel; coverage-overlap-cap: a slot whose overlap
+#     zones near a record have more than 1024 readings, of which each allele alone is read
+#     for the targets only such readings hold (counted, never demanded; 2 records, one
+#     carrier, on chr22); coverage-chain-limit: a population-level
+#     cluster longer than the 3 kb either side its chain follows; coverage-snp-row-indel: a
+#     per-sample cluster without alternative alignments reached only through a SNP target
+#     of a slot that also holds an indel touching it, which 2.10.0 writes only where its
+#     reading of the slot through a repeat keeps the carrier;
+#     coverage-unindexed-long-ref: a VCF without a .tbi holding a deletion longer than
+#     20 kb, which an unindexed read may miss: give it a .tbi), each listed with its
+#     samples and target: read them, and say in the release notes if a class grew. A
+#     known upstream defect can be listed with --known (class, chrom, start, strand,
+#     variants, samples, reason): it turns non-gating as known-defect, and a listed one
+#     that stops showing is reported as known-not-seen. Exit 2 is no verdict: a usage
+#     error, or a configuration the checker refuses -- two genotyped datasets that share
+#     samples (run and check each dataset's search alone), or inputs other than the ones
+#     the run records it searched with: its .Params.txt budget, PAM and variant datasets
+#     (give one VCF per dataset of the search for each chromosome: a two-dataset search
+#     given one VCF is refused; a search without bulges records Genome_idx None, and its
+#     datasets are read from the --vcf list its command line names, in the folder that
+#     holds its Results), a guide its .guides.txt does not hold (a subset of its
+#     guides is checked; the others are counted, guide-not-given), a --samples other than
+#     its .sampleID.txt, an --analysis other than its .search_mode (the mode the search
+#     ran), a run whose records contradict each other, a search of a genotyped dataset
+#     without its genotype store that says so (its log_verbose.txt's "Registry-only
+#     install" line, or a --per-sample search run population-level), or one that does not
+#     record what
+#     the check needs (whether it wrote alternative alignments and, where it wrote none,
+#     its mode: --ci-cd-test chooses none; --analysis can give it). Genome-wide
+#     COMPLETENESS (at most about 52 CPU-hours per guide: 53 to 78 min on 40 processes of a
+#     loaded node, 6 GB, a TSV of about 31 MB) is not a release gate; chr22 above stands
+#     for it.
+
 # 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.
 docker run -d --rm --name gate-web -p 8090:8080 "$IMG" crisprme.py web-interface
 until curl -sf -o /dev/null http://localhost:8090/index; do sleep 3; done
@@ -164,6 +271,9 @@ apptainer exec --bind "$PWD" --pwd "$PWD" sb /usr/local/bin/_entrypoint.sh pytho
 grep -q "^all passed" gate/fmt2_engine.log || echo GATE_FAILED
 apptainer exec --bind "$PWD" --pwd "$PWD" sb /usr/local/bin/_entrypoint.sh python3 /opt/conda/opt/crisprme/test/index_format2/check_boundary_rows.py "$PWD/gate/fmt2_rows" 2>&1 | tee gate/fmt2_rows.log
 grep -q "^all passed" gate/fmt2_rows.log || echo GATE_FAILED
+# step 4c: the same commands as above, with `apptainer run --bind ... sb crisprme.py complete-search`
+# for the two searches. check_indel_rows.py itself needs only the host's python3 (stdlib only);
+# --jobs N splits it over N processes.
 ```
 
 ### C. Release mechanics (at/after tag)

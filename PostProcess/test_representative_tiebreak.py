@@ -50,6 +50,19 @@ ASSERTS:
     branch. Controls: more carriers, a smaller aligned DNA, a smaller Position or a
     higher CFD still win over it; rows without carriers (a sites-only index) keep the
     order of the merge step's sort.
+  * Alignments that start inside one insertion (2.10.0: all at its anchor): two targets
+    of the insertion with one carrier set both stay, the site's row and an alternative
+    alignment, on both strands; two copies of one target are one row; a bulged alignment
+    of one target, before the same PAM, still folds into the best (as up to 2.8.1).
+  * Two alignments of one indel target string (2.10.0: the merge keys an indel row by its
+    aligned spacer too): a carrier resolved PUTATIVE stays on the alignment it was resolved
+    on (the SNP+indel oracle's site U, S19); one alignment from two VCF datasets is still
+    one entry; alignments of one target with one carrier set are one entry, the best; carrier
+    sets are compared whole (an alignment whose carriers are a subset of a better one's keeps
+    its entry), the same entries in every order.
+  * Cost (2.10.0): one target's alignments inside a 54 kb insertion, each its own aligned
+    spacer, have their place on the haplotype read once per target, not once per alignment
+    (indel_snp_cis.row_first_base, counted in a fresh interpreter).
 
 Run with:
     cd PostProcess && python3 -m unittest test_representative_tiebreak -v
@@ -86,6 +99,11 @@ SNP_COL = 18
 CFD_COL = 20
 
 GUIDE = "GAGTCCGAGCAGAAGAAGAANNN"
+_COMP = str.maketrans("ACGTacgt-", "TGCAtgca-")
+
+
+def _rc(seq):
+    return seq.translate(_COMP)[::-1]
 
 
 def _row(dna, cfd, total=4, cluster_pos=1000, position=1000, snp="n",
@@ -468,6 +486,356 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
             self.assertEqual(len(best), 1)
             counts.add(len(alt))
         self.assertEqual(counts, {2})  # the carrier sets {S1}, {S1,S2}, {S2}
+
+
+class OneTargetTwoAlignments(unittest.TestCase):
+    """2.10.0: an indel row merges only with rows of its own alignment, its target and its
+    aligned spacer the same.
+
+    A carrier resolved PUTATIVE (phase unknown) is listed with the strongest target its own
+    alleles allow on each alignment (indel_snp_cis.worst_case_bases): the guide's base at a
+    spacer column, the CFD's choice in a DNA bulge. So two alignments of one target string
+    can list different carriers. The rows are the SNP+indel oracle's site U as the indel
+    post-analysis writes them: the deletion chr21:8010 TC>T, the SNP chr21:8006 C>A whose A
+    the guide needs, S19 0/1 for both, S20 0/1 for the deletion alone. The target
+    AC-TGA?ATCTGTAAGCAGGCTGG (? the SNP's base) has two alignments: A-CTGAAATCTG..., where ?
+    faces the guide's A (S19 with A, CFD 0.93; S20 with C, 0.423), and ACTGAA-ATCTG..., where
+    ? is a DNA bulge and the CFD takes C (r-:dG,7 0.059, r-:dT,7 0), so S19 and S20 with C
+    (0.014). Up to 8d3f278 the merge keyed an indel row by its target alone, and the two C
+    rows were one entry, the first in the file's order: the CFD 0.423 alignment, which then
+    listed S19 with C, where its alleles give that alignment A (0.93)."""
+
+    DEL, SNP = "chr21_8010_TC_T", "chr21_8006_C_A"
+    G = "ACTGAAATCTGTAAGCAGGCNNN"
+    BULGED_A = "A-CTGAAATCTGTAAGCAGGCNNN"  # the SNP's base faces the guide's A
+    BULGED_B = "ACTGAA-ATCTGTAAGCAGGCNNN"  # the SNP's base is a DNA bulge
+    REF = "ACTGACATCTCGTAAGCAGGCTGG"  # the reference from 8000 (the deleted C at 8010)
+
+    setUp = IndelRowsKeepTheirOwnCarriers.setUp
+    tearDown = IndelRowsKeepTheirOwnCarriers.tearDown
+    _merge = IndelRowsKeepTheirOwnCarriers._merge
+
+    def _u(self, crrna, dna, cfd, mm, samples, snp=False, rsid=".", af="0.0128205"):
+        bulges = crrna.count("-") + dna.count("-")
+        r = _row(dna, cfd=cfd, total=mm + bulges, cluster_pos=8000, position=8000,
+                 snp=(self.SNP + "," + self.DEL) if snp else self.DEL, chrom="chr21",
+                 guide=crrna, samples=samples)
+        ref = self.REF[:len(dna.replace("-", ""))]
+        for i, c in enumerate(dna):
+            if c == "-":
+                ref = ref[:i] + "-" + ref[i:]
+        r[0] = {0: "X", 1: "DNA" if "-" in crrna else "RNA"}.get(bulges, "RNA,DNA")
+        r[3], r[8], r[9] = ref, str(mm), str(bulges)
+        r[16], r[17] = (".,rs1" if snp else rsid), ("0.00641026," + af if snp else af)
+        return r
+
+    def _site_u(self):
+        return [self._u(self.G, "ACTGAAATCTGTAAGCAGGCTGG", "1.000", 0, "S19", snp=True),
+                self._u(self.BULGED_A, "AC-TGAAATCTGTAAGCAGGCTGG", "0.930", 0, "S19", snp=True),
+                self._u(self.BULGED_A, "AC-TGAcATCTGTAAGCAGGCTGG", "0.423", 1, "S20"),
+                self._u(self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG", "0.014", 2, "S19,S20")]
+
+    def _all(self, rows, sort_order):
+        best, alt = self._merge([list(r) for r in rows], sort_order)
+        return best + alt
+
+    def test_a_putative_carrier_stays_on_the_alignment_it_was_resolved_on(self):
+        """In the merge step's order of each file (CFD then mismatches + bulges, or
+        mismatches + bulges), and reversed: S19 is listed under the deletion alone only on
+        the alignment that makes the SNP's base a DNA bulge, and the other alignment of that
+        target lists S20 alone. One entry per carrier set and variant list: S19 under both
+        variants (the perfect alignment, A-CTGAAATCTG...'s A folded into it, as up to 2.8.1),
+        S20 and S19 + S20 under the deletion alone; the same three whatever the sort, so the
+        three files keep one row count."""
+        rows = self._site_u()
+        by_cfd = sorted(rows, key=lambda r: (-float(r[CFD_COL]), int(r[TOTAL_COL])))
+        by_total = sorted(rows, key=lambda r: int(r[TOTAL_COL]))
+        for sort_order, order in (("score", by_cfd), ("score", by_cfd[::-1]),
+                                  ("total", by_total), ("total", by_total[::-1])):
+            with self.subTest(sort_order=sort_order, first=order[0][1]):
+                out = self._all(order, sort_order)
+                got = {(r[1], r[DNA_COL]): (r[SNP_COL], r[13]) for r in out}
+                self.assertEqual(got, {
+                    (self.G, "ACTGAAATCTGTAAGCAGGCTGG"): (self.SNP + "," + self.DEL, "S19"),
+                    (self.BULGED_A, "AC-TGAcATCTGTAAGCAGGCTGG"): (self.DEL, "S20"),
+                    (self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG"): (self.DEL, "S19,S20")})
+
+    def test_one_alignment_from_two_datasets_is_still_merged(self):
+        """The same alignment from two VCF datasets (a carrier T01 of the second): one entry
+        with the carriers, rsIDs and AFs of both."""
+        one = self._u(self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG", "0.014", 2, "S19,S20")
+        two = self._u(self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG", "0.014", 2, "T01",
+                      rsid="rs7", af="0.2")
+        for sort_order in ("score", "total"):
+            out = self._all([one, two], sort_order)
+            self.assertEqual(len(out), 1)
+            self.assertEqual((out[0][13], out[0][16], out[0][17]),
+                             ("S19,S20,T01", ".,rs7", "0.0128205,0.2"))
+
+    def test_alignments_of_one_target_with_one_carrier_set_are_one_entry(self):
+        """Two alignments of one target string (ACTG-AcATCTG...) listing one carrier set
+        (S20, its slot's C facing the guide's A in both) are one entry, the best by the order
+        that picks each block's representative (the CFD on the score branch, whichever comes
+        first), with the other's rsID and AF; and the alignment of that target where the C
+        is a DNA bulge, which lists S19 too, stays an entry of its own."""
+        strong = self._u("ACT-GAAATCTGTAAGCAGGCNNN", "ACTG-AcATCTGTAAGCAGGCTGG", "0.042", 1,
+                         "S20", rsid="rs9", af="0.5")
+        weak = self._u("ACTGA-AATCTGTAAGCAGGCNNN", "ACTG-AcATCTGTAAGCAGGCTGG", "0.012", 1,
+                       "S20")
+        bulge = self._u(self.BULGED_B, "ACTG-ACATCTGTAAGCAGGCTGG", "0.019", 0, "S19,S20")
+        for sort_order in ("score", "total"):
+            for order in ((strong, weak, bulge), (weak, strong, bulge), (bulge, weak, strong)):
+                with self.subTest(sort_order=sort_order, first=order[0][1]):
+                    out = self._all(order, sort_order)
+                    self.assertEqual(len(out), 2)
+                    s20 = [r for r in out if r[13] == "S20"]
+                    self.assertEqual(len(s20), 1)
+                    self.assertEqual((s20[0][16], s20[0][17]), (".,rs9", "0.0128205,0.5"))
+                    if sort_order == "score":
+                        self.assertEqual(s20[0][1], strong[1])
+                    self.assertEqual([r[1] for r in out if r[13] == "S19,S20"], [bulge[1]])
+
+    def test_carrier_sets_are_compared_whole(self):
+        """The fold compares whole carrier sets, so that every block keeps one row count
+        whatever its order. S04 (homozygous for the SNP) and S06 (phased, the SNP in cis)
+        carry the A wherever the target is; the unphased S01 and S03 take it where the
+        alignment pairs it with the guide's A (the perfect alignment) and the C where it is
+        a DNA bulge (ACTGAA-ATCTG..., whose CFD the A makes 0). So ACTGAA-ATCTG... with the
+        A lists S04 and S06 alone and keeps an entry of its own, though both are listed on
+        the perfect alignment of that target and variants (METHODS: an extra alternative
+        alignment, never a wrong carrier or score). The same three entries in every order."""
+        rows = [self._u(self.G, "ACTGAAATCTGTAAGCAGGCTGG", "1.000", 0, "S01,S03,S04,S06",
+                        snp=True),
+                self._u(self.BULGED_B, "AC-tgAAATCTGTAAGCAGGCTGG", "0.000", 2, "S04,S06",
+                        snp=True),
+                self._u(self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG", "0.014", 2, "S01,S03")]
+        both = self.SNP + "," + self.DEL
+        for sort_order in ("score", "total"):
+            for order in (rows, rows[::-1], rows[1:] + rows[:1]):
+                with self.subTest(sort_order=sort_order, first=order[0][DNA_COL]):
+                    out = self._all(order, sort_order)
+                    got = {(r[1], r[DNA_COL]): (r[SNP_COL], r[13]) for r in out}
+                    self.assertEqual(got, {
+                        (self.G, "ACTGAAATCTGTAAGCAGGCTGG"): (both, "S01,S03,S04,S06"),
+                        (self.BULGED_B, "AC-tgAAATCTGTAAGCAGGCTGG"): (both, "S04,S06"),
+                        (self.BULGED_B, "AC-tgACATCTGTAAGCAGGCTGG"): (self.DEL, "S01,S03")})
+
+
+class AlignmentsStartingInsideOneInsertion(unittest.TestCase):
+    """2.10.0: a row whose first base is one an insertion adds starts at the insertion's
+    anchor (indel_snp_cis.reference_start), so alignments that start on different bases
+    of one insertion have one Position and one Cluster_Position, and are one site.
+
+    The merge folds a site's alignments naming the same variants with the same carriers
+    into one entry, and compares them where they are on the haplotype carrying the indel
+    (remove_contiguous_samples._haplotype_cluster_position): there, two targets that start
+    on different inserted bases are as many bases apart as 2.8.1 placed them. So they stay,
+    the site's row and its alternative alignments (on the Cluster_Position alone they fold
+    into one: on the HGDP + 1000 Genomes index, an alignment of the TRAC guide's left the
+    tables), and one target's alignments with different bulges before one PAM still fold,
+    as up to 2.8.1. Two copies of one target inside an insertion (a repeat it holds) are
+    the same row at the anchor: one entry.
+
+    The rows are those the indel post-analysis writes: the insertion after the anchor at
+    0-based 100 (VCF POS 101), the target's bases on the haplotype carrying it, the REF
+    text the reference's from the anchor, as many bases as the target holds."""
+
+    T1 = "ACTGAAATCTGTAAGCAGGCTGG"  # the guide + TGG
+    T2 = "ACTGAAATCTGTAAGCAGGCAGG"  # the guide + AGG
+    REFSEQ = "GATTACAGCT" * 10 + "G" + "CCTAGGTCAA" * 10  # the anchor at 100: G
+
+    setUp = IndelRowsKeepTheirOwnCarriers.setUp
+    tearDown = IndelRowsKeepTheirOwnCarriers.tearDown
+    _row = IndelRowsKeepTheirOwnCarriers._row
+    _merge = IndelRowsKeepTheirOwnCarriers._merge
+    INDEL = IndelRowsKeepTheirOwnCarriers.INDEL
+
+    def _site(self, ins):
+        """The insertion's token, and the haplotype carrying it."""
+        anchor = self.REFSEQ[100]
+        return ("chr1_101_%s_%s" % (anchor, anchor + ins),
+                self.REFSEQ[:101] + ins + self.REFSEQ[101:])
+
+    def _inside(self, ins, k, n, strand="+", cfd="1.000", total=0, dna_bulges=0,
+                samples="S1", rsid="rs1", af="0.1"):
+        """A row of the alignment whose first base (the leftmost) is the k-th base the
+        insertion adds, its target the n bases from there; a DNA bulge one base of them."""
+        token, hap = self._site(ins)
+        bases, ref = hap[100 + k:100 + k + n], self.REFSEQ[100:100 + n]
+        if strand == "-":
+            bases, ref = _rc(bases), _rc(ref)
+        r = self._row(bases, cfd, total, samples, snp=token, rsid=rsid, af=af)
+        r[3], r[7] = ref, strand
+        r[5] = "100"  # the anchor
+        # the Cluster_Position: the start, plus the DNA bulges on the + strand, 3' PAM
+        r[CLUSTER_POS_COL] = str(100 + (dna_bulges if strand == "+" else 0))
+        if dna_bulges:
+            r[0], r[1], r[9] = "DNA", "-" + GUIDE, str(dna_bulges)
+        return r
+
+    def test_other_targets_of_one_insertion_stay_as_alternatives(self):
+        """Two targets inside one insertion, 25 bases apart on its haplotype (2.8.1: two
+        sites), the same variant and carrier: one site at the anchor, the second target
+        one of its alternative alignments, on both strands and both branches."""
+        for strand, ins in (("+", "AT" + self.T1 + "CA" + self.T2 + "TC"),
+                            ("-", "AT" + _rc(self.T1) + "CA" + _rc(self.T2) + "TC")):
+            rows = [self._inside(ins, 3, 23, strand), self._inside(ins, 28, 23, strand)]
+            want = {r[DNA_COL] for r in rows}
+            for sort_order in ("score", "total"):
+                for order in (rows, rows[::-1]):
+                    with self.subTest(strand=strand, sort_order=sort_order):
+                        best, alt = self._merge([list(r) for r in order], sort_order)
+                        self.assertEqual((len(best), len(alt)), (1, 1))
+                        self.assertEqual({best[0][DNA_COL], alt[0][DNA_COL]}, want)
+                        self.assertEqual(best[0][19], "1")  # the site's other row
+                        self.assertEqual((best[0][13], alt[0][13]), ("S1", "S1"))
+
+    def test_two_copies_of_one_target_are_one_row(self):
+        """The insertion holds the target twice (a repeat): the two alignments are the
+        same row at the anchor, its bases, REF text, variant and carriers, so one entry
+        (2.8.1 reported each copy at its own start)."""
+        ins = "AT" + self.T1 + "CA" + self.T1 + "TC"
+        rows = [self._inside(ins, 3, 23), self._inside(ins, 28, 23)]
+        self.assertEqual(rows[0], rows[1])
+        for sort_order in ("score", "total"):
+            best, alt = self._merge([list(r) for r in rows], sort_order)
+            self.assertEqual((len(best), len(alt)), (1, 0))
+            self.assertEqual((best[0][DNA_COL], best[0][13]), (self.T1, "S1"))
+
+    def test_two_copies_are_created_when_either_copys_pam_is(self):
+        """Two copies of one target inside one insertion are one row (above), and the indel
+        post-analysis judges each copy's PAM on its own: the copy that a placement of the
+        insertion moves onto the reference's own PAM is not created ("n"), the copy the
+        insertion adds can be (its ALT PAM). The row is created when either copy is,
+        whichever the merge meets first (2.10.0; up to 50803b6 the first one met
+        was kept, and only the pre-merge sort's byte order, an upper-case PAM before "n",
+        put the created copy first: TRAC, HGDP + 1000 Genomes, chr22:50193928 (-))."""
+        ins = "AT" + self.T1 + "CA" + self.T1 + "TC"
+        rows = [self._inside(ins, 3, 23), self._inside(ins, 28, 23)]
+        rows[0][11], rows[1][11] = "n", "TGG"
+        for sort_order in ("score", "total"):
+            for order in (rows, rows[::-1]):
+                with self.subTest(sort_order=sort_order, first=order[0][11]):
+                    best, alt = self._merge([list(r) for r in order], sort_order)
+                    self.assertEqual((len(best), len(alt)), (1, 0))
+                    self.assertEqual((best[0][DNA_COL], best[0][11]), (self.T1, "TGG"))
+        # neither created: "n"
+        rows[1][11] = "n"
+        best, alt = self._merge([list(r) for r in rows])
+        self.assertEqual(best[0][11], "n")
+
+    def test_bulged_alignments_of_one_target_still_fold(self):
+        """A DNA-bulge alignment of the same target, one base longer and before the same
+        PAM, starts one inserted base earlier: on the haplotype the same site (2.8.1: one
+        Cluster_Position), here Cluster_Positions 100 and 101. One entry, the better one,
+        with the other's rsID and AF, each pair in its place (2.10.0: the rsID and AF lists
+        follow the variants, so the "." of the bulged row goes with its 0.2)."""
+        ins = "AT" + self.T1 + "CA"
+        perfect = self._inside(ins, 3, 23)
+        bulged = self._inside(ins, 2, 24, cfd="0.500", total=1, dna_bulges=1, rsid=".",
+                              af="0.2")
+        self.assertEqual(bulged[DNA_COL], "T" + self.T1)
+        for sort_order in ("score", "total"):
+            for order in ((perfect, bulged), (bulged, perfect)):
+                best, alt = self._merge([list(r) for r in order], sort_order)
+                self.assertEqual((best[0][DNA_COL], best[0][16], best[0][17]),
+                                 (self.T1, ".,rs1", "0.2,0.1"))
+                self.assertEqual(alt, [])
+
+    def test_a_target_on_the_anchor_and_one_inside_stay_apart(self):
+        """The target of a row starting on the anchor base itself (its first base a
+        reference one) and one starting inside the insertion, the same carrier: two
+        alignments, as up to 2.8.1."""
+        ins = "AT" + self.T2 + "CA"
+        token, hap = self._site(ins)
+        on_anchor = self._row(hap[100:123], "0.300", 3, "S1", snp=token)
+        on_anchor[3], on_anchor[5] = self.REFSEQ[100:123], "100"
+        on_anchor[CLUSTER_POS_COL] = "100"
+        rows = [self._inside(ins, 3, 23), on_anchor]
+        best, alt = self._merge([list(r) for r in rows])
+        self.assertEqual((best[0][DNA_COL], [a[DNA_COL] for a in alt]),
+                         (self.T2, [hap[100:123]]))
+
+
+# Runs the real merge script in a fresh interpreter with indel_snp_cis.row_first_base
+# counting its calls, and prints their number.
+_COUNTING_MERGE = """
+import runpy, sys
+import indel_snp_cis as isc
+calls = []
+_read = isc.row_first_base
+def _counted(*args, **kwargs):
+    calls.append(args[1])
+    return _read(*args, **kwargs)
+isc.row_first_base = _counted
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+sys.stderr.write("ROW_FIRST_BASE_CALLS %d\\n" % len(calls))
+"""
+
+
+class OneTargetsAlignmentsInsideALongInsertion(unittest.TestCase):
+    """2.10.0, cost: the merge reads a row's place on the haplotype carrying its indel
+    (_haplotype_cluster_position) once per target, REF text, place and variants, not once
+    per aligned spacer, which the merge also keys an indel row by.
+
+    The rows start inside an insertion of 54 kb, as at chr22:10690626 of HPRC, where 402
+    alleles of 53.9 to 54.4 kb hold 16,058 rows of the README guide's chr22 search: 20
+    DNA-bulge alignments of one target (the gap in a different place of the guide, the
+    mismatches in a different case), its perfect alignment and a second target. Read per
+    aligned spacer, 22 times; per target, 3. The fold is the same either way: the bulged
+    alignments fold into the perfect one, and the second target is its alternative."""
+
+    T1 = AlignmentsStartingInsideOneInsertion.T1
+    T2 = AlignmentsStartingInsideOneInsertion.T2
+    INS = "C" * 30000 + "AT" + T1 + "CA" + T2 + "TC" + "G" * 23950
+    setUp = IndelRowsKeepTheirOwnCarriers.setUp
+    tearDown = IndelRowsKeepTheirOwnCarriers.tearDown
+    _site = AlignmentsStartingInsideOneInsertion._site
+    _inside = AlignmentsStartingInsideOneInsertion._inside
+    _row = IndelRowsKeepTheirOwnCarriers._row
+    REFSEQ = AlignmentsStartingInsideOneInsertion.REFSEQ
+    INDEL = IndelRowsKeepTheirOwnCarriers.INDEL
+
+    def _merge_counting(self, rows):
+        infile = os.path.join(self.d, "in.txt")
+        outfile = os.path.join(self.d, "out.txt")
+        with open(infile, "w") as fh:
+            fh.write("\t".join(POST_ADJUST_HEADER) + "\n")
+            for r in rows:
+                fh.write("\t".join(r) + "\n")
+        cmd = [sys.executable, "-c", _COUNTING_MERGE,
+               os.path.join(PP, "remove_contiguous_samples.py"), infile, outfile,
+               "3", "5", "7", "11", "16", "19", "21", "score", "mm+bulges"]
+        res = subprocess.run(cmd, cwd=PP, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        calls = [int(l.split()[1]) for l in res.stderr.splitlines()
+                 if l.startswith("ROW_FIRST_BASE_CALLS ")]
+        out = []
+        for path in (outfile, outfile + ".discarded_samples"):
+            with open(path) as fh:
+                out.append([l.rstrip("\n").split("\t") for l in fh.readlines()[1:]])
+        return calls, out
+
+    def test_the_place_is_read_once_per_target(self):
+        k1 = 30000 + 3  # T1's first base: the k-th base the insertion adds
+        perfect = self._inside(self.INS, k1, 23)
+        bulged = []
+        for i in range(20):
+            r = self._inside(self.INS, k1 - 1, 24, cfd="0.%03d" % (100 + i), total=1,
+                             dna_bulges=1, rsid=".", af="0.2")
+            r[1] = GUIDE[:i] + "-" + GUIDE[i:]
+            r[DNA_COL] = r[DNA_COL][:i + 1] + r[DNA_COL][i + 1].lower() + r[DNA_COL][i + 2:]
+            bulged.append(r)
+        self.assertEqual(len({(r[1], r[DNA_COL]) for r in bulged}), 20)
+        self.assertEqual(len({r[DNA_COL].upper() for r in bulged}), 1)
+        second = self._inside(self.INS, k1 + 25, 23, cfd="0.800", total=1)
+        calls, (best, alt) = self._merge_counting([perfect] + bulged + [second])
+        self.assertEqual(calls, [3])
+        self.assertEqual((len(best), len(alt)), (1, 1))
+        # (the rsID and AF of each folded row together, as the lists follow the variants)
+        self.assertEqual((best[0][DNA_COL], best[0][16], best[0][17]), (self.T1, ".,rs1", "0.2,0.1"))
+        self.assertEqual(alt[0][DNA_COL], self.T2)
 
 
 if __name__ == "__main__":

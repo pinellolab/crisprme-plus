@@ -420,25 +420,51 @@ haplotypes is bounded by ≈2×(number of carriers) rather than 2^*k*, so it is
 efficient, and each enumerated haplotype carries its **exact set of carriers**
 (which in turn yields its exact frequency, Section 3). Cross-individual chimeras
 — combinations assembled from variants carried by *different* people — are
-**excluded** by construction. Since 2.10.0 a SNP row's carriers are also read against the
-index's phased indel genotypes (`Dictionaries/indel_genotypes_<vcf>/`): an individual whose
-only phased haplotypes holding the row's SNPs (and no other SNP of the window) also hold an
-indel that changes the bases the target covers is not listed, as its own sequence there is
-the indel's (reported on the indel row when it is in budget), and a row left with no carrier
-is not reported. The haplotype is read on the reference, with the row's SNP alleles and the
-indel, from the target's first base on and up to its last, as the indel rows read a second
-indel (below): an indel that leaves the target's bases where they were (a tandem repeat's
-unit gained or lost, where the repeat runs on past the target) takes no carrier off. An indel
-at one of the row's SNPs, or over one, is another allele of that base, so a slot phased with
-both is a phasing artefact and keeps the carrier; so does an unphased call of the SNP or of
-the indel. A haploid call — a male's on chrX outside PAR — is his one haplotype's, so his
-calls in a window are cis by construction (they make one enumerated haplotype, not every
-subset of them) and an indel of his that changes the target takes him off the row, whatever
-else that haplotype holds. The same holds on the classic per-sample dictionaries. Up to
-2.8.1 such a carrier
-was listed: on chr22 of the HGDP + 1000 Genomes panel, per sample, 2.2% of SNP row-blocks
-(990 of 45,921, five guides) named one, and 545 of them had no listed carrier that holds the
-sequence.
+**excluded** by construction. A SNP row's target is the reference with the SNP alleles
+of a haplotype (the enriched genome holds SNPs only), so it is not the sequence of a
+haplotype that also holds an indel changing the target's bases: that haplotype's own
+target there is the indel row's, when it is in budget. Since 2.10.0 a per-sample SNP row
+does not list such a carrier. The carriers are read against the phased indel genotype
+store the indel post-analysis reads (§4, SNP+indel), as an indel row's second indel is:
+- an indel changes the target when it deletes or replaces a base of the target's span
+  (protospacer and PAM, a DNA-bulge base included) or inserts bases between two of them.
+  One whose deleted bases all lie outside the span, its junction at or past the target's
+  edge, or that inserts before the target's first base or after its last, leaves the
+  target's bases as they are;
+- whether the bases change is read on the haplotype's own bases, written with every indel
+  of the store it holds there and its own SNP alleles: in a tandem repeat a unit gained or
+  lost at the target's edge leaves them as they are (from the first base on, or up to the
+  last), and the carrier stays. The bases must be read through the SNPs the row names: a
+  haplotype whose indel pushes a named SNP out of the stretch, or deletes its base, has its
+  target thanks to the indel, not the SNP;
+- a phased carrier is decided by its haplotype: one whose indel is on the other haplotype
+  stays. One homozygous for an indel that changes the bases holds it on every haplotype and
+  leaves the row (one homozygous for an indel that leaves them as they are stays, as above).
+  Otherwise one whose indel call or SNP call is unphased cannot be tied to a haplotype and
+  stays, PUTATIVE, as every carrier on an unphased panel is. An indel at the position of a
+  SNP the row names is another allele of that base (a VCF writes a haplotype holding both as
+  one record), so a haplotype phased with both is a phasing artefact, and it stays; a
+  haplotype whose bases cannot be read (an indel there whose slot is unknown, two records
+  of one base) leaves the row;
+- a haploid call — a male's on chrX outside PAR — is his one haplotype's, so his calls in a
+  window are cis by construction (they make one enumerated haplotype, not every subset of
+  them, below) and an indel of his that changes the target takes him off the row, whatever
+  else that haplotype holds;
+- a row left with no carrier is not reported. The same holds on the classic per-sample
+  dictionaries. The population-level analysis (§5) is unchanged: its rows are worst-case
+  composites, whose variant combinations the carrier gate checks (§5). With
+  `CRISPRME_INDEL_SNP=0`, the opt-out of the SNP+indel co-occurrence, the store is not read,
+  and a SNP row lists its carriers as up to 2.8.1.
+
+On chr22 of the HGDP + 1000 Genomes panel, the README guide, NRG, 4 mismatches + 1 + 1, per
+sample, up to 2.8.1 3 of 628 highest-CFD SNP rows of the integrated results and 7 of 399 of
+the alternative alignments listed such carriers (4,234 listings), and 7 of them had no other
+carrier: chr22:21052638 − listed 1,292 carriers of 21052641 G>A, which sits on the same 1,448
+haplotypes as 21052640 T>TCACC. Genome-wide, 280 of 65,184 highest-CFD SNP rows (28,700
+listings, 13,525 of them carriers homozygous for the indel), and 208 had no other carrier (none
+at CFD ≥ 0.2, highest 0.112). Over five guides on chr22, per sample, 2.2% of SNP
+row-blocks (990 of 45,921) named such a carrier up to 2.8.1, and 545 of them had no listed
+carrier that holds the sequence.
 
 ### Behavior by phasing status
 The confidence attached to an enumerated haplotype depends on the phasing of the
@@ -529,13 +555,16 @@ haplotype** (`indel_snp_cis.resolve_target`):
   a raw target that no individual carries gives no row;
 - an individual whose genotypes cannot put an allele on the indel's haplotype (an unphased
   call, a missing allele, no phased indel genotype, a haploid call against a diploid one)
-  gets the **strongest target its own alleles allow** (the guide's base wherever it carries
-  it; elsewhere, and at the PAM jointly, the alleles that maximize CFD among those the motif
-  allows), PUTATIVE in the co-occurrence companion: it is never listed for an allele it
-  does not carry. The carriers of an equal-length multi-base record (an MNV, AC>TG), which
-  CRISPRitz puts in a fake-indel window as it does an indel, are always in this case: the
-  phased indel genotype store keeps only records whose REF and ALT differ in length (and, since
-  2.10.0, whose FILTER is `PASS` or `.`, as the enricher reads: §8). With
+  gets the **strongest target its own alleles allow** on each alignment (the guide's base
+  wherever it carries it and the alignment pairs the position with a guide base; elsewhere, a
+  DNA bulge included, and at the PAM jointly, the alleles that maximize CFD among those the
+  motif allows; a search that scores no CFD, with a 5′ PAM or a guide or PAM not 20 and 3 nt
+  long, takes there the reference base where its alleles and the motif allow it, else the first
+  of A, C, G, T they allow), PUTATIVE in the co-occurrence companion: it is never listed for an
+  allele it does not carry. The carriers of an equal-length multi-base record (an MNV, AC>TG),
+  which CRISPRitz puts in a fake-indel window as it does an indel, are always in this case: the
+  phased indel genotype store keeps only records whose REF and ALT differ in length (and,
+  since 2.10.0, whose FILTER is `PASS` or `.`, as the enricher reads: §8). With
   **no genotypes at all** (a sites-only panel such as `mega`) the row
   holds that worst case over the code's alleles, keeps the carriers the indel log lists,
   and its co-occurrence is rung 3 above (PUTATIVE, min-AF bound); with no SNP genotypes
@@ -593,14 +622,29 @@ which writes no alternative alignments, can have lines with no row in its tables
 resolution does not depend on the analysis mode (§5).
 A target with no code (every target of a classic, non-overlaid
 fake-indel genome) that holds the indel needs no resolution: its sequence is the one the
-engine found. An indel row's carriers belong to its sequence: two alignments of one site can
-name the same variants with different carriers (an RNA-bulge alignment does not reach the base a
-SNP sits on, so it lists that SNP's carriers under the indel alone), and the merge of a
+engine found. An indel row's carriers belong to its sequence and its alignment: two alignments
+of one site can name the same variants with different carriers (an RNA-bulge alignment does not
+reach the base a SNP sits on, so it lists that SNP's carriers under the indel alone; and a
+PUTATIVE carrier can have different bases on two alignments of one target string, the guide's
+base where one pairs the position with a guide base and the CFD's choice, or the reference base
+in a search that scores no CFD, where the other leaves it as a DNA bulge), and the merge of a
 cluster's rows, which otherwise keeps one row per position and variant list, keeps one per
-carrier set there, so that no carrier is added to a sequence it does not have; of the
-alignments with one carrier set it keeps the best by the order that picks each block's
-representative (the score first in the CFD and CRISPR-Bulge blocks, then
-`--sorting-criteria`). An MNV row is merged as an indel row is.
+carrier set there, so that no carrier is added to a sequence it does not have, nor to an
+alignment it was not resolved on (the merge keys an indel row by its aligned spacer as well as
+by its target, since 2.10.0: up to 2.8.1 the alignments of one target string were one entry
+whatever their carriers, and in the SNP+indel oracle's site U the unphased S19 was listed with
+the reference base on the alignment where its alleles give the guide's base); of the alignments
+with one carrier set it keeps the best by the order that picks each block's representative (the
+score first in the CFD and CRISPR-Bulge blocks, then `--sorting-criteria`). Carrier sets are
+compared whole, so that every block keeps one row count whatever its order. So an alignment
+whose carriers are all listed on a better alignment of the same target and variants still keeps
+an entry when the better one also lists a PUTATIVE carrier resolved to another base on the
+weaker one: with a SNP whose base the weaker alignment leaves as a DNA bulge, an unphased
+carrier takes the guide's base on the better alignment and the CFD's choice on the weaker, so
+only the carriers homozygous for the SNP, or phased with it in cis, are listed on the weaker
+one with the SNP. That entry is an extra alternative alignment, its carriers and score right;
+none occurs in the chr22 searches checked on HGDP + 1000 Genomes, HPRC and an unphased copy of
+HPRC. An MNV row is merged as an indel row is.
 
 An indel row is placed as the reference and SNP rows of the same alignment are: it starts at
 its target's first aligned base, the leftmost on either strand, carried from the window to
@@ -609,6 +653,178 @@ there, in the target's orientation and gapped as the target (an RNA bulge is a g
 REF covers one base fewer per RNA bulge). Up to 2.8.0 an indel row with only RNA bulges
 started one base per bulge early on the + strand (on the - strand with a 5' PAM), and the
 REF alignment of an indel row with both bulge types had no gap and one base too many.
+
+**A row that starts inside an insertion.** A first base that an insertion adds has no reference
+coordinate: such a row starts at the reference base the inserted bases follow, the insertion's
+anchor (its VCF POS, 1-based; POS − 1 in the 0-based `Start_coordinate`), as the VCF writes the
+insertion and as the target's reference span already counts it. Up to 2.8.1 it started at that
+base's place on the haplotype, 1 to len(ALT) − len(REF) bases past the anchor, where its REF
+alignment was read, from reference bases the target does not hold. Alignments that start on
+bases of one insertion therefore share the anchor. The merge takes a guide's rows on one
+chromosome for one site while the cluster position of each (its start, less its RNA bulges and
+plus its DNA bulges on the + strand with a 3′ PAM and on the − strand with a 5′ one) is within
+`--merge` bases (3 by default) of the one before, on either strand and whatever their bases,
+and keeps one row to represent the site, the others being its alternative alignments:
+alignments that start on bases of one insertion are now one site, and such a row can join the
+site of a reference or SNP row that starts near the anchor (on the HGDP + 1000 Genomes index,
+the README guide's chr22:21052642 (−) of 2.8.1, 4 bases from the reference row at 21052638 (−),
+is now 21052639, one of that row's alternative alignments). Within a site, the alignments that
+name the same variants with the same carriers are one entry, the best, as on every row: they
+are one target's alignments with different bulges. The merge compares indel rows there at their
+cluster position on the haplotype carrying the indel, which on a row that starts inside an
+insertion is past the anchor by the rank of its first base among the inserted ones, read from
+the row's bases (`indel_snp_cis.row_first_base`). Two alignments whose cluster positions on
+that haplotype differ are two targets of it, as many bases apart as 2.8.1 placed them, and both
+are listed, as the site's row or one of its alternative alignments (a population-level run
+lists only each site's row); one target's alignments with different bulges before one PAM fold
+into the best, as up to 2.8.1, also when they start on different bases an insertion adds. Two
+copies of one target inside an insertion (a repeat it holds) make the same row at the anchor,
+its bases, REF alignment and variants the same, and that row is listed once, with the carriers
+of both, where 2.8.1 listed each copy at its own start; its `PAM_creation` is created when
+either copy's PAM is (below). A bulged alignment of the second copy,
+which 2.8.1 folded into that copy's row, then has no row of its own copy to fold into and is
+listed as one of the site's alternative alignments (the SNP+indel oracle's X2). With the TRAC
+guide (CTCTCAGCTGGTACACGGCA) on that index, two alleles of chr22:50193929 that insert 96 bases,
+a 48-base unit twice, with one carrier each, hold the CFD-0 alignment CTACTCAGgaGGgACA-GGCtGAG
+(−) in both copies, which 2.8.1 listed at 50193950 and 50193998 and 2.10.0 lists once per
+allele, at 50193928. Such a row's ALT alignment begins mid-insertion: on the + strand its first
+bases are the last bases the insertion adds that the target holds (TTAT, the 7th to 10th of
+G>GCAATCATTAT, in a 2.8.0 alternative alignment at chr22:22322768). Its REF alignment holds the
+reference bases from the anchor on, as many as the target holds, so it begins with the anchor
+base, which the target does not hold, and past the insertion it is out of register with the ALT
+by the number of inserted bases the target holds, less one. On the − strand both are shown
+reverse-complemented, in the target's orientation: the ALT ends mid-insertion (with a 3′ PAM,
+its PAM holds those inserted bases) and the REF ends with the anchor's complement.
+`CFD_score_REF` and the REF seed and non-seed counts are read from that REF alignment.
+
+**`Variant_info_spacer+PAM`.** Each variant is numbered as on a SNP row, by its distance from
+the target's first aligned base to the variant's POS base, the first base being 1: on
+the + strand counted from the left, POS − start; on the − strand from the right,
+len(`Aligned_spacer+PAM`) + 1 − (POS − start), less the deleted bases for a deletion, its REF
+and ALT reverse-complemented. The number shown is its absolute value: a deletion that
+reaches past the target's far end makes it negative (TRAC guide, chr22:48378297 (−), 21
+bases deleted at 48378315: 24 + 1 − 18 − 21 = −14, shown 14, as in 2.8.1). A variant
+before the target's first base is 1 on the + strand and
+the last on the − strand. On an indel row the distance is counted along the haplotype carrying
+the indel, the target's own bases: the bases an insertion adds count, those a deletion removes
+do not. So a SNP past an indel is len(ALT) − len(REF) bases further along the target than along
+the reference, and a row that starts inside an insertion is counted from its first base, the
+inserted one, not from its start: in the SNP+indel oracle's site Z3 the SNP is the target's
+13th base. The indel itself is numbered at its POS base, the anchor, which comes before the
+bases it changes: on a row that starts inside an insertion it is 1 on the + strand and the last
+on the − strand. Up to 2.8.1 the distance was counted along the reference: a SNP past an
+insertion was len(ALT) − len(REF) bases short of its place on the + strand (long on the −
+strand), one past a deletion as many long (short). So was a SNP on a row starting inside an
+insertion, which 2.8.1 placed at its first base's place on the haplotype (Z3: 4 for 13), and
+one whose POS was before that place was taken for a variant before the target's first base, 1
+on the + strand and the last on the − strand (chr22:21052639 (−) above: its SNP, numbered 22,
+was numbered 24). On the − strand each RNA bulge adds one to the numbers, on SNP rows as well:
+chr22:21052639 has one, and its SNP is the target's 21st base.
+
+**`PAM_creation`.** It holds the ALT's PAM when the variants created it and NA when the
+reference holds a PAM there. On a SNP row the PAM sits on reference bases, and the predicate
+reads the reference bases under it. On an indel row the PAM's place on the reference depends
+on which of the target's bases are the indel's, and in a repeat that is not fixed: the VCF
+writes an insertion or a deletion at the left end of its repeat (bcftools norm left-aligns it),
+and the same haplotype holds the same bases with the inserted sequence rotated through the
+repeat and written further right, or with the deletion's junction moved through it. Since
+2.10.0 the PAM is judged on every placement of the indel that keeps the row's haplotype, the
+reference with the row's own variants (its indel and the SNP alts it names), so the answer
+does not depend on where in its repeat the VCF writes the indel:
+
+1. a placement that leaves the whole PAM on reference bases (no inserted base, no deletion's
+   junction inside it): the reference bases it sits on there. Without a SNP alt of the row in
+   the PAM they are the PAM's own bases: NA. A SNP alt is read as the reference base it
+   replaces, as on a SNP row; a PAM that two placements put on the reference (before the
+   indel and past it, when the repeat spans it) is not created if either reading holds the
+   motif;
+2. else a placement that leaves the protospacer's base that touches the PAM on a reference
+   base: the reference PAM beside that base, on the PAM's side, the PAM's place beside that
+   protospacer. A deletion's PAM always has one, its bases all being reference bases; an
+   insertion's has one when some placement puts the inserted bases at or past the PAM's
+   first base (the PAM at the target's right end, forward: the + strand with a 3′ PAM, the −
+   strand with a 5′ one) or ending at or before the PAM's last (the PAM at its left end);
+3. else, an insertion that holds that base, with the protospacer's end and the PAM's start,
+   wherever it is placed: no place on the reference, created.
+
+A complex record replaces REF bases and adds bases or loses some (A>T and inserted bases after
+it: HPRC writes many insertions so). Its first min(len(REF), len(ALT)) changed bases stand in
+the places of the REF bases they replace, as an MNV's, and are read as those REF bases, as a
+SNP alt of the row is; its other ALT bases are added after them, or its other REF bases
+deleted, and are placed as an insertion's or a deletion's are. So a PAM made of a complex record's added bases is judged as one made of an
+insertion's: a target wholly inside them, its PAM and the protospacer's end added bases, is
+created unless a placement of those bases through their repeat puts its PAM on the reference
+(up to 2.8.1 such a PAM was read on the REF alignment's window, reference bases the target
+does not hold, NA where they happen to hold a valid PAM). On HPRC's chr22 (8,022 complex
+records with a net insertion, 1,055 with a net deletion), with the TRAC guide, three CFD-0
+alignments wholly inside the added bases of three complex records whose added bases repeat
+the reference after them are not created (chr22:37509610 (−), 42134819 (−) and 42135364 (−):
+placed further right, their PAM is the reference's own GGG).
+
+A row whose REF alignment is its ALT has its target, PAM included, on the reference at its
+start: NA (since 2.10.0). A PAM with a bulge in it keeps the REF alignment's bases, and so does
+a PAM holding an MNV's ALT bases, as up to 2.8.1 (an MNV moves no base: those are the reference
+bases under the PAM). The rule reads the row's haplotype: a carrier's other indels are not part
+of it (a carrier whose second indel changes the target's bases is not listed on the row,
+above), and a repeat that runs past the target is read on the reference. A row that stands for
+two copies of one target inside one insertion (above) is created when either copy's PAM is:
+each copy is judged on its own, and a placement of the insertion can put one copy's PAM on the
+reference's own (not created) while the copy the insertion adds has none (TRAC guide,
+chr22:50193928 (−): a 96-base allele holds the CFD-0 alignment CTACTCAGgaGGgACA-GGCtGAG twice,
+at 50193950 and 50193998 on its haplotype, where 2.8.1 listed each; placed further right, the
+insertion leaves the left copy's PAM on the reference's own CTC, GAG on −, and no placement
+takes the right copy's off it: the row reads GAG). The merge keeps that value whichever copy it
+meets first.
+
+Examples, SNP+indel oracle (`test/indel_snp_oracle`): a tandem duplication of a 27-base unit
+holding a whole target, the copy written left of the reference's (PR, PM): the copy's target
+starts inside the insertion, its PAM wholly inserted bases, and placed one unit right the
+insertion leaves that PAM on the reference's own: NA. Where an insertion after the protospacer
+copies the reference's own PAM (T, C6), NA likewise. C>CCAG after its anchor on the − strand
+(QC), whose first base the reference repeats there, holds the protospacer's first forward base
+in both its places: created. Not a repeat, C>CCA after an anchor C that starts a − strand row
+(QN): the protospacer's touching base is a reference base, and the reference holds CTC beside it
+(GAG on −): NA; and with an inserted TGG before the reference's AGG on the + strand (T2), or
+TTCCA inserted between the reference's CCG and its protospacer on the − strand (QW, a wholly
+inserted PAM), the reference holds a valid PAM beside the very protospacer: NA. CA>C inside the
+PAM CCG on the − strand (QD) leaves the reference's CAG (CTG on −) beside the protospacer:
+created. Inserted bases holding the protospacer's last four bases and the PAM on the + strand
+(QA): created. Complex records: A>T on the + strand and C>T on the − strand, each with 33
+bases added after it that hold a whole target (QX, QY): created, though the REF alignment,
+read from the replaced base where such a row starts, holds AGG (+) and CCG (CGG on −) in the
+PAM's columns; G>CCA on the − strand, the row starting on the replaced base, its PAM CCA (TGG
+on −) that base and the two added ones, beside a reference CTG (CAG on −) (QZ): NA; TG>C on
+the − strand, the T replaced and the G lost, the junction inside the PAM CCA (QV): the
+reference holds TGA (TCA on −) beside the protospacer, created.
+
+In 2.8.1 a PAM on reference bases was read on them, through the indel, and any other on the REF
+alignment's bases, read from the row's start. That answered the question only
+where the protospacer runs from the row's start to the PAM: on the + strand with a 3′ PAM (the −
+strand with a 5′ one), and on a row that starts on a reference base. On the − strand with a 3′
+PAM (the + strand with a 5′ one) the start is the PAM's far end, and the bases read were
+len(ALT) − len(REF) bases from the reference PAM beside the protospacer: across a deletion's
+junction they included the deleted bases, the PAM of another protospacer one base on or more
+(README guide, HGDP + 1000 Genomes: chr22:21056178 (−), CT>C at 21056179, read CTC, GAG on −,
+where the reference holds TCT, AGA on −, beside its protospacer: now AGG); on a row starting on
+the anchor of an insertion inside the PAM, the anchor and the bases after it (chr3:154367344 (−),
+C>CCT, read AGG as created where the reference holds GGG beside the protospacer: now NA). A row
+that starts inside an insertion started at its first base's place on the haplotype, past the
+anchor, and the bases read were reference bases the target does not hold (chr22:21052639 (−):
+TGG, where the reference has CAG beside its protospacer: now NA; with NRR, chr22:44115947 (+),
+wholly inside a 37- or a 33-base insertion: now TAA, at 44115944 and 44115946). With such
+rows at the anchor, reading the PAM where the VCF writes the insertion would not do either: a
+repeat unit inserted next to a reference PAM would read as created, where a placement further
+right puts that PAM on the reference's own bases (with NRR, chr22:25415044 (−), the same
+alignment as its site's reference row; TRAC guide, chr22:49196564 (−) and the row of
+50193928 (−): NA, as 2.8.1 read them). Genome-wide,
+2.8.1's tables (2.8.1's code gives back every value in them) with each row's PAM_creation
+computed by 2.10.0's code, highest-CFD alignments: README guide, per-sample, 97 go NA → created
+(70 rows and 27 alternative alignments: a PAM across a deletion's junction on the − strand 56,
+CFD at most 0.083; a PAM holding inserted bases on a row that starts inside the insertion 27, on
+a row that starts on a reference base 14) and 4 created → NA (3 rows and 1 alternative
+alignment); population-level 70 and 3 rows; TRAC guide (CTCTCAGCTGGTACACGGCA), per-sample, 109
+(67 and 42: deletions 29, CFD at most 0.039; rows inside an insertion 58; on a reference base 22)
+and 5 (2 and 3).
 
 From 2.5.0 to 2.8.0 each code was instead read **column by column without genotypes** —
 the guide's base when it was an allele, else the code's first allele. That reported one
@@ -1438,10 +1654,13 @@ records of another FILTER a carrier was taken off an indel row, for a second ind
 target, or off a SNP row, for an indel no window holds. A store written so is written again by
 `build-index-only` where its VCFs are (its `.done` marker does not record the FILTER rule), and
 a search that reads one says so in its `log_verbose.txt`; the panels published hold no such
-record. Up to 2.8.1 a SNP row's carriers were resolved from
-SNP genotypes only, so an individual whose haplotype holding the row's SNPs also carries an
-indel inside the target was still listed; since 2.10.0 the phased indel genotypes take it off
-(§4), but for an unphased call of either, which keeps it.
+record. Since 2.10.0 a per-sample SNP row does not list a
+carrier whose haplotype holding its SNPs also holds an indel that changes the target's bases
+(§4); up to 2.8.1 it did, and so it does with `CRISPRME_INDEL_SNP=0`. What remains: an MNV
+inside the target, which the phased indel store does not hold (the HGDP + 1000 Genomes index
+has none); a carrier whose indel call or SNP call is unphased, which stays listed, PUTATIVE;
+and the population-level analysis, whose rows are worst-case composites (the carrier gate
+ranks a combination no haplotype carries after the others, §5).
 On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists of the results
 tables are in the order of its `Variant_info_genome`, one rsID and one AF a variant, and two
 variants of one frequency give it each: the merge of a cluster's rows
@@ -1506,6 +1725,378 @@ validate-test`. This is a one-time correctness check, not a per-search step:
   double, including the joint-PAM case), and on the legacy dict / aggregate-panel path against a
   real CFD-scored multiallelic fixture; the ML score's (CRISPR-Bulge) best-effort bound is
   described under *Worst-case scoring in the population-level analysis* above.
+
+`validate-test` compares the engine's **sites** — (chromosome, start, strand) — on the
+reference and on the **SNV-only** 1000 Genomes chr22 enriched genome. It therefore says
+nothing about the **indel path**: the brute-force references are built from a FASTA that
+holds no indel, so the fake-indel genome, an indel row's coordinate, its aligned
+spacer/target strings, its REF/ALT text, its named variants, its carriers and the whole
+alternative-alignments table are outside the comparison, and so is the per-carrier truth
+(the enriched genome collapses every individual into IUPAC codes). The synthetic SNP+indel
+oracle (`test/indel_snp_oracle`) checks those on a planted synthetic chromosome, through the
+real CLI, but only there.
+
+**Validation (the indel path on real data).** `scripts/check_indel_rows.py` is an
+independent checker of the indel path on a real panel, added in 2.10.0. It imports only
+Python's standard library and no code of CRISPRme's variant or indel machinery, and copies
+none: its inputs are what a user has — the reference FASTA, the VCF(s) the search read, the
+samples list (the samplesID files; by default the run's `.sampleID.txt`, which CRISPRme
+writes from them), the guide, the PAM file, the search budget and the result folder (the CFD
+tables are read as data) — and it writes each sample's haplotypes itself from the VCF 4.x
+definition of a record, keeps its own map from haplotype bases to reference coordinates, and
+aligns with its own exhaustive aligner. **The truth is the VCF, as the search read it.** A
+slot is the reference with every ALT allele its genotype puts there of the records CRISPRme
+reads (FILTER, below), and it holds a row's target when it reads
+the target's bases from the row's start through the row's record: each base the record
+puts in the target at its place, and the base after them (a second insertion between the
+start and the record lengthens the stretch and pushes some of them out of it, which makes
+another target, one that needs two indel-path records). Two alleles of one slot whose REF
+spans meet — a SNP at an insertion's own position, a SNP on a base a deletion removes, one
+complex allele split into overlapping records, two ALTs at one position phased onto one
+haplotype — describe one stretch twice, so the VCF gives no sequence there. Where every
+allele that meets the record's REF is one §4 reads the slot without (another allele at the
+record's own position, an allele only on bases it deletes, an MNV) and no allele kept
+meets one left out, the slot is read without them: the one reading that holds the record,
+and so the one a row naming the record and not them can mean. A listed carrier must hold
+the target there, and one that does is a note (`overlap-reading-agrees`); one the row
+leaves off while its slot holds it there (§4: it stays listed) is counted
+(`limit-overlapping-records`). Any other overlap of the record (an indel at another
+position, which §4 takes off, or a SNP there, which §4 does not cover) leaves the slot no
+reading. Two other alleles of the slot whose REFs meet (an overlap zone) leave it no
+sequence only where they can change what it says of the target — one of them is named, or
+changes a base read from the target's start —: every reading of such zones (any of their
+alleles no two of which meet, none included) is tried, and where all agree the slot is
+judged so; a zone wholly before or after the stretch read changes none of its bases. Where
+the readings part, the slot has no reading. There the VCF gives no truth, and §4's rules
+are the only model: a listed carrier they take off the target for a documented cause (a
+complex allele, a second indel the slot cannot be read through, the last record of a
+split site, the PUTATIVE rule) fails (`carrier-off-by-rule`), any other is counted.
+Whatever its overlaps, a slot that holds a named variant on no reading (neither on it nor
+of unknown phase there) lacks the target. Where a call that touches the target has unknown
+phase (unphased, a missing allele, or fewer copies than the record's call — a haploid call
+against a diploid one), the record's known slot is judged first — when no placement of
+those calls lets it hold the target (a phased second indel inside it, say), or every
+placement does — and otherwise the truth is the PUTATIVE rule of §4: the strongest target
+the sample's own alleles allow on the row's alignment, the guide's base wherever it
+carries it and the alignment pairs the position with a guide base, elsewhere (a DNA bulge
+included, and at the PAM jointly) the alleles that maximize the alignment's CFD, its copies
+counted against the record's call (a haploid ALT call beside a diploid record leaves the
+reference possible); CFD is a product, so where it is 0 whatever the choice (a DNA bulge
+whose base the table scores 0, say) every choice is a strongest one, and §4 orders no CFD
+tie, so a tie is left open; a search that scores no CFD (a 5′ PAM, or a guide or PAM not
+20 and 3 nt long) takes the reference base where the alleles and the motif allow it, else
+the first of A, C, G, T they allow, read in the target's orientation. The rule chooses
+only at the fake-indel window's code columns, the target's reference bases off the
+record's own REF span: the window writes the ALT verbatim, the anchor included, and codes
+flank bases only, so a SNV the VCF holds at the record's position (the other allele of a
+multi-allelic heterozygote, one per haplotype) is never a choice there.
+CRISPRitz's enricher reads only the VCF lines whose FILTER is `PASS` or `.` (those exact
+strings; `PostProcess/validate_inputs.py`'s full check says the others "will be excluded
+from enrichment"): no other line
+is in the enriched genome, its dictionaries, registry and genotype store, the indel log or
+the fake-indel windows. The phased indel store (`build_indel_genotypes.py`) streams the VCF
+without reading FILTER and keeps every indel, and §4's carrier resolution reads it: a second
+indel or an overlapping one on a carrier's slot takes the carrier off a target, and a SNP row
+drops a carrier for an indel of its slot, whatever that indel's FILTER (the SNP+indel oracle,
+the second deletions of its sites O and Q and the insertion of Y1 marked `LowQual`, lists its
+carriers so). So of a genotyped dataset a line outside `PASS` and `.` keeps its indels, on
+their carriers' haplotypes as the store has them — no fake-indel window holds one, so a row
+naming one fails (`variant-filtered`) and completeness demands none of its targets (one
+`limit-filtered-record` line per chromosome counts them) — and its SNVs and MNVs are read as
+the reference: a carrier of such a SNP stays listed for a target the SNP would change (the
+oracle's site A, its PAM SNP marked `LowQual`, lists its cis carrier). Of a sites-only
+dataset such a line's indels and MNVs are dropped (the `hg38_mega` index's indel log holds
+exactly the 222,283 `PASS` indels of its chr22 VCF, none of its 40,840 others), and its SNVs
+are read by its SNP rows whatever their FILTER: `hg38_mega`'s registry holds all 838,025
+SNVs of its chr22 VCF, the 78,116 outside `PASS` among them, and its SNP rows name some
+(chr22:11574550 C>G, `LOW_VQSLOD`), while an index CRISPRitz's enricher builds from a
+sites-only VCF holds none of them, and a run does not say which it read, so a SNP row
+through one is a row CRISPRme may write or not (below). Its fake-indel windows code what
+CRISPRitz's overlay codes from the enriched genome: its SNVs whose FILTER passes, the last
+record of a split site (on chr22, `hg38_mega`'s indel rows name the last record at 279 split
+sites and, at chr22:25093750, the `PASS` C>G before the `LOW_VQSLOD` C>T, and no other), so a
+row of a sites-only dataset (no carrier) must name SNVs of that dataset's VCF whose FILTER
+passes (`variant-not-in-dataset`, `variant-filtered`; an earlier record of a split site is
+the note `variant-shadowed`).
+CRISPRme's documented reading of a carrier (§4: the one-indel window, resolved with each
+carrier's own SNP alleles, so that a row lists a carrier only where those give its target;
+the second indel read from either end of the target through the indel, each base the indel
+puts in the target at its place, before any unphased call; the phasing artefact and the
+complex allele, the PUTATIVE carriers of MNVs and of multi-ALT alts the genotypes cannot
+tie, the last record of a split site) is re-implemented from this text only to classify a
+disagreement as a documented limit (counted, non-gating, a PUTATIVE tie included) or a
+failure. An MNV beside the record is in no store CRISPRme reads (§4): a target that needs it
+needs two indel-path records (the two-indel limit), while a carrier listed for a sequence
+such an MNV on its slot changes is listed for a sequence it does not have, which nothing
+documents, and fails. It runs two ways:
+
+- **Soundness.** Every row block of the integrated results (the highest-CFD, fewest mm+b
+  and highest-CRISPR-Bulge blocks) and of the alternative alignments whose variant list
+  names an indel or an MNV must be labelled ALT, name one indel-path record (and SNPs),
+  all records of the VCF the search read (one whose FILTER it skips is
+  `variant-filtered`); its aligned spacer must be the guide with its PAM, its
+  mismatches, bulge types and sizes and totals must recount within the budget, no gap may
+  fall in the PAM, the PAM must match the searched motif and the REF text must be the
+  reference read from the row's start, gapped as the target; its target (gaps removed, PAM
+  included) must be the reference with exactly its named variants, read from the reported
+  start (the first aligned base's reference coordinate, the insertion's anchor for a base
+  an insertion adds, the last replaced base for one a complex record adds), and hold a
+  base of its record. Each listed carrier must be a sample of the panel and hold the target
+  on a haplotype at that start with every named variant — or, its phase unknown there, be
+  listed for its strongest target; a carrier whose slot's alleles overlap the record is
+  held to the slot's one reading where §4 gives it, and to the named variants on a slot
+  that can be the record's always, and is otherwise counted — and each carrier of the
+  record whose haplotype holds it (or whose strongest it is) must be listed: the merge
+  never moves a carrier off its sequence's row (its key for an indel or MNV row holds the
+  aligned target and, since 2.10.0, the aligned spacer, so a PUTATIVE carrier stays on the
+  alignment it was resolved on). An ALT-origin block that names no variant is reported. A
+  sites-only VCF genotypes nobody, and a sites-only dataset's rows list no carrier (§4): a
+  row that lists none for a record a sites-only VCF holds is checked but for its carriers,
+  each record deciding for itself, so that beside a genotyped dataset (the default index
+  with `hg38_mega`) the genotyped dataset's rows are checked in full. A row that names an
+  earlier SNP record of a split site, which the documented limit says the stores do not
+  hold, is a note: the record is real and the target is checked with it.
+- **Completeness (the real-data brute force).** For every indel and MNV record of the VCF
+  in the checked region, each carrier's known slots around it are written with their
+  known alleles (a target that touches a call of unknown phase is the PUTATIVE rule's, and
+  no other target depends on where such a call is), identical sequences are aligned once,
+  and every in-budget alignment on both strands with the PAM that holds a base the record
+  changes (for a pure deletion, the bases on both sides of it — a target wholly in a flank
+  is reference or SNP sequence and gives no indel row) is mapped to the reference and
+  required to be reported for that sample by rows no worse than its best alignment by the
+  merge's own sort keys — a fewest-mm+b block whose key under `--sorting-criteria`
+  (mm+bulges, then mm, by default) is at most the least of the target's alignments', and a
+  highest-CFD block of at least its CFD that, where the two print the same three decimals,
+  has a key no greater than the least of the target's alignments of that CFD (the CFD file
+  sorts on the CFD, then on the same criteria; where a run names
+  `--sorting-criteria-scoring`, which a later branch hands the CFD file, a tie no worse
+  under either is accepted) — since the merge keeps, of the rows of one site, variant list
+  and carrier set, the first by each file's order (§4): a row with exactly that target and
+  variants whose fold group (the rows of its site naming those variants with its carrier
+  set, which two alignments of one target always share) is no worse, or rows of its site
+  naming the same variants with the target's own carrier set that are no worse — every
+  carrier both the documented reading and its own haplotypes list for it, and besides them
+  only carriers either lists or the reading leaves open (the documented reading only
+  classifies: a carrier it would list against the carrier's haplotypes vetoes no fold; a
+  carrier whose slot overlaps the record is never required, and allowed where its slot,
+  read as §4 reads it, holds the target, or, a slot with no reading, where the reading
+  lists it or leaves it open). The fold key holds no strand, while one target's alignments
+  share theirs, so a fold group is taken on one strand: a fold across strands loses another
+  target. The merge's later keys (the Cluster Position, the carrier count, the aligned text)
+  only order alignments equal in all of these and are not compared. The merge sorts on the
+  CFD of a row's own alignment, written to three decimals (the results' `CFD_score_ALT`;
+  their `CFD_score` prints the higher of the REF and ALT scores), so each row's CFD is
+  recomputed from its aligned strings and compared at three decimals. A PUTATIVE target is
+  the carrier's own: it is held to the alignments under which the rule picks it for that
+  carrier, and a target the rule ties with another to its own best. The site is the cluster
+  position on the haplotype carrying the record: CRISPRitz's Cluster Position (the start
+  moved to the PAM's fixed end, shared by every alignment of one PAM site) plus the rank of
+  the row's first base among the bases an insertion adds, as the merge compares rows that
+  start inside one insertion; a row whose own target is not at its start stands for no
+  other alignment. A target that needs a second indel-path record is demanded, as the
+  window's target of the same bases, start and variants, exactly when CRISPRme's reading of
+  the slot against that target holds (from its first base on or up to its last, through the
+  record: it then keeps the carrier), and is the two-indel limit otherwise. A target
+  touching a call of unknown phase is demanded as the sample's strongest (a base on the
+  record's own REF span is no choice, as above). A target that an overlap zone of the
+  carrier's slot changes on some reading and not on another is counted, not demanded. A
+  run that writes no alternative alignments (`.alt_mode` = `no-alt-alignments`: by default
+  a population-level run, as the chr22 self-test's are, whatever `--ci-cd-test` says)
+  keeps one row per merge cluster: there the target's cluster — the integrated row with a
+  block within `--merge` bp of its Cluster Position, or of one that the rows CRISPRme can
+  write chain to it, each within `--merge` bp of the next, as the merge clusters: its
+  reference rows, its SNP rows (in the mode the run ran, its `.search_mode`:
+  population-level the worst case of each alignment over each dataset's SNP alleles that
+  CRISPRme's stores hold, per sample only the haplotypes individuals hold) and the targets
+  some carrier of an indel-path record holds (the per-carrier resolution gives no row for a
+  raw target no carrier holds, nor for one that needs two indel-path records; a slot whose
+  overlap §4 reads it without is read so, as a clean slot, one §4 takes off gives none; a
+  sites-only dataset's rows are the worst case of each alignment of its window, the
+  record's ALT written verbatim and a SNV coded only off its REF span, and a record that a
+  genotyped and a sites-only dataset both hold gives the rows of both, whichever record's
+  work reads it first), every record the chain reaches read, up to 3 kb either side (a
+  chain still going there with no row as good as the target is the checker's own coverage
+  gap, `coverage-chain-limit`, not a miss) — must be reported with a fewest-mm+b block of
+  no more edits than the target's best alignment by the first sorting criterion (the merge
+  picks between a cluster's reference and variant rows on mm+bulges, or the CFD, alone)
+  and a highest-CFD block of at least its CFD (each row's recomputed from its own aligned
+  strings, the value the merge sorts on). The rows CRISPRme may write or not, which no
+  documented rule settles (the one-record reading of an overlap §4 does not cover, a target
+  an overlap zone of two other alleles of a slot changes, on any reading of the zone, a
+  target of a slot read without its overlap that touches a call of unknown phase, a target
+  through an SNV its stores read otherwise, a per-sample run's capped windows' greedy rows,
+  which §5's known limit writes on the classic dictionary path only, a per-sample SNP
+  target of a slot that also holds an indel touching it, which 2.10.0 writes only where its
+  reading of the slot through a repeat keeps the carrier, and a sites-only dataset's row
+  through one of its SNVs outside `PASS` and `.`), are followed only when the rows it
+  writes reach no row as good as the target, and never one that needs a second indel-path
+  record: a cluster reached only through them is counted under their cause's class
+  (`limit-capped-window`, the checker's `coverage-snp-row-indel` and
+  `limit-filtered-record` for the last three), neither passed nor failed. A record only
+  sites-only VCFs hold is carried by nobody: it is counted, not demanded; so is one whose
+  FILTER the search skips (`limit-filtered-record`).
+
+The check's inputs must be the search's: where the run's own record of them says otherwise
+(its `.Params.txt` budget, PAM and variant datasets — one VCF per dataset must hold each
+chromosome checked; a search without bulges records `Genome_idx None` whatever it searched,
+and its datasets are then the lines of the `--vcf` list its command line names, read in its
+working directory —, a guide its `.guides.txt` does not hold, a `--samples` other than its
+`.sampleID.txt`, an `--analysis` other than its `.search_mode`, which records the mode the
+search ran whatever chose it), the run is refused (exit 2), as is a search of two genotyped
+datasets that share samples, a run whose records contradict each other, and one that does
+not record what the check needs (completeness: whether it wrote alternative alignments and,
+where it wrote none, its mode, which `--analysis` can give). It models a search that read
+each genotyped dataset's genotypes (its genotype store, or classic dictionaries), as every
+index CRISPRme installs or builds with `--samplesID` does; an install without them
+(`download --what index --no-genotypes`) searches population-level and lists every carrier
+of an indel on a SNP+indel row, with or without its SNPs (§4). Such a search records it:
+in any mode its `log_verbose.txt`, the pipeline's stdout kept in the result folder, holds
+the SNP post-analysis's `Registry-only install for <chrom>: ...` line for the dataset
+(`hg38_mega`'s aggregate registry prints that line too, marked `(aggregate info_af
+registry`, and is not counted), and one made with `--per-sample` writes `.search_mode`
+population-level beside `--per-sample`, which `complete-search` does only there or where
+every dataset it searches is sites-only; given a genotyped VCF, the check refuses either
+(exit 2). Without that line (a result folder without its `log_verbose.txt`, or a dataset
+its SNP post-analysis never read), a run made with `--population-level` or no mode flag
+records nothing else that tells it apart (its `.search_mode`, `.command_line.txt` and
+`.Params.txt` read as a search that read the store; the warning goes to the terminal only):
+such a run is not to be checked.
+
+The SNP-only rows of a per-sample run can be checked report-only (`--snp-rows report`):
+their strings, their target and that each named variant lies in it, their listed carriers,
+and the phased carriers a row of their site leaves out, each carrier read as §4 reads a
+SNP row's carriers — an individual with an SNV call of unknown phase in the target is
+listed for every non-empty subset of its variants there (`limit-snp-row-unphased`); the
+merge joins the carriers of a site's SNP rows of one variant list (its key for a SNP row
+is the Cluster Position and the variants, no alignment), so a carrier may be listed for
+another alignment of the site its slot holds; and since 2.10.0 a carrier whose slot of the
+row's SNPs holds an indel of the phased store that changes the target is dropped unless its
+own bases still read the target, from the first base on or up to the last, through the
+row's SNPs (kept too where that indel's call cannot be tied to the slot, PUTATIVE, or where
+it sits at a named SNP's position, a phasing artefact), and a slot whose bases cannot be
+read (an indel near it whose slot is unknown, two records of one base, a base whose allele
+its calls leave unknown) leaves the row. Listing a carrier the rule drops is reported
+(`snp-row-indel-carrier`), an MNV the store does not hold is `limit-snp-row-mnv`.
+Population-level SNP rows are a documented worst-case union and are out of scope.
+
+It does not check the `CFD_score_REF`/`_ALT`, `CFD_risk_score` and CRISPR-Bulge columns or
+which row the CRISPR-Bulge block keeps, `Variant_info_spacer+PAM`, `PAM_creation`, the seed
+counts, `Variant_MAF`, `Variant_rsID`, `Other_motifs`, `Not_found_in_REF` or the
+annotations, nor a row's own `CFD_score` against its alignment. The panel is the samples
+list; CRISPRme's input validator refuses one that leaves out a sample of the VCF, so on a
+run it accepts it is every sample of the VCF.
+
+The documented limits — the last record of a split multi-allelic site, two indel-path
+records in one target, a PUTATIVE carrier listed for its strongest target, a site within
+one target of a contig's end, a record whose FILTER the search skips — and the slots the
+VCF leaves without a sequence are listed
+with their carriers under their own class and do not fail the check, as do the checker's
+own coverage gaps (a carrier the PUTATIVE rule resolves with more than 10 positions within
+a target's reach of the record, off its REF span, where its alleles allow two bases, whose
+targets touching a call of unknown phase it does not enumerate, `coverage-putative-cap`; a
+population-level cluster that runs past the 3 kb either side its chain follows,
+`coverage-chain-limit`; a slot whose overlap zones near a record have more readings than
+it tries for the targets only such readings hold, which it counts and never demands,
+`coverage-overlap-cap`; a per-sample cluster reached only through a SNP target of a slot
+with an indel touching it, `coverage-snp-row-indel`; a VCF read without a `.tbi` that holds
+a deletion longer than the 20 kb such a read looks back, `coverage-unindexed-long-ref`); a
+row on a chromosome no VCF covers, a table line shorter than its header and a window
+holding N are reported. A target all of whose carriers are documented limits is demanded
+of no one, so a row that lists only them is not missed when it is lost: each completeness
+limit line says how many of its carriers a row naming the record lists, and that count
+changes then, without failing the check (the documented reading of those slots, "stays
+listed" and "the last record", is not modeled into a gating demand).
+
+Measured on 2.10.0's code (rel/2.8.2: its post-analysis files over the released 2.8.1
+image, searched through the README's apptainer route), chr22 of the HGDP + 1000 Genomes
+panel, the README guide, NRG, 4 mismatches, 1 DNA and 1 RNA bulge: soundness and
+completeness pass in both analysis modes (completeness 2 to 3 min of the whole chromosome
+with `--jobs 16`), its limits 8 two-indel targets, 4 records whose carriers' slots hold
+overlapping alleles where a target reads, 1 split-site target (per sample) and the
+checker's coverage gap for one carrier's slot near two records (`coverage-overlap-cap`);
+so do NRR and the TRAC guide per sample (19 and 20 two-indel targets, 8 overlapping
+records each), the README guide and review-r9's ACTGAAATCTGTAAGCAGGC without bulges (4
+mismatches, both modes; the second's 3 indel row blocks), three repeat-rich guides (VEGFA
+site 3 `GGTGAGTGAGTGTGTGCGTG`, EMX1 `GAGTCCGAGCAGAAGAAGAA`, VEGFA site 1
+`GGGTGGGGGGAGTTTGCTCC`) per sample and population-level (per sample 8,289 notes where a
+listed carrier's slot, read as §4 reads it, holds the target, 834 row blocks and 1,458
+records with overlapping alleles, 1,284 two-indel targets), the HPRC chr22 panel (9,125
+MNVs, 4.5% of its calls with a missing allele) and a copy of it with every fourth sample
+unphased, both modes (3 row blocks of an MNV whose carrier CRISPRme resolves PUTATIVE, as
+it documents; 6 two-indel targets; 17 and 26 windows across N; the checker's coverage gap
+for 21 records of the unphased copy, carriers resolved PUTATIVE with more than 10
+positions of two possible bases within a target's reach), and the default index beside
+the sites-only `hg38_mega`, both modes (6,747 and 274 row blocks of `hg38_mega` list no
+carrier and are checked as rows, each naming SNVs of `hg38_mega`'s VCF whose FILTER passes;
+completeness counts the 127,735 indel records of chr22 only `hg38_mega` holds and the 32,178
+the search skips for their FILTER, and its verdicts are those it gave reading every record:
+the single drop of each of the runs' 146 and 147 integrated indel lines is caught, or
+passes, alike). The genotyped panels of these configurations have no FILTER other than `.`
+(HGDP + 1000 Genomes, HPRC) or `PASS` (the self-test's 1000 Genomes); the SNP+indel oracle
+with a SNP, a deletion, two second deletions, an insertion and an MNV marked `LowQual`
+(review-r10's pair, and four records the phased indel store reads), searched through the
+real CLI, passes in both modes, and failed before on what the enricher skips (12 and 8
+gating findings, 6 and 5). On the documented chr22 self-test (`complete-test`, as CI runs
+it) soundness passes every benchmark, the 5′ Cas12a PAM included, completeness of
+`cas9_sg1617` and `cas12a_hbg` passes (population-level, their `.search_mode`), and
+removing the 5 indel rows of `cas9_sg1617` is caught at each of their 5 clusters; CI's
+step, replayed
+verbatim, passes there (about 4 min) and fails on 2.8.1's self-test. The SNP+indel oracle
+passes in both profiles and both modes, with no known defect left to list. Corrupting rows
+of the README per-sample run — the start moved by one base, a REF base, the bulge count, a
+non-carrier added, a carrier dropped, the strand flipped, a target base — is caught on 8 of
+8 rows of each class in the integrated table and in the alternative alignments. The
+negative controls fail as before: on 2.8.1 soundness reports exactly the four rows per
+mode whose first aligned base is one an insertion adds, and nothing else, and completeness
+reports their 1,306 carrier targets missing at the right coordinate per sample (and,
+population-level, the one such row placed more than `--merge` bp past its cluster); on the
+2.8.0 run soundness reports 10,093 row blocks per sample, among them the alternative
+alignment at chr22:22322768 that paired an insertion's only carrier with SNP alleles other
+individuals carry and two rows that list a carrier whose slot holds a second deletion
+inside the target and a SNV on the base it deletes, which §4 cannot read through and lists
+on no row, and completeness 1,425 carrier targets, 109 of them met only through a fold into
+a phantom row, 5 listed only by rows whose site has no fewest-mm+b block with their
+carriers, and 2 whose target (5 edits, 3 mismatches) the rows of its site with their
+carriers hold only as another target of 5 edits and 4 mismatches, which the merge's fewest
+file, sorting on mm+bulges and then mm, ranks after it. Genome-wide, soundness of the 2.8.1
+runs of the README guide (per sample and population-level) and of TRAC reports only that
+inside-insertion class (1,111, 682 and 1,332 row blocks, 70 to 100 s each with `--jobs 24`),
+and completeness of the README run reports the same class again, as carrier targets missing
+at the right coordinate (63,651 carrier targets of 348 records, each a carrier of a 2.8.1
+row of the same record placed past its anchor, and 4 whose target at the anchor lost its
+highest-CFD block to such a row at its Cluster Position), and nothing else that gates (about
+an hour on 40 processes of a loaded node: a background job, not the release gate).
+The SNP-row report finds no listing the documented rules do not explain on 2.10.0's
+per-sample runs above, but beside `hg38_mega`, where 60 SNP row blocks (28 lines of the
+alternative alignments, at 23 sites of chr22) name only an HGDP + 1000 Genomes SNP and list its carriers for a target that holds
+more variant bases than that: the merge, whose key for a SNP row is the Cluster Position and
+the variant list, keeps `hg38_mega`'s worst-case alignment of the site under them. On
+2.8.1 and d7a6fff its 30 row blocks list carriers whose slot of the SNP holds an indel
+that changes the target, which 2.10.0 drops. The checker's CFD of a row's own alignment is
+the `CFD_score_ALT` the runs printed on every one of their 46,626 indel row blocks, and on
+all but 14 of about 2.4 million SNP and REF blocks (each a value at a x.xxx5 rounding
+boundary, which the comparison gives the benefit of the doubt); the same input gives the
+same findings byte for byte. It found one CRISPRme defect that 2.10.0 fixes: the merge
+keyed an indel row by Cluster Position, variant list and aligned target, not the aligned
+spacer, so an unphased carrier resolved on an alignment where its SNP falls in a DNA bulge
+(CFD picks the reference base there) was listed on another alignment of the same aligned
+target whose column there faces the guide's base, which the carrier carries — a weaker
+target than its strongest (the SNP+indel oracle's site U, S19; and in a synthetic world of
+partly phased carriers searched through the real CLI, a carrier phased for the deletion
+and unphased for the SNP, which 2.10.0's code passes). It also shows a defect 2.10.0 does
+not fix: a search whose targets reach 27 nt (SaCas9's 21-nt guide and 6-nt PAM) loses those
+that start at a fake-indel window's first base (chr22, `CACTTTGGGAGGCCGAGGCGG` with
+`NNGRRT`, 2 mismatches, per sample: 2,103 carrier targets at 6 records, 2,088 of them the
+insertion chr22:17325232 A>AT's; an SpCas9 target, 24 nt at most here, never starts there
+holding its record); and two readings no text documents: `hg38_mega`'s SNP rows name SNVs
+whose FILTER is not `PASS` and earlier records of split sites (58 split sites of chr22, 57
+of them a `PASS` record before a later `PASS` one), where its indel rows and indel log
+follow CRISPRitz's enricher; and the phased indel store keeps every indel whatever its
+FILTER, so a carrier is taken off a target, and off a SNP row, for an indel no fake-indel
+window of the search holds.
+`test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check` in both profiles,
+`validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
+`docs/RELEASE_CHECKLIST.md` makes it a release gate.
 
 This establishes that the engine **does not miss** off-targets relative to
 exhaustive search. It does **not** validate the *scoring* models' predictive

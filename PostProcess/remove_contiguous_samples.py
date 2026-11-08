@@ -3,6 +3,8 @@
 import sys
 import time
 
+import indel_snp_cis as _isc
+
 
 def _rep_tiebreak(x):
     """Deterministic, intrinsic final tie-break for the per-cluster representative
@@ -44,6 +46,11 @@ def _rep_tiebreak(x):
     after everything else ties, so no other choice of representative can change. It holds
     among rows with carriers only: the rows of a sites-only index (mega) have none and
     their REF alignment was never upper case, so their ties stay in the sort's order.
+
+    2.10.0: two alignments of one indel target string can share their aligned DNA too, since
+    the merge keys an indel row by its aligned spacer as well. Those with one carrier set are
+    folded into one entry (_fold_same_carriers), and an exact tie between them keeps the
+    input order, in which the merge kept the first of them before 2.10.0.
     """
     try:
         _samples = str(x[true_guide - 2])
@@ -151,14 +158,77 @@ def _merge_row(kept, ele, snp_info, triples):
     )  # snp_info - 1 points to AF column
 
 
+def _first_base_offset(start, strand, variants, target, ref):
+    """How far past its start an indel row's first aligned base is on the haplotype
+    carrying its indel (indel_snp_cis.row_first_base), from the row's Position, strand,
+    variants, aligned target and REF text; 0 for a row with no indel or one this cannot
+    read."""
+    try:
+        toks = []
+        for tok in variants.split(","):
+            p = tok.rsplit("_", 3)
+            toks.append((int(p[1]), p[2], p[3]))
+        indel = next((t for t in toks if len(t[1]) != len(t[2])), None)
+        if indel is None:
+            return 0
+        start = int(start)
+        return _isc.row_first_base(strand, start, target, ref, indel,
+                                   [t for t in toks if t is not indel]) - start
+    except (IndexError, ValueError):
+        return 0
+
+
+def _haplotype_cluster_position(row, memo=None):
+    """An indel row's cluster position on the haplotype carrying its indel: its
+    Cluster_Position plus how far past its start its first aligned base is there.
+
+    That is the Cluster_Position itself, except on a row whose first base is one an
+    insertion adds. Since 2.10.0 such a row starts at the insertion's anchor
+    (indel_snp_cis.reference_start), while its first base is the k-th added base, k bases
+    past the anchor on the haplotype, which the row's bases tell
+    (indel_snp_cis.row_first_base). So two alignments that start on different bases of
+    one insertion have one Cluster_Position, while on the haplotype they are as many bases
+    apart as 2.8.1 placed them; and two alignments before one PAM with different bulges,
+    one place on the haplotype (on the + strand with a 3' PAM a DNA bulge starts one base
+    earlier and the Cluster_Position adds it back), can have two Cluster_Positions when
+    they start inside an insertion. The row's Position is the column before its
+    Cluster_Position, its strand the one after, its aligned target and REF text columns
+    2 and 3. A row with no indel, or one this cannot read: its Cluster_Position.
+
+    ``memo`` (a dict, one per cluster) keeps the offset by what it is read from: the
+    Position, strand and variants, and the bases of the target and REF text, gaps and case
+    aside, as row_first_base reads them. The aligned spacer is not among them, and since
+    2.10.0 the merge keys an indel row by it as well, so every alignment of a target comes
+    here; without the memo each read the haplotype again, the whole ALT for a row at the
+    anchor of a long insertion."""
+    cluster = int(row[pos])
+    try:
+        what = (row[pos - 1], row[pos + 1], row[snp_info],
+                row[2].replace("-", "").upper(), row[3].replace("-", "").upper())
+    except IndexError:
+        return cluster
+    if memo is None:
+        return cluster + _first_base_offset(*what)
+    if what not in memo:
+        memo[what] = _first_base_offset(*what)
+    return cluster + memo[what]
+
+
 def _fold_same_carriers(rows, fold_of, snp_info, triples):
     """Alignments of one site naming the same variants with the same carriers are one
     entry, as for every other row: the first of them in ``rows``, which is sorted by the
     file's own criterion, so the entry is the best by it. It takes the rsIDs and AFs of
-    the others. ``fold_of`` maps a row (by id) to its (position, variants, carriers);
-    other rows stay as they are. The carrier sets do not depend on the sort, so the
-    three files keep one row count per cluster and their alternative alignments stay
-    aligned line by line."""
+    the others. ``fold_of`` maps a row (by id) to its (cluster position on the haplotype
+    carrying its indel, variants, carriers); other rows stay as they are. The carrier
+    sets do not depend on the sort, so the three files keep one row count per cluster
+    and their alternative alignments stay aligned line by line.
+
+    The cluster position is the one on the haplotype (_haplotype_cluster_position): one
+    site's alignments there, the bulged ones folding into the best, as up to 2.8.1. Since
+    2.10.0 alignments that start on different bases of one insertion share its anchor and
+    one site; on the Cluster_Position alone they would fold into one entry, and all but
+    the best would leave both tables. They are other targets of the haplotype (2.8.1
+    reported them at their own starts), and stay: the site's row and its alternatives."""
     kept = {}
     out = []
     for row in rows:
@@ -205,26 +275,57 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             seen_ref.add(ref_key)
             list_ref.append(ele)
         else:
-            # merge samples of identical targets (coming from different VCF datasets)
+            # merge samples of identical targets (coming from different VCF datasets).
+            # Since 2.10.0 a row that starts on a base an insertion adds starts at its
+            # anchor, so two copies of one target inside one insertion (a repeat it
+            # holds), the same bases with the same carriers, are such identical rows too:
+            # one entry, at the anchor (2.8.1 reported each at its own start).
             key = (ele[pos], ele[snp_info])
             # An indel row lists the carriers of its own sequence (each carrier haplotype
             # resolved on its own, analisi_indels_NNN.py), and two alignments at one site
             # can name the same variants with different carriers: an RNA-bulge alignment
             # does not reach the base a SNP sits on, so it holds carriers of that SNP
             # that the full alignment does not. So only rows with one sequence merge here.
+            # And only rows with one alignment of it (2.10.0): a carrier resolved PUTATIVE
+            # (phase unknown) gets the strongest target its own alleles allow on each
+            # alignment (indel_snp_cis.worst_case_bases): the guide's base where the
+            # alignment pairs a SNP's base with a guide base, the CFD's choice (the
+            # reference base in a search that scores no CFD) where it leaves that base as a
+            # DNA bulge. So two alignments of one target string can list it with different
+            # bases, and with the target alone as the key it went onto the other alignment
+            # with the first one's bases, a target weaker than its own there (the SNP+indel
+            # oracle's S19). Rows of one alignment still merge (one target from two VCF
+            # datasets); the alignments of a target with one carrier set are folded into
+            # the best below (_fold_same_carriers), carrier sets compared whole.
             if _holds_indel_token(ele[snp_info]):
-                key += (ele[2].upper(),)
+                key += (ele[2].upper(), ele[1].upper())
             if key in dict_var.keys():
-                _merge_row(dict_var[key][0], ele, snp_info, triples)
+                kept = dict_var[key][0]
+                _merge_row(kept, ele, snp_info, triples)
+                # Two copies of one target inside one insertion are this one row, and the
+                # indel post-analysis judges each copy's PAM on its own: one that a
+                # placement of the insertion moves onto the reference's own PAM is not
+                # created, the copy the insertion adds can be. The row is created when
+                # either copy is (METHODS, "PAM_creation"), in whatever order the copies
+                # come (2.10.0; the pre-merge sort's whole-line tie-break put a created
+                # copy, its PAM in upper case, before an "n" one). PAM_gen is the column
+                # after Total; one alignment's created PAM is the same string in every
+                # copy, its ALT PAM.
+                if len(key) == 4 and kept[total + 1] == "n" and ele[total + 1] != "n":
+                    kept[total + 1] = ele[total + 1]
             else:
                 dict_var[key] = [ele]
     # Alignments of one site naming the same variants with the same carriers are folded
-    # into one entry once the variant rows are sorted (_fold_same_carriers).
+    # into one entry once the variant rows are sorted (_fold_same_carriers), the site
+    # being their cluster position on the haplotype carrying the indel, read once per
+    # target, REF text, place and variants (the memo), not once per aligned spacer.
     fold_of = {}
+    first_base_memo = {}
     for key in dict_var.keys():
-        if len(key) == 3:
+        if len(key) == 4:  # an indel or MNV row (its target and aligned spacer in the key)
             row = dict_var[key][0]
-            fold_of[id(row)] = (key[0], key[1], frozenset(row[true_guide - 2].split(",")))
+            fold_of[id(row)] = (_haplotype_cluster_position(row, first_base_memo), key[1],
+                                frozenset(row[true_guide - 2].split(",")))
 
     final_list_best_ref = list()
     var_only = False

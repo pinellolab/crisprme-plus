@@ -220,7 +220,15 @@ jobs:
         # read from the row's start: on the + strand with a 3' PAM (the - strand with a 5'
         # one) a deletion or an insertion in the protospacer moved them len(REF) - len(ALT)
         # bases, and a PAM the reference already has was flagged as created (the WALK
-        # panel's chr2:10000 and chr3:20000 rows, pinned here).
+        # panel's chr2:10000 and chr3:20000 rows, pinned here). Since 2.10.0 a PAM holding
+        # bases an insertion adds, or a deletion's junction, is judged wherever in its
+        # repeat the VCF writes the indel (indel_snp_cis.pam_reference_place: the reference
+        # bases it sits on in a placement that leaves it on the reference, else the
+        # reference PAM beside the protospacer's base that touches the PAM, else created),
+        # a complex record read as its replaced bases (the REF bases they replace) and its
+        # added or lost bases (an insertion's or a deletion's), and never created when the
+        # REF alignment is the ALT; the rule's own tests, against every placement built
+        # whole, are in test_indel_snp_cis.
         working-directory: PostProcess
         run: python -m unittest test_indel_pam_creation -v
 
@@ -257,14 +265,106 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows test_check_alt_pam -v
 
-      - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; both strands, PAM at either end)"
+      - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; 2.10.0: a row whose first base is one an insertion adds starts at the insertion's anchor, and a PAM holding inserted bases or a deletion's junction is judged wherever in its repeat the VCF writes the indel; both strands, PAM at either end)"
         # Up to 2.8.0 analisi_indels_NNN.py took CRISPRitz's Cluster_Position for an
         # RNA-bulge row on the + strand with a 3' PAM and on the - strand with a 5' PAM,
         # one base before the first aligned base, and the REF text of an RNA,DNA row, and
-        # of a 5' PAM RNA-bulge row, was a base off. The shipped analyzer on planted
-        # alignments given as the engine reports them (pandas + numpy).
+        # of a 5' PAM RNA-bulge row, was a base off. Up to 2.8.1 a row whose first base is
+        # one an insertion adds started at that base's place on the haplotype, and a PAM
+        # holding inserted bases was judged on the REF text read from the row's start; an
+        # unreleased draft of 2.10.0's rules took a PAM made of inserted bases for created on
+        # every row, also on one starting on a reference base whose REF text is its ALT (a
+        # tandem duplication of the PAM's bases), and the next judged it where the VCF
+        # writes the insertion (a repeat unit inserted beside a reference PAM: created; on
+        # the - strand with a 3' PAM, a row starting on a reference base read its REF
+        # text's window, not the reference PAM beside the protospacer, also across a
+        # deletion's junction). The shipped analyzer on planted alignments given as the
+        # engine reports them (pandas + numpy).
         working-directory: PostProcess
         run: python -m unittest test_indel_row_coordinates -v
+
+      - name: "Indel row Variant_info_spacer+PAM (2.10.0: each variant counted along the target on the haplotype carrying the indel, as a SNP row counts it on the reference)"
+        # Up to 2.8.1 resultIntegrator counted an indel row's variants along the reference: a
+        # SNP past an insertion was len(ALT) - len(REF) bases short (long on the - strand), also
+        # on a row starting on a base an insertion adds, which 2.8.1 placed at that base's
+        # place on the haplotype (a SNP before that place got the first number, on the - strand
+        # the last), and one past a deletion as many long (short). Counted along the reference
+        # from the insertion's anchor, where 2.10.0 places such a row, it would be short (long)
+        # by the inserted bases the target holds, less one. The REAL integrator on bestMerge
+        # rows of both strands (GNU cut).
+        working-directory: PostProcess
+        run: python -m unittest test_indel_variant_positions -v
+
+      - name: "Independent real-data indel check (scripts/check_indel_rows.py: its own VCF reader, haplotype builder and aligner; mutation tests that corrupt a right row)"
+        # scripts/check_indel_rows.py is the second opinion on the indel path that
+        # validate-test cannot give: validate-test compares only the engine's SITES
+        # (chromosome, start, strand) on the reference and the SNV-only 1000 Genomes
+        # chr22 genome, so an indel row's coordinate, aligned strings, REF text,
+        # variants, carriers and the alternative-alignment table are never checked
+        # against an independent truth on real data. These tests build a reference, a
+        # phased VCF (plain gzip, and BGZF with a tabix index written by the test) and
+        # rows by hand, assert a right row raises nothing gating, and assert that each
+        # corruption of it is caught: the start shifted by 1 and by an insertion's offset
+        # (the 2.8.1 defect), one target base changed, the aligned spacer rewritten, a
+        # carrier swapped, added or dropped (also when the same target sits elsewhere),
+        # a named variant dropped, a cross-haplotype SNP, a phantom of the shape reported
+        # at chr22:22322768 on 2.8.0, an MNV row and an unphased row with a phantom
+        # base, a merge that keeps the worse of two alignments of one site or of one
+        # target (fewest block, CFD block, a CFD only three decimals tell apart: three
+        # real rows of chr22; one worse only by the merge's next sorting criterion, mm
+        # after mm+bulges or the criteria after a CFD tie), a fold across strands, a
+        # carrier listed for a sequence its MNV changes, a carrier
+        # outside the samples list, an ALT block that lost its variants, a population-
+        # level cluster dropped beside another cluster's row, a row placed past an
+        # insertion's anchor, two targets inside one insertion folded into one, a long
+        # deletion's far junction, a second indel that keeps the target's bases, another
+        # guide's row, a carrier whose second insertion pushes the record's bases out of
+        # the target, a carrier whose second indel puts an SNV's bases where it carries
+        # none, a population-level cluster joined to another only through a target no
+        # carrier holds, two genotyped VCFs that share samples (refused), calls of unknown
+        # phase on the record's REF span, a SNP named for a carrier whose slot's alleles
+        # overlap the record and that holds it on no slot, a slot read without its
+        # phasing artefact that lacks the row's target, a carrier off by rule in a fold
+        # group, a population-level cluster joined through a slot a complex allele takes
+        # off, a haploid SNP call beside a diploid record (the reference stays possible),
+        # a capped window's greedy row in a per-sample chain, inputs other than the
+        # search's (its datasets, budget, PAM, guides, samples list, mode: refused), a
+        # run read in the mode it ran (its .search_mode, not --ci-cd-test, which chooses
+        # none: a population-level cluster joined only by a worst-case SNP row; a run that
+        # records no mode, or contradictory ones, refused), a listed carrier whose slot
+        # has no one sequence and that METHODS' rules take off (a second deletion with a
+        # SNV on the base it deletes; both alts of a split site), two overlapping alleles
+        # that change no base of the target (the carrier judged: an unnamed SNV, a
+        # carrier left off, a dropped row), a carrier whose slot has no reading counted and
+        # never demanded, a slot read without its artefact that chains no target needing a
+        # second indel record, a completeness check of some of a run's guides naming the
+        # others, a PUTATIVE rule offered no choice on the record's own REF span (its
+        # anchor) and, in a search that scores no CFD, the reference base then A, C, G, T,
+        # a record's chain holding its sites-only dataset's rows whoever reads it first
+        # and no coded anchor, a search without bulges read from its --vcf list, a VCF's
+        # FILTER read as CRISPRme's stores read it (a genotyped record outside PASS and
+        # '.' is no record of the search, but its indels stay on their carriers'
+        # haplotypes, as the phased indel store keeps them: a SNP the search skips leaves
+        # its carrier listed, an indel it skips still takes one off a target and off a SNP
+        # row; a sites-only one's indels dropped, its SNVs open rows of its SNP rows'
+        # chain and none of its fake-indel windows, whose rows must name the dataset's own
+        # PASS SNVs), a search that says it read no genotype store (its log_verbose.txt, or
+        # a --per-sample search run population-level: refused), and the
+        # SNP-row report (report-only) reading a SNP row's carriers as METHODS section 4
+        # does: a named variant outside the target, the 2.10.0 drop of a carrier whose slot
+        # holds an indel that changes the target (read through a repeat at its edge, an
+        # unreadable slot dropped), a carrier the merge joins from another alignment of the
+        # site, and an unphased individual listed for every subset of its variants.
+        # CRISPRme's documented limits (a split
+        # multi-allelic site, two indels in one target, a complex allele, a phasing
+        # artefact, a repeat unit at the target's edge, a PUTATIVE tie) must come out
+        # under their own non-gating class, and the driver must never pass silently (a
+        # chromosome no VCF covers, one FASTA of several contigs, a sites-only VCF alone
+        # or beside a genotyped one, whose rows list no carrier; a deletion longer than
+        # an unindexed read looks back; a tabix read yields each record once).
+        # Stdlib only -- the checker imports no CRISPRme module, nor do they.
+        working-directory: PostProcess
+        run: python -m unittest test_check_indel_rows -v
 
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
@@ -306,6 +406,10 @@ jobs:
         # matplotlib, installed above).
         working-directory: PostProcess
         run: python -m unittest test_haplotype_prioritizer -v
+
+      - name: "SNP rows drop a carrier whose SNP haplotype holds an indel changing the target"
+        working-directory: PostProcess
+        run: python -m unittest test_snp_row_indel_carriers -v
 
       - name: "AF panel denominator uses VCF-filtered genotyped samples"
         working-directory: PostProcess

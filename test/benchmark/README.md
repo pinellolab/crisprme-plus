@@ -60,6 +60,124 @@ Cas9 reference **exactly** (3495 rows, 0 diff) on the identical enriched genome,
 confirming the algorithm + PAM/edge-gap filters. The Cas12a reference was produced
 by the same validated generator.
 
+## What `validate-test` covers, and what it does not
+
+`validate-test` compares **sites** — the (chromosome, start, strand) triples of the
+engine's raw CRISPRitz target reports — on two genomes: the plain reference and the
+**SNV-only** 1000 Genomes chr22 enriched genome. That is the right check for the search
+engine: it proves the TST index misses no site an exhaustive aligner finds.
+
+It does **not** check:
+
+- **indel rows.** The references are built from the SNV-enriched FASTA, which holds no
+  indel, so the fake-indel genome and everything the indel post-analysis derives from it
+  are outside the comparison. A wrong indel coordinate, a wrong REF text, a wrong carrier
+  list or a dropped indel off-target all pass it. (The chr22 1000 Genomes VCF the
+  self-test uses has no indel in `chr22:22322700-22322850` at all, which is why the
+  2.8.0 row reported at `chr22:22322768` could not be caught here.)
+- **anything but the site.** The aligned spacer/target strings, the REF/ALT text, the
+  PAM, the mismatch and bulge counts, the named variants, the carriers and the whole
+  alternative-alignments table are never compared with an independent truth.
+- **per-carrier truth.** The enriched genome collapses every individual into IUPAC codes,
+  so the reference cannot say which sample carries which sequence.
+
+**`scripts/check_indel_rows.py` is the check for that part**, on real data: it writes
+each sample's haplotypes itself from the VCF the search read (every allele of a slot, as
+VCF 4.x defines a record), keeps its own map from haplotype bases to reference
+coordinates and aligns with its own exhaustive dynamic-programming aligner (it imports
+and copies no CRISPRme code, only Python's standard library; the CFD tables are read as
+data). The truth is the VCF: a slot holds a row's target when it reads its bases from
+the row's start through the record (each base the record puts in the target at its
+place); a slot whose alleles overlap gives no sequence, so it is read without the alleles
+METHODS section 4 reads it without (a phasing artefact at the record's position, an
+allele only on bases it deletes, an MNV), the one reading that holds the record, and is
+otherwise counted (`limit-overlapping-records`) where a target of its record reads, a
+named variant it holds on no reading always failing a listed carrier; where a call
+touching a target has unknown phase (a haploid call against a diploid one included) the
+record's known slot is judged first, then METHODS section 4's PUTATIVE rule (the
+strongest target the sample's alleles allow on the row's alignment, by the alignment's
+CFD, or, in a search that scores no CFD, the reference base, else the first of A, C, G, T;
+its copies counted against the record's; a choice only at the fake-indel window's code
+columns, never on the record's own REF span). CRISPRme's documented reading of a carrier (the one-indel window
+resolved with the carrier's own SNP alleles, a second indel read from either end through
+the indel, the last record of a split multi-allelic site, the PUTATIVE carriers of MNVs)
+only classifies a disagreement, and a carrier it would list against the carrier's own
+haplotypes vetoes no fold: every disagreement it checks
+for is a line, gating or a listed limit, and none passes in silence (what it does not
+check is listed below). **Soundness**: every indel/MNV row block of the integrated
+results and of the alternative alignments must be the given guide aligned to the
+reference with exactly its named variants, from its reported start, and its carriers must
+be the panel samples whose haplotypes hold it (or whose strongest target it is), within
+the samples list the search read; a row of a sites-only dataset (a VCF with no sample
+columns, as `hg38_mega`, alone or beside a genotyped one) lists no carrier, and only its
+own strings, target and variants are checked. **Completeness**: every in-budget alignment
+on a carrier's haplotypes that holds a base of an indel or MNV must be reported for that
+carrier by rows no worse than its best alignment by the merge's own sort keys (the
+fewest-mm+b block's key under `--sorting-criteria`, mm+bulges then mm by default; the
+highest CFD at the three decimals the merge sorts on, recomputed from each row's strings,
+then those criteria): a row of exactly that target whose fold group -- the rows of its
+site (the cluster position on the record's haplotype) and strand naming the same variants
+with the same carriers, which the documented merge folds into the first by each block's
+order -- is no worse, or such rows with the target's own carrier set; a run that writes
+no alternative alignments -- by default a population-level one, as `complete-test`'s runs
+are (their `.search_mode` says so; `--ci-cd-test` chooses no mode) -- keeps one row per
+merge cluster, and there the row of the target's cluster (rows chained within `--merge`
+bp by the rows CRISPRme can write, as the merge clusters: the reference rows, the SNP rows
+of the mode the run ran -- population-level each alignment's worst case, per sample the
+haplotypes individuals hold -- the targets some carrier of an indel record holds, none
+that needs two indel records, and a sites-only dataset's worst case of each window, its
+ALT written verbatim) must be no worse than each target; a cluster that reaches such a
+row only through rows CRISPRme may write or not, which no documented rule settles (a
+per-sample run's capped window's greedy row, which only the classic dictionary path
+writes; a per-sample SNP target of a slot that also holds an indel touching it, which
+2.10.0 writes only where its reading of the slot keeps the carrier; the one-record
+reading of an undocumented overlap; a target two overlapping alleles of a slot change),
+is counted under its cause's class, not passed. A slot whose
+VCF alleles overlap is read as METHODS section 4 reads it where it says how, and judged
+on every reading of the rest (a carrier whose slot holds the target on all of them, or on
+none, is judged so); where its readings part, a listed carrier METHODS' rules take off
+the target fails, and any other is counted. It does not check the CFD_REF/ALT, CFD risk
+and CRISPR-Bulge scores (nor which row the CRISPR-Bulge block keeps),
+`Variant_info_spacer+PAM`, `PAM_creation`, the seed counts, MAF, rsID, `Other_motifs`,
+`Not_found_in_REF` or the annotations, nor the merge's keys after the sorting criteria and
+the CFD (the Cluster Position, the carrier count, the aligned text), which only order
+alignments equal in all of these. Give each VCF a `.tbi` when the panel has deletions longer
+than 20 kb (HPRC's does): a read without one looks back 20 kb, and the checker lists such a
+VCF under its own coverage class. Two genotyped datasets that share samples are refused
+(exit 2): CRISPRme resolves each dataset on its own genotypes and joins their rows, which
+the checker does not model; a sites-only dataset beside a genotyped one is checked. So are
+inputs other than the search's where the run's own record of them says so (its
+`.Params.txt` budget, PAM and variant datasets -- one VCF per dataset for each chromosome
+checked; a search without bulges records `Genome_idx None`, and its `--vcf` list says
+them --, its `.guides.txt`, `.sampleID.txt` and `.search_mode`, the mode it ran), a run
+whose records contradict each other, and one that does not record what the check needs
+(whether it wrote alternative alignments and, where it wrote none, its mode, which
+`--analysis` can give). It models a search that read each genotyped dataset's genotypes
+(its genotype store, or classic dictionaries): an install made with `--no-genotypes`
+lists every carrier of an indel on a SNP+indel row; its search says so (its
+`log_verbose.txt` holds the SNP post-analysis's `Registry-only install for <chrom>` line,
+not counting an aggregate registry's such as `hg38_mega`'s, and a `--per-sample` one
+records `.search_mode` population-level beside `--per-sample`), and given a genotyped VCF
+the check refuses it (exit 2); without that line (no `log_verbose.txt`, or a dataset its
+SNP post-analysis never read), a run made with `--population-level` or no mode flag records
+nothing else that tells it apart, and is not to be checked. The VCF is read as the search
+read it: CRISPRitz's enricher skips every line whose FILTER is neither `PASS` nor
+`.`, so a genotyped dataset's such line is read as the reference but for its indels,
+which stay on their carriers' haplotypes as no record of the search (the phased indel
+store keeps them, and CRISPRme's carrier resolution reads them: a row naming one fails,
+none of their targets is demanded, `limit-filtered-record`); a sites-only dataset's such
+indels are dropped, and its SNVs read by its SNP rows only (`hg38_mega` holds them, an index
+the enricher builds does not: a row CRISPRme may write or not). `--snp-rows report` adds,
+report-only, the SNP-only rows of a per-sample run, their carriers read as METHODS section 4
+reads them (an unphased individual listed for every subset of its variants, the merge
+joining a site's SNP rows of one variant list, and since 2.10.0 a carrier dropped whose slot
+holds an indel of the phased store that changes the target).
+`test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check` (both profiles),
+`validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
+`docs/RELEASE_CHECKLIST.md` (step 4c) makes it a release gate on a real HGDP + 1000 Genomes
+chr22 search in both modes and genome-wide. Its unit and mutation tests are
+`PostProcess/test_check_indel_rows.py`.
+
 ## Reproducible generation pipeline
 ```bash
 # 1. Build the variant-enriched genome the same way CRISPRme does internally
