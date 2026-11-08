@@ -339,12 +339,12 @@ and the `release-crisprme` skill.
   whose `INFO` has `AF` at another place than the VCF's first record has none. METHODS (sections
   2, 3 and 8), the README, `docs/INDEX_PROVENANCE.md`, `docs/INPUT_FORMATS.md`,
   `docs/PRECOMPUTED_INDEXES.md`, `docs/DESIGN_mega_index.md` and the panel recipes of
-  `seq_script/merge_panels/` gave both as this release's, to be fixed in the next release, and
-  the input validator's warning of a VCF whose records hold `AF` at different places in `INFO`
-  said that CRISPRitz reads it at the first record's place, where a later record gets a blank
-  `AF`. Each now says that CRISPRitz 2.10.0 codes every ALT of such a site and finds each
-  record's `AF` by its key, so that an index it builds, as every one rebuilt for this release,
-  has neither limit. Covered by `PostProcess/test_site_alleles.py`,
+  `seq_script/merge_panels/` gave them as this release's limits, most of them as to be fixed in
+  the next release, and the input validator's warning of a VCF whose records hold `AF` at
+  different places in `INFO` said that CRISPRitz reads it at the first record's place, where a
+  later record gets a blank `AF`. Each now says that CRISPRitz 2.10.0 codes every ALT of such a
+  site and finds each record's `AF` by its key, so that an index it builds, as every one rebuilt
+  for this release, has neither limit. Covered by `PostProcess/test_site_alleles.py`,
   `PostProcess/test_generate_report.py` and `PostProcess/test_validate_inputs.py`.
 - **The check that an index is whole follows the index format it was built in.**
   `build-index-only` and the search check an index before they take it: each `.bin` whole, and no
