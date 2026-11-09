@@ -725,8 +725,10 @@ class TestDictlessDefaults(unittest.TestCase):
             csrc = fh.read()
         self.assertRegex(csrc, r"max_total_edits\s*=\s*6",
                          "crisprme.py complete-search default max_total_edits must be 6")
-        # and the CLI bulge derivation is capped at a single bulge of each type
-        self.assertRegex(csrc, r"_SIMPLE_BULGE_CAP\s*=\s*1")
+        # and the CLI bulge derivation is capped at a single bulge of each type: the default
+        # budget, DEFAULT_BULGES, which assembly-search takes too
+        self.assertRegex(csrc, r"_SIMPLE_BULGE_CAP\s*=\s*DEFAULT_BULGES\b")
+        self.assertRegex(csrc, r"(?m)^DEFAULT_BULGES\s*=\s*1\b")
 
 
 class TestPruningNotePersisted(unittest.TestCase):

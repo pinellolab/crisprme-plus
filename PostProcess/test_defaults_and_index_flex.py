@@ -896,10 +896,14 @@ class AnIndexNameMayCarryItsGuideAndSide(unittest.TestCase):
                                                           True, True))
         self.assertFalse(tbc.crisprme._index_serves_search("NRR-20_3_hg38", "hg38", "NRR", 2,
                                                            False, True))
-        # the router reads the flank of a PAM-less one in either form
+        # the router reads the flank of a PAM-less one in either form: the older name's wide
+        # flank is 2.8.1's general index, and a name of 2.10.0 is of the repo of index format 2
+        # (C2), wide flank or not
         self.assertEqual(crisprme_hf.index_flank_width("20-NNNNNNNN_3_hg38+hg38_HGDP1kGP"), 8)
-        self.assertEqual(crisprme_hf.resolve_index_repo("20-NNNNNNNN_3_hg38"),
+        self.assertEqual(crisprme_hf.resolve_index_repo("NNNNNNNN_3_hg38"),
                          crisprme_hf.GENERAL_INDEX_HF_REPO)
+        self.assertEqual(crisprme_hf.resolve_index_repo("20-NNNNNNNN_3_hg38"),
+                         crisprme_hf.FORMAT2_HF_REPO)
         # the web form counts it, on its side
         pu = tbc.pages_utils
         root = Path(tempfile.mkdtemp(dir=self.tmp.name))

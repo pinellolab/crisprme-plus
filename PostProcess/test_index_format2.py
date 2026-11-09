@@ -1699,8 +1699,12 @@ class AnArchiveSaysItsFormat(_Index):
         return idx
 
     def manifest(self, api):
+        """The manifest of the index's own archive (an index of format 2 goes up after its
+        panel's companions, its Dictionaries bundle first: crisprme_hf.publish_index)."""
         import tarfile
-        with tarfile.open(api.uploads[0][0]) as tf:
+        archive = next(local for local, remote in api.uploads if remote.endswith(".tar.gz")
+                       and not dpub.hf._companion_kind(os.path.basename(remote)[:-7]))
+        with tarfile.open(archive) as tf:
             return json.load(tf.extractfile("manifest.json"))
 
     @staticmethod
