@@ -5417,7 +5417,21 @@ class ReleaseTwoTen(Base):
                 self.assertEqual(gating(found), [], found)
                 line = [f[2] for f in found if f[1] == "limit-window-reach"][0]
                 self.assertIn("(25 bases before the record's first REF base, 27 after its "
-                              "last)", line)
+                              "last), or whose site's guide region does (a target of a 27-nt "
+                              "guide and PAM with a DNA bulge, or one with an RNA bulge at the "
+                              "window's first base, say)", line)
+
+    def test_the_reach_example_is_the_windows(self):
+        """The example a limit-window-reach line gives is the shortest target past the run's
+        own windows: L + b past min(LEFT + 2, RIGHT + 1), a 27-nt SaCas9 target with a DNA
+        bulge on 25/27, a 29-nt one with 3 on 30/30 (with one it fits), any 33-nt one."""
+        self.assertEqual(C.reach_example((25, 27), 27),
+                         "a target of a 27-nt guide and PAM with a DNA bulge")
+        self.assertEqual(C.reach_example((30, 30), 29),
+                         "a target of a 29-nt guide and PAM with 3 DNA bulges")
+        self.assertEqual(C.reach_example((30, 30), 23),
+                         "a target of a 23-nt guide and PAM with 9 DNA bulges")
+        self.assertEqual(C.reach_example((30, 30), 33), "a target of a 33-nt guide and PAM")
 
     def test_a_run_whose_records_say_no_window_is_refused(self):
         """A run of 2.10.0 whose working directory holds no indel log of the dataset, and

@@ -4573,6 +4573,17 @@ def one_record_reading(win, main_al, slot_hap, alleles, t, toks, lo, hi, unknown
     return None
 
 
+def reach_example(window, full_n):
+    """The shortest target that runs past a fake-indel window of ``window`` (before, after),
+    for a guide and PAM of ``full_n`` bases, said as a limit-window-reach line's example: a
+    target of L bases with b DNA bulges holds its record's change only where L + b <=
+    min(before + 2, after + 1) (one fewer at an MNV), so the fewest DNA bulges past it."""
+    need = max(min(window[0] + 2, window[1] + 1) + 1 - full_n, 0)
+    return "a target of a %d-nt guide and PAM%s" % (
+        full_n, "" if not need else " with a DNA bulge" if need == 1
+        else " with %d DNA bulges" % need)
+
+
 def record_window(win, al):
     """(before, after): the reference bases the fake-indel window of record ``al`` holds
     before its first REF base and after its last, as the run's records say them
@@ -4980,12 +4991,12 @@ def comp_record(win, ctx, rep, reported, al, carriers, guide, full, lo, hi, popm
             "table": "completeness", "chrom": chrom, "start": al.lo, "var": tok},
             "%d sample(s) hold a target of %s in budget that runs past its fake-indel "
             "window (%d bases before the record's first REF base, %d after its last), or "
-            "whose site's guide region does (a target of a %d-nt guide and PAM with a DNA "
-            "bulge, or with an RNA bulge at the window's first base, say), which no index "
-            "holds (METHODS section 4): not demanded (%d of them listed on a row naming "
-            "the record): %s" % (len(who), tok, record_window(win, al)[0],
-                                 record_window(win, al)[1], len(full),
-                                 reported.on_rows(guide, who, tok), ",".join(who[:12])),
+            "whose site's guide region does (%s, or one with an RNA bulge at the window's "
+            "first base, say), which no index holds (METHODS section 4): not demanded (%d "
+            "of them listed on a row naming the record): %s"
+            % (len(who), tok, record_window(win, al)[0], record_window(win, al)[1],
+               reach_example(record_window(win, al), len(full)),
+               reported.on_rows(guide, who, tok), ",".join(who[:12])),
             samples=",".join(who))
     if cut.get("edge"):
         who = sorted(cut["edge"])
