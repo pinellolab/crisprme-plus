@@ -57,6 +57,7 @@ tabix index written by this file's own writer), and rows in the column layout of
 import contextlib
 import gzip
 import io
+import json
 import os
 import shutil
 import struct
@@ -4615,14 +4616,47 @@ def write_bin(path, fmt, flags=0, guide_len=20, pam="NRG", budget=2):
         fh.write(b"\0" * 64)
 
 
+def write_indel_log(path, vcf, window):
+    """The indel log CRISPRitz's add-variants writes of ``vcf`` (log<chrom>.txt of
+    Dictionaries/log_indels_<dataset>), as far as the checker reads it: one row per
+    indel-path ALT of a PASS or '.' record (an indel or an MNV), its CHR field holding its
+    fake-indel window's start and end, ``window`` = (before, after) reference bases around
+    the record's REF (POS - 1 - before, POS - 1 + len(REF) + after)."""
+    before, after = window
+    rows, k = [], 0
+    with gzip.open(vcf, "rt") as fh:
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            f = line.rstrip("\n").split("\t")
+            if f[6] not in ("PASS", "."):
+                continue
+            pos, ref = int(f[1]), f[3]
+            for alt in f[4].split(","):
+                if alt.startswith("<") or alt == "*" or not (
+                        len(alt) != len(ref) or (len(alt) > 1 and len(ref) > 1)):
+                    continue
+                k += 1
+                rows.append("%s_%d-%d_%d\tS01\t.\t0.1\t%s_%d_%s_%s\t0,1\tN" % (
+                    f[0], pos - 1 - before, pos - 1 + len(ref) + after, k, f[0], pos, ref,
+                    alt))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n" +
+                 "".join(r + "\n" for r in rows))
+
+
 def as_2100(case, log="", var_flags=4, var_format=2, indels_format=2, enriched=None,
-            budget=2, guide_len=20, pam="NRG"):
+            budget=2, guide_len=20, pam="NRG", window=(25, 27)):
     """Lay ``case`` out as a run of CRISPRme 2.10.0 of dataset v: its results folder moved
     to work/Results/run, with .Params.txt (Genome_idx), .indexes_searched.txt and (``log``
     not None) log_verbose.txt; the variant index and the INDELS index it names in
     work/genome_library, a .bin of the format given each (``var_format`` None: no variant
     index, as for a search without bulges); ``enriched``: the variant genome, written as
-    work/Genomes/hg38+v/chr21.enriched.fa."""
+    work/Genomes/hg38+v/chr21.enriched.fa; ``window`` (None: none): the (before, after)
+    of the fake-indel windows the dataset's indel log, work/Dictionaries/log_indels_v,
+    records (write_indel_log): 25/27, an enrichment of CRISPRitz 2.9.1 or earlier, unless
+    a test says otherwise (30/30: 2.10.0's)."""
     work = os.path.join(case.tmp, "work")
     lib = os.path.join(work, "genome_library")
     res = os.path.join(work, "Results", "run")
@@ -4650,6 +4684,9 @@ def as_2100(case, log="", var_flags=4, var_format=2, indels_format=2, enriched=N
     if enriched is not None:
         os.makedirs(os.path.join(work, "Genomes", "hg38+v"), exist_ok=True)
         write_fasta(os.path.join(work, "Genomes", "hg38+v", "chr21.enriched.fa"), enriched)
+    if window is not None:
+        write_indel_log(os.path.join(work, "Dictionaries", "log_indels_v",
+                                     "log%s.txt" % case.chrom), case.vcf, window)
     return case
 
 
@@ -4830,11 +4867,13 @@ class ReleaseTwoTen(Base):
         case, _ = world_indel_snp(plain)
         self.assertEqual(said(case), ["check_indel_rows: read as a run of CRISPRme 2.8.1 or "
                                       "earlier (every dataset: the last record of a split "
-                                      "site, store of every FILTER, INDELS format 1)"])
-        as_2100(case, var_flags=0)
+                                      "site, store of every FILTER, INDELS format 1, "
+                                      "fake-indel windows 25/27)"])
+        as_2100(case, var_flags=0, window=(30, 30))
         self.assertEqual(said(case), ["check_indel_rows: read as a run of CRISPRme 2.10.0 or "
                                       "later (v on chr21: no split SNP site to tell, store "
-                                      "of PASS and '.', INDELS format 2)"])
+                                      "of PASS and '.', INDELS format 2, fake-indel windows "
+                                      "30/30)"])
         seq = PRE + GUIDE[:4] + other(GUIDE[4]) + GUIDE[5:10] + "C" + GUIDE[10:] + "TGG" + POST
         snp, ref_b = len(PRE) + 5, seq[len(PRE) + 4]
         third = next(x for x in "ACGT" if x not in (ref_b, GUIDE[4]))
@@ -4846,7 +4885,8 @@ class ReleaseTwoTen(Base):
                                       "later (no chromosome to read it for)"])
         self.assertEqual(said(case, mode="completeness", budget=("0", "0", "0", "0")),
                          ["check_indel_rows: read as a run of CRISPRme 2.10.0 or later (v on "
-                          "chr21: every allele, store of PASS and '.', INDELS format 2)"])
+                          "chr21: every allele, store of PASS and '.', INDELS format 2, "
+                          "fake-indel windows 25/27)"])
 
     def test_two_alts_of_one_position_on_a_slot_are_putative(self):
         """Every allele coded, a slot can hold two ALTs of one position (split records
@@ -5355,6 +5395,72 @@ class ReleaseTwoTen(Base):
         self.assertEqual((rc, gating(found)), (0, []), found)
         self.assertIn("limit-window-reach", classes(found), found)
 
+    def test_the_fake_indel_window_is_the_runs_own(self):
+        """The fake-indel window is read from the run's indel log (each row's window start
+        and end): on windows of 25/27 (CRISPRitz 2.9.1) a DNA-bulged SaCas9 target that
+        starts a base before the window is held by no index (limit-window-reach, not
+        demanded); on windows of 30/30 (2.10.0) it is in the window, demanded, and a missing
+        row fails. Read as 25/27 whatever the log, it was never demanded."""
+        seq, recs, _start = world_window_edge(self.tmp, bulged=True)
+        budget = ("2", "1", "0", "3")
+        for window, want in (((25, 27), (0, "limit-window-reach")),
+                             ((30, 30), (1, "missing-row"))):
+            tmp = os.path.join(self.tmp, "w%d" % window[0])
+            os.makedirs(tmp)
+            case = as_2100(Case(tmp, seq, recs, [], pam=SA_PAM), budget=2, guide_len=21,
+                           pam="NNGRRT", window=window)
+            rc, found = case.run(mode="completeness", budget=budget, guide=G21)
+            self.assertEqual(rc, want[0], (window, found))
+            self.assertIn(want[1], classes(gating(found) if want[0] else found),
+                          (window, found))
+            if not want[0]:
+                self.assertEqual(gating(found), [], found)
+                line = [f[2] for f in found if f[1] == "limit-window-reach"][0]
+                self.assertIn("(25 bases before the record's first REF base, 27 after its "
+                              "last)", line)
+
+    def test_a_run_whose_records_say_no_window_is_refused(self):
+        """A run of 2.10.0 whose working directory holds no indel log of the dataset, and
+        whose INDELS index records no window (index_meta's indel_window), does not say the
+        fake-indel windows its targets were searched in: refused (exit 2) where its VCF has
+        indel records. With the INDELS sub-index's record of 30/30 it is read so (the
+        DNA-bulged target is demanded)."""
+        seq, recs, _start = world_window_edge(self.tmp, bulged=True)
+        budget = ("2", "1", "0", "3")
+        case = as_2100(Case(self.tmp, seq, recs, [], pam=SA_PAM), budget=2, guide_len=21,
+                       pam="NNGRRT", window=None)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, _found = case.run(mode="completeness", budget=budget, guide=G21)
+        self.assertEqual(rc, 2)
+        self.assertIn("the fake-indel windows of v on chr21", err.getvalue())
+        sub = os.path.join(self.tmp, "work", "genome_library", "21-NNGRRT_2_hg38+v_INDELS",
+                           "NNGRRT_2_fakechr21")
+        with open(os.path.join(sub, ".index_meta.json"), "w") as fh:
+            json.dump({"index_format": 2, "indel_window": [30, 30]}, fh)
+        rc, found = case.run(mode="completeness", budget=budget, guide=G21)
+        self.assertEqual(rc, 1, found)
+        self.assertIn("missing-row", classes(gating(found)), found)
+
+    def test_indel_log_window(self):
+        """indel_log_window reads a log's windows from its rows (CHR <chrom>_<start>-<end>_<id>,
+        indel <chrom>_<POS>_<REF>_<ALT>), a chromosome name holding '_' or '-' too; a log
+        of two widths is no one enrichment's (ValueError); one with no row says none."""
+        path = os.path.join(self.tmp, "logchrUn_K-1.txt")
+        rows = ["chrUn_K-1_%d-%d_%d\tS01\t.\t0.1\tchrUn_K-1_%d_%s_%s\t0,1\tN"
+                % (p - 31, p - 1 + len(r) + 30, k, p, r, a)
+                for k, (p, r, a) in enumerate(((100, "A", "AT"), (200, "ACG", "A"),
+                                               (300, "AC", "TG")))]
+        write_text = lambda body: open(path, "w").write(  # noqa: E731
+            "CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n" + body)
+        write_text("".join(r + "\n" for r in rows))
+        self.assertEqual(C.indel_log_window(path), (30, 30))
+        write_text(rows[0] + "\n" + "chr1_74-127_9\tS01\t.\t0.1\tchr1_100_A_AT\t0,1\tN\n")
+        with self.assertRaises(ValueError):
+            C.indel_log_window(path)
+        write_text("")
+        self.assertIsNone(C.indel_log_window(path))
+
     def test_window_cut(self):
         """window_cut on its own: 25 reference bases before the record's first REF base and
         27 after its last; the site's guide region, the guide's length from the PAM
@@ -5402,6 +5508,19 @@ class ReleaseTwoTen(Base):
         right = [(99, 1)] + [(q, 0) for q in range(100, 125)]
         self.assertEqual(C.window_cut(win, ctx, al_, right, "-", 27), "edge")
         self.assertIsNone(C.window_cut(win, ctx, al_, right, "-", 26))
+        # the run's windows of 30/30 (CRISPRitz 2.10.0, its indel log): 30 bases before the
+        # REF's first base (99) and 30 after its last
+        win.sem = C.Semantics(True, {(None, None): {"indels": (2, 2), "window": (30, 30)}}, {})
+        wide = [(q, 0) for q in range(69, 100)] + [(99, 1)]          # 69 = 99 - 30
+        self.assertIsNone(C.window_cut(win, ctx, al_, wide, "+", 27))
+        self.assertEqual(C.window_cut(win, ctx, al_, [(68, 0)] + wide, "+", 27), "reach")
+        self.assertIsNone(C.window_cut(win, ctx, al_, [(99, 1)] + [(q, 0) for q in
+                                                                range(100, 130)], "+", 27))
+        self.assertEqual(C.window_cut(win, ctx, al_, [(99, 1)] + [(q, 0) for q in
+                                                               range(100, 131)], "+", 27),
+                         "reach")
+        self.assertIsNone(C.window_cut(win, ctx, al_, [(q, 0) for q in range(73, 99)]
+                                       + [(99, 1)], "+", 27))         # rna0 of 25/27
 
     def test_a_run_of_2_10_0_writes_no_capped_greedy_row(self):
         """A per-sample run of 2.10.0 reports a window over CRISPRME_IUPAC_CAP by the
