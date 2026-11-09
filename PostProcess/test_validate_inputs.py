@@ -1453,7 +1453,9 @@ class TestCheckVcfFullScan(unittest.TestCase):
                     issues = self._scan(tmp, [vcf_record(pos=pos, ref="A", alt="AT")])
                     self.assertEqual(len(issues), int(warns), (pos, issues))
                     if warns:
-                        self.assertIn("a POS below 31", issues[0].message)
+                        self.assertIn("a POS below 31, with fewer than 30 reference bases "
+                                      "between the chromosome start and the record",
+                                      issues[0].message)
                         self.assertIn("fake-indel window holds 30 reference bases",
                                       issues[0].message)
         with tempfile.TemporaryDirectory() as tmp:

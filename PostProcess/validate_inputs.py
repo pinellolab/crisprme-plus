@@ -1484,9 +1484,12 @@ def check_vcf_full_scan(
       (common with merged cohorts) causes silently wrong haplotype/sample
       attribution. The validator can only warn here; the real fix belongs in
       `new_simple_analysis.py`.
-    - Indels within 26bp of a chromosome start: `enricher.py:322`'s
-      `pos-26` context window goes negative, and Python silently wraps a
-      negative slice index to the end of the string instead of erroring.
+    - Indels nearer a chromosome's start than the installed CRISPRitz's
+      fake-indel window reaches (a POS below `indel_start_proximity()`: 31
+      with 2.10.0's windows of 30 bases, 26 with 2.9.1's of 25): the enricher
+      skips such a record, with a warning on stdout (up to 2.9.0 its window's
+      negative slice wrapped to the chromosome's end instead), so no indel
+      off-target is searched there.
     - AF/ALT allele-count consistency, SNP path: `enricher.py`'s
       `add_to_dict_snps` indexes the comma-separated AF list by each
       single-character ALT allele's 1-indexed position in the full ALT list.
@@ -1802,8 +1805,9 @@ def check_vcf_full_scan(
             Issue(
                 WARN,
                 f"{fname}: {indel_near_start_count} indel(s) at a POS below "
-                f"{indel_start}, fewer than {indel_start - 1} bases from the chromosome "
-                f"start — the enricher (CRISPRitz add-variants) skips such an indel, "
+                f"{indel_start}, with fewer than {indel_start - 1} reference bases between the "
+                f"chromosome start and the record — the enricher (CRISPRitz add-variants) "
+                f"skips such an indel, "
                 f"with a warning on stdout: its fake-indel window holds "
                 f"{indel_start - 1} reference bases before the record, so no indel "
                 f"off-target is searched at it",
