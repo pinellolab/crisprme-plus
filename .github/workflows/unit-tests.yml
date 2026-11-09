@@ -684,3 +684,18 @@ jobs:
         # and the report's dense-region column and inputs card.
         working-directory: PostProcess
         run: python -m unittest test_window_density -v
+
+      - name: "The haplotype pre-check, its carriers-first indel twin and the K-skip (2.10.0): exact against every choice"
+        # haplotype_precheck against a brute-force enumeration of every choice of alleles,
+        # counted as new_simple_analysis's finalizer and indel_snp_cis.resolve_target count
+        # them; and the real new_simple_analysis.py with the pre-check on and off (the same
+        # files), a skipped target's reference row, one BED line a dense window, the K-skip.
+        working-directory: PostProcess
+        run: python -m unittest test_haplotype_precheck -v
+
+      - name: "Option P (2.10.0): a chromosome's post-analysis in pieces, merged byte for byte"
+        # merge_pieces scores CRISPR-Bulge in the batches one process forms; the pool's
+        # ranges and its first-failure stop; the real new_simple_analysis.py and
+        # analisi_indels_NNN.py as one process and as pieces merged give the same files.
+        working-directory: PostProcess
+        run: python -m unittest test_postproc_pieces -v

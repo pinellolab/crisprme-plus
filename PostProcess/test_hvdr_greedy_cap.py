@@ -92,6 +92,9 @@ def _run(iupac_cap):
     ns["_phase_confirmation_rows"].clear()
     ns["_phase_confirmation_keys"].clear()
     cluster = []
+    # the main loop lists a dense window in the high-variant-density BED from the raw
+    # target's letters, before it is decomposed (2.10.0: _record_dense_window)
+    ns["_record_dense_window"](split)
     ns["iupac_decomposition"](split, GUIDE.replace("-", ""), GUIDE_NO_PAM, cluster)
     return cluster, ns
 
@@ -118,7 +121,8 @@ class TestHvdrGreedyCap(unittest.TestCase):
             % [(r[7], r[12]) for r in var],
         )
         # the region is STILL surfaced in the high-variant-density BED (visibility kept)
-        self.assertIn("chrT", ns["hvdr_bed"].getvalue())
+        self.assertIn("chrT", "".join(ns["hvdr_line"]("chrT", key, rec)
+                                      for key, rec in ns["_hvdr_records"].items()))
 
     def test_uncapped_also_finds_it_via_subcombinations(self):
         """CONTROL: uncapped (IUPAC_CAP=10) the sub-combination enumeration already

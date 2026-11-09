@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 
-from multiprocessing import Pool
-
 import gzip
 import subprocess
 import sys
 import os
+
+import postproc_pool
 
 
 def _chrom_from_vcf(vcf_path: str) -> str:
@@ -93,17 +93,13 @@ ncpus = int(sys.argv[13])
 max_total_edits = sys.argv[14] if len(sys.argv) > 14 else "-1"
 
 
-def start_analysis(chrom: str) -> None:
-    code = subprocess.call(
-        f"{POSTANALYSIS} {output_folder} {ref_folder} {vcf_folder} {guide_file} "
-        f"{mm} {bDNA} {bRNA} {annotation_file} {pam_file} {dict_folder} "
-        f"{final_res} {final_res_alt} {chrom} {max_total_edits}",
-        shell=True
-    )
-    if code != 0:
-        raise subprocess.SubprocessError(
-            f"Post-analysis on indels failed on chromosome {chrom}"
-        )
+def driver_args(chrom: str, stage: str) -> list:
+    """post_analisi_indel.sh for one chromosome and stage (postproc_pool: "all" runs the
+    whole post-analysis as one process; "cluster" and "finish" the steps around its
+    analysis in pieces). Each value one argument (no shell)."""
+    return [POSTANALYSIS, output_folder, ref_folder, vcf_folder, guide_file, mm, bDNA, bRNA,
+            annotation_file, pam_file, dict_folder, final_res, final_res_alt, chrom,
+            str(max_total_edits), stage]
 
 
 def _detect_budget_gb():
@@ -191,14 +187,20 @@ def memory_capped_workers(requested, n_tasks, dict_folder):
 # chromosome list (raw VCFs when present; else the bundled indel logs)
 vcf_name = os.path.basename(vcf_folder.rstrip("/"))
 chrs = _dataset_chroms(vcf_folder, os.path.join(dict_folder, "log_indels_" + vcf_name))
-workers, budget_gb, per_worker_gb = memory_capped_workers(ncpus, len(chrs), dict_folder)
+# with option P a chromosome's pieces share the pool, so the workers are not bounded by
+# the number of chromosomes (postproc_pool)
+workers, budget_gb, per_worker_gb = memory_capped_workers(
+    ncpus, len(chrs) if not postproc_pool.pieces_on() else max(ncpus, 1), dict_folder)
 # NOTE: write these diagnostics to STDOUT (log_verbose.txt), never STDERR.
 # The caller treats a non-empty stderr log (`[ -s $logerror ]`) as a fatal
 # post-analysis failure, so informational text on stderr aborts the run.
 sys.stdout.write(
     f"Post-analysis INDELs: {workers} concurrent worker(s) "
     f"(cores={ncpus}, detected memory budget {budget_gb:.1f} GB, "
-    f"est. per-worker {per_worker_gb:.1f} GB)\n"
+    f"est. per-worker {per_worker_gb:.1f} GB); "
+    + ("each chromosome in pieces over them (CRISPRME_POSTPROC_PIECES=0: one process a "
+       "chromosome)\n" if postproc_pool.pieces_on() else
+       "one process a chromosome (CRISPRME_POSTPROC_PIECES=0)\n")
 )
 usable_gb = max(1.0, budget_gb - max(2.0, budget_gb * 0.15))
 if per_worker_gb > usable_gb:
@@ -209,5 +211,10 @@ if per_worker_gb > usable_gb:
         f"dataset), give the container more memory, or set CRISPRME_MAX_MEM_GB.\n"
     )
 sys.stdout.flush()
-with Pool(processes=workers) as pool:  # run chrom-wise post-analysis in parallel
-    pool.map(start_analysis, chrs)
+try:
+    postproc_pool.run_stage(
+        "indel", chrs, workers, driver_args, "./analisi_indels_NNN.py",
+        min_lines=postproc_pool.piece_lines(50000))
+except postproc_pool.StageError as err:
+    sys.stderr.write(f"Post-analysis INDEL failed: {err}\n")
+    sys.exit(1)

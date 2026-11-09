@@ -23,6 +23,8 @@ final_res_alt=${12}
 key=${13}
 # the search's cap on total edits (mismatches + bulges), -1 for none
 max_total_edits=${14:--1}
+# 2.10.0, option P: all (default), cluster or finish (analisi_indels_NNN.sh)
+stage=${15:-all}
 
 # process indel targets on chromosome $key
 chrom=$key
@@ -31,6 +33,14 @@ fakechrom="fake${chrom}"
 # reference and alternative crispritz targets files
 targets_tsv_ref="$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
 targets_tsv_alt="${output_folder}/crispritz_targets/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
+targets_chrom_prefix="${output_folder}/${fakechrom}_${pam_name}_${guide_name}_${annotation_name}_${mm}_${bDNA}_${bRNA}"
+if [ "$stage" = "finish" ]; then
+    # the steps after the analysis, once the pool has merged its pieces
+    ./analisi_indels_NNN.sh "" "" "$targets_chrom_prefix" "$annotation_file" \
+        "${dict_folder}/log_indels_${vcf_name}" "${ref_folder}/${chrom}.fa" "$mm" "$bDNA" "$bRNA" \
+        "$guide_file" "$pam_file" "$output_folder" "$max_total_edits" finish
+    exit $?
+fi
 
 
 echo "Processing INDELs results for $key, starting post-analysis"
@@ -89,7 +99,6 @@ case "$header" in
 esac
 
 # perform targets analysis by chromosome (scores, annotation, etc.)
-targets_chrom_prefix="${output_folder}/${fakechrom}_${pam_name}_${guide_name}_${annotation_name}_${mm}_${bDNA}_${bRNA}"
 ./analisi_indels_NNN.sh \
     "$targets_tsv_ref_chrom" \
     "$targets_tsv_alt_chrom" \
@@ -101,7 +110,8 @@ targets_chrom_prefix="${output_folder}/${fakechrom}_${pam_name}_${guide_name}_${
     "$guide_file" \
     "$pam_file" \
     "$output_folder" \
-    "$max_total_edits"
+    "$max_total_edits" \
+    "$stage"
 
 # remove chrom-specific targets tsv files
 rm $targets_tsv_ref_chrom $targets_tsv_alt_chrom

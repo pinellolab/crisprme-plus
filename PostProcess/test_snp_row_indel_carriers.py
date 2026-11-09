@@ -365,16 +365,21 @@ class DictionaryPath(ObservedPath):
 
 class DenseWindowBed(unittest.TestCase):
     """The high-variant-density BED lists a dense window's samples with an alt, also one
-    whose haplotype an indel took off the window's rows: it is unchanged by the filter."""
+    whose haplotype an indel took off the window's rows: it is unchanged by the filter.
+    (Since 2.10.0 the run lists the window from its raw target before it is decomposed,
+    _record_dense_window, and writes the BED at the end, one line a window: hvdr_line.)"""
 
     def test_bed_keeps_the_dropped_sample(self):
         fx = _Fixture({"S1": "1|0", "S2": "1|0"},
                       [(_ins_inside(), {"S1": "1|0", "S2": "0|1"})])
         fx.ns["IUPAC_CAP"] = 0  # every window is logged
-        bed = fx.ns["hvdr_bed"]
+        fx.ns["_record_dense_window"](fx.split)
         rows = fx.run()
         self.assertEqual(fx.snp_carriers(rows), {"S2"})
-        self.assertEqual(bed.getvalue().rstrip("\n").split("\t")[5], "S1,S2")
+        lines = [fx.ns["hvdr_line"]("chrT", key, rec)
+                 for key, rec in sorted(fx.ns["_hvdr_records"].items())]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].rstrip("\n").split("\t")[5], "S1,S2")
 
 
 class RunTimeWiring(unittest.TestCase):

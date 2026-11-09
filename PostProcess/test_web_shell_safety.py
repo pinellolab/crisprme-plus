@@ -1123,7 +1123,12 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
     genome folders with the names its archive gives (one holding such a name is no longer
     imported: test_personal_assembly; one imported before can be searched).
     post_analisi_snp.sh is a stand-in here, which records its arguments, in the folder the
-    post-analysis runs in (the search runs it in PostProcess/)."""
+    post-analysis runs in (the search runs it in PostProcess/). Since 2.10.0 (option P) the
+    pool runs it with a stage, last: "all" (the whole post-analysis of a chromosome, with
+    CRISPRME_POSTPROC_PIECES=0), or "cluster" and "finish" around the analysis it runs itself
+    in pieces with the arguments the "cluster" stage writes to CRISPRME_POSTPROC_MANIFEST
+    (the stand-ins write a clustered file of one line, so the analysis, a stand-in too, runs
+    once a chromosome, as one piece)."""
 
     def setUp(self):
         super().setUp()
@@ -1131,8 +1136,16 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
         os.makedirs(self.post)
         stand_in = os.path.join(self.post, "post_analisi_snp.sh")
         with open(stand_in, "w") as fh:
-            fh.write('#!/bin/bash\nprintf "%s\\0" "$@" >> "$(dirname "$0")/args"\n')
+            fh.write('#!/bin/bash\nprintf "%s\\0" "$@" >> "$(dirname "$0")/args"\n'
+                     'if [ "${14}" = cluster ]; then\n'
+                     '  c="$(dirname "$0")/cluster.$$"; printf "#h\\nx\\n" > "$c"\n'
+                     '  printf "%s\\n" fa dict "$c" pam "${13}" 4 > "$CRISPRME_POSTPROC_MANIFEST"\n'
+                     'fi\n')
         os.chmod(stand_in, 0o755)
+        analysis = os.path.join(self.post, "new_simple_analysis.py")
+        with open(analysis, "w") as fh:
+            fh.write('#!/bin/bash\nprintf "%s\\0" "$@" >> "$(dirname "$0")/analyses"\n')
+        os.chmod(analysis, 0o755)
         self.genome = os.path.join(self.data, "Genomes", "hg38")
         self.job = os.path.join(self.data, "Results", "JOB1")
         os.makedirs(self.job)
@@ -1144,21 +1157,30 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
                      os.path.join(self.job, "final_results_JOB1.altMerge.txt")]
         self.before = self.outside_files()
 
-    def post_analysis(self):
+    def post_analysis(self, pieces="0"):
         """pool_post_analisi_snp.py, run as the search runs it, and the arguments of each
-        run of post_analisi_snp.sh it made."""
+        run of post_analisi_snp.sh it made (with its stage, last), and of the analysis."""
         record = os.path.join(self.post, "args")
-        if os.path.exists(record):
-            os.remove(record)
+        analyses = os.path.join(self.post, "analyses")
+        for old in (record, analyses):
+            if os.path.exists(old):
+                os.remove(old)
+        env = dict(os.environ, CRISPRME_POSTPROC_PIECES=pieces, TMPDIR=self.post)
         done = subprocess.run(
             [sys.executable, os.path.join(HERE, "pool_post_analisi_snp.py")] + self.head + ["1"],
-            cwd=self.post, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+            cwd=self.post, stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env)
+        self.analyses = []
+        if os.path.exists(analyses):
+            with open(analyses, "rb") as fh:
+                words = [w.decode() for w in fh.read().split(b"\0")[:-1]]
+            os.remove(analyses)
+            self.analyses = [words[i:i + 6] for i in range(0, len(words), 6)]
         words = []
         if os.path.exists(record):
             with open(record, "rb") as fh:
                 words = [w.decode() for w in fh.read().split(b"\0")[:-1]]
             os.remove(record)
-        return done, [words[i:i + 13] for i in range(0, len(words), 13)]
+        return done, [words[i:i + 14] for i in range(0, len(words), 14)]
 
     def test_a_fasta_named_with_a_command_runs_nothing(self):
         # a FASTA of sequence chr1 named so: the search's own check of the folder reads the
@@ -1186,8 +1208,17 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
                 fh.write(f">{name}\n" + SEQ + "\n")
         done, runs = self.post_analysis()
         self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertEqual(sorted(runs), [self.head + [chrom]
+        self.assertEqual(sorted(runs), [self.head + [chrom, "all"]
                                         for chrom in ("HLA-A*01:01", "chr1", "chr2")])
+        self.assertEqual(self.markers(), [])
+        # in pieces (the default): "cluster" then "finish" a chromosome, the analysis between
+        # them run with the arguments the cluster stage wrote, each name one argument
+        done, runs = self.post_analysis(pieces="1")
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        names = ("HLA-A*01:01", "chr1", "chr2")
+        self.assertEqual(sorted(runs), sorted(self.head + [chrom, stage] for chrom in names
+                                              for stage in ("cluster", "finish")))
+        self.assertEqual(sorted(a[4] for a in self.analyses), sorted(names))
         self.assertEqual(self.markers(), [])
 
 

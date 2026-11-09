@@ -2739,9 +2739,10 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
     BANNER = ("[complete-search] PER-SAMPLE analysis ({}): resolving per-sample genotypes "
               "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and "
               "exact joint AF. Requires a genotyped index (sites-only panels have no genotypes "
-              "to resolve -- the population-level analysis runs instead). Slower, and can be "
-              "intractable on dense panels; pass --population-level for the fast worst-case "
-              "screen.\n")
+              "to resolve -- the population-level analysis runs instead). Its post-analysis "
+              "skips the raw targets no sample can have (the haplotype pre-check) and runs in "
+              "pieces over the --thread workers; pass --population-level for each window's "
+              "worst case instead.\n")
     # a population-level search's, which {} splits where it says what --per-sample gives
     POPULATION = ("[complete-search] POPULATION-LEVEL analysis: the SNP variant post-analysis "
                   "reports one WORST-POSSIBLE off-target per variant window (no 2^k haplotype "
@@ -2789,8 +2790,10 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                     "at all, has no frequency. To get the tiers, rebuild the index with "
                     "build-index-only "
                     "--samplesID, or download a prebuilt one (crisprme.py download --what index "
-                    "--index-name NRR_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
-                    "dense panels; pass --population-level for the fast worst-case screen.\n", out)
+                    "--index-name NRR_3_hg38+hg38_HGDP1kGP). Its post-analysis skips the raw "
+                    "targets no sample can have (the haplotype pre-check) and runs in pieces "
+                    "over the --thread workers; pass --population-level for each window's worst "
+                    "case instead.\n", out)
                 # (and no frequency "the VCF gives": a variant has the AF that add-variants
                 # copied, none where its record has AF at another place in INFO than the
                 # first record's, test_generate_report)

@@ -661,7 +661,23 @@ def print_help_complete_search() -> None:
         "break the PAM, and the row's allele fits. A worst-case alignment (population-level, "
         "or a dense window's) is cut back to the strongest within it; any other row resting "
         "on more without such carriers is left out. Rows resting on 2 or more such columns "
-        "are rarely carried by anyone. Variant searches only; off by default [OPTIONAL]\n"
+        "are rarely carried by anyone, but not never: in a population-level search, whose rows "
+        "no phased carrier confirms, a K below 4 leaves out off-targets real people carry "
+        "(per-sample rows of the IGH locus rest on up to 4 such columns), so use K >= 4 there. "
+        "A population-level search with it skips, before reading their genotypes, the raw "
+        "targets every row of which would rest on more than K such columns (the K-skip: it "
+        "writes what the cap leaves, faster). Variant searches only; off by default "
+        "[OPTIONAL]\n"
+        "\t--no-haplotype-precheck, turn off the exact haplotype pre-check of a per-sample "
+        "search: before a raw target of the variant genome is expanded into the haplotypes "
+        "its carriers have, it is tested against the samples' genotypes, and skipped (its "
+        "reference row is still written) when no sample, free to take at each variant column "
+        "the reference base or any ALT it carries there, reaches the mismatch budget and the "
+        "PAM; the same carriers-first test skips an overlaid indel target no carrier of its "
+        "indel can have. It also turns off the K-skip of --max-degeneracy. The results are "
+        "the same either way (neither skips a target a row can come from); off, a dense "
+        "region's raw targets are each expanded, as up to 2.8.1 "
+        "(CRISPRME_HAPLOTYPE_PRECHECK=0 does the same) [OPTIONAL]\n"
         "\t--full_input_validate, also run a full per-VCF-record scan (chromosome "
         "coverage, AF/FILTER consistency, POS bounds, multiallelic/breakend/"
         "duplicate/phasing survey) before launching the search; slower than the "
@@ -671,14 +687,18 @@ def print_help_complete_search() -> None:
         "cis phasing + named carrier samples + exact joint AF (the resolution the genotyped "
         "indexes are built for). Requires a genotyped index (no-op with a warning on "
         "sites-only panels); on one without the dict-less tiers (built without --samplesID) "
-        "it names the carrier samples only. Slower, and can be intractable on dense panels "
-        "(measured 49h+ "
-        "without completing on a 4x-density panel) [OPTIONAL]\n"
-        "\t--population-level, force the fast population-level analysis: one worst-possible "
+        "it names the carrier samples only. Its post-analysis skips the raw targets no "
+        "sample's genotypes can produce (the haplotype pre-check: --no-haplotype-precheck) "
+        "and, as the population-level one, runs in pieces over the --thread workers; up to "
+        "2.8.1 it could be intractable on dense panels (measured 49h+ without completing on a "
+        "4x-density panel) [OPTIONAL]\n"
+        "\t--population-level, force the population-level analysis: one worst-possible "
         "PUTATIVE representative per variant window, exact worst-case CFD, dataset-level "
-        "allele frequencies -- lossless for detection, tractable on any panel. Use this to "
-        "opt OUT of per-sample on a phased index (e.g. a very dense / high-edit / "
-        "genome-wide search) [OPTIONAL]\n"
+        "allele frequencies -- lossless for detection. A genotype-resolution choice, not a "
+        "speed one: on the indexes CRISPRitz 2.10.0 builds, which code every allele, it is "
+        "no faster than the per-sample analysis, whose haplotype pre-check skips the dense "
+        "windows' raw targets nobody carries (METHODS.md section 5). Use this to opt OUT of "
+        "per-sample on a phased index [OPTIONAL]\n"
         "\t(DEFAULT, no flag: CRISPRme+ auto-selects the mode by index type -- PER-SAMPLE on "
         "a genotyped + PHASED index [e.g. the HGDP+1000G default: CONFIRMED cis + named "
         "carriers], POPULATION-LEVEL otherwise [sites-only / unphased / hybrid / "
@@ -819,7 +839,8 @@ _COMPLETE_SEARCH_FLAGS = frozenset(
         "--be-window", "--compute-backend", "--full_input_validate",
         "--gene_annotation", "--genome", "--guide", "--index-path",
         "--keep-intermediates", "--max-degeneracy", "--max-total-edits", "--merge",
-        "--mm", "--no-alt-alignments", "--output", "--pam", "--per-sample",
+        "--mm", "--no-alt-alignments", "--no-haplotype-precheck", "--output", "--pam",
+        "--per-sample",
         "--personal_annotation", "--population-level", "--prune-pam",
         "--report-full", "--samplesID", "--sequence", "--sorting-criteria",
         "--sorting-criteria-scoring", "--thread", "--vcf",
@@ -2648,6 +2669,53 @@ def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[s
     return prune_flank.wider_flank_notes(indexes, motif, genomedir, "complete-search")
 
 
+def _every_allele_variant_index(vcf_dirs: List[str], genome: str, index_path: str) -> bool:
+    """True when a variant dataset of the search is searched on an index that codes every
+    allele of a split site (CRISPRitz 2.10.0's enrichment, whose indexes are in index format
+    2): one of its installed variant indexes (SNP or INDELS) is of format 2, or none is
+    installed and the installed CRISPRitz builds format 2 (it will build one)."""
+    libs = _variant_libraries(index_path)
+    for vdir in vcf_dirs:
+        dataset = f"{genome}+{os.path.basename(os.path.normpath(vdir))}"
+        found = False
+        for lib in libs:
+            for name in sorted(_listdir(lib)):
+                idx = os.path.join(lib, name)
+                if not (name.endswith(f"_{dataset}") or name.endswith(f"_{dataset}_INDELS")) \
+                        or not os.path.isdir(idx):
+                    continue
+                found = True
+                if index_fit.recorded_format(idx) == 2 or 2 in index_fit.bin_formats(idx):
+                    return True
+        if not found and index_fit.engine_index_format() == 2:
+            return True
+    return False
+
+
+def _warn_wide_bulge_budget(vcf_dirs: List[str], genome: str, index_path: str, mm: int,
+                            bdna: int, brna: int) -> None:
+    """A stdout warning (2.10.0) for a variant search allowing more than 1 DNA + 1 RNA bulge
+    on an index that codes every allele (_every_allele_variant_index): there the variant
+    search of the densest regions grows by orders of magnitude, a cost no step after the
+    search removes (the haplotype pre-check acts on the raw targets the search wrote)."""
+    if bdna <= 1 and brna <= 1:
+        return
+    if not _every_allele_variant_index(vcf_dirs, genome, index_path):
+        return
+    print(
+        f"WARNING [complete-search]: {mm} mismatch(es) + {bdna} DNA + {brna} RNA bulge(s) on "
+        f"a variant index that codes every allele (index format 2, CRISPRitz 2.10.0). Above "
+        f"the 1 DNA + 1 RNA default, the variant search of the densest regions (the "
+        f"immunoglobulin loci) grows by orders of magnitude: on IGL alone (chr22, HGDP + 1000 "
+        f"Genomes, one guide) 0.76 million raw SNP targets at 4 + 1 + 1, 5.3 million at "
+        f"4 + 2 + 1 and 34 million at 4 + 2 + 2, where the indel search wrote 204 million "
+        f"(157 GB of memory); IGH (chr14) needed 225 GB at 4 + 2 + 1. Such a search can run "
+        f"for many hours or run out of memory. The 1 DNA + 1 RNA default is recommended "
+        f"(METHODS.md section 5).",
+        flush=True,
+    )
+
+
 def _variant_libraries(index_path: str) -> List[str]:
     """The libraries a search reads a variant index from, in the order it reads them: the
     --index-path library (``index_path``, "_" for none), then the working directory's
@@ -2969,9 +3037,9 @@ def complete_search() -> None:
         print(
             "[complete-search] genotyped + PHASED index detected -> PER-SAMPLE analysis "
             "by DEFAULT: CONFIRMED cis phasing + named carrier samples + exact joint "
-            "allele frequency. Pass --population-level for the fast worst-case screen "
-            "(recommended on a very dense / high-edit / genome-wide search, where "
-            "per-sample resolution can be slow).",
+            "allele frequency. Pass --population-level for each window's worst case "
+            "instead (no faster on the indexes CRISPRitz 2.10.0 builds: METHODS.md "
+            "section 5).",
             flush=True,
         )
     # The pre-2.5.4 --fast / --full flags were removed (no aliases). argparse-free parsing
@@ -3207,6 +3275,12 @@ def complete_search() -> None:
                 flush=True,
             )
     os.environ["CRISPRME_MAX_DEGENERACY"] = str(max_degeneracy)
+    # 2.10.0: the exact haplotype pre-check of a per-sample search, and its carriers-first
+    # twin on the indel side (new_simple_analysis.py, analisi_indels_NNN.py), are on unless
+    # --no-haplotype-precheck turns them off (as CRISPRME_HAPLOTYPE_PRECHECK=0 in the
+    # environment does); inherited by the post-analysis like CRISPRME_FAST_MODE
+    if "--no-haplotype-precheck" in args:
+        os.environ["CRISPRME_HAPLOTYPE_PRECHECK"] = "0"
 
     # extract pam seq from file
     pam_len = 0
@@ -3291,6 +3365,8 @@ def complete_search() -> None:
         _refuse_no_variant_index(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
             bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
+        _warn_wide_bulge_budget(resolve_vcf_dataset_dirs(vcfdir, current_working_directory),
+                                genome_ref, index_path, mm, bDNA, bRNA)
     if variant and index_path != "_" and (bDNA or bRNA):
         _refuse_no_reference_index(index_path, genome_ref, pam_char, max(bDNA, bRNA) + 1,
                                    prune_pam, not pam_begin, total_pam_len - pam_len, bDNA, bRNA,
@@ -3767,16 +3843,14 @@ def complete_search() -> None:
                 f"AF they give as 0, or not at all, has no frequency. "
                 f"To get the tiers, rebuild the index with build-index-only "
                 f"--samplesID, or download a prebuilt one (crisprme.py download --what index "
-                f"--index-name NRR_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
-                f"dense panels; pass --population-level for the fast worst-case screen."
+                f"--index-name NRR_3_hg38+hg38_HGDP1kGP). Its post-analysis skips the raw targets no sample can have (the haplotype pre-check) and runs in pieces over the --thread workers; pass --population-level for each window's worst case instead."
             )
         else:
             print(
                 "[complete-search] PER-SAMPLE analysis (%s): resolving per-sample genotypes "
                 "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and exact "
                 "joint AF. Requires a genotyped index (sites-only panels have no genotypes to resolve "
-                "-- the population-level analysis runs instead). Slower, and can be intractable on "
-                "dense panels; pass --population-level for the fast worst-case screen."
+                "-- the population-level analysis runs instead). Its post-analysis skips the raw targets no sample can have (the haplotype pre-check) and runs in pieces over the --thread workers; pass --population-level for each window's worst case instead."
                 % _why
             )
     # the pre-flight has passed: the samples lists taken without --samplesID, for the pipeline
