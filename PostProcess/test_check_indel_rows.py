@@ -1424,6 +1424,46 @@ class ReviewRound2(Base):
         self.assertFalse(rep.locus("TTTTAAAATTTTAAAATTTT", "chr21", 102, d(3, 0.2),
                                    alone)[0])
 
+    def test_a_near_row_that_names_an_insertion_can_be_the_next_sites(self):
+        """Since 2.10.0 a row that starts inside an insertion joins one site and chains
+        none (remove_contiguous_samples, rule of decision (d)): a row within --merge bp of
+        a target that names an insertion can be the next site's, and the target's own row
+        further along the chain of every row. The gate's repeat-rich population-level run:
+        the target of CFD 0.040 at Cluster Position 22,263,588 (+, VEGFA site 3) beside the
+        new chr22:22,263,589 row of CFD 0.030 (an insertion row), its site's row the
+        chr22:22,263,577 one of CFD 0.102, eleven bases before. It is counted under
+        limit-insertion-site, not judged; a near row that names none is the target's
+        cluster's, as before, and a far row no better leaves it a miss."""
+        ctx = C.Ctx(argparse_ns(), "NRG", 3, False, [GUIDE])
+
+        def d(total, cfd):
+            return C.Demand("exact", [], C.edits(total, 0), cfd, 0)
+
+        def chain(wide=False):
+            return [89, 92, 95, 98, 100], False, set()
+        for ins, far_cfd, want in ((True, 0.102, (True, {"insertion-site"})),
+                                   (False, 0.102, (False, set())),
+                                   (True, 0.020, (False, set()))):
+            with self.subTest(ins=ins, far_cfd=far_cfd):
+                far = (GUIDE, [89, 89, 89], C.edits(2, 0), far_cfd, 7, False)
+                near = (GUIDE, [101, 101, 101], C.edits(3, 0), 0.030, 8, ins)
+                rep = C.Reported([], ctx, loci={(GUIDE, "chr21"): [far, near]})
+                self.assertEqual(rep.locus(GUIDE, "chr21", 100, d(3, 0.040), chain)[::3],
+                                 want)
+
+    def test_an_integrated_line_says_whether_it_names_an_insertion(self):
+        # read_rows' per-line entry for the cluster check: its last field says whether a
+        # block of the line names an insertion (an ALT longer than its REF)
+        r1 = row_fields("chr21", 69, "+", GUIDE + "NNN", GUIDE + "TGG", GUIDE + "TGG", "TGG",
+                        0, 0, "X", "chr21_70_T_TA", "S01")
+        r2 = row_fields("chr21", 80, "+", GUIDE + "NNN", GUIDE + "TGG", GUIDE + "TGG", "TGG",
+                        0, 0, "X", "chr21_81_TA_T", "S01")
+        p = write_results(os.path.join(self.tmp, "ins_res"), [r1, r2])
+        loci = {}
+        C.read_rows(p, "integrated", "chr21", None, None, 0, False, loci=loci)
+        got = [ln[5] for lines in loci.values() for ln in lines]
+        self.assertEqual(got, [True, False])
+
     def test_a_short_table_line_is_reported(self):
         """N4: a results line with fewer fields than its header is not skipped silently."""
         case, info = world_deletion(self.tmp)

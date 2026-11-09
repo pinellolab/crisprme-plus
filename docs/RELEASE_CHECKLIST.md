@@ -188,7 +188,10 @@ done
 #     from its PAM) does, a 27-nt target with a DNA bulge; limit-window-edge and
 #     limit-last-alt-wins on an index CRISPRitz 2.9.1 built, of format 1;
 #     limit-max-degeneracy under --max-degeneracy; limit-capped-window on a per-sample run
-#     of 2.8.x, whose classic dictionaries wrote a capped window's greedy row), slots whose VCF
+#     of 2.8.x, whose classic dictionaries wrote a capped window's greedy row;
+#     limit-density-guard, a sites-only dataset's row the density guard withheld;
+#     limit-insertion-site, a population-level target whose near row names an insertion
+#     and can be the next site's, the chain of every row reaching a row as good as it), slots whose VCF
 #     alleles overlap where a target of their record reads, so the VCF gives it no sequence
 #     (limit-overlapping-records: 4 records on chr22; a carrier there is judged where
 #     METHODS section 4 reads the slot

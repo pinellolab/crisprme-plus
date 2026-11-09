@@ -2007,7 +2007,11 @@ per-sample run of 2.10.0 writes no greedy row of a window over `CRISPRME_IUPAC_C
 joins a cluster; its `--max-degeneracy K` (§5) cuts back or leaves out a SNP row resting on
 more than K ambiguous columns, so in a cluster chain an alignment over more than K positions
 of several options is a row CRISPRme may write or not (`limit-max-degeneracy`); an indel row
-is not cut. The carrier gate (§5) ranks and labels population-level rows in its companion
+is not cut. Since 2.10.0 a row that starts inside an insertion joins one merge site and chains
+none, so the row within `--merge` bases of a population-level target can be the next site's: a
+target whose near rows are not as good as it, one of them naming an insertion, is
+`limit-insertion-site` (non-gating) where the chain of every row, which the check follows,
+reaches a row that is (its own coverage gap). The carrier gate (§5) ranks and labels population-level rows in its companion
 and the report and leaves the integrated results and their alternative alignments as they
 are, so it changes nothing the check reads. A run made with the SNP+indel co-occurrence off
 (`CRISPRME_INDEL_SNP=0`, which a search of 2.10.0 notes in its `log_verbose.txt`) is

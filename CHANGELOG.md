@@ -2324,10 +2324,17 @@ and the `release-crisprme` skill.
   67 more that the same search with 2.8.1's merge wrote (27 at the same place, 40 at their
   insertion's anchor), and 25 sites that a row inside an insertion joined to a neighbour with
   2.8.1's merge too (chr22:22,585,904 (-) of EMX1, CFD 0.317, eight bases from the
-  chr22:22,585,896 site of the same CFD, among them). The real-data
-  check's cluster chain is the chain of every row, a superset of the merge's around such a row:
-  it never fails a run for it (its coverage gap, documented). Covered by
-  `PostProcess/test_representative_tiebreak.py`.
+  chr22:22,585,896 site of the same CFD, among them). The real-data check's cluster chain is the
+  chain of every row, a superset of the merge's around such a row, and it took the row within
+  `--merge` bases of a target for the target's cluster's: on the gate's repeat-rich
+  population-level run (HGDP + 1000 Genomes chr22, three guides), where this merge writes 11
+  rows more, a target of CFD 0.040 at chr22:22,263,588 (+) of VEGFA site 3 was a gating
+  `missing-locus` beside the new chr22:22,263,589 insertion row of CFD 0.030, its own site's
+  row chr22:22,263,577's, of CFD 0.102. A target whose near rows are not as good as it, one of
+  them naming an insertion, is now `limit-insertion-site` (non-gating) where the chain of every
+  row reaches a row that is, and a miss where it does not: the check can take a row of the next
+  site for a target's there (its coverage gap, documented). Covered by
+  `PostProcess/test_representative_tiebreak.py` and `test_check_indel_rows.py`.
 
 ## [2.8.1] - 2026-11-05
 
