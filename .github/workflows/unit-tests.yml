@@ -241,6 +241,7 @@ jobs:
         working-directory: PostProcess
         run: |
           python test_indel_snp_overlay.py
+          python -m unittest test_indel_window -v
           python test_indel_genotypes.py
           python test_indel_snp_cis.py
           python test_indel_snp_bruteforce.py
