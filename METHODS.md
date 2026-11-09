@@ -334,7 +334,8 @@ it reads one set of records, those CRISPRitz's enricher reads:
    the frequencies of the more frequent record (the higher `INFO/AF`; on a tie, the earlier),
    as the enricher merges one allele's dictionary entries. Up to 2.8.1 the registry read every
    record whatever its FILTER, and the indel frequencies took each source's highest of a
-   repeated key;
+   repeated key; and `samplesIDs/<dataset>.samplesID.txt`, which a search names, lists the
+   sources as pseudo-samples, as the shipped install does;
 4. `verify_mega_chrom.py` reads the source VCF on its own and checks every store against it:
    the registry's records are exactly the SNP alleles, the indel frequencies' and the indel
    log's exactly the indel-path alleles (one log row each, no sample, `AF` = `AF_max`), the

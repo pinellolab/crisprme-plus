@@ -43,8 +43,10 @@ merged VCFs (`mega.<chr>.afmax.vcf.gz`) so that every part of it reads the recor
 genotype `MEGA` (`synth_sites_gt.py`, every ALT carried) builds the enriched genome, the SNP
 index, the fake-indel genome, the `_INDELS` index and the indel log, from which `MEGA` is taken
 out; the registry and the indel frequencies are built from the build input as the enricher reads
-it (FILTER, every allele, one REF>ALT on two records the more frequent one's); and
-`PostProcess/verify_mega_chrom.py` checks every store against the source VCF read on its own.
+it (FILTER, every allele, one REF>ALT on two records the more frequent one's), and
+`samplesIDs/hg38_mega.samplesID.txt` lists the five sources as pseudo-samples (the file a search
+names, as the shipped install has it); and `PostProcess/verify_mega_chrom.py` checks every store
+against the source VCF read on its own.
 Validated on chr22 and chr14 (METHODS section 2); not run genome-wide before the release's
 readiness audit. Usage: `mega_rebuild.sh <install_dir> <merged_vcf_dir> [chrom ...]` (its
 header has the environment it reads).

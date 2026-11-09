@@ -24,7 +24,9 @@
 #      frequencies (PostProcess/build_mega_indel_af.py) from the build input, both reading
 #      it as the enricher does: FILTER PASS or '.', the SNP ALTs it codes, every allele of a
 #      line, one REF>ALT on two records merged into the more frequent (INFO/AF);
-#   6. the build input VCFs left in VCFs/<dataset>/ (sites-only), the checks of
+#   6. samplesIDs/<dataset>.samplesID.txt, the file a search names (--samplesID): the registry's
+#      sources as pseudo-samples, as the shipped install has it (one already there is kept);
+#   7. the build input VCFs left in VCFs/<dataset>/ (sites-only), the checks of
 #      PostProcess/verify_mega_chrom.py run on every chromosome (the source VCF read
 #      independently against the registry, the indel frequencies, the indel log and the
 #      enriched genome).
@@ -165,7 +167,25 @@ done
 rmdir "$STAGE/prepared" "$STAGE"
 say "registry_$DATASET and indel_af_$DATASET written; VCFs/$DATASET holds the build input"
 
-# 6. checks, the source VCFs read independently
+# 6. the samplesID file a search names (--samplesID) and its post-analysis reads: the
+# registry's sources as pseudo-samples, as the shipped install has it; one already there is kept
+SID="$INSTALL/samplesIDs/$DATASET.samplesID.txt"
+if [ ! -e "$SID" ]; then
+  mkdir -p "$INSTALL/samplesIDs"
+  run "$PYTHON" - "$PP" "$SID" <<'PY'
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import build_mega_registry as b
+with open(sys.argv[2] + ".tmp", "w") as out:
+    out.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+    for ds in b.DEFAULT_DATASET_META:
+        out.write("%s\t%s\t%s\tNA\n" % (ds, ds, ds))
+os.replace(sys.argv[2] + ".tmp", sys.argv[2])
+PY
+  say "samplesIDs/$DATASET.samplesID.txt written (the registry's sources)"
+fi
+
+# 7. checks, the source VCFs read independently
 run "$PYTHON" "$PP/verify_mega_chrom.py" "$SRC" "$D/registry_$DATASET" "$D/indel_af_$DATASET" \
   "${CHROMS[@]}" --log "$L" --enriched "$INSTALL/Genomes/$GENOME+$DATASET" \
   --reference "$INSTALL/Genomes/$GENOME" --build-vcf-dir "$VDIR"

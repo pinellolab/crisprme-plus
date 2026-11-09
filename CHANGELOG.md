@@ -687,7 +687,9 @@ and the `release-crisprme` skill.
   (`PostProcess/synth_sites_gt.py`; `0/1` carried the first alone), builds the enriched genome,
   the SNP index, the fake-indel genome and its INDELS index (format 2) and the indel log; `MEGA`
   is taken out of the log and the per-sample dictionaries removed; the registry and the indel
-  frequencies are built from the build input as the enricher reads it (Changed, below); and
+  frequencies are built from the build input as the enricher reads it (Changed, below);
+  `samplesIDs/hg38_mega.samplesID.txt`, which a search names, lists the five sources as
+  pseudo-samples, as the shipped install does (a search of the install failed without it); and
   `PostProcess/verify_mega_chrom.py`, rewritten, reads the source VCF on its own and checks the
   registry (exactly the SNP alleles, each source's AF within 0.5/AN, the GLOBAL group `AF_max`),
   the indel frequencies and the indel log (exactly the indel-path alleles, one log row each, no
@@ -700,9 +702,9 @@ and the `release-crisprme` skill.
   two-build recipe the D2 judges validated (a sites-only SNP build beside
   `mega_build_indels.sh`'s). Not run genome-wide: the release's readiness audit (D7) comes first.
   METHODS section 2, `docs/PRECOMPUTED_INDEXES.md` (mega), `seq_script/merge_panels/README.md`.
-  Covered by `PostProcess/test_mega_rebuild.py` (the recipe end to end on the stub engine, and
-  its checks failing on a registry that reads every record), `test_prepare_mega_build_vcf.py`
-  and `test_synth_sites_gt.py`.
+  Covered by `PostProcess/test_mega_rebuild.py` (the recipe end to end on the stub engine, the
+  samplesID file it writes or keeps, and its checks failing on a registry that reads every
+  record), `test_prepare_mega_build_vcf.py` and `test_synth_sites_gt.py`.
 - **The sites-only density guard: of a sites-only dataset, the candidates in windows of 2^20
   sequences or more are withheld from the SNP and the indel post-analysis, and listed.** A
   sites-only dataset (the mega) has no genotypes to tell which combinations of a window's

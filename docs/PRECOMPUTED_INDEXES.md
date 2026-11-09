@@ -581,6 +581,8 @@ complete protocol.
      indel frequencies (`PostProcess/build_mega_indel_af.py`), both reading the build input as
      the enricher does (FILTER, every allele of a line, one REF>ALT on two records the more
      frequent one's); the registry is SNP-only, the indels (~24%) the fake-indel path's;
+   - `samplesIDs/hg38_mega.samplesID.txt`, the file a search names with `--samplesID`: the five
+     sources as pseudo-samples, as the shipped install has it (one already there is kept);
    - `PostProcess/verify_mega_chrom.py`, which reads the source VCF on its own and checks the
      registry, the indel frequencies, the indel log, the enriched genome and the build input
      against it.

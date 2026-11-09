@@ -198,6 +198,34 @@ class TheRecipe(bio._Fixture):
         self.assertTrue(os.path.isdir(self.lib("20-NRG_2_hg38+hg38_mega")))
         self.assertTrue(os.path.isdir(self.lib("20-NRG_2_hg38+hg38_mega_INDELS")))
 
+    # the samplesID file the shipped mega install holds: its five sources as pseudo-samples
+    SAMPLES_ID = ("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+                  "1000G2021\t1000G2021\t1000G2021\tNA\nHGDP\tHGDP\tHGDP\tNA\n"
+                  "gnomAD\tgnomAD\tgnomAD\tNA\nTOPMed\tTOPMed\tTOPMed\tNA\nAoU\tAoU\tAoU\tNA\n")
+
+    def test_the_install_has_the_samples_id_file_a_search_reads(self):
+        # a search names the dataset's samplesID file (--samplesID), and the post-analysis
+        # reads it (a search of the gate failed at hg38_mega without it): the recipe writes
+        # the shipped one, the registry's sources as pseudo-samples, and keeps one there
+        done = self.rebuild()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        sid = self.path("samplesIDs", "hg38_mega.samplesID.txt")
+        with open(sid) as fh:
+            self.assertEqual(fh.read(), self.SAMPLES_ID)
+        import build_mega_registry as bmr
+        self.assertEqual([ln.split("\t")[0] for ln in self.SAMPLES_ID.splitlines()[1:]],
+                         list(bmr.DEFAULT_DATASET_META))
+
+    def test_a_samples_id_file_already_there_is_kept(self):
+        os.makedirs(self.path("samplesIDs"), exist_ok=True)
+        sid = self.path("samplesIDs", "hg38_mega.samplesID.txt")
+        with open(sid, "w") as fh:
+            fh.write(self.SAMPLES_ID.replace("\tNA\n", "\tunknown\n"))
+        done = self.rebuild()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        with open(sid) as fh:
+            self.assertEqual(fh.read(), self.SAMPLES_ID.replace("\tNA\n", "\tunknown\n"))
+
     def test_the_checks_fail_a_registry_that_reads_every_record(self):
         # the shipped mega's registry read every record whatever its FILTER: the checks
         # of the recipe catch it (the LOW_VQSLOD SNV at 31 is no allele the genome codes)
