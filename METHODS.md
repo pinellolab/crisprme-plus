@@ -916,7 +916,10 @@ complementary controls:
   off-targets. It bounds the
   variant-density combinatorial explosion. (`assembly-search` instead defaults it to
   the full `mm+bDNA+bRNA` budget — a resolved diploid genome has no IUPAC-variant
-  lattice, so it needs no variant-density cap.)
+  lattice, so it needs no variant-density cap.) The default bulge budget is **1 DNA + 1
+  RNA bulge**: a search given neither `--bDNA` nor `--bRNA` takes it (complete-search, up to
+  the bulges an index it can use or build holds; assembly-search, since 2.10.0; the web
+  form's simple and Advanced modes, whose Advanced panel offers up to 2 of each).
 - **High-variant-density cap.** Dense windows, those spelling more sequences than a
   configurable budget, 2 to the power `CRISPRME_IUPAC_CAP` (default 2¹⁰), fall back to a
   bounded procedure instead of full enumeration, so a single pathological window cannot

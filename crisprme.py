@@ -609,8 +609,12 @@ def print_help_complete_search() -> None:
         "\t--gene_annotation, specify gene annotation (e.g., GENCODE) to find "
         "nearest gene for each target (plain or bgzip-compressed BED) [OPTIONAL]\n"
         "\t--mm, number of mismatches allowed in the search [REQUIRED]\n"
-        "\t--bDNA, number of DNA bulges allowed in the search [OPTIONAL]\n"
-        "\t--bRNA, number of RNA bulges allowed in the search [OPTIONAL]\n"
+        "\t--bDNA, number of DNA bulges allowed in the search [OPTIONAL; given neither "
+        "--bDNA nor --bRNA, 1 DNA + 1 RNA bulge, the default budget (as the web form's), "
+        "fewer where no index this search can use or build holds one, which it says; given "
+        "one of them, the other is 0. A budget above 4 mismatches + 1 + 1 needs "
+        "--max-total-edits raised to its sum]\n"
+        "\t--bRNA, number of RNA bulges allowed in the search [OPTIONAL; as --bDNA]\n"
         "\t--merge, window size (nucleotides) to merge candidate off-targets "
         "using the highest scoring as pivot [default: 3]\n"
         "\t--sorting-criteria-scoring, comma-separated list to sort targets by "
@@ -1979,6 +1983,14 @@ def _check_mm(args: List[str]) -> int:
         error("Invalid number of mismatches specified")
     return mm
 
+# The default search budget (decision of 2026-11-08): given neither --bDNA nor --bRNA, a search
+# takes one DNA and one RNA bulge -- complete-search (bounded by the bulges an index it can use
+# or build holds), assembly-search, and the web form's simple and Advanced modes alike (the
+# Advanced panel offers up to 2 of each, MAX_BULGES - 1 in pages_utils). 4 mismatches + 1 + 1 is
+# the default --max-total-edits, 6.
+DEFAULT_BULGES = 1
+
+
 def _check_bdna(args: List[str], bdna: bool) -> int:
     """Retrieves and validates the number of DNA bulges from command-line arguments.
 
@@ -2789,10 +2801,11 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
                                    guide_len, bdna, brna)
             ]
         assembly_search = (
+            "assembly-search, which searches each haplotype on an index of its own (given no "
+            f"--bDNA/--bRNA it takes {DEFAULT_BULGES} DNA + {DEFAULT_BULGES} RNA bulge, the "
+            "default budget)" if (bdna, brna) == (DEFAULT_BULGES, DEFAULT_BULGES) else
             f"assembly-search --bDNA {bdna} --bRNA {brna}, which searches each haplotype "
-            f"on an index of its own (given no --bDNA/--bRNA, assembly-search takes no "
-            f"bulges)" if bdna or brna else
-            "assembly-search, which searches each haplotype on an index of its own"
+            f"on an index of its own"
         )
         for index_dir, why in in_the_way:
             error(
@@ -3256,7 +3269,7 @@ def complete_search() -> None:
     # as the search shell does), so a fresh/dict-less install still gets its 1 bulge; the
     # variant term stays strictly installed-index-based. If no index can supply bulges and no
     # raw genome exists the search stays bulge-free (fast, safe).
-    _SIMPLE_BULGE_CAP = 1
+    _SIMPLE_BULGE_CAP = DEFAULT_BULGES
     _no_bulges_reached = False
     if not _bdna_given and not _brna_given and max_total_edits > 0:
         # (an index that serves only pruned counts: the search then prunes by itself)
@@ -3900,7 +3913,9 @@ def print_help_build_index() -> None:
         "\t--genome, specify the reference genome folder [REQUIRED]\n"
         "\t--pam, specify a file containing the PAM sequence [REQUIRED]\n"
         "\t--bDNA, number of DNA bulges the index must support [OPTIONAL, "
-        "default 0]\n"
+        "default 0; a search's default budget, 1 DNA + 1 RNA bulge, needs an index of at "
+        "least 1 + 1 (N = 2), and the web's ceiling of 2 + 2 one of N = 3, as the "
+        "published indexes are]\n"
         "\t--bRNA, number of RNA bulges the index must support [OPTIONAL, "
         "default 0]\n"
         "\t--thread, set number of threads to use [default: 8]\n"
@@ -6600,8 +6615,10 @@ def print_help_assembly_search() -> None:
         "\t--guide, specify a file containing guide RNAs [REQUIRED]\n"
         "\t--pam, specify a file containing the PAM sequence [REQUIRED]\n"
         "\t--mm, number of mismatches allowed in the search [REQUIRED]\n"
-        "\t--bDNA, number of DNA bulges allowed in the search [OPTIONAL]\n"
-        "\t--bRNA, number of RNA bulges allowed in the search [OPTIONAL]\n"
+        "\t--bDNA, number of DNA bulges allowed in the search [OPTIONAL; given neither "
+        "--bDNA nor --bRNA, 1 DNA + 1 RNA bulge, the default budget, as complete-search's; "
+        "given one of them, the other is 0]\n"
+        "\t--bRNA, number of RNA bulges allowed in the search [OPTIONAL; as --bDNA]\n"
         "\t--merge, window size (nucleotides) to merge candidate off-targets "
         "using the highest scoring as pivot [default: 3] -- also used as the "
         "locus-clustering threshold when reconciling the two haplotypes, so it "
@@ -6831,6 +6848,13 @@ def assembly_search() -> None:
     mm = _check_mm(args)
     bDNA = _check_bdna(args, "--bDNA" in args)
     bRNA = _check_brna(args, "--bRNA" in args)
+    # The default budget, as complete-search's and the web's (its Personal assembly tab takes
+    # the form's 1 + 1): given neither --bDNA nor --bRNA, one bulge of each type, which each
+    # haplotype's search builds its index for (up to 2.8.1 assembly-search took none)
+    if "--bDNA" not in args and "--bRNA" not in args:
+        bDNA = bRNA = DEFAULT_BULGES
+        print(f"[assembly-search] no --bDNA/--bRNA given: {DEFAULT_BULGES} bulge(s) of each type, "
+              f"the default budget (--bDNA 0 --bRNA 0 for none).", flush=True)
     merge_t = _check_merge(args, "--merge" in args)
     thread = _check_threads(args, "--thread" in args)
     debug = "--debug" in args

@@ -295,11 +295,14 @@ same name, to search that index again.
 
 By default the form exposes a single **Maximum edits** slider — the total number
 of differences (mismatches + DNA/RNA bulges) allowed between a guide and an
-off-target (default **6**, which resolves to 4 mismatches + 1 DNA + 1 RNA bulge;
-raise it for a deeper, slower search). This is all you
-need for a quick search.
+off-target (default **6**, which resolves to 4 mismatches + 1 DNA + 1 RNA bulge, the
+default budget, as on the command line). Lower it for a faster, narrower search; the
+slider caps the total of the per-type caps below, so a deeper search (more mismatches,
+or 2 bulges of a type) is set in **Advanced options**. This is all you need for a quick
+search.
 
-Open **Advanced options** to set the per-type caps individually instead:
+Open **Advanced options** to set the per-type caps individually instead (defaults: 4
+mismatches, 1 DNA bulge, 1 RNA bulge):
 
 - **Mismatches** — the maximum number of base mismatches between the spacer and
   the protospacer. The web interface supports up to **6 mismatches**.

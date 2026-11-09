@@ -675,6 +675,22 @@ and the `release-crisprme` skill.
     method.
 
 ### Changed
+- **The default search budget, 1 DNA + 1 RNA bulge, is every search's** (decision of
+  2026-11-08). complete-search (given neither `--bDNA` nor `--bRNA`, up to the bulges an index it
+  can use or build holds) and the web form (its simple mode, and its Advanced panel's defaults,
+  which offer up to 2 of each) took it already; `assembly-search`, given neither, took **no**
+  bulges, and its web tab the form's 1 + 1: it now takes 1 DNA + 1 RNA bulge, searching each
+  haplotype on an index of its own, and says so (`--bDNA 0 --bRNA 0` for none; given one of
+  them, the other is 0, as complete-search's). The help of complete-search, assembly-search and
+  build-index-only says the default (build-index-only's 0 + 0 builds an index of N = 1, which
+  the default search cannot use: it needs N = 2, and the web's ceiling N = 3, as the published
+  indexes are), METHODS §5 states it, the web user guide no longer tells a user to raise the
+  Max edits slider for a deeper search (with the Advanced panel at its defaults, 4 + 1 + 1, the
+  slider caps a total of 6), and the search examples of `docs/PRECOMPUTED_INDEXES.md` take it
+  (they gave 2 + 2, which the default `--max-total-edits` of 6 prunes). Covered by
+  `test_assembly_haplotype_genomes` (assembly-search given no bulges passes `--bDNA 1 --bRNA 1`
+  to each haplotype's search, and the refusal that names it says so; both fail on the code
+  before it).
 - **CRISPRme and CRISPRitz share their major.minor version; this release is 2.10.0, after 2.8.1.**
   CRISPRme X.Y.z requires CRISPRitz X.Y.* (2.10.z, then 2.11, ...), patch numbers are
   independent, and a breaking change in either package -- an index format, the enricher's output
