@@ -467,6 +467,48 @@ class AnArchiveOf281NamesItsSuccessor(_Base):
         # (the note is read from the index set, offline: the format-2 repo is not asked)
         self.assertNotIn(FMT2, {c[1] for c in self.hub.calls if c[0] != "upload_file"})
 
+    def test_it_says_so_before_the_archive_is_fetched(self):
+        """The note came after the install: after the whole archive of 2.8.1 was fetched
+        (tens of GB) for an index the user may rather replace. It now comes first, and a
+        download stopped during the fetch has said it."""
+        name = self._old(f"NNN_3_hg38+{VCF}")
+        out = io.StringIO()
+
+        def stopped(*a, **k):
+            raise KeyboardInterrupt
+
+        with mock.patch.object(hf, "_require_hf", return_value=self.hub), \
+                mock.patch.object(hf, "_hf_snapshot", side_effect=stopped), \
+                mock.patch("sys.stdout", out), mock.patch("sys.stderr", io.StringIO()), \
+                self.assertRaises(KeyboardInterrupt):
+            hf.download_component("index", self.tmp, index_name=name, token=None)
+        self.assertIn(f"It is not built again for 2.10.0: 20-NNNNNNNN_3_hg38+{VCF}",
+                      out.getvalue())
+        # (and once, when the download goes on to the end)
+        self.assertEqual(self.download(self.tmp, name).count(f"NOTE: {name} is an index of "
+                                                               "CRISPRme 2.8.1"), 1)
+
+    def test_a_name_of_2_10_0_not_yet_published_says_where_it_was_looked_for(self):
+        """Asked for an index of this release that its repo does not hold (before the
+        rebuild is published), the error described the repo of index format 2 as the one
+        "where indexes with a flank wider than 3 nt are published", 2.8.1's general index's."""
+        with mock.patch.object(hf, "_require_hf", return_value=self.hub), \
+                mock.patch("sys.stdout", io.StringIO()), mock.patch("sys.stderr", io.StringIO()), \
+                self.assertRaises(ValueError) as caught:
+            hf.download_component("index", self.tmp, index_name="20-NRR_3_hg38", token=None)
+        said = str(caught.exception)
+        self.assertIn(f"No index '20-NRR_3_hg38' was found in HuggingFace repo '{FMT2}' (where "
+                      "the indexes of CRISPRme 2.10.0 and later, in index format 2, are "
+                      f"published), nor in the fallback '{DEFAULT}'", said)
+        self.assertNotIn("flank wider than 3 nt", said)
+        # (an older wide-flank name: 2.8.1's general index's repo, as before)
+        with mock.patch.object(hf, "_require_hf", return_value=self.hub), \
+                mock.patch("sys.stdout", io.StringIO()), mock.patch("sys.stderr", io.StringIO()), \
+                self.assertRaises(ValueError) as caught:
+            hf.download_component("index", self.tmp, index_name="NNNNNNNN_3_hg38", token=None)
+        self.assertIn(f"'{GENERAL}' (where indexes with a flank wider than 3 nt are published)",
+                      str(caught.exception))
+
     def test_the_index_set_replaces_every_archive_of_2_8_1(self):
         self.assertEqual(hf.successor_index("NRG_3_hg38+hg38_HPRC"), "20-NRR_3_hg38+hg38_HPRC")
         self.assertEqual(hf.successor_index("NNNNNNNN_3_hg38"), "20-NNNNNNNN_3_hg38")

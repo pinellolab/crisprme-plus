@@ -1841,7 +1841,7 @@ def download_component(
             f"{', '.join(sorted(_COMPONENT_PREFIXES))}."
         )
     routed = component == "index" and bool(index_name) and not repo_overridden(repo)
-    routed_from = None  # the wide-flank repo an index fell back from, if it did
+    routed_from = None  # the repo (format 2, or 2.8.1's wide-flank one) an index fell back from
     if routed:
         # Same routing as publish; the fallback probe waits until the index is known
         # not to be installed (below), so a complete install costs no network call.
@@ -2128,6 +2128,26 @@ def download_component(
                 pass  # existence check failed — use the requested name as-is
         patterns = [f"{remote_prefix}/{index_name}.tar.gz"]
         staging = os.path.join(workdir, ".hf_stage_index")
+        # (2.10.0) an archive of 2.8.1 asked for by its own name: say which index of this
+        # release replaces it (the index set's "replaces" column: its build of 2.10.0, or the
+        # index that serves its searches where it is not built again, as NNN_3), before its
+        # archive, tens of GB, is fetched
+        successor = (successor_index(index_name)
+                     if routed and _note_successor and repo != FORMAT2_HF_REPO else None)
+        if successor:
+            _vcf_of = index_name.partition("+")[2]
+            same_pam = (index_fit.index_pam(successor)
+                        == index_fit.index_pam(canonical_index_name(index_name)))
+            instead = (f" instead, in another working directory (the two read different "
+                       f"Dictionaries of {_vcf_of})" if _vcf_of else " instead")
+            print(
+                f"NOTE: {canonical_index_name(index_name)} is an index of CRISPRme 2.8.1 "
+                f"(index format 1). "
+                + (f"This release's build of it is {successor}, in {FORMAT2_HF_REPO}: "
+                   f"download that one{instead}." if same_pam else
+                   f"It is not built again for 2.10.0: {successor}, in {FORMAT2_HF_REPO}, "
+                   f"serves every search it serves (pruned to the search's PAM, at the same "
+                   f"speed or faster): download that one{instead}."), flush=True)
         # multi-part phase labels: a VARIANT index installs in 3 stages (main index
         # tarball -> genotypes companion -> shared reference index); a reference-only
         # index is a single download. Re-seed the total to the ACTUAL (possibly
@@ -2156,13 +2176,15 @@ def download_component(
                 routed_from, repo = None, FORMAT2_HF_REPO
         if not os.path.isfile(tarball):
             shutil.rmtree(staging, ignore_errors=True)
+            published = ("the indexes of CRISPRme 2.10.0 and later, in index format 2, are "
+                         "published" if routed_from == FORMAT2_HF_REPO else
+                         "indexes with a flank wider than 3 nt are published")
             where = (
-                f"neither in HuggingFace repo '{routed_from}' (where indexes with a "
-                f"flank wider than 3 nt are published) nor in the fallback '{repo}'"
-                if routed_from else f"in HuggingFace repo '{repo}'"
+                f"in HuggingFace repo '{routed_from}' (where {published}), nor in the "
+                f"fallback '{repo}'" if routed_from else f"in HuggingFace repo '{repo}'"
             )
             raise ValueError(
-                f"No index '{index_name}' found {where} "
+                f"No index '{index_name}' was found {where} "
                 f"(looked for '{remote_prefix}/{index_name}.tar.gz'). Check "
                 f"--index-name, or build it locally with 'crisprme.py "
                 f"build-index-only' — the repo may not have it uploaded yet."
@@ -2526,22 +2548,6 @@ def download_component(
             # dataset + its samples in the --vcf / --samplesID list files the web
             # builds per-search but a CLI complete-search reads from disk.
             _ensure_search_lists(workdir, vcf_name)
-        # (2.10.0) an archive of 2.8.1 asked for by its own name: say which index of this
-        # release replaces it (the index set's "replaces" column: its build of 2.10.0, or the
-        # index that serves its searches where it is not built again, as NNN_3)
-        successor = (successor_index(index_name)
-                     if routed and _note_successor and repo != FORMAT2_HF_REPO else None)
-        if successor:
-            same_pam = index_fit.index_pam(successor) == index_fit.index_pam(install_name)
-            instead = (f" instead, in another working directory (the two read different "
-                       f"Dictionaries of {vcf_name})" if vcf_name else " instead")
-            sys.stdout.write(
-                f"NOTE: {install_name} is an index of CRISPRme 2.8.1 (index format 1). "
-                + (f"This release's build of it is {successor}, in {FORMAT2_HF_REPO}: "
-                   f"download that one{instead}.\n" if same_pam else
-                   f"It is not built again for 2.10.0: {successor}, in {FORMAT2_HF_REPO}, "
-                   f"serves every search it serves (pruned to the search's PAM, at the same "
-                   f"speed or faster): download that one{instead}.\n"))
         return os.path.join(local_dir, install_name)
 
     # flat components: annotations, pams, samples

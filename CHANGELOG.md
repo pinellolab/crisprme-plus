@@ -71,10 +71,12 @@ and the `release-crisprme` skill.
     genotype-oracle` takes this repo's stores first, and 2.8.1's where it holds none; and the
     web's Settings catalog lists this repo's indexes, no longer 2.8.1's (merged from two repos up
     to now). The archives of 2.8.1 stay where they are, with a note on their cards that newer
-    indexes exist; `download` still fetches one by its name, and names the index of 2.10.0 that
-    replaces it, read offline from the index set (below): its build of 2.10.0, or the index that
-    serves its searches where it is not built again (`NNN_3_*`: the general index `20-NNNNNNNN_3_*`,
-    at the same speed; NRG on HPRC and mega: NRR there). `download --what all` fetches the
+    indexes exist; `download` still fetches one by its name, and names first, before fetching
+    it, the index of 2.10.0 that replaces it, read offline from the index set (below): its build
+    of 2.10.0, or the index that serves its searches where it is not built again (`NNN_3_*`: the
+    general index `20-NNNNNNNN_3_*`, at the same speed; NRG on HPRC and mega: NRR there); and an
+    index of 2.10.0 not found says where it was looked for (the repo of index format 2, then
+    `lucapinello/crisprme-data`). `download --what all` fetches the
     default reference index `20-NRR_3_hg38`, and 2.8.1's `NRR_3_hg38` where it cannot. Every
     advice that names an index to download names 2.10.0's (`20-NRR_3_hg38+hg38_HGDP1kGP`;
     complete-test, the search's refusals, the setup and download help, the per-sample banner,
