@@ -2439,11 +2439,14 @@ def indel_log_window(path, rows=LOG_ROWS):
             f = line.rstrip("\n").split("\t")
             if f[0] == "CHR" or len(f) < 5:
                 continue
-            head, _id = f[0].rsplit("_", 1)
-            span = head.rsplit("_", 1)[1]
-            start, end = (int(x) for x in span.rsplit("-", 1))
-            _c, pos, ref, _alt = f[4].rsplit("_", 3)
-            first = int(pos) - 1
+            try:
+                head, _id = f[0].rsplit("_", 1)
+                span = head.rsplit("_", 1)[1]
+                start, end = (int(x) for x in span.rsplit("-", 1))
+                _c, pos, ref, _alt = f[4].rsplit("_", 3)
+                first = int(pos) - 1
+            except (IndexError, ValueError) as exc:
+                raise ValueError("%s holds a row of no indel log's layout (%s)" % (path, exc))
             found.add((first - start, end - first - len(ref)))
             n += 1
             if n >= rows:
@@ -2626,14 +2629,24 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
             val["indels"] = (fmt, _budget_of(indels_name))
             # the fake-indel windows: the run's indel log's, else its INDELS index's record,
             # else, for an index of format 1 (built by CRISPRitz 2.9.1 or earlier, whose
-            # enricher wrote no other), 25/27
-            log = _log_of(workdir, ds, ch) if ds else None
-            try:
-                window = indel_log_window(log) if log else None
-            except (OSError, ValueError, EOFError):
-                window = None   # (refused where it matters: main)
+            # enricher wrote no other), 25/27. (The indel log has a name of its own: `log`,
+            # the run's log_verbose.txt, says every chromosome's store rule above.)
+            ilog = _log_of(workdir, ds, ch) if ds else None
+            window, why_none = None, (
+                "the run's working directory holds no indel log of it, "
+                "Dictionaries/log_indels_%s/log%s.txt[.gz]" % (ds or "<dataset>", ch))
+            if ilog:
+                try:
+                    window = indel_log_window(ilog)
+                    why_none = "its indel log %s holds no row" % ilog
+                except ValueError as exc:   # (two widths: no one enrichment's log)
+                    why_none = str(exc)
+                except (OSError, EOFError) as exc:
+                    why_none = "its indel log %s cannot be read (%s)" % (ilog, exc)
             val["window"] = window or _recorded_window(indels_dir, ch) or (
                 OLD_WINDOW if fmt == 1 else None)
+            if val["window"] is None:   # (refused where it matters: main says why)
+                val["window_why"] = why_none
             alls = None
             var_heads = [h for h in (bin_header(b) for b in _bins_of(var_dir, ch)) if h]
             if var_heads and all(h[0] == 1 for h in var_heads):
@@ -6989,12 +7002,13 @@ def main(argv=None):
                     r["filter"] in PASS_FILTERS and any(
                         len(a) != len(r["ref"]) or len(a) > 1 for a in r["alts"])
                     for r in v.records(ch, 0, 1 << 31)):
-                unknown.append("the fake-indel windows of %s on %s (the run's working "
-                               "directory holds no indel log of it, Dictionaries/log_indels_"
-                               "%s, and its INDELS index records none), and %s holds indel "
-                               "records there: whether a target reaches a window's edge "
-                               "depends on them (25/27 bases up to CRISPRitz 2.9.1, 30/30 "
-                               "since 2.10.0)" % (ds or v.path, ch, ds or "<dataset>", v.path))
+                unknown.append("the fake-indel windows of %s on %s (%s, and its INDELS "
+                               "index records none), and %s holds indel records there: "
+                               "whether a target reaches a window's edge depends on them "
+                               "(25/27 bases up to CRISPRitz 2.9.1, 30/30 since 2.10.0)"
+                               % (ds or v.path, ch, val.get("window_why") or
+                                  "the run's working directory holds no indel log of it",
+                                  v.path))
             # the nearest a site holding a base of its record lies to the window's first
             # base: its PAM ending on the record's first REF base (an MNV's first replaced
             # base), the window's bases before it in, its guide region from full_n - 1
