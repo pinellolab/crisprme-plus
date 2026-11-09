@@ -33,25 +33,34 @@ values, and matching the indel companion's shape); genotyped indices unchanged.
 
 ---
 
-## 2. Dense-panel search: per-chromosome parallelism + benchmark
-**Why.** Dense / pamless variant panels are the slowest searches. The combinatorial blow-up itself is
-already tamed (the `--max-edits` bound + the high-variant-density greedy cap `CRISPRME_IUPAC_CAP` +
-the Tier-0 registry cache / O(1) LRU that shipped in 2.5.3 and remains in place as of 2.8.1). What's left is raw throughput: the
-search still processes contigs largely serially.
+## 2. Dense-panel search: what is left of the post-analysis' parallelism
+**Why.** Dense variant panels are the slowest searches. The combinatorial blow-up itself is tamed
+(the `--max-edits` bound, the high-variant-density greedy cap `CRISPRME_IUPAC_CAP`, the Tier-0
+registry cache, and since 2.10.0 the exact haplotype pre-check), and since 2.10.0 the post-analysis
+runs each chromosome in pieces over one pool of `--thread` workers (`PostProcess/postproc_pool.py`:
+threads that each run one subprocess at a time, no longer the `multiprocessing` `Pool` whose
+`pool.map` deadlocked at `--thread 200` in earlier releases; the files are those of one process a
+chromosome, byte for byte: METHODS.md §5). What is left is serial within a chromosome.
 
-**What to build.** Run the dense-panel search **per chromosome in parallel** and **measure** the
-wall-clock speedup vs. the current path on a dense panel (e.g. the mega or a pamless index). Fold in
-the known post-analysis fix while here: `pool_post_analisi_snp.py` spins up `Pool(cores)` (~200 on a
-big host) across hundreds of contigs and FD-inheritance **deadlocks** the parent `pool.map` at very
-high `--thread`; cap workers (~16–32) + `maxtasksperchild`.
+**Current behavior.** Per chromosome, the extraction, sorting and clustering of the raw targets
+(about 5 min for IGH's 37.6 million indel raw targets), the merge of the pieces, and the
+CRISPR-Bulge scoring of all of the chromosome's rows, which the merge does in one process to keep
+the batches of one process (13 of the 20 min of a population-level SNP stage of chr22 on a loaded
+node), run on one core. Equal line ranges are not equal costs (IGH: one SNP piece 294 s, the
+others 77 s or less). Each piece repeats the start-up one process does (about 30% more CPU per
+sample on chr22).
 
-**Code pointers.** `PostProcess/pool_post_analisi_snp.py` (the `Pool` worker count), the
-`complete-search` submit chain in `crisprme.py`, `CRISPRME_IUPAC_CAP` + the high-variant-density
-region handling. See memory notes `crisprme-postanalysis-pool-deadlock`,
-`variant-search-complexity-explosion`. (Was tracking task #174.)
+**What to build.** Score the CRISPR-Bulge batches in parallel, each in the batch one process forms,
+with a test that the floats do not depend on the process that scores them; cut the ranges by an
+estimate of their cost (the windows' variant columns) rather than by lines; measure a genome-wide
+search on the indexes of the 2.10.0 rebuild at `--thread 16` and `--thread 200`.
 
-**Acceptance.** Measured speedup on a dense/pamless genome-wide search with byte-identical results,
-and no `Pool` deadlock at `--thread 200`.
+**Code pointers.** `PostProcess/postproc_pool.py` (`run_stage`, `n_pieces`, `ranges`),
+`PostProcess/merge_pieces.py` (`score_cbulge`), `PostProcess/cbulge_rows.py`; the drivers'
+`cluster` and `finish` stages (`scriptAnalisiNNN_v3.sh`, `analisi_indels_NNN.sh`).
+
+**Acceptance.** The same files, byte for byte, as `CRISPRME_POSTPROC_PIECES=0` (RELEASE_CHECKLIST
+step 4d), and a measured speed-up on IGH alone and genome-wide.
 
 ---
 

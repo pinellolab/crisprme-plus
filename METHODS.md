@@ -49,8 +49,8 @@ off-target site.
 per-sample (CONFIRMED cis phasing + named carriers + exact joint AF) on a
 genotyped+PHASED index, or a population-level worst-possible screen (works on any
 index, lossless for detection) otherwise (sites-only/unphased/hybrid/reference-only).
-Force the population-level analysis with **`--population-level`** (a resolution choice: on
-the indexes CRISPRitz 2.10.0 builds it is no faster, §5); force resolution
+Force the population-level analysis with **`--population-level`** (a resolution choice: which
+mode is faster depends on the panel, §5); force resolution
 with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-only
 index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
 catalog name `NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.10.0; NRG
@@ -900,13 +900,21 @@ complementary controls:
   a WARNING when the cap is below the requested budget; set `--max-total-edits` to
   `mm+bDNA+bRNA` (the sum of the requested per-type caps) to keep all requested-depth
   off-targets. At the default budget it bounds the variant-density combinatorial explosion;
-  above 1 DNA + 1 RNA bulge on an index that codes every allele (CRISPRitz 2.10.0) it does
-  not: on the IGL locus alone (chr22, HGDP + 1000 Genomes, the README guide, NRG, cap 6) the
-  variant search writes 755,963 SNP raw targets at 4 + 1 + 1, 5,297,920 at 4 + 2 + 1 and
-  33,858,344 at 4 + 2 + 2 (27.9 GB of memory), where the indel search writes 204,453,499
-  (157 GB); IGH (chr14) needed 225 GB at 4 + 2 + 1 (the 2.10.0 haplotype-scan judges and
-  design). `complete-search` warns on stdout when a variant search allows more than 1 DNA + 1
-  RNA bulge on such an index (or on none yet, where the installed CRISPRitz builds one).
+  above 1 DNA + 1 RNA bulge on an index that codes every allele (CRISPRitz 2.10.0) it does so
+  only when it is low. On the IGL locus alone (chr22, HGDP + 1000 Genomes, the README guide,
+  NRG; the variant search alone, 16 threads) the variant search writes 755,963 SNP raw targets
+  at the default 4 + 1 + 1 (0.7 GB of memory), 5,097,095 at 4 + 2 + 1 and 33,657,519 at
+  4 + 2 + 2 (27.9 GB) at the cap of 6, and 93,753,487 at 4 + 2 + 2 under a cap of 8 (75 GB);
+  the indel search writes 204,453,499 raw targets at 4 + 2 + 2 (157 GB), and IGH (chr14)
+  needed 225 GB at 4 + 2 + 1 (the 2.10.0 haplotype-scan judges and design). A cap of 3 brings
+  a wider budget back to the default's cost: there 6 + 2 + 2 writes 618,209 SNP raw targets
+  at a cap of 3, 4.5 million at 4, 14.7 million at 5 and 33.7 million at 6 (4 + 2 + 1: 1.2
+  million at 4, 2.7 million at 5). `complete-search` warns on stdout when a variant search on
+  such an index (or on none yet, where the installed CRISPRitz builds one) allows more than 1
+  DNA + 1 RNA bulge in alignments of more than 3 edits (the smaller of the cap and
+  mm + bDNA + bRNA), and keeps the warning in the run's `.Params.txt` (`Bulge_budget_note`,
+  which the report's bundle holds); the search script says it again in `log_verbose.txt`, as
+  it does for a web search.
   (`assembly-search` instead defaults it to
   the full `mm+bDNA+bRNA` budget — a resolved diploid genome has no IUPAC-variant
   lattice, so it needs no variant-density cap.)
@@ -1075,40 +1083,47 @@ DNA + 1 RNA bulge) gives 766,427 SNP and 4,487,567 indel raw targets, 98.6% and 
 in IGL (chr22:21.99-22.96 Mb), where the indexes of CRISPRitz 2.9.1 gave 17,891 and 26,635.
 A per-sample search expanded each raw target into the haplotypes its carriers have, one process
 a chromosome, and took 98 min on 16 threads (the SNP post-analysis 77 min of it), where 2.8.1
-took 6 min. Almost none of those raw targets is a sequence anybody carries: of IGL's 755,863 SNP
-raw targets, 190 are realized by a phased haplotype or by a PUTATIVE sample's own alleles (the
-2.10.0 haplotype-scan judges' census). Three exact steps, and running the post-analysis over the
+took 6 min. Almost none of those raw targets is a sequence anybody carries: of the 755,863 of
+IGL's 755,963 SNP raw targets that hold a variant letter (the other 100 hold none),
+190 are realized by a phased haplotype or by a PUTATIVE sample's own alleles (the 2.10.0
+haplotype-scan judges' census). Three exact steps, and running the post-analysis over the
 search's threads, bring it back. None changes a row.
 
 - **The haplotype pre-check (per sample).** Every row the per-sample post-analysis writes for a
   raw target puts, at each variant column, the reference base or an ALT one of its carriers
   carries there: a phased slot's alleles (a CONFIRMED haplotype), a PUTATIVE sample's own
   alleles (their combinations, or their unions past `CRISPRME_IUPAC_CAP`), the dictionary
-  path's combinations of the ALTs its carriers share; the slot filter of an indel (§4),
-  `--max-degeneracy` and the admission of a column's ALTs by its letter only take alleles or
-  carriers away. So a raw target can give a variant row only if one sample, free to put at
-  each variant column the reference base or any ALT its genotype source lists for it there,
-  reaches the mismatch budget and the PAM. The finalizer counts a row's mismatches column by
-  column and needs each PAM column to hold a base the PAM admits, so the test is per column: a
-  protospacer column whose reference base mismatches the guide is *fixed* by an ALT that is
-  the guide's base there; a row must fix *need* = the reference alignment's mismatches less
-  the budget of them; and a PAM column whose reference base the PAM does not admit needs an
-  ALT it admits. The samples are bits of integers, so "one sample is in *need* of the fixing
-  sets and in every PAM set" is a few integer operations a column. Where no sample can, the
-  raw target is not expanded and only its reference row is written (the observed path writes
-  it whatever the genotypes; the dictionary path writes none of its own). The test is a bound,
-  never a guess: it keeps a raw target that one sample's union of alleles reaches though none
-  of its haplotypes does, and never skips one a row comes from. It runs on the observed path
-  and on the uncapped dictionary path of a per-sample search, never on a registry-only
-  (sites-only) dataset, whose rows need no carrier. Its unit test compares it with every choice
-  of alleles of every sample (3,000 random windows on both strands, with and without bulges,
-  and a 5′ PAM). On chr22 it skips 755,137 of the README guide's 764,435 raw targets with a
-  variant letter (98.8%; in IGL, 752,074 of 755,863).
+  path's combinations of the ALTs its carriers share; the slot filter of an indel (§4: it takes
+  a carrier off a row, or keeps it there PUTATIVE beside an unphased indel, on the row its
+  haplotype gives), `--max-degeneracy` and the admission of a column's ALTs by its letter only
+  take alleles or carriers away. So a raw target can give a variant row only if one sample,
+  free to put at each variant column the reference base or any ALT its genotype source lists
+  for it there, reaches the mismatch budget and the PAM. The finalizer counts a row's
+  mismatches column by column and needs each PAM column to hold a base the PAM admits, so the
+  test is per column: a protospacer column whose reference base mismatches the guide is *fixed*
+  by an ALT that is the guide's base there; a row must fix *need* = the reference alignment's
+  mismatches less the budget of them; and a PAM column whose reference base the PAM does not
+  admit needs an ALT it admits. The samples are bits of integers, so "one sample is in *need*
+  of the fixing sets and in every PAM set" is a few integer operations a column. Where no
+  sample can, the raw target is not expanded and only its reference row is written (the
+  observed path writes it whatever the genotypes; the dictionary path writes none of its own).
+  The test is a bound, never a guess: it keeps a raw target that one sample's union of alleles
+  reaches though none of its haplotypes does, and never skips one a row comes from. It runs on
+  the observed path and on the uncapped dictionary path of a per-sample search, never on a
+  registry-only (sites-only) dataset, whose rows need no carrier. Its unit test compares it
+  with every choice of alleles of every sample (3,000 random windows on both strands, with and
+  without bulges, and a 5′ PAM), and the real script's tests skip and keep raw targets with an
+  RNA or a DNA bulge on both paths, in pieces too. On chr22 it skips 755,137 of the README
+  guide's 764,435 raw targets with a variant letter (98.8%; in IGL, 752,074 of its 755,863).
 - **Carriers first on the indel side.** An overlaid target of the fake-indel genome (§4) gives
   the rows its indel's carriers have, each holding at a code column the reference base or a base
   the carrier carries there (an exact slot's alleles; a PUTATIVE carrier's own, the reference
-  among them; the code's alleles where no genotype covers the column), and the second indels
-  that break a slot only take carriers away. The same test over the indel's carriers, counted as
+  among them; the code's alleles where no genotype covers the column). A second indel that
+  breaks a slot takes that slot's carrier away or, where it cannot be put on a slot (an
+  unphased call, or one of another ploidy), makes the carrier PUTATIVE: that can add a row,
+  one none of the carrier's slots holds (a base of one slot at one column, of the other at
+  another), but a PUTATIVE row too holds at each code column one of the carrier's own
+  alleles, so the test below stays exact. The same test over the indel's carriers, counted as
   `indel_snp_cis.resolve_target` counts (mismatches over the protospacer columns that are no
   bulge, the total-edits cap, the bulge limits), skips a target no carrier can have, before the
   second indels of the phased store are read for it. On chr22 it tells 2,904,141 of the README
@@ -1125,37 +1140,45 @@ search's threads, bring it back. None changes a row.
   choice): on chr22 the README guide's population-level search with `--max-degeneracy 4` skips
   753,990 of its 764,435 raw targets with a variant letter (98.6%) and takes 7.4 min on 16
   threads (16 min with the K-skip off, the same files). Use K = 4 or more in a population-level
-  search (above). `--no-haplotype-precheck`
-  turns off the pre-check, its indel twin and the K-skip together.
+  search (above). `--no-haplotype-precheck` (or `CRISPRME_HAPLOTYPE_PRECHECK` set to 0, false,
+  no or off, in any case, as `CRISPRME_POSTPROC_PIECES` below) turns off the pre-check, its
+  indel twin and the K-skip together; the log then says which of them is off.
 - **The post-analysis in pieces.** Up to this release the SNP and the indel post-analysis ran
   one process a chromosome, so IGL ran on one core while the others waited. Now each
   chromosome's clustered raw targets are cut into up to `--thread` contiguous ranges of lines
   (at least 16,000 lines a range on the SNP side, 50,000 on the indel side, whose lines cost
   less; `CRISPRME_POSTPROC_PIECE_LINES` sets it), and the ranges of every chromosome run on one
-  pool of `--thread` workers, bounded by the memory as before. Each line is analysed on its own,
-  so a piece writes exactly the rows one process writes for its lines: each piece starts up as
-  one process does over the whole chromosome (the spans of every line, the phased indel store
-  read around them, the dictionary keys they need, which the pool reads once a chromosome
-  into a copy the pieces load; on the indel side the windows of the indel log that hold its
-  lines' positions, the windows its lines read), then analyses its own lines. A merge joins
-  the pieces' files into the chromosome's: the rows in order, the companions keeping the first
-  row of each identity as one process does, the dense-window BED one line a window. A
-  CRISPR-Bulge score depends in its last bits on which rows share a batch of the scorer (the
-  2.10.0 cost judges measured 80 of 890,496 population-level chr22 rows differing, by up to
-  1.2e-5 relative, when one chromosome's rows were scored in other batches), so the pieces
-  leave their rows unscored and the merge scores them in exactly the batches one process forms
-  (every 100,000 rows, cut after the input line that reaches it): the files are those of one
-  process, byte for byte. A piece's own output goes to a file of the pieces' folder (each would
-  repeat the start-up): the log (`log_verbose.txt`) keeps one piece's, any line another adds,
-  and the notes a chromosome ends with (the pre-check's count, the dense windows), which the
-  merge writes from the pieces' counts as one process writes them. `CRISPRME_POSTPROC_PIECES=0`
-  runs one process a chromosome.
-- **The indel store read once a window.** A per-sample SNP post-analysis reads the phased indel
+  pool of `--thread` workers, bounded by the memory as before (each worker is budgeted what one
+  process of the largest chromosome needs, and a piece loads no more than one process of its
+  chromosome: its genome, the dictionary keys of the chromosome's lines; chr22's and IGH's
+  pieces used 0.2 to 1.4 GB each; genome-wide, with up to `--thread` pieces of one chromosome
+  at once, it is not measured yet). Each line is analysed on its own, so a piece writes exactly
+  the rows one process writes for its lines: each piece starts up as one process does over the
+  whole chromosome (the spans of every line, the phased indel store read around them, the
+  dictionary keys they need, which the pool reads once a chromosome into a copy the pieces
+  load; on the indel side the windows of the indel log that hold its lines' positions, the
+  windows its lines read), then analyses its own lines. A merge joins the pieces' files into
+  the chromosome's: the rows in order, the companions keeping the first row of each identity as
+  one process does, the dense-window BED one line a window. A CRISPR-Bulge score depends in its
+  last bits on which rows share a batch of the scorer (the 2.10.0 cost judges measured 80 of
+  890,496 population-level chr22 rows differing, by up to 1.2e-5 relative, when one
+  chromosome's rows were scored in other batches), so the pieces leave their rows unscored and
+  the merge scores them in exactly the batches one process forms (every 100,000 rows, cut after
+  the input line that reaches it): the files are those of one process, byte for byte. A piece's
+  own output goes to a file of the pieces' folder (each would repeat the start-up): the log
+  (`log_verbose.txt`) keeps one piece's, any line another adds (but the pieces' own run times),
+  the notes a chromosome ends with (the pre-check's count, the dense windows), which the merge
+  writes from the pieces' counts as one process writes them, and the chromosome's run time
+  ("Post-analysis SNP of chr22: done in 101.2 s (16 pieces)"). The analysis' arguments reach
+  the pieces through a file of a folder only the run can write. `CRISPRME_POSTPROC_PIECES=0`
+  (or false, no or off, in any case) runs one process a chromosome.
+- **The indel store read once a span.** A per-sample SNP post-analysis reads the phased indel
   store around its targets, to take off a SNP row the carriers whose haplotype holds an indel
   in the target (§4). It read the store's surroundings once per raw target, and a dense window
   has a hundred or more of them, one per alignment: 227 s on chr22 and about an hour on IGH,
-  for 10,000 to 25,000 distinct spans. It now reads each span once (about 4 s on chr22 and 27 s
-  on IGH, in each piece).
+  for 10,000 to 25,000 distinct spans (a span: a raw target's start and length). It now reads
+  each span once (about 4 s on chr22 and 27 s on IGH, in each piece), still around every span,
+  those of the raw targets the pre-check skips too.
 - **The CRISPR-Bulge batch's nulled rows looked up at once.** The scorer writes -1 for the rows
   its model cannot score (two bulges, an `N`, more than 24 columns), and in a dense locus nearly
   every row has a DNA and an RNA bulge. It looked each row of a batch up in the list of the rows
@@ -1164,13 +1187,13 @@ search's threads, bring it back. None changes a row.
   searches pay it most (the README guide's on chr22 scores 890,496 rows, nine batches).
 
 Measured on ml007 (two AMD EPYC 7H12, 256 hardware threads, shared with other work: its load
-ran from 25 to 500 during these runs), `--thread 16`, CRISPRme with these steps and CRISPRitz
-2.10.0 against the same code without them (the integration's head of stage 2a, d3722b0), on the
-same format-2 indexes of chr22 of HGDP + 1000 Genomes, and of the immunoglobulin loci alone
-(IGL chr22:21.99-22.96 Mb, IGH chr14:105.50-106.95 Mb, IGK chr2:88.75-90.35 Mb: the
-chromosome with every base outside the locus set to N, and the panel's records of the locus).
-Wall time, then the CPU time of the whole run (user and system, every process) in brackets;
-4 mismatches + 1 DNA + 1 RNA bulge:
+ran from 25 to 500 during these runs), `--thread 16` (the runs marked ¹: `--thread 8`),
+CRISPRme with these steps and CRISPRitz 2.10.0 against the same code without them (the
+integration's head of stage 2a, d3722b0), on the same format-2 indexes of chr22 of HGDP + 1000
+Genomes, and of the immunoglobulin loci alone (IGL chr22:21.99-22.96 Mb, IGH
+chr14:105.50-106.95 Mb, IGK chr2:88.75-90.35 Mb: the chromosome with every base outside the
+locus set to N, and the panel's records of the locus). Wall time, then the CPU time of the
+whole run (user and system, every process) in brackets; 4 mismatches + 1 DNA + 1 RNA bulge:
 
 | Search | Without these steps | With them | With them, the pre-check off |
 |---|---|---|---|
@@ -1182,13 +1205,17 @@ Wall time, then the CPU time of the whole run (user and system, every process) i
 | chr22, SaCas9 (NNGRRT), per sample | 590 min¹ | 72 min (291 min) | |
 | chr22, three repeat-rich guides (NRG), per sample | 456 min¹ | 35 min (104 min) | |
 | IGL alone, per sample | 96 min (104 min) | 7.6 min (28 min) | 15 min (112 min) |
-| IGH alone, per sample | about 9 h² | 28 min (102 min) | 117 min (698 min) |
-| IGK alone, per sample | over 3 h² | 9.7 min (42 min) | 31 min (223 min) |
+| IGH alone, per sample | over 9 h² | 28 min (102 min) | 117 min (698 min) |
+| IGK alone, per sample | 224 min (232 min) | 9.7 min (42 min) | 31 min (223 min) |
 
 ¹ Stage 2a's fresh run of the same code (whose files these match), on ml008, a node of the same
-hardware, under other load. ² d3722b0's run of IGK alone took 3.0 h for its SNP post-analysis
-alone; that of IGH was still in its SNP post-analysis after 3 h when this was written, for
-which the cost judges estimated 7.2 h, and 1.9 h of indel post-analysis.
+hardware, under other load, with `--thread 8`. Without these steps the post-analysis of a
+one-chromosome search runs in one process, so the thread count changes only the search and a
+few short steps after the post-analysis: the search took 0.9 to 4.4 min of these runs, and
+stage 2a's README guide per sample took 95 min with `--thread 8` there, against 98 min with
+`--thread 16` here. ² d3722b0's run of IGH alone was still in its SNP post-analysis after 7.5 h
+when this was written (the cost judges estimated 7.2 h for it, and 1.9 h of indel
+post-analysis); that of IGK alone took 3.0 h of SNP and 38 min of indel post-analysis.
 
 The pre-check does most of it: with the post-analysis in pieces but the pre-check off, a
 per-sample search still expands every raw target, now over the `--thread` workers (and starts
@@ -1211,26 +1238,45 @@ guides) they are the same too, the dense-window BED cut to one line a window as 
 
 **What the default budget costs.** The bulges drive it: on chr22 per sample the README guide's
 search took 238 s at 4 + 0 + 0, 471 s at 4 + 1 + 0, 481 s at 4 + 0 + 1 and 5,758 s at 4 + 1 + 1
-without these steps (the cost judges, on a loaded node); with them it took 8 min at 4 + 0 + 0,
-4 + 1 + 0 and 4 + 0 + 1 alike and 9 min at 4 + 1 + 1 (on a node at load 150 to 500: most of it
-is now the search and the steps after the post-analysis). Genome-wide we estimate about 1.5 h
-per sample on 16 threads, against 2.8.1's 1.2 h and the cost judges' 9 to 11 h without these
-steps: about 50 min of search, then the post-analysis, whose longest chromosome is chr14: its
-IGH locus alone took 27.5 min on 16 threads, of which 4 min of search, 6.6 min of SNP
-post-analysis and 11.8 min of indel post-analysis (9 of them serial: the sorting and the
-clustering of its 37.6 million indel raw targets, the merge, the end), the other chromosomes'
-pieces running beside it. Above 1 DNA + 1 RNA bulge the variant search itself explodes in the
-dense loci (the `--max-total-edits` bullet above), which no step after the search removes:
-`complete-search` warns.
+without these steps (the cost judges, 16 threads, on a loaded node); with them it took 8 min at
+4 + 0 + 0, 4 + 1 + 0 and 4 + 0 + 1 alike and 9 min at 4 + 1 + 1 (16 threads, on a node at load
+150 to 500: most of it is now the search and the steps after the post-analysis).
 
-**Population-level is not the fast mode on these indexes.** The population-level analysis
-reports each window's worst case and reads no haplotype, so the pre-check cannot skip its
-windows: on chr22 the README guide's population-level search took 121 min without these
-steps (more than the per-sample one's 98) and 32 min with the post-analysis in pieces, where
-the per-sample search takes 9.1 min. Its CPU time did not fall (147 and 151 min): the pieces
-only spread it over the threads, and the merge, which scores the CRISPR-Bulge rows of all
-the pieces (890,496) in one process, took 13 of its 20 min of SNP post-analysis on a loaded
-node. Choose the mode for what it reports, not for speed.
+Genome-wide, 2.10.0 has not been timed yet: the indexes of format 2 it searches exist for
+chr22 and the loci above only, until the rebuild, whose release gates time a genome-wide
+search. What its time is made of, as measured: 2.8.1's genome-wide per-sample search of the
+README guide took 73 min on 32 threads of ml008, 48 of them the search, on indexes of
+CRISPRitz 2.9.1 (format 1; the 2.8.1 release gate); on chr22 the search of the format-2
+indexes took about twice that of format 1 at the same 16 threads (69 s against 36 to 38 s,
+the README guide per sample), IGL being most of it; the IGH locus alone took 3.7 min of
+search, then 24 min on 16 threads (6.6 min of SNP post-analysis, 11.8 min of indel
+post-analysis, 9 of them serial: the sorting and the clustering of its 37.6 million indel raw
+targets, the merge, the end; then the steps after the post-analysis), the longest chromosome's
+part, beside which the other chromosomes' pieces run on the same workers. If the genome-wide
+search takes on 16 threads the 48 min it took on 32, or twice that, and on format 2 up to
+twice as long as on format 1, as on chr22, a genome-wide per-sample search takes about 1.5 to
+4 h on 16 threads, against 2.8.1's 1.2 h on 32 and the cost judges' estimate of 9 to 11 h
+without these steps (whose model took that search, at 50 min). Above 1 DNA + 1 RNA bulge the
+variant search itself explodes in the dense loci (the `--max-total-edits` bullet above), which
+no step after the search removes: `complete-search` warns.
+
+**Which mode is faster depends on the panel.** The population-level analysis reports each
+window's worst case and reads no haplotype, so the pre-check cannot skip its windows. On a
+dense panel of many samples, such as the default HGDP + 1000 Genomes index (4,091 samples), the
+per-sample search is the faster: on chr22 the README guide's population-level search took 121
+min without these steps (more than the per-sample one's 98) and 23 to 32 min with the
+post-analysis in pieces, where the per-sample search takes 8 to 9 min (16 threads). Its CPU
+time did not fall (147 and 151 min): the pieces only spread it over the threads, and the merge,
+which scores the CRISPR-Bulge rows of all the pieces (890,496) in one process, took 13 of its
+20 min of SNP post-analysis on a loaded node. On a small panel the per-sample search can be the
+slower one: on HPRC (232 samples, its index of format 2 too) the same search of chr22 took 14
+to 16 min per sample against 9 to 11 min population-level (16 threads, the two started
+together), its post-analysis costing about the same in both modes (the SNP side half a minute
+or less, the indels about 3.5 min) and the per-sample run writing what the population-level one
+does not (the alternative alignments, the observed-haplotypes sidecar) and integrating its rows
+for longer; beside mega (HGDP + 1000 Genomes and mega, NRR) the per-sample search took 87 to 99
+min from its search to its end, about an hour of it its report, against 27 to 29 min
+population-level. Choose the mode for what it reports.
 
 ### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
@@ -1278,11 +1324,12 @@ population-level analysis** (rows are PUTATIVE worst cases); the launch-time mes
 never silent. The default therefore follows the panel. On a genotyped+PHASED index (such as the
 default HGDP + 1000 Genomes one) it is per-sample, the phased haplotype resolution that
 *confirmatory / pre-IND* runs need, and `--population-level` the worst-case *screen*, which on
-the indexes CRISPRitz 2.10.0 builds is no faster (the per-sample analysis skips the dense
-windows' raw targets nobody carries, and both run in pieces: above). On a sites-only, unphased,
-hybrid or reference-only
-index it is the population-level analysis (the only meaningful mode on sites-only panels), and
-`--per-sample` forces resolution on a genotyped one. On sites-only (aggregate) panels there are
+the indexes CRISPRitz 2.10.0 builds is not the faster on a dense panel of many samples such as
+the default one (the per-sample analysis skips the dense windows' raw targets nobody carries,
+and both run in pieces), though it can be on a small panel such as HPRC, or beside mega
+(above). On a sites-only, unphased, hybrid or reference-only index it is the population-level
+analysis (the only meaningful mode on sites-only panels), and `--per-sample` forces resolution
+on a genotyped one. On sites-only (aggregate) panels there are
 no per-sample genotypes to recover — verified on the released **mega** index: `--per-sample`
 yields **zero CONFIRMED rows and no cis carriers** in either mode (there is no genotype store to
 enumerate), and the `indel_snp_cooc.tsv` / `indel_af.tsv` companions are **byte-identical**
@@ -1332,7 +1379,9 @@ index) makes the trade concrete and confirms the guarantees hold end-to-end:
   modes differ in genotype resolution, not intrinsic speed; population-level's advantage
   materializes only on the dense/aggregate-panel enumeration wall, not sparse single-guide runs.
   (On the indexes CRISPRitz 2.10.0 builds, which code every allele, the per-sample analysis is
-  the faster of the two: "Search speed" above.)
+  the faster of the two on a dense panel of many samples such as the default HGDP + 1000
+  Genomes one, and the population-level one can be on a small panel such as HPRC, or beside
+  mega: "Search speed" above.)
 
 The measured numbers above, side by side (same guide/PAM/thresholds; only `--per-sample` differs):
 

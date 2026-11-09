@@ -584,10 +584,11 @@ and the `release-crisprme` skill.
     skips), each read as a run of 2.10.0 from its records, as is the README per-sample
     search with this release's code on the indexes of CRISPRitz 2.9.1 (format 1, the last
     record of a split site, a store of every FILTER), which passes too (4
-    `limit-last-alt-wins` lines). That search takes 6.5 min there and 97 min on the indexes
-    this release built, its SNP post-analysis 1 min against 76, in the windows every allele
-    coded makes dense (7,493 on chr22, 7,255 hyperdense). The SNP+indel oracle with the
-    second deletions of its sites O and Q, the insertion of Y1 and an MNV marked `LowQual`
+    `limit-last-alt-wins` lines). That search takes 6.5 min there and, on 8 threads, 97 min on
+    the indexes this release built without its haplotype pre-check and post-analysis in pieces
+    (8.4 min with them: METHODS.md §5), its SNP post-analysis 1 min against 76, in the windows
+    every allele coded makes dense (7,493 on chr22, 7,255 hyperdense). The SNP+indel oracle
+    with the second deletions of its sites O and Q, the insertion of Y1 and an MNV marked `LowQual`
     passes in both modes, and fails where the run read a store of every FILTER (14 and 6
     gating findings); the same world searched with `CRISPRME_INDEL_SNP=0` is refused
     (2.8.2's checker gave 166 and 77 gating findings there). On the documented chr22

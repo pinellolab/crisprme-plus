@@ -115,11 +115,14 @@ for the HGDP+1000G index) and reads the panel's genotype store: on a large panel
   naming the carriers of an indel alone (the index holds them), and `--per-sample`
   falls back to it with a `WARNING` that names the dataset: re-download without
   `--no-genotypes` to get carriers.
-- If you only need site-level results, pass `--population-level`. It is not faster on the
-  indexes CRISPRitz 2.10.0 builds, which code every allele: it reads no haplotype, so
-  nothing skips the raw targets of the dense windows of the immunoglobulin loci, which a
-  per-sample search skips when no sample can have them; on chr22 the README guide's
-  population-level search took 32 min against 9 min per sample (METHODS.md §5).
+- If you only need site-level results, pass `--population-level`. Which mode is faster
+  depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele, a
+  population-level search reads no haplotype, so nothing skips the raw targets of the dense
+  windows of the immunoglobulin loci, which a per-sample search skips when no sample can have
+  them: on HGDP + 1000 Genomes (4,091 samples) the README guide's population-level search of
+  chr22 took 23 to 32 min against 8 to 9 min per sample. On a small panel it can be the faster:
+  on HPRC (232 samples) 9 to 11 min against 14 to 16 min per sample (16 threads; METHODS.md
+  §5).
   On a phased index leaving out `--per-sample` is not enough, since per-sample is that
   index's default; population-level is the default only on a sites-only, unphased,
   hybrid or reference-only index.

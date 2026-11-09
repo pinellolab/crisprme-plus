@@ -310,7 +310,11 @@ Open **Advanced options** to set the per-type caps individually instead:
 
 In Advanced mode a candidate must satisfy **each** per-type cap **and** the overall
 max-total-edits budget. Bulges can be consecutive (e.g., `NN--NN`) or interleaved
-(e.g., `NN-N-NN`).
+(e.g., `NN-N-NN`). On the indexes CRISPRitz 2.10.0 builds, which code every allele, 2 DNA or
+2 RNA bulges make the variant search of the dense loci (the immunoglobulin loci) explode, to
+many hours or out of memory, unless the total budget is 3 or less: the job's
+`log_verbose.txt` says so before its variant search. (The **Maximum edits** slider alone never
+asks for more than 1 bulge of each type.)
 
 Bulge searches need a genome index. If no installed **reference** index supports the
 bulges you ask for, the search first builds one from the installed genome (once: about
@@ -352,12 +356,16 @@ set automatically from the index you picked:
   representative of the variants in its window. It never misses a candidate off-target and works
   on any index, so it is the default on the sites-only *mega* index; on a genotyped+phased panel
   pick it (or pass `--population-level`) to opt out of per-sample for each window's worst case
-  (on the indexes CRISPRitz 2.10.0 builds it is not faster than per-sample). It does **not**
-  tell you which individuals carry a site.
+  (on the indexes CRISPRitz 2.10.0 builds it is slower than per-sample on a dense panel of many
+  samples such as the default HGDP + 1000 Genomes one, and can be faster on a small one such as
+  HPRC). It does **not** tell you which individuals carry a site.
 
-Per-sample is a **genotype-resolution** dial, **not** a speed dial: on the indexes CRISPRitz
-2.10.0 builds, which code every allele, it is the faster of the two (its haplotype pre-check
-skips the dense windows' raw targets nobody carries). It **requires a genotyped index** (HGDP +
+Per-sample is a **genotype-resolution** dial, **not** a speed dial: which of the two is faster
+depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele,
+per-sample is the faster on a dense panel of many samples such as the default HGDP + 1000
+Genomes one (its haplotype pre-check skips the dense windows' raw targets nobody carries);
+population-level can be the faster on a small panel such as HPRC, or with mega selected
+beside it. It **requires a genotyped index** (HGDP +
 1000 Genomes [the default], or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
 greyed out and the search automatically uses population-level. (See "Understanding CONFIRMED vs
 PUTATIVE and carriers" in the results section for how these labels appear in the report.)

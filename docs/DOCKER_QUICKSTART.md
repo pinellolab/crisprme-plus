@@ -303,13 +303,18 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 > on HPC / in containers) add `-e CRISPRME_TMPDIR=/DATA/crisprme_tmp` to the
 > `docker run` so temp lands on your mounted data disk instead. `--per-sample` adds the
 > genotype resolution (named carriers) and reads the genotype store, which needs more RAM;
-> on the indexes CRISPRitz 2.10.0 builds it is not slower than `--population-level`, which
-> reads no haplotype and so skips none of the dense windows' raw targets. No GPU is
-> required (CPU is the default and always works). If anything fails, see
-> [Troubleshooting](TROUBLESHOOTING.md).
+> on the indexes CRISPRitz 2.10.0 builds it is faster than `--population-level` on a dense
+> panel of many samples such as the default HGDP + 1000 Genomes one (the population-level
+> analysis reads no haplotype and so skips none of the dense windows' raw targets), and can
+> be slower on a small panel such as HPRC. No GPU is required (CPU is the default and always
+> works). If anything fails, see [Troubleshooting](TROUBLESHOOTING.md).
 
 - `--mm` is mismatches; `--bDNA` / `--bRNA` are DNA / RNA bulges. For a wider
-  search use e.g. `--mm 5 --bDNA 2 --bRNA 2 --max-total-edits 9`. In the web form the
+  search use e.g. `--mm 5 --bDNA 2 --bRNA 2 --max-total-edits 9`; on the indexes CRISPRitz
+  2.10.0 builds, which code every allele, more than 1 DNA + 1 RNA bulge makes the variant
+  search of the dense loci (the immunoglobulin loci) explode, to many hours or out of memory,
+  unless `--max-total-edits` is 3 or less: `complete-search` warns (see the README's "What the
+  default search costs"), so raise `--mm` first. In the web form the
   per-type values live under **Advanced options**, while the **Maximum edits** slider
   is the total budget — the equivalent of `--max-total-edits`.
 - `--max-total-edits` caps the **total** edits (mismatches + bulges) in one alignment,
@@ -324,8 +329,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   (unphased) with the exact joint allele frequency. It needs a genotyped index
   (HGDP + 1000 Genomes [the default], or HPRC); on these phased panels per-sample
   is already the context-aware default, so use `--population-level` to force the
-  worst-case screen (a resolution choice, not a faster one on the indexes CRISPRitz 2.10.0
-  builds), and note per-sample is inert on the sites-only *mega* index. Either way
+  worst-case screen (a resolution choice: on the indexes CRISPRitz 2.10.0 builds it is the
+  slower on HGDP + 1000 Genomes, and can be the faster on HPRC), and note per-sample is inert
+  on the sites-only *mega* index. Either way
   the search is variant-aware with allele frequencies and rsIDs.
 - COSMIC cancer rows ship in the annotation bundle but are **off by default**
   (licence-gated) — enable with `crisprme.py cosmic-license enable`; IntOGen
