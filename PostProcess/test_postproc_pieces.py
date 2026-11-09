@@ -401,6 +401,32 @@ class TheNotes(unittest.TestCase):
                          "K-skip on chrT: off (CRISPRME_HAPLOTYPE_PRECHECK=0)")
         self.assertEqual(analysis_notes.snp_lines("chrT", counts, False, True, -1), [])
 
+    def test_the_indel_side_says_its_pre_check_is_off(self):
+        """The carriers-first pre-check of the indel side runs in either mode, so its notes say
+        when the switch turned it off (after the count of the overlaid targets), and with it
+        on how many targets it told; a piece's counts carry the switch to the merge."""
+        import analysis_notes
+        counts = analysis_notes.indel_counts()
+        counts["overlaid"].update(targets=5, rows=2, dropped=3)
+        off = "indel-snp: carriers-first pre-check off (CRISPRME_HAPLOTYPE_PRECHECK=0)"
+        self.assertEqual(analysis_notes.indel_lines("chrT", counts, False)[-1], off)
+        self.assertNotIn(off, analysis_notes.indel_lines("chrT", counts))
+        counts["overlaid"]["prechecked"] = 3
+        self.assertEqual(analysis_notes.indel_lines("chrT", counts)[-1],
+                         "indel-snp: 3 of them told by the carriers-first pre-check, before the "
+                         "second indels of the phased store were read")
+        # no overlaid target, nothing to say
+        self.assertEqual(analysis_notes.indel_lines("chrT", analysis_notes.indel_counts(),
+                                                    False), [])
+        tmp = tempfile.mkdtemp(prefix="indel_notes_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        counts["overlaid"]["prechecked"] = 0
+        p = os.path.join(tmp, "p0")
+        with open(p + ".piece.json", "w") as fh:
+            json.dump({"do_scores": False, "lines": 5, "chrom": "chrT",
+                       "notes": {"counts": counts, "precheck_on": False}}, fh)
+        self.assertEqual(merge_pieces.indel_notes([p])[-1], off)
+
 
 class TheStageThroughAFakeDriver(unittest.TestCase):
     """postproc_pool.run_stage over a fake driver and analysis script (the merge left out):
@@ -624,6 +650,56 @@ class PiecesThroughTheRealScripts(unittest.TestCase):
                     ",".join("%s:%s" % c for c in carriers), ref, alt, k, col)
             dna = "".join(codes.get(c, ch) for c, ch in enumerate(aligned))
             rows.append((k, dna, "+", "RNA" if bulge else "X", 1 if bulge else 0))
+        # windows of 6 mismatches and an RNA or a DNA bulge (the gap counts as a mismatch,
+        # which the bulge count takes off: a budget of 4 needs 2 fixed), on the dictionary path
+        # (4 two-allele columns) and the observed one (12): the two fixing ALTs carried by two
+        # samples (skipped) or both by S2 (kept, S2's row); the other ALTs by S3 to S5
+        self.bulged = {}
+        for kind in ("RNA", "DNA"):
+            for n_cols in (4, 12):
+                for together in (False, True):
+                    k = len(sites)
+                    gap = 4 + len(self.bulged)
+                    guide_al = list(guide)
+                    t = list(guide)
+                    if kind == "RNA":
+                        t[gap] = "-"
+                    else:
+                        guide_al.insert(gap, "-")
+                        t.insert(gap, "A")
+                    n_spacer = len(t)
+                    guide_al += ["N", "N", "N"]
+                    t += ["T", "G", "G"]
+                    mism = rng.sample([c for c in range(n_spacer) if c != gap], 6)
+                    for col in mism:
+                        t[col] = rng.choice([b for b in "ACGT" if b != guide_al[col]])
+                    fixing = rng.sample(mism, 2)
+                    others = rng.sample([c for c in range(len(t)) if c != gap and c not in mism],
+                                        n_cols - 2)
+                    site_at, n = {}, 0
+                    for c, ch in enumerate(t):
+                        if ch != "-":
+                            site_at[c] = n
+                            n += 1
+                    codes = {}
+                    for col in fixing + others:
+                        ref = t[col]
+                        alt = guide_al[col] if col in fixing else \
+                            rng.choice([b for b in "ACGT" if b not in (ref, guide_al[col])])
+                        codes[col] = {frozenset("AG"): "R", frozenset("CT"): "Y",
+                                      frozenset("CG"): "S", frozenset("AT"): "W",
+                                      frozenset("GT"): "K",
+                                      frozenset("AC"): "M"}[frozenset((ref, alt))]
+                        if col in fixing:
+                            who = ["S2"] if together else ["S%d" % fixing.index(col)]
+                        else:
+                            who = rng.sample(["S3", "S4", "S5"], rng.randint(1, 2))
+                        entries[(k, site_at[col])] = "%s;%s,%s;rs%d_%d;0.1" % (
+                            ",".join("%s:1|0" % w for w in who), ref, alt, k, col)
+                    sites.append("".join(ch for ch in t if ch != "-"))
+                    dna = "".join(codes.get(c, ch) for c, ch in enumerate(t))
+                    rows.append((k, dna, "+", kind, 1, "".join(guide_al)))
+                    self.bulged[k] = (kind, n_cols, together)
         self.sites, self.rows, self.entries = sites, rows, entries
 
     def write(self, d):
@@ -647,11 +723,13 @@ class PiecesThroughTheRealScripts(unittest.TestCase):
             fh.write("#header\n")
             for row in self.rows:
                 i, window, strand = row[:3]
-                kind, bulges = row[3:] if len(row) > 3 else ("X", 0)
+                kind, bulges = row[3:5] if len(row) > 3 else ("X", 0)
+                crrna = row[5] if len(row) > 5 else self.twd.CRRNA
                 fh.write("\t".join(
-                    [kind, self.twd.CRRNA, window, "chrT", str(starts[i]), str(starts[i]),
+                    [kind, crrna, window, "chrT", str(starts[i]), str(starts[i]),
                      strand, "0", str(bulges), str(bulges), "NA", "y", "NA", "NA", "NA", "NA",
                      "NA", "NA"]) + "\n")
+        self.starts = starts
         return fasta, dct, targets, pam
 
     def run_script(self, args, env):
@@ -710,10 +788,20 @@ class PiecesThroughTheRealScripts(unittest.TestCase):
                         note = [line for line in self.said["whole"].splitlines()
                                 if line.startswith("Haplotype pre-check on chrT: ")]
                         skipped, seen = (int(x) for x in note[0].split(": ")[1].split()[:3:2])
-                        self.assertGreater(skipped, 3, note)
-                        self.assertGreater(seen - skipped, 3, note)
+                        self.assertGreater(skipped, 7, note)
+                        self.assertGreater(seen - skipped, 7, note)
                         # bulged rows within the budget only with their bulge taken off
                         self.assertIn(b"\nRNA\t", whole[".bestCFD.txt"])
+                        self.assertIn(b"\nDNA\t", whole[".bestCFD.txt"])
+                    # a bulged window needing two fixes: none where two samples carry one
+                    # each (skipped, with the pre-check on), S2's row where S2 carries both
+                    rows = [line.split("\t") for line in
+                            whole[".bestCFD.txt"].decode().splitlines()[1:]]
+                    for k, (kind, n_cols, together) in self.bulged.items():
+                        carriers = {s for r in rows if r[4] == str(self.starts[k])
+                                    for s in r[12].split(",") if s not in ("n", "NA")}
+                        self.assertEqual(carriers, {"S2"} if together else set(),
+                                         (kind, n_cols, together))
 
     def test_population_level_pieces_are_one_process(self):
         whole, merged = self.one_and_pieces(3, CRISPRME_FAST_MODE="1")
@@ -759,58 +847,125 @@ class PiecesThroughTheRealScripts(unittest.TestCase):
                                                         self.said["prefixes"]), want)
 
 
+def _budget_world():
+    """test_indel_overlaid_rows' world and two more sites, targets no real-script test held
+    before (the review of lane S, round 2): BG, a deletion whose carrier's target has exactly
+    the budget's 4 mismatches, beside the code of another sample's SNP it does not need; UN, a
+    deletion whose target needs the guide's base at a code that does not hold the reference
+    base (never expected: no genotype covers that column, so resolve_target takes the code's
+    alleles there, and the pre-check must let every carrier fix it)."""
+    import test_indel_overlaid_rows as tio
+    w = tio.World()
+    g = tio.GUIDE
+    other = {"A": "C", "C": "A", "G": "T", "T": "G"}
+    bg = list(g)
+    for c in (1, 6, 13, 17):
+        bg[c] = other[g[c]]
+    w._put(5500, "".join(bg[:10]) + "G" + "".join(bg[10:]) + "TGG")
+    w._indel("BG", 5500 + 10, bg[9] + "G", bg[9], {"S01": "1|0"})
+    w._snp("BG", 5500 + 4 + 1, g[4], other[g[4]], {"S02": "1|0"})
+    un = list(g)
+    for c in (1, 7, 12, 18):
+        un[c] = other[g[c]]
+    assert g[3] == "G"
+    un[3] = "T"  # the reference base; the code R there holds the guide's G, not T
+    w._put(5700, "".join(un[:10]) + "C" + "".join(un[10:]) + "TGG")
+    w._indel("UN", 5700 + 10, un[9] + "C", un[9], {"S03": "1|0"})
+    w.extra_codes[5700 + 3 + 1] = "R"
+    w.ref = "".join(w.seq)
+    return w
+
+
 @unittest.skipUnless(_gnu_wc(), "analisi_indels_NNN.py reads GNU wc -l")
 class IndelPiecesThroughTheRealScript(unittest.TestCase):
-    """analisi_indels_NNN.py on test_indel_overlaid_rows' world, as one process and as
-    pieces merged: the same files, with the carriers-first pre-check on and off."""
+    """analisi_indels_NNN.py on test_indel_overlaid_rows' world and _budget_world's two sites,
+    as one process and as pieces merged: the same files, with the carriers-first pre-check on
+    and off; and the same files with it on as off, the rows of a target at exactly the budget
+    and of a column no genotype covers among them, the pre-check telling some targets (site
+    C's chimera), and the run saying when it is off."""
 
     FILES = (".bestCFD_INDEL.txt", ".bestmmblg_INDEL.txt", ".bestCRISPR_BULGE_INDEL.txt",
              ".indel_snp_cooc.tsv", ".indel_af.tsv")
+    OFF = "indel-snp: carriers-first pre-check off (CRISPRME_HAPLOTYPE_PRECHECK=0)"
+
+    def one_and_pieces(self, pre):
+        """One process and three pieces merged, with the pre-check on (pre "1") or off:
+        (the one process's fixture, its files)."""
+        import test_indel_overlaid_rows as tio
+        tmp = tempfile.mkdtemp(prefix="pieces_indel_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        env = {"CRISPRME_HAPLOTYPE_PRECHECK": pre, "PYTHONHASHSEED": "0"}
+        fx = tio._Fixture(tmp, _budget_world(), env=env)
+        self.assertEqual(fx.proc.returncode, 0, fx.proc.stderr[-2000:])
+        whole = _files(fx.out, self.FILES)
+        self.assertTrue(whole[".bestCFD_INDEL.txt"].count(b"\n") > 2)
+        logd = os.path.join(tmp, "Dictionaries", "log_indels_" + tio.VCF)
+        cluster = os.path.join(tmp, "targets.cluster.txt")
+        n_lines = len(fx.rows_in)
+        prefixes = []
+        run_env = {k: v for k, v in os.environ.items()
+                   if k not in ("MAMBA_EXE", "CONDA_EXE", "CRISPRME_CONDA_EXE")}
+        run_env["PATH"] = os.path.dirname(sys.executable) + ":/usr/bin:/bin"
+        run_env.update(env, PYTHONHASHSEED="0")
+        for i, (a, b) in enumerate(postproc_pool.ranges(n_lines, 3)):
+            p = os.path.join(tmp, "out", "piece%d" % i)
+            prefixes.append(p)
+            argv = [sys.executable, tio.ANALYZER, "", cluster, p, logd,
+                    os.path.join(tmp, "pam.txt"), "4",
+                    os.path.join(tmp, tio.CHROM + ".fa"),
+                    os.path.join(tmp, "guides.txt"), "1", "1"]
+            e = dict(run_env, CRISPRME_POSTPROC_PIECE="1",
+                     CRISPRME_POSTPROC_RANGE="%d:%d" % (a, b))
+            done = subprocess.run(argv, cwd=HERE, env=e, capture_output=True,
+                                  text=True, timeout=600)
+            self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+            self.assertEqual(done.stderr, "")
+            # the notes the chromosome ends with are the merge's
+            self.assertEqual(self.notes(done.stdout), [])
+        merged = os.path.join(tmp, "out", "merged")
+        merge_pieces.merge_indel(merged, prefixes)
+        got = _files(merged, self.FILES)
+        self.assertEqual(sorted(whole), sorted(got))
+        for name in whole:
+            self.assertEqual(got[name], whole[name], name)
+        want = self.notes(fx.proc.stdout)
+        self.assertTrue(any(" overlaid target(s) resolved per carrier haplotype "
+                            in n for n in want), want)
+        self.assertEqual(merge_pieces.indel_notes(prefixes), want)
+        return fx, whole
 
     def test_pieces_are_one_process(self):
-        import test_indel_overlaid_rows as tio
         for pre in ("1", "0"):
             with self.subTest(precheck=pre):
-                tmp = tempfile.mkdtemp(prefix="pieces_indel_")
-                self.addCleanup(shutil.rmtree, tmp, True)
-                env = {"CRISPRME_HAPLOTYPE_PRECHECK": pre, "PYTHONHASHSEED": "0"}
-                fx = tio._Fixture(tmp, tio.World(), env=env)
-                self.assertEqual(fx.proc.returncode, 0, fx.proc.stderr[-2000:])
-                whole = _files(fx.out, self.FILES)
-                self.assertTrue(whole[".bestCFD_INDEL.txt"].count(b"\n") > 2)
-                logd = os.path.join(tmp, "Dictionaries", "log_indels_" + tio.VCF)
-                cluster = os.path.join(tmp, "targets.cluster.txt")
-                n_lines = len(fx.rows_in)
-                prefixes = []
-                run_env = {k: v for k, v in os.environ.items()
-                           if k not in ("MAMBA_EXE", "CONDA_EXE", "CRISPRME_CONDA_EXE")}
-                run_env["PATH"] = os.path.dirname(sys.executable) + ":/usr/bin:/bin"
-                run_env.update(env, PYTHONHASHSEED="0")
-                for i, (a, b) in enumerate(postproc_pool.ranges(n_lines, 3)):
-                    p = os.path.join(tmp, "out", "piece%d" % i)
-                    prefixes.append(p)
-                    argv = [sys.executable, tio.ANALYZER, "", cluster, p, logd,
-                            os.path.join(tmp, "pam.txt"), "4",
-                            os.path.join(tmp, tio.CHROM + ".fa"),
-                            os.path.join(tmp, "guides.txt"), "1", "1"]
-                    e = dict(run_env, CRISPRME_POSTPROC_PIECE="1",
-                             CRISPRME_POSTPROC_RANGE="%d:%d" % (a, b))
-                    done = subprocess.run(argv, cwd=HERE, env=e, capture_output=True,
-                                          text=True, timeout=600)
-                    self.assertEqual(done.returncode, 0, done.stderr[-2000:])
-                    self.assertEqual(done.stderr, "")
-                    # the notes the chromosome ends with are the merge's
-                    self.assertEqual(self.notes(done.stdout), [])
-                merged = os.path.join(tmp, "out", "merged")
-                merge_pieces.merge_indel(merged, prefixes)
-                got = _files(merged, self.FILES)
-                self.assertEqual(sorted(whole), sorted(got))
-                for name in whole:
-                    self.assertEqual(got[name], whole[name], name)
-                want = self.notes(fx.proc.stdout)
-                self.assertTrue(any(" overlaid target(s) resolved per carrier haplotype "
-                                    in n for n in want), want)
-                self.assertEqual(merge_pieces.indel_notes(prefixes), want)
+                fx, _whole = self.one_and_pieces(pre)
+                told = [n for n in self.notes(fx.proc.stdout)
+                        if n.endswith(" of them told by the carriers-first pre-check, before "
+                                      "the second indels of the phased store were read")]
+                if pre == "1":
+                    # site C's chimera at least: S05's deletion, the SNP only S06 carries
+                    self.assertEqual(len(told), 1, self.notes(fx.proc.stdout))
+                    self.assertGreater(int(told[0].split()[1]), 0, told)
+                    self.assertNotIn(self.OFF, self.notes(fx.proc.stdout))
+                else:
+                    self.assertEqual(told, [])
+                    self.assertIn(self.OFF, self.notes(fx.proc.stdout))
+
+    def test_the_pre_check_changes_no_row(self):
+        """With the pre-check on and off, one process each: the same files. Among the rows,
+        BG's at exactly the budget (4 mismatches, S01's slot: one fewer allowed would skip it)
+        and UN's, whose column no genotype covers (S03 takes the code's G there: read as known
+        with nobody carrying an ALT, the target would be skipped)."""
+        on_fx, on = self.one_and_pieces("1")
+        _off_fx, off = self.one_and_pieces("0")
+        self.assertEqual(sorted(on), sorted(off))
+        for name in on:
+            self.assertEqual(on[name], off[name], name)
+        rows = on_fx.rows()
+        bg = [r for r in rows if r["var"].split(",")[0].startswith("chrT_5510_")]
+        self.assertEqual([(r["mm"], r["samples"]) for r in bg], [(4, "S01")], bg)
+        un = [r for r in rows if r["var"].split(",")[0].startswith("chrT_5710_")]
+        self.assertEqual([(r["mm"], r["samples"], r["dna"][3]) for r in un], [(4, "S03", "G")],
+                         un)
 
     @staticmethod
     def notes(text):

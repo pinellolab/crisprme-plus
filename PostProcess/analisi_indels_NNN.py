@@ -1217,9 +1217,9 @@ def _indel_carriers(indel_data, ipos, iref, ialt):
 # indel_snp_cis.resolve_target writes holds, at each code column, the reference base or a
 # base one of the indel's carriers carries there, so when no carrier, free to take at each
 # column any of those, reaches the budget and the PAM, the target has no row. On with the
-# SNP side's pre-check (CRISPRME_HAPLOTYPE_PRECHECK=0, complete-search
-# --no-haplotype-precheck, turns both off; so do false, no and off, in any case:
-# haplotype_precheck.switch_on).
+# SNP side's pre-check, in either analysis mode (CRISPRME_HAPLOTYPE_PRECHECK=0, complete-search
+# --no-haplotype-precheck, turns both off, and the notes at the end of the chromosome say so;
+# so do false, no and off, in any case: haplotype_precheck.switch_on).
 _PRECHECK = _hpc.switch_on(os.environ, "CRISPRME_HAPLOTYPE_PRECHECK")
 _sample_bits = _hpc.SampleBits()
 _snp_masks = {}      # (pos1, forward alt) -> the samples the genotype source lists for it
@@ -1817,7 +1817,7 @@ else:
     # chromosome are written from
     with open(outputFile + ".piece.json", "w") as _fh:
         json.dump({"do_scores": do_scores, "lines": line_no, "chrom": current_chr,
-                   "notes": {"counts": _note_counts()}}, _fh)
+                   "notes": {"counts": _note_counts(), "precheck_on": _PRECHECK}}, _fh)
 os.system(
     "sed -i '1s/.*/" + _BEST_HEADER + "/' "
     + outputFile
@@ -1830,7 +1830,7 @@ os.system(
 # failure, `[ -s $logerror ]`). A piece of a post-analysis cut into pieces writes none: the
 # merge writes the chromosome's from the counts in its <out>.piece.json.
 if not _PIECE:
-    _notes.write(_notes.indel_lines(current_chr, _note_counts()))
+    _notes.write(_notes.indel_lines(current_chr, _note_counts(), _PRECHECK))
 
 print("Done", current_chr, time.time() - start_time)
 

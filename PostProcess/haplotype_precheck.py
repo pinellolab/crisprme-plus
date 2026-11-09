@@ -41,7 +41,8 @@ THE K-SKIP (population-level, --max-degeneracy K). Every row a capped population
 writes rests on at most K ambiguous columns (window_density.degeneracy), and every row within
 the budget and the PAM rests on at least D_min = max(0, need) + the PAM columns that need an
 ALT, whatever ALT it takes. A raw target whose D_min exceeds K therefore gives no variant row
-and is skipped the same way, before its genotypes are read.
+and is skipped the same way, before it is expanded (the ALTs listed at its variant columns are
+read, to tell which columns an ALT can fix, but no sample's haplotype).
 
 Stdlib only and free of the post-analysis scripts' module globals, so it is unit-tested alone
 (test_haplotype_precheck.py, against a brute-force enumeration of every haplotype).

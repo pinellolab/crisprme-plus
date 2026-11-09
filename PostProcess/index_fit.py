@@ -594,8 +594,8 @@ def index_name(pam, n, rest, guide, three_prime):
 # variant search alone, CRISPRitz 2.10.0, 16 threads), 6 mismatches + 2 DNA + 2 RNA bulges
 # wrote 618,209 SNP raw targets at a cap of 3 (0.6 GB), against 755,963 at the default
 # 4 + 1 + 1 (cap 6, 0.7 GB), and 4.5 million at a cap of 4 (3.8 GB), 14.7 million at 5 (11.8
-# GB), 33.7 million at 6 (21.6 GB); 4 + 2 + 1 wrote 5.1 million at 6, 4 + 2 + 2 33.7 million
-# at 6 (27.9 GB).
+# GB), 33.7 million at 6 (21.6 GB); 4 + 2 + 1 wrote 5.1 million at 6 and 7.9 million at 7,
+# 4 + 2 + 2 33.7 million at 6 (27.9 GB) and 93.8 million at 8 (75 GB).
 WIDE_BUDGET_FREE_CAP = 3
 
 
@@ -622,11 +622,13 @@ def wide_bulge_note(mm, bdna, brna, max_total_edits=-1):
     return (f"{mm} mismatch(es) + {bdna} DNA + {brna} RNA bulge(s){cap} on a variant index "
             f"that codes every allele (index format 2, CRISPRitz 2.10.0). Above the 1 DNA + 1 "
             f"RNA default, the variant search of the densest regions (the immunoglobulin loci) "
-            f"grows by orders of magnitude: on IGL alone (chr22, HGDP + 1000 Genomes, one "
-            f"guide) 0.76 million SNP raw targets at 4 + 1 + 1, 5.1 million at 4 + 2 + 1 and "
-            f"33.7 million (28 GB of memory) at 4 + 2 + 2, where the indel search wrote 204 "
-            f"million (157 GB); IGH (chr14) needed 225 GB at 4 + 2 + 1. Such a search can run for many "
-            f"hours or run out of memory. The 1 DNA + 1 RNA default is recommended, or a "
+            f"grows by orders of magnitude. At the default --max-total-edits of 6, on IGL alone "
+            f"(chr22, HGDP + 1000 Genomes, one guide) the SNP search wrote 0.76 million raw "
+            f"targets at 4 + 1 + 1, 5.1 million at 4 + 2 + 1 and 33.7 million (28 GB of memory) "
+            f"at 4 + 2 + 2, the indel search 204 million (157 GB) at 4 + 2 + 2, and IGH (chr14) "
+            f"needed 225 GB at 4 + 2 + 1; with the cap at the budget's sum (7 and 8), IGL's SNP "
+            f"search wrote 7.9 and 93.8 million (75 GB). Such a search can run for many hours "
+            f"or run out of memory. The 1 DNA + 1 RNA default is recommended, or a "
             f"--max-total-edits of {WIDE_BUDGET_FREE_CAP} or less, which keeps a wider budget "
             f"near the default's cost (METHODS.md section 5).")
 

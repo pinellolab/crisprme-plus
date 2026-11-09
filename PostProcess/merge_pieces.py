@@ -314,7 +314,8 @@ def indel_notes(pieces):
     counts = analysis_notes.indel_counts()
     for meta in metas:
         analysis_notes.add_counts(counts, meta["notes"]["counts"])
-    return analysis_notes.indel_lines(metas[0]["chrom"], counts)
+    return analysis_notes.indel_lines(metas[0]["chrom"], counts,
+                                      metas[0]["notes"].get("precheck_on", True))
 
 
 def merge_line(kind, out, pieces):

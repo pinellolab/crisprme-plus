@@ -105,8 +105,10 @@ def snp_lines(chrom, counts, precheck_on, fast_mode, max_degeneracy):
     return lines
 
 
-def indel_lines(chrom, counts):
-    """The notes of an indel post-analysis, from ``counts`` (indel_counts)."""
+def indel_lines(chrom, counts, precheck_on=True):
+    """The notes of an indel post-analysis, from ``counts`` (indel_counts); ``precheck_on``
+    False when CRISPRME_HAPLOTYPE_PRECHECK turned off its carriers-first pre-check, which
+    runs in either analysis mode."""
     ovl = counts["overlaid"]
     lines = []
     if counts["foreign_rows"]:
@@ -129,6 +131,8 @@ def indel_lines(chrom, counts):
     if ovl["prechecked"]:
         lines.append("indel-snp: %d of them told by the carriers-first pre-check, before the "
                      "second indels of the phased store were read" % ovl["prechecked"])
+    elif not precheck_on:
+        lines.append("indel-snp: carriers-first pre-check off (CRISPRME_HAPLOTYPE_PRECHECK=0)")
     if ovl["unmapped"]:
         lines.append("WARNING [indel-snp]: %d IUPAC column(s) of %s did not map onto the "
                      "reference base they code; they were resolved without genotypes"

@@ -502,6 +502,80 @@ class ThroughThePostAnalysis(_PostAnalysis):
         self.assertIn("0 of 1 raw target(s)", said)
         self.assertIn("S1", [r[12] for r in rows])
 
+    @staticmethod
+    def minus_strand(site, window, entries):
+        """The raw target of eleven_columns on the minus strand: the genome holds the site's
+        reverse complement there, the dictionary its forward positions and bases; the raw
+        target's letters stay in the guide's orientation, as the engine writes them."""
+        comp = {"A": "T", "C": "G", "G": "C", "T": "A"}
+        fwd = {}
+        for (i, col), value in entries.items():
+            carriers, alleles, rsid, af = value.split(";")
+            ref, alt = alleles.split(",")
+            fwd[(i, len(site) - 1 - col)] = "%s;%s,%s;%s;%s" % (carriers, comp[ref], comp[alt],
+                                                                rsid, af)
+        return revcomp(site), window, fwd
+
+    def test_a_minus_strand_target_is_read_at_its_forward_positions(self):
+        """The pre-check reads a minus-strand raw target's columns at their forward positions,
+        their ALTs complemented. Nobody carrying an ALT, it is skipped, and the observed path
+        writes no reference row of its own on the minus strand (the reference search holds
+        that alignment); S1 carrying the two fixes a budget of 1 needs keeps it, with S1's row.
+        Either way the files are those with the pre-check off."""
+        site, window, entries = self.minus_strand(*self.eleven_columns({}))
+        self.write_inputs([site], [(0, window, "-")], entries)
+        rows, said, _h, _q = self.analyse(allowed_mms="3", CRISPRME_FAST_MODE="0")
+        self.assertIn("Haplotype pre-check on chrT: 1 of 1 raw target(s)", said)
+        self.assertEqual(rows, [])
+        on = self.files()
+        self.analyse(allowed_mms="3", CRISPRME_FAST_MODE="0", CRISPRME_HAPLOTYPE_PRECHECK="0")
+        self.assertEqual(self.files(), on)
+        site, window, entries = self.minus_strand(
+            *self.eleven_columns({0: "S1:1|0", 4: "S1:1|0", 8: "S3:1|1"}))
+        self.write_inputs([site], [(0, window, "-")], entries)
+        rows, said, _h, _q = self.analyse(allowed_mms="1", CRISPRME_FAST_MODE="0")
+        self.assertIn("Haplotype pre-check on chrT: 0 of 1 raw target(s)", said)
+        self.assertIn("S1", [r[12] for r in rows])
+        self.assertEqual({r[6] for r in rows}, {"-"})
+        on = self.files()
+        self.analyse(allowed_mms="1", CRISPRME_FAST_MODE="0", CRISPRME_HAPLOTYPE_PRECHECK="0")
+        self.assertEqual(self.files(), on)
+
+    def test_never_on_a_registry_only_dataset(self):
+        """A per-sample search of a dataset with a Tier-0 registry and neither genotypes nor
+        dictionaries (`download --no-genotypes` of a genotyped panel) writes its variant rows
+        with no carrier (Samples NA): the pre-check, which needs a sample carrying the ALTs,
+        does not run there, and the rows are those with it off."""
+        import tier0_registry as t0
+        site = list(_G + "TGG")
+        for col in (3, 9):
+            site[col] = _MISMATCHING[_G[col]]
+        site = "".join(site)
+        window = _site_window(site, {c: _CODE2[frozenset((site[c], _G[c]))] for c in (3, 9)})
+        start = self.write_inputs([site], [(0, window, "+")], {})[0]
+        reg = os.path.join(self.tmp, "Dictionaries", "registry_ds")
+        os.makedirs(reg)
+        t0.compile_registry_panel(
+            [(start + c + 1, site[c], _G[c], "rs%d" % c, {"S1": "1|0", "S2": "0|1"})
+             for c in (3, 9)],
+            {"S1": ("ds", "POP", "female"), "S2": ("ds", "POP", "male")}, None,
+            t0.autosomal_ploidy, os.path.join(reg, "reg_chrT.bin"),
+            os.path.join(reg, "reg_chrT.idx"))
+        # the dictionary the registry stands beside: none
+        self.dict = os.path.join(self.tmp, "Dictionaries", "dictionaries_ds", "my_dict_chrT.json")
+        rows, said, _h, _q = self.analyse(allowed_mms="1", CRISPRME_FAST_MODE="0")
+        self.assertIn("Registry-only install for chrT", said)
+        self.assertNotIn("Sites-only dataset on chrT", said)
+        self.assertNotIn("Haplotype pre-check on chrT", said)
+        # a row of each variant, its other mismatch left, no carrier named (the pre-check would
+        # find no sample listed for either ALT, and skip the target)
+        self.assertEqual(sorted((r[7], r[12], r[17]) for r in rows),
+                         [("1", "NA", "chrT_%d_%s_%s" % (start + c + 1, site[c], _G[c]))
+                          for c in (3, 9)])
+        on = self.files()
+        self.analyse(allowed_mms="1", CRISPRME_FAST_MODE="0", CRISPRME_HAPLOTYPE_PRECHECK="0")
+        self.assertEqual(self.files(), on)
+
     def test_a_window_two_alignments_share_is_one_bed_line(self):
         """Two raw targets of one window (the engine writes a mismatching base in lower
         case, so its alignments differ in case): one line, the letters resultIntegrator's
@@ -516,8 +590,8 @@ class ThroughThePostAnalysis(_PostAnalysis):
 
     def test_the_k_skip_writes_what_the_cap_writes(self):
         """Population-level with --max-degeneracy 1: every row within a budget of 1 rests on
-        two fixing columns or more, so the target is skipped before its genotypes are read;
-        the files are those of the cap alone."""
+        two fixing columns or more, so the target is skipped before it is expanded; the files
+        are those of the cap alone."""
         site, window, entries = self.eleven_columns({0: "S1:1|0", 4: "S2:0|1", 8: "S3:1|1"})
         self.write_inputs([site], [(0, window, "+")], entries)
         _rows, said, _h, _q = self.analyse(allowed_mms="1", CRISPRME_FAST_MODE="1",
@@ -629,6 +703,28 @@ class BulgesAndTheDictionaryPath(_PostAnalysis):
                     self.assertIn("Haplotype pre-check on chrT: 0 of 1 raw target(s)", said)
                     carriers = {s for r in rows for s in r[12].split(",")}
                     self.assertTrue({"S1", "S2"} <= carriers, rows)
+
+    def test_a_bulged_target_no_sample_can_have_is_skipped(self):
+        """Three mismatches and a bulge, a budget of 1: with the bulge taken off a row still
+        needs two fixes on one sample. Each is another sample's: skipped, with an RNA or a DNA
+        bulge, on the dictionary path and the observed one, with no variant row, as with the
+        pre-check off; S1 carrying two of them keeps it, with S1's row."""
+        within = {c: g for c, g in self.WITHIN.items() if c != 18}  # 7 + 3 fixing columns
+        for kind, at in (("RNA", 7), ("DNA", 9)):
+            for path, others in (("dictionary", within), ("observed", self.OVER)):
+                with self.subTest(bulge=kind, path=path):
+                    self.write_target(kind, at, {3: "S1:1|0", 5: "S2:0|1", 15: "S3:1|1"},
+                                      others)
+                    rows, said, dense = self.same_on_and_off("1", CRISPRME_FAST_MODE="0")
+                    self.assertEqual(len(dense), path == "observed", dense)
+                    self.assertIn("Haplotype pre-check on chrT: 1 of 1 raw target(s)", said)
+                    self.assertEqual([r for r in rows if r[12] not in ("n", "NA")], [])
+                    self.write_target(kind, at, {3: "S1:1|0", 5: "S1:1|0", 15: "S3:1|1"},
+                                      others)
+                    rows, said, dense = self.same_on_and_off("1", CRISPRME_FAST_MODE="0")
+                    self.assertIn("Haplotype pre-check on chrT: 0 of 1 raw target(s)", said)
+                    self.assertIn("S1", {s for r in rows for s in r[12].split(",")})
+                    self.assertTrue(all(r[0] == kind for r in rows), rows)
 
     def test_the_dictionary_path_skips_what_no_sample_can_have(self):
         """Three mismatches, a budget of 1: a row needs two fixes on one sample. Each is
@@ -751,6 +847,19 @@ class TheWideBudgetWarning(unittest.TestCase):
         self.assertIn("4 mismatch(es) + 2 DNA + 1 RNA bulge(s) on a variant index",
                       self.said(2, 1, cap=7))
         self.assertIn("--max-total-edits of 3 or less", self.said(2, 1, cap=6))
+
+    def test_the_counts_it_quotes_say_their_cap(self):
+        """The counts it quotes are those of the default cap of 6; a user who raises the cap to
+        the budget's sum, as the README advises, gets far more, which it quotes too (IGL alone:
+        7.9 million SNP raw targets at 4 + 2 + 1 with a cap of 7, 93.8 million at 4 + 2 + 2
+        with 8)."""
+        self.index(2)
+        said = self.said(2, 2)
+        self.assertIn("At the default --max-total-edits of 6, on IGL alone (chr22, HGDP + 1000 "
+                      "Genomes, one guide) the SNP search wrote 0.76 million raw targets at "
+                      "4 + 1 + 1, 5.1 million at 4 + 2 + 1 and 33.7 million", said)
+        self.assertIn("with the cap at the budget's sum (7 and 8), IGL's SNP search wrote 7.9 "
+                      "and 93.8 million (75 GB)", said)
 
     def test_the_run_keeps_it(self):
         """.Params.txt keeps the warning complete-search prints (Bulge_budget_note), and the
