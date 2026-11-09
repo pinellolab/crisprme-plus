@@ -68,6 +68,7 @@ import os
 import sys
 from collections import namedtuple
 
+import build_indel_genotypes as big
 import build_mega_indel_af as bia
 import bulge_cfd_penalty as bcp
 import indel_snp_cis as isc
@@ -442,7 +443,10 @@ class IndelIndex(object):
                 if wanted is not None and not any(
                         p in wanted for p in range(pos - 1, pos + len(ref))):
                     continue
-                self._toks[(pos, ref, alt)] = toks
+                prev = self._toks.get((pos, ref, alt))
+                # an indel the VCF writes on two lines: one allele, its carriers merged
+                self._toks[(pos, ref, alt)] = (toks if prev is None else
+                                               big.merge_store_carriers(prev, toks))
         self.indels = sorted(self._toks)
         self.starts = [p for p, _r, _a in self.indels]
         self.maxref = max((len(r) for _p, r, _a in self.indels), default=1)

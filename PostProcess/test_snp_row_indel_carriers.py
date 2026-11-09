@@ -271,6 +271,20 @@ class StoreReader(unittest.TestCase):
             self.assertTrue(st.covers(LO - 50, HI + 50))
             self.assertFalse(st.covers(LO - 51, HI))
 
+    def test_an_indel_the_store_holds_twice_is_one(self):
+        """R3B-N1: an indel written on two VCF lines has two lines in the store; the SNP rows'
+        reader takes it once, its carriers merged (build_indel_genotypes.
+        merge_store_carriers). It listed the indel twice and kept the later line's carriers:
+        S1, on the earlier line only, kept a SNP row its slot's indel changes."""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s.tsv.gz")
+            near = _ins_inside()
+            _write_store(path, [(near, {"S1": "1|0", "S2": "0|1"}), (near, {"S2": "1|0"})])
+            ns = _load_pure_functions({})
+            st = ns["_SnpRowIndels"](path, [(LO, HI)], 50)
+            self.assertEqual(st.indels, [near])
+            self.assertEqual(st.carriers(near), {"S1": "1|0", "S2": "1|1"})
+
     def test_touching_junction_rule(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "s.tsv.gz")

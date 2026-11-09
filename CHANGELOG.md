@@ -171,15 +171,17 @@ and the `release-crisprme` skill.
   integrated results are byte for byte those of the same search with `--no-prioritize-observed`
   (TRAC's search of chr22, measured so). Checked against all 8,182 phased haplotypes by a harness
   that rebuilds every alignment's window on each haplotype from the VCF, on 2.8.1's run of the same
-  search (198,826 rows) with the gate of the integration's first stage, before the fixes of 2.8.2
-  and that reading of an indel (A 4,155, B 55,191, C1 40,231): the only alignments left in tier A or
-  B that list a combination no haplotype carries are the 2,574 of a `same score` state (2,328 at the
-  fewest-mismatches alignment, none at the CRISPR-Bulge one, as on this release's run), which is
-  what that state says; every other A or B alignment lists a combination a haplotype carries, and
-  every C1 alignment that a haplotype does carry is one with an indel in the target. The harness's
-  stricter test (a haplotype that reproduces the alignment within its mismatches with a valid PAM)
-  reaches 2,572 of the 2,574, and the per-sample run of the same search reports a row within three
-  bases of every one of them, at the CFD the row shows. Covered by
+  search (198,826 rows) with this release's gate (A 4,155, B 55,190, C1 40,232, C2 0 by each row's
+  highest-CFD alignment, in 27 s on 24 threads, the integrated results unchanged; the gate of the
+  integration's first stage, before the fixes of 2.8.2 and that reading of an indel, gave B 55,191
+  and C1 40,231): the only alignments left in tier A or B that list a combination no haplotype
+  carries are the 2,574 of a `same score` state (2,328 at the fewest-mismatches alignment, none at
+  the CRISPR-Bulge one, as on this release's run), which is what that state says; every other A or
+  B alignment lists a combination a haplotype carries, and every C1 alignment that a haplotype does
+  carry is one with an indel in the target (205 at the highest-CFD alignment, 187 at each other).
+  The harness's stricter test (a haplotype that reproduces the alignment within its mismatches with
+  a valid PAM) reaches 2,572 of the 2,574 (2,326 of the 2,328), and the per-sample run of the same
+  search reports a row within three bases of every one of them, at the CFD the row shows. Covered by
   `PostProcess/test_haplotype_prioritizer.py`.
 - **`--prioritize-observed` checks a sites-only dataset's rows against the phased HGDP + 1000
   Genomes genotypes, and `download --what genotype-oracle` installs them.** The `mega` panel has no
@@ -347,7 +349,11 @@ and the `release-crisprme` skill.
   one an insertion adds taking that base's place on the haplotype as its coordinate, fixed
   below).
   - It imports only Python's standard library and **no code of CRISPRme's variant or indel
-    machinery, and copies none**. Its inputs are what a user has — the reference FASTA, the
+    machinery, and copies none**: a unit test compares its code lines with those of every
+    Python file of CRISPRme's, and no run of four is the same (a run of imports aside; its
+    rule for a line of several ALTs had been `site_alleles`' narrowing loop copied line for
+    line, which a test of function names let through, and is now written from METHODS'
+    text). Its inputs are what a user has — the reference FASTA, the
     VCF(s) the search read (its own BGZF + tabix reader; without a `.tbi` it indexes each
     VCF once in memory, writing nothing), the samples list (`--samples`, the samplesID files
     the search read; by default the run's `.sampleID.txt`, else every VCF sample), the
@@ -355,7 +361,11 @@ and the `release-crisprme` skill.
     search budget and the result folder; the CFD tables in `PostProcess/` are read as data.
     It writes each sample's haplotypes itself from the VCF 4.x definition of a record
     (every SNV, MNV and indel of a slot), keeps its own map from haplotype bases to
-    reference coordinates and aligns with its own exhaustive dynamic-programming aligner.
+    reference coordinates and aligns with its own exhaustive dynamic-programming aligner. A
+    row's variants are read with REF and ALT in upper case, as every record (HPRC writes
+    1,546 indel records of chr22 in lower case, whose rows it looked up by their raw
+    tokens: a world of a lower-case deletion gave 21 gating `missing-row`, every carrier of
+    every target).
   - **The truth is the VCF.** A slot holds a row's target when it reads the target's bases
     from the row's start through the row's record: each base the record puts in the target
     at its place, and the base after them. Two alleles of one slot whose REF spans meet give
@@ -405,14 +415,22 @@ and the `release-crisprme` skill.
     a second indel read from either end of the target through the indel; the phasing
     artefact and the complex allele; MNVs and untied multi-ALT alts resolved PUTATIVE (an
     alt's number the one every carrier of it holds, less those the position's other alts of
-    one character settle, a `*` among them, an indel's ALT not), and from this release a
-    slot holding two ALTs of one position; on a genome of CRISPRitz 2.9.1 or earlier only
-    the last record of a split multi-allelic SNP site searched, an earlier record of the
-    same REF>ALT too, whose carriers its dictionary lost, on one of 2.10.0 every allele, two
-    listings of one SNV REF>ALT at a position one allele, on a line of several ALTs too,
-    their calls merged by the rule CRISPRitz's own documentation gives its enricher) is
-    re-implemented from that text and only classifies a disagreement: a documented limit
-    (non-gating, listed with its cause, a PUTATIVE tie included) or a failure.
+    one character of a line of several ALTs settle, a `*` among them, an indel's ALT not, an
+    alt whose carriers hold only 0 and 1 settling none), and from this release a slot
+    holding two ALTs of one position; on a genome of CRISPRitz 2.9.1 or earlier only the
+    last record of a split multi-allelic SNP site searched, an earlier record of the same
+    REF>ALT too, whose carriers its dictionary lost, and every line before a last line of a
+    `*` alone, whose entry 2.9.1's dictionary kept while its genome kept the earlier lines'
+    code; on one of 2.10.0 every allele, two listings of one SNV REF>ALT at a position one
+    allele, on a line of several ALTs too, their calls merged by the rule CRISPRitz's own
+    documentation gives its enricher) is re-implemented from that text and only classifies
+    a disagreement: a documented limit (non-gating, listed with its cause, a PUTATIVE tie
+    included) or a failure. Two lines of one indel REF>ALT at a position are one allele on
+    every release, their calls merged by that rule (decision B2, as 2.10.0's readers of the
+    phased indel store merge them): the check read the record's call off the first line that
+    listed the sample, so a slot only the later line gave was no slot of the record, and a
+    listing on both a second allele at the record's position (a world of a deletion on two
+    lines: right rows failed, `carrier-without-variants`).
   - **Releases**: where CRISPRme's and CRISPRitz's releases read the data otherwise, the
     check reads which one made the run from the run's own records and prints the reading
     it took (`read as a run of CRISPRme 2.10.0 or later (<dataset> on <chrom>: every allele,
@@ -427,9 +445,13 @@ and the `release-crisprme` skill.
     site); the INDELS index's format is its `.bin` files', else the log's format-1 NOTE of
     it; the store applies the FILTER rule but where the log notes a store written before. A
     run whose records do not tell, where its data makes it matter (a split SNP site, two or
-    more lines of an SNV ALT at one position, a line of several ALTs among them; a target of
+    more lines of an SNV ALT at one position, a line of several ALTs among them, or such a
+    line before a last line of a `*` alone; a target of
     the guide, PAM and budget that can lie at a fake-indel window's edge; a
     genotyped VCF with an indel record of another FILTER and no log), is refused (exit 2),
+    as is a run of every allele whose VCF holds, near what it checks, two lines that each
+    list several ALTs at one position (their allele numbers are not told apart, METHODS
+    section 4),
     and so is a run made with the SNP+indel co-occurrence off
     (`CRISPRME_INDEL_SNP=0`, which a search of this release notes in its `log_verbose.txt`):
     every SNP code of its fake-indel genomes reads as the reference, so its indel rows name
@@ -468,9 +490,14 @@ and the `release-crisprme` skill.
     identical sequences aligned once, and every in-budget alignment on both strands with the
     PAM that holds a base the record changes (for a pure deletion, the bases on both sides
     of it) must be reported for that sample **by rows no worse than its best alignment** by
-    the merge's own sort keys (`--sorting-criteria`, then the CFD at three decimals): a row
-    with exactly that target and variants whose fold group is no worse, or rows of its site
-    and strand naming the same variants with the target's own carrier set that are no worse.
+    the merge's own sort keys (`--sorting-criteria`, then the CFD at three decimals): rows
+    that list the sample with exactly that target and variants whose fold groups (one per
+    carrier set) are together no worse, or rows of its site and strand naming the same
+    variants with the target's own carrier sets that are together no worse. A PUTATIVE
+    co-carrier listed on some of the target's alignments only splits them between two
+    carrier sets (METHODS section 4), the alignment of the fewest edits in one and that of
+    the highest CFD in the other: judged one group at a time, both alignments reported for
+    the sample failed (`missing-best-alignment`; the review's world WQ, two carriers).
     The site is the cluster position on the haplotype carrying the record (the Cluster
     Position plus the rank of the row's first base among the bases an insertion adds, as
     the merge compares rows that start inside one insertion). A target that needs a second
@@ -499,8 +526,10 @@ and the `release-crisprme` skill.
     checks of a SNP row's strings, target and named variants (each must lie in the target),
     its listed carriers and the phased carriers a SNP row of its site leaves out, each read
     as METHODS section 4 reads a SNP row's carriers: an individual with an SNV call of
-    unknown phase in the target is listed for every non-empty subset of its variants there
-    (`limit-snp-row-unphased`); the merge joins the carriers of a site's SNP rows of one
+    unknown phase in the target, or with an alt of a line of several ALTs whose number the
+    genotypes cannot tie, is listed for every non-empty subset of its variants there
+    (`limit-snp-row-unphased`; such an alt's carrier was `carrier-without-target`); the
+    merge joins the carriers of a site's SNP rows of one
     variant list (its key for a SNP row holds no alignment), so a carrier may be listed for
     another alignment of the site its slot holds; and since 2.10.0 a carrier whose slot of
     the row's SNPs holds an indel of the phased store that changes the target is dropped,
@@ -657,7 +686,7 @@ and the `release-crisprme` skill.
     variant bases than the SNP they carry (chr22:11333697 (−), chr22_11333716_T_G: HG00271,
     HG00318, HG00369, HG00379, HG00864, NA06991, NA06993, NA18547), where the HGDP + 1000
     Genomes run alone lists them on an alignment that holds it (report-only).
-  - Wired in: `PostProcess/test_check_indel_rows.py` (205 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (224 unit and mutation tests: a right
     row raises nothing gating, each corruption of it is caught, each documented limit and
     overlapping slot comes out under its own class, the checker's coverage gaps under
     theirs; the refusals; each release's reading of the data, told from a run's records;
@@ -878,11 +907,17 @@ and the `release-crisprme` skill.
   the ALT (the earlier on a tie) as it is; CRISPRme's dictionary readers (the Tier-0 and Tier-1
   compiles, the dictionary path of the SNP post-analysis, the indel path) merge two entries of one
   ALT, or a sample listed twice in one entry, that reach them from another enrichment, slot by slot
-  where the calls are phased alike, and otherwise read the sample without phase, with the larger
-  copy count. Up to 2.8.1 two entries of one ALT stopped the Tier-1 compile of the whole chromosome
-  (`duplicate (pos, alt) record`), and up to CRISPRitz 2.9.1 the later record's entry replaced the
-  earlier's. A sample that the merge leaves with two ALTs of the position on one slot is resolved
-  without phase (see Fixed). Covered by `PostProcess/test_site_alleles.py`.
+  where the calls are phased alike, and otherwise keeping the call with more copies of the ALT
+  (the earlier on a tie) as it is, as the enricher does (`site_alleles.merge_gt`: CRISPRitz's
+  `_gt_union`'s output on 20 pairs of calls, in its test; up to the integration it read a pair not
+  phased alike as unphased, `1|0` beside `0/1` giving `1/0` where the enricher's entry holds
+  `1|0`). An indel written on two VCF lines is one allele too: the readers of the phased indel
+  genotype store (the indel path's, the SNP rows' and the carrier gate's) merge its two lines by
+  the same rule (see Fixed). Up to 2.8.1 two entries of one ALT stopped the Tier-1 compile of the
+  whole chromosome (`duplicate (pos, alt) record`), and up to CRISPRitz 2.9.1 the later record's
+  entry replaced the earlier's. A sample that the merge leaves with two ALTs of the position on
+  one slot is resolved without phase (see Fixed). Covered by `PostProcess/test_site_alleles.py`,
+  `test_indel_genotypes.py`, `test_snp_row_indel_carriers.py` and `test_haplotype_prioritizer.py`.
 - **The input validator says what CRISPRme does with a VCF line that lists several ALTs, and with
   positions that hold several records, and looks for such lines on every run.** It warned only at 10
   ALTs or more, in the opt-in `--full_input_validate`, of an allele-index substring match the
@@ -892,7 +927,10 @@ and the `release-crisprme` skill.
   as dropped duplicates; two records of one REF>ALT warn that their carriers are merged; a line of
   several ALTs warns that each of them is given the line's first ID, and that split, each ALT's
   record holds the whole ID column, which a SNP's rows give whole and an indel's by its first ID
-  (see the known limit below). `gnomAD-converter --multiallelic` says, in its help, on stdout and in
+  (see the known limit below); and the full scan counts the positions that hold two or more
+  lines of several ALTs (one a base each, FILTER `PASS` or `.`), whose allele numbers the readers
+  cannot tell apart (see the B3 entry under Fixed), naming up to five.
+  `gnomAD-converter --multiallelic` says, in its help, on stdout and in
   the README, what it writes: a position's SNP records joined into one line and its indel records
   into another (`bcftools norm -m+`), with the converter's genotypes, which are unphased (`1/2`),
   and how CRISPRme reads them. Covered by `PostProcess/test_validate_inputs.py`.
@@ -1212,8 +1250,9 @@ and the `release-crisprme` skill.
   holds such a file, with the ERROR above.
 
 - **A VCF line that lists several ALTs is read one ALT at a time, each carrier's genotype against
-  that ALT's own allele index (decision B3).** Such a line keeps its raw genotype (`1|2`) under
-  every ALT its sample carries, and the readers took "1" for "this ALT": the Tier-0 registry
+  that ALT's own allele index where its genotypes tell it (decision B3).** Such a line keeps its
+  raw genotype (`1|2`) under every ALT its sample carries, and the readers took "1" for "this
+  ALT": the Tier-0 registry
   counted the second ALT's copies as reference (on chr22 of HGDP + 1000 Genomes with its split
   records joined into such lines, 42,952 of its 43,389 positions of several SNP ALTs had an ALT
   with a wrong global AC: chr22:10,570,455 T, AC 2 in the registry against 2,977 of 8,182 in the
@@ -1221,14 +1260,33 @@ and the `release-crisprme` skill.
   index from its own carriers' most frequent token (`_alt_index_for_record`, wrong for 449 of
   45,837 ALTs, 2 or 3 carriers lost per search); and the dictionary path put a `1|2` sample's
   first ALT on both its slots. The allele index of an ALT is
-  now the token all its carriers share, narrowed by what the position's other ALTs need (every
-  ALT of one character the dictionary lists there, the `*` of a spanning deletion among them, in
-  every reader: the indel path's reader of an install without a Tier-1 store dropped the `*`
-  first, so a `1|2` carrier of `G>T,*` whose `*` another sample carries alone was read without
-  phase there and with T on its first slot through the Tier-1 store); where the genotypes cannot
-  tell (every carrier of two ALTs is `1|2`, or of an SNV and an indel of its line, which no
-  dictionary entry holds), the carrier holds one copy on an unknown slot and is resolved without
-  phase (PUTATIVE); the population summary of a phased panel
+  now the token all its carriers share, narrowed by what the position's other ALTs of a line of
+  several ALTs need (every ALT of one character the dictionary lists there, the `*` of a spanning
+  deletion among them, in every reader: the indel path's reader of an install without a Tier-1
+  store dropped the `*` first, so a `1|2` carrier of `G>T,*` whose `*` another sample carries
+  alone was read without phase there and with T on its first slot through the Tier-1 store). An
+  ALT whose carriers hold no index but 0 and 1 settles none: CRISPRitz 2.10.0 lists every line of
+  a position, and the `1` of a line of one ALT, or of the entry it merges from two lines (written
+  as one of a line of one ALT), numbers that line, not the others. Read with it, `C>G` (S05 `1|0`)
+  beside `C>A,CT` (S06 `1|2`: A on its first slot, the insertion on its second) tied A to `2`, the
+  insertion's number, and every reader put S06's A on the insertion's slot: S06, which holds A
+  beside the deletion `TC>T` on its first slot, a CFD-1.0 target 2.8.1 reported, was listed only
+  for the deletion's 1-mismatch target (CFD 0.455; the same beside `C>A,*`, and on SNP rows a
+  carrier listed for two targets its haplotypes hold neither of: the review's worlds X and Y
+  through the real CLI, 28 gating findings of the real-data check); the same through a listing
+  merged from two lines (`A>C` beside `A>T,C`). Within one line of several ALTs no such ALT
+  settles an index another needs (a carrier of two one-base ALTs is listed under both, with both
+  indexes), so the narrowing loses nothing there. Where the genotypes cannot tell (every carrier
+  of two ALTs is `1|2`, or of an SNV and an indel or a `*` of its line, which no dictionary entry
+  holds, beside a line of one ALT of the position too), the carrier holds one copy on an unknown
+  slot and is resolved without phase (PUTATIVE): S06 is listed, PUTATIVE, for its CFD-1.0 target
+  again, and worlds X and Y pass the check in both modes. Two lines of several ALTs at one
+  position are not told apart (an ALT of one can be tied to an index of the other's: the full
+  input validation warns of such positions); no published panel holds one on chr22 (HGDP + 1000
+  Genomes, HPRC and mega: 0 lines of several ALTs, 0 `*`), and the 33,993 lines of several ALTs of
+  HF's raw HPRC `vcfwave` chr22 VCF are each alone at their position. Writing each ALT of such a
+  line in split form in the dictionary, which would tie every one, is CRISPRitz's (left to
+  CRISPRme by B3); the population summary of a phased panel
   decides it without phase too (it read the unknown slot as slot 0, a cis copy of the row of each
   ALT of the line). The Tier-1 store holds each ALT's genotypes read so (`1|0` and `0|1` for a
   `1|2`), and a store of an earlier release is read the same way. The sites-only (mega) registry
@@ -1958,6 +2016,27 @@ and the `release-crisprme` skill.
   Covered by `PostProcess/test_indel_genotypes.py`, `test_search_indel_snp.py`,
   `test_build_index_only_atomic.py` (a store of 2.8.1 written again) and
   `test_indel_overlaid_rows.py` (the note, with the real `analisi_indels_NNN.py`).
+- **An indel written on two VCF lines of one REF>ALT is one allele: its carriers on either line
+  are its carriers** (decision B2; every release with the phased indel store). The store keeps a
+  line per record, and its three readers (the indel path's, the SNP rows' and the carrier gate's)
+  kept the later line's carriers alone, so a carrier only the earlier line listed lost its phased
+  genotype: CRISPRme listed it on no row of the indel, or on some of its alignments only, and a
+  carrier listed on both lost the slots only the earlier line gave. HPRC chr22 writes 39 indels so,
+  with 1,400 carrier listings on the earlier line only: chr22:36235742 AGGGT>A, 144 carriers on its
+  first line and 4 on its second, was listed for one sample, and the 14 carriers of chr22:32763933
+  GC>G on its first line alone were missing from its 24-nt alignment's row (a fresh per-sample
+  search of three guides over such deletions, 4 + 1 + 1: 300 gating findings of the real-data
+  check; the same search with this fix gives none of them, its 6 left being an MNV on one
+  carrier's slot at chr22:46469988, which CRISPRme does not read beside a record).
+  The readers now merge the two lines as CRISPRitz merges two listings of one SNV: every carrier of
+  either kept, a carrier of both with its two calls merged slot by slot where they are phased
+  alike, else with the call of more copies, the earlier on a tie (`build_indel_genotypes.
+  merge_store_carriers`). On the review's world WD (a deletion on two lines, beside the SNV its
+  perfect target needs) the rows list S02 and S03 (on the first line alone) and the check passes in
+  both modes (17 and 3 gating findings before, with the check's own misreading of the two
+  lines). No store need be written again. Covered by
+  `PostProcess/test_indel_genotypes.py`, `test_snp_row_indel_carriers.py` and
+  `test_haplotype_prioritizer.py`.
 - **An indel row whose first base is one an insertion adds is placed at the insertion**
   (every release with the fake-indel genome; both modes, any PAM).
   - The engine reports where the target's first aligned base (the leftmost, on either strand)

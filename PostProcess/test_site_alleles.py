@@ -102,10 +102,49 @@ class OnePositionsAlleles(unittest.TestCase):
         got = dict(site_alleles.per_alt_entries([("C", {"S": "1|2"}), ("G", {"S": "2|1"})]))
         self.assertEqual(got, {"C": {"S": "1/0"}, "G": {"S": "1/0"}})
 
+    def test_a_line_of_several_alts_settles_its_own_numbers(self):
+        # one line C>A,G,T: A's carriers share 1, which leaves G 2 and T 3
+        self.assertEqual(site_alleles.alt_tokens([
+            ("A", {"S1": "1|2", "S2": "1|3"}), ("G", {"S1": "1|2"}),
+            ("T", {"S2": "1|3"})]), ["1", "2", "3"])
+
+    def test_a_split_line_settles_no_number_of_a_line_of_several_alts(self):
+        """R3A-1: CRISPRitz 2.10.0 lists C>G (a split line, S05 1|0) beside C>A,CT (S06 1|2:
+        A on the first slot, the insertion on the second), A's entry keeping the raw 1|2.
+        The split line's "1" is its own line's numbering, so it settles nothing: A cannot be
+        tied (every carrier holds 1 and 2) and S06 reads one copy on an unknown slot. Read
+        with the split line's 1 taken off, A was tied to 2 and S06 read A on the insertion's
+        slot (0|1), losing its CFD-1.0 target. The same through a listing CRISPRitz merged
+        from two lines (written as a split line's): A>C (S01 1|0) beside A>T,C (S02 1|2) gives
+        C's entry 1|0 and 0|1, T's the raw 1|2; T was tied to 2, C's number."""
+        site = [("G", {"S05": "1|0"}), ("A", {"S06": "1|2"})]
+        self.assertEqual(site_alleles.alt_tokens(site), ["1", None])
+        self.assertEqual(dict(site_alleles.per_alt_entries(site))["A"], {"S06": "1/0"})
+        merged = [("C", {"S01": "1|0", "S02": "0|1"}), ("T", {"S02": "1|2"})]
+        self.assertEqual(site_alleles.alt_tokens(merged), ["1", None])
+        self.assertEqual(dict(site_alleles.per_alt_entries(merged))["T"], {"S02": "1/0"})
+        # the same through the readers: the Tier-1 compile's and the indel path's decode
+        value = "S05:1|0;C,G;.;0.1$S06:1|2;C,A;.;0.1"
+        got = {r[1]: r[4] for r in isc.parse_dict_value(value)}
+        self.assertEqual(got, {"G": {"S05": "1|0"}, "A": {"S06": "1/0"}})
+        got = {alt: gts for _p, _r, alt, _rs, gts in tier0_compile._emit_key(
+            "chrT,3005", value, "chrT,")}
+        self.assertEqual(got, {"G": {"S05": "1|0"}, "A": {"S06": "1/0"}})
+
     def test_merge_gt(self):
+        """A sample's two calls of one allele, merged as CRISPRitz 2.10.0's enricher merges
+        them (its _gt_union, enricher.py and enricher.cpp at feat/2.10.0 4579026; every
+        expected value here is that function's output): phased alike, slot by slot; else
+        the call with more copies of the allele, as it is, the earlier on a tie. Up to the
+        integration this read a pair not phased alike as unphased (1|0 beside 0/1 gave
+        1/0, the enricher's entry 1|0)."""
         cases = [("1|0", "0|1", "1|1"), ("1|0", "1|0", "1|0"), ("0|0", "0|1", "0|1"),
-                 ("1|.", ".|0", "1|0"), ("1", "1", "1"), ("1|0", "0/1", "1/0"),
-                 ("1/1", "0|1", "1/1"), ("1", "0|1", "1/0")]
+                 ("1|.", ".|0", "1|0"), ("1", "1", "1"), ("1|0", "0/1", "1|0"),
+                 ("0/1", "1|0", "0/1"), ("1/1", "0|1", "1/1"), ("1", "0|1", "1"),
+                 ("0|1", "1", "0|1"), (".|.", ".|.", ".|."), ("1/0", "0/1", "1/0"),
+                 ("0/1", "1/1", "1/1"), ("1|0|0", "0|0|1", "1|0|1"), ("1|0", "1|0|0", "1|0"),
+                 ("", "", ""), ("", "1", "1"), (".", "1", "1"), ("1|.", "0/1", "1|."),
+                 ("0|1", "1/1", "1/1")]
         for a, b, want in cases:
             with self.subTest(a=a, b=b):
                 self.assertEqual(site_alleles.merge_gt(a, b), want)
@@ -379,22 +418,29 @@ class ThePopulationSummaryOfTwoAltsOnASlot(unittest.TestCase):
         """A carrier whose genotype at a variant of the row is unphased ('/') is decided
         without phase: its slot order is no phase. A phased store holds such a genotype
         for a line C>A,T whose only carrier S is 1|2 (which of S's slots holds A, the
-        genotypes cannot tell: 1/0 under A and under T) and for the merge of a phased and
-        an unphased record of one REF>ALT. With G at column 9 on S's slot 0, A + G and
-        T + G were each one cis copy, though A and T cannot both be on slot 0; and S was
-        no carrier of the merged G + C, slot 0 against slot 1."""
+        genotypes cannot tell: 1/0 under A and under T) and for the merge of an unphased
+        and a phased record of one REF>ALT, in that order (CRISPRitz 2.10.0's enricher
+        keeps the earlier of two calls not phased alike whose copies tie, and merge_gt
+        reads two listings so). With G at column 9 on S's slot 0, A + G and T + G were
+        each one cis copy, though A and T cannot both be on slot 0; and S was no carrier
+        of the merged G + C, slot 0 against slot 1. In the other order the merge keeps
+        the phased 1|0, and S is no carrier of G + C, as on the enricher's entry."""
         p5, p9 = _pos1(5), _pos1(9)
         cases = (
             ({p5: [("C", "A", "rs1", "0.1", {"S": "1|2"}),
                    ("C", "T", "rs1", "0.1", {"S": "1|2"})],
               p9: [("A", "G", "rs9", "0.1", {"S": "1|0"})]},
-             ([(p5, "A"), (p9, "G")], [(p5, "T"), (p9, "G")])),
+             ([(p5, "A"), (p9, "G")], [(p5, "T"), (p9, "G")]), (1, 0)),
+            ({p5: [("C", "G", "rs1", "0.1", {"S": "0/1"}),
+                   ("C", "G", "rs2", "0.1", {"S": "1|0"})],
+              p9: [("A", "C", "rs9", "0.1", {"S": "0|1"})]},
+             ([(p5, "G"), (p9, "C")],), (1, 0)),
             ({p5: [("C", "G", "rs1", "0.1", {"S": "1|0"}),
                    ("C", "G", "rs2", "0.1", {"S": "0/1"})],
               p9: [("A", "C", "rs9", "0.1", {"S": "0|1"})]},
-             ([(p5, "G"), (p9, "C")],)),
+             ([(p5, "G"), (p9, "C")],), None),
         )
-        for values, combinations in cases:
+        for values, combinations, want in cases:
             tmp = tempfile.mkdtemp(prefix="sa_popun_")
             self.addCleanup(shutil.rmtree, tmp, True)
             _build_tiers(tmp, values, keep_dict=False)
@@ -413,8 +459,9 @@ class ThePopulationSummaryOfTwoAltsOnASlot(unittest.TestCase):
                         pos_alts, reg, gt, gt._axis,
                         tier0_compile.ploidy_of_for_chrom("chrT"), phased=True)
                     g = summary.groups.get(tier0_registry.GLOBAL_GROUP_ID)
-                    # a carrier, with no haplotype count
-                    self.assertEqual((g.n_carrier, g.allele_count) if g else None, (1, 0))
+                    # a carrier, with no haplotype count (want (1, 0)), or none
+                    got = (g.n_carrier, g.allele_count) if g and g.n_carrier else None
+                    self.assertEqual(got, want)
 
 
 # --------------------------------------------------------------------------- #

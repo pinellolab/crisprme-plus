@@ -13,23 +13,39 @@ under A and 1|0 under T.
 
 The allele index of an ALT is the token all its carriers share. When that leaves more
 than one (every carrier holds two ALT indexes, e.g. 2|1), it is the one no other ALT of
-the position needs. Where the genotypes cannot say (every carrier of two ALTs is 1|2),
-no slot can be tied to the ALT: each carrier reads "1/0", one copy on an unknown slot,
-and is resolved without phase (PUTATIVE). A position whose genotypes hold no index
+the position needs: the indexes the position's other entries of a line of several ALTs
+settle are taken off it. An entry whose carriers hold no index other than 0 and 1 settles
+none, for its "1" may be another line's numbering: CRISPRitz 2.10.0 lists every line of a
+position (a split record, the listing it merges from two lines, written as a split
+record's) beside a line of several ALTs, whose raw calls number its own ALTs, so C>G
+(1|0) beside C>A,CT (1|2) would have tied A to 2, the insertion's number, and read A on
+the other slot. Within one line of several ALTs such an entry never settles a number
+another entry needs (a carrier of its ALT and of another one-base ALT is listed under
+both, with both numbers), so the narrowing loses nothing there. Where the genotypes
+cannot say (every carrier of two ALTs is 1|2, or of an SNV and an indel or a '*' of its
+line), no slot can be tied to the ALT: each carrier reads "1/0", one copy on an unknown
+slot, and is resolved without phase (PUTATIVE). A position whose genotypes hold no index
 other than 0 and 1 (split or biallelic records) comes back as it is.
 
 Two records with the same REF>ALT at one position are one allele: their carriers are
-merged, a slot carrying the ALT if either record puts it there (``merge_gt``). A slot
-that ends up holding two different ALTs of the position is no haplotype; the readers
-resolve such a sample without phase (PUTATIVE).
+merged as CRISPRitz 2.10.0's enricher merges them into the allele's one dictionary entry
+(its ``_gt_union``): two calls phased alike give a slot the ALT where either puts it there
+(``merge_gt``), and two that are not (one unphased, or of another ploidy) give the call with
+more copies of the ALT, the earlier on a tie, as it is. A slot that ends up holding two
+different ALTs of the position is no haplotype; the readers resolve such a sample without
+phase (PUTATIVE).
 
 STDLIB ONLY and pure, like ``simple_analysis_registry``: imported by the dictionary and
 tier readers (tier0_compile, simple_analysis_registry, indel_snp_cis, observed_haplotypes,
 population_summary) and unit-tested on its own (test_site_alleles.py).
 """
 
+import re
+
 # the tokens of a split or biallelic record's genotypes ("" an empty genotype)
 _PLAIN = ("0", "1", ".", "")
+# the separators between the alleles of a genotype, either kind
+_ALLELE_SEP = re.compile(r"[|/]")
 
 
 def gt_tokens(gt):
@@ -59,6 +75,13 @@ def _unplaced(gt):
     return "/".join(["1"] + ["0"] * (len(toks) - 1))
 
 
+def _numbers_another_line(carriers):
+    """True when a carrier's genotype holds an allele index other than 0 and 1: the
+    entry's genotypes are a line of several ALTs' raw calls (a split record's, and the
+    entry CRISPRitz 2.10.0 merges from two records, hold only 0 and 1)."""
+    return any(t not in _PLAIN for g in carriers.values() for t in gt_tokens(g)[0])
+
+
 def alt_tokens(entries):
     """The allele index of each entry of one position, or None where the genotypes
     cannot tell it.
@@ -66,20 +89,24 @@ def alt_tokens(entries):
     ``entries`` is a list of ``(alt, {sample: genotype})``, one per ALT record of the
     position (the same ALT may come twice, from two records). Returns a list of the
     same length: the token every carrier of the entry shares, narrowed by the tokens
-    the position's other entries need when more than one is left; None when still
-    more than one is left (every carrier holds both); "1" for an entry with no
-    carriers."""
+    the position's other entries of a line of several ALTs settle when more than one is
+    left (an entry whose genotypes hold only 0 and 1 settles none: see the module
+    docstring); None when still more than one is left (every carrier holds both), or
+    none; "1" for an entry with no carriers."""
     shared = []
+    numbered = []
     for _alt, carriers in entries:
         common = None
         for g in carriers.values():
             toks = {t for t in gt_tokens(g)[0] if t not in ("0", ".", "")}
             common = toks if common is None else common & toks
         shared.append(common)
+        numbered.append(_numbers_another_line(carriers))
     settled = True
     while settled:
         settled = False
-        taken = {next(iter(c)) for c in shared if c is not None and len(c) == 1}
+        taken = {next(iter(c)) for c, n in zip(shared, numbered)
+                 if n and c is not None and len(c) == 1}
         for i, c in enumerate(shared):
             if c is not None and len(c) > 1 and c & taken:
                 shared[i] = c - taken
@@ -118,14 +145,18 @@ def per_alt_entries(entries):
 
 
 def merge_gt(a, b):
-    """One sample's genotype for one ALT that two records give (read against the ALT:
-    "1" holds it): a slot holds the ALT if either record puts it there. Two phased
-    genotypes of one ploidy (or two haploid ones) are merged slot by slot; otherwise
-    which slot holds it is not known, and the sample reads unphased with the larger of
-    the two copy counts."""
+    """One sample's genotype for one ALT that two records give, ``a`` the earlier's (read
+    against the ALT: "1" holds it), as CRISPRitz 2.10.0's enricher merges the two into
+    the allele's one dictionary entry (its ``_gt_union``), so that a reader merging two
+    listings reads them as the enricher would have. Two phased genotypes of one ploidy
+    (or two haploid ones) are merged slot by slot: a slot holds the ALT if either record
+    puts it there, else a called 0 if either has one. Otherwise the slots cannot be
+    matched up, and the genotype with more copies of the ALT is kept as it is, the
+    earlier on a tie (1|0 beside 0/1 stays 1|0; up to 2.10.0's integration this read
+    "1/0", unphased, where the enricher kept 1|0)."""
     ta, ka = gt_tokens(a)
     tb, kb = gt_tokens(b)
-    if ka == kb and ka != "unphased" and len(ta) == len(tb):
+    if ka == kb and ka != "unphased" and len(ta) == len(tb) and "/" not in a + b:
         merged = []
         for x, y in zip(ta, tb):
             if x == "1" or y == "1":
@@ -133,13 +164,11 @@ def merge_gt(a, b):
             elif x == "0" or y == "0":
                 merged.append("0")
             else:
-                merged.append(".")
+                merged.append(x)
         return merged[0] if ka == "haploid" else "|".join(merged)
-    ploidy = max(len(ta), len(tb))
-    copies = min(ploidy, max(ta.count("1"), tb.count("1")))
-    if ploidy == 1:
-        return "1" if copies else "0"
-    return "/".join(["1"] * copies + ["0"] * (ploidy - copies))
+    copies_a = _ALLELE_SEP.split(a.strip()).count("1")
+    copies_b = _ALLELE_SEP.split(b.strip()).count("1")
+    return b if copies_b > copies_a else a
 
 
 def merge_carriers(a, b):
@@ -175,12 +204,11 @@ def read_records(records):
     ``records`` is a list of ``(ref, alt, rsid, af, {sample: genotype})``, one per
     dictionary entry in its order. Each entry's genotypes are read against its own
     allele index (``per_alt_entries``), then two records of one REF>ALT become one:
-    their carriers merged (``merge_carriers``), with the rsID and AF of the more frequent
-    record (on a tie, the earlier), as CRISPRitz 2.10.0's enricher takes them (its merge of
-    a sample's two calls that are not phased alike keeps the call with more copies, the
-    earlier on a tie, where ``merge_gt`` reads the sample without phase). Returns
-    the same shape, one record per REF>ALT in first-seen order: ``records`` itself when
-    the position is plain and repeats no REF>ALT."""
+    their carriers merged (``merge_carriers``, a sample's two calls as ``merge_gt`` merges
+    them), with the rsID and AF of the more frequent record (on a tie, the earlier), as
+    CRISPRitz 2.10.0's enricher takes them. Returns the same shape, one record per
+    REF>ALT in first-seen order: ``records`` itself when the position is plain and repeats
+    no REF>ALT."""
     keys = [(r[0], r[1]) for r in records]
     entries = [(r[1], r[4]) for r in records]
     got = per_alt_entries(entries)

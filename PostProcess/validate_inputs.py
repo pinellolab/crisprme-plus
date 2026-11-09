@@ -569,7 +569,8 @@ def _multi_alt_issue(fname: str, count: int, example: str, scanned: Optional[int
         "reads each ALT with its own carriers, a genotype such as 1|2 read against "
         "each ALT's own allele index (1|0 under the first, 0|1 under the second); "
         "where the genotypes cannot tell which index an ALT is (every carrier of "
-        "two ALTs is 1|2), its carriers are resolved without phase (PUTATIVE). "
+        "two ALTs is 1|2; a record of one ALT at the same position tells nothing "
+        "of the line's numbers), its carriers are resolved without phase (PUTATIVE). "
         "Each ALT of such a line is given the line's first ID, as CRISPRitz "
         "add-variants writes it: where the ID column lists one per ALT (rs1;rs2), "
         "the rows of the second ALT name the first's (rs1). A VCF split with "
@@ -1518,6 +1519,11 @@ def check_vcf_full_scan(
     seen_alleles: set = set()
     same_allele_count = 0
     same_allele_examples: List[str] = []
+    # the lines of the position being read that list several ALTs, one of one character
+    # (the dictionary keeps each such line's raw calls), and the positions with two
+    block_multi = 0
+    multi_lines_positions = 0
+    multi_lines_examples: List[str] = []
     phased_seen = False
     unphased_seen = False
     indel_near_start_count = 0
@@ -1550,7 +1556,15 @@ def check_vcf_full_scan(
                 if key != block_key:
                     block_key = key
                     seen_alleles = set()
+                    block_multi = 0
                 alt_alleles = alt.split(",")
+                if (len(alt_alleles) > 1 and len(ref) == 1 and filt in ENRICHER_PASS_VALUES
+                        and any(len(a) == 1 for a in alt_alleles)):
+                    block_multi += 1
+                    if block_multi == 2:
+                        multi_lines_positions += 1
+                        if len(multi_lines_examples) < 5:
+                            multi_lines_examples.append(f"{chrom}:{pos_str}")
                 record_alleles = {(ref, a) for a in alt_alleles}
                 for allele in sorted(record_alleles & seen_alleles):
                     same_allele_count += 1
@@ -1765,11 +1779,27 @@ def check_vcf_full_scan(
                 f"earlier record at their position (e.g. "
                 f"{', '.join(same_allele_examples)}; {dup_count} position(s) hold "
                 "more than one record) — CRISPRme reads the records of one REF>ALT "
-                "as one allele, their carriers merged: a haplotype slot carries the "
-                "ALT if either record puts it there. A sample left with two ALTs of "
+                "as one allele, their carriers merged, an indel's too: a haplotype slot "
+                "carries the ALT if either record puts it there (a sample whose two calls "
+                "are not phased alike keeps the one with more copies, the earlier on a "
+                "tie, as CRISPRitz merges them). A sample left with two ALTs of "
                 "one position on one slot is resolved without phase (PUTATIVE). "
                 "Split records of one site, one ALT each, are read each as its own "
                 "allele",
+            )
+        )
+    if multi_lines_positions:
+        issues.append(
+            Issue(
+                WARN,
+                f"{fname}: {multi_lines_positions} position(s) hold two or more lines that "
+                f"each list several ALTs (e.g. {', '.join(multi_lines_examples)}) — "
+                "CRISPRitz lists the one-base ALTs of every such line in the position's one "
+                "dictionary value, each with its line's own allele numbers (1|2), which "
+                "CRISPRme's readers cannot tell apart: an ALT of one line can be tied to a "
+                "number of the other's and read on the other haplotype slot. Split such "
+                "lines (`bcftools norm -m -any`, as the published panels are built) or join "
+                "them into one",
             )
         )
     if phased_seen and unphased_seen:

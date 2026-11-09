@@ -970,8 +970,9 @@ def biallelic_site(rec):
     record holds, but a record with several alts on one line (C>A,T) keeps its raw
     genotype under every alt its sample carries: S:2|1 is listed under A and under T.
     The allele index of an alt is the token all its carriers share, and when that
-    leaves more than one (a single carrier, 2|1), the one no other alt of the position
-    needs; the record's own alt then reads "1", any other allele "0": 2|1 is 0|1 under
+    leaves more than one (a single carrier, 2|1), the one no other alt of the position's
+    lines of several ALTs needs (a line of one ALT there settles none: its 1 is its own
+    line's); the record's own alt then reads "1", any other allele "0": 2|1 is 0|1 under
     A, 1|0 under T. Where the genotypes cannot say which index is the alt (every carrier
     of two alts is 1|2) no slot can be tied to it: "1/0", one copy on an unknown slot,
     so the carrier is resolved PUTATIVE on the alleles it does carry. A position with

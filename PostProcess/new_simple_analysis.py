@@ -36,6 +36,8 @@ except Exception:  # module absent in an old deploy -> no genotype tier
 import simple_analysis_registry as _sar
 # One position's genotypes read against each ALT's own allele index (stdlib, pure).
 import site_alleles as _site
+# The phased indel genotype store's format and the merge of an indel it holds twice.
+import build_indel_genotypes as _big
 # The ambiguity budget: how many sequences a window spells (its bits), the hyperdense flag,
 # and the ambiguous columns an alignment rests on. Pure and stdlib-only, like _sar.
 import window_density as _wd
@@ -919,8 +921,14 @@ class _SnpRowIndels(object):
                     if k < 0 or self.intervals[k][1] < p0:
                         continue  # meets no target's surroundings
                     rec = (p0 + 1, ref, alt)
+                    toks = toks.rstrip("\n")
+                    if rec in self._tokens:
+                        # an indel the VCF writes on two lines: one allele, its carriers
+                        # merged (build_indel_genotypes.merge_store_carriers)
+                        self._tokens[rec] = _big.merge_store_carriers(self._tokens[rec], toks)
+                        continue
                     self.indels.append(rec)
-                    self._tokens[rec] = toks.rstrip("\n")
+                    self._tokens[rec] = toks
         self.indels.sort()
         self._starts = [p for p, _r, _a in self.indels]
         self._ivstarts = starts

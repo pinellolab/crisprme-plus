@@ -99,6 +99,40 @@ def test_compile_and_reader_roundtrip():
         os.remove(store)
 
 
+def test_an_indel_written_on_two_lines_is_one_allele():
+    """R3B-N1: two VCF lines of one indel REF>ALT (HPRC chr22 writes 39 indels so) are one
+    allele (decision B2): the store keeps a line per record, and its reader merges them,
+    every carrier of either kept, a carrier of both with its two calls merged as CRISPRitz
+    2.10.0's enricher merges two listings of one SNV (site_alleles.merge_gt). The reader
+    kept the later line alone: HG2 and HG3, on the earlier only, lost their phased
+    genotype, and HG1 its slot 0 (the review's world WD: S02 and S03 on no row)."""
+    vcf_text = (
+        "##fileformat=VCFv4.2\n##contig=<ID=chr22>\n"
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\tHG3\tHG4\n"
+        "chr22\t100\t.\tAT\tA\t.\tPASS\t.\tGT\t1|0\t0|1\t1/0\t0/1\n"
+        "chr22\t100\t.\tAT\tA\t.\tPASS\t.\tGT\t0|1\t0|0\t0|0\t1|0\n")
+    fd, vcf = tempfile.mkstemp(suffix=".vcf.gz")
+    os.close(fd)
+    with gzip.open(vcf, "wt") as fh:
+        fh.write(vcf_text)
+    fd, store = tempfile.mkstemp(suffix=".tsv.gz")
+    os.close(fd)
+    try:
+        assert big.compile_indel_genotypes(vcf, store) == 2   # one line per record
+        r = big.IndelGenotypeReader(store)
+        # HG4: 0/1 then 1|0, not phased alike, one copy each: the earlier, as it is
+        assert r.carriers_dict(100, "AT", "A") == {"HG1": "1|1", "HG2": "0|1", "HG3": "1/0",
+                                                   "HG4": "0/1"}
+        assert r.indels() == [(100, "AT", "A")]
+    finally:
+        os.remove(vcf)
+        _cleanup(store)
+    assert big.merge_store_carriers("A:1|0,B:0|1", "A:0|1,C:1") == "A:1|1,B:0|1,C:1"
+    assert big.merge_store_carriers("A:1|0", "A:0/1") == "A:1|0"
+    assert big.merge_store_carriers("", "A:0|1") == "A:0|1"
+    assert big.merge_store_carriers("A:0|1", "") == "A:0|1"
+
+
 def test_keep_samples_panel_filter():
     vcf = _write_vcf(gz=True)
     try:

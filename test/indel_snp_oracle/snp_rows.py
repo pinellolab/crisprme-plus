@@ -82,7 +82,8 @@ def check(name, rd, tables, truth, expect, fail, alt_rows, is_indel_token, rc):
     names. A row naming two alts of one position, which no haplotype holds, fails: before
     2.10.0 the SNP path read site N2's lone 2|1 carrier of an alt on a VCF line of several
     ALTs as carrying the other alt too and listed it on such rows; since 2.10.0 every reader
-    reads a genotype against its own alt's allele index. Then the Y sites'
+    reads a genotype against its own alt's allele index where the genotypes tell it (else the
+    carrier is read without phase: METHODS section 4). Then the Y sites'
     expectations (snp_listed: on a CFD-1 SNP row; snp_never: on no SNP row; snp_phase:
     the phase confirmation of the site's SNP rows)."""
     seen = {}  # site -> [(samples set, cfd)]

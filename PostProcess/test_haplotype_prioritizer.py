@@ -109,6 +109,20 @@ class TestParseAndSupport(unittest.TestCase):
         self.assertFalse(hp.holds_target(lambda a, b: plain[max(a, 0):b], 2, 17, {},
                                          (7, "CAA", "C")))
 
+    def test_an_indel_the_store_holds_twice_is_one(self):
+        """R3B-N1: the carrier gate's reader of the phased indel store takes an indel the
+        VCF writes on two lines once, its carriers merged (build_indel_genotypes.
+        merge_store_carriers); it kept the later line's carriers, so S1 (the earlier line's
+        alone) was no breaker of a row its indel changes."""
+        tmp = tempfile.mkdtemp(prefix="hp_dup_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "gt_indel_%s.tsv.gz" % CHROM)
+        with gzip.open(path, "wt") as fh:
+            fh.write("100_AT_A\tS1:1|0,S2:0|1\n100_AT_A\tS2:1|0\n")
+        idx = hp.IndelIndex(path)
+        self.assertEqual(idx.indels, [(100, "AT", "A")])
+        self.assertEqual(idx.carriers(100, "AT", "A"), {"S1": "1|0", "S2": "1|1"})
+
     def test_two_alts_on_one_slot_is_unknown(self):
         alt_g = {"S1": "1|0", "S2": "1|0"}
         alt_t = {"S1": "1|0"}  # S1's first slot holds G and T at one position

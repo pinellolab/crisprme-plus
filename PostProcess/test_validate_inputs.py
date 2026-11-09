@@ -1371,6 +1371,32 @@ class TestCheckVcfFullScan(unittest.TestCase):
                           "record)", issues[0].message)
             self.assertIn("one allele, their carriers merged", issues[0].message)
 
+    def test_two_lines_of_several_alts_at_one_position_warn(self):
+        """R3A-1: CRISPRitz lists the one-base ALTs of every line of a position in one
+        dictionary value, a line of several ALTs with its own raw allele numbers. A line
+        of one ALT beside one of several is read as CRISPRme documents (it settles no
+        number); two lines of several ALTs cannot be told apart: warned, with the
+        positions. A non-PASS line (the enricher skips it), a line of several indels and a
+        lone line of several ALTs are no such position."""
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [
+                vcf_record(pos=100, ref="A", alt="C", samples=("1|0",)),
+                vcf_record(pos=100, ref="A", alt="G,AT", samples=("1|2",)),
+                vcf_record(pos=200, ref="A", alt="C,T", samples=("1|2",)),
+                vcf_record(pos=200, ref="A", alt="G,AT", samples=("1|2",)),
+                vcf_record(pos=300, ref="A", alt="C,T", samples=("1|2",)),
+                vcf_record(pos=300, ref="A", alt="AT,AC", samples=("1|2",)),
+                vcf_record(pos=400, ref="A", alt="C,T", samples=("1|2",)),
+                vcf_record(pos=500, ref="A", alt="C,T", samples=("1|2",)),
+                vcf_record(pos=500, ref="A", alt="G,T", filt="LowQual", samples=("1|2",)),
+            ]
+            issues = self._scan(tmp, records)
+            warned = [i for i in issues if "two or more lines" in i.message]
+            self.assertEqual(len(warned), 1, issues)
+            self.assertEqual(warned[0].severity, vi.WARN)
+            self.assertIn("1 position(s) hold two or more lines that each list several "
+                          "ALTs (e.g. chr1:200)", warned[0].message)
+
     def test_no_duplicates_no_warning(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = [

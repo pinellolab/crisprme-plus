@@ -26,6 +26,8 @@ import os
 import sys
 import gzip
 
+import site_alleles
+
 # The FILTER values whose records the store holds: those CRISPRitz's enricher reads
 # (Enrichment/enricher.py and enricher.cpp, `if line[6] not in ('PASS', '.')`, the line
 # skipped; validate_inputs.ENRICHER_PASS_VALUES), so that every indel of the store is one
@@ -248,11 +250,37 @@ def compile_indel_genotypes_safe(vcf_path, out_path, keep_samples=None):
         return -1
 
 
+def merge_store_carriers(earlier, later):
+    """The carriers ("sample:gt,...") of one indel that two lines of the store give, the
+    earlier line's first: two VCF records of one REF>ALT at a position are one allele
+    (decision B2, as CRISPRitz 2.10.0's enricher merges two listings of one SNV), so every
+    carrier of either is kept, and a carrier of both gets its two calls merged as the
+    enricher merges them (site_alleles.merge_gt: a slot holds the indel where either call
+    puts it there when they are phased alike; else the call with more copies, the earlier
+    on a tie). The store writes one line per record, and up to 2.10.0's integration every
+    reader kept the later line alone, so a carrier only the earlier line listed lost its
+    phased genotype: CRISPRme listed it on no row of the indel, or on some alignments only
+    (39 indels of HPRC chr22 are written on two lines, 1,400 listings on the earlier only)."""
+    if not earlier:
+        return later
+    if not later:
+        return earlier
+    a, b = {}, {}
+    for into, toks in ((a, earlier), (b, later)):
+        for t in toks.split(","):
+            sid, sep, gt = t.partition(":")
+            if sid and sep:
+                into[sid] = site_alleles.merge_gt(into[sid], gt) if sid in into else gt
+    return ",".join("%s:%s" % (s, g) for s, g in site_alleles.merge_carriers(a, b).items())
+
+
 class IndelGenotypeReader(object):
     """Read a phased indel genotype store (one chromosome) into a dict keyed by
     ``<pos>_<REF>_<ALT>``. Small enough to hold in memory (indels << SNPs).
     ``reads_filter``: whether the store holds only the records of PASS_FILTERS
-    (store_reads_filter); one written before 2.10.0 may hold the others too."""
+    (store_reads_filter); one written before 2.10.0 may hold the others too. A key the
+    store holds twice (an indel the VCF writes on two lines) is one allele, its carriers
+    merged (merge_store_carriers)."""
 
     __slots__ = ("_by_key", "reads_filter")
 
@@ -265,7 +293,8 @@ class IndelGenotypeReader(object):
                 key, _, toks = line.rstrip("\n").partition("\t")
                 if not key:
                     continue
-                self._by_key[key] = toks
+                prev = self._by_key.get(key)
+                self._by_key[key] = toks if prev is None else merge_store_carriers(prev, toks)
 
     def carriers(self, pos, ref, alt):
         """Return "sample:gt" tokens (comma-joined) for the indel, or "" if absent."""
