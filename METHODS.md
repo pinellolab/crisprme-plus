@@ -972,9 +972,9 @@ complementary controls:
   for some. `complete-search` says per chromosome how many were cut back and how many left
   out, and the report states the cap. An indel row is resolved per carrier haplotype (§4)
   and is not cut. On chr22 of the published index, the README
-  guide's population-level search (4 mismatches + 1 DNA + 1 RNA bulge) reports 2,198 rows;
+  guide's population-level search (4 mismatches + 1 DNA + 1 RNA bulge) reports 2,197 rows;
   681 of its 1,257 SNP variant rows rest on two or more columns, the second-highest by CFD
-  (0.299, in IGL) on eleven. With `--max-degeneracy 1` it reports 1,573: 625 sites go, those
+  (0.299, in IGL) on eleven. With `--max-degeneracy 1` it reports 1,572: 625 sites go, those
   only such alignments reach (9 more move by 1 or 2 nt, to where their cut-back alignment
   starts), the rows lying in a dense window fall from 281 to 2, and 47 to 49 of the 100
   sites with the highest CFD leave the top 100, as the ties at the 100th CFD fall. Its

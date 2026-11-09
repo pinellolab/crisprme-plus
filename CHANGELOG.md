@@ -40,19 +40,23 @@ and the `release-crisprme` skill.
   2.9.1, 5 of its 6). On hg38 chr22 (five guides -- `ACTGAAATCTGTAAGCAGGC`, TRAC, EMX1, VEGFA site 3
   and one whose perfect match starts right after an `N` run -- NGG, 4 mismatches + 1 DNA + 1 RNA
   bulge, per-sample over 300 HGDP + 1000 Genomes samples, and a reference search), the indexes
-  CRISPRme 2.8.1 built with CRISPRitz 2.9.1 (format 1) give this release's 10,938 per-sample and
+  CRISPRme 2.8.1 built with CRISPRitz 2.9.1 (format 1) give this release's 10,927 per-sample and
   9,210 reference rows with CRISPRitz 2.9.1, and the same rows, byte for byte, with CRISPRitz 2.10.0
   (`feat/2.10.0` 881f761's build), which adds the note below; built again by `build-index-only`
   with 2.10.0 (format 2), they give every one of those rows and one more, that perfect match at
-  chr22:11,118,987, which no index of format 1 holds (10,939 and 9,211 rows); and a search of them
+  chr22:11,118,987, which no index of format 1 holds (10,928 and 9,211 rows); and a search of them
   by 2.9.1 stops with that ERROR, exit 1. The reference rows are 2.8.1's. Of 2.8.1's 10,942
-  per-sample rows, 5 are gone, 1 is new and 17 differ by the carriers whose haplotype holds an
-  indel in the target, whom a SNP row no longer names (Fixed: the new row is such carriers' own
-  alignment, their indel beside the SNPs), and 75 others only in the order of their rsID and AF
-  lists (72; Fixed) or a dense window's note (3; Changed). Throughout, a CRISPR-Bulge score can
-  differ in its last digit from one batch of the scorer, or one machine, to another: here in 5 more
-  of 2.8.1's per-sample rows (in one of which the reference alignment of a tie then comes first),
-  and in 7 per-sample rows and 1 reference row of the indexes built again.
+  per-sample rows, 10,752 are this release's byte for byte, and the other 190 differ as entries
+  under Fixed and Changed say: 54 started on a base an insertion adds, 35 of which start at its
+  anchor (as 34 rows: two were copies of one target inside one insertion) and 19 are now an
+  alternative alignment of a row there; 16 are gone or differ by the carriers whose haplotype
+  holds an indel in the target, whom a SNP row no longer names (5 and 11); 31 more, within 25
+  bases of an indel row, change with the site the merge now gives that row (4 gone, 27 differ; 14
+  rows there are new); 16 number an indel's variants along its target or give `PAM_creation` by
+  its placement rule (13 and 3); and 73 differ only in the order of their rsID and AF lists (66), a
+  dense window's note (3; Changed) or a CRISPR-Bulge score's last digit (4). Such a score can
+  differ in its last digit from one batch of the scorer, or one machine, to another: so do 7
+  per-sample rows and 1 reference row of the indexes built again.
 - **Every index CRISPRme builds records what it holds, in `.index_meta.json`.** `build-index-only`,
   a search's own build and each sub-index of an INDELS index write the index format, the build
   PAM, its side, the flank and guide lengths, the budget, whether the PAM is all `N` and whether the
@@ -154,30 +158,28 @@ and the `release-crisprme` skill.
   threshold (default 3; 0 turns it off). A per-sample search, whose rows name their cis carriers,
   needs none; a dataset with the classic dictionaries alone has no phased store to read, and the
   search and the report say so. On the genome-wide population-level search of the README guide
-  (HGDP + 1000 Genomes, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, 198,826 rows) the gate took 32 s
-  in the search (39 s and 1.6 GB on 24 threads alone) and gave, by each row's highest-CFD
-  alignment, A 4,155 (690 `one haplotype`, 1 `phase not known`, 2,574 `same score`, none `same
-  score as the reference`), B 55,191, C1 40,231 (246 where 3 or more haplotypes were expected,
-  39,781
-  `too rare to tell`, 204 `indel in the target`, 172 of them of one variant) and C2 0. The report's
-  top-1000 by CFD and validation panel then hold no row whose highest-CFD alignment is C1, and its
-  own table all 40,231, while the
-  panel's totals are the search's (198,826 sites, 1 perfect match, 91,289 variant-created
-  off-targets) and 43,264 rows are C1 at their highest-CRISPR-Bulge alignment. The integrated
-  results are byte for byte those of the same search with `--no-prioritize-observed`. Checked
-  against all 8,182 phased haplotypes by a harness that rebuilds every alignment's window on each
-  haplotype from the VCF (on 2.8.1's run of the same search: this release's, with CRISPRitz 2.10.0,
-  gives the tiers above and holds its 198,826 rows, with the same alignments, variants and
-  carriers, differing only in the order of the rsID and AF lists of 40,935 of them, the notes of
-  1,499 in a dense window and the last digit of 17 CRISPR-Bulge scores, scored on another
-  machine): the only alignments left in tier A or B that list a combination no haplotype carries
-  are the 2,574 of a `same score` state (2,328 at the fewest-mismatches alignment, none at the
-  CRISPR-Bulge one), which is what that state says; every other A or B alignment lists a
-  combination a haplotype carries, and every C1
-  alignment that a haplotype does carry is one with an indel in the target. The harness's stricter
-  test (a haplotype that reproduces the alignment within its mismatches with a valid PAM) reaches
-  2,572 of the 2,574, and the per-sample run of the same search reports a row within three bases
-  of every one of them, at the CFD the row shows. Covered by
+  (HGDP + 1000 Genomes, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, 198,812 rows) the gate took 29 s in
+  the search (26 s and 1.6 GB on 24 threads alone) and gave, by each row's highest-CFD alignment, A
+  4,153 (689 `one haplotype`, 1 `phase not known`, 2,574 `same score`, none `same score as the
+  reference`), B 55,180, C1 40,231 (246 where 3 or more haplotypes were expected, 39,780 `too rare
+  to tell`, 205 `indel in the target`, 173 of them of one variant) and C2 0, its reading of an indel
+  over a variant's base (above) moving chr5:4507931 (+), whose 58 haplotypes carrying chr5:4507935
+  T>A all hold chr5:4507932 CTTTCA>C, from B to `indel in the target`. The report's top-1000 by CFD
+  and validation panel then hold no row whose highest-CFD alignment is C1, and its own table all
+  40,231, while the panel's totals are the search's (198,812 sites, 1 perfect match, 91,275
+  variant-created off-targets) and 43,264 rows are C1 at their highest-CRISPR-Bulge alignment. The
+  integrated results are byte for byte those of the same search with `--no-prioritize-observed`
+  (TRAC's search of chr22, measured so). Checked against all 8,182 phased haplotypes by a harness
+  that rebuilds every alignment's window on each haplotype from the VCF, on 2.8.1's run of the same
+  search (198,826 rows) with the gate of the integration's first stage, before the fixes of 2.8.2
+  and that reading of an indel (A 4,155, B 55,191, C1 40,231): the only alignments left in tier A or
+  B that list a combination no haplotype carries are the 2,574 of a `same score` state (2,328 at the
+  fewest-mismatches alignment, none at the CRISPR-Bulge one, as on this release's run), which is
+  what that state says; every other A or B alignment lists a combination a haplotype carries, and
+  every C1 alignment that a haplotype does carry is one with an indel in the target. The harness's
+  stricter test (a haplotype that reproduces the alignment within its mismatches with a valid PAM)
+  reaches 2,572 of the 2,574, and the per-sample run of the same search reports a row within three
+  bases of every one of them, at the CFD the row shows. Covered by
   `PostProcess/test_haplotype_prioritizer.py`.
 - **`--prioritize-observed` checks a sites-only dataset's rows against the phased HGDP + 1000
   Genomes genotypes, and `download --what genotype-oracle` installs them.** The `mega` panel has no
@@ -189,11 +191,11 @@ and the `release-crisprme` skill.
   on disk from the Hub), and which `CRISPRME_GENOTYPE_TIER` can name elsewhere. A variant the panel
   does not hold makes its row C2, kept in place, with its frequency bound (a SNP's frequency from
   the dataset's registry, an indel's from its indel frequencies, `AF_max` both). On chr22 of the
-  mega panel (five guides, NRG, 4 + 1 + 1, 20,338 rows): A 137 (32 of them `same score`), B 4,419
-  (1,568 of a variant not in
-  the panel), C1 594 (58 where 3 or more haplotypes were expected, 520 `too rare to tell`, 16
-  `indel in the target`, 13 of them of one variant), C2 3,519 (1,919 within the bound, 1,600 below
-  it), the integrated results byte for byte those of the search without the flag. Without the
+  mega panel (five guides, NRG, 4 + 1 + 1, 20,010 rows): A 138 (32 of them `same score`), B 4,318
+  (1,479 of a variant not in the panel), C1 587 (58 where 3 or more haplotypes were expected, 513
+  `too rare to tell`, 16 `indel in the target`, 13 of them of one variant), C2 3,297 (1,833 within
+  the bound, 1,464 below it), the integrated results byte for byte those of the search without the
+  flag. Without the
   oracle the search says so (a `WARNING` line on stdout), and the rows are reported unchecked.
   Until the Hub has the panel's phased indel genotypes (see Changed), the download says so in one
   line and installs the SNP genotypes, and an indel inside a target then takes no haplotype off.
@@ -225,7 +227,7 @@ and the `release-crisprme` skill.
   allele coded, 5,103 (the worst 2^44.75, at chr22:22,881,189 in the IGL locus). On the published
   index, the README guide's search of chr22 lists 565 dense windows, 381 of them hyperdense (the
   worst 2^24.00; each aligned with 2 to 4 columns that do not admit the guide's base), and 164 of
-  the population-level report's 2,198 rows lie in one (1 of the per-sample report's 1,571). The
+  the population-level report's 2,197 rows lie in one (1 of the per-sample report's 1,570). The
   threshold is one constant, `window_density.HYPERDENSE_BITS`; see
   [`METHODS.md` §5](METHODS.md#5-search-space-control-for-high-variant-density-regions).
 - **A row whose window holds a four-allele position says so.** Where the reference base and three
@@ -252,7 +254,7 @@ and the `release-crisprme` skill.
   how many rows left out, writes the cap to `Params.txt` (`Max_degeneracy`), and the report's search
   criteria state it. An indel row is resolved per carrier haplotype, as before, and is not cut. On
   chr22 of the published index, the README guide's population-level search with `--max-degeneracy 1`
-  cut 20,918 worst-case alignments back and reports 1,573 rows instead of 2,198, every SNP variant
+  cut 20,918 worst-case alignments back and reports 1,572 rows instead of 2,197, every SNP variant
   row then resting on at most one column (of the 1,257 such rows without it, 681 rested on two or
   more): 625 sites go, those only such alignments reach (9 more move by 1 or 2 nt, to where their
   cut-back alignment starts), the rows lying in a dense window fall from 281 to 2, and 47 to 49 of
@@ -743,17 +745,17 @@ and the `release-crisprme` skill.
   does not hold`, as `build-index-only` of the dataset says (exit 1, `Error: VCF folder
   'hg38_HGDP1kGP' from .../list_vcf.txt not found under .../VCFs/`). On hg38 chr22 (the guides and
   samples above), the install CRISPRme 2.8.1 built with CRISPRitz 2.9.1, laid out as a download (no
-  VCFs, no enriched genome, no per-sample dictionaries), gives the 10,938 rows of the install as
+  VCFs, no enriched genome, no per-sample dictionaries), gives the 10,927 rows of the install as
   built (above), byte for byte, and the three notes; `build-index-only` of the dataset stops as its
   notes say (exit 1, every `.bin` unchanged); with the reference index moved out of the way as its
-  note says, `build-index-only` builds it in format 2, and the per-sample search gives the 10,939
+  note says, `build-index-only` builds it in format 2, and the per-sample search gives the 10,928
   rows of format 2 above, byte for byte (the row more, the perfect match at chr22:11,118,987, is a
   reference site), with the other two notes, and the reference search the 9,211, with none. The
   same install as built (its VCFs and enriched genomes in place): the notes of its variant and
   INDELS indexes say to build them again from `Genomes/hg38+hg38_hgdp300` and
   `Genomes/hg38+hg38_hgdp300_INDELS`; `build-index-only` alone keeps the three indexes, every
   `.bin` unchanged; with each moved out of the way as its note says, it builds all three in
-  format 2, and the per-sample and reference searches give the same 10,939 and 9,211 rows, with no
+  format 2, and the per-sample and reference searches give the same 10,928 and 9,211 rows, with no
   note. With its VCFs and no enriched genome, those two notes say that
   building them again takes the enriched genome, or else the VCFs, from which the whole dataset is
   enriched again first. Each of these searches ends with exit 0 and nothing on stderr. A search
@@ -951,27 +953,31 @@ and the `release-crisprme` skill.
 - **`CRISPRME_IUPAC_CAP` counts bits, log2 of the sequences a window spells, where it counted the
   window's ambiguous columns.** Above it a `--per-sample` search of an index without the dict-less
   tiers reports a window by the haplotypes its carriers have, read from the dictionaries as the
-  tiers' path reads them (the carrier gate's entry under Fixed), instead of every combination of
-  its alleles (a population-level search reports every window by its greedy worst-case alignment,
-  as before), and every path lists the window in `high_variant_density_regions.bed`. The default, 10, caps a
-  window of two-allele columns where the count of columns did, so that on an index whose windows
-  hold no other variant column the unit changes nothing: on the published HGDP + 1000 Genomes
-  index, whose chr22 holds no three-allele column, the README guide's searches of chr22 list the
-  same 565 windows over the cap as with 2.8.1 (8,155 lines, per sample and population-level), the
-  notes giving the windows' sequences (and per sample no greedy worst case: Fixed, below); their
-  rows differ from 2.8.1's otherwise only in the order of their rsID and AF lists and, per sample,
-  in the carriers whose haplotype holds an indel in the target, whom a SNP row no longer names (3 of
-  the 1,574 rows gone, 5 changed), both under Fixed. A three-allele column
-  weighs 1.58 bits and a four-allele one 2, where each counted 1: coding every allele of a split
-  site makes them common, and the immunoglobulin loci explode (on chr22 of HGDP + 1000 Genomes, five
-  guides' variant search returns 4,372,248 raw targets with CRISPRitz 2.10.0, 96.6% of them in IGL,
-  where 2.9.1 returned 206,883), which the count of columns could not see. A VCF line that lists
-  several ALTs writes a three-allele column with any release: on a small genome whose phased VCF has
-  seven such lines in one window of the README guide (3^7 = 2^11.09 sequences), 2.8.1 listed the
-  window nowhere; it is listed now, and under `--per-sample` an index built without `--samplesID`
-  reports it by the haplotypes its carriers have, as one with the tiers does (the carrier gate's
-  entry under Fixed, whose test of the cap counts bits as this one does). `-1` still disables the
-  cap; a hyperdense window is listed all the same.
+  tiers' path reads them (the carrier gate's entry under Fixed), instead of every combination of its
+  alleles (a population-level search reports every window by its greedy worst-case alignment, as
+  before), and every path lists the window in `high_variant_density_regions.bed`. The default, 10,
+  caps a window of two-allele columns where the count of columns did, so that on an index whose
+  windows hold no other variant column the unit changes nothing: on the published HGDP + 1000
+  Genomes index, whose chr22 holds no three-allele column, the README guide's searches of chr22 list
+  the same 565 windows over the cap as with 2.8.1 (8,155 lines, per sample and population-level),
+  the notes giving the windows' sequences (and per sample no greedy worst case: Fixed, below); their
+  rows differ from 2.8.1's otherwise only as entries under Fixed say: the order of their rsID and AF
+  lists; per sample, the carriers whose haplotype holds an indel in the target, whom a SNP row no
+  longer names (3 of the 1,574 rows gone, 4 changed); in both modes the 4 rows that started on a
+  base an insertion adds, at its anchor now, one of them (chr22:21052642 (−)) an alternative
+  alignment of the row at 21052638 (−) (1,570 rows per sample, 2,197 population-level, against
+  2.8.1's 1,574 and 2,198), and one row's `Variant_info_spacer+PAM` and one's `PAM_creation`
+  (population-level also two CRISPR-Bulge scores in their last digit, scored in another batch). A
+  three-allele column weighs 1.58 bits and a four-allele one 2, where each counted 1: coding every
+  allele of a split site makes them common, and the immunoglobulin loci explode (on chr22 of HGDP +
+  1000 Genomes, five guides' variant search returns 4,372,248 raw targets with CRISPRitz 2.10.0,
+  96.6% of them in IGL, where 2.9.1 returned 206,883), which the count of columns could not see. A
+  VCF line that lists several ALTs writes a three-allele column with any release: on a small genome
+  whose phased VCF has seven such lines in one window of the README guide (3^7 = 2^11.09 sequences),
+  2.8.1 listed the window nowhere; it is listed now, and under `--per-sample` an index built without
+  `--samplesID` reports it by the haplotypes its carriers have, as one with the tiers does (the
+  carrier gate's entry under Fixed, whose test of the cap counts bits as this one does). `-1` still
+  disables the cap; a hyperdense window is listed all the same.
 
 - **SpCas9 NRR (`NAA`, `NAG`, `NGA`, `NGG`) is the default PAM and index; it was NRG (`NAG`,
   `NGG`).** The broadest SpCas9 screen of the three published ones, and the one recommended for an
@@ -1261,12 +1267,17 @@ and the `release-crisprme` skill.
   mismatches + 1 DNA + 1 RNA bulge, population-level; against 2.8.1): 110 for a PASS ALT the 2.9.1
   code left out (chr22:10,752,820 C>A, whose later record C>T is the coded one) and 4 for a non-PASS
   one, 22 of them from 0.1 or more and 2 from 0.5 or more (VEGFA site 3's chr22:22,893,912 from
-  0.585 to 0.327, TRAC's chr22:22,900,049 from 0.524 to 0.127); this release's search gives 2.8.1's
-  20,338 sites with 2.8.1's highest CFD at every one, and no row naming two ALTs of one position
-  (2.8.1: 4 of the integrated table's), with nothing on stderr (CRISPRitz 2.9.1, the 2.8.1 image). A
-  target that only such an ALT brings within the search's budget is still not found on that index:
-  the mega index rebuilt by CRISPRitz 2.10.0 codes every PASS ALT (METHODS section 2). Covered by
-  `PostProcess/test_site_alleles.py`.
+  0.585 to 0.327, TRAC's chr22:22,900,049 from 0.524 to 0.127); the alleles track's code, before the
+  fixes of 2.8.2 were merged, gave 2.8.1's 20,338 sites with 2.8.1's highest CFD at every one, and
+  no row naming two ALTs of one position (2.8.1: 4 of the integrated table's), with nothing on
+  stderr (CRISPRitz 2.9.1, the 2.8.1 image). Those fixes place a row that starts on a base an
+  insertion adds at its anchor and compare an indel row at its cluster position on its haplotype,
+  where a population-level search writes one row a site (entries below): this release gives 20,010
+  rows there (792 of the 833 rows of 2.8.1 it no longer writes name an insertion), none naming two
+  ALTs of one position, with nothing on stderr (CRISPRitz 2.10.0; the integration's first stage,
+  without those fixes, gives the 20,338). A target that only such an ALT brings within the search's
+  budget is still not found on that index: the mega index rebuilt by CRISPRitz 2.10.0 codes every
+  PASS ALT (METHODS section 2). Covered by `PostProcess/test_site_alleles.py`.
 - **On a row of several variants, the rsID and AF lists follow its variants: one rsID and one AF a
   variant, in the order of `Variant_info_genome`, and two variants of one frequency give it each.**
   The merge of a cluster's rows (`remove_contiguous_samples.py`) sorted the variant, rsID and AF
@@ -1370,9 +1381,10 @@ and the `release-crisprme` skill.
   README guide (HGDP + 1000 Genomes, NRG, 4 + 1 + 1), 23 chrX rows whose listed carriers were all
   such males, none of them with an indel that changes the target, are gone (at chrX:144234310(-)
   all 171 also hold chrX:144234328 T, at chrX:19417344(+) all 85 chrX:19417355 A), 5 keep their
-  place with another alignment and 13 list 1,460 carriers fewer: in all 1,912 carrier listings
-  leave 48 SNP alignments. With the fix above, the search returns 170,469 rows against 2.8.1's
-  170,660 (chrX 8,220 against 8,249). Pre-existing, in 2.8.0 too. Covered by
+  place with another alignment and 13 list 1,460 carriers fewer: in all 1,924 carrier listings
+  leave 51 SNP alignments of the rows' three blocks (this release's search of chrX with and
+  without the fix). With this release's other fixes, the search returns 170,455 rows against
+  2.8.1's 170,660 (chrX 8,221 against 8,249). Pre-existing, in 2.8.0 too. Covered by
   `PostProcess/test_haplotype_prioritizer.py`.
 - **A `--per-sample` search of an index without the dict-less tiers no longer reports a dense
   window by its greedy worst-case alignment.** On the classic dictionaries a window denser than
@@ -1382,11 +1394,13 @@ and the `release-crisprme` skill.
   bulge) gave 5 such rows (chr22:22410074, 22687072, 22687116, 22698190 and 22888934), naming 102
   individuals as carriers 114 times. Such a window now gives the haplotypes its carriers have, read
   from the dictionaries as from the tiers: the same search returns 560 rows against 565, the five
-  gone. Ten other rows differ: chr22:44864861 lists one carrier fewer and chr22:42848613 one other
-  motif fewer (an indel in the target, two entries above: every one of the 87 haplotypes that carry
-  the SNP of the alignment gone, chr22:42848616 A>T, carries the insertion at chr22:42848614 too),
+  gone. Two rows that started on a base an insertion adds start at its anchor (chr22:17434485 (+)
+  and 21052639 (−), which 2.8.1 placed at 17434488 and 21052642: an entry below), and nine others
+  differ: chr22:44864861 lists one carrier fewer and chr22:42848613 one other motif fewer (an
+  indel in the target, two entries above: every one of the 87 haplotypes that carry the SNP of
+  the alignment gone, chr22:42848616 A>T, carries the insertion at chr22:42848614 too),
   chr22:50763084's CRISPR-Bulge score its last digit (3.61989e-21, 3.6199e-21: a score of another
-  batch), and seven the order of their rsID and AF lists alone (an entry above). Neither
+  batch), and six the order of their rsID and AF lists alone (an entry above). Neither
   `complete-search` nor the report says any longer that a dense window can be such an alignment
   (but the report of a 2.8.1 search's results, read again), and neither does a per-sample row's
   `High_variant_density_region` note (see Changed). Covered by
