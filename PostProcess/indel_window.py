@@ -267,6 +267,6 @@ def target_note(window, target_len, bdna, who, dataset):
               "31: enrich %s again with it (build-index-only) to search them." % dataset)
     return ("WARNING [%s]: the fake-indel windows of %s hold %d reference bases before each "
             "indel and %d after it, so a target that holds an indel there holds %s, guide, PAM "
-            "and DNA bulges counted; this search's need up to %d (%s): such indel off-targets "
-            "are held by no index and not reported.%s"
+            "and DNA bulges counted; this search's targets need up to %d (%s): such indel "
+            "off-targets are held by no index and not reported.%s"
             % (who, dataset, window[0], window[1], holds, want, how, advice))

@@ -4170,11 +4170,11 @@ class TheFakeIndelWindowsAreTheEnrichments(_Fixture):
                       "reference bases before each indel and 30 after it, so a target that "
                       "holds an indel there holds up to 22 bases (21 at a record whose REF and "
                       "ALT differ at their first base, an MNV or complex record), guide, PAM "
-                      "and DNA bulges counted; this search's need up to 24 (a 23-nt guide and "
-                      "PAM with 1 DNA bulge): such indel off-targets are held by no index and "
-                      "not reported. CRISPRitz 2.10.0 writes windows of 30 bases on either "
-                      "side, which hold up to 31: enrich ds again with it (build-index-only) "
-                      "to search them.", out)
+                      "and DNA bulges counted; this search's targets need up to 24 (a 23-nt "
+                      "guide and PAM with 1 DNA bulge): such indel off-targets are held by no "
+                      "index and not reported. CRISPRitz 2.10.0 writes windows of 30 bases on "
+                      "either side, which hold up to 31: enrich ds again with it "
+                      "(build-index-only) to search them.", out)
         with open(self.path("Results", "search", "Params.txt")) as fh:
             self.assertIn("Indel_window_note\tWARNING [complete-search]: the fake-indel "
                           "windows of ds hold 20", fh.read())

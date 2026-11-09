@@ -881,8 +881,8 @@ class SearchSide(_Fixture):
                       "bases before each indel and 27 after it, so a target that holds an "
                       "indel there holds up to 27 bases (26 at a record whose REF and ALT "
                       "differ at their first base, an MNV or complex record), guide, PAM and "
-                      "DNA bulges counted; this search's need up to 28 (a 27-nt guide and PAM "
-                      "with 1 DNA bulge)", res.stdout)
+                      "DNA bulges counted; this search's targets need up to 28 (a 27-nt guide "
+                      "and PAM with 1 DNA bulge)", res.stdout)
         shutil.rmtree(os.path.join(self.tmp, "work"))
         shutil.rmtree(os.path.join(self.tmp, "out"))
         res, _lines = self.run_search({"chrA": window_rows("chrA", 30, 30)}, {"chrA": True},

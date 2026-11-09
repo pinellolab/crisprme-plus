@@ -85,7 +85,8 @@ class ALogsWindows(unittest.TestCase):
 
     def test_the_first_rows_say_the_width(self):
         rows = [row("chr1", 100 + 10 * k, "A", "AT", 30, 30, k) for k in range(5)]
-        path = self.write("logchr1.txt.gz", rows + ["chr1_x-y_9\tS1\t.\t0.1\tchr1_900_A_AT\t0,1\tN"])
+        path = self.write("logchr1.txt.gz",
+                          rows + ["chr1_x-y_9\tS1\t.\t0.1\tchr1_900_A_AT\t0,1\tN"])
         self.assertEqual(iw.log_windows(path, rows=5), {(30, 30)})
         with self.assertRaises(ValueError):
             iw.log_windows(path, rows=None)
@@ -108,13 +109,13 @@ class WhatAWindowHolds(unittest.TestCase):
                                         "hold 30 reference bases before each indel and 30 "
                                         "after it"), note)
         self.assertIn("holds up to 31 bases, guide, PAM and DNA bulges counted; this search's "
-                      "need up to 32 (a 29-nt guide and PAM with 3 DNA bulges)", note)
+                      "targets need up to 32 (a 29-nt guide and PAM with 3 DNA bulges)", note)
         self.assertNotIn("CRISPRitz 2.10.0 writes", note)
         # an archive of 2.9.1's windows: an MNV's limit too, and how to search them
         note = iw.target_note((25, 27), 27, 0, "indel search", "ds")
         self.assertIn("holds up to 27 bases (26 at a record whose REF and ALT differ at their "
                       "first base, an MNV or complex record)", note)
-        self.assertIn("need up to 27 (a 27-nt guide and PAM)", note)
+        self.assertIn("this search's targets need up to 27 (a 27-nt guide and PAM)", note)
         self.assertIn("enrich ds again with it (build-index-only)", note)
 
 
