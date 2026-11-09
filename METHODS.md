@@ -199,8 +199,10 @@ Each source VCF is normalized so that variant records are directly comparable:
   list carrying the ALT on every haplotype slot where either puts it when its two calls
   are phased alike (as many alleles, every separator `|`: `0|1` and `1|0` give `1|1`),
   and otherwise keeping the call with more copies of the ALT, the earlier record's on a
-  tie, as it is (CRISPRitz's `docs/MULTIALLELIC_ENRICHMENT.md` §2.3). Up to 2.9.1 the
-  later record's entry replaced the earlier one, whose carriers were lost.
+  tie, as it is (CRISPRitz's `docs/MULTIALLELIC_ENRICHMENT.md` §2.3). So too where a VCF
+  line of several ALTs lists it, whose calls of it are first written as a split record's
+  (that ALT `1`, every other called allele `0`: a `1|2` reads `0|1` for its second ALT).
+  Up to 2.9.1 the later record's entry replaced the earlier one, whose carriers were lost.
 - **Consistent coordinates and contigs** (reference build, chromosome naming)
   across datasets.
 
@@ -544,16 +546,22 @@ so the co-occurrence signal is never silently dropped for lack of genotypes.
 Off-targets that need an indel are searched on the **fake-indel genome**: one short window
 per indel (25 bp of reference, the indel's ALT, then 27 bp of reference, an `N` between two
 windows), onto which the build writes the IUPAC code of every SNP of the enriched genome.
-A target that runs past its window cannot be searched, whatever the index: a known limit
-for targets longer than SpCas9's with bulges — a 27-nt one (SaCas9's 21-nt guide and
-`NNGRRT`, SaCas9-KKH, Cas12a `TTTV`/`TTTN` at 23 nt) with a DNA bulge, from an insertion's
-first added base, needs 26 bases before it (from 3% to 20% of the indel-holding alignment
-slots of those enzymes at 1 to 3 DNA bulges; SaCas9 4.2% at one), while every target of up
-to 27 bases fits, SpCas9's 23-nt ones with their bulges among them. An index of format 1 (CRISPRitz 2.9.1) also lost a target whose
-guide's far end lies within its budget of the window's edge, the `N` in its pad: every
-budget of a 27-nt motif, so for SaCas9 the targets that start at a window's first base
-(2,103 carrier targets at 6 records on chr22 of HGDP + 1000 Genomes for one guide,
-2 mismatches, no bulge); an index of format 2 (§9) holds them. The search engine matches a code
+A target is searched in its window only where its own bases and its site lie there, the
+site being its PAM and the guide's length of bases from it, as CRISPRitz indexes a site, not
+an alignment (an RNA bulge leaves the site's far end past the target's first base, a DNA
+bulge the target's first base past the site's). The window holds every SpCas9 site (23 nt)
+that holds a base of its record, with its targets of up to 3 DNA bulges, and a 27-nt site
+(SaCas9's 21-nt guide and `NNGRRT`, SaCas9-KKH, Cas12a `TTTV`/`TTTN` at 23 nt) only from its
+first base on: a known limit for such motifs, whose target with a DNA bulge, from an
+insertion's first added base, needs 26 bases before it (from 3% to 20% of the indel-holding
+alignment slots of those enzymes at 1 to 3 DNA bulges; SaCas9 4.2% at one), and whose site
+ending on an MNV's first replaced base starts a base before the window. Such targets cannot
+be searched, whatever the index. An index of format 1 (CRISPRitz 2.9.1) also lost a target
+whose site's guide region ends within its budget of the window's edge, the `N` in its pad:
+every budget of a 27-nt motif, so for SaCas9 the sites that start within the budget of a
+window's first base (at it, for a search without bulges: 2,103 carrier targets at 6 records
+on chr22 of HGDP + 1000 Genomes for one guide, 2 mismatches); an index of format 2 (§9)
+holds them. The search engine matches a code
 when **any** of its alleles fits the guide (or the PAM), so one raw indel target stands for
 every combination of the window's SNP alleles at once; only the genotypes say which of them
 exist. The indel post-analysis therefore resolves each such target **per carrier
@@ -1864,15 +1872,16 @@ genome codes every allele of a split site where the variant index that served it
 its `.bin` headers, or where its enriched genome (`Genomes/<genome>+<dataset>/` of the run's
 working directory) codes an earlier record's ALT at a split site of the VCF, and the last
 record alone where that index is of format 1, or the enriched genome holds the last ALT
-alone, or an index of format 2 flags no Q while the VCF has a position of four bases; with
-every allele coded, two lines of one SNV REF>ALT are one allele, their calls merged as
-CRISPRitz 2.10.0 merges them into the allele's one dictionary entry, which the search reads
-(§2: taken from CRISPRitz's documentation, not from CRISPRme's code), and a slot holding two
-ALTs of one position is resolved PUTATIVE (§4), the truth there (above); with the last record
-alone coded, an earlier line of the same REF>ALT is an earlier record of the site, whose
-carriers that dictionary lost (its entry was the last line's: `limit-last-alt-wins`). The
-INDELS index's format is that of its `.bin` files, else the run's format-1 NOTE of it
-(§9). The phased indel store holds only the records whose FILTER passes but where the run's
+alone, or an index of format 2 flags no Q while the VCF has a position of four bases (a
+line whose ALT is a `*` is no record of such a site: no code holds it); with every allele
+coded, two listings of one SNV REF>ALT at a position, on a line of several ALTs too, are one
+allele, their calls merged as CRISPRitz 2.10.0 merges them into the allele's one dictionary
+entry, which the search reads (§2: taken from CRISPRitz's documentation, not from CRISPRme's
+code), and a slot holding two ALTs of one position is resolved PUTATIVE (§4), the truth there
+(above); with the last record alone coded, an earlier line of the same REF>ALT is an earlier
+record of the site, whose carriers that dictionary lost (its entry was the last line's:
+`limit-last-alt-wins`). The INDELS index's format is that of its `.bin` files, else the
+run's format-1 NOTE of it (§9). The phased indel store holds only the records whose FILTER passes but where the run's
 `log_verbose.txt` notes a store written before 2.10.0 for the dataset and chromosome (without
 the log, a run whose genotyped VCF holds an indel record of another FILTER is refused). A
 per-sample run of 2.10.0 writes no greedy row of a window over `CRISPRME_IUPAC_CAP`, so none
@@ -1892,9 +1901,9 @@ carrier's own SNP alleles, so that a row lists a carrier only where those give i
 the second indel read from either end of the target through the indel, each base the indel
 puts in the target at its place, before any unphased call; the phasing artefact and the
 complex allele, the PUTATIVE carriers of MNVs and of multi-ALT alts the genotypes cannot
-tie, the last record of a split site) is re-implemented from this text only to classify a
-disagreement as a documented limit (counted, non-gating, a PUTATIVE tie included) or a
-failure. An MNV beside the record is in no store CRISPRme reads (§4): a target that needs it
+tie by §4's rule, the last record of a split site) is re-implemented from this text only to
+classify a disagreement as a documented limit (counted, non-gating, a PUTATIVE tie included)
+or a failure. An MNV beside the record is in no store CRISPRme reads (§4): a target that needs it
 needs two indel-path records (the two-indel limit), while a carrier listed for a sequence
 such an MNV on its slot changes is listed for a sequence it does not have, which nothing
 documents, and fails. It runs two ways:

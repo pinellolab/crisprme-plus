@@ -352,14 +352,18 @@ jobs:
         # that says it read no genotype store (its log_verbose.txt, or a --per-sample
         # search run population-level: refused), a run's release read from its records
         # (2.10.0's .indexes_searched.txt; every allele of a split site from the variant
-        # index's Q flag or its enriched genome, so its target is demanded; two lines of
-        # one SNV REF>ALT one allele, their calls merged by CRISPRitz 2.10.0's documented
-        # rule (a phased call beside an unphased one of as many copies stays phased), and
-        # on a genome of the last record the earlier line's carriers lost; a slot holding
-        # two ALTs of one position read by the PUTATIVE rule, a carrier it lists required;
-        # the store's FILTER rule from the log; the INDELS index's format from its .bin, a
-        # 27-nt target at its fake-indel window's first base left out by format 1,
-        # limit-window-edge, and demanded of format 2; a target past the window,
+        # index's Q flag or its enriched genome, so its target is demanded, a '*' line no
+        # split site; two listings of one SNV REF>ALT at a position one allele, on a line
+        # of several ALTs too, their calls merged by CRISPRitz 2.10.0's documented rule (a
+        # phased call beside an unphased one of as many copies stays phased), and on a
+        # genome of the last record the earlier line's carriers lost; a slot holding two
+        # ALTs of one position read by the PUTATIVE rule, a carrier it lists required; an
+        # alt of a line of several ALTs untied as CRISPRme's readers untie it (a '*' among
+        # the alts that settle its number, an indel's ALT not); the store's FILTER rule
+        # from the log; the INDELS index's format from its .bin, a 27-nt target at its
+        # fake-indel window's first base left out by format 1, limit-window-edge, and
+        # demanded of format 2, a bulged one read by its site (the guide's length from its
+        # PAM, and format 1's pad); a target or site past the window,
         # limit-window-reach; no capped greedy row in a 2.10.0 run's chain; a SNP row over
         # --max-degeneracy a row it may write or not; refused where the records do not
         # tell and it matters), a search with CRISPRME_INDEL_SNP=0 (its log's NOTE:

@@ -403,14 +403,16 @@ and the `release-crisprme` skill.
     CRISPRme's documented reading of a carrier (METHODS section 4 and the
     2.8.1 Known limits: one indel per window, resolved with each carrier's own SNP alleles;
     a second indel read from either end of the target through the indel; the phasing
-    artefact and the complex allele; MNVs and untied multi-ALT alts resolved PUTATIVE, and
-    from this release a slot holding two ALTs of one position; on a genome of CRISPRitz
-    2.9.1 or earlier only the last record of a split multi-allelic SNP site searched, an
-    earlier record of the same REF>ALT too, whose carriers its dictionary lost, on one of
-    2.10.0 every allele, two lines of one SNV REF>ALT one allele, their calls merged by the
-    rule CRISPRitz's own documentation gives its enricher) is re-implemented from that text
-    and only classifies a disagreement: a documented limit (non-gating, listed with its
-    cause, a PUTATIVE tie included) or a failure.
+    artefact and the complex allele; MNVs and untied multi-ALT alts resolved PUTATIVE (an
+    alt's number the one every carrier of it holds, less those the position's other alts of
+    one character settle, a `*` among them, an indel's ALT not), and from this release a
+    slot holding two ALTs of one position; on a genome of CRISPRitz 2.9.1 or earlier only
+    the last record of a split multi-allelic SNP site searched, an earlier record of the
+    same REF>ALT too, whose carriers its dictionary lost, on one of 2.10.0 every allele, two
+    listings of one SNV REF>ALT at a position one allele, on a line of several ALTs too,
+    their calls merged by the rule CRISPRitz's own documentation gives its enricher) is
+    re-implemented from that text and only classifies a disagreement: a documented limit
+    (non-gating, listed with its cause, a PUTATIVE tie included) or a failure.
   - **Releases**: where CRISPRme's and CRISPRitz's releases read the data otherwise, the
     check reads which one made the run from the run's own records and prints the reading
     it took (`read as a run of CRISPRme 2.10.0 or later (<dataset> on <chrom>: every allele,
@@ -421,23 +423,28 @@ and the `release-crisprme` skill.
     `.bin` headers flag Q, or its enriched genome in the working directory codes an earlier
     record's ALT at a split site, and the last record's where that index is of format 1, or
     the enriched genome holds the last ALT alone, or an index of format 2 flags no Q while
-    the VCF has a position of four bases; the INDELS index's format is its `.bin` files',
-    else the log's format-1 NOTE of it; the store applies the FILTER rule but where the log
-    notes a store written before. A run whose records do not tell, where its data makes it
-    matter (a split SNP site; a target of the guide, PAM and budget that can lie at a
-    fake-indel window's edge; a genotyped VCF with an indel record of another FILTER and no
-    log), is refused (exit 2), and so is a run made with the SNP+indel co-occurrence off
+    the VCF has a position of four bases (a line whose ALT is a `*` is no record of such a
+    site); the INDELS index's format is its `.bin` files', else the log's format-1 NOTE of
+    it; the store applies the FILTER rule but where the log notes a store written before. A
+    run whose records do not tell, where its data makes it matter (a split SNP site, two or
+    more lines of an SNV ALT at one position, a line of several ALTs among them; a target of
+    the guide, PAM and budget that can lie at a fake-indel window's edge; a
+    genotyped VCF with an indel record of another FILTER and no log), is refused (exit 2),
+    and so is a run made with the SNP+indel co-occurrence off
     (`CRISPRME_INDEL_SNP=0`, which a search of this release notes in its `log_verbose.txt`):
     every SNP code of its fake-indel genomes reads as the reference, so its indel rows name
     no SNP and list every carrier of their indel, none of the per-carrier resolution the
     check models (the check of 2.8.2's code gave 166 and 77 gating findings on the
-    SNP+indel oracle's world searched so, per sample and population-level). A target that
-    runs past its fake-indel window (25 bases before the record's first REF base, 27 after
-    its last) is held by no index: its carriers are counted (`limit-window-reach`), as are,
-    on an INDELS index of format 1, those of a target whose guide's far end lies within the
-    budget of the window's edge (`limit-window-edge`), which an index of format 2 holds. A
-    cluster reached only through a SNP row over the run's `--max-degeneracy` is
-    `limit-max-degeneracy`; the carrier gate changes nothing the check reads.
+    SNP+indel oracle's world searched so, per sample and population-level). An index keeps
+    a target's site, its PAM and the guide's length of bases from it, not its alignment, so
+    a target is read by its site: one that runs past its fake-indel window (25 bases before
+    the record's first REF base, 27 after its last), or whose site's guide region does (an
+    RNA-bulged target at the window's first base), is held by no index, and its carriers are
+    counted (`limit-window-reach`), as are, on an INDELS index of format 1, those of a
+    target whose site's guide region ends within the budget of the window's edge
+    (`limit-window-edge`), which an index of format 2 holds. A cluster reached only
+    through a SNP row over the run's `--max-degeneracy` is `limit-max-degeneracy`; the
+    carrier gate changes nothing the check reads.
   - **Soundness**: every indel/MNV row block of the integrated results (the three blocks)
     and of the alternative alignments must be labelled ALT, name one indel-path record (and
     SNPs), all records of the VCF the search read; have an aligned spacer that is the guide
