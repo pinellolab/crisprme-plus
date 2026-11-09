@@ -561,17 +561,19 @@ and the `release-crisprme` skill.
     never read), a run made with `--population-level` or no mode flag records nothing else
     that tells it apart, and is not to be checked.
   - Measured on this release itself (its code over the 2.8.1 image with CRISPRitz 2.10.0,
-    every index built by `build-index-only` with it, of format 2, each search from a clean
-    environment), chr22 of HGDP + 1000 Genomes (4,091 samples), the README guide, NRG, 4
+    every index built by `build-index-only` with it, of format 2, on fake-indel windows of
+    30/30, each search from a clean environment), chr22 of HGDP + 1000 Genomes (4,091
+    samples), the README guide, NRG, 4
     mismatches + 1 + 1: soundness and completeness pass in both modes (both, with the
     per-sample run's SNP-row report, about 2.5 min with `--jobs 16`; limits: 8 two-indel
     targets, 4 records with overlapping alleles and the checker's coverage gap for one
     carrier's slot near two records; no split-site target, every allele being coded). So do
     NRR and the TRAC guide per sample (19 and 20 two-indel targets, 8 overlapping records
     each), SaCas9's `CACTTTGGGAGGCCGAGGCGG` with `NNGRRT` per sample at 2 mismatches without
-    bulges (the 2,103 targets at a fake-indel window's first base reported) and at 4 + 1 + 1
-    (16 records whose carriers hold a target that runs past its window,
-    `limit-window-reach`, 2,121 carrier listings), three repeat-rich guides (VEGFA site 3,
+    bulges (the 2,103 targets that start at the first base of a window of 25/27 reported)
+    and at 4 + 1 + 1 (the targets of the 16 records whose carriers held a target past a
+    window of 25/27, `limit-window-reach`, 2,121 carrier listings, reported), three
+    repeat-rich guides (VEGFA site 3,
     EMX1, VEGFA site 1) in both modes, HPRC chr22 (9,125 MNVs, 4.5% of its calls with a
     missing allele) and a copy of it with every fourth sample unphased in both modes, and
     the default index beside the sites-only `hg38_mega` in both modes (2,254,806 and 666 row
@@ -625,7 +627,7 @@ and the `release-crisprme` skill.
     and passes on this release's, and `test/indel_snp_oracle/known_check_indel_rows.tsv`
     lists nothing. A search whose targets reach 27 nt (SaCas9: a 21-nt guide and a 6-nt PAM)
     lost, on an INDELS index of format 1 (CRISPRitz 2.9.1), those that start at a fake-indel
-    window's first base (on chr22 of HGDP + 1000 Genomes, `CACTTTGGGAGGCCGAGGCGG` with
+    window's first base (of 25/27; on chr22 of HGDP + 1000 Genomes, `CACTTTGGGAGGCCGAGGCGG` with
     `NNGRRT`, 2 mismatches, per sample: 2,103 carrier targets at 6 records, 2,088 of them
     the insertion chr22:17325232 A>AT's, the same on two fresh searches; an SpCas9 target,
     24 nt at most in these searches, never starts there holding its record): an index of
@@ -723,6 +725,39 @@ and the `release-crisprme` skill.
   that the enricher skips it (it said Python wraps the slice, which 2.9.1 fixed). The
   real-data check reads the windows from the run's own indel log (else its INDELS index's
   record), and refuses a run of 2.10.0 that says neither where its VCF has indel records.
+  Measured on chr22 of HGDP + 1000 Genomes (4,091 samples), each dataset enriched anew and every
+  index built by `build-index-only`, against the same searches on windows of 25/27 (this
+  release's code before the change, its CRISPRitz writing 2.9.1's windows): the README guide
+  (NRG per sample and population-level, NRR), the TRAC guide, the three repeat-rich guides
+  population-level, HPRC chr22 and its unphased copy in both modes, the default index beside
+  `hg38_mega` population-level, SaCas9's 21-nt `CACTTTGGGAGGCCGAGGCGG` at 2 mismatches, CEP290's
+  two 22-nt `NNGRRN` guides (4 mismatches, without bulges and with 1 + 1) and HBB's 23-nt Cas12a
+  guide give the same rows, line for line; per sample the three guides and the index beside
+  `hg38_mega` give the same integrated rows, and the same alternative alignments but for their
+  CRISPR-Bulge columns (8 of 93,753 and 5,303 of 762,645 lines: the same score printed in
+  another format, a difference in its sixth digit, which the model's float32 scoring takes from
+  the batch it scores a target in, or the CRISPR-Bulge block naming another of a site's
+  near-tied alignments; on 25/27 the search beside `hg38_mega` gives the same rows, byte for
+  byte, with this release's code before the change as with stage 2a's). SaCas9's 21-nt guide at
+  4 + 1 + 1, 3 + 2 + 0 and 2 + 1 + 1, its 22-nt and 23-nt forms (`G`/`AG` before it) at 2
+  mismatches with up to 2 DNA bulges, and a 23-nt Cas12a guide of the same Alu (`TTTG`
+  `GGAGGCCGAGGCGGGCGGATCAC`, 2 + 2 + 0) report the targets that 25/27 held in no index, the
+  carriers the check counted under `limit-window-reach` there (from 3 records and 2,098 carrier
+  listings to 66 and 10,924 a search; METHODS §8): each on a row of its own or among the
+  alternative alignments of a site it joins, whose rows then count it in `Other_motifs` (at two
+  sites a recovered alignment heads the row, the one it replaced listed among the alternative
+  alignments; at one it replaces the worse alignment 25/27 held of the same target; at one it
+  takes the block of fewest mismatches and bulges, which places a bulge at the other of two
+  equal bases in three alternative alignments). Nothing else changed. Every run passes the check
+  (0 gating) with no `limit-window-reach` line, and the general K=8 index (`--prune-pam`) gives
+  the dedicated `NNGRRT` index's rows for the 21-nt guide at 2 + 1 + 1 byte for byte, on either
+  width; the 23-nt SaCas9 guide at 3 DNA bulges (32 bases) says so on its console, in
+  `Indel_window_note` and in its log, and the check counts its targets past the window under
+  `limit-window-reach` (10 records, 1,910 carrier listings). On an enrichment of 25/27,
+  `complete-search` says so on the same three channels, and `build-index-only`'s advice,
+  followed word for word, gives a fresh enrichment's fake-indel genome and indel log byte for
+  byte. The fake-indel genome is 14% larger (15.6 MB against 13.7 MB on chr22), an INDELS index
+  about 22%.
 - **The two known limits of CRISPRitz `add-variants` that 2.8.1 stated are given as those of an
   index CRISPRitz 2.9.1 or earlier built, every one published until the rebuild for this
   release.** At a split multi-allelic site only the last record's ALT is searched, and a record

@@ -645,6 +645,11 @@ A dict-less variant index adds the tier/companion/self-completeness fields:
 - `display_label` — human-friendly name shown by the web index list / search form.
 - `has_samplesids` — the samplesID lists are bundled in the main tarball, so
   `download --what index` yields a self-complete install (no `--what samples`).
+- `indel_window` — (a variant index published by CRISPRme 2.10.0 or later) the reference
+  bases each fake-indel window holds before an indel and after it, as the index's indel
+  logs record them: `[30, 30]` for one CRISPRitz 2.10.0 built (an archive without the field,
+  every one published up to 2.8.1, holds 25 and 27). `download --what index` says when an
+  archive's windows are not the installed CRISPRitz's ([METHODS §4](../METHODS.md#snpindel-off-targets-each-carriers-own-haplotype)).
 
 The manifest is surfaced (build timestamp / display name) when the index is
 downloaded, and old fields are ignored by older consumers — the index directory

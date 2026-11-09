@@ -571,8 +571,13 @@ each INDELS sub-index records the windows it was built from (`.index_meta.json`'
 earlier build), and a search refuses one beside an indel log of other windows (the two come
 from two enrichments, and the log would place every row of it wrong), as build-index-only
 does of one in place, which also warns of an enrichment in place whose windows the
-installed CRISPRitz does not write. An index of format 1 (CRISPRitz 2.9.1) also lost a
-target whose site's guide region ends within its budget of the window's edge, the `N` in its
+installed CRISPRitz does not write, and says how to enrich the dataset again (followed word
+for word on chr22 of HGDP + 1000 Genomes, it gives the fake-indel genome and indel log of a
+fresh enrichment, byte for byte). The wider windows make the fake-indel genome 14% larger
+there (15.6 MB against 13.7 MB) and an INDELS index about 22% (SaCas9's `NNGRRT`: 8.7 MB
+against 7.1 MB); what they change in the searches is measured in §8. An index of format 1
+(CRISPRitz 2.9.1) also lost a target whose site's guide region ends within its budget of
+the window's edge, the `N` in its
 pad: every budget of a 27-nt motif on 25/27 windows, so for SaCas9 the sites that start
 within the budget of a window's first base (at it, for a search without bulges: 2,103
 carrier targets at 6 records on chr22 of HGDP + 1000 Genomes for one guide, 2 mismatches);
@@ -2101,8 +2106,9 @@ changes then, without failing the check (the documented reading of those slots, 
 listed" and "the last record", is not modeled into a gating demand).
 
 Measured on 2.10.0 itself (its code over the 2.8.1 image with CRISPRitz 2.10.0; every
-index built by `build-index-only` with it, of format 2; each search from a clean
-environment, as the HPC route runs it), chr22 of the HGDP + 1000 Genomes panel (4,091
+index built by `build-index-only` with it, of format 2, on fake-indel windows of 30/30;
+each search from a clean environment, as the HPC route runs it), chr22 of the HGDP + 1000
+Genomes panel (4,091
 samples), the README guide, NRG, 4 mismatches, 1 DNA and 1 RNA bulge: soundness and
 completeness pass in both analysis modes (the two, with the per-sample run's SNP-row
 report, about 2.5 min with `--jobs 16`), its limits 8 two-indel targets, 4 records whose
@@ -2112,12 +2118,13 @@ holds two ALTs of one position at more than 10 positions there), and no split-si
 target, every allele of a split site being coded; so do NRR and the TRAC guide per sample
 (19 and 20 two-indel targets, 8 overlapping records each), SaCas9's 21-nt
 `CACTTTGGGAGGCCGAGGCGG` with `NNGRRT` per sample at 2 mismatches without bulges (the 2,103
-carrier targets at a fake-indel window's first base reported; 22 two-indel targets, 7
-overlapping records) and at 4 + 1 + 1 (the targets of 16 records that run past their
-fake-indel window, a 27-nt target with a DNA bulge, held by no index and counted for their
-2,121 carrier listings, `limit-window-reach`; two-indel targets at 66 records, overlapping
-alleles at 22), three repeat-rich guides (VEGFA site 3 `GGTGAGTGAGTGTGTGCGTG`, EMX1
-`GAGTCCGAGCAGAAGAAGAA`, VEGFA site 1 `GGGTGGGGGGAGTTTGCTCC`) per sample and
+carrier targets that start at the first base of a window of 25/27, which an index of
+format 1 loses, reported; 22 two-indel targets, 7 overlapping records) and at 4 + 1 + 1
+(no target past its window: the targets of the 16 records that ran past a window of
+25/27, held by no index there and counted for their 2,121 carrier listings, reported;
+two-indel targets at 66 records, overlapping alleles at 22), three repeat-rich guides
+(VEGFA site 3 `GGTGAGTGAGTGTGTGCGTG`, EMX1 `GAGTCCGAGCAGAAGAAGAA`, VEGFA site 1
+`GGGTGGGGGGAGTTTGCTCC`) per sample and
 population-level (per sample 8,289 notes where a listed carrier's slot, read as §4 reads
 it, holds the target, 1,082 row blocks and 1,457 records with overlapping alleles, 1,284
 two-indel targets; population-level 160 notes, 67 row blocks and the same 1,457 records,
@@ -2199,7 +2206,8 @@ SNP+indel oracle's site U, S19; and in a synthetic world of partly phased carrie
 searched through the real CLI, a carrier phased for the deletion and unphased for the SNP,
 which 2.10.0's code passes). A search whose targets reach 27 nt (SaCas9's 21-nt guide and
 6-nt PAM) lost, on an INDELS index of format 1, those that start at a fake-indel window's
-first base (chr22, `CACTTTGGGAGGCCGAGGCGG` with `NNGRRT`, 2 mismatches, per sample: 2,103
+first base (of 25/27; chr22, `CACTTTGGGAGGCCGAGGCGG` with `NNGRRT`, 2 mismatches, per
+sample: 2,103
 carrier targets at 6 records, 2,088 of them the insertion chr22:17325232 A>AT's; an SpCas9
 target, 24 nt at most here, never starts there holding its record), which an index of
 format 2 holds: the same search of indexes 2.10.0 built reports them all, its row at
@@ -2219,6 +2227,44 @@ population-level one in none.
 `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check` in both profiles,
 `validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
 `docs/RELEASE_CHECKLIST.md` makes it a release gate.
+
+What the fake-indel windows of 30/30 (§4) change was measured against the same searches on
+windows of 25/27 (2.10.0's code before the change, its CRISPRitz writing 2.9.1's windows),
+on chr22 of HGDP + 1000 Genomes, each dataset enriched anew and every index built by
+`build-index-only`. Where no target of the search reaches past a window of 25/27 they give
+the same rows, line for line: the README guide (NRG per sample and population-level, NRR),
+the TRAC guide, the three repeat-rich guides population-level, HPRC chr22 and its unphased
+copy in both modes, the default index beside `hg38_mega` population-level, SaCas9's 21-nt
+guide at 2 mismatches, CEP290's two 22-nt `NNGRRN` guides at 4 mismatches without bulges and
+with 1 + 1 (the check counts none of their targets past a window of 25/27) and HBB's 23-nt
+Cas12a guide at 4 mismatches without bulges, with 1 + 1 and with 2 DNA bulges. Per sample
+the three guides and the index beside `hg38_mega` give the same integrated rows, and the
+same alternative alignments but for their CRISPR-Bulge columns: 8 of 93,753 lines (a score's
+sixth digit once; seven times the CRISPR-Bulge block naming another of a site's near-tied
+alignments) and 5,303 of 762,645 (5,133 the same scores printed in another format, 69 a
+score's sixth digit, 101 the block). The model scores in float32 a batch of targets at a
+time, and a target's score takes its last digits from the batch and the threads (one pair of
+the three guides', alone and in batches of 1 to 20,000 on 1, 8 and the default threads:
+4.61037e-14 to 4.61042e-14, 4.61038e-14 in the run on 25/27); on 25/27 the search beside
+`hg38_mega` gives stage 2a's rows byte for byte with this release's code before the change
+too. Elsewhere every line that changed is a target such windows held in no index, whose
+carriers the check counted under `limit-window-reach` on them, or a line of the site it
+joins: a row of its own or an alternative alignment of a site whose rows then count it in
+`Other_motifs` (twice the site's row itself, the row it headed listed among the alternative
+alignments; once the better alignment of a target whose 25/27 row was a worse one; once a
+site's block of fewest mismatches and bulges, and with it the place, between two equal
+bases, of a bulge in three alternative alignments of that site). The records so recovered,
+and their carrier listings: SaCas9's 21-nt guide 16 and 2,121 at 4 + 1 + 1, 48 and 2,728 at
+3 + 2 + 0, 3 and 2,098 at 2 + 1 + 1; its 22-nt form (`G` before it) at 2 mismatches 7 and
+2,106 without bulges, 36 and 2,951 with 1 + 1, 39 and 9,956 with 2 DNA bulges; its 23-nt
+form (`AG`) 20 and 2,596, 66 and 10,924, 42 and 10,093; a 23-nt Cas12a guide of the same Alu
+(`TTTG` `GGAGGCCGAGGCGGGCGGATCAC`), 2 mismatches and 2 DNA bulges, 23 and 271. At 30/30 each
+passes the check (0 gating) with no `limit-window-reach` line, and the general K=8 index
+(`--prune-pam`) gives the dedicated `NNGRRT` index's rows for the 21-nt guide at 2 + 1 + 1,
+byte for byte, on either width; the 23-nt SaCas9 guide at 3 DNA bulges, 32 bases, past what
+30/30 holds, says so on its console, in `Indel_window_note` and in its log, and the check
+counts its targets past the window under `limit-window-reach` (10 records, 1,910 carrier
+listings).
 
 This establishes that the engine **does not miss** off-targets relative to
 exhaustive search. It does **not** validate the *scoring* models' predictive
