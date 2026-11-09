@@ -171,9 +171,9 @@ def memory_capped_workers(requested, n_tasks, dict_folder):
     usable_gb = max(1.0, budget_gb - max(2.0, budget_gb * 0.15))
     per_worker_gb = _estimate_worker_gb(dict_folder)
     cap = max(1, int(usable_gb // per_worker_gb))
-    # ABSOLUTE worker cap (default 32; override CRISPRME_POSTPROC_MAX_WORKERS) --
-    # post-analysis is I/O-bound and a Pool with hundreds of workers DEADLOCKS via
-    # per-worker sentinel-pipe FD inheritance (see pool_post_analisi_snp.py twin).
+    # ABSOLUTE worker cap (default 32; override CRISPRME_POSTPROC_MAX_WORKERS): the
+    # workers are postproc_pool's threads since 2.10.0, no longer a multiprocessing Pool,
+    # whose pipes deadlocked hundreds of workers (see pool_post_analisi_snp.py's twin).
     try:
         abs_cap = int(os.environ.get("CRISPRME_POSTPROC_MAX_WORKERS", "32"))
     except ValueError:

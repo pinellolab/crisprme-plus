@@ -204,9 +204,9 @@ _four_allele_positions = set()
 # reference row is written. The K-skip (a population-level search with --max-degeneracy K)
 # skips the same way a raw target every row of which rests on more than K ambiguous
 # columns. CRISPRME_HAPLOTYPE_PRECHECK=0 (complete-search --no-haplotype-precheck) turns
-# both off. Counted for the stdout note at the end.
-_PRECHECK = os.environ.get("CRISPRME_HAPLOTYPE_PRECHECK", "1") not in (
-    "0", "false", "False", "no")
+# both off (as do false, no and off, in any case: haplotype_precheck.switch_on). Counted for
+# the stdout note at the end.
+_PRECHECK = _hpc.switch_on(os.environ, "CRISPRME_HAPLOTYPE_PRECHECK")
 _precheck_stats = {"seen": 0, "skipped": 0, "kseen": 0, "kskipped": 0}
 # The samples of a run as bits of Python integers (haplotype_precheck.SampleBits), the
 # genotypes each variant column of a raw target reads, by (position, letter), and the

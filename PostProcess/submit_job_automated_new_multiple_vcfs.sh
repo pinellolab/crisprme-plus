@@ -2310,6 +2310,13 @@ while read vcf_f; do
 			# bulge-enabled, or no enriched genome to scan (_enriched_genome_whole): TST
 			# index search, which serves 0 bulges too, as for the indels below
 			if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ] || ! _enriched_genome_whole; then
+				# 2.10.0: above 1 DNA + 1 RNA bulge, on an index that codes every allele
+				# (format 2), the dense loci make this search explode: a WARNING on stdout,
+				# which log_verbose.txt keeps, a web search's too (complete-search also says
+				# it at once, and in .Params.txt). PostProcess/index_fit.py wide_bulge_note;
+				# nothing on stderr, which is fatal to the stage.
+				python "$starting_dir/index_fit.py" wide-budget "$mm" "$bDNA" "$bRNA" \
+					"$max_total_edits" "$idx_var" 2>/dev/null
 				idx_var_view="$(_bin_only_view "$idx_var")"
 				crispritz.py search "$idx_var_view" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result -var --max-edits $max_total_edits $prune_pam_flag \
 					|| { _drop_bin_views; echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }

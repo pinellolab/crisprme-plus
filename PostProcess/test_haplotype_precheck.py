@@ -287,10 +287,13 @@ class DegeneracyFloorAgainstEveryChoice(unittest.TestCase):
 def random_indel_case(rng):
     """An overlaid indel target: aligned guide and DNA with code columns, the indel's
     carriers, and the SNP carriers of each code column's bases (or a column no genotype
-    covers)."""
+    covers). An RNA bulge is a gap in the DNA; a DNA bulge a gap in the guide, the DNA
+    holding an extra base there, which is often a code column (no base of it is a
+    mismatch)."""
     sl = (0, -3)
-    guide = "".join(rng.choice("ACGT") for _ in range(20)) + "NNN"
-    target = list(guide[:20].lower() if rng.random() < 0.1 else guide[:20]) + list("AGG")
+    guide = list("".join(rng.choice("ACGT") for _ in range(20)) + "NNN")
+    target = list("".join(guide[:20]).lower() if rng.random() < 0.1 else guide[:20]) + list(
+        "AGG")
     for j in range(20):
         if rng.random() < 0.25:
             target[j] = rng.choice("ACGT")
@@ -299,7 +302,17 @@ def random_indel_case(rng):
     for j in range(20, 23):
         if rng.random() < 0.2:
             target[j] = rng.choice("ACGT")
-    codes = sorted(rng.sample([j for j in range(23) if target[j] != "-"], rng.randint(1, 5)))
+    dna_bulge = None
+    if rng.random() < 0.35:
+        dna_bulge = rng.randrange(1, 19)
+        guide.insert(dna_bulge, "-")
+        target.insert(dna_bulge, rng.choice("ACGT"))
+    guide = "".join(guide)
+    n = len(guide)
+    codes = rng.sample([j for j in range(n) if target[j] != "-"], rng.randint(1, 5))
+    if dna_bulge is not None and dna_bulge not in codes and rng.random() < 0.7:
+        codes[0] = dna_bulge
+    codes = sorted(codes)
     carriers = ["S%d" % i for i in range(rng.randint(1, 6))]
     others = ["T%d" % i for i in range(rng.randint(0, 3))]
     columns = []
@@ -316,17 +329,19 @@ def random_indel_case(rng):
                             listed=listed))
         target[j] = "N"  # the code itself (any letter: the tests read the columns)
     return dict(guide=guide, target="".join(target), columns=columns, carriers=carriers,
-                spacer=list(range(23))[sl[0]:sl[1]], motif={20: "N", 21: "G", 22: "G"},
+                spacer=list(range(n))[sl[0]:sl[1]], motif={n - 3: "N", n - 2: "G", n - 1: "G"},
                 max_mm=rng.randint(0, 4), max_total=rng.choice([-1, 3, 4, 6]),
-                bulge=rng.randint(0, 2))
+                bulge=rng.randint(0, 2), dna_bulge=dna_bulge)
 
 
 class IndelPrecheckAgainstEveryChoice(unittest.TestCase):
     def test_random_targets(self):
         rng = random.Random(5)
         possible_seen = impossible_seen = 0
+        dna_bulge_codes = 0  # targets with a code column at a DNA bulge
         for _ in range(3000):
             case = random_indel_case(rng)
+            dna_bulge_codes += case["dna_bulge"] in [c["col"] for c in case["columns"]]
             sb = hpc.SampleBits()
             everyone = sb.mask(case["carriers"])
             cols = [(c["col"], c["ref"], c["known"], c["code"],
@@ -367,6 +382,23 @@ class IndelPrecheckAgainstEveryChoice(unittest.TestCase):
             impossible_seen += not want
         self.assertGreater(possible_seen, 200)
         self.assertGreater(impossible_seen, 200)
+        self.assertGreater(dna_bulge_codes, 300)
+
+    def test_a_dna_bulge_column_is_no_mismatch(self):
+        """A code column at a DNA bulge (a gap in the guide) holds no mismatch, whatever its
+        base, as resolve_target counts: a target whose one other mismatch a carrier fixes is
+        within a budget of 0 mismatches for that carrier."""
+        guide = "ACGTACGTAC-GTACGTACGTNNN"
+        target = "ACGTACGTACNGTACCTACGTAGG"  # a code at the bulge, C for G at column 15
+        motif = {21: "N", 22: "G", 23: "G"}
+        cols = [(10, "T", True, frozenset("TC"), {"C": 1}),
+                (15, "C", True, frozenset("CG"), {"G": 2})]
+        self.assertTrue(hpc.indel_target_possible(guide, target, motif, range(21), 0, -1, 1,
+                                                  cols, 3, 3))
+        # nobody fixes column 15: the target is out of a budget of 0 for everyone
+        cols[1] = (15, "C", True, frozenset("CG"), {"G": 0})
+        self.assertFalse(hpc.indel_target_possible(guide, target, motif, range(21), 0, -1,
+                                                   1, cols, 3, 3))
 
     def test_too_many_bulges_or_no_carrier(self):
         # the guide's T at column 3, a C there on the reference, the T an ALT sample 1 carries
@@ -382,7 +414,8 @@ class IndelPrecheckAgainstEveryChoice(unittest.TestCase):
                                                    max_dna_bulges=0))
 
 
-from test_window_density import GUIDE as _G, _PostAnalysis, _site_window  # noqa: E402
+from test_window_density import (  # noqa: E402
+    CRRNA, GUIDE as _G, _PostAnalysis, _site_window)
 
 _OUT_FILES = (".bestCFD.txt", ".bestmmblg.txt", ".bestCRISPR_BULGE.txt",
               ".high_variant_density_regions.bed", ".four_allele_positions.bed")
@@ -449,6 +482,19 @@ class ThroughThePostAnalysis(_PostAnalysis):
         self.analyse(allowed_mms="3", CRISPRME_FAST_MODE="0", CRISPRME_HAPLOTYPE_PRECHECK="0")
         self.assertEqual(self.files(), on)
 
+    def test_the_switch_is_off_in_any_case(self):
+        """CRISPRME_HAPLOTYPE_PRECHECK reads as CRISPRME_POSTPROC_PIECES: off, OFF, False or
+        no turn it off too (haplotype_precheck.switch_on)."""
+        site, window, entries = self.eleven_columns({0: "S1:1|0", 4: "S2:0|1", 8: "S3:1|1"})
+        self.write_inputs([site], [(0, window, "+")], entries)
+        for value in ("OFF", " off ", "False", "No"):
+            _rows, said, _h, _q = self.analyse(allowed_mms="1", CRISPRME_FAST_MODE="0",
+                                               CRISPRME_HAPLOTYPE_PRECHECK=value)
+            self.assertIn("Haplotype pre-check on chrT: off", said, value)
+        _rows, said, _h, _q = self.analyse(allowed_mms="1", CRISPRME_FAST_MODE="0",
+                                           CRISPRME_HAPLOTYPE_PRECHECK="on")
+        self.assertIn("Haplotype pre-check on chrT: 1 of 1 raw target(s)", said)
+
     def test_one_sample_reaching_the_budget_keeps_the_target(self):
         site, window, entries = self.eleven_columns({0: "S1:1|0", 4: "S1:1|0", 8: "S3:1|1"})
         self.write_inputs([site], [(0, window, "+")], entries)
@@ -478,9 +524,13 @@ class ThroughThePostAnalysis(_PostAnalysis):
                                            CRISPRME_MAX_DEGENERACY="1")
         self.assertIn("K-skip on chrT: 1 of 1 raw target(s)", said)
         on = self.files()
-        self.analyse(allowed_mms="1", CRISPRME_FAST_MODE="1", CRISPRME_MAX_DEGENERACY="1",
-                     CRISPRME_HAPLOTYPE_PRECHECK="0")
+        _rows, said, _h, _q = self.analyse(allowed_mms="1", CRISPRME_FAST_MODE="1",
+                                           CRISPRME_MAX_DEGENERACY="1",
+                                           CRISPRME_HAPLOTYPE_PRECHECK="0")
         self.assertEqual(self.files(), on)
+        # the switch turns off the K-skip here: there is no pre-check population-level
+        self.assertIn("K-skip on chrT: off (CRISPRME_HAPLOTYPE_PRECHECK=0)", said)
+        self.assertNotIn("Haplotype pre-check on chrT", said)
         # at K = 2 the target is read: its worst case rests on two columns
         rows, said, _h, _q = self.analyse(allowed_mms="1", CRISPRME_FAST_MODE="1",
                                           CRISPRME_MAX_DEGENERACY="2")
@@ -488,10 +538,134 @@ class ThroughThePostAnalysis(_PostAnalysis):
         self.assertTrue([r for r in rows if r[12] not in ("n", "NA")])
 
 
+_MISMATCHING = {"A": "C", "C": "A", "G": "T", "T": "G"}
+_TRANSITION = {"A": "G", "G": "A", "C": "T", "T": "C"}
+_CODE2 = {frozenset("AG"): "R", frozenset("CT"): "Y", frozenset("CG"): "S",
+          frozenset("AT"): "W", frozenset("GT"): "K", frozenset("AC"): "M"}
+
+
+class BulgesAndTheDictionaryPath(_PostAnalysis):
+    """The pre-check and the K-skip through the real new_simple_analysis.py on bulged raw
+    targets and on the dictionary path (a window within CRISPRME_IUPAC_CAP; the classic
+    dictionaries take the observed path only over it). The finalizer counts a bulged row's
+    mismatches with its bulge gap and takes the bulges off, so a row needs ``need`` =
+    mismatches + gap - Bulge_Size - budget fixes: a bound that left the bulge out would skip a
+    target one sample's single fix makes a row of."""
+
+    def target(self, kind=None, at=5, fixes=None, others=None):
+        """(crRNA, DNA, site, entries, bulges) of a raw target of the guide + TGG: an RNA
+        bulge (a gap in the DNA at aligned column ``at``), a DNA bulge (a gap in the guide
+        there, the DNA holding an extra base) or none. ``fixes``: {aligned column: genotypes
+        of the ALT that is the guide's base there, the reference mismatching it}; ``others``:
+        {aligned column: genotypes of an ALT that mismatches the guide}."""
+        g, t = list(CRRNA), list(_G + "TGG")
+        if kind == "RNA":
+            t[at] = "-"
+        elif kind == "DNA":
+            g.insert(at, "-")
+            t.insert(at, "A")
+        codes, alleles = {}, {}
+        for c, gts in (fixes or {}).items():
+            ref = _MISMATCHING[t[c]]
+            alleles[c] = (ref, t[c], gts)
+            t[c] = ref
+        for c, gts in (others or {}).items():
+            alleles[c] = (t[c], _TRANSITION[t[c]], gts)
+        for c, (ref, alt, _gts) in alleles.items():
+            codes[c] = _CODE2[frozenset((ref, alt))]
+        site_at = {}
+        n = 0
+        for c, ch in enumerate(t):
+            if ch != "-":
+                site_at[c] = n
+                n += 1
+        site = "".join(ch for ch in t if ch != "-")
+        dna = "".join(codes.get(c, ch) for c, ch in enumerate(t))
+        entries = {(0, site_at[c]): "%s;%s,%s;rs%d;0.1" % (gts, ref, alt, c)
+                   for c, (ref, alt, gts) in alleles.items()}
+        return "".join(g), dna, site, entries, 0 if kind is None else 1
+
+    def write_target(self, kind=None, at=5, fixes=None, others=None):
+        crrna, dna, site, entries, bulges = self.target(kind, at, fixes, others)
+        start = self.write_inputs([site], [(0, dna, "+")], entries)[0]
+        # the bulge type, the aligned guide and the bulge count of the row
+        with open(self.targets) as fh:
+            lines = fh.read().splitlines()
+        f = lines[1].split("\t")
+        f[0], f[1], f[8], f[9] = kind or "X", crrna, str(bulges), str(bulges)
+        with open(self.targets, "w") as fh:
+            fh.write("\n".join([lines[0], "\t".join(f)]) + "\n")
+        return start
+
+    def same_on_and_off(self, allowed, **env):
+        """The files with the switch on, and the same off; the rows, stdout and the dense
+        windows (the BED's lines but its header) of the run with it on."""
+        rows, said, hvdr, _q = self.analyse(allowed_mms=allowed, **env)
+        on = self.files()
+        self.analyse(allowed_mms=allowed, CRISPRME_HAPLOTYPE_PRECHECK="0", **env)
+        self.assertEqual(self.files(), on)
+        return rows, said, hvdr[1:]
+
+    files = ThroughThePostAnalysis.files
+
+    # two-allele columns no row needs: with the fixing ones, WITHIN makes 10 columns (2^10
+    # sequences, within the default cap of 10 bits: the dictionary path), OVER 13 (over it:
+    # the observed path, which the classic dictionaries take there per sample)
+    WITHIN = {2: "S4:1|0", 6: "S4:0|1", 10: "S5:1|1", 12: "S5:1|0", 13: "S6:0|1",
+              14: "S6:1|1", 16: "S4:1|1", 18: "S5:0|1"}
+    OVER = {**WITHIN, 11: "S6:1|0", 17: "S4:0|1", 9: "S5:1|1"}
+
+    def test_a_bulge_is_taken_off_the_mismatches_a_row_needs_fixed(self):
+        """Two mismatches and a bulge, a budget of 1: one fix suffices, S1 and S2 each carry
+        one. Kept, on the dictionary path and the observed one, with an RNA or a DNA bulge,
+        and the files are those with the pre-check off."""
+        for kind, at in (("RNA", 7), ("DNA", 9)):
+            for path, others in (("dictionary", self.WITHIN), ("observed", self.OVER)):
+                with self.subTest(bulge=kind, path=path):
+                    fixes = {3: "S1:1|0", 15: "S2:0|1"}
+                    self.write_target(kind, at, fixes, others)
+                    rows, said, dense = self.same_on_and_off("1", CRISPRME_FAST_MODE="0")
+                    self.assertEqual(len(dense), path == "observed", dense)
+                    self.assertIn("Haplotype pre-check on chrT: 0 of 1 raw target(s)", said)
+                    carriers = {s for r in rows for s in r[12].split(",")}
+                    self.assertTrue({"S1", "S2"} <= carriers, rows)
+
+    def test_the_dictionary_path_skips_what_no_sample_can_have(self):
+        """Three mismatches, a budget of 1: a row needs two fixes on one sample. Each is
+        another sample's: skipped on the dictionary path, which then writes no row of its own,
+        as with the pre-check off; S1 carrying two of them keeps it, with S1's row."""
+        within = {c: g for c, g in self.WITHIN.items() if c != 18}  # 7 + 3 fixing columns
+        self.write_target(None, 0, {3: "S1:1|0", 8: "S2:0|1", 15: "S3:1|1"}, within)
+        rows, said, dense = self.same_on_and_off("1", CRISPRME_FAST_MODE="0")
+        self.assertEqual(dense, [])  # within the cap: the dictionary path
+        self.assertIn("Haplotype pre-check on chrT: 1 of 1 raw target(s)", said)
+        self.assertEqual([r for r in rows if r[12] not in ("n", "NA")], [])
+        self.write_target(None, 0, {3: "S1:1|0", 8: "S1:1|0", 15: "S3:1|1"}, within)
+        rows, said, dense = self.same_on_and_off("1", CRISPRME_FAST_MODE="0")
+        self.assertEqual(dense, [])
+        self.assertIn("Haplotype pre-check on chrT: 0 of 1 raw target(s)", said)
+        self.assertIn("S1", {s for r in rows for s in r[12].split(",")})
+
+    def test_the_k_skip_takes_the_bulge_off(self):
+        """Population-level with --max-degeneracy 1, two mismatches and a bulge, a budget of
+        1: a row within the budget rests on one fixing column, so the target is read, and the
+        files are those of the cap alone."""
+        for kind, at in (("RNA", 7), ("DNA", 9)):
+            with self.subTest(bulge=kind):
+                self.write_target(kind, at, {3: "S1:1|0", 15: "S2:0|1"}, self.WITHIN)
+                rows, said, _dense = self.same_on_and_off("1", CRISPRME_FAST_MODE="1",
+                                                          CRISPRME_MAX_DEGENERACY="1")
+                self.assertIn("K-skip on chrT: 0 of 1 raw target(s)", said)
+                self.assertTrue([r for r in rows if r[12] not in ("n", "NA")], rows)
+
+
 class TheWideBudgetWarning(unittest.TestCase):
     """complete-search warns (stdout) above 1 DNA + 1 RNA bulge on a variant index that codes
     every allele (index format 2), or where none is installed and the installed CRISPRitz
-    builds format 2; not at 1 + 1, nor on a format-1 index."""
+    builds format 2; not at 1 + 1, nor on a format-1 index, nor where --max-total-edits 3 or
+    less bounds the alignments (index_fit.wide_bulge_budget: on IGL alone 6 + 2 + 2 wrote
+    fewer raw targets at a cap of 3 than the default at 6). It keeps the warning in
+    .Params.txt, and the search script says it in log_verbose.txt, a web search's too."""
 
     def setUp(self):
         import contextlib
@@ -517,15 +691,19 @@ class TheWideBudgetWarning(unittest.TestCase):
         with open(os.path.join(d, "NNNNNNNNNNNNNNNNNNNNNRG_chr22_1.bin"), "wb") as fh:
             fh.write(head + b"\0" * 64)
 
-    def said(self, bdna, brna, engine=2):
+    def said(self, bdna, brna, engine=2, mm=4, cap=-1):
         out = self.io.StringIO()
         old = self.cm.index_fit.engine_index_format
         self.cm.index_fit.engine_index_format = lambda: engine
         try:
             with self.contextlib.redirect_stdout(out):
-                self.cm._warn_wide_bulge_budget([self.vcf], "hg38", "_", 4, bdna, brna)
+                note = self.cm._warn_wide_bulge_budget([self.vcf], "hg38", "_", mm, bdna,
+                                                       brna, cap)
         finally:
             self.cm.index_fit.engine_index_format = old
+        # the text it returns, for .Params.txt, is the one it printed
+        self.assertEqual(out.getvalue(), "" if note is None else
+                         "WARNING [complete-search]: %s\n" % note)
         return out.getvalue()
 
     def test_above_one_plus_one_on_a_format_2_index(self):
@@ -544,6 +722,67 @@ class TheWideBudgetWarning(unittest.TestCase):
     def test_no_index_yet_follows_the_installed_crispritz(self):
         self.assertIn("WARNING", self.said(2, 1, engine=2))
         self.assertEqual(self.said(2, 1, engine=1), "")
+
+    def test_a_cap_of_three_edits_or_less_keeps_a_wide_budget_quiet(self):
+        """complete-test's 6 + 2 + 2 benchmarks: at --max-total-edits 3 no warning (on IGL
+        alone 618,209 SNP raw targets, against 755,963 at the default 4 + 1 + 1); at 5 one,
+        which says the cap (14.7 million there). An alignment has at most mm + bDNA + bRNA
+        edits: 1 + 2 + 0 is quiet whatever the cap."""
+        self.index(2)
+        self.assertEqual(self.said(2, 2, mm=6, cap=3), "")
+        self.assertEqual(self.said(2, 2, mm=6, cap=0), "")
+        self.assertEqual(self.said(2, 0, mm=1, cap=-1), "")
+        self.assertIn("6 mismatch(es) + 2 DNA + 2 RNA bulge(s) (at most 5 edits in all) on a "
+                      "variant index that codes every allele", self.said(2, 2, mm=6, cap=5))
+        self.assertIn("(at most 4 edits in all)", self.said(2, 1, cap=4))
+        # a cap at or above the budget's sum is no cap to mention
+        self.assertIn("4 mismatch(es) + 2 DNA + 1 RNA bulge(s) on a variant index",
+                      self.said(2, 1, cap=7))
+        self.assertIn("--max-total-edits of 3 or less", self.said(2, 1, cap=6))
+
+    def test_the_run_keeps_it(self):
+        """.Params.txt keeps the warning complete-search prints (Bulge_budget_note), and the
+        search script prints it before the variant search (index_fit.py wide-budget, whose
+        stdout log_verbose.txt keeps), for a web search too, which runs that script alone."""
+        with open(os.path.join(HERE, os.pardir, "crisprme.py")) as fh:
+            src = fh.read()
+        self.assertIn("wide_budget_note = _warn_wide_bulge_budget(", src)
+        self.assertIn("index_path, mm, bDNA, bRNA, max_total_edits)", src)
+        self.assertIn('if wide_budget_note:  # the stdout WARNING above 1 DNA + 1 RNA bulge, '
+                      'kept with the run\n            p.write("Bulge_budget_note\\t" + '
+                      'wide_budget_note + "\\n")', src)
+        with open(os.path.join(HERE, "submit_job_automated_new_multiple_vcfs.sh")) as fh:
+            sh = fh.read()
+        call = sh.index('python "$starting_dir/index_fit.py" wide-budget "$mm" "$bDNA" "$bRNA"')
+        search = sh.index('crispritz.py search "$idx_var_view"')
+        self.assertLess(call, search)
+        self.assertIn('"$max_total_edits" "$idx_var" 2>/dev/null', sh[call:search])
+
+    def wide_budget(self, *args):
+        import subprocess
+        return subprocess.run([sys.executable, os.path.join(HERE, "index_fit.py"),
+                               "wide-budget"] + [str(a) for a in args],
+                              capture_output=True, text=True)
+
+    def test_the_search_scripts_warning(self):
+        """index_fit.py wide-budget <mm> <bDNA> <bRNA> <cap> <index>...: the warning on stdout
+        when one index codes every allele and the budget is wide; nothing otherwise, nothing
+        on stderr (fatal to the stage), status 0."""
+        self.index(2)
+        idx = os.path.join(self.root, "genome_library", "20-NRG_2_hg38+hg38_ds")
+        for args, warned in (((4, 2, 1, 6, idx), True), ((6, 2, 2, 5, idx), True),
+                             ((6, 2, 2, 3, idx), False), ((4, 1, 1, 6, idx), False),
+                             ((4, 2, 1, 6, self.root), False), ((4, "x", 1, 6, idx), False)):
+            done = self.wide_budget(*args)
+            self.assertEqual((done.returncode, done.stderr), (0, ""), args)
+            self.assertEqual(done.stdout.startswith("WARNING [variant search]: "), warned,
+                             (args, done.stdout))
+        d1 = os.path.join(self.root, "lib1", "20-NRG_2_hg38+hg38_ds")
+        os.makedirs(d1)
+        with open(os.path.join(d1, "NNNNNNNNNNNNNNNNNNNNNRG_chr22_1.bin"), "wb") as fh:
+            fh.write((5).to_bytes(4, sys.byteorder) + (23).to_bytes(4, sys.byteorder)
+                     + b"\0" * 64)
+        self.assertEqual(self.wide_budget(4, 2, 2, 8, d1).stdout, "")
 
 
 if __name__ == "__main__":

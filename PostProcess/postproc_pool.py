@@ -9,7 +9,8 @@ IGH on chr14) ran on one core while the others waited: on chr22 at 4 mismatches 
 goes through three steps on the pool's workers:
 
 1. its shell driver's "cluster" stage: the extraction and the clustering of its raw
-   targets, as before; the driver writes the analysis script's arguments to a manifest;
+   targets, as before; the driver writes the analysis script's arguments to a manifest, a
+   file of a folder only this run can write (tempfile.mkdtemp);
 2. the analysis in pieces: the clustered file's lines cut into ``n`` contiguous ranges
    (``n_pieces``), the script run once a range (CRISPRME_POSTPROC_PIECE=1 and
    CRISPRME_POSTPROC_RANGE), each piece starting up exactly as one process does over the
@@ -29,8 +30,10 @@ stage), as up to 2.8.1. CRISPRME_POSTPROC_PIECE_LINES sets the fewest lines a pi
 Stdout carries the notes (log_verbose.txt). A piece's own output goes to a file of the
 pieces' folder (each piece starts up as one process does, so the pieces would repeat it):
 once the pieces of a chromosome are done, the log takes the first piece's output and any
-line another piece wrote that the first did not (piece_notes), then merge_pieces.py writes
-the notes one process ends with, from the pieces' counts. A failed step writes its error
+line another piece wrote that the first did not, but for the pieces' run times (piece_notes),
+then merge_pieces.py writes the notes one process ends with, from the pieces' counts, and the
+pool the chromosome's own run time ("Post-analysis SNP of chr22: done in 101.2 s (16
+pieces)"). A failed step writes its error
 on stderr, with the last lines of its output, and the stage stops (the search treats any
 stderr write as a failure).
 """
@@ -41,13 +44,17 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
+import time
+
+import haplotype_precheck as _hpc
 
 
 def pieces_on():
-    """Option P is on unless CRISPRME_POSTPROC_PIECES says 0 (or false/no)."""
-    return os.environ.get("CRISPRME_POSTPROC_PIECES", "1").strip().lower() not in (
-        "0", "false", "no", "off")
+    """Option P is on unless CRISPRME_POSTPROC_PIECES says off: 0, false, no or off, in any
+    case (haplotype_precheck.switch_on, the rule of CRISPRME_HAPLOTYPE_PRECHECK too)."""
+    return _hpc.switch_on(os.environ, "CRISPRME_POSTPROC_PIECES")
 
 
 def piece_lines(default):
@@ -180,6 +187,10 @@ def _call_logged(cmd, log, env=None, what=""):
 
 
 _NUMBERS = re.compile(r"[0-9]+")
+# A piece's run time, which its script prints last: "ANALYSIS COMPLETE IN <s>" (both
+# scripts), after "Done <chrom> <s>" (analisi_indels_NNN.py). The chromosome's own is the
+# pool's "... done in <s> s" line (run_stage).
+_RUN_TIME = re.compile(r"ANALYSIS COMPLETE IN |Done \S+ [0-9.eE+-]+$")
 
 
 def piece_notes(logs, pdir):
@@ -187,7 +198,7 @@ def piece_notes(logs, pdir):
     the first piece's, which say what one process says of its start-up (each piece starts up
     as one process does), and any line another piece wrote that the first did not, numbers
     aside (one of each); never a line that names the pieces' folder ``pdir`` (a piece's own
-    files) or a piece's run time (its last line)."""
+    files) or a piece's run time (_RUN_TIME: its last lines)."""
     out, seen = [], set()
     for i, log in enumerate(logs):
         try:
@@ -196,7 +207,7 @@ def piece_notes(logs, pdir):
         except OSError:
             continue
         for line in lines:
-            if pdir in line or line.startswith("ANALYSIS COMPLETE IN"):
+            if pdir in line or _RUN_TIME.match(line):
                 continue
             key = _NUMBERS.sub("#", line)
             if i and key in seen:
@@ -226,20 +237,25 @@ def run_stage(kind, chroms, workers, driver_args, script, prepare_dict=False,
         return
     cluster_at, out_at = (2, 4) if kind == "snp" else (1, 2)
     base_env = dict(os.environ)
+    started = {}  # chromosome -> when its cluster stage started (its "done in" line)
 
-    def finish(chrom, pdir, cluster):
+    def finish(chrom, pdir, cluster, n=1):
         _call(driver_args(chrom, "finish"), what=f"post-analysis of {chrom} (finish)")
         if pdir is not None:
             shutil.rmtree(pdir, ignore_errors=True)
         if os.path.exists(cluster):
             os.remove(cluster)
+        if n > 1:
+            # the chromosome's run time, which no piece's own line tells (piece_notes)
+            _say([f"Post-analysis {kind.upper()} of {chrom}: done in "
+                  f"{time.time() - started[chrom]:.1f} s ({n} pieces)"])
 
     def merge(chrom, args, pdir, prefixes):
         _say(piece_notes([p + ".log" for p in prefixes], pdir))
         # it writes the notes one process ends with, from the pieces' counts
         _call([sys.executable, "merge_pieces.py", kind, args[out_at]] + prefixes,
               what=f"merge of the pieces of {chrom}")
-        finish(chrom, pdir, args[cluster_at])
+        finish(chrom, pdir, args[cluster_at], len(prefixes))
 
     def piece(chrom, args, pdir, prefixes, i, rng, dict_copy, left):
         a = list(args)
@@ -274,11 +290,13 @@ def run_stage(kind, chroms, workers, driver_args, script, prepare_dict=False,
                      what=f"start-up of the post-analysis of {chrom}")
         pieces(chrom, args, pdir, rngs, dict_copy)
 
-    def cluster(chrom):
+    def cluster(chrom, i):
+        started[chrom] = time.time()
         env = dict(base_env)
-        # the driver writes the analysis' arguments there, one a line
-        tmp = os.path.join(os.environ.get("TMPDIR", "/tmp"),
-                           "crisprme_postproc_%s_%d_%s.args" % (kind, os.getpid(), chrom))
+        # the driver writes the analysis' arguments there, one a line: a file of a folder
+        # only this run can write (tempfile.mkdtemp, mode 0700), so no other user of a
+        # shared $TMPDIR can name it before the driver does, or put another list there
+        tmp = os.path.join(manifests, "%s_%d.args" % (kind, i))
         env["CRISPRME_POSTPROC_MANIFEST"] = tmp
         code = subprocess.call(driver_args(chrom, "cluster"), env=env)
         if code != 0:
@@ -309,6 +327,10 @@ def run_stage(kind, chroms, workers, driver_args, script, prepare_dict=False,
         else:
             pieces(chrom, args, pdir, rngs, None)
 
-    for chrom in chroms:
-        pool.put(2, cluster, chrom)
-    pool.run()
+    manifests = tempfile.mkdtemp(prefix="crisprme_postproc_%s_" % kind)
+    try:
+        for i, chrom in enumerate(chroms):
+            pool.put(2, cluster, chrom, i)
+        pool.run()
+    finally:
+        shutil.rmtree(manifests, ignore_errors=True)

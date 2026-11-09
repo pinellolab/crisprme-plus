@@ -3685,8 +3685,10 @@ def index_page() -> html.Div:
                             "(exact worst-case CFD; CRISPR-Bulge is a best-effort screen). It is "
                             "lossless for detection, but does NOT "
                             "compute per-sample carriers, CONFIRMED cis phasing or exact joint "
-                            "allele frequency, and on the indexes CRISPRitz 2.10.0 builds it is "
-                            "no faster. ",
+                            "allele frequency. Which mode is faster depends on the panel: "
+                            "per-sample on a dense panel of many samples such as the default "
+                            "HGDP + 1000 Genomes one, population-level on a small one such as "
+                            "HPRC. ",
                             html.B("Per-sample"),
                             " resolves per-sample genotypes into observed haplotypes (named "
                             "carriers + CONFIRMED cis + exact joint AF) — recommended for "

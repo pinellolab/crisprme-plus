@@ -1218,9 +1218,9 @@ def _indel_carriers(indel_data, ipos, iref, ialt):
 # base one of the indel's carriers carries there, so when no carrier, free to take at each
 # column any of those, reaches the budget and the PAM, the target has no row. On with the
 # SNP side's pre-check (CRISPRME_HAPLOTYPE_PRECHECK=0, complete-search
-# --no-haplotype-precheck, turns both off).
-_PRECHECK = os.environ.get("CRISPRME_HAPLOTYPE_PRECHECK", "1") not in (
-    "0", "false", "False", "no")
+# --no-haplotype-precheck, turns both off; so do false, no and off, in any case:
+# haplotype_precheck.switch_on).
+_PRECHECK = _hpc.switch_on(os.environ, "CRISPRME_HAPLOTYPE_PRECHECK")
 _sample_bits = _hpc.SampleBits()
 _snp_masks = {}      # (pos1, forward alt) -> the samples the genotype source lists for it
 _carrier_masks = {}  # indel token -> the indel's carriers

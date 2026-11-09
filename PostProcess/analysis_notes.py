@@ -80,8 +80,11 @@ def snp_lines(chrom, counts, precheck_on, fast_mode, max_degeneracy):
                      f"target(s) with a variant letter skipped (no sample's genotypes can make "
                      f"them a row within the budget and the PAM; their reference rows are "
                      f"written)")
-    elif not precheck_on and (not fast_mode or max_degeneracy >= 0):
+    elif not precheck_on and not fast_mode:
         lines.append(f"Haplotype pre-check on {chrom}: off (CRISPRME_HAPLOTYPE_PRECHECK=0)")
+    elif not precheck_on and max_degeneracy >= 0:
+        # population-level, the switch turns off the K-skip (there is no pre-check)
+        lines.append(f"K-skip on {chrom}: off (CRISPRME_HAPLOTYPE_PRECHECK=0)")
     if pre["kseen"]:
         lines.append(f"K-skip on {chrom}: {pre['kskipped']} of {pre['kseen']} raw target(s) "
                      f"with a variant letter skipped (every row within the budget and the PAM "

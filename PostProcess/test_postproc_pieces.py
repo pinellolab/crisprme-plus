@@ -250,16 +250,26 @@ class ThePool(unittest.TestCase):
                 self.assertLessEqual(max(sizes) - min(sizes), 1)
 
     def test_the_switch(self):
+        """CRISPRME_POSTPROC_PIECES and CRISPRME_HAPLOTYPE_PRECHECK read alike: 0, false, no
+        and off, in any case and with spaces around, turn each off; anything else leaves it
+        on (haplotype_precheck.switch_on)."""
+        import haplotype_precheck
+        values = (("0", False), ("no", False), ("off", False), ("OFF", False),
+                  (" Off ", False), ("False", False), ("FALSE", False), ("No", False),
+                  ("1", True), ("", True), ("on", True), ("yes", True), ("2", True))
         old = os.environ.get("CRISPRME_POSTPROC_PIECES")
         try:
-            for v, on in (("0", False), ("no", False), ("1", True), ("", True)):
+            for v, on in values:
                 os.environ["CRISPRME_POSTPROC_PIECES"] = v
                 self.assertEqual(postproc_pool.pieces_on(), on, v)
+                self.assertEqual(haplotype_precheck.switch_on(
+                    {"CRISPRME_HAPLOTYPE_PRECHECK": v}, "CRISPRME_HAPLOTYPE_PRECHECK"), on, v)
         finally:
             if old is None:
                 os.environ.pop("CRISPRME_POSTPROC_PIECES", None)
             else:
                 os.environ["CRISPRME_POSTPROC_PIECES"] = old
+        self.assertTrue(haplotype_precheck.switch_on({}, "CRISPRME_HAPLOTYPE_PRECHECK"))
 
     def test_tasks_queue_tasks_and_the_first_error_stops_the_pool(self):
         pool = postproc_pool.TaskPool(3)
@@ -295,7 +305,8 @@ class ThePool(unittest.TestCase):
     def test_the_log_keeps_one_pieces_output_and_what_the_others_add(self):
         """Each piece starts up as one process does: the log keeps the first piece's output
         and the lines another piece adds (numbers aside), never a piece's own files or its
-        run time."""
+        run times (the indel script's "Done <chrom> <s>" too: the chromosome's is the
+        pool's line)."""
         tmp = tempfile.mkdtemp(prefix="pieces_log_")
         self.addCleanup(shutil.rmtree, tmp, True)
         pdir = os.path.join(tmp, "out.pieces")
@@ -306,10 +317,12 @@ class ThePool(unittest.TestCase):
                 "Read 3 indel(s) of the phased indel genotype store in 0.4s\n"
                 "Wrote phase-confirmation companion (2 variant off-target row[s]) to "
                 + os.path.join(pdir, "p0000.phase_confirmation.tsv") + "\n"
+                "Done chrT 3.1923\n"
                 "ANALYSIS COMPLETE IN 3.2\n",
                 "Loaded 12 SNP dictionary entr(y/ies) for chrT\n"
                 "Read 3 indel(s) of the phased indel genotype store in 0.7s\n"
                 "WARNING [mega-indel-af]: emission error (further ones not shown)\n"
+                "Done chrT 3.9\n"
                 "ANALYSIS COMPLETE IN 4.0\n",
                 "Read 3 indel(s) of the phased indel genotype store in 0.5s\n"
                 "WARNING [mega-indel-af]: emission error (further ones not shown)\n"
@@ -347,6 +360,163 @@ class ThePool(unittest.TestCase):
         self.assertNotIn("line 19\n", msg)
 
 
+_FAKE_DRIVER = r"""#!/bin/bash
+# a chromosome's shell driver for postproc_pool.run_stage: "cluster" writes a clustered file
+# of $LINES lines and the analysis' arguments to $CRISPRME_POSTPROC_MANIFEST, as
+# scriptAnalisiNNN_v3.sh does; "finish" leaves a mark
+chrom=$1 stage=$2 d=$FAKE_DIR
+echo "$stage $chrom ${CRISPRME_POSTPROC_MANIFEST:-}" >> "$d/driver.log"
+if [ "$stage" = cluster ]; then
+    { echo "#header"; seq 1 "$LINES"; } > "$d/$chrom.cluster.txt"
+    printf '%s\n' genome dict "$d/$chrom.cluster.txt" pam "$d/out_$chrom" 4 \
+        > "${CRISPRME_POSTPROC_MANIFEST:?}"
+    exit 0
+fi
+touch "$d/finished_$chrom"
+"""
+
+_FAKE_SCRIPT = r"""#!/usr/bin/env python3
+# the analysis script of a piece: its arguments and range in the run's log; on stdout what
+# one process says, its start-up and its run times
+import os, sys
+with open(os.path.join(os.environ["FAKE_DIR"], "script.log"), "a") as fh:
+    fh.write(" ".join(sys.argv[1:]) + " " + os.environ.get("CRISPRME_POSTPROC_RANGE", "-")
+             + "\n")
+print("Loaded 3 SNP dictionary entr(y/ies) for chrT")
+print("Done chrT 1.25")
+print("ANALYSIS COMPLETE IN 1.5")
+"""
+
+
+class TheNotes(unittest.TestCase):
+    def test_the_switch_off_names_what_it_turns_off(self):
+        """Per sample the switch turns off the pre-check; population-level with
+        --max-degeneracy, the K-skip (there is no pre-check there); population-level
+        without it, nothing (no note)."""
+        import analysis_notes
+        counts = analysis_notes.snp_counts()
+        self.assertEqual(analysis_notes.snp_lines("chrT", counts, False, False, -1),
+                         ["Haplotype pre-check on chrT: off (CRISPRME_HAPLOTYPE_PRECHECK=0)"])
+        self.assertEqual(analysis_notes.snp_lines("chrT", counts, False, True, 4)[0],
+                         "K-skip on chrT: off (CRISPRME_HAPLOTYPE_PRECHECK=0)")
+        self.assertEqual(analysis_notes.snp_lines("chrT", counts, False, True, -1), [])
+
+
+class TheStageThroughAFakeDriver(unittest.TestCase):
+    """postproc_pool.run_stage over a fake driver and analysis script (the merge left out):
+    the analysis' arguments come from a file only the run can write, and the log says the
+    chromosome's run time once."""
+
+    def setUp(self):
+        import tempfile as _tf
+        self.tmp = _tf.mkdtemp(prefix="pieces_stage_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.d = os.path.join(self.tmp, "run")
+        self.tmpdir = os.path.join(self.tmp, "tmpdir")
+        os.makedirs(self.d)
+        os.makedirs(self.tmpdir)
+        self.driver = os.path.join(self.tmp, "driver.sh")
+        self.script = os.path.join(self.tmp, "script.py")
+        for path, text in ((self.driver, _FAKE_DRIVER), (self.script, _FAKE_SCRIPT)):
+            with open(path, "w") as fh:
+                fh.write(text)
+            os.chmod(path, 0o755)
+        saved = {k: os.environ.get(k) for k in ("TMPDIR", "FAKE_DIR", "LINES",
+                                                 "CRISPRME_POSTPROC_PIECES")}
+        os.environ.update(TMPDIR=self.tmpdir, FAKE_DIR=self.d, LINES="90",
+                          CRISPRME_POSTPROC_PIECES="1")
+        saved_tempdir = _tf.tempdir
+        _tf.tempdir = None  # read TMPDIR again
+
+        def restore():
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            _tf.tempdir = saved_tempdir
+        self.addCleanup(restore)
+        # the merge (merge_pieces.py, which needs a real piece's files) is left out
+        real_call = postproc_pool._call
+        self.merged = []
+
+        def call(cmd, env=None, what=""):
+            if any(str(c).endswith("merge_pieces.py") for c in cmd):
+                self.merged.append(cmd)
+                return
+            real_call(cmd, env=env, what=what)
+        postproc_pool._call = call
+        self.addCleanup(setattr, postproc_pool, "_call", real_call)
+
+    def run_stage(self):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            postproc_pool.run_stage("snp", ["chrT"], 3, lambda c, st: [self.driver, c, st],
+                                    self.script, min_lines=30)
+        return out.getvalue()
+
+    def read(self, name):
+        with open(os.path.join(self.d, name)) as fh:
+            return fh.read().splitlines()
+
+    def test_the_manifest_is_a_file_of_a_folder_only_the_run_writes(self):
+        """The manifest was once $TMPDIR/crisprme_postproc_<kind>_<pid>_<chrom>.args:
+        another user of a shared /tmp who made that file first, read-only to the run, had the
+        driver's write fail and the run read that user's list. The name is made here as it
+        was, with another list in it: the run reads its own."""
+        planted = os.path.join(self.tmpdir, "crisprme_postproc_snp_%d_chrT.args" % os.getpid())
+        with open(planted, "w") as fh:
+            fh.write("genome\ndict\n%s\npam\n%s\n4\n" % (
+                os.path.join(self.d, "chrT.cluster.txt"), os.path.join(self.d, "planted")))
+        os.chmod(planted, 0o444)
+        self.addCleanup(os.chmod, planted, 0o644)
+        self.run_stage()
+        ran = self.read("script.log")
+        self.assertEqual(len(ran), 3, ran)
+        for line in ran:
+            self.assertIn(os.path.join(self.d, "out_chrT.pieces", "p000"), line)
+            self.assertNotIn("planted", line)
+        manifest = self.read("driver.log")[0].split()[2]
+        folder = os.path.dirname(manifest)
+        self.assertNotEqual(os.path.realpath(folder), os.path.realpath(self.tmpdir))
+        self.assertEqual(os.path.realpath(os.path.dirname(folder)),
+                         os.path.realpath(self.tmpdir))
+        self.assertFalse(os.path.exists(folder))  # the run took its folder away
+        self.assertEqual(sorted(os.listdir(self.tmpdir)), [os.path.basename(planted)])
+
+    def test_the_folder_is_the_runs_alone(self):
+        seen = []
+        real = postproc_pool.subprocess.call
+
+        def call(cmd, env=None, **kw):
+            m = (env or {}).get("CRISPRME_POSTPROC_MANIFEST")
+            if m:
+                seen.append(os.stat(os.path.dirname(m)).st_mode & 0o777)
+            return real(cmd, env=env, **kw)
+        postproc_pool.subprocess.call = call
+        try:
+            self.run_stage()
+        finally:
+            postproc_pool.subprocess.call = real
+        self.assertEqual(seen, [0o700])
+
+    def test_the_chromosome_says_its_own_run_time(self):
+        """The pieces' "Done chrT <s>" and "ANALYSIS COMPLETE IN <s>" are theirs: the log
+        keeps neither, and the pool says the chromosome's, once its pieces are merged."""
+        said = self.run_stage().splitlines()
+        self.assertEqual(len(self.merged), 1)
+        self.assertIn("Post-analysis SNP of chrT: 90 line(s) in 3 piece(s)", said)
+        self.assertIn("Loaded 3 SNP dictionary entr(y/ies) for chrT", said)
+        done = [line for line in said if line.startswith("Post-analysis SNP of chrT: done in ")]
+        self.assertEqual(len(done), 1, said)
+        self.assertTrue(done[0].endswith(" s (3 pieces)"), done)
+        self.assertFalse([line for line in said
+                          if line.startswith(("Done ", "ANALYSIS COMPLETE IN"))], said)
+        self.assertTrue(os.path.exists(os.path.join(self.d, "finished_chrT")))
+
+
 def _gnu_wc():
     try:
         return subprocess.run(["wc", "--version"], capture_output=True).returncode == 0
@@ -375,7 +545,10 @@ def _files(prefix, names):
 
 class PiecesThroughTheRealScripts(unittest.TestCase):
     """new_simple_analysis.py on a chromosome of dense and sparse windows, as one process
-    and as pieces merged: the same files."""
+    and as pieces merged: the same files. Some windows have more mismatches than the budget,
+    some of them an RNA bulge, so that the pre-check skips raw targets of the pieces (on the
+    dictionary path and the observed one) and keeps others, which bulged rows reach only
+    with the bulge taken off the mismatches."""
 
     SNP_FILES = (".bestCFD.txt", ".bestmmblg.txt", ".bestCRISPR_BULGE.txt", ".CFDGraph.txt",
                  ".high_variant_density_regions.bed", ".four_allele_positions.bed",
@@ -417,6 +590,40 @@ class PiecesThroughTheRealScripts(unittest.TestCase):
             low = list(window)
             low[0] = low[0].lower()
             rows.append((k, "".join(low), "+"))
+        # windows of 5 or 6 mismatches (a budget of 4 needs 1 or 2 fixed), half of them 5 and
+        # an RNA bulge (a guide base the site lacks: the gap counts as a mismatch, which the
+        # bulge count takes off, so 1 to fix), the ALTs that fix them carried by a sample or
+        # two each
+        for k in range(14, 30):
+            bulge = k % 2 == 0
+            gap = rng.randrange(3, 17) if bulge else None
+            aligned = list(guide + "TGG")
+            spacer = [c for c in range(20) if c != gap]
+            mism = rng.sample(spacer, 5 if bulge else 5 + k % 4 // 2)
+            for col in mism:
+                aligned[col] = rng.choice([b for b in "ACGT" if b != guide[col]])
+            if bulge:
+                aligned[gap] = "-"
+            site = "".join(ch for ch in aligned if ch != "-")
+            sites.append(site)
+            at = {c: c - (gap is not None and c > gap) for c in range(23) if c != gap}
+            fixing = rng.sample(mism, rng.randint(1, 3))
+            others = rng.sample([c for c in range(23) if c != gap and c not in mism],
+                                rng.randint(1, 8))
+            codes = {}
+            for col in fixing + others:
+                ref = aligned[col]
+                alt = guide[col] if col in fixing else \
+                    rng.choice([b for b in "ACGT" if b != ref])
+                codes[col] = {frozenset("AG"): "R", frozenset("CT"): "Y",
+                              frozenset("CG"): "S", frozenset("AT"): "W",
+                              frozenset("GT"): "K", frozenset("AC"): "M"}[frozenset((ref, alt))]
+                carriers = [("S%d" % s, rng.choice(["1|0", "0|1", "1|1"]))
+                            for s in rng.sample(range(6), rng.randint(1, 2))]
+                entries[(k, at[col])] = "%s;%s,%s;rs%d_%d;0.1" % (
+                    ",".join("%s:%s" % c for c in carriers), ref, alt, k, col)
+            dna = "".join(codes.get(c, ch) for c, ch in enumerate(aligned))
+            rows.append((k, dna, "+", "RNA" if bulge else "X", 1 if bulge else 0))
         self.sites, self.rows, self.entries = sites, rows, entries
 
     def write(self, d):
@@ -438,11 +645,13 @@ class PiecesThroughTheRealScripts(unittest.TestCase):
         targets = os.path.join(d, "chrT.targets.txt")
         with open(targets, "w") as fh:
             fh.write("#header\n")
-            for i, window, strand in self.rows:
+            for row in self.rows:
+                i, window, strand = row[:3]
+                kind, bulges = row[3:] if len(row) > 3 else ("X", 0)
                 fh.write("\t".join(
-                    ["X", self.twd.CRRNA, window, "chrT", str(starts[i]), str(starts[i]),
-                     strand, "0", "0", "0", "NA", "y", "NA", "NA", "NA", "NA", "NA",
-                     "NA"]) + "\n")
+                    [kind, self.twd.CRRNA, window, "chrT", str(starts[i]), str(starts[i]),
+                     strand, "0", str(bulges), str(bulges), "NA", "y", "NA", "NA", "NA", "NA",
+                     "NA", "NA"]) + "\n")
         return fasta, dct, targets, pam
 
     def run_script(self, args, env):
@@ -496,6 +705,15 @@ class PiecesThroughTheRealScripts(unittest.TestCase):
                     self.assertEqual(sorted(whole), sorted(merged))
                     for name in whole:
                         self.assertEqual(merged[name], whole[name], name)
+                    if pre == "1":
+                        # the pre-check skips raw targets of the pieces, and keeps others
+                        note = [line for line in self.said["whole"].splitlines()
+                                if line.startswith("Haplotype pre-check on chrT: ")]
+                        skipped, seen = (int(x) for x in note[0].split(": ")[1].split()[:3:2])
+                        self.assertGreater(skipped, 3, note)
+                        self.assertGreater(seen - skipped, 3, note)
+                        # bulged rows within the budget only with their bulge taken off
+                        self.assertIn(b"\nRNA\t", whole[".bestCFD.txt"])
 
     def test_population_level_pieces_are_one_process(self):
         whole, merged = self.one_and_pieces(3, CRISPRME_FAST_MODE="1")

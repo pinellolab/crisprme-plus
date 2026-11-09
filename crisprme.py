@@ -695,10 +695,12 @@ def print_help_complete_search() -> None:
         "\t--population-level, force the population-level analysis: one worst-possible "
         "PUTATIVE representative per variant window, exact worst-case CFD, dataset-level "
         "allele frequencies -- lossless for detection. A genotype-resolution choice, not a "
-        "speed one: on the indexes CRISPRitz 2.10.0 builds, which code every allele, it is "
-        "no faster than the per-sample analysis, whose haplotype pre-check skips the dense "
-        "windows' raw targets nobody carries (METHODS.md section 5). Use this to opt OUT of "
-        "per-sample on a phased index [OPTIONAL]\n"
+        "speed one: which mode is faster depends on the panel. On a dense panel of many "
+        "samples, such as the default HGDP + 1000 Genomes index, the per-sample analysis is "
+        "(its haplotype pre-check skips the dense windows' raw targets nobody carries); on a "
+        "small panel such as HPRC, or beside mega, the population-level one can be "
+        "(METHODS.md section 5). Use this to opt OUT of per-sample on a phased index "
+        "[OPTIONAL]\n"
         "\t(DEFAULT, no flag: CRISPRme+ auto-selects the mode by index type -- PER-SAMPLE on "
         "a genotyped + PHASED index [e.g. the HGDP+1000G default: CONFIRMED cis + named "
         "carriers], POPULATION-LEVEL otherwise [sites-only / unphased / hybrid / "
@@ -2685,7 +2687,7 @@ def _every_allele_variant_index(vcf_dirs: List[str], genome: str, index_path: st
                         or not os.path.isdir(idx):
                     continue
                 found = True
-                if index_fit.recorded_format(idx) == 2 or 2 in index_fit.bin_formats(idx):
+                if index_fit.every_allele_index(idx):
                     return True
         if not found and index_fit.engine_index_format() == 2:
             return True
@@ -2693,27 +2695,20 @@ def _every_allele_variant_index(vcf_dirs: List[str], genome: str, index_path: st
 
 
 def _warn_wide_bulge_budget(vcf_dirs: List[str], genome: str, index_path: str, mm: int,
-                            bdna: int, brna: int) -> None:
+                            bdna: int, brna: int, max_total_edits: int = -1) -> "Optional[str]":
     """A stdout warning (2.10.0) for a variant search allowing more than 1 DNA + 1 RNA bulge
+    in alignments of more edits than --max-total-edits 3 allows (index_fit.wide_bulge_budget)
     on an index that codes every allele (_every_allele_variant_index): there the variant
     search of the densest regions grows by orders of magnitude, a cost no step after the
-    search removes (the haplotype pre-check acts on the raw targets the search wrote)."""
-    if bdna <= 1 and brna <= 1:
-        return
-    if not _every_allele_variant_index(vcf_dirs, genome, index_path):
-        return
-    print(
-        f"WARNING [complete-search]: {mm} mismatch(es) + {bdna} DNA + {brna} RNA bulge(s) on "
-        f"a variant index that codes every allele (index format 2, CRISPRitz 2.10.0). Above "
-        f"the 1 DNA + 1 RNA default, the variant search of the densest regions (the "
-        f"immunoglobulin loci) grows by orders of magnitude: on IGL alone (chr22, HGDP + 1000 "
-        f"Genomes, one guide) 0.76 million raw SNP targets at 4 + 1 + 1, 5.3 million at "
-        f"4 + 2 + 1 and 34 million at 4 + 2 + 2, where the indel search wrote 204 million "
-        f"(157 GB of memory); IGH (chr14) needed 225 GB at 4 + 2 + 1. Such a search can run "
-        f"for many hours or run out of memory. The 1 DNA + 1 RNA default is recommended "
-        f"(METHODS.md section 5).",
-        flush=True,
-    )
+    search removes (the haplotype pre-check acts on the raw targets the search wrote).
+    Returns the warning's text, which .Params.txt keeps (Bulge_budget_note), or None. The
+    search script says it again in log_verbose.txt (index_fit.py wide-budget), a web
+    search's too."""
+    note = index_fit.wide_bulge_note(mm, bdna, brna, max_total_edits)
+    if note is None or not _every_allele_variant_index(vcf_dirs, genome, index_path):
+        return None
+    print(f"WARNING [complete-search]: {note}", flush=True)
+    return note
 
 
 def _variant_libraries(index_path: str) -> List[str]:
@@ -2970,10 +2965,11 @@ def complete_search() -> None:
     # Context-aware DEFAULT (2.8.0): on a genotyped + PHASED index the per-sample
     # resolution (CONFIRMED cis + named carriers + exact joint AF) is what the panel is
     # built for, so it is the DEFAULT; population-level otherwise (sites-only / unphased /
-    # hybrid / reference / unknown -- where per-sample buys little or nothing and the fast
+    # hybrid / reference / unknown -- where per-sample buys little or nothing and the
     # worst-case screen is the right call). Explicit flags always win and are mutually
-    # exclusive: --per-sample forces genotype resolution, --population-level forces the fast
-    # worst-case screen. (data_type is read from the Phase-2.1 registry manifest.)
+    # exclusive: --per-sample forces genotype resolution, --population-level forces the
+    # worst-case screen (a resolution choice: which mode is faster depends on the panel,
+    # METHODS.md section 5). (data_type is read from the Phase-2.1 registry manifest.)
     _force_ps = "--per-sample" in args
     _force_pop = "--population-level" in args
     if _force_ps and _force_pop:
@@ -3038,8 +3034,8 @@ def complete_search() -> None:
             "[complete-search] genotyped + PHASED index detected -> PER-SAMPLE analysis "
             "by DEFAULT: CONFIRMED cis phasing + named carrier samples + exact joint "
             "allele frequency. Pass --population-level for each window's worst case "
-            "instead (no faster on the indexes CRISPRitz 2.10.0 builds: METHODS.md "
-            "section 5).",
+            "instead (a resolution choice: which mode is faster depends on the panel, "
+            "METHODS.md section 5).",
             flush=True,
         )
     # The pre-2.5.4 --fast / --full flags were removed (no aliases). argparse-free parsing
@@ -3353,6 +3349,7 @@ def complete_search() -> None:
     # needs it serves it (_prune_on_its_own; the search script decides the same, for a web
     # search too): said here first, and recorded in the run's Params.txt.
     prune_auto = None
+    wide_budget_note = None  # _warn_wide_bulge_budget's, for .Params.txt
     if not prune_pam:
         prune_auto = _prune_on_its_own(
             index_path, genome_ref,
@@ -3365,8 +3362,9 @@ def complete_search() -> None:
         _refuse_no_variant_index(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
             bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
-        _warn_wide_bulge_budget(resolve_vcf_dataset_dirs(vcfdir, current_working_directory),
-                                genome_ref, index_path, mm, bDNA, bRNA)
+        wide_budget_note = _warn_wide_bulge_budget(
+            resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref,
+            index_path, mm, bDNA, bRNA, max_total_edits)
     if variant and index_path != "_" and (bDNA or bRNA):
         _refuse_no_reference_index(index_path, genome_ref, pam_char, max(bDNA, bRNA) + 1,
                                    prune_pam, not pam_begin, total_pam_len - pam_len, bDNA, bRNA,
@@ -3507,6 +3505,8 @@ def complete_search() -> None:
             )
         if prune_notes:  # (a single physical line, as Pruning_note)
             p.write("Prune_pam_note\t" + " ".join(prune_notes) + "\n")
+        if wide_budget_note:  # the stdout WARNING above 1 DNA + 1 RNA bulge, kept with the run
+            p.write("Bulge_budget_note\t" + wide_budget_note + "\n")
         if prune_pam:  # given, or taken by the search itself (the report says which)
             p.write("Prune_pam\t" + ("auto" if prune_auto else "given") + "\n")
         p.write("Annotation\t" + str(annotation_name) + "\n")

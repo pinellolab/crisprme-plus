@@ -586,19 +586,87 @@ def index_name(pam, n, rest, guide, three_prime):
     return f"{guide}-{pam}_{n}_{rest}" if three_prime else f"{pam}-{guide}_{n}_{rest}"
 
 
+# Above the default 1 DNA + 1 RNA bulge, the variant search of an index that codes every
+# allele of a split site (index format 2, CRISPRitz 2.10.0) grows by orders of magnitude in
+# the densest loci, a cost no step after the search removes (METHODS.md section 5). A cap of
+# total edits (--max-total-edits) of WIDE_BUDGET_FREE_CAP or less keeps such a budget near the
+# default's: on the IGL locus alone (chr22, HGDP + 1000 Genomes, the README guide, NRG; the
+# variant search alone, CRISPRitz 2.10.0, 16 threads), 6 mismatches + 2 DNA + 2 RNA bulges
+# wrote 618,209 SNP raw targets at a cap of 3 (0.6 GB), against 755,963 at the default
+# 4 + 1 + 1 (cap 6, 0.7 GB), and 4.5 million at a cap of 4 (3.8 GB), 14.7 million at 5 (11.8
+# GB), 33.7 million at 6 (21.6 GB); 4 + 2 + 1 wrote 5.1 million at 6, 4 + 2 + 2 33.7 million
+# at 6 (27.9 GB).
+WIDE_BUDGET_FREE_CAP = 3
+
+
+def wide_bulge_budget(mm, bdna, brna, max_total_edits=-1):
+    """True when a search of ``mm`` mismatches, ``bdna`` DNA and ``brna`` RNA bulges, with
+    at most ``max_total_edits`` edits in all (< 0 or None: no cap), allows more than 1 DNA +
+    1 RNA bulge in alignments of more than WIDE_BUDGET_FREE_CAP edits: the most edits an
+    alignment can have is the smaller of the cap and mm + bdna + brna."""
+    if bdna <= 1 and brna <= 1:
+        return False
+    most = mm + bdna + brna
+    if max_total_edits is not None and max_total_edits >= 0:
+        most = min(most, max_total_edits)
+    return most > WIDE_BUDGET_FREE_CAP
+
+
+def wide_bulge_note(mm, bdna, brna, max_total_edits=-1):
+    """What a variant search on an index that codes every allele is told of a budget
+    wide_bulge_budget finds wide (one line), or None."""
+    if not wide_bulge_budget(mm, bdna, brna, max_total_edits):
+        return None
+    cap = (f" (at most {max_total_edits} edits in all)" if max_total_edits is not None
+           and 0 <= max_total_edits < mm + bdna + brna else "")
+    return (f"{mm} mismatch(es) + {bdna} DNA + {brna} RNA bulge(s){cap} on a variant index "
+            f"that codes every allele (index format 2, CRISPRitz 2.10.0). Above the 1 DNA + 1 "
+            f"RNA default, the variant search of the densest regions (the immunoglobulin loci) "
+            f"grows by orders of magnitude: on IGL alone (chr22, HGDP + 1000 Genomes, one "
+            f"guide) 0.76 million SNP raw targets at 4 + 1 + 1, 5.1 million at 4 + 2 + 1 and "
+            f"33.7 million (28 GB of memory) at 4 + 2 + 2, where the indel search wrote 204 "
+            f"million (157 GB); IGH (chr14) needed 225 GB at 4 + 2 + 1. Such a search can run for many "
+            f"hours or run out of memory. The 1 DNA + 1 RNA default is recommended, or a "
+            f"--max-total-edits of {WIDE_BUDGET_FREE_CAP} or less, which keeps a wider budget "
+            f"near the default's cost (METHODS.md section 5).")
+
+
+def every_allele_index(index_dir):
+    """True when ``index_dir`` is an index of format 2 (CRISPRitz 2.10.0 and later), which
+    codes every allele of a split site: its record says so, or one of its trees."""
+    return recorded_format(index_dir) == 2 or 2 in bin_formats(index_dir)
+
+
 def main(argv):
     """For the search script, which records each index it builds as build-index-only does:
 
         python index_fit.py meta <index dir> <PAM file of the build>
 
     writes the index's record (write_index_meta, as built here); a record it cannot write
-    is said on stdout (stderr is fatal to the stage), and the status is 0 either way."""
+    is said on stdout (stderr is fatal to the stage), and the status is 0 either way.
+
+        python index_fit.py wide-budget <mm> <bDNA> <bRNA> <max total edits> <index dir>...
+
+    prints the warning of a wide budget (wide_bulge_note) when one of the variant indexes
+    the search reads codes every allele (every_allele_index), on stdout, which the search's
+    log keeps (a web search's too); nothing otherwise, and the status is 0 either way."""
     if len(argv) == 3 and argv[0] == "meta":
         why = write_index_meta(argv[1], argv[2], built=True)
         if why:
             print(f"Note: {why}")
         return 0
-    sys.stderr.write("usage: index_fit.py meta <index dir> <PAM file>\n")
+    if len(argv) >= 6 and argv[0] == "wide-budget":
+        try:
+            mm, bdna, brna, cap = (int(x) for x in argv[1:5])
+        except ValueError:
+            return 0
+        note = wide_bulge_note(mm, bdna, brna, cap)
+        if note and any(every_allele_index(d) for d in argv[5:]):
+            print(f"WARNING [variant search]: {note}")
+        return 0
+    sys.stderr.write("usage: index_fit.py meta <index dir> <PAM file>\n"
+                     "       index_fit.py wide-budget <mm> <bDNA> <bRNA> <max total edits> "
+                     "<index dir>...\n")
     return 2
 
 

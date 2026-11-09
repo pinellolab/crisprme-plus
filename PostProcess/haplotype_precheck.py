@@ -14,8 +14,10 @@ THE PRE-CHECK (per sample). Every row the per-sample post-analysis can write for
 puts, at each variant column, the reference base or an ALT that one of its carriers carries:
 a phased slot's alleles, a PUTATIVE sample's own alleles (its subsets, or the unions past
 CRISPRME_IUPAC_CAP), the classic dictionaries' lattice of carriers shared by every allele of a
-combination. The slot filter of an indel, --max-degeneracy and the #139 column admission only
-take alleles or carriers away. So the target can give a variant row only if one sample, free to
+combination. The slot filter of an indel (it takes a carrier off, or keeps it PUTATIVE beside
+an unphased indel, on the row its haplotype already gives), --max-degeneracy and the #139
+column admission only take alleles or carriers away. So the target can give a variant row only
+if one sample, free to
 put at each column the reference base or any ALT it carries there (its "union", with no phase),
 reaches the budget and the PAM. Where no sample can, the target gives no variant row: it is
 skipped, and only its reference row is written (the post-analysis writes that one whatever the
@@ -44,6 +46,17 @@ and is skipped the same way, before its genotypes are read.
 Stdlib only and free of the post-analysis scripts' module globals, so it is unit-tested alone
 (test_haplotype_precheck.py, against a brute-force enumeration of every haplotype).
 """
+
+# The values that turn off a switch of the 2.10.0 speed steps (CRISPRME_HAPLOTYPE_PRECHECK,
+# CRISPRME_POSTPROC_PIECES), in any case, spaces around them aside. Any other value, or none,
+# leaves it on.
+SWITCH_OFF = ("0", "false", "no", "off")
+
+
+def switch_on(environ, name):
+    """True unless the variable ``name`` of ``environ`` says off (SWITCH_OFF)."""
+    return str(environ.get(name, "1")).strip().lower() not in SWITCH_OFF
+
 
 # The bases each IUPAC letter of a PAM file admits (a PAM's N is any base).
 PAM_ADMITS = {
@@ -227,10 +240,15 @@ def indel_target_possible(guide_seq, target_seq, motif_at, spacer_cols, max_mm, 
 
     Every row resolve_target writes holds, at each code column, the reference base or a base
     one of its carriers carries there (an exact slot's alleles; a PUTATIVE carrier's own
-    alleles, the reference among them; the code's alleles at a column no genotype covers), and
-    the second indels that break a slot only take carriers away. So a carrier that may put at
+    alleles, the reference among them; the code's alleles at a column no genotype covers). A
+    second indel that breaks a slot takes that slot's carrier away, or, where it cannot be put
+    on a slot (unphased, or of another ploidy), makes the carrier PUTATIVE
+    (indel_snp_cis.resolve_carriers): that can add a row, one the carrier's slots do not hold
+    (a base of one slot at one column, of the other at another), but a PUTATIVE row is still
+    a choice of the carrier's own alleles at each code column. So a carrier that may put at
     each code column the reference base or any base it carries there (any base of the code
-    where nobody's genotype is known) is the widest row a carrier can have.
+    where nobody's genotype is known) is the widest row a carrier can have, with or without
+    second indels.
 
     Args:
       guide_seq, target_seq: the engine's aligned crRNA and DNA (codes included).
