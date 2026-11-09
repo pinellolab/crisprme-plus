@@ -1113,16 +1113,16 @@ search's threads, bring it back. None changes a row.
   holds a minus-strand one; the dictionary path writes none of its own). The test is a bound,
   never a guess: it keeps a raw target that one sample's union of alleles reaches though none
   of its haplotypes does, and never skips one a row comes from. It runs on the observed path
-  and on the uncapped dictionary path of a per-sample search, never on a registry-only
-  (sites-only) dataset, whose rows need no carrier. Its unit test compares it with every choice
-  of alleles of every sample (3,000 random windows on both strands, with and without bulges,
-  and 1,500 with a 5′ PAM). The real script's tests, each against the same run with the
-  pre-check off, skip and keep raw targets with no bulge, an RNA bulge or a DNA bulge, on the
-  dictionary path and the observed one, as one process and in pieces (a bulged target needing
-  two fixes that two samples hold one each is skipped, one sample holding both keeps it); they
-  read a minus-strand target at its forward positions and leave a registry-only dataset's rows
-  alone. On chr22 it skips 755,137 of the README guide's 764,435 raw targets with a variant
-  letter (98.8%; in IGL, 752,074 of its 755,863).
+  and on the uncapped dictionary path of a per-sample search, never on a registry-only dataset
+  (sites-only, or downloaded without its genotypes), whose rows need no carrier. Its unit test
+  compares it with every choice of alleles of every sample (3,000 random windows on both
+  strands, with and without bulges, and 1,500 with a 5′ PAM). The real script's tests, each
+  against the same run with the pre-check off, skip and keep raw targets with no bulge, an RNA
+  bulge or a DNA bulge, on the dictionary path and the observed one, as one process and in
+  pieces (a bulged target needing two fixes that two samples hold one each is skipped, one
+  sample holding both keeps it); they read a minus-strand target at its forward positions and
+  leave a registry-only dataset's rows alone. On chr22 it skips 755,137 of the README guide's
+  764,435 raw targets with a variant letter (98.8%; in IGL, 752,074 of its 755,863).
 - **Carriers first on the indel side.** An overlaid target of the fake-indel genome (§4) gives
   the rows its indel's carriers have, each holding at a code column the reference base or a base
   the carrier carries there (an exact slot's alleles; a PUTATIVE carrier's own, the reference
@@ -1221,7 +1221,7 @@ whole run (user and system, every process) in brackets; 4 mismatches + 1 DNA + 1
 | chr22, SaCas9 (NNGRRT), per sample | 590 min¹ | 72 min (291 min) | |
 | chr22, three repeat-rich guides (NRG), per sample | 456 min¹ | 35 min (104 min) | |
 | IGL alone, per sample | 96 min (104 min) | 7.6 min (28 min) | 15 min (112 min) |
-| IGH alone, per sample | over 9 h² | 28 min (102 min) | 117 min (698 min) |
+| IGH alone, per sample | over 14 h² | 28 min (102 min) | 117 min (698 min) |
 | IGK alone, per sample | 224 min (232 min) | 9.7 min (42 min) | 31 min (223 min) |
 
 ¹ Stage 2a's fresh run of the same code (whose files these match), on ml008, a node of the same
@@ -1229,9 +1229,10 @@ hardware, under other load, with `--thread 8`. Without these steps the post-anal
 one-chromosome search runs in one process, so the thread count changes only the search and a
 few short steps after the post-analysis: the search took 0.9 to 4.4 min of these runs, and
 stage 2a's README guide per sample took 95 min with `--thread 8` there, against 98 min with
-`--thread 16` here. ² d3722b0's run of IGH alone was still in its SNP post-analysis after 7.5 h
-when this was written (the cost judges estimated 7.2 h for it, and 1.9 h of indel
-post-analysis); that of IGK alone took 3.0 h of SNP and 38 min of indel post-analysis.
+`--thread 16` here. ² d3722b0's run of IGH alone took 10.7 h of SNP post-analysis (the cost
+judges had estimated 7.2 h) and was still in its indel post-analysis 3.4 h later (they
+estimated 1.9 h for it), 14.2 h from its start, when this was written; that of IGK alone took
+3.0 h of SNP and 38 min of indel post-analysis.
 
 The pre-check does most of it: with the post-analysis in pieces but the pre-check off, a
 per-sample search still expands every raw target, now over the `--thread` workers (and starts

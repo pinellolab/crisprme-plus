@@ -22,12 +22,12 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   and 1,500 with a 5′ PAM), and on chr22 the README, NRR, TRAC and VEGFA site 3 searches, and
   the IGL, IGH and IGK loci alone, give the same files with it on and off (44 data files each,
   byte for byte). It runs per sample on the observed-haplotype path and the dictionary path
-  within `CRISPRME_IUPAC_CAP`, never on a registry-only (sites-only) dataset. The real script's
-  tests, each against the same run with the pre-check off, skip and keep raw targets with no
-  bulge, an RNA bulge or a DNA bulge, on both paths, as one process and in pieces, read a
-  minus-strand target at its forward positions, and leave a registry-only dataset's rows alone.
-  On chr22 it skips 755,137 of the README guide's 764,435 raw targets with a variant letter
-  (98.8%).
+  within `CRISPRME_IUPAC_CAP`, never on a registry-only dataset (sites-only, or downloaded
+  without its genotypes). The real script's tests, each against the same run with the
+  pre-check off, skip and keep raw targets with no bulge, an RNA bulge or a DNA bulge, on both
+  paths, as one process and in pieces, read a minus-strand target at its forward positions,
+  and leave a registry-only dataset's rows alone. On chr22 it skips 755,137 of the README
+  guide's 764,435 raw targets with a variant letter (98.8%).
   `complete-search --no-haplotype-precheck` (or `CRISPRME_HAPLOTYPE_PRECHECK` set to 0, false,
   no or off, in any case, as `CRISPRME_POSTPROC_PIECES` below) turns it off; the run says per
   chromosome how many it skipped, or that it is off (stdout, `log_verbose.txt`). See [`METHODS.md`
