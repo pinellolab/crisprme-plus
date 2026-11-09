@@ -6530,27 +6530,38 @@ def download_data() -> None:
     # (correct, but slow). Non-fatal: on any hiccup the genome is still present
     # and the index is built on demand at search time.
     if what == "all" and ref == "hg38":
-        candidates = ([index_name] if index_name else
-                      [DEFAULT_REFERENCE_INDEX_HG38, _FALLBACK_REFERENCE_INDEX_HG38])
-        for k, ref_index in enumerate(candidates):
-            try:
-                dest = download_component(
-                    "index", workdir, repo=repo, ref=ref,
-                    index_name=ref_index, genotypes=False,
-                )
-                print(f"Downloaded reference index {ref_index} -> {dest}", flush=True)
-                break
-            except (ValueError, ImportError, RuntimeError) as e:
-                if k + 1 < len(candidates):
-                    print(f"NOTE: could not fetch the default reference index {ref_index} "
-                          f"({e}); fetching {candidates[k + 1]}, CRISPRme 2.8.1's, in its "
-                          f"place.", flush=True)
-                    continue
-                sys.stderr.write(
-                    f"WARNING: could not fetch the default reference index "
-                    f"{ref_index} ({e}). The reference genome is present; a reference "
-                    f"index will be built on demand at the first search.\n"
-                )
+        _download_default_reference_index(workdir, repo, ref, index_name)
+
+
+def _download_default_reference_index(workdir: str, repo, ref: str,
+                                      index_name: "Optional[str]" = None) -> None:
+    """download --what all on hg38: the default-PAM reference index (``index_name`` if
+    given), 2.10.0's 20-NRR_3_hg38, else 2.8.1's NRR_3_hg38 where it cannot be fetched (before
+    the rebuild is published, or from a repo of 2.8.1's archives alone). The fallback's
+    download names no index of 2.10.0 that replaces it (crisprme_hf.successor_index): that is
+    the one that just failed, and the note here says why 2.8.1's is fetched. Non-fatal: the
+    genome is present, and a search builds the index it needs."""
+    candidates = ([index_name] if index_name else
+                  [DEFAULT_REFERENCE_INDEX_HG38, _FALLBACK_REFERENCE_INDEX_HG38])
+    for k, ref_index in enumerate(candidates):
+        try:
+            dest = download_component(
+                "index", workdir, repo=repo, ref=ref,
+                index_name=ref_index, genotypes=False, _note_successor=k == 0,
+            )
+            print(f"Downloaded reference index {ref_index} -> {dest}", flush=True)
+            break
+        except (ValueError, ImportError, RuntimeError) as e:
+            if k + 1 < len(candidates):
+                print(f"NOTE: could not fetch the default reference index {ref_index} "
+                      f"({e}); fetching {candidates[k + 1]}, CRISPRme 2.8.1's, in its "
+                      f"place.", flush=True)
+                continue
+            sys.stderr.write(
+                f"WARNING: could not fetch the default reference index "
+                f"{ref_index} ({e}). The reference genome is present; a reference "
+                f"index will be built on demand at the first search.\n"
+            )
 
 
 def print_help_publish_index() -> None:

@@ -77,7 +77,8 @@ and the `release-crisprme` skill.
     general index `20-NNNNNNNN_3_*`, at the same speed; NRG on HPRC and mega: NRR there); and an
     index of 2.10.0 not found says where it was looked for (the repo of index format 2, then
     `lucapinello/crisprme-data`). `download --what all` fetches the
-    default reference index `20-NRR_3_hg38`, and 2.8.1's `NRR_3_hg38` where it cannot. Every
+    default reference index `20-NRR_3_hg38`, and 2.8.1's `NRR_3_hg38` where it cannot (saying
+    so, and naming no index of 2.10.0 in its place: the default is that one). Every
     advice that names an index to download names 2.10.0's (`20-NRR_3_hg38+hg38_HGDP1kGP`;
     complete-test, the search's refusals, the setup and download help, the per-sample banner,
     the report, the one-click installers).

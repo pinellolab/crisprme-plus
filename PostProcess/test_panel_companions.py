@@ -515,5 +515,41 @@ class AnArchiveOf281NamesItsSuccessor(_Base):
         self.assertIsNone(hf.successor_index(NRR))
 
 
+class TheDefaultReferenceIndex(unittest.TestCase):
+    """download --what all fetches 20-NRR_3_hg38, and 2.8.1's NRR_3_hg38 where it cannot
+    (before the rebuild is published). That download then said "This release's build of it is
+    20-NRR_3_hg38 ...: download that one instead", the index that had just failed: the
+    fallback names no successor (its own note says why it is fetched); a download of
+    NRR_3_hg38 asked for by name still does."""
+
+    def fetch(self, fails):
+        import test_bulge_cap as tbc
+        crisprme = tbc.crisprme
+        calls = []
+
+        def fake(component, workdir, **kw):
+            calls.append((kw["index_name"], kw.get("_note_successor", True)))
+            if kw["index_name"] in fails:
+                raise ValueError(f"No index '{kw['index_name']}' was found")
+            return os.path.join(workdir, "genome_library", kw["index_name"])
+
+        out = io.StringIO()
+        with mock.patch.object(crisprme, "download_component", side_effect=fake), \
+                mock.patch("sys.stdout", out), mock.patch("sys.stderr", io.StringIO()):
+            crisprme._download_default_reference_index("/w", None, "hg38")
+        return calls, out.getvalue()
+
+    def test_the_fallback_names_no_successor(self):
+        calls, said = self.fetch({"20-NRR_3_hg38"})
+        self.assertEqual(calls, [("20-NRR_3_hg38", True), ("NRR_3_hg38", False)])
+        self.assertIn("fetching NRR_3_hg38, CRISPRme 2.8.1's, in its place", said)
+        self.assertIn("Downloaded reference index NRR_3_hg38", said)
+
+    def test_the_default_alone_where_it_is_published(self):
+        calls, said = self.fetch(set())
+        self.assertEqual(calls, [("20-NRR_3_hg38", True)])
+        self.assertIn("Downloaded reference index 20-NRR_3_hg38", said)
+
+
 if __name__ == "__main__":
     unittest.main()
