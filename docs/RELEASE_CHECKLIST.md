@@ -183,9 +183,13 @@ done
 #     MNV's, an untied multi-ALT alt's or an unphased call's, as it documents, whose known
 #     haplotype says otherwise, or a target the PUTATIVE rule ties with another; a slot
 #     holding two ALTs of one position is read by that rule, which there is the truth --,
-#     limit-contig-end; limit-window-reach: a target that runs past its fake-indel window, 25
-#     bases before the record and 27 after, or whose site's guide region (the guide's length
-#     from its PAM) does, a 27-nt target with a DNA bulge; limit-window-edge and
+#     limit-contig-end; limit-window-reach: a target that runs past its fake-indel window
+#     (the reference bases before the record and after it that the run's indel log records:
+#     30 and 30 on an enrichment of CRISPRitz 2.10.0, 25 and 27 on one of 2.9.1), or whose
+#     site's guide region (the guide's length from its PAM) does: on 30/30 windows a target
+#     of more than 31 bases, guide, PAM and DNA bulges counted, on 25/27 a 27-nt one with a
+#     DNA bulge (the check reads the windows from the run's indel log, else its INDELS
+#     index's record, and refuses a run of 2.10.0 that says neither); limit-window-edge and
 #     limit-last-alt-wins on an index CRISPRitz 2.9.1 built, of format 1;
 #     limit-max-degeneracy under --max-degeneracy; limit-capped-window on a per-sample run
 #     of 2.8.x, whose classic dictionaries wrote a capped window's greedy row), slots whose VCF

@@ -437,10 +437,13 @@ and the `release-crisprme` skill.
     check models (the check of 2.8.2's code gave 166 and 77 gating findings on the
     SNP+indel oracle's world searched so, per sample and population-level). An index keeps
     a target's site, its PAM and the guide's length of bases from it, not its alignment, so
-    a target is read by its site: one that runs past its fake-indel window (25 bases before
-    the record's first REF base, 27 after its last), or whose site's guide region does (an
-    RNA-bulged target at the window's first base), is held by no index, and its carriers are
-    counted (`limit-window-reach`), as are, on an INDELS index of format 1, those of a
+    a target is read by its site: one that runs past its fake-indel window (the reference
+    bases before the record's first REF base and after its last that the run's indel log
+    records: 30 and 30 on an enrichment of CRISPRitz 2.10.0, 25 and 27 on one of 2.9.1; else
+    its INDELS index's record, else 25/27 for an index of format 1, a run of 2.10.0 that
+    says none refused where its VCF has indel records), or whose site's guide region does
+    (an RNA-bulged target at the window's first base), is held by no index, and its carriers
+    are counted (`limit-window-reach`), as are, on an INDELS index of format 1, those of a
     target whose site's guide region ends within the budget of the window's edge
     (`limit-window-edge`), which an index of format 2 holds. A cluster reached only
     through a SNP row over the run's `--max-degeneracy` is `limit-max-degeneracy`; the
@@ -688,6 +691,38 @@ and the `release-crisprme` skill.
   `install_from_source.sh`'s `CRISPRITZ_REF` default equals; the recipe's bound, the next minor,
   keeps out a CRISPRitz that may change the index format or the enricher again (the version
   policy above; 2.8.1's was `>=2.9.1,<2.9.2`).
+- **The fake-indel window is 30 reference bases on either side of an indel (CRISPRitz 2.10.0; 25
+  before and 27 after up to 2.9.1), and every reader takes each window's width from its own
+  indel log row.** A target of L bases (guide and PAM) with b DNA bulges holds an indel's change
+  on its window only where L + b <= LEFT + 2 and L + b <= RIGHT + 1 (LEFT + 1 at an MNV or complex
+  record): 31 on 2.10.0's windows, every published index's motif at up to 2 DNA bulges (LEFT =
+  RIGHT = Lmax - 1 + bmax, Lmax = 29: a 21-nt guide and an 8-nt PAM, the longest the general K=8
+  index serves; bmax = 2, the web's most DNA bulges), 27 (26 at an MNV) on 2.9.1's, which a
+  27-nt site (SaCas9's 21-nt guide, Cas12a at 23 nt) with a DNA bulge, and a 28-nt one (CEP290's
+  22-nt SaCas9 guide) at every budget, exceeded whatever the index (METHODS §4).
+  `overlay_indel_snps.LEFT_FLANK = 25` was the one place CRISPRme held the width, and read
+  against a window of 30 it put the overlay's SNP codes on inserted bases and none on the five
+  flank bases before the REF, and every row of the window five bases off. It is gone:
+  `indel_window` takes a window's left flank from its log row, `POS - 1 - start` (the start its
+  `CHR` field records), which `map_fake_offset_to_real`, `overlay_sub_fasta`, `count_coded`,
+  `parse_log_indels` and `indel_snp_cis.build_offset_to_real` (now given the indel's POS) take,
+  so an index of either release, published or reused, reads right. Each INDELS sub-index
+  records the windows it was built from (`.index_meta.json`'s `indel_window`; 25/27 is
+  inferred for an index of format 1, which only CRISPRitz 2.9.1 and earlier build). A search
+  refuses a sub-index beside an indel log of other windows (an index kept beside an enrichment
+  made again: the log would place every row of it wrong), and so does `build-index-only` of
+  one in place, which also warns of any other INDELS index of the dataset so mismatched and of
+  an enrichment in place whose windows the installed CRISPRitz does not write (`crispritz.py`'s
+  `INDEL_LEFT`/`INDEL_RIGHT`). `complete-search` warns on its console and in its parameters
+  (`Indel_window_note`), and the indel search in its `log_verbose.txt`, when the search's
+  targets with its DNA bulges need more bases than a dataset's windows hold. `download --what
+  index` says when an archive's windows are not the installed CRISPRitz's (2.8.1's 25/27) and
+  names any other INDELS index of the dataset its logs no longer match; `publish-index` records
+  the windows in the archive's manifest. The input validator's warning of an indel near a
+  chromosome's start takes the installed CRISPRitz's window (a POS below 31, was 26) and says
+  that the enricher skips it (it said Python wraps the slice, which 2.9.1 fixed). The
+  real-data check reads the windows from the run's own indel log (else its INDELS index's
+  record), and refuses a run of 2.10.0 that says neither where its VCF has indel records.
 - **The two known limits of CRISPRitz `add-variants` that 2.8.1 stated are given as those of an
   index CRISPRitz 2.9.1 or earlier built, every one published until the rebuild for this
   release.** At a split multi-allelic site only the last record's ALT is searched, and a record

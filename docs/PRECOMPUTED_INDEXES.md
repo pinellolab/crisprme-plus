@@ -699,7 +699,13 @@ crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.tx
 With co-occurrence on, the build (a) compiles a per-chromosome **phased indel
 genotype store** (`Dictionaries/indel_genotypes_<vcf>/`) and (b) **overlays SNP IUPAC
 codes** onto the fake-indel genome flanks before indexing the `_INDELS` companion, so
-the indel search can match SNP+indel haplotypes. Post-analysis resolves each indel
+the indel search can match SNP+indel haplotypes. Each indel's fake-indel window holds 30
+reference bases on either side of it in an index CRISPRitz 2.10.0 built (25 before and 27
+after in one of 2.9.1, every archive published up to CRISPRme 2.8.1), so a target of guide,
+PAM and DNA bulges up to 31 bases (27) holds its indel there; the width is read from each
+archive's own indel logs, which every INDELS sub-index records it was built from, and a
+search refuses an INDELS index installed beside the logs of another archive, and says when
+its targets need more than its windows hold (METHODS §4). Post-analysis resolves each indel
 target on its carriers' own haplotypes (each gets the SNP alleles it carries, so a row
 lists only the individuals that have its sequence, or, where the phase is unknown, those
 whose own alleles allow it, PUTATIVE, split multi-allelic SNP sites aside on an index

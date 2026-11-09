@@ -106,9 +106,10 @@ slot holding two ALTs of one position PUTATIVE; two listings of one REF>ALT at a
 one allele, on a line of several ALTs too, their calls merged as CRISPRitz's own
 documentation says its enricher merges them) and its last record on one of 2.9.1 (an
 earlier line of the same REF>ALT too), the PUTATIVE carriers of MNVs and of the multi-ALT
-alts the genotypes cannot tie, the window of 25 bases before a record and 27 after it, read
-by a target's site (its PAM and the guide's length of bases from it), whose edge an INDELS
-index of format 1 does not hold) only classifies a disagreement, and a carrier it would list against the carrier's own
+alts the genotypes cannot tie, the fake-indel window the run's indel log records (30 bases
+before a record and 30 after it on an enrichment of CRISPRitz 2.10.0, 25 and 27 on one of
+2.9.1), read by a target's site (its PAM and the guide's length of bases from it), whose edge
+an INDELS index of format 1 does not hold) only classifies a disagreement, and a carrier it would list against the carrier's own
 haplotypes vetoes no fold: every disagreement it checks
 for is a line, gating or a listed limit, and none passes in silence (what it does not
 check is listed below). **Soundness**: every indel/MNV row block of the integrated
