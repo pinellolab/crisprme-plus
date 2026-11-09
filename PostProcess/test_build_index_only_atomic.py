@@ -4196,7 +4196,10 @@ class TheFakeIndelWindowsAreTheEnrichments(_Fixture):
                       "it (its indel logs, %s), and the installed CRISPRitz writes 30 and 30: "
                       "a target that holds an indel there holds up to 27 bases, guide, PAM "
                       "and DNA bulges counted (26 at a record whose REF and ALT differ at "
-                      "their first base), against 31 on windows of 30/30" % (
+                      "their first base), against 31 on windows of 30/30: the indel "
+                      "off-targets of a longer target are in no INDELS index built from it. "
+                      "Every search reads each window's width from its log, so its rows are "
+                      "right." % (
                           self.path("Genomes", "hg38+ds"),
                           self.path("Dictionaries", "log_indels_ds")), out)
 

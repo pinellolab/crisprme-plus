@@ -4252,8 +4252,9 @@ def _enrichment_window_notes(enriched: str, indels_out: str, log_dir: str, genom
                f"their first base)" if indel_window.reach(w, mnv=True) != indel_window.reach(w)
                else "") +
             f", against {indel_window.reach(engine)} on windows of "
-            f"{indel_window.describe(engine)}: an INDELS index built from it holds no longer "
-            f"one. Every search reads each window's width from its log, so its rows are right. To "
+            f"{indel_window.describe(engine)}: the indel off-targets of a longer target are in no "
+            f"INDELS index built from it. Every search reads each window's width from its log, so "
+            f"its rows are right. To "
             f"enrich {vcf_name} with the installed CRISPRitz's windows, remove {enriched} "
             f"and the INDELS indexes of the dataset (rm -rf '{enriched}' "
             f"genome_library/*_{genome_ref}+{vcf_name}_INDELS) and run build-index-only "
