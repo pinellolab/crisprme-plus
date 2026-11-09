@@ -3179,13 +3179,13 @@ class ReviewRound7(Base):
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
             ctx = self._ctx(GUIDE)
             ctx.snp_union = False
-            rows, capped, _drop, _filt, _deg = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+            rows, capped, _drop, _filt, _deg, _grd = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
                                                 len(seq))
             cp = len(PRE)
             self.assertNotIn(cp, rows, n)
             self.assertEqual(cp in capped, want, n)
             ctx.snp_union = True
-            rows, capped, _drop, _filt, _deg = C.snp_row_cps(
+            rows, capped, _drop, _filt, _deg, _grd = C.snp_row_cps(
                 C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)]), ctx, GUIDE,
                 ctx.full(GUIDE), 0, len(seq))
             self.assertIn(cp, rows, n)   # population-level: the union is a row
@@ -3926,12 +3926,12 @@ class ReviewRound9(Base):
                 mm, bdna, brna, max_total_edits = 0, 0, 0, 0
             ctx = C.Ctx(A(), "NRG", 3, False, [GUIDE])
             ctx.snp_union = False
-            rows, _capped, dropped, _filt, _deg = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+            rows, _capped, dropped, _filt, _deg, _grd = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
                                                    len(seq))
             self.assertEqual((cp in rows, cp in dropped), (sure, not sure), extra)
             ctx.snp_union = True    # population-level: unchanged
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
-            rows, _capped, dropped, _filt, _deg = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
+            rows, _capped, dropped, _filt, _deg, _grd = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0,
                                                    len(seq))
             self.assertEqual((cp in rows, dropped), (True, set()), extra)
 
@@ -4168,7 +4168,7 @@ class ReviewRound10(Base):
         for filt in ("PASS", "LOW_VQSLOD"):
             write_sites_only_vcf(so, "chr21", [(p + 6, other(GUIDE[5]), GUIDE[5], filt)])
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(so)])
-            rows, _capped, _drop, filt_cps, _deg = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE),
+            rows, _capped, _drop, filt_cps, _deg, _grd = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE),
                                                            0, len(seq))
             self.assertEqual((cp in rows, cp in filt_cps), (filt == "PASS",
                                                             filt != "PASS"), filt)
@@ -4210,8 +4210,74 @@ class ReviewRound10(Base):
             write_sites_only_vcf(so, "chr21", [E, (p + 3, x, y, filt), D])
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(so)])
             d = win.by_key[D][0]
-            got = C.sites_only_cps(win, ctx, ctx.full(G), d, 0, len(seq))
+            got, _guarded = C.sites_only_cps(win, ctx, ctx.full(G), d, 0, len(seq))
             self.assertEqual(cp in got, held, (filt, sorted(got)))
+
+    def test_the_density_guard_withholds_a_sites_only_datasets_dense_rows(self):
+        """The sites-only density guard (2.10.0; the run's *.sites_only_density_guard.bed):
+        a sites-only dataset's candidate whose window spells 2^bits sequences or more is
+        withheld from its post-analysis, so its rows -- SNP and indel -- are rows CRISPRme
+        does not write: open (limit-density-guard), never ones a chain counts on. A
+        genotyped dataset's rows are not guarded; without the guard they are rows."""
+        G = GUIDE
+        x = other(G[2])
+        seq = PRE + G[:2] + x + G[3:10] + "C" + G[10:] + "TGG" + POST
+        p = len(PRE)
+        D = (p + 10, G[9] + "C", G[9])      # a deletion: its window's target is perfect
+        E = (p + 3, x, G[2])                # with E's allele at a flank base
+        # two more SNVs of the dataset in the target (past the C D deletes, seq[p + 11 + k]
+        # is G[10 + k]): the window spells 2^3 sequences
+        F = (p + 15, G[13], other(G[13]))
+        H = (p + 17, G[15], other(G[15]))
+        so = os.path.join(self.tmp, "so.vcf.gz")
+        write_sites_only_vcf(so, "chr21", [E, F, H, D])
+
+        class A(object):
+            mm, bdna, brna, max_total_edits = 0, 0, 0, 0
+        ctx = C.Ctx(A(), "NRG", 3, False, [G])
+        cp = C.cluster_of(p, "+", 23, 23, False)
+        for bits, want in ((None, (True, False)), (4, (True, False)), (3, (False, True)),
+                           (-1, (True, False))):
+            ctx.guard_bits = bits
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(so)])
+            d = win.by_key[D][0]
+            got, guarded = C.sites_only_cps(win, ctx, ctx.full(G), d, 0, len(seq))
+            self.assertEqual((cp in got, cp in guarded), want, bits)
+            rows, opened = C.chain_cps(win, ctx, G, ctx.full(G), 0, len(seq))
+            self.assertEqual(cp in rows, want[0], bits)
+            self.assertEqual("guard" in opened.get(cp, set()), want[1], bits)
+        # a SNP row of the dataset: a target three of whose bases its SNVs restore (2^3)
+        site = list(G + "TGG")
+        for i in (3, 8, 12):
+            site[i] = other(site[i])
+        seq2 = PRE + "".join(site) + POST
+        snvs = [(p + i + 1, site[i], G[i]) for i in (3, 8, 12)]
+        write_sites_only_vcf(so, "chr21", snvs)
+        for bits, want in ((3, (False, True)), (4, (True, False)), (None, (True, False))):
+            ctx.guard_bits = bits
+            win = C.Window(seq2, "chr21", 0, len(seq2), [C.Vcf(so)])
+            rows, _c, _d, _f, _g, guarded = C.snp_row_cps(win, ctx, G, ctx.full(G), 0,
+                                                          len(seq2))
+            self.assertEqual((cp in rows, cp in guarded), want, bits)
+        # a genotyped dataset's own rows are not guarded
+        gt = os.path.join(self.tmp, "gt.vcf.gz")
+        write_vcf(gt, "chr21", [(q, r, a, {"S01": "1|1"}) for q, r, a in snvs])
+        ctx.guard_bits = 3
+        win = C.Window(seq2, "chr21", 0, len(seq2), [C.Vcf(gt)])
+        rows, _c, _d, _f, _g, guarded = C.snp_row_cps(win, ctx, G, ctx.full(G), 0, len(seq2))
+        self.assertIn(cp, rows)
+        self.assertEqual(guarded, set())
+
+    def test_a_run_says_its_guard_in_its_beds(self):
+        """run_guard_bits: the bits a run's sites-only density guard wrote on the second line
+        of its BEDs; None for a run that wrote none."""
+        self.assertIsNone(C.run_guard_bits(self.tmp))
+        with open(os.path.join(self.tmp, "x_chr21.snp" + C.GUARD_SUFFIX), "w") as fh:
+            fh.write("## CRISPRme sites-only density guard: ...\n"
+                     "## bits=20\tdataset=hg38_mega\tchrom=chr21\tkind=snp\tcandidates=4"
+                     "\twithheld=1\n#chrom\tstart\tend\tguide\tcandidates_withheld\t"
+                     "max_bits\n")
+        self.assertEqual(C.run_guard_bits(self.tmp), 20)
 
     # --- R10-F2: --per-sample without the genotype store ------------------------------ #
     def test_a_per_sample_run_without_its_genotype_store_is_refused(self):
@@ -5439,7 +5505,7 @@ class ReleaseTwoTen(Base):
         for k, want in ((None, (True, False)), (1, (False, True)), (2, (True, False))):
             ctx.max_degeneracy = k
             win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
-            rows, _c, _d, _f, deg = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0, len(seq))
+            rows, _c, _d, _f, deg, _g = C.snp_row_cps(win, ctx, GUIDE, ctx.full(GUIDE), 0, len(seq))
             self.assertEqual((cp in rows, cp in deg), want, k)
 
     def test_the_semantics_of_a_run(self):

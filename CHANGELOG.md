@@ -196,7 +196,8 @@ and the `release-crisprme` skill.
   `too rare to tell`, 16 `indel in the target`, 13 of them of one variant), C2 3,297 (1,833 within
   the bound, 1,464 below it), the integrated results byte for byte those of the search without the
   flag. Without the
-  oracle the search says so (a `WARNING` line on stdout), and the rows are reported unchecked.
+  oracle the search says so (a `WARNING` line on stdout), and the rows are checked against the
+  frequency bound alone (D6, below).
   Until the Hub has the panel's phased indel genotypes (see Changed), the download says so in one
   line and installs the SNP genotypes, and an indel inside a target then takes no haplotype off.
   Covered by `PostProcess/test_haplotype_prioritizer.py` and
@@ -673,6 +674,83 @@ and the `release-crisprme` skill.
     soundness of the README guide and TRAC a release gate. `test/benchmark/README.md` says
     what `validate-test` covers and what it does not, and METHODS section 8 states the
     method.
+- **The mega index is rebuilt for 2.10.0 from the same merged VCFs, every part of it reading
+  the records CRISPRitz's enricher reads: `seq_script/merge_panels/mega_rebuild.sh`.** The
+  shipped `hg38_mega` index was built by CRISPRitz 2.9.1 (index format 1; the last PASS record of
+  a split site coded alone; no `Q`), its registry and indel frequencies from every record of the
+  VCF whatever its FILTER (the merge carried HGDP-2019's `LOW_VQSLOD` and `ExcHet` onto 2,442,989
+  SNVs and 1,885,916 indels genome-wide, which the enricher skips), and its VCF had no `INFO/AF`,
+  so no indel row showed a frequency. The recipe (decision D2, plan item 4): the build input
+  keeps the `PASS`/`.` records and sets `INFO/AF` to `AF_max`, SNVs and indels alike
+  (`PostProcess/prepare_mega_build_vcf.py`); one `build-index-only` without `--samplesID` of its
+  copy with the presence genotype `MEGA`, now carrying every ALT of a line
+  (`PostProcess/synth_sites_gt.py`; `0/1` carried the first alone), builds the enriched genome,
+  the SNP index, the fake-indel genome and its INDELS index (format 2) and the indel log; `MEGA`
+  is taken out of the log and the per-sample dictionaries removed; the registry and the indel
+  frequencies are built from the build input as the enricher reads it (Changed, below); and
+  `PostProcess/verify_mega_chrom.py`, rewritten, reads the source VCF on its own and checks the
+  registry (exactly the SNP alleles, each source's AF within 0.5/AN, the GLOBAL group `AF_max`),
+  the indel frequencies and the indel log (exactly the indel-path alleles, one log row each, no
+  sample, `AF` = `AF_max`), the enriched genome (exactly the registry's alleles coded, no other
+  base changed) and the build input. On chr22 and chr14 (NRG, 2 DNA + 2 RNA bulges, as
+  published, CRISPRitz 2.10.0 881f761) every check passes: chr22 982,192 of 1,101,148 records
+  pass FILTER, 759,909 SNP alleles at 742,436 coded positions, 222,283 indel-path alleles; chr14
+  1,882,699 of 2,001,087, 1,460,360 SNP alleles at 1,435,025 positions, 422,339 indel-path
+  alleles; and the SNP and INDELS indexes and the indel log are byte for byte those of the
+  two-build recipe the D2 judges validated (a sites-only SNP build beside
+  `mega_build_indels.sh`'s). Not run genome-wide: the release's readiness audit (D7) comes first.
+  METHODS section 2, `docs/PRECOMPUTED_INDEXES.md` (mega), `seq_script/merge_panels/README.md`.
+  Covered by `PostProcess/test_mega_rebuild.py` (the recipe end to end on the stub engine, and
+  its checks failing on a registry that reads every record), `test_prepare_mega_build_vcf.py`
+  and `test_synth_sites_gt.py`.
+- **The sites-only density guard: of a sites-only dataset, the candidates in windows of 2^20
+  sequences or more are withheld from the SNP and the indel post-analysis, and listed.** A
+  sites-only dataset (the mega) has no genotypes to tell which combinations of a window's
+  alleles anyone carries, and with every allele coded its windows in the immunoglobulin loci
+  and some tandem repeats spell 2^40 sequences and more: they match nearly any guide, as
+  combinations of ten to seventeen variants nobody is known to carry (the three CFD-1.0 rows of
+  the rebuilt mega's chr22 lie in the (TA)n repeat at chr22:24,238,761-774), and cost most of a
+  mega search's time. `PostProcess/sites_only_guard.py`, run by `post_analisi_snp.sh` and
+  `post_analisi_indel.sh` on each chromosome's variant candidates before the analysis reads
+  them, withholds a sites-only dataset's candidate whose window (the letters of its aligned
+  target) spells 2^bits sequences or more (`window_density.guard_withholds`; 20 bits,
+  `complete-search --sites-only-density-guard N`, `--no-sites-only-density-guard` off; the
+  run's `.Params.txt` records it), writes the regions to
+  `<out>_<chrom>.{snp,indel}.sites_only_density_guard.bed`, which the report merges into
+  `sites_only_density_guard.bed` and counts in its inputs card, and says per chromosome what it
+  withheld (the run's `log_verbose.txt`). A genotyped dataset's rows, resolved per sample or
+  checked by the carrier gate, which drops none, are not guarded, nor are the reference rows.
+  Five guides, 4 mismatches and 1 + 1 bulges, population-level: on chr22 it withholds 107,038 of
+  the rebuilt mega's 280,112 SNP and 5,782,488 of its 7,476,229 indel candidates, and the search
+  takes 1.46 times the shipped mega's (44.6 against 30.5 min, on a shared node); on chr14 (IGH)
+  3,373,484 of 3,651,632 and 34,248,990 of 36,946,128, and 1.57 times (73.7 against 46.8 min;
+  unguarded, 12 to 16 h were projected). On the shipped mega it withholds 7 of chr22's 20,010
+  rows. METHODS section 5. Covered by `PostProcess/test_sites_only_guard.py` and
+  `test_complete_search_flags.py` (a value of the flag that is no number of bits, or outside 1
+  to 64, and both flags together are refused before the output folder is made); the real-data
+  indel check reads a run's guard from its BEDs and takes such a row for one CRISPRme does not
+  write (`limit-density-guard`; `test_check_indel_rows.py`).
+- **In a search of a sites-only dataset, the carrier gate ranks a combination below the
+  frequency bound after the others (plan decision D6): demoted and labelled, never dropped.** A
+  C2 alignment -- two or more variants, one or more not in any phased panel the gate reads --
+  whose variants' frequencies fail the safeguards' bound (their product under 1e-06, or the
+  rarest under 0.001; `AF_max` on `mega`, an indel's from its indel frequencies) is state `below
+  the frequency bound`, counted in the sidecar (`C2_below_bound`), labelled `... (below the
+  1e-06 / 0.001 bound, ranked after the others)`, and ranked after every other row in the views
+  ranked by the score of that alignment, in the table of the C1 rows after the top-1000, out of
+  the validation panel's thresholds and the risk card; the integrated results are unchanged.
+  Without the genotype oracle the gate now runs on a sites-only dataset all the same (status
+  `bound`, where it said `opt-in` and ran nothing): every alignment of two or more variants is C2
+  (`not checked against phased haplotypes (no panel)`), checked against the bound alone; in a
+  per-sample search beside a genotyped dataset it reads the rows that name no carrier, the
+  sites-only dataset's, against the genotyped dataset's store. In a search of genotyped datasets
+  alone the bound stays information. On the rebuilt mega's chr22 (five guides, 4 mismatches and
+  1 + 1 bulges, population-level, status `bound`), 2,109 of the 4,689 C2 rows are below the bound,
+  and the 100 rows that lead the five guides' CFD rankings (20 each) held 61 combinations below
+  it, and hold none once they are ranked after the others: 25 combinations within it, 22
+  single-variant and 53 reference rows, where there were 6, 5 and 28 (the shipped mega: 1,535 of
+  4,004 C2 rows below the bound, 39 of its top 100). METHODS section 5. Covered by
+  `PostProcess/test_haplotype_prioritizer.py`.
 
 ### Changed
 - **CRISPRme and CRISPRitz share their major.minor version; this release is 2.10.0, after 2.8.1.**
@@ -1169,6 +1247,22 @@ and the `release-crisprme` skill.
     with the TRAC guide the SNP+SNP co-occurrence companion, follow the carriers it takes off).
     In the SNP+indel oracle the 197 co-occurrence lines of Z3, which starts inside an insertion,
     go from 15702, 15703 and 15704 to 15699.
+- **The mega's registry and indel frequencies read the records as CRISPRitz 2.10.0's enricher
+  reads them.** `build_mega_registry.py` and `build_mega_indel_af.py` read every record of the
+  VCF whatever its FILTER, the registry upper-cased a one-base lower-case ALT into a SNP, the
+  indel frequencies took a `*` over a one-base REF for an indel, and of one REF>ALT on two
+  records the registry kept both and the indel frequencies each source's highest. They now read
+  what the enricher reads (`build_mega_registry.read_as_enricher`): FILTER `PASS` or `.`; a SNP
+  allele is an upper-case A, C, G or T over a REF of one base, each ALT of a line with its own
+  frequencies and ID (a `*`, an `N` or a lower-case base is coded by no one and in no store); an
+  indel-path allele is one the enricher windows (an MNV too, none within 26 bases of the
+  chromosome's start); one REF>ALT on two records is one allele with the frequencies of the more
+  frequent record (the higher `INFO/AF`, a missing one counting 0; on a tie, the earlier), as
+  the enricher merges one allele's dictionary entries. Every count is reported. The registry's
+  manifest says which records it holds (`vcf_records`). On the rebuilt chr22 the registry holds
+  759,909 SNP alleles, all of them the genome's, where the shipped one held 838,025 (78,116
+  outside PASS). Covered by `PostProcess/test_build_mega_registry.py`,
+  `test_build_mega_indel_af.py` and `test_site_alleles.py`.
 
 ### Fixed
 - **An index folder that holds a macOS AppleDouble file is read by its own trees.** macOS `tar` and
@@ -1272,8 +1366,9 @@ and the `release-crisprme` skill.
   dictionary path, and a genotyped panel's registry read alone (`download --no-genotypes`),
   substituted every ALT listed at a position, an ALT the code the engine matched does not hold
   included, so the two paths could report different rows for one window: those sources list what the
-  enrichment coded, so such an ALT is another position's. A sites-only (mega) registry is read from
-  its VCF, every record of it, and lists ALTs the enrichment never coded: on an index built by
+  enrichment coded, so such an ALT is another position's. A sites-only (mega) registry built before
+  this release is read from its VCF, every record of it (the rebuilt mega's reads the records as
+  the enricher does: Changed, below), and lists ALTs the enrichment never coded: on an index built by
   CRISPRitz 2.9.1 or earlier, as every mega index published until the rebuild, the earlier records
   of a split site (the enrichment codes the last PASS record's), and on any index non-PASS records.
   Each is the panel's own allele at its own position, so a sites-only dataset substitutes every one
@@ -2195,6 +2290,41 @@ and the `release-crisprme` skill.
     start check above had stopped doing, and now also that an unphased carrier's target is the
     strongest its own alleles allow on the row's alignment. Without this fix that check fails
     twice, at site U.
+- **`build-index-only` of a sites-only dataset says on stdout what builds its registry, where
+  it warned on stderr to run it again with `--samplesID`.** A sites-only dataset has no
+  genotypes: its registry and indel frequencies come from its INFO AF fields. The build of the
+  mega printed the 765-byte `WARNING: INCOMPLETE VARIANT INDEX` banner on stderr (which fails a
+  CRISPRme stage that reads it), told the user to re-run with `--samplesID`, which no sites-only
+  dataset has, and, from the presence-genotype copy of its VCF, built a phased indel store that
+  named the pseudo-sample `MEGA` as every indel's carrier. A dataset whose VCFs have no sample
+  columns, or whose one sample is `synth_sites_gt.py`'s presence genotype (its new
+  `##CRISPRme_sites_only=` header line), now gets a `NOTE [build-index-only]` on stdout naming
+  `build_mega_registry.py`, `build_mega_indel_af.py` and `mega_rebuild.sh` (and, for a VCF
+  without samples, that its indels need the presence genotype), and no phased indel store; a
+  genotyped dataset without `--samplesID` is warned as before. Covered by
+  `PostProcess/test_mega_rebuild.py`.
+- **A row that starts inside an insertion joins a site and chains none: two sites of 2.8.1 no
+  longer leave a population-level search's results.** Since this release such a row starts at
+  the insertion's anchor, up to the insertion's length before where 2.8.1 placed it, and the
+  merge chained it like any other row: between two sites 2.8.1 kept apart, it joined them, and
+  the one whose row was weaker left the integrated results for the other's alternative
+  alignments. On `hg38_mega` chr22, population-level, these were chr22:36,838,374 (+) of VEGFA
+  site 3 (a deletion row, CFD 0.004) and chr22:47,379,217 (+) of EMX1 (CFD 0.003), joined to the
+  next cluster through the insertion rows chr22_36838378_A_ATGTG... and chr22_47379212_A_AGGAGG...
+  (and two more) moved to their anchors (found in this release's stage-2a validation; the
+  review explained them). The merge (`remove_contiguous_samples.py`) now chains the other rows,
+  and a row that starts inside an insertion joins the site whose rows lie within `--merge` bases
+  of its cluster position -- of two, the one nearer its place on the haplotype, the next on a
+  tie, where 2.8.1 had it --, or, with none, a site with the others within `--merge` bases (its
+  insertion's alignments, one site at the anchor, as decided). In that search (five guides, NRG,
+  4 mismatches and 1 + 1 bulges) the merge writes 94 rows more and none fewer: the two sites and
+  67 more that the same search with 2.8.1's merge wrote (27 at the same place, 40 at their
+  insertion's anchor), and 25 sites that a row inside an insertion joined to a neighbour with
+  2.8.1's merge too (chr22:22,585,904 (-) of EMX1, CFD 0.317, eight bases from the
+  chr22:22,585,896 site of the same CFD, among them). The real-data
+  check's cluster chain is the chain of every row, a superset of the merge's around such a row:
+  it never fails a run for it (its coverage gap, documented). Covered by
+  `PostProcess/test_representative_tiebreak.py`.
 
 ## [2.8.1] - 2026-11-05
 

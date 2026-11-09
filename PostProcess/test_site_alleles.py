@@ -886,10 +886,13 @@ class TheSitesOnlyPathTakesEveryAltItsRegistryLists(_SnpPostAnalysis):
 
     def test_an_alt_the_enrichment_did_not_code(self):
         # column 5: C>A then C>T, coded Y (the later record's alone); column 9: A>C, coded
-        # M, and A>G, a non-PASS record CRISPRitz never codes
+        # M, and A>G, a non-PASS record CRISPRitz never codes, which the registry of the
+        # shipped mega lists: CRISPRme 2.8.1's builder read every record whatever its FILTER
+        # (modelled here by a registry built from the records with every FILTER PASS; the
+        # 2.10.0 builder reads them as the enricher does, test_the_rebuilt_registry_...)
         vcf = _mega_vcf(os.path.join(self.tmp, "mega.chrT.vcf"), (
             (_pos1(5), "C", "A", "rsA", "PASS"), (_pos1(5), "C", "T", "rsT", "PASS"),
-            (_pos1(9), "A", "C", "rsC", "PASS"), (_pos1(9), "A", "G", "rsG", "LowQual")))
+            (_pos1(9), "A", "C", "rsC", "PASS"), (_pos1(9), "A", "G", "rsG", "PASS")))
         ref = _site(c5="C", c9="A")
         rows, _comp = self.analyse(ref, [_window(ref, {5: "Y", 9: "M"})], None,
                                    sites_only_vcf=vcf, mms=2)
@@ -899,6 +902,24 @@ class TheSitesOnlyPathTakesEveryAltItsRegistryLists(_SnpPostAnalysis):
         self.assertIn(("chrT_%d_C_A" % p5, "chrT_%d_A_G" % p9), got)
         self.assertEqual(set(got), {("chrT_%d_C_%s" % (p5, a5), "chrT_%d_A_%s" % (p9, a9))
                                     for a5 in "AT" for a9 in "CG"})
+
+    def test_the_rebuilt_registry_lists_no_record_the_enrichment_skips(self):
+        """The mega's registry of CRISPRme 2.10.0 reads its VCF as CRISPRitz's enricher does
+        (build_mega_registry: FILTER PASS or '.'): column 9's A>G of FILTER LowQual is in no
+        store, so no row names it; the rows of the ALTs both read are as before."""
+        vcf = _mega_vcf(os.path.join(self.tmp, "mega.chrT.vcf"), (
+            (_pos1(5), "C", "A", "rsA", "PASS"), (_pos1(5), "C", "T", "rsT", "PASS"),
+            (_pos1(9), "A", "C", "rsC", "PASS"), (_pos1(9), "A", "G", "rsG", "LowQual")))
+        ref = _site(c5="C", c9="A")
+        rows, _comp = self.analyse(ref, [_window(ref, {5: "Y", 9: "M"})], None,
+                                   sites_only_vcf=vcf, mms=2)
+        p5, p9 = _pos1(5), _pos1(9)
+        got = set(self.variant_rows(rows))
+        self.assertTrue(got)
+        self.assertFalse([r for r in got if "chrT_%d_A_G" % p9 in r], got)
+        # the rows of the ALTs it reads: column 5's two, each with column 9's A>C
+        self.assertTrue({("chrT_%d_C_A" % p5, "chrT_%d_A_C" % p9),
+                         ("chrT_%d_C_T" % p5, "chrT_%d_A_C" % p9)} <= got, got)
 
     def test_a_q_column(self):
         """A Q column admits every ALT the registry lists at its position, whether or not

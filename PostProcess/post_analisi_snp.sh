@@ -38,6 +38,14 @@ targets_tsv_alt_chrom="${targets_tsv_alt}.${chrom}"
 LC_ALL=C grep -F -w -e "$chrom" "$targets_tsv_ref" > "$targets_tsv_ref_chrom"
 LC_ALL=C grep -F -w -e "$chrom" "$targets_tsv_alt" > "$targets_tsv_alt_chrom"
 
+# the sites-only density guard (sites_only_guard.py, CRISPRme 2.10.0): of a sites-only
+# dataset (the mega), the candidates whose window spells 2^bits sequences or more
+# (CRISPRME_SITES_ONLY_GUARD, 20 by default) leave the targets before the post-analysis
+# reads them, and their regions are listed in the BED; a genotyped dataset's are untouched
+python sites_only_guard.py snp "$targets_tsv_alt_chrom" "$(dirname "${dict_folder%/}")" \
+    "$vcf_name" "$chrom" \
+    "$output_folder/${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}_${chrom}.snp.sites_only_density_guard.bed"
+
 # perform targets analysis by chromosome (scores, annotation, etc.)
 targets_chrom_prefix="$output_folder/${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${annotation_name}_${mm}_${bDNA}_${bRNA}_${key}"
 ./scriptAnalisiNNN_v3.sh \

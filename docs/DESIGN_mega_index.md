@@ -9,6 +9,15 @@ variation across cohorts, with **per-dataset allele frequencies** + a **global
 `AF_max`**. Individual-level (genotype) data is intentionally discarded (user
 decision, 2026-09-01). NRG (NRG_3) only for now.
 
+> **CRISPRme 2.10.0.** The mega is rebuilt from the same merged VCFs by
+> `seq_script/merge_panels/mega_rebuild.sh`: every store reads the records CRISPRitz 2.10.0's
+> enricher reads (FILTER `PASS`/`.`, every allele of a line, one REF>ALT on two records the more
+> frequent one's), the build input carries `INFO/AF` = `AF_max`, and `PostProcess/verify_mega_chrom.py`
+> checks every store against the source VCF (METHODS section 2). Searched, a sites-only dataset's
+> candidates in windows of 2^20 sequences or more are withheld (the sites-only density guard) and
+> its combinations below the frequency bound ranked after the others (METHODS section 5). The build
+> notes below are the original 2.5.x design and status.
+
 Sources (`/data/pinello/SHARED_DATA/CRISPRme_data/variants_datasets_20260827/`):
 1000G-2021, HGDP, gnomAD v4.1, TOPMed, All-of-Us. MAF > 0.001 for **all** (uniform
 threshold, user decision).

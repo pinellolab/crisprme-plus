@@ -757,6 +757,46 @@ class AlignmentsStartingInsideOneInsertion(unittest.TestCase):
                          (self.T2, [hap[100:123]]))
 
 
+    def test_an_insertion_row_at_its_anchor_chains_no_two_sites(self):
+        """A row starting inside an insertion stands at the anchor, k bases before where
+        2.8.1 placed it, and chained there it joined two sites 2.8.1 kept apart: on
+        hg38_mega chr22, population-level, chr22:36,838,374 + of VEGFA site 3 (a deletion
+        row, 2 bases before such a row's anchor) left the results for the cluster of the
+        reference row 3 bases after it, its place on the haplotype. It joins one site --
+        the one nearer its place on the haplotype -- and chains none: two clusters, two
+        rows, on both branches. Without the row starting inside, the same two."""
+        ins = "AT" + self.T2 + "CA"
+        inside = self._inside(ins, 3, 23)            # Cluster_Position 100, haplotype 103
+        before = _row("GGACTGAAATCTGTAAGCAGGCAGG"[:23], "0.200", 3, cluster_pos=98,
+                      position=98)
+        after = _row(self.T1, "0.400", 2, cluster_pos=103, position=103)
+        for rows in ([before, inside, after], [before, after]):
+            for sort_order in ("score", "total"):
+                with self.subTest(n=len(rows), sort_order=sort_order):
+                    best, alt = self._merge([list(r) for r in rows], sort_order)
+                    # the site before the anchor keeps its row
+                    self.assertEqual(len(best), 2)
+                    self.assertIn(before[DNA_COL], [r[DNA_COL] for r in best])
+                    if len(rows) == 3:
+                        # the inside row is in the cluster of the site after its anchor,
+                        # whose row it is (the better), that site's alignment its
+                        # alternative
+                        self.assertIn(inside[DNA_COL], [r[DNA_COL] for r in best])
+                        self.assertEqual([r[DNA_COL] for r in alt], [after[DNA_COL]])
+                    else:
+                        self.assertEqual(alt, [])
+
+    def test_an_insertion_row_with_no_site_near_is_a_site_of_its_own(self):
+        """A row starting inside an insertion with no other row within --merge bp of its
+        anchor is a cluster of its own, with the others of its insertion (one site)."""
+        ins = "AT" + self.T1 + "CA" + self.T2 + "TC"
+        rows = [self._inside(ins, 3, 23), self._inside(ins, 28, 23),
+                _row(self.T1, "0.400", 2, cluster_pos=110, position=110)]
+        best, alt = self._merge([list(r) for r in rows])
+        self.assertEqual(sorted(r[CLUSTER_POS_COL] for r in best), ["100", "110"])
+        self.assertEqual(len(alt), 1)
+
+
 # Runs the real merge script in a fresh interpreter with indel_snp_cis.row_first_base
 # counting its calls, and prints their number.
 _COUNTING_MERGE = """

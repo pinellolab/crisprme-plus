@@ -32,6 +32,16 @@ import math
 # to tune it: new_simple_analysis.py and generate_report.py read it here.
 HYPERDENSE_BITS = 20
 
+# The sites-only density guard (CRISPRme 2.10.0): a candidate of a sites-only dataset (the
+# mega) whose window spells 2^SITES_ONLY_GUARD_BITS sequences or more is withheld from the
+# SNP and the indel post-analysis, its window listed instead (sites_only_guard.py). A
+# sites-only dataset has no genotypes to tell which of a window's combinations anyone
+# carries, and every allele coded makes the immunoglobulin loci spell 2^40 and more: such a
+# window matches nearly any guide, and its rows are combinations of 10 to 17 variants.
+# complete-search --sites-only-density-guard sets it (CRISPRME_SITES_ONLY_GUARD), and
+# --no-sites-only-density-guard turns the guard off.
+SITES_ONLY_GUARD_BITS = HYPERDENSE_BITS
+
 # CRISPRME_IUPAC_CAP's default, in bits: above 2^10 sequences the dictionary path reports a
 # window by the haplotypes its carriers have, not every combination of its alleles. That is ten
 # two-allele columns, which the cap allowed when it counted ambiguous positions, up to 2.8.1.
@@ -60,6 +70,30 @@ def sequences(window):
     for c in window:
         n *= _WIDTH.get(c, 1)
     return n
+
+
+# the letters of more than one base, by how many they stand for (guard_withholds)
+_KEEP_AMBIGUOUS = {i: None for i in range(256)}
+for _c in "RYSWKMBDHV" + FOUR_ALLELE:
+    _KEEP_AMBIGUOUS.pop(ord(_c), None)
+    _KEEP_AMBIGUOUS.pop(ord(_c.lower()), None)
+
+
+def guard_withholds(window, guard_bits):
+    """True when ``window`` spells 2^guard_bits sequences or more, as sequences() counts
+    them (a bulge gap and a letter of one base count one): the sites-only density guard
+    withholds such a candidate. Fast, as it runs over every raw target of a sites-only
+    dataset: the letters standing for more than one base are kept by one translate, and
+    fewer than guard_bits / 2 of them cannot reach the bound. A negative bound is none."""
+    if guard_bits < 0:
+        return False
+    amb = window.translate(_KEEP_AMBIGUOUS)
+    if 2 * len(amb) < guard_bits:
+        return False
+    n4 = amb.count(FOUR_ALLELE) + amb.count(FOUR_ALLELE.lower())
+    n3 = sum(amb.count(c) for c in "BDHVbdhv")
+    n2 = len(amb) - n3 - n4
+    return (1 << (n2 + 2 * n4)) * 3 ** n3 >= 1 << guard_bits
 
 
 def bits(n_sequences):

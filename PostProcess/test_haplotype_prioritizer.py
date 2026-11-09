@@ -786,6 +786,195 @@ class TestTheFrequencyBoundOfASitesOnlyRow(unittest.TestCase):
                                       "(within the 1e-06 / 0.001 bound)")
 
 
+def write_results_with_samples(path, rows):
+    """write_results, with each block's Variant_samples column too."""
+    cols = ["Spacer+PAM", "Chromosome"]
+    for name in hp.BLOCKS:
+        cols += [f"{c}_({name})" for c in hp._BLOCK_COLUMNS]
+        cols.append(f"Variant_samples_({name})")
+    with open(path, "w") as fh:
+        fh.write("\t".join(cols) + "\n")
+        for r in rows:
+            fh.write("\t".join(r.get(c, "NA") for c in cols) + "\n")
+
+
+class TestTheFrequencyBoundDemotesSitesOnlyRows(unittest.TestCase):
+    """Plan decision D6: in a search of a sites-only dataset (the mega), a combination of two
+    or more variants that no phased panel can check (C2) and whose frequencies fail the
+    safeguards' bound -- their product under 1e-06, or the rarest under 0.001 -- is ranked
+    after the others ("below the frequency bound"), demoted and labelled, never dropped;
+    one within the bound, a carried one (A) and a single variant keep their place. Without
+    the genotype oracle the gate still runs, on the bound alone; in a search of genotyped
+    datasets only the bound stays information."""
+
+    MEGA = [
+        (100, "A", "G", "0.05"), (104, "C", "T", "0.05"),          # within: 2.5e-03
+        (200, "G", "A", "0.0011"), (204, "T", "C", "0.0011"),      # below: 1.2e-06 x
+        (208, "A", "C", "0.0011"),                                 #   0.0011 = 1.3e-09
+        (300, "C", "G", "0.6"), (303, "G", "T", "0.0005"),         # rarest under 0.001
+    ]
+
+    def setUp(self):
+        import build_mega_registry as bmr
+        self.tmp = tempfile.mkdtemp(prefix="gate_d6_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.dicts = os.path.join(self.tmp, "Dictionaries")
+        os.makedirs(self.dicts)
+        vcf = os.path.join(self.tmp, "mega.chr22.build.vcf.gz")
+        with gzip.open(vcf, "wt") as fh:
+            fh.write("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n")
+            for pos, ref, alt, af in self.MEGA:
+                fh.write(f"{CHROM}\t{pos}\t.\t{ref}\t{alt}\t.\tPASS\t"
+                         f"AF_gnomAD={af};AF_max={af};AF={af}\n")
+        bmr.build(vcf, CHROM, os.path.join(self.dicts, "registry_hg38_mega"))
+        self.out = os.path.join(self.tmp, "Results", "job")
+        os.makedirs(self.out)
+        self.results = os.path.join(self.out,
+                                    "GUIDE+NRG_hg38+hg38_mega_4+2_integrated_results.tsv")
+        aln = "ACGTACGTACGTACGTACGTAGG"
+
+        def row(start, variants, samples=""):
+            out = {"Spacer+PAM": "G", "Chromosome": CHROM}
+            for name in hp.BLOCKS:
+                out.update(block(name, start, "+", aln, "alt", variants))
+                out[f"Variant_samples_({name})"] = samples
+            return out
+        self.rows = [
+            row(90, f"{CHROM}_100_A_G,{CHROM}_104_C_T"),                       # 1: within
+            row(190, f"{CHROM}_200_G_A,{CHROM}_204_T_C,{CHROM}_208_A_C"),    # 2: below
+            row(290, f"{CHROM}_300_C_G,{CHROM}_303_G_T"),                      # 3: rarest
+            row(390, f"{CHROM}_200_G_A"),                                       # 4: one variant
+        ]
+        write_results_with_samples(self.results, self.rows)
+
+    def gate(self, *extra, vcfs="VCFs/hg38_mega\n"):
+        lst = os.path.join(self.tmp, "list_vcf.txt")
+        with open(lst, "w") as fh:
+            fh.write(vcfs)
+        done = subprocess.run([sys.executable, os.path.join(HERE, "haplotype_prioritizer.py"),
+                               "--results", self.results, "--dictionaries", self.dicts,
+                               "--vcf-list", lst, *extra], capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        with open(os.path.join(self.out, hp.META_NAME)) as fh:
+            meta = json.load(fh)
+        lines = []
+        if meta.get("companion"):
+            with open(os.path.join(self.out, meta["companion"])) as fh:
+                lines = [ln.rstrip("\n").split("\t") for ln in fh if not ln.startswith("#")]
+        return done.stdout, meta, [(r[0], r[1], r[7], r[8], r[16]) for r in lines
+                                   if r[1] == "highest_CFD"]
+
+    def test_without_the_oracle_the_bound_alone(self):
+        with open(self.results) as fh:
+            before = fh.read()
+        out, meta, got = self.gate("--mode", "population-level")
+        with open(self.results) as fh:
+            self.assertEqual(fh.read(), before)  # no row changes
+        self.assertEqual(meta["status"], "bound")
+        self.assertTrue(meta["frequency_bound"])
+        self.assertEqual(meta["counts"], {"C2": 3, "B": 1, hp.BELOW_BOUND_COUNT: 2})
+        self.assertEqual(got, [
+            ("1", "highest_CFD", "C2", "-",
+             "not checked against phased haplotypes (no panel); frequency product 2.5e-03, "
+             "rarest 5.0e-02 (within the 1e-06 / 0.001 bound)"),
+            ("2", "highest_CFD", "C2", hp.BELOW_BOUND,
+             "not checked against phased haplotypes (no panel); frequency product 1.3e-09, "
+             "rarest 1.1e-03 (below the 1e-06 / 0.001 bound, ranked after the others)"),
+            ("3", "highest_CFD", "C2", hp.BELOW_BOUND,
+             "not checked against phased haplotypes (no panel); frequency product 3.0e-04, "
+             "rarest 5.0e-04 (below the 1e-06 / 0.001 bound, ranked after the others)"),
+            ("4", "highest_CFD", "B", hp.NOT_IN_PANEL, "single variant (not in the panel)"),
+        ])
+        self.assertIn("checked against the frequency bound alone: C2 3, 2 of them below the "
+                      "frequency bound", out)
+
+    def test_a_carried_combination_keeps_its_place(self):
+        # the oracle carries 200 + 204 + 208 together on S00's first haplotype: A, whatever
+        # the frequencies; 300 + 303 has 303 not in it: C2, below the bound
+        build_panel(self.dicts, [(100, "A", "G", {"S01": "1|0"}),
+                                 (200, "G", "A", {"S00": "1|0"}),
+                                 (204, "T", "C", {"S00": "1|0"}),
+                                 (208, "A", "C", {"S00": "1|0"}),
+                                 (300, "C", "G", {"S02": "0|1"})], name=hp.ORACLE_PANEL)
+        _out, meta, got = self.gate("--mode", "population-level", "--prioritize-observed", "on")
+        self.assertEqual(meta["status"], "run")
+        tiers = {r[0]: (r[2], r[3]) for r in got}
+        self.assertEqual(tiers["2"], ("A", hp.ONE_HAPLOTYPE))
+        self.assertEqual(tiers["3"], ("C2", hp.BELOW_BOUND))
+        self.assertEqual(tiers["1"], ("C2", "-"))  # 104 not in the panel; within the bound
+
+    def test_a_genotyped_search_shows_the_bound_only(self):
+        # the same rows, checked as a genotyped dataset's (no sites-only dataset searched):
+        # the bound is information, as before D6
+        build_panel(self.dicts, [(300, "C", "G", {"S02": "0|1"})], name="hg38_G")
+        _out, meta, got = self.gate("--mode", "population-level", vcfs="VCFs/hg38_G\n")
+        self.assertFalse(meta["frequency_bound"])
+        self.assertEqual({r[3] for r in got if r[2] == "C2"}, {"-"})
+
+    def test_a_per_sample_search_checks_the_rows_that_name_no_carrier(self):
+        build_panel(self.dicts, [(100, "A", "G", {"S01": "1|0"})], name="hg38_G")
+        rows = list(self.rows)
+        for name in hp.BLOCKS:   # the second row is a genotyped dataset's per-sample row
+            rows[1] = dict(rows[1], **{f"Variant_samples_({name})": "S00"})
+        write_results_with_samples(self.results, rows)
+        _out, meta, got = self.gate("--mode", "per-sample",
+                                    vcfs="VCFs/hg38_G\nVCFs/hg38_mega\n")
+        self.assertEqual((meta["status"], meta["rows"]), ("run", "no carrier listed"))
+        self.assertEqual([r[0] for r in got], ["1", "3", "4"])
+        self.assertEqual({r[0]: r[3] for r in got}["3"], hp.BELOW_BOUND)
+
+
+class TestTheReportDemotesBelowTheBound(unittest.TestCase):
+    """generate_report ranks a C2 row below the frequency bound after the others, as a C1
+    one, in the same table, and says why; a C2 row within the bound keeps its place."""
+
+    def test_gate_demoted_and_the_texts(self):
+        import pandas as pd
+        import generate_report as gr
+        df = pd.DataFrame({"_gate_cfd_tier": ["C1", "C2", "C2", "A", ""],
+                           "_gate_cfd_state": ["", hp.BELOW_BOUND, "-", "", ""]})
+        self.assertEqual(gr.gate_demoted(df).tolist(), [True, True, False, False, False])
+        gate = {"status": "bound", "used": True, "frequency_bound": True,
+                "counts": {"C2": 3, "B": 1, "C2_below_bound": 2}}
+        label, text = gr.render_gate_row(gate)
+        self.assertEqual(label, "Carrier gate")
+        self.assertIn("checked against the frequency bound alone", text)
+        self.assertIn("<strong>2</strong> of them below the bound", text)
+        oracle = gr.render_gate_row(dict(gate, oracle_missing=True))[1]
+        self.assertIn("crisprme.py download --what genotype-oracle", oracle)
+        html = gr.render_unobserved_section(gate, 2, 0, "<table></table>", None, 2)
+        self.assertIn("variant combinations of a sites-only dataset below the frequency bound "
+                      "(carrier gate, tier C2)", html)
+        run = {"status": "run", "used": True, "frequency_bound": True, "panels": [],
+               "counts": {"A": 1, "C1": 1, "C2": 2, "C2_below_bound": 1}}
+        self.assertIn("1 of them, of the search's sites-only dataset, below the frequency "
+                      "bound", gr.render_gate_row(run)[1])
+        self.assertIn("or of a sites-only dataset below the frequency bound (C2)",
+                      gr.render_unobserved_section(run, 2, 0, "", None, 2))
+        # the report reads the companion of a gate that ran on the bound alone
+        tmp = tempfile.mkdtemp(prefix="gate_d6_report_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        res = os.path.join(tmp, "G+NRG_hg38+hg38_mega_4+2_integrated_results.tsv")
+        frame = pd.DataFrame({"Chromosome": [CHROM, CHROM],
+                              "Start_coordinate_(highest_CFD)": ["90", "190"]})
+        frame.to_csv(res, sep="\t", index=False)
+        with open(os.path.join(tmp, hp.companion_path(res).rsplit("/", 1)[-1]), "w") as fh:
+            fh.write("#" + "\t".join(hp.COMPANION_COLUMNS) + "\n")
+            fh.write("\t".join(["2", "highest_CFD", "G", CHROM, "190", "+", "v", "C2",
+                                hp.BELOW_BOUND, "-", "NA", "NA", "-", "NA", "1e-9", "0.0011",
+                                "label", "-"]) + "\n")
+        with open(os.path.join(tmp, hp.META_NAME), "w") as fh:
+            json.dump(dict(gate, companion=os.path.basename(hp.companion_path(res))), fh)
+        got, meta = gr.load_carrier_gate(tmp, res, frame)
+        self.assertTrue(meta["used"])
+        self.assertEqual(gr.gate_demoted(got).tolist(), [False, True])
+        # a search of genotyped datasets only: the texts of before
+        plain = {"status": "run", "used": True, "panels": [], "counts": {"C2": 2}}
+        self.assertNotIn("below the frequency bound", gr.render_gate_row(plain)[1])
+        self.assertIn("(carrier gate, tier C1)</h3>",
+                      gr.render_unobserved_section(plain, 1, 0, "", None, 1))
+
+
 class TestReportRanksByTheGate(unittest.TestCase):
     """generate_report on a population-level run the gate checked: the C1 row leaves the
     top-1000, the panel and the risk card for its own table, the A and C2 rows keep their
@@ -1462,10 +1651,28 @@ class TestPlanPanels(unittest.TestCase):
         self.assertEqual(hp.plan_panels(d, ["hg38_G"], "per-sample", "auto"),
                          ("per-sample", []))
         self.assertEqual(hp.plan_panels(d, ["hg38_G"], "population-level", "off"), ("off", []))
+        # a sites-only dataset with no phased panel to read: its rows are checked against
+        # the frequency bound alone (D6; up to it, "opt-in" and "no-oracle", nothing run)
         self.assertEqual(hp.plan_panels(d, ["hg38_mega"], "population-level", "auto"),
-                         ("opt-in", []))
+                         ("bound", []))
         self.assertEqual(hp.plan_panels(d, ["hg38_mega"], "population-level", "on"),
-                         ("no-oracle", []))
+                         ("bound", []))
+        self.assertTrue(hp.oracle_missing(d, ["hg38_mega"], "on"))
+        self.assertFalse(hp.oracle_missing(d, ["hg38_mega"], "auto"))
+        self.assertEqual(hp.plan_panels(d, ["hg38_mega"], "population-level", "off"),
+                         ("off", []))
+        # beside a genotyped dataset, in a per-sample search too: the sites-only rows (the
+        # ones that name no carrier) against the genotyped dataset's own store
+        self.assertEqual(hp.plan_panels(d, ["hg38_G", "hg38_mega"], "per-sample", "auto"),
+                         ("run", [("hg38_G", d, "own")]))
+        self.assertEqual(hp.gate_scope(d, ["hg38_G", "hg38_mega"], "per-sample", "auto"),
+                         (True, True))
+        self.assertEqual(hp.gate_scope(d, ["hg38_G", "hg38_mega"], "population-level",
+                                       "auto"), (True, False))
+        self.assertEqual(hp.gate_scope(d, ["hg38_G"], "population-level", "auto"),
+                         (False, False))
+        self.assertEqual(hp.gate_scope(d, ["hg38_mega"], "population-level", "off"),
+                         (False, False))
         # a genotyped dataset with the classic dictionaries alone: said, not run
         os.makedirs(os.path.join(d, "dictionaries_hg38_1000G"))
         self.assertEqual(hp.plan_panels(d, ["hg38_1000G"], "population-level", "auto"),

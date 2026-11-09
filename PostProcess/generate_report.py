@@ -339,10 +339,13 @@ _GREEDY_DENSE = True
 # each row's variant combination, from the run's *_carrier_gate.tsv, keyed by the row's line in
 # the integrated results, for the highest-CFD alignment the report shows and the highest
 # CRISPR-Bulge one its second ranking takes. A C1 row -- variants each in the panel, which no
-# haplotype of it carries together -- leaves the top-1000 tables, the validation panel and the
-# risk card for a table of its own after the top-1000 (it stays in the integrated results); an
-# A or C2 row keeps its place, and the label of its tier is its Observed cell.
+# haplotype of it carries together -- and, in a search of a sites-only dataset, a C2 row whose
+# variants' frequencies fail the bound (state "below the frequency bound", plan decision D6)
+# leave the top-1000 tables, the validation panel and the risk card for a table of their own
+# after the top-1000 (they stay in the integrated results); an A or other C2 row keeps its
+# place, and the label of its tier is its Observed cell.
 GATE_DEMOTED = "C1"
+GATE_BELOW_BOUND = ("C2", "below the frequency bound")
 _GATE_BLOCKS = (("highest_CFD", "_gate_cfd"), ("highest_CRISPR_BULGE", "_gate_cb"))
 GATE_META = ".carrier_gate.json"
 UNOBSERVED_NAME = "unobserved_worst_case.tsv"
@@ -361,7 +364,8 @@ def load_carrier_gate(result_dir, integrated_tsv, df):
     except (OSError, ValueError):
         return df, None
     gate["used"] = False
-    if gate.get("status") != "run" or not gate.get("companion"):
+    # "bound": a sites-only dataset checked against the frequency bound alone (no panel)
+    if gate.get("status") not in ("run", "bound") or not gate.get("companion"):
         return df, gate
     try:
         chroms = df["Chromosome"].astype(str).tolist()
@@ -370,6 +374,7 @@ def load_carrier_gate(result_dir, integrated_tsv, df):
         return df, gate
     tiers = {block: {} for block, _p in _GATE_BLOCKS}
     labels = {block: {} for block, _p in _GATE_BLOCKS}
+    states = {block: {} for block, _p in _GATE_BLOCKS}
     try:
         with open(os.path.join(folder, os.path.basename(gate["companion"]))) as fh:
             for line in fh:
@@ -385,6 +390,7 @@ def load_carrier_gate(result_dir, integrated_tsv, df):
                                      "match the integrated results; not used\n")
                     return df, gate
                 tiers[f[1]][row] = f[7]
+                states[f[1]][row] = f[8]
                 labels[f[1]][row] = f[16]
     except (OSError, ValueError) as exc:
         sys.stderr.write(f"generate-report: carrier gate companion unavailable: {exc}\n")
@@ -392,6 +398,7 @@ def load_carrier_gate(result_dir, integrated_tsv, df):
     df = df.copy()
     for block, prefix in _GATE_BLOCKS:
         df[prefix + "_tier"] = [tiers[block].get(i, "") for i in range(len(df))]
+        df[prefix + "_state"] = [states[block].get(i, "") for i in range(len(df))]
         df[prefix + "_label"] = [labels[block].get(i, "") for i in range(len(df))]
     gate["used"] = True
     return df, gate
@@ -431,11 +438,16 @@ def render_gate_row(gate):
     if not gate:
         return None
     status = gate.get("status")
+    bound = bool(gate.get("frequency_bound"))
     if status == "run" and gate.get("used"):
         c = gate.get("counts") or {}
         same = int(c.get("A_same_score", 0))
+        below = int(c.get("C2_below_bound", 0))
         text = (
-            "Each row's variant combination was checked against the phased genotypes of "
+            ("The variant combination of each row that names no carrier (a sites-only "
+             "dataset's; the others name their cis carriers) was checked against the phased "
+             "genotypes of " if gate.get("rows") == "no carrier listed" else
+             "Each row's variant combination was checked against the phased genotypes of ")
             + _gate_panels(gate) + ". By each row's highest-CFD alignment: "
             f"<strong>A</strong> {int(c.get('A', 0)):,} (two or more variants that one phased "
             "haplotype of the panel carries together"
@@ -448,7 +460,11 @@ def render_gate_row(gate):
             "together and none reaches the row's CFD without; or variants, a single one too, "
             f"every haplotype carrying which has an indel in the target), <strong>C2</strong> "
             f"{int(c.get('C2', 0)):,} (a variant not "
-            "in the panel, which then cannot say). A C1 row is ranked after every other row "
+            "in the panel, which then cannot say"
+            + (f"; {below:,} of them, of the search's sites-only dataset, below the "
+               "frequency bound: the product of the variants' frequencies under 1e-06, or the "
+               "rarest under 0.001, ranked after the others as a C1 row is" if bound else "")
+            + "). A C1 row is ranked after every other row "
             "in the views ranked by the score of the alignment that is C1: a row whose "
             "highest-CFD alignment is C1 is left out of the top-1000 by CFD, panels (a) and "
             "(b) of Section 2, the validation panel's CFD thresholds and the risk card's CFD "
@@ -457,7 +473,9 @@ def render_gate_row(gate):
             "thresholds and the card's CRISPR-Bulge bands (so a row can be in one ranking and "
             "not the other). The panel's totals count them, and they are listed in a table of "
             "their own after the top-1000 (Section 6). "
-            "A, B and C2 rows keep their place; the <code>Observed</code> column gives the "
+            + ("A, B and the other C2 rows keep their place" if bound else
+               "A, B and C2 rows keep their place")
+            + "; the <code>Observed</code> column gives the "
             "tier of a row the gate checked &mdash; a row of two or more variants, and a row "
             "of one whose every carrying haplotype has an indel in the target. A zero says "
             f"little where fewer than "
@@ -465,7 +483,32 @@ def render_gate_row(gate):
             "the variants together if they were independent (&ldquo;too rare to tell&rdquo;). "
             "The gate changes no row: the integrated results are those of the search."
             + _gate_ancestry(gate))
-    elif status == "run":
+    elif status == "bound" and gate.get("used"):
+        c = gate.get("counts") or {}
+        below = int(c.get("C2_below_bound", 0))
+        text = (
+            "No phased panel was read to check the sites-only dataset's variant "
+            "combinations against (the phased HGDP + 1000 Genomes genotypes, the genotype "
+            "oracle, are read on request: <code>complete-search --prioritize-observed</code>, "
+            "or the web form's check box"
+            + ("; it was asked for, and is not installed: <code>crisprme.py download --what "
+               "genotype-oracle</code>" if gate.get("oracle_missing") else "")
+            + "). Each row of two or more variants was checked against the frequency bound "
+            "alone, the product of its variants' frequencies at least 1e-06 and the rarest at "
+            "least 0.001 (the dataset's own frequencies: on <code>mega</code>, "
+            f"<code>AF_max</code>). By each row's highest-CFD alignment: <strong>C2</strong> "
+            f"{int(c.get('C2', 0)):,}, <strong>{below:,}</strong> of them below the bound, "
+            "which are ranked after every other row in the views ranked by the score of the "
+            "alignment that is below it: left out of the top-1000 by CFD, panels (a) and (b) "
+            "of Section 2, the validation panel's CFD thresholds and the risk card's CFD "
+            "bands (or the same of the CRISPR-Bulge ranking), and listed in a table of their "
+            "own after the top-1000 (Section 6); <strong>B</strong> "
+            f"{int(c.get('B', 0)):,} (one variant, which some individual carries). The "
+            "<code>Observed</code> column gives each row's frequency product and rarest "
+            "frequency. A combination below the bound may still be real in a person of an "
+            "ancestry the sources sample little; the gate changes no row: the integrated "
+            "results are those of the search.")
+    elif status == "run" or status == "bound":
         text = ("The gate's table of this search was not read, so the rows are shown "
                 "unchecked.")
     elif status == "no-oracle":
@@ -490,6 +533,77 @@ def render_gate_row(gate):
     return ("Carrier gate", text)
 
 
+# The sites-only density guard (sites_only_guard.py, run by the post-analysis): of a
+# sites-only dataset (the mega), the candidates whose window spells 2^bits sequences or more
+# are withheld from the analysis, each chromosome's regions in a BED of this suffix.
+GUARD_SUFFIX = ".sites_only_density_guard.bed"
+GUARD_BUNDLE = "sites_only_density_guard.bed"
+
+
+def load_density_guard(result_dir):
+    """The sites-only density guard of a run, from its BEDs: {"bits", "datasets":
+    {dataset: {"snp": [candidates, withheld], "indel": [...]}}, "regions", "lines": the
+    BEDs' region lines}, or None when it wrote none (no sites-only dataset, the guard off,
+    a run before CRISPRme 2.10.0)."""
+    import sites_only_guard as _sog
+
+    paths = sorted(glob.glob(os.path.join(result_dir, "*" + GUARD_SUFFIX))) \
+        if result_dir else []
+    if not paths:
+        return None
+    out = {"bits": None, "datasets": {}, "regions": 0, "lines": []}
+    for path in paths:
+        head = _sog.read_bed_counts(path)
+        if head is None:
+            continue
+        out["bits"] = head.get("bits")
+        kinds = out["datasets"].setdefault(head.get("dataset"), {})
+        got = kinds.setdefault(head.get("kind"), [0, 0])
+        got[0] += head.get("candidates", 0)
+        got[1] += head.get("withheld", 0)
+        with open(path) as fh:
+            for line in fh:
+                if not line.startswith("#") and line.strip():
+                    out["lines"].append(line if line.endswith("\n") else line + "\n")
+    out["regions"] = len(out["lines"])
+    return out if out["datasets"] else None
+
+
+def render_guard_row(guard, bundle_name=None, gate=None, guard_bits=None):
+    """The 'Sites-only density guard' row of the inputs card (label, HTML), or None: a
+    search with no sites-only dataset. ``guard`` (load_density_guard); ``gate``, the
+    carrier gate's sidecar, whose frequency_bound says the search had a sites-only dataset;
+    ``guard_bits``, the run's .Params.txt Sites_only_density_guard (-1: turned off)."""
+    if not guard:
+        if gate and gate.get("frequency_bound") and str(guard_bits).strip() == "-1":
+            return ("Sites-only density guard",
+                    "Turned off for this search (<code>--no-sites-only-density-guard</code>): "
+                    "every candidate of the sites-only dataset was analysed, its windows of "
+                    "2<sup>20</sup> sequences or more included.")
+        return None
+    parts = []
+    for ds in sorted(guard["datasets"]):
+        kinds = guard["datasets"][ds]
+        said = []
+        for kind, what in (("snp", "SNP"), ("indel", "indel")):
+            if kind in kinds:
+                n, w = kinds[kind]
+                said.append(f"{w:,} of {n:,} {what} candidates")
+        parts.append(f"of <code>{_esc(ds)}</code>, " + " and ".join(said))
+    where = (f"listed in <code>{_esc(bundle_name)}</code>" if bundle_name else
+             "listed in the run's <code>*.sites_only_density_guard.bed</code> files")
+    return ("Sites-only density guard", (
+        "A sites-only dataset has no genotypes to tell which combinations of a window's "
+        "alleles anyone carries, and its windows of 2<sup>" + str(guard["bits"])
+        + "</sup> sequences or more (the immunoglobulin loci and some tandem repeats, with "
+        "every allele coded) match nearly any guide, as combinations of ten variants and "
+        "more: their candidates were withheld from the analysis, so no row stands for them "
+        "(" + "; ".join(parts) + f"). Their {guard['regions']:,} region(s) are " + where
+        + ". The reference rows there, and every row of a genotyped dataset, are reported as "
+        "always. <code>complete-search --no-sites-only-density-guard</code> analyses every "
+        "candidate."))
+
+
 def render_unobserved_section(gate, n_demoted, n_cb_only, table_html, download_name,
                               n_shown, n_perfect=0):
     """The table after the top-1000 of the rows the gate ranks after every other one (tier
@@ -497,14 +611,27 @@ def render_unobserved_section(gate, n_demoted, n_cb_only, table_html, download_n
     which the validation panel and its banner would otherwise have put first."""
     if not gate or not gate.get("used") or not (n_demoted or n_cb_only):
         return ""
-    head = ('<h3 style="margin:1.4em 0 0.3em 0">Ranked after every other row: variant '
-            "combinations no haplotype of the panel carries (carrier gate, tier C1)</h3>\n")
+    bound = bool(gate.get("frequency_bound"))
+    if gate.get("status") == "bound":
+        what = ("variant combinations of a sites-only dataset below the frequency bound "
+                "(carrier gate, tier C2)")
+    elif bound:
+        what = ("variant combinations no haplotype of the panel carries (carrier gate, tier "
+                "C1), or of a sites-only dataset below the frequency bound (C2)")
+    else:
+        what = "variant combinations no haplotype of the panel carries (carrier gate, tier C1)"
+    head = ('<h3 style="margin:1.4em 0 0.3em 0">Ranked after every other row: '
+            + what + "</h3>\n")
+    combines = ("combines variants whose frequencies fail the bound"
+                if gate.get("status") == "bound" else
+                "combines variants none of the panel's haplotypes carries together"
+                + (", or variants of a sites-only dataset whose frequencies fail the bound"
+                   if bound else ""))
     if not n_demoted:
         return (head + '<p class="caption">No row of the CFD ranking is in this tier. '
                 f"{n_cb_only:,} row{' is' if n_cb_only == 1 else 's are'} left out of the "
                 "views ranked by CRISPR-Bulge score (its table and panels (c) and (d) of "
-                "Section 2): its highest-scoring alignment there combines "
-                "variants none of the panel's haplotypes carries together.</p>\n")
+                "Section 2): its highest-scoring alignment there " + combines + ".</p>\n")
     dl = (f'<p style="margin:0 0 0.5em"><a class="download" href="{_dl_href(download_name)}" '
           f"download>&#11015; Download all {n_demoted:,} (curated TSV)</a></p>\n"
           if download_name else "")
@@ -513,40 +640,67 @@ def render_unobserved_section(gate, n_demoted, n_cb_only, table_html, download_n
     cb = (f" {n_cb_only:,} more row{' keeps its' if n_cb_only == 1 else 's keep their'} place "
           "by CFD, but the views ranked by CRISPR-Bulge score leave "
           f"{'it' if n_cb_only == 1 else 'them'} out: the highest-scoring alignment there "
-          "combines variants none of the panel's haplotypes carries together."
-          if n_cb_only else "")
+          + combines + "." if n_cb_only else "")
     perfect = (f" <strong>{n_perfect:,} of them {'is a perfect match' if n_perfect == 1 else 'are perfect matches'}"
                "</strong> (0 mismatches and bulges), which the validation panel would have put "
-               "first: a perfect match of variants no panel haplotype carries together may "
-               "still be real in a person the panel does not represent." if n_perfect else "")
+               "first: a perfect match of variants "
+               + ("whose frequencies fail the bound may still be real in a person of an "
+                  "ancestry the sources sample little."
+                  if gate.get("status") == "bound" else
+                  "no panel haplotype carries together may still be real in a person the "
+                  "panel does not represent.") if n_perfect else "")
+    if gate.get("status") == "bound":
+        takes = ("each takes, at its highest-CFD alignment, two or more variants of a "
+                 "sites-only dataset, which no phased panel was read to check, whose "
+                 "frequencies fail the bound: their product under 1e-06, or the rarest under "
+                 "0.001, so that a person carrying them all is not expected among the "
+                 "sources' samples. They are the search's worst cases that the frequencies "
+                 "do not support: ")
+    else:
+        takes = ("each takes, at its highest-CFD alignment, variants that each occur in the "
+                 "panel but that none of its haplotypes carries together, none of them "
+                 "reaching the row's CFD without every variant (or variants, a single one "
+                 "too, every haplotype carrying which has an indel in the target), so no "
+                 "individual of the panel has its sequence at this score"
+                 + ("; or two or more variants of a sites-only dataset, one or more of them "
+                    "not in the panel, whose frequencies fail the bound (their product under "
+                    "1e-06, or the rarest under 0.001)" if bound else "")
+                 + ". They are the search's worst cases that the panel does not show: ")
     return (
         head
         + f'<p class="caption">{n_demoted:,} row{"" if n_demoted == 1 else "s"} ({shown}): '
-        "each takes, at its highest-CFD alignment, variants that each occur in the panel "
-        "but that none of its haplotypes carries together, none of them reaching the row's "
-        "CFD without every variant (or variants, a single one too, "
-        "every haplotype carrying which has an indel in the target), so no individual of the "
-        "panel has its sequence at this score. They are the search's worst cases that the "
-        "panel does not show: left out of the views ranked by CFD (the top-1000 by CFD, "
+        + takes + "left out of the views ranked by CFD (the top-1000 by CFD, "
         "panels (a) and (b) of Section 2, the validation panel's CFD thresholds and the risk "
         "card's CFD bands; the panel's totals count them), and kept here and in the "
         "integrated results. A row of this table whose highest-CRISPR-Bulge alignment is not "
-        "C1 keeps its place in the views ranked by that score. The site itself can still "
+        + ("demoted" if bound else "C1")
+        + " keeps its place in the views ranked by that score. The site itself can still "
         "have a real off-target with fewer of the variants and a lower score, which a "
         "<code>--per-sample</code> search of a genotyped panel reports as its own row. The "
-        "<code>Observed</code> column says what the panel "
-        "shows, and how many haplotypes were expected to carry the variants together if "
-        "they were independent: where few were (&ldquo;too rare to tell&rdquo;), the zero "
-        "says little." + perfect + cb + "</p>\n" + dl + table_html)
+        + ("<code>Observed</code> column gives each row's frequency product and its rarest "
+           "frequency." if gate.get("status") == "bound" else
+           "<code>Observed</code> column says what the panel "
+           "shows, and how many haplotypes were expected to carry the variants together if "
+           "they were independent: where few were (&ldquo;too rare to tell&rdquo;), the zero "
+           "says little"
+           + ("; of a combination below the frequency bound, its frequency product and "
+              "rarest frequency." if bound else "."))
+        + perfect + cb + "</p>\n" + dl + table_html)
 
 
 def gate_demoted(df, prefix="_gate_cfd"):
-    """The rows the carrier gate ranks after the others (tier C1), by the alignment of
-    ``prefix`` (_gate_cfd: highest CFD; _gate_cb: highest CRISPR-Bulge)."""
+    """The rows the carrier gate ranks after the others (tier C1, and a C2 one of a
+    sites-only search below the frequency bound), by the alignment of ``prefix``
+    (_gate_cfd: highest CFD; _gate_cb: highest CRISPR-Bulge)."""
     col = prefix + "_tier"
     if col not in df.columns:
         return pd.Series(False, index=df.index)
-    return df[col].eq(GATE_DEMOTED)
+    demoted = df[col].eq(GATE_DEMOTED)
+    state = prefix + "_state"
+    if state in df.columns:
+        demoted = demoted | (df[col].eq(GATE_BELOW_BOUND[0])
+                             & df[state].eq(GATE_BELOW_BOUND[1]))
+    return demoted
 
 
 def _dense_note(value):
@@ -1858,6 +2012,9 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "reference_only": reference_only,
         # complete-search's --max-degeneracy (.Params.txt "Max_degeneracy"; absent when off)
         "max_degeneracy": params.get("Max_degeneracy"),
+        # the sites-only density guard's bits (.Params.txt "Sites_only_density_guard"; -1:
+        # turned off; absent before CRISPRme 2.10.0's guard, or in a web search)
+        "sites_only_guard": params.get("Sites_only_density_guard"),
         "n_hyperdense_rows": n_hyperdense_rows,
         "n_four_allele_rows": n_four_allele_rows,
     }
@@ -2012,7 +2169,7 @@ def build_mmb_matrix(df, cols, meta):
 
 def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
                            variant_count=None, no_registry=False, n_variant=None,
-                           gate_row=None):
+                           gate_row=None, guard_row=None):
     """'Analysis inputs & criteria' box (FDA off-target guidance VII.F.i / F.ii).
 
     States, in one place, the variant database(s), the variant inclusion policy
@@ -2028,7 +2185,8 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     ``variant_count`` (``{'n_records', 'databases'}`` from the Tier-0 registry) add
     the panel size + database SNP-variant count to the inclusion row when known
     (registry sample counts preferred -- they match the AC/AN denominator).
-    ``gate_row`` (render_gate_row): the carrier gate's row, after the Search mode one.
+    ``gate_row`` (render_gate_row): the carrier gate's row, after the Search mode one;
+    ``guard_row`` (render_guard_row): the sites-only density guard's, after it.
     ``no_registry`` (_run_lacks_registry) says the run's index has no Tier-0 registry,
     so that no SNP+indel co-occurrence table was written; a registry this report does
     not find (results read away from their install) is not that.
@@ -2160,7 +2318,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     rows = [
         ("Variant database(s)", _esc(ds)),
         ("Search mode", sm_note),
-    ] + ([gate_row] if gate_row else []) + [
+    ] + ([gate_row] if gate_row else []) + ([guard_row] if guard_row else []) + [
         ("Variants included",
          "All variants present in the database(s) &mdash; common and rare, genic "
          "and intergenic, SNPs and insertions/deletions (indels)."
@@ -3846,11 +4004,20 @@ def render_validation_panel(
     # alignment of each score
     _cb_gate = bool(vp.get("crispr_bulge_counts"))
     if vp.get("n_gate_demoted"):
+        _why_demoted = {
+            "C1": "tier C1: no haplotype of the panel has the sequence of the row's "
+                  "highest-CFD alignment",
+            "C1+bound": "tier C1: no haplotype of the panel has the sequence of the row's "
+                        "highest-CFD alignment; or C2 below the frequency bound: variants of "
+                        "a sites-only dataset whose frequencies' product is under 1e-06, or "
+                        "the rarest under 0.001",
+            "bound": "tier C2 below the frequency bound: variants of a sites-only dataset "
+                     "whose frequencies' product is under 1e-06, or the rarest under 0.001",
+        }[vp.get("gate_demotes") or "C1"]
         _variant_rows += (
-            "<tr><td>Ranked after every other row by the carrier gate (tier C1: no haplotype "
-            "of the panel has the sequence of the row's highest-CFD alignment; their table "
-            "follows the top-1000, in Section 6): counted above, left out of the CFD and "
-            "edit-distance thresholds, the panel and the risk card"
+            "<tr><td>Ranked after every other row by the carrier gate (" + _why_demoted
+            + "; their table follows the top-1000, in Section 6): counted above, left out "
+            "of the CFD and edit-distance thresholds, the panel and the risk card"
             + ("&rsquo;s CFD bands" if _cb_gate else "")
             + f"</td><td class='num'>{vp['n_gate_demoted']:,}</td></tr>")
     if vp.get("n_gate_demoted_cb") and _cb_gate:
@@ -4755,8 +4922,11 @@ def build_score_legend_html(untiered=None, gate=None):
             "&lt;panel&gt; haplotypes</code> (C1, with the number expected if the variants "
             "were independent; such a row is ranked after every other one, in its own "
             "table), <code>not checked: K of N variants not in &lt;panel&gt;</code> (C2, "
-            "with the product of the variants' frequencies and the rarest, the 1e-06 / "
-            "0.001 bound shown as information only). A row of one variant reads its "
+            "with the product of the variants' frequencies and the rarest, against the "
+            "1e-06 / 0.001 bound: in a search of a sites-only dataset a C2 row below it is "
+            "ranked after every other one too, in the same table, <code>not checked against "
+            "phased haplotypes (no panel)</code> where no phased panel was read; elsewhere the "
+            "bound is information only). A row of one variant reads its "
             "carriers, unless every haplotype carrying it has an indel that takes the "
             "target's bases off it (<code>all N &lt;panel&gt; haplotypes carrying it have "
             "an indel in the target</code>: C1, ranked after every other row as well). The "
@@ -6244,6 +6414,10 @@ def build_report(
     try:
         vp = build_validation_panel(df, cols, demoted=demoted,
                                     demoted_cb=gate_demoted(df, "_gate_cb"))
+        # what the gate's demoted rows are, for the panel's row of them: C1, or, in a search
+        # of a sites-only dataset, also C2 below the frequency bound (C2 alone, with no panel)
+        if gate and gate.get("frequency_bound"):
+            vp["gate_demotes"] = "bound" if gate.get("status") == "bound" else "C1+bound"
         perfect_banner = render_perfect_match_banner(vp)
         panel_top100_df = vp.get("panel_df")
 
@@ -6521,6 +6695,23 @@ def build_report(
         sys.stderr.write(f"generate-report: HVDR bed bundle unavailable: {exc}\n")
         hvdr_bundle_name = None
 
+    # ---- the sites-only density guard's regions (sites_only_guard.py) --------
+    # every chromosome's BED merged into one bundled file (small: one line per region)
+    guard = None
+    guard_bundle_name = None
+    try:
+        guard = load_density_guard(result_dir or os.path.dirname(integrated_tsv))
+        if guard and guard["lines"]:
+            with open(os.path.join(staging, GUARD_BUNDLE), "w") as _g:
+                _g.write("## CRISPRme sites-only density guard: the regions of the candidates "
+                         f"withheld (windows of 2^{guard['bits']} sequences or more)\n")
+                _g.write("#chrom\tstart\tend\tguide\tcandidates_withheld\tmax_bits\n")
+                _g.writelines(guard["lines"])
+            guard_bundle_name = GUARD_BUNDLE
+    except Exception as exc:  # noqa: BLE001 - never abort on the sidecar bundle
+        sys.stderr.write(f"generate-report: sites-only density guard BED unavailable: {exc}\n")
+        guard_bundle_name = None
+
     # ---- SNP+indel cis co-occurrence companion (*.indel_snp_cooc.tsv) --------
     # The indel post-analysis writes ONE 12-column *.indel_snp_cooc.tsv per
     # chromosome (header at analisi_indels_NNN.py); nothing merges them, so the
@@ -6691,6 +6882,8 @@ def build_report(
         no_registry=_run_lacks_registry(result_dir, meta),
         n_variant=vp.get("n_variant"),
         gate_row=render_gate_row(gate),
+        guard_row=render_guard_row(guard, guard_bundle_name, gate,
+                                   meta.get("sites_only_guard")),
     )
     # Assemble the per-site observed-haplotype modals (built as a side effect of the
     # top-1000 table renders) into a single backdrop + modal set + one self-contained
@@ -6770,6 +6963,8 @@ def build_report(
         _linkable.add(panel_top100_name)
     if hvdr_bundle_name:
         _linkable.add(hvdr_bundle_name)
+    if guard_bundle_name:
+        _linkable.add(guard_bundle_name)
     if cooc_bundle_name:
         _linkable.add(cooc_bundle_name)
     if observed_haplotypes_bundle_name:
@@ -6827,6 +7022,8 @@ def build_report(
         bundle += staged_tier_paths
         if hvdr_bundle_name:
             bundle.append(os.path.join(staging, hvdr_bundle_name))
+        if guard_bundle_name:
+            bundle.append(os.path.join(staging, guard_bundle_name))
         if gate_companion_name:
             bundle.append(os.path.join(staging, gate_companion_name))
         if cooc_bundle_name:
@@ -6887,9 +7084,12 @@ def build_report(
                     "used": gate.get("used"),
                     "panels": [p.get("name") for p in gate.get("panels") or []],
                     "min_expected": gate.get("min_expected"),
-                    # the tiers by each row's highest-CFD alignment, and A_same_score, the
-                    # A rows a haplotype reaches the row's CFD on without every variant
+                    # the tiers by each row's highest-CFD alignment, A_same_score, the A
+                    # rows a haplotype reaches the row's CFD on without every variant, and
+                    # C2_below_bound, the C2 rows of a sites-only search below the frequency
+                    # bound, ranked after the others (D6)
                     "tiers": gate.get("counts"),
+                    "frequency_bound": bool(gate.get("frequency_bound")),
                 } if gate else None),
                 "source_integrated_results": os.path.basename(integrated_tsv),
                 # Resolved from the engine on PATH, never hardcoded: the literal

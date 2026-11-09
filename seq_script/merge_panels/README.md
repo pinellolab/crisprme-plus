@@ -36,7 +36,20 @@ default is the re-phased HGDP + 1000 Genomes panel, `NRR_3_hg38+hg38_HGDP1kGP` s
 > The current shipped default (`NRR_3_hg38+hg38_HGDP1kGP` since 2.10.0, `NRG_3_hg38+hg38_HGDP1kGP`
 > before) is instead SHAPEIT5 re-phased and is not produced by this recipe.
 
-**Whole-genome mega build scripts (as-run, in this folder):**
+**The mega for CRISPRme 2.10.0: `mega_rebuild.sh`.** It rebuilds the index from the same
+merged VCFs (`mega.<chr>.afmax.vcf.gz`) so that every part of it reads the records CRISPRitz
+2.10.0's enricher reads: the build input keeps the `PASS`/`.` records with `INFO/AF` = `AF_max`
+(`PostProcess/prepare_mega_build_vcf.py`); one `build-index-only` of its copy with the presence
+genotype `MEGA` (`synth_sites_gt.py`, every ALT carried) builds the enriched genome, the SNP
+index, the fake-indel genome, the `_INDELS` index and the indel log, from which `MEGA` is taken
+out; the registry and the indel frequencies are built from the build input as the enricher reads
+it (FILTER, every allele, one REF>ALT on two records the more frequent one's); and
+`PostProcess/verify_mega_chrom.py` checks every store against the source VCF read on its own.
+Validated on chr22 and chr14 (METHODS section 2); not run genome-wide before the release's
+readiness audit. Usage: `mega_rebuild.sh <install_dir> <merged_vcf_dir> [chrom ...]` (its
+header has the environment it reads).
+
+**Whole-genome mega build scripts (as-run up to 2.8.1, in this folder):**
 `mega_gw_merge.sh` (the GW 24-contig 5-source merge driver around `merge_mega_sites.sh`)
 → `mega_build_indels.sh` (the fake-indel assembly: `synth_sites_gt.py` adds a synthetic
 `MEGA` pseudo-sample so the enricher materializes fake contigs, builds the `_INDELS` genome,
@@ -257,9 +270,14 @@ Then the hybrid index assembly (enrich via `build-index-only` **without**
 `--samplesID`, then drop `registry_hg38_mega/` in) — see `docs/DESIGN_mega_index.md`.
 
 ### Gaps / open items
-- **Indel per-dataset AF absent in v1** (SNP-only registry). Indel off-targets are
-  still discovered via fake-indel contigs, just un-annotated. Fast-follow: a
-  sites-only indel-AF store.
+- **Indel per-dataset AF absent in v1** (SNP-only registry): closed by the sites-only
+  indel-AF store (`build_mega_indel_af.py`), and, from the 2.10.0 rebuild, by the build
+  input's `INFO/AF` = `AF_max`, which the enricher writes into the indel log.
+- **FILTER (2.10.0).** The merge carries HGDP-2019's FILTER onto the merged record; up to 2.8.1
+  the registry and the indel frequencies read every record whatever it, while the enricher
+  skips a record outside `PASS`/`.`. `mega_rebuild.sh` builds every store from the `PASS`/`.`
+  records. Re-merging with each source's own `PASS` (decision C3) is left out: the records it
+  brings back are mostly TOPMed-only, pericentromeric and ExcHet (the D2 judges).
 - **Carrier/hom counts are not estimated**: the registry stores 0 for both (AF itself is
   exact), and its taxonomy sets `aggregate_af_only: True` (manifest `aggregation: "info_af"`),
   so the population-summary companion renders them NA.

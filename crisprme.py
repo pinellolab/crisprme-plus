@@ -560,6 +560,52 @@ def _sites_only_vcfs(vdir: str) -> bool:
     return bool(vcfs) and not any(_vcf_header_samples(vf) for vf in vcfs)
 
 
+# The header line of a VCF whose one sample is the presence genotype
+# PostProcess/synth_sites_gt.py writes on a sites-only VCF (its SITES_ONLY_MARK), so that the
+# enricher windows its indels: no individual's genotypes.
+SITES_ONLY_VCF_MARK = "##CRISPRme_sites_only="
+
+
+def _sites_only_build(vdir: str):
+    """How the VCFs of the folder ``vdir`` are sites-only, for build-index-only: "no
+    samples" when none of them has sample columns, "presence" when every one either has
+    none or is synth_sites_gt.py's presence genotype (its SITES_ONLY_VCF_MARK header
+    line) and one is, else None (a genotyped dataset, or no VCF to read). A sites-only
+    dataset has no genotypes to count, phase or list: its registry and indel frequencies
+    come from its INFO AF fields (PostProcess/build_mega_registry.py and
+    build_mega_indel_af.py), not from --samplesID."""
+    import gzip as _gz
+
+    vcfs = [os.path.join(vdir, f) for f in sorted(_listdir(vdir))
+            if f.endswith((".vcf.gz", ".vcf"))]
+    if not vcfs:
+        return None
+    kinds = set()
+    for vf in vcfs:
+        marked, samples = False, None
+        try:
+            with (_gz.open(vf, "rt") if vf.endswith(".gz") else open(vf)) as fh:
+                for line in fh:
+                    if line.startswith(SITES_ONLY_VCF_MARK):
+                        marked = True
+                    if line.startswith("#CHROM"):
+                        samples = line.rstrip("\n").split("\t")[9:]
+                        break
+                    if not line.startswith("#"):
+                        break
+        except (OSError, EOFError, ValueError):
+            return None
+        if samples is None:
+            return None
+        if not samples:
+            kinds.add("no samples")
+        elif marked and len(samples) == 1:
+            kinds.add("presence")
+        else:
+            return None
+    return "presence" if "presence" in kinds else "no samples"
+
+
 def print_help_complete_search() -> None:
     """Prints detailed help information for the complete-search functionality.
 
@@ -662,6 +708,16 @@ def print_help_complete_search() -> None:
         "or a dense window's) is cut back to the strongest within it; any other row resting "
         "on more without such carriers is left out. Rows resting on 2 or more such columns "
         "are rarely carried by anyone. Variant searches only; off by default [OPTIONAL]\n"
+        "\t--sites-only-density-guard, the bits of the sites-only density guard (default 20): "
+        "of a sites-only dataset (e.g. the mega panel), whose rows no genotype checks, the "
+        "candidates whose window spells 2^bits sequences or more are withheld from its SNP "
+        "and indel post-analysis, and the regions they lie in are listed "
+        "(*.sites_only_density_guard.bed; the report says how many). Such windows, the "
+        "immunoglobulin loci above all, match nearly any guide, give combinations of 10 or "
+        "more variants nobody is known to carry, and cost most of a search's time. A "
+        "genotyped dataset's rows are untouched [OPTIONAL]\n"
+        "\t--no-sites-only-density-guard, turn the sites-only density guard off: every "
+        "candidate of a sites-only dataset is analysed [OPTIONAL]\n"
         "\t--full_input_validate, also run a full per-VCF-record scan (chromosome "
         "coverage, AF/FILTER consistency, POS bounds, multiallelic/breakend/"
         "duplicate/phasing survey) before launching the search; slower than the "
@@ -824,6 +880,7 @@ _COMPLETE_SEARCH_FLAGS = frozenset(
         "--report-full", "--samplesID", "--sequence", "--sorting-criteria",
         "--sorting-criteria-scoring", "--thread", "--vcf",
         "--prioritize-observed", "--no-prioritize-observed", "--gate-min-expected",
+        "--sites-only-density-guard", "--no-sites-only-density-guard",
         # accepted, deliberately not advertised in the help
         "--help",
         "--vcf-filter-pass-values",
@@ -2146,6 +2203,33 @@ def _check_sorting_criteria(args: List[str], sorting_criteria: bool) -> str:
         error("Forbidden sorting criteria selected\n")
     return sorting_criteria_fewest
 
+def _check_sites_only_guard(args: List[str]) -> int:
+    """The bits of the sites-only density guard (sites_only_guard.py): of a sites-only
+    dataset, the candidates whose window spells 2^bits sequences or more are withheld from
+    its SNP and indel post-analysis, their regions listed. On by default
+    (window_density.SITES_ONLY_GUARD_BITS, 20); --sites-only-density-guard N sets it,
+    --no-sites-only-density-guard turns it off (-1). Read before the output folder is
+    made, as the other input errors."""
+    import window_density as _wd
+
+    if "--sites-only-density-guard" in args and "--no-sites-only-density-guard" in args:
+        error("--sites-only-density-guard and --no-sites-only-density-guard are mutually "
+              "exclusive")
+    if "--no-sites-only-density-guard" in args:
+        return -1
+    if "--sites-only-density-guard" not in args:
+        return _wd.SITES_ONLY_GUARD_BITS
+    try:
+        bits = int(args[args.index("--sites-only-density-guard") + 1])
+    except (IndexError, ValueError):
+        error("Please provide a whole number of bits for --sites-only-density-guard "
+              "(e.g. 20: windows of 2^20 sequences or more)")
+    if not 1 <= bits <= 64:
+        error("--sites-only-density-guard takes 1 to 64 bits (20 by default); "
+              "--no-sites-only-density-guard turns it off")
+    return bits
+
+
 def _check_output(args: List[str]) -> str:
     """Retrieves and validates the output folder from command-line arguments.
 
@@ -2875,6 +2959,7 @@ def complete_search() -> None:
     merge_t = _check_merge(args, "--merge" in args)  # merge threshold
     sorting_criteria_scoring = _check_sorting_criteria_scoring(args, "--sorting-criteria-scoring" in args)  # sorting criteria score columns
     sorting_criteria = _check_sorting_criteria(args, "--sorting-criteria" in args)  # sorting criteria (mm+bulges) columns
+    sites_only_guard = _check_sites_only_guard(args)  # the sites-only density guard's bits
     _refuse_no_temp_folder()  # (before the output folder is made)
     outputfolder = _check_output(args)  # output folder
     # (given no --samplesID, the samples lists of its datasets: their listing goes in the
@@ -3018,14 +3103,36 @@ def complete_search() -> None:
             os.path.join(current_working_directory, "Dictionaries"),
             list(dict.fromkeys(_named)), "per-sample" if per_sample else "population-level",
             gate_setting, os.environ.get("CRISPRME_GENOTYPE_TIER") or None)
+        _bound, _unlisted = _hp.gate_scope(
+            os.path.join(current_working_directory, "Dictionaries"),
+            list(dict.fromkeys(_named)), "per-sample" if per_sample else "population-level",
+            gate_setting)
+        _bound_text = (
+            "; a combination of a sites-only dataset that no panel can check, whose "
+            "variants' frequencies fail the bound (product >= 1e-06, rarest >= 0.001), "
+            "is ranked after the others too" if _bound else "")
+        _scope = (" (of the rows that name no carrier: the sites-only dataset's)"
+                  if _unlisted else "")
         if _gate_status == "run":
             print(
-                f"[complete-search] Carrier gate: each row's variant combination is checked "
-                f"against the phased genotypes of "
+                f"[complete-search] Carrier gate: each row's variant combination{_scope} "
+                f"is checked against the phased genotypes of "
                 f"{', '.join(_n for _n, _r, _role in _gate_panels)}; the report ranks a "
-                f"combination no haplotype carries after every other row (a table of its "
-                f"own after the top-1000), and drops none. --no-prioritize-observed turns "
-                f"it off.",
+                f"combination no haplotype carries after every other row (a table of its own "
+                f"after the top-1000){_bound_text}, and drops none. --no-prioritize-observed "
+                f"turns it off.",
+                flush=True,
+            )
+        elif _gate_status == "bound":
+            print(
+                f"[complete-search] Carrier gate: no phased panel to check the sites-only "
+                f"rows against (--prioritize-observed reads the phased {_hp.ORACLE_PANEL} "
+                f"genotypes, which crisprme.py download --what genotype-oracle installs): "
+                f"their combinations of two or more variants are checked against the "
+                f"frequency bound (product of the variants' frequencies >= 1e-06, rarest >= "
+                f"0.001), and the report ranks one below it after every other row, in a table "
+                f"of its own after the top-1000; it drops none. --no-prioritize-observed "
+                f"turns it off.",
                 flush=True,
             )
         elif _gate_status == "untiered":
@@ -3037,13 +3144,18 @@ def complete_search() -> None:
                 "are reported unchecked.",
                 flush=True,
             )
-        elif _gate_status == "no-oracle":
+        if _hp.oracle_missing(os.path.join(current_working_directory, "Dictionaries"),
+                              list(dict.fromkeys(_named)), gate_setting,
+                              os.environ.get("CRISPRME_GENOTYPE_TIER") or None):
             print(
                 f"WARNING [complete-search]: --prioritize-observed: the phased "
                 f"{_hp.ORACLE_PANEL} genotypes the sites-only rows are checked against are "
                 f"not installed (Dictionaries/genotypes_{_hp.ORACLE_PANEL}/, or the folder "
-                f"CRISPRME_GENOTYPE_TIER names), so the rows are reported unchecked. Install "
-                f"them with: crisprme.py download --what genotype-oracle",
+                f"CRISPRME_GENOTYPE_TIER names), so they are checked against "
+                + (f"the phased genotypes of "
+                   f"{', '.join(_n for _n, _r, _role in _gate_panels)} and the frequency bound"
+                   if _gate_panels else "the frequency bound alone")
+                + ". Install them with: crisprme.py download --what genotype-oracle",
                 flush=True,
             )
 
@@ -3207,6 +3319,10 @@ def complete_search() -> None:
                 flush=True,
             )
     os.environ["CRISPRME_MAX_DEGENERACY"] = str(max_degeneracy)
+
+    # the sites-only density guard's bits (_check_sites_only_guard, read before the output
+    # folder is made), for the post-analysis: CRISPRME_SITES_ONLY_GUARD, -1 is off
+    os.environ["CRISPRME_SITES_ONLY_GUARD"] = str(sites_only_guard)
 
     # extract pam seq from file
     pam_len = 0
@@ -3410,6 +3526,9 @@ def complete_search() -> None:
         # the reports read it from here (written only when given, as it is off by default)
         if max_degeneracy >= 0:
             p.write("Max_degeneracy\t" + str(max_degeneracy) + "\n")
+        # the sites-only density guard's bits, -1 when off (the report reads it; the
+        # guard's own BEDs say what it withheld)
+        p.write("Sites_only_density_guard\t" + str(sites_only_guard) + "\n")
         # Persist the silent-prune WARN into the run sidecar so it reaches
         # .Params.txt -> report.zip. The parent-stdout WARN (printed earlier in
         # complete_search) is NOT captured: log_verbose.txt only redirects the child
@@ -5299,6 +5418,9 @@ def build_index_only() -> None:
                                   pamfile, idx_val > 0)
         indels_idx = snp_idx + "_INDELS"
         _outputs += [(enriched, indels_out), (snp_idx,), (indels_idx,)]
+        # a sites-only dataset (the mega): no genotypes for the tiers or the phased indel
+        # store, which it does not get (STEP 1b, 1c); what does build its registry is said
+        _sites_only = _sites_only_build(vcfdir)
     for _out in _outputs:
         _refuse_locked_build(*_out)
     # An index already in place is kept, and pamfile recorded on it: not over a record of
@@ -5725,7 +5847,7 @@ def build_index_only() -> None:
             if samples_listing:
                 _mark_unfinished(_reg_dir)
                 _tiers_marked.append(1)
-            if _snp_overlay:
+            if _snp_overlay and not _sites_only:
                 _mark_unfinished(_igt_dir)
             _end_cleanly(_place, {})
             if _said is not None:
@@ -5771,6 +5893,33 @@ def build_index_only() -> None:
         print(f"NOTE [build-index-only]: no --samplesID given: the dict-less tiers in place "
               f"({_reg_dir}{' and its genotype store' if _gt_kept else ''}) are kept as they "
               f"are, not rebuilt. To rebuild them, run this again with --samplesID.", flush=True)
+    elif not db_to_samplesid and _sites_only and not samples_listing:
+        # A sites-only dataset (the mega) has no genotypes: no --samplesID would give its
+        # tiers, and the WARNING below told the user to run with one (stderr, which fails
+        # a CRISPRme stage that reads it). Its registry and indel frequencies come from its
+        # VCF's INFO AF fields, built beside this run (seq_script/merge_panels/mega_rebuild.sh).
+        print(
+            f"NOTE [build-index-only]: {vcf_name} is a sites-only dataset ("
+            + ("its VCFs have no sample columns"
+               if _sites_only == "no samples" else
+               "its one sample is the presence genotype PostProcess/synth_sites_gt.py writes")
+            + "): it has no genotypes, so no genotype-counted registry, genotype store or "
+            f"phased indel store is built for it here. Its registry and indel frequencies come "
+            f"from its INFO AF fields: PostProcess/build_mega_registry.py and "
+            f"PostProcess/build_mega_indel_af.py write Dictionaries/registry_{vcf_name}/ and "
+            f"Dictionaries/indel_af_{vcf_name}/ (seq_script/merge_panels/mega_rebuild.sh runs "
+            f"the whole recipe). "
+            + ("Its indels are searchable only from a VCF carrying the presence genotype of "
+               "PostProcess/synth_sites_gt.py: the enricher windows an indel a sample carries, "
+               "so this build's fake-indel genome holds none."
+               if _sites_only == "no samples" else
+               f"Strip the presence sample from Dictionaries/log_indels_{vcf_name}/ (its "
+               f"SAMPLES column) and remove Dictionaries/dictionaries_{vcf_name}/, which list "
+               f"it as a carrier, before the index is used (mega_rebuild.sh does)."),
+            flush=True,
+        )
+        if _tiers_marked:  # (as the enrichment went into place: no tiers come)
+            _unmark_unfinished(_reg_dir, _reg_made)
     elif not db_to_samplesid:
         _why = ("no usable samplesID entries (check the --samplesID listing)"
                 if samples_listing else "no --samplesID was given")
@@ -6025,7 +6174,11 @@ def build_index_only() -> None:
     # or no memory left aborts); absent -> the post-
     # analysis degrades to PUTATIVE via the log's unphased carriers. Enabled by
     # default (opt-out): set CRISPRME_INDEL_SNP=0 to disable.
-    if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
+    # A sites-only dataset has no phase to store: the presence genotype that makes its
+    # indels searchable is no individual's, and a store of it would name that pseudo-sample
+    # as every indel's carrier (STEP 1b says so).
+    if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes") \
+            and not _sites_only:
         _big, _ig_left = None, None  # (_ig_left: the chromosomes whose store is not built)
         try:
             import build_indel_genotypes as _big
@@ -6302,7 +6455,7 @@ def build_index_only() -> None:
     # could clear it. The SNP codes of the fake-indel genome are refused either way, and
     # only a run with the overlay on finishes them; a search reads that genome only to
     # build an INDELS index it does not have yet.
-    if _snp_overlay:
+    if _snp_overlay and not _sites_only:
         _parts.append(
             (_igt_dir, f"{_redo}, or remove the phased indel genotype store to search without "
                        f"it (rm -rf '{_igt_dir}')"))

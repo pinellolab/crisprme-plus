@@ -320,7 +320,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     # being their cluster position on the haplotype carrying the indel, read once per
     # target, REF text, place and variants (the memo), not once per aligned spacer.
     fold_of = {}
-    first_base_memo = {}
+    first_base_memo = _FIRST_BASE_MEMO
     for key in dict_var.keys():
         if len(key) == 4:  # an indel or MNV row (its target and aligned spacer in the key)
             row = dict_var[key][0]
@@ -1004,6 +1004,108 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             fileOut_disc.write(("\t".join(elem)))
 
 
+# The offsets of a row's first base past its start (_haplotype_cluster_position), read once
+# per target and REF text: the merge's chain reads them, and the fold of each cluster again.
+# Emptied at each guide and chromosome.
+_FIRST_BASE_MEMO = {}
+
+
+def _inside_offset(row):
+    """How far past its Cluster_Position a row is on the haplotype carrying its indel
+    (_haplotype_cluster_position): more than 0 for a row whose first base is one an
+    insertion adds, which since 2.10.0 starts at the insertion's anchor; 0 for any other."""
+    if not _holds_indel_token(row[snp_info]):
+        return 0
+    return max(0, _haplotype_cluster_position(row, _FIRST_BASE_MEMO) - int(row[pos]))
+
+
+def _clusters(lines):
+    """The merge clusters of ``lines`` (sorted by guide, chromosome and Cluster_Position),
+    each a list of rows in file order, in the order of their Cluster_Positions.
+
+    Rows within --merge bp (tau) of the previous one are one cluster, chained: one row of a
+    population-level search. Since 2.10.0 a row that starts on a base an insertion adds
+    starts at the insertion's anchor (indel_snp_cis.reference_start), up to the
+    insertion's length before where 2.8.1 placed it, and the alignments that start inside
+    one insertion are one site, at the anchor (decision (d), 2026-11-06: an indel row can
+    join a reference row's site there). Chained like any other row, such a row bridged two
+    clusters 2.8.1 kept apart, and a site of its own left the results for a neighbour's
+    cluster: on hg38_mega chr22, population-level, chr22:36,838,374 + of VEGFA site 3 and
+    chr22:47,379,217 + of EMX1 (the insertion rows chr22_36838378_A_ATGTG... and
+    chr22_47379212_A_AGGAGG... moved to their anchors, between them and the next cluster).
+    So the chain is made of the other rows, and a row starting inside an insertion joins
+    the cluster within tau of its Cluster_Position -- of two, the one nearer its place on
+    the haplotype, the next on a tie (where 2.8.1 had it) -- or, with none, a cluster with
+    the others of its kind within tau of it: it joins a site, and never chains two."""
+    group = None
+    current = None   # [last Cluster_Position of its chain, [(seq, row)]]
+    pending = []     # (seq, row, Cluster_Position, place on the haplotype) to be placed
+    seq = 0
+
+    def place(nxt_cp):
+        """Clusters to emit before a chain row of Cluster_Position nxt_cp (None: the group's
+        end) starts a cluster of its own, and the rows of ``pending`` that join it."""
+        out, joins, alone = [], [], []
+        for item in pending:
+            _s, _r, cp, hp = item
+            to_cur = current is not None and cp - current[0] <= tau
+            to_next = nxt_cp is not None and nxt_cp - cp <= tau
+            if to_cur and to_next:
+                if abs(nxt_cp - hp) <= abs(hp - current[0]):
+                    joins.append(item)
+                else:
+                    current[1].append(item[:2])
+            elif to_cur:
+                current[1].append(item[:2])
+            elif to_next:
+                joins.append(item)
+            else:
+                alone.append(item)
+        if current is not None:
+            out.append(current[1])
+        chain, last = [], None
+        for item in alone:
+            if chain and item[2] - last > tau:
+                out.append(chain)
+                chain = []
+            chain.append(item[:2])
+            last = item[2]
+        if chain:
+            out.append(chain)
+        return out, [j[:2] for j in joins]
+
+    for line in lines:
+        row = line.split("\t")
+        key = (row[true_guide], row[chrom])
+        if key != group:
+            if group is not None:
+                done, _joins = place(None)
+                for c in done:
+                    yield [r for _s, r in sorted(c, key=lambda x: x[0])]
+            current, pending, group = None, [], key
+            _FIRST_BASE_MEMO.clear()
+        cp = int(row[pos])
+        if _inside_offset(row):
+            pending.append((seq, row, cp, cp + _inside_offset(row)))
+        elif current is not None and cp - current[0] <= tau:
+            # the chain goes on: the inside rows held lie within it
+            current[1].extend(item[:2] for item in pending)
+            pending = []
+            current[0] = cp
+            current[1].append((seq, row))
+        else:
+            done, joins = place(cp)
+            for c in done:
+                yield [r for _s, r in sorted(c, key=lambda x: x[0])]
+            pending = []
+            current = [cp, joins + [(seq, row)]]
+        seq += 1
+    if group is not None:
+        done, _joins = place(None)
+        for c in done:
+            yield [r for _s, r in sorted(c, key=lambda x: x[0])]
+
+
 tau = int(sys.argv[3])  # range in bp to merge targets
 chrom = int(sys.argv[4]) - 1  # chromoso
 pos = int(sys.argv[5]) - 1  # position of target
@@ -1025,28 +1127,7 @@ with open(sys.argv[1], "r") as fileIn:
         with open(sys.argv[2] + ".discarded_samples", "w") as fileOut_disc:
             fileOut.write(header)
             fileOut_disc.write(header)
-            prev_pos = -(tau + 1)
-            best_row = ""
-            prev_guide = ""
-            prev_chr = ""
-            prev_snp = ""
-            cluster = []
-            for line in fileIn:
-                splitted = line.split("\t")
-                if (
-                    prev_guide != splitted[true_guide]
-                    or prev_chr != splitted[chrom]
-                    or int(splitted[pos]) - prev_pos > tau
-                ):
-                    get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info)
-                    cluster = [splitted]
-                else:
-                    cluster.append(splitted)
-                prev_guide = splitted[true_guide]
-                prev_pos = int(splitted[pos])
-                prev_chr = splitted[chrom]
-                prev_snp = splitted[snp_info]
-
-            get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info)
+            for cluster in _clusters(fileIn):
+                get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info)
 
 print("Merging done in: " + str(time.time() - start))

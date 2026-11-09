@@ -564,16 +564,43 @@ complete protocol.
    `bcftools merge -m none` the sources and add **`AF_max`** (max over present `AF_<src>`). There is
    **no pooled AF** (ΣAC/ΣAN isn't meaningful across these sources). Driver:
    `seq_script/merge_panels/mega_gw_merge.sh`.
-3. **Registry (sites-only).** `PostProcess/build_mega_registry.py` →
-   `tier0_registry.compile_registry_from_info_af`: each source becomes a db group with
-   `AC=round(AF·AN_nom)`, `AN_nom=2×cohort-N`; the GLOBAL group carries `AF_max`. SNP-only; indels
-   (~24%) are routed to the fake-indel path.
-4. **Searchable indels.** `seq_script/merge_panels/mega_build_indels.sh` adds a synthetic `MEGA`
-   pseudo-sample so the enricher materializes fake contigs, builds the `_INDELS` genome, then strips
-   the pseudo-sample back out.
-5. **Enrich + index** (produces the kit): `build-index-only` **without** `--samplesID` (sites-only
-   has no genotypes to count); drop in the registry afterward. Design rationale:
+3. **The 2.10.0 rebuild, from those VCFs** (`seq_script/merge_panels/mega_rebuild.sh <install>
+   <merged_vcf_dir> [chrom ...]`, one PAM a run; `PAM`, `BDNA`, `BRNA`, `THREADS` and `RUN`, a
+   container prefix, from the environment). Every part of the index reads the records CRISPRitz
+   2.10.0's enricher reads:
+   - the build input (`PostProcess/prepare_mega_build_vcf.py`): the records whose FILTER is `PASS`
+     or `.` only, `INFO/AF` = `AF_max` for SNVs and indels (the indel log's frequency);
+   - one `build-index-only` **without** `--samplesID` of its copy with a presence genotype,
+     `MEGA`, carrying every ALT (`PostProcess/synth_sites_gt.py`), so the enricher windows the
+     indels: the enriched genome (the kit), the SNP index, the fake-indel genome, the `_INDELS`
+     index and the indel log; then `MEGA` out of the log and the per-sample dictionaries removed
+     (`build-index-only` says, on stdout, that a sites-only dataset gets no genotype store);
+   - the registry (`PostProcess/build_mega_registry.py` →
+     `tier0_registry.compile_registry_from_info_af`: each source a db group with
+     `AC=round(AF·AN_nom)`, `AN_nom=2×cohort-N`, the GLOBAL group `AF_max`) and the per-source
+     indel frequencies (`PostProcess/build_mega_indel_af.py`), both reading the build input as
+     the enricher does (FILTER, every allele of a line, one REF>ALT on two records the more
+     frequent one's); the registry is SNP-only, the indels (~24%) the fake-indel path's;
+   - `PostProcess/verify_mega_chrom.py`, which reads the source VCF on its own and checks the
+     registry, the indel frequencies, the indel log, the enriched genome and the build input
+     against it.
+
+   Measured on chr22 and chr14 (METHODS section 2): every check passes, and the indexes and the
+   indel log are byte for byte those of the two-build recipe it replaces (step 4, and
+   `build-index-only` without `--samplesID` for the SNP index). Run it genome-wide only after
+   the release's readiness audit. Design rationale:
    [`docs/DESIGN_mega_index.md`](DESIGN_mega_index.md).
+4. **Up to 2.8.1: searchable indels** (the shipped mega's). `seq_script/merge_panels/mega_build_indels.sh`
+   adds a synthetic `MEGA` pseudo-sample so the enricher materializes fake contigs, builds the
+   `_INDELS` genome, then strips the pseudo-sample back out; the registry and the indel
+   frequencies were built from every record of the VCF, whatever its FILTER.
+5. **Searching it.** A sites-only dataset's candidates in windows of 2<sup>20</sup> sequences or
+   more are withheld from its post-analysis by the sites-only density guard
+   (`--no-sites-only-density-guard` turns it off), and its rows of two or more variants whose
+   frequencies fail the safeguards' bound are ranked after the others by the carrier gate
+   (METHODS section 5). With the guard, a search of five guides at 4 mismatches and 1 + 1 bulges
+   took 1.46 times the shipped mega's on chr22 and 1.57 times on chr14 (IGH), measured side by
+   side; unguarded, the chr14 search was projected at 12 to 16 h against 46 min.
 
 Once you have an enriched genome (`Genomes/hg38+hg38_<ds>/` + `_INDELS/`) — downloaded or
 rebuilt — **any** PAM reuses it via Step 3.

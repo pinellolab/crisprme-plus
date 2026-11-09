@@ -65,6 +65,15 @@ if [ ! -s "$targets_tsv_alt_chrom" ]; then
     echo "WARNING: no indel targets matched '$fakechrom' in $targets_tsv_alt -- the per-chromosome indel subset for $chrom is EMPTY (see GitHub issue #172 if unexpected)."
 fi
 
+# the sites-only density guard (sites_only_guard.py, CRISPRme 2.10.0): of a sites-only
+# dataset (the mega), the indel candidates whose window on the fake-indel contig spells
+# 2^bits sequences or more (CRISPRME_SITES_ONLY_GUARD, 20 by default) leave the targets
+# before the post-analysis reads them, and their regions are listed in the BED; a
+# genotyped dataset's are untouched (after the check above: a subset it withholds whole
+# is no issue #172)
+python sites_only_guard.py indel "$targets_tsv_alt_chrom" "$dict_folder" "$vcf_name" "$chrom" \
+    "${output_folder}/${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}_${chrom}.indel.sites_only_density_guard.bed"
+
 # adjust targets header
 #
 # Only ever prepend an actual header. If an upstream filter dropped the header

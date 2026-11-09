@@ -662,7 +662,7 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_compute_backend -v
 
-      - name: "2.5.1 fast mode + mega + scoring (two-pass equivalence/CFD oracle, aggregate carrier-NA, mega registry/indel-AF)"
+      - name: "2.5.1 fast mode + mega + scoring (two-pass equivalence/CFD oracle, aggregate carrier-NA, mega registry/indel-AF, the 2.10.0 mega rebuild recipe)"
         # The two-pass population-level analysis (default since 2.5.3; opt-in `--fast` in
         # 2.5.1, renamed to the `--per-sample` opt-out in 2.5.4): lossless detection +
         # worst-case bound. Plus the all-source mega registry/indel-AF and aggregate
@@ -673,9 +673,9 @@ jobs:
           test_twopass_cfd_exact test_twopass_fast_equivalence test_twopass_legacy_cfd
           test_twopass_lynchpin_counterexamples test_aggregate_carrier_na
           test_build_mega_registry test_build_mega_indel_af test_lossless_dense
-          test_memory_check -v
+          test_memory_check test_prepare_mega_build_vcf test_mega_rebuild -v
 
-      - name: "The ambiguity budget (2.10.0): CRISPRME_IUPAC_CAP in bits, hyperdense windows and four-allele positions flagged, --max-degeneracy"
+      - name: "The ambiguity budget (2.10.0): CRISPRME_IUPAC_CAP in bits, hyperdense windows and four-allele positions flagged, --max-degeneracy, the sites-only density guard"
         # A three-allele column of a split site coded with every allele weighs log2(3) bits
         # of the cap, a four-allele one (Q) 2, where the cap counted positions; a window of
         # 2^20 sequences or more goes to the high-variant-density BED whatever the cap. The
@@ -683,4 +683,4 @@ jobs:
         # crisprme.py complete-search against test_build_index_only_atomic's stub engine,
         # and the report's dense-region column and inputs card.
         working-directory: PostProcess
-        run: python -m unittest test_window_density -v
+        run: python -m unittest test_window_density test_sites_only_guard -v

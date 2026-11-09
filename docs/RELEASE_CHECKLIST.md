@@ -407,9 +407,12 @@ crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NNN-NO-PAM.tx
 # 3. search it
 crisprme.py complete-search --pam PAMs/20bp-NNN-NO-PAM.txt --index-path genome_library … --guide guides.txt …
 ```
-The mega sites-only indel half uses `seq_script/merge_panels/mega_build_indels.sh` (honors `PAM=`/`IDXNAME=`
-since T-34); the three phased per-dataset scripts (`{hgdp1kgp,onekg2021,hprc}_build.sh`) thread `--pam`
-directly.
+The mega is rebuilt for 2.10.0 by `seq_script/merge_panels/mega_rebuild.sh <install> <merged_vcf_dir>
+[chrom ...]` (honors `PAM=`, one PAM a run; its last step, `PostProcess/verify_mega_chrom.py`, must print
+`ALL PASS` for every chromosome before an archive is packed: the registry, the indel frequencies, the indel
+log and the enriched genome checked against the source VCF read on its own); up to 2.8.1 its sites-only
+indel half used `seq_script/merge_panels/mega_build_indels.sh` (honors `PAM=`/`IDXNAME=` since T-34). The
+three phased per-dataset scripts (`{hgdp1kgp,onekg2021,hprc}_build.sh`) thread `--pam` directly.
 
 ### Release checklist for a NEW published index
 - [ ] **Provenance verified (T-35)** — the source VCF matches the shipped/intended index (sample list +

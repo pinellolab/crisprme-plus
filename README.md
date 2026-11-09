@@ -1060,6 +1060,23 @@ its purpose and usage:
   chromosome how many were cut back and left out, and the report states the cap. Variant
   searches only.
 
+- `--sites-only-density-guard <bits>` / `--no-sites-only-density-guard` (*Optional*, on by
+  default at 20 bits; 1 to 64)
+  <br>The **sites-only density guard** (since 2.10.0). A sites-only dataset (the `mega` panel)
+  has no genotypes to tell which combinations of a window's alleles anyone carries, and with
+  every allele coded its windows in the immunoglobulin loci and some tandem repeats spell
+  2<sup>20</sup> sequences and more: they match nearly any guide, as combinations of ten
+  variants and more, and their candidates cost most of a mega search's time. The guard
+  withholds, from the SNP and the indel post-analysis of a sites-only dataset, every
+  candidate whose window spells 2<sup>bits</sup> sequences or more, and lists the regions
+  they lie in (`*.sites_only_density_guard.bed`, merged into the report's
+  `sites_only_density_guard.bed`; the report's inputs card says how many). The reference rows
+  there, and every row of a genotyped dataset, are reported as always; the run's
+  `log_verbose.txt` says per chromosome what it withheld. `--no-sites-only-density-guard`
+  analyses every candidate. Measured at 4 mismatches and 1 + 1 bulges, a search of the mega
+  rebuilt for 2.10.0 with the guard took 1.46 (chr22) and 1.57 (chr14) times the shipped
+  mega's; unguarded, the chr14 search was projected at 12 to 16 h. See METHODS §5.
+
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP
   post-analysis. Reports each observed haplotype with CONFIRMED cis phasing, named carrier
@@ -1109,10 +1126,17 @@ its purpose and usage:
   turns the gate off. `--prioritize-observed` checks a **sites-only** dataset's rows (the
   `mega` panel) against the phased HGDP + 1000 Genomes genotypes (the genotype oracle: see
   `download --what genotype-oracle`; an installed `NRG_3_hg38+hg38_HGDP1kGP` index brings it
-  too). `--gate-min-expected` (default 3) is the number of panel haplotypes expected to carry
-  a combination if its variants were independent below which the gate calls a combination
-  none carries "too rare to tell" (ranked after the others all the same); 0 turns that
-  distinction off. A per-sample search needs no gate: its rows name their cis carriers. See
+  too). In a search of a sites-only dataset a C2 row — one no panel can check — whose
+  variants' frequencies fail the safeguards' bound (their product under 1e-06, or the rarest
+  under 0.001; `AF_max` on `mega`) is ranked after the others as a C1 row is, labelled
+  `... (below the 1e-06 / 0.001 bound, ranked after the others)`, and dropped from nothing;
+  without the oracle every row of two or more variants of the sites-only dataset is checked
+  against the bound alone (`not checked against phased haplotypes (no panel)`). In a
+  per-sample search beside a genotyped dataset the gate reads the rows that name no carrier,
+  the sites-only dataset's. `--gate-min-expected` (default 3) is the number of panel haplotypes
+  expected to carry a combination if its variants were independent below which the gate calls
+  a combination none carries "too rare to tell" (ranked after the others all the same); 0 turns
+  that distinction off. A per-sample search needs no gate: its rows name their cis carriers. See
   METHODS §5.
 
 - `--compute-backend {cpu,cuda,metal}` (*Optional*)
@@ -2128,8 +2152,10 @@ is under `data/`). Reading top to bottom:
   index such a CRISPRitz built, nor its SNP on one without the tiers. Of the indexes published
   until the rebuild for 2.10.0 this affects only HPRC's chrY (a known limit:
   [§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)); CRISPRitz 2.10.0 finds each
-  record's `AF` by its key. The mega's VCF has no `INFO/AF` at all, so none of its indels has a
-  frequency there, and the report's `indel_af.tsv` gives their per-dataset ones.
+  record's `AF` by its key. The shipped mega's VCF has no `INFO/AF` at all, so none of its indels
+  has a frequency there, and the report's `indel_af.tsv` gives their per-dataset ones; the mega
+  rebuilt for 2.10.0 (`seq_script/merge_panels/mega_rebuild.sh`) sets `INFO/AF` to `AF_max`, so
+  its indel rows show the global frequency as its SNP rows do.
 - **Key off-target table columns** — in the per-site table (and every download TSV):
   - **Chromosome / Position / Direction (`+`/`-`)** — where the off-target is and on which strand.
   - **crRNA vs DNA (aligned)** — the guide and the genomic sequence aligned; `-` marks a bulge.
