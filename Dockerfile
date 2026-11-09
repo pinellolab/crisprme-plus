@@ -33,6 +33,9 @@ FROM mambaorg/micromamba:2.10.0@sha256:e1476182cd40eb1f7c0cfae4adec9bfd78f3d7f05
 
 LABEL org.opencontainers.image.authors="ManuelTgn, lucapinello"
 
+# The CRISPRitz pin: the exact tag this release was tested with, of CRISPRme's own major.minor
+# (docs/RELEASING.md, Version policy; install_from_source.sh's CRISPRITZ_REF default equals it).
+# The Bioconda recipe's range, crispritz >=X.Y.0,<X.(Y+1), can start below it (decision D5).
 ARG crispritz_ref=v2.10.0
 ENV SHELL=bash
 ENV PREFIX=/opt/conda
