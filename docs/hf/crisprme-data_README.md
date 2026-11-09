@@ -18,6 +18,16 @@ A fast, reliable mirror of the reference resources CRISPRme+ needs, plus
 **precomputed indexes** — so users can skip the slow raw-data download, the
 multi-hour variant **enrichment**, and the index build entirely.
 
+> **Newer indexes exist.** CRISPRme+ **2.10.0** publishes its indexes, rebuilt by CRISPRitz
+> 2.10.0 in index format 2 and named for their guide length and side (`20-NRR_3_hg38+hg38_HGDP1kGP`),
+> with each panel's Dictionaries once and the enriched-genome kits they were built from, in
+> [`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2),
+> which 2.10.0's `download` reads by default. The archives under `indexes/` and `build-inputs/`
+> here are CRISPRme+ 2.8.1's (index format 1), kept unchanged for 2.8.1 and earlier, which
+> cannot read index format 2; 2.10.0 still fetches one by its name, and says which index of
+> 2.10.0 replaces it. The genome, annotations, PAMs, sample lists and VCFs here serve every
+> release.
+
 Pulled automatically by `crisprme.py download` (and the web **Settings → Data
 Manager**). See the CRISPRme+ docs for the full data layout and quickstart:
 https://github.com/pinellolab/crisprme-plus

@@ -1484,11 +1484,13 @@ while read vcf_f; do
 				[ -z "$_wider" ] || { _todo="${_wider##*/} serves it pruned to this PAM at leaf time (--prune-pam), which the installed CRISPRitz cannot do: install a CRISPRitz build that supports --prune-pam (CRISPRme pins one). "; break; }
 			fi
 		done
-		# (the indexes published are of N = 3)
+		# (the indexes published are of N = 3, and since 2.10.0 named for their guide length and
+		# side, as a build names them: _build_name)
+		_build_name _pub_v "$true_pam" "$(( bMax > 3 ? bMax : 3 ))" "$_set"
 		printf "ERROR: no variant index here serves this search (genome %s, dataset %s, PAM %s, %s DNA and %s RNA bulge(s), a %s-nt guide), and none can be built: neither its VCFs (VCFs/%s) nor its enriched genome (Genomes/%s) is installed. Variant indexes installed for %s: %s. %s%sTo install one: crisprme.py download --what index --index-name %s if it is published, or crisprme.py build-index-only with the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)\n" \
 			"$ref_name" "$vcf_name" "$true_pam" "$bDNA" "$bRNA" "$(( ${#fullseqpam} - ${pos#-} ))" \
 			"$vcf_name" "$_set" "$vcf_name" "${_have:-none}" "$_fewer" "$_todo" \
-			"${true_pam}_$(( bMax > 3 ? bMax : 3 ))_${_set}" >&2
+			"$_pub_v" >&2
 		for _lib in "${_libs[@]}"; do
 			_other=$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax" any)
 			[ -z "$_other" ] || { _say_other_side "$_other"; break; }
@@ -1867,9 +1869,10 @@ while read vcf_f; do
 			fi
 		fi
 		_say_wider_flank "$ref_lib" "$ref_name"
-		# (the indexes published are named in the older form, and are of N = 3)
-		_pub="${true_pam}_$(( bMax > 3 ? bMax : 3 ))_${ref_name}"
-		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s, or %s as a build names it since 2.10.0)\n" "$true_pam" "$ref_name" "$bMax" "$_pub" "$(basename "$idx_folder1")" >&2
+		# (the indexes published are of N = 3, and since 2.10.0 named for their guide length and
+		# side, as a build names them: _build_name)
+		_build_name _pub "$true_pam" "$(( bMax > 3 ? bMax : 3 ))" "$ref_name"
+		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s, or %s as a build names it since 2.10.0)\n" "$true_pam" "$ref_name" "$bMax" "${true_pam}_$(( bMax > 3 ? bMax : 3 ))_${ref_name}" "$(basename "$idx_folder1")" >&2
 		printf "       re-run 'crisprme.py download --what index --index-name %s' if it is published (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$_pub" >&2
 		exit 1
 	else

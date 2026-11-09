@@ -62,8 +62,8 @@ and only a WARNING in its error log).
 ## 2. A genome-wide search needs a lot of disk — plan for it
 
 The default variant-aware install (`download --what all`, then
-`download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP`) takes **~150 GB** on disk
-(measured: 150.0 GB) before any results:
+`download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP`) takes **~150 GB** on disk
+(measured: 150.0 GB, with 2.8.1's `NRR_3_hg38+hg38_HGDP1kGP`) before any results:
 
 | Item | Approx size |
 |---|---|

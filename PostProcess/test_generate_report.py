@@ -1196,7 +1196,7 @@ class TestGenerateReport(unittest.TestCase):
             "carriers need not carry every variant in it. To get the tiers, rebuild the index "
             "with <code>build-index-only --samplesID</code>, or with Build an index locally in "
             "the web's Settings, or download a prebuilt one (<code>crisprme.py download --what "
-            "index --index-name NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index "
+            "index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index "
             "in Settings).")
         two = row({**base, "untiered": ["hg38_1000G", "hg38_<x>"]})
         for said in ("named carrier samples only for <code>hg38_1000G</code>, "

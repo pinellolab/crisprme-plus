@@ -68,7 +68,14 @@ report malformed rows: use them with 2.8.1 or later. Only **variable/longer-flan
 e.g. `NNNNNNNN_3` with an 8-nt flank) are unsafe for old code — a 3-nt search is a width mismatch
 and old tools lack the guard — so those go in a **SEPARATE HF repo**,
 `lucapinello/crisprme-data-general-index` (since 2.8.1), which the old default never points at.
-New code's resolver knows both; `publish-index` targets that repo only for width>3 indexes.
+New code's resolver knows both; `publish-index` targets that repo only for width>3 indexes of
+index format 1.
+
+Since 2.10.0 the same isolation holds by index format: every index of format 2 (CRISPRitz 2.10.0),
+which 2.8.1 refuses and 2.8.0 aborts on, is published in `lucapinello/crisprme-indexes-format2`
+(decision C2), whatever its flank width, the general index `20-NNNNNNNN_3_*` included; no release
+before 2.10.0 points at it, and `publish-index` refuses an index of format 2 in the two repos above
+(`crisprme_hf.resolve_index_repo`, `docs/PRECOMPUTED_INDEXES.md`).
 
 ### Layer 2 — RUNTIME version-gate: fail-safe even if an index is hand-moved
 *As built in CRISPRme 2.10.0 (2.8.1 writes and reads no sidecar):* every index CRISPRme builds
@@ -141,6 +148,10 @@ that it reads, what such a flank cannot index, with a warning of one built befor
 index's name and `.pam_build`, not a sidecar.
 
 ## 6. NNN index publish plan (*superseded*)
+2.10.0 does not build `NNN_3` again: the general index `20-NNNNNNNN_3_*` (format 2, in
+`lucapinello/crisprme-indexes-format2`, with its `.index_meta.json` record) serves every search
+`NNN_3` served at the same speed (a 3-nt and an 8-nt PAM-less index cost the same: every position
+is a site), and a download of 2.8.1's `NNN_3_*` names it (`seq_script/rebuild/index_set_2.10.0.tsv`).
 2.8.1 publishes `NNN_3` in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
 `lucapinello/crisprme-data-general-index`, with no `index_meta.json`. The plan was:
 The genome-wide NNN HGDP+1kGP index (in progress) is published to the **new pam-less HF repo**,

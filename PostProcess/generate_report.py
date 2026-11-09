@@ -597,7 +597,7 @@ def _hap_label(n, head=False, greedy=False):
 _GET_THE_TIERS = (
     "rebuild the index with <code>build-index-only --samplesID</code>, or with Build an index "
     "locally in the web's Settings, or download a prebuilt one (<code>crisprme.py download "
-    "--what index --index-name NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index "
+    "--what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index "
     "in Settings)"
 )
 

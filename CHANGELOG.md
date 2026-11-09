@@ -57,6 +57,84 @@ and the `release-crisprme` skill.
   dense window's note (3; Changed) or a CRISPR-Bulge score's last digit (4). Such a score can
   differ in its last digit from one batch of the scorer, or one machine, to another: so do 7
   per-sample rows and 1 reference row of the indexes built again.
+- **The indexes of 2.10.0 have a Hugging Face repo of their own, and each variant panel's
+  Dictionaries and genotype store are published and fetched once (decisions C2 and P4).**
+  - **The location.** Every index of index format 2, which CRISPRme 2.8.1 refuses and 2.8.0
+    aborts on, or named for its guide length and side, goes to and comes from
+    `lucapinello/crisprme-indexes-format2` (`crisprme_hf.FORMAT2_HF_REPO`), which no earlier
+    release points at: `publish-index` routes it there by itself, by the format its `.bin` files
+    are in, and refuses to publish one in `lucapinello/crisprme-data` or
+    `lucapinello/crisprme-data-general-index`, the repos 2.8.1 reads, even when named; `download`
+    of such a name fetches it there; `download --what build-inputs` fetches 2.10.0's
+    enriched-genome kits there (2.8.1's, enriched by CRISPRitz 2.9.1 with one allele of a site and
+    narrower fake-indel windows, do not match 2.10.0's Dictionaries); `download --what
+    genotype-oracle` takes this repo's stores first, and 2.8.1's where it holds none; and the
+    web's Settings catalog lists this repo's indexes, no longer 2.8.1's (merged from two repos up
+    to now). The archives of 2.8.1 stay where they are, with a note on their cards that newer
+    indexes exist; `download` still fetches one by its name, and names the index of 2.10.0 that
+    replaces it, read offline from the index set (below): its build of 2.10.0, or the index that
+    serves its searches where it is not built again (`NNN_3_*`: the general index `20-NNNNNNNN_3_*`,
+    at the same speed; NRG on HPRC and mega: NRR there). `download --what all` fetches the
+    default reference index `20-NRR_3_hg38`, and 2.8.1's `NRR_3_hg38` where it cannot. Every
+    advice that names an index to download names 2.10.0's (`20-NRR_3_hg38+hg38_HGDP1kGP`;
+    complete-test, the search's refusals, the setup and download help, the per-sample banner,
+    the report, the one-click installers).
+  - **Once per panel.** A variant index of format 2 is published without its panel's
+    Dictionaries: its archive holds the index, its `_INDELS` index and a manifest that names the
+    panel's **Dictionaries bundle** (`dictionaries-bundle_<vcf>.tar.gz`: `registry_`,
+    `log_indels_`, `indel_genotypes_`, mega's `indel_af_`, a classic publish's `dictionaries_`,
+    and the samplesID lists) and its genotype store (`genotypes_<vcf>.tar.gz`) by name and
+    fingerprint (`crisprme_hf.companion_fingerprint`: the SHA-256 of one line per file, its path,
+    size and SHA-256, a gzip header's timestamp read as zeros, which no reader uses). Each
+    companion goes up with a record of what it holds (`<name>.json`) once: `publish-index` of a
+    panel's next index finds it in the repo, the same, and uploads the index alone; one built
+    against another build of the panel's Dictionaries is refused before anything is uploaded,
+    and `--replace-companions` replaces them for a panel built again as a whole. `download`
+    installs each once per panel: kept, and not fetched again, where the install holds it with
+    the fingerprint the index's manifest names (`Dictionaries/.<name>.json` records it and the
+    indexes installed with it); a repo's companion that is not that one is refused, nothing of
+    it installed; an archive of 2.8.1, which carries its own build's Dictionaries, is refused in a
+    working directory that holds a bundle of its panel, and a bundle that replaces another
+    build's Dictionaries names the installed indexes that read them. Up to 2.8.1 every variant
+    archive carried its own copy of the Dictionaries (16.5 GB of each HGDP + 1000 Genomes
+    archive), every install replaced them, and `publish-index` re-packed and re-uploaded the
+    genotype store with every index; for the seven HGDP + 1000 Genomes indexes of 2.10.0's set that
+    is six copies of about 16.5 GB not uploaded, and an install of a second index of a panel
+    fetches its own archive alone. An index of format 1 is
+    published and installed as before. The catalog no longer lists an `indel_genotypes_`
+    companion as an index (the phased indel genotypes `publish-index` has uploaded since 2.8.1).
+  - Covered by `PostProcess/test_panel_companions.py` (a fake hub that keeps its repos in a
+    folder: the routing, the catalog, the first and the next publish of a panel, another build
+    refused and replaced, a gzip timestamp, an index of format 2 never in a repo of 2.8.1, an
+    index of format 1 unchanged; the first and the next download of a panel, `--no-genotypes`, a
+    complete install that costs no call, a companion that is not the index's refused, an
+    archive of 2.8.1 refused over a bundle, a bundle over another build's Dictionaries named;
+    the successor of an archive of 2.8.1; 21 of its 23 tests fail on the code before it, the
+    other two pin 2.8.1's behaviour), `test_legacy_index_access` (the catalog of this release,
+    the repo of 2.8.1 still listed when named), and the advice and installer tests of
+    `test_defaults_and_index_flex`, `test_bulge_cap`, `test_index_resolution`,
+    `test_generate_report` and `test_build_index_only_atomic`.
+- **The index set of 2.10.0, the rebuild manifest** (`seq_script/rebuild/index_set_2.10.0.tsv`,
+  `seq_script/rebuild/README.md`; the lean set approved on 2026-11-08). Every archive the rebuild
+  builds and publishes, one line each, with its panel, PAM file, PAM, side, spacer length, N, the
+  build's bulges, the archives of 2.8.1 it replaces, and its build and publish commands: SpCas9
+  NRR 20-nt on the reference, HGDP + 1000 Genomes, HPRC and mega; NGG and NRG 20-nt, the general
+  PAM-less index (an 8-nt 3′ flank, 20-nt guide), SaCas9 NNGRRN 22-nt and Cas12a TTTN 5′ at 20
+  and 23 nt, each on the reference and HGDP + 1000 Genomes; every index of N = 3 (up to 2 bulges
+  of each type, the web's ceiling); each panel's Dictionaries bundle, genotype store and
+  phased indel genotypes (HGDP + 1000 Genomes, HPRC; mega, sites-only, a bundle alone); and the
+  enriched-genome kits. `NNN_3` is not built again. The rebuild follows it, one working
+  directory per panel so that a panel's indexes share its one Dictionaries, and the D7 readiness
+  audit runs `seq_script/rebuild/check_index_set.py` before any build: each PAM file gives its
+  row's PAM, side and spacer; N is the build's bulges + 1; each name is the one
+  `build-index-only` gives the build (`index_fit.index_name`), and routes to the format-2 repo;
+  each index serves its own guide at 2 + 2 bulges (`index_fit.fits`); each variant index's
+  reference index is in the set; each panel has its companions once; every index archive of
+  2.8.1 is replaced by exactly one archive of the set, the one a download of it names
+  (`--commands` prints every build command, then every publish command). Covered by
+  `PostProcess/test_index_set.py`, which also mutates the set nine ways and checks that each is
+  found. The PAM files the set builds ship in `PAMs/`: `20bp-NNNNNNNN-NO-PAM.txt` (the general
+  index), `22bp-NNGRRN-SaCas9.txt` and `20bp-TTTN-Cas12a.txt`.
 - **Every index CRISPRme builds records what it holds, in `.index_meta.json`.** `build-index-only`,
   a search's own build and each sub-index of an INDELS index write the index format, the build
   PAM, its side, the flank and guide lengths, the budget, whether the PAM is all `N` and whether the

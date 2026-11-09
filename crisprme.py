@@ -219,6 +219,8 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
     resolve_repo,
     synthesize_combined_samplesid,
     DEFAULT_HF_REPO,
+    FORMAT2_HF_REPO,
+    GENERAL_INDEX_HF_REPO,
 )
 from utils import download_reference_genome  # noqa: E402
 from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file, haplotype_genome_view, clear_stale_haplotype_indexes, stamp_built_haplotype_indexes, stamp_index_source, foreign_index_sources, haplotype_search_name, unrecorded_index_dirs, haplotype_genome_source, record_haplotype_source, haplotype_source_matches  # noqa: E402
@@ -2439,13 +2441,15 @@ def _refuse_no_reference_index(index_path: str, genome: str, motif: str, want: i
         return
     if any(d.endswith(f"_{genome}.lock") for d in _listdir(index_path)):
         return
-    # (the indexes published are of N = 3, as _refuse_no_variant_index says)
+    # (the indexes published are of N = 3, as _refuse_no_variant_index says, and since
+    # 2.10.0 named for their guide length and side, as a build names them)
     error(
         f"No reference index under --index-path {index_path} serves this search (genome "
         f"{genome}, PAM {motif}, {bdna} DNA and {brna} RNA bulge(s)), and a search builds "
         f"none there: it would stop on that after enriching the genome with the dataset's "
         f"variants (hours on a human genome). Install one in that library (crisprme.py "
-        f"download --what index --index-name {motif}_{max(want, 3)}_{genome} if it is "
+        f"download --what index --index-name "
+        f"{index_fit.index_name(motif, max(want, 3), genome, guide_len, three_prime)} if it is "
         f"published, or crisprme.py build-index-only), or run "
         f"without --index-path, where a search takes an index of the working directory's "
         f"library, pruned to this PAM where only such a one serves it, and builds one from "
@@ -2527,8 +2531,9 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
             f"be built: neither its VCFs (VCFs/{vcf}) nor its enriched genome (Genomes/{dataset}) "
             f"is installed. Variant indexes installed for {vcf}: {', '.join(have) or 'none'}. "
             f"{fewer}{wider}{flank}To install one: crisprme.py download --what index --index-name "
-            f"{motif}_{max(want, 3)}_{dataset} if it is published, or crisprme.py build-index-only with "
-            f"the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)."
+            f"{index_fit.index_name(motif, max(want, 3), dataset, guide_len, three_prime)} if it "
+            f"is published, or crisprme.py build-index-only with the dataset's VCFs "
+            f"(docs/PRECOMPUTED_INDEXES.md)."
         )
 
 
@@ -3643,7 +3648,7 @@ def complete_search() -> None:
                 "index. Build or download the index FIRST, then re-run complete-search:\n\n"
                 "  download a prebuilt index (recommended):\n"
                 "    crisprme.py download --what index --index-name "
-                "NRR_3_hg38+hg38_HGDP1kGP --path .\n"
+                "20-NRR_3_hg38+hg38_HGDP1kGP --path .\n"
                 "    (recommended default: phased HGDP + 1000 Genomes, 4,091 samples, "
                 "CONFIRMED carriers)\n\n"
                 "  or build it locally (source VCFs required):\n"
@@ -3759,7 +3764,7 @@ def complete_search() -> None:
                f"variant whose AF they give as 0, or not at all, has no frequency). "
                f"To get the tiers, rebuild "
                f"the index with build-index-only --samplesID, or download a prebuilt one "
-               f"(crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP). "
+               f"(crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP). "
                if _untiered else "")
             + "SNP+indel co-occurrence is UNCHANGED "
             "(the indel cis-phasing pass is unaffected). See METHODS.md, 'Context-aware analysis mode'."
@@ -3780,7 +3785,7 @@ def complete_search() -> None:
                 f"AF they give as 0, or not at all, has no frequency. "
                 f"To get the tiers, rebuild the index with build-index-only "
                 f"--samplesID, or download a prebuilt one (crisprme.py download --what index "
-                f"--index-name NRR_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
+                f"--index-name 20-NRR_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
                 f"dense panels; pass --population-level for the fast worst-case screen."
             )
         else:
@@ -6371,10 +6376,18 @@ def print_help_download() -> None:
         "enrichment and only indexes (fast / new-PAM path; kits exist for a subset of datasets) "
         "[REQUIRED for --what vcf/build-inputs]\n"
         "\t--index-name, precomputed index directory name for --what index "
-        "(e.g. the reference index NRR_3_hg38, the recommended variant-aware default "
-        "NRR_3_hg38+hg38_HGDP1kGP (SpCas9 NRR, the default PAM; phased HGDP + 1000 "
-        "Genomes, 4,091 samples), or NRR_3_hg38+hg38_HPRC / NRR_3_hg38+hg38_mega; the "
-        "NRG and NGG ones too, e.g. NRG_3_hg38+hg38_HGDP1kGP) "
+        "(e.g. the reference index 20-NRR_3_hg38, the recommended variant-aware default "
+        "20-NRR_3_hg38+hg38_HGDP1kGP (SpCas9 NRR, the default PAM; phased HGDP + 1000 "
+        "Genomes, 4,091 samples), or 20-NRR_3_hg38+hg38_HPRC / 20-NRR_3_hg38+hg38_mega; "
+        "on the reference and HGDP + 1000 Genomes also 20-NGG_3, 20-NRG_3, the general "
+        "index 20-NNNNNNNN_3 (any 3' PAM of up to 8 nt, pruned), SaCas9 22-NNGRRN_3 and "
+        "Cas12a TTTN-20_3 and TTTN-23_3, e.g. 20-NGG_3_hg38+hg38_HGDP1kGP; the list is "
+        "docs/PRECOMPUTED_INDEXES.md's). Since 2.10.0 a name of this form (guide length and "
+        f"side) is fetched from {FORMAT2_HF_REPO}, with its panel's Dictionaries bundle "
+        "and genotype store, each fetched once per panel; an index of CRISPRme 2.8.1 "
+        "(index format 1: NRR_3_hg38+hg38_HGDP1kGP, NNN_3_hg38, ...) is still fetched by "
+        "its own name, from the repos of 2.8.1, and the download names the index of this "
+        "release that replaces it "
         "[REQUIRED for --what index]\n"
         "\t--panel, for --what genotype-oracle: the phased panel [default: HGDP1kGP, "
         "i.e. hg38_HGDP1kGP] [OPTIONAL]\n"
@@ -6399,9 +6412,12 @@ def print_help_download() -> None:
     sys.exit(1)
 
 
-# Default REFERENCE index published on HF for hg38 (the default NRR PAM, bMax 3);
-# fetched by ``download --what all`` so a simple reference scan works out of the box.
-DEFAULT_REFERENCE_INDEX_HG38 = "NRR_3_hg38"
+# Default REFERENCE index published on HF for hg38 (the default NRR PAM, a 20-nt guide,
+# bMax 3: CRISPRme 2.10.0's, in FORMAT2_HF_REPO); fetched by ``download --what all`` so a
+# simple reference scan works out of the box. Where it cannot be fetched, 2.8.1's
+# (index format 1, the older name) is fetched in its place.
+DEFAULT_REFERENCE_INDEX_HG38 = "20-NRR_3_hg38"
+_FALLBACK_REFERENCE_INDEX_HG38 = "NRR_3_hg38"
 
 
 def download_data() -> None:
@@ -6514,19 +6530,27 @@ def download_data() -> None:
     # (correct, but slow). Non-fatal: on any hiccup the genome is still present
     # and the index is built on demand at search time.
     if what == "all" and ref == "hg38":
-        ref_index = index_name or DEFAULT_REFERENCE_INDEX_HG38
-        try:
-            dest = download_component(
-                "index", workdir, repo=repo, ref=ref,
-                index_name=ref_index, genotypes=False,
-            )
-            print(f"Downloaded reference index {ref_index} -> {dest}", flush=True)
-        except (ValueError, ImportError, RuntimeError) as e:
-            sys.stderr.write(
-                f"WARNING: could not fetch the default reference index "
-                f"{ref_index} ({e}). The reference genome is present; a reference "
-                f"index will be built on demand at the first search.\n"
-            )
+        candidates = ([index_name] if index_name else
+                      [DEFAULT_REFERENCE_INDEX_HG38, _FALLBACK_REFERENCE_INDEX_HG38])
+        for k, ref_index in enumerate(candidates):
+            try:
+                dest = download_component(
+                    "index", workdir, repo=repo, ref=ref,
+                    index_name=ref_index, genotypes=False,
+                )
+                print(f"Downloaded reference index {ref_index} -> {dest}", flush=True)
+                break
+            except (ValueError, ImportError, RuntimeError) as e:
+                if k + 1 < len(candidates):
+                    print(f"NOTE: could not fetch the default reference index {ref_index} "
+                          f"({e}); fetching {candidates[k + 1]}, CRISPRme 2.8.1's, in its "
+                          f"place.", flush=True)
+                    continue
+                sys.stderr.write(
+                    f"WARNING: could not fetch the default reference index "
+                    f"{ref_index} ({e}). The reference genome is present; a reference "
+                    f"index will be built on demand at the first search.\n"
+                )
 
 
 def print_help_publish_index() -> None:
@@ -6554,6 +6578,21 @@ def print_help_publish_index() -> None:
         "[OPTIONAL, default: off]. In BOTH modes the small registry_<vcf>/ is "
         "added when present, and a separate genotypes_<vcf>.tar.gz companion is "
         "uploaded when a genotype store exists.\n"
+        "\t--replace-companions, for an index of format 2: replace a panel companion "
+        "(its Dictionaries bundle or genotype store) the repo holds in another build "
+        "[OPTIONAL, default: refused]\n"
+    )
+    sys.stderr.write(
+        "Where it goes (since 2.10.0): an index of index format 2 (CRISPRitz 2.10.0), or "
+        "one named for its guide length and side (20-NRR_3_hg38), to "
+        f"{FORMAT2_HF_REPO}, never to the repos CRISPRme 2.8.1 reads ({DEFAULT_HF_REPO}, "
+        f"{GENERAL_INDEX_HF_REPO}); an index of format 1 as before. A variant index of "
+        "format 2 is published without its panel's Dictionaries, which go once per panel "
+        "into the Dictionaries bundle dictionaries-bundle_<vcf>.tar.gz, as its genotype "
+        "store goes into genotypes_<vcf>.tar.gz: each is uploaded only where the repo does "
+        "not hold it already, the same (its record, <name>.json, gives a fingerprint of what "
+        "it holds), and the index's manifest names both, so that a download fetches each "
+        "once per panel.\n"
     )
     sys.exit(1)
 
@@ -6572,12 +6611,13 @@ def publish_index_cmd() -> None:
     # tarball (tiers replace them); default off => byte-for-byte-unchanged publish.
     dictless = "--dictless" in args
     try:
-        remote_path = publish_index(
-            index_dir, repo=repo, token=token, display_name=name, dictless=dictless
+        # (it says where each archive went, the repo it was routed to included)
+        publish_index(
+            index_dir, repo=repo, token=token, display_name=name, dictless=dictless,
+            replace_companions="--replace-companions" in args,
         )
     except (ValueError, ImportError) as e:
         error(str(e))
-    print(f"Published index to {resolve_repo(repo)}:{remote_path}", flush=True)
 
 
 def print_help_assembly_search() -> None:
@@ -7571,7 +7611,7 @@ def print_help_complete_test():
         "prebuilt-index smoke searches only that chromosome of the index's genome, and "
         "refuses one the genome or the index lacks, naming those it has; with all it "
         "searches every chromosome, which with a variant index such as "
-        "NRR_3_hg38+hg38_HGDP1kGP is a genome-wide variant search needing 64 GB+ of "
+        "20-NRR_3_hg38+hg38_HGDP1kGP is a genome-wide variant search needing 64 GB+ of "
         "RAM. The benchmark mode downloads and tests that chromosome\n"
         "\t--vcf_dataset, variant dataset for the LEGACY build-from-source test "
         "(the benchmark mode: it builds small test indexes from raw VCFs for "
@@ -7581,7 +7621,7 @@ def print_help_complete_test():
         "shipped re-phased HGDP1kGP default and NOT the retired "
         "NRG_3_hg38+hg38_1000G2021_HGDP index [default: 1000G]. Without "
         "CRISPRME_ALLOW_ONDEMAND_BUILD, complete-test instead runs the example guide against "
-        "whichever index you downloaded (recommended: NRR_3_hg38+hg38_HGDP1kGP) -- "
+        "whichever index you downloaded (recommended: 20-NRR_3_hg38+hg38_HGDP1kGP) -- "
         "the prebuilt-index smoke test. The self-test, as CI runs it: "
         "CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py complete-test "
         "--chrom chr22 --vcf_dataset 1000G, then crisprme.py validate-test --chrom chr22.\n"
@@ -7764,7 +7804,7 @@ def print_help_setup_database_test() -> None:
         "NOTE: for most users the FASTER modern path is\n"
         "  crisprme.py download --what all\n"
         "(fetches the reference genome + annotations over HuggingFace's CDN), then\n"
-        "  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP\n"
+        "  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP\n"
         "for the recommended default variant index. 'setup' is the legacy "
         "from-scratch download (hundreds of GB) retained for advanced / offline "
         "builds. It takes only two files from the HuggingFace data repo "

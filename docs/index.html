@@ -37,7 +37,7 @@
         e.g. <code>NGG</code> for SpCas9; no building required). Use the <strong>reference</strong>
         index for a basic scan, and a <strong>variant-aware</strong> index (the recommended
         default is the phased HGDP&nbsp;+&nbsp;1000&nbsp;Genomes panel of the default SpCas9
-        <code>NRR</code> PAM, <code>NRR_3_hg38+hg38_HGDP1kGP</code>, 4,091&nbsp;samples) to catch off-targets created by
+        <code>NRR</code> PAM, <code>20-NRR_3_hg38+hg38_HGDP1kGP</code>, 4,091&nbsp;samples) to catch off-targets created by
         human genetic variants &mdash; CRISPRme's main feature. The quickstart below downloads one
         for you.
       </p>
@@ -192,14 +192,14 @@ docker pull pinellolab/crisprme:latest</code></pre>
 mkdir -p ~/crisprme &amp;&amp; cd ~/crisprme
 
 # reference genome, annotations, PAMs, sample lists, AND the default hg38
-# reference index (NRR_3_hg38 = SpCas9 NRR: NGG, NAG, NGA, NAA) -- so a reference-only
+# reference index (20-NRR_3_hg38 = SpCas9 NRR: NGG, NAG, NGA, NAA) -- so a reference-only
 # search works immediately with no further downloads
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what all --path /DATA
 
 # the recommended default variant-aware index (phased HGDP + 1000 Genomes, 4,091 samples)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA</code></pre>
+  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA</code></pre>
 
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
@@ -229,14 +229,14 @@ apptainer pull crisprme.sif docker://pinellolab/crisprme:latest</code></pre>
 
         <h3>2 &mdash; Download the data and a ready-made index (minutes, not hours)</h3>
         <pre><code># reference genome, annotations, PAMs, sample lists, AND the default hg38
-# reference index (NRR_3_hg38 = SpCas9 NRR: NGG, NAG, NGA, NAA) -- so a reference-only
+# reference index (20-NRR_3_hg38 = SpCas9 NRR: NGG, NAG, NGA, NAA) -- so a reference-only
 # search works immediately with no further downloads
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what all --path /DATA
 
 # the recommended default variant-aware index (phased HGDP + 1000 Genomes, 4,091 samples)
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA</code></pre>
+  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA</code></pre>
 
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
@@ -285,7 +285,7 @@ ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</cod
 
       <p class="note" style="margin-top:1rem">
         Want variant-aware searches (CRISPRme's speciality)? The prebuilt variant index
-        downloaded in step&nbsp;2 (<code>NRR_3_hg38+hg38_HGDP1kGP</code>) already enables them —
+        downloaded in step&nbsp;2 (<code>20-NRR_3_hg38+hg38_HGDP1kGP</code>) already enables them —
         including sample-level named carriers, via the genotype store it bundles. No raw VCFs
         needed. You can skip the variant index for a reference-only first run.
       </p>

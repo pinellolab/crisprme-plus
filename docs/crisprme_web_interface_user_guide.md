@@ -76,16 +76,16 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
 
 # a ready-made SpCas9 NRR reference index (skips a long index build)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
-  crisprme.py download --what index --index-name NRR_3_hg38 --path /DATA
+  crisprme.py download --what index --index-name 20-NRR_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (HGDP + 1000 Genomes, 4,091 samples, re-phased)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
-  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA
+  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 ```
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
-pre-downloaded `NRR_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
+pre-downloaded `20-NRR_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
 4,091 samples — the recommended default) already makes the default web
 search variant-aware. Sample-level analyses / named carriers / personal risk cards
 come from the **genotype store bundled with that index** (fetched by `download --what
@@ -280,7 +280,7 @@ columns, such as the hosted `hg38_mega` VCFs) is listed too, but **Submit** refu
 search of it, built here or not, and the note under the bulge options says why: a search
 reports its variants only through a per-dataset allele-frequency registry, which a build
 here does not make. To search the mega variants, download the published
-`NRR_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
+`20-NRR_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
 dataset whose sample list is missing too, and the note says so, with how to get one:
 removing a VCF dataset in Settings takes the list it wrote for it and leaves the variant
 index built from it, and the dataset stays listed here only if its name begins with the
@@ -885,7 +885,7 @@ variants.
 2. **Reference-only selected** — keep the pre-selected **variant** index (not **Reference
    only**) to get variant off-targets.
 3. **Variant index not installed** — re-run
-   `crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA`
+   `crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA`
    (the recommended default panel).
 4. **Confirm success** — `Results/<name>/log_error_no_check.txt` is empty and
    `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its

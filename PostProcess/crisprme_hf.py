@@ -67,6 +67,96 @@ GENERAL_INDEX_HF_REPO = "lucapinello/crisprme-data-general-index"
 # default repo.
 _COMPAT_FLANK_WIDTH = 3
 
+# CRISPRme 2.10.0's indexes (decision C2): every index of index format 2, which CRISPRitz
+# 2.10.0 writes and CRISPRme 2.8.1 refuses (2.8.0 aborts on one), is published in a dataset
+# repo of its own that no earlier release points at, under a name that carries its guide
+# length and side (index_fit.parse_index_name: 20-NRR_3_hg38), the general (all-N) index
+# among them; with each panel's Dictionaries bundle and genotype store once
+# (_PANEL_COMPANIONS), and the enriched-genome kits these were built from (build-inputs/).
+# The 2.10.0 set is docs/rebuild/INDEX_SET_2.10.0.tsv. The repos above keep the archives of
+# 2.8.1 (index format 1, the older names), which a download still fetches by their own names.
+FORMAT2_HF_REPO = "lucapinello/crisprme-indexes-format2"
+
+# The archives of a panel (a variant dataset) that every index of it shares, published and
+# fetched once per panel beside its indexes under indexes/ (_publish_companion,
+# _fetch_companion), each with a small record, <name>.json, of what it holds: the
+# Dictionaries bundle (dictionaries-bundle_<vcf>: the panel's Dictionaries/ but its
+# genotype store -- registry_, log_indels_, indel_genotypes_, indel_af_, and a classic
+# publish's dictionaries_ -- and its samplesID lists), which an index of index format 2 does
+# not carry in its own archive (an index of format 1 does, as 2.8.1's downloader needs); the
+# Tier-1 genotype store (genotypes_<vcf>), which --no-genotypes skips; and the phased indel
+# genotypes alone (indel_genotypes_<vcf>), for the genotype oracle (download --what
+# genotype-oracle). None is an index: the catalog lists none of them.
+BUNDLE_PREFIX = "dictionaries-bundle_"
+_PANEL_COMPANIONS = (BUNDLE_PREFIX, "genotypes_", "indel_genotypes_")
+
+
+def is_named_for_guide(index_name: str) -> bool:
+    """Whether ``index_name`` has the form of CRISPRme 2.10.0, which carries its guide length
+    and side (``20-NRR_3_hg38``, ``TTTN-23_3_hg38``: index_fit.parse_index_name), the form of
+    every index published in FORMAT2_HF_REPO."""
+    parsed = index_fit.parse_index_name(canonical_index_name(index_name or ""))
+    return bool(parsed and parsed[3])
+
+
+def _companion_kind(name: str) -> Optional[str]:
+    """The panel companion prefix (_PANEL_COMPANIONS) of an archive's base name, else None.
+    (``indel_genotypes_`` is tested before ``genotypes_``, which it ends with.)"""
+    for prefix in sorted(_PANEL_COMPANIONS, key=len, reverse=True):
+        if name.startswith(prefix):
+            return prefix
+    return None
+
+
+def _masked_sha256(path: str) -> str:
+    """The SHA-256 of a file's bytes, with the timestamp of a gzip header (bytes 4-7 of a
+    file that opens with the gzip magic) read as zeros: gzip writes the time it compressed,
+    which no reader uses, and two builds of one panel's Dictionaries differ in nothing else
+    there (docs/hf/README.md)."""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        head = fh.read(8)
+        if head[:2] == b"\x1f\x8b" and len(head) == 8:
+            head = head[:4] + b"\0\0\0\0"
+        h.update(head)
+        for blk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(blk)
+    return h.hexdigest()
+
+
+def companion_fingerprint(members: List[str]) -> Dict:
+    """What a panel companion holds, the same wherever it is computed: ``members`` are
+    (archive path, local path) pairs, a folder (Dictionaries/<dir>) or a file
+    (samplesIDs/<file>). Returns {"fingerprint": the SHA-256 of one line per file,
+    "<archive path>\\t<bytes>\\t<_masked_sha256>", in path order; "files"; "bytes";
+    "members": the archive paths}. A dot file (a marker this module writes) and an
+    AppleDouble file (._name) are left out, as the archive leaves them out."""
+    import hashlib
+    lines, total, files = [], 0, 0
+    for arc, local in sorted(members):
+        if os.path.isdir(local):
+            for root, dirs, names in os.walk(local):
+                dirs.sort()
+                for fn in sorted(names):
+                    if fn.startswith("."):
+                        continue
+                    p = os.path.join(root, fn)
+                    rel = os.path.join(arc, os.path.relpath(p, local)).replace(os.sep, "/")
+                    size = os.path.getsize(p)
+                    lines.append(f"{rel}\t{size}\t{_masked_sha256(p)}")
+                    total += size
+                    files += 1
+        elif os.path.isfile(local):
+            size = os.path.getsize(local)
+            lines.append(f"{arc}\t{size}\t{_masked_sha256(local)}")
+            total += size
+            files += 1
+    lines.sort()
+    digest = hashlib.sha256("\n".join(lines).encode()).hexdigest()
+    return {"fingerprint": digest, "files": files, "bytes": total,
+            "members": sorted(arc for arc, _ in members)}
+
 # Components understood by the download command and their remote sub-paths.
 # This layout is the single source of truth for the HF dataset tree; the
 # transparent setup/complete_test fast-path (utils.hf_fetch) targets the same
@@ -293,15 +383,22 @@ def _index_archive_exists(repo: str, index_name: str,
         return False
 
 
-def resolve_index_repo(index_name: str, cli_repo: Optional[str] = None) -> str:
+def resolve_index_repo(index_name: str, cli_repo: Optional[str] = None,
+                       index_format: Optional[int] = None) -> str:
     """Which repo holds (or should hold) this index.
 
-    An explicit ``--hf-repo`` / ``CRISPRME_HF_REPO`` always wins. Otherwise a
-    PAM-less index whose flank is wider than a dedicated 3-nt PAM index routes to
-    :data:`GENERAL_INDEX_HF_REPO`; everything else to :data:`DEFAULT_HF_REPO`.
+    An explicit ``--hf-repo`` / ``CRISPRME_HF_REPO`` always wins. Otherwise an index whose
+    name has the form of 2.10.0 (is_named_for_guide), or one of index format 2
+    (``index_format``, read from its .bin files where they are at hand, as publish-index
+    reads them), routes to :data:`FORMAT2_HF_REPO`, which no release before 2.10.0 reads
+    (decision C2); of the others, a PAM-less index whose flank is wider than a dedicated
+    3-nt PAM index routes to :data:`GENERAL_INDEX_HF_REPO`, and everything else to
+    :data:`DEFAULT_HF_REPO`.
     """
     if repo_overridden(cli_repo):
         return resolve_repo(cli_repo)
+    if index_format == 2 or is_named_for_guide(index_name):
+        return FORMAT2_HF_REPO
     width = index_flank_width(index_name)
     if width is not None and width > _COMPAT_FLANK_WIDTH:
         return GENERAL_INDEX_HF_REPO
@@ -357,26 +454,18 @@ def list_available_downloads(
     ``indexes/<name>.tar.gz`` archives. Returns ``[]`` on any error (offline,
     missing repo, dependency absent) so callers can fall back gracefully.
 
-    For ``index`` with no repo named, both the default repo and the wide-flank
-    PAM-less repo are listed and merged, each row taken from the copy ``download``
-    would fetch: every default-repo row (a legacy name is fetched only there, and a
-    wide-flank name falls back there), and a wide-flank-repo row only for a name
-    routed to that repo, where it replaces the default repo's copy. A legacy-named
-    archive that exists only in the wide-flank repo is therefore not offered, since
-    ``download`` would never look there for it. The wide-flank repo being
-    unreadable just drops its rows; the default repo being unreadable returns
-    ``[]``, the offline signal, rather than a catalog of only wide-flank indexes.
+    For ``index`` with no repo named, the indexes of this release: those of
+    :data:`FORMAT2_HF_REPO` (index format 2, the set of the rebuild for 2.10.0). The
+    archives of 2.8.1 in :data:`DEFAULT_HF_REPO` and :data:`GENERAL_INDEX_HF_REPO` (index
+    format 1, built from data that 2.10.0 builds otherwise: every allele of a site, the
+    FILTER-consistent stores, the wider fake-indel windows) are not offered beside them: a
+    download still fetches one by its name, and says which index of this release replaces
+    it. The repo being unreadable returns ``[]``, the offline signal. (Before 2.10.0 the
+    catalog merged the two repos of 2.8.1, the wide-flank one's rows for the names routed
+    there.)
     """
     if component == "index" and not repo_overridden(repo):
-        try:
-            default_rows = _list_available_downloads_raw("index", DEFAULT_HF_REPO)
-        except Exception:
-            return []
-        merged: Dict[str, Dict] = {row["name"]: row for row in default_rows}
-        for row in _list_available_downloads_one("index", GENERAL_INDEX_HF_REPO):
-            if resolve_index_repo(row["name"]) == GENERAL_INDEX_HF_REPO:
-                merged[row["name"]] = row
-        return sorted(merged.values(), key=lambda row: row["name"])
+        return _list_available_downloads_one("index", FORMAT2_HF_REPO)
     return _list_available_downloads_one(component, repo)
 
 
@@ -403,7 +492,8 @@ def _list_available_downloads_raw(
     prefix = _COMPONENT_PREFIXES[component]
     if component == "index":
         items = []
-        gt_present = set()  # vcf names that have a genotypes_<vcf>.tar.gz companion
+        # vcf names that have a panel companion, by kind (_PANEL_COMPANIONS)
+        present: Dict[str, set] = {kind: set() for kind in _PANEL_COMPANIONS}
         for entry in api.list_repo_tree(
             repo, repo_type="dataset", path_in_repo=prefix
         ):
@@ -412,20 +502,24 @@ def _list_available_downloads_raw(
             if size is None or not path.endswith(".tar.gz"):
                 continue
             name = os.path.basename(path)[: -len(".tar.gz")]
-            # The separate Tier-1 genotype companions live under the SAME
-            # indexes/ prefix but are NOT selectable indexes themselves — they
-            # ride along with their index on download. Record which vcfs have
-            # one (so the index rows can advertise it) and skip them as rows.
-            if name.startswith("genotypes_"):
-                gt_present.add(name[len("genotypes_"):])
+            # The panel companions (the Tier-1 genotype store, the phased indel
+            # genotypes, the Dictionaries bundle) live under the SAME indexes/
+            # prefix but are NOT selectable indexes themselves — they ride along
+            # with their index on download. Record which vcfs have one (so the
+            # index rows can advertise it) and skip them as rows.
+            kind = _companion_kind(name)
+            if kind:
+                present[kind].add(name[len(kind):])
                 continue
             items.append({"name": name, "size": size})
         # ADDITIVE metadata: mark whether each variant index has a genotype
-        # companion available (has_genotypes). Consumers that only read
-        # name/size are unaffected (extra keys are ignored).
+        # companion available (has_genotypes), and a Dictionaries bundle
+        # (has_bundle). Consumers that only read name/size are unaffected (extra
+        # keys are ignored).
         for it in items:
             vcf = it["name"].partition("+")[2]
-            it["has_genotypes"] = bool(vcf) and vcf in gt_present
+            it["has_genotypes"] = bool(vcf) and vcf in present["genotypes_"]
+            it["has_bundle"] = bool(vcf) and vcf in present[BUNDLE_PREFIX]
         return sorted(items, key=lambda d: d["name"])
     # genome / vcf: folders under prefix/, sum their files' sizes
     sizes: Dict[str, int] = {}
@@ -1331,9 +1425,12 @@ def download_genotype_oracle(
     there (an installed index of the panel brings both) is kept and not fetched again; an
     indel store the repository does not host is said in one line on stdout, and the gate
     then reads the SNP genotypes alone. Neither the panel's index nor its registry is
-    needed. Returns the folders installed or kept; raises ValueError when the repository
-    hosts no genotypes of the panel and none are installed."""
-    repo = resolve_repo(repo)
+    needed. With no repo named, the stores of this release (FORMAT2_HF_REPO, the rebuild of
+    2.10.0) are fetched, and those of 2.8.1 (DEFAULT_HF_REPO) where it holds none. Returns
+    the folders installed or kept; raises ValueError when no repository asked hosts genotypes
+    of the panel and none are installed."""
+    repos = ([resolve_repo(repo)] if repo_overridden(repo)
+             else [FORMAT2_HF_REPO, DEFAULT_HF_REPO])
     dicts = os.path.join(workdir, "Dictionaries")
     out = []
     for store, required in (("genotypes", True), ("indel_genotypes", False)):
@@ -1342,15 +1439,27 @@ def download_genotype_oracle(
             sys.stdout.write(f"{store}_{panel}/ is installed already ({dest}): kept\n")
             out.append(dest)
             continue
-        if _fetch_genotypes_companion(repo, workdir, panel, _COMPONENT_PREFIXES["index"],
-                                      token, store=store):
+        got = None
+        for k, here in enumerate(repos):
+            try:
+                if _fetch_genotypes_companion(here, workdir, panel,
+                                              _COMPONENT_PREFIXES["index"], token, store=store):
+                    got = here
+                    break
+            except Exception:  # noqa: BLE001 - a repo that cannot be read: the next one
+                if k + 1 == len(repos):
+                    raise
+        if got:
             out.append(dest)
+            if got != repos[0]:
+                sys.stdout.write(f"{store}_{panel}/ is CRISPRme 2.8.1's ({got}): "
+                                 f"{repos[0]} holds none\n")
         elif required:
             raise ValueError(
-                f"The HuggingFace repo '{repo}' has no phased genotypes of {panel} "
-                f"({_COMPONENT_PREFIXES['index']}/genotypes_{panel}.tar.gz). Check "
+                f"No HuggingFace repo asked ({', '.join(repos)}) has phased genotypes of "
+                f"{panel} ({_COMPONENT_PREFIXES['index']}/genotypes_{panel}.tar.gz). Check "
                 f"--panel, or install the panel's index (download --what index --index-name "
-                f"NRG_3_hg38+{panel}), which brings them.")
+                f"20-NRR_3_hg38+{panel}), which brings them.")
         else:
             sys.stdout.write(
                 f"The repo has no phased indel genotypes of {panel} "
@@ -1450,6 +1559,247 @@ def _ensure_perdb_samplesids(
         )
 
 
+# --- panel companions, once per panel (CRISPRme 2.10.0) -------------------------------------
+
+def _read_json_file(path: str) -> Optional[Dict]:
+    try:
+        with open(path) as fh:
+            rec = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def companion_marker(workdir: str, name: str) -> str:
+    """Where an install records the panel companion ``name`` it holds: a dot file in
+    ``<workdir>/Dictionaries/``, which no reader of the Dictionaries takes for a store."""
+    return os.path.join(workdir, "Dictionaries", f".{name}.json")
+
+
+def installed_companion(workdir: str, name: str) -> Optional[Dict]:
+    """The record of the panel companion ``name`` installed in ``workdir`` (its marker:
+    name, fingerprint, repo, members, and the indexes installed with it), or None when there
+    is none or a member it lists is no longer in place."""
+    rec = _read_json_file(companion_marker(workdir, name))
+    if not rec:
+        return None
+    for arc in rec.get("members", []):
+        if not os.path.exists(os.path.join(workdir, arc)):
+            return None
+    return rec
+
+
+def _write_marker(workdir: str, name: str, rec: Dict) -> None:
+    path = companion_marker(workdir, name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".part", "w") as fh:
+        json.dump(rec, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    os.replace(path + ".part", path)
+
+
+def _hf_absent(exc: BaseException) -> bool:
+    """Whether a Hub error says the file is not in the repo (as distinct from a repo that
+    cannot be read)."""
+    name = type(exc).__name__
+    text = str(exc)
+    return name in ("EntryNotFoundError", "RemoteEntryNotFoundError") or (
+        "404" in text and "Repository" not in text)
+
+
+def _remote_companion_record(hf, repo: str, name: str,
+                             token: Optional[str] = None) -> Optional[Dict]:
+    """The record ``indexes/<name>.json`` of the panel companion ``name`` in ``repo``, or
+    None where the repo holds none; an error that does not say the file is absent is
+    raised (a repo that cannot be read cannot be told from one without the companion)."""
+    remote = f"{_COMPONENT_PREFIXES['index']}/{name}.json"
+    try:
+        path = hf.hf_hub_download(repo_id=repo, filename=remote, repo_type="dataset",
+                                  token=token)
+    except Exception as exc:  # noqa: BLE001
+        if _hf_absent(exc):
+            return None
+        raise
+    return _read_json_file(path)
+
+
+def _make_companion_tarball(tarball: str, members: List, record: Dict) -> None:
+    """The archive of a panel companion: each (archive path, local path) member stored
+    under its archive path (Dictionaries/<dir>/..., samplesIDs/<file>), and ``record``
+    as ``bundle.json`` at its root. Dot files and AppleDouble files are left out, as
+    companion_fingerprint leaves them out. pigz through tar where both are at hand, else
+    Python's tarfile (the same layout)."""
+    tmpd = tempfile.mkdtemp(prefix="hfcomp_")
+    try:
+        with open(os.path.join(tmpd, "bundle.json"), "w") as fh:
+            json.dump(record, fh, indent=1, sort_keys=True)
+        pigz, tar = shutil.which("pigz"), shutil.which("tar")
+        if pigz and tar:
+            inputs = []
+            for arc, local in members:
+                root = local[: -len(arc)].rstrip(os.sep) if local.endswith(arc) else None
+                if root is None:  # (an archive path that is not the tail of the local one)
+                    inputs = None
+                    break
+                inputs += ["-C", root or os.sep, arc]
+            if inputs is not None:
+                try:
+                    subprocess.check_call(
+                        [tar, "--use-compress-program", pigz, "--exclude=.*", "-cf", tarball,
+                         *inputs, "-C", tmpd, "bundle.json"],
+                        env=dict(os.environ, COPYFILE_DISABLE="1"))
+                    return
+                except (subprocess.CalledProcessError, OSError):
+                    if os.path.exists(tarball):
+                        os.remove(tarball)
+
+        def _stored(info):
+            return None if os.path.basename(info.name).startswith(".") else info
+
+        with tarfile.open(tarball, "w:gz") as tf:
+            for arc, local in members:
+                tf.add(local, arcname=arc, filter=_stored)
+            tf.add(os.path.join(tmpd, "bundle.json"), arcname="bundle.json")
+    finally:
+        shutil.rmtree(tmpd, ignore_errors=True)
+
+
+def _install_companion(repo: str, workdir: str, name: str, fingerprint: Optional[str],
+                       token: Optional[str] = None,
+                       reporter: Optional["_ProgressReporter"] = None,
+                       index: Optional[str] = None) -> Optional[Dict]:
+    """Install the panel companion ``name`` (indexes/<name>.tar.gz of ``repo``) into
+    ``workdir`` once: kept, and not fetched again, where the install holds it already with
+    the same ``fingerprint`` (installed_companion); else fetched, its record checked against
+    ``fingerprint`` (the index's manifest: the companion it was built with), each of its
+    Dictionaries/ folders swapped into place and each samplesID list put in where none is
+    (as an index archive's are), and its marker written. ``index``, the index the install is
+    for, is added to the marker's list of indexes. Returns the marker, or None when the repo
+    holds no such companion. Raises DownloadIntegrityError when the repo's companion is not
+    the one the index needs."""
+    have = installed_companion(workdir, name)
+    if have and fingerprint and have.get("fingerprint") == fingerprint:
+        if index and index not in have.get("indexes", []):
+            have["indexes"] = sorted(set(have.get("indexes", [])) | {index})
+            _write_marker(workdir, name, have)
+        sys.stdout.write(f"{name} is installed already, the one this index was built with: "
+                         f"not fetched again\n")
+        return have
+    prefix = _COMPONENT_PREFIXES["index"]
+    staging = os.path.join(workdir, f".hf_stage_{name}")
+    shutil.rmtree(staging, ignore_errors=True)
+    try:
+        _hf_snapshot(repo, [f"{prefix}/{name}.tar.gz", f"{prefix}/{name}.json"], staging,
+                     token, reporter=reporter)
+        tgz = os.path.join(staging, prefix, f"{name}.tar.gz")
+        if not os.path.isfile(tgz):
+            return None
+        record = _read_json_file(os.path.join(staging, prefix, f"{name}.json")) or {}
+        dicts_root = os.path.join(workdir, "Dictionaries")
+        os.makedirs(dicts_root, exist_ok=True)
+        extract_tmp = os.path.join(dicts_root, f".extract_{name}")
+        shutil.rmtree(extract_tmp, ignore_errors=True)
+        os.makedirs(extract_tmp)
+        try:
+            with _decompress_progress(reporter, extract_tmp, phase=f"Extracting {name}"), \
+                    tarfile.open(tgz) as tf:
+                safe_tar.extract(tf, extract_tmp)
+            inner = _read_json_file(os.path.join(extract_tmp, "bundle.json")) or {}
+            got = record.get("fingerprint") or inner.get("fingerprint")
+            if fingerprint and got != fingerprint:
+                raise DownloadIntegrityError(
+                    f"{prefix}/{name}.tar.gz in {repo} is not the one this index was built "
+                    f"with (fingerprint {got or 'not recorded'}, the index's manifest names "
+                    f"{fingerprint}): the repo's index and companion come from two builds of "
+                    f"the panel. Nothing of it was installed.")
+            staged = os.path.join(extract_tmp, "Dictionaries")
+            for sub in sorted(os.listdir(staged)) if os.path.isdir(staged) else []:
+                src = os.path.join(staged, sub)
+                if not os.path.isdir(src):
+                    continue
+                dst = os.path.join(dicts_root, sub)
+                backup = os.path.join(dicts_root, f".{sub}.replaced")
+                if os.path.isdir(backup) and not os.path.exists(dst):
+                    os.rename(backup, dst)
+                shutil.rmtree(backup, ignore_errors=True)
+                if os.path.exists(dst):
+                    os.rename(dst, backup)
+                os.rename(src, dst)
+                shutil.rmtree(backup, ignore_errors=True)
+            staged_sids = os.path.join(extract_tmp, "samplesIDs")
+            if os.path.isdir(staged_sids):
+                dst_sids = os.path.join(workdir, "samplesIDs")
+                os.makedirs(dst_sids, exist_ok=True)
+                for fn in sorted(os.listdir(staged_sids)):
+                    src = os.path.join(staged_sids, fn)
+                    if os.path.isfile(src) and not os.path.isfile(os.path.join(dst_sids, fn)):
+                        shutil.move(src, os.path.join(dst_sids, fn))
+        finally:
+            shutil.rmtree(extract_tmp, ignore_errors=True)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    marker = {"name": name, "fingerprint": got, "repo": repo,
+              "members": record.get("members") or inner.get("members") or [],
+              "indexes": [index] if index else [],
+              "installed_at": datetime.now(timezone.utc).isoformat()}
+    _write_marker(workdir, name, marker)
+    sys.stdout.write(f"Installed {name} from {repo} into {os.path.join(workdir, 'Dictionaries')}"
+                     f"\n")
+    return marker
+
+
+def _panel_indexes(local_dir: str, vcf: str) -> List[str]:
+    """The variant indexes of panel ``vcf`` installed in ``local_dir`` (genome_library),
+    _INDELS folders aside."""
+    try:
+        names = sorted(os.listdir(local_dir))
+    except OSError:
+        return []
+    return [n for n in names if not n.startswith(".") and not n.endswith("_INDELS")
+            and canonical_index_name(n).partition("+")[2] == vcf
+            and os.path.isdir(os.path.join(local_dir, n))]
+
+
+# The index set of 2.10.0 (the rebuild manifest: seq_script/rebuild/index_set_2.10.0.tsv), whose
+# "replaces" column says which archive of this release replaces each archive of 2.8.1.
+INDEX_SET = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "seq_script", "rebuild", "index_set_2.10.0.tsv")
+
+
+def _replacements() -> Dict[str, str]:
+    """{name of an archive of 2.8.1: the archive of this release that replaces it}, from the
+    index set's "replaces" column; {} where the index set cannot be read."""
+    found: Dict[str, str] = {}
+    head = None
+    try:
+        with open(INDEX_SET) as fh:
+            for line in fh:
+                if not line.strip() or line.startswith("#"):
+                    continue
+                fields = line.rstrip("\n").split("\t")
+                if head is None:
+                    head = fields
+                    continue
+                row = dict(zip(head, fields))
+                for old in row.get("replaces", "").split(","):
+                    if old and old != "-":
+                        found.setdefault(old, row.get("archive", ""))
+    except OSError:
+        return {}
+    return found
+
+
+def successor_index(index_name: str) -> Optional[str]:
+    """The index of this release (FORMAT2_HF_REPO) that replaces the archive of 2.8.1 named
+    ``index_name`` (the older form of name), as the index set says (INDEX_SET): its build of
+    2.10.0 (NRR_3_hg38+hg38_HGDP1kGP: 20-NRR_3_hg38+hg38_HGDP1kGP), or, for one not built
+    again, the index that serves its searches (NNN_3: the general index; NRG on HPRC and mega:
+    NRR there). None for a name of the form of 2.10.0, or one the set does not replace."""
+    if is_named_for_guide(index_name):
+        return None
+    return _replacements().get(canonical_index_name(index_name or ""))
+
+
 # The record of the genome folder an index was built from, which complete-search and
 # assembly-search keep inside the index folder (assembly_reconcile.INDEX_SOURCE_FILENAME).
 # It names a folder of the machine that built the index, so it is left out of a
@@ -1467,6 +1817,7 @@ def download_component(
     index_name: Optional[str] = None,
     token: Optional[str] = None,
     genotypes: bool = True,
+    _note_successor: bool = True,
 ) -> str:
     """Download one CRISPRme reference component from HF into the canonical
     local layout under ``workdir``.
@@ -1495,6 +1846,11 @@ def download_component(
         # Same routing as publish; the fallback probe waits until the index is known
         # not to be installed (below), so a complete install costs no network call.
         repo = resolve_index_repo(index_name, repo)
+    elif component == "build-inputs" and not repo_overridden(repo):
+        # the enriched-genome kits of 2.10.0 (every allele of a site coded, its fake-indel
+        # windows), with the indexes built from them and their Dictionaries bundles; a kit
+        # of 2.8.1 (DEFAULT_HF_REPO) matches neither
+        repo = FORMAT2_HF_REPO
     else:
         repo = resolve_repo(repo)
     remote_prefix = _COMPONENT_PREFIXES[component]
@@ -1576,7 +1932,7 @@ def download_component(
                 f"source VCFs of its prebuilt variant indexes as the datasets "
                 f"hg38_HGDP1kGP, hg38_HPRC and hg38_mega (e.g. --what vcf --dataset "
                 f"hg38_HGDP1kGP). A variant-aware search does not need them:  crisprme.py "
-                f"download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP  (the "
+                f"download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP  (the "
                 f"genotype store it ships covers carriers and per-sample output). To build "
                 f"an index from other VCFs, place them under VCFs/{dataset}/ yourself, or "
                 f"use --hf-repo to point at a repo that hosts '{remote_prefix}/{dataset}/'."
@@ -1611,6 +1967,10 @@ def download_component(
                 f"'{remote_prefix}/{dataset}.tar.gz'). Pre-enriched kits exist for a SUBSET of "
                 f"datasets; build from the raw source VCFs instead:  crisprme.py download "
                 f"--what vcf --dataset {dataset}  then  build-index-only --vcf VCFs/{dataset} ..."
+                + (f" (The kits of CRISPRme 2.8.1, in {DEFAULT_HF_REPO}, were enriched by "
+                   f"CRISPRitz 2.9.1, with one allele of a site and narrower fake-indel windows: "
+                   f"an index built from one does not match the Dictionaries of this release.)"
+                   if repo == FORMAT2_HF_REPO else "")
             )
         # Optional checksum verification (the kit ships a <dataset>.SHA256SUMS sidecar).
         sums = os.path.join(staging, remote_prefix, f"{dataset}.SHA256SUMS")
@@ -1678,8 +2038,8 @@ def download_component(
         sys.stderr.write(
             f"build-inputs: staged {', '.join(moved)} into {local_dir} — build-index-only will "
             f"now SKIP enrichment and only index. Pair with the PAM-independent Dictionaries "
-            f"(download --what index --index-name <...> for the shipped index, or build-index-only "
-            f"--samplesID to regenerate them).\n"
+            f"(download --what index --index-name <...> of any index of the panel brings its "
+            f"Dictionaries bundle, or build-index-only --samplesID to regenerate them).\n"
         )
         return local_dir
 
@@ -1712,6 +2072,10 @@ def download_component(
         _ref_index_dir = os.path.join(local_dir, installed_name.partition("+")[0])
         _dicts = os.path.join(workdir, "Dictionaries")
         _genotype_dir = os.path.join(_dicts, f"genotypes_{_vcf}")
+        # (2.10.0) where the panel's Dictionaries are a bundle's, an index is complete only
+        # if it was installed with that bundle: an index installed with another build's
+        # Dictionaries, which a later install replaced, is downloaded again
+        _bundle = installed_companion(workdir, f"{BUNDLE_PREFIX}{_vcf}") if _vcf else None
         _complete = os.path.isdir(installed_dir) and (
             not _vcf
             or (
@@ -1721,6 +2085,7 @@ def download_component(
                 and any(os.path.isdir(os.path.join(_dicts, f"{_tier}_{_vcf}"))
                         for _tier in ("registry", "dictionaries"))
                 and (not genotypes or os.path.isdir(_genotype_dir))
+                and (_bundle is None or installed_name in _bundle.get("indexes", []))
             )
         )
         if _complete:
@@ -1780,6 +2145,15 @@ def download_component(
             )
         _hf_snapshot(repo, patterns, staging, token, reporter=reporter)
         tarball = os.path.join(staging, remote_prefix, f"{index_name}.tar.gz")
+        if not os.path.isfile(tarball) and routed and repo != FORMAT2_HF_REPO:
+            # an index of format 2 published under a name of the older form (built from a
+            # PAM file that gives no guide length) is in FORMAT2_HF_REPO (resolve_index_repo)
+            try:
+                _hf_snapshot(FORMAT2_HF_REPO, patterns, staging, token, reporter=reporter)
+            except Exception:  # noqa: BLE001 - that repo unreadable: the archive is absent
+                pass
+            if os.path.isfile(tarball):
+                routed_from, repo = None, FORMAT2_HF_REPO
         if not os.path.isfile(tarball):
             shutil.rmtree(staging, ignore_errors=True)
             where = (
@@ -1812,6 +2186,7 @@ def download_component(
         extract_tmp = os.path.join(local_dir, f".extract_{index_name}")
         shutil.rmtree(extract_tmp, ignore_errors=True)
         os.makedirs(extract_tmp)
+        manifest: Dict = {}  # the archive's manifest.json, {} when it has none
         try:
             label = None
             with tarfile.open(tarball) as tf:
@@ -1828,6 +2203,7 @@ def download_component(
                     mf = tf.extractfile("manifest.json")
                     if mf is not None:
                         meta = json.load(mf)
+                        manifest = meta if isinstance(meta, dict) else {}
                         fmt = meta.get("index_format")
                         sys.stderr.write(
                             f"Downloaded index {index_name} "
@@ -1855,6 +2231,25 @@ def download_component(
                         f"missing its _INDELS companion (incomplete/corrupt download) "
                         f"— nothing installed."
                     )
+            # (2.10.0) an archive that carries its panel's Dictionaries (an index of
+            # format 1, as 2.8.1 published them) installs them over the panel's: where
+            # they are a Dictionaries bundle of this release, the indexes installed with
+            # it would then read another build's Dictionaries (and this index the bundle's,
+            # had its own been left out). Refused before anything is swapped in.
+            _vcf_here = install_name.partition("+")[2]
+            _bundle_here = (installed_companion(workdir, f"{BUNDLE_PREFIX}{_vcf_here}")
+                            if _vcf_here else None)
+            _carried = os.path.join(extract_tmp, "Dictionaries")
+            if (_bundle_here and not manifest.get("dictionaries_bundle")
+                    and os.path.isdir(_carried)
+                    and any(sub.endswith("_" + _vcf_here) for sub in os.listdir(_carried))):
+                raise ValueError(
+                    f"{index_name} carries the Dictionaries of another build of "
+                    f"{_vcf_here} (an archive of CRISPRme 2.8.1, index format 1), which would "
+                    f"replace the Dictionaries bundle {_bundle_here['name']} that "
+                    f"{', '.join(_bundle_here.get('indexes', [])) or 'the indexes here'} "
+                    f"read in {os.path.join(workdir, 'Dictionaries')}. Install it in "
+                    f"another working directory (--path); nothing was installed.")
             # restore the friendly display name into the staged index before swap
             if label:
                 try:
@@ -1958,6 +2353,44 @@ def download_component(
         # dictless index (no dictionaries_<vcf>/ in the main tarball) is also FINE:
         # the registry + genotype tiers cover it.
         vcf_name = index_name.partition("+")[2]
+        # (2.10.0) an index of format 2 carries no Dictionaries: its manifest names the
+        # panel's Dictionaries bundle, fetched once per panel (_install_companion: kept,
+        # not fetched again, where the install holds it with the same fingerprint). The
+        # panel's indexes installed with Dictionaries of another build (an archive of
+        # 2.8.1, or another bundle) then read this bundle's: said, by name.
+        bundle = manifest.get("dictionaries_bundle") if vcf_name else None
+        if bundle:
+            have = installed_companion(workdir, bundle["name"])
+            same = bool(have) and have.get("fingerprint") == bundle.get("fingerprint")
+            # the panel's other indexes here, but those installed with this very bundle
+            others = [n for n in _panel_indexes(local_dir, vcf_name)
+                      if n != install_name
+                      and not (same and n in (have or {}).get("indexes", []))]
+            if reporter.enabled and not same:
+                reporter.set_total(_remote_file_size(
+                    repo, f"{remote_prefix}/{bundle['name']}.tar.gz", token))
+                reporter.set_phase("Downloading Dictionaries", bundle["name"],
+                                   carry_done=False)
+            got_bundle = _install_companion(repo, workdir, bundle["name"],
+                                            bundle.get("fingerprint"), token,
+                                            reporter=reporter, index=install_name)
+            if got_bundle is None:
+                raise ValueError(
+                    f"{index_name} reads the Dictionaries bundle {bundle['name']}, which "
+                    f"{repo} does not hold ({remote_prefix}/{bundle['name']}.tar.gz): a "
+                    f"variant search of it cannot run. The index is installed; run this "
+                    f"download again once the repo holds the bundle.")
+            if others and not same:
+                sys.stdout.write(
+                    f"WARNING: {', '.join(others)} in {local_dir} "
+                    f"{'was' if len(others) == 1 else 'were'} installed with Dictionaries of "
+                    f"another build of {vcf_name}, which {bundle['name']} has now replaced: "
+                    f"a search of {'it' if len(others) == 1 else 'them'} would read "
+                    f"Dictionaries {'it was' if len(others) == 1 else 'they were'} not built "
+                    f"with. Remove {'it' if len(others) == 1 else 'them'}, or keep "
+                    f"{'it' if len(others) == 1 else 'them'} in another working directory "
+                    f"with {'its' if len(others) == 1 else 'their'} own Dictionaries.\n")
+        gt_companion = manifest.get("genotypes") if vcf_name else None
         if vcf_name:
             if not genotypes:
                 sys.stdout.write(
@@ -1981,10 +2414,18 @@ def download_component(
                         carry_done=False,
                     )
                 try:
-                    got = _fetch_genotypes_companion(
-                        repo, workdir, vcf_name, remote_prefix, token,
-                        reporter=reporter,
-                    )
+                    if gt_companion:
+                        # (2.10.0) once per panel: kept where the install holds the store
+                        # this index was built with
+                        got = _install_companion(
+                            repo, workdir, gt_companion["name"],
+                            gt_companion.get("fingerprint"), token, reporter=reporter,
+                            index=install_name) is not None
+                    else:
+                        got = _fetch_genotypes_companion(
+                            repo, workdir, vcf_name, remote_prefix, token,
+                            reporter=reporter,
+                        )
                 except Exception as exc:  # network/extract error -> non-fatal
                     got = None  # None = errored and already reported below
                     sys.stdout.write(
@@ -2032,6 +2473,7 @@ def download_component(
                     download_component(
                         "index", workdir, repo=repo, ref=ref,
                         index_name=ref_index_name, token=token, genotypes=False,
+                        _note_successor=False,
                     )
                     sys.stdout.write(
                         f"Also installed the shared reference index "
@@ -2084,6 +2526,22 @@ def download_component(
             # dataset + its samples in the --vcf / --samplesID list files the web
             # builds per-search but a CLI complete-search reads from disk.
             _ensure_search_lists(workdir, vcf_name)
+        # (2.10.0) an archive of 2.8.1 asked for by its own name: say which index of this
+        # release replaces it (the index set's "replaces" column: its build of 2.10.0, or the
+        # index that serves its searches where it is not built again, as NNN_3)
+        successor = (successor_index(index_name)
+                     if routed and _note_successor and repo != FORMAT2_HF_REPO else None)
+        if successor:
+            same_pam = index_fit.index_pam(successor) == index_fit.index_pam(install_name)
+            instead = (f" instead, in another working directory (the two read different "
+                       f"Dictionaries of {vcf_name})" if vcf_name else " instead")
+            sys.stdout.write(
+                f"NOTE: {install_name} is an index of CRISPRme 2.8.1 (index format 1). "
+                + (f"This release's build of it is {successor}, in {FORMAT2_HF_REPO}: "
+                   f"download that one{instead}.\n" if same_pam else
+                   f"It is not built again for 2.10.0: {successor}, in {FORMAT2_HF_REPO}, "
+                   f"serves every search it serves (pruned to the search's PAM, at the same "
+                   f"speed or faster): download that one{instead}.\n"))
         return os.path.join(local_dir, install_name)
 
     # flat components: annotations, pams, samples
@@ -2271,6 +2729,7 @@ def publish_index(
     token: Optional[str] = None,
     display_name: Optional[str] = None,
     dictless: bool = False,
+    replace_companions: bool = False,
 ) -> str:
     """Tar a locally built genome_library index and upload it to HF.
 
@@ -2303,6 +2762,16 @@ def publish_index(
     (component ``samples``); the download-side generation then becomes a pure
     fallback. This publish path is unchanged; the note is intentional.
 
+    Since 2.10.0 an index of index format 2 is published in FORMAT2_HF_REPO, never in the
+    repos of 2.8.1 (decision C2), and a variant one in the panel's companions
+    (_PANEL_COMPANIONS): its archive holds the index, its _INDELS index and the manifest,
+    which names the panel's Dictionaries bundle and genotype store by name and fingerprint
+    (companion_fingerprint); each companion is uploaded once per panel: not again where the
+    repo's record (indexes/<name>.json) has the same fingerprint, and refused where it has
+    another, unless ``replace_companions`` (the panel's indexes already published read the
+    one in place), before anything is uploaded. An index of format 1 is published as up to
+    2.8.1 (its Dictionaries in its own archive, which 2.8.1's download installs).
+
     Returns:
         The remote path (``indexes/<index_name>.tar.gz``) the main index was
         uploaded to.
@@ -2324,20 +2793,6 @@ def publish_index(
                     f"build-index-only run that writes it has not finished it. Run "
                     f"build-index-only again to its end, then publish the index."
                 )
-    # Route a wide-flank PAM-less index to its own repo, so an older client that
-    # only knows the default repo cannot download an index it would misread.
-    repo = resolve_index_repo(index_name, repo)
-    token = resolve_token(token)
-    if not token:
-        raise ValueError(
-            "An HF write token is required to publish an index. Provide --token "
-            "or set HF_TOKEN (never commit it)."
-        )
-    hf = _require_hf()
-    # self-describing provenance travels inside the tarball (adopted from the
-    # #141 design): PAM / bulge / genome parsed from the folder name
-    # <PAM>_<bMax+1>_<ref>, plus a UTC timestamp.
-    manifest = {"name": index_name, "created_at": datetime.now(timezone.utc).isoformat()}
     # the index format its .bin files are in (1: CRISPRitz up to 2.9.1; 2: 2.10.0 and later,
     # which CRISPRme 2.8.1 refuses and 2.8.0 aborts on), and what it records it holds
     # (index_fit.write_index_meta): what an archive card states of it. An index whose files
@@ -2349,6 +2804,29 @@ def publish_index(
             f"{' and '.join(map(str, formats))}: it was put together from two builds. Build "
             f"it again with build-index-only, then publish it."
         )
+    index_format = formats[0] if formats else None
+    # Route an index of format 2, or one named for its guide length and side, to the repo
+    # of 2.10.0's indexes, and a wide-flank PAM-less index of format 1 to its own repo, so
+    # an older client that only knows the default repo cannot download an index it would
+    # misread.
+    repo = resolve_index_repo(index_name, repo, index_format)
+    if index_format == 2 and repo in (DEFAULT_HF_REPO, GENERAL_INDEX_HF_REPO):
+        raise ValueError(
+            f"{index_name} is in index format 2, which CRISPRme 2.8.1 refuses and 2.8.0 "
+            f"aborts on: it is not published in {repo}, which they read (decision C2). "
+            f"Publish it in {FORMAT2_HF_REPO} (the default for it), or in a repo of your own "
+            f"(--hf-repo).")
+    token = resolve_token(token)
+    if not token:
+        raise ValueError(
+            "An HF write token is required to publish an index. Provide --token "
+            "or set HF_TOKEN (never commit it)."
+        )
+    hf = _require_hf()
+    # self-describing provenance travels inside the tarball (adopted from the
+    # #141 design): PAM / bulge / genome parsed from the folder name
+    # <PAM>_<bMax+1>_<ref>, plus a UTC timestamp.
+    manifest = {"name": index_name, "created_at": datetime.now(timezone.utc).isoformat()}
     if formats:
         manifest["index_format"] = formats[0]
     index_meta = index_fit.read_index_meta(index_dir)
@@ -2492,13 +2970,81 @@ def publish_index(
     manifest["dictless"] = bool(dictless and vcf_name)
     manifest["has_genotypes"] = genotypes_dir is not None
     manifest["has_samplesids"] = bool(samplesid_files)
+    api = hf.HfApi()
+    indel_gt_dir = (os.path.join(os.path.dirname(genotypes_dir), f"indel_genotypes_{vcf_name}")
+                    if genotypes_dir is not None else None)
+    if vcf_name and index_format == 2:
+        # (2.10.0) the panel's companions, once per panel: what each holds, and whether the
+        # repo holds it already (the same: not uploaded again; another one: refused unless
+        # replace_companions), all decided before anything is uploaded
+        companions = [(f"{BUNDLE_PREFIX}{vcf_name}",
+                       [(f"Dictionaries/{os.path.basename(p)}", p) for p in dict_dirs]
+                       + [(f"samplesIDs/{os.path.basename(f)}", f) for f in samplesid_files],
+                       "Dictionaries bundle")]
+        if genotypes_dir is not None:
+            companions.append((f"genotypes_{vcf_name}",
+                               [(f"Dictionaries/genotypes_{vcf_name}", genotypes_dir)],
+                               "Tier-1 genotype store"))
+            if os.path.isdir(indel_gt_dir) and os.listdir(indel_gt_dir):
+                # the phased indel genotypes on their own too (they are in the bundle as
+                # well): with the genotypes, the genotype oracle a sites-only search's rows
+                # are checked against (download --what genotype-oracle), without the index
+                companions.append((f"indel_genotypes_{vcf_name}",
+                                   [(f"Dictionaries/indel_genotypes_{vcf_name}", indel_gt_dir)],
+                                   "phased indel genotypes"))
+        planned, clashes = [], []
+        for name, members, what in companions:
+            record = dict(companion_fingerprint(members), name=name, panel=vcf_name,
+                          created_at=datetime.now(timezone.utc).isoformat())
+            remote = _remote_companion_record(hf, repo, name, token)
+            if remote and remote.get("fingerprint") == record["fingerprint"]:
+                planned.append((name, members, what, record, False))
+            else:
+                if remote and not replace_companions:
+                    clashes.append(f"{name} (in {repo}: {remote.get('fingerprint')}; here: "
+                                   f"{record['fingerprint']})")
+                planned.append((name, members, what, record, True))
+        if clashes:
+            raise ValueError(
+                f"{repo} holds another build of the companions of {vcf_name} than "
+                f"{os.path.join(os.path.dirname(os.path.dirname(index_dir)), 'Dictionaries')} "
+                f"does: {'; '.join(clashes)}. Every index of a panel reads its one Dictionaries "
+                f"bundle and genotype store, so the indexes of {vcf_name} already published "
+                f"there read those. Publish this index from the working directory of their "
+                f"build, or rebuild and publish the whole panel with --replace-companions. "
+                f"Nothing was uploaded.")
+        manifest["dictionaries_bundle"] = {"name": planned[0][0],
+                                           "fingerprint": planned[0][3]["fingerprint"]}
+        manifest["has_bundle"] = True
+        if genotypes_dir is not None:
+            manifest["genotypes"] = {"name": planned[1][0],
+                                     "fingerprint": planned[1][3]["fingerprint"]}
+        # the companions first: an index published before its bundle could not be installed
+        for name, members, what, record, upload in planned:
+            if not upload:
+                sys.stdout.write(f"The {what} {name} is in {repo} already, the same "
+                                 f"(fingerprint {record['fingerprint'][:12]}): not uploaded "
+                                 f"again\n")
+                continue
+            ctar = os.path.join(os.path.dirname(index_dir), f"{name}.tar.gz")
+            crec = os.path.join(os.path.dirname(index_dir), f"{name}.json")
+            _make_companion_tarball(ctar, members, record)
+            with open(crec, "w") as fh:
+                json.dump(record, fh, indent=1, sort_keys=True)
+                fh.write("\n")
+            for local, remote_name in ((ctar, f"{name}.tar.gz"), (crec, f"{name}.json")):
+                api.upload_file(path_or_fileobj=local,
+                                path_in_repo=f"indexes/{remote_name}", repo_id=repo,
+                                repo_type="dataset", token=token)
+                os.remove(local)
+            sys.stdout.write(f"Published the {what} {name} to {repo}:indexes/{name}.tar.gz\n")
+        dict_dirs, samplesid_files = [], []  # in the bundle, not in the index's archive
     tarball = f"{index_dir}.tar.gz"
     _make_index_tarball(
         tarball, index_dir, index_name, indels_dir, manifest, dict_dirs,
         samplesid_files=samplesid_files,
     )
     remote_path = f"indexes/{index_name}.tar.gz"
-    api = hf.HfApi()
     api.upload_file(
         path_or_fileobj=tarball,
         path_in_repo=remote_path,
@@ -2507,6 +3053,9 @@ def publish_index(
         token=token,
     )
     os.remove(tarball)
+    sys.stdout.write(f"Published index to {repo}:{remote_path}\n")
+    if vcf_name and index_format == 2:
+        return remote_path
     # SEPARATE upload of the big Tier-1 genotype store (only when it exists), to
     # the SAME repo + indexes/ prefix as the main tarball, named after the vcf so
     # download can find it deterministically from the index name.
@@ -2529,7 +3078,6 @@ def publish_index(
         # and the phased indel genotypes on their own too (they are in the main archive
         # as well): with the genotypes, the genotype oracle a sites-only search's rows are
         # checked against (download --what genotype-oracle), without the index
-        indel_gt_dir = os.path.join(os.path.dirname(genotypes_dir), f"indel_genotypes_{vcf_name}")
         if os.path.isdir(indel_gt_dir) and os.listdir(indel_gt_dir):
             ig_tarball = os.path.join(os.path.dirname(index_dir),
                                       f"indel_genotypes_{vcf_name}.tar.gz")

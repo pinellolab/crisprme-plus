@@ -14,6 +14,14 @@ viewer: false
 
 # CRISPRme+ general indexes — wide-flank, PAM-less
 
+> **A newer general index exists.** CRISPRme+ **2.10.0** publishes the general index again,
+> built by CRISPRitz 2.10.0 in index format 2, as `20-NNNNNNNN_3_hg38` and
+> `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` in
+> [`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2),
+> where it also stands for `NNN_3` (not built again for 2.10.0: it serves every search
+> `NNN_3` serves, at the same speed). The archives here are CRISPRme+ 2.8.1's (index format 1),
+> kept unchanged for 2.8.1.
+
 One index that serves **many PAMs**. A *general* index stores the raw genomic
 flank instead of a fixed PAM, so a single build answers searches for any 3′ PAM no
 longer than that flank — `NGG`, `NRG`, `NRR`, `NGA`, `NAG`, `NNGRRT` and so on —

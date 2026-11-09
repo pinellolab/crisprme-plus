@@ -58,6 +58,9 @@ on:
       # into each report, and falls back to test/data/samplesIDs/ for the sample lists.
       - "assets/**"
       - "test/data/**"
+      # the index set of 2.10.0 (the rebuild manifest), which crisprme_hf reads (the index
+      # of 2.10.0 that replaces an archive of 2.8.1) and test_index_set checks
+      - "seq_script/rebuild/**"
       # test_complete_search_flags reads every .py, .sh, .yml and .yaml file in the
       # repository, seq_script/ and the paper's scripts too, for a complete-search command
       # with a flag complete-search rejects.
@@ -593,14 +596,17 @@ jobs:
         # indexes/SHA256SUMS writer (hermetic; it must never emit an empty file), and
         # a chromosome with SNPs but no indels, which CRISPRitz 2.9.1's refusal of an
         # index dir without a .bin turned into a whole-run abort. Plus legacy-index
-        # access: dedicated-PAM and NNN_3 indexes are still listed and downloaded from
-        # the default repo only, and the catalog offers each name's fetchable copy.
+        # access: dedicated-PAM and NNN_3 indexes are still downloaded from the default
+        # repo only, and the catalog offers the indexes of 2.10.0. Plus the location of
+        # 2.10.0's indexes (index format 2) and each panel's Dictionaries bundle and
+        # genotype store, published and fetched once per panel (test_panel_companions),
+        # and the index set of 2.10.0 against the code (test_index_set).
         working-directory: PostProcess
         run: >
           python -m unittest test_indel_header_injection test_complete_search_flags
           test_index_resolution test_index_repo_routing test_legacy_index_access
           test_iupac_collapse_consistency test_hf_sha256sums
-          test_indel_empty_chromosome -v
+          test_indel_empty_chromosome test_panel_companions test_index_set -v
 
       - name: "The default PAM and index are NRR, and which index serves a search (2.10.0)"
         # The NRR PAM file ships and a download of the PAM files installs it, the web form
