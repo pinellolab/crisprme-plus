@@ -587,17 +587,25 @@ def _revcomp(seq):
 # where the reference holds it, in that order:
 #   1. a placement that puts the whole PAM on reference bases (no inserted base, no
 #      deletion's junction inside it): the reference bases it sits on there. Without a
-#      SNP alt of the row in the PAM they are the PAM's own bases, so not created;
-#   2. else a placement that puts the protospacer's base that touches the PAM on a
+#      SNP alt of the row in the PAM they are the PAM's own bases, so not created (a
+#      tandem duplication of the PAM's bases: the "inserted" PAM is the reference's own,
+#      shifted);
+#   2. else, a PAM that every placement makes wholly of the bases the insertion adds: an
+#      additional PAM, which the reference does not have there, created even where the
+#      reference holds a valid PAM beside the protospacer (decision D4, 2.10.0: up to
+#      2.10.0's drafts step 3 read that PAM beside the protospacer, and a valid one there
+#      read not created);
+#   3. else a placement that puts the protospacer's base that touches the PAM on a
 #      reference base: the reference PAM beside it, on the PAM's side (the PAM's place
 #      beside that protospacer). A deletion's PAM always has one, its bases all being
 #      reference bases;
-#   3. else (an insertion that holds that base in every placement, the protospacer's end
+#   4. else (an insertion that holds that base in every placement, the protospacer's end
 #      and the PAM's start or the whole PAM): no reference place, created.
 # The placements of one kind read the same reference bases (but for a SNP alt of the row in
 # a PAM that a repeat spans: placed before the indel and past it, the PAM sits on two
-# places, and it is not created if either holds the motif), so the answer depends on the
-# haplotype alone, not on where in its repeat the VCF writes the indel.
+# places, and it is not created if either holds the motif), and step 2 asks about every
+# placement, so the answer depends on the haplotype alone, not on where in its repeat the
+# VCF writes the indel.
 #
 # A complex record replaces REF bases and adds bases or loses some (A>T plus inserted
 # bases: HPRC writes many insertions so). It is read as haplotype_base_kind and
@@ -630,9 +638,10 @@ def pam_reference_place(genome, indel, snps, first, n, k, pam_right):
     """Where an indel row's PAM is judged on the reference (the rule above): ("ref", los),
     the k reference bases genome[lo:lo + k] (forward strand) of each place ``lo`` the rule
     finds -- the PAM is not created if one of them holds the motif; ("created", ()), no
-    placement of the indel gives the PAM a place on the reference, so the indel created
-    it; None for a record that adds no base and loses none (an MNV), which the caller
-    judges on the reference under the PAM, as 2.8.1.
+    placement of the indel gives the PAM a place on the reference, or every placement makes
+    it wholly of inserted bases (D4), so the indel created it; None for a record that adds
+    no base and loses none (an MNV), which the caller judges on the reference under the
+    PAM, as 2.8.1.
 
     A PAM that placements put on the reference has one place there or two -- before the
     indel and past it, which hold the same bases --, and the first is the VCF's placement's
@@ -660,10 +669,13 @@ def pam_reference_place(genome, indel, snps, first, n, k, pam_right):
     record replaces, so a placement keeps the same haplotype with the same variants. With
     the PAM at [p0, p0 + k) of the haplotype:
       * an insertion placed at x leaves the PAM on the reference, as genome[p0:] when
-        x >= p0 + k and as genome[p0 - m:] when x + m <= p0; otherwise the protospacer's
-        base by the PAM is on the reference when x >= p0 (PAM at the right) or
-        x + m <= p0 + k (at the left), and the PAM beside it is genome[p0:p0 + k] or
-        genome[p0 - m:p0 - m + k];
+        x >= p0 + k and as genome[p0 - m:] when x + m <= p0; it makes the PAM wholly of
+        inserted bases when p0 + k - m <= x <= p0, which holds for every placement when it
+        holds for the VCF's and the insertion can move neither to p0 + 1 nor to
+        p0 + k - m - 1 (the placements are an interval, x = e - left .. e + right);
+        otherwise the protospacer's base by the PAM is on the reference when x >= p0 (PAM
+        at the right) or x + m <= p0 + k (at the left), and the PAM beside it is
+        genome[p0:p0 + k] or genome[p0 - m:p0 - m + k];
       * a deletion's junction at x leaves the PAM on the reference, as genome[p0:] when
         x >= p0 + k and as genome[p0 + d:] when x <= p0; otherwise the PAM beside the
         protospacer is genome[p0:p0 + k] (PAM at the right) or genome[p0 + d:p0 + d + k].
@@ -718,6 +730,11 @@ def pam_reference_place(genome, indel, snps, first, n, k, pam_right):
                 los.append(p0 - m)
         if los:
             return "ref", tuple(los)
+        # D4: every placement makes the PAM wholly of the inserted bases (the VCF's does, and
+        # the insertion can move neither past p0 nor before p0 + k - m): created, whatever
+        # PAM the reference holds beside the protospacer
+        if p0 + k - m <= e <= p0 and not moves(p0 + 1 - e) and not moves(p0 + k - m - 1 - e):
+            return "created", ()
         if pam_right:
             if e >= p0 or moves(p0 - e):
                 return "ref", (p0,)

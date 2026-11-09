@@ -768,14 +768,22 @@ does not depend on where in its repeat the VCF writes the indel:
    the PAM they are the PAM's own bases: NA. A SNP alt is read as the reference base it
    replaces, as on a SNP row; a PAM that two placements put on the reference (before the
    indel and past it, when the repeat spans it) is not created if either reading holds the
-   motif;
-2. else a placement that leaves the protospacer's base that touches the PAM on a reference
+   motif. A tandem duplication of the PAM's bases is this case: the "inserted" PAM is the
+   reference's own, shifted, and it stays NA;
+2. else, a PAM that every placement makes wholly of the bases the insertion adds: an
+   additional PAM, which the reference does not have there: created, even where the reference
+   holds a valid PAM beside the protospacer (decision D4, 2.10.0: a new PAM within the
+   search's mismatches and bulges is reported as one; before D4 such a PAM went to step 3, and
+   a valid reference PAM beside the protospacer read NA, since the site existed before the
+   insertion);
+3. else a placement that leaves the protospacer's base that touches the PAM on a reference
    base: the reference PAM beside that base, on the PAM's side, the PAM's place beside that
    protospacer. A deletion's PAM always has one, its bases all being reference bases; an
    insertion's has one when some placement puts the inserted bases at or past the PAM's
    first base (the PAM at the target's right end, forward: the + strand with a 3′ PAM, the −
-   strand with a 5′ one) or ending at or before the PAM's last (the PAM at its left end);
-3. else, an insertion that holds that base, with the protospacer's end and the PAM's start,
+   strand with a 5′ one) or ending at or before the PAM's last (the PAM at its left end): a
+   PAM partly made of inserted bases, in that placement;
+4. else, an insertion that holds that base, with the protospacer's end and the PAM's start,
    wherever it is placed: no place on the reference, created.
 
 A complex record replaces REF bases and adds bases or loses some (A>T and inserted bases after
@@ -814,10 +822,12 @@ insertion leaves that PAM on the reference's own: NA. Where an insertion after t
 copies the reference's own PAM (T, C6), NA likewise. C>CCAG after its anchor on the − strand
 (QC), whose first base the reference repeats there, holds the protospacer's first forward base
 in both its places: created. Not a repeat, C>CCA after an anchor C that starts a − strand row
-(QN): the protospacer's touching base is a reference base, and the reference holds CTC beside it
-(GAG on −): NA; and with an inserted TGG before the reference's AGG on the + strand (T2), or
-TTCCA inserted between the reference's CCG and its protospacer on the − strand (QW, a wholly
-inserted PAM), the reference holds a valid PAM beside the very protospacer: NA. CA>C inside the
+(QN): the PAM is the anchor and two added bases, the protospacer's touching base a reference
+base, and the reference holds CTC beside it (GAG on −): NA. An inserted TGG before the
+reference's AGG on the + strand (T2), or TTCCA inserted between the reference's CCG and its
+protospacer on the − strand (QW): the PAM is inserted bases wherever the insertion sits, an
+additional PAM, created (TGG), though the reference holds a valid PAM beside the very
+protospacer (decision D4; NA before it). CA>C inside the
 PAM CCG on the − strand (QD) leaves the reference's CAG (CTG on −) beside the protospacer:
 created. Inserted bases holding the protospacer's last four bases and the PAM on the + strand
 (QA): created. Complex records: A>T on the + strand and C>T on the − strand, each with 33
@@ -849,13 +859,18 @@ right puts that PAM on the reference's own bases (with NRR, chr22:25415044 (−)
 alignment as its site's reference row; TRAC guide, chr22:49196564 (−) and the row of
 50193928 (−): NA, as 2.8.1 read them). Genome-wide,
 2.8.1's tables (2.8.1's code gives back every value in them) with each row's PAM_creation
-computed by 2.10.0's code, highest-CFD alignments: README guide, per-sample, 97 go NA → created
-(70 rows and 27 alternative alignments: a PAM across a deletion's junction on the − strand 56,
+computed by 2.10.0's code, highest-CFD alignments: README guide, per-sample, 99 go NA → created
+(70 rows and 29 alternative alignments: a PAM across a deletion's junction on the − strand 56,
 CFD at most 0.083; a PAM holding inserted bases on a row that starts inside the insertion 27, on
-a row that starts on a reference base 14) and 4 created → NA (3 rows and 1 alternative
-alignment); population-level 70 and 3 rows; TRAC guide (CTCTCAGCTGGTACACGGCA), per-sample, 109
-(67 and 42: deletions 29, CFD at most 0.039; rows inside an insertion 58; on a reference base 22)
-and 5 (2 and 3).
+a row that starts on a reference base 16) and 4 created → NA (3 rows and 1 alternative
+alignment); population-level 70 and 3 rows; TRAC guide (CTCTCAGCTGGTACACGGCA), per-sample, 113
+(67 and 46: deletions 29, CFD at most 0.039; rows inside an insertion 58; on a reference base 26)
+and none created → NA. Of these, decision D4 (step 2) accounts for 11 highest-CFD blocks, every
+one a PAM wholly inserted beside a reference protospacer that held a valid PAM, at CFD at most
+0.008: 2 README alternative alignments (chr11:35248792 (+), CFD 0), none population-level, and
+on TRAC 2 rows (chr17:77419671 (−), 0.008; chr2:159346 (−), 0.003) and 7 alternative
+alignments (chr1:246083493 (+), chr20:63226848 (+), chr4:183404212 (−) three,
+chr5:157864188 (+) two), 5 of which 2.8.1 also read created; nothing else changes.
 
 From 2.5.0 to 2.8.0 each code was instead read **column by column without genotypes** —
 the guide's base when it was an allele, else the code's first allele. That reported one

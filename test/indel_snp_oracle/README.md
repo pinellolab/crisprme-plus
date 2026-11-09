@@ -48,9 +48,11 @@ its start); otherwise read on the haplotype the row's variants make (the referen
 SNP alts and its indel), over every placement of the indel that keeps that haplotype, each
 built whole (an insertion's bases rotated through its repeat, a deletion's junction moved
 through it): created when no placement leaves the PAM on reference bases holding the motif,
-and, where none leaves it on reference bases at all, when the reference PAM beside the
-protospacer's base that touches the PAM lacks the motif in a placement that leaves that base
-on the reference, or when no placement does (an MNV: the reference bases under the PAM; a
+and, where none leaves it on reference bases at all, when every placement makes it wholly of
+inserted bases (an additional PAM, created even beside a reference protospacer with a valid
+PAM: decision D4, 2.10.0), else when the reference PAM beside the protospacer's base that
+touches the PAM lacks the motif in a placement that leaves that base on the reference, or
+when no placement does (an MNV: the reference bases under the PAM; a
 complex record, bases replaced and bases added or lost: its first min(len(REF), len(ALT))
 changed bases in the places of the REF bases they replace, read as those, and its other bases
 an insertion's or a deletion's). The planted sites then pin who has which target:
@@ -58,7 +60,7 @@ an insertion's or a deletion's). The planted sites then pin who has which target
 | Site | Planted | Expected |
 |---|---|---|
 | A | deletion + G>A at the PAM's last base, in cis (S02) and in trans (S03) | S01, S03 CFD 1 (TGG); S02 no target |
-| T, T2 | (+) an insertion after a target's reference protospacer adds TGG: a copy of the reference's own TGG there (T, a tandem duplication), or before the reference's AGG (T2) | per-sample (the reference's own target represents each site in a population-level run): S62, S63 CFD 1, the row at the target's first base, a reference one; PAM_creation NA (at T a placement 3 bases right leaves the PAM on the reference's own TGG; at T2 the PAM is wholly inserted wherever the insertion sits, and the reference holds AGG beside the protospacer) |
+| T, T2 | (+) an insertion after a target's reference protospacer adds TGG: a copy of the reference's own TGG there (T, a tandem duplication), or before the reference's AGG (T2) | per-sample (the reference's own target represents each site in a population-level run): S62, S63 CFD 1, the row at the target's first base, a reference one; PAM_creation NA at T (a placement 3 bases right leaves the PAM on the reference's own TGG), TGG at T2 (the PAM is wholly inserted wherever the insertion sits: an additional PAM, created though the reference holds AGG beside the protospacer; decision D4, before which T2 read NA) |
 | B | minus-strand insertion + PAM SNP in cis (S06) and in trans (S07) | S05, S07 CFD 1 (AGG) |
 | C | deletion, no SNP | S09 CFD 1 |
 | D | deletion + a PAM-creating A>G SNP in cis (S10) | S10 CFD 1, CONFIRMED co-occurrence; S11 no target |
@@ -86,7 +88,7 @@ an insertion's or a deletion's). The planted sites then pin who has which target
 | QC | (-) C>CCAG after the anchor C, the PAM's far end; the reference repeats its first base: in both places it holds the PAM's inner bases and the protospacer's first forward base | S81 CFD 1; PAM_creation TGG (no placement gives the PAM a place on the reference; the REF alignment's window, CCC from the anchor, is GGG on -) |
 | QN | (-) C>CCA after the anchor C, no repeat; the reference holds CTC (GAG on -) beside the protospacer | per-sample (the reference's own target 2 bases left represents the site in a population-level run): S82 CFD 1; PAM_creation NA (the window, CGC, is GCG on -) |
 | QD | (-) CA>C deletes the A of CCAG before the protospacer, its junction inside the PAM CCG (CGG on -) | S83 CFD 1; PAM_creation CGG (the reference holds CAG, CTG on -, beside the protospacer; the window from the row's start, CCA, is TGG on -, another protospacer's PAM) |
-| QW | (-) TTCCA inserted after the anchor G: a target from its 3rd added base, its PAM the last three, and the reference's CCG (CGG on -) before the protospacer | per-sample (the reference's own target represents the site in a population-level run): S84 CFD 1 at the anchor; PAM_creation NA |
+| QW | (-) TTCCA inserted after the anchor G: a target from its 3rd added base, its PAM the last three, and the reference's CCG (CGG on -) before the protospacer | per-sample (the reference's own target represents the site in a population-level run): S84 CFD 1 at the anchor; PAM_creation TGG (an additional PAM, wholly inserted wherever the insertion sits; decision D4, before which it read NA) |
 | QA | (+) G[16:] + TGG inserted after G[15], no repeat | S85 CFD 1; PAM_creation TGG (the protospacer's end and the PAM are inserted wherever the insertion sits; the window holds AGG) |
 | QX | (+) a complex record, A>T and 33 bases added after it that hold a whole target from the 6th, its PAM and the protospacer's end added bases | S86 CFD 1, the row at the replaced A; PAM_creation TGG (as for the insertion of those bases after an anchor; the window, read from the replaced A, holds AGG) |
 | QY | (-) its mirror, C>T and the bases added, the PAM (forward CCA) and the protospacer's first forward base added | S87 CFD 1; PAM_creation TGG (the window, CCG from the replaced C, is CGG on -) |

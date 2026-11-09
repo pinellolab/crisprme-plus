@@ -2037,16 +2037,18 @@ and the `release-crisprme` skill.
     through its repeat, a deletion's junction moved through it (the VCF writes either at the
     left end of its repeat). A placement that leaves the PAM on reference bases: the bases it
     sits on there, which are its own (not created) but for a SNP alt of the row, read as the
-    reference base it replaces. Else a placement that leaves the protospacer's base touching
-    the PAM on a reference base: the reference PAM beside it. Else, an insertion that holds
-    that base wherever it sits: created. A complex record, which replaces REF bases and adds
-    bases or loses some (A>T and inserted bases after it: HPRC writes many insertions so), is
-    its replaced bases, read as the REF bases they replace (as a SNP alt is), and its added or
-    lost bases, placed as an insertion's or a deletion's. A row whose REF alignment is its ALT
-    is never created; a PAM with a bulge, or holding an MNV's ALT bases, keeps the REF
+    reference base it replaces. Else, a PAM that every placement makes wholly of the inserted
+    bases: an additional PAM, created, even where the reference holds a valid PAM beside the
+    protospacer (decision D4, below). Else a placement that leaves the protospacer's base
+    touching the PAM on a reference base: the reference PAM beside it. Else, an insertion that
+    holds that base wherever it sits: created. A complex record, which replaces REF bases and
+    adds bases or loses some (A>T and inserted bases after it: HPRC writes many insertions so),
+    is its replaced bases, read as the REF bases they replace (as a SNP alt is), and its added
+    or lost bases, placed as an insertion's or a deletion's. A row whose REF alignment is its
+    ALT is never created; a PAM with a bulge, or holding an MNV's ALT bases, keeps the REF
     alignment's (for an MNV, the reference under it). A row that stands for two copies of one
-    target inside one insertion is created when either copy's PAM is (the insertion added
-    that copy, with a PAM it made). METHODS, "`PAM_creation`".
+    target inside one insertion is created when either copy's PAM is (the insertion added that
+    copy, with a PAM it made). METHODS, "`PAM_creation`".
   - The answer does not depend on where in its repeat the VCF writes the indel. Read where it
     writes it, at the anchor where a row that starts inside an insertion now starts, a repeat
     unit inserted beside a reference PAM would put inserted bases in a PAM the reference
@@ -2057,9 +2059,27 @@ and the `release-crisprme` skill.
     duplication of a PAM's bases after a reference protospacer is not created
     either (TRAC guide, the alternative alignment of chr22:20586277 (+), on the anchor of an
     insertion of two more copies of the 16-base unit the reference repeats after it, the same
-    alignment as its site's reference row); a PAM wholly inserted after a protospacer of
-    reference bases is created only where the reference lacks a PAM beside that protospacer
-    (an inserted TGG before the reference's AGG: NA).
+    alignment as its site's reference row).
+  - **Decision D4: an additional PAM is created.** A PAM that every placement of its
+    insertion makes wholly of inserted bases is a PAM the reference does not have there, and
+    a site the search reports within its mismatches and bulges is a site the insertion made:
+    created, even beside a protospacer the reference holds with a valid PAM (an inserted TGG
+    before the reference's AGG: TGG). The placement-invariant exception stays: an "inserted"
+    PAM that a placement puts on the reference's own bases (a tandem duplication of the PAM)
+    is not created, and a PAM partly made of inserted bases, or across a deletion's junction,
+    is still judged by the reference PAM beside the protospacer. Before D4 (2.10.0's drafts)
+    the reference PAM beside the protospacer decided for a wholly inserted PAM too, and a
+    valid one read NA, the site having existed before the insertion. Genome-wide, on 2.8.1's
+    tables (below), D4 turns 11 highest-CFD blocks from NA to created and changes nothing else:
+    README guide, per-sample, 2 alternative alignments (chr11:35248792 (+), CFD 0);
+    population-level none; TRAC guide 2 rows (chr17:77419671 (−), CFD 0.008, and chr2:159346
+    (−), 0.003) and 7 alternative alignments (chr1:246083493 (+), chr20:63226848 (+),
+    chr4:183404212 (−) three, chr5:157864188 (+) two), CFD at most 0.008; 5 of them (the
+    insertions at chr17, chr2 and chr4) 2.8.1 also read created. In the SNP+indel oracle T2 and
+    QW, and in `test_indel_row_coordinates` DUPS and W2, now read created;
+    `test_indel_snp_cis.test_pam_reference_place_an_additional_inserted_pam_is_created` pins
+    both strands, 3′ and 5′ PAMs, a complex record's added bases, and the cases D4 leaves as
+    they were.
   - chr22, released 2.8.1 image against 2.10.0's post-analysis on it (CRISPRitz 2.9.1, index format
     1): README guide NRG per-sample 2 alignments, 21052639 (−) (TGG → NA; above, now one of the
     alternative alignments of 21052638's site) and the row of 21056178 (−) (NA → AGG);
@@ -2074,17 +2094,18 @@ and the `release-crisprme` skill.
     reference's own PAM, is not, but its right copy is, and the row of two copies is created when
     either is. The row of 50193928 (−) and its alternative alignment of the 48-base allele that
     repeats the unit exactly keep NA, as 49196564 (−) does. In the SNP+indel oracle Z2 (wholly
-    inserted) reads TGG, Z4 NA and Z5 TGG (partly inserted), T, T2, PR, PM, QN, QW, QZ and the
-    Cas12a profile's C6 and CB1 NA, and QC, QD, QA, QX, QY, QV and CB3 created (below).
+    inserted) reads TGG, Z4 NA and Z5 TGG (partly inserted), T, PR, PM, QN, QZ and the Cas12a
+    profile's C6 and CB1 NA, and T2, QW (both D4), QC, QD, QA, QX, QY, QV and CB3 created
+    (below).
   - Genome-wide, 2.8.1's tables with each row's `PAM_creation` computed by 2.10.0's code
     (2.8.1's code gives back every value in them), highest-CFD alignments: README guide,
-    per-sample, 97 go NA → created (70 rows and 27 alternative alignments): a PAM across a
+    per-sample, 99 go NA → created (70 rows and 29 alternative alignments): a PAM across a
     deletion's junction on the − strand 56 (CFD at most 0.083), a PAM holding inserted bases on
-    a row that starts inside the insertion 27 and on a row that starts on a reference base 14;
+    a row that starts inside the insertion 27 and on a row that starts on a reference base 16;
     and 4 created → NA (3 rows and 1 alternative alignment); population-level 70 and 3 rows;
-    TRAC guide, per-sample, 109 (67 and 42: deletions 29, CFD at most 0.039; rows inside an
-    insertion 58; rows on a reference base 22) and 5 (2 and 3). HGDP + 1000 Genomes holds no
-    complex record.
+    TRAC guide, per-sample, 113 (67 and 46: deletions 29, CFD at most 0.039; rows inside an
+    insertion 58; rows on a reference base 26) and none created → NA (with D4; before it 109
+    and 5). HGDP + 1000 Genomes holds no complex record.
   - HPRC's chr22 holds 8,022 complex records with a net insertion and 1,055 with a net
     deletion (against 106,118 insertions and 80,464 deletions). Every block of a row that names
     one reads as an independent re-derivation from the VCF record reads it (the README guide,
@@ -2094,34 +2115,34 @@ and the `release-crisprme` skill.
     of chr22:37509610 (−) and alternative alignments at 42134819 (−) and 42135364 (−), whose
     added bases repeat the reference after them, so that placed further right their PAM is
     the reference's own GGG.
-- The SNP+indel oracle (`test/indel_snp_oracle`) checks every indel row's start (strictly: at
-  an occurrence on a listed carrier's haplotype that holds the row's variants; up to now a row
-  with no carrier occurrence within 40 bp of its start was not checked),
-  `Variant_info_spacer+PAM` and `PAM_creation` against its carriers' haplotypes, plants Z, Z2,
-  Z3 (rows starting inside an insertion), Z4 and Z5 (a PAM partly inserted, the reference PAM
-  beside the protospacer valid and not), X (an insertion holding two targets: both are listed),
-  X2 (one holding a target twice: one row), T and T2 (an insertion after a reference
-  protospacer that copies the reference's own PAM, or adds one before another reference PAM:
-  not created), PR, PM, QC, QN, QD, QW and QA (PAMs judged wherever in its repeat the VCF
-  writes the indel: tandem duplications of a unit holding a target, an insertion that holds
-  the protospacer's end in both its places, a non-repeat insertion on a row starting on its
-  anchor, a deletion across a − strand PAM, a wholly inserted PAM beside a reference
-  protospacer holding a valid PAM, an insertion of the protospacer's end and the PAM), QX, QY,
-  QZ and QV (complex records: A>T and C>T with a whole target in their added bases, G>CCA on a
-  row starting on the replaced base, TG>C across a − strand PAM), and has a Cas12a profile (5′
-  PAM TTTV, both strands, rows starting inside an insertion, PAMs wholly and partly inserted,
-  a tandem duplication of a PAM (C6), a SNP past a deletion, and CB1 and CB3, the placement
-  rule on each strand); its `PAM_creation` expectation builds every placement of the row's
-  indel on the haplotype the row's variants make. The released v2.8.1 image fails the oracle
-  231 times (SpCas9) and 60 times (Cas12a); 2.10.0 passes both. Unit tests:
-  `test_indel_variant_positions` (the real integrator), `test_indel_pam_creation`,
-  `test_indel_row_coordinates` (rows starting inside an insertion, rows whose PAM an insertion
-  adds after a reference protospacer, PAMs judged wherever in its repeat the VCF writes the
-  indel, complex records, 3′ and 5′ PAMs, both strands), `test_indel_snp_cis` (the placement
-  rule against every placement built whole, on 3,000 random rows and on 3,000 more, over 1,000
-  of them complex records, and the same answer for every record that writes one haplotype) and
-  `test_representative_tiebreak` (the real merge: alignments that start inside one
-  insertion, and two copies of one target, created when either copy is, in either order).
+- The SNP+indel oracle (`test/indel_snp_oracle`) checks every indel row's start (strictly: at an
+  occurrence on a listed carrier's haplotype that holds the row's variants; up to now a row with
+  no carrier occurrence within 40 bp of its start was not checked), `Variant_info_spacer+PAM`
+  and `PAM_creation` against its carriers' haplotypes, plants Z, Z2, Z3 (rows starting inside an
+  insertion), Z4 and Z5 (a PAM partly inserted, the reference PAM beside the protospacer valid
+  and not), X (an insertion holding two targets: both are listed), X2 (one holding a target
+  twice: one row), T and T2 (an insertion after a reference protospacer that copies the
+  reference's own PAM, not created, or adds one before another reference PAM, created by D4),
+  PR, PM, QC, QN, QD, QW and QA (PAMs judged wherever in its repeat the VCF writes the indel:
+  tandem duplications of a unit holding a target, an insertion that holds the protospacer's end
+  in both its places, a non-repeat insertion on a row starting on its anchor, a deletion across
+  a − strand PAM, a wholly inserted PAM beside a reference protospacer holding a valid PAM, an
+  insertion of the protospacer's end and the PAM), QX, QY, QZ and QV (complex records: A>T and
+  C>T with a whole target in their added bases, G>CCA on a row starting on the replaced base,
+  TG>C across a − strand PAM), and has a Cas12a profile (5′ PAM TTTV, both strands, rows
+  starting inside an insertion, PAMs wholly and partly inserted, a tandem duplication of a PAM
+  (C6), a SNP past a deletion, and CB1 and CB3, the placement rule on each strand); its
+  `PAM_creation` expectation builds every placement of the row's indel on the haplotype the
+  row's variants make. The released v2.8.1 image fails the oracle 231 times (SpCas9) and 60
+  times (Cas12a); 2.10.0 passes both. Unit tests: `test_indel_variant_positions` (the real
+  integrator), `test_indel_pam_creation`, `test_indel_row_coordinates` (rows starting inside an
+  insertion, rows whose PAM an insertion adds after a reference protospacer, PAMs judged
+  wherever in its repeat the VCF writes the indel, complex records, 3′ and 5′ PAMs, both
+  strands), `test_indel_snp_cis` (the placement rule against every placement built whole, on
+  3,000 random rows and on 3,000 more, over 1,000 of them complex records, and the same answer
+  for every record that writes one haplotype) and `test_representative_tiebreak` (the real
+  merge: alignments that start inside one insertion, and two copies of one target, created when
+  either copy is, in either order).
 - **The release gate `scripts/check_alt_pam.py` lets an indel row's REF text hold an N where
   the reference genome does** (the gate's no-N check, since 2.8.1).
   - An indel row's REF text is the reference at the row's coordinates, as many bases as its

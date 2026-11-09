@@ -508,8 +508,9 @@ def test_row_first_base_cost_does_not_grow_with_the_insertion():
 
 # --- where an indel row's PAM is judged on the reference (pam_reference_place, 2.10.0):
 # the reference bases its PAM sits on in a placement of the indel, through its repeat, that
-# leaves it on the reference; else the reference PAM beside the protospacer's base that
-# touches the PAM, placed on the reference; else created. -------------------------------
+# leaves it on the reference; else, a PAM made wholly of inserted bases in every placement,
+# created (D4); else the reference PAM beside the protospacer's base that touches the PAM,
+# placed on the reference; else created. ------------------------------------------------
 
 def _trims(ref, alt):
     c = 0
@@ -524,7 +525,7 @@ def _trims(ref, alt):
 def _pam_place_every_placement(genome, indel, snps, first, n, k, pam_right):
     """pam_reference_place's rule read the long way: every place of the indel that gives
     the same haplotype (the reference with the row's indel and SNP alts) is built whole,
-    each of its bases mapped to the reference, and the rule's three steps are read off
+    each of its bases mapped to the reference, and the rule's four steps are read off
     those maps: the VCF's placement first, then the ones right of it, then left. A complex
     record's first min(len(REF), len(ALT)) changed bases are written into the reference
     as the SNP alts are, in the places of the REF bases they replace (whose reference
@@ -572,6 +573,10 @@ def _pam_place_every_placement(genome, indel, snps, first, n, k, pam_right):
             free.add(genome[refs[0]:refs[0] + k].upper())
     if free:
         return "ref", frozenset(free)
+    # D4 (2.10.0): a PAM every placement makes wholly of the inserted bases is created,
+    # whatever PAM the reference holds beside the protospacer
+    if m and all(all(x is None for x in pos[p0:p0 + k]) for pos in maps):
+        return "created", frozenset()
     for pos in maps:
         if pos[tb] is not None:
             lo = pos[tb] + 1 if pam_right else pos[tb] - k
@@ -730,11 +735,12 @@ def test_pam_reference_place_geometries():
     genome = "T" * 30 + g + "TGG" + "CATTACG" + "T" * 30
     assert isc.pam_reference_place(genome, (50, "C", "CTGG"), [], 30, 23, 3, True) == \
         ("ref", (50,))
-    # TGG before the reference's AGG, no repeat: the PAM wholly inserted, the protospacer's
-    # last base the anchor, a reference base: the reference PAM beside it, AGG
+    # TGG before the reference's AGG, no repeat: the PAM wholly inserted wherever the
+    # insertion sits, an additional PAM beside a protospacer that had a valid one, AGG:
+    # created (D4; before it, the reference PAM beside the protospacer decided, AGG: NA)
     genome = "T" * 30 + g + "AGG" + "CATTACG" + "T" * 30
     assert isc.pam_reference_place(genome, (50, "C", "CTGG"), [], 30, 23, 3, True) == \
-        ("ref", (50,))
+        ("created", ())
     # the insertion holds the protospacer's last two bases and the PAM's first wherever it
     # is placed (it can move one base right, no further): created
     genome = "T" * 30 + g[:18] + "GG" + "AGG" + "T" * 30
@@ -769,6 +775,71 @@ def test_pam_reference_place_geometries():
     genome = "C" * 28 + "TTTA" + "GATCCAGTCACGTTAGCATG" + "C" * 30
     assert isc.pam_reference_place(genome, (31, "T", "TTT"), [], 30, 24, 4, False) == \
         ("ref", (28,))
+
+
+def test_pam_reference_place_an_additional_inserted_pam_is_created():
+    """2.10.0, decision D4: an additional PAM, made wholly of the bases an insertion adds
+    wherever the insertion sits, beside a reference protospacer is created, even where the
+    reference already holds a valid PAM beside that protospacer (the haplotype has a PAM the
+    reference does not have there). Before D4 the reference PAM beside the protospacer
+    decided, and a valid one there read NA. Unchanged by D4: a placement that puts the PAM
+    on the reference's own bases (a tandem duplication of the PAM: NA), a PAM that only some
+    placements make wholly of inserted bases or that holds a reference base (the reference
+    PAM beside the protospacer decides), and a deletion's junction."""
+    g = "ACTGAAATCTGTAAGCAGGC"
+    place = isc.pam_reference_place
+    # + strand, 3' PAM: TGG inserted after the protospacer, beside the reference's AGG (a
+    # valid NGG) and beside CAT (none): created both ways
+    for after in ("AGG", "CAT"):
+        genome = "T" * 30 + g + after + "CATTACG" + "T" * 30
+        assert place(genome, (50, "C", "CTGG"), [], 30, 23, 3, True) == ("created", ()), after
+    # beside TCA the inserted TGG can sit one base right (GGT after the reference's T), where
+    # the PAM holds that reference T: not every placement makes it wholly of inserted bases,
+    # and the reference PAM beside the protospacer decides, TCA (no NGG: created by the
+    # caller)
+    genome = "T" * 30 + g + "TCA" + "CATTACG" + "T" * 30
+    assert place(genome, (50, "C", "CTGG"), [], 30, 23, 3, True) == ("ref", (50,))
+    # the tandem duplication of the reference's own TGG: a placement 3 bases right puts the
+    # PAM on it (NA, the exception D4 keeps)
+    genome = "T" * 30 + g + "TGG" + "CATTACG" + "T" * 30
+    assert place(genome, (50, "C", "CTGG"), [], 30, 23, 3, True) == ("ref", (50,))
+    # TGG inserted beside the reference's TGA: placed one or two bases right (GGT, GTG) the
+    # PAM holds a reference base, so not every placement makes it wholly of inserted bases:
+    # the reference PAM beside the protospacer decides, TGA (no NGG: created by the caller)
+    genome = "T" * 30 + g + "TGA" + "CATTACG" + "T" * 30
+    assert place(genome, (50, "C", "CTGG"), [], 30, 23, 3, True) == ("ref", (50,))
+    # a PAM of two inserted bases and a reference one (TG, then the reference's G): the
+    # reference PAM beside the protospacer decides, GTA (no NGG: created by the caller)
+    genome = "T" * 30 + g + "GTA" + "CATTACG" + "T" * 30
+    assert place(genome, (50, "C", "CTG"), [], 30, 23, 3, True) == ("ref", (50,))
+    # - strand, 3' PAM (forward CCN at the target's left end): TTCCA inserted after the
+    # anchor G, a target from its 3rd added base, the PAM CCA (TGG on -) the last three
+    # added bases, beside the reference's CCG (CGG on -, a valid NGG): created (the oracle's
+    # QW, TRAC chr17:77419671 (-))
+    rcg = _rc(g)
+    genome = "T" * 30 + "CCG" + rcg + "T" * 30
+    assert place(genome, (33, "G", "GTTCCA"), [], 35, 23, 3, False) == ("created", ())
+    # Cas12a, 5' PAM, - strand (the PAM at the target's right end, forward): TAAA (TTTA on
+    # -) inserted after the spacer's last forward base, beside the reference's GAAA (TTTC
+    # on -, a valid TTTV): created; beside its own TAAA, a tandem duplication: NA
+    sp = "GATCCAGTCACGTTAGCATGCAA"
+    f = _rc(sp)
+    for after, want in (("GAAA", ("created", ())), ("TAAA", ("ref", (53,)))):
+        genome = "C" * 30 + f + after + "CCGT" + "C" * 30
+        got = place(genome, (53, f[-1], f[-1] + "TAAA"), [], 30, 27, 4, True)
+        assert got == want, (after, got)
+    # + strand, 5' PAM (at the target's left end): TTTA inserted before the spacer, beside
+    # the reference's TTTC (valid): created
+    genome = "G" * 26 + "CA" + "TTTC" + sp + "G" * 30
+    assert place(genome, (32, "C", "CTTTA"), [], 32, 27, 4, False) == ("created", ())
+    # a complex record's added bases are an insertion's: A>CTGG on the protospacer's last
+    # base, its added TGG beside the reference's AGG: created
+    genome = "T" * 40 + g[:19] + "A" + "AGG" + "CATTAC" + "T" * 30
+    assert place(genome, (60, "A", g[19] + "TGG"), [], 40, 23, 3, True) == ("created", ())
+    # a deletion is not an additional PAM: CA>C, its junction inside the PAM CCG (CGG on
+    # -), keeps the reference PAM beside the protospacer, CAG (CTG on -)
+    genome = "T" * 30 + "CCAG" + rcg + "T" * 30
+    assert place(genome, (32, "CA", "C"), [], 30, 23, 3, False) == ("ref", (31,))
 
 
 def test_pam_reference_place_reads_a_complex_record_as_replaced_and_added_bases():
@@ -833,12 +904,13 @@ def test_pam_reference_place_complex_records_by_hand():
     genome = "T" * 40 + g + "TGA" + "CATTAC" + "T" * 30
     assert isc.pam_reference_place(genome, (63, "A", "GTTT"), [], 40, 23, 3, True) == \
         ("ref", (60,))
-    # + strand, A>CTGG on the protospacer's last base: the PAM is the added TGG, and the
-    # protospacer's touching base the replaced one, in its REF base's place: the reference
-    # PAM beside it, AGG
+    # + strand, A>CTGG on the protospacer's last base: the PAM is the added TGG wherever it
+    # sits, beside the protospacer whose touching base is the replaced one, in its REF base's
+    # place, where the reference holds AGG: created, as for the insertion of TGG (D4; before
+    # it, the reference PAM beside it decided, AGG: NA)
     genome = "T" * 40 + g[:19] + "A" + "AGG" + "CATTAC" + "T" * 30
     assert isc.pam_reference_place(genome, (60, "A", g[19] + "TGG"), [], 40, 23, 3, True) \
-        == ("ref", (60,))
+        == ("created", ())
 
 
 def test_pam_reference_place_reads_a_snp_alt_in_the_pam_as_its_reference_base():
