@@ -194,7 +194,8 @@ def _engine_value(name):
             values = {}
             with open(exe, errors="replace") as fh:
                 for line in fh:
-                    m = re.match(r"""(VERSION|INDEX_FORMAT)\s*=\s*["']?([^"'\s#]+)""", line)
+                    m = re.match(r"""(VERSION|INDEX_FORMAT|INDEL_LEFT|INDEL_RIGHT)\s*=\s*"""
+                                 r"""["']?([^"'\s#]+)""", line)
                     if m and m.group(1) not in values:
                         values[m.group(1)] = m.group(2)
             _engine_cache[key] = values
@@ -364,11 +365,14 @@ def _crisprme_version():
     return None
 
 
-def write_index_meta(index_dir, pam_file=None, built=False):
+def write_index_meta(index_dir, pam_file=None, built=False, indel_window=None):
     """Records in ``index_dir`` (INDEX_META, JSON) what the index holds: its index format,
     build PAM, the side of the guide that PAM is on, the flank width (the build PAM's
     length), the guide length and max bulges it was built for, whether its build PAM is all
-    N and whether it holds the four-allele symbol Q. Each is read from the headers of its
+    N and whether it holds the four-allele symbol Q, and, for the sub-index of an INDELS
+    index, ``indel_window``: the (left, right) reference bases of the fake-indel windows it
+    was built from, which its indel log tells (indel_window.META_KEY; a search refuses the
+    sub-index beside a log of other windows). Each is read from the headers of its
     .bin files where they hold it (format 2 holds them all; format 1 the guide length, its
     file names the PAM); else from ``pam_file``, the PAM file of the build, and the N of the
     folder's name, and the format, for an index with no .bin, from the installed CRISPRitz
@@ -441,6 +445,8 @@ def write_index_meta(index_dir, pam_file=None, built=False):
         meta["flank_len"] = len(meta["build_pam"])
         meta["pamless"] = set(meta["build_pam"]) == {"N"}
     meta["four_allele"] = True in flags
+    if indel_window is not None:
+        meta["indel_window"] = [int(indel_window[0]), int(indel_window[1])]
     if built:
         meta["built_by"] = {"crispritz": engine_version(), "crisprme": _crisprme_version()}
     try:

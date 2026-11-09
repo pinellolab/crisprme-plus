@@ -69,9 +69,14 @@ and the format version, then the body, then the magic again), though this crispr
 states no INDEX_FORMAT, as CRISPRitz 2.9.1's states none. add-variants pads the fake
 contig of chromosome $STUB_BIG_FAKE with a megabase of N (and this stub lifts any
 file-size limit of its own), and with $STUB_GZ_BLOCKED leaves a directory where the
-last dictionary's .gz would go.
+last dictionary's .gz would go. Its fake-indel windows hold 25 bases before an indel and
+34 after it, which this crispritz.py states (INDEL_LEFT, INDEL_RIGHT), as CRISPRitz
+2.10.0's states its own (30 and 30).
 """
 import json, os, resource, shutil, struct, sys, time
+
+INDEL_LEFT = 25
+INDEL_RIGHT = 34
 
 if os.environ.get("STUB_BIG_FAKE"):
     resource.setrlimit(resource.RLIMIT_FSIZE, (resource.getrlimit(resource.RLIMIT_FSIZE)[1],) * 2)
@@ -3275,10 +3280,10 @@ BEFORE = {
             "b27b5953fb0c4677  genome_library/20-NRG_2_hg38+ds/NRG_chr2_1.bin",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
-            "d9f701cbadb490ab  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/.index_meta.json",
+            "fe69ec7e9c3b2235  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/.index_meta.json",
             "13a14310b8ce8302  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/",
-            "d9f701cbadb490ab  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/.index_meta.json",
+            "fe69ec7e9c3b2235  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/.index_meta.json",
             "103c77c7195d36be  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
             "dir  genome_library/20-NRG_2_hg38/",
             "d9f701cbadb490ab  genome_library/20-NRG_2_hg38/.index_meta.json",
@@ -3367,10 +3372,10 @@ BEFORE = {
             "b27b5953fb0c4677  genome_library/20-NRG_2_hg38+ds/NRG_chr2_1.bin",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
-            "d9f701cbadb490ab  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/.index_meta.json",
+            "fe69ec7e9c3b2235  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/.index_meta.json",
             "13a14310b8ce8302  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/",
-            "d9f701cbadb490ab  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/.index_meta.json",
+            "fe69ec7e9c3b2235  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/.index_meta.json",
             "103c77c7195d36be  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
             "dir  genome_library/20-NRG_2_hg38/",
             "d9f701cbadb490ab  genome_library/20-NRG_2_hg38/.index_meta.json",
@@ -4109,14 +4114,104 @@ class AStoreOfAnEarlierReleaseIsWrittenAgain(_Fixture):
             self.assertEqual(fh.read().splitlines()[1:], ["FILTER\tPASS,."])
 
 
+class TheFakeIndelWindowsAreTheEnrichments(_Fixture):
+    """The fake-indel windows: each INDELS sub-index records those its chromosome's indel
+    log records (here the stub's, 25 bases before an indel and 34 after it); a re-run beside
+    the logs and fake-indel genome of an enrichment of other windows (put in place with
+    their SNP codes, the index kept) refuses that index, which every search refuses too; and
+    a re-run on an enrichment in place whose windows the installed CRISPRitz does not write
+    says so, with the longest target they hold, and how to enrich the dataset again
+    (crisprme._enrichment_window_notes)."""
+
+    def reenrich(self, left, right):
+        """The indel logs and the fake-indel genome of ds, as an enrichment of windows of
+        left/right reference bases writes them (the stub's insertion at 26, its window from
+        26 - 1 - left), with their SNP codes on (the stub's SNP at 11, coded R in the enriched
+        genome), as the build that made them overlaid them."""
+        for chrom, seq in GENOME.items():
+            pos, start = 26, 26 - 1 - left
+            end = pos - 1 + 1 + right
+            contig = list(seq[start:pos] + "T" + seq[pos:end])
+            contig[10 - start] = "R"   # the SNP at 11's code, overlaid
+            contig = "".join(contig)
+            with gzip.open(self.path("Dictionaries", "log_indels_ds", "log%s.txt.gz" % chrom),
+                           "wt") as fh:
+                fh.write("%s\n%s_%d-%d_1\tS2\trs_%s_26\t0.25\t%s_26_%s_%sT\t0,%d\t%s\n" % (
+                    LOG_HEADER, chrom, start, end, chrom, chrom, seq[25], seq[25], len(contig),
+                    seq[start:start + len(contig)]))
+            _write(self.path("Genomes", "hg38+ds_INDELS", "fake_ds_%s" % chrom,
+                             "fake%s.fa" % chrom), ">fake%s\n%s\n" % (chrom, contig))
+
+    def test_each_sub_index_records_its_windows_and_one_of_others_is_refused(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        for chrom in ("chr1", "chr2"):
+            with open(self.lib(INDELS) + "/NRG_2_fake%s/.index_meta.json" % chrom) as fh:
+                self.assertEqual(json.load(fh)["indel_window"], [25, 34])
+        self.reenrich(20, 30)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("The INDELS index %s was built from fake-indel windows of 25/34 reference "
+                      "bases (before an indel's REF and after it; NRG_2_fakechr1), while the "
+                      "indel logs %s record windows of 20/30: the index and the logs come "
+                      "from two enrichments, and every search refuses them. Remove the index "
+                      "(rm -rf '%s') and run build-index-only again"
+                      % (self.lib(INDELS), self.path("Dictionaries", "log_indels_ds"),
+                         self.lib(INDELS)), err)
+        self.assertIn("WARNING [build-index-only]: the INDELS index %s was built from "
+                      "fake-indel windows of 25/34 reference bases, and the indel logs of ds "
+                      "(%s) record windows of 20/30" % (
+                          self.lib(INDELS), self.path("Dictionaries", "log_indels_ds")), out)
+        # complete-search says, on its console, that its targets (a 23-nt guide and PAM with
+        # a DNA bulge) need more than such windows hold (it stops later, at this stub's
+        # search, which a search refuses at the index: test_indel_empty_chromosome)
+        rc, out, err = self.run_search()
+        self.assertIn("WARNING [complete-search]: the fake-indel windows of ds hold 20 "
+                      "reference bases before each indel and 30 after it, so a target that "
+                      "holds an indel there holds up to 22 bases (21 at a record whose REF and "
+                      "ALT differ at their first base, an MNV or complex record), guide, PAM "
+                      "and DNA bulges counted; this search's need up to 24 (a 23-nt guide and "
+                      "PAM with 1 DNA bulge): such indel off-targets are held by no index and "
+                      "not reported. CRISPRitz 2.10.0 writes windows of 30 bases on either "
+                      "side, which hold up to 31: enrich ds again with it (build-index-only) "
+                      "to search them.", out)
+        with open(self.path("Results", "search", "Params.txt")) as fh:
+            self.assertIn("Indel_window_note\tWARNING [complete-search]: the fake-indel "
+                          "windows of ds hold 20", fh.read())
+
+    def test_an_enrichment_in_place_of_other_windows_is_said(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertNotIn("fake-indel windows", out)
+        # the installed CRISPRitz now writes 30/30: the enrichment in place holds 25/34
+        stub = os.path.join(self.bin, "crispritz.py")
+        with open(stub) as fh:
+            text = fh.read()
+        _write(stub, text.replace("INDEL_LEFT = 25\nINDEL_RIGHT = 34\n",
+                                  "INDEL_LEFT = 30\nINDEL_RIGHT = 30\n"))
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("WARNING [build-index-only]: the enrichment of ds in place (%s) holds "
+                      "fake-indel windows of 25 reference bases before an indel and 34 after "
+                      "it (its indel logs, %s), and the installed CRISPRitz writes 30 and 30: "
+                      "a target that holds an indel there holds up to 27 bases, guide, PAM "
+                      "and DNA bulges counted (26 at a record whose REF and ALT differ at "
+                      "their first base), against 31 on windows of 30/30" % (
+                          self.path("Genomes", "hg38+ds"),
+                          self.path("Dictionaries", "log_indels_ds")), out)
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix: but for the
     names of the indexes, which since 2.10.0 say the guide length and the side (BEFORE is
     the record of the code before the fix with NRG_2_hg38 named 20-NRG_2_hg38, which a
-    --record of 2.10.0 gives, byte for byte), and the .done marker of each chromosome's
+    --record of 2.10.0 gives, byte for byte), the .done marker of each chromosome's
     phased indel genotypes, which since 2.10.0 says, after its record count, that the store
-    holds only records whose FILTER is PASS or '.' (build_indel_genotypes.FILTER_MARK)."""
+    holds only records whose FILTER is PASS or '.' (build_indel_genotypes.FILTER_MARK), and
+    the record of each INDELS sub-index (.index_meta.json), which since 2.10.0 says the
+    fake-indel windows it was built from, as its chromosome's indel log records them
+    (indel_window: the stub's 25 and 34)."""
 
     maxDiff = None
 

@@ -31,6 +31,11 @@ ncpus = sys.argv[7]
 # it writes there in place (submit_job_automated_new_multiple_vcfs.sh _build_in_lock).
 variant_index = (sys.argv[8] if len(sys.argv) > 8
                  else f"{true_pam}_{bMax}_{ref_name}+{vcf_name}")
+# the dataset's indel logs, which record each fake-indel window (Dictionaries/log_indels_<vcf>
+# of the working directory that holds Genomes/, where both the search and build-index-only
+# keep them)
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(indels_folder))),
+                       "Dictionaries", f"log_indels_{vcf_name}")
 
 # The record of a chromosome's sub-index that buildTST built with no target, which
 # pool_search_indels.py reads. Its fake-indel genome holds indels, but no window of
@@ -209,17 +214,35 @@ def index_indels(chrom):
     return status
 
 
+def _log_window(chrom):
+    """The fake-indel windows (left, right) of ``chrom``'s indel log, which records each
+    window's start and end (indel_window): the windows its fake-indel genome holds, which
+    the sub-index records. None where the log is not there, holds no row, or holds two
+    widths (it is then no log of this genome)."""
+    import indel_window
+
+    path = indel_window.log_path(LOG_DIR, chrom)
+    try:
+        found = indel_window.log_windows(path) if path else set()
+    except (OSError, ValueError, EOFError):
+        return None
+    return next(iter(found)) if len(found) == 1 else None
+
+
 def _record_index(chrom):
     """Record in ``chrom``'s sub-index, which index-genome has just built, what it holds
     (index_fit.write_index_meta): its index format among it, which a sub-index with no .bin
-    records nowhere else. A record that cannot be written is said on stdout."""
+    records nowhere else, and the fake-indel windows it was built from, which its indel log
+    tells (_log_window): a search refuses the sub-index beside a log of other windows. A
+    record that cannot be written is said on stdout."""
     sub = _sub_index(chrom)
     if not os.path.isdir(sub):
         return
     try:
         import index_fit
 
-        why = index_fit.write_index_meta(sub, build_pam, built=True)
+        why = index_fit.write_index_meta(sub, build_pam, built=True,
+                                         indel_window=_log_window(chrom))
     except (ImportError, OSError) as exc:
         why = str(exc)
     if why:
