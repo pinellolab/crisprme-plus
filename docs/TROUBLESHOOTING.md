@@ -68,7 +68,7 @@ The default variant-aware install (`download --what all`, then
 | Item | Approx size |
 |---|---|
 | Reference genome (hg38) | ~3 GB |
-| Reference + variant-aware indexes (`NRR_3_hg38`, `NRR_3_hg38+hg38_HGDP1kGP` and its indel index) | ~94 GB |
+| Reference + variant-aware indexes (`20-NRR_3_hg38`, `20-NRR_3_hg38+hg38_HGDP1kGP` and its indel index) | ~94 GB |
 | Its `Dictionaries/`: genotype store ~30 GB, allele-frequency registry ~8.5 GB, indel genotype store ~7.7 GB, indel logs ~6.5 GB (fetched by default; per-sample analysis, this index's default, reads the store) | ~52 GB |
 | Annotations | ~0.1 GB |
 | Per-run results (grows with mismatches/bulges; larger for per-sample runs, the default on a phased index) | GB–tens of GB |
@@ -109,7 +109,7 @@ the default on a genotyped + phased index (HGDP + 1000 Genomes, HPRC), and `--pe
 forces it on any other genotyped one.
 
 - `--per-sample` requires a **genotyped** index. It no-ops (with a warning) on a
-  sites-only index such as `NRR_3_hg38+hg38_mega`.
+  sites-only index such as `20-NRR_3_hg38+hg38_mega`.
 - Named carriers / personal risk cards come from the **genotype store** bundled with
   the index (`download --what index`, unless you pass `--no-genotypes`). Without it
   (and without the classic per-sample dictionaries) a search runs population-level,
@@ -149,8 +149,8 @@ due to initialization overhead.
 - **Get everything a reference scan needs:** `crisprme.py download --what all` fetches
   the genome, annotations, PAMs, sample lists, and the default reference index.
 - **Add a variant-aware index:** `crisprme.py download --what index --index-name
-  NRR_3_hg38+hg38_HGDP1kGP` (the recommended phased HGDP + 1000 Genomes default, of the
-  default SpCas9 NRR PAM).
+  20-NRR_3_hg38+hg38_HGDP1kGP` (the recommended phased HGDP + 1000 Genomes default, of the
+  default SpCas9 NRR PAM, for a 20-nt guide).
 - The public repository ships **prebuilt indexes** that already encode the variants, so
   you do not need the VCFs to search the shipped datasets. It also hosts their source
   VCFs (`hg38_HGDP1kGP`, `hg38_HPRC`, `hg38_mega`), for building an index yourself:
@@ -212,7 +212,7 @@ Each of these names the index and what to do; none of them removes anything.
 
 - **`no variant index here serves this search (...)`.** The dataset's indexes are for another PAM or
   fewer bulges, and neither its VCFs nor its enriched genome are here to build one. A download holds
-  its own index only: `NRR_3_hg38+hg38_HGDP1kGP` searches NRR, and the PAMs NRR holds (NGG, NAG,
+  its own index only: `20-NRR_3_hg38+hg38_HGDP1kGP` searches NRR, and the PAMs NRR holds (NGG, NAG,
   NGA, NRG), pruned to them (and, with a 20-nt guide, up to 2 bulges of each type). Search with what
   the message lists, or install another index ([Precomputed indexes](PRECOMPUTED_INDEXES.md)).
 - **`index '...' is not installed, and this run cannot build it`.** The library is on a read-only

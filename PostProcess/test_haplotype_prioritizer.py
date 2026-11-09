@@ -737,6 +737,77 @@ class TestTheSearchGivesTheGateItsPam(unittest.TestCase):
         self.assertIn('--pam "$pam_file"', step)
 
 
+class TestAFailedGateIsRecorded(unittest.TestCase):
+    """The pipeline's carrier-gate step (STEP 8a0 of the search script) removed the gate's
+    sidecar, .carrier_gate.json, when the gate failed, and the report took the results, with
+    none, for a search before 2.10.0: in a per-sample report of datasets without the tiers it
+    said that a dense window can be reported by its greedy worst-case alignment, which no
+    search since 2.10.0 does (stage-1 review R3-N6). The step now leaves a sidecar that says
+    the gate failed (and the report says so: test_generate_report), removes what the gate
+    wrote of its table, and still ends the run as it is (issue #143)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gate_failed_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        with open(os.path.join(HERE, "submit_job_automated_new_multiple_vcfs.sh")) as fh:
+            text = fh.read()
+        self.step = text[text.index("# STEP 8a0"):text.index("# END STEP 8a0")]
+        self.out = os.path.join(self.tmp, "Results", "job")
+        os.makedirs(self.out)
+        self.results = os.path.join(self.out, "job+NGG_hg38+ds_4+1_integrated_results.tsv")
+        with open(self.results, "w") as fh:
+            fh.write("#header\n")
+        # a gate that writes part of its table and its sidecar, then fails
+        self.bin = os.path.join(self.tmp, "bin")
+        os.makedirs(self.bin)
+        with open(os.path.join(self.bin, "haplotype_prioritizer.py"), "w") as fh:
+            fh.write("import json, os, sys\n"
+                     "res = sys.argv[sys.argv.index('--results') + 1]\n"
+                     "out = res[:-len('_integrated_results.tsv')] + '_carrier_gate.tsv'\n"
+                     "open(out, 'w').write('#Row\\n')\n"
+                     "json.dump({'status': 'run', 'companion': os.path.basename(out)},\n"
+                     "          open(os.path.join(os.path.dirname(res), '.carrier_gate.json'), 'w'))\n"
+                     "sys.exit(int(os.environ.get('GATE_RC', '1')))\n")
+        with open(os.path.join(self.bin, "python"), "w") as fh:
+            fh.write(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+        os.chmod(os.path.join(self.bin, "python"), 0o755)
+        self.vcfs = os.path.join(self.tmp, "list_vcf.txt")
+        with open(self.vcfs, "w") as fh:
+            fh.write("VCFs/ds\n")
+        self.log = os.path.join(self.out, "log.txt")
+
+    def run_step(self, rc):
+        script = os.path.join(self.tmp, "step.sh")
+        with open(script, "w") as fh:
+            fh.write(f'output_folder="{self.out}"\nvcf_list="{self.vcfs}"\nlog="{self.log}"\n'
+                     f'starting_dir="{self.bin}"\ncurrent_working_directory="{self.tmp}"\n'
+                     f'ref_folder="{self.tmp}"\npam_file="{self.tmp}/pam.txt"\nncpus=1\n'
+                     + self.step + 'echo "step done"\n')
+        env = dict(os.environ, PATH=self.bin + os.pathsep + os.environ.get("PATH", ""),
+                   GATE_RC=str(rc))
+        return subprocess.run(["bash", script], capture_output=True, text=True, env=env)
+
+    def test_a_failed_gate_leaves_a_sidecar_that_says_so(self):
+        done = self.run_step(1)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("step done", done.stdout)
+        self.assertIn("WARNING: the carrier gate failed", done.stderr)
+        companion = self.results[:-len("_integrated_results.tsv")] + "_carrier_gate.tsv"
+        self.assertFalse(os.path.exists(companion), "the failed gate's table is kept")
+        with open(os.path.join(self.out, hp.META_NAME)) as fh:
+            self.assertEqual(json.load(fh), {"status": "failed", "companion": None})
+        with open(self.log) as fh:
+            self.assertIn("Carrier gate\tFAILED (non-fatal)", fh.read())
+
+    def test_a_gate_that_ran_keeps_its_own(self):
+        done = self.run_step(0)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        with open(os.path.join(self.out, hp.META_NAME)) as fh:
+            self.assertEqual(json.load(fh)["status"], "run")
+        self.assertTrue(os.path.exists(
+            self.results[:-len("_integrated_results.tsv")] + "_carrier_gate.tsv"))
+
+
 class TestTheFrequencyBoundOfASitesOnlyRow(unittest.TestCase):
     """A sites-only dataset's row of a SNP and an indel the genotype oracle does not hold
     (C2) shows the frequency bound of both: the SNP's frequency from the dataset's registry,

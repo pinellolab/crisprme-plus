@@ -2937,7 +2937,10 @@ echo -e "JOB END"
 # genotyped dataset; the phased HGDP + 1000 Genomes store for a sites-only one, only with
 # --prioritize-observed, CRISPRME_PRIORITIZE_OBSERVED=on) and writes their tiers to
 # *_carrier_gate.tsv, which the report ranks by. It changes no row. A failure leaves the
-# completed run as it is (issue #143): the report then ranks the rows unchecked.
+# completed run as it is (issue #143): the report then ranks the rows unchecked, and the
+# sidecar says the gate failed (with none, the report would take the results for those of a
+# release before 2.10.0, whose per-sample search could report a dense window by a greedy
+# alignment).
 results_tsv=$(ls "${output_folder}"/*_integrated_results.tsv 2>/dev/null | head -1)
 if [ -n "${results_tsv}" ] && [ "$(head -c 1 "$vcf_list")" != "_" ]; then
 	echo -e 'Carrier gate\tStart\t'$(date) >>$log
@@ -2952,7 +2955,8 @@ if [ -n "${results_tsv}" ] && [ "$(head -c 1 "$vcf_list")" != "_" ]; then
 		--genome "$ref_folder" --pam "$pam_file" --threads "$ncpus"; then
 		echo -e 'Carrier gate\tEnd\t'$(date) >>$log
 	else
-		rm -f "${results_tsv%_integrated_results.tsv}_carrier_gate.tsv" "${output_folder}/.carrier_gate.json"
+		rm -f "${results_tsv%_integrated_results.tsv}_carrier_gate.tsv"
+		printf '{"status": "failed", "companion": null}\n' >"${output_folder}/.carrier_gate.json"
 		printf "WARNING: the carrier gate failed — results are PRESERVED (issue #143); the report ranks the rows unchecked\n" >&2
 		echo -e 'Carrier gate\tFAILED (non-fatal)\t'$(date) >>$log
 	fi

@@ -781,7 +781,11 @@ and the `release-crisprme` skill.
   every record's `AF` (its CHANGELOG). The pin is the Dockerfile's `ARG crispritz_ref`, which
   `install_from_source.sh`'s `CRISPRITZ_REF` default equals; the recipe's bound, the next minor,
   keeps out a CRISPRitz that may change the index format or the enricher again (the version
-  policy above; 2.8.1's was `>=2.9.1,<2.9.2`).
+  policy above; 2.8.1's was `>=2.9.1,<2.9.2`). When CRISPRitz gets a patch, the image and the
+  source install pin the exact CRISPRitz a release was tested with, and the recipe's lower bound
+  moves up only to a patch that fixes something CRISPRme depends on, so it can be below the
+  image's (decision D5; `docs/RELEASING.md`, the release checklist and the release skill say so,
+  where the checklist and the skill had tied the two).
 - **The two known limits of CRISPRitz `add-variants` that 2.8.1 stated are given as those of an
   index CRISPRitz 2.9.1 or earlier built, every one published until the rebuild for this
   release.** At a split multi-allelic site only the last record's ALT is searched, and a record
@@ -1513,9 +1517,14 @@ and the `release-crisprme` skill.
   batch), and six the order of their rsID and AF lists alone (an entry above). Neither
   `complete-search` nor the report says any longer that a dense window can be such an alignment
   (but the report of a 2.8.1 search's results, read again), and neither does a per-sample row's
-  `High_variant_density_region` note (see Changed). Covered by
-  `PostProcess/test_haplotype_prioritizer.py`, `PostProcess/test_phased_haplotype.py` and
-  `PostProcess/test_generate_report.py`.
+  `High_variant_density_region` note (see Changed). The report tells a search of this release by
+  the carrier gate's sidecar, `.carrier_gate.json`, which the search now writes when the gate
+  fails too (status `failed`: the inputs card's **Carrier gate** row says the gate failed and the
+  rows are shown unchecked), and, where a copy of the result folder lost it (a copy by a glob
+  skips dot files), by the version in the run's `.version.txt`; before, a failed gate's search
+  removed it, and the report of such a run, or of such a copy, said that a dense window could be
+  a greedy alignment. Covered by `PostProcess/test_haplotype_prioritizer.py`,
+  `PostProcess/test_phased_haplotype.py` and `PostProcess/test_generate_report.py`.
 
 - **A per-sample row on an index with the dict-less tiers is no longer noted as a dense window's
   greedy worst-case alignment.** Since 2.7.10 that path reports a dense window by its carriers' own

@@ -52,8 +52,9 @@ index, lossless for detection) otherwise (sites-only/unphased/hybrid/reference-o
 Force the fast population-level mode with **`--population-level`**; force resolution
 with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-only
 index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
-catalog name `NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.10.0; NRG
-before): 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
+catalog name `20-NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.10.0, for a
+20-nt guide; NRG before, `NRG_3_hg38+hg38_HGDP1kGP` up to 2.8.1): 925 HGDP + 3,166 1000 Genomes
+= 4,091 samples,
 jointly SHAPEIT5 re-phased — or `HPRC`. See
 [§5, Search-space control for high-variant-density regions](#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis).
 
@@ -236,8 +237,9 @@ The merge above is the **genotyped, cis-capable** mode (`merge_vcf_panels.sh` /
 feeds the genotype-counting Tier-0 registry. It is correct only when *every* merged
 source is genotyped, and it is what enables indel+SNP cis reconstruction.
 
-The **default** shipped index, **`NRR_3_hg38+hg38_HGDP1kGP`** (the SpCas9 NRR PAM's, the
-default since 2.10.0; the NRG and NGG indexes of the panel are built from the same data), is
+The **default** shipped index, **`20-NRR_3_hg38+hg38_HGDP1kGP`** (the SpCas9 NRR PAM's, the
+default since 2.10.0, for a 20-nt guide; the NRG and NGG indexes of the panel are built from the
+same data; 2.8.1's archive was `NRR_3_hg38+hg38_HGDP1kGP`), is
 built in this genotyped mode
 from the gnomAD **v3.1.2 HGDP+1kGP** jointly-called callset (GRCh38; 4,091 samples = 925 HGDP +
 3,166 1000 Genomes), which CRISPRme+ **re-phases with SHAPEIT5** (`phase_common` scaffold +
@@ -1051,7 +1053,9 @@ After `build-index-only --samplesID` the same search returned exactly those 5 ro
 every carrier it lists has all of its row's variants on one phased haplotype; since 2.10.0 the
 index without the tiers gives the same rows (560 against 565, the five rows above gone). The
 2.8.1 report said so of a 2.8.1 search's results, and still does when it reads them again (a
-search since 2.10.0 writes the carrier gate's sidecar, `.carrier_gate.json`, in either mode).
+search since 2.10.0 writes the carrier gate's sidecar, `.carrier_gate.json`, in either mode,
+one that says `failed` where the gate failed; where a copy of the result folder lost it, as a
+copy by a glob loses dot files, the report reads the search's version in `.version.txt`).
 
 ### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
@@ -1265,6 +1269,10 @@ the search without it (`--no-prioritize-observed`).
   haplotypes that carry them together and their samples, E, the frequency product and
   rarest frequency, and the label), and `.carrier_gate.json` (how the gate ran, its panels
   with their samples by superpopulation, and its tiers by each row's highest-CFD alignment).
+  A gate that fails leaves the completed search as it is (issue #143): the search says so on
+  stderr and in its log, removes what the gate wrote of its table, and leaves a
+  `.carrier_gate.json` whose status is `failed`, so that the report's **Carrier gate** row
+  says the gate failed and shows the rows unchecked.
 - **Report.** A C1 row is ranked after every other row in the views ranked by the score of
   the alignment that is C1. A row whose highest-CFD alignment is C1 leaves the top-1000 by
   CFD, panels (a) and (b) of Section 2, the validation panel's CFD thresholds and the risk
@@ -2302,7 +2310,7 @@ records it.
 **Pruning by itself.** Since 2.10.0 a search prunes, as if `--prune-pam` was given, whenever
 no installed index serves it unpruned and one of these does: a wider all-`N` one, or a
 dedicated one of a PAM that holds the search's. It says so first, naming the index that needs
-it ("no installed reference index of hg38 serves PAM NGG unpruned, and NRR_3_hg38 serves it
+it ("no installed reference index of hg38 serves PAM NGG unpruned, and 20-NRR_3_hg38 serves it
 pruned to it at leaf time: searching with --prune-pam, as if it was given"): a search from the
 command line on its console, one from the web, which has none, in its `log_verbose.txt`. The
 run's record of the indexes it searched (`.indexes_searched.txt` in the result folder, beside

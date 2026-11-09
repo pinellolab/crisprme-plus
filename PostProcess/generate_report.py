@@ -327,12 +327,24 @@ _PER_SAMPLE = False
 # dense windows come as their observed haplotypes, flagged there too, no row reads so.
 _UNTIERED = False
 
-# False for a search that wrote the carrier gate's sidecar (.carrier_gate.json: 2.10.0 and
-# later, in either mode): its per-sample post-analysis gives a window denser than
-# CRISPRME_IUPAC_CAP on the classic dictionaries as the haplotypes its carriers have, as on
-# the tiers, so none of its rows is a greedy alignment (_greedy_union) and the texts that
-# say a dense window can be one leave it out. True for an earlier search's results.
+# False for a search of 2.10.0 or later (_since_2_10): its per-sample post-analysis gives a
+# window denser than CRISPRME_IUPAC_CAP on the classic dictionaries as the haplotypes its
+# carriers have, as on the tiers, so none of its rows is a greedy alignment (_greedy_union)
+# and the texts that say a dense window can be one leave it out. True for an earlier
+# search's results.
 _GREEDY_DENSE = True
+
+
+def _since_2_10(gate, version):
+    """True for the results of a search of CRISPRme 2.10.0 or later: one that wrote the
+    carrier gate's sidecar (``gate``, .carrier_gate.json; in either mode, and since a failed
+    gate's says "failed", whatever the gate did), or, where it is gone (a copy of the result
+    folder by a glob skips dot files), whose .version.txt (``version``) says 2.10.0 or later.
+    False for an earlier release's, and where neither tells."""
+    if gate is not None:
+        return True
+    m = re.match(r"\s*v?(\d+)\.(\d+)", str(version or ""))
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (2, 10)
 
 
 # The carrier gate (haplotype_prioritizer.py, run by the search before the report): the tier of
@@ -479,6 +491,9 @@ def render_gate_row(gate):
                 "--prioritize-observed</code>, or the web form's check box).")
     elif status == "off":
         text = "Turned off for this search: the rows are shown unchecked."
+    elif status == "failed":
+        text = ("The carrier gate failed in this search (its log says why): the search's "
+                "results are complete, and the rows are shown unchecked.")
     elif status == "untiered":
         text = ("Not run: the search's genotyped datasets have the classic per-sample "
                 "dictionaries alone, not the phased genotype store the gate reads "
@@ -2095,9 +2110,10 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         # CRISPRitz add-variants copied into them from the VCF (an indel has the AF it copied
         # into the indel log, as on any index), none for a record whose INFO has AF at
         # another place than the VCF's first record on an index CRISPRitz 2.9.1 or earlier
-        # built (METHODS section 8; maf_footnote), and
-        # their post-analysis still reports a window denser than CRISPRME_IUPAC_CAP by its
-        # greedy worst-case alignment, listing the carriers of any of the variants it takes
+        # built (METHODS section 8; maf_footnote), and, in a search before 2.10.0
+        # (_GREEDY_DENSE), their post-analysis reported a window denser than
+        # CRISPRME_IUPAC_CAP by its greedy worst-case alignment, listing the carriers of any
+        # of the variants it takes
         sm_note = (
             "<strong>Per-sample</strong> &mdash; per-sample genotypes resolved into named "
             "carrier samples only for " + _untiered_named(_ut) + " "
@@ -6119,7 +6135,8 @@ def build_report(
     untiered = meta.get("untiered") or []
     _UNTIERED = _PER_SAMPLE and bool(untiered) and bool(meta.get("untiered_all"))
     global _GREEDY_DENSE
-    _GREEDY_DENSE = gate is None
+    # (by the version the search recorded, not this install's)
+    _GREEDY_DENSE = not _since_2_10(gate, meta.get("version"))
     version = meta.get("version") or _package_version()
     has_crispr_bulge = crispr_bulge_computed(df, cols)
 

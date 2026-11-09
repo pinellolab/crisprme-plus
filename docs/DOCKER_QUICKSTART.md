@@ -81,7 +81,10 @@ docker pull pinellolab/crisprme:latest
 
 > **Reproducibility:** `:latest` auto-updates to the newest release (and is the
 > GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.8.1`
-> everywhere below in place of `:latest`.
+> everywhere below in place of `:latest`. An image carries the CRISPRitz search engine it was
+> tested with, of its own major.minor from 2.10.0 (CRISPRme+ 2.10.z runs on CRISPRitz 2.10.z:
+> the [version policy](RELEASING.md#version-policy)); `crisprme.py --version` and
+> `crispritz.py version` print the two.
 
 > **Already have an older image?** Docker does **not** re-download a tag you already
 > have — run `docker pull pinellolab/crisprme:latest` again to update. Skipping this makes an

@@ -1351,8 +1351,9 @@ class BuildIndexOnlyTakesTheSideInTheHeader(atomic._Fixture):
     def test_a_pam_file_of_the_other_side_is_not_recorded_on_it(self):
         """Since the names of 2.10.0 (the defaults track's E2) a PAM file that says its guide
         length builds its own index beside it, under the name that says its side; one of its
-        PAM alone, which says none and so takes the older name, is still refused. Either says
-        that the header records the other side, and neither records the PAM file on it."""
+        PAM alone, which says none and so takes the older name, is still refused, before the
+        engine runs. Either says that the header records the other side, and neither records
+        the PAM file on it."""
         index = self.in_place("NNN_2_hg38", at_start=True)
         alone = self.path("PAMs", "3bp-NNN-alone.txt")
         atomic._write(alone, "NNN 3\n")
@@ -1369,8 +1370,10 @@ class BuildIndexOnlyTakesTheSideInTheHeader(atomic._Fixture):
                     "its .bin files records): it is left as it is, and this index is built beside "
                     "it, as 20-NNN_2_hg38.\n", out)
                 self.assertNotIn(f"already present: {index}", out)
+                ran = len(self.calls())  # (the 3' build ran the engine, for its own index)
                 rc, out, err = self.build(alone)
                 self.assertEqual(rc, 1, out)
+                self.assertEqual(self.calls()[ran:], [], "the refused build ran the engine")
                 mv = f"mv '{index}' '{self.lib('NNN-20_2_hg38')}'"
                 self.assertEqual(err, (
                     f"Error: {index} is already there, a PAM-less index for a PAM on the 5' side "

@@ -52,8 +52,8 @@ hours to minutes.
 ```
 crisprme-data/
 ├── indexes/                        # PRECOMPUTED search indexes (genome_library tarballs)
-│   ├── NRR_3_hg38.tar.gz                       # reference-only (no variants), NRR: the default PAM since CRISPRme+ 2.10.0
-│   ├── NRR_3_hg38+hg38_HGDP1kGP.tar.gz         # ← recommended variant DEFAULT
+│   ├── NRR_3_hg38.tar.gz                       # reference-only (no variants), NRR (2.10.0's default PAM: its index is 20-NRR_3_hg38, in the repo above)
+│   ├── NRR_3_hg38+hg38_HGDP1kGP.tar.gz         # ← the recommended variant default's 2.8.1 archive
 │   ├── NRR_3_hg38+hg38_HPRC.tar.gz             # HPRC pangenome panel
 │   ├── NRR_3_hg38+hg38_mega.tar.gz             # sites-only aggregate (worst-case fallback)
 │   ├── NRG_3_hg38{,+hg38_HGDP1kGP,+hg38_HPRC,+hg38_mega}.tar.gz   # NRG PAM (the default before 2.10.0)
@@ -158,10 +158,12 @@ The indexes are fetched automatically:
 
 ```bash
 # one-shot: genome + annotations + PAMs + sample lists + the default reference index
-# (NRR_3_hg38 since CRISPRme+ 2.10.0, NRG_3_hg38 before)
+# (CRISPRme+ 2.8.1: NRG_3_hg38, from here; 2.10.0: 20-NRR_3_hg38, from
+# lucapinello/crisprme-indexes-format2)
 crisprme.py download --what all --path .
 
-# then the recommended variant default (or any other index by name)
+# then the recommended variant default's 2.8.1 archive (or any other index by name; under
+# 2.10.0, 20-NRR_3_hg38+hg38_HGDP1kGP fetches its index of format 2)
 crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path .
 ```
 

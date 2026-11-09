@@ -19,9 +19,10 @@ Version-sync points (ALL must equal the same `X.Y.Z`):
   which pins nothing and which the helper leaves: bump it by hand. There is NO
   `ARG crisprme_version`. The image is built FROM SOURCE (`COPY . ${PREFIX}/opt/crisprme/`), so
   the only pin is `crisprme.py`. The Dockerfile does carry `ARG crispritz_ref=vA.B.C`, the
-  CRISPRitz pin and never CRISPRme's version, which a release bumps
-  when CRISPRitz moves; it equals `install_from_source.sh`'s `CRISPRITZ_REF` default and the lower
-  bound of the recipe's bounded `crispritz >=A.B.C,<…` pin (`docs/RELEASING.md`).
+  CRISPRitz pin and never CRISPRme's version: the exact CRISPRitz tag the release was tested
+  with, which a release bumps when CRISPRitz moves; it equals `install_from_source.sh`'s
+  `CRISPRITZ_REF` default. The recipe's bounded pin is `crispritz >=X.Y.0,<X.(Y+1)`, whose lower
+  bound can be below it (`docs/RELEASING.md`, Version policy).
 - git tag / GitHub release → `vX.Y.Z`
 - Bioconda `recipes/crisprme/meta.yaml` → `{% set version = "X.Y.Z" %}` + fresh `sha256` + `build.number: 0`
 
@@ -30,7 +31,11 @@ major.minor (2.10, then 2.11, ...) and their patch numbers are independent. CRIS
 requires CRISPRitz X.Y.*: the recipe pins `crispritz >=X.Y.0,<X.(Y+1)`, and `crispritz_ref` is a
 CRISPRitz X.Y tag. A breaking change in either package (an index format, the enricher's output)
 bumps the minor of BOTH. So a release whose minor differs from its `crispritz_ref`'s is wrong:
-stop and fix it, or release CRISPRitz first.
+stop and fix it, or release CRISPRitz first. When CRISPRitz gets a patch (decision D5, Luca,
+2026-11-08): `crispritz_ref` and `CRISPRITZ_REF` pin the exact CRISPRitz tag the release was
+tested with; the recipe's lower bound stays X.Y.0 and moves up only when a CRISPRitz patch fixes
+something CRISPRme depends on (then to that patch, e.g. `>=2.10.1,<2.11`). So the lower bound may
+be below `crispritz_ref`, never above it.
 
 Bioconda source URL is `https://github.com/pinellolab/crisprme-plus/archive/refs/tags/v{{ version }}.tar.gz`,
 so the recipe pulls the **GitHub release tarball** — its sha256 is the hash of that exact tarball.
@@ -158,7 +163,7 @@ Edit `recipes/crisprme/meta.yaml`:
 - `{% set version = "X.Y.Z" %}`  ← bump
 - `source.sha256:` ← the hash from above
 - `build.number: 0`  ← RESET to 0 (only INCREMENT, keeping version, for a same-version rebuild)
-- `crispritz >=X.Y.0,<X.(Y+1)`  ← CRISPRme X.Y.z requires CRISPRitz X.Y.* (the version policy: `>=2.10.0,<2.11` for 2.10.z; `docs/RELEASING.md`); keep it BOUNDED, and move it with the minor
+- `crispritz >=X.Y.0,<X.(Y+1)`  ← CRISPRme X.Y.z requires CRISPRitz X.Y.* (the version policy: `>=2.10.0,<2.11` for 2.10.z; `docs/RELEASING.md`); keep it BOUNDED, and move it with the minor (within a minor, raise the lower bound only to a CRISPRitz patch that fixes something CRISPRme depends on: D5)
 - Do NOT edit `source.url` — it uses `{{ version }}` and resolves automatically.
 
 ```bash

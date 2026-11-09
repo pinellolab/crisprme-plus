@@ -81,7 +81,7 @@ crisprme.py download --what genome --ref susScr11 --source ucsc
 
 ### Add an index (or build one)
 Bulge-enabled searches need a genome **index**.
-- **Download** a ready-made index from HuggingFace by name (e.g. `NRR_3_hg38`, of the default PAM).
+- **Download** a ready-made index from HuggingFace by name (e.g. `20-NRR_3_hg38`, of the default PAM).
 - **Build locally** from an installed genome + PAM + bulge counts.
 - **Pre-build a variant-aware index**: pick a VCF dataset in the build panel and
   CRISPRme enriches the genome with the variants and indexes it ahead of time, so
