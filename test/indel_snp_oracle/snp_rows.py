@@ -79,13 +79,13 @@ def check(name, rd, tables, truth, expect, fail, alt_rows, is_indel_token, rc):
     alternative alignments), every SNP-only row (no indel or MNV named) must list only
     carriers that have its target: a phased one on a haplotype holding every SNP it names,
     the target's first base at the row's start; an unphased one must carry every SNP it
-    names. A row naming two alts of one position, which no haplotype holds, is counted and
-    not checked: site N2's lone 2|1 carrier of an alt on a multi-allelic VCF line is read
-    by the SNP path as carrying the other alt too, a defect of its own. Then the Y sites'
+    names. A row naming two alts of one position, which no haplotype holds, fails: before
+    2.10.0 the SNP path read site N2's lone 2|1 carrier of an alt on a VCF line of several
+    ALTs as carrying the other alt too and listed it on such rows; since 2.10.0 every reader
+    reads a genotype against its own alt's allele index. Then the Y sites'
     expectations (snp_listed: on a CFD-1 SNP row; snp_never: on no SNP row; snp_phase:
     the phase confirmation of the site's SNP rows)."""
     seen = {}  # site -> [(samples set, cfd)]
-    two_alts = 0
     for t in tables:
         for f in alt_rows(t):
             if any(is_indel_token(x) for x in f["var"].split(",")):
@@ -97,7 +97,8 @@ def check(name, rd, tables, truth, expect, fail, alt_rows, is_indel_token, rc):
                      for t2 in f["var"].split(",")]
             samples = [x for x in f["samples"].split(",") if x and x != "NA"]
             if len({n[0] for n in named}) < len(named):
-                two_alts += 1
+                fail("%s: a SNP row names two alts of one position, which no haplotype "
+                     "holds (listing %s)" % (where, ",".join(samples)))
                 continue
             for smp in samples:
                 if truth.phased(smp):
@@ -111,9 +112,6 @@ def check(name, rd, tables, truth, expect, fail, alt_rows, is_indel_token, rc):
             site = truth.site_of(f["start"])
             if site:
                 seen.setdefault(site, []).append((set(samples), f["cfd"]))
-    if two_alts:
-        print("oracle: %s: %d SNP row block(s) name two alts of one position, not checked"
-              % (name, two_alts))
     for site, ex in sorted(expect.items()):
         for s in ex.get("snp_listed", ()):
             if not any(s in ss and c is not None and c >= 0.999 for ss, c in seen.get(site, [])):

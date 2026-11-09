@@ -1230,7 +1230,11 @@ and the `release-crisprme` skill.
   each ALT the line's first ID: see the known limit under Changed). A position of split or biallelic
   records reads as before. These lines come from HF's raw HPRC `vcfwave` VCFs (33,993 on chr22), the
   2019 HGDP data `complete-test` uses, and `gnomAD-converter --multiallelic`. Covered by
-  `PostProcess/test_site_alleles.py` and `PostProcess/test_build_mega_registry.py`.
+  `PostProcess/test_site_alleles.py`, `PostProcess/test_build_mega_registry.py` and the SNP+indel
+  oracle, which now fails a per-sample SNP row naming two ALTs of one position: the per-sample run
+  of rel/2.8.2's code (fe0585a) lists its site N2's lone `2|1` carrier of an ALT on a line of
+  several ALTs on 3 such row blocks, which the oracle counted and did not check, as it did for the
+  counts it gave before this release; this release's lists none.
 - **A haplotype slot holding two ALTs of one position is no haplotype: the sample is PUTATIVE
   there, a carrier of each ALT's row, and no row names two ALTs of one position (decision B4).**
   With every ALT of a split site in the dictionary, a panel's split records phased one by one put

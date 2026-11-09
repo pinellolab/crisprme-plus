@@ -172,11 +172,13 @@ haplotype holding its SNPs also holds an indel inside the target, though that ha
 not have the row's sequence. In the per-sample results, every SNP-only row (no indel or MNV
 named) is now checked as the indel rows are: a phased carrier it lists must have its sequence
 on a haplotype holding every SNP it names, the target's first base at the row's start, and an
-unphased one must carry every SNP it names. (A row naming two alts of one position, which no
-haplotype holds, is counted and not checked: site N2's lone `2|1` carrier of an alt on a
-multi-allelic VCF line is read by the SNP path as carrying the other alt too, a defect of its
-own.) Sites Y1-Y4 sit at 17000-17900 and use samples S70-S78 (the reference is 22 kb, the
-panel 89 samples):
+unphased one must carry every SNP it names. A row naming two alts of one position, which no
+haplotype holds, fails. Before 2.10.0 the SNP path read site N2's lone `2|1` carrier of an alt
+on a VCF line of several ALTs as carrying the other alt too, and the per-sample run lists it on
+3 such row blocks (rel/2.8.2 at fe0585a), which the check counted and did not check when the
+counts below were taken; since 2.10.0 every reader reads a genotype against its own alt's
+allele index, and no row names two alts of one position. Sites Y1-Y4 sit at 17000-17900 and use
+samples S70-S78 (the reference is 22 kb, the panel 89 samples):
 
 | Site | Planted | Expected (per sample) |
 |---|---|---|
