@@ -105,8 +105,9 @@ class TestParseAndSupport(unittest.TestCase):
         self.assertFalse(hp.holds_target(seq_at, 2, 25, {}, (12, "ACA", "A")))
         # a deletion in a stretch with no repeat
         plain = "ACGTTGCAAGTCCATGGTCA"
+        self.assertEqual(plain[6:9], "CAA")
         self.assertFalse(hp.holds_target(lambda a, b: plain[max(a, 0):b], 2, 17, {},
-                                         (8, "CAA", "C")))
+                                         (7, "CAA", "C")))
 
     def test_two_alts_on_one_slot_is_unknown(self):
         alt_g = {"S1": "1|0", "S2": "1|0"}
@@ -241,7 +242,8 @@ class TestClassify(unittest.TestCase):
         snps = [(106, "G", "C", {"S00": "1|0", "S01": "1|0", "S02": "1|0"}),
                 (107, "C", "T", {"S00": "1|0", "S01": "1|0"})]
         indels = [(104, "AGGC", "A", {"S00": "1|0"}), (106, "GC", "G", {"S02": "1|0"})]
-        ref = "ACGT" * 26 + "AGGCTTCA" + "ACGT" * 8
+        ref = "ACGT" * 25 + "ACG" + "AGGCTTCA" + "ACGT" * 8
+        self.assertEqual(ref[103:107], "AGGC")   # the reference holds the records
         p = self.panel(snps, indels)
         for seq_at in (None, lambda a, b: ref[max(a, 0):max(b, 0)]):
             p.seq_at = seq_at
@@ -260,6 +262,30 @@ class TestClassify(unittest.TestCase):
         only_s02 = self.panel([(106, "G", "C", {"S02": "1|0"})], indels[1:])
         self.assertEqual(hp.classify([v(106, "G", "C")], [only_s02], span=(100, 122)).tier,
                          "B")
+
+    def test_an_indel_over_the_snp_in_a_repeat_takes_the_slot(self):
+        """F1 in a tandem repeat (R2A-1): on S00's first slot the row's SNP 108 C>G and the
+        deletion 106 TAC>T, whose REF holds 108's base, in CCCCC TAC AGAG...: the slot's bases
+        read the target's (holds_target: TAG + AGAG... is T + AGAGAG...), and still it holds
+        two records of 108's base, whose bases cannot be read, so it does not hold the row,
+        whatever the reference reads there, as a per-sample SNP row reads its carriers
+        (snp_target_held, METHODS section 4). S01 holds the SNP alone."""
+        ref = "ACGT" * 25 + "CCCCC" + "TAC" + "AG" * 20 + "T" * 30
+        self.assertEqual(ref[105:108], "TAC")   # the reference holds the records
+        seq_at = lambda a, b: ref[max(a, 0):max(b, 0)]  # noqa: E731
+        indels = [(106, "TAC", "T", {"S00": "1|0"})]
+        self.assertTrue(hp.holds_target(seq_at, 100, 122, {108: "G"}, indels[0][:3]))
+        alone = self.panel([(108, "C", "G", {"S00": "1|0"})], indels)
+        alone.seq_at = seq_at
+        changing = hp.changing_indels(alone.indels, 100, 122)
+        self.assertEqual(hp.breakers_of(changing, {108: "G"}, 100, 122, seq_at),
+                         [{"S00": "1|0"}])
+        ver = hp.classify([v(108, "C", "G")], [alone], span=(100, 122))
+        self.assertEqual((ver.tier, ver.state, ver.haplotypes), ("C1", hp.INDEL_IN_TARGET, 1))
+        both = self.panel([(108, "C", "G", {"S00": "1|0", "S01": "1|0"})], indels)
+        both.seq_at = seq_at
+        ver = hp.classify([v(108, "C", "G")], [both], span=(100, 122))
+        self.assertEqual(ver.tier, "B")
 
     def test_multi_alt_genotypes_are_read_per_alt(self):
         # one VCF line with two ALTs: S00 is G on slot 0 and T on slot 1 (1|2), listed under
