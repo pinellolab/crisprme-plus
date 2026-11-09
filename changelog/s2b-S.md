@@ -19,12 +19,15 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   samples held as bits of integers, so it costs a few integer operations a column. It is a
   bound, never a guess: it never skips a target a row comes from (its unit test compares it with
   every choice of alleles of every sample: 3,000 random windows, both strands, bulged or not,
-  and a 5′ PAM), and on chr22 the README, NRR, TRAC and VEGFA site 3 searches, and the IGL, IGH
-  and IGK loci alone, give the same files with it on and off (44 data files each, byte for
-  byte). It runs per sample on the observed-haplotype path and the dictionary path within
-  `CRISPRME_IUPAC_CAP`, never on a registry-only (sites-only) dataset; the real script's tests
-  skip and keep raw targets with an RNA or a DNA bulge on both paths, in pieces too. On chr22 it
-  skips 755,137 of the README guide's 764,435 raw targets with a variant letter (98.8%).
+  and 1,500 with a 5′ PAM), and on chr22 the README, NRR, TRAC and VEGFA site 3 searches, and
+  the IGL, IGH and IGK loci alone, give the same files with it on and off (44 data files each,
+  byte for byte). It runs per sample on the observed-haplotype path and the dictionary path
+  within `CRISPRME_IUPAC_CAP`, never on a registry-only (sites-only) dataset. The real script's
+  tests, each against the same run with the pre-check off, skip and keep raw targets with no
+  bulge, an RNA bulge or a DNA bulge, on both paths, as one process and in pieces, read a
+  minus-strand target at its forward positions, and leave a registry-only dataset's rows alone.
+  On chr22 it skips 755,137 of the README guide's 764,435 raw targets with a variant letter
+  (98.8%).
   `complete-search --no-haplotype-precheck` (or `CRISPRME_HAPLOTYPE_PRECHECK` set to 0, false,
   no or off, in any case, as `CRISPRME_POSTPROC_PIECES` below) turns it off; the run says per
   chromosome how many it skipped, or that it is off (stdout, `log_verbose.txt`). See [`METHODS.md`
@@ -36,9 +39,13 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   none of its slots holds, but one still made of the carrier's own alleles: a target no carrier,
   free to take any of those at each column, can have within the budget and the PAM gives no
   row, and is now skipped before the second indels of the phased indel store are read for it
-  (the window breakers). On chr22 it tells 2,904,141 of the README guide's 2,904,487 overlaid
-  targets (all but 346). Its unit test compares it with every choice of every carrier, DNA
-  bulges at code columns among them; the switch above turns it off too.
+  (the window breakers). The indel post-analysis is the same in both analysis modes, and so is
+  this check: on chr22 it tells 2,904,141 of the README guide's 2,904,487 overlaid targets (all
+  but 346), per sample and population-level. Its unit test compares it with every choice of
+  every carrier, DNA bulges at code columns among them, and the real script gives the same
+  files with it on and off, on targets that include one at exactly the mismatch budget and one
+  whose code column no genotype covers. The switch above turns it off too, and the indel
+  post-analysis then says so in `log_verbose.txt` ("indel-snp: carriers-first pre-check off").
 - **The K-skip: a population-level search with `--max-degeneracy K` skips, before expanding
   them, the raw targets every row of which would rest on more than K ambiguous columns.** Every
   row the cap lets through rests on at most K, and every row within the budget and the PAM rests
@@ -76,8 +83,10 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   CRISPRitz builds one) the variant search of the dense loci explodes above the default budget,
   a cost no step after the search removes: on IGL alone (the variant search alone, 16 threads)
   755,963 SNP raw targets at 4 + 1 + 1, 5,097,095 at 4 + 2 + 1 and 33,657,519 at 4 + 2 + 2
-  (27.9 GB of memory) at the cap of 6, where the indel search writes 204,453,499 (157 GB); IGH
-  needed 225 GB at 4 + 2 + 1. A `--max-total-edits` of 3 or less keeps a wider budget near the
+  (27.9 GB of memory) at the default cap of 6, where the indel search writes 204,453,499 (157
+  GB); IGH needed 225 GB at 4 + 2 + 1; with the cap at the budget's sum, 7,885,211 at 4 + 2 + 1
+  (a cap of 7) and 93,753,487 at 4 + 2 + 2 (8; 75 GB), which the warning quotes too, with the
+  cap of each count. A `--max-total-edits` of 3 or less keeps a wider budget near the
   default's cost (6 + 2 + 2 wrote 618,209 SNP raw targets there at a cap of 3, 4.5 million at 4,
   14.7 million at 5), so the warning counts the most edits an alignment can have (the smaller
   of the cap and mm + bDNA + bRNA) and is given only above 3: `complete-test`'s 6 + 2 + 2

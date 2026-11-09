@@ -16,8 +16,11 @@ merged into the files one process writes, byte for byte.
     file, and the log keeps one piece's start-up and what the others add;
   * through the real scripts: new_simple_analysis.py and analisi_indels_NNN.py run as one
     process and as pieces (CRISPRME_POSTPROC_RANGE, CRISPRME_POSTPROC_PIECE) then merged give
-    the same files, byte for byte, with the pre-check on and off; the pieces write none of
-    the notes a chromosome ends with, the merge writes one process's.
+    the same files, byte for byte, with the pre-check on and off (the pieces skip and keep
+    bulged raw targets too), and analisi_indels_NNN.py the same files with its carriers-first
+    pre-check on as off, a target at exactly the budget among them; the pieces write none of
+    the notes a chromosome ends with, the merge writes one process's, which say when the
+    pre-check is off.
 
 Run with:
     cd PostProcess && python3 -m unittest test_postproc_pieces -v

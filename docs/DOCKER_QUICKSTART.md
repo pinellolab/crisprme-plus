@@ -188,8 +188,10 @@ and so does a search of NGG, NAG, NRG or NGA, pruned to that PAM.
 > **Per-sample** in the web form to force resolution — it's a no-op on the sites-only mega panel
 > (no genotypes to resolve), and the web form disables it there. Add **`--population-level`**
 > (CLI) or pick **Population-level** in the web form to force the worst-case screen even on
-> a genotyped+phased panel (a resolution choice: on the indexes CRISPRitz 2.10.0 builds it is not
-> faster). The shareable report states which mode ran.
+> a genotyped+phased panel (a resolution choice, whose speed depends on the panel: on the
+> indexes CRISPRitz 2.10.0 builds per-sample is the faster on a dense panel of many samples
+> such as HGDP + 1000 Genomes, and population-level can be on a small panel such as HPRC, or
+> beside mega). The shareable report states which mode ran.
 
 ## 5. (Optional, advanced) Add the raw source VCFs
 
@@ -310,11 +312,14 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 > works). If anything fails, see [Troubleshooting](TROUBLESHOOTING.md).
 
 - `--mm` is mismatches; `--bDNA` / `--bRNA` are DNA / RNA bulges. For a wider
-  search use e.g. `--mm 5 --bDNA 2 --bRNA 2 --max-total-edits 9`; on the indexes CRISPRitz
-  2.10.0 builds, which code every allele, more than 1 DNA + 1 RNA bulge makes the variant
-  search of the dense loci (the immunoglobulin loci) explode, to many hours or out of memory,
-  unless `--max-total-edits` is 3 or less: `complete-search` warns (see the README's "What the
-  default search costs"), so raise `--mm` first. In the web form the
+  search raise `--mm` first, e.g. `--mm 6 --bDNA 1 --bRNA 1 --max-total-edits 8`: on the
+  indexes CRISPRitz 2.10.0 builds, which code every allele, more than 1 DNA + 1 RNA bulge makes
+  the variant search of the dense loci (the immunoglobulin loci) explode, to many hours or out
+  of memory, unless `--max-total-edits` is 3 or less, and `complete-search` warns (see the
+  README's "What the default search costs"). On the IGL locus alone the variant search wrote
+  0.76 million SNP and 4.5 million indel raw targets at 4 + 1 + 1, 1.6 and 8.5 million at
+  6 + 1 + 1 with a cap of 8, and 33.7 and 204 million at 4 + 2 + 2 with the default cap of 6
+  (93.8 million SNP raw targets with a cap of 8). In the web form the
   per-type values live under **Advanced options**, while the **Maximum edits** slider
   is the total budget — the equivalent of `--max-total-edits`.
 - `--max-total-edits` caps the **total** edits (mismatches + bulges) in one alignment,

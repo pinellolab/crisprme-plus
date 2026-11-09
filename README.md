@@ -920,11 +920,12 @@ min population-level, and beside mega 87 to 99 min per sample against 27 to 29 m
 search on). Genome-wide it has not been timed yet on the indexes of the rebuild for 2.10.0 (its
 release gates do): from its parts we expect about 1.5 to 4 h per sample on 16 threads, against
 2.8.1's 1.2 h on 32 threads and an estimated 9 to 11 h without these steps (METHODS.md says
-how). Above 1 DNA + 1 RNA bulge the variant search itself explodes in those loci (IGL alone: 5.1
-million SNP raw targets at 4 + 2 + 1, 33.7 million at 4 + 2 + 2, where the indel search wrote
-204 million and needed 157 GB of memory), and `complete-search` warns, unless
-`--max-total-edits` 3 or less bounds the alignments (6 + 2 + 2 at a cap of 3 wrote fewer raw
-targets there than the default).
+how). Above 1 DNA + 1 RNA bulge the variant search itself explodes in those loci (IGL alone, at
+the default `--max-total-edits` of 6: 5.1 million SNP raw targets at 4 + 2 + 1, 33.7 million at
+4 + 2 + 2, where the indel search wrote 204 million and needed 157 GB of memory; with the cap
+raised to the budget's sum, 7.9 and 93.8 million SNP raw targets), and `complete-search` warns,
+unless `--max-total-edits` 3 or less bounds the alignments (6 + 2 + 2 at a cap of 3 wrote fewer
+raw targets there than the default). For a wider search, raise `--mm` first.
 See METHODS.md
 [§5](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces).
 
@@ -1057,9 +1058,12 @@ its purpose and usage:
   <br>Maximum allowable DNA bulge size. If omitted (together with `--bRNA`), it defaults to
   **1** (one DNA bulge), bounded by the bulge depth the installed index supports — the
   recommended single-bulge default (the CRISPR-Bulge ML scorer's validated domain). Pass it
-  explicitly for a deeper search. If no index the search can use holds bulges (in the working
-  directory's `genome_library/` or at `--index-path`; a reference index that can be built from
-  the `--genome` folder counts), the search stays bulge-free and prints a `WARNING` that says so.
+  explicitly for a deeper search; on the indexes CRISPRitz 2.10.0 builds, more than 1 DNA + 1 RNA
+  bulge makes the variant search of the dense loci explode and `complete-search` warns (see
+  **What the default search costs**), so raise `--mm` first. If no index the search can use
+  holds bulges (in the working directory's `genome_library/` or at `--index-path`; a reference
+  index that can be built from the `--genome` folder counts), the search stays bulge-free and
+  prints a `WARNING` that says so.
 
 - `--bRNA` (*Optional*, default `1`)
   <br>Maximum allowable RNA bulge size. See `--bDNA` — defaults to one RNA bulge when neither
@@ -1106,15 +1110,17 @@ its purpose and usage:
 
 - `--no-haplotype-precheck` (*Optional*)
   <br>Turn off the exact haplotype pre-check of a per-sample search, its carriers-first twin on
-  the indel side and the K-skip above. Before a raw target of the variant genome is expanded
-  into the haplotypes its carriers have, it is tested against the samples' genotypes, and
-  skipped (its reference row is still written) when no sample, free to take at each variant
-  column the reference base or any ALT it carries there, reaches the mismatch budget and the
-  PAM. The results are the same either way (it never skips a target a row comes from); off,
-  a dense region's raw targets are each expanded, as up to 2.8.1. `CRISPRME_HAPLOTYPE_PRECHECK`
-  set to 0, false, no or off (in any case) does the same. (The post-analysis runs each
-  chromosome in pieces over the `--thread` workers; `CRISPRME_POSTPROC_PIECES=0`, read the same
-  way, runs it as one process a chromosome, as up to 2.8.1; the files are the same.)
+  the indel side (which runs in either analysis mode) and the K-skip above; the notes each
+  chromosome ends with in `log_verbose.txt` say which of them is off. Before a raw target of
+  the variant genome is expanded into the haplotypes its carriers have, it is tested against
+  the samples' genotypes, and skipped (its reference row is still written) when no sample, free
+  to take at each variant column the reference base or any ALT it carries there, reaches the
+  mismatch budget and the PAM. The results are the same either way (it never skips a target a
+  row comes from); off, a dense region's raw targets are each expanded, as up to 2.8.1.
+  `CRISPRME_HAPLOTYPE_PRECHECK` set to 0, false, no or off (in any case) does the same. (The
+  post-analysis runs each chromosome in pieces over the `--thread` workers;
+  `CRISPRME_POSTPROC_PIECES=0`, read the same way, runs it as one process a chromosome, as up to
+  2.8.1; the files are the same.)
 
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP

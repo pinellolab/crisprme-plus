@@ -16,7 +16,11 @@ count them:
   * indel_target_possible says True whenever one carrier has a choice resolve_target keeps;
   * and, through the real new_simple_analysis.py, the rows, the companions and both BEDs are
     the same with the pre-check on and off, a skipped target keeps its reference row, and the
-    run says how many it skipped; a dense window two alignments share is one BED line.
+    run says how many it skipped; bulged targets (an RNA or a DNA bulge) are skipped and kept
+    on the dictionary path and the observed one, a minus-strand target is read at its forward
+    positions, a registry-only dataset's rows are left alone; a dense window two alignments
+    share is one BED line;
+  * complete-search's warning above 1 DNA + 1 RNA bulge, its cap rule and the counts it quotes.
 
 Run with:
     cd PostProcess && python3 -m unittest test_haplotype_precheck -v

@@ -909,7 +909,10 @@ complementary controls:
   needed 225 GB at 4 + 2 + 1 (the 2.10.0 haplotype-scan judges and design). A cap of 3 brings
   a wider budget back to the default's cost: there 6 + 2 + 2 writes 618,209 SNP raw targets
   at a cap of 3, 4.5 million at 4, 14.7 million at 5 and 33.7 million at 6 (4 + 2 + 1: 1.2
-  million at 4, 2.7 million at 5). `complete-search` warns on stdout when a variant search on
+  million at 4, 2.7 million at 5, 7.9 million at 7). More mismatches cost far less than more
+  bulges: 6 + 1 + 1 under a cap of 8 writes 1,639,081 SNP and 8,497,278 indel raw targets there
+  (5 + 1 + 1 under 7: 1,156,089 SNP), against 755,963 and 4,485,088 at the default, so a wider
+  search raises `--mm` first. `complete-search` warns on stdout when a variant search on
   such an index (or on none yet, where the installed CRISPRitz builds one) allows more than 1
   DNA + 1 RNA bulge in alignments of more than 3 edits (the smaller of the cap and
   mm + bDNA + bRNA), and keeps the warning in the run's `.Params.txt` (`Bulge_budget_note`,
@@ -1106,15 +1109,20 @@ search's threads, bring it back. None changes a row.
   admit needs an ALT it admits. The samples are bits of integers, so "one sample is in *need*
   of the fixing sets and in every PAM set" is a few integer operations a column. Where no
   sample can, the raw target is not expanded and only its reference row is written (the
-  observed path writes it whatever the genotypes; the dictionary path writes none of its own).
-  The test is a bound, never a guess: it keeps a raw target that one sample's union of alleles
-  reaches though none of its haplotypes does, and never skips one a row comes from. It runs on
-  the observed path and on the uncapped dictionary path of a per-sample search, never on a
-  registry-only (sites-only) dataset, whose rows need no carrier. Its unit test compares it
-  with every choice of alleles of every sample (3,000 random windows on both strands, with and
-  without bulges, and a 5′ PAM), and the real script's tests skip and keep raw targets with an
-  RNA or a DNA bulge on both paths, in pieces too. On chr22 it skips 755,137 of the README
-  guide's 764,435 raw targets with a variant letter (98.8%; in IGL, 752,074 of its 755,863).
+  observed path writes it whatever the genotypes, on the plus strand: the reference search
+  holds a minus-strand one; the dictionary path writes none of its own). The test is a bound,
+  never a guess: it keeps a raw target that one sample's union of alleles reaches though none
+  of its haplotypes does, and never skips one a row comes from. It runs on the observed path
+  and on the uncapped dictionary path of a per-sample search, never on a registry-only
+  (sites-only) dataset, whose rows need no carrier. Its unit test compares it with every choice
+  of alleles of every sample (3,000 random windows on both strands, with and without bulges,
+  and 1,500 with a 5′ PAM). The real script's tests, each against the same run with the
+  pre-check off, skip and keep raw targets with no bulge, an RNA bulge or a DNA bulge, on the
+  dictionary path and the observed one, as one process and in pieces (a bulged target needing
+  two fixes that two samples hold one each is skipped, one sample holding both keeps it); they
+  read a minus-strand target at its forward positions and leave a registry-only dataset's rows
+  alone. On chr22 it skips 755,137 of the README guide's 764,435 raw targets with a variant
+  letter (98.8%; in IGL, 752,074 of its 755,863).
 - **Carriers first on the indel side.** An overlaid target of the fake-indel genome (§4) gives
   the rows its indel's carriers have, each holding at a code column the reference base or a base
   the carrier carries there (an exact slot's alleles; a PUTATIVE carrier's own, the reference
@@ -1126,9 +1134,12 @@ search's threads, bring it back. None changes a row.
   alleles, so the test below stays exact. The same test over the indel's carriers, counted as
   `indel_snp_cis.resolve_target` counts (mismatches over the protospacer columns that are no
   bulge, the total-edits cap, the bulge limits), skips a target no carrier can have, before the
-  second indels of the phased store are read for it. On chr22 it tells 2,904,141 of the README
-  guide's 2,904,487 overlaid targets (all but 346) (its unit test, against every choice of every
-  carrier).
+  second indels of the phased store are read for it. The indel post-analysis is the same in
+  both analysis modes, and so is this check. On chr22 it tells 2,904,141 of the README guide's
+  2,904,487 overlaid targets (all but 346), per sample and population-level. Its unit test
+  compares it with every choice of every carrier; the real script gives the same files with it
+  on and off, as one process and in pieces, on targets that include one at exactly the
+  mismatch budget and one whose code column no genotype covers.
 - **The K-skip (population-level, `--max-degeneracy K`).** Every row a capped
   population-level search writes rests on at most K ambiguous columns (above), and every row
   within the budget and the PAM rests on at least D_min = max(0, *need*) + the PAM columns
@@ -1140,9 +1151,14 @@ search's threads, bring it back. None changes a row.
   choice): on chr22 the README guide's population-level search with `--max-degeneracy 4` skips
   753,990 of its 764,435 raw targets with a variant letter (98.6%) and takes 7.4 min on 16
   threads (16 min with the K-skip off, the same files). Use K = 4 or more in a population-level
-  search (above). `--no-haplotype-precheck` (or `CRISPRME_HAPLOTYPE_PRECHECK` set to 0, false,
-  no or off, in any case, as `CRISPRME_POSTPROC_PIECES` below) turns off the pre-check, its
-  indel twin and the K-skip together; the log then says which of them is off.
+  search (above). The K-skip reads the ALTs listed at a raw target's variant columns, to tell
+  which columns an ALT can fix, and no sample's haplotype. `--no-haplotype-precheck` (or
+  `CRISPRME_HAPLOTYPE_PRECHECK` set to 0, false, no or off, in any case, as
+  `CRISPRME_POSTPROC_PIECES` below) turns off the pre-check, its indel twin and the K-skip
+  together, and the notes each chromosome ends with in `log_verbose.txt` say which of them is
+  off ("Haplotype pre-check on chr22: off" per sample, "K-skip on chr22: off" with
+  `--max-degeneracy` population-level, "indel-snp: carriers-first pre-check off" in either
+  mode).
 - **The post-analysis in pieces.** Up to this release the SNP and the indel post-analysis ran
   one process a chromosome, so IGL ran on one core while the others waited. Now each
   chromosome's clustered raw targets are cut into up to `--thread` contiguous ranges of lines
