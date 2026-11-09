@@ -31,6 +31,7 @@ test_indel_haplotype_resolution.py).
 import bisect
 import itertools
 
+import indel_window
 import site_alleles
 from overlay_indel_snps import map_fake_offset_to_real
 
@@ -143,7 +144,7 @@ def complement(base):
 
 
 def build_offset_to_real(dna_aligned, fake_start, strand, indel_fake_start,
-                         indel_start, ref, alt):
+                         indel_pos1, indel_start, ref, alt):
     """Map each aligned column of an indel off-target's DNA to a real 0-based ref
     position (or None for a bulge/inserted column).
 
@@ -152,8 +153,11 @@ def build_offset_to_real(dna_aligned, fake_start, strand, indel_fake_start,
       fake_start:  the target's leftmost fake position (search col 4, forward coord).
       strand:      '+' or '-' (search col 6).
       indel_fake_start: the indel's fake-region start (log FAKEPOS start).
-      indel_start, ref, alt: the indel's real 0-based start + REF/ALT (for the
-        piecewise fake->real map).
+      indel_pos1, indel_start, ref, alt: the indel's VCF POS (1-based), its window's real
+        0-based start (the log's CHR field) + REF/ALT (for the piecewise fake->real map).
+        The window's left flank is indel_pos1 - 1 - indel_start (indel_window.left_flank),
+        as holds_indel, reference_start and window_place read it: never assumed, so the
+        windows of CRISPRitz 2.10.0 (30 bases) and of 2.9.1 (25) map alike.
 
     Returns a list ``real_of`` aligned to ``dna_aligned`` (real 0-based pos or None).
 
@@ -168,11 +172,12 @@ def build_offset_to_real(dna_aligned, fake_start, strand, indel_fake_start,
     """
     base_cols = [j for j, ch in enumerate(dna_aligned) if ch != "-"]
     n = len(base_cols)
+    left = indel_window.left_flank(indel_pos1, indel_start)
     real_of = [None] * len(dna_aligned)
     for i, j in enumerate(base_cols):
         fpos = fake_start + i if strand == "+" else fake_start + (n - 1 - i)
         real_of[j] = map_fake_offset_to_real(
-            fpos - indel_fake_start, indel_start, len(ref), len(alt)
+            fpos - indel_fake_start, indel_start, len(ref), len(alt), left
         )
     return real_of
 
@@ -390,8 +395,8 @@ def holds_indel(first, last, indel_pos1, indel_start, ref, alt):
     of the deleted ones. Anything else lies wholly in a flank: plain reference (or SNP)
     sequence that does not need the indel, at a coordinate the indel shifts.
     ``indel_start`` is the real 0-based start of the window (the log's), so the REF's
-    first base is at offset indel_pos1 - 1 - indel_start (overlay_indel_snps.LEFT_FLANK
-    on a full window)."""
+    first base is at offset indel_pos1 - 1 - indel_start, the window's left flank
+    (indel_window.left_flank: 30 bases for CRISPRitz 2.10.0, 25 up to 2.9.1)."""
     alt_at = indel_pos1 - 1 - indel_start
     added_from = alt_at + kept_bases(ref, alt)        # first base the ALT adds or replaces
     added_to = alt_at + len(alt) - shared_tail(ref, alt)  # and the base past the last

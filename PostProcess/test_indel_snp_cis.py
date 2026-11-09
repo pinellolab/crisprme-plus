@@ -173,7 +173,7 @@ def test_offset_to_real_plus_strand_left_flank():
     # indel at real start 100, ref/alt len 2/1 (delta +1). target fake_start = indel
     # fake_start + 3 (so fst=3, left flank).
     real = isc.build_offset_to_real("ACGT", fake_start=13, strand="+",
-                                    indel_fake_start=10, indel_start=100,
+                                    indel_fake_start=10, indel_pos1=126, indel_start=100,
                                     ref="AT", alt="A")
     # fst=3 -> real 103, then 104,105,106 (all left flank, 1:1)
     assert real == [103, 104, 105, 106]
@@ -182,7 +182,7 @@ def test_offset_to_real_plus_strand_left_flank():
 def test_offset_to_real_minus_strand_reverses():
     # '-' strand: leftmost column is the HIGHEST forward fake position
     real = isc.build_offset_to_real("ACGT", fake_start=13, strand="-",
-                                    indel_fake_start=10, indel_start=100,
+                                    indel_fake_start=10, indel_pos1=126, indel_start=100,
                                     ref="AT", alt="A")
     # 4 bases at forward fake 13,14,15,16 (fst 3,4,5,6 -> real 103..106); '-' reverses
     assert real == [106, 105, 104, 103]
@@ -191,7 +191,7 @@ def test_offset_to_real_minus_strand_reverses():
 def test_offset_to_real_rna_bulge_column_is_none():
     # a '-' in the DNA (RNA bulge) consumes no fake position
     real = isc.build_offset_to_real("AC-GT", fake_start=13, strand="+",
-                                    indel_fake_start=10, indel_start=100,
+                                    indel_fake_start=10, indel_pos1=126, indel_start=100,
                                     ref="AT", alt="A")
     assert real[2] is None
     assert real[0] == 103 and real[1] == 104 and real[3] == 105 and real[4] == 106
@@ -253,7 +253,7 @@ def test_reference_start_agrees_with_offset_to_real_on_reference_bases():
     for ref, alt in (("G", "GCAATCATTAT"), ("AGCAGCT", "A"), ("AC", "TG")):
         n = 25 + len(alt) + 27
         for off in range(n):
-            real = isc.map_fake_offset_to_real(off, W, len(ref), len(alt))
+            real = isc.map_fake_offset_to_real(off, W, len(ref), len(alt), 25)
             if real is not None:
                 assert _start(off, ref, alt) == real, (ref, alt, off)
 

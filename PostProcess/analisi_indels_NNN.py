@@ -728,6 +728,7 @@ with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, 
 # A target with no IUPAC code (every target of a classic, non-overlaid fake-indel
 # genome) never reaches any of this: its row is the one the engine reported.
 import indel_snp_cis as _isc
+import indel_window as _indel_window_mod
 
 _indel_snp = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
 _reg = _gt = _indelgt = _cooc_out = _dict_snps = None
@@ -804,10 +805,11 @@ except Exception as _iaf_err:  # noqa: BLE001 - never break the classic path
 
 
 def _indel_window(indel_data):
-    """(pos, REF, ALT, real 0-based start of the fake window) of a log entry."""
+    """(pos, REF, ALT, real 0-based start of the fake window) of a log entry: the start its
+    CHR field records (indel_window.window_start), from which every reader of the window
+    takes its left flank, POS - 1 - start (30 bases for CRISPRitz 2.10.0, 25 up to 2.9.1)."""
     _ip = indel_data[4].split("_")  # chrN_pos_REF_ALT
-    return (int(_ip[-3]), _ip[-2], _ip[-1],
-            int(indel_data[0].split("_")[1].split("-")[0]))
+    return (int(_ip[-3]), _ip[-2], _ip[-1], _indel_window_mod.window_start(indel_data[0]))
 
 
 def _holds_its_indel(dna, fake_start, indel_data):
@@ -843,7 +845,7 @@ def _overlaid_positions(path):
             if not amb and _indelgt is None:
                 continue
             real_of = _isc.build_offset_to_real(
-                ln[2], int(ln[4]), ln[6], int(idata[5]), _istart, _iref, _ialt)
+                ln[2], int(ln[4]), ln[6], int(idata[5]), _ipos, _istart, _iref, _ialt)
             for j in amb:
                 if real_of[j] is not None:
                     out.add(real_of[j] + 1)
@@ -1238,7 +1240,7 @@ def _overlaid_rows(line, final_result, indel_data, amb):
     _ipos, _iref, _ialt, _istart = _indel_window(indel_data)
     strand = line[6]
     real_of = _isc.build_offset_to_real(
-        line[2], int(line[4]), strand, int(indel_data[5]), _istart, _iref, _ialt)
+        line[2], int(line[4]), strand, int(indel_data[5]), _ipos, _istart, _iref, _ialt)
     have_gt = _indel_snp and (_gt is not None or _dict_snps is not None)
     cols = []
     for j in amb:
@@ -1360,7 +1362,7 @@ def _second_indel_rows(line, final_result, indel_data):
         return [final_result]
     _ipos, _iref, _ialt, _istart = _indel_window(indel_data)
     real_of = _isc.build_offset_to_real(
-        line[2], int(line[4]), line[6], int(indel_data[5]), _istart, _iref, _ialt)
+        line[2], int(line[4]), line[6], int(indel_data[5]), _ipos, _istart, _iref, _ialt)
     others = _window_breakers(
         line[2], real_of, _isc.window_offsets(line[2], int(line[4]), int(indel_data[5])),
         _ipos, _iref, _ialt, _istart, indel_data)

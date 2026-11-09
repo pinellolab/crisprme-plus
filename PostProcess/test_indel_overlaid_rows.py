@@ -110,7 +110,12 @@ def rc(s):
 
 
 class World(object):
-    """The reference, the panel and the planted sites."""
+    """The reference, the panel and the planted sites. LEFT and RIGHT: the reference bases
+    of a fake-indel window before an indel's REF and after it, 25 and 27 as CRISPRitz 2.9.1
+    and earlier cut them (the windows of every index published up to CRISPRme 2.8.1, which
+    must still read right); World30 cuts them as 2.10.0 does."""
+
+    LEFT, RIGHT = 25, 27
 
     def __init__(self):
         rng = random.Random(28101)
@@ -377,8 +382,8 @@ class World(object):
 
     # -- the fake-indel genome, cut and overlaid as the build does --------------------
     def fake_windows(self):
-        """[(indel, start_position, window)] -- 25 bp of plain reference, the ALT, then
-        27 bp downstream (CRISPRitz add-variants), SNP-overlaid (overlay_indel_snps)."""
+        """[(indel, start_position, window)] -- LEFT bases of plain reference, the ALT, then
+        RIGHT bases downstream (CRISPRitz add-variants), SNP-overlaid (overlay_indel_snps)."""
         enriched = list(self.ref)
         alleles = {}
         for pos1, ref, alt, _rs, _g in self.snps:
@@ -391,9 +396,10 @@ class World(object):
         out = []
         for ind in self.indels:
             pos1, ref, alt = ind[:3]
-            s = pos1 - 26
-            sub = self.ref[s:s + 25] + alt + self.ref[s + 25 + len(ref):s + 25 + len(ref) + 27]
-            out.append((ind, s, ov.overlay_sub_fasta(sub, s, ref, alt, enriched)))
+            s = pos1 - 1 - self.LEFT
+            sub = (self.ref[s:s + self.LEFT] + alt
+                   + self.ref[s + self.LEFT + len(ref):s + self.LEFT + len(ref) + self.RIGHT])
+            out.append((ind, s, ov.overlay_sub_fasta(sub, s, ref, alt, self.LEFT, enriched)))
         return out
 
     def haplotypes(self, sample):
@@ -486,8 +492,9 @@ class _Fixture(object):
         with open(os.path.join(logd, "log%s.txt" % CHROM), "w") as fh:
             fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n")
             for k, ((pos1, ref, alt, rs, gts), s, win) in enumerate(windows):
+                # (the window's end as the enricher writes it: RIGHT bases past the REF)
                 fh.write("%s_%d-%d_%d\t%s\t%s\t%s\t%s_%d_%s_%s\t%d,%d\t%s\n" % (
-                    CHROM, s, s + len(win), k + 1, ",".join(sorted(gts)), rs,
+                    CHROM, s, pos1 - 1 + len(ref) + world.RIGHT, k + 1, ",".join(sorted(gts)), rs,
                     "%.6g" % (sum(g.count("1") for g in gts.values()) / float(AN)),
                     CHROM, pos1, ref, alt, starts[k], starts[k] + len(win),
                     world.ref[s:s + len(win)]))
@@ -591,10 +598,12 @@ class _Fixture(object):
 
 
 class _Base(unittest.TestCase):
+    world_class = World
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_")
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        self.world = World()
+        self.world = self.world_class()
 
     def run_analyzer(self, **kw):
         fx = _Fixture(self.tmp, self.world, **kw)
@@ -910,6 +919,22 @@ class OtherInstalls(_Base):
                          and 0 <= int(x[4]) - self.fake_start(fx, "U") < 80],
                         "the engine must report the flank target")
         self.assertNotIn("U", site, site.get("U"))
+
+
+
+class World30(World):
+    """The same world, its fake-indel windows cut as CRISPRitz 2.10.0 cuts them: 30
+    reference bases before an indel's REF and 30 after it."""
+
+    LEFT, RIGHT = 30, 30
+
+
+class FullTiers30(FullTiers):
+    """FullTiers on windows of 30 / 30: the same rows, each window read with its own left
+    flank (the log row's POS - 1 - start). Read with 2.9.1's 25, every flank base, SNP code
+    and row of such a window was five bases off."""
+
+    world_class = World30
 
 
 if __name__ == "__main__":

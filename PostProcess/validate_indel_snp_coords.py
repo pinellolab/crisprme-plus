@@ -11,7 +11,9 @@ use the SAME 0-based coordinate as ``overlay_indel_snps.read_enriched_chromosome
 
   * fake flank base at fake-region offset k  ==  enriched[start + k]   (0-based)
     -> overlay reads enriched[real] with real = map_fake_offset_to_real(...).
-    Verified 72554/72554 (100%) fake-flank vs enriched matches.
+    Verified 72554/72554 (100%) fake-flank vs enriched matches. The left flank is
+    each window's own, POS - 1 - start (indel_window.left_flank: 30 bases for an
+    enrichment of CRISPRitz 2.10.0, 25 up to 2.9.1), never assumed.
 
   * the SNP dict (my_dict_<chrom>.json) is keyed 1-BASED:
         dict key "chr,POS"  <->  enriched[POS-1]
@@ -42,10 +44,11 @@ def validate(enriched_fa, fake_fa, log_path, dict_path, sample=200):
 
     recs = list(ov.parse_log_indels(log_path))
 
-    # 1) fake flank base == enriched[start + k] (the overlay's read position)
+    # 1) fake flank base == enriched[start + k] (the overlay's read position), over each
+    # window's own left flank
     m = t = 0
-    for sp, ref, alt, fs, fe in recs[:3000]:
-        for k in range(25):
+    for sp, ref, alt, fs, fe, left in recs[:3000]:
+        for k in range(left):
             fb, eb = orig[fs + k], (E[sp + k] if sp + k < len(E) else "N")
             if fb in "ACGT" and eb in "ACGT":
                 t += 1
@@ -72,10 +75,10 @@ def validate(enriched_fa, fake_fa, log_path, dict_path, sample=200):
     step = max(1, len(diffs) // sample)
     for P in diffs[::step][:sample]:
         i = bisect.bisect_right(starts, P) - 1
-        sp, ref, alt, fs, fe = recs[i]
+        sp, ref, alt, fs, fe, left = recs[i]
         if not (fs <= P < fe):
             continue
-        real = ov.map_fake_offset_to_real(P - fs, sp, len(ref), len(alt))
+        real = ov.map_fake_offset_to_real(P - fs, sp, len(ref), len(alt), left)
         if real is None:
             continue
         if over[P] == E[real] and (real + 1) in dpos:

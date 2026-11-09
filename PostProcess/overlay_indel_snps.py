@@ -3,9 +3,10 @@
 
 CRISPRme's indel search runs against a "fake-indel genome" that ``crispritz
 add-variants`` cuts from the PLAIN reference (one fake chromosome per real
-chromosome; ~25 bp flanks around each indel with the indel ALT applied at
-offset 25). Because those flanks are plain reference, an off-target that needs
-BOTH an indel AND a nearby SNP is invisible to the indel search.
+chromosome; a window of reference flanks around each indel with the indel ALT applied
+after the left flank: 30 bases on either side with CRISPRitz 2.10.0, 25 before and 27
+after up to 2.9.1, indel_window). Because those flanks are plain reference, an
+off-target that needs BOTH an indel AND a nearby SNP is invisible to the indel search.
 
 This module OVERLAYS the SNP ambiguity (IUPAC) codes from the already-produced
 enriched genome (``Genomes/<ref>+<vcf>/<chrom>.enriched.fa``) onto the flank
@@ -17,9 +18,11 @@ then matches SNP+indel targets for free (searchTST matches IUPAC codes).
 Run AFTER ``add-variants`` and BEFORE indexing the ``_INDELS`` genome. Enabled by
 default; set ``CRISPRME_INDEL_SNP=0`` to disable (opt-out).
 
-Geometry reference: CRISPRitz enricher.py ``indel_to_fasta`` (25 bp left flank,
-REF->ALT re.sub at offset 25, ``refseq``/``FAKEPOS`` = matched-length window,
-``start_position = POS-26`` in the enricher's 0-based ``genomeStr`` coordinate).
+Geometry reference: CRISPRitz enricher.py ``indel_to_fasta`` (a left flank of INDEL_LEFT
+bases, REF->ALT re.sub at offset INDEL_LEFT, ``refseq``/``FAKEPOS`` = matched-length window,
+``start_position = POS - 1 - INDEL_LEFT`` in the enricher's 0-based ``genomeStr``
+coordinate). The left flank is never assumed: each log row's own window start and POS give
+it (indel_window.left_flank), so a fake-indel genome of either release is overlaid right.
 """
 
 import os
@@ -29,27 +32,26 @@ import shutil
 import stat
 import tempfile
 
+import indel_window
+
 # The non-ACGT / non-N codes the enricher writes for SNPs: the IUPAC ambiguity codes, and
 # Q at a position whose reference base and SNP ALTs hold all four bases (CRISPRitz
 # 2.10.0; N is a gap, never written for a variant). A base is "SNP-carrying" in the
 # enriched genome iff it is one of these.
 _IUPAC_AMBIG = set("RYSWKMBDHVQryswkmbdhvq")
 
-# The enricher's fixed left-flank width (enricher.py:302, start_position = POS-26,
-# indel applied at sub_fasta[25:]).
-LEFT_FLANK = 25
-
-
-def map_fake_offset_to_real(k, start_position, ref_len, alt_len):
+def map_fake_offset_to_real(k, start_position, ref_len, alt_len, left_flank):
     """Map a 0-based offset ``k`` within a fake sub-sequence to its 0-based real
     reference position (enricher ``genomeStr`` coordinate), or ``None`` if ``k`` is
     an indel/ALT base with no reference position.
 
-    Mirrors enricher.indel_to_fasta: ``sub_fasta = leftflank(25 plain-ref) +
-    resub(REF->ALT applied)``.
-      * k in [0, 25)                 -> LEFT FLANK:  start_position + k
-      * k in [25, 25 + alt_len)      -> ALT/indel bases: None (skip; it's the variant)
-      * k in [25 + alt_len, len)     -> DOWNSTREAM ref: start_position + k + (ref_len - alt_len)
+    Mirrors enricher.indel_to_fasta: ``sub_fasta = leftflank(left_flank plain-ref) +
+    resub(REF->ALT applied)``, ``left_flank`` the window's own (its log row's POS - 1 -
+    start: indel_window.left_flank; 30 for CRISPRitz 2.10.0, 25 up to 2.9.1).
+      * k in [0, L)                  -> LEFT FLANK:  start_position + k
+      * k in [L, L + alt_len)        -> ALT/indel bases: None (skip; it's the variant)
+      * k in [L + alt_len, len)      -> DOWNSTREAM ref: start_position + k + (ref_len - alt_len)
+    (L = left_flank.)
 
     The downstream shift is delta = ref_len - alt_len (positive for deletions:
     downstream real positions run ahead of the fake offset; negative for
@@ -64,15 +66,17 @@ def map_fake_offset_to_real(k, start_position, ref_len, alt_len):
     key ``real + 1`` (equivalently, tier0_registry.retrieve_5tuple uses chr_pos+1
     internally, so pass ``real`` as its 0-based chr_pos).
     """
-    if k < LEFT_FLANK:
+    if k < left_flank:
         return start_position + k
-    if k < LEFT_FLANK + alt_len:
+    if k < left_flank + alt_len:
         return None  # the ALT allele (indel) bases — not a reference position
     return start_position + k + (ref_len - alt_len)
 
 
-def overlay_sub_fasta(sub_fasta, start_position, ref, alt, enriched, enriched_offset=0):
+def overlay_sub_fasta(sub_fasta, start_position, ref, alt, left_flank, enriched,
+                      enriched_offset=0):
     """Return ``sub_fasta`` with SNP IUPAC codes overlaid on its flank bases.
+    ``left_flank``: the window's own left flank (map_fake_offset_to_real).
 
     For every offset whose real position carries an IUPAC ambiguity code in the
     ``enriched`` chromosome (and only where the fake base currently equals a plain
@@ -93,7 +97,7 @@ def overlay_sub_fasta(sub_fasta, start_position, ref, alt, enriched, enriched_of
         base = out[k]
         if base not in "ACGTacgt":
             continue
-        real = map_fake_offset_to_real(k, start_position, ref_len, alt_len)
+        real = map_fake_offset_to_real(k, start_position, ref_len, alt_len, left_flank)
         if real is None or real < enriched_offset or real >= n_enr:
             continue
         e = enriched[real - enriched_offset]
@@ -102,7 +106,7 @@ def overlay_sub_fasta(sub_fasta, start_position, ref, alt, enriched, enriched_of
     return "".join(out)
 
 
-def count_coded(sub_fasta, start_position, ref, alt, enriched):
+def count_coded(sub_fasta, start_position, ref, alt, left_flank, enriched):
     """The flank bases of ``sub_fasta`` that already carry the IUPAC code that
     overlay_sub_fasta gives them: those of a fake-indel genome overlaid before."""
     ref_len, alt_len = len(ref), len(alt)
@@ -110,7 +114,7 @@ def count_coded(sub_fasta, start_position, ref, alt, enriched):
     for k, base in enumerate(sub_fasta):
         if base not in _IUPAC_AMBIG:
             continue
-        real = map_fake_offset_to_real(k, start_position, ref_len, alt_len)
+        real = map_fake_offset_to_real(k, start_position, ref_len, alt_len, left_flank)
         if real is not None and 0 <= real < len(enriched) and enriched[real] == base:
             coded += 1
     return coded
@@ -130,11 +134,13 @@ def read_enriched_chromosome(enriched_fa):
 
 
 def parse_log_indels(log_path):
-    """Yield (start_position, ref, alt, fake_start, fake_end) per indel log row.
+    """Yield (start_position, ref, alt, fake_start, fake_end, left_flank) per indel log row.
 
     log_indels columns: CHR(<chrom>_<start>-<end>_<id>), SAMPLES, rsID, AF,
     indel(<chrom>_<pos>_<REF>_<ALT>), FAKEPOS(<start>,<end>), refseq.
-    ``start`` in CHR is the enricher's ``start_position`` (= POS-26).
+    ``start`` in CHR is the enricher's ``start_position`` (POS - 1 - its left flank), so
+    each row's own left flank is POS - 1 - start (indel_window.left_flank): 30 for an
+    enrichment of CRISPRitz 2.10.0, 25 for one of 2.9.1 or earlier.
     """
     with _open_text(log_path) as fh:
         header = fh.readline()  # CHR SAMPLES rsID AF indel FAKEPOS refseq
@@ -147,12 +153,12 @@ def parse_log_indels(log_path):
                 continue
             try:
                 # CHR = <chrom>_<start>-<end>_<id>  -> start
-                start_position = int(c[0].rsplit("_", 1)[0].split("-")[0].split("_")[-1])
+                start_position = indel_window.window_start(c[0])
                 # indel = <chrom>_<pos>_<REF>_<ALT>
-                ind = c[4].split("_")
-                ref, alt = ind[-2], ind[-1]
+                pos1, ref, alt = c[4].rsplit("_", 3)[1:]
+                left = indel_window.left_flank(int(pos1), start_position)
                 fs, fe = c[5].split(",")
-                yield start_position, ref, alt, int(fs), int(fe)
+                yield start_position, ref, alt, int(fs), int(fe), left
             except (ValueError, IndexError):
                 continue
 
@@ -186,17 +192,17 @@ def overlay_fake_chromosome(fake_fa, enriched_fa, log_path, out_fa=None, owner=N
     seq = list(flat)
 
     changed = 0
-    for start_position, ref, alt, fs, fe in records:
+    for start_position, ref, alt, fs, fe, left in records:
         sub = "".join(seq[fs:fe])
-        overlaid = overlay_sub_fasta(sub, start_position, ref, alt, enriched)
+        overlaid = overlay_sub_fasta(sub, start_position, ref, alt, left, enriched)
         for i, ch in enumerate(overlaid):
             if seq[fs + i] != ch:
                 seq[fs + i] = ch
                 changed += 1
     if coded is not None:
         coded.append(0 if changed else sum(
-            count_coded("".join(seq[fs:fe]), start_position, ref, alt, enriched)
-            for start_position, ref, alt, fs, fe in records))
+            count_coded("".join(seq[fs:fe]), start_position, ref, alt, left, enriched)
+            for start_position, ref, alt, fs, fe, left in records))
     if before_write is not None and out_fa is None:
         if not changed:
             return 0

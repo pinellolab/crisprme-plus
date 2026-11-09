@@ -81,7 +81,7 @@ def test_window_mapper_refbase_match():
         sp, ref, alt, fs = ind["start_position"], ind["ref"], ind["alt"], ind["fake_start"]
         for t in ind["targets"]:
             dna, strand = t["dna"], t["strand"]
-            ro = isc.build_offset_to_real(dna, t["fake_pos"], strand, fs, sp, ref, alt)
+            ro = isc.build_offset_to_real(dna, t["fake_pos"], strand, fs, ind["pos"], sp, ref, alt)
             for j, ch in enumerate(dna):
                 if ch == "-" or ro[j] is None:
                     continue
@@ -103,7 +103,7 @@ def test_overlay_places_iupac_on_flanks_only():
         slc = "".join(reals.get(i, "A") for i in range(lo, hi + 1))
         over = ov.overlay_sub_fasta(
             ind["fake_seq"], ind["start_position"], ind["ref"], ind["alt"],
-            slc, enriched_offset=lo,
+            ind["pos"] - 1 - ind["start_position"], slc, enriched_offset=lo,
         )
         assert len(over) == len(ind["fake_seq"])
         for j, ch in enumerate(over):
@@ -121,7 +121,7 @@ def test_used_snps_detects_cooccurrence():
         sp, ref, alt, fs = ind["start_position"], ind["ref"], ind["alt"], ind["fake_start"]
         for t in ind["targets"]:
             dna, guide, strand = t["dna"], t["guide"], t["strand"]
-            ro = isc.build_offset_to_real(dna, t["fake_pos"], strand, fs, sp, ref, alt)
+            ro = isc.build_offset_to_real(dna, t["fake_pos"], strand, fs, ind["pos"], sp, ref, alt)
             dna_ov = _overlay_target_dna(dna, ro, ind, strand)
             used = isc.used_snps_for_target(guide, dna_ov, lambda j: ro[j], _snp_at(ind, strand))
             found += len(used)
@@ -140,7 +140,7 @@ def test_full_cis_on_real_data():
         indel_gt = ind["indel_gt"]
         for t in ind["targets"]:
             dna, guide, strand = t["dna"], t["guide"], t["strand"]
-            ro = isc.build_offset_to_real(dna, t["fake_pos"], strand, fs, sp, ref, alt)
+            ro = isc.build_offset_to_real(dna, t["fake_pos"], strand, fs, ind["pos"], sp, ref, alt)
             dna_ov = _overlay_target_dna(dna, ro, ind, strand)
             used = isc.used_snps_for_target(guide, dna_ov, lambda j: ro[j], _snp_at(ind, strand))
             if not used:
@@ -167,7 +167,7 @@ def test_brute_force_snp_flips_a_mismatch():
         sp, ref, alt, fs = ind["start_position"], ind["ref"], ind["alt"], ind["fake_start"]
         for t in ind["targets"]:
             dna, guide, strand = t["dna"], t["guide"], t["strand"]
-            ro = isc.build_offset_to_real(dna, t["fake_pos"], strand, fs, sp, ref, alt)
+            ro = isc.build_offset_to_real(dna, t["fake_pos"], strand, fs, ind["pos"], sp, ref, alt)
             dna_alt = list(dna)
             changed = False
             for j, ch in enumerate(dna):
