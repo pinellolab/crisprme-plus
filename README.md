@@ -1075,7 +1075,8 @@ its purpose and usage:
   `log_verbose.txt` says per chromosome what it withheld. `--no-sites-only-density-guard`
   analyses every candidate. Measured at 4 mismatches and 1 + 1 bulges, a search of the mega
   rebuilt for 2.10.0 with the guard took 1.46 (chr22) and 1.57 (chr14) times the shipped
-  mega's; unguarded, the chr14 search was projected at 12 to 16 h. See METHODS §5.
+  mega's; unguarded, 4.6 times on chr22, and the chr14 search was projected at 12 to 16 h. See
+  METHODS §5.
 
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP

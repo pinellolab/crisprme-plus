@@ -1078,11 +1078,17 @@ complementary controls:
   compare with one another only): on chr22 the guard withholds 107,038 of the rebuilt mega's
   280,112 SNP candidates and 5,782,488 of its 7,476,229 indel candidates (three quarters of these
   in the (TA)n repeat at chr22:24,238,749-24,238,997), in 338 regions, and the search takes
-  44.6 min, 1.46 times the shipped mega's 30.5 min; on chr14 it withholds 3,373,484 of 3,651,632
-  SNP candidates (97 % of them in IGH) and 34,248,990 of 36,946,128 indel candidates, and the
-  search takes 73.7 min, 1.57 times the shipped mega's 46.8 min (unguarded, it was projected
-  at 12 to 16 h). On the shipped mega's chr22 it withholds 1,474 SNP and 18,675 indel candidates
-  and 7 of its 20,010 rows, each a combination of two or more variants in IGL or a (TA)n repeat.
+  44.6 min, 1.46 times the shipped mega's 30.5 min, where unguarded it takes 140.4 min (4.6
+  times). It takes 319 of the unguarded search's 20,846 rows out, each a combination of two or
+  more variants, keeps all 56 single-variant rows the rebuild adds over the shipped mega, and of
+  the 106 rows at CFD 0.2 or more the rebuild adds, 41 remain (184 more rows are read from
+  another alignment of their site). The 100 rows that lead the five guides' CFD rankings hold 81
+  combinations below the frequency bound unguarded and 61 guarded (none once D6 ranks them after
+  the others, below). On chr14 it withholds 3,373,484 of 3,651,632 SNP candidates (97 % of them
+  in IGH) and 34,248,990 of 36,946,128 indel candidates, and the search takes 73.7 min, 1.57
+  times the shipped mega's 46.8 min (unguarded, it was projected at 12 to 16 h). On the shipped
+  mega's chr22 it withholds 1,474 SNP and 18,675 indel candidates and 7 of its 20,010 rows, each
+  a combination of two or more variants in IGL or a (TA)n repeat.
 
 Together these keep genome-wide variant search tractable while making any bound
 that was applied explicit and reviewable, and, unless `--max-degeneracy` is given,

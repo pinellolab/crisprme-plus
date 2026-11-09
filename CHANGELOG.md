@@ -722,10 +722,11 @@ and the `release-crisprme` skill.
   checked by the carrier gate, which drops none, are not guarded, nor are the reference rows.
   Five guides, 4 mismatches and 1 + 1 bulges, population-level: on chr22 it withholds 107,038 of
   the rebuilt mega's 280,112 SNP and 5,782,488 of its 7,476,229 indel candidates, and the search
-  takes 1.46 times the shipped mega's (44.6 against 30.5 min, on a shared node); on chr14 (IGH)
-  3,373,484 of 3,651,632 and 34,248,990 of 36,946,128, and 1.57 times (73.7 against 46.8 min;
-  unguarded, 12 to 16 h were projected). On the shipped mega it withholds 7 of chr22's 20,010
-  rows. METHODS section 5. Covered by `PostProcess/test_sites_only_guard.py` and
+  takes 1.46 times the shipped mega's (44.6 against 30.5 min, on a shared node; unguarded 140.4
+  min, 4.6 times), with 319 rows fewer, each a combination of two or more variants, and all 56
+  single-variant rows the rebuild adds; on chr14 (IGH) 3,373,484 of 3,651,632 and 34,248,990 of
+  36,946,128, and 1.57 times (73.7 against 46.8 min; unguarded, 12 to 16 h were projected). On
+  the shipped mega it withholds 7 of chr22's 20,010 rows. METHODS section 5. Covered by `PostProcess/test_sites_only_guard.py` and
   `test_complete_search_flags.py` (a value of the flag that is no number of bits, or outside 1
   to 64, and both flags together are refused before the output folder is made); the real-data
   indel check reads a run's guard from its BEDs and takes such a row for one CRISPRme does not

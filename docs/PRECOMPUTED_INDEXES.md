@@ -600,7 +600,8 @@ complete protocol.
    frequencies fail the safeguards' bound are ranked after the others by the carrier gate
    (METHODS section 5). With the guard, a search of five guides at 4 mismatches and 1 + 1 bulges
    took 1.46 times the shipped mega's on chr22 and 1.57 times on chr14 (IGH), measured side by
-   side; unguarded, the chr14 search was projected at 12 to 16 h against 46 min.
+   side; unguarded, 4.6 times on chr22, and the chr14 search was projected at 12 to 16 h against
+   46 min.
 
 Once you have an enriched genome (`Genomes/hg38+hg38_<ds>/` + `_INDELS/`) — downloaded or
 rebuilt — **any** PAM reuses it via Step 3.
