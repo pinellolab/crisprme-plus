@@ -351,13 +351,14 @@ set automatically from the index you picked:
   "Population-level" opt-out)** — reports each off-target once, using a worst-possible
   representative of the variants in its window. It never misses a candidate off-target and works
   on any index, so it is the default on the sites-only *mega* index; on a genotyped+phased panel
-  pick it (or pass `--population-level`) to opt out of per-sample for a fast worst-case screen
-  (e.g. a very dense / high-edit / genome-wide search). It does **not** tell you which
-  individuals carry a site.
+  pick it (or pass `--population-level`) to opt out of per-sample for each window's worst case
+  (on the indexes CRISPRitz 2.10.0 builds it is not faster than per-sample). It does **not**
+  tell you which individuals carry a site.
 
-Per-sample is a **genotype-resolution** dial, **not** a speed dial: for a single guide the
-runtimes are comparable. It **requires a genotyped index** (HGDP + 1000 Genomes [the default],
-or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
+Per-sample is a **genotype-resolution** dial, **not** a speed dial: on the indexes CRISPRitz
+2.10.0 builds, which code every allele, it is the faster of the two (its haplotype pre-check
+skips the dense windows' raw targets nobody carries). It **requires a genotyped index** (HGDP +
+1000 Genomes [the default], or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
 greyed out and the search automatically uses population-level. (See "Understanding CONFIRMED vs
 PUTATIVE and carriers" in the results section for how these labels appear in the report.)
 

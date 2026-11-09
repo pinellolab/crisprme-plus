@@ -62,7 +62,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 
 #### The local gate: nothing stays skipped
 
-Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. So step 4b runs here, on the release's own engine, the three engine checks CI runs only on that published image: `test/index_flex/check_index_flex.py`, `test/indel_snp_oracle/run_oracle.sh` and `scripts/check_alt_pam.py`, and the two no CI job runs, which need the engine the release installs: `test/index_format2/check_real_engine.py` (CRISPRme's reader of the index files the engine writes, and its rule for a contig's sites, against the engine's own) and `test/index_format2/check_boundary_rows.py` (rows at contig ends and `N` runs through the CLI). It needs Docker, git-lfs, and network to Docker Hub, Hugging Face, EBI, GitHub, MCR, PyPI (step 5) and the Debian package mirror (step 2). 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them. Step 4b adds about 16 min on the Mac (index_flex 14, the oracle under 2) and 30 to 40 min on a busy amd64 node (index_flex 28 to 37, the oracle 3); its index_flex and oracle need nothing from step 4 and can run beside it. Step 4c, the independent real-data indel check, needs a chr22 HGDP + 1000 Genomes install and the genome-wide per-sample runs of the README guide and TRAC; on indexes this release built (every allele of a split site coded) the two chr22 searches take 97 min (per sample) and 113 min (population-level) on 8 threads of a loaded node, most of it the SNP post-analysis of the windows that coding makes dense (76 min per sample; 7,493 dense windows on chr22, 7,255 of them hyperdense): the same per-sample search with this release's code on the indexes of CRISPRitz 2.9.1 takes 6.5 min (its SNP post-analysis 1 min), as 2.8.x's did; the four chr22 checks take a few minutes in all with `--jobs 16` to `24` (soundness and completeness of a per-sample run, with its SNP-row report, about 2.5 min with `--jobs 16`; soundness alone 10 to 15 s; completeness of the whole chromosome 100 to 180 s depending on the node's load, about 40 CPU-minutes), and genome-wide soundness under 2 min per guide with `--jobs 24` once the VCFs have a `.tbi` (each unindexed VCF is first read once into an in-memory index).
+Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. So step 4b runs here, on the release's own engine, the three engine checks CI runs only on that published image: `test/index_flex/check_index_flex.py`, `test/indel_snp_oracle/run_oracle.sh` and `scripts/check_alt_pam.py`, and the two no CI job runs, which need the engine the release installs: `test/index_format2/check_real_engine.py` (CRISPRme's reader of the index files the engine writes, and its rule for a contig's sites, against the engine's own) and `test/index_format2/check_boundary_rows.py` (rows at contig ends and `N` runs through the CLI). It needs Docker, git-lfs, and network to Docker Hub, Hugging Face, EBI, GitHub, MCR, PyPI (step 5) and the Debian package mirror (step 2). 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them. Step 4b adds about 16 min on the Mac (index_flex 14, the oracle under 2) and 30 to 40 min on a busy amd64 node (index_flex 28 to 37, the oracle 3); its index_flex and oracle need nothing from step 4 and can run beside it. Step 4c, the independent real-data indel check, needs a chr22 HGDP + 1000 Genomes install and the genome-wide per-sample runs of the README guide and TRAC; on indexes this release built (every allele of a split site coded) the two chr22 searches take 9 min (per sample) and 32 min (population-level) on 16 threads of a loaded node, with the haplotype pre-check and the post-analysis in pieces (METHODS.md §5; without them 97 and 113 min on 8 threads, most of it the SNP post-analysis of the windows that coding makes dense: 7,493 dense windows on chr22, 7,255 of them hyperdense): the same per-sample search with this release's code on the indexes of CRISPRitz 2.9.1 takes 6.5 min (its SNP post-analysis 1 min), as 2.8.x's did; step 4d's two searches take 17 and 18 min on 16 threads; the four chr22 checks take a few minutes in all with `--jobs 16` to `24` (soundness and completeness of a per-sample run, with its SNP-row report, about 2.5 min with `--jobs 16`; soundness alone 10 to 15 s; completeness of the whole chromosome 100 to 180 s depending on the node's load, about 40 CPU-minutes), and genome-wide soundness under 2 min per guide with `--jobs 24` once the VCFs have a `.tbi` (each unindexed VCF is first read once into an in-memory index).
 
 **Three skips are allowed, and only these**, each run elsewhere in the gate: `no TensorFlow here` (`test_crispr_bulge_fidelity`, the CRISPR-Bulge fidelity gate, runs in its own env in step 3), `en_US.UTF-8 is not installed` (`test_index_resolution`'s locale tests, step 2) and `no ps here to compare` (`test_index_resolution`, runs in the `unit-tests` job, whose runner has `ps`).
 
@@ -245,6 +245,37 @@ done
 #     loaded node, 6 GB, a TSV of about 31 MB) is not a release gate; chr22 above stands
 #     for it.
 
+# 4d. The speed steps of 2.10.0 change no file (METHODS.md §5): the haplotype pre-check, its
+#     carriers-first twin on the indel side and the K-skip, which --no-haplotype-precheck
+#     turns off, and the post-analysis in pieces, which CRISPRME_POSTPROC_PIECES=0 turns off
+#     (one process a chromosome). After step 4c, in $D22, the README guide per sample with
+#     each off; every data file of each must be step 4c's per-sample run's, byte for byte
+#     (logs, the HTML report and its bundle, the images and the report's database aside; a
+#     zip by the bytes of its members):
+docker run --rm -v "$D22:/DATA" -w /DATA "$IMG" crisprme.py complete-search --genome Genomes/hg38 \
+  --pam PAMs/20bp-NRG-SpCas9.txt --guide guide.txt --vcf list_vcf.txt --samplesID list_samplesID.txt \
+  --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+  --gene_annotation Annotations/gencode.protein_coding.bed.gz --index-path genome_library \
+  --mm 4 --bDNA 1 --bRNA 1 --thread 8 --output gate_noprecheck --per-sample --no-haplotype-precheck
+docker run --rm -e CRISPRME_POSTPROC_PIECES=0 -v "$D22:/DATA" -w /DATA "$IMG" crisprme.py complete-search \
+  --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --guide guide.txt --vcf list_vcf.txt \
+  --samplesID list_samplesID.txt --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+  --gene_annotation Annotations/gencode.protein_coding.bed.gz --index-path genome_library \
+  --mm 4 --bDNA 1 --bRNA 1 --thread 8 --output gate_onepiece --per-sample
+same() {  # same <run A> <run B>: every data file of two Results folders of $D22, byte for byte
+  ( cd "$D22/Results/$1" && find . -type f ! -path './imgs/*' ! -path './crispritz_prof/*' \
+      ! -name 'log*.txt' ! -name 'report.log' ! -name '.command_line.txt' ! -name '*.db' \
+      ! -name '*.html' ! -name '*_report.zip' ) | while read -r f; do
+    g=${f//$1/$2}
+    case $f in
+      *.zip) cmp -s <(unzip -p "$D22/Results/$1/$f") <(unzip -p "$D22/Results/$2/$g") ;;
+      *) cmp -s "$D22/Results/$1/$f" "$D22/Results/$2/$g" ;;
+    esac || echo "GATE_FAILED $1 $2: $f"
+  done
+}
+same gate_per-sample gate_noprecheck
+same gate_per-sample gate_onepiece
+
 # 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.
 docker run -d --rm --name gate-web -p 8090:8080 "$IMG" crisprme.py web-interface
 until curl -sf -o /dev/null http://localhost:8090/index; do sleep 3; done
@@ -289,6 +320,8 @@ grep -q "^all passed" gate/fmt2_rows.log || echo GATE_FAILED
 # step 4c: the same commands as above, with `apptainer run --bind ... sb crisprme.py complete-search`
 # for the two searches. check_indel_rows.py itself needs only the host's python3 (stdlib only);
 # --jobs N splits it over N processes.
+# step 4d: the same, with `apptainer run --bind ... sb crisprme.py complete-search` (and
+# `--env CRISPRME_POSTPROC_PIECES=0` for the second search).
 ```
 
 ### C. Release mechanics (at/after tag)

@@ -187,9 +187,9 @@ and so does a search of NGG, NAG, NRG or NGA, pruned to that PAM.
 > enumeration wall and is lossless for detection. Add **`--per-sample`** (CLI) or pick
 > **Per-sample** in the web form to force resolution — it's a no-op on the sites-only mega panel
 > (no genotypes to resolve), and the web form disables it there. Add **`--population-level`**
-> (CLI) or pick **Population-level** in the web form to force the fast worst-case screen even on
-> a genotyped+phased panel (e.g. a very dense / high-edit / genome-wide search). The shareable
-> report states which mode ran.
+> (CLI) or pick **Population-level** in the web form to force the worst-case screen even on
+> a genotyped+phased panel (a resolution choice: on the indexes CRISPRitz 2.10.0 builds it is not
+> faster). The shareable report states which mode ran.
 
 ## 5. (Optional, advanced) Add the raw source VCFs
 
@@ -302,9 +302,11 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 > genome-wide run needs tens of GB of scratch: if your host's `/tmp` is small (common
 > on HPC / in containers) add `-e CRISPRME_TMPDIR=/DATA/crisprme_tmp` to the
 > `docker run` so temp lands on your mounted data disk instead. `--per-sample` adds the
-> genotype resolution (named carriers) and needs more RAM and time — drop it for a
-> faster population-level scan. No GPU is required (CPU is the default and always
-> works). If anything fails, see [Troubleshooting](TROUBLESHOOTING.md).
+> genotype resolution (named carriers) and reads the genotype store, which needs more RAM;
+> on the indexes CRISPRitz 2.10.0 builds it is not slower than `--population-level`, which
+> reads no haplotype and so skips none of the dense windows' raw targets. No GPU is
+> required (CPU is the default and always works). If anything fails, see
+> [Troubleshooting](TROUBLESHOOTING.md).
 
 - `--mm` is mismatches; `--bDNA` / `--bRNA` are DNA / RNA bulges. For a wider
   search use e.g. `--mm 5 --bDNA 2 --bRNA 2 --max-total-edits 9`. In the web form the
@@ -321,8 +323,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   and marks co-occurring variants **CONFIRMED cis** (phased) / **PUTATIVE co-carrier**
   (unphased) with the exact joint allele frequency. It needs a genotyped index
   (HGDP + 1000 Genomes [the default], or HPRC); on these phased panels per-sample
-  is already the context-aware default, so use `--population-level` to force the fast
-  worst-case screen, and note per-sample is inert on the sites-only *mega* index. Either way
+  is already the context-aware default, so use `--population-level` to force the
+  worst-case screen (a resolution choice, not a faster one on the indexes CRISPRitz 2.10.0
+  builds), and note per-sample is inert on the sites-only *mega* index. Either way
   the search is variant-aware with allele frequencies and rsIDs.
 - COSMIC cancer rows ship in the annotation bundle but are **off by default**
   (licence-gated) — enable with `crisprme.py cosmic-license enable`; IntOGen

@@ -103,10 +103,9 @@ CRISPRme+ 2.10.0). Only if you run CRISPRme against an older, unpinned CRISPRitz
 ## 4. Per-sample runs need memory (and a genotyped index)
 
 Per-sample analysis resolves genotypes across the whole panel (e.g. 4,091 individuals
-for the HGDP+1000G index) and is both slower and more memory-hungry than the
-population-level analysis. On a large panel budget **tens of GB of RAM** per run. It is
-the default on a genotyped + phased index (HGDP + 1000 Genomes, HPRC), and `--per-sample`
-forces it on any other genotyped one.
+for the HGDP+1000G index) and reads the panel's genotype store: on a large panel budget
+**tens of GB of RAM** per run. It is the default on a genotyped + phased index (HGDP +
+1000 Genomes, HPRC), and `--per-sample` forces it on any other genotyped one.
 
 - `--per-sample` requires a **genotyped** index. It no-ops (with a warning) on a
   sites-only index such as `NRR_3_hg38+hg38_mega`.
@@ -116,7 +115,11 @@ forces it on any other genotyped one.
   naming the carriers of an indel alone (the index holds them), and `--per-sample`
   falls back to it with a `WARNING` that names the dataset: re-download without
   `--no-genotypes` to get carriers.
-- If you only need site-level results, pass `--population-level` — it is much lighter.
+- If you only need site-level results, pass `--population-level`. It is not faster on the
+  indexes CRISPRitz 2.10.0 builds, which code every allele: it reads no haplotype, so
+  nothing skips the raw targets of the dense windows of the immunoglobulin loci, which a
+  per-sample search skips when no sample can have them; on chr22 the README guide's
+  population-level search took 32 min against 9 min per sample (METHODS.md §5).
   On a phased index leaving out `--per-sample` is not enough, since per-sample is that
   index's default; population-level is the default only on a sites-only, unphased,
   hybrid or reference-only index.
@@ -173,10 +176,13 @@ raced on a temp file is fixed in 2.7.10.)
 
 ## 8. Very high `--thread` can stall post-analysis
 
-The post-analysis pool is bounded by `--thread`. On many-core nodes, extremely high
-values (e.g. `--thread 200`) can stall the per-chromosome pool. A value in the
-**16–32** range is a good balance on large machines; raising it further rarely helps
-and can hurt.
+The post-analysis pool is bounded by `--thread` (and by memory; at most 32 workers unless
+`CRISPRME_POSTPROC_MAX_WORKERS` says otherwise). Since 2.10.0 it runs each chromosome in
+pieces over those workers, so a dense locus no longer runs on one core
+(`CRISPRME_POSTPROC_PIECES=0` runs one process a chromosome, as before). On many-core
+nodes, extremely high values (e.g. `--thread 200`) stalled the per-chromosome pool of
+earlier releases. A value in the **16–32** range is a good balance on large machines;
+raising it further rarely helps and can hurt.
 
 ---
 

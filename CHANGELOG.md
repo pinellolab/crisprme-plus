@@ -261,6 +261,12 @@ and the `release-crisprme` skill.
   the 100 sites with the highest CFD leave the top 100, as the ties at the 100th CFD fall (the
   second and third, CFD 0.299 at chr22:22358032 in IGL and 0.275 at chr22:49464611, rest on 11 and 2
   columns). The per-sample search changes no row: its multi-variant rows are CONFIRMED haplotypes.
+  On the index CRISPRitz 2.10.0 builds from the same VCF (every allele coded), the per-sample
+  search with K from 1 to 4 withholds one row (chr22:22,881,183 (−), CFD 0.002, a PUTATIVE
+  alignment of one carrier) and saves no time, the cap acting after the genotypes are read; in a
+  population-level search a K below 4 leaves out off-targets real people carry (IGH's CONFIRMED
+  per-sample rows rest on up to 4 columns: 103 lost at K = 1, none at K = 4), so use K >= 4 there
+  (the K-skip entry under Added; METHODS.md §5).
 
 - **A dedicated index serves the PAMs its own holds.** An `NRR` index stores every site of `NGG`,
   `NAG`, `NGA`, `NAA` and `NRG`, an `NRG` index every site of `NGG` and `NAG`, as concrete bases in
@@ -966,7 +972,9 @@ and the `release-crisprme` skill.
   caps a window of two-allele columns where the count of columns did, so that on an index whose
   windows hold no other variant column the unit changes nothing: on the published HGDP + 1000
   Genomes index, whose chr22 holds no three-allele column, the README guide's searches of chr22 list
-  the same 565 windows over the cap as with 2.8.1 (8,155 lines, per sample and population-level),
+  the same 565 windows over the cap as with 2.8.1 (8,155 lines, per sample and population-level,
+  in the BED's form of one line per raw target, now one a window: the per-window BED entry under
+  Changed),
   the notes giving the windows' sequences (and per sample no greedy worst case: Fixed, below); their
   rows differ from 2.8.1's otherwise only as entries under Fixed say: the order of their rsID and AF
   lists; per sample, the carriers whose haplotype holds an indel in the target, whom a SNP row no
