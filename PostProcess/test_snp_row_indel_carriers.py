@@ -422,6 +422,25 @@ class RunTimeWiring(unittest.TestCase):
             st = ns["_SnpRowIndels"](store, spans, 500)
             self.assertEqual(ns["_snp_indel_frame_keys"](st, spans, "chrT"), set())
 
+    def test_a_span_many_alignments_share_is_read_once(self):
+        """A dense window has a hundred raw targets or more, one per alignment, over the same
+        span: the store is read around each span once (2.10.0; reading it once per raw target
+        took 227 s on chr22 and an hour on IGH), with the same keys."""
+        with tempfile.TemporaryDirectory() as d:
+            cluster = os.path.join(d, "c.txt")
+            dna = G[:5] + "M" + G[6:] + "TGG"
+            low = dna[:2] + dna[2].lower() + dna[3:]
+            with open(cluster, "w") as fh:
+                fh.write("header\n")
+                for _ in range(3):
+                    for window in (dna, low):
+                        fh.write("\t".join(["X", G + "NGG", window, "chrT", str(T0)]) + "\n")
+            ns = _load_pure_functions({})
+            spans = []
+            keys = ns["_collect_needed_dict_keys"](cluster, "chrT", spans)
+            self.assertEqual(spans, [(LO, HI)])
+            self.assertEqual(len(keys), HI - LO + 1)
+
 
 class OptOutGate(unittest.TestCase):
     """_read_snp_row_indels, which the run calls before the dictionary: it reads the store
