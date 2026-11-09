@@ -1214,9 +1214,14 @@ and the `release-crisprme` skill.
   index from its own carriers' most frequent token (`_alt_index_for_record`, wrong for 449 of
   45,837 ALTs, 2 or 3 carriers lost per search); and the dictionary path put a `1|2` sample's
   first ALT on both its slots. The allele index of an ALT is
-  now the token all its carriers share, narrowed by what the position's other ALTs need; where the
-  genotypes cannot tell (every carrier of two ALTs is `1|2`), the carrier holds one copy on an
-  unknown slot and is resolved without phase (PUTATIVE); the population summary of a phased panel
+  now the token all its carriers share, narrowed by what the position's other ALTs need (every
+  ALT of one character the dictionary lists there, the `*` of a spanning deletion among them, in
+  every reader: the indel path's reader of an install without a Tier-1 store dropped the `*`
+  first, so a `1|2` carrier of `G>T,*` whose `*` another sample carries alone was read without
+  phase there and with T on its first slot through the Tier-1 store); where the genotypes cannot
+  tell (every carrier of two ALTs is `1|2`, or of an SNV and an indel of its line, which no
+  dictionary entry holds), the carrier holds one copy on an unknown slot and is resolved without
+  phase (PUTATIVE); the population summary of a phased panel
   decides it without phase too (it read the unknown slot as slot 0, a cis copy of the row of each
   ALT of the line). The Tier-1 store holds each ALT's genotypes read so (`1|0` and `0|1` for a
   `1|2`), and a store of an earlier release is read the same way. The sites-only (mega) registry

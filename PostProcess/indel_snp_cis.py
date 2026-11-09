@@ -1242,7 +1242,10 @@ def parse_dict_value(value):
     ``<sample:gt,...>;<ref>,<alt>;<rsID>;<AF>`` joined by '$', one per alt. Returns
     ``[(ref, alt, rsid, af, {sample: gt})]`` for the single-base ACGT alts (the SNPs
     the overlay codes), one per REF>ALT, each genotype read against its own alt's
-    allele index (site_alleles.read_records); malformed entries are skipped."""
+    allele index (site_alleles.read_records) among every alt of one character the value
+    lists, a '*' too (the Tier-1 store's compile, tier0_compile.iter_dict_records, reads
+    them so: a carrier of the '*' alone tells its index); malformed entries are
+    skipped."""
     out = []
     for entry in str(value).split("$"):
         parts = entry.split(";")
@@ -1252,7 +1255,7 @@ def parse_dict_value(value):
         if len(refalt) < 2:
             continue
         ref, alt = refalt[0].strip().upper(), refalt[1].strip().upper()
-        if len(ref) != 1 or len(alt) != 1 or ref not in _BASE_ORDER or alt not in _BASE_ORDER:
+        if len(ref) != 1 or len(alt) != 1:
             continue
         carriers = {}
         for tok in parts[0].split(","):
@@ -1265,8 +1268,10 @@ def parse_dict_value(value):
         af = parts[3].strip() if len(parts) > 3 else ""
         out.append((ref, alt, rsid, af, carriers))
     # each genotype read against its own alt's allele index, two records of one REF>ALT
-    # merged (a slot carries the alt if either puts it there): site_alleles.read_records
-    return site_alleles.read_records(out)
+    # merged (a slot carries the alt if either puts it there): site_alleles.read_records;
+    # then the bases
+    return [r for r in site_alleles.read_records(out)
+            if r[0] in _BASE_ORDER and r[1] in _BASE_ORDER]
 
 
 def load_dict_snps(dict_path, chrom, positions):

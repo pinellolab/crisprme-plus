@@ -296,6 +296,27 @@ class TheDictionaryDecode(unittest.TestCase):
                          [("A", {"S": "1|0", "X": "1|0", "Z": "0|1"}),
                           ("T", {"S": "0|1", "Y": "1|1"})])
 
+    def test_a_star_beside_an_snv_tells_its_index_in_every_reader(self):
+        """A line G>T,* (a spanning deletion's '*' as its second ALT): CRISPRitz lists the
+        '*' too, and W, a carrier of the '*' alone, tells that its index is 2, so S's 1|2
+        holds T on slot 0. The Tier-1 store's compile and the dictionary decode read the
+        '*' with the other alts and tie T to 1; the indel path's reader of a classic
+        install dropped the '*' first and read S unphased, PUTATIVE (R2B-F1's sweep)."""
+        value = _dict_value([("G", "T", "rs1", "0.1", {"S": "1|2"}),
+                             ("G", "*", "rs1", "0.1", {"S": "1|2", "W": "0|2"})])
+        tier1 = [(alt, gts) for _pos, _ref, alt, _rs, gts in
+                 tier0_compile._emit_key("chrT,105", value, "chrT,") if alt == "T"]
+        self.assertEqual(tier1, [("T", {"S": "1|0"})])
+        snps, samples, _rs, _af, _info = sar.legacy_5tuple_from_entry(value, "chrT", 104)
+        self.assertEqual(samples[snps.index("T")], ["S:1|0"])
+        self.assertEqual([(r[1], r[4]) for r in isc.parse_dict_value(value)],
+                         [("T", {"S": "1|0"})])
+        # with no carrier of the '*' alone nothing tells it: S is read unphased everywhere
+        value = _dict_value([("G", "T", "rs1", "0.1", {"S": "1|2"}),
+                             ("G", "*", "rs1", "0.1", {"S": "1|2"})])
+        self.assertEqual([(r[1], r[4]) for r in isc.parse_dict_value(value)],
+                         [("T", {"S": "1/0"})])
+
 
 class ThePopulationSummaryOfTwoAltsOnASlot(unittest.TestCase):
     """A two-variant row G at column 5 + C at column 9: S holds G and C on slot 1, and T

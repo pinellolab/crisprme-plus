@@ -564,9 +564,12 @@ haplotype** (`indel_snp_cis.resolve_target`):
   sequence form **one reported row**, listing only their individuals and naming the SNP alts
   they hold next to the indel (Variant info, rsID, MAF). A SNP with several alts on one VCF
   line keeps its raw genotype under each alt (2|1 under A and under T), so each genotype is
-  first read against its own alt; where the genotypes cannot tell which index is which (every
-  carrier of two alts is 1|2) no slot can be tied to the alt and the carrier is resolved as an
-  unphased one;
+  first read against its own alt's allele index: the index every carrier of the alt holds,
+  less, where that leaves several, the indexes the position's other alts settle (each alt of
+  one character the dictionary lists there, the `*` of a spanning deletion among them; an
+  indel's ALT is in no entry); where the genotypes still cannot tell (every carrier of two
+  alts is 1|2, or of an SNV and an indel of its line) no slot can be tied to the alt and the
+  carrier is resolved as an unphased one;
 - a sequence whose PAM no longer satisfies the searched motif, or whose mismatches,
   recounted on the concrete sequence, exceed `--mm` or `--max-total-edits`, is **dropped**:
   a raw target that no individual carries gives no row;
