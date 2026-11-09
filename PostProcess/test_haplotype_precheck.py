@@ -646,6 +646,18 @@ class BulgesAndTheDictionaryPath(_PostAnalysis):
         self.assertIn("Haplotype pre-check on chrT: 0 of 1 raw target(s)", said)
         self.assertIn("S1", {s for r in rows for s in r[12].split(",")})
 
+    def test_the_dictionary_paths_samples_are_those_its_entries_list(self):
+        """The dictionary path puts on an ALT's combination every sample the ALT's entry lists
+        with an allele other than "0" on the haplotype, a missing call ("./.") too; the
+        observed path takes a sample whose genotype holds the ALT. The pre-check counts the
+        listed samples, so it keeps a target the dictionary path makes a row of on them."""
+        within = {c: g for c, g in self.WITHIN.items() if c != 18}
+        self.write_target(None, 0, {3: "S1:./.", 8: "S1:./.", 15: "S3:1|1"}, within)
+        rows, said, dense = self.same_on_and_off("1", CRISPRME_FAST_MODE="0")
+        self.assertEqual(dense, [])
+        self.assertIn("Haplotype pre-check on chrT: 0 of 1 raw target(s)", said)
+        self.assertIn("S1", {s for r in rows for s in r[12].split(",")})
+
     def test_the_k_skip_takes_the_bulge_off(self):
         """Population-level with --max-degeneracy 1, two mismatches and a bulge, a budget of
         1: a row within the budget rests on one fixing column, so the target is read, and the
