@@ -808,11 +808,14 @@ and the `release-crisprme` skill.
   2.9.1 (format-1 NRG indexes, 25/27), `build-index-only`'s advice, its rm run from another
   directory, gives a fresh 2.10.0 build's dataset file for file (genomes, dictionaries, indel
   logs, tiers, phased indel store and indexes, their records included; 2.8.1's reference index
-  stays, which is no dataset's), where the advice before this fix left the 2.9.1 tiers and
-  variant index in place, and the README guide's per-sample search then lost a row (1 gating
-  finding); with the enriched genome alone removed, `build-index-only` refuses the dataset and
-  changes nothing, and with the variant index removed too, that search refuses it before it
-  enriches it. The fake-indel genome is 14% larger (15.6 MB against 13.7 MB on chr22), an INDELS index
+  stays, which is no dataset's), and the README guide's per-sample search on it that build's
+  tables byte for byte, passing the check (41 findings, 0 gating; without the IntOGen driver
+  annotation that 2.8.1 install holds and the fresh build's folder does not, with which the
+  IntOGen column of 50 rows differs, nothing else), where the advice before this fix left the
+  2.9.1 tiers and variant index in place, and that search then lost a row (1 gating finding);
+  with the enriched genome alone removed, `build-index-only` refuses the dataset and changes
+  nothing, and with the variant index removed too, that search refuses it before it enriches
+  it. The fake-indel genome is 14% larger (15.6 MB against 13.7 MB on chr22), an INDELS index
   21% to 22%, and CRISPRitz's search of it about 30% slower (one thread on chr22: 33 s against
   25 for the README guide, 114 against 89 for the three repeat-rich guides), for targets in a
   flank, which the post-analysis drops: the README guide's whole per-sample search took 96 min
