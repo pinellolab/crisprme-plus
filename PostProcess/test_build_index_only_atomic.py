@@ -4204,6 +4204,156 @@ class TheFakeIndelWindowsAreTheEnrichments(_Fixture):
                           self.path("Dictionaries", "log_indels_ds")), out)
 
 
+class ADatasetIsEnrichedAnewWhole(_Fixture):
+    """W-R2-F1: an enrichment of another CRISPRitz than the installed one (its fake-indel
+    windows not those the installed crispritz.py states: here the stub's 25/34, which it
+    goes on writing, beside an installed CRISPRitz that states 30/30) differs from a new
+    one in its SNPs too, as 2.9.1's does from 2.10.0's at every split site. So what was
+    built from it -- the dict-less tiers, every index of the dataset -- must go with it: the
+    advice of the warning on such an enrichment in place removes all of it, by absolute
+    path; and a dataset enriched anew beside those stores, by build-index-only or by a search
+    that enriches it itself, is refused, saying what to remove (indel_window.reenrichment_
+    refusal). An earlier enrichment of the installed CRISPRitz's windows gives the same
+    enrichment: a dataset enriched anew beside its stores is built as before. Each store of
+    the earlier enrichment holds a file of its own here, which no store of the new one
+    holds."""
+
+    MARK = "earlier_enrichment.txt"
+
+    def engine(self, left, right):
+        stub = os.path.join(self.bin, "crispritz.py")
+        with open(stub) as fh:
+            text = re.sub(r"INDEL_LEFT = \d+\nINDEL_RIGHT = \d+\n",
+                          f"INDEL_LEFT = {left}\nINDEL_RIGHT = {right}\n", fh.read())
+        _write(stub, text)
+
+    def mark_earlier(self):
+        """A file of its own in each store the earlier enrichment gave, or was built from it."""
+        stores = [self.path("Genomes", d) for d in ("hg38+ds", "hg38+ds_INDELS")] + [
+            self.path("Dictionaries", f"{k}_ds")
+            for k in ("dictionaries", "log_indels", "registry", "genotypes")] + [
+            self.lib(VAR), self.lib(INDELS)]
+        for d in stores:
+            if os.path.isdir(d):
+                _write(os.path.join(d, self.MARK), "built from the earlier enrichment\n")
+        return stores
+
+    def marks_left(self):
+        return sorted(os.path.relpath(os.path.join(d, f), self.work)
+                      for d, _, files in os.walk(self.work) for f in files if f == self.MARK)
+
+    def rm_of(self, text):
+        """The rm command a message gives, run from another directory than the working one
+        (as from a shell anywhere: build-index-only --path), its exit status."""
+        m = re.search(r"\(rm -rf ([^;)]*)[;)]", text)
+        self.assertIsNotNone(m, text)
+        done = subprocess.run(["bash", "-c", "rm -rf " + m.group(1)], cwd=self.root,
+                              capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""), m.group(1))
+        return m.group(1)
+
+    def test_the_warnings_advice_followed_gives_a_fresh_enrichments_dataset(self):
+        """The reviewer's F1A in miniature. Before the fix the advice removed the enriched
+        genome and, by a path relative to the shell's directory, the INDELS indexes: the
+        dataset enriched anew kept the tiers (taken as emitted) and the variant index (kept
+        as built) of the earlier enrichment, and, from another directory, its INDELS index."""
+        self.engine(30, 30)
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        fresh = self.outputs()
+        self.fresh()
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.mark_earlier()
+        self.engine(30, 30)
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("WARNING [build-index-only]: the enrichment of ds in place", out)
+        removed = self.rm_of(out)
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("Enriching hg38 with ds (add-variants)...", out)
+        self.assertEqual(self.marks_left(), [])
+        self.assertEqual(self.outputs(), fresh)
+        for d in (self.path("Genomes", "hg38+ds"), self.path("Dictionaries", "registry_ds"),
+                  self.path("Dictionaries", "genotypes_ds"), self.lib(VAR), self.lib(INDELS)):
+            self.assertIn(f"'{d}'", removed)
+        self.assertNotIn("indel_genotypes_ds", removed)   # (its VCFs', the same from any)
+
+    def test_a_dataset_enriched_anew_beside_another_crispritzs_stores_is_refused(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        fresh = self.outputs()
+        # the enrichment gone, of the installed CRISPRitz's windows: enriched anew, as before
+        shutil.rmtree(self.path("Genomes", "hg38+ds"))
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("Enriching hg38 with ds (add-variants)...", out)
+        self.assertEqual(self.outputs(), fresh)
+        # and of another's: refused, before anything is built, saying what to remove
+        self.mark_earlier()
+        shutil.rmtree(self.path("Genomes", "hg38+ds"))
+        self.engine(30, 30)
+        before, calls = self.outputs(), len(self.calls())
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(
+            "Error: No finished enrichment of ds is in place (%s), so build-index-only would "
+            "enrich it anew with the installed CRISPRitz, whose fake-indel windows are 30/30; "
+            "but an earlier enrichment of it, whose records tell windows of 25/34 (CRISPRitz "
+            "2.9.1 and earlier wrote 25/27), left what was built from it: %s. An enrichment "
+            "of another CRISPRitz differs in its SNPs too" % (
+                self.path("Genomes", "hg38+ds"), ", ".join(
+                    [self.path("Dictionaries", "registry_ds"),
+                     self.path("Dictionaries", "genotypes_ds"), self.lib(VAR),
+                     self.lib(INDELS)])), err)
+        self.assertEqual(self.calls()[calls:], [])
+        self.assertEqual(self.outputs(), before)
+        self.rm_of(err)
+        self.assertEqual(self.marks_left(), [])
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(self.outputs(), fresh)
+
+    def test_a_search_that_would_enrich_it_beside_them_is_refused_too(self):
+        """A search enriches a dataset itself where no variant index of it serves it and its
+        enriched genome is not in place, its dictionaries and logs passing complete-search's
+        check: it moved its dictionaries and logs in beside the earlier ones and read the
+        earlier tiers, and later searches the earlier indexes."""
+        def gone():
+            for d in (("Genomes", "hg38+ds"), ("Genomes", "hg38+ds_INDELS"),
+                      ("genome_library", VAR)):
+                shutil.rmtree(self.path(*d))
+
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        gone()
+        rc, out, err = self.run_web_search()   # (the installed CRISPRitz's windows)
+        self.assertNotIn("no finished enrichment", err)
+        self.assertEqual(sum(c.startswith("add-variants ") for c in self.calls()), 2, err)
+        self.fresh()
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        gone()
+        self.engine(30, 30)
+        said = ("ERROR: no finished enrichment of ds is in place (%s), so this search would "
+                "enrich it anew with the installed CRISPRitz, whose fake-indel windows are "
+                "30/30; but an earlier enrichment of it, whose records tell windows of 25/34 "
+                "(CRISPRitz 2.9.1 and earlier wrote 25/27), left what was built from it: %s." % (
+                    self.path("Genomes", "hg38+ds"), ", ".join(
+                        [self.path("Dictionaries", "registry_ds"),
+                         self.path("Dictionaries", "genotypes_ds"), self.lib(INDELS)])))
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(said, err)
+        self.assertIn("then run build-index-only with the dataset's VCFs and its --samplesID",
+                      err)
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(said, err)
+        self.assertEqual(sum(c.startswith("add-variants ") for c in self.calls()), 1)
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix: but for the

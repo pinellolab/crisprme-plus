@@ -1410,6 +1410,33 @@ class TestFakeIndelWindowNotes(unittest.TestCase):
                       "and DNA bulges counted (26 at a record whose REF and ALT differ at "
                       "their first base), against 31", notes[0])
 
+    def test_a_variant_index_of_an_earlier_crispritz_is_warned_of(self):
+        """W-R2-F1's class: an archive of 2.10.0 (30/30) downloaded beside a variant index of
+        the dataset that CRISPRitz 2.9.1 built (index format 1), from an enrichment that
+        differs from the archive's in its SNPs too: a search of it reads its alleles with the
+        archive's carriers. Not the downloaded index, nor one of format 2; nor anything for
+        an archive of 25/27, which 2.9.1's enrichment made too."""
+        self.log(30, 30)
+        self.index("20-NRG_2_hg38+ds_INDELS", (30, 30))
+        for name, head in (("NRG_3_hg38+ds", b"\x01\x00\x00\x00\x14\x00\x00\x00"),
+                           ("20-NRG_2_hg38+ds", b"\x01\x00\x00\x00\x14\x00\x00\x00"),
+                           ("20-NRR_2_hg38+ds", b"CZI\xfe\x02\x00\x00\x00")):
+            os.makedirs(os.path.join(self.lib, name))
+            with open(os.path.join(self.lib, name, "NRG_chr1_1.bin"), "wb") as fh:
+                fh.write(head)
+        with mock.patch.object(hf.index_fit, "engine_index_format", return_value=2):
+            notes = self.notes()
+        self.assertEqual(len(notes), 1, notes)
+        self.assertTrue(notes[0].startswith(
+            "WARNING: the variant index %s is of index format 1: CRISPRitz 2.9.1 or earlier "
+            "built it, from an enrichment of its own, of fake-indel windows of 25/27, and the "
+            "indel logs of ds installed now (%s) record windows of 30/30: they come from two "
+            "enrichments" % (os.path.join(self.lib, "NRG_3_hg38+ds"), self.logs)), notes)
+        self.assertIn("(rm -rf '%s')" % os.path.join(self.lib, "NRG_3_hg38+ds"), notes[0])
+        self.log(25, 27)
+        with mock.patch.object(hf.index_fit, "engine_index_format", return_value=2):
+            self.assertEqual([n for n in self.notes() if "variant index" in n], [])
+
     def test_another_index_the_logs_no_longer_match_is_warned_of(self):
         self.log(30, 30)
         self.index("20-NRG_2_hg38+ds_INDELS", (30, 30))

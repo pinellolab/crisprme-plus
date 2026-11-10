@@ -2279,7 +2279,12 @@ def _window_notes(local_dir, workdir, install_name, vcf_name):
     CRISPRme 2.8.1 or earlier: 25/27 against 2.10.0's 30/30), with the longest target that
     holds an indel there; a WARNING for each other INDELS index of the dataset in
     ``local_dir`` built from windows the logs no longer record, which every search
-    refuses. Read-only, and never fatal."""
+    refuses; and one for each other variant index of the dataset there of index format 1
+    where the installed CRISPRitz writes format 2 and the logs record other windows than
+    25/27: an earlier CRISPRitz built it, from an enrichment of its own, which differs from
+    the archive's in its SNPs too (2.9.1 enriched only the last ALT of a site written on
+    several records), and a search of it reads its alleles with the archive's carriers.
+    Read-only, and never fatal."""
     logs = os.path.join(workdir, "Dictionaries", f"log_indels_{vcf_name}")
     notes = []
     try:
@@ -2307,7 +2312,26 @@ def _window_notes(local_dir, workdir, install_name, vcf_name):
                 f"{vcf_name} installed now ({logs}) record windows of "
                 f"{' and '.join(indel_window.describe(x) for x in logged)}: they come from two "
                 f"enrichments, and every search of it refuses it. Download its index again, or "
-                f"remove it (rm -rf '{idx}') and build it with build-index-only.")
+                f"remove it (rm -rf {indel_window.quote(idx)}) and build it with "
+                f"build-index-only.")
+        _genome = ((index_fit.parse_index_name(install_name) or (None,) * 3)[2]
+                   or "").partition("+")[0]
+        if widths and widths != {indel_window.OLD_WINDOW} and \
+                (index_fit.engine_index_format() or 2) >= 2:
+            for idx in indel_window.dataset_indexes(local_dir, _genome, vcf_name):
+                if idx.endswith("_INDELS") or os.path.basename(idx) == install_name or \
+                        set(index_fit.bin_formats(idx)) != {1}:
+                    continue
+                notes.append(
+                    f"WARNING: the variant index {idx} is of index format 1: CRISPRitz 2.9.1 "
+                    f"or earlier built it, from an enrichment of its own, of fake-indel windows "
+                    f"of 25/27, and the indel logs of {vcf_name} installed now ({logs}) record "
+                    f"windows of {' and '.join(indel_window.describe(x) for x in sorted(widths))}"
+                    f": they come from two enrichments, which differ in their SNPs too (2.9.1 "
+                    f"enriched only the last ALT of a site written on several records), and a "
+                    f"search of it would read the alleles it holds with the carriers of the "
+                    f"other. Download its index again, or remove it (rm -rf "
+                    f"{indel_window.quote(idx)}) and build it with build-index-only.")
     except (OSError, ValueError, EOFError) as exc:
         notes.append(f"NOTE: could not read the fake-indel windows of {vcf_name} ({exc}).")
     return notes

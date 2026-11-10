@@ -26,11 +26,21 @@ it. A target of more is held by no index, whatever the engine. CRISPRitz 2.10.0'
 LEFT = RIGHT = Lmax - 1 + bmax, Lmax = 29 (the general K=8 index's flank and a 21-nt guide)
 and bmax = 2 (the most DNA bulges the web offers): L + b <= 31.
 
+The windows also tell an enrichment of CRISPRitz 2.9.1 or earlier (25/27) from one of 2.10.0,
+which differs in its SNPs too (2.9.1 enriched only the last ALT of a site written on several
+records). The dictionaries, indel logs, enriched genome and fake-indel genome of a dataset, its
+dict-less tiers and every index of it must come from one enrichment (enrichment_stores): a
+dataset enriched anew beside the stores of an earlier enrichment of other windows is refused,
+by build-index-only and by a search that enriches it itself (reenrichment_refusal; the search
+script calls ``indel_window.py reenrichment``).
+
 Stdlib only.
 """
 
 import gzip
+import json
 import os
+import sys
 
 # The window of CRISPRitz 2.9.1 and earlier (enricher.py: genome[POS-26 : POS+26+len(REF)]),
 # of every index published up to CRISPRme 2.8.1: 25 reference bases before the record's REF,
@@ -272,3 +282,194 @@ def target_note(window, target_len, bdna, who, dataset):
             "and DNA bulges counted; this search's targets need up to %d (%s): such indel "
             "off-targets are held by no index and not reported.%s"
             % (who, dataset, window[0], window[1], holds, want, how, advice))
+
+
+# ---- a dataset enriched anew: what an earlier enrichment of it left -----------------------
+
+def quote(path):
+    """``path`` single-quoted for a shell command line, a quote in it escaped."""
+    return "'%s'" % str(path).replace("'", "'\\''")
+
+
+def dataset_indexes(library, genome, dataset):
+    """The variant and INDELS indexes of variant dataset ``dataset`` of genome ``genome`` in
+    ``library`` (<PAM>_<N>_<genome>+<dataset>[_INDELS], either form of the name:
+    index_fit.parse_index_name), as paths, sorted: not a hidden folder, nor a build lock."""
+    index_fit = _index_fit()
+    try:
+        names = sorted(os.listdir(library))
+    except OSError:
+        return []
+    rests = ("%s+%s" % (genome, dataset), "%s+%s_INDELS" % (genome, dataset))
+    return [os.path.join(library, name) for name in names
+            if not name.startswith(".") and (index_fit.parse_index_name(name) or "xxx")[2] in rests
+            and os.path.isdir(os.path.join(library, name))]
+
+
+def _sites_only_registry(registry):
+    """Whether the registry ``registry`` says, in the manifest of a chromosome
+    (reg_<chrom>.idx), that it is of a sites-only dataset."""
+    try:
+        names = sorted(n for n in os.listdir(registry) if n.startswith("reg_")
+                       and n.endswith(".idx"))
+    except OSError:
+        return False
+    for name in names:
+        try:
+            with open(os.path.join(registry, name)) as fh:
+                return json.load(fh).get("data_type") == "sites-only"
+        except (OSError, ValueError, AttributeError):
+            continue
+    return False
+
+
+def _holds_a_file(directory):
+    try:
+        return any(not n.startswith(".") for n in os.listdir(directory))
+    except OSError:
+        return False
+
+
+def _indexes(workdir, genome, dataset, libraries):
+    """The indexes of the dataset (dataset_indexes) in the working directory's genome_library
+    and in each of ``libraries``, each once."""
+    out, seen = [], set()
+    for lib in [os.path.join(workdir, "genome_library")] + list(libraries):
+        for idx in dataset_indexes(lib, genome, dataset):
+            if os.path.realpath(idx) not in seen:
+                seen.add(os.path.realpath(idx))
+                out.append(idx)
+    return out
+
+
+def _tiers(workdir, dataset):
+    """The dict-less tiers build-index-only emits from the dataset's dictionaries:
+    Dictionaries/registry_<dataset> (not a sites-only one) and genotypes_<dataset>."""
+    dicts = os.path.join(workdir, "Dictionaries")
+    registry = os.path.join(dicts, "registry_%s" % dataset)
+    return ([] if _sites_only_registry(registry) else [registry]) + [
+        os.path.join(dicts, "genotypes_%s" % dataset)]
+
+
+def enrichment_stores(workdir, genome, dataset, libraries=(), present=True):
+    """What of variant dataset ``dataset`` of genome ``genome``, in working directory
+    ``workdir``, comes from its enrichment, as paths, in the order a removal names them:
+    its enriched genome and fake-indel genome (Genomes/<genome>+<dataset>[_INDELS]), its
+    dictionaries and indel logs (Dictionaries/dictionaries_<dataset>, log_indels_<dataset>),
+    its dict-less tiers, which build-index-only emits from those dictionaries
+    (Dictionaries/registry_<dataset>, genotypes_<dataset>), and its indexes, built from those
+    genomes (dataset_indexes, of the working directory's genome_library and of each of
+    ``libraries``). With ``present``, those that are there (a tier where it holds a file).
+    Not what comes from its VCFs alone, the same from any enrichment of them: its phased
+    indel genotype store, and a sites-only registry (the mega's, which
+    PostProcess/build_mega_registry.py writes from its VCFs' INFO AF fields, its manifest
+    says so) with its indel frequencies."""
+    own = [os.path.join(workdir, "Genomes", "%s+%s%s" % (genome, dataset, s))
+           for s in ("", "_INDELS")] + [
+        os.path.join(workdir, "Dictionaries", "%s_%s" % (k, dataset))
+        for k in ("dictionaries", "log_indels")]
+    tiers = _tiers(workdir, dataset)
+    if present:
+        own = [d for d in own if os.path.lexists(d)]
+        tiers = [d for d in tiers if _holds_a_file(d)]
+    return own + tiers + _indexes(workdir, genome, dataset, libraries)
+
+
+def earlier_windows(workdir, genome, dataset, libraries=()):
+    """The fake-indel windows that the records of the enrichment of ``dataset`` of genome
+    ``genome`` in ``workdir`` tell -- of an earlier one, where a new one is to be made: its
+    indel logs' (Dictionaries/log_indels_<dataset>: dataset_windows), each INDELS sub-index's
+    of the dataset (index_window: the one it records, or 25/27 for one of index format 1),
+    and 25/27 for a variant index of the dataset of format 1 where the installed CRISPRitz
+    writes format 2 (only CRISPRitz 2.9.1 and earlier build one, from an enrichment of
+    theirs, whose windows were 25/27). A set: empty where nothing tells (no log row, no
+    such index)."""
+    index_fit = _index_fit()
+    found = set()
+    try:
+        for ws in dataset_windows(os.path.join(workdir, "Dictionaries",
+                                               "log_indels_%s" % dataset)).values():
+            found |= ws
+    except (OSError, ValueError, EOFError):
+        pass
+    newer = (index_fit.engine_index_format() or 2) >= 2
+    for idx in _indexes(workdir, genome, dataset, libraries):
+        if idx.endswith("_INDELS"):
+            try:
+                subs = sorted(os.listdir(idx))
+            except OSError:
+                subs = []
+            for sub in subs:
+                if "_fake" in sub and os.path.isdir(os.path.join(idx, sub)):
+                    w = index_window(os.path.join(idx, sub))
+                    if w is not None:
+                        found.add(w)
+        elif newer and set(index_fit.bin_formats(idx)) == {1}:
+            found.add(OLD_WINDOW)
+    return found
+
+
+def reenrichment_refusal(workdir, genome, dataset, libraries=(), who="build-index-only"):
+    """Why ``who`` (build-index-only, or "this search": the search script's STEP 1, where a
+    search enriches a dataset itself) must not enrich variant dataset ``dataset`` of genome
+    ``genome`` anew in ``workdir``, its finished enrichment not in place; None where nothing
+    stands in the way. Stores built from an earlier enrichment of it are in place, its tiers
+    or its indexes (enrichment_stores; ``libraries``: those a search reads besides the
+    working directory's), and that enrichment was another CRISPRitz's, as its records tell
+    by fake-indel windows other than those the installed CRISPRitz writes (earlier_windows,
+    engine_window): one of 2.9.1 or earlier, whose enrichment differs in its SNPs too (it
+    enriched only the last ALT of a site written on several records). Enriched anew, the
+    dataset would hold stores of two enrichments, which a search reads together: the alleles
+    its indexes match and the carriers its tiers give would disagree. An earlier enrichment
+    of the installed CRISPRitz's windows gives the same enrichment of the same VCFs: what
+    was built from it is kept, as before. The removal named is of everything that comes
+    from the earlier enrichment (enrichment_stores), with its dictionaries and indel logs,
+    which a new enrichment writes again (a search's own moves its files in beside them)."""
+    built = ([d for d in _tiers(workdir, dataset) if _holds_a_file(d)]
+             + _indexes(workdir, genome, dataset, libraries))
+    if not built:
+        return None
+    engine = engine_window()
+    other = sorted(earlier_windows(workdir, genome, dataset, libraries) - {engine})
+    if not other:
+        return None
+    enriched = os.path.join(workdir, "Genomes", "%s+%s" % (genome, dataset))
+    then = ("then run build-index-only again, which enriches the dataset anew and builds its "
+            "index, and its tiers with --samplesID, from that enrichment (a build or a search "
+            "builds each other index of it again where it needs it)"
+            if who == "build-index-only" else
+            "then run build-index-only with the dataset's VCFs and its --samplesID, which "
+            "enriches it anew and builds its tiers and an index from that enrichment, and "
+            "run this search again")
+    return ("no finished enrichment of %s is in place (%s), so %s would enrich it anew with "
+            "the installed CRISPRitz, whose fake-indel windows are %s; but an earlier "
+            "enrichment of it, whose records tell windows of %s (CRISPRitz 2.9.1 and earlier "
+            "wrote 25/27), left what was built from it: %s. An enrichment of another CRISPRitz "
+            "differs in its SNPs too (2.9.1 enriched only the last ALT of a site written on "
+            "several records, 2.10.0 enriches every one), and a search would read the stores "
+            "of the two enrichments together, with carriers or rows wrong or lost. Remove "
+            "them, with the dataset's dictionaries and indel logs, which the new enrichment "
+            "writes again (rm -rf %s), %s; or put back the enrichment they were built from "
+            "(%s and %s_INDELS), on which they are searched as they are."
+            % (dataset, enriched, who, describe(engine), " and ".join(describe(w) for w in other),
+               ", ".join(built), " ".join(quote(d) for d in enrichment_stores(
+                   workdir, genome, dataset, libraries)), then, enriched, enriched))
+
+
+def main(argv):
+    """``indel_window.py reenrichment <workdir> <genome> <dataset> [<library>...]``: the
+    search script's check before it enriches a dataset itself (STEP 1): the refusal
+    (reenrichment_refusal) on stdout, exit 3; nothing, exit 0."""
+    if len(argv) < 5 or argv[1] != "reenrichment":
+        sys.stderr.write("usage: indel_window.py reenrichment <workdir> <genome> <dataset> "
+                         "[<library>...]\n")
+        return 2
+    why = reenrichment_refusal(argv[2], argv[3], argv[4], argv[5:], who="this search")
+    if why:
+        print(why)
+        return 3
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

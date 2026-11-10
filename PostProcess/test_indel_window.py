@@ -119,7 +119,9 @@ class WhatAWindowHolds(unittest.TestCase):
         self.assertIn("enrich ds again with it (build-index-only)", note)
 
 
-class TheEngineAndTheIndex(unittest.TestCase):
+class _EngineCase(unittest.TestCase):
+    """A temporary folder, and engine(): a crispritz.py of the lines given on PATH."""
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="indel_window_")
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -136,6 +138,8 @@ class TheEngineAndTheIndex(unittest.TestCase):
         index_fit._engine_cache.clear()
         return mock.patch.dict(os.environ, {"PATH": bindir})
 
+
+class TheEngineAndTheIndex(_EngineCase):
     def test_the_engine_states_its_window(self):
         with self.engine(['VERSION = "2.10.0"', "INDEX_FORMAT = 2", "INDEL_LEFT = 30",
                           "INDEL_RIGHT = 30"]):
@@ -156,6 +160,145 @@ class TheEngineAndTheIndex(unittest.TestCase):
         with open(os.path.join(sub, index_fit.INDEX_META), "w") as fh:
             fh.write('{"index_format": 1, "indel_window": [30, 30]}')
         self.assertEqual((iw.recorded_window(sub), iw.index_window(sub)), ((30, 30), (30, 30)))
+
+
+class ADatasetEnrichedAnew(_EngineCase):
+    """W-R2-F1: what an enrichment left, which a new one of another CRISPRitz must not be
+    mixed with: its genomes, dictionaries, indel logs, dict-less tiers and indexes, by
+    absolute path (enrichment_stores); the windows its records tell (earlier_windows); and
+    the refusal of build-index-only and of a search that would enrich the dataset anew beside
+    the stores of an earlier enrichment of other windows (reenrichment_refusal)."""
+
+    def put(self, *rel, text="x", data=None):
+        path = os.path.join(self.tmp, "work", *rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb" if data is not None else "w") as fh:
+            fh.write(data if data is not None else text)
+        return path
+
+    def dataset(self, window=(25, 27), data_type="genotyped-phased"):
+        """A dataset ds of genome hg38 as build-index-only leaves it, its indel log of
+        ``window``, its variant index of format 1 (2.9.1's), beside what is not its own."""
+        w = os.path.join(self.tmp, "work")
+        shutil.rmtree(w, ignore_errors=True)
+        self.put("Genomes", "hg38", "chr1.fa")
+        self.put("Genomes", "hg38+ds", "chr1.enriched.fa")
+        self.put("Genomes", "hg38+ds_INDELS", "fake_ds_chr1", "fakechr1.fa")
+        self.put("Dictionaries", "dictionaries_ds", "my_dict_chr1.json.gz")
+        with gzip.open(self.put("Dictionaries", "log_indels_ds", "logchr1.txt.gz", data=b""),
+                       "wt") as fh:
+            fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n"
+                     + row("chr1", 100, "A", "AT", *window) + "\n")
+        self.put("Dictionaries", "registry_ds", "reg_chr1.idx",
+                 text='{"n_records": 2, "data_type": "%s"}' % data_type)
+        self.put("Dictionaries", "registry_ds", "reg_chr1.bin")
+        self.put("Dictionaries", "genotypes_ds", "gt_chr1.idx")
+        self.put("Dictionaries", "indel_genotypes_ds", "gt_indel_chr1.tsv.gz")
+        fmt1 = b"\x01\x00\x00\x00\x14\x00\x00\x00"
+        for name in ("NRG_3_hg38+ds", "20-NRG_2_hg38+ds", "20-NRG_2_hg38",
+                     "20-NRG_2_x_hg38+ds", "20-NRG_2_hg38+ds2"):
+            self.put("genome_library", name, "NRG_chr1_1.bin", data=fmt1)
+        self.put("genome_library", "20-NRG_2_hg38+ds_INDELS", "NRG_2_fakechr1",
+                 "NRG_fakechr1_1.bin", data=fmt1)
+        os.makedirs(os.path.join(w, "genome_library", "20-NRG_2_hg38+ds.lock"))
+        os.makedirs(os.path.join(w, "genome_library", ".build-index-only-x", "NRG_3_hg38+ds"))
+        return w
+
+    def test_what_comes_from_an_enrichment(self):
+        w = self.dataset()
+        g, d, lib = (os.path.join(w, x) for x in ("Genomes", "Dictionaries", "genome_library"))
+        indexes = [os.path.join(lib, n) for n in ("20-NRG_2_hg38+ds", "20-NRG_2_hg38+ds_INDELS",
+                                                 "NRG_3_hg38+ds")]
+        self.assertEqual(iw.enrichment_stores(w, "hg38", "ds"), [
+            os.path.join(g, "hg38+ds"), os.path.join(g, "hg38+ds_INDELS"),
+            os.path.join(d, "dictionaries_ds"), os.path.join(d, "log_indels_ds"),
+            os.path.join(d, "registry_ds"), os.path.join(d, "genotypes_ds")] + indexes)
+        # another library a search reads, each index once; the tiers there or not
+        other = os.path.join(self.tmp, "staged")
+        os.makedirs(os.path.join(other, "NRR_3_hg38+ds"))
+        os.symlink(os.path.join(lib, "NRG_3_hg38+ds"), os.path.join(other, "NRG_3_hg38+ds"))
+        shutil.rmtree(os.path.join(d, "genotypes_ds"))
+        os.makedirs(os.path.join(d, "genotypes_ds", ".building"))
+        self.assertEqual(iw.enrichment_stores(w, "hg38", "ds", [other])[4:],
+                         [os.path.join(d, "registry_ds")] + indexes
+                         + [os.path.join(other, "NRR_3_hg38+ds")])
+        self.assertIn(os.path.join(d, "genotypes_ds"),
+                      iw.enrichment_stores(w, "hg38", "ds", present=False))
+        # a sites-only registry is its VCFs' (the mega's), not the enrichment's
+        w = self.dataset(data_type="sites-only")
+        self.assertNotIn(os.path.join(d, "registry_ds"), iw.enrichment_stores(w, "hg38", "ds"))
+
+    def test_the_windows_an_earlier_enrichment_tells(self):
+        w = self.dataset((25, 27))
+        lib = os.path.join(w, "genome_library")
+        with self.engine(['VERSION = "2.10.0"', "INDEX_FORMAT = 2", "INDEL_LEFT = 30",
+                          "INDEL_RIGHT = 30"]):
+            self.assertEqual(iw.earlier_windows(w, "hg38", "ds"), {(25, 27)})
+            # each told alone: its log, its INDELS index (format 1: 2.9.1's), its variant index
+            os.remove(os.path.join(w, "Dictionaries", "log_indels_ds", "logchr1.txt.gz"))
+            self.assertEqual(iw.earlier_windows(w, "hg38", "ds"), {(25, 27)})
+            shutil.rmtree(os.path.join(lib, "20-NRG_2_hg38+ds_INDELS"))
+            self.assertEqual(iw.earlier_windows(w, "hg38", "ds"), {(25, 27)})
+            for n in ("NRG_3_hg38+ds", "20-NRG_2_hg38+ds"):
+                shutil.rmtree(os.path.join(lib, n))
+            self.assertEqual(iw.earlier_windows(w, "hg38", "ds"), set())
+        # a variant index of format 1 tells nothing where the installed CRISPRitz writes it
+        w = self.dataset((30, 30))
+        os.remove(os.path.join(w, "Dictionaries", "log_indels_ds", "logchr1.txt.gz"))
+        shutil.rmtree(os.path.join(w, "genome_library", "20-NRG_2_hg38+ds_INDELS"))
+        with self.engine(['VERSION = "2.9.1"']):
+            self.assertEqual(iw.earlier_windows(w, "hg38", "ds"), set())
+
+    def test_a_dataset_enriched_anew_beside_another_crispritzs_stores_is_refused(self):
+        w = self.dataset((25, 27))
+        g, d, lib = (os.path.join(w, x) for x in ("Genomes", "Dictionaries", "genome_library"))
+        shutil.rmtree(os.path.join(g, "hg38+ds"))
+        with self.engine(['VERSION = "2.10.0"', "INDEX_FORMAT = 2", "INDEL_LEFT = 30",
+                          "INDEL_RIGHT = 30"]):
+            why = iw.reenrichment_refusal(w, "hg38", "ds")
+        built = [os.path.join(d, "registry_ds"), os.path.join(d, "genotypes_ds")] + [
+            os.path.join(lib, n) for n in ("20-NRG_2_hg38+ds", "20-NRG_2_hg38+ds_INDELS",
+                                           "NRG_3_hg38+ds")]
+        self.assertTrue(why.startswith(
+            "no finished enrichment of ds is in place (%s), so build-index-only would enrich "
+            "it anew with the installed CRISPRitz, whose fake-indel windows are 30/30; but an "
+            "earlier enrichment of it, whose records tell windows of 25/27 (CRISPRitz 2.9.1 "
+            "and earlier wrote 25/27), left what was built from it: %s." % (
+                os.path.join(g, "hg38+ds"), ", ".join(built))), why)
+        self.assertIn("(rm -rf %s), then run build-index-only again" % " ".join(
+            "'%s'" % p for p in [os.path.join(g, "hg38+ds_INDELS"),
+                                 os.path.join(d, "dictionaries_ds"),
+                                 os.path.join(d, "log_indels_ds")] + built), why)
+        self.assertNotIn("indel_genotypes_ds", why)
+        # of the installed CRISPRitz's windows: the same enrichment, nothing refused
+        with self.engine(['VERSION = "2.9.1"']):
+            self.assertIsNone(iw.reenrichment_refusal(w, "hg38", "ds"))
+        # nothing built from it: nothing to refuse
+        for p in built:
+            shutil.rmtree(p)
+        with self.engine(['VERSION = "2.10.0"', "INDEX_FORMAT = 2", "INDEL_LEFT = 30",
+                          "INDEL_RIGHT = 30"]):
+            self.assertIsNone(iw.reenrichment_refusal(w, "hg38", "ds"))
+
+    def test_the_search_scripts_check(self):
+        """indel_window.py reenrichment, as the search script runs it before it enriches a
+        dataset itself (STEP 1): the refusal on stdout, exit 3; nothing, exit 0."""
+        import subprocess
+        import sys
+
+        w = self.dataset((25, 27))
+        shutil.rmtree(os.path.join(w, "Genomes", "hg38+ds"))
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "indel_window.py")
+        for lines, rc in (([ 'VERSION = "2.10.0"', "INDEX_FORMAT = 2", "INDEL_LEFT = 30",
+                            "INDEL_RIGHT = 30"], 3), (['VERSION = "2.9.1"'], 0)):
+            with self.engine(lines):
+                done = subprocess.run([sys.executable, script, "reenrichment", w, "hg38", "ds",
+                                       os.path.join(self.tmp, "staged")],
+                                      capture_output=True, text=True, env=dict(os.environ))
+            self.assertEqual((done.returncode, done.stderr), (rc, ""), done.stdout)
+            self.assertEqual(done.stdout.startswith(
+                "no finished enrichment of ds is in place (%s), so this search would enrich "
+                "it anew" % os.path.join(w, "Genomes", "hg38+ds")), rc == 3, done.stdout)
 
 
 if __name__ == "__main__":

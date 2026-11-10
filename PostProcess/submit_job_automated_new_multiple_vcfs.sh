@@ -1703,6 +1703,20 @@ while read vcf_f; do
 				# while this lock stands: each one that needs them waits on it first.
 				rm -rf "$enriched_folder" "$indels_out"
 			fi
+			# Not beside what an earlier enrichment of another CRISPRitz left -- the
+			# dataset's tiers and indexes, here or in the --index-path library -- which this
+			# and every later search would read with the new one, disagreeing with it in its
+			# SNPs (2.9.1 enriched only the last ALT of a site written on several records):
+			# refused, as build-index-only refuses it (indel_window.reenrichment_refusal).
+			_enr_libs=("$current_working_directory/genome_library")
+			[ "$ref_lib" -ef "${_enr_libs[0]}" ] || _enr_libs+=("$ref_lib")
+			_enr_why=$(python "$starting_dir/indel_window.py" reenrichment "$current_working_directory" "$ref_name" "$vcf_name" "${_enr_libs[@]}")
+			if [ $? = 3 ]; then
+				printf "ERROR: %s\n" "$_enr_why" >&2
+				rm -rf "$_run_tmp"
+				_lock_release "$_lock"
+				exit 1
+			fi
 			echo -e 'Add-variants\tStart\t'$(date) >>$log
 			echo -e "Adding variants"
 
