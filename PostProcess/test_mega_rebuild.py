@@ -318,5 +318,31 @@ class TheRecipe(bio._Fixture):
         self.assertFalse(ok)
 
 
+    def test_the_checks_fail_a_global_group_counted_over_another_allele_number(self):
+        """The GLOBAL group is the largest of the sources' frequencies as a count over the
+        summed nominal AN of the sources that carry the allele, which the carrier gate's
+        frequency bound reads (D6): the checks hold it to that count exactly. A registry
+        whose allele numbers are twice the nominal ones keeps every source's frequency
+        within 0.5/AN, and its GLOBAL frequency within 1e-3 of AF_max, which the checks let
+        through up to review r1 of lane M (M-R1-N3); they fail it now."""
+        done = self.rebuild()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        import build_mega_registry as bmr
+        import verify_mega_chrom as vm
+        reg = self.path("Dictionaries", "registry_hg38_mega")
+        meta = {ds: dict(m, an_nominal=2 * m["an_nominal"])
+                for ds, m in bmr.DEFAULT_DATASET_META.items()}
+        build_vcf = self.path("VCFs", "hg38_mega", "mega.chr1.build.vcf.gz")
+        bmr.build(build_vcf, "chr1", reg, dataset_meta=meta)
+        ok, _ns, _ni = vm.verify(self.src, reg, self.path("Dictionaries", "indel_af_hg38_mega"),
+                                 "chr1")
+        self.assertFalse(ok)
+        # and the recipe's own registry passes
+        bmr.build(build_vcf, "chr1", reg)
+        ok, _ns, _ni = vm.verify(self.src, reg, self.path("Dictionaries", "indel_af_hg38_mega"),
+                                 "chr1")
+        self.assertTrue(ok)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -19,7 +19,9 @@ record a window and a log row of its own.
 Checks, each a FAIL with its first examples:
   * registry: its records are exactly the SNP alleles (every one read back by position and
     ALT: none more, none less), each dataset's AF within 0.5/AN of the VCF's, the GLOBAL
-    group's AF the record's AF_max;
+    group exactly the largest of the datasets' AFs held as a count over the summed nominal AN
+    of the datasets that carry the allele (round(AF x AN), as the registry's compiler writes
+    it), and that largest AF the record's AF_max;
   * indel store: its keys are exactly the indel-path alleles, each dataset's AF and AF_max
     the record's;
   * --log DIR (log_indels_<dataset>/): the indel log's alleles are the store's (one row per
@@ -312,9 +314,19 @@ def verify(gw, regd, indd, chrom, log=None, enriched=None, reference=None, build
             got = g.get(db_group_id(ds))
             if got is None or abs(got.allele_freq() - af) > 0.5 / _AN[ds] + 1e-9:
                 bad += 1
+        # the GLOBAL group: the largest dataset AF as a count over the pooled nominal AN of
+        # the datasets that carry it, exactly; and that AF the record's AF_max
+        best = max(afs.values())
+        g_an = sum(_AN[ds] for ds in afs)
+        g_ac = min(max(int(round(best * g_an)), 1), g_an)
         gg = g.get(GLOBAL_GROUP_ID)
-        if mx is not None and (gg is None or abs(gg.allele_freq() - mx) > 1e-3):
+        if gg is None or (gg.AC, gg.AN) != (g_ac, g_an) or (
+                mx is not None and abs(best - mx) > 1e-12):
             bad += 1
+            if bad <= 3:
+                errs.append("registry %d %s GLOBAL %s, expected %d/%d (AF_max %s)" % (
+                    pos, a, None if gg is None else "%d/%d" % (gg.AC, gg.AN), g_ac, g_an,
+                    mx))
     if bad:
         errs.append("registry: %d frequency(ies) differ from the VCF's" % bad)
     reg.close()
