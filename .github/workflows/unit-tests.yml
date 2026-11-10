@@ -109,7 +109,9 @@ jobs:
         run: python -m unittest test_crisprme_hf -v
 
       - name: "Web Settings download progress + failure relay (2.8.1; AST-extracted, no Dash)"
-        # with the names Settings refuses, which CRISPRme takes into shell commands
+        # with the names Settings refuses, which CRISPRme takes into shell commands; a job runs
+        # its argv without a shell, in a folder of its own, and Retry re-runs the command the
+        # server launched it with, never a cmd.json of the job's folder (2.10.0)
         working-directory: PostProcess
         run: python -m unittest test_settings_progress -v
 
@@ -500,7 +502,9 @@ jobs:
 
       - name: "Modular scorer env-manager + runner (env lifecycle/state + subprocess protocol; no TF)"
         # scorer_env: detect env manager, create-command shape, atomic state file,
-        # health-check probe. scorer_runner: real stdin/stdout worker protocol against
+        # health-check probe, which with the self-test runs isolated (-I): a module put in the
+        # working directory, the data folder a search runs from, runs nothing (2.10.0).
+        # scorer_runner: real stdin/stdout worker protocol against
         # a stdlib fake worker + graceful-degradation paths. Neither needs TensorFlow.
         # test_crispr_bulge_fidelity, the CRISPR-Bulge fidelity gate, needs TensorFlow and
         # the Refined_TrueOT dataset, so here it skips: what this checks is that it imports
@@ -594,7 +598,9 @@ jobs:
         # a chromosome with SNPs but no indels, which CRISPRitz 2.9.1's refusal of an
         # index dir without a .bin turned into a whole-run abort. Plus legacy-index
         # access: dedicated-PAM and NNN_3 indexes are still listed and downloaded from
-        # the default repo only, and the catalog offers each name's fetchable copy.
+        # the default repo only, and the catalog offers each name's fetchable copy. And the
+        # indel search's merge takes the header of its part files in as the line it is: a
+        # "$(...)" another user put there runs nothing (2.10.0).
         working-directory: PostProcess
         run: >
           python -m unittest test_indel_header_injection test_complete_search_flags
@@ -708,10 +714,15 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_postproc_pieces -v
 
-      - name: "No code loads a file in a way that runs code, nor takes a temporary name another user can make first"
+      - name: "What a scan of the source shows of loading code and of temporary names, and read-back values that reach a shell (2.10.0)"
         # The pieces once read a pickle from the run's output folder, which its group could
-        # replace (2.10.0, the review of lane S, round 3): over every module's parse tree but
-        # the tests, no pickle, marshal, shelve or the like, no eval or exec, no unsafe YAML
-        # load, no tempfile.mktemp; in the shell scripts, no eval and no name mktemp did not make.
+        # replace (2.10.0, the review of lane S, round 3), and every search ran the scorer's
+        # health check as "python -c" from the data folder (round 4): over every module's parse
+        # tree but the tests, no pickle, marshal, shelve or the like, no eval or exec, no unsafe
+        # YAML load, no tempfile.mktemp, no python -c, -m or - that is not isolated (-I); in the
+        # shell scripts, no eval, no name mktemp did not make, no python -c, -m or - that is not
+        # isolated. And process_summaries.py and assemble_cfd_graphs.py run nothing a line or a
+        # name another user put in a search's folder holds. What it cannot see, a folder others
+        # can write still allows (docs/TROUBLESHOOTING.md section 7).
         working-directory: PostProcess
         run: python -m unittest test_no_code_from_files -v

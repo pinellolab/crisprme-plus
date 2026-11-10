@@ -194,6 +194,16 @@ def _run(cmd: List[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
+# The env's python runs the code of the health check, the self-test and env_python isolated
+# ("python -I -c"). "python -c" puts the working directory first on sys.path, and every
+# complete-search runs the health check from the folder the user runs crisprme.py in, the
+# data folder, which the members of its group can write under a umask of 002: a json.py one
+# of them put there ran as the user, on the probe's first "import json" (2.10.0, the review
+# of lane S, round 4, S-R4-1). -I leaves the working directory, the PYTHON* variables and
+# the user's site-packages out of the interpreter's path; the env's own packages are in its
+# prefix, and the self-test puts PostProcess on the path itself, as the scorer's worker does.
+
+
 def env_python(name: str) -> Optional[str]:
     """Absolute path to the env's python, or None if the env is absent.
 
@@ -207,7 +217,9 @@ def env_python(name: str) -> Optional[str]:
         return None
     exe, _ = mgr
     try:
-        cp = _run([exe, "run", "-n", name, "python", "-c", "import sys;print(sys.executable)"])
+        # isolated (-I), as the probes below: see _run
+        cp = _run([exe, "run", "-n", name, "python", "-I", "-c",
+                   "import sys;print(sys.executable)"])
         if cp.returncode == 0:
             path = cp.stdout.strip().splitlines()[-1].strip() if cp.stdout.strip() else ""
             if path and os.path.exists(path):
@@ -472,7 +484,7 @@ def health_check(name: str = DEFAULT_ENV) -> dict:
         "print(json.dumps({'py':pv,'vers':vers,'bad':bad}))\n"
     )
     try:
-        cp = _run([py, "-c", probe])
+        cp = _run([py, "-I", "-c", probe])  # isolated: see _run
         payload = json.loads(cp.stdout.strip().splitlines()[-1]) if cp.stdout.strip() else {}
     except Exception as e:
         rec["status"] = ERROR
@@ -526,7 +538,7 @@ def selftest(name: str = DEFAULT_ENV) -> tuple:
         "print(json.dumps(s.CRISPR_BULGE_predict_list(sg, off)))\n"
     )
     try:
-        cp = _run([py, "-c", code])
+        cp = _run([py, "-I", "-c", code])  # isolated: see _run
         r = json.loads(cp.stdout.strip().splitlines()[-1]) if cp.stdout.strip() else None
     except Exception as e:  # noqa: BLE001
         return False, "self-test failed to run: %s" % e

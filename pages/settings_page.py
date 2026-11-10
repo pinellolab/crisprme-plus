@@ -495,7 +495,7 @@ def _settings_jobdir(job_id) -> Optional[str]:
     """``<cwd>/Settings/<job_id>`` for an id `_new_job_id` could have made, else
     None. Refuses a traversal (``../x``), an absolute path, a non-string, and a
     job dir whose real path leaves Settings/ (a symlink), so the callbacks that
-    read a job's logs or re-run its cmd.json (Retry, shell=True) never act on a
+    read a job's logs or decide whether Retry may re-run it never act on a
     directory outside Settings/."""
     if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
         return None
@@ -507,8 +507,9 @@ def _settings_jobdir(job_id) -> Optional[str]:
     return jobdir
 
 
-def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
-    """Run a data-management shell command, recording stage markers.
+def _run_settings_job(argv: List[str], jobdir: str, stage: str) -> None:
+    """Run a data-management command, an argv run without a shell (_launch_job_cmd),
+    recording stage markers.
 
     Module-level (picklable) so it can be submitted to the ProcessPoolExecutor.
     Success/failure is decided by the process exit code — NOT by whether stderr
@@ -529,7 +530,7 @@ def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
         env = dict(os.environ)
         env["CRISPRME_PROGRESS_FILE"] = os.path.join(jobdir, "progress.json")
         with open(logverb, "w") as vout, open(logerr, "w") as eout:
-            proc = subprocess.Popen(cmd, shell=True, stdout=vout, stderr=eout, env=env)
+            proc = subprocess.Popen(list(argv), stdout=vout, stderr=eout, env=env)
             # heartbeat: bump log.txt's mtime every 60s while the subprocess runs
             # so refresh_settings_job's stale detector doesn't mistake a long,
             # output-quiet stage (e.g. a big extraction) for a dead worker.
@@ -552,61 +553,70 @@ def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
             lt.write(f"{stage}\tFAILED\n")
 
 
-def _launch_job_cmd(cmd: str, stage: str) -> str:
+# The command of each job this server launched, by job id: what Retry re-runs. Kept in the
+# server's memory only, never read back from a file to be run: the files of Settings/ are as
+# writable as the data folder (by its group, under a umask of 002), and up to 2.10.0 Retry
+# ran through a shell the command a job's cmd.json held, so a member of that group could put
+# a command there for the web app's user to run (the review of lane S, round 4, S-R4-2). A
+# job this server did not launch (one of before its last start) is started again from its
+# card.
+_LAUNCHED_JOBS = {}
+_LAUNCHED_JOBS_LOCK = threading.Lock()
+
+
+def _launch_job_cmd(argv: List[str], stage: str) -> str:
     """Shared job-tracking setup (id, jobdir, Queued marker, executor submit)
     behind both `launch_settings_job` (crisprme.py subcommands) and
-    `launch_settings_job_raw` (an arbitrary shell command, e.g.
-    download_hprc_assembly.py) -- same polling contract either way via
-    :func:`refresh_settings_job`.
+    `launch_settings_job_raw` (another program, e.g. download_hprc_assembly.py)
+    -- same polling contract either way via :func:`refresh_settings_job`.
+
+    ``argv`` is run as it is, without a shell, and kept in memory by job id
+    (_LAUNCHED_JOBS) for a Retry of the job. Its folder is its own: made here,
+    never one that was there already.
     """
-    job_id = _new_job_id()
-    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
-    os.makedirs(jobdir, exist_ok=True)
+    argv = [str(a) for a in argv]
+    while True:
+        job_id = _new_job_id()
+        jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
+        try:
+            os.mkdir(jobdir)
+        except FileExistsError:  # made since _new_job_id looked: take another id
+            continue
+        break
     # "Queued" at submit time; _run_settings_job appends "Start" when the single-slot
     # executor actually begins running it, so the banner can distinguish the two.
     with open(os.path.join(jobdir, "log.txt"), "w") as lt:
         lt.write(f"{stage}\tQueued\n")
-    # Persist the exact command + stage so a failed download can be RE-LAUNCHED
-    # verbatim from the web "Retry" button without the page having to reconstruct
-    # the argv (crisprme_hf resumes partial transfers, so a retry is cheap).
-    try:
-        import json
-        with open(os.path.join(jobdir, "cmd.json"), "w") as cf:
-            json.dump({"cmd": cmd, "stage": stage}, cf)
-    except OSError:
-        pass
-    settings_executor.submit(_run_settings_job, cmd, jobdir, stage)
+    # so a failed download can be RE-LAUNCHED from the web "Retry" button with the same
+    # command (crisprme_hf resumes partial transfers, so a retry is cheap)
+    with _LAUNCHED_JOBS_LOCK:
+        _LAUNCHED_JOBS[job_id] = (argv, stage)
+    settings_executor.submit(_run_settings_job, argv, jobdir, stage)
     return job_id
 
 
 def launch_settings_job(argv: List[str], stage: str) -> str:
-    """Launch ``crisprme.py <argv...> --path <cwd>`` as a detached job.
+    """Launch ``crisprme.py <argv...> --path <cwd>`` as a detached job (no shell).
 
     Returns the job id; progress is polled by :func:`refresh_settings_job`.
     """
     # crisprme.py is on PATH inside the activated env; append --path so data
     # lands under the app's working directory.
-    quoted = " ".join(_shlex_quote(a) for a in argv)
-    cmd = f"crisprme.py {quoted} --path {_shlex_quote(current_working_directory)}"
-    return _launch_job_cmd(cmd, stage)
+    return _launch_job_cmd(
+        ["crisprme.py"] + list(argv) + ["--path", current_working_directory], stage
+    )
 
 
-def launch_settings_job_raw(cmd: str, stage: str) -> str:
-    """Launch an arbitrary shell command as a detached, pollable job -- same
-    tracking/logging contract as `launch_settings_job`, but for tools that
+def launch_settings_job_raw(argv: List[str], stage: str) -> str:
+    """Launch another program's ``argv`` (no shell) as a detached, pollable job --
+    same tracking/logging contract as `launch_settings_job`, but for tools that
     aren't a `crisprme.py <subcommand>` (e.g. download_hprc_assembly.py,
     which isn't routed through crisprme.py's own CLI dispatch -- kept as an
     independent script, same reasoning as the rest of assembly-search's web
     integration: build parallel code paths rather than growing crisprme.py's
     core dispatch for something this self-contained).
     """
-    return _launch_job_cmd(cmd, stage)
-
-
-def _shlex_quote(s: str) -> str:
-    import shlex
-
-    return shlex.quote(str(s))
+    return _launch_job_cmd(argv, stage)
 
 
 def _validate_name(name: str) -> Optional[str]:
@@ -917,32 +927,27 @@ def _job_failed(jobdir: str) -> bool:
 
 
 def _relaunch_job(job_id: str) -> Optional[str]:
-    """Re-launch the download recorded in <job_id>/cmd.json (the Retry action);
-    returns the NEW job id, or None if the original command can't be recovered
-    or may not be re-run. The id is client data, so the server re-checks what
-    the page implies: the job FAILED, and a 'Publish index' job, which the page's
-    Publish ran in maintainer mode before 2.8.1, is never re-run: the page does not
-    publish (_publish_index_section)."""
+    """Re-launch a failed job (the Retry action) with the command this server
+    launched it with, kept in its memory (_LAUNCHED_JOBS): never one read from a
+    file of the job's folder, which others may write (a cmd.json there is not
+    read). Returns the NEW job id, or None if this server did not launch the job
+    (one of before its last start) or it may not be re-run. The id is client
+    data, so the server re-checks what the page implies: the job FAILED, and a
+    'Publish index' job, which the page's Publish ran in maintainer mode before
+    2.8.1, is never re-run: the page does not publish (_publish_index_section)."""
     jobdir = _settings_jobdir(job_id)
-    if not jobdir:  # not a Settings job id: never read or run that cmd.json
+    if not jobdir:  # not a Settings job id
         return None
     if not _job_failed(jobdir):  # queued, running, done, or no log at all
         return None
-    cmd_path = os.path.join(jobdir, "cmd.json")
-    if not os.path.isfile(cmd_path):
+    with _LAUNCHED_JOBS_LOCK:
+        rec = _LAUNCHED_JOBS.get(job_id)
+    if rec is None:  # not launched by this server since it started
         return None
-    try:
-        import json
-        with open(cmd_path) as cf:
-            rec = json.load(cf)
-    except (OSError, ValueError):
-        return None
-    cmd, stage = rec.get("cmd"), rec.get("stage") or "Retry download"
-    if not cmd:
-        return None
+    argv, stage = rec
     if stage == "Publish index":  # it uploaded an index with the server's token
         return None
-    return _launch_job_cmd(cmd, stage)
+    return _launch_job_cmd(argv, stage)
 
 
 def _write_vcf_marker(dataset: str, genome: str) -> None:
@@ -2949,15 +2954,8 @@ def fetch_from_hprc(n, sample_id):
     script = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "download_hprc_assembly.py"
     )
-    cmd = " ".join(
-        [
-            _shlex_quote(sys.executable),
-            _shlex_quote(script),
-            _shlex_quote(sample_id),
-            "--data-dir", _shlex_quote(current_working_directory),
-        ]
-    )
-    job_id = launch_settings_job_raw(cmd, f"Fetch {sample_id} from HPRC")
+    argv = [sys.executable, script, sample_id, "--data-dir", current_working_directory]
+    job_id = launch_settings_job_raw(argv, f"Fetch {sample_id} from HPRC")
     return _start(job_id)
 
 
@@ -3253,7 +3251,7 @@ def refresh_settings_job(n, job_id):
         # If an index download installed a variant index but its genotypes companion
         # fetch failed, the index detects off-targets but per-sample Samples are
         # degraded — surface that as a visible warning, not a quiet stdout NOTE.
-        # (A Retry keeps the stage cmd.json recorded.) And the build directories a
+        # (A Retry keeps the stage the job was launched with.) And the build directories a
         # stopped build left, which this run could not reclaim.
         done = html.Div(f"{stage}: done.", style={"color": "green"})
         degraded = _genotypes_degraded_warning(jobdir) if stage == "Download index" else None
@@ -3365,8 +3363,9 @@ def _toggle_settings_full_log(n, currently_hidden, failed_job):
     prevent_initial_call=True,
 )
 def _retry_settings_job(n, failed_job):
-    """Re-launch the failed download (same command, via cmd.json) and resume
-    polling. crisprme_hf resumes partial transfers, so a retry is cheap."""
+    """Re-launch the failed download (the same command, as this server launched
+    it: _relaunch_job) and resume polling. crisprme_hf resumes partial transfers,
+    so a retry is cheap."""
     if not n or ONLINE or not failed_job:
         raise PreventUpdate
     new_job = _relaunch_job(failed_job)
@@ -3375,8 +3374,8 @@ def _retry_settings_job(n, failed_job):
             no_update,
             no_update,
             html.Div(
-                "Could not retry: the original download command was not found. "
-                "Please start the download again from its card above.",
+                "Could not retry: the server re-runs only a job it launched since it "
+                "last started. Please start the download again from its card above.",
                 style={"color": "#b00"},
             ),
         )

@@ -2660,8 +2660,10 @@ echo -e 'Annotating results\tStart\t'$(date) >>$log
 # bgzips the placeholder in place -> consumes it (breaking the later gene-annotation
 # `cp vuoto.txt`) and fails on a read-only install. load_annotation_bed now no-ops on it too,
 # but a reference-only search passes vuoto.txt here, so we avoid even the pre-build spawn.
+# Isolated (-I), with this folder's modules put on the path by name: "python -c" puts the
+# working directory first on sys.path (2.10.0, the review of lane S, round 4).
 if [ "$(basename "$annotation_file")" != "vuoto.txt" ]; then
-	python -c "import annotation,sys; annotation.load_annotation_bed(sys.argv[1])" "$annotation_file" >/dev/null 2>&1 || true
+	python -I -c "import sys; sys.path.insert(0, sys.argv[1]); import annotation; annotation.load_annotation_bed(sys.argv[2])" "$starting_dir" "$annotation_file" >/dev/null 2>&1 || true
 fi
 # annotate primary targets
 python annotation.py $final_res.bestCFD.txt $annotation_file $final_res.bestCFD.txt.annotated &

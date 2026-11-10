@@ -10,7 +10,8 @@ goes through three steps on the pool's workers:
 
 1. its shell driver's "cluster" stage: the extraction and the clustering of its raw
    targets, as before; the driver writes the analysis script's arguments to a manifest, a
-   file of a folder only this run can write (tempfile.mkdtemp);
+   file of a folder the pool makes in $TMPDIR (tempfile.mkdtemp: a new name, 0700), which no
+   one else can replace where $TMPDIR is sticky, as /tmp is, or the user's own;
 2. the analysis in pieces: the clustered file's lines cut into ``n`` contiguous ranges
    (``n_pieces``), the script run once a range (CRISPRME_POSTPROC_PIECE=1 and
    CRISPRME_POSTPROC_RANGE), each piece starting up exactly as one process does over the
@@ -18,7 +19,7 @@ goes through three steps on the pool's workers:
    reads the dictionary keys of the whole chromosome once (CRISPRME_POSTPROC_PREPARE), for
    the pieces to read them from a small copy (CRISPRME_POSTPROC_DICT) instead of streaming
    the whole dictionary each: a JSON file (write_dict_copy, read_dict_copy) in the pieces'
-   folder, which only the run's user can open. Then merge_pieces.py joins the pieces' files
+   folder, which loads as data whoever wrote it. Then merge_pieces.py joins the pieces' files
    into the chromosome's, byte for byte those of one process (the CRISPR-Bulge scores in the
    batches one process forms);
 3. the driver's "finish" stage (adjust_cols.py and, for indels, remove_bad_indel_targets.py).
@@ -104,9 +105,12 @@ def data_lines(path):
 # members of that folder's group can write where the umask lets them (002 on many shared
 # nodes), so loading it must run no code whoever wrote it: JSON, the dictionary's own
 # format, which loads as data only. (The first copy, a pickle, ran whatever its file named
-# when a piece loaded it: 2.10.0 lane S review r3.) It is also made where only the run's
-# user can open it: in the pieces' folder (made 0700) and created 0600, never through a
-# name that already stood (O_EXCL).
+# when a piece loaded it: 2.10.0 lane S review r3.) It is created 0600, never through a name
+# that already stood (O_EXCL), in the pieces' folder (made 0700). That keeps others from
+# reading or writing this copy, not from changing what a piece reads: in an output folder
+# they can write, they can rename the pieces' folder and put one of their own in its place
+# (a rename needs only write access to the folder that holds it), with a copy of their own
+# and links the pieces then write through (docs/TROUBLESHOOTING.md section 7).
 DICT_COPY_NAME = "dictionary.json"
 
 
@@ -343,9 +347,10 @@ def run_stage(kind, chroms, workers, driver_args, script, prepare_dict=False,
     def cluster(chrom, i):
         started[chrom] = time.time()
         env = dict(base_env)
-        # the driver writes the analysis' arguments there, one a line: a file of a folder
-        # only this run can write (tempfile.mkdtemp, mode 0700), so no other user of a
-        # shared $TMPDIR can name it before the driver does, or put another list there
+        # the driver writes the analysis' arguments there, one a line: a file of the folder
+        # the pool made (tempfile.mkdtemp: a new name, mode 0700), so no other user of a
+        # shared $TMPDIR can name it before the driver does, nor, where $TMPDIR is sticky (as
+        # /tmp) or the user's own, put another list there
         tmp = os.path.join(manifests, "%s_%d.args" % (kind, i))
         env["CRISPRME_POSTPROC_MANIFEST"] = tmp
         code = subprocess.call(driver_args(chrom, "cluster"), env=env)
@@ -367,10 +372,12 @@ def run_stage(kind, chroms, workers, driver_args, script, prepare_dict=False,
             return
         pdir = args[out_at] + ".pieces"
         shutil.rmtree(pdir, ignore_errors=True)
-        # the pieces' files, the dictionary copy among them, for the run's user alone (the
-        # output folder takes the umask, and 002 lets its group write there); anything left
-        # under this name that the line above could not remove (another user's folder, a
-        # link) stops the stage (FileExistsError), and is never used
+        # the pieces' files, the dictionary copy among them, in a folder made here, 0700:
+        # others cannot read or write the files in it, but in an output folder they can
+        # write (a umask of 002 lets the group) they can rename it and put their own in its
+        # place, whose files the pieces then read and write through (DICT_COPY_NAME's note).
+        # Anything left under this name that the line above could not remove (another
+        # user's folder, a link) stops the stage (FileExistsError), and is never used.
         os.makedirs(pdir, mode=0o700)
         rngs = ranges(lines, n)
         _say([f"Post-analysis {kind.upper()} of {chrom}: {lines} line(s) in {n} piece(s)"])

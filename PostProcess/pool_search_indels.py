@@ -2,6 +2,7 @@
 
 import gzip
 import os
+import shlex
 import sys
 import tempfile
 from multiprocessing import Pool
@@ -601,7 +602,10 @@ if len(skipped) == len(chrs):
     with open(merged, "w") as fh:
         fh.write(_TARGETS_HEADER + "\n")
 else:
-    os.system(f'sed -i 1i"{header}" {merged}')
+    # the header is read from a chromosome's part file, a file of the output folder, which
+    # others may write (its group, under a umask of 002): it reaches sed quoted, never as the
+    # shell's own text, where a "$(...)" in it ran (2.10.0, the review of lane S, round 4)
+    os.system(f"sed -i {shlex.quote('1i' + header)} {merged}")
 
 
 # os.system('echo "Search INDELs End: '+datetime.now().strftime('%Y-%m-%d %H:%M:%S')+'" >> '+output_folder+'/../log.txt')

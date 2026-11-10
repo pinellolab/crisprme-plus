@@ -84,6 +84,13 @@ offer for the genome, PAM and dataset selected, and the Max edits slider's maxim
 follows them), before anything is written. The reference Submit made its job folder before
 int() refused the Max edits value: it checks that value first.
 
+And up to 2.10.0 the results' region page (cluster_page) ran through a shell what two files
+of the job's folder held, a folder others may write (its group, under a umask of 002): a
+"guide" put in the job's guide list passed the check that the link's guide is one of the job's,
+and an annotation put in its annotated targets went into the lookup's command (the review of
+lane S, round 4). A guide is looked up only if it is letters too, and the annotation reaches
+awk as a quoted value.
+
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
 normal value still works; a job id holding '../' reads, writes and removes nothing
@@ -1646,6 +1653,36 @@ class TestResultsPages(_WebFolder):
                 self.assertEqual(page.children.children, "The selected position does not exist")
         page = rp.cluster_page(self.OUT, f"{GUIDE}-Pos-chr1-1000")
         self.assertEqual(page.children.children, "The selected result does not exist")
+        self.assertNothingRun()
+
+    # The guide list and the annotated targets are files of the job's folder, which others
+    # may write (its group, under a umask of 002): a "guide" put in the list passed the check
+    # that the link's guide is the job's, and an annotation put in the annotated targets went
+    # into the lookup's command, both through the shell, as the web app's user (2.10.0, the
+    # review of lane S, round 4)
+    def test_a_region_link_runs_no_guide_the_job_s_guide_list_holds(self):
+        planted = f"{GUIDE};touch${{IFS}}MARK_guide;#"
+        with open(os.path.join(self.job, ".guides.txt"), "a") as fh:
+            fh.write(planted + "\n")
+        page = rp.cluster_page(self.JOB, f"{planted}-Pos-chr1-1000")
+        self.assertEqual(self.markers(), [])
+        self.assertEqual(getattr(page.children, "children", None),
+                         "The selected position does not exist")
+        self.assertNothingRun()
+
+    def test_a_region_link_runs_no_annotation_the_job_s_targets_hold(self):
+        with open(os.path.join(self.job, f"{self.JOB}.Annotation.targets.txt"), "w") as fh:
+            fh.write(f"X\t{GUIDE}\tY\tchr1\t1\t1000\t'; touch MARK_annotation; echo '\n")
+        # (the lookup's first command reads .bestMerge.txt of the web app's working
+        # directory, its name as it is, and stops the page without one: one there, which
+        # anyone who can write the data folder can make, lets it reach the annotation's)
+        with open(os.path.join(self.data, ".bestMerge.txt"), "w") as fh:
+            fh.write("#Bulge_type\tcrRNA\n")
+        page = rp.cluster_page(self.JOB, f"{GUIDE}-Pos-chr1-1000")
+        self.assertEqual(self.markers(), [])
+        self.assertEqual(page.children[0].children, "Selected Position: chr1 - 1000")
+        with open(os.path.join(self.job, f"{self.JOB}.chr1_1000.{GUIDE}.txt")) as fh:
+            self.assertNotIn("MARK", fh.read())
         self.assertNothingRun()
 
     def test_a_sample_link(self):

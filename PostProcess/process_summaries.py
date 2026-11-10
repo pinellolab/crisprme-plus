@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import sys
 import os
+import shlex
 
 
 path_best = sys.argv[1]
@@ -71,6 +72,10 @@ def init_summary_by_sample(path_samplesID):
 # os.system(f"tail -n +2 {path_alt} >> {path_best}.cumulative")
 
 
+# The guides are read from the search's guide file, a file of its output folder, which others
+# may write (its group, under a umask of 002), and go into the shell commands below: each is
+# quoted there (shlex.quote leaves a guide of letters as it is), so a line put in the file runs
+# nothing (2.10.0, the review of lane S, round 4).
 guides = []
 general_table = {}
 with open(f"{path_guides}", "r") as guide_file:
@@ -94,8 +99,9 @@ count_for = (
 # general_count.write('#Guide\tOn-Targets (Reference - Enriched)\tOff-Targets Reference ' +
 #                     count_for + '\tOff-Targets Enriched ' + count_for + '\n')
 
+_q = shlex.quote
 for guide in guides:
-    os.system(f"LC_ALL=C grep -F {guide} {path_best} > {path_best}.{guide}")
+    os.system(f"LC_ALL=C grep -F {_q(guide)} {_q(path_best)} > {_q(f'{path_best}.{guide}')}")
     # os.system(f"LC_ALL=C grep -F {guide} {path_alt} >> {path_best}.{guide}")
 
     sum_cfds = 0
@@ -253,13 +259,11 @@ for guide in guides:
     # 					str(sum(general_table[guide]['var'][1:])) + ' (' + ' - '.join([ str(x) for x in general_table[guide]['var'][1:]]) + ')\n'
     # 					)
 
-    os.system(
-        f"sort -k2,2n -k3,3n {path_output}/{name_job}.summary_by_guide.{guide}_{filter_criterion}.txt -o {path_best}.summary_by_guide.{guide}_{filter_criterion}.sorted"
-    )
-    os.system(
-        f"mv {path_best}.summary_by_guide.{guide}_{filter_criterion}.sorted {path_output}/{name_job}.summary_by_guide.{guide}_{filter_criterion}.txt"
-    )
-    os.system(f"rm {path_best}.{guide}")
+    _summary = _q(f"{path_output}/{name_job}.summary_by_guide.{guide}_{filter_criterion}.txt")
+    _sorted = _q(f"{path_best}.summary_by_guide.{guide}_{filter_criterion}.sorted")
+    os.system(f"sort -k2,2n -k3,3n {_summary} -o {_sorted}")
+    os.system(f"mv {_sorted} {_summary}")
+    os.system(f"rm {_q(f'{path_best}.{guide}')}")
 
 
 with open(
