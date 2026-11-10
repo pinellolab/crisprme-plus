@@ -341,6 +341,12 @@ For a variant-aware search, each VCF record needs:
   **only indels** works fine — the missing category simply yields an empty
   branch of results.
 - **`complex` and `mnp` records are treated as indels.**
+- **REF and ALT are read whatever their case for an indel or MNV** (VCF 4.x reads them
+  alike): CRISPRme names such a record in upper case in its results, and two lines of one
+  indel written in two cases (HPRC's `vcfwave` writes `TG>T` beside `tg>t`) are one allele, their
+  carriers merged. **An SNV whose ALT is written in lower case is never searched**: CRISPRitz
+  codes no lower-case ALT into the enriched genome, though its dictionary lists the carriers.
+  The full pre-flight scan (§9) warns of such records; write REF and ALT in upper case (below).
 - **Structural variants are not supported.** Symbolic ALT alleles such as
   `<DEL>`, `<INS>`, `<DUP>` are skipped, and breakend (BND) notation can corrupt
   parsing — **remove SV records before running.**
@@ -356,7 +362,14 @@ bcftools view -f PASS input.vcf.gz \
   -Oz -o clean.vcf.gz
 ```
 
-and confirm every record carries a numeric `INFO/AF` and a `FORMAT/GT` field.
+and confirm every record carries a numeric `INFO/AF` and a `FORMAT/GT` field. A VCF that
+writes some REF or ALT in lower case can be written in upper case so:
+
+```bash
+zcat input.vcf.gz | awk 'BEGIN{FS=OFS="\t"} !/^#/{$4=toupper($4); $5=toupper($5)} 1' \
+  | bgzip > upper.vcf.gz
+```
+
 See §9 for catching these problems before a long run.
 
 ---
@@ -375,7 +388,7 @@ sample-ID mismatch, or a chromosome-naming mismatch.
 > `--full_input_validate` (the `--full_input_validate` flag in `crisprme.py`) to
 > run a full per-VCF-record check — chromosome coverage,
 > `AF`/`FILTER` consistency, `POS` bounds, and a multiallelic/breakend/duplicate/
-> phasing survey — before the search starts (slower, so it is opt-in).
+> phasing/lower-case-SNV survey — before the search starts (slower, so it is opt-in).
 >
 > Optional extra checks you can run yourself if you want to eyeball a VCF:
 >

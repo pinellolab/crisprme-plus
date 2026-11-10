@@ -350,11 +350,14 @@ and the `release-crisprme` skill.
   below).
   - It imports only Python's standard library and **no code of CRISPRme's variant or indel
     machinery, and copies none**: a unit test compares its code lines with those of every
-    Python file of CRISPRme's, and no run of four is the same (a run of imports aside; its
-    rule for a line of several ALTs had been `site_alleles`' narrowing loop copied line for
-    line, which a test of function names let through, and is now written from METHODS'
-    text). Its inputs are what a user has — the reference FASTA, the
-    VCF(s) the search read (its own BGZF + tabix reader; without a `.tbi` it indexes each
+    Python file of the repository's tree, in every folder (158 files: PostProcess and its
+    `supportFunctions` and `fixtures`, `scripts`, `seq_script`, `pages`, the oracle and
+    benchmark scripts of `test/`, the paper's scripts, `crisprme.py`), the unit tests aside,
+    and no run of four is the same (a run of imports aside; its rule for a line of several
+    ALTs had been `site_alleles`' narrowing loop copied line for line, which a test of
+    function names let through, and is now written from METHODS' text). Its inputs are what
+    a user has — the reference FASTA, the VCF(s) the search read (its own BGZF + tabix
+    reader; without a `.tbi` it indexes each
     VCF once in memory, writing nothing), the samples list (`--samples`, the samplesID files
     the search read; by default the run's `.sampleID.txt`, else every VCF sample), the
     guide (`--guide`, required: the table's own column is never trusted), the PAM file, the
@@ -362,10 +365,11 @@ and the `release-crisprme` skill.
     It writes each sample's haplotypes itself from the VCF 4.x definition of a record
     (every SNV, MNV and indel of a slot), keeps its own map from haplotype bases to
     reference coordinates and aligns with its own exhaustive dynamic-programming aligner. A
-    row's variants are read with REF and ALT in upper case, as every record (HPRC writes
-    1,546 indel records of chr22 in lower case, whose rows it looked up by their raw
-    tokens: a world of a lower-case deletion gave 21 gating `missing-row`, every carrier of
-    every target).
+    row's variants are read with REF and ALT in upper case, as every record, as VCF 4.x reads
+    them (HPRC writes 1,546 indel records of chr22 in lower case, which a release before this
+    one names as written and this one in upper case (Fixed); the check looked their rows up
+    by their raw tokens: a world of a lower-case deletion gave 21 gating `missing-row`, every
+    carrier of every target).
   - **The truth is the VCF.** A slot holds a row's target when it reads the target's bases
     from the row's start through the row's record: each base the record puts in the target
     at its place, and the base after them. Two alleles of one slot whose REF spans meet give
@@ -426,8 +430,8 @@ and the `release-crisprme` skill.
     documentation gives its enricher) is re-implemented from that text and only classifies
     a disagreement: a documented limit (non-gating, listed with its cause, a PUTATIVE tie
     included) or a failure. Two lines of one indel REF>ALT at a position are one allele on
-    every release, their calls merged by that rule (decision B2, as 2.10.0's readers of the
-    phased indel store merge them): the check read the record's call off the first line that
+    every release, in one case or in two, their calls merged by that rule (decision B2, as
+    2.10.0 reads them: Fixed): the check read the record's call off the first line that
     listed the sample, so a slot only the later line gave was no slot of the record, and a
     listing on both a second allele at the record's position (a world of a deletion on two
     lines: right rows failed, `carrier-without-variants`).
@@ -451,7 +455,12 @@ and the `release-crisprme` skill.
     genotyped VCF with an indel record of another FILTER and no log), is refused (exit 2),
     as is a run of every allele whose VCF holds, near what it checks, two lines that each
     list several ALTs at one position (their allele numbers are not told apart, METHODS
-    section 4),
+    section 4), and a run of any release whose VCF holds there an SNV whose ALT is written in
+    lower case (CRISPRitz codes no lower-case ALT, while its dictionary lists the carriers:
+    read in upper case, the check demanded targets the search cannot find), the check
+    stopping at the first work unit that meets such a position (it refused a run of two lines
+    of several ALTs only once every unit had been checked, the whole check time of a
+    genome-wide run),
     and so is a run made with the SNP+indel co-occurrence off
     (`CRISPRME_INDEL_SNP=0`, which a search of this release notes in its `log_verbose.txt`):
     every SNP code of its fake-indel genomes reads as the reference, so its indel rows name
@@ -686,7 +695,7 @@ and the `release-crisprme` skill.
     variant bases than the SNP they carry (chr22:11333697 (−), chr22_11333716_T_G: HG00271,
     HG00318, HG00369, HG00379, HG00864, NA06991, NA06993, NA18547), where the HGDP + 1000
     Genomes run alone lists them on an alignment that holds it (report-only).
-  - Wired in: `PostProcess/test_check_indel_rows.py` (224 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (226 unit and mutation tests: a right
     row raises nothing gating, each corruption of it is caught, each documented limit and
     overlapping slot comes out under its own class, the checker's coverage gaps under
     theirs; the refusals; each release's reading of the data, told from a run's records;
@@ -911,10 +920,11 @@ and the `release-crisprme` skill.
   (the earlier on a tie) as it is, as the enricher does (`site_alleles.merge_gt`: CRISPRitz's
   `_gt_union`'s output on 20 pairs of calls, in its test; up to the integration it read a pair not
   phased alike as unphased, `1|0` beside `0/1` giving `1/0` where the enricher's entry holds
-  `1|0`). An indel written on two VCF lines is one allele too: the readers of the phased indel
-  genotype store (the indel path's, the SNP rows' and the carrier gate's) merge its two lines by
-  the same rule (see Fixed). Up to 2.8.1 two entries of one ALT stopped the Tier-1 compile of the
-  whole chromosome (`duplicate (pos, alt) record`), and up to CRISPRitz 2.9.1 the later record's
+  `1|0`). An indel written on two VCF lines is one allele too, in one case or in two: the readers
+  of the phased indel genotype store (the indel path's, the SNP rows' and the carrier gate's) read
+  its REF and ALT in upper case and merge its two lines by the same rule (see Fixed). Up to
+  2.8.1 two entries of one ALT stopped the Tier-1 compile of the whole chromosome (`duplicate
+  (pos, alt) record`), and up to CRISPRitz 2.9.1 the later record's
   entry replaced the earlier's. A sample that the merge leaves with two ALTs of the position on
   one slot is resolved without phase (see Fixed). Covered by `PostProcess/test_site_alleles.py`,
   `test_indel_genotypes.py`, `test_snp_row_indel_carriers.py` and `test_haplotype_prioritizer.py`.
@@ -929,7 +939,14 @@ and the `release-crisprme` skill.
   record holds the whole ID column, which a SNP's rows give whole and an indel's by its first ID
   (see the known limit below); and the full scan counts the positions that hold two or more
   lines of several ALTs (one a base each, FILTER `PASS` or `.`), whose allele numbers the readers
-  cannot tell apart (see the B3 entry under Fixed), naming up to five.
+  cannot tell apart (see the B3 entry under Fixed), naming up to five, as the bounded scan of
+  every run now does among a VCF's first 1,000 records. The survey of records that repeat a
+  REF>ALT reads an indel's or MNV's REF and ALT in upper case, as CRISPRme reads them (HPRC chr22:
+  179 indels on two lines, of which 140 in two cases, which it compared as written and counted
+  none of), and an SNV's as written, as CRISPRitz compares two listings of one; and the full scan
+  warns of an SNV whose ALT is written in lower case, which CRISPRitz does not code (so it is never
+  searched, though its dictionary lists the carriers), with an `awk` line that writes REF and ALT
+  in upper case (none in the published panels' chr22).
   `gnomAD-converter --multiallelic` says, in its help, on stdout and in
   the README, what it writes: a position's SNP records joined into one line and its indel records
   into another (`bcftools norm -m+`), with the converter's genotypes, which are unphased (`1/2`),
@@ -1281,9 +1298,11 @@ and the `release-crisprme` skill.
   holds, beside a line of one ALT of the position too), the carrier holds one copy on an unknown
   slot and is resolved without phase (PUTATIVE): S06 is listed, PUTATIVE, for its CFD-1.0 target
   again, and worlds X and Y pass the check in both modes. Two lines of several ALTs at one
-  position are not told apart (an ALT of one can be tied to an index of the other's: the full
-  input validation warns of such positions); no published panel holds one on chr22 (HGDP + 1000
-  Genomes, HPRC and mega: 0 lines of several ALTs, 0 `*`), and the 33,993 lines of several ALTs of
+  position are not told apart (an ALT of one can be tied to an index of the other's: the
+  pre-flight check of every run warns of such positions among each VCF's first 1,000 records,
+  the full input validation of every one, and the real-data check refuses a run that holds
+  one); no published panel holds one on chr22 (HGDP + 1000 Genomes, HPRC and mega: 0 lines of
+  several ALTs, 0 `*`), and the 33,993 lines of several ALTs of
   HF's raw HPRC `vcfwave` chr22 VCF are each alone at their position. Writing each ALT of such a
   line in split form in the dictionary, which would tie every one, is CRISPRitz's (left to
   CRISPRme by B3); the population summary of a phased panel
@@ -2021,8 +2040,9 @@ and the `release-crisprme` skill.
   line per record, and its three readers (the indel path's, the SNP rows' and the carrier gate's)
   kept the later line's carriers alone, so a carrier only the earlier line listed lost its phased
   genotype: CRISPRme listed it on no row of the indel, or on some of its alignments only, and a
-  carrier listed on both lost the slots only the earlier line gave. HPRC chr22 writes 39 indels so,
-  with 1,400 carrier listings on the earlier line only: chr22:36235742 AGGGT>A, 144 carriers on its
+  carrier listed on both lost the slots only the earlier line gave. HPRC chr22 writes 39 indels so
+  in one case (and 140 more in two cases: next entry), with 1,400 carrier listings on the earlier
+  line only: chr22:36235742 AGGGT>A, 144 carriers on its
   first line and 4 on its second, was listed for one sample, and the 14 carriers of chr22:32763933
   GC>G on its first line alone were missing from its 24-nt alignment's row (a fresh per-sample
   search of three guides over such deletions, 4 + 1 + 1: 300 gating findings of the real-data
@@ -2037,6 +2057,49 @@ and the `release-crisprme` skill.
   lines). No store need be written again. Covered by
   `PostProcess/test_indel_genotypes.py`, `test_snp_row_indel_carriers.py` and
   `test_haplotype_prioritizer.py`.
+- **An indel or MNV record is read with its REF and ALT in upper case, as VCF 4.x reads it: two
+  lines of one indel written in two cases are one allele, and the carrier gate finds an indel
+  written in lower case** (every release with the fake-indel genome; HPRC). CRISPRitz cuts a
+  fake-indel window for each line and its indel log names each line as the VCF writes it, while
+  the windows hold one sequence (it writes the ALT in place of the REF whatever their case, and the
+  search reads the window in upper case). CRISPRme named each window's rows as the log does, and
+  its readers of the phased indel store keyed each line as written. So two lines of one indel in
+  two cases (HPRC's `vcfwave` writes 140 indels of chr22 so, chr22:23541792 TG>T beside tg>t) were
+  two records: each window's rows listed its own line's carriers, and the carriers of one target
+  were split over two rows named in two cases (8,755 carrier listings on one of the two lines
+  only, 917 carriers on both), which the real-data check, reading the two
+  lines as one allele, failed: on a fresh per-sample HPRC chr22 search of two guides over such
+  deletions, 4 + 1 + 1, 141 of its 159 gating findings, on three such pairs (126 `missing-row` and
+  9 `carrier-missing` at chr22:23541792, 3 and 3 at 17341322 and 34811282; the review's world WDC,
+  WD with one of its two lines in lower case: 16 gating). And the carrier gate reads a row's
+  variants in upper case (`haplotype_prioritizer.parse_variants`) and looked them up in a store
+  keyed as written, so an indel written in lower case (1,546 records of HPRC chr22) was in no
+  panel: a population-level row naming one alone was labelled `single variant (not in the
+  panel)` (17 alignment lines of the two-guide search above, run population-level), and one
+  naming it beside other variants `not checked` (C2), though the panel holds it. Now the
+  indel path names an indel or MNV record with REF and ALT in upper case
+  (`indel_snp_cis.record_name`), and the three
+  readers of the store key each line so (`build_indel_genotypes.store_key`): the two lines are one
+  allele, their carriers merged as for two lines written alike (above), and the merge folds the
+  two windows' rows into one, which gives the ID and the frequency of each line, as it does for two
+  lines written alike. A row of an indel written in lower case names it in upper case, in
+  `Variant_info_genome` and `Variant_info_spacer+PAM` (`chr22_36126395_CCCTCTCCCTCCTTTCCTTCCTT_C`,
+  which 2.8.1 wrote `chr22_36126395_ccctctccctcctttcctTCCTT_c`). An SNV is read as written,
+  as CRISPRitz's dictionary compares two listings of
+  one; one whose ALT is written in lower case is not coded by CRISPRitz and is never searched: the
+  input validator's full scan warns of it (above), and the real-data check refuses a run whose VCF
+  holds one (none in the published panels' chr22). The review's world WDC (WD with one of its
+  deletion's two lines in lower case) now gives WD's rows exactly, and the check 0 gating findings in
+  both modes; the fresh two-guide per-sample HPRC search gives 18, none at a two-case pair: all are
+  an MNV on a carrier's slot, which CRISPRme does not read beside a record (6 sites, 3 blocks each;
+  METHODS section 8), as before (its population-level run: 6, the same class). Its population-level
+  rows differ from before only in the case of their `Variant_info` and in `Other_motifs`, which
+  counts the two windows' copies of one target once (430 to 428 at chr22:23541773). The README
+  guide's HPRC searches (both modes, and on the unphased copy) name no indel written in lower case
+  and are byte for byte as before. Covered by
+  `PostProcess/test_indel_snp_cis.py`, `test_indel_genotypes.py`, `test_snp_row_indel_carriers.py`,
+  `test_haplotype_prioritizer.py`, `test_indel_overlaid_rows.py` (the real `analisi_indels_NNN.py`
+  on a deletion written on two lines in two cases) and `test_validate_inputs.py`.
 - **An indel row whose first base is one an insertion adds is placed at the insertion**
   (every release with the fake-indel genome; both modes, any PAM).
   - The engine reports where the target's first aligned base (the leftmost, on either strand)

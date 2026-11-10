@@ -123,6 +123,24 @@ class TestParseAndSupport(unittest.TestCase):
         self.assertEqual(idx.indels, [(100, "AT", "A")])
         self.assertEqual(idx.carriers(100, "AT", "A"), {"S1": "1|0", "S2": "1|1"})
 
+    def test_an_indel_written_in_lower_case_is_in_the_panel(self):
+        """C-R1-1: a row's variants are read in upper case (parse_variants), and the store
+        keyed each indel as the VCF writes it: an indel written in lower case (1,546 of HPRC
+        chr22) was in no panel, so a row naming it was 'not checked' (C2), and the two
+        lines of one indel in two cases (tg>t beside TG>T, 140 of HPRC chr22) were two
+        indels. Both are now read in upper case, the two lines one allele, merged."""
+        tmp = tempfile.mkdtemp(prefix="hp_case_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "gt_indel_%s.tsv.gz" % CHROM)
+        with gzip.open(path, "wt") as fh:
+            fh.write("100_AT_A\tS1:1|0,S2:0|1\n100_at_a\tS2:1|0\n300_cAA_c\tS3:0|1\n")
+        idx = hp.IndelIndex(path)
+        self.assertEqual(idx.indels, [(100, "AT", "A"), (300, "CAA", "C")])
+        self.assertEqual(idx.carriers(100, "AT", "A"), {"S1": "1|0", "S2": "1|1"})
+        (v,) = hp.parse_variants("%s_300_cAA_c" % CHROM)
+        self.assertTrue(idx.has(v[1], v[2], v[3]))
+        self.assertEqual(idx.carriers(v[1], v[2], v[3]), {"S3": "0|1"})
+
     def test_two_alts_on_one_slot_is_unknown(self):
         alt_g = {"S1": "1|0", "S2": "1|0"}
         alt_t = {"S1": "1|0"}  # S1's first slot holds G and T at one position

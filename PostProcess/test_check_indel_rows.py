@@ -64,6 +64,7 @@ import sys
 import tempfile
 import unittest
 import zlib
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
                                 "scripts"))
@@ -5584,23 +5585,33 @@ class StageTwoARoundThree(Base):
     def test_the_checker_copies_no_crisprme_code(self):
         """R3B-F4: no run of four code lines or more (comments and docstrings left out,
         whitespace collapsed; a run of imports aside) is the same in the checker and in a
-        Python file of CRISPRme's (PostProcess, scripts, seq_script, crisprme.py; the
-        tests aside). Window._untie was site_alleles.alt_tokens with its narrowing loop
-        copied line for line, which the test of function names let through, as R-B1's
-        merge_call (site_alleles.merge_gt) before it."""
-        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)
+        Python file of CRISPRme's: every file of the repository's tree, in every folder
+        (PostProcess and its supportFunctions and fixtures, scripts, seq_script, pages, the
+        oracle and benchmark scripts of test/, plot_generation_paper, paper, crisprme.py),
+        the unit tests (test_*.py) aside. Window._untie was site_alleles.alt_tokens with
+        its narrowing loop copied line for line, which the test of function names let
+        through, as R-B1's merge_call (site_alleles.merge_gt) before it. C-R1-2: the test
+        read only the top level of PostProcess, scripts, seq_script and the root, where
+        the docs said every file."""
+        root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                            os.pardir))
         checker = os.path.join(root, "scripts", "check_indel_rows.py")
         mine = code_lines(checker)
         others = []
-        for folder in ("PostProcess", "scripts", "seq_script", "."):
-            d = os.path.join(root, folder)
-            for name in sorted(os.listdir(d)) if os.path.isdir(d) else ():
+        for d, subdirs, names in os.walk(root):
+            subdirs[:] = sorted(x for x in subdirs
+                                if not x.startswith(".") and x != "__pycache__")
+            for name in sorted(names):
                 path = os.path.join(d, name)
                 if (name.endswith(".py") and not name.startswith("test_")
                         and os.path.isfile(path) and os.path.abspath(path) !=
                         os.path.abspath(checker)):
                     others.append(path)
-        self.assertIn("site_alleles.py", {os.path.basename(p) for p in others})
+        rel = {os.path.relpath(p, root) for p in others}
+        for want in ("PostProcess/site_alleles.py", "crisprme.py",
+                     "PostProcess/supportFunctions/loadSample/associateSample.py",
+                     "test/indel_snp_oracle/oracle.py"):
+            self.assertIn(want, rel)
         found = []
         for path in others:
             for n, i, j, text in shared_runs(mine, code_lines(path), 4):
@@ -5778,6 +5789,72 @@ class StageTwoARoundThree(Base):
         case = Case(os.path.join(self.tmp, "old"), seq, recs, [row])
         rc, found = case.run(mode="both", budget=("1", "0", "0", "1"))
         self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_refused_run_stops_at_the_first_unit_that_meets_it(self):
+        """C-R1-6: the run of the test above is refused as soon as a work unit meets the
+        position, the other units not checked (here one unit of 30 bases, the first in the
+        order units are run); the refusal came only after every unit had been checked, the
+        whole check time of a genome-wide run."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dpos, spos = len(PRE) + 10, len(PRE) + 4
+        ref_b = GUIDE[3]
+        alts = [x for x in "ACGT" if x != ref_b]
+        recs = [(spos, ref_b, alts[0] + "," + alts[1], {"S03": "1|2"}),
+                (spos, ref_b, alts[2] + "," + ref_b + "T", {"S04": "1|2"}),
+                (dpos, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "0|1"})]
+        start = len(PRE)
+        row = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                         GUIDE + "TGG", "TGG", 0, 0, "X", tok("chr21", recs[2]), "S01,S02")
+        case = as_2100(Case(self.tmp, seq, recs, [row]))
+        ran = []
+        real = C.run_unit
+
+        def counted(unit):
+            ran.append(unit[:4])
+            return real(unit)
+        err = io.StringIO()
+        with mock.patch.object(C, "run_unit", counted), contextlib.redirect_stderr(err):
+            rc, found = case.run(mode="completeness", budget=("1", "0", "0", "1"),
+                                 extra=("--tile", "30"))
+        self.assertEqual((rc, found), (2, []), err.getvalue())
+        self.assertIn("chr21:%d holds two or more VCF lines" % spos, err.getvalue())
+        self.assertEqual(ran, [("comp", "chr21", 0, 30)])
+
+    def test_an_snv_whose_alt_is_in_lower_case_is_refused(self):
+        """The sweep of C-R1-1: CRISPRitz codes no lower-case ALT (a lower-case ALT is not a
+        SNP ALT, every release), while its dictionary lists the carriers; read in upper case
+        as VCF 4.x reads it, the check put the SNV on its carriers' haplotypes and demanded
+        targets the search cannot find. Not modeled: the run is refused (exit 2) with the
+        position, on every release. A lower-case REF with an upper-case ALT is coded (the
+        enricher reads the reference's base) and is checked, as is an indel written in lower
+        case (CRISPRme names it in upper case)."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dpos, spos = len(PRE) + 10, len(PRE) + 4
+        ref_b = GUIDE[3]
+        alt_b = next(x for x in "ACGT" if x != ref_b)
+        start = len(PRE)
+        for name, snv, refused in (("low", (spos, ref_b, alt_b.lower(), {"S03": "1|0"}), True),
+                                   ("ref", (spos, ref_b.lower(), alt_b, {"S03": "1|0"}), False)):
+            recs = [snv, (dpos, (GUIDE[9] + "C").lower(), GUIDE[9].lower(),
+                          {"S01": "1|0", "S02": "0|1"})]
+            row = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                             GUIDE + "TGG", "TGG", 0, 0, "X",
+                             "chr21_%d_%s_%s" % (dpos, GUIDE[9] + "C", GUIDE[9]), "S01,S02")
+            for release in ("2100", "281"):
+                tmp = os.path.join(self.tmp, name + release)
+                os.makedirs(tmp)
+                case = Case(tmp, seq, recs, [row])
+                if release == "2100":
+                    case = as_2100(case)
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    rc, found = case.run(mode="both", budget=("1", "0", "0", "1"))
+                if refused:
+                    self.assertEqual((rc, found), (2, []), (name, release, err.getvalue()))
+                    self.assertIn("chr21:%d holds an SNV whose ALT the VCF writes in lower "
+                                  "case" % spos, err.getvalue())
+                else:
+                    self.assertEqual((rc, gating(found)), (0, []), (name, release, found))
 
     def test_a_snp_row_lists_an_untied_alts_carrier_as_an_unphased_one(self):
         """R3A-1, the SNP rows (the reviewer's world Y, site F): S06 is 1|2 on a line C>A,CT

@@ -9,6 +9,19 @@ import unittest
 import indel_snp_cis as isc
 
 
+def test_record_name_reads_ref_and_alt_in_upper_case():
+    """C-R1-1: the indel path names a record with REF and ALT in upper case, as VCF 4.x
+    and the fake-indel window read them: HPRC's two lines of one deletion, TG>T and tg>t,
+    are one record (their rows fold, their carriers merge), and a contig name with '_'
+    keeps its case."""
+    assert isc.record_name("chr22_23541792_tg_t") == "chr22_23541792_TG_T"
+    assert isc.record_name("chr22_23541792_TG_T") == "chr22_23541792_TG_T"
+    assert (isc.record_name("chr22_36126395_ccctctccctcctttcctTCCTT_c")
+            == "chr22_36126395_CCCTCTCCCTCCTTTCCTTCCTT_C")
+    assert isc.record_name("chrUn_KI270302v1_10_Tgaa_T") == "chrUn_KI270302v1_10_TGAA_T"
+    assert isc.record_name("nounderscore") == "nounderscore"
+
+
 def test_phased_cis_single_snp_confirmed():
     # indel and SNP both on slot 0 -> in cis, CONFIRMED, 1 copy
     cis, phase, ac = isc.cis_cooccurrence({"S": "1|0"}, [{"S": "1|0"}])

@@ -30,9 +30,14 @@ This is that check.
 
 THE TRUTH IS THE VCF, AS THE SEARCH READ IT. A sample's haplotype is the reference with
 every ALT allele its genotype puts on that slot, each in place of its REF bases (VCF 4.x),
-of the records CRISPRme reads; a record is read with its REF and ALT in upper case, and so
-is a row's Variant_info (var_text: a row writes a record as its VCF does, some HPRC records
-in lower case). CRISPRitz's enricher skips every line whose FILTER is
+of the records CRISPRme reads; a record is read with its REF and ALT in upper case, as
+VCF 4.x reads them, and so is a row's Variant_info (var_text: CRISPRme 2.10.0 names an indel
+or MNV record in upper case, and an SNV record, as an earlier release names every record,
+as its VCF writes it, some HPRC records in lower case). An SNV whose ALT the VCF writes in
+lower case is not modeled: CRISPRitz codes no lower-case ALT (a lower-case ALT is not a SNP
+ALT, every release) while its dictionary lists the carriers, and a run whose VCF holds one
+near a row or a record it checks is REFUSED (exit 2). CRISPRitz's enricher skips every line
+whose FILTER is
 neither PASS nor '.' (those exact strings): no such line is in the enriched genome, its
 dictionaries, registry and genotype store, the indel log or the fake-indel windows. The
 phased indel store (build_indel_genotypes) holds the same records since CRISPRme 2.10.0;
@@ -306,14 +311,20 @@ the merge of ``remove_contiguous_samples.py``).
   greater than the least key of the target's alignments of that CFD. (Not compared: the
   merge's keys after the criteria -- the Cluster Position, the carrier count, the aligned
   text -- which only order alignments equal in all of these.) So a (sample, target) is
-  satisfied by a row reporting
-  exactly it with its variants whose fold group (the rows of its site naming those
-  variants with its carrier set) is no worse than it, or by the rows of its site naming
-  the same variants whose carrier set is the target's own as CRISPRme writes it and that
-  are no worse than it: every carrier both the documented view and its own haplotypes
-  list for it, and nobody else but carriers either lists or the view leaves open
-  (PUTATIVE) -- the view only classifies, so one carrier it lists against the truth makes
-  no veto; a carrier whose slot overlaps the record is never required, and allowed where
+  satisfied by the rows that list the sample with exactly that target and its variants,
+  whose fold groups (the rows of its site naming those variants with one of their
+  carrier sets, which two alignments of one target with one carrier set always share)
+  are TOGETHER no worse than it, or by the rows of its site naming the same variants with
+  the target's own carrier sets as CRISPRme writes them that are together no worse than
+  it (a PUTATIVE co-carrier listed on some of the target's alignments only splits them
+  between two carrier sets, METHODS section 4, each set's block its best: the alignment of
+  the fewest edits can stand in one group and the one of the highest CFD in the other;
+  each group judged alone, such a target failed missing-best-alignment, R3B-F2): a
+  carrier set is the target's own when it holds every carrier both the documented view
+  and its own haplotypes list for it, and nobody else but carriers either lists or the
+  view leaves open (PUTATIVE) -- the view only classifies, so one carrier it lists against
+  the truth makes no veto; a carrier whose slot overlaps the record is never required, and
+  allowed where
   its slot, read as METHODS reads it (without the overlapping alleles), holds the target,
   or, a slot with no reading (no one sequence in the VCF), where the view lists it or
   leaves it open. A PUTATIVE target is the carrier's own: it is
@@ -493,11 +504,14 @@ genome keeps the code the earlier lines wrote: a '*' adds no base, and one base 
 code). A run of every allele whose VCF holds, near a row or a record it checks, two or more
 lines that each list several ALTs at one position is refused (exit 2): each entry of the
 position's dictionary value keeps its line's raw allele numbers, which CRISPRme's readers
-cannot tell apart (METHODS section 4), and what CRISPRme then lists is not modeled. Two
-lines of one indel or MNV REF>ALT at a position are one allele on every release,
-their calls merged by the same rule (decision B2: CRISPRme 2.10.0's readers of the phased
-indel store merge them so; one before read the later line alone, a defect the truth
-catches). The INDELS
+cannot tell apart (METHODS section 4), and what CRISPRme then lists is not modeled (a
+refused run stops at the first work unit that meets such a position). Two lines of one
+indel or MNV REF>ALT at a position, in one case or in two, are one allele on every release,
+their calls merged by the same rule (decision B2: CRISPRme 2.10.0 reads them so, REF and
+ALT in upper case, its readers of the phased indel store merging the two lines and its rows
+naming the record in upper case; one before read two lines in one case as the later line
+alone, and two in two cases as two records, the carriers of a target split over two rows:
+defects the truth catches). The INDELS
 index's format is that of its .bin files, else its log's format-1 NOTE of it (refused
 where neither tells and a target of the guide, PAM and budget can lie at a window's edge).
 The phased indel store holds only the records whose FILTER passes but where the run's
@@ -957,7 +971,10 @@ class Vcf(object):
     def _parse(self, line, chrom, beg, end):
         """A record as a dict; the genotype columns stay unsplit (only the lines a window
         keeps are split). A sites-only line (eight columns, no FORMAT) is a record with no
-        genotypes. Its FILTER is kept as written (Window reads it: PASS_FILTERS)."""
+        genotypes. Its FILTER is kept as written (Window reads it: PASS_FILTERS). REF and
+        ALT are read in upper case, as VCF 4.x reads them, and as CRISPRme 2.10.0 names an
+        indel or MNV record; the ALT column as written is kept too (``alt_text``), for an
+        SNV's ALT written in lower case, which CRISPRitz does not code (Window)."""
         if not line or line.startswith("#"):
             return None
         head, sep, tail = line.rstrip("\n").partition("\t")
@@ -973,8 +990,8 @@ class Vcf(object):
         if pos1 - 1 + len(ref) <= beg:
             return None
         return {"chrom": head, "pos1": pos1, "id": f[1], "ref": ref,
-                "alts": [a.upper() for a in f[3].split(",")], "filter": f[5],
-                "info": f[6], "format": f[7] if len(f) > 7 else "",
+                "alts": [a.upper() for a in f[3].split(",")], "alt_text": f[3],
+                "filter": f[5], "info": f[6], "format": f[7] if len(f) > 7 else "",
                 "tail": f[8] if len(f) > 8 else ""}
 
 
@@ -1259,6 +1276,10 @@ class Window(object):
         self.untied = set()
         self.mixed = set()   # 1-based positions whose dictionary lines (every allele coded)
                              # are two or more lines of several ALTs (_dictionary)
+        self.lower_snv = set()  # 1-based positions of an SNV allele read whose ALT the VCF
+                                # writes in lower case, which CRISPRitz does not code (a
+                                # lower-case ALT is not a SNP ALT) while its dictionary
+                                # lists the carriers: not modeled (main refuses the run)
         self.snv_at = defaultdict(list)  # reference coordinate -> SNV alleles there
         self.filtered_keys = {}  # record key -> the FILTER of a line of it outside
                                  # PASS_FILTERS (kept or not)
@@ -1289,6 +1310,14 @@ class Window(object):
                         self._dictionary(group, all_alleles, v.samples)
                     at, group, listed = r["pos1"], [], {}
                 passing = r["filter"] in PASS_FILTERS
+                if (len(r["ref"]) == 1 and (passing or not v.samples)
+                        and r["alt_text"] != r["alt_text"].upper()
+                        and any(x in ("a", "c", "g", "t")
+                                for x in r["alt_text"].split(","))):
+                    # an SNV the run reads whose ALT is written in lower case (the line of
+                    # a genotyped dataset that the enricher reads, or any line of a
+                    # sites-only one, whose SNVs mega's SNP rows read whatever their FILTER)
+                    self.lower_snv.add(r["pos1"])
                 # a line CRISPRitz's enricher lists in the per-sample dictionary: its REF one
                 # base, an ALT of one character at least (a '*' too), its FILTER read
                 in_dict = passing and len(r["ref"]) == 1 and any(len(x) == 1
@@ -2019,9 +2048,11 @@ def parse_token(tok):
 
 def var_text(text):
     """A row's Variant_info with each token's REF and ALT in upper case, as Vcf._parse
-    reads every record (so an allele's token): a row writes a record as its VCF does, and
-    HPRC writes 1,546 indel records of chr22 in lower case (chr22_36126395_ccctctccctcctttc
-    ctTCCTT_c), whose rows completeness looked up by their raw tokens and never found."""
+    reads every record (so an allele's token): a release before 2.10.0 names a record as
+    its VCF writes it (CRISPRme 2.10.0 an SNV record so too, an indel or MNV record in upper
+    case), and HPRC writes 1,546 indel records of chr22 in lower case
+    (chr22_36126395_ccctctccctcctttcctTCCTT_c), whose rows completeness looked up by their
+    raw tokens and never found."""
     if text in NO_VARIANT:
         return text
     out = []
@@ -6475,6 +6506,8 @@ def run_unit(unit):
                 needed.append((a, b))
         win = Window(refseq, ch, needed[0][0], needed[-1][1], vcfs, needed=needed,
                      panel=ctx.panel, sem=ctx.sem)
+        if win.mixed or win.lower_snv:
+            return [], refused(stats, win)   # the run is refused: nothing more to check
         for r in sorted(rows, key=lambda x: x["start"]):
             if any(is_indel_token(x) for x in r["var"].split(",")):
                 check_row(r, win, ctx, rep)
@@ -6483,6 +6516,8 @@ def run_unit(unit):
     else:
         win = Window(refseq, ch, max(0, tlo - pad), thi + pad, vcfs, panel=ctx.panel,
                      sem=ctx.sem)
+        if win.mixed or win.lower_snv:
+            return [], refused(stats, win)
         # a record of the tile whose REF runs far (a long deletion) has its targets'
         # haplotypes written past what was read: read again, to its far end
         one = max(len(ctx.full(g)) for g in ctx.guides) + max(ctx.bdna, ctx.brna) + 2
@@ -6495,8 +6530,17 @@ def run_unit(unit):
     for v in vcfs:
         if v.long_ref:
             stats.setdefault("long_ref", {})[v.path] = v.long_ref
+    return rep.rows, refused(stats, win)
+
+
+def refused(stats, win):
+    """``stats`` with the positions of ``win`` that make the run one this checker does not
+    model (main refuses it, as soon as a unit meets one, and checks no further): two lines
+    of several ALTs at one position where every allele is coded (Window.mixed), an SNV
+    whose ALT the VCF writes in lower case (Window.lower_snv)."""
     stats["mixed"] = sorted(win.mixed)
-    return rep.rows, stats
+    stats["lower_snv"] = sorted(win.lower_snv)
+    return stats
 
 
 def default_cfd_dir():
@@ -7019,11 +7063,13 @@ def main(argv=None):
     filtered = defaultdict(int)     # chromosome -> records the search skips for FILTER
     long_ref = {}                   # unindexed VCF -> the longest REF its reads met
     mixed = set()                   # (chromosome, POS) of two lines of several ALTs
+    lower_snv = set()               # (chromosome, POS) of an SNV ALT in lower case
 
     def keep(result):
         found, stats = result
         rep.rows.extend(found)
         mixed.update((stats["chrom"], p) for p in stats.get("mixed", ()))
+        lower_snv.update((stats["chrom"], p) for p in stats.get("lower_snv", ()))
         sites_only[stats["chrom"]] += stats.get("sites_only", 0)
         filtered[stats["chrom"]] += stats.get("filtered", 0)
         for path, n in stats.get("long_ref", {}).items():
@@ -7035,10 +7081,14 @@ def main(argv=None):
     if args.jobs > 1 and len(units) > 1:
         import multiprocessing as mp
         ctx_mp = mp.get_context("fork")
+        # (a unit that meets a position this checker does not model ends the run: the
+        # pool is left, and its other units stopped, at once)
         with ctx_mp.Pool(args.jobs) as pool:
             for found in pool.imap_unordered(run_unit, units, chunksize=1):
                 keep(found)
                 done += 1
+                if mixed or lower_snv:
+                    break
                 if args.progress and done % args.progress == 0:
                     sys.stderr.write("  %d/%d unit(s), %d finding(s)\n"
                                      % (done, len(units), len(rep.rows)))
@@ -7047,14 +7097,21 @@ def main(argv=None):
         for u in sorted(units, key=lambda x: (x[1], x[2])):
             keep(run_unit(u))
             done += 1
+            if mixed or lower_snv:
+                break
             if args.progress and done % args.progress == 0:
                 sys.stderr.write("  %s %d/%d unit(s), %d finding(s)\n"
                                  % (u[1], done, len(units), len(rep.rows)))
                 sys.stderr.flush()
-    if mixed:
+
+    def where(found):
+        return (", ".join("%s:%d" % m for m in sorted(found)[:5])
+                + (" and %d more" % (len(found) - 5) if len(found) > 5 else ""))
+    if mixed or lower_snv:
         if partial is not None:
             partial.close()
             os.remove(args.out + ".partial")
+    if mixed:
         sys.stderr.write(
             "ERROR: %s hold%s two or more VCF lines that each list several ALTs (a REF of "
             "one base, one ALT of one character at least, FILTER PASS or '.'), on a variant "
@@ -7063,11 +7120,21 @@ def main(argv=None):
             "its line's own allele numbers (1|2), which CRISPRme's readers cannot tell apart "
             "(METHODS section 4: an ALT can be tied to the other line's number and read on "
             "another haplotype slot), and this checker does not model what CRISPRme then "
-            "lists: the run is not checked. Split such lines (bcftools norm -m -any, as the "
-            "published panels are built) or join them into one, and search again.\n"
-            % (", ".join("%s:%d" % m for m in sorted(mixed)[:5])
-               + (" and %d more" % (len(mixed) - 5) if len(mixed) > 5 else ""),
-               "s" if len(mixed) == 1 else ""))
+            "lists: the run is not checked (the first such positions found: the check "
+            "stops at them). Split such lines (bcftools norm -m -any, as the published "
+            "panels are built) or join them into one, and search again.\n"
+            % (where(mixed), "s" if len(mixed) == 1 else ""))
+    if lower_snv:
+        sys.stderr.write(
+            "ERROR: %s hold%s an SNV whose ALT the VCF writes in lower case: CRISPRitz codes "
+            "no lower-case ALT into the enriched genome (a lower-case ALT is not a SNP ALT), "
+            "so the search never reads it, while its dictionary lists its carriers; this "
+            "checker does not model such an allele: the run is not checked (the first such "
+            "positions found: the check stops at them). VCF 4.x reads "
+            "REF and ALT whatever their case: write them in upper case (the input "
+            "validator's full scan, --full_input_validate, says how) and search again.\n"
+            % (where(lower_snv), "s" if len(lower_snv) == 1 else ""))
+    if mixed or lower_snv:
         return 2
     for ch in sorted(c for c, n in sites_only.items() if n):
         rep.add(False, "limit-no-genotypes", {"table": "completeness", "chrom": ch},

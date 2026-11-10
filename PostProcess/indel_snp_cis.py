@@ -316,6 +316,25 @@ class SnpColumn(object):
 _gt_tokens = site_alleles.gt_tokens
 
 
+def record_name(name):
+    """The name of an indel or MNV record, '<contig>_<POS>_<REF>_<ALT>' as CRISPRitz's
+    indel log writes it, with REF and ALT in upper case (split from the right: a contig
+    name can hold '_'). VCF 4.x reads REF and ALT whatever their case, and so does the
+    fake-indel window (CRISPRitz writes the ALT in place of the REF, and the search reads
+    the window in upper case), while the log keeps the VCF's text: HPRC's vcfwave writes
+    1,546 indel records of chr22 in lower case, 140 of them beside a line of the same
+    indel in upper case (chr22:23541792 TG>T and tg>t). Named as written, such two lines
+    were two records, the carriers of one target split over two rows; named so, they are
+    one, as two lines of one indel written alike are (the merge folds their rows, and the
+    readers of the phased indel store merge their carriers:
+    build_indel_genotypes.merge_store_carriers)."""
+    head, sep, alt = name.rpartition("_")
+    contig_pos, sep2, ref = head.rpartition("_")
+    if not sep or not sep2:
+        return name
+    return "%s_%s_%s" % (contig_pos, ref.upper(), alt.upper())
+
+
 def kept_bases(ref, alt):
     """How many bases REF and ALT share at the start (the VCF anchor base): the REF
     bases a haplotype carrying the variant keeps. The rest of REF is deleted or

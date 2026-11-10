@@ -259,8 +259,10 @@ def merge_store_carriers(earlier, later):
     puts it there when they are phased alike; else the call with more copies, the earlier
     on a tie). The store writes one line per record, and up to 2.10.0's integration every
     reader kept the later line alone, so a carrier only the earlier line listed lost its
-    phased genotype: CRISPRme listed it on no row of the indel, or on some alignments only
-    (39 indels of HPRC chr22 are written on two lines, 1,400 listings on the earlier only)."""
+    phased genotype: CRISPRme listed it on no row of the indel, or on some alignments only.
+    The readers key both lines in upper case (store_key), so two lines in two cases are
+    merged too. HPRC chr22 writes 179 indels on two lines: 39 in one case (1,400 listings on
+    the earlier only, which every reader lost) and 140 in two (read as two indels before)."""
     if not earlier:
         return later
     if not later:
@@ -274,13 +276,24 @@ def merge_store_carriers(earlier, later):
     return ",".join("%s:%s" % (s, g) for s, g in site_alleles.merge_carriers(a, b).items())
 
 
+def store_key(pos, ref, alt):
+    """The key a reader of the store gives an indel: ``<pos>_<REF>_<ALT>`` with REF and
+    ALT in upper case. The store writes each record's key as its VCF line does, and VCF
+    4.x reads REF and ALT whatever their case, as the fake-indel window does (CRISPRitz
+    writes the ALT in place of the REF, the search reads the window in upper case), so
+    two lines of one indel in two cases (tg>t beside TG>T) are one allele here as two
+    lines written alike are (merge_store_carriers); the rows name it in upper case
+    (indel_snp_cis.record_name)."""
+    return f"{pos}_{ref}_{alt}".upper()
+
+
 class IndelGenotypeReader(object):
     """Read a phased indel genotype store (one chromosome) into a dict keyed by
-    ``<pos>_<REF>_<ALT>``. Small enough to hold in memory (indels << SNPs).
-    ``reads_filter``: whether the store holds only the records of PASS_FILTERS
-    (store_reads_filter); one written before 2.10.0 may hold the others too. A key the
-    store holds twice (an indel the VCF writes on two lines) is one allele, its carriers
-    merged (merge_store_carriers)."""
+    ``<pos>_<REF>_<ALT>``, REF and ALT in upper case (store_key). Small enough to hold
+    in memory (indels << SNPs). ``reads_filter``: whether the store holds only the
+    records of PASS_FILTERS (store_reads_filter); one written before 2.10.0 may hold the
+    others too. A key the store holds twice (an indel the VCF writes on two lines, in
+    one case or in two) is one allele, its carriers merged (merge_store_carriers)."""
 
     __slots__ = ("_by_key", "reads_filter")
 
@@ -293,12 +306,13 @@ class IndelGenotypeReader(object):
                 key, _, toks = line.rstrip("\n").partition("\t")
                 if not key:
                     continue
+                key = key.upper()  # store_key: the position is digits
                 prev = self._by_key.get(key)
                 self._by_key[key] = toks if prev is None else merge_store_carriers(prev, toks)
 
     def carriers(self, pos, ref, alt):
         """Return "sample:gt" tokens (comma-joined) for the indel, or "" if absent."""
-        return self._by_key.get(f"{pos}_{ref}_{alt}", "")
+        return self._by_key.get(store_key(pos, ref, alt), "")
 
     def carriers_dict(self, pos, ref, alt):
         """Return {sample_id: normalized_gt} for the indel (empty if absent)."""

@@ -690,6 +690,8 @@ mmblg_best = open(outputFile + ".bestmmblg_INDEL.txt", "w")
 mmblg_best.write(header + "\tCFD\n")  # Write header
 
 
+import indel_snp_cis as _isc
+
 INDELS_tree = IntervalTree()
 # prefer a gzip-compressed indel log (log<chrom>.txt.gz) when present so batteries
 # installs keep the logs compressed on disk and read them on the fly; fall back to plain
@@ -703,13 +705,16 @@ with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, 
         fake_pos = splitted[5].strip().split(",")  # inizio,fine del fakechr
         # start       end fakechr          #pos_vera,samples,rsID,MAF,INDELinfo,start_fake,ref_seq
         # (the rsID is the record's first ID: CRISPRitz add-variants writes no other into
-        # the indel log, whatever the number of ALTs; METHODS section 8)
+        # the indel log, whatever the number of ALTs; METHODS section 8). The record is
+        # named with REF and ALT in upper case (indel_snp_cis.record_name): two lines of
+        # one indel written in two cases are one record, as the phased store's readers
+        # read them (2.10.0; the log keeps the VCF's case).
         INDELS_tree[int(fake_pos[0]) : int(fake_pos[1])] = [
             splitted[0],
             splitted[1],
             splitted[2],
             splitted[3],
-            splitted[4],
+            _isc.record_name(splitted[4]),
             int(fake_pos[0]),
             splitted[6],
         ]

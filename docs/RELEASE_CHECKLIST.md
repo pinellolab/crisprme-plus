@@ -147,8 +147,10 @@ for mode in per-sample population-level; do
   #   missed: per sample on the per-sample run, where every carrier target must be
   #   reported for its carrier by rows of its site and strand no worse than its best
   #   alignment by the merge's sort keys (--sorting-criteria, then the CFD at three
-  #   decimals and the criteria again) -- the fold group of the row that lists it, or the
-  #   rows a fold puts it under; per merge cluster on the population-level run, which keeps
+  #   decimals and the criteria again) -- the fold groups of the rows that list it,
+  #   together, or the rows a fold puts it under, together (a PUTATIVE co-carrier can split
+  #   one target's alignments between two carrier sets); per merge cluster on the
+  #   population-level run, which keeps
   #   one row per cluster -- its row must have no more edits than each target and at least
   #   its CFD, at the three decimals the merge sorts on; the checker reads the mode from
   #   Results/*/.alt_mode, the cap from .Params.txt, the criteria from .command_line.txt

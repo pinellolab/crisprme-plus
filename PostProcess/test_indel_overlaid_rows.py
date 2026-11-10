@@ -824,6 +824,31 @@ class FullTiers(_Base):
         self.assertTrue(rows)
         self.assertTrue(all(r["total"] == 0 for r in rows), rows)
 
+    def test_an_indel_written_in_two_cases_is_one_record(self):
+        """C-R1-1: site A's deletion written on two VCF lines in two cases, S01 on the
+        upper-case line and S02, S03 on the lower-case one (HPRC's vcfwave writes 140
+        indels of chr22 so: TG>T beside tg>t). CRISPRitz cuts a fake-indel window for each
+        line and its log names each as written; the record is one allele, so both windows'
+        rows name it in upper case with the carriers of both lines (S02's PAM SNP is in cis,
+        S03's in trans), and the merge folds the two copies into one row. Read as written,
+        the upper-case window's rows listed S01 alone and the lower-case one's, named
+        chrT_110_gcac_g, S03 alone: one target's carriers split over two rows."""
+        w = self.world
+        i = next(k for k, ind in enumerate(w.indels) if ind[3] == "rs_A_indel")
+        pos1, ref, alt, _rs, _gts = w.indels[i]
+        w.indels[i] = (pos1, ref, alt, "rs_A_indel", {"S01": "1|0"})
+        w.indels.insert(i + 1, (pos1, ref.lower(), alt.lower(), "rs_A_indel_lc",
+                                {"S02": "1|0", "S03": "1|0"}))
+        fx = self.run_analyzer()
+        rows = [r for r in fx.rows() if int(r["var"].split(",")[0].split("_")[1]) == pos1]
+        self.assertTrue(rows)
+        self.assertEqual({r["var"].split(",")[0] for r in rows},
+                         {"%s_%d_%s_%s" % (CHROM, pos1, ref, alt)})
+        best = [r for r in rows if r["cfd"] == 1.0]
+        self.assertEqual(sorted((r["dna"], r["samples"], r["rsid"]) for r in best),
+                         [(GUIDE + "TGG", "S01,S03", "rs_A_indel"),
+                          (GUIDE + "TGG", "S01,S03", "rs_A_indel_lc")])
+
 
 @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
 class OtherInstalls(_Base):

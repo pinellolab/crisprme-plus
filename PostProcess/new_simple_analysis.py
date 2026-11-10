@@ -920,11 +920,13 @@ class _SnpRowIndels(object):
                     k = bisect.bisect_right(starts, p0 + len(ref) - 1) - 1
                     if k < 0 or self.intervals[k][1] < p0:
                         continue  # meets no target's surroundings
-                    rec = (p0 + 1, ref, alt)
+                    # REF and ALT in upper case (build_indel_genotypes.store_key)
+                    rec = (p0 + 1, ref.upper(), alt.upper())
                     toks = toks.rstrip("\n")
                     if rec in self._tokens:
-                        # an indel the VCF writes on two lines: one allele, its carriers
-                        # merged (build_indel_genotypes.merge_store_carriers)
+                        # an indel the VCF writes on two lines, in one case or in two:
+                        # one allele, its carriers merged
+                        # (build_indel_genotypes.merge_store_carriers)
                         self._tokens[rec] = _big.merge_store_carriers(self._tokens[rec], toks)
                         continue
                     self.indels.append(rec)

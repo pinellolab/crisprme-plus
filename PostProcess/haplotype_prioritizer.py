@@ -443,17 +443,22 @@ class IndelIndex(object):
                 if wanted is not None and not any(
                         p in wanted for p in range(pos - 1, pos + len(ref))):
                     continue
-                prev = self._toks.get((pos, ref, alt))
-                # an indel the VCF writes on two lines: one allele, its carriers merged
-                self._toks[(pos, ref, alt)] = (toks if prev is None else
-                                               big.merge_store_carriers(prev, toks))
+                # REF and ALT in upper case, as parse_variants reads a row's
+                # (build_indel_genotypes.store_key): keyed as the VCF writes them, an
+                # indel written in lower case (1,546 of HPRC chr22) was in no panel
+                key = (pos, ref.upper(), alt.upper())
+                prev = self._toks.get(key)
+                # an indel the VCF writes on two lines, in one case or in two: one
+                # allele, its carriers merged
+                self._toks[key] = (toks if prev is None else
+                                   big.merge_store_carriers(prev, toks))
         self.indels = sorted(self._toks)
         self.starts = [p for p, _r, _a in self.indels]
         self.maxref = max((len(r) for _p, r, _a in self.indels), default=1)
         self._gts = {}
 
     def carriers(self, pos, ref, alt):
-        key = (pos, ref, alt)
+        key = (pos, ref.upper(), alt.upper())
         gts = self._gts.get(key)
         if gts is None:
             gts = {}
@@ -465,7 +470,7 @@ class IndelIndex(object):
         return gts
 
     def has(self, pos, ref, alt):
-        return (pos, ref, alt) in self._toks
+        return (pos, ref.upper(), alt.upper()) in self._toks
 
     def near(self, lo, hi):
         """Every indel whose REF meets the reference bases lo..hi (0-based, inclusive) or
