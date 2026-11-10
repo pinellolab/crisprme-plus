@@ -885,24 +885,24 @@ alignments (chr1:246083493 (+), chr20:63226848 (+), chr4:183404212 (−) three,
 chr5:157864188 (+) two), 5 of which 2.8.1 also read created; in these tables D4 changes nothing
 else. Its reach depends on the guide and the panel, and it is largest beside hg38_mega, a
 sites-only panel whose five sources hold many insertions in short tandem repeats. Every indel block
-of a run judged with the rule before D4 and with D4's (each run's own code gives back every value
-of its tables), D4 turns NA to created, and changes nothing else: on chr22, the README guide with
-NRR at 4 mismatches + 1 DNA + 1 RNA bulge, per-sample on HGDP + 1000 Genomes beside hg38_mega, 260
-blocks of each kind in 646 alternative alignments, the highest-CFD ones at CFD at most 0.057 (19
-above 0.008), from 12 insertions, 234 of those 260 at three in (TA)n repeats (chr22:18201792
-T>TATATCA, 18201794 A>ATATATTG, 24238776 T>TAAGATAG; chr22:18201791 (−), its PAM TGA wholly
-inserted beside the reference's AAA, CFD 0.057); the checker's three repeat-rich guides with NRG,
-per-sample on HGDP + 1000 Genomes, 4 alternative alignments (chr22:45890423 (+), its PAM CGG wholly
-inserted beside the reference's AGG, CFD 0.115; 45890407 (+), 0.040; two at CFD 0);
+of a run judged with the rule before D4 and with D4's (the code of each run of 2.10.0 gives back
+every value of its tables), D4 turns NA to created, and changes nothing else: on chr22, the README
+guide with NRR at 4 mismatches + 1 DNA + 1 RNA bulge, per-sample on HGDP + 1000 Genomes beside
+hg38_mega, 260 blocks of each kind in 646 alternative alignments, the highest-CFD ones at CFD at
+most 0.057 (19 above 0.008), from 12 insertions, 234 of those 260 at three in (TA)n repeats
+(chr22:18201792 T>TATATCA, 18201794 A>ATATATTG, 24238776 T>TAAGATAG; chr22:18201791 (−), its PAM
+TGA wholly inserted beside the reference's AAA, CFD 0.057); the checker's three repeat-rich guides
+with NRG, per-sample on HGDP + 1000 Genomes, 4 alternative alignments (chr22:45890423 (+), its PAM
+CGG wholly inserted beside the reference's AGG, CFD 0.115; 45890407 (+), 0.040; two at CFD 0);
 genome-wide, hg38_mega alone, five guides (README, `ACTGAAATCTGTAAGCAGGC`, TRAC, EMX1, VEGFA site
 3) with NRG at 4 mismatches and no bulge, population-level, one block in each of 8 rows (the one
 highest-CFD block chr14:91881120 (−), VEGFA site 3, its PAM GGG wholly inserted beside the
-reference's TAG, CFD 0.113); and genome-wide on HPRC, the rows of the one genome-wide HPRC table there
-is (CRISPRme 2.5.4, per-sample, `TGCTTGGTCGGCACTGATAG` with NRG at 4 + 1 + 1, placed as 2.10.0
-places them), 17 highest-CFD blocks, CFD at most 0.011. It changes nothing in the same chr22 runs
-population-level, in HPRC's and its unphased copy's (both modes), or in the README guide's (NRG,
-NRR), TRAC's and SaCas9's on HGDP + 1000 Genomes. These go well beyond the 11 rows at CFD at most
-0.008 decision D4 was taken on.
+reference's TAG, CFD 0.113); and genome-wide on HPRC, the rows of the one genome-wide HPRC table
+there is (CRISPRme 2.5.4, per-sample, `TGCTTGGTCGGCACTGATAG` with NRG at 4 + 1 + 1, placed as
+2.10.0 places them; its own rule is not one this can check), 17 highest-CFD blocks, CFD at most
+0.011. It changes nothing in the same chr22 runs population-level, in HPRC's and its unphased
+copy's (both modes), or in the README guide's (NRG, NRR), TRAC's and SaCas9's on HGDP + 1000
+Genomes. These go well beyond the 11 rows at CFD at most 0.008 decision D4 was taken on.
 
 From 2.5.0 to 2.8.0 each code was instead read **column by column without genotypes** —
 the guide's base when it was an allele, else the code's first allele. That reported one

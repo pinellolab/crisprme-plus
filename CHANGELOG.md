@@ -2204,8 +2204,8 @@ and the `release-crisprme` skill.
     taken on those 11. Its reach depends on the guide and the panel, and it is largest beside
     hg38_mega, a sites-only panel whose five sources hold many insertions in short tandem
     repeats. Every indel block of a run judged with the rule before D4 (d3722b0's) and with
-    D4's (each run's own code gives back every value of its tables), it turns NA to created,
-    and changes nothing else:
+    D4's (the code of each run of 2.10.0 gives back every value of its tables), it turns NA to
+    created, and changes nothing else:
     - chr22, the README guide with NRR at 4 mismatches + 1 DNA + 1 RNA bulge, per-sample on
       HGDP + 1000 Genomes beside hg38_mega (a gate configuration): 260 blocks of each kind
       (highest CFD, fewest mismatches and bulges, highest CRISPR-Bulge) in 646 of its 762,646
@@ -2226,7 +2226,8 @@ and the `release-crisprme` skill.
     - Genome-wide, HPRC: the rows of the one genome-wide HPRC table there is (CRISPRme 2.5.4,
       per-sample, `TGCTTGGTCGGCACTGATAG` with NRG at 4 mismatches + 1 + 1, placed as 2.10.0
       places them; 63% of its rows and 86% of its alternative alignments hold the variants they
-      list): 17 highest-CFD blocks (3 rows, 14 alternative alignments), CFD at most 0.011.
+      list; its own PAM_creation rule is not one this can check): 17 highest-CFD blocks (3 rows,
+      14 alternative alignments), CFD at most 0.011.
     - None in the other chr22 gate runs: HPRC and its unphased copy (both modes), and the README
       guide (NRG, both modes; NRR), TRAC and SaCas9 (2/0/0, 4/1/1) on HGDP + 1000 Genomes.
     The genome-wide mega tables of CRISPRme 2.8.1 (a pre-release, NRR and NRG, 4 mismatches and
