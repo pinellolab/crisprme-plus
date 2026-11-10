@@ -1015,8 +1015,16 @@ def _gate_chromosome(job):
     panels = [PanelChrom(name, root, chrom, role, wanted, seq_at)
               for name, root, role in panel_specs]
     panels = [p for p in panels if p.gt is not None or p.indels is not None]
+    # the frequencies of the bound: a sites-only dataset's first (on mega a SNP's AF_max as
+    # its registry holds it, an indel's from its indel frequencies), then the other
+    # datasets', in the search's order. Beside a genotyped dataset the rows the bound
+    # demotes are the sites-only dataset's, and a SNP both list took the genotyped
+    # dataset's own frequency when that dataset came first in the search (HGDP + 1000
+    # Genomes, then mega: a singleton of its 8,182 haplotypes where the mega's AF_max is
+    # 0.002; review r2 of lane M)
+    ordered = sorted(datasets, key=lambda d: dataset_kind(dictionaries, d) != "sites-only")
     registries = []
-    for name in datasets:
+    for name in ordered:
         rb = os.path.join(dictionaries, f"registry_{name}", f"reg_{chrom}.bin")
         ri = os.path.join(dictionaries, f"registry_{name}", f"reg_{chrom}.idx")
         if os.path.isfile(rb) and os.path.isfile(ri):
@@ -1029,7 +1037,7 @@ def _gate_chromosome(job):
     # as its registry gives for a SNP); a genotyped dataset's rows carry theirs (MAF)
     at_indels = {v[1] for aln in rows for v in aln.variants if not is_snp(v)}
     indel_afs = []
-    for name in datasets:
+    for name in ordered:
         path = os.path.join(dictionaries, f"indel_af_{name}", f"indel_af_{chrom}.tsv.gz")
         if at_indels and os.path.isfile(path):
             try:

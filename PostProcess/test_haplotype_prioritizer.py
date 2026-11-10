@@ -911,6 +911,37 @@ class TestTheFrequencyBoundDemotesSitesOnlyRows(unittest.TestCase):
         self.assertFalse(meta["frequency_bound"])
         self.assertEqual({r[3] for r in got if r[2] == "C2"}, {"-"})
 
+    def test_beside_a_genotyped_dataset_a_snp_takes_the_sites_only_frequency(self):
+        """(review r2 of lane M, M-R2-2) In a search of a genotyped dataset and a sites-only
+        one, a SNP both datasets list takes the sites-only dataset's frequency in the bound
+        (on mega its AF_max as its registry holds it), whatever their order in the search:
+        the rows the bound demotes are the sites-only dataset's. Row 3's 303 G>T is one of
+        the genotyped dataset's 40 alleles (0.025) and 0.0005 in the mega: the rarest is
+        under 0.001. With the genotyped dataset first, its frequency was taken, and the row
+        was within the bound (the gate's HGDP + 1000 Genomes then mega)."""
+        import tier0_compile as t0c
+        import tier0_registry as t0
+        build_panel(self.dicts, [(303, "G", "T", {"S00": "1|0"})], name="hg38_G")
+        rd = os.path.join(self.dicts, "registry_hg38_G")
+        os.makedirs(rd)
+        t0.compile_registry_panel([(303, "G", "T", "rs303", {"S00": "1|0"})], SAMPLE_META,
+                                  None, t0c.ploidy_of_for_chrom(CHROM),
+                                  os.path.join(rd, f"reg_{CHROM}.bin"),
+                                  os.path.join(rd, f"reg_{CHROM}.idx"))
+        for vcfs in ("VCFs/hg38_G\nVCFs/hg38_mega\n", "VCFs/hg38_mega\nVCFs/hg38_G\n"):
+            with self.subTest(order=vcfs.split()):
+                _out, meta, got = self.gate("--mode", "population-level", vcfs=vcfs)
+                self.assertEqual((meta["status"], meta["frequency_bound"]), ("run", True))
+                by_row = {r[0]: r for r in got}
+                # 300 C>G is not in the genotyped panel: C2, read against the bound
+                self.assertEqual(by_row["3"][2:], (
+                    "C2", hp.BELOW_BOUND,
+                    "not checked: 1 of 2 variants not in hg38_G; frequency product 3.0e-04, "
+                    "rarest 5.0e-04 (below the 1e-06 / 0.001 bound, ranked after the others)"))
+                self.assertEqual({r[0]: r[3] for r in got},
+                                 {"1": "-", "2": hp.BELOW_BOUND, "3": hp.BELOW_BOUND,
+                                  "4": hp.NOT_IN_PANEL})
+
     def test_a_per_sample_search_checks_the_rows_that_name_no_carrier(self):
         build_panel(self.dicts, [(100, "A", "G", {"S01": "1|0"})], name="hg38_G")
         rows = list(self.rows)
