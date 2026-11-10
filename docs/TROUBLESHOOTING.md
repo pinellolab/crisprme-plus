@@ -225,3 +225,43 @@ Each of these names the index and what to do; none of them removes anything.
   .../23-NGG_2_hg38 .../20-NGG_2_hg38`), or move it aside. An index of the older name
   (`NGG_2_hg38`) built for another guide is left as it is, and the search builds its own beside it.
   Any published index serves a 21-nt guide at up to 1 bulge of each type.
+
+## 12. A build or a search refuses to enrich a dataset anew
+
+**Symptom.** `build-index-only`, or a variant search, stops before it builds anything with
+`No finished enrichment of <dataset> is in place (...), so ... would enrich it anew with the
+installed CRISPRitz, whose fake-indel windows are 30/30; but an earlier enrichment of it, whose
+records tell windows of 25/27 (...), left what was built from it: ...`.
+
+**Cause.** The dataset's enriched genome (`Genomes/<genome>+<dataset>`) is not there (removed to
+save space, or never installed: an index download holds none), while its dict-less tiers or
+indexes are, built from an enrichment of CRISPRitz 2.9.1 or earlier (CRISPRme 2.8.1, fake-indel
+windows of 25/27). A new enrichment of CRISPRitz 2.10.0 differs from it in its SNPs too (2.9.1
+enriched only the last ALT of a site written on several records), and a search would read the
+stores of the two together, with carriers or rows wrong or lost.
+
+**Fix.** Remove what the message lists (it gives the `rm -rf` command, each path absolute), then
+run `build-index-only` with the dataset's VCFs and its `--samplesID`, which enriches it anew and
+builds its tiers and index; or put the earlier enrichment back and search it as it is (its windows
+hold targets of up to 27 bases, guide, PAM and DNA bulges counted, 26 at an MNV). Beside the stores
+of an enrichment of the installed CRISPRitz's windows, a dataset is enriched anew as before.
+`build-index-only` run on an enrichment of 2.9.1's windows in place says how to enrich it with
+2.10.0's in the same way (METHODS §4).
+
+## 13. A build or a search says a fake-indel genome and its indel logs come from two enrichments
+
+**Symptom.** `build-index-only`, or a variant search that would build an index, stops with
+`The fake-indel genome Genomes/<genome>+<dataset>_INDELS and the indel logs ... come from two
+enrichments: on <chrom>, the window of ... ends elsewhere there`; or `download --what index`
+warns that `the enrichment of <dataset> in place ... is another one than the archive's`.
+
+**Cause.** The dataset's indel logs, dictionaries and tiers came one way (a download of an index
+installs them) and its enriched and fake-indel genomes another (an enrichment made here, by
+another CRISPRitz, whose windows were another width). An index built from the enrichment in place
+would be read with the other enrichment's logs: every indel row misplaced.
+
+**Fix.** Put the enrichment that goes with the logs in place of this one: remove it, as the
+message says (`rm -rf` of the enriched and the fake-indel genome), and install the published
+index's enriched-genome kit ([Precomputed indexes](PRECOMPUTED_INDEXES.md)); or remove all of the
+dataset that comes from an enrichment (the message lists it) and run `build-index-only` with its
+VCFs and `--samplesID`, which enriches it anew.

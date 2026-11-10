@@ -197,8 +197,9 @@ done
 #     (the reference bases before the record and after it that the run's indel log records:
 #     30 and 30 on an enrichment of CRISPRitz 2.10.0, 25 and 27 on one of 2.9.1), or whose
 #     site's guide region (the guide's length from its PAM) does: on 30/30 windows a target
-#     of more than 31 bases, guide, PAM and DNA bulges counted, on 25/27 a 27-nt one with a
-#     DNA bulge (the check reads the windows from the run's indel log, else its INDELS
+#     of more than 31 bases, guide, PAM and DNA bulges counted, on 25/27 one of more than 27
+#     (26 at an MNV): a 27-nt one with a DNA bulge, or at an MNV without one (the check reads
+#     the windows from the run's indel log, else its INDELS
 #     index's record, and refuses a run of 2.10.0 that says neither); limit-window-edge and
 #     limit-last-alt-wins on an index CRISPRitz 2.9.1 built, of format 1;
 #     limit-max-degeneracy under --max-degeneracy; limit-capped-window on a per-sample run

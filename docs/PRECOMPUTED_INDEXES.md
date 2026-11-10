@@ -649,7 +649,10 @@ A dict-less variant index adds the tier/companion/self-completeness fields:
   bases each fake-indel window holds before an indel and after it, as the index's indel
   logs record them: `[30, 30]` for one CRISPRitz 2.10.0 built (an archive without the field,
   every one published up to 2.8.1, holds 25 and 27). `download --what index` says when an
-  archive's windows are not the installed CRISPRitz's ([METHODS §4](../METHODS.md#snpindel-off-targets-each-carriers-own-haplotype)).
+  archive's windows are not the installed CRISPRitz's, and warns of an index of the dataset
+  already installed from another enrichment (an INDELS index of other windows, or a variant
+  index of index format 1 beside an archive of 30/30), which a search would read with the
+  archive's dictionaries ([METHODS §4](../METHODS.md#snpindel-off-targets-each-carriers-own-haplotype)).
 
 The manifest is surfaced (build timestamp / display name) when the index is
 downloaded, and old fields are ignored by older consumers — the index directory
@@ -707,12 +710,18 @@ codes** onto the fake-indel genome flanks before indexing the `_INDELS` companio
 the indel search can match SNP+indel haplotypes. Each indel's fake-indel window holds 30
 reference bases on either side of it in an index CRISPRitz 2.10.0 built (25 before and 27
 after in one of 2.9.1, every archive published up to CRISPRme 2.8.1), so a target of guide,
-PAM and DNA bulges up to 31 bases (27) holds its indel there; the width is read from each
-archive's own indel logs, which every INDELS sub-index records it was built from, and a
+PAM and DNA bulges up to 31 bases (27, 26 at an MNV) holds its indel there; the width is read
+from each archive's own indel logs, which every INDELS sub-index records it was built from, and a
 search refuses an INDELS index installed beside indel logs of other windows (a 2.8.1
 archive's index beside the logs of a 2.10.0 one, say: two archives of one panel and one
 release share their logs, and are searched as usual), and says when its targets need more
-than its windows hold (METHODS §4). Post-analysis resolves each indel
+than its windows hold (METHODS §4). A dataset of 2.9.1's windows that you built yourself is
+enriched again with 2.10.0's as `build-index-only` run on it says: by removing its enrichment
+and all that was built from it (its genomes, dictionaries, indel logs and dict-less tiers, and
+every index of it), which the command names by absolute path, then running it again, since a
+2.9.1 enrichment differs from a 2.10.0 one in its SNPs too; a dataset is never enriched anew
+beside the stores of an enrichment of other windows (a search or a build refuses it, naming
+them). Post-analysis resolves each indel
 target on its carriers' own haplotypes (each gets the SNP alleles it carries, so a row
 lists only the individuals that have its sequence, or, where the phase is unknown, those
 whose own alleles allow it, PUTATIVE, split multi-allelic SNP sites aside on an index
