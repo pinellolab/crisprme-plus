@@ -569,7 +569,11 @@ complete protocol.
    container prefix, from the environment). Every part of the index reads the records CRISPRitz
    2.10.0's enricher reads:
    - the build input (`PostProcess/prepare_mega_build_vcf.py`): the records whose FILTER is `PASS`
-     or `.` only, `INFO/AF` = `AF_max` for SNVs and indels (the indel log's frequency);
+     or `.` only, `INFO/AF` = `AF_max` for SNVs and indels (the indel log's frequency; a record
+     with no `AF_max`, as on chrY, the largest of its sources' frequencies, written as both), one
+     record of each REF>ALT, the more frequent (the enricher merges two SNP records of one
+     allele but gives each indel record a window and a log row of its own; the as-run merge
+     wrote 8 long deletions on two lines genome-wide, none on chr22 or chr14);
    - one `build-index-only` **without** `--samplesID` of its copy with a presence genotype,
      `MEGA`, carrying every ALT (`PostProcess/synth_sites_gt.py`), so the enricher windows the
      indels: the enriched genome (the kit), the SNP index, the fake-indel genome, the `_INDELS`
@@ -579,8 +583,9 @@ complete protocol.
      `tier0_registry.compile_registry_from_info_af`: each source a db group with
      `AC=round(AF·AN_nom)`, `AN_nom=2×cohort-N`, the GLOBAL group `AF_max`) and the per-source
      indel frequencies (`PostProcess/build_mega_indel_af.py`), both reading the build input as
-     the enricher does (FILTER, every allele of a line, one REF>ALT on two records the more
-     frequent one's); the registry is SNP-only, the indels (~24%) the fake-indel path's;
+     the enricher does (FILTER, every allele of a line, an allele once, no indel within the
+     window's left flank of the chromosome's start, read from the indel log); the registry is
+     SNP-only, the indels (~24%) the fake-indel path's;
    - `samplesIDs/hg38_mega.samplesID.txt`, the file a search names with `--samplesID`: the five
      sources as pseudo-samples, as the shipped install has it (one already there is kept);
    - `PostProcess/verify_mega_chrom.py`, which reads the source VCF on its own and checks the
@@ -598,12 +603,13 @@ complete protocol.
    frequencies were built from every record of the VCF, whatever its FILTER.
 5. **Searching it.** A sites-only dataset's candidates in windows of 2<sup>20</sup> sequences or
    more are withheld from its post-analysis by the sites-only density guard
-   (`--no-sites-only-density-guard` turns it off), and its rows of two or more variants whose
-   frequencies fail the safeguards' bound are ranked after the others by the carrier gate
-   (METHODS section 5). With the guard, a search of five guides at 4 mismatches and 1 + 1 bulges
-   took 1.46 times the shipped mega's on chr22 and 1.57 times on chr14 (IGH), measured side by
-   side; unguarded, 4.6 times on chr22, and the chr14 search was projected at 12 to 16 h against
-   46 min.
+   (`--no-sites-only-density-guard` turns it off), listed in the dense-region files and noted on
+   the rows there, and its rows of two or more variants whose frequencies fail the safeguards'
+   bound are ranked after the others by the carrier gate (METHODS section 5). With the guard, a
+   search of five guides at 4 mismatches and 1 + 1 bulges took 1.37 times the shipped mega's on
+   chr22 (1.46 in an earlier measurement) and 1.57 times on chr14 (IGH), measured side by side;
+   unguarded, 4.5 times on chr22, and the chr14 search was projected at 12 to
+   16 h against 46 min.
 
 Once you have an enriched genome (`Genomes/hg38+hg38_<ds>/` + `_INDELS/`) — downloaded or
 rebuilt — **any** PAM reuses it via Step 3.

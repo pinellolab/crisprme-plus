@@ -11,8 +11,9 @@ decision, 2026-09-01). NRG (NRG_3) only for now.
 
 > **CRISPRme 2.10.0.** The mega is rebuilt from the same merged VCFs by
 > `seq_script/merge_panels/mega_rebuild.sh`: every store reads the records CRISPRitz 2.10.0's
-> enricher reads (FILTER `PASS`/`.`, every allele of a line, one REF>ALT on two records the more
-> frequent one's), the build input carries `INFO/AF` = `AF_max`, and `PostProcess/verify_mega_chrom.py`
+> enricher reads (FILTER `PASS`/`.`, every allele of a line), the build input carries `INFO/AF` =
+> `AF_max` and one record of each REF>ALT (the more frequent: the enricher windows each indel
+> record apart), and `PostProcess/verify_mega_chrom.py`
 > checks every store against the source VCF (METHODS section 2). Searched, a sites-only dataset's
 > candidates in windows of 2^20 sequences or more are withheld (the sites-only density guard) and
 > its combinations below the frequency bound ranked after the others (METHODS section 5). The build

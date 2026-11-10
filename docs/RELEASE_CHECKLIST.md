@@ -190,8 +190,9 @@ done
 #     limit-max-degeneracy under --max-degeneracy; limit-capped-window on a per-sample run
 #     of 2.8.x, whose classic dictionaries wrote a capped window's greedy row;
 #     limit-density-guard, a sites-only dataset's row the density guard withheld;
-#     limit-insertion-site, a population-level target whose near row names an insertion
-#     and can be the next site's, the chain of every row reaching a row as good as it), slots whose VCF
+#     limit-insertion-site, a population-level target whose near row starts inside an
+#     insertion and can be the next site's, the chain of every row reaching a row as good as
+#     it), slots whose VCF
 #     alleles overlap where a target of their record reads, so the VCF gives it no sequence
 #     (limit-overlapping-records: 4 records on chr22; a carrier there is judged where
 #     METHODS section 4 reads the slot
@@ -413,7 +414,12 @@ crisprme.py complete-search --pam PAMs/20bp-NNN-NO-PAM.txt --index-path genome_l
 The mega is rebuilt for 2.10.0 by `seq_script/merge_panels/mega_rebuild.sh <install> <merged_vcf_dir>
 [chrom ...]` (honors `PAM=`, one PAM a run; its last step, `PostProcess/verify_mega_chrom.py`, must print
 `ALL PASS` for every chromosome before an archive is packed: the registry, the indel frequencies, the indel
-log and the enriched genome checked against the source VCF read on its own); up to 2.8.1 its sites-only
+log and the enriched genome checked against the source VCF read on its own; a chromosome whose source holds
+one REF>ALT on two PASS records says `second_records_of_one_allele=<n>`, those the build input left out: 8
+long deletions genome-wide in the as-run merge, on chr1, chr4, chr7, chr10 (3), chr13 and chr21, which the
+D7 readiness audit confirms before the build; its first step, `PostProcess/prepare_mega_build_vcf.py IN -`, says
+per chromosome without building anything how many records it keeps, leaves out, and gives the `AF_max` their
+sources give: all 177,968 of chrY's, where the merge wrote none); up to 2.8.1 its sites-only
 indel half used `seq_script/merge_panels/mega_build_indels.sh` (honors `PAM=`/`IDXNAME=` since T-34). The
 three phased per-dataset scripts (`{hgdp1kgp,onekg2021,hprc}_build.sh`) thread `--pam` directly.
 

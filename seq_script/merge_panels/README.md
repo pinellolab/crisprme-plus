@@ -39,11 +39,16 @@ default is the re-phased HGDP + 1000 Genomes panel, `NRR_3_hg38+hg38_HGDP1kGP` s
 **The mega for CRISPRme 2.10.0: `mega_rebuild.sh`.** It rebuilds the index from the same
 merged VCFs (`mega.<chr>.afmax.vcf.gz`) so that every part of it reads the records CRISPRitz
 2.10.0's enricher reads: the build input keeps the `PASS`/`.` records with `INFO/AF` = `AF_max`
-(`PostProcess/prepare_mega_build_vcf.py`); one `build-index-only` of its copy with the presence
+(on chrY, where the merge wrote no `AF_max`, the largest of the sources' frequencies), one record
+of each REF>ALT, the more frequent (`PostProcess/prepare_mega_build_vcf.py`: the
+enricher merges two SNP records of one allele but windows each indel record apart, and the
+as-run merge wrote 8 indels on two lines genome-wide); one `build-index-only` of its copy with
+the presence
 genotype `MEGA` (`synth_sites_gt.py`, every ALT carried) builds the enriched genome, the SNP
 index, the fake-indel genome, the `_INDELS` index and the indel log, from which `MEGA` is taken
 out; the registry and the indel frequencies are built from the build input as the enricher reads
-it (FILTER, every allele, one REF>ALT on two records the more frequent one's), and
+it (FILTER, every allele, an allele once; no indel within the window's left flank of the
+chromosome's start, read from the indel log), and
 `samplesIDs/hg38_mega.samplesID.txt` lists the five sources as pseudo-samples (the file a search
 names, as the shipped install has it); and `PostProcess/verify_mega_chrom.py` checks every store
 against the source VCF read on its own.
