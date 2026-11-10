@@ -115,8 +115,9 @@ and the `release-crisprme` skill.
     index of format 1 unchanged; the first and the next download of a panel, `--no-genotypes`, a
     complete install that costs no call, a companion that is not the index's refused, an
     archive of 2.8.1 refused over a bundle, a bundle over another build's Dictionaries named;
-    the successor of an archive of 2.8.1; 21 of its 23 tests fail on the code before it, the
-    other two pin 2.8.1's behaviour), `test_legacy_index_access` (the catalog of this release,
+    the successor of an archive of 2.8.1, and what a download says of it: the general index as
+    fast for NNN_3, NRR slower than an NRG index on HPRC and mega; 26 of its 28 tests fail on the
+    code before it, d3722b0, the other two pin 2.8.1's behaviour), `test_legacy_index_access` (the catalog of this release,
     the repo of 2.8.1 still listed when named), and the advice and installer tests of
     `test_defaults_and_index_flex`, `test_bulge_cap`, `test_index_resolution`,
     `test_generate_report` and `test_build_index_only_atomic`.
@@ -2187,16 +2188,50 @@ and the `release-crisprme` skill.
     created, even beside a protospacer the reference holds with a valid PAM (an inserted TGG
     before the reference's AGG: TGG). The placement-invariant exception stays: an "inserted"
     PAM that a placement puts on the reference's own bases (a tandem duplication of the PAM)
-    is not created, and a PAM partly made of inserted bases, or across a deletion's junction,
-    is still judged by the reference PAM beside the protospacer. Before D4 (2.10.0's drafts)
-    the reference PAM beside the protospacer decided for a wholly inserted PAM too, and a
-    valid one read NA, the site having existed before the insertion. Genome-wide, on 2.8.1's
-    tables (below), D4 turns 11 highest-CFD blocks from NA to created and changes nothing else:
-    README guide, per-sample, 2 alternative alignments (chr11:35248792 (+), CFD 0);
-    population-level none; TRAC guide 2 rows (chr17:77419671 (−), CFD 0.008, and chr2:159346
-    (−), 0.003) and 7 alternative alignments (chr1:246083493 (+), chr20:63226848 (+),
-    chr4:183404212 (−) three, chr5:157864188 (+) two), CFD at most 0.008; 5 of them (the
-    insertions at chr17, chr2 and chr4) 2.8.1 also read created. In the SNP+indel oracle T2 and
+    is not created, and a PAM partly made of inserted bases in some placement, or across a
+    deletion's junction, is still judged by the reference PAM beside the protospacer, one wholly
+    inserted where the VCF writes it but partly on a reference base one placement along too
+    (TRAC guide, an alternative alignment at chr21:46302051 (+), CFD 0.019: TAG inserted before
+    the reference's TGG, whose T repeats the insertion's first base, reads NA). Before D4
+    (2.10.0's drafts) the reference PAM beside the protospacer decided for a wholly inserted PAM
+    too, and a valid one read NA, the site having existed before the insertion. Genome-wide, on
+    2.8.1's README and TRAC tables (below), D4 turns 11 highest-CFD blocks from NA to created and
+    changes nothing else in them: README guide, per-sample, 2 alternative alignments
+    (chr11:35248792 (+), CFD 0); population-level none; TRAC guide 2 rows (chr17:77419671 (−),
+    CFD 0.008, and chr2:159346 (−), 0.003) and 7 alternative alignments (chr1:246083493 (+),
+    chr20:63226848 (+), chr4:183404212 (−) three, chr5:157864188 (+) two), CFD at most 0.008; 5
+    of them (the insertions at chr17, chr2 and chr4) 2.8.1 also read created. Decision D4 was
+    taken on those 11. Its reach depends on the guide and the panel, and it is largest beside
+    hg38_mega, a sites-only panel whose five sources hold many insertions in short tandem
+    repeats. Every indel block of a run judged with the rule before D4 (d3722b0's) and with
+    D4's (each run's own code gives back every value of its tables), it turns NA to created,
+    and changes nothing else:
+    - chr22, the README guide with NRR at 4 mismatches + 1 DNA + 1 RNA bulge, per-sample on
+      HGDP + 1000 Genomes beside hg38_mega (a gate configuration): 260 blocks of each kind
+      (highest CFD, fewest mismatches and bulges, highest CRISPR-Bulge) in 646 of its 762,646
+      alternative alignments; the highest-CFD ones at CFD at most 0.057, 19 above 0.008; 12
+      insertions, 234 of those 260 at three in (TA)n repeats (chr22:18201792 T>TATATCA,
+      18201794 A>ATATATTG, 24238776 T>TAAGATAG; chr22:18201791 (−), its PAM TGA wholly inserted
+      beside the reference's AAA, CFD 0.057). The same configuration population-level: none.
+    - chr22, the checker's three repeat-rich guides with NRG, per-sample on HGDP + 1000 Genomes:
+      4 alternative alignments (chr22:45890423 (+), its PAM CGG wholly inserted beside the
+      reference's AGG, CFD 0.115; 45890407 (+), 0.040; 36821519 (+) and 34025930 (−), CFD 0);
+      population-level none.
+    - Genome-wide, hg38_mega alone, five guides (README, `ACTGAAATCTGTAAGCAGGC`, TRAC, EMX1,
+      VEGFA site 3) with NRG at 4 mismatches and no bulge, population-level (feat/2.10.0 at
+      f873ebb, whose rule is d3722b0's): one block in each of 8 rows on mega's published index (one
+      highest-CFD block, chr14:91881120 (−), VEGFA site 3, its PAM GGG wholly inserted beside
+      the reference's TAG, CFD 0.113; one fewest-mismatches block, chr7:1446227 (+), 0.036; six
+      highest-CRISPR-Bulge blocks), in 7 of them on the judges' rebuilt mega.
+    - Genome-wide, HPRC: the rows of the one genome-wide HPRC table there is (CRISPRme 2.5.4,
+      per-sample, `TGCTTGGTCGGCACTGATAG` with NRG at 4 mismatches + 1 + 1, placed as 2.10.0
+      places them; 63% of its rows and 86% of its alternative alignments hold the variants they
+      list): 17 highest-CFD blocks (3 rows, 14 alternative alignments), CFD at most 0.011.
+    - None in the other chr22 gate runs: HPRC and its unphased copy (both modes), and the README
+      guide (NRG, both modes; NRR), TRAC and SaCas9 (2/0/0, 4/1/1) on HGDP + 1000 Genomes.
+    The genome-wide mega tables of CRISPRme 2.8.1 (a pre-release, NRR and NRG, 4 mismatches + 1
+    + 1) cannot be judged so: 76% and 82% of their indel rows hold SNP alleles they do not list.
+    In the SNP+indel oracle T2 and
     QW, and in `test_indel_row_coordinates` DUPS and W2, now read created;
     `test_indel_snp_cis.test_pam_reference_place_an_additional_inserted_pam_is_created` pins
     both strands, 3′ and 5′ PAMs, a complex record's added bases, and the cases D4 leaves as
@@ -2254,8 +2289,9 @@ and the `release-crisprme` skill.
   starting inside an insertion, PAMs wholly and partly inserted, a tandem duplication of a PAM
   (C6), a SNP past a deletion, and CB1 and CB3, the placement rule on each strand); its
   `PAM_creation` expectation builds every placement of the row's indel on the haplotype the
-  row's variants make. The released v2.8.1 image fails the oracle 231 times (SpCas9) and 60
-  times (Cas12a); 2.10.0 passes both. Unit tests: `test_indel_variant_positions` (the real
+  row's variants make. The released v2.8.1 image fails the oracle 239 times (SpCas9) and 60
+  times (Cas12a); 2.10.0 passes both, and d3722b0, before D4, fails it 8 times (SpCas9: T2 and
+  QW, three blocks and the site's check each). Unit tests: `test_indel_variant_positions` (the real
   integrator), `test_indel_pam_creation`, `test_indel_row_coordinates` (rows starting inside an
   insertion, rows whose PAM an insertion adds after a reference protospacer, PAMs judged
   wherever in its repeat the VCF writes the indel, complex records, 3′ and 5′ PAMs, both

@@ -214,3 +214,14 @@ record to its REF alignment's window, the SpCas9 oracle fails 31 times, all at t
 37d81de, whose inserted-PAM rules already read QX and QY right (their rows start inside the
 added bases), 57 times (the 42 above and 15 at QZ and QV); on the released v2.8.1 image 231
 times. The `cas12a` profile is unchanged: 0 failures on 50803b6, 10 on 37d81de, 60 on v2.8.1.
+
+The check that no SNP row names two alts of one position (9de4813, above) brought the released
+v2.8.1 image's count to 234 (`cas9`; 231 with the oracle of its parent, 7a565e3).
+
+Decision D4 (2.10.0: an additional PAM, wholly inserted wherever its insertion sits, is created
+beside a reference protospacer that held a valid PAM) changed what T2 and QW expect, from NA to
+TGG. On d3722b0, before D4, the oracle fails 8 times, all at those two sites (three row blocks
+and the site's check each); on the released v2.8.1 image 239 times (`cas9`) and 60 (`cas12a`).
+2.10.0 passes both profiles. The `cas12a` profile has no site D4 changes: D4 on a 5′ PAM is
+covered by the unit tests (`test_indel_snp_cis`, and `test_indel_row_coordinates`'s `DUPS`,
+its 5′ side).
