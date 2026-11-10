@@ -17,8 +17,10 @@
 > and later), which make the index self-describing. Another record is `.pam_build`, the PAM
 > file an index was built from, which `build-index-only` writes into a reference or variant
 > index, and a search into one it builds (the published 8-nt-flank archives have none).
-> `NNN_3` is published in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
-> `lucapinello/crisprme-data-general-index`. The parts below marked *planned* are not in
+> Up to 2.8.1 `NNN_3` was published in `lucapinello/crisprme-data` and the 8-nt-flank indexes
+> in `lucapinello/crisprme-data-general-index`, where 2.8.1's archives stay; 2.10.0 publishes
+> every index in `lucapinello/crisprme-indexes-format2`, the general index `20-NNNNNNNN_3`
+> among them, and does not build `NNN_3` again. The parts below marked *planned* are not in
 > 2.10.0. What ships is described in
 > [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering) and the README.
 

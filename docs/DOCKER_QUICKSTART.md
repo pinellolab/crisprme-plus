@@ -501,9 +501,10 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 ```
 
 To see which indexes are published, browse the dataset repository
-(`lucapinello/crisprme-data`, folder `indexes/`; the 8-nt-flank PAM-less indexes are
-in `lucapinello/crisprme-data-general-index`) — the names there are exactly what you
-pass to `--index-name`, and `download` picks the repo for you.
+(`lucapinello/crisprme-indexes-format2`, folder `indexes/`, for the indexes of 2.10.0; 2.8.1's
+are in `lucapinello/crisprme-data` and, PAM-less with an 8-nt flank,
+`lucapinello/crisprme-data-general-index`) — the names there are exactly what you pass to
+`--index-name`, and `download` picks the repo for you.
 
 If an index you need is **not** published, build it once: every later search reuses it.
 A web search builds a missing **reference** index itself, from the installed genome
