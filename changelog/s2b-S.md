@@ -187,12 +187,13 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   - `PostProcess/validate_indel_snp_coords.py`, a developer's check, wrote its overlaid genome
     under a name `tempfile.mktemp` gave: in a folder of its own now.
 
-  A test of the unit-test job (`test_no_code_from_files`) keeps out what a scan of the source
-  can show of the class: over every module but the tests, no pickle, marshal, shelve or the
-  like (their loads run what a file names), no `eval` or `exec`, no YAML load but `safe_load`,
-  no `tempfile.mktemp`, no `python -c`, `-m` or `-` that is not isolated; in the shell scripts,
-  no `eval`, no `mktemp -u`, no name added to the one `mktemp` made, no `python -c`, `-m` or
-  `-` that is not isolated. A folder others can write still lets them do more than change a
+  A test (`test_no_code_from_files`, in the unit-test job and web-e2e's image step) keeps out
+  what a scan of the source can show of the class: over every module but the tests, no pickle,
+  marshal, shelve or the like (their loads run what a file names), no `eval` or `exec`, no YAML
+  load but `safe_load`, no `tempfile.mktemp`, no `python -c`, `-m` or `-` that is not isolated;
+  in the shell scripts, no `eval`, no `mktemp -u`, no name added to the one `mktemp` made, no
+  `python -c`, `-m` or `-` that is not isolated; and it runs `crisprme.py --debug` and the
+  scripts fixed here on a planted folder, line or name. A folder others can write still lets them do more than change a
   search's inputs and results: stop it, swap a folder it made there (the pieces' folder among
   them), put links it writes through, and change what older parts of the pipeline pass to a
   shell. On a shared machine, keep the data, output and temporary folders writable by you

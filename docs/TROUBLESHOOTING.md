@@ -193,15 +193,15 @@ than change the inputs and the results:
 
 What holds wherever you run it, since 2.10.0:
 
-- nothing CRISPRme runs takes Python code from the folder it is run from: every
-  `python -c`, `-m` or `-` it runs is isolated (`-I`), and `--debug` keeps the `PostProcess/`
-  beside the `crisprme.py` that runs. Up to 2.10.0 the scorer's health check, which every
-  search runs first from the folder you run `crisprme.py` in, loaded a module put there, and
-  `--debug` took that folder's `PostProcess/` for its own;
-- no file a search or the web app writes is loaded as code (they are JSON or text), and the
-  web app's Settings Retry re-runs a job with the command the server launched it with, kept
-  in its memory and run without a shell. Up to 2.10.0 it ran through a shell the command a
-  job's `Settings/<job>/cmd.json` held;
+- Python looks for no module in the folder CRISPRme is run from: every `python -c`, `-m` or
+  `-` it runs is isolated (`-I`), and `--debug` keeps the `PostProcess/` beside the
+  `crisprme.py` that runs. Up to 2.10.0 the scorer's health check, which every search runs
+  first from the folder you run `crisprme.py` in, loaded a module put there, and `--debug` took
+  that folder's `PostProcess/` for its own;
+- no file CRISPRme writes is loaded as code (they are JSON or text; TensorFlow's own
+  modules, above, aside), and the web app's Settings Retry re-runs a job with the command the
+  server launched it with, kept in its memory and run without a shell. Up to 2.10.0 it ran
+  through a shell the command a job's `Settings/<job>/cmd.json` held;
 - the values a review found going from a job's files into shell commands as the shell's own
   text are quoted or checked now: the guides of the guide file, the indel targets' header,
   the names of the CFD graph files, and the guide and the annotation of the results' region
@@ -212,11 +212,12 @@ What holds wherever you run it, since 2.10.0:
   sticky or private folder keeps others from replacing them; and the intermediate files a
   search writes in its output folder keep fixed names (such as `<file>.tmp`).
 
-A test of the unit-test job (`test_no_code_from_files`) keeps out of CRISPRme what a scan of
-the source can show: loads that run code (pickle and the like, `eval`, `exec`, YAML loads but
-`safe_load`), a temporary name made by name only, and a `python -c`, `-m` or `-` that is not
-isolated. It cannot follow every value read back into a shell command, which is one more
-reason to keep these folders yours.
+A test (`test_no_code_from_files`, in the unit-test job and the web image's) keeps out of
+CRISPRme what a scan of the source can show: loads that run code (pickle and the like, `eval`,
+`exec`, YAML loads but `safe_load`), a temporary name made by name only, and a `python -c`,
+`-m` or `-` that is not isolated; and it runs `crisprme.py --debug` and the scripts fixed here
+on what another user could put in their folders. It cannot follow every value read back into a
+shell command, which is one more reason to keep these folders yours.
 
 ---
 
