@@ -33,7 +33,8 @@ step and the CI workflows, which run in folders the build and the checkout make,
 scanned.
 
 WhatASearchReadsBackRunsNothing runs the scripts the sweep fixed on a line or a name another
-user could put in a search's folder. These are the forms a scan of the source and those runs
+user could put in a search's folder, and TheDebugFlagRunsNoModuleOfTheWorkingDirectory
+crisprme.py --debug from a folder holding a PostProcess/ of someone else's. These are the forms a scan of the source and those runs
 show: a folder others can write still lets them swap a folder a search made there, put links
 it writes through and change what older parts of the pipeline read, so keep data, output and
 temporary folders writable by you alone (docs/TROUBLESHOOTING.md section 7).
@@ -342,6 +343,35 @@ class WhatASearchReadsBackRunsNothing(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(out)), ["indels.CFDGraph.txt", "snps.CFDGraph.txt"])
         with open(os.path.join(out, "snps.CFDGraph.txt")) as fh:
             self.assertEqual(fh.read().splitlines()[1], "2\t4")
+
+
+try:  # crisprme.py imports Biopython at once, which the light unit-test CI does not have
+    import Bio  # noqa: F401
+except ImportError:  # pragma: no cover
+    Bio = None
+
+
+@unittest.skipUnless(Bio, "Biopython not installed: crisprme.py does not start")
+class TheDebugFlagRunsNoModuleOfTheWorkingDirectory(unittest.TestCase):
+    """crisprme.py --debug took the working directory's PostProcess/ for its own whenever there
+    was one, and loaded its memory_check.py at start-up: run from a data folder its group can
+    write (a umask of 002), a PostProcess/ another member put there ran as the user, whatever
+    the subcommand (2.10.0, the review of lane S, round 4). It keeps the PostProcess/ beside
+    the crisprme.py that runs."""
+
+    def test_a_planted_postprocess_runs_nothing(self):
+        data = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, data, ignore_errors=True)
+        os.makedirs(os.path.join(data, "PostProcess"))
+        for mod in ("memory_check", "validate_inputs", "genome_layout"):
+            with open(os.path.join(data, "PostProcess", mod + ".py"), "w") as fh:
+                fh.write("import os\nopen(os.path.join(%r, 'MARK_%s'), 'w').close()\n"
+                         % (data, mod))
+        done = subprocess.run([sys.executable, os.path.join(REPO, "crisprme.py"), "--version",
+                               "--debug"], cwd=data, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=600)
+        self.assertEqual(sorted(f for f in os.listdir(data) if f.startswith("MARK")), [])
+        self.assertIn("DEBUG MODE", done.stdout)
 
 
 class TheScanSeesEachForm(unittest.TestCase):

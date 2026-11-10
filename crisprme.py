@@ -89,15 +89,11 @@ if __name__ == "__main__":  # (run as the command, not loaded by a test)
 
 if "--debug" in input_args:
     print("DEBUG MODE")
-    # Switch to cwd-relative PostProcess ONLY when running from a source checkout
-    # (cwd actually has PostProcess/). Otherwise keep the __file__-based path
-    # resolved above, so --debug does not break the import when cwd is unrelated to
-    # the install -- e.g. the web assembly-search job runs with cwd set to the
-    # Results output dir, which has no PostProcess/ (ModuleNotFoundError otherwise).
-    _dbg_pp = current_working_directory + "PostProcess/"
-    if os.path.isdir(_dbg_pp):
-        script_path = _dbg_pp
-        corrected_web_path = current_working_directory
+    # --debug keeps the PostProcess/ resolved above, beside the crisprme.py that runs (a
+    # source checkout's own, run from it or not). Up to 2.10.0 it took the working
+    # directory's PostProcess/ whenever there was one, and loaded its memory_check.py at
+    # once (below): a folder another member of the data folder's group put there (a umask
+    # of 002 lets them) ran as the user (2.10.0, the review of lane S, round 4).
 
 # Load the non-fatal low-memory warning from the PostProcess directory by
 # explicit file path: crisprme.py is installed in bin/, so PostProcess is not
