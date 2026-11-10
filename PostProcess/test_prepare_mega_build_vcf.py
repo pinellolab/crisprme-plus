@@ -63,7 +63,8 @@ class TestPrepare(unittest.TestCase):
         self.assertEqual([r[:7] for r in body], [ln.split("\t")[:7] for ln in
                                                  (ROWS[0], ROWS[2], ROWS[3], ROWS[5])])
         self.assertEqual(stats, {"records": 6, "kept": 4, "filtered": 2, "collapsed": 0,
-                                 "alts_collapsed": 0, "af": 3, "no_af_max": 1})
+                                 "alts_collapsed": 0, "af": 3, "no_af_max": 1,
+                                 "af_max_derived": 0})
         header = [l for l in lines if l.startswith("##")]
         self.assertIn(pm.AF_HEADER, header)
         self.assertIn(pm.BUILD_MARK, header)
@@ -121,7 +122,8 @@ class TestPrepare(unittest.TestCase):
             ("45918501", ".", "T", "TA", ".", "AF_HGDP=0.1;AF_max=0.1;AF=0.1"),
         ])
         self.assertEqual(stats, {"records": 9, "kept": 6, "filtered": 1, "collapsed": 2,
-                                 "alts_collapsed": 1, "af": 6, "no_af_max": 0})
+                                 "alts_collapsed": 1, "af": 6, "no_af_max": 0,
+                                 "af_max_derived": 0})
         # every store and check then reads one record of each allele
         import build_mega_registry as bmr
         import build_mega_indel_af as bmi
@@ -132,6 +134,36 @@ class TestPrepare(unittest.TestCase):
         self.assertEqual([r[:3] for r in bmi.iter_indel_af_records(out, {"HGDP"})],
                          [("45918284", deletion, "A"), ("45918400", "G", "GTT"),
                           ("45918500", "T", "TA"), ("45918501", "T", "TA")])
+
+    def test_a_record_without_af_max_gets_the_one_its_sources_give(self):
+        """The as-run merge declares AF_max and writes it on none of chrY's records (its
+        177,968 PASS records; every other chromosome has it on all): with no AF_max the build
+        input had no AF, so no indel row of chrY showed a frequency and the frequency bound
+        (D6) had none to read. Such a record gets the largest of its sources' frequencies,
+        per ALT and as the source wrote it, as AF_max and AF both (found by the census of
+        review r1's fix of lane M); one whose sources give none gets neither."""
+        rows = [
+            "chrY\t2781613\t.\tTCAGC\tT\t1232.18\tPASS\tAF_HGDP=0.007788",
+            "chrY\t2781653\t.\tG\tT\t301.73\tPASS\tAF_HGDP=0.001575;AF_AoU=0.001277",
+            "chrY\t2781700\t.\tG\tT,GA\t.\tPASS\tAF_HGDP=0.002,.;AF_AoU=0.001,0.01",
+            "chrY\t2781716\t.\tT\tC\t728.3\tPASS\tAF_HGDP=.",
+        ]
+        with gzip.open(self.inp, "wt") as fh:
+            fh.write(HEADER + "\n".join(rows) + "\n")
+        out = os.path.join(self.d, "build.vcf")
+        stats = pm.prepare(self.inp, out)
+        body = [l.split("\t") for l in self.read(out) if not l.startswith("#")]
+        self.assertEqual([r[7] for r in body], [
+            "AF_HGDP=0.007788;AF_max=0.007788;AF=0.007788",
+            "AF_HGDP=0.001575;AF_AoU=0.001277;AF_max=0.001575;AF=0.001575",
+            "AF_HGDP=0.002,.;AF_AoU=0.001,0.01;AF_max=0.002,0.01;AF=0.002,0.01",
+            "AF_HGDP=.",
+        ])
+        self.assertEqual((stats["af"], stats["af_max_derived"], stats["no_af_max"]), (3, 3, 1))
+        # the indel frequencies and the checks read it (verify_mega_chrom derives it alike)
+        import build_mega_indel_af as bmi
+        recs = list(bmi.iter_indel_af_records(out, {"HGDP", "AoU"}))
+        self.assertEqual([(r[0], r[4]) for r in recs], [("2781613", 0.007788), ("2781700", 0.01)])
 
     def test_a_duplicate_on_a_line_with_samples_stops(self):
         with gzip.open(self.inp, "wt") as fh:

@@ -16,7 +16,10 @@ rebuilds the mega from those same VCFs, and every part of the index reads the sa
     key since CRISPRitz 2.10.0), so an indel row shows its frequency, as a SNP row shows
     the registry's GLOBAL group (``AF_max`` too). The as-run merge wrote no ``INFO/AF``,
     so every indel row of the shipped mega showed none. An ``AF`` the input already
-    has is replaced. A record without ``AF_max`` gets no ``AF``.
+    has is replaced. A record without ``AF_max`` gets the one its sources give, the largest
+    of its ``AF_<source>`` values per ALT, as ``AF_max`` and ``AF`` both: the as-run merge
+    wrote none on chrY (its 177,968 PASS records), and declares it. One with no source
+    frequency either gets no ``AF``.
 
   * one record of each REF>ALT at a position: of an allele on two PASS/'.' records, the
     more frequent record's (its INFO/AF, AF_max; on a tie, the earlier), as the enricher
@@ -76,19 +79,58 @@ def _open_write(path):
     return open(path, "w"), False
 
 
-def with_af_max(info):
+def _number(value):
+    """A frequency of the VCF as a float, or None ('.', empty, not a number, not positive)."""
+    try:
+        v = float(value)
+    except ValueError:
+        return None
+    return v if 0.0 < v <= 1.0 else None
+
+
+def derived_af_max(info, n_alts):
+    """The ``AF_max`` a record without one has: per ALT, the largest of its sources'
+    frequencies (the ``AF_<source>`` keys, Number=A), as the merge computes it, the value as
+    the source wrote it; '.' for an ALT no source gives one; None when no ALT has one. The
+    as-run merge declares AF_max on every chromosome and writes it on none of chrY's records
+    (its 177,968 PASS records; every other chromosome has it on all)."""
+    best = [None] * n_alts
+    for kv in (info.split(";") if info and info != "." else []):
+        key, _s, value = kv.partition("=")
+        if not key.startswith("AF_") or key == "AF_max":
+            continue
+        vals = value.split(",")
+        if len(vals) != n_alts:
+            continue
+        for k, text in enumerate(vals):
+            v = _number(text)
+            if v is not None and (best[k] is None or v > best[k][0]):
+                best[k] = (v, text)
+    if all(b is None for b in best):
+        return None
+    return ",".join("." if b is None else b[1] for b in best)
+
+
+def with_af_max(info, n_alts=1):
     """``info`` with its ``AF`` set to its ``AF_max`` value (an ``AF`` it has is dropped,
-    the new one appended last), and whether it got one. No ``AF_max``, or one of '.', gives
-    no ``AF``."""
+    the new one appended last), and whether it got one. A record with no ``AF_max`` (or one
+    of '.') gets the one its sources give (derived_af_max), written as ``AF_max`` too, so
+    every part of the index reads it; one with no source frequency either gets no ``AF``.
+    Returns (info, got an AF, derived the AF_max)."""
     keys = info.split(";") if info and info != "." else []
     afmax = None
     for kv in keys:
         if kv.startswith("AF_max="):
             afmax = kv[len("AF_max="):]
     kept = [kv for kv in keys if kv.partition("=")[0] != "AF"]
+    derived = False
     if afmax in (None, "", "."):
-        return (";".join(kept) or "."), False
-    return ";".join(kept + ["AF=" + afmax]), True
+        afmax = derived_af_max(info, n_alts)
+        if afmax is None:
+            return (";".join(kept) or "."), False, False
+        kept = [kv for kv in kept if kv.partition("=")[0] != "AF_max"] + ["AF_max=" + afmax]
+        derived = True
+    return ";".join(kept + ["AF=" + afmax]), True, derived
 
 
 def _without_alts(f, drop, number_of):
@@ -145,9 +187,11 @@ def prepare(inp, out):
     ``kept``, ``filtered`` (another FILTER), ``collapsed`` (a PASS/'.' record whose every
     ALT another record of its position has, more frequent: left out), ``alts_collapsed``
     (such ALTs taken off a line that keeps others), ``af`` (kept records given an AF),
-    ``no_af_max`` (kept records with no AF_max, so no AF)."""
+    ``no_af_max`` (kept records with no AF_max and no source frequency, so no AF),
+    ``af_max_derived`` (PASS/'.' records whose AF_max is the one their sources give, as the
+    VCF wrote none)."""
     stats = {"records": 0, "kept": 0, "filtered": 0, "collapsed": 0, "alts_collapsed": 0,
-             "af": 0, "no_af_max": 0}
+             "af": 0, "no_af_max": 0, "af_max_derived": 0}
     w, is_bgzf = _open_write(out)
 
     def emit(s):
@@ -187,7 +231,8 @@ def prepare(inp, out):
                 if len(f) < 8 or f[6] not in PASS_FILTERS:
                     stats["filtered"] += 1
                     continue
-                f[7], _got = with_af_max(f[7])
+                f[7], _got, derived = with_af_max(f[7], len(f[4].split(",")))
+                stats["af_max_derived"] += derived
                 if block and (f[0], f[1]) != (block[0][0], block[0][1]):
                     flush(block)
                     block = []
@@ -207,9 +252,10 @@ def main(argv=None):
     sys.stderr.write(
         "prepare_mega_build_vcf: %d records -> %d kept (FILTER PASS or '.'), %d of another "
         "FILTER left out, %d left out as a second record of one REF>ALT (%d ALT(s) taken off "
-        "a line that keeps others); INFO/AF = AF_max on %d, %d with no AF_max -> %s\n"
+        "a line that keeps others); INFO/AF = AF_max on %d (%d with the AF_max their sources "
+        "give, the VCF writing none), %d with no AF_max -> %s\n"
         % (st["records"], st["kept"], st["filtered"], st["collapsed"], st["alts_collapsed"],
-           st["af"], st["no_af_max"], argv[1]))
+           st["af"], st["af_max_derived"], st["no_af_max"], argv[1]))
     return 0
 
 

@@ -97,7 +97,9 @@ def _info(info):
 
 
 def _afs(info, k, n):
-    """{dataset: AF} of ALT k of n (positive, at most 1), and AF_max (or None)."""
+    """{dataset: AF} of ALT k of n (positive, at most 1), and AF_max: the record's, or, where
+    it has none (the as-run merge wrote none on chrY), the largest of those AFs, as the build
+    input derives it (None when there is none)."""
     kv = _info(info)
     afs = {}
     for ds in _DS:
@@ -119,18 +121,17 @@ def _afs(info, k, n):
             mx = None
         if mx is not None and not 0.0 < mx <= 1.0:
             mx = None
+    if mx is None and afs and kv.get("AF_max", ".") in (".", ""):
+        mx = max(afs.values())
     return afs, mx
 
 
 def _rank(info, k, n):
     """How two records of one allele are told apart: the higher AF_max (the build input's
-    INFO/AF), 0 when it is missing or unreadable, as the enricher ranks INFO/AF; on a tie,
-    the earlier."""
-    vals = _info(info).get("AF_max", "").split(",")
-    try:
-        return float(vals[k]) if len(vals) == n else 0.0
-    except ValueError:
-        return 0.0
+    INFO/AF; where the record has none, the largest of its sources' AFs, _afs), 0 when there
+    is none, as the enricher ranks INFO/AF; on a tie, the earlier."""
+    mx = _afs(info, k, n)[1]
+    return mx if mx is not None else 0.0
 
 
 def read_source(vcf, left=LEFT):
