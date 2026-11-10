@@ -794,8 +794,15 @@ targets' place on the haplotype than the site before it, whose reference row sta
 base: two rows with one start, each another target. No two written rows are alignments of one
 target, and 22 lie within `--merge` bases of a neighbour's (by cluster position), each an
 insertion's row at its anchor beside a site it does not chain (none with the chain of every
-row). Within a site, the alignments that name the same variants with the same carriers are one
-entry, the best, as on every row: they are one target's alignments with different bulges. The
+row). On the HGDP + 1000 Genomes index (chr22, the three repeat-rich guides of §8, NRG, 4
+mismatches, 1 DNA and 1 RNA bulge) it writes 11 rows more than the chain of every row
+population-level and 12 per sample, and none fewer, each target once (chr22:45,890,432 (+) of
+VEGFA site 3 one row, as with the chain of every row; chr22:38,937,540 (+), a SNP row of CFD
+0.134 an insertion's rows had joined to a deletion row's site six bases before, now leads a site
+of its own), and 5 and 6 pairs of its rows lie within `--merge` bases of each other (by cluster
+position), each an insertion's row at its anchor beside a site it does not chain. Within a site,
+the alignments that name the same variants with the same carriers are one entry, the best, as on
+every row: they are one target's alignments with different bulges. The
 merge compares indel rows there at their cluster position on the haplotype carrying the indel,
 which on a row that starts inside an insertion is past the anchor by the rank of its first base
 among the inserted ones, read from the row's bases (`indel_snp_cis.row_first_base`). Two
@@ -2308,7 +2315,7 @@ alleles at 22), three repeat-rich guides (VEGFA site 3 `GGTGAGTGAGTGTGTGCGTG`, E
 `GAGTCCGAGCAGAAGAAGAA`, VEGFA site 1 `GGGTGGGGGGAGTTTGCTCC`) per sample and
 population-level (per sample 8,289 notes where a listed carrier's slot, read as §4 reads
 it, holds the target, 1,082 row blocks and 1,457 records with overlapping alleles, 1,284
-two-indel targets; population-level 160 notes, 67 row blocks and the same 1,457 records,
+two-indel targets; population-level 163 notes, 70 row blocks and the same 1,457 records,
 271 two-indel targets), the HPRC chr22 panel (9,125 MNVs, 4.5% of its calls with a missing
 allele) and a copy of it with every fourth sample unphased, both modes (3 row blocks of an
 MNV whose carrier CRISPRme resolves PUTATIVE, as it documents; 6 two-indel targets; 17 and
@@ -2320,7 +2327,11 @@ naming SNVs of `hg38_mega`'s VCF whose FILTER passes, per sample 615,803 lines o
 alternative alignments at one (AT)n repeat, chr22:24,238,700-24,238,900, where `hg38_mega`
 lists several SNVs and indels at almost every position; completeness counts the 127,735
 indel records of chr22 only `hg38_mega` holds and the 32,178 the search skips for their
-FILTER; 19 and 9 two-indel targets, 8 overlapping records); each read as a run of 2.10.0
+FILTER; 19 and 9 two-indel targets, 8 overlapping records; so measured before the sites-only
+density guard of §5, which withholds the repeat's densest windows: with it, beside the mega
+the recipe of §2 rebuilt, 85,953 and 689 such row blocks, 11,414 lines at the repeat, the
+same 127,735 records and none skipped, its build input holding only `PASS` records, and the
+same two-indel targets and overlapping records); each read as a run of 2.10.0
 from its own records (every allele, a store of `PASS` and `.`, an INDELS index of format
 2), as is the README per-sample search with 2.10.0's code on the indexes of CRISPRitz
 2.9.1 (the last record of a split site, a store of every FILTER, which its log notes,

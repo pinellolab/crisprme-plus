@@ -576,12 +576,13 @@ and the `release-crisprme` skill.
     blocks of `hg38_mega` list no carrier and are checked as rows, per sample 615,803 lines
     of the alternative alignments at one (AT)n repeat of chr22; completeness counts the
     127,735 indel records only `hg38_mega` holds and the 32,178 whose FILTER the search
-    skips), each read as a run of 2.10.0 from its records, as is the README per-sample
-    search with this release's code on the indexes of CRISPRitz 2.9.1 (format 1, the last
-    record of a split site, a store of every FILTER), which passes too (4
-    `limit-last-alt-wins` lines). That search takes 6.5 min there and 97 min on the indexes
-    this release built, its SNP post-analysis 1 min against 76, in the windows every allele
-    coded makes dense (7,493 on chr22, 7,255 hyperdense). The SNP+indel oracle with the
+    skips; before the sites-only density guard: with it, beside the rebuilt mega, 85,953 and 689
+    row blocks, 11,414 lines at that repeat), each read as a run of 2.10.0 from its records, as
+    is the README per-sample search with this release's code on the indexes of CRISPRitz 2.9.1
+    (format 1, the last record of a split site, a store of every FILTER), which passes too (4
+    `limit-last-alt-wins` lines). That search takes 6.5 min there and 97 min on the indexes this
+    release built, its SNP post-analysis 1 min against 76, in the windows every allele coded
+    makes dense (7,493 on chr22, 7,255 hyperdense). The SNP+indel oracle with the
     second deletions of its sites O and Q, the insertion of Y1 and an MNV marked `LowQual`
     passes in both modes, and fails where the run read a store of every FILTER (14 and 6
     gating findings); the same world searched with `CRISPRME_INDEL_SNP=0` is refused
@@ -2385,7 +2386,17 @@ and the `release-crisprme` skill.
   base (two rows with one start, each another target). No two written rows are alignments of one
   target (with the first version, one, at chr22:22,263,574 (+)); 22 lie within `--merge` bases of
   a neighbour's, each an insertion's row beside a site it does not chain (none with the chain of
-  every row). The real-data check's cluster chain is the chain of every row, a superset of the
+  every row). On the gate's repeat-rich runs (HGDP + 1000 Genomes chr22, the three guides, NRG, 4
+  mismatches and 1 + 1 bulges) it writes 11 rows more population-level and 12 per sample than the
+  chain of every row, and none fewer (the first version: 14 and 15, chr22:45,890,432 (+) and
+  chr22:39,091,378 (+) twice among them); each target is one row, those two as with the chain of
+  every row, and chr22:38,937,540 (+) of VEGFA site 3, a SNP row of CFD 0.134 that an insertion's
+  rows had joined to a deletion row's site six bases before, now leads a site of its own; 5 and 6
+  pairs of rows lie within `--merge` bases of each other, each an insertion's row at its anchor
+  beside a site it does not chain. The real-data check passes both runs (0 gating findings;
+  population-level 163 notes of a carrier's slot read as METHODS §4 reads it and 70 row blocks
+  with overlapping alleles, for 160 and 67, the rest as before). The real-data check's cluster
+  chain is the chain of every row, a superset of the
   merge's around such rows, and it took the row within `--merge` bases of a target for the
   target's cluster's: on the gate's repeat-rich population-level run (HGDP + 1000 Genomes chr22,
   three guides) a target of CFD 0.040 at chr22:22,263,588 (+) of VEGFA site 3 was a gating
