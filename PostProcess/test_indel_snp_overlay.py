@@ -214,6 +214,51 @@ def test_overlay_of_a_fake_genome_of_either_window():
 
 
 
+def test_validate_indel_snp_coords_reads_each_windows_own_flank():
+    """W-R2-N3: validate_indel_snp_coords, the dev check of the coordinate convention on real
+    data, compares every base of each window's own left flank (POS - 1 - start: 30 on the
+    windows of CRISPRitz 2.10.0) with the enriched genome. On a consistent world it passes; a
+    window of 30 whose 28th base is not the reference's fails it, a base a fixed 25-base
+    flank left unread."""
+    import json
+    import os
+    import tempfile
+
+    import validate_indel_snp_coords as vic
+
+    ref = "".join("ACGT"[(i * 7 + i // 5) % 4] for i in range(400))
+    code = {"A": "R", "C": "Y", "G": "R", "T": "Y"}
+    snps = (80, 95, 110, 185, 215)   # 1-based: a SNP code in and around each window
+    with tempfile.TemporaryDirectory() as tmp:
+        records = [(100, ref[99], ref[99] + "TT"), (200, ref[199:202], ref[199])]
+        fa, log, spans = _fake_genome(tmp, ref, records, 30, 30)
+        enriched = list(ref)
+        for p in snps:
+            enriched[p - 1] = code[ref[p - 1]]
+        en = os.path.join(tmp, "chrT.enriched.fa")
+        with open(en, "w") as fh:
+            fh.write(">chrT\n" + "".join(enriched) + "\n")
+        dct = os.path.join(tmp, "my_dict_chrT.json")
+        with open(dct, "w") as fh:
+            json.dump({"chrT,%d" % p: "S1:0|1;%s,G;rs%d;0.1" % (ref[p - 1], p) for p in snps}, fh)
+        vic.validate(en, fa, log, dct)
+        # the first window's 28th base (offset 27, POS 97 of the reference), made another
+        with open(fa) as fh:
+            lines = fh.read().split("\n")
+        start = records[0][0] - 1 - 30
+        assert enriched[start + 27] in "ACGT" and lines[1][27] == ref[start + 27]
+        lines[1] = lines[1][:27] + {"A": "C"}.get(lines[1][27], "A") + lines[1][28:]
+        with open(fa, "w") as fh:
+            fh.write("\n".join(lines))
+        try:
+            vic.validate(en, fa, log, dct)
+        except AssertionError as exc:
+            assert "fake-flank vs enriched[start+k] mismatch" in str(exc), exc
+        else:
+            raise AssertionError("a flank base past the 25th that is not the reference's "
+                                 "went unseen")
+
+
 def load_tests(loader, tests, pattern):
     """Under ``python -m unittest`` too, each test_ function above, which it found none of,
     and said OK (suite P4)."""

@@ -4944,6 +4944,47 @@ class ReleaseTwoTen(Base):
                 self.assertEqual(out.stdout.strip(), "" if passes else "GATE_FAILED",
                                  (line, text[-300:]))
 
+    def test_a_chromosome_without_an_indel_reads_no_window(self):
+        """W-R2-N2: a chromosome whose VCF holds no indel record has no fake-indel window (its
+        indel log no row, its INDELS index none recorded): its reading says so, "fake-indel
+        windows none: no indel record", where it said "not told" as of a run whose records do
+        not tell them, and the run is checked; gate 4c passes a genome-wide check that reads it
+        beside chromosomes of 30/30 (it failed every such check of a panel with a chromosome
+        free of indels), and still fails one of windows not told."""
+        tmp = os.path.join(self.tmp, "snp_only")
+        os.makedirs(tmp)
+        seq = PRE + GUIDE[:5] + "C" + GUIDE[6:] + "TGG" + POST
+        case = as_2100(Case(tmp, seq, [(len(PRE) + 6, "C", GUIDE[5], {"S05": "1|0"})], []),
+                       window=(30, 30))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):   # (checked: every chromosome the VCF holds)
+            rc, found = case.run("completeness")
+        none = err.getvalue()
+        self.assertEqual((rc, gating(found)), (0, []), none)
+        said = [x for x in none.splitlines() if "read as a run of" in x]
+        self.assertEqual(len(said), 1, none)
+        self.assertTrue(said[0].endswith("INDELS format 2, fake-indel windows none: no indel "
+                                         "record)"), said[0])
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(repo, "docs", "RELEASE_CHECKLIST.md")) as fh:
+            checks = [x for x in fh.read().splitlines() if 'grep -o "fake-indel windows' in x]
+        self.assertEqual(len(checks), 2, checks)
+        gate = os.path.join(self.tmp, "gate")
+        os.makedirs(gate)
+        told = self.printed_reading((30, 30))
+        for text, passes in ((told + none, True), (none, False),
+                             (told + none.replace("none: no indel record", "not told"), False)):
+            for name in ("indelrows_per-sample_soundness.err", "indelrows_gw_readme.err"):
+                with open(os.path.join(gate, name), "w") as fh:
+                    fh.write(text)
+            for line in checks:
+                out = subprocess.run(["bash", "-c", line], capture_output=True, text=True,
+                                     env={"GATE": gate, "mode": "per-sample",
+                                          "check": "soundness", "g": "readme:guide.txt",
+                                          "PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+                self.assertEqual(out.stdout.strip(), "" if passes else "GATE_FAILED",
+                                 (line, text[-300:]))
+
     def test_two_alts_of_one_position_on_a_slot_are_putative(self):
         """Every allele coded, a slot can hold two ALTs of one position (split records
         phased one by one): no haplotype, and CRISPRme resolves the carrier PUTATIVE

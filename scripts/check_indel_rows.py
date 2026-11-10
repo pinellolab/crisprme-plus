@@ -6976,6 +6976,9 @@ def main(argv=None):
         ctx.max_degeneracy = int(m.group(1)) if m else None
     full_n = max(len(ctx.full(g)) for g in guides)   # the longest site of a guide
     unknown = []
+    # (the datasets and chromosomes whose windows no record tells, and whose VCF holds no
+    # indel record there: no window to tell, which the reading says as such)
+    no_indel = set()
     for ch in sorted(chroms):
         for v in vcfs_for.get(ch, ()):
             ds = sem.dataset_of.get(v.path)
@@ -6998,17 +7001,19 @@ def main(argv=None):
                                % (ds or v.path, ch, v.path))
             fmt, pad = val.get("indels") or (None, None)
             window = val.get("window")
-            if window is None and sem.release2100 and v.samples is not None and any(
-                    r["filter"] in PASS_FILTERS and any(
+            if window is None and sem.release2100 and v.samples is not None:
+                if any(r["filter"] in PASS_FILTERS and any(
                         len(a) != len(r["ref"]) or len(a) > 1 for a in r["alts"])
-                    for r in v.records(ch, 0, 1 << 31)):
-                unknown.append("the fake-indel windows of %s on %s (%s, and its INDELS "
-                               "index records none), and %s holds indel records there: "
-                               "whether a target reaches a window's edge depends on them "
-                               "(25/27 bases up to CRISPRitz 2.9.1, 30/30 since 2.10.0)"
-                               % (ds or v.path, ch, val.get("window_why") or
-                                  "the run's working directory holds no indel log of it",
-                                  v.path))
+                       for r in v.records(ch, 0, 1 << 31)):
+                    unknown.append("the fake-indel windows of %s on %s (%s, and its INDELS "
+                                   "index records none), and %s holds indel records there: "
+                                   "whether a target reaches a window's edge depends on them "
+                                   "(25/27 bases up to CRISPRitz 2.9.1, 30/30 since 2.10.0)"
+                                   % (ds or v.path, ch, val.get("window_why") or
+                                      "the run's working directory holds no indel log of it",
+                                      v.path))
+                else:
+                    no_indel.add((ds, ch))
             # the nearest a site holding a base of its record lies to the window's first
             # base: its PAM ending on the record's first REF base (an MNV's first replaced
             # base), the window's bases before it in, its guide region from full_n - 1
@@ -7034,7 +7039,8 @@ def main(argv=None):
                 v.get("all_alleles"), "no split SNP site to tell"),
             "of PASS and '.'" if v.get("store_filter") else "of every FILTER",
             (v.get("indels") or (None,))[0],
-            "%d/%d" % v["window"] if v.get("window") else "not told") for k, v in sorted(
+            "%d/%d" % v["window"] if v.get("window") else
+            "none: no indel record" if k in no_indel else "not told") for k, v in sorted(
                 sem.values.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))))
         or "no chromosome to read it for"))
     if not ref.keep_all:

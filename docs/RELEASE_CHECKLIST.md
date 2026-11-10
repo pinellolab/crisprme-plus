@@ -161,8 +161,9 @@ for mode in per-sample population-level; do
       2> "$GATE/indelrows_${mode}_${check}.err" || echo GATE_FAILED
     cat "$GATE/indelrows_${mode}_${check}.err" >&2
     #   and its reading of the run (stderr) holds the fake-indel windows this release's
-    #   CRISPRitz writes, 30/30, wherever it read them
-    [ "$(grep -o "fake-indel windows [^;)]*" "$GATE/indelrows_${mode}_${check}.err" | sort -u)" = "fake-indel windows 30/30" ] || echo GATE_FAILED
+    #   CRISPRitz writes, 30/30, wherever it read them (a chromosome whose VCF holds no
+    #   indel record reads "none: no indel record": it has no window)
+    [ "$(grep -o "fake-indel windows [^;)]*" "$GATE/indelrows_${mode}_${check}.err" | grep -vx "fake-indel windows none: no indel record" | sort -u)" = "fake-indel windows 30/30" ] || echo GATE_FAILED
   done
 done
 #     Genome-wide SOUNDNESS of the README guide and of TRAC: $GW is a genome-wide HGDP + 1000
@@ -180,13 +181,14 @@ for g in readme:guide.txt trac:guide_trac.txt; do
     --max-total-edits 6 --mode soundness --jobs 24 --out "$GATE/indelrows_gw_${g%%:*}.tsv" \
     2> "$GATE/indelrows_gw_${g%%:*}.err" || echo GATE_FAILED
   cat "$GATE/indelrows_gw_${g%%:*}.err" >&2
-  [ "$(grep -o "fake-indel windows [^;)]*" "$GATE/indelrows_gw_${g%%:*}.err" | sort -u)" = "fake-indel windows 30/30" ] || echo GATE_FAILED
+  [ "$(grep -o "fake-indel windows [^;)]*" "$GATE/indelrows_gw_${g%%:*}.err" | grep -vx "fake-indel windows none: no indel record" | sort -u)" = "fake-indel windows 30/30" ] || echo GATE_FAILED
 done
 #     The gate is the exit status: 0 gating findings. The check reads from the run's own
 #     records how its release read the data (its stderr says so: "read as a run of
 #     CRISPRme 2.10.0 or later (... every allele, store of PASS and '.', INDELS format 2,
-#     fake-indel windows 30/30)" on an index this release built, and the gate fails a check
-#     that reads other windows). Non-gating lines are documented CRISPRme limits
+#     fake-indel windows 30/30)" on an index this release built, "fake-indel windows none: no
+#     indel record" on a chromosome whose VCF holds none, and the gate fails a check that
+#     reads other windows). Non-gating lines are documented CRISPRme limits
 #     (limit-two-indels, limit-putative-carrier -- a carrier CRISPRme resolves PUTATIVE, an
 #     MNV's, an untied multi-ALT alt's or an unphased call's, as it documents, whose known
 #     haplotype says otherwise, or a target the PUTATIVE rule ties with another; a slot
