@@ -346,9 +346,13 @@ rebuilt by CRISPRitz 2.10.0 codes every PASS ALT.
 An enriched reference genome is **PAM-independent**: the per-position IUPAC overlay and the
 Dictionaries/registry encode the *variants*, not the nuclease. Only the CRISPRitz search index
 (`genome_library/<PAM>_<N>_<ref>+<vcf>`) is PAM-specific. CRISPRme+ therefore publishes the
-PAM-independent **enriched-genome kit** for the flagship datasets (under `build-inputs/<dataset>.tar.gz`
-on the HuggingFace data repo), so a user targeting a different nuclease (NGG, NNGRRT, TTTN, …)
-rebuilds *only* the index off the published enriched genome rather than re-deriving the variants.
+PAM-independent **enriched-genome kit** for the flagship datasets, so a user targeting a different
+nuclease (NGG, NNGRRT, TTTN, …) rebuilds *only* the index off the published enriched genome rather
+than re-deriving the variants: since 2.10.0 under `build-inputs/<dataset>.tar.gz` in
+`lucapinello/crisprme-indexes-format2`, beside the indexes built from them (HGDP + 1000 Genomes,
+HPRC and mega; `download --what build-inputs` fetches them there). The kits of 2.8.1, in
+`lucapinello/crisprme-data`, were enriched by CRISPRitz 2.9.1 (one allele of a site, narrower
+fake-indel windows) and do not match 2.10.0's Dictionaries.
 The complete workflow — downloading the kit, indexing a new PAM, and reproducing the kit from
 source (including the re-phasing above and the mega merge/filters) — is in
 `docs/PRECOMPUTED_INDEXES.md`.
@@ -783,8 +787,14 @@ does not depend on where in its repeat the VCF writes the indel:
    protospacer. A deletion's PAM always has one, its bases all being reference bases; an
    insertion's has one when some placement puts the inserted bases at or past the PAM's
    first base (the PAM at the target's right end, forward: the + strand with a 3′ PAM, the −
-   strand with a 5′ one) or ending at or before the PAM's last (the PAM at its left end): a
-   PAM partly made of inserted bases, in that placement;
+   strand with a 5′ one) or ending at or before the PAM's last (the PAM at its left end).
+   Such a PAM holds inserted bases, and reference bases too in some placement, though maybe
+   not in the VCF's: an insertion that is the whole PAM where the VCF writes it, and that a
+   placement one base or more along puts partly on a reference base, is judged here, D4 or
+   not (TRAC guide, an alternative alignment at chr21:46302051 (+), CFD 0.019 in 2.8.1's
+   genome-wide table: TAG inserted after the protospacer's last base, before the reference's
+   TGG, whose T repeats the insertion's first base, so that one base right the PAM is that T
+   and two inserted bases; the reference's TGG beside the protospacer reads NA);
 4. else, an insertion that holds that base, with the protospacer's end and the PAM's start,
    wherever it is placed: no place on the reference, created.
 
@@ -1054,8 +1064,11 @@ every carrier it lists has all of its row's variants on one phased haplotype; si
 index without the tiers gives the same rows (560 against 565, the five rows above gone). The
 2.8.1 report said so of a 2.8.1 search's results, and still does when it reads them again (a
 search since 2.10.0 writes the carrier gate's sidecar, `.carrier_gate.json`, in either mode,
-one that says `failed` where the gate failed; where a copy of the result folder lost it, as a
-copy by a glob loses dot files, the report reads the search's version in `.version.txt`).
+one that says `failed` where the gate failed; where there is none, the report reads the
+version `complete-search` records in `.version.txt`). These are dot files, as are the run's mode
+and datasets (`.search_mode`, `.untiered_datasets`), which the report reads too: copy a result
+folder whole (`cp -r <folder>`, `rsync -a`), not by a glob (`<folder>/*` skips dot files), or
+the report reads the copy as a population-level search.
 
 ### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
@@ -2475,9 +2488,12 @@ off a wider flank is supported for a 3′ PAM only; for a 5′ PAM the engine re
 PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its name,
 the header of its `.bin` files or its `.pam_build` records (above). The published
 PAM-less indexes are 3′ builds, so they serve no 5′ PAM: a Cas12a search needs a dedicated
-index. A flank wider than
-3 nt is not readable by CRISPRme versions before this one, so those indexes are published
-in a separate repository rather than alongside the standard ones.
+index. Up to 2.8.1 a
+PAM-less index with a flank wider than 3 nt, which a release before `--prune-pam` misreads, was
+published in a repository of its own (`lucapinello/crisprme-data-general-index`), apart from
+the others; since 2.10.0 every index, the general one among them, is published in
+`lucapinello/crisprme-indexes-format2`, the repository of index format 2, which no release
+before 2.10.0 reads (`docs/PRECOMPUTED_INDEXES.md`).
 
 ---
 

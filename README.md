@@ -201,9 +201,11 @@ SNP+SNP / SNP+indel co-occurrence; download whichever you need with `--what inde
 > run when you need maximal allele-frequency breadth. Grab the others any time from the web
 > **Settings** or by re-running the download with a different `--index-name`.
 
-A variant index also fetches its reference index (`20-NRR_3_hg38`) if it is not installed yet,
-and its panel's Dictionaries and genotype store **once per panel**: a second index of the panel
-fetches its own archive alone. Download sizes are in
+A variant index also fetches its PAM's reference index (`20-NRR_3_hg38` for the default) if it is
+not installed yet, and its panel's Dictionaries and genotype store **once per panel**: a second
+index of the panel fetches its own archive (and its PAM's reference index, `20-NGG_3_hg38` for
+`20-NGG_3_hg38+hg38_HGDP1kGP`, where that is not installed), not the Dictionaries and the store
+again. Download sizes are in
 [`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md).
 
 **Other PAMs and guide lengths.** Beside NRR the set publishes, on the reference and on HGDP +

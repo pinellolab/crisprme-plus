@@ -106,12 +106,12 @@ You never have to merge these by hand — that is what "combine everything" mean
 # reference bundle in one shot: genome + annotations + PAMs + sample-ID files
 crisprme.py download --what all --path "$CRISPRME_DIR"
 
-# variant-aware search: fetch a prebuilt variant index (its bundled genotype store
-# also covers sample-level / named carriers — no raw VCFs needed)
+# variant-aware search: fetch a prebuilt variant index (with its panel's Dictionaries and
+# genotype store, fetched once per panel: sample-level / named carriers, no raw VCFs needed)
 crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path "$CRISPRME_DIR"
 ```
 
-The default repository is `lucapinello/crisprme-data`; override it with `--hf-repo <org/name>` or the `CRISPRME_HF_REPO` environment variable. FASTA is decompressed automatically after download. The default repo hosts the reference bundle + prebuilt variant **indexes** (with their genotype stores) + the `build-inputs/` enrichment kits (`hg38_HGDP1kGP`, `hg38_mega`) + the source VCFs of its three variant panels: `download --what vcf --dataset <name>` fetches `hg38_HGDP1kGP`, `hg38_HPRC` or `hg38_mega` into `VCFs/<name>/`. For any other dataset, place its VCFs under `VCFs/<dataset>/` yourself (the `setup` path above), or point `--hf-repo` at a repo that hosts a `vcfs/<dataset>/` folder.
+The default repository is `lucapinello/crisprme-data`; override it with `--hf-repo <org/name>` or the `CRISPRME_HF_REPO` environment variable. FASTA is decompressed automatically after download. The default repo hosts the reference bundle + the source VCFs of its three variant panels (`download --what vcf --dataset <name>` fetches `hg38_HGDP1kGP`, `hg38_HPRC` or `hg38_mega` into `VCFs/<name>/`) + the prebuilt indexes and `build-inputs/` kits of CRISPRme 2.8.1 (index format 1). The indexes of 2.10.0 (index format 2), each panel's Dictionaries and genotype store, and the `build-inputs/` enrichment kits of the three panels (`hg38_HGDP1kGP`, `hg38_HPRC`, `hg38_mega`) are in `lucapinello/crisprme-indexes-format2`, where `download --what index` and `download --what build-inputs` look by themselves ([`docs/PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md)). For any other dataset, place its VCFs under `VCFs/<dataset>/` yourself (the `setup` path above), or point `--hf-repo` at a repo that hosts a `vcfs/<dataset>/` folder.
 
 ---
 

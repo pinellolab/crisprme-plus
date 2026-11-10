@@ -1613,13 +1613,14 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_nor_one_whose_carrier_gate_failed_or_whose_record_was_lost(self):
         """The report took results without .carrier_gate.json for a search before 2.10.0, and
-        the search removed it when the carrier gate failed (it is lost, too, where a result
-        folder is copied by a glob, which skips dot files): a per-sample report of datasets
+        the search removed it when the carrier gate failed: a per-sample report of datasets
         without the tiers then said that a dense window can be reported by its greedy
         worst-case alignment, which no search since 2.10.0 does (stage-1 review R3-N6). A
         failed gate's sidecar now says it failed, and the inputs card says so; with none, the
         run's .version.txt, of 2.10.0 or later, says the same. Results of an earlier release
-        (no sidecar; a .version.txt before 2.10.0, or none) read as before."""
+        (no sidecar; a .version.txt before 2.10.0, or none) read as before. (A copy of the
+        folder by a glob loses every dot file, the run's mode and datasets with these: it reads
+        as a population-level search, which none of these texts concerns.)"""
         html = self.since_2_10_0((".carrier_gate.json",
                                   '{"status": "failed", "companion": null}'), job="failed")
         self.assertTrue("The carrier gate failed in this search" in html)

@@ -112,7 +112,7 @@ crisprme.py download --what all  --path .                                       
 crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path .         # recommended default (phased HGDP + 1000 Genomes, 4,091 samples; carriers)
 crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HPRC     --path .         # HPRC pangenome (phased assemblies, carriers)
 crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_mega     --path .         # mega (sites-only, per-dataset AF provenance)
-crisprme.py download --what index --index-name 20-NGG_3_hg38+hg38_HGDP1kGP --path .         # another index of the default panel: its own archive alone
+crisprme.py download --what index --index-name 20-NGG_3_hg38+hg38_HGDP1kGP --path .         # another index of the default panel: its own archive (+ 20-NGG_3_hg38 if not installed)
 ```
 
 A first-time unauthenticated download of these many-small-file indexes can hit
@@ -148,7 +148,9 @@ build-inputs/
 `registry_<vcf>/`, `log_indels_<vcf>/`, `indel_genotypes_<vcf>/`, mega's `indel_af_<vcf>/`, a
 classic publish's `dictionaries_<vcf>/`, and the samplesID lists) and its **genotype store**
 (`genotypes_<vcf>`) by name and fingerprint. `download` fetches each once per panel: a second
-index of the panel finds them installed, the same, and fetches its own archive alone. Up to
+index of the panel finds them installed, the same, and fetches its own archive (and its PAM's
+reference index where that is not installed: `20-NGG_3_hg38` for `20-NGG_3_hg38+hg38_HGDP1kGP`),
+not the bundle and the store again. Up to
 2.8.1 every variant archive carried its own copy of the Dictionaries (16.5 GB of each HGDP +
 1000 Genomes archive) and every install replaced them (`docs/hf/README.md`). Download sizes are
 given here once the rebuild has published them.
@@ -455,7 +457,8 @@ crisprme.py download --what index \
   maintainer put in the archives.
 - The **Dictionaries bundle** and the **genotype store** of the panel are fetched once per
   panel: a second index of it (`20-NGG_3_hg38+hg38_HGDP1kGP`) finds them installed, the same
-  build its manifest names, and fetches its own archive alone. A marker,
+  build its manifest names, and fetches its own archive (and `20-NGG_3_hg38`, its reference
+  index, where that is not installed), not them again. A marker,
   `Dictionaries/.<name>.json`, records what is installed and the indexes installed with it; a
   repo whose companion is not the one the index's manifest names is refused, nothing of it
   installed. An archive of 2.8.1, which carries the Dictionaries of its own build, is refused in

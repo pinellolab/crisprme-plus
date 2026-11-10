@@ -105,7 +105,8 @@ and the `release-crisprme` skill.
     archive), every install replaced them, and `publish-index` re-packed and re-uploaded the
     genotype store with every index; for the seven HGDP + 1000 Genomes indexes of 2.10.0's set that
     is six copies of about 16.5 GB not uploaded, and an install of a second index of a panel
-    fetches its own archive alone. An index of format 1 is
+    fetches its own archive (and its PAM's reference index where that is not installed, as
+    every variant index does), not the Dictionaries again. An index of format 1 is
     published and installed as before. The catalog no longer lists an `indel_genotypes_`
     companion as an index (the phased indel genotypes `publish-index` has uploaded since 2.8.1).
   - Covered by `PostProcess/test_panel_companions.py` (a fake hub that keeps its repos in a
@@ -1535,10 +1536,12 @@ and the `release-crisprme` skill.
   `High_variant_density_region` note (see Changed). The report tells a search of this release by
   the carrier gate's sidecar, `.carrier_gate.json`, which the search now writes when the gate
   fails too (status `failed`: the inputs card's **Carrier gate** row says the gate failed and the
-  rows are shown unchecked), and, where a copy of the result folder lost it (a copy by a glob
-  skips dot files), by the version in the run's `.version.txt`; before, a failed gate's search
-  removed it, and the report of such a run, or of such a copy, said that a dense window could be
-  a greedy alignment. Covered by `PostProcess/test_haplotype_prioritizer.py`,
+  rows are shown unchecked), and, where there is none, by the version `complete-search` records in
+  the run's `.version.txt`; before, a failed gate's search removed it, and the report of such a
+  run said that a dense window could be a greedy alignment. (A copy of a result folder by a glob,
+  which skips dot files, loses these with the run's mode and datasets, `.search_mode` and
+  `.untiered_datasets`, and the report reads it as a population-level search, which no such text
+  concerns: copy the folder whole.) Covered by `PostProcess/test_haplotype_prioritizer.py`,
   `PostProcess/test_phased_haplotype.py` and `PostProcess/test_generate_report.py`.
 
 - **A per-sample row on an index with the dict-less tiers is no longer noted as a dense window's

@@ -338,9 +338,12 @@ _GREEDY_DENSE = True
 def _since_2_10(gate, version):
     """True for the results of a search of CRISPRme 2.10.0 or later: one that wrote the
     carrier gate's sidecar (``gate``, .carrier_gate.json; in either mode, and since a failed
-    gate's says "failed", whatever the gate did), or, where it is gone (a copy of the result
-    folder by a glob skips dot files), whose .version.txt (``version``) says 2.10.0 or later.
-    False for an earlier release's, and where neither tells."""
+    gate's says "failed", whatever the gate did), or, where there is none, whose .version.txt
+    (``version``, which complete-search writes and a web search does not) says 2.10.0 or
+    later. False for an earlier release's, and where neither tells. Both are dot files, as are
+    the run's mode and datasets (.search_mode, .untiered_datasets), which the texts this
+    decides also need: a copy of the result folder that skips dot files (a glob's) loses them
+    all, and reads as a population-level search, which none of those texts concerns."""
     if gate is not None:
         return True
     m = re.match(r"\s*v?(\d+)\.(\d+)", str(version or ""))

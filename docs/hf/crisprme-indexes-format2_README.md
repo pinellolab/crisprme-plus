@@ -94,7 +94,9 @@ crisprme-indexes-format2/
 (`dictionaries-bundle_<dataset>`: the Tier-0 registry, the indel logs, the phased indel
 genotypes, mega's indel allele frequencies, and the samplesID lists) and its **genotype store**
 (`genotypes_<dataset>`) by name and fingerprint. `download` fetches each once per panel: a
-second index of the panel finds them installed, the same, and fetches its own archive alone.
+second index of the panel finds them installed, the same, and fetches its own archive (and its
+PAM's reference index where that is not installed: `20-NGG_3_hg38` for
+`20-NGG_3_hg38+hg38_HGDP1kGP`), not the bundle and the store again.
 `--no-genotypes` leaves the genotype store out. (The archives of 2.8.1 each carried their own
 copy of the Dictionaries, 16.5 GB for every HGDP + 1000 Genomes archive.)
 
@@ -108,7 +110,8 @@ crisprme.py download --what all --path .
 # the recommended variant-aware default: phased HGDP + 1000 Genomes, SpCas9 NRR
 crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path .
 
-# another index of the same panel: its archive alone (the bundle and store are installed)
+# another index of the same panel: its archive, and 20-NGG_3_hg38 if not installed (the
+# bundle and store are installed already)
 crisprme.py download --what index --index-name 20-NGG_3_hg38+hg38_HGDP1kGP --path .
 ```
 

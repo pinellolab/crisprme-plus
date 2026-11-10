@@ -215,8 +215,8 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 
 They land in `VCFs/hg38_HGDP1kGP/`; build from them with `build-index-only` (see
 [`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md)). For a new PAM on HGDP + 1000
-Genomes or mega, the pre-enriched kit (`download --what build-inputs --dataset
-hg38_HGDP1kGP`, about 1 GB) is the faster route.
+Genomes, HPRC or mega, the pre-enriched kit of 2.10.0 (`download --what build-inputs --dataset
+hg38_HGDP1kGP`, from `lucapinello/crisprme-indexes-format2`) is the faster route.
 
 ## 6. Start the web interface
 
