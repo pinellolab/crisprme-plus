@@ -120,8 +120,8 @@ for the HGDP+1000G index) and reads the panel's genotype store: on a large panel
   population-level search reads no haplotype, so nothing skips the raw targets of the dense
   windows of the immunoglobulin loci, which a per-sample search skips when no sample can have
   them: on HGDP + 1000 Genomes (4,091 samples) the README guide's population-level search of
-  chr22 took 23 to 32 min against 8 to 9 min per sample. On a small panel it can be the faster:
-  on HPRC (232 samples) 9 to 11 min against 14 to 16 min per sample (16 threads; METHODS.md
+  chr22 took 23 to 32 min against 8 to 11 min per sample. On a small panel it can be the faster:
+  on HPRC (232 samples) 9 to 12 min against 14 to 17 min per sample (16 threads; METHODS.md
   §5).
   On a phased index leaving out `--per-sample` is not enough, since per-sample is that
   index's default; population-level is the default only on a sites-only, unphased,
@@ -174,6 +174,14 @@ Independent `complete-search` jobs can run in parallel, but give each job its ow
 `/tmp` is tight. Jobs correctly share the read-only reference genome + index. (A
 long-standing collision where two jobs stripping the same COSMIC-containing annotation
 raced on a temp file is fixed in 2.7.10.)
+
+On a machine other people use, keep the data folder and the output folders writable by you
+alone (a umask of 022 or 077, or `chmod go-w` on them): anyone who can write a folder can
+change the inputs and the results of a search there. What a search reads back of its own
+files is data only (since 2.10.0 the post-analysis in pieces passes its dictionary keys as
+JSON, made 0600 in a folder made 0700, and a test keeps every way of loading a file that runs
+code out of CRISPRme), and its temporary files and folders are made under names no one else
+could make first (`tempfile.mkdtemp`, `mkstemp`, `mktemp -d`).
 
 ---
 

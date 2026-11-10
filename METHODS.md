@@ -1149,10 +1149,11 @@ search's threads, bring it back. None changes a row.
   variant row under the cap: it is skipped before it is expanded, and only its reference row
   is written. It writes what the cap alone writes (its unit test compares D_min with every
   choice): on chr22 the README guide's population-level search with `--max-degeneracy 4` skips
-  753,990 of its 764,435 raw targets with a variant letter (98.6%) and takes 7.4 min on 16
-  threads (16 min with the K-skip off, the same files). Use K = 4 or more in a population-level
-  search (above). The K-skip reads the ALTs listed at a raw target's variant columns, to tell
-  which columns an ALT can fix, and no sample's haplotype. `--no-haplotype-precheck` (or
+  753,990 of its 764,435 raw targets with a variant letter (98.6%) and takes 8 to 10 min on 16
+  threads (17 to 18 min with the K-skip off, the same files; each pair of runs started
+  together). Use K = 4 or more in a population-level search (above). The K-skip reads the
+  ALTs listed at a raw target's variant columns, to tell which columns an ALT can fix, and no
+  sample's haplotype. `--no-haplotype-precheck` (or
   `CRISPRME_HAPLOTYPE_PRECHECK` set to 0, false, no or off, in any case, as
   `CRISPRME_POSTPROC_PIECES` below) turns off the pre-check, its indel twin and the K-skip
   together, and the notes each chromosome ends with in `log_verbose.txt` say which of them is
@@ -1173,7 +1174,11 @@ search's threads, bring it back. None changes a row.
   whole chromosome (the spans of every line, the phased indel store read around them, the
   dictionary keys they need, which the pool reads once a chromosome into a copy the pieces
   load; on the indel side the windows of the indel log that hold its lines' positions, the
-  windows its lines read), then analyses its own lines. A merge joins the pieces' files into
+  windows its lines read), then analyses its own lines. The copy is a file of the run's output
+  folder, which other members of its group can write under a umask of 002, so it is JSON, the
+  dictionary's own format, which loads as data whoever wrote it (a pickle runs what it names
+  when loaded), made 0600 in a pieces' folder the pool makes 0700; a file there that is not
+  such a copy stops the piece. A merge joins the pieces' files into
   the chromosome's: the rows in order, the companions keeping the first row of each identity as
   one process does, the dense-window BED one line a window. A CRISPR-Bulge score depends in its
   last bits on which rows share a batch of the scorer (the 2.10.0 cost judges measured 80 of
@@ -1221,7 +1226,7 @@ whole run (user and system, every process) in brackets; 4 mismatches + 1 DNA + 1
 | chr22, SaCas9 (NNGRRT), per sample | 590 min¹ | 72 min (291 min) | |
 | chr22, three repeat-rich guides (NRG), per sample | 456 min¹ | 35 min (104 min) | |
 | IGL alone, per sample | 96 min (104 min) | 7.6 min (28 min) | 15 min (112 min) |
-| IGH alone, per sample | over 14 h² | 28 min (102 min) | 117 min (698 min) |
+| IGH alone, per sample | 864 min (875 min)² | 28 min (102 min) | 117 min (698 min) |
 | IGK alone, per sample | 224 min (232 min) | 9.7 min (42 min) | 31 min (223 min) |
 
 ¹ Stage 2a's fresh run of the same code (whose files these match), on ml008, a node of the same
@@ -1230,9 +1235,8 @@ one-chromosome search runs in one process, so the thread count changes only the 
 few short steps after the post-analysis: the search took 0.9 to 4.4 min of these runs, and
 stage 2a's README guide per sample took 95 min with `--thread 8` there, against 98 min with
 `--thread 16` here. ² d3722b0's run of IGH alone took 10.7 h of SNP post-analysis (the cost
-judges had estimated 7.2 h) and was still in its indel post-analysis 3.4 h later (they
-estimated 1.9 h for it), 14.2 h from its start, when this was written; that of IGK alone took
-3.0 h of SNP and 38 min of indel post-analysis.
+judges had estimated 7.2 h) and 3.6 h of indel post-analysis (they estimated 1.9 h), 14.4 h in
+all; that of IGK alone took 3.0 h of SNP and 38 min of indel post-analysis.
 
 The pre-check does most of it: with the post-analysis in pieces but the pre-check off, a
 per-sample search still expands every raw target, now over the `--thread` workers (and starts
@@ -1282,18 +1286,20 @@ window's worst case and reads no haplotype, so the pre-check cannot skip its win
 dense panel of many samples, such as the default HGDP + 1000 Genomes index (4,091 samples), the
 per-sample search is the faster: on chr22 the README guide's population-level search took 121
 min without these steps (more than the per-sample one's 98) and 23 to 32 min with the
-post-analysis in pieces, where the per-sample search takes 8 to 9 min (16 threads). Its CPU
+post-analysis in pieces, where the per-sample search takes 8 to 11 min (16 threads). Its CPU
 time did not fall (147 and 151 min): the pieces only spread it over the threads, and the merge,
 which scores the CRISPR-Bulge rows of all the pieces (890,496) in one process, took 13 of its
 20 min of SNP post-analysis on a loaded node. On a small panel the per-sample search can be the
 slower one: on HPRC (232 samples, its index of format 2 too) the same search of chr22 took 14
-to 16 min per sample against 9 to 11 min population-level (16 threads, the two started
+to 17 min per sample against 9 to 12 min population-level (16 threads, the two started
 together), its post-analysis costing about the same in both modes (the SNP side half a minute
 or less, the indels about 3.5 min) and the per-sample run writing what the population-level one
 does not (the alternative alignments, the observed-haplotypes sidecar) and integrating its rows
-for longer; beside mega (HGDP + 1000 Genomes and mega, NRR) the per-sample search took 87 to 99
-min from its search to its end, about an hour of it its report, against 27 to 29 min
-population-level. Choose the mode for what it reports.
+for longer; beside mega (HGDP + 1000 Genomes and mega, NRR: each dataset searched and
+post-analysed in turn, then the rows of both merged, integrated and reported) the per-sample
+search took 96 to 107 min, 54 to 62 min of it its report, against 50 to 55 min population-level
+(the whole runs, the two started together; a search of several datasets writes its `log.txt`
+anew for each, so the times there are its last dataset's). Choose the mode for what it reports.
 
 ### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 

@@ -53,9 +53,9 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   not admit: a raw target needing more than K gives none under the cap, and only its reference
   row is written. It writes what the cap alone writes (its unit test compares the bound with
   every choice; on chr22 the README guide's population-level search with K = 4 skips 753,990 of
-  its 764,435 raw targets with a variant letter and takes 7.4 min on 16 threads, 16 min with the
-  K-skip off, with the same files), and the switch above turns it off too (the log then says the
-  K-skip is off). `--max-degeneracy` stays off by default.
+  its 764,435 raw targets with a variant letter and takes 8 to 10 min on 16 threads, 17 to 18
+  min with the K-skip off, with the same files), and the switch above turns it off too (the log
+  then says the K-skip is off). `--max-degeneracy` stays off by default.
 - **The post-analysis runs each chromosome in pieces over the search's threads.** Up to now the
   SNP and the indel post-analysis ran one process a chromosome, so the IGL locus of chr22 ran on
   one core. Each chromosome's clustered raw targets are now cut into up to `--thread` ranges of
@@ -71,9 +71,12 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   population-level against the same searches as one process a chromosome, every data file).
   `CRISPRME_POSTPROC_PIECES=0` (or false, no or off, in any case) runs one process a
   chromosome. The SNP pieces read the chromosome's dictionary keys from a copy written once a
-  chromosome; the indel pieces read the windows of the indel log their lines need. The
-  analysis' arguments reach the pieces through a file of a folder only the run can write
-  (`tempfile.mkdtemp`), never a name another user of a shared `/tmp` could make first.
+  chromosome: JSON, which loads as data whoever wrote it (it sits in the run's output folder,
+  which its group can write under a umask of 002, and loading a pickle runs what it names),
+  made 0600 in a pieces' folder made 0700. The indel pieces read the windows of the indel log
+  their lines need. The analysis' arguments reach the pieces through a file of a folder only the
+  run can write (`tempfile.mkdtemp`), never a name another user of a shared `/tmp` could make
+  first.
   `log_verbose.txt` keeps one piece's output and what the others add, but their own run times,
   the notes one process ends a chromosome with (the pre-check's count, the dense windows),
   which the merge writes from the pieces' counts, and the chromosome's run time ("Post-analysis
@@ -118,13 +121,13 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   CRISPRitz 2.10.0 builds it is not, on a dense panel of many samples: the population-level
   analysis reads no haplotype, so nothing skips its dense windows, and on HGDP + 1000 Genomes
   (4,091 samples) the README guide's population-level search of chr22 takes 23 to 32 min against
-  8 to 9 min per sample (16 threads). On a small panel it can still be the faster: on HPRC (232
-  samples) 9 to 11 min against 14 to 16 min per sample, the post-analysis costing about the same
+  8 to 11 min per sample (16 threads). On a small panel it can still be the faster: on HPRC (232
+  samples) 9 to 12 min against 14 to 17 min per sample, the post-analysis costing about the same
   in both modes and the per-sample run writing more (the alternative alignments, the
-  observed-haplotypes sidecar); beside mega, 27 to 29 min against 87 to 99 min, an hour of which
-  the per-sample report. They now say it is a resolution choice whose speed depends on the
-  panel, and what the default search costs (README, "What the default search costs"; METHODS.md
-  §5).
+  observed-haplotypes sidecar); with mega beside HGDP + 1000 Genomes, 50 to 55 min against 96 to
+  107 min, 54 to 62 min of which the per-sample report (the whole search of both datasets). They
+  now say it is a resolution choice whose speed depends on the panel, and what the default
+  search costs (README, "What the default search costs"; METHODS.md §5).
 - **The CRISPR-Bulge scoring of a batch looks its nulled rows up at once.** The scorer writes -1
   for the rows its model cannot score (two bulges, an `N`, more than 24 columns), nearly every
   row of a dense locus (a DNA and an RNA bulge). It looked each row of a batch up in the list of
@@ -135,3 +138,30 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   once.** It read it once per raw target, a hundred or more of them a dense window: 227 s on
   chr22 and about an hour on IGH for 10,000 to 25,000 distinct spans. Each span is now read once
   (about 4 s on chr22, 27 s on IGH).
+
+### Fixed
+- **A temporary file is made where only the run's user can reach it, never under a name another
+  user could make first.** A review of the post-analysis in pieces found it loading a pickle,
+  which runs what it names, from the run's output folder (never released: the pieces' copy is
+  JSON); a sweep of CRISPRme for the same class found these in released code:
+  - The COSMIC-free copy of an annotation whose folder cannot hold it (a read-only or shared
+    install) was written into `$CRISPRME_TMPDIR`, the working directory or `/tmp` under a fixed
+    name (`.nocosmic.<annotation>`), by a strip writing beside it under one made of its process
+    id: another user of a shared `/tmp` could make those names first, a link to a file of the
+    user's among them, which the strip then overwrote with the annotation's lines. The copy is
+    now made in a folder of the run's own there (`tempfile.mkdtemp`, 0700), removed with the
+    annotation temp folders, and the strip never writes through a name that already stands
+    (`O_EXCL`): where one does, in an `Annotations/` folder others can write, the copy is made
+    in such a folder of the run's own instead.
+  - The macOS app installer (`docs/install.sh`) wrote the launcher's AppleScript, which it then
+    compiled into the app, under a name it made by adding `.applescript` to the file
+    `mktemp -t` made: it writes it in a folder `mktemp -d` makes now.
+  - `PostProcess/validate_indel_snp_coords.py`, a developer's check, wrote its overlaid genome
+    under a name `tempfile.mktemp` gave: in a folder of its own now.
+
+  A test of the unit-test job (`test_no_code_from_files`) keeps the class out: over every
+  module but the tests, no pickle, marshal, shelve or the like (their loads run what a file
+  names), no `eval` or `exec`, no YAML load but `safe_load`, no `tempfile.mktemp`; in the shell
+  scripts, no `eval`, no `mktemp -u` and no name added to the one `mktemp` made. A folder
+  others can write still lets them change a search's inputs and results: on a shared machine,
+  keep the data and output folders writable by you alone (`docs/TROUBLESHOOTING.md` §7).
