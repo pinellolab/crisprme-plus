@@ -1026,6 +1026,19 @@ def _inside_place(row):
     return int(row[pos - 1]), place
 
 
+def _indel_tokens(variants):
+    """The tokens of a row's variant list (<contig>_<pos>_<ref>_<alt>,...) whose REF and ALT
+    differ in length, its indel's, in the list's order: the first is the one its place on
+    the haplotype is read from (_first_base_offset). Split from the right, as
+    _holds_indel_token reads them."""
+    out = []
+    for tok in variants.split(","):
+        p = tok.rsplit("_", 3)
+        if len(p) == 4 and len(p[2]) != len(p[3]):
+            out.append(tok)
+    return out
+
+
 def _max_shift(path):
     """The largest difference between a row's Cluster_Position and its Position in the
     merge's input ``path``: the most an alignment's bulges move its Cluster_Position off its
@@ -1083,11 +1096,37 @@ def _clusters(lines, shift=0):
     is in when it is placed. A row's place, and so its cluster, does not depend on the
     order of the rows of one Cluster_Position, which the three merges sort differently
     (each must make the same clusters: their alternative alignments are pasted line by
-    line). Without such rows the clusters are those of the plain chain, as up to 2.8.1."""
+    line). Without such rows the clusters are those of the plain chain, as up to 2.8.1.
+
+    A unit is made of whole targets (review r2 of lane M). One target's alignments before
+    one PAM start on different bases, so some can start inside the insertion and others on
+    a reference base before it (on the + strand with a 3' PAM a DNA bulge starts one base
+    earlier, an RNA bulge one base later): the anchor base itself, or a base before it.
+    Such an alignment names the insertion and is a row of the chain like any other, at its
+    Cluster_Position, which is the target's place on the haplotype, where the alignments
+    inside are too (_haplotype_cluster_position). With those held in the unit, the unit
+    could join the site before it while the target's alignment on a reference base opened
+    the site after it, and the target was written twice: at 2 DNA + 2 RNA bulges, another
+    target's 2-RNA-bulge alignment from the insertion's first base, one base after a site,
+    took the unit there, and the target's 2-DNA-bulge alignment from the anchor base was a
+    site of its own (the chain of every row, and 2.8.1, wrote it once). So a target that
+    has an alignment on a reference base is placed by it: its alignments inside the
+    insertion (the same strand, place on the haplotype and insertion) leave the unit and
+    go with it, at its Cluster_Position, where 2.8.1 placed them all; the unit holds the
+    targets that lie wholly inside the insertion. They reach the merge before it (their
+    Cluster_Positions are smaller, by the rank of their first base among the inserted
+    ones) and are still in the window then (it starts at the anchor or before, at most
+    ``shift`` bp before its Cluster_Position), so every alignment of a target is in one
+    cluster, whatever its bulges and --merge, and a row's cluster still does not depend on
+    the order of the rows of one Cluster_Position."""
     group = None
-    window = []      # (place in the chain, 1 for a unit's row, seq, row, cp, haplotype place)
-    current = None   # [last Cluster_Position of its chain, [(seq, row)]]
+    # (place in the chain, 1 for a unit's row, seq, row, cp, haplotype place, its target:
+    # (strand, haplotype place, insertion) for a unit's row, None for a row of the chain)
+    window = []
+    current = None   # [last place of its chain, [(seq, row)]]
     pending = []     # [anchor, lowest cp, highest cp, nearest haplotype place, [(seq, row)]]
+    inside = {}      # a target inside an insertion -> its rows in the window, in a unit
+    moved = set()    # the seq of a unit's row that went with its target's row of the chain
     seq = 0
 
     def place(nxt_cp):
@@ -1126,7 +1165,7 @@ def _clusters(lines, shift=0):
     def take(item):
         """Take one row in its place in the chain; return the clusters it completes."""
         nonlocal current, pending
-        at, in_unit, s, row, cp, hp = item
+        at, in_unit, s, row, cp, hp, _target = item
         if in_unit:
             if pending and pending[-1][0] == at:
                 unit = pending[-1]
@@ -1148,11 +1187,23 @@ def _clusters(lines, shift=0):
         current = [at, joins + [(s, row)]]
         return done
 
+    def pop():
+        """Take the next row of the window; return the clusters it completes. A unit's row
+        that went with its target's row of the chain is taken there, not in the unit; once
+        a unit's row is taken, no row of the chain to come is its target's."""
+        item = heapq.heappop(window)
+        if item[1]:
+            if item[2] in moved:
+                moved.discard(item[2])
+                return []
+            inside.pop(item[6], None)
+        return take(item)
+
     def drain():
         """The clusters of the rest of a guide and chromosome."""
         out = []
         while window:
-            out.extend(take(heapq.heappop(window)))
+            out.extend(pop())
         out.extend(place(None)[0])
         return out
 
@@ -1164,17 +1215,30 @@ def _clusters(lines, shift=0):
                 for c in drain():
                     yield [r for _s, r in sorted(c, key=lambda x: x[0])]
             current, pending, group = None, [], key
+            inside.clear()
+            moved.clear()
             _FIRST_BASE_MEMO.clear()
         cp = int(row[pos])
-        inside = _inside_place(row)
-        if inside is None:
-            heapq.heappush(window, (cp, 0, seq, row, cp, cp))
+        at = _inside_place(row)
+        if at is None:
+            # a row of the chain; one naming an insertion can be an alignment of a target
+            # whose other alignments start inside it: they go with it, at its place
+            for tok in (_indel_tokens(row[snp_info]) if _holds_indel_token(row[snp_info])
+                        else ()):
+                for item in inside.pop((row[pos + 1], cp, tok), ()):
+                    moved.add(item[2])
+                    heapq.heappush(window, (cp, 0, item[2], item[3], item[4], item[5], None))
+            heapq.heappush(window, (cp, 0, seq, row, cp, cp, None))
         else:
-            heapq.heappush(window, (inside[0], 1, seq, row, cp, inside[1]))
+            toks = _indel_tokens(row[snp_info])
+            target = (row[pos + 1], at[1], toks[0] if toks else None)
+            item = (at[0], 1, seq, row, cp, at[1], target)
+            inside.setdefault(target, []).append(item)
+            heapq.heappush(window, item)
         seq += 1
         # every row still to come is at cp - shift or after in the chain
         while window and window[0][0] < cp - shift:
-            for c in take(heapq.heappop(window)):
+            for c in pop():
                 yield [r for _s, r in sorted(c, key=lambda x: x[0])]
     if group is not None:
         for c in drain():
