@@ -172,11 +172,11 @@ indexes/                                         # lucapinello/crisprme-data-gen
 
 Each is replaced in 2.10.0 by the index the index set names (`NRR_3_hg38+hg38_HGDP1kGP` by
 `20-NRR_3_hg38+hg38_HGDP1kGP`; `NNN_3_*` and `NNNNNNNN_3_*` by the general index `20-NNNNNNNN_3_*`;
-NRG on HPRC and mega by the NRR index there), which a download of it names. An install holds
-one build of a panel's Dictionaries: install an archive of 2.8.1 in another working directory
-than an index of 2.10.0 of the same panel (`download` refuses to put an archive of 2.8.1's
-Dictionaries over a bundle of 2.10.0, and says which installed indexes read another build's
-where a bundle replaces them). Their download sizes, as the Hugging Face API reports them
+NRG on HPRC and mega by the NRR index there, more slowly than NRG's own), which a download of it
+names. An install holds one build of a panel's Dictionaries: install an archive of 2.8.1 in another
+working directory than an index of 2.10.0 of the same panel (`download` refuses to put an archive
+of 2.8.1's Dictionaries over a bundle of 2.10.0, and says which installed indexes read another
+build's where a bundle replaces them). Their download sizes, as the Hugging Face API reports them
 (GB = 10⁹ bytes):
 
 | Archive | Repo | Download |

@@ -56,7 +56,8 @@ budget of up to 2 DNA and 2 RNA bulges, the web's ceiling. The 2.8.1 names (`NRR
 
 An index serves a search of a PAM its own holds, pruned (an NRR index serves NGG, NAG, NGA and
 NRG; NNGRRN serves NNGRRT; TTTN serves TTTV), and the general index any 3′ PAM of up to 8 nt.
-NRG on HPRC and mega is served by the NRR index there. HGDP + 1000 Genomes is genotyped and
+NRG on HPRC and mega is served by the NRR index there, pruned: the same rows, more slowly than
+a dedicated NRG index (on chr22 about twice the wall time). HGDP + 1000 Genomes is genotyped and
 phased (4,091 samples), HPRC genotyped and phased (232 assembly-derived genomes), mega
 sites-only (5 sources, allele frequencies only).
 

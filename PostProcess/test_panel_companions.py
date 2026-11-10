@@ -450,7 +450,8 @@ class DownloadOncePerPanel(_Base):
 
 class AnArchiveOf281NamesItsSuccessor(_Base):
     def _old(self, name):
-        old = make_panel(os.path.join(self.tmp, "old"), [name], fmt=1)
+        old = make_panel(os.path.join(self.tmp, "old"), [name],
+                         vcf=name.partition("+")[2] or VCF, fmt=1)
         index = os.path.join(old, "genome_library", name)
         self.publish(index, dictless=True)
         if "+" in name:
@@ -464,8 +465,29 @@ class AnArchiveOf281NamesItsSuccessor(_Base):
     def test_nnn_3_is_served_by_the_general_index(self):
         said = self.download(self.tmp, self._old(f"NNN_3_hg38+{VCF}"))
         self.assertIn(f"It is not built again for 2.10.0: 20-NNNNNNNN_3_hg38+{VCF}", said)
+        # (a PAM-less index costs the same whatever its flank: every position is a site)
+        self.assertIn("serves every search it serves, pruned to the search's PAM, at the same "
+                      "speed", said)
+        self.assertNotIn("or faster", said)
         # (the note is read from the index set, offline: the format-2 repo is not asked)
         self.assertNotIn(FMT2, {c[1] for c in self.hub.calls if c[0] != "upload_file"})
+
+    def test_nrg_on_hprc_and_mega_is_served_by_nrr_more_slowly(self):
+        """NRG is not built again on HPRC and mega: the panel's NRR index serves its searches,
+        pruned to NRG. The note said it did so "at the same speed or faster", which holds of
+        the general index for NNN_3 alone: an NRR index holds the sites of NAA, NAG, NGA and
+        NGG and prunes at leaf time (chr22, three NRG guides at 4 mismatches + 1 bulge, the
+        same 85,563 rows: 107 s wall and 380 s CPU, against 57 s and 110 s for an NRG index;
+        the stage-2b review of lane D, D-R1-2)."""
+        for vcf in ("hg38_HPRC", "hg38_mega"):
+            name = self._old(f"NRG_3_hg38+{vcf}")
+            said = self.download(os.path.join(self.tmp, vcf), name)
+            self.assertIn(f"It is not built again for 2.10.0: 20-NRR_3_hg38+{vcf}, in {FMT2}, "
+                          "serves every search it serves, pruned to the search's PAM: the same "
+                          "rows, more slowly than a dedicated NRG index", said)
+            self.assertNotIn("same speed", said)
+            self.assertNotIn("faster", said)
+            shutil.rmtree(os.path.join(self.tmp, "old"))
 
     def test_it_says_so_before_the_archive_is_fetched(self):
         """The note came after the install: after the whole archive of 2.8.1 was fetched

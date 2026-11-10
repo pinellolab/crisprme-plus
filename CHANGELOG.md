@@ -74,7 +74,9 @@ and the `release-crisprme` skill.
     indexes exist; `download` still fetches one by its name, and names first, before fetching
     it, the index of 2.10.0 that replaces it, read offline from the index set (below): its build
     of 2.10.0, or the index that serves its searches where it is not built again (`NNN_3_*`: the
-    general index `20-NNNNNNNN_3_*`, at the same speed; NRG on HPRC and mega: NRR there); and an
+    general index `20-NNNNNNNN_3_*`, at the same speed; NRG on HPRC and mega: NRR there, pruned to
+    NRG, which gives the same rows more slowly than a dedicated NRG index: on chr22, three NRG
+    guides at 4 mismatches + 1 bulge, 107 against 57 s wall and 380 against 110 s CPU); and an
     index of 2.10.0 not found says where it was looked for (the repo of index format 2, then
     `lucapinello/crisprme-data`). `download --what all` fetches the
     default reference index `20-NRR_3_hg38`, and 2.8.1's `NRR_3_hg38` where it cannot (saying

@@ -73,8 +73,9 @@ _COMPAT_FLANK_WIDTH = 3
 # length and side (index_fit.parse_index_name: 20-NRR_3_hg38), the general (all-N) index
 # among them; with each panel's Dictionaries bundle and genotype store once
 # (_PANEL_COMPANIONS), and the enriched-genome kits these were built from (build-inputs/).
-# The 2.10.0 set is docs/rebuild/INDEX_SET_2.10.0.tsv. The repos above keep the archives of
-# 2.8.1 (index format 1, the older names), which a download still fetches by their own names.
+# The 2.10.0 set is seq_script/rebuild/index_set_2.10.0.tsv (INDEX_SET, below). The repos
+# above keep the archives of 2.8.1 (index format 1, the older names), which a download still
+# fetches by their own names.
 FORMAT2_HF_REPO = "lucapinello/crisprme-indexes-format2"
 
 # The archives of a panel (a variant dataset) that every index of it shares, published and
@@ -2136,18 +2137,30 @@ def download_component(
                      if routed and _note_successor and repo != FORMAT2_HF_REPO else None)
         if successor:
             _vcf_of = index_name.partition("+")[2]
-            same_pam = (index_fit.index_pam(successor)
-                        == index_fit.index_pam(canonical_index_name(index_name)))
+            _old_pam = index_fit.index_pam(canonical_index_name(index_name))
+            _new_pam = index_fit.index_pam(successor)
             instead = (f" instead, in another working directory (the two read different "
                        f"Dictionaries of {_vcf_of})" if _vcf_of else " instead")
-            print(
-                f"NOTE: {canonical_index_name(index_name)} is an index of CRISPRme 2.8.1 "
-                f"(index format 1). "
-                + (f"This release's build of it is {successor}, in {FORMAT2_HF_REPO}: "
-                   f"download that one{instead}." if same_pam else
-                   f"It is not built again for 2.10.0: {successor}, in {FORMAT2_HF_REPO}, "
-                   f"serves every search it serves (pruned to the search's PAM, at the same "
-                   f"speed or faster): download that one{instead}."), flush=True)
+            if _new_pam == _old_pam:
+                said = (f"This release's build of it is {successor}, in {FORMAT2_HF_REPO}: "
+                        f"download that one{instead}.")
+            elif set(_new_pam) == {"N"}:
+                # NNN_3: the general index, as fast (a PAM-less index costs the same whatever
+                # its flank, every position being a site)
+                said = (f"It is not built again for 2.10.0: {successor}, in {FORMAT2_HF_REPO}, "
+                        f"serves every search it serves, pruned to the search's PAM, at the same "
+                        f"speed: download that one{instead}.")
+            else:
+                # NRG on HPRC and mega: the panel's NRR index, which holds every NRR site and
+                # prunes at leaf time (chr22, three NRG guides at 4 mismatches + 1 bulge, the
+                # same rows: 107 s wall and 380 s CPU, against 57 s and 110 s for NRG's index)
+                said = (f"It is not built again for 2.10.0: {successor}, in {FORMAT2_HF_REPO}, "
+                        f"serves every search it serves, pruned to the search's PAM: the same "
+                        f"rows, more slowly than a dedicated {_old_pam} index (it holds every "
+                        f"{_new_pam} site; on chr22 about twice the wall time): download that "
+                        f"one{instead}.")
+            print(f"NOTE: {canonical_index_name(index_name)} is an index of CRISPRme 2.8.1 "
+                  f"(index format 1). " + said, flush=True)
         # multi-part phase labels: a VARIANT index installs in 3 stages (main index
         # tarball -> genotypes companion -> shared reference index); a reference-only
         # index is a single download. Re-seed the total to the ACTUAL (possibly
