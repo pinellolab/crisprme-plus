@@ -1087,9 +1087,9 @@ its purpose and usage:
   sites-only dataset's alignments of that window; the run's `log_verbose.txt` says per
   chromosome what it withheld. `--no-sites-only-density-guard` analyses every candidate.
   Measured at 4 mismatches and 1 + 1 bulges, a search of the mega rebuilt for 2.10.0 with the
-  guard took 1.37 (chr22; 1.46 in an earlier measurement) and 1.57 (chr14) times the shipped
-  mega's; unguarded, 4.5 times on chr22, and the chr14 search was projected at
-  12 to 16 h. See METHODS §5.
+  guard took 1.37 to 1.46 (chr22) and 1.53 to 1.73 (chr14) times the shipped mega's, in several
+  measurements side by side on shared nodes; unguarded, 4.4 to 4.9 times on chr22, and the chr14
+  search was projected at 12 to 16 h. See METHODS §5.
 
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP
@@ -1143,8 +1143,8 @@ its purpose and usage:
   too). In a search of a sites-only dataset a C2 row — one no panel can check — whose
   variants' frequencies fail the safeguards' bound (their product under 1e-06, or the rarest
   under 0.001; on `mega` a SNP's `AF_max` as its registry holds it, a count over the nominal
-  allele number of the sources that carry it, and an indel's `AF_max`) is ranked after the
-  others as a C1 row is, labelled
+  allele number of the sources that carry it, and an indel's `AF_max`, also for a variant that a
+  genotyped dataset searched beside it lists) is ranked after the others as a C1 row is, labelled
   `... (below the 1e-06 / 0.001 bound, ranked after the others)`, and dropped from nothing;
   without the oracle every row of two or more variants of the sites-only dataset is checked
   against the bound alone (`not checked against phased haplotypes (no panel)`). In a

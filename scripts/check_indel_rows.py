@@ -505,12 +505,14 @@ its positions' options at or over the bound, as the window's letters spell it --
 CRISPRme does not write, which a chain never counts on (limit-density-guard where a cluster
 reaches a row as good as a target only through it); a genotyped dataset's rows are not
 guarded. The merge (2.10.0) places the rows that start inside an insertion at one anchor
-together, as one site that joins the site within --merge bp of its rows and chains none:
-the chain this checker follows is the chain of every row, a superset of CRISPRme's around
-such rows, and the row within --merge bp of a target, which it takes for the target's
-cluster's, can then be the next site's -- an insertion's row the merge placed there. A
-target whose near rows are not as good as it, one of them starting inside an insertion (its
-first base one the insertion adds, row_first_k, read on the target's own window), is
+together, as one site that joins the site within --merge bp of its rows and chains none, but
+for the rows of a target that has an alignment starting on a reference base, which go with
+that alignment, at the target's place on the haplotype, up to the insertion's length past
+their own Cluster Position: the chain this checker follows is the chain of every row, a
+superset of CRISPRme's around such rows, and the row within --merge bp of a target, which it
+takes for the target's cluster's, can then be the next site's -- an insertion's row the merge
+placed there. A target whose near rows are not as good as it, one of them starting inside an
+insertion (its first base one the insertion adds, row_first_k, read on the target's own window), is
 limit-insertion-site (non-gating) where the chain of every row reaches a row that is, and a
 miss where it does not; this checker can thus take a row of the next site for a target's
 there (its own coverage gap). A near row that names an insertion and starts on a reference
@@ -5886,7 +5888,8 @@ OPEN_TEXT = {
     "insertion-site": "a row within --merge bp of the target that starts inside an "
                       "insertion and is not as good as it, which can be the next site's: "
                       "since 2.10.0 the rows that start inside an insertion at one anchor "
-                      "are placed together, join one site and chain none "
+                      "are placed together, join one site and chain none, or go with their "
+                      "target's alignment on a reference base, at its place on the haplotype "
                       "(remove_contiguous_samples), and this checker follows the chain of "
                       "every row, a superset of the merge's, so the row as good as the "
                       "target that it reaches may be another site's (its own coverage gap)"}
@@ -6369,10 +6372,11 @@ class Reported(object):
         within --merge bp of c names one and ``inside`` says its first base is one the
         insertion adds: row_first_k), and the chain of every row reaches one that is (since
         2.10.0 the rows that start inside an insertion are one site, which joins one site
-        and chains none: the near row can be the next site's). A near row that names an
-        insertion and starts on a reference base the merge chains like any other: it is the
-        target's site's, and not as good, a miss (up to review r1 of lane M any near row
-        naming an insertion was let through, M-R1-N1)."""
+        and chains none, or go with their target's alignment on a reference base, at the
+        target's place on the haplotype: the near row can be the next site's). A near row
+        that names an insertion and starts on a reference base the merge chains like any
+        other: it is the target's site's, and not as good, a miss (up to review r1 of lane M
+        any near row naming an insertion was let through, M-R1-N1)."""
         pos, lines = self.loci.get((guide, chrom), ([], []))
         near = self.near(pos, [c])
         if near:
