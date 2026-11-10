@@ -4,7 +4,9 @@
 and publishes in [`lucapinello/crisprme-indexes-format2`](../../docs/hf/crisprme-indexes-format2_README.md),
 the location of index format 2 that no release before 2.10.0 reads (decision C2), one line each,
 with its panel, PAM file, PAM, side, spacer (guide) length, bMax (N, the name's), the build's
-`--bDNA`/`--bRNA`, the archives of 2.8.1 it replaces, and its build and publish commands.
+`--bDNA`/`--bRNA`, the archives of 2.8.1 it replaces, its build and publish commands, and a note.
+A panel's companions (its Dictionaries bundle and genotype stores) have no command of their own
+(`-`): the panel's first build writes them and its first `publish-index` uploads them.
 
 | Who reads it | For |
 |---|---|
@@ -44,12 +46,18 @@ it serves for its own guide length (`index_fit.fits`).
 3. **Publish each panel as a unit**, then write `indexes/SHA256SUMS` with
    `scripts/hf_sha256sums.py lucapinello/crisprme-indexes-format2 --staged staged.sha256` and
    check it against the Hub after the upload (`docs/hf/README.md`).
+4. **Upload the set's PAM files** to `pams/` of `lucapinello/crisprme-data`, which
+   `download --what pams` installs: every `pam_file` of the set and the search PAMs its indexes
+   serve (`22bp-NNGRRT-SaCas9.txt`, `21bp-NNGRRT-SaCas9.txt`, `20bp-TTTV-Cas12a.txt`,
+   `23bp-TTTV-Cas12a.txt`), as `PAMs/` ships them (`docs/RELEASE_CHECKLIST.md`). Until then a
+   working directory set up by `download` holds the default `20bp-NRR-SpCas9.txt` and the data
+   repo's NGG, NNN and NRG files only, and the web offers no other PAM.
 
 ## Commands
 
 ```bash
 python seq_script/rebuild/check_index_set.py              # the check (the D7 audit runs it): exit 1 on a problem
-python seq_script/rebuild/check_index_set.py --commands   # every build command, then every publish command, in order
+python seq_script/rebuild/check_index_set.py --commands   # every build command, then every publish command, in order: a script bash runs
 ```
 
 The check holds when: every PAM file exists and gives the row's PAM, side and spacer; N =
@@ -59,7 +67,8 @@ max(bDNA, bRNA) + 1; every index's name is the one `build-index-only` gives its 
 variant index's reference index is in the set; every variant panel has one bundle and one kit,
 and a genotyped one (HGDP + 1000 Genomes, HPRC) one genotype store and one store of phased indel
 genotypes; and every index archive of 2.8.1 is replaced by exactly one archive of the set, the
-one a download of it names. `PostProcess/test_index_set.py` runs it in the unit tests.
+one a download of it names; and every build and publish command is one bash runs (`bash -n`),
+a companion having none. `PostProcess/test_index_set.py` runs it in the unit tests.
 
 The mega rows follow lane M's full rebuild of `hg38_mega` (decision D2: PASS/'.' records, AF =
 AF_max, its registry and indel allele frequencies consistent), whose recipe

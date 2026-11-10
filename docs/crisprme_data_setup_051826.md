@@ -673,7 +673,7 @@ samplesIDs.config.txt
 
 ### A2g. Write PAM files
 
-Writes PAM definition files for all supported nucleases to `PAMs/`. Each file is skipped if it already exists. The full set written by setup is:
+Writes PAM definition files for all supported nucleases to `PAMs/`, each over a file of the same name (a PAM file of your own needs a name of its own). Those that CRISPRme also ships in `PAMs/` (`20bp-NGG-SpCas9.txt`, `20bp-NRG-SpCas9.txt`, `20bp-NRR-SpCas9.txt`, `22bp-NNGRRN-SaCas9.txt`) hold what the shipped ones hold. The full set written by setup is:
 
 - `20bp-NGG-SpCas9.txt`
 - `20bp-NGC-SpCas9.txt`

@@ -11,7 +11,9 @@ format-2 repo (``crisprme_hf.resolve_index_repo``), every index must serve its o
 web's ceiling of 2 DNA + 2 RNA bulges (``index_fit.fits``), every variant panel must have its
 Dictionaries bundle (and, genotyped, its genotype stores) once, and every index archive of 2.8.1
 must be replaced by exactly one archive of the set (NNN_3, not built again, by the general
-index), as a download of it says (``crisprme_hf.successor_index``).
+index), as a download of it says (``crisprme_hf.successor_index``). Every build and publish
+command is one bash runs (``bash -n``: a note has a column of its own), and a panel companion,
+which its panel's first build writes and first publish uploads, has none ("-").
 
     python seq_script/rebuild/check_index_set.py              # the check; exit 1 on a problem
     python seq_script/rebuild/check_index_set.py --commands   # the build, then publish, commands
@@ -21,7 +23,9 @@ Standard library and the repository's PostProcess modules only; no network.
 
 import argparse
 import csv
+import functools
 import os
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -33,8 +37,12 @@ import crisprme_hf  # noqa: E402
 import index_fit  # noqa: E402
 
 COLUMNS = ("archive", "kind", "panel", "pam_file", "pam", "side", "spacer", "bmax", "bdna",
-           "brna", "repo", "replaces", "build", "publish")
+           "brna", "repo", "replaces", "build", "publish", "notes")
 INDEX_KINDS = ("reference", "variant")
+# The panel companions, which the panel's first build writes (Dictionaries/) and its first
+# publish-index uploads: no command of their own ("-" in both columns)
+COMPANION_KINDS = ("bundle", "genotypes", "indel-genotypes")
+NO_COMMAND = "-"
 # The index archives of 2.8.1 (index format 1), as `scripts/hf_sha256sums.py` listed the repos
 # of 2.8.1 on 2026-10-30: lucapinello/crisprme-data and lucapinello/crisprme-data-general-index.
 ARCHIVES_281 = (
@@ -71,9 +79,31 @@ def read_pam_file(path):
     return pam, ("5'" if pos < 0 else "3'"), len(seq) - abs(pos)
 
 
+@functools.lru_cache(maxsize=None)
+def bash_syntax_error(command):
+    """What ``bash -n`` says of ``command`` (its syntax only: nothing runs), "" when bash takes
+    it."""
+    got = subprocess.run(["bash", "-n"], input=command, text=True, capture_output=True)
+    return "" if got.returncode == 0 else (got.stderr.strip() or f"exit {got.returncode}")
+
+
 def check(rows, root=ROOT):
     """The problems of the index set ``rows`` (a list of strings; none: it holds)."""
     problems = []
+    for r in rows:
+        for what in ("build", "publish"):
+            command = r[what]
+            if r["kind"] in COMPANION_KINDS:
+                if command != NO_COMMAND:
+                    problems.append(f"{r['archive']}: a companion has no {what} command of its "
+                                    f"own (its panel's first build writes it, its first publish "
+                                    f"uploads it): {NO_COMMAND!r}, not {command!r}")
+                continue
+            error = (f"no {what} command" if command in ("", NO_COMMAND)
+                     else bash_syntax_error(command))
+            if error:
+                problems.append(f"{r['archive']}: its {what} command is not one bash can run "
+                                f"({error}); a note goes in the notes column")
     names = [r["archive"] for r in rows]
     for dup in sorted({n for n in names if names.count(n) > 1}):
         problems.append(f"{dup}: listed {names.count(dup)} times")
@@ -177,7 +207,9 @@ def main(argv=None):
         for what in ("build", "publish"):
             print(f"# {what}")
             for r in rows:
-                print(f"{r[what]}    # {r['archive']}")
+                if r[what] != NO_COMMAND:
+                    note = "" if r["notes"] == NO_COMMAND else f": {r['notes']}"
+                    print(f"{r[what]}    # {r['archive']}{note}")
         return 0
     problems = check(rows)
     for p in problems:

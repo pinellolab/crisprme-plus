@@ -135,11 +135,21 @@ and the `release-crisprme` skill.
   `build-index-only` gives the build (`index_fit.index_name`), and routes to the format-2 repo;
   each index serves its own guide at 2 + 2 bulges (`index_fit.fits`); each variant index's
   reference index is in the set; each panel has its companions once; every index archive of
-  2.8.1 is replaced by exactly one archive of the set, the one a download of it names
-  (`--commands` prints every build command, then every publish command). Covered by
-  `PostProcess/test_index_set.py`, which also mutates the set nine ways and checks that each is
-  found. The PAM files the set builds ship in `PAMs/`: `20bp-NNNNNNNN-NO-PAM.txt` (the general
-  index), `22bp-NNGRRN-SaCas9.txt` and `20bp-TTTN-Cas12a.txt`.
+  2.8.1 is replaced by exactly one archive of the set, the one a download of it names; every
+  build and publish command is one bash runs (`bash -n`: a note has a column of its own, and a
+  panel companion, which the panel's first build writes and its first `publish-index` uploads,
+  has no command, `-`), so that `--commands` prints a script: every build command, then every
+  publish command. Covered by `PostProcess/test_index_set.py`, which also mutates the set eleven
+  ways and checks that each is found. The PAM files the set builds ship in `PAMs/`:
+  `20bp-NNNNNNNN-NO-PAM.txt` (the general index), `22bp-NNGRRN-SaCas9.txt` and
+  `20bp-TTTN-Cas12a.txt`; and so do PAM files for the searches its indexes are published for,
+  which no shipped file gave: `22bp-NNGRRT-SaCas9.txt` (the CEP290 guides, served by the 22-nt
+  NNGRRN index, pruned) and `20bp-TTTV-Cas12a.txt` (served by `TTTN-20`). `download --what pams`
+  installs the data repo's `pams/` (and the default `20bp-NRR-SpCas9.txt`), so the release
+  uploads these there (`docs/RELEASE_CHECKLIST.md`); until then the web of a working directory
+  set up by `download` offers none of them. `crisprme.py setup` wrote its own
+  `22bp-NNGRRN-SaCas9.txt`, with a 23-nt guide (25 N, then GRRN), over the shipped one: it now
+  writes the shipped file's 22-nt guide (`test_setup_legacy_database`).
 - **Every index CRISPRme builds records what it holds, in `.index_meta.json`.** `build-index-only`,
   a search's own build and each sub-index of an INDELS index write the index format, the build
   PAM, its side, the flank and guide lengths, the budget, whether the PAM is all `N` and whether the

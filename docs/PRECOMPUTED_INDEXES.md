@@ -67,17 +67,20 @@ ceiling):
 | Cas12a **TTTN** | 23 nt | 5′ | `TTTN-23_3_hg38` | `TTTN-23_3_hg38+hg38_HGDP1kGP` | | |
 
 An index serves a search of a PAM its own holds, pruned to it (`--prune-pam`, which the search
-passes by itself): an NRR index serves NGG, NAG, NGA and NRG; NRG serves NGG and NAG; NNGRRN
-serves NNGRRT (SaCas9, the CEP290 guides); TTTN serves TTTV and every Cas12a PAM CRISPRme ships;
-the general index serves any 3′ PAM of up to 8 nt (SpRY, VRER, St1Cas9, Nme, a PAM of your own),
-at about 3-4 times a dedicated index's search time genome-wide. NRG on HPRC and mega is served by
-the NRR index there. **`NNN_3` is not built again for 2.10.0**: the general index serves every
-search it served, at the same speed (a 3-nt and an 8-nt PAM-less index cost the same, every
-position being a site); a download of an `NNN_3` archive of 2.8.1 says so. A guide of another
-length than its index's is served within the rule of
-[METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering) (`built + N >= guide +
-bDNA + 1`: the 20-nt general index serves a 21-nt guide at up to 1 bulge of each type), else it
-needs an index of its own, which `build-index-only` builds (below).
+passes by itself): an NRR index serves NGG, NAG, NGA and NRG; NRG serves NGG and NAG; NNGRRN serves
+NNGRRT (SaCas9, the CEP290 guides: `PAMs/22bp-NNGRRT-SaCas9.txt`); TTTN serves TTTV and every
+Cas12a PAM CRISPRme ships (`PAMs/20bp-TTTV-Cas12a.txt`, `23bp-TTTV-Cas12a.txt`); the general index
+serves any 3′ PAM of up to 8 nt (SpRY, VRER, St1Cas9, Nme, a PAM of your own), at about 3-4 times a
+dedicated index's search time genome-wide. NRG on HPRC and mega is served by the NRR index there,
+pruned: the same rows, more slowly than a dedicated NRG index (chr22, three NRG guides at 4
+mismatches + 1 bulge: 107 against 57 s wall, 380 against 110 s CPU), and a download of 2.8.1's
+`NRG_3_hg38+hg38_HPRC` or `+hg38_mega` says so. **`NNN_3` is not built again for 2.10.0**: the
+general index serves every search it served, at the same speed (a 3-nt and an 8-nt PAM-less index
+cost the same, every position being a site); a download of an `NNN_3` archive of 2.8.1 says so. A
+guide of another length than its index's is served within the rule of [METHODS
+§9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering) (`built + N >= guide + bDNA + 1`:
+the 20-nt general index serves a 21-nt guide at up to 1 bulge of each type), else it needs an index
+of its own, which `build-index-only` builds (below).
 
 The three variant panels are **complementary**, not alternatives:
 
@@ -560,8 +563,10 @@ Ready-made files already ship in `PAMs/`:
 | SpCas9 (NRG = NAG+NGG) | `20bp-NRG-SpCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNRG 3` |
 | SaCas9 (NNGRRT) | `21bp-NNGRRT-SaCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNNNGRRT 6` |
 | SaCas9 (NNGRRN, 22 nt; the published index's) | `22bp-NNGRRN-SaCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNNNNGRRN 6` |
+| SaCas9 (NNGRRT, 22 nt: CEP290; the NNGRRN index serves it, pruned) | `22bp-NNGRRT-SaCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNNNNGRRT 6` |
 | Cas12a (TTTN, 5′, 23 nt) | `23bp-TTTN-Cas12a.txt` | `TTTNNNNNNNNNNNNNNNNNNNNNNNN -4` |
 | Cas12a (TTTN, 5′, 20 nt) | `20bp-TTTN-Cas12a.txt` | `TTTNNNNNNNNNNNNNNNNNNNNN -4` |
+| Cas12a (TTTV, 5′, 23 and 20 nt; the TTTN indexes serve them, pruned) | `23bp-TTTV-Cas12a.txt`, `20bp-TTTV-Cas12a.txt` | `TTTVNNNNNNNNNNNNNNNNNNNNNNN -4`, `TTTVNNNNNNNNNNNNNNNNNNNN -4` |
 | PAM-less (the general index: any 3′ PAM of up to 8 nt) | `20bp-NNNNNNNN-NO-PAM.txt` | `NNNNNNNNNNNNNNNNNNNNNNNNNNNN 8` |
 
 For any **other** nuclease, write one line yourself — e.g. a hypothetical 20 nt-spacer 3′ `NGA`:

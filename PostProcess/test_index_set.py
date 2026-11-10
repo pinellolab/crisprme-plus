@@ -70,6 +70,62 @@ class TheSetHolds(unittest.TestCase):
         self.assertIn("crisprme.py publish-index --index genome_library/20-NRR_3_hg38+hg38_HGDP1kGP",
                       text)
 
+    def test_what_commands_prints_is_a_script_bash_runs(self):
+        """--commands prints every build command, then every publish command, for the rebuild
+        to run. The build column of the kits and of mega's index ended in a note in brackets,
+        and the companions' columns held prose, so bash refused the script (the stage-2b
+        review of lane D, D-R1-8): a note now has its own column, and a companion, which its
+        panel's first build writes and first publish uploads, has no command ("-")."""
+        import contextlib
+        import io
+        import subprocess
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(cis.main(["--commands"]), 0)
+        script = out.getvalue()
+        got = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
+        self.assertEqual((got.returncode, got.stderr), (0, ""))
+        for r in self.rows:
+            companion = r["kind"] in ("bundle", "genotypes", "indel-genotypes")
+            for what in ("build", "publish"):
+                self.assertEqual(r[what] == "-", companion, (r["archive"], what))
+                if not companion:
+                    one = subprocess.run(["bash", "-n"], input=r[what], text=True,
+                                         capture_output=True)
+                    self.assertEqual((one.returncode, one.stderr), (0, ""), r["archive"])
+        self.assertIn("lane M's recipe", _row(self.rows, "20-NRR_3_hg38+hg38_mega")["notes"])
+        self.assertIn("written by its first build",
+                      _row(self.rows, "dictionaries-bundle_hg38_HGDP1kGP")["notes"])
+
+
+class TheSearchPamsOfTheSetShip(unittest.TestCase):
+    """An index of the set serves the PAMs its own holds, pruned: SaCas9's 22-nt NNGRRN index
+    the CEP290 guides' NNGRRT, Cas12a's TTTN indexes TTTV. CRISPRme shipped the PAM files the
+    set builds from, but none for a 22-nt NNGRRT or a 20-nt TTTV search, so the web, which
+    lists the working directory's PAMs/, offered neither (the stage-2b review of lane D,
+    D-R1-7). Each ships, of its index's guide length, a PAM that index serves."""
+
+    SEARCHES = {"22-NNGRRN_3_hg38": ("22bp-NNGRRT-SaCas9.txt", "21bp-NNGRRT-SaCas9.txt"),
+                "TTTN-20_3_hg38": ("20bp-TTTV-Cas12a.txt",),
+                "TTTN-23_3_hg38": ("23bp-TTTV-Cas12a.txt",)}
+
+    def test_each_ships_and_its_index_serves_it(self):
+        rows = {r["archive"]: r for r in cis.read_manifest()}
+        codes = {"A": "A", "C": "C", "G": "G", "T": "T", "R": "AG", "V": "ACG", "N": "ACGT"}
+        for archive, pam_files in self.SEARCHES.items():
+            r = rows[archive]
+            for name in pam_files:
+                path = os.path.join(ROOT, "PAMs", name)
+                self.assertTrue(os.path.isfile(path), name)
+                pam, side, guide = cis.read_pam_file(path)
+                self.assertEqual(side, r["side"], name)
+                self.assertTrue(all(set(codes[c]) <= set(codes[i])
+                                    for c, i in zip(pam, r["pam"])) and len(pam) == len(r["pam"]),
+                                (name, pam, r["pam"]))
+                # (a guide of the index's length, or one it serves within the web's bulges)
+                self.assertTrue(cis.index_fit.fits(int(r["spacer"]), int(r["bmax"]), guide, 1, 1),
+                                name)
+
 
 class TheCheckFindsWhatItIsFor(unittest.TestCase):
     """Each mutation of the set is caught (and the set itself passes: TheSetHolds)."""
@@ -124,6 +180,19 @@ class TheCheckFindsWhatItIsFor(unittest.TestCase):
         rows = [r for r in self.rows if r["archive"] != "22-NNGRRN_3_hg38"]
         self.assertTrue([p for p in cis.check(rows)
                          if "its reference index 22-NNGRRN_3_hg38" in p])
+
+    def test_a_note_in_a_command(self):
+        kit = _row(self.rows, "build-inputs/hg38_HPRC")
+        problems = self.mutated("build-inputs/hg38_HPRC",
+                                build=kit["build"] + " (the enriched genome of the panel's first "
+                                "build, 20-NRR_3_hg38+hg38_HPRC)")
+        self.assertTrue([p for p in problems if p.startswith(
+            "build-inputs/hg38_HPRC: its build command is not one bash can run")], problems)
+
+    def test_a_command_for_a_companion(self):
+        problems = self.mutated("genotypes_hg38_HPRC", publish="crisprme.py publish-index")
+        self.assertTrue([p for p in problems if p.startswith(
+            "genotypes_hg38_HPRC: a companion has no publish command of its own")], problems)
 
 
 if __name__ == "__main__":
