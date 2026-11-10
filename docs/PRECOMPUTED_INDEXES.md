@@ -709,8 +709,10 @@ reference bases on either side of it in an index CRISPRitz 2.10.0 built (25 befo
 after in one of 2.9.1, every archive published up to CRISPRme 2.8.1), so a target of guide,
 PAM and DNA bulges up to 31 bases (27) holds its indel there; the width is read from each
 archive's own indel logs, which every INDELS sub-index records it was built from, and a
-search refuses an INDELS index installed beside the logs of another archive, and says when
-its targets need more than its windows hold (METHODS §4). Post-analysis resolves each indel
+search refuses an INDELS index installed beside indel logs of other windows (a 2.8.1
+archive's index beside the logs of a 2.10.0 one, say: two archives of one panel and one
+release share their logs, and are searched as usual), and says when its targets need more
+than its windows hold (METHODS §4). Post-analysis resolves each indel
 target on its carriers' own haplotypes (each gets the SNP alleles it carries, so a row
 lists only the individuals that have its sequence, or, where the phase is unknown, those
 whose own alleles allow it, PUTATIVE, split multi-allelic SNP sites aside on an index

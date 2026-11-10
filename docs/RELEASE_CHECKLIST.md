@@ -157,7 +157,12 @@ for mode in per-sample population-level; do
     python3 "$SRC/scripts/check_indel_rows.py" --results "$D22/Results/gate_${mode}" \
       --reference "$D22/Genomes/hg38" --vcf "$VCF" --pam "$D22/PAMs/20bp-NRG-SpCas9.txt" \
       --guide "$D22/guide.txt" --mm 4 --bDNA 1 --bRNA 1 --max-total-edits 6 --chrom chr22 \
-      --mode "$check" --jobs 24 --out "$GATE/indelrows_${mode}_${check}.tsv" || echo GATE_FAILED
+      --mode "$check" --jobs 24 --out "$GATE/indelrows_${mode}_${check}.tsv" \
+      2> "$GATE/indelrows_${mode}_${check}.err" || echo GATE_FAILED
+    cat "$GATE/indelrows_${mode}_${check}.err" >&2
+    #   and its reading of the run (stderr) holds the fake-indel windows this release's
+    #   CRISPRitz writes, 30/30, wherever it read them
+    [ "$(grep -o "fake-indel windows [^;)]*" "$GATE/indelrows_${mode}_${check}.err" | sort -u)" = "fake-indel windows 30/30" ] || echo GATE_FAILED
   done
 done
 #     Genome-wide SOUNDNESS of the README guide and of TRAC: $GW is a genome-wide HGDP + 1000
@@ -173,12 +178,15 @@ for g in readme:guide.txt trac:guide_trac.txt; do
     --reference "$GW/Genomes/hg38" --vcf-dir "$GW/VCFs/hg38_HGDP1kGP" \
     --pam "$GW/PAMs/20bp-NRG-SpCas9.txt" --guide "$GW/${g#*:}" --mm 4 --bDNA 1 --bRNA 1 \
     --max-total-edits 6 --mode soundness --jobs 24 --out "$GATE/indelrows_gw_${g%%:*}.tsv" \
-    || echo GATE_FAILED
+    2> "$GATE/indelrows_gw_${g%%:*}.err" || echo GATE_FAILED
+  cat "$GATE/indelrows_gw_${g%%:*}.err" >&2
+  [ "$(grep -o "fake-indel windows [^;)]*" "$GATE/indelrows_gw_${g%%:*}.err" | sort -u)" = "fake-indel windows 30/30" ] || echo GATE_FAILED
 done
 #     The gate is the exit status: 0 gating findings. The check reads from the run's own
-#     records how its release read the data (its stdout says so: "read as a run of
-#     CRISPRme 2.10.0 or later (... every allele, store of PASS and '.', INDELS format 2)"
-#     on an index this release built). Non-gating lines are documented CRISPRme limits
+#     records how its release read the data (its stderr says so: "read as a run of
+#     CRISPRme 2.10.0 or later (... every allele, store of PASS and '.', INDELS format 2,
+#     fake-indel windows 30/30)" on an index this release built, and the gate fails a check
+#     that reads other windows). Non-gating lines are documented CRISPRme limits
 #     (limit-two-indels, limit-putative-carrier -- a carrier CRISPRme resolves PUTATIVE, an
 #     MNV's, an untied multi-ALT alt's or an unphased call's, as it documents, whose known
 #     haplotype says otherwise, or a target the PUTATIVE rule ties with another; a slot

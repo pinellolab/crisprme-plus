@@ -931,8 +931,10 @@ class World30(World):
 
 class FullTiers30(FullTiers):
     """FullTiers on windows of 30 / 30: the same rows, each window read with its own left
-    flank (the log row's POS - 1 - start). Read with 2.9.1's 25, every flank base, SNP code
-    and row of such a window was five bases off."""
+    flank (the log row's POS - 1 - start). Read with 2.9.1's 25, the window's bases from its
+    26th through the ALT's last mapped to the wrong reference position or to none (rows kept
+    their places): of World30's 40 rows, the SNP+indel rows next to the indel, 9 were lost
+    and 2 listed other carriers, and 7 wrong rows were written."""
 
     world_class = World30
 

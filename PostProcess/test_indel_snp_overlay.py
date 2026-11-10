@@ -184,8 +184,9 @@ def test_overlay_of_a_fake_genome_of_either_window():
     """overlay_fake_chromosome codes every flank base whose reference position carries a
     SNP code in the enriched genome, and no ALT base, on the windows of CRISPRitz 2.9.1
     (25 / 27) and 2.10.0 (30 / 30) alike: each window read with its own left flank. With
-    the 25-base flank of 2.9.1 taken for every window, a window of 30 gets codes on its
-    inserted bases and none on the five flank bases before its REF."""
+    the 25-base flank of 2.9.1 taken for every window, a window of 30 gets codes on the
+    inserted bases of its 6-base ALT and none on the five flank bases before its REF, and
+    the deletion's window gives four of those five bases, and its ALT, a neighbour's code."""
     import os
     import tempfile
 

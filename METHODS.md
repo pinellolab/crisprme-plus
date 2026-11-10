@@ -552,10 +552,11 @@ of bases from it, as CRISPRitz indexes a site, not an alignment (an RNA bulge le
 site's far end past the target's first base, a DNA bulge the target's first base past the
 site's). So a target of L bases (guide and PAM) with b DNA bulges holds its record's change
 only where L + b <= LEFT + 2 and L + b <= RIGHT + 1 (LEFT + 1 for a record whose REF and ALT
-differ at their first base, an MNV or complex record, whose first replaced base is the
-window's LEFT-th): **31 bases on 2.10.0's windows**, every published index's motif at up to
-2 DNA bulges (LEFT = RIGHT = Lmax - 1 + bmax, Lmax = 29, a 21-nt guide and an 8-nt PAM, the
-longest the general K=8 index serves, bmax = 2, the most DNA bulges the web offers); 27 on
+differ at their first base, an MNV or complex record, whose first replaced base, at offset
+LEFT, is the window's (LEFT + 1)-th): **31 bases on 2.10.0's windows**, every published
+index's motif at up to 2 DNA bulges (LEFT = RIGHT = Lmax - 1 + bmax, Lmax = 29, a 21-nt guide
+and an 8-nt PAM, the longest the general K=8 index serves, bmax = 2, the most DNA bulges the
+web offers); 27 on
 2.9.1's (26 at an MNV), which every SpCas9 site (23 nt) with up to 3 DNA bulges met, but a
 27-nt site (SaCas9's 21-nt guide and `NNGRRT`, SaCas9-KKH, Cas12a `TTTV`/`TTTN` at 23 nt)
 only from its first base on, a DNA-bulged one not at all (from 3% to 20% of the
@@ -563,9 +564,11 @@ indel-holding alignment slots of those enzymes at 1 to 3 DNA bulges; SaCas9 4.2%
 and a 28-nt one (CEP290's 22-nt SaCas9 guide) at no budget. A target longer than its
 windows hold cannot be searched, whatever the index: the search says so on its console and
 in its parameters (`Indel_window_note`), and the indel search in its log
-(`indel_window.target_note`). The window's width is never assumed: each reader takes a
-window's left flank from its indel log row (`POS - 1 - start`, the start its `CHR` field
-records: `indel_window`), so an index of either release, published or reused, reads right;
+(`indel_window.target_note`; a search from the web interface, which runs the search script
+itself, says so only there, in its `log_verbose.txt`). The window's width is never assumed:
+each reader takes a window's left flank from its indel log row (`POS - 1 - start`, the start
+its `CHR` field records: `indel_window`), so an index of either release, published or
+reused, reads right;
 each INDELS sub-index records the windows it was built from (`.index_meta.json`'s
 `indel_window`; 25/27 is inferred for one of index format 1, which only CRISPRitz 2.9.1 and
 earlier build), and a search refuses one beside an indel log of other windows (the two come

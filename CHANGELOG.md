@@ -415,8 +415,9 @@ and the `release-crisprme` skill.
     (non-gating, listed with its cause, a PUTATIVE tie included) or a failure.
   - **Releases**: where CRISPRme's and CRISPRitz's releases read the data otherwise, the
     check reads which one made the run from the run's own records and prints the reading
-    it took (`read as a run of CRISPRme 2.10.0 or later (<dataset> on <chrom>: every allele,
-    store of PASS and '.', INDELS format 2)`). A run of 2.10.0 writes `.indexes_searched.txt`
+    it took on stderr (`read as a run of CRISPRme 2.10.0 or later (<dataset> on <chrom>: every
+    allele, store of PASS and '.', INDELS format 2, fake-indel windows 30/30)` on an index
+    this release built). A run of 2.10.0 writes `.indexes_searched.txt`
     (and `.carrier_gate.json`); one without them is an earlier CRISPRme's (CRISPRitz 2.9.1
     or earlier: index format 1, the last record of a split site, a store of every FILTER).
     Of a run of 2.10.0, the variant genome codes every allele where its variant index's
@@ -702,9 +703,15 @@ and the `release-crisprme` skill.
   index serves; bmax = 2, the web's most DNA bulges), 27 (26 at an MNV) on 2.9.1's, which a
   27-nt site (SaCas9's 21-nt guide, Cas12a at 23 nt) with a DNA bulge, and a 28-nt one (CEP290's
   22-nt SaCas9 guide) at every budget, exceeded whatever the index (METHODS §4).
-  `overlay_indel_snps.LEFT_FLANK = 25` was the one place CRISPRme held the width, and read
-  against a window of 30 it put the overlay's SNP codes on inserted bases and none on the five
-  flank bases before the REF, and every row of the window five bases off. It is gone:
+  `overlay_indel_snps.LEFT_FLANK = 25` was the one place CRISPRme held the width. Read against a
+  window of 30, it mapped the window's bases from its 26th through the ALT's last to the wrong
+  reference position, or to none; the bases before and after them mapped right, and rows kept
+  their places (the post-analysis places a row by `POS - 1 - start`). So the overlay left the
+  five flank bases before the REF without their SNP codes, or gave them a neighbour's (all five
+  went uncoded only for an ALT of five or more bases), and gave the ALT's own bases codes; and
+  an SNP+indel row next to the indel named a wrong SNP allele or carrier, or was lost (on the
+  test windows of 30/30, 9 of 40 rows lost, 2 with other carriers, and 7 wrong rows written).
+  The constant is gone:
   `indel_window` takes a window's left flank from its log row, `POS - 1 - start` (the start its
   `CHR` field records), which `map_fake_offset_to_real`, `overlay_sub_fasta`, `count_coded`,
   `parse_log_indels` and `indel_snp_cis.build_offset_to_real` (now given the indel's POS) take,
@@ -716,15 +723,18 @@ and the `release-crisprme` skill.
   one in place, which also warns of any other INDELS index of the dataset so mismatched and of
   an enrichment in place whose windows the installed CRISPRitz does not write (`crispritz.py`'s
   `INDEL_LEFT`/`INDEL_RIGHT`). `complete-search` warns on its console and in its parameters
-  (`Indel_window_note`), and the indel search in its `log_verbose.txt`, when the search's
-  targets with its DNA bulges need more bases than a dataset's windows hold. `download --what
+  (`Indel_window_note`), and the indel search in its `log_verbose.txt` (the only place a web
+  search says it), when the search's targets with its DNA bulges need more bases than a
+  dataset's windows hold. `download --what
   index` says when an archive's windows are not the installed CRISPRitz's (2.8.1's 25/27) and
   names any other INDELS index of the dataset its logs no longer match; `publish-index` records
   the windows in the archive's manifest. The input validator's warning of an indel near a
   chromosome's start takes the installed CRISPRitz's window (a POS below 31, was 26) and says
   that the enricher skips it (it said Python wraps the slice, which 2.9.1 fixed). The
   real-data check reads the windows from the run's own indel log (else its INDELS index's
-  record), and refuses a run of 2.10.0 that says neither where its VCF has indel records.
+  record), and refuses a run of 2.10.0 that says neither where its VCF has indel records,
+  saying why (no indel log of the dataset in the run's working directory, a log with no row,
+  or one whose rows hold two widths).
   Measured on chr22 of HGDP + 1000 Genomes (4,091 samples), each dataset enriched anew and every
   index built by `build-index-only`, against the same searches on windows of 25/27 (this
   release's code before the change, its CRISPRitz writing 2.9.1's windows): the README guide

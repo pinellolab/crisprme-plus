@@ -11,9 +11,11 @@ records every window: its CHR field ``<chrom>_<start>-<end>_<id>`` (start and en
 end exclusive and not clipped at the chromosome's end) and its indel field
 ``<chrom>_<POS>_<REF>_<ALT>``. So a reader takes each window's left flank as
 ``POS - 1 - start`` and its right flank as ``end - (POS - 1 + len(REF))`` (row_flanks), and
-never assumes a width: the windows of either release read right, and a reader that took
-2.10.0's 30 bases for 2.9.1's 25 would put every flank base, SNP code and row of a window
-five bases off.
+never assumes a width: the windows of either release read right. A reader that took 2.10.0's
+30 bases for 2.9.1's 25 would map a window's bases from its 26th through the ALT's last to
+the wrong reference position or to none (the bases before and after them map alike under
+either width), so the SNP codes on and around the REF and ALT, and the SNP+indel rows next to
+the indel, would be wrong.
 
 A target of L bases (guide + PAM) with b DNA bulges holds a record's change on its window
 only where L + b <= LEFT + 2 and L + b <= RIGHT + 1, or L + b <= LEFT + 1 for a record whose

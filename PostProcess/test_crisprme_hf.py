@@ -1359,10 +1359,6 @@ class TestStructuralCheckWhenSizesEmpty(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestFakeIndelWindowNotes(unittest.TestCase):
     """What a download of a variant index says of its fake-indel windows, which the indel
     logs it installs record (crisprme_hf._window_notes): nothing for the installed
@@ -1424,3 +1420,7 @@ class TestFakeIndelWindowNotes(unittest.TestCase):
                       "reference bases, and the indel logs of ds installed now (%s) record "
                       "windows of 30/30" % (os.path.join(self.lib, "20-NGG_2_hg38+ds_INDELS"),
                                             self.logs), notes[0])
+
+
+if __name__ == "__main__":
+    unittest.main()

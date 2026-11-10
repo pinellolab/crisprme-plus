@@ -59,8 +59,10 @@ import gzip
 import io
 import json
 import os
+import re
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -4887,6 +4889,61 @@ class ReleaseTwoTen(Base):
                          ["check_indel_rows: read as a run of CRISPRme 2.10.0 or later (v on "
                           "chr21: every allele, store of PASS and '.', INDELS format 2, "
                           "fake-indel windows 25/27)"])
+
+    def printed_reading(self, window):
+        """The stderr of a check of a run of 2.10.0 (dataset v on chr21; its variant index
+        codes every allele, its store 2.10.0's), whose indel log records fake-indel windows
+        of ``window``."""
+        tmp = os.path.join(self.tmp, "w%d" % window[0])
+        os.makedirs(tmp)
+        case, _ = world_indel_snp(tmp)
+        as_2100(case, window=window)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            case.run()
+        return err.getvalue()
+
+    def test_the_documented_reading_is_the_printed_one(self):
+        """W-R1-F3: the CHANGELOG and RELEASE_CHECKLIST (gate 4c) quote the reading the check
+        prints (on stderr) of a run on an index this release built as the check prints it,
+        its fake-indel windows 30/30 included; gate 4c's check of that reading passes such a
+        run and fails one of other windows, or of windows its records do not tell."""
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        err = self.printed_reading((30, 30))
+        said = [x for x in err.splitlines() if "read as a run of" in x]
+        self.assertEqual(len(said), 1, err)
+        printed = said[0].split("(v on chr21: ", 1)[1][:-1]
+        self.assertTrue(printed.endswith("INDELS format 2, fake-indel windows 30/30"), printed)
+        with open(os.path.join(repo, "docs", "RELEASE_CHECKLIST.md")) as fh:
+            checklist = fh.read()
+        quote = " ".join(re.sub(r"\n#\s+", " ", checklist).split())
+        m = re.search(r'its stderr says so: "read as a run of CRISPRme 2\.10\.0 or later '
+                      r'\(\.\.\. ([^"]*)\)"', quote)
+        self.assertIsNotNone(m, "RELEASE_CHECKLIST 4c quotes no reading")
+        self.assertEqual(m.group(1), printed)
+        with open(os.path.join(repo, "CHANGELOG.md")) as fh:
+            changelog = " ".join(fh.read().split())
+        m = re.search(r"prints the reading it took on stderr \(`read as a run of CRISPRme "
+                      r"2\.10\.0 or later \(<dataset> on <chrom>: ([^`]*)\)`", changelog)
+        self.assertIsNotNone(m, "the CHANGELOG quotes no reading")
+        self.assertEqual(m.group(1), printed)
+        checks = [x for x in checklist.splitlines() if 'grep -o "fake-indel windows' in x]
+        self.assertEqual(len(checks), 2, checks)   # (per chromosome, and genome-wide)
+        gate = os.path.join(self.tmp, "gate")
+        os.makedirs(gate)
+        told = self.printed_reading((25, 27))
+        for text, passes in ((err, True), (told, False),
+                             (err.replace("windows 30/30", "windows not told"), False)):
+            for name in ("indelrows_per-sample_soundness.err", "indelrows_gw_readme.err"):
+                with open(os.path.join(gate, name), "w") as fh:
+                    fh.write(text)
+            for line in checks:
+                out = subprocess.run(["bash", "-c", line], capture_output=True, text=True,
+                                     env={"GATE": gate, "mode": "per-sample",
+                                          "check": "soundness", "g": "readme:guide.txt",
+                                          "PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+                self.assertEqual(out.stdout.strip(), "" if passes else "GATE_FAILED",
+                                 (line, text[-300:]))
 
     def test_two_alts_of_one_position_on_a_slot_are_putative(self):
         """Every allele coded, a slot can hold two ALTs of one position (split records
