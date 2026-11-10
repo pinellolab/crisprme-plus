@@ -318,7 +318,6 @@ class TestProbeVersions(unittest.TestCase):
                       "withversion=1.2.3", se.render_health(rec))
 
 
-
 class TheProbesRunNoCodeOfTheWorkingDirectory(unittest.TestCase):
     """Every complete-search runs the health check before it searches, from the folder the
     user runs crisprme.py in: the data folder, which the members of its group can write under
