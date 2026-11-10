@@ -2229,10 +2229,10 @@ and the `release-crisprme` skill.
       list): 17 highest-CFD blocks (3 rows, 14 alternative alignments), CFD at most 0.011.
     - None in the other chr22 gate runs: HPRC and its unphased copy (both modes), and the README
       guide (NRG, both modes; NRR), TRAC and SaCas9 (2/0/0, 4/1/1) on HGDP + 1000 Genomes.
-    The genome-wide mega tables of CRISPRme 2.8.1 (a pre-release, NRR and NRG, 4 mismatches + 1
-    + 1) cannot be judged so: 76% and 82% of their indel rows hold SNP alleles they do not list.
-    In the SNP+indel oracle T2 and
-    QW, and in `test_indel_row_coordinates` DUPS and W2, now read created;
+    The genome-wide mega tables of CRISPRme 2.8.1 (a pre-release, NRR and NRG, 4 mismatches and
+    1 DNA + 1 RNA bulge) cannot be judged so: 76% and 82% of their indel rows hold SNP alleles
+    they do not list. In the SNP+indel oracle T2 and QW, and in `test_indel_row_coordinates`
+    DUPS and W2, now read created;
     `test_indel_snp_cis.test_pam_reference_place_an_additional_inserted_pam_is_created` pins
     both strands, 3′ and 5′ PAMs, a complex record's added bases, and the cases D4 leaves as
     they were.
