@@ -2218,7 +2218,7 @@ Bulge-enabled searches build a CRISPRitz index of the reference genome. `complet
 crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt --bDNA 2 --bRNA 2 --thread 16 --path /data/crisprme
 ```
 
-This writes `genome_library/20-NRR_3_hg38` (the guide length, 20, then the PAM of the 3′ side; the folder number is `max(bDNA,bRNA)+1`, so 2 bulges → `_3_`), the index shipped precomputed on HuggingFace as `NRR_3_hg38`. An `NRR_3_hg38` already in place (a download) is kept as this index, and nothing is built.
+This writes `genome_library/20-NRR_3_hg38` (the guide length, 20, then the PAM of the 3′ side; the folder number is `max(bDNA,bRNA)+1`, so 2 bulges → `_3_`), the index 2.10.0 ships precomputed on HuggingFace, in `lucapinello/crisprme-indexes-format2` (`NRR_3_hg38` in 2.8.1's repo, `lucapinello/crisprme-data`). An `NRR_3_hg38` already in place (a download of 2.8.1's) is kept as this index, and nothing is built.
 
 Add `--vcf` (a VCF dataset directory, e.g. `VCFs/hg38_HGDP1kGP`, **or** a config file listing one VCF folder name under `VCFs/` — the same `--vcf` form `complete-search` accepts) to also pre-build the **variant-aware** index (genome enrichment + SNP/indel indexes). Add `--samplesID` (a listing file, one samplesID filename per line under `samplesIDs/`; a combined panel lists each per-db samplesID file) to make it **self-complete**: with `--samplesID` the build ALSO emits the dict-less Tier-0 registry + Tier-1 genotype tiers and, for a merged panel, writes the combined `samplesIDs/<vcf>.samplesID.txt` list. Without `--samplesID` you get a dicts-only index (no fast post-analysis).
 

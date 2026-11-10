@@ -92,7 +92,7 @@ them; use the rebuilt `NNN_3` archives with CRISPRme+ 2.8.1 or later (see below)
 | Index | Variants | Phasing | Notes |
 |---|---|---|---|
 | `NRR_3_hg38` | none | — | reference-only |
-| **`NRR_3_hg38+hg38_HGDP1kGP`** | HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000G) | **genotyped-phased** (SHAPEIT5 re-phased) | **recommended variant default** — CONFIRMED *cis* co-occurrence + named carriers |
+| **`NRR_3_hg38+hg38_HGDP1kGP`** | HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000G) | **genotyped-phased** (SHAPEIT5 re-phased) | **the recommended variant default's 2.8.1 archive** (2.10.0's is `20-NRR_3_hg38+hg38_HGDP1kGP`, in `lucapinello/crisprme-indexes-format2`) — CONFIRMED *cis* co-occurrence + named carriers |
 | `NRR_3_hg38+hg38_HPRC` | HPRC pangenome (232 samples incl. CHM13) | genotyped-phased | pangenome panel |
 | `NRR_3_hg38+hg38_mega` | aggregate (1000G + HGDP + gnomAD + TOPMed + All of Us) | sites-only | worst-case fallback; a listed haplotype may not exist in any individual |
 

@@ -2,7 +2,7 @@
 # 1000G-2021 single-source, PHASED variant-index build (as-run, resumable) — the clean
 # "real-haplotypes" single-source panel NRG_3_hg38+hg38_1000G2021 (RETIRED in 2.8.0 / removed from HuggingFace;
 # this recipe rebuilds it from source for reproducibility only. The recommended variant
-# default is the SHAPEIT5 re-phased HGDP + 1000 Genomes panel, NRR_3_hg38+hg38_HGDP1kGP since
+# default is the SHAPEIT5 re-phased HGDP + 1000 Genomes panel, 20-NRR_3_hg38+hg38_HGDP1kGP since
 # 2.10.0, NRG_3_hg38+hg38_HGDP1kGP before).
 #
 # WHAT THIS IS: a standard CRISPRme variant-aware index built by ENRICHING hg38 with the

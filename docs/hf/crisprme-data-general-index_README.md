@@ -81,7 +81,8 @@ at any width: use a dedicated index, which `crisprme.py build-index-only` builds
 
 ```bash
 # the genome, annotations, PAMs and sample lists (plus the default reference index:
-# NRR_3_hg38 since CRISPRme+ 2.10.0, NRG_3_hg38 before)
+# CRISPRme+ 2.10.0: 20-NRR_3_hg38, from lucapinello/crisprme-indexes-format2; 2.8.1:
+# NRG_3_hg38, from lucapinello/crisprme-data)
 crisprme.py download --what all --path .
 
 # fetch the general index (routes here automatically on flank width)
