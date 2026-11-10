@@ -70,17 +70,22 @@ An index serves a search of a PAM its own holds, pruned to it (`--prune-pam`, wh
 passes by itself): an NRR index serves NGG, NAG, NGA and NRG; NRG serves NGG and NAG; NNGRRN serves
 NNGRRT (SaCas9, the CEP290 guides: `PAMs/22bp-NNGRRT-SaCas9.txt`); TTTN serves TTTV and every
 Cas12a PAM CRISPRme ships (`PAMs/20bp-TTTV-Cas12a.txt`, `23bp-TTTV-Cas12a.txt`); the general index
-serves any 3′ PAM of up to 8 nt (SpRY, VRER, St1Cas9, Nme, a PAM of your own), at about 3-4 times a
-dedicated index's search time genome-wide. NRG on HPRC and mega is served by the NRR index there,
-pruned: the same rows, more slowly than a dedicated NRG index (chr22, three NRG guides at 4
-mismatches + 1 bulge: 107 against 57 s wall, 380 against 110 s CPU), and a download of 2.8.1's
-`NRG_3_hg38+hg38_HPRC` or `+hg38_mega` says so. **`NNN_3` is not built again for 2.10.0**: the
-general index serves every search it served, at the same speed (a 3-nt and an 8-nt PAM-less index
-cost the same, every position being a site); a download of an `NNN_3` archive of 2.8.1 says so. A
-guide of another length than its index's is served within the rule of [METHODS
-§9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering) (`built + N >= guide + bDNA + 1`:
-the 20-nt general index serves a 21-nt guide at up to 1 bulge of each type), else it needs an index
-of its own, which `build-index-only` builds (below).
+serves any 3′ PAM of up to 8 nt (SpRY, VRER, St1Cas9, Nme, a PAM of your own), its search taking
+3.3 times a dedicated NGG index's and 1.7 times the default NRR index's (genome-wide on the
+reference, `ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1 DNA + 1 RNA bulge, the engine's search: 26
+min for NGG against 8 min on the NGG index, and 15 min for NRR on the NRR index). NRG on HPRC and
+mega is served by the NRR index there, pruned: the same rows, more slowly than a dedicated NRG
+index (about twice the wall time in the engine's search of chr22's reference sequence: three NRG
+guides at 4 mismatches + 1 DNA + 1 RNA bulge, the same 85,563 rows in 107 against 57 s wall, 380
+against 110 s CPU; on an HPRC or mega index the post-analysis, the same for both, adds to each),
+and a download of 2.8.1's `NRG_3_hg38+hg38_HPRC` or `+hg38_mega` says so. **`NNN_3` is not built
+again for 2.10.0**: the general index serves every search it served, at the same speed (a 3-nt
+and an 8-nt PAM-less index cost the same, every position being a site); a download of an
+`NNN_3` archive of 2.8.1 says so. A guide of another length than its index's is served within
+the rule of [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)
+(`built + N >= guide + bDNA + (1 if bRNA > 0, else 0)`: the 20-nt general index serves a 21-nt
+guide at up to 1 bulge of each type, and on the command line at 2 DNA bulges and no RNA bulge
+too), else it needs an index of its own, which `build-index-only` builds (below).
 
 The three variant panels are **complementary**, not alternatives:
 

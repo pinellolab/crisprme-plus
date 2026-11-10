@@ -242,18 +242,22 @@ crisprme.py complete-search \
 ```
 
 The general index of 2.10.0 is `20-NNNNNNNN_3_hg38` (and `+hg38_HGDP1kGP`): an 8-nt flank, any
-3′ PAM of up to 8 nt, at about 3-4 times a dedicated index's search time genome-wide. **`NNN_3`
-(the 3-nt flank of 2.8.1) is not built again for 2.10.0**: the general index serves every search
-it served, at the same speed (a 3-nt and an 8-nt PAM-less index cost the same, every position
-being a site), and a download of 2.8.1's `NNN_3_*` says so. A 5′ PAM (Cas12a) needs a
+3′ PAM of up to 8 nt. Its search takes 3.3 times a dedicated NGG index's, and 1.7 times the
+default NRR index's (genome-wide on the reference, `ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1
+DNA + 1 RNA bulge, the engine's search: 26 min for NGG against 8 min on the NGG index, and 15
+min for NRR on the NRR index). **`NNN_3` (the 3-nt flank of 2.8.1) is not built again for
+2.10.0**: the general index serves every search it served, at the same speed (a 3-nt and an
+8-nt PAM-less index cost the same, every position being a site), and a download of 2.8.1's
+`NNN_3_*` says so. A 5′ PAM (Cas12a) needs a
 dedicated index (the TTTN ones), which `build-index-only` builds for any other: these indexes
 store the flank on the 3′ side of the guide, so a 5′ search does not use them.
 
 An index also fixes how many bases it stores per site, from the guide length it was built
 for and its `N` (`20-NRR_3`: N = 3, up to 2 bulges of each type). An index built for a 20-nt
-guide with N = 3 also serves a 21-nt guide (the shipped SaCas9 PAM files) at up to 1 bulge of
-each type, byte-identically to an index built for it. A guide past that needs its own index,
-which the search builds, under a name of its own (rule:
+guide with N = 3 also serves a 21-nt guide (the shipped 21-nt SaCas9 PAM files,
+`21bp-NNGRRT-SaCas9.txt` and `21bp-NNNRRT-SaCas9KKH.txt`) at up to 1 bulge of each type,
+byte-identically to an index built for it. A guide past that needs its own index, which the
+search builds, under a name of its own (rule:
 [methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
 
 The older name `<PAM>_<N>_<genome>` says neither the guide length an index was built for nor

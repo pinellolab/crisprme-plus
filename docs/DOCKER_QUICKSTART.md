@@ -148,8 +148,8 @@ the default PAM's since 2.10.0 (it was NRG = NGG + NAG).
 > general one that serves any 3′ PAM of up to 8 nt (`20-NNNNNNNN_3_hg38`; 2.8.1's 3-nt
 > `NNN_3_hg38` is not built again). The NRR index already serves an NGG, NAG, NRG or NGA search: a
 > search prunes an index to its PAM by itself when no installed index serves it unpruned
-> (one of that PAM, or a PAM-less one of its width), and says so (`--prune-pam`). For any other
-> PAM (e.g. a Cas12a one) or reference genome, build the index yourself (see
+> (one of that PAM, or a PAM-less one of its width), and says so (`--prune-pam`). For a PAM or a
+> guide length no published index serves, or another reference genome, build the index yourself (see
 > **"Installing more indexes"** at the bottom). Variant indexes are always a separate
 > download (see below).
 

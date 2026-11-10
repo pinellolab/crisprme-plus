@@ -476,15 +476,20 @@ class AnArchiveOf281NamesItsSuccessor(_Base):
         """NRG is not built again on HPRC and mega: the panel's NRR index serves its searches,
         pruned to NRG. The note said it did so "at the same speed or faster", which holds of
         the general index for NNN_3 alone: an NRR index holds the sites of NAA, NAG, NGA and
-        NGG and prunes at leaf time (chr22, three NRG guides at 4 mismatches + 1 bulge, the
-        same 85,563 rows: 107 s wall and 380 s CPU, against 57 s and 110 s for an NRG index;
-        the stage-2b review of lane D, D-R1-2)."""
+        NGG and prunes at leaf time (the engine's search of chr22's reference sequence, three
+        NRG guides at 4 mismatches + 1 DNA + 1 RNA bulge, the same 85,563 rows: 107 s wall and
+        380 s CPU, against 57 s and 110 s for an NRG index; the stage-2b review of lane D,
+        D-R1-2). The note said "on chr22 about twice the wall time", which reads as a search
+        on an HPRC or mega index, whose post-analysis was not measured: it names the setting
+        of the measurement (D-R2-4)."""
         for vcf in ("hg38_HPRC", "hg38_mega"):
             name = self._old(f"NRG_3_hg38+{vcf}")
             said = self.download(os.path.join(self.tmp, vcf), name)
             self.assertIn(f"It is not built again for 2.10.0: 20-NRR_3_hg38+{vcf}, in {FMT2}, "
                           "serves every search it serves, pruned to the search's PAM: the same "
                           "rows, more slowly than a dedicated NRG index", said)
+            self.assertIn("about twice the wall time in the engine's search of chr22's "
+                          "reference sequence", said)
             self.assertNotIn("same speed", said)
             self.assertNotIn("faster", said)
             shutil.rmtree(os.path.join(self.tmp, "old"))

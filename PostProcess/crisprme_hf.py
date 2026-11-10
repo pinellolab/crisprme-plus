@@ -2152,13 +2152,15 @@ def download_component(
                         f"speed: download that one{instead}.")
             else:
                 # NRG on HPRC and mega: the panel's NRR index, which holds every NRR site and
-                # prunes at leaf time (chr22, three NRG guides at 4 mismatches + 1 bulge, the
-                # same rows: 107 s wall and 380 s CPU, against 57 s and 110 s for NRG's index)
+                # prunes at leaf time (the engine's search of chr22's reference sequence, three
+                # NRG guides at 4 mismatches + 1 DNA + 1 RNA bulge, 4 threads, the same 85,563
+                # rows: 107 s wall and 380 s CPU, against 57 s and 110 s for NRG's index; the
+                # design judges' assess-portfolio, R_A_nrr2_NRG_b1 and R_A_ded2_NRG_b1)
                 said = (f"It is not built again for 2.10.0: {successor}, in {FORMAT2_HF_REPO}, "
                         f"serves every search it serves, pruned to the search's PAM: the same "
                         f"rows, more slowly than a dedicated {_old_pam} index (it holds every "
-                        f"{_new_pam} site; on chr22 about twice the wall time): download that "
-                        f"one{instead}.")
+                        f"{_new_pam} site: about twice the wall time in the engine's search of "
+                        f"chr22's reference sequence): download that one{instead}.")
             print(f"NOTE: {canonical_index_name(index_name)} is an index of CRISPRme 2.8.1 "
                   f"(index format 1). " + said, flush=True)
         # multi-part phase labels: a VARIANT index installs in 3 stages (main index
