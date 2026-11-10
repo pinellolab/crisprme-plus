@@ -382,6 +382,11 @@ for count, line in enumerate(inEmpiricalResults):
 # and whether a greedy worst-case alignment stands for it (greedy 0: its rows are its
 # carriers' own haplotypes, as a per-sample search reports any window).
 hvdr_by_chrom = {}
+# 2.10.0: the regions of windows the sites-only density guard withheld from a sites-only
+# dataset's indel post-analysis (greedy "withheld-region", sites_only_guard.py): a row is
+# noted by one only where no window of the list covers it (a region, wider than its windows,
+# would otherwise come first and stand for the row's own window)
+hvdr_region_by_chrom = {}
 _hvdr_folder = os.path.dirname(outFile_name) or "."
 # the search's mode, as new_simple_analysis.py reads it (CRISPRME_FAST_MODE: "1" =
 # population-level, "0" or unset = per-sample)
@@ -403,9 +408,12 @@ try:
             # a BED of 2.8.1 has no such column: its note said so of every window
             _greedy = _f[9] != "0" if len(_f) > 9 else True
             # 2.10.0: "withheld", a window the sites-only density guard took out of a
-            # sites-only dataset's post-analysis (sites_only_guard.py): no row of it
-            _withheld = len(_f) > 9 and _f[9] == "withheld"
-            hvdr_by_chrom.setdefault(_chrom, IntervalTree())[_s - 1 : _e + 1] = (
+            # sites-only dataset's post-analysis (sites_only_guard.py): no row of it;
+            # "withheld-region", a region of such windows of its indel post-analysis
+            _flag = _f[9] if len(_f) > 9 else ""
+            _withheld = _flag in ("withheld", "withheld-region")
+            (hvdr_region_by_chrom if _flag == "withheld-region" else hvdr_by_chrom).setdefault(
+                _chrom, IntervalTree())[_s - 1 : _e + 1] = (
                 _nvar,
                 _iupac,
                 _bits,
@@ -440,16 +448,26 @@ def _hvdr_note(chrom, pos, greedy=True):
     # (its greedy column; a BED of 2.8.1 has none, and its note said so of every window):
     # either makes the note say so.
     tree = hvdr_by_chrom.get(chrom)
-    if not tree:
-        return "NA"
-    hits = tree[pos]
+    hits = tree[pos] if tree else set()
+    region = False
+    if not hits:
+        tree = hvdr_region_by_chrom.get(chrom)
+        hits = tree[pos] if tree else set()
+        region = True
     if not hits:
         return "NA"
     nvar, iupac, bits, window_greedy, withheld = sorted(hits)[0].data
     note = "high_variant_density (%s variants%s)" % (
         nvar, ", 2^%s sequences" % bits if bits else ""
     )
-    if withheld:
+    if withheld and region:
+        # a region whose windows the guard withheld from a sites-only dataset's indel
+        # post-analysis (its densest window's variants, sequences and letters)
+        note += (
+            ": the sites-only density guard withheld a sites-only dataset's indel "
+            "alignments in this region; other haplotype alignments may exist"
+        )
+    elif withheld:
         # the sites-only density guard withheld the window's candidates of a sites-only
         # dataset (the mega) from its post-analysis: none of its alignments is a row
         note += (

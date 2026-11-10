@@ -48,7 +48,11 @@ guard keeps in such a window (a reference row, a genotyped dataset's) keeps its 
 the four-allele positions of those windows go to ``<out stem>.four_allele_positions.bed``,
 as the post-analysis lists those of every window it reads. The indel side, whose
 post-analysis lists no dense window, lists one line a region of ``<out>`` (its densest
-window's letters, on the fake-indel contig).
+window's letters, on the fake-indel contig), its ``greedy`` column ``withheld-region``:
+resultIntegrator notes a row by such a region only where no window of the list covers it,
+so the note of a row in a window is the one the post-analysis gives it with the guard off
+(a region, wider than the windows it holds, would come first: on the rebuilt mega's chr22,
+155 rows got a region's note for their own window's).
 
 usage: sites_only_guard.py snp|indel <targets file> <Dictionaries folder> <dataset> <chrom>
                            <bed out>
@@ -76,6 +80,9 @@ HVDR_SUFFIX = ".high_variant_density_regions.bed"
 HVDR_HEADER = ("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\tbits"
                "\tfour_allele\tgreedy\n")
 WITHHELD = "withheld"
+# the indel side's lines are regions of windows on the fake-indel contigs, not windows:
+# resultIntegrator notes a row by one only where no window covers it
+WITHHELD_REGION = "withheld-region"
 FOUR_ALLELE_SUFFIX = ".four_allele_positions.bed"
 # the complement of a window's letters, IUPAC codes included (new_simple_analysis's table;
 # Q, every base, is its own)
@@ -95,14 +102,14 @@ def forward_letters(dna, strand):
     return letters.translate(_COMPLEMENT)[::-1] if strand == "-" else letters
 
 
-def hvdr_line(chrom, start, end, guide, letters, n_seq):
-    """One line of the dense-region list for a window the guard withheld: its span, guide,
-    variant columns, no carriers (a sites-only dataset has none), letters, bits, four-allele
-    positions, and ``withheld`` where the post-analysis says whether a greedy worst case
-    stands for it."""
+def hvdr_line(chrom, start, end, guide, letters, n_seq, flag=WITHHELD):
+    """One line of the dense-region list for a window the guard withheld (or, ``flag``
+    WITHHELD_REGION, a region of them): its span, guide, variant columns, no carriers (a
+    sites-only dataset has none), letters, bits, four-allele positions, and ``flag`` where
+    the post-analysis says whether a greedy worst case stands for the window."""
     return "%s\t%d\t%d\t%s\t%d\t.\t%s\t%.2f\t%d\t%s\n" % (
         chrom, start, end, guide, _wd.variant_columns(letters), letters, _wd.bits(n_seq),
-        len(_wd.four_allele_offsets(letters)), WITHHELD)
+        len(_wd.four_allele_offsets(letters)), flag)
 
 
 def guard_bits(environ=None):
@@ -193,7 +200,9 @@ def run(kind, targets, dictionaries, dataset, chrom, bed_out, bits=None):
         if not place.rows:
             raise ValueError(f"no indel log of {chrom} in log_indels_{dataset}/ to place "
                              f"its windows on the reference by")
-    regions = {}   # (guide, start) -> [end, max bits, candidates, letters of the densest]
+    # (guide, start) -> [end, max bits, candidates, the densest window's letters and its
+    # number of sequences]
+    regions = {}
     windows = {}   # SNP side: (start, end, guide) -> (variants, letters, bits) to list it by
     quads = set()  # SNP side: the four-allele positions of the withheld windows
     total = withheld = 0
@@ -282,7 +291,7 @@ def run(kind, targets, dictionaries, dataset, chrom, bed_out, bits=None):
                 fh.write(hvdr_line(chrom, wkey[0], wkey[1], wkey[2], letters, n_seq))
         else:
             for _s, guide, (start, end, _b, _n, letters, n_seq) in lines:
-                fh.write(hvdr_line(chrom, start, end, guide, letters, n_seq))
+                fh.write(hvdr_line(chrom, start, end, guide, letters, n_seq, WITHHELD_REGION))
     if quads:
         with open(quads_out + ".tmp", "w") as fh:
             fh.write("#chrom\tstart\tend\n")

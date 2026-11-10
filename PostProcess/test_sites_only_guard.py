@@ -220,9 +220,9 @@ class TestTheWithheldWindowsAreInTheDenseRegionList(_Dicts):
         bed = os.path.join(self.tmp, "x_chr22.indel" + sog.BED_SUFFIX)
         self.assertEqual(sog.run("indel", path, self.dicts, "hg38_mega", "chr22", bed), (3, 2))
         hvdr, quads = sog.companion_paths(bed)
-        # one region, 1010..1037, its densest window's letters
+        # one region, 1010..1037, its densest window's letters; a region, not a window
         self.assertEqual(self.body(hvdr), [["chr22", "1010", "1037", GUIDE, "12", ".", DENSER,
-                                            "24.00", "12", "withheld"]])
+                                            "24.00", "12", "withheld-region"]])
         self.assertFalse(os.path.exists(quads))
 
     def test_a_genotyped_dataset_or_the_guard_off_lists_nothing(self):
@@ -281,16 +281,26 @@ class TestARowTheGuardKeepsKeepsItsNote(_Dicts):
         path = self.targets([target(DENSE, 100, chrom="chrT"), target(PLAIN, 3000, "chrT")])
         sog.run("snp", path, self.dicts, "hg38_mega", "chrT",
                 os.path.join(res_dir, "job_chrT.snp" + sog.BED_SUFFIX))
+        # the indel side: a region of windows at 90..113 (the contig chrT_80-140_1 placed at
+        # 80), over the SNP window at 100 and the row at 95, which no window covers
+        log = os.path.join(self.dicts, "log_indels_hg38_mega")
+        os.makedirs(log)
+        with gzip.open(os.path.join(log, "logchrT.txt.gz"), "wt") as fh:
+            fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n")
+            fh.write("chrT_80-140_1\t\t.\t0.1\tchrT_106_A_AT\t0,60\tN\n")
+        ipath = self.targets([target(DENSER, 10, chrom="fakechrT")], name="i.txt")
+        sog.run("indel", ipath, self.dicts, "hg38_mega", "chrT",
+                os.path.join(res_dir, "job_chrT.indel" + sog.BED_SUFFIX))
         aln = "CTAACAGTTGCTTTTATCACTGG"
         best = os.path.join(res_dir, "job.bestMerge.txt")
         with open(best, "w") as fh:
-            for start in (100, 3000):
+            for start in (95, 100, 3000):
                 block = _block("X", GUIDE, GUIDE, aln, "n", 0, 0, "NA", "NA")
                 block[5] = block[6] = str(start)
                 fh.write("\t".join(block * 3) + "\n")
         found = os.path.join(res_dir, "job.found.bed")
         with open(found, "w") as fh:
-            fh.write("NA\nNA\n")
+            fh.write("NA\nNA\nNA\n")
         empirical = os.path.join(self.tmp, "dummy.txt")
         open(empirical, "w").close()
         guides = os.path.join(self.tmp, "guides.txt")
@@ -306,12 +316,20 @@ class TestARowTheGuardKeepsKeepsItsNote(_Dicts):
         with open(best + ".integrated_results.tsv", newline="") as fh:
             notes = {int(r["Start_coordinate_(highest_CFD)"]): r["High_variant_density_region"]
                      for r in csv.DictReader(fh, delimiter="\t")}
+        # the row in the SNP window: the window's note, though the indel region covers it
+        # too and starts before it
         self.assertEqual(
             notes[100],
             "high_variant_density (10 variants, 2^20.00 sequences): the sites-only density "
             "guard withheld a sites-only dataset's alignments of this window; other haplotype "
             "alignments may exist; full_IUPAC=%s; four_allele_positions=%s"
             % (DENSE, ",".join("chrT:%d" % p for p in range(101, 111))))
+        # the row only the indel region covers: the region's note
+        self.assertEqual(
+            notes[95].split("; four_allele_positions=")[0],
+            "high_variant_density (12 variants, 2^24.00 sequences): the sites-only density "
+            "guard withheld a sites-only dataset's indel alignments in this region; other "
+            "haplotype alignments may exist; full_IUPAC=%s" % DENSER)
         self.assertEqual(notes[3000], "NA")
 
 
