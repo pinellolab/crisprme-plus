@@ -5,9 +5,12 @@ holds against the code that builds, names, publishes and downloads its archives
 and the check finds what it is for: a name build-index-only would not give, an N that is not
 the build's bulges + 1, a panel without its bundle, a genotyped panel without its store, an
 archive of 2.8.1 nothing replaces (NNN_3's pointer to the general index), an index the web's
-2 + 2 bulges do not fit.
+2 + 2 bulges do not fit. And the rebuild its commands make runs: the script --commands prints,
+run dry (check_index_set.dry_run: every program stubbed, in temporary working directories), runs
+to its end from the repository's root, and the check finds each way a command fails there.
 
-Hermetic: reads the repository's files only.
+Hermetic: reads the repository's files, and runs the rebuild's script dry in a temporary
+directory (bash, and this Python for the stubs).
 """
 
 import copy
@@ -67,15 +70,16 @@ class TheSetHolds(unittest.TestCase):
             self.assertEqual(cis.main(["--commands"]), 0)
         text = out.getvalue()
         self.assertLess(text.index("# build"), text.index("# publish"))
-        self.assertIn("crisprme.py publish-index --index genome_library/20-NRR_3_hg38+hg38_HGDP1kGP",
-                      text)
+        self.assertIn("$RUN crisprme.py publish-index --index "
+                      "$HGDP/genome_library/20-NRR_3_hg38+hg38_HGDP1kGP", text)
 
-    def test_what_commands_prints_is_a_script_bash_runs(self):
+    def test_what_commands_prints_is_a_script_bash_reads(self):
         """--commands prints every build command, then every publish command, for the rebuild
         to run. The build column of the kits and of mega's index ended in a note in brackets,
         and the companions' columns held prose, so bash refused the script (the stage-2b
         review of lane D, D-R1-8): a note now has its own column, and a companion, which its
-        panel's first build writes and first publish uploads, has no command ("-")."""
+        panel's first build writes and first publish uploads, has no command ("-"). (Its
+        syntax alone: TheRebuildRuns runs it.)"""
         import contextlib
         import io
         import subprocess
@@ -194,6 +198,157 @@ class TheCheckFindsWhatItIsFor(unittest.TestCase):
         self.assertTrue([p for p in problems if p.startswith(
             "genotypes_hg38_HPRC: a companion has no publish command of its own")], problems)
 
+
+
+class TheRebuildRuns(unittest.TestCase):
+    """The script --commands prints is the rebuild: bash runs it from the repository's root,
+    every build command, then every publish command. bash -n took it, but it did not run: each
+    variant build cd'd into its panel's working directory, then called its recipe by its
+    repository path, which was no longer there; each reference build read its PAM file from a
+    working directory nothing had put it in; a kit was packed after a cd that moved every
+    command after it, and uploaded from the repository's root, where it is not; and mega's
+    recipe read its source VCFs from a folder of the cluster it was written on (the stage-2b
+    review of lane D, D-R2-1). The check now runs it dry (check_index_set.dry_run: every
+    program stubbed, in temporary working directories), and reads each command for the ways it
+    failed."""
+
+    def setUp(self):
+        self.rows = cis.read_manifest()
+
+    def mutated(self, which, what, old, new):
+        rows = copy.deepcopy(self.rows)
+        row = _row(rows, which)
+        self.assertIn(old, row[what])
+        row[what] = row[what].replace(old, new)
+        return rows
+
+    def test_its_script_runs_dry_to_its_end(self):
+        self.assertEqual(cis.dry_run(self.rows), [])
+
+    def test_the_script_stops_before_its_first_command_where_a_variable_is_not_set(self):
+        import shutil
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as t:
+            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": t,
+                   "RUN": "", "HGDP": t, "HPRC": t, "MEGA": t}
+            got = subprocess.run([shutil.which("bash"), "-c", cis.commands_script(self.rows)],
+                                 cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertNotEqual(got.returncode, 0)
+            self.assertIn("REF: the working directory of the reference indexes", got.stderr)
+            self.assertEqual(os.listdir(t), [], "a command ran")
+
+    def test_a_recipe_called_by_its_path_after_a_cd(self):
+        # (the manifest's form before: cd $HGDP && ... bash seq_script/merge_panels/...)
+        rows = self.mutated("20-NGG_3_hg38+hg38_HGDP1kGP", "build", "SIF=$SIF",
+                            "cd $HGDP && SIF=$SIF")
+        problems = cis.check(rows)
+        self.assertIn("20-NGG_3_hg38+hg38_HGDP1kGP: its build command names the repository's "
+                      "seq_script/merge_panels/hgdp1kgp_build.sh after a cd, where it is not",
+                      problems)
+        self.assertTrue([p for p in problems if p.startswith(
+            "20-NGG_3_hg38+hg38_HGDP1kGP: its build command moves the directory of every "
+            "command after it")], problems)
+        dry = cis.dry_run(rows)
+        self.assertTrue([p for p in dry if "the script seq_script/merge_panels/hgdp1kgp_build.sh "
+                         "is not there" in p], dry)
+
+    def test_a_build_that_reads_a_pam_file_it_did_not_put_there(self):
+        rows = self.mutated("20-NRR_3_hg38", "build",
+                            "mkdir -p $REF/PAMs && cp PAMs/20bp-NRR-SpCas9.txt $REF/PAMs/ && ", "")
+        self.assertTrue([p for p in cis.check(rows) if p.startswith(
+            "20-NRR_3_hg38: its build command does not first copy its PAM file into its "
+            "working directory")])
+        dry = cis.dry_run(rows)
+        self.assertTrue([p for p in dry if "the PAM file PAMs/20bp-NRR-SpCas9.txt is not there"
+                         in p], dry)
+
+    def test_a_kit_uploaded_from_the_repository_s_root(self):
+        """(and the script stops there: set -e did not stop it at the first command of an &&
+        list, which this upload is, so each command of the script ends in || exit)"""
+        rows = self.mutated("build-inputs/hg38_HPRC", "publish", "$HPRC/hg38_HPRC.tar.gz",
+                            "hg38_HPRC.tar.gz")
+        dry = cis.dry_run(rows)
+        self.assertTrue([p for p in dry if "the file to upload hg38_HPRC.tar.gz is not there"
+                         in p], dry)
+
+    def test_a_kit_packed_after_a_cd_that_moves_the_next_commands(self):
+        rows = self.mutated("build-inputs/hg38_HGDP1kGP", "build", "(cd $HGDP && ", "cd $HGDP && ")
+        _row(rows, "build-inputs/hg38_HGDP1kGP")["build"] = \
+            _row(rows, "build-inputs/hg38_HGDP1kGP")["build"][:-1]
+        self.assertTrue([p for p in cis.check(rows) if p.startswith(
+            "build-inputs/hg38_HGDP1kGP: its build command moves the directory of every command "
+            "after it")])
+        dry = cis.dry_run(rows)
+        self.assertTrue([p for p in dry if "the script seq_script/merge_panels/hprc_build.sh is "
+                         "not there" in p], dry)
+
+    def test_an_input_a_recipe_reads_from_the_cluster_it_was_written_on(self):
+        # (as mega's recipe read its source VCFs, SRC, from /srv/local/lp698/mega_gw)
+        rows = self.mutated("20-NRR_3_hg38+hg38_HPRC", "build", "P1KG=$P1KG ", "")
+        self.assertTrue([p for p in cis.check(rows) if p.startswith(
+            "20-NRR_3_hg38+hg38_HPRC: seq_script/merge_panels/hprc_build.sh reads P1KG from "
+            "/srv/local/")])
+
+    def test_a_program_of_the_release_image_run_outside_it(self):
+        rows = self.mutated("20-NGG_3_hg38", "publish", "$RUN crisprme.py", "crisprme.py")
+        self.assertIn("20-NGG_3_hg38: its publish command runs crisprme.py outside the release "
+                      "image: $RUN crisprme.py", cis.check(rows))
+        dry = cis.dry_run(rows)
+        self.assertTrue([p for p in dry if "runs outside the release image" in p], dry)
+
+    def test_a_variable_the_rebuild_does_not_set(self):
+        rows = self.mutated("20-NRR_3_hg38+hg38_mega", "build", "$MEGA_SRC", "$CK")
+        self.assertTrue([p for p in cis.check(rows) if p.startswith(
+            "20-NRR_3_hg38+hg38_mega: its build command reads $CK, which the rebuild does not "
+            "set")])
+
+    def test_the_working_directory_of_another_panel(self):
+        rows = self.mutated("20-NGG_3_hg38+hg38_HGDP1kGP", "publish", "$HGDP/", "$HPRC/")
+        self.assertTrue([p for p in cis.check(rows) if p.startswith(
+            "20-NGG_3_hg38+hg38_HGDP1kGP: its publish command uses $HPRC, the working directory "
+            "of another panel")])
+
+    def test_a_script_the_repository_does_not_have(self):
+        rows = self.mutated("TTTN-23_3_hg38+hg38_HGDP1kGP", "build", "hgdp1kgp_build.sh",
+                            "hgdp1kgp.sh")
+        self.assertIn("TTTN-23_3_hg38+hg38_HGDP1kGP: its build command names "
+                      "seq_script/merge_panels/hgdp1kgp.sh, which the repository does not have",
+                      cis.check(rows))
+        dry = cis.dry_run(rows)
+        self.assertTrue([p for p in dry if "the script seq_script/merge_panels/hgdp1kgp.sh is "
+                         "not there" in p], dry)
+
+    def test_a_pending_recipe_the_tree_holds(self):
+        """mega's build calls lane M's mega_rebuild.sh, which the branch of lane D does not
+        hold: the check says so, and the dry run takes its call as done, until the tree holds
+        it; then its entry in PENDING_SCRIPTS has to go."""
+        import tempfile
+        self.assertIn("seq_script/merge_panels/mega_rebuild.sh",
+                      _row(self.rows, "20-NRR_3_hg38+hg38_mega")["build"])
+        with tempfile.TemporaryDirectory() as t:
+            os.symlink(os.path.join(ROOT, "PAMs"), os.path.join(t, "PAMs"))
+            panels = os.path.join(t, "seq_script", "merge_panels")
+            os.makedirs(panels)
+            for n in os.listdir(os.path.join(ROOT, "seq_script", "merge_panels")):
+                os.symlink(os.path.join(ROOT, "seq_script", "merge_panels", n),
+                           os.path.join(panels, n))
+            for script in cis.PENDING_SCRIPTS:
+                if not os.path.exists(os.path.join(t, script)):
+                    open(os.path.join(t, script), "w").close()
+            problems = cis.check(self.rows, root=t)
+            self.assertEqual(cis.pending(root=t), [])
+        for script in cis.PENDING_SCRIPTS:
+            self.assertIn(f"{script}: this tree holds it, so it is no longer pending: take it out "
+                          f"of check_index_set.PENDING_SCRIPTS", problems)
+
+    def test_a_text_the_script_cannot_hold(self):
+        import unittest.mock
+        with unittest.mock.patch.dict(cis.VARIABLES, {"META": "gnomAD's metadata file"}):
+            self.assertTrue([p for p in cis.check(self.rows) if p.startswith(
+                "VARIABLES['META'] holds one of")])
+            dry = cis.dry_run(self.rows)
+        self.assertTrue([p for p in dry if "stops" in p], dry)
 
 if __name__ == "__main__":
     unittest.main()

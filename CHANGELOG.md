@@ -138,11 +138,26 @@ and the `release-crisprme` skill.
   each index serves its own guide at 2 + 2 bulges (`index_fit.fits`); each variant index's
   reference index is in the set; each panel has its companions once; every index archive of
   2.8.1 is replaced by exactly one archive of the set, the one a download of it names; every
-  build and publish command is one bash runs (`bash -n`: a note has a column of its own, and a
+  build and publish command is one bash reads (`bash -n`: a note has a column of its own, and a
   panel companion, which the panel's first build writes and its first `publish-index` uploads,
-  has no command, `-`), so that `--commands` prints a script: every build command, then every
-  publish command. Covered by `PostProcess/test_index_set.py`, which also mutates the set eleven
-  ways and checks that each is found. The PAM files the set builds ship in `PAMs/`:
+  has no command, `-`), and one the rebuild runs as written: from the repository's root, each
+  on its own (a `cd` only inside `( )`, so no command moves the next), a recipe called by its
+  repository path and given every input it would otherwise read from a path of the cluster it
+  was written on, each build first copying its PAM file from the repository's `PAMs/` into its
+  working directory's, `crisprme.py`, `hf` and `pigz` run in the release image (`$RUN`), each
+  command in its own panel's working directory, with the variables the README lists.
+  `--commands` prints the rebuild as one script, every build command, then every publish
+  command; it stops before its first command where one of those variables is not set, and at the
+  first command that fails (each ends in `|| exit`: `set -e` does not stop at a command of an
+  `&&` list but its last). The check runs it dry, every program it calls stubbed, in temporary
+  working directories, from a copy of the repository's root made of links: it runs to its end
+  only where every script it calls is there, every PAM file a build reads is in place and every
+  file a publish uploads is where the command says. mega's build calls
+  `seq_script/merge_panels/mega_rebuild.sh`, the recipe of its full rebuild (decision D2), from
+  the merged VCFs `mega.<chr>.afmax.vcf.gz`. Covered by `PostProcess/test_index_set.py`, which
+  also mutates the set eleven ways and checks that each is found, and makes each way a command
+  can fail to run fail once, in the check and in the dry run. The PAM files the set builds ship
+  in `PAMs/`:
   `20bp-NNNNNNNN-NO-PAM.txt` (the general index), `22bp-NNGRRN-SaCas9.txt` and
   `20bp-TTTN-Cas12a.txt`; and so do PAM files for the searches its indexes are published for,
   which no shipped file gave: `22bp-NNGRRT-SaCas9.txt` (the CEP290 guides, served by the 22-nt

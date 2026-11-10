@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """check_index_set.py - check the index set of CRISPRme 2.10.0 (the rebuild manifest) against the
-code that builds, names, publishes and downloads its archives.
+code that builds, names, publishes and downloads its archives, and run its commands dry.
 
 The manifest, ``seq_script/rebuild/index_set_2.10.0.tsv``, lists every archive the rebuild for
 2.10.0 builds and publishes in ``lucapinello/crisprme-indexes-format2`` (decision C2), with its
@@ -11,12 +11,24 @@ format-2 repo (``crisprme_hf.resolve_index_repo``), every index must serve its o
 web's ceiling of 2 DNA + 2 RNA bulges (``index_fit.fits``), every variant panel must have its
 Dictionaries bundle (and, genotyped, its genotype stores) once, and every index archive of 2.8.1
 must be replaced by exactly one archive of the set (NNN_3, not built again, by the general
-index), as a download of it says (``crisprme_hf.successor_index``). Every build and publish
-command is one bash runs (``bash -n``: a note has a column of its own), and a panel companion,
-which its panel's first build writes and first publish uploads, has none ("-").
+index), as a download of it says (``crisprme_hf.successor_index``).
 
-    python seq_script/rebuild/check_index_set.py              # the check; exit 1 on a problem
-    python seq_script/rebuild/check_index_set.py --commands   # the build, then publish, commands
+Its commands are what the rebuild runs, and ``--commands`` prints them as one script: each a
+bash command (``bash -n``; a note has a column of its own) run from the repository's root on its
+own, so that none moves the next (a ``cd`` only inside ``( )``); a recipe called by its repository
+path, and given every input it would otherwise read from a path of the cluster it was written on;
+each build first copying its PAM file from the repository's ``PAMs/`` into its working
+directory's, and reading it there; ``crisprme.py``, ``hf`` and ``pigz`` run in the release image
+(``$RUN``); each command in its own panel's working directory, with the variables of VARIABLES
+alone; a panel companion, which its panel's first build writes and first publish uploads, with
+none ("-"). The check reads every command so, then runs the script dry (dry_run): every program
+it calls stubbed, in working directories that hold what the builds leave, from a copy of the
+repository's root made of links. The script runs to its end only where every script it calls is
+there, every PAM file a build reads is in place, and every file a publish uploads is where the
+command says.
+
+    python seq_script/rebuild/check_index_set.py              # the check and the dry run; exit 1 on a problem
+    python seq_script/rebuild/check_index_set.py --commands   # the rebuild: a script bash runs from the repository's root
 
 Standard library and the repository's PostProcess modules only; no network.
 """
@@ -25,8 +37,12 @@ import argparse
 import csv
 import functools
 import os
+import re
+import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -59,6 +75,45 @@ KITS_281 = ("build-inputs/hg38_HGDP1kGP", "build-inputs/hg38_mega")
 # The ceiling of the web's Advanced panel: an index of the set must serve it for its own guide
 WEB_BULGES = 2
 
+# The variables the commands use, each what the rebuild sets it to (seq_script/rebuild/README.md);
+# --commands' script stops before its first command where one is not set. No text here may hold
+# a '}', a '$', a '`', a '"' or a "'": each goes into the script's ${NAME:?text} (_VARIABLE_TEXT).
+VARIABLES = {
+    "REF": "the working directory of the reference indexes, holding hg38 in Genomes/hg38",
+    "HGDP": "the working directory of hg38_HGDP1kGP, holding hg38 in Genomes/hg38",
+    "HPRC": "the working directory of hg38_HPRC, holding hg38 in Genomes/hg38",
+    "MEGA": "the working directory of hg38_mega, holding hg38 in Genomes/hg38",
+    "RUN": "the prefix that runs a command in the release image, empty where the release is "
+           "installed: apptainer exec --bind <the folders> <the image> "
+           "/usr/local/bin/_entrypoint.sh",
+    "SIF": "the release image, which the HGDP + 1000 Genomes and HPRC recipes run",
+    "RP": "the folder of the re-phased HGDP + 1000 Genomes BCFs, hgdp1kg.<chr>.rephased.bcf",
+    "META": "the metadata file of HGDP + 1000 Genomes by gnomAD, gnomad_meta_updated.tsv",
+    "HPRC_SRC": "the folder of the HPRC VCFs, ALL.<chr>.HPRC.vcfwave.vcf.gz",
+    "P1KG": "the samplesID file of 1000 Genomes 2021, which names the populations of the HPRC "
+            "samples",
+    "MEGA_SRC": "the folder of the merged VCFs of mega, mega.<chr>.afmax.vcf.gz",
+}
+# The ones that may be set empty (RUN: the release installed where the script runs)
+MAY_BE_EMPTY = ("RUN",)
+# What a text of VARIABLES may not hold
+_VARIABLE_TEXT = re.compile(r"[}$`\"']")
+# Each panel's working directory, the variable that names it
+WORKDIR = {"-": "REF", "hg38_HGDP1kGP": "HGDP", "hg38_HPRC": "HPRC", "hg38_mega": "MEGA"}
+# The programs of the release image, which a command runs through $RUN
+IMAGE_PROGRAMS = ("crisprme.py", "hf", "huggingface-cli", "pigz", "python", "python3")
+# The repository's folders a command names a path in, read from the repository's root (PAMs/
+# names the working directory's after a cd into it)
+REPOSITORY_FOLDERS = ("seq_script", "scripts", "PostProcess", "PAMs")
+# A recipe the set calls that another lane of stage 2b brings, which this tree does not hold
+# yet: the integration of stage 2b brings it, and its entry here goes then (the check says so
+# once the tree holds it). Each is said, not counted as a problem, while it is missing.
+PENDING_SCRIPTS = {
+    "seq_script/merge_panels/mega_rebuild.sh":
+        "lane M's recipe of the mega rebuild (decision D2: PASS/'.' records, AF = AF_max), "
+        "on branch s2b-M",
+}
+
 
 def read_manifest(path=MANIFEST):
     """The manifest's rows, each a dict of COLUMNS (comment lines, starting with '#', skipped)."""
@@ -87,28 +142,172 @@ def bash_syntax_error(command):
     return "" if got.returncode == 0 else (got.stderr.strip() or f"exit {got.returncode}")
 
 
+def variables(command):
+    """The names of the variables ``command`` reads ($NAME or ${NAME}), in order, once each."""
+    seen = []
+    for name in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", command):
+        if name not in seen:
+            seen.append(name)
+    return seen
+
+
+def simple_commands(command):
+    """The simple commands of ``command``, in order: (assignments, words, depth, moved) each,
+    its leading NAME=value words, the rest (a redirection's target left out), how many ( ) it is
+    inside, and whether a cd before it, in its ( ) or one around it, moved its directory."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    found, moved, assignments, words = [], [False], [], []
+    redirect = False
+
+    def end():
+        if assignments or words:
+            found.append((list(assignments), list(words), len(moved) - 1, moved[-1]))
+            if words and words[0] == "cd":
+                moved[-1] = True
+        assignments.clear()
+        words.clear()
+
+    for token in lexer:
+        if redirect:
+            redirect = False
+        elif token == "(":
+            end()
+            moved.append(moved[-1])
+        elif token == ")":
+            end()
+            if len(moved) > 1:
+                moved.pop()
+        elif token in ("&&", "||", "|", ";", "&", ";;", "|&"):
+            end()
+        elif token[0] in "<>":
+            redirect = True
+        elif not words and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", token):
+            assignments.append(token)
+        else:
+            words.append(token)
+    end()
+    return found
+
+
+@functools.lru_cache(maxsize=None)
+def script_inputs(path):
+    """The inputs recipe ``path`` reads from a path of the cluster it was written on unless it
+    is given them: (NAME, default) for each NAME=${NAME:-<absolute path>} whose NAME it reads
+    after."""
+    with open(path) as fh:
+        text = fh.read()
+    found = []
+    for m in re.finditer(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\$\{\1:-(/[^}]*|\$\([^)]*\s/[^)]*\))\}",
+                         text, re.M):
+        name = m.group(1)
+        if re.search(r"\$\{?%s\b" % name, text[m.end():]):
+            found.append((name, m.group(2)))
+    return tuple(found)
+
+
+def check_commands(r, root=ROOT):
+    """The problems of row ``r``'s build and publish commands, read as the rebuild runs them."""
+    problems = []
+    a, kind = r["archive"], r["kind"]
+    own = WORKDIR.get(r["panel"])
+    for what in ("build", "publish"):
+        command = r[what]
+        if kind in COMPANION_KINDS:
+            if command != NO_COMMAND:
+                problems.append(f"{a}: a companion has no {what} command of its own (its "
+                                f"panel's first build writes it, its first publish uploads "
+                                f"it): {NO_COMMAND!r}, not {command!r}")
+            continue
+        if command in ("", NO_COMMAND):
+            problems.append(f"{a}: no {what} command")
+            continue
+        error = bash_syntax_error(command)
+        if error:
+            problems.append(f"{a}: its {what} command is not one bash can run ({error}); a "
+                            f"note goes in the notes column")
+            continue
+        for name in variables(command):
+            if name not in VARIABLES:
+                problems.append(f"{a}: its {what} command reads ${name}, which the rebuild does "
+                                f"not set (check_index_set.VARIABLES)")
+        dirs = {name for name in variables(command) if name in WORKDIR.values()}
+        if own is None or own not in dirs:
+            problems.append(f"{a}: its {what} command does not name its working directory "
+                            f"(${own})")
+        for other in sorted(dirs - {own}):
+            problems.append(f"{a}: its {what} command uses ${other}, the working directory of "
+                            f"another panel: a panel's indexes share its working directory's "
+                            f"Dictionaries alone")
+        for assignments, words, depth, moved in simple_commands(command):
+            program, in_image = (words[:1] or [""])[0], False
+            if program == "$RUN":
+                program, in_image = (words[1:2] or [""])[0], True
+                if not program:
+                    problems.append(f"{a}: its {what} command runs nothing through $RUN")
+            if program in IMAGE_PROGRAMS and not in_image:
+                problems.append(f"{a}: its {what} command runs {program} outside the release "
+                                f"image: $RUN {program}")
+            if program == "cd" and depth == 0:
+                problems.append(f"{a}: its {what} command moves the directory of every command "
+                                f"after it: its cd goes inside ( ), the commands running from "
+                                f"the repository's root")
+            for word in words:
+                folder = word.split("/", 1)[0]
+                if folder not in REPOSITORY_FOLDERS or "/" not in word:
+                    continue
+                if moved:
+                    if folder != "PAMs":
+                        problems.append(f"{a}: its {what} command names the repository's "
+                                        f"{word} after a cd, where it is not")
+                elif word in PENDING_SCRIPTS:
+                    pass
+                elif not os.path.exists(os.path.join(root, word)):
+                    problems.append(f"{a}: its {what} command names {word}, which the "
+                                    f"repository does not have")
+            if program in ("bash", "sh"):
+                script = next((w for w in words[1:] if not w.startswith("-")), "")
+                if script.split("/", 1)[0] not in ("seq_script", "scripts"):
+                    problems.append(f"{a}: its {what} command runs {script or 'no script'}, not "
+                                    f"a recipe of the repository's seq_script/ or scripts/")
+                elif os.path.isfile(os.path.join(root, script)) and not moved:
+                    given = {x.split("=", 1)[0] for x in assignments}
+                    for name, default in script_inputs(os.path.join(root, script)):
+                        if name not in given:
+                            problems.append(f"{a}: {script} reads {name} from {default} unless "
+                                            f"it is given it: its {what} command gives "
+                                            f"{name}=")
+    if kind in INDEX_KINDS and r["build"] not in ("", NO_COMMAND):
+        base = os.path.basename(r["pam_file"])
+        copy = f"mkdir -p ${own}/PAMs && cp {r['pam_file']} ${own}/PAMs/ && "
+        if not r["build"].startswith(copy):
+            problems.append(f"{a}: its build command does not first copy its PAM file into its "
+                            f"working directory, which the setup of a working directory does not "
+                            f"hold: it starts {copy!r}")
+        elif f"PAMs/{base}" not in r["build"][len(copy):]:
+            problems.append(f"{a}: its build command does not read the PAM file it copies, "
+                            f"PAMs/{base}")
+    if kind in INDEX_KINDS and f"--index ${own}/genome_library/{a}" not in r["publish"]:
+        problems.append(f"{a}: its publish command does not publish ${own}/genome_library/{a}")
+    return problems
+
+
 def check(rows, root=ROOT):
     """The problems of the index set ``rows`` (a list of strings; none: it holds)."""
     problems = []
     for r in rows:
-        for what in ("build", "publish"):
-            command = r[what]
-            if r["kind"] in COMPANION_KINDS:
-                if command != NO_COMMAND:
-                    problems.append(f"{r['archive']}: a companion has no {what} command of its "
-                                    f"own (its panel's first build writes it, its first publish "
-                                    f"uploads it): {NO_COMMAND!r}, not {command!r}")
-                continue
-            if command in ("", NO_COMMAND):
-                problems.append(f"{r['archive']}: no {what} command")
-                continue
-            error = bash_syntax_error(command)
-            if error:
-                problems.append(f"{r['archive']}: its {what} command is not one bash can run "
-                                f"({error}); a note goes in the notes column")
+        problems += check_commands(r, root)
     names = [r["archive"] for r in rows]
     for dup in sorted({n for n in names if names.count(n) > 1}):
         problems.append(f"{dup}: listed {names.count(dup)} times")
+    for name, text in VARIABLES.items():
+        if _VARIABLE_TEXT.search(text):
+            problems.append(f"VARIABLES[{name!r}] holds one of }} $ ` \" ', which the rebuild's "
+                            f"script cannot hold in ${{{name}:?...}}")
+    for script in PENDING_SCRIPTS:
+        if os.path.exists(os.path.join(root, script)):
+            problems.append(f"{script}: this tree holds it, so it is no longer pending: take it "
+                            f"out of check_index_set.PENDING_SCRIPTS")
     panels_with_index = set()
     replaced = {}
     for r in rows:
@@ -149,12 +348,8 @@ def check(rows, root=ROOT):
                 if base not in names:
                     problems.append(f"{a}: its reference index {base}, which a download of it "
                                     f"installs, is not in the set")
-            if r["pam_file"] not in r["build"] and os.path.basename(r["pam_file"]) not in r["build"]:
-                problems.append(f"{a}: its build command does not name {r['pam_file']}")
             if kind == "reference" and f"--bDNA {bdna} --bRNA {brna}" not in r["build"]:
                 problems.append(f"{a}: its build command does not give --bDNA {bdna} --bRNA {brna}")
-            if f"--index genome_library/{a}" not in r["publish"]:
-                problems.append(f"{a}: its publish command does not publish genome_library/{a}")
         elif kind in ("bundle", "genotypes", "indel-genotypes"):
             prefix = {"bundle": crisprme_hf.BUNDLE_PREFIX, "genotypes": "genotypes_",
                       "indel-genotypes": "indel_genotypes_"}[kind]
@@ -198,22 +393,243 @@ def check(rows, root=ROOT):
     return problems
 
 
+def pending(root=ROOT):
+    """What the check says of each script of PENDING_SCRIPTS this tree does not hold yet."""
+    return [f"{script}: {why}, which this tree does not hold yet (the integration of stage 2b "
+            f"brings it): the dry run takes its call as done"
+            for script, why in PENDING_SCRIPTS.items()
+            if not os.path.exists(os.path.join(root, script))]
+
+
+def commands_script(rows, manifest=MANIFEST):
+    """The rebuild as one script bash runs from the repository's root: it stops before its first
+    command where a variable the commands read is not set, then runs every build command, then
+    every publish command, in the manifest's order, and stops at the first that fails: each
+    ends in || exit, as set -e does not stop at a command of an && list but its last."""
+    used = []
+    for r in rows:
+        for what in ("build", "publish"):
+            if r[what] != NO_COMMAND:
+                used += [v for v in variables(r[what]) if v not in used]
+    lines = ["#!/usr/bin/env bash",
+             f"# The rebuild of the index set of CRISPRme 2.10.0 ({os.path.basename(manifest)}), "
+             f"as check_index_set.py --commands",
+             "# prints it: every build command, then every publish command, in the manifest's "
+             "order (seq_script/rebuild/README.md).",
+             "# Run it from the repository's root, with the variables below set.",
+             "set -euo pipefail",
+             "[ -f seq_script/rebuild/check_index_set.py ] || { echo \"run it from the "
+             "repository's root\" >&2; exit 2; }"]
+    for name in sorted(used, key=lambda v: list(VARIABLES).index(v) if v in VARIABLES else 99):
+        text = VARIABLES.get(name, "a variable of the manifest")
+        lines.append(f': "${{{name}{"?" if name in MAY_BE_EMPTY else ":?"}{text}}}"')
+    for what in ("build", "publish"):
+        lines.append(f"# {what}")
+        for r in rows:
+            if r[what] != NO_COMMAND:
+                note = "" if r["notes"] == NO_COMMAND else f": {r['notes']}"
+                lines.append(f"{r[what]} || {{ echo \"rebuild: the {what} of {r['archive']} "
+                             f"failed\" >&2; exit 1; }}    # {r['archive']}{note}")
+    return "\n".join(lines) + "\n"
+
+
+# The stub of every program the rebuild's commands run, for the dry run: one Python script, which
+# does what its name (the link's) says it does, logs it, and stops the script, saying why, where a
+# path it is handed is not there. bash runs a recipe as a stub (its own steps are its own tests');
+# any other bash is the real one.
+_STUB = r'''#!{python} -I
+import os, sys
+name = os.path.basename(sys.argv[0])
+args = sys.argv[1:]
+tmp = os.environ["CRISPRME_DRY_RUN_TMP"]
+
+
+def log(*parts):
+    with open(os.environ["CRISPRME_DRY_RUN_LOG"], "a") as fh:
+        fh.write("\t".join([name, os.getcwd()] + [str(p) for p in parts]) + "\n")
+
+
+def fail(why):
+    log("FAIL", why)
+    sys.stderr.write("dry run: %s: %s\n" % (name, why))
+    sys.exit(1)
+
+
+def need(path, what, test=os.path.exists):
+    if not test(path):
+        fail("%s %s is not there (the command runs in %s)" % (what, path, os.getcwd()))
+    return os.path.abspath(path)
+
+
+def opt(flag):
+    if flag not in args[:-1]:
+        fail("no %s" % flag)
+    return args[args.index(flag) + 1]
+
+
+if name in ("crisprme.py", "hf", "huggingface-cli", "pigz") \
+        and os.environ.get("CRISPRME_REBUILD_IMAGE") != "1":
+    fail("runs outside the release image: a command runs it through $RUN")
+if name == "crisprme.py":
+    if args[:1] == ["build-index-only"]:
+        need(opt("--genome"), "the genome folder", os.path.isdir)
+        log("build-index-only", need(opt("--pam"), "the PAM file", os.path.isfile),
+            need(opt("--path"), "the working directory", os.path.isdir))
+    elif args[:1] == ["publish-index"]:
+        log("publish-index", need(opt("--index"), "the index", os.path.isdir))
+    else:
+        fail("crisprme.py %s is not a command of the rebuild" % " ".join(args[:1]))
+elif name in ("hf", "huggingface-cli"):
+    if args[:1] != ["upload"] or len(args) < 4:
+        fail("not hf upload <repo> <file> <path in the repo>")
+    log("upload", args[1], need(args[2], "the file to upload", os.path.isfile), args[3])
+elif name == "pigz":
+    sys.stdout.buffer.write(sys.stdin.buffer.read())
+elif name == "tar":
+    if args[:2] != ["-cf", "-"] or len(args) < 3:
+        fail("not tar -cf - <folders>")
+    log("pack", *[need(p, "the folder to pack", os.path.isdir) for p in args[2:]])
+elif name == "sha256sum":
+    for p in args:
+        need(p, "the file to hash", os.path.isfile)
+        print("0" * 64 + "  " + p)
+elif name == "bash" and args and args[0].endswith(".sh") and not args[0].startswith("-"):
+    script = args[0]
+    if script in os.environ.get("CRISPRME_DRY_RUN_PENDING", "").split(":"):
+        log("pending", script)
+        sys.exit(0)
+    need(script, "the script", os.path.isfile)
+    repo = os.environ["CRISPRME_DRY_RUN_REPO"]
+    if not os.path.realpath(script).startswith(repo + os.sep):
+        fail("%s is not a script of the repository" % script)
+    for key, value in sorted(os.environ.items()):
+        if key != "PATH" and not key.startswith("CRISPRME_DRY_RUN_") \
+                and value.startswith(tmp + os.sep):
+            need(value, "%s=" % key)
+    log("recipe", script, *[need(x, "the argument") if x.startswith(tmp + os.sep) else x
+                            for x in args[1:]])
+elif name == "bash":
+    os.execv({bash!r}, [{bash!r}] + args)
+else:
+    fail("runs the image itself: a command runs the release image through $RUN")
+'''
+_STUBBED = ("crisprme.py", "hf", "huggingface-cli", "pigz", "tar", "sha256sum", "bash",
+            "apptainer", "singularity")
+
+
+def dry_run(rows, root=ROOT, manifest=MANIFEST):
+    """The problems of running the rebuild (commands_script) dry: every program its commands
+    run stubbed (_STUB), from a copy of the repository's root made of links, with each variable
+    set to a folder or file of a temporary directory: working directories that hold hg38's folder
+    and what the builds leave (each index of the set, each panel's enriched genomes), and the
+    recipes' inputs. It runs to its end only where every script it calls is there (a pending one,
+    PENDING_SCRIPTS, taken as done), every PAM file a build reads is in place, every path a
+    command hands a program or a recipe is there, crisprme.py, hf and pigz run in the release
+    image, and every index of the set is published from its working directory; and it writes
+    nothing into the repository's root."""
+    bash = shutil.which("bash")
+    if not bash:
+        return ["no bash to run the rebuild's script with"]
+    problems = []
+    with tempfile.TemporaryDirectory(prefix="check_index_set.") as t:
+        t = os.path.realpath(t)
+        top = os.path.join(t, "root")
+        os.mkdir(top)
+        links = sorted(n for n in os.listdir(root) if n != ".git")
+        for n in links:
+            os.symlink(os.path.join(root, n), os.path.join(top, n))
+        stubs = os.path.join(t, "bin")
+        os.mkdir(stubs)
+        stub = os.path.join(t, "stub")
+        with open(stub, "w") as fh:
+            fh.write(_STUB.replace("{python}", sys.executable).replace("{bash!r}", repr(bash)))
+        os.chmod(stub, 0o755)
+        for n in _STUBBED:
+            os.symlink(stub, os.path.join(stubs, n))
+        env = {"PATH": os.pathsep.join([stubs, "/usr/bin", "/bin", "/usr/sbin", "/sbin"]),
+               "HOME": os.path.join(t, "home"), "LC_ALL": "C",
+               "RUN": "env CRISPRME_REBUILD_IMAGE=1",
+               "CRISPRME_DRY_RUN_TMP": t, "CRISPRME_DRY_RUN_REPO": os.path.realpath(root),
+               "CRISPRME_DRY_RUN_LOG": os.path.join(t, "log"),
+               "CRISPRME_DRY_RUN_PENDING": ":".join(
+                   s for s in PENDING_SCRIPTS if not os.path.exists(os.path.join(root, s)))}
+        os.mkdir(env["HOME"])
+        open(env["CRISPRME_DRY_RUN_LOG"], "w").close()
+        work = {}
+        for panel, name in WORKDIR.items():
+            work[panel] = env[name] = os.path.join(t, "work", name)
+            os.makedirs(os.path.join(work[panel], "Genomes", "hg38"))
+        for r in rows:
+            w = work.get(r["panel"])
+            if w and r["kind"] in INDEX_KINDS:
+                os.makedirs(os.path.join(w, "genome_library", r["archive"]), exist_ok=True)
+            if w and r["panel"] != "-":
+                for g in (f"hg38+{r['panel']}", f"hg38+{r['panel']}_INDELS"):
+                    os.makedirs(os.path.join(w, "Genomes", g), exist_ok=True)
+        inputs = os.path.join(t, "inputs")
+        for name in ("RP", "HPRC_SRC", "MEGA_SRC"):
+            env[name] = os.path.join(inputs, name)
+            os.makedirs(env[name])
+        for name in ("SIF", "META", "P1KG"):
+            env[name] = os.path.join(inputs, name)
+            open(env[name], "w").close()
+        # (a variable VARIABLES does not hold, which the check says, a folder: the run goes on)
+        for r in rows:
+            for what in ("build", "publish"):
+                for name in variables(r[what]):
+                    if name not in env:
+                        env[name] = os.path.join(inputs, name)
+                        os.makedirs(env[name])
+        script = os.path.join(t, "rebuild.sh")
+        with open(script, "w") as fh:
+            fh.write(commands_script(rows, manifest))
+        try:
+            got = subprocess.run([bash, script], cwd=top, env=env, capture_output=True,
+                                 text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            return ["the rebuild's script, run dry, did not end in 600 s"]
+        if got.returncode != 0:
+            why = [x for x in got.stderr.splitlines() if x.strip()][-3:]
+            problems.append(f"the rebuild's script, run dry from the repository's root, stops "
+                            f"(exit {got.returncode}): {' | '.join(why) or 'no message'}")
+        log = []
+        if os.path.exists(env["CRISPRME_DRY_RUN_LOG"]):
+            with open(env["CRISPRME_DRY_RUN_LOG"]) as fh:
+                log = [line.rstrip("\n").split("\t") for line in fh]
+        failed = [x[3] for x in log if len(x) > 3 and x[2] == "FAIL"]
+        if failed and got.returncode == 0:
+            problems.append(f"the rebuild's script, run dry, goes on past a command that "
+                            f"failed: {' | '.join(failed)}")
+        if got.returncode == 0:
+            published = {x[3] for x in log if x[0] == "crisprme.py" and x[2] == "publish-index"}
+            for r in rows:
+                if r["kind"] in INDEX_KINDS:
+                    want = os.path.join(work[r["panel"]], "genome_library", r["archive"])
+                    if want not in published:
+                        problems.append(f"{r['archive']}: the rebuild's script, run dry, does "
+                                        f"not publish {want}")
+        extra = sorted(set(os.listdir(top)) - set(links))
+        if extra:
+            problems.append(f"the rebuild's script, run dry, writes into the repository's root: "
+                            f"{', '.join(extra)}")
+    return problems
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--manifest", default=MANIFEST)
     ap.add_argument("--commands", action="store_true",
-                    help="print the build commands, then the publish commands, in order")
+                    help="print the rebuild, a script bash runs from the repository's root: "
+                         "every build command, then every publish command, in order")
     args = ap.parse_args(argv)
     rows = read_manifest(args.manifest)
     if args.commands:
-        for what in ("build", "publish"):
-            print(f"# {what}")
-            for r in rows:
-                if r[what] != NO_COMMAND:
-                    note = "" if r["notes"] == NO_COMMAND else f": {r['notes']}"
-                    print(f"{r[what]}    # {r['archive']}{note}")
+        sys.stdout.write(commands_script(rows, args.manifest))
         return 0
     problems = check(rows)
+    problems += dry_run(rows, manifest=args.manifest)
+    for note in pending():
+        print(f"NOTE: {note}")
     for p in problems:
         print(f"PROBLEM: {p}")
     n_idx = sum(r["kind"] in INDEX_KINDS for r in rows)

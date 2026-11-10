@@ -34,15 +34,23 @@ it serves for its own guide length (`index_fit.fits`).
 ## Rules the rebuild keeps
 
 1. **One working directory per panel**, every index of the panel built in it (`$HGDP`, `$HPRC`,
-   `$MEGA`; `$REF` for the reference indexes). The first build enriches the genome and writes the
-   Dictionaries; each later PAM re-indexes the same enriched genome ("Enriched genome already
-   present"). So the panel's indexes share one Dictionaries, whose fingerprint every one of their
-   manifests records: `publish-index` uploads the bundle and the genotype store with the panel's
-   first index, skips them for the others (the repo holds them, the same), and refuses to publish
-   an index built against another build of them (`--replace-companions` replaces them, for a
-   whole panel built again).
+   `$MEGA`; `$REF` for the reference indexes), each holding hg38 in `Genomes/hg38` (one FASTA per
+   chromosome, as `crisprme.py download --what genome` installs it). The first build enriches the
+   genome and writes the Dictionaries; each later PAM re-indexes the same enriched genome
+   ("Enriched genome already present"). So the panel's indexes share one Dictionaries, whose
+   fingerprint every one of their manifests records: `publish-index` uploads the bundle and the
+   genotype store with the panel's first index, skips them for the others (the repo holds them,
+   the same), and refuses to publish an index built against another build of them
+   (`--replace-companions` replaces them, for a whole panel built again).
 2. **Build with the release image only** (the CRISPRme and CRISPRitz the release ships), after the
-   D7 readiness audit: no fix that can change index creation is pending.
+   D7 readiness audit: no fix that can change index creation is pending. `$SIF` is that image,
+   which the HGDP + 1000 Genomes and HPRC recipes run themselves, and `$RUN` the prefix that runs
+   the commands' `crisprme.py`, `hf` and `pigz` in it, e.g. `RUN="apptainer exec --bind /srv/local
+   $SIF /usr/local/bin/_entrypoint.sh"` (empty where the release is installed). The recipes bind
+   `/srv/local` (`hgdp1kgp_build.sh`), and `/srv/local/lp698` and `/data/pinello`
+   (`hprc_build.sh`), into the image: their working directories and inputs lie there, and `$RUN`
+   binds the working directories and the repository's checkout (mega's recipe runs the
+   repository's `PostProcess/` in the image).
 3. **Publish each panel as a unit**, then write `indexes/SHA256SUMS` with
    `scripts/hf_sha256sums.py lucapinello/crisprme-indexes-format2 --staged staged.sha256` and
    check it against the Hub after the upload (`docs/hf/README.md`).
@@ -52,12 +60,22 @@ it serves for its own guide length (`index_fit.fits`).
    `23bp-TTTV-Cas12a.txt`), as `PAMs/` ships them (`docs/RELEASE_CHECKLIST.md`). Until then a
    working directory set up by `download` holds the default `20bp-NRR-SpCas9.txt` and the data
    repo's NGG, NNN and NRG files only, and the web offers no other PAM.
+5. **The commands run from the repository's root**, each on its own: a `cd` is inside `( )`, so no
+   command moves the next; a recipe is called by its repository path (`seq_script/merge_panels/`),
+   with every input it would otherwise read from a path of the cluster it was written on (`$RP`,
+   `$META` of HGDP + 1000 Genomes; `$HPRC_SRC`, `$P1KG` of HPRC; `$MEGA_SRC` of mega); each build
+   first copies its PAM file from the repository's `PAMs/` into its working directory's `PAMs/`,
+   which a working directory set up by `download` does not hold (rule 4), and reads it there; and
+   every file a publish uploads is named by its working directory. `--commands` prints them as one
+   script, which stops before its first command where one of these variables is not set, and at
+   the first command that fails.
 
 ## Commands
 
 ```bash
-python seq_script/rebuild/check_index_set.py              # the check (the D7 audit runs it): exit 1 on a problem
-python seq_script/rebuild/check_index_set.py --commands   # every build command, then every publish command, in order: a script bash runs
+python seq_script/rebuild/check_index_set.py              # the check and its dry run (the D7 audit runs it): exit 1 on a problem
+python seq_script/rebuild/check_index_set.py --commands > rebuild.sh   # the rebuild: every build command, then every publish command, in order
+REF=... HGDP=... HPRC=... MEGA=... RUN=... SIF=... RP=... META=... HPRC_SRC=... P1KG=... MEGA_SRC=... bash rebuild.sh   # from the repository's root
 ```
 
 The check holds when: every PAM file exists and gives the row's PAM, side and spacer; N =
@@ -67,9 +85,26 @@ max(bDNA, bRNA) + 1; every index's name is the one `build-index-only` gives its 
 variant index's reference index is in the set; every variant panel has one bundle and one kit,
 and a genotyped one (HGDP + 1000 Genomes, HPRC) one genotype store and one store of phased indel
 genotypes; and every index archive of 2.8.1 is replaced by exactly one archive of the set, the
-one a download of it names; and every build and publish command is one bash runs (`bash -n`),
-a companion having none. `PostProcess/test_index_set.py` runs it in the unit tests.
+one a download of it names; and every build and publish command is one bash reads (`bash -n`),
+a companion having none, and keeps rule 5: each command reads only the variables above, in its
+own panel's working directory, with no `cd` outside `( )` and no repository path after one;
+every script it calls is the repository's, and given the inputs it reads from the cluster's
+paths otherwise; each build copies its PAM file and reads that one; `crisprme.py`, `hf` and
+`pigz` run through `$RUN`. Then the check runs `--commands`' script dry: every program it calls
+stubbed (`crisprme.py`, `hf`, `pigz`, `tar`, `sha256sum`, a recipe; `apptainer` called directly
+fails), from a copy of the repository's root made of links, in temporary working directories
+that hold `Genomes/hg38` and what the builds leave. It must run to its end, which it does only
+where every script it calls is there, every PAM file a build reads is in place, every path a
+command hands a program or a recipe is there, and every index of the set is published from its
+working directory; and it must write nothing into the repository's root.
+`PostProcess/test_index_set.py` runs the check and the dry run in the unit tests, and makes each
+of these failures happen once.
 
 The mega rows follow lane M's full rebuild of `hg38_mega` (decision D2: PASS/'.' records, AF =
-AF_max, its registry and indel allele frequencies consistent), whose recipe
-(`seq_script/merge_panels/mega_gw_merge.sh`, `mega_build_indels.sh`) that lane owns.
+AF_max, its registry and indel allele frequencies consistent), from the merged VCFs
+`mega.<chr>.afmax.vcf.gz` (`$MEGA_SRC`: `vcfs/hg38_mega` of `lucapinello/crisprme-data`, or what
+`seq_script/merge_panels/mega_gw_merge.sh` writes), whose recipe,
+`seq_script/merge_panels/mega_rebuild.sh <install_dir> <merged_vcf_dir>`, that lane owns. Until
+the integration of stage 2b brings it into this tree, the check names it as pending
+(`check_index_set.PENDING_SCRIPTS`) and the dry run takes its call as done; once the tree holds
+it, the check asks for its entry to go.
