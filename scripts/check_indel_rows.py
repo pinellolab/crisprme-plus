@@ -508,10 +508,12 @@ cannot tell apart (METHODS section 4), and what CRISPRme then lists is not model
 refused run stops at the first work unit that meets such a position). Two lines of one
 indel or MNV REF>ALT at a position, in one case or in two, are one allele on every release,
 their calls merged by the same rule (decision B2: CRISPRme 2.10.0 reads them so, REF and
-ALT in upper case, its readers of the phased indel store merging the two lines and its rows
-naming the record in upper case; one before read two lines in one case as the later line
-alone, and two in two cases as two records, the carriers of a target split over two rows:
-defects the truth catches). The INDELS
+ALT in upper case, its readers of the phased indel store merging the two lines, its indel
+path the indel log's carriers of both where the store holds none of the record (an MNV, or
+an install without the store), and its rows naming the record in upper case; one before
+read two lines in one case as the later line alone, two in two cases as two records, the
+carriers of a target split over two rows, and an MNV's second window with the first's log
+carriers: defects the truth catches). The INDELS
 index's format is that of its .bin files, else its log's format-1 NOTE of it (refused
 where neither tells and a target of the guide, PAM and budget can lie at a window's edge).
 The phased indel store holds only the records whose FILTER passes but where the run's
@@ -534,7 +536,12 @@ every SNP code of its fake-indel genomes read as the reference, its indel rows n
 and list every carrier of their indel, and its SNP rows keep a carrier whose haplotype
 holds an indel in the target -- none of the per-carrier resolution modeled here (a run of
 an earlier CRISPRme made so records nothing that tells it: check only runs made with the
-default).
+default). So is one whose log says that it read a genotyped dataset's indels on a
+chromosome with no phased indel store (NOTE [indel-snp]: no phased indel genotype store of
+<dataset> on <chrom>, since 2.10.0: an index built with CRISPRME_INDEL_SNP=0, or a store
+whose compile failed) where the VCF given holds indels: each indel's carriers are then its
+indel log's, their slot unknown, and the store's phased reading modeled here does not
+apply (a run of an earlier CRISPRme so made records nothing that tells it).
 
 PRECONDITION. The search read each genotyped dataset's genotypes (its Tier-1 genotype
 store, or classic dictionaries), as every index CRISPRme installs or builds with
@@ -2365,6 +2372,10 @@ OPT_OUT = "NOTE: the SNP+indel co-occurrence is off (CRISPRME_INDEL_SNP=0)"
 # per dataset and chromosome), which holds the indels of every FILTER
 OLD_STORE = re.compile(r"NOTE \[indel-snp\]: the phased indel genotype store of (\S+) on "
                        r"(\S+) was written before CRISPRme 2\.10\.0")
+# its record of a dataset's chromosome whose indels it read with no phased store (2.10.0):
+# their carriers the indel log's, their phase unknown
+NO_STORE = re.compile(r"NOTE \[indel-snp\]: no phased indel genotype store of (\S+) on "
+                      r"([^\s:]+):")
 # the search script's record of an index of format 1 it took (CRISPRitz 2.10.0 or later)
 FORMAT1_NOTE = re.compile(r"^NOTE: (\S+) is in index format 1 \(built by CRISPRitz 2\.9\.1 "
                           r"or earlier\)", re.M)
@@ -2604,9 +2615,11 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
                                 "indels": (1, None)}
         return Semantics(False, values, dataset_of), None
     old = set()
+    no_store = set()
     format1 = set()
     if log is not None:
         old = {(m.group(1), m.group(2)) for m in OLD_STORE.finditer(log)}
+        no_store = {(m.group(1), m.group(2)) for m in NO_STORE.finditer(log)}
         format1 = {os.path.basename(m.group(1).rstrip("/"))
                    for m in FORMAT1_NOTE.finditer(log)}
     searched = indexes_searched(resdir) or {}
@@ -2633,6 +2646,7 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
         for ch in chroms:
             val = {}
             val["store_filter"] = None if log is None else (ds, ch) not in old
+            val["store"] = (ds, ch) not in no_store
             fmt = None
             heads = [bin_header(b) for b in _bins_of(indels_dir, ch)]
             heads = [h for h in heads if h is not None]
@@ -6963,6 +6977,32 @@ def main(argv=None):
                 m = re.search(r"--max-degeneracy\s+(\d+)", fh.read())
         ctx.max_degeneracy = int(m.group(1)) if m else None
     full_n = max(len(ctx.full(g)) for g in guides)   # the longest site of a guide
+    # a genotyped dataset whose indels the run read with no phased store (its log's NOTE):
+    # each indel's carriers the indel log's, their slot unknown, which is not modeled
+    storeless = []
+    for ch in sorted(chroms):
+        for v in vcfs_for.get(ch, ()):
+            ds = sem.dataset_of.get(v.path)
+            val = sem.values.get((ds, ch)) or {}
+            if v.samples and val.get("store") is False and any(
+                    r["filter"] in PASS_FILTERS and any(
+                        len(a) != len(r["ref"]) and "<" not in a for a in r["alts"])
+                    for r in v.records(ch, 0, 1 << 31)):
+                storeless.append("%s on %s" % (ds or v.path, ch))
+    if storeless:
+        sys.stderr.write(
+            "ERROR: the run's log_verbose.txt says that it read the indels of %s with no "
+            "phased indel genotype store ('NOTE [indel-snp]: no phased indel genotype store "
+            "of ...', an index built with CRISPRME_INDEL_SNP=0 or a store whose compile "
+            "failed), and the VCF(s) given hold genotyped indels there. Such a search reads "
+            "each indel's carriers from its indel log, their phase unknown: every carrier of "
+            "an indel target with a SNP code gets the strongest target its own SNP alleles "
+            "allow, a second indel on its haplotype is not read, and the SNP rows keep a "
+            "carrier whose haplotype holds an indel in the target, which this checker does "
+            "not model (it models a search that read the phased store: build-index-only with "
+            "the dataset's VCFs writes it); the run is not checked\n"
+            % ", ".join(storeless[:6] + (["..."] if len(storeless) > 6 else [])))
+        return 2
     unknown = []
     for ch in sorted(chroms):
         for v in vcfs_for.get(ch, ()):

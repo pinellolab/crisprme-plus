@@ -344,7 +344,9 @@ For a variant-aware search, each VCF record needs:
 - **REF and ALT are read whatever their case for an indel or MNV** (VCF 4.x reads them
   alike): CRISPRme names such a record in upper case in its results, and two lines of one
   indel written in two cases (HPRC's `vcfwave` writes `TG>T` beside `tg>t`) are one allele, their
-  carriers merged. **An SNV whose ALT is written in lower case is never searched**: CRISPRitz
+  carriers merged. An SNV's REF is read whatever its case too: two lines `C>G` and `c>G` at one
+  position are one allele, their carriers merged. **An SNV whose ALT is written in lower case is
+  never searched**: CRISPRitz
   codes no lower-case ALT into the enriched genome, though its dictionary lists the carriers.
   The full pre-flight scan (§9) warns of such records; write REF and ALT in upper case (below).
 - **Structural variants are not supported.** Symbolic ALT alleles such as

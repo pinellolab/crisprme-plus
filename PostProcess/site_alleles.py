@@ -206,20 +206,24 @@ def read_records(records):
     allele index (``per_alt_entries``), then two records of one REF>ALT become one:
     their carriers merged (``merge_carriers``, a sample's two calls as ``merge_gt`` merges
     them), with the rsID and AF of the more frequent record (on a tie, the earlier), as
-    CRISPRitz 2.10.0's enricher takes them. Returns the same shape, one record per
-    REF>ALT in first-seen order: ``records`` itself when the position is plain and repeats
-    no REF>ALT."""
-    keys = [(r[0], r[1]) for r in records]
+    CRISPRitz 2.10.0's enricher takes them. The REF is read in upper case, as VCF 4.x
+    reads it: CRISPRitz codes C>G and c>G alike but lists them as two entries of G (its
+    dictionary compares an SNV's REF,ALT as written), which stopped the Tier-1 compile
+    ("duplicate (pos, alt) record"); the record is named as the first writes it. The ALT
+    is read as written: CRISPRitz codes no ALT written in lower case. Returns the same
+    shape, one record per REF>ALT in first-seen order: ``records`` itself when the
+    position is plain and repeats no REF>ALT."""
+    keys = [(r[0].upper(), r[1]) for r in records]
     entries = [(r[1], r[4]) for r in records]
     got = per_alt_entries(entries)
     if got is entries and len(set(keys)) == len(keys):
         return records
     out = []
     where = {}
-    for (ref, alt, rsid, af, _c), (_alt, carriers) in zip(records, got):
-        i = where.get((ref, alt))
+    for key, (ref, alt, rsid, af, _c), (_alt, carriers) in zip(keys, records, got):
+        i = where.get(key)
         if i is None:
-            where[(ref, alt)] = len(out)
+            where[key] = len(out)
             out.append((ref, alt, rsid, af, carriers))
             continue
         pref, palt, prsid, paf, pcarriers = out[i]

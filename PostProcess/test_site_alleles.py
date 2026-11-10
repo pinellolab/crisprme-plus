@@ -161,6 +161,22 @@ class OnePositionsAlleles(unittest.TestCase):
         two = recs[:2]
         self.assertIs(site_alleles.read_records(two), two)
 
+    def test_two_records_of_one_snv_in_two_cases_are_one_allele(self):
+        """C-R2-2: VCF 4.x reads REF whatever its case, and CRISPRitz codes C>G and c>G
+        alike, but lists them as two entries of G (its dictionary compares an SNV's REF,ALT
+        as written). They are one allele, named as the first writes it; an ALT in lower
+        case stays apart (CRISPRitz does not code it)."""
+        recs = [("c", "G", "rs1", "0.1", {"S": "1|0", "X": "1|1"}),
+                ("C", "G", "rs9", "0.3", {"S": "0|1", "Z": "0|1"}),
+                ("C", "g", "rs5", "0.2", {"Y": "1|0"})]
+        got = site_alleles.read_records(recs)
+        self.assertEqual([(r[0], r[1]) for r in got], [("c", "G"), ("C", "g")])
+        ref, alt, rsid, af, carriers = got[0]
+        self.assertEqual((rsid, af), ("rs9", "0.3"))  # the more frequent record's
+        self.assertEqual(carriers, {"S": "1|1", "X": "1|1", "Z": "0|1"})
+        one = [recs[0], recs[2]]
+        self.assertIs(site_alleles.read_records(one), one)
+
     def test_two_alts_on_a_slot(self):
         site = {"G": {"S": "0|1", "O": "1|0"}, "T": {"S": "0|1", "O": "0|1", "U": "1/0"}}
         self.assertEqual(site_alleles.two_alts_on_a_slot(site), {"S": {1}})
@@ -278,6 +294,35 @@ class TwoRecordsOfOneRefAlt(unittest.TestCase):
         self.addCleanup(reg.close)
         t = reg.lookup(pos, "T")[tier0_registry.GLOBAL_GROUP_ID]
         self.assertEqual((t.AC, t.n_carrier_indiv), (5, 3))
+
+    def test_two_records_in_two_cases_are_one_allele_in_the_tiers(self):
+        """C-R2-2: C>G and c>G at one position, two entries of G in CRISPRitz's dictionary,
+        stopped the Tier-1 compile of the chromosome ("duplicate (pos, alt) record (1004,
+        'G')"; build-index-only --samplesID then fails, and every search of the dataset is
+        refused). They are one allele; the dictionary decode reads them so too."""
+        tmp = tempfile.mkdtemp(prefix="sa_dupcase_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        pos = _pos1(5)
+        entries = [("C", "G", "rs1", "0.1", {"S": "1|0", "X": "1|1"}),
+                   ("c", "G", "rs2", "0.1", {"S": "0|1", "Z": "0|1"})]
+        _build_tiers(tmp, {pos: entries}, keep_dict=False)
+        d = os.path.join(tmp, "Dictionaries")
+        self.assertTrue(os.path.exists(os.path.join(d, "genotypes_ds", "gt_chrT.idx")),
+                        "the Tier-1 store was not written")
+        gt = tier1_genotypes.GenotypeReader(os.path.join(d, "genotypes_ds", "gt_chrT.bin"),
+                                            os.path.join(d, "genotypes_ds", "gt_chrT.idx"))
+        self.addCleanup(gt.close)
+        self.assertEqual(gt.alts_at(pos), ["G"])
+        self.assertEqual(dict(gt.carriers(pos, "G")), {"S": "1|1", "X": "1|1", "Z": "0|1"})
+        reg = tier0_registry.RegistryReader(os.path.join(d, "registry_ds", "reg_chrT.bin"),
+                                            os.path.join(d, "registry_ds", "reg_chrT.idx"))
+        self.addCleanup(reg.close)
+        g = reg.lookup(pos, "G")[tier0_registry.GLOBAL_GROUP_ID]
+        self.assertEqual((g.AC, g.n_carrier_indiv), (5, 3))
+        snps, samples, _rsids, _afs, infos = sar.legacy_5tuple_from_entry(
+            _dict_value(entries), "chrT", pos - 1)
+        self.assertEqual((snps, samples, infos),
+                         (["G"], [["S:1|1", "X:1|1", "Z:0|1"]], ["chrT_%d_C_G" % pos]))
 
 
 class TheRegistryListsTheFourBasePositions(unittest.TestCase):

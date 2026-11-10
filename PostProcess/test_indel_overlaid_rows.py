@@ -29,8 +29,11 @@ on them and its rows checked:
     or PUTATIVE, PAM-window SNPs included, its joint frequency counting haplotype
     copies;
   * a classic dictionary install (no Tier-1 store: the per-sample SNP dictionary), a
-    sites-only panel (no genotypes), no phased indel store, CRISPRME_INDEL_SNP=0 and
-    --max-total-edits.
+    sites-only panel (no genotypes), no phased indel store (which the run notes in its
+    log), CRISPRME_INDEL_SNP=0 and --max-total-edits;
+  * a record written on two VCF lines, in one case and in two, is one allele: an indel
+    read from the store, an MNV (which no store holds) and an indel without the store
+    read from the indel log, each window's rows listing the carriers of both lines.
 
 On 2.8.0 / aa9c54b the chimera and the PAM-less rows (an R at the last PAM base read
 as A) are reported, and a classic dictionary install leaves the codes in the rows.
@@ -522,6 +525,8 @@ class _Fixture(object):
             os.makedirs(igd)
             with gzip.open(os.path.join(igd, "gt_indel_%s.tsv.gz" % CHROM), "wt") as fh:
                 for p, r, a, _rs, g in world.indels:
+                    if not big._is_indel(r, a):
+                        continue  # an MNV is in no store, as compile_indel_genotypes keeps them
                     fh.write("%d_%s_%s\t%s\n" % (p, r, a, ",".join(
                         "%s:%s" % kv for kv in sorted(g.items()))))
             if store_marker:  # (as build_indel_genotypes marks a store of 2.10.0)
@@ -849,6 +854,44 @@ class FullTiers(_Base):
                          [(GUIDE + "TGG", "S01,S03", "rs_A_indel"),
                           (GUIDE + "TGG", "S01,S03", "rs_A_indel_lc")])
 
+    def test_an_mnv_on_two_lines_is_one_record(self):
+        """C-R2-1: an MNV M (TT>GA, the guide's bases 4-5, a perfect target with PAM TGG)
+        written on two VCF lines, in one case and in two: S01 on both (1|0, 0|1), S02 on the
+        first (0|1), S03 on the second (1|0). An SNV at the target's base 13 (A>C), S04's
+        alone, puts a code in M's window, so its target is resolved per carrier
+        (_overlaid_rows). The phased indel store holds no MNV, so the carriers are the indel
+        log's, phase unknown, each line's window listing its own; the two lines are one
+        allele, so each window's row lists the carriers of both. The carriers were cached by
+        the record's name, which both windows share (in one case, and since the name is
+        read in upper case in two): the second window read the first's, and S03 was on no
+        row of M."""
+        g = GUIDE
+        m0 = 5600
+        for lower in (False, True):
+            with self.subTest(second_line="tt>ga" if lower else "TT>GA"):
+                w = World()
+                w._put(m0, g[:3] + "TT" + g[5:] + "TGG")
+                w.ref = "".join(w.seq)
+                w.indels.append((m0 + 4, "TT", g[3:5], "rs_M_mnv", {"S01": "1|0", "S02": "0|1"}))
+                ref2, alt2 = ("tt", g[3:5].lower()) if lower else ("TT", g[3:5])
+                w.indels.append((m0 + 4, ref2, alt2, "rs_M_mnv_2", {"S01": "0|1", "S03": "1|0"}))
+                w._snp("M", m0 + 13, g[12], "C", {"S04": "1|0"})
+                tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_mnv_")
+                self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+                fx = _Fixture(tmp, w)
+                self.assertEqual(fx.proc.returncode, 0,
+                                 fx.proc.stdout[-2000:] + fx.proc.stderr[-2000:])
+                self.assertTrue([x for x in fx.rows_in if "M" in x[2]],
+                                "the SNV must put a code in the MNV's targets")
+                rows = [r for r in fx.rows()
+                        if int(r["var"].split(",")[0].split("_")[1]) == m0 + 4]
+                self.assertEqual({r["var"].split(",")[0] for r in rows},
+                                 {"%s_%d_TT_GA" % (CHROM, m0 + 4)})
+                best = [r for r in rows if r["cfd"] == 1.0]
+                self.assertEqual(sorted((r["dna"], r["samples"], r["rsid"]) for r in best),
+                                 [(g + "TGG", "S01,S02,S03", "rs_M_mnv"),
+                                  (g + "TGG", "S01,S02,S03", "rs_M_mnv_2")])
+
 
 @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
 class OtherInstalls(_Base):
@@ -867,14 +910,53 @@ class OtherInstalls(_Base):
 
     def test_no_phased_indel_store(self):
         """The indel log's carriers, no phase: a sample holding the SNP gets its worst
-        case, PUTATIVE, on whichever slot the SNP is (S07 is 1|0 at the SNP)."""
+        case, PUTATIVE, on whichever slot the SNP is (S07 is 1|0 at the SNP). The run says
+        so in its log, once per chromosome (the real-data check refuses such a run: it
+        models the store's phased reading); with the store it says nothing
+        (test_a_store_of_an_earlier_release_is_noted)."""
         fx = self.run_analyzer(tiers=("registry", "tier1"))
+        self.assertEqual(fx.proc.stdout.count(
+            "NOTE [indel-snp]: no phased indel genotype store of %s on %s:" % (VCF, CHROM)), 1,
+            fx.proc.stdout[-2000:])
         rows = fx.rows()
         d = {r["samples"]: r for r in self.by_site(rows)["D"]}
         self.assertEqual(d["S07"]["dna"], GUIDE + "CGG")
         self.assertEqual(d["S08"]["dna"][3], "c")
         lines = [c for c in fx.cooc() if c[1] == "510"]
         self.assertEqual(sorted(set(c[8] for c in lines)), ["PUTATIVE"])
+
+    def test_an_indel_on_two_lines_without_the_store_is_one_record(self):
+        """C-R2-1's sweep: with no phased indel store the carriers of every indel are the
+        log's, as an MNV's are. Site A's deletion on two VCF lines, in one case and in two:
+        S01 on the first, S02 and S03 on the second (their PAM SNP phased, the deletion's
+        phase unknown: each gets the strongest target its own alleles allow, the PAM TGG).
+        Each window's row lists the carriers of both lines; read from a cache keyed by the
+        record's name, the second window listed the first's (S01 alone), and S02 and S03
+        were on no row of the deletion."""
+        w = self.world
+        i = next(k for k, ind in enumerate(w.indels) if ind[3] == "rs_A_indel")
+        pos1, ref, alt, _rs, _gts = w.indels[i]
+        for lower in (False, True):
+            with self.subTest(second_line=(ref.lower() if lower else ref) + ">"
+                              + (alt.lower() if lower else alt)):
+                world = World()
+                world.indels[i] = (pos1, ref, alt, "rs_A_indel", {"S01": "1|0"})
+                world.indels.insert(i + 1, (pos1, ref.lower() if lower else ref,
+                                            alt.lower() if lower else alt, "rs_A_indel_2",
+                                            {"S02": "1|0", "S03": "1|0"}))
+                tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_nostore_")
+                self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+                fx = _Fixture(tmp, world, tiers=("registry", "tier1"))
+                self.assertEqual(fx.proc.returncode, 0,
+                                 fx.proc.stdout[-2000:] + fx.proc.stderr[-2000:])
+                rows = [r for r in fx.rows()
+                        if int(r["var"].split(",")[0].split("_")[1]) == pos1]
+                self.assertEqual({r["var"].split(",")[0] for r in rows},
+                                 {"%s_%d_%s_%s" % (CHROM, pos1, ref, alt)})
+                best = [r for r in rows if r["cfd"] == 1.0]
+                self.assertEqual(sorted((r["dna"], r["samples"], r["rsid"]) for r in best),
+                                 [(GUIDE + "TGG", "S01,S02,S03", "rs_A_indel"),
+                                  (GUIDE + "TGG", "S01,S02,S03", "rs_A_indel_2")])
 
     def test_a_store_of_an_earlier_release_is_noted(self):
         """A phased indel store written before 2.10.0 (its .done marker without the FILTER

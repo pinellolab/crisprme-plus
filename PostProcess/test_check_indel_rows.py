@@ -5882,6 +5882,27 @@ class StageTwoARoundThree(Base):
         self.assertEqual({(f[1], f[3]) for f in found},
                          {("limit-snp-row-unphased", "S06")}, found)
 
+    def test_a_run_whose_indels_were_read_without_their_phased_store_is_refused(self):
+        """The sweep of C-R2-1: a search that found no phased indel store for a genotyped
+        dataset's chromosome (an index built with CRISPRME_INDEL_SNP=0, or a store whose
+        compile failed) reads each indel's carriers from the indel log, phase unknown, and
+        says so in its log_verbose.txt. The checker models the store's phased reading, so
+        it judged such a run's right rows wrong (a world of a deletion on two lines, the
+        store removed: 43 gating findings, every one the unphased reading): refused (exit
+        2), in every mode; the note of another chromosome or dataset refuses nothing."""
+        case, _ = world_indel_snp(self.tmp)
+        note = ("NOTE [indel-snp]: no phased indel genotype store of %s on %s: each indel's "
+                "carriers are its indel log's, their phase unknown, ...\n")
+        as_2100(case, log="STARTING ANALYSIS FOR v\n" + note % ("v", "chr21"))
+        for mode in ("soundness", "completeness", "both"):
+            rc, _found = case.run(mode=mode)
+            self.assertEqual(rc, 2, mode)
+        for other_run in (note % ("v", "chr22"), note % ("w", "chr21"), ""):
+            with open(os.path.join(case.res, "log_verbose.txt"), "w") as fh:
+                fh.write("STARTING ANALYSIS FOR v\n" + other_run)
+            rc, found = case.run()
+            self.assertEqual((rc, gating(found)), (0, []), (other_run, found))
+
 
 def code_lines(path):
     """[(line number, text)] of a Python file's code lines: comments, docstrings (a string

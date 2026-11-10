@@ -212,7 +212,14 @@ Each source VCF is normalized so that variant records are directly comparable:
   indel path names the record in upper case (`indel_snp_cis.record_name`: CRISPRitz's indel
   log names each line as written), so the rows of the two fake-indel windows CRISPRitz cuts
   for it fold into one, with the carriers of both lines and the ID and frequency of each, as
-  two datasets that give one variant do. Up to 2.10.0's integration each reader kept the
+  two datasets that give one variant do. The store holds no MNV (its REF and ALT of one
+  length), and an install may have no store (an index built with `CRISPRME_INDEL_SNP=0`, or a
+  store whose compile failed, which a search notes in its `log_verbose.txt`, once per
+  chromosome): the indel path then reads a record's carriers from CRISPRitz's indel log,
+  phase unknown, those of every line of the record (each line's window lists its own; a
+  target with a SNP code in its window read the first window's on both, up to the
+  integration, so a carrier only the second line listed was on no row of it). Up to 2.10.0's
+  integration each reader kept the
   later line's carriers alone, so a carrier only the earlier line listed lost its phased
   genotype and was listed on no row of the indel, or on some of its alignments only; two
   lines written in two cases (TG>T beside tg>t) were two records, the carriers of one target
@@ -220,8 +227,13 @@ Each source VCF is normalized so that variant records are directly comparable:
   in upper case, found no indel written in lower case in its panel. HPRC chr22 writes 179
   indels on two lines: 39 in one case (1,400 carrier listings on the earlier line only) and
   140 in two (8,755 carrier listings on one of the two only, 917 carriers on both), and
-  1,546 indel records in lower case. An SNV's REF>ALT is compared as written, as CRISPRitz's
-  dictionary compares two listings of one, and an SNV whose ALT is written in lower case is
+  1,546 indel records in lower case. CRISPRitz's dictionary compares an SNV's REF and ALT as
+  written, so C>G beside c>G, coded alike, are two entries of G there; CRISPRme's readers of
+  it (the Tier-0 and Tier-1 compiles, the dictionary path of the SNP post-analysis, the
+  indel path) read an SNV's REF in upper case and merge the two as one allele by the same
+  rule (`site_alleles.read_records`; up to the integration such a pair stopped the Tier-1
+  compile of the chromosome, `duplicate (pos, alt) record`, and the input validator's survey
+  of repeated REF>ALTs counted none). An SNV whose ALT is written in lower case is
   never searched: CRISPRitz codes no lower-case ALT, though its dictionary lists the
   carriers (the input validator's full scan warns of such records and says how to write
   the VCF in upper case; the published panels' chr22 holds none). CRISPRme's own merge of
@@ -1831,10 +1843,14 @@ a run whose VCF holds one near a row or a record it checks is refused (exit 2).
 slot is the reference with every ALT allele its genotype puts there of the records CRISPRme
 reads (FILTER, below); two lines of one REF>ALT at a position are one allele (§2), a sample's
 calls of it on both merged by §2's rule, an indel's (or MNV's) on every release, in one case
-or in two (its two lines are read so by 2.10.0; a release that read two lines in one case as
-the later line alone lost the carriers only the earlier lists, and one that read two lines
-in two cases as two records split one target's carriers over two rows, which the check
-finds), an SNV's where every allele is coded (releases, below); and a slot holds a row's
+or in two (its two lines are read so by 2.10.0, from the phased store or, for an MNV or
+without a store, from the indel log's carriers of both; a release that read two lines in
+one case as the later line alone lost the carriers only the earlier lists, one that read
+two lines in two cases as two records split one target's carriers over two rows, and one
+that gave the second window of an MNV the first window's log carriers lost, on a target
+with a SNP code, the carriers only the second line lists, which the check finds), an SNV's
+where every allele is coded (releases, below), its REF in either case (C>G beside c>G);
+and a slot holds a row's
 target when it reads the target's bases from the row's start through the row's record: each
 base the record
 puts in the target at its place, and the base after them (a second insertion between the
@@ -1956,7 +1972,12 @@ are, so it changes nothing the check reads. A run made with the SNP+indel co-occ
 refused: every SNP code of its fake-indel genomes read as the reference, its indel rows name
 no SNP and list every carrier of their indel, and its SNP rows keep a carrier whose
 haplotype holds an indel in the target, none of the per-carrier resolution modeled here (a
-run of an earlier CRISPRme made so records nothing that tells it).
+run of an earlier CRISPRme made so records nothing that tells it). So is a run that read a
+genotyped dataset's indels on a chromosome with no phased indel store, where the VCF holds
+indels (an index built with `CRISPRME_INDEL_SNP=0`, or a store whose compile failed; a
+search of 2.10.0 notes it in its `log_verbose.txt`: `NOTE [indel-snp]: no phased indel
+genotype store of <dataset> on <chrom>`): each indel's carriers are then its indel log's,
+their slot unknown (§4), not the store's phased reading modeled here.
 CRISPRme's documented reading of a carrier (§4: the one-indel window, resolved with each
 carrier's own SNP alleles, so that a row lists a carrier only where those give its target;
 the second indel read from either end of the target through the indel, each base the indel

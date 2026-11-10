@@ -105,9 +105,13 @@ indel or MNV record in upper case, an SNV record as its VCF writes it, as earlie
 name every record: HPRC writes 1,546 indel records of chr22 in lower case). Two lines of one
 indel or MNV REF>ALT at a position, in one case or in two (TG>T beside tg>t), are one allele
 on every release, their calls merged by METHODS section 2's rule: CRISPRme 2.10.0's readers
-of the phased indel store merge them so; an earlier release read two lines in one case as
-the later line alone, and two in two cases as two records, the carriers of one target split
-over two rows, which the check finds. CRISPRme's documented reading of a carrier (the
+of the phased indel store merge them so, and its indel path reads the indel log's carriers
+of both lines where the store holds none of the record (an MNV, or an install without the
+store); an earlier release read two lines in one case as the later line alone, two in two
+cases as two records, the carriers of one target split over two rows, and an MNV's second
+window with the first window's log carriers, which the check finds. So are two lines of one SNV
+whose REF is written in two cases (C>G beside c>G), where every allele is coded.
+CRISPRme's documented reading of a carrier (the
 one-indel window resolved with the carrier's own SNP alleles, a second indel read from either
 end through
 the indel, every allele of a split multi-allelic site on an index CRISPRitz 2.10.0 built (a
@@ -174,6 +178,9 @@ checked; a search without bulges records `Genome_idx None`, and its `--vcf` list
 them --, its `.guides.txt`, `.sampleID.txt` and `.search_mode`, the mode it ran), a run
 whose records contradict each other, a search made with `CRISPRME_INDEL_SNP=0` (its
 `log_verbose.txt` notes it since 2.10.0: none of the per-carrier resolution applies), one
+that read a genotyped dataset's indels with no phased indel store (its `log_verbose.txt`
+notes it since 2.10.0, `NOTE [indel-snp]: no phased indel genotype store of ...`: their
+carriers are the indel log's, their slot unknown), one
 whose records do not say how its release read data that makes it matter (every allele of a
 split site or the last record, the INDELS index's format, the phased indel store's FILTER
 rule: the check reads them from `.indexes_searched.txt`, the indexes' `.bin` headers, the

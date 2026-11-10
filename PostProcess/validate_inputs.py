@@ -1611,10 +1611,12 @@ def check_vcf_full_scan(
                 # an indel or MNV whatever the case of its REF and ALT (VCF 4.x reads
                 # them alike, and so does CRISPRme, which names such a record in upper
                 # case: two lines of one indel in two cases, tg>t beside TG>T, are one
-                # allele); an SNV as written, as CRISPRitz's dictionary compares two
-                # listings of one (one whose ALT is in lower case is not coded: below)
+                # allele); an SNV whatever the case of its REF (CRISPRitz codes C>G and
+                # c>G alike and lists them as two entries of G, which CRISPRme's readers
+                # read as one allele: site_alleles.read_records), its ALT as written (one
+                # in lower case is not coded: below)
                 record_alleles = {(ref.upper(), a.upper()) if len(ref) > 1 or len(a) > 1
-                                  else (ref, a) for a in alt_alleles}
+                                  else (ref.upper(), a) for a in alt_alleles}
                 for allele in sorted(record_alleles & seen_alleles):
                     same_allele_count += 1
                     if len(same_allele_examples) < 5:
@@ -1835,7 +1837,8 @@ def check_vcf_full_scan(
                 "more than one record) — CRISPRme reads the records of one REF>ALT "
                 "as one allele, their carriers merged, an indel's too (an indel's or "
                 "MNV's REF and ALT whatever their case: tg>t beside TG>T is one allele, "
-                "named in upper case): a haplotype slot "
+                "named in upper case; an SNV's REF too (c>G beside C>G is one allele), "
+                "its ALT as written): a haplotype slot "
                 "carries the ALT if either record puts it there (a sample whose two calls "
                 "are not phased alike keeps the one with more copies, the earlier on a "
                 "tie, as CRISPRitz merges them). A sample left with two ALTs of "

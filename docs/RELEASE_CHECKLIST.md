@@ -236,6 +236,8 @@ done
 #     without its genotype store that says so (its log_verbose.txt's "Registry-only
 #     install" line, or a --per-sample search run population-level), a search made with
 #     CRISPRME_INDEL_SNP=0 (its log_verbose.txt's "SNP+indel co-occurrence is off" NOTE),
+#     one that read a genotyped dataset's indels with no phased indel store (its
+#     log_verbose.txt's "no phased indel genotype store" NOTE),
 #     one whose records do not say how its release read data that makes it matter (a split
 #     SNP site where nothing tells every allele from the last record, an INDELS index of
 #     no known format where a target can lie at a window's edge, a store's FILTER rule
