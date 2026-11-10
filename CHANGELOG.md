@@ -761,13 +761,21 @@ and the `release-crisprme` skill.
   equal bases in three alternative alignments). Nothing else changed. Every run passes the check
   (0 gating) with no `limit-window-reach` line, and the general K=8 index (`--prune-pam`) gives
   the dedicated `NNGRRT` index's rows for the 21-nt guide at 2 + 1 + 1 byte for byte, on either
-  width; the 23-nt SaCas9 guide at 3 DNA bulges (32 bases) says so on its console, in
-  `Indel_window_note` and in its log, and the check counts its targets past the window under
+  width. At the window's design point, a 29-base site (the same guide with CjCas9's 8-nt
+  `NNNNRYAC`) at 2 mismatches and 2 DNA bulges, the general index gives a dedicated
+  `NNNNRYAC` index's rows byte for byte, and both pass the check with no `limit-window-reach`
+  line, where on 25/27 the search says its targets exceed the windows and the check counts 6
+  records (22 carrier listings) past them. The 23-nt SaCas9 guide at 3 DNA bulges (32 bases,
+  past what 30/30 holds) says so on its console, in `Indel_window_note` and in its log, and the
+  check counts its targets past the window under
   `limit-window-reach` (10 records, 1,910 carrier listings). On an enrichment of 25/27,
   `complete-search` says so on the same three channels, and `build-index-only`'s advice,
   followed word for word, gives a fresh enrichment's fake-indel genome and indel log byte for
   byte. The fake-indel genome is 14% larger (15.6 MB against 13.7 MB on chr22), an INDELS index
-  about 22%.
+  21% to 22%, and CRISPRitz's search of it about 30% slower (one thread on chr22: 33 s against
+  25 for the README guide, 114 against 89 for the three repeat-rich guides), for targets in a
+  flank, which the post-analysis drops: the README guide's whole per-sample search took 96 min
+  against 95 (METHODS §4).
 - **The two known limits of CRISPRitz `add-variants` that 2.8.1 stated are given as those of an
   index CRISPRitz 2.9.1 or earlier built, every one published until the rebuild for this
   release.** At a split multi-allelic site only the last record's ALT is searched, and a record

@@ -4917,14 +4917,13 @@ class ReleaseTwoTen(Base):
         with open(os.path.join(repo, "docs", "RELEASE_CHECKLIST.md")) as fh:
             checklist = fh.read()
         quote = " ".join(re.sub(r"\n#\s+", " ", checklist).split())
-        m = re.search(r'its stderr says so: "read as a run of CRISPRme 2\.10\.0 or later '
-                      r'\(\.\.\. ([^"]*)\)"', quote)
+        m = re.search(r'"read as a run of CRISPRme 2\.10\.0 or later \(\.\.\. ([^"]*)\)"', quote)
         self.assertIsNotNone(m, "RELEASE_CHECKLIST 4c quotes no reading")
         self.assertEqual(m.group(1), printed)
         with open(os.path.join(repo, "CHANGELOG.md")) as fh:
             changelog = " ".join(fh.read().split())
-        m = re.search(r"prints the reading it took on stderr \(`read as a run of CRISPRme "
-                      r"2\.10\.0 or later \(<dataset> on <chrom>: ([^`]*)\)`", changelog)
+        m = re.search(r"`read as a run of CRISPRme 2\.10\.0 or later \(<dataset> on <chrom>: "
+                      r"([^`]*)\)`", changelog)
         self.assertIsNotNone(m, "the CHANGELOG quotes no reading")
         self.assertEqual(m.group(1), printed)
         checks = [x for x in checklist.splitlines() if 'grep -o "fake-indel windows' in x]

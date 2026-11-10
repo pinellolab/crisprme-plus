@@ -577,8 +577,17 @@ does of one in place, which also warns of an enrichment in place whose windows t
 installed CRISPRitz does not write, and says how to enrich the dataset again (followed word
 for word on chr22 of HGDP + 1000 Genomes, it gives the fake-indel genome and indel log of a
 fresh enrichment, byte for byte). The wider windows make the fake-indel genome 14% larger
-there (15.6 MB against 13.7 MB) and an INDELS index about 22% (SaCas9's `NNGRRT`: 8.7 MB
-against 7.1 MB); what they change in the searches is measured in §8. An index of format 1
+there (15.6 MB against 13.7 MB) and an INDELS index 21% to 22% (NRG's 61.2 MB against 50.6,
+SaCas9's `NNGRRT` 8.7 MB against 7.1), and CRISPRitz's search of it about 30% slower: on one
+thread, as the indel search runs it on a chromosome, 33 s against 25 for the README guide
+(NRG, 4 + 1 + 1), 40 against 31 for TRAC, 114 against 89 for the three repeat-rich guides
+and 21 against 16 for SaCas9's 21-nt guide at 4 + 1 + 1 (medians of three runs on one node,
+with the same tree), for 31% to 43% more raw targets. For the README guide every added
+target lies in a flank, which the post-analysis drops (2,986,768 such targets against
+1,582,922, beside the same 2,904,487 targets that hold a base of their indel, and the same
+311 rows); its whole per-sample search, run on both at once, took 96 min against 95, its indel
+post-analysis 858 s against 823. What the windows change in the searches' rows is measured
+in §8. An index of format 1
 (CRISPRitz 2.9.1) also lost a target whose site's guide region ends within its budget of
 the window's edge, the `N` in its
 pad: every budget of a 27-nt motif on 25/27 windows, so for SaCas9 the sites that start
@@ -2144,9 +2153,10 @@ lists several SNVs and indels at almost every position; completeness counts the 
 indel records of chr22 only `hg38_mega` holds and the 32,178 the search skips for their
 FILTER; 19 and 9 two-indel targets, 8 overlapping records); each read as a run of 2.10.0
 from its own records (every allele, a store of `PASS` and `.`, an INDELS index of format
-2), as is the README per-sample search with 2.10.0's code on the indexes of CRISPRitz
-2.9.1 (the last record of a split site, a store of every FILTER, which its log notes,
-format 1), which passes too, its limits those above and 4 `limit-last-alt-wins` lines. The
+2, fake-indel windows of 30/30), as is the README per-sample search with 2.10.0's code on
+the indexes of CRISPRitz 2.9.1 (the last record of a split site, a store of every FILTER,
+which its log notes, format 1, windows of 25/27), which passes too, its limits those above
+and 4 `limit-last-alt-wins` lines. The
 genotyped panels of these configurations have no FILTER other than `.` (HGDP + 1000
 Genomes, HPRC) or `PASS` (the self-test's 1000 Genomes); the SNP+indel oracle with the
 second deletions of its sites O and Q, the insertion of Y1 and an MNV marked `LowQual`,
@@ -2264,8 +2274,15 @@ form (`AG`) 20 and 2,596, 66 and 10,924, 42 and 10,093; a 23-nt Cas12a guide of 
 (`TTTG` `GGAGGCCGAGGCGGGCGGATCAC`), 2 mismatches and 2 DNA bulges, 23 and 271. At 30/30 each
 passes the check (0 gating) with no `limit-window-reach` line, and the general K=8 index
 (`--prune-pam`) gives the dedicated `NNGRRT` index's rows for the 21-nt guide at 2 + 1 + 1,
-byte for byte, on either width; the 23-nt SaCas9 guide at 3 DNA bulges, 32 bases, past what
-30/30 holds, says so on its console, in `Indel_window_note` and in its log, and the check
+byte for byte, on either width; at the window's design point itself, a site of 29 bases (the
+same guide's 21 nt and CjCas9's 8-nt `NNNNRYAC`) with 2 mismatches and 2 DNA bulges, 31 bases
+in all, the general index gives a dedicated `NNNNRYAC` index's rows byte for byte, and both
+pass the check with no `limit-window-reach` line, where the same search on 25/27 says that its
+targets need more than the windows hold and the check counts 6 records (22 carrier listings)
+past them, which 30/30 reports (three rows of their own, an alternative alignment of a site
+whose other 7 lines then count it in `Other_motifs`, and two held by rows the 25/27 run wrote
+too); the 23-nt SaCas9 guide at 3 DNA bulges, 32 bases, past what 30/30 holds, says so on its
+console, in `Indel_window_note` and in its log, and the check
 counts its targets past the window under `limit-window-reach` (10 records, 1,910 carrier
 listings).
 
