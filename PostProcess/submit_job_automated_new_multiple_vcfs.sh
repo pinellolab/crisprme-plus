@@ -1775,6 +1775,16 @@ while read vcf_f; do
 		fi
 
 		cd $current_working_directory
+		# This search builds the index it needs from the enrichment in place (STEP 2): not
+		# from one whose fake-indel genome holds other windows than the dataset's indel logs
+		# record, which come from another enrichment with its dictionaries and tiers (a
+		# download installs an index's, not the enrichment they come from), as build-index-
+		# only refuses it (indel_window.fake_genome_refusal).
+		_enr_why=$(python "$starting_dir/indel_window.py" fakecheck "$current_working_directory" "$ref_name" "$vcf_name")
+		if [ $? = 3 ]; then
+			printf "ERROR: %s\n" "$_enr_why" >&2
+			exit 1
+		fi
 	fi
 
 	# check if anything odd happened during enrichment

@@ -301,5 +301,103 @@ class ADatasetEnrichedAnew(_EngineCase):
                 "it anew" % os.path.join(w, "Genomes", "hg38+ds")), rc == 3, done.stdout)
 
 
+class AFakeGenomeAndItsLogs(unittest.TestCase):
+    """The fake-indel genome of a chromosome and its indel log must come from one enrichment
+    (fake_window_disagreement): each row's window at the offsets its FAKEPOS field gives,
+    an N after it, its left flank the reference its refseq field records (a SNP code of the
+    overlay standing for its base, Q for any). A download installs an archive's logs beside an
+    enrichment made by another CRISPRitz: a 25/27 fake-indel genome read with 30/30 logs, or
+    the other way round, disagrees at its first window."""
+
+    REF = (lambda r: "".join(r.choice("ACGT") for _ in range(400)))(
+        __import__("random").Random(7))
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="indel_window_fake_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def cut(self, left, right, name, overlay=False):
+        """The fake-indel FASTA and indel log an enricher of windows left/right writes of an
+        insertion at 100, a deletion at 200 and an MNV at 300 (overlay: every flank base
+        coded, as the SNP overlay codes it, the first as Q)."""
+        recs = [(100, self.REF[99], self.REF[99] + "TT"), (200, self.REF[199:202], self.REF[199]),
+                (300, self.REF[299:301], "".join({"A": "C"}.get(b, "A") for b in self.REF[299:301]))]
+        code = {"A": "R", "C": "Y", "G": "R", "T": "Y"}
+        flat, rows = "", []
+        for k, (pos, ref, alt) in enumerate(recs):
+            start = pos - 1 - left
+            lf = self.REF[start:pos - 1]
+            if overlay:
+                lf = "Q" + "".join(code[b] for b in lf[1:])
+            win = lf + alt + self.REF[pos - 1 + len(ref):pos - 1 + len(ref) + right]
+            rows.append("chrT_%d-%d_%d\tS1\trs%d\t0.1\tchrT_%d_%s_%s\t%d,%d\t%s" % (
+                start, pos - 1 + len(ref) + right, k + 1, k, pos, ref, alt, len(flat),
+                len(flat) + len(win), self.REF[start:start + len(win)]))
+            flat += win + "N"
+        d = os.path.join(self.tmp, name)
+        os.makedirs(d)
+        fa = os.path.join(d, "fakechrT.fa")
+        with open(fa, "w") as fh:
+            fh.write(">fakechrT\n" + "".join(w + "\nN\n" for w in flat.split("N")[:-1]))
+        log = os.path.join(d, "logchrT.txt.gz")
+        with gzip.open(log, "wt") as fh:
+            fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n" + "\n".join(rows) + "\n")
+        return fa, log
+
+    def test_one_enrichment_agrees(self):
+        for left, right in ((25, 27), (30, 30)):
+            for overlay in (False, True):
+                fa, log = self.cut(left, right, "w%d_%d_%s" % (left, right, overlay), overlay)
+                self.assertIsNone(iw.fake_window_disagreement(fa, log), (left, overlay))
+                self.assertIsNone(iw.fake_window_disagreement(fa, log, rows=None))
+
+    def test_two_enrichments_disagree(self):
+        fa27, log27 = self.cut(25, 27, "w25", overlay=True)
+        fa30, log30 = self.cut(30, 30, "w30", overlay=True)
+        how = iw.fake_window_disagreement(fa27, log30)
+        self.assertEqual(how, "the window of chrT_100_%s_%sTT, which the log places at 0-63 of "
+                              "the fake sequence, ends elsewhere there (no separator after it)"
+                         % (self.REF[99], self.REF[99]))
+        self.assertIn("ends elsewhere there", iw.fake_window_disagreement(fa30, log27))
+        # the right length, but another flank: a window of 30 cut 3 bases later
+        with open(fa30) as fh:
+            text = fh.read()
+        lines = text.split("\n")
+        lines[1] = self.REF[99 - 27:99 - 27 + len(lines[1])]
+        with open(fa30, "w") as fh:
+            fh.write("\n".join(lines))
+        self.assertIn("does not hold there the 30 reference bases before the record",
+                      iw.fake_window_disagreement(fa30, log30))
+        # nothing to compare: no log, a log of no row, no FASTA
+        self.assertIsNone(iw.fake_window_disagreement(fa27, None))
+        empty = os.path.join(self.tmp, "logempty.txt")
+        with open(empty, "w") as fh:
+            fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n")
+        self.assertIsNone(iw.fake_window_disagreement(fa27, empty))
+        self.assertIsNone(iw.fake_window_disagreement(os.path.join(self.tmp, "none.fa"), log27))
+
+    def test_a_dataset_of_two_enrichments_is_refused(self):
+        """fake_genome_refusal, as build-index-only and the search script take it."""
+        w = os.path.join(self.tmp, "work")
+        fa, log = self.cut(25, 27, "w25", overlay=True)
+        _, log30 = self.cut(30, 30, "w30")
+        fake = os.path.join(w, "Genomes", "hg38+ds_INDELS", "fake_ds_chrT")
+        os.makedirs(fake)
+        shutil.copy(fa, fake)
+        logs = os.path.join(w, "Dictionaries", "log_indels_ds")
+        os.makedirs(logs)
+        shutil.copy(log, logs)
+        self.assertIsNone(iw.fake_genome_refusal(w, "hg38", "ds"))
+        shutil.copy(log30, logs)
+        why = iw.fake_genome_refusal(w, "hg38", "ds", who="this search")
+        self.assertTrue(why.startswith(
+            "the fake-indel genome %s_INDELS and the indel logs %s of ds come from two "
+            "enrichments: on chrT, the window of chrT_100_" % (
+                os.path.join(w, "Genomes", "hg38+ds"), logs)), why)
+        self.assertIn("so an index that this search built from the enrichment in place", why)
+        self.assertIn("(rm -rf '%s' '%s_INDELS'; of a published index" % (
+            os.path.join(w, "Genomes", "hg38+ds"), os.path.join(w, "Genomes", "hg38+ds")), why)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

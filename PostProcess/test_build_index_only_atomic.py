@@ -4354,6 +4354,76 @@ class ADatasetIsEnrichedAnewWhole(_Fixture):
         self.assertEqual(sum(c.startswith("add-variants ") for c in self.calls()), 1)
 
 
+class AnEnrichmentInPlaceIsItsLogsOwn(_Fixture):
+    """The class of W-R2-F1 again: a download installs an index's indel logs, dictionaries and
+    tiers, not the enrichment they come from, beside one made here by another CRISPRitz,
+    whose fake-indel windows were another width (here the stub's 25/34 beside logs of 20/30).
+    build-index-only built an index from that enrichment and recorded the logs' windows on
+    its INDELS sub-indexes, and so did a search that builds one: every indel row read with the
+    other enrichment's log, misplaced, and its overlay misplaced every code. As the refusal of
+    an INDELS index of other windows says (remove it and run build-index-only again, which
+    builds it from the enrichment in place), the INDELS index is gone here: each refuses the
+    enrichment in place, saying what to put back or remove, and builds nothing from it
+    (indel_window.fake_genome_refusal; pool_index_indels' _window_disagreement)."""
+
+    def archive_logs(self, left, right):
+        """The indel logs of ds as an archive of windows left/right holds them."""
+        for chrom, seq in GENOME.items():
+            pos, start = 26, 26 - 1 - left
+            end = pos - 1 + 1 + right
+            win = seq[start:pos] + "T" + seq[pos:end]
+            with gzip.open(self.path("Dictionaries", "log_indels_ds", "log%s.txt.gz" % chrom),
+                           "wt") as fh:
+                fh.write("%s\n%s_%d-%d_1\tS2\trs_%s_26\t0.25\t%s_26_%s_%sT\t0,%d\t%s\n" % (
+                    LOG_HEADER, chrom, start, end, chrom, chrom, seq[25], seq[25], len(win),
+                    seq[start:start + len(win)]))
+
+    def said(self, who):
+        chrom, seq = "chr1", GENOME["chr1"]
+        return ("he fake-indel genome %s_INDELS and the indel logs %s of ds come from two "
+                "enrichments: on %s, the window of %s_26_%s_%sT, which the log places at 0-52 of "
+                "the fake sequence, ends elsewhere there (no separator after it). With the "
+                "fake-indel genome goes the enriched genome %s, and with the logs the dataset's "
+                "dictionaries and dict-less tiers (a download installs an index's dictionaries "
+                "and logs, not the enrichment they come from), so an index %s built from the "
+                "enrichment in place" % (
+                    self.path("Genomes", "hg38+ds"), self.path("Dictionaries", "log_indels_ds"),
+                    chrom, chrom, seq[25], seq[25], self.path("Genomes", "hg38+ds"), who))
+
+    def test_build_index_only_refuses_it(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.archive_logs(20, 30)
+        shutil.rmtree(self.lib(INDELS))
+        before, calls = self.outputs(), len(self.calls())
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("Error: T" + self.said("that build-index-only"), err)
+        self.assertEqual(self.calls()[calls:], [])
+        self.assertEqual(self.outputs(), before)   # nothing overlaid, nothing built
+
+    def test_a_search_that_builds_its_index_from_it_refuses_it(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.archive_logs(20, 30)
+        # its variant index in place, the search builds the INDELS index it lacks
+        shutil.rmtree(self.lib(INDELS))
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("ERROR: the fake-indel genome of chr1 (", err)
+        self.assertIn(") and its indel log, in %s, come from two enrichments: the window of "
+                      "chr1_26_" % self.path("Dictionaries", "log_indels_ds"), err)
+        self.assertFalse(os.path.isdir(self.lib(INDELS)))
+        # with no variant index of the dataset either, it would build both: refused first
+        shutil.rmtree(self.lib(VAR))
+        calls = len(self.calls())
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("ERROR: t" + self.said("that this search"), err)
+        self.assertEqual([c for c in self.calls()[calls:] if c.startswith("index-genome hg38+ds")],
+                         [])
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix: but for the

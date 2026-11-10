@@ -5864,6 +5864,14 @@ def build_index_only() -> None:
                       stage=(os.path.join(workdir, "Dictionaries"), ".build-index-only-dicts-"))
     else:
         print(f"Enriched genome already present: {enriched}", flush=True)
+        # Not one whose fake-indel genome holds other windows than the dataset's indel logs
+        # record: the two come from two enrichments (a download installs an index's logs,
+        # dictionaries and tiers, not the enrichment they come from, beside one made here by
+        # another CRISPRitz), and an index built from it would be read with the other's
+        # (indel_window.fake_genome_refusal): its overlay too would misplace every code.
+        _why = indel_window.fake_genome_refusal(workdir, genome_ref, vcf_name)
+        if _why:
+            error(_why[0].upper() + _why[1:])
         # One that came another way may lack the SNP codes. Overlaid only at STEP 3,
         # after the hours of the steps between, it stayed without them after a run
         # stopped in between, and a complete-search then built the INDELS index from it,

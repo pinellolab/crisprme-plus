@@ -2283,8 +2283,11 @@ def _window_notes(local_dir, workdir, install_name, vcf_name):
     where the installed CRISPRitz writes format 2 and the logs record other windows than
     25/27: an earlier CRISPRitz built it, from an enrichment of its own, which differs from
     the archive's in its SNPs too (2.9.1 enriched only the last ALT of a site written on
-    several records), and a search of it reads its alleles with the archive's carriers.
-    Read-only, and never fatal."""
+    several records), and a search of it reads its alleles with the archive's carriers; and
+    one where the dataset's fake-indel genome in the working directory holds other windows
+    than the logs record (indel_window.fake_genome_disagreement): the enrichment in place is
+    another one than the archive's, which build-index-only, and a search that would build an
+    index from it, refuse. Read-only, and never fatal."""
     logs = os.path.join(workdir, "Dictionaries", f"log_indels_{vcf_name}")
     notes = []
     try:
@@ -2332,6 +2335,20 @@ def _window_notes(local_dir, workdir, install_name, vcf_name):
                     f"search of it would read the alleles it holds with the carriers of the "
                     f"other. Download its index again, or remove it (rm -rf "
                     f"{indel_window.quote(idx)}) and build it with build-index-only.")
+        _enriched = os.path.join(workdir, "Genomes", f"{_genome}+{vcf_name}")
+        _odd = indel_window.fake_genome_disagreement(_enriched + "_INDELS", logs, vcf_name) \
+            if _genome else None
+        if _odd:
+            notes.append(
+                f"WARNING: the enrichment of {vcf_name} in place ({_enriched}, and its "
+                f"fake-indel genome {_enriched}_INDELS) is another one than the archive's: on "
+                f"{_odd[0]}, {_odd[1]}, in the indel logs installed now ({logs}). An index built "
+                f"from it would be read with the archive's logs, dictionaries and tiers, so "
+                f"build-index-only, and a search that would build one from it, refuse it. "
+                f"Remove it (rm -rf {indel_window.quote(_enriched)} "
+                f"{indel_window.quote(_enriched + '_INDELS')}); to build an index of another "
+                f"PAM, install the archive's enriched-genome kit "
+                f"(docs/PRECOMPUTED_INDEXES.md).")
     except (OSError, ValueError, EOFError) as exc:
         notes.append(f"NOTE: could not read the fake-indel windows of {vcf_name} ({exc}).")
     return notes

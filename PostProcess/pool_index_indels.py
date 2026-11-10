@@ -195,11 +195,37 @@ def _contigs_left_out():
     return contigs
 
 
+def _window_disagreement(chrom, fake_dir):
+    """The ERROR for ``chrom`` when its fake-indel genome holds other windows than its indel
+    log records (indel_window.fake_window_disagreement): the two come from two enrichments
+    (a download installs an index's logs, not the enrichment they come from, beside one made
+    here by another CRISPRitz), and the sub-index, which records the log's windows
+    (_record_index), would be read with that log, every indel row of it misplaced. None
+    where they agree, or nothing tells."""
+    import indel_window
+
+    how = indel_window.fake_window_disagreement(os.path.join(fake_dir, f"fake{chrom}.fa"),
+                                                indel_window.log_path(LOG_DIR, chrom))
+    if not how:
+        return None
+    return (f"ERROR: the fake-indel genome of {chrom} ({os.path.normpath(fake_dir)}) and its "
+            f"indel log, in "
+            f"{LOG_DIR}, come from two enrichments: {how}. An INDELS index built from it would "
+            f"be read with that log, every indel off-target of {chrom} misplaced. Install the "
+            f"dataset's enrichment and its dictionaries from one build or one download "
+            f"(build-index-only, run on the dataset, says what to remove)")
+
+
 def index_indels(chrom):
     fake_dir = f"{indels_folder}/fake_{vcf_name}_{chrom}"
     if _fake_genome_is_empty(fake_dir):
         print(f"No indels on {chrom}: nothing to index", flush=True)
         return
+    said = _window_disagreement(chrom, fake_dir)
+    if said:  # (stderr: the search fails this step on it, as on an engine error)
+        sys.stderr.write(said + "\n")
+        sys.stderr.flush()
+        return 1
     # (flushed, as every line of a worker: the pool's exit terminates the workers, and
     # what one still holds in its buffer is lost)
     print("Indexing INDELs in", chrom, flush=True)

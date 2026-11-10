@@ -13,9 +13,14 @@ end exclusive and not clipped at the chromosome's end) and its indel field
 ``POS - 1 - start`` and its right flank as ``end - (POS - 1 + len(REF))`` (row_flanks), and
 never assumes a width: the windows of either release read right. A reader that took 2.10.0's
 30 bases for 2.9.1's 25 would map a window's bases from its 26th through the ALT's last to
-the wrong reference position or to none (the bases before and after them map alike under
-either width), so the SNP codes on and around the REF and ALT, and the SNP+indel rows next to
-the indel, would be wrong.
+the wrong reference position, or to none where they have one (the bases before and after them
+map alike under either width): the five flank bases before the REF would lose their code or
+take a neighbour's, and the ALT's last five bases (all of a shorter ALT) would take codes,
+where none belongs. Two exceptions: at an MNV, whose REF and ALT have one length, the flank
+bases past the ALT's length map to their own position by chance (the 28th to the 30th at a
+2-base MNV), and an ALT longer than five bases has its bases before its last five map to none
+under either width, as they should. So the SNP codes on and around the REF and ALT, and the
+SNP+indel rows next to the indel, would be wrong.
 
 A target of L bases (guide + PAM) with b DNA bulges holds a record's change on its window
 only where L + b <= LEFT + 2 and L + b <= RIGHT + 1, or L + b <= LEFT + 1 for a record whose
@@ -456,15 +461,139 @@ def reenrichment_refusal(workdir, genome, dataset, libraries=(), who="build-inde
                    workdir, genome, dataset, libraries)), then, enriched, enriched))
 
 
+# The bases an IUPAC code of the enriched genome stands for (the SNP overlay writes a flank
+# base's code over it), Q (CRISPRitz 2.10.0's four bases) and N among them.
+_STANDS_FOR = {"A": "A", "C": "C", "G": "G", "T": "T", "R": "AG", "Y": "CT", "S": "CG",
+               "W": "AT", "K": "GT", "M": "AC", "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG",
+               "N": "ACGTN", "Q": "ACGT"}
+
+
+def _fake_sequence(fake_fasta, upto):
+    """The first ``upto`` + 1 bases of the fake-indel FASTA ``fake_fasta`` (its record's
+    lines joined), or all of it where it is shorter."""
+    out, n = [], 0
+    with open(fake_fasta) as fh:
+        for line in fh:
+            if line.startswith(">"):
+                continue
+            line = line.strip()
+            out.append(line)
+            n += len(line)
+            if n > upto:
+                break
+    return "".join(out)
+
+
+def fake_window_disagreement(fake_fasta, log_path, rows=ROWS):
+    """How the fake-indel genome of a chromosome, ``fake_fasta``, was not cut by the windows
+    its indel log ``log_path`` records -- the two come from two enrichments, as where a
+    download installs an archive's indel logs beside an enrichment made here by another
+    CRISPRitz, whose windows were another width -- or None: each of the first ``rows`` rows'
+    window (every row's with None) lies at the offsets of the fake sequence its FAKEPOS field
+    gives, an N (the separator) or the sequence's end after it, and its left flank (POS - 1 -
+    start) holds the reference bases its refseq field records, a SNP code standing for its own
+    base (where the field holds them all). None too where there is nothing to compare, or
+    nothing that tells: no log, no row, no fake FASTA, a row of no indel log's layout."""
+    if not log_path or not os.path.isfile(fake_fasta):
+        return None
+    windows = []
+    opener = gzip.open if log_path.endswith(".gz") else open
+    with opener(log_path, "rt") as fh:
+        for i, line in enumerate(fh):
+            f = line.rstrip("\n").split("\t")
+            if i == 0 and f[0] == "CHR":
+                continue
+            if len(f) < 7 or not f[0]:
+                continue
+            try:
+                a, b = (int(x) for x in f[5].split(","))
+                left = row_flanks(f[0], f[4])[0]
+            except (IndexError, ValueError):
+                return None   # (no log of CRISPRitz's layout: nothing to tell by)
+            windows.append((f[4], a, b, left, f[6]))
+            if rows is not None and len(windows) >= rows:
+                break
+    if not windows:
+        return None
+    seq = _fake_sequence(fake_fasta, max(b for _, _, b, _, _ in windows))
+    for indel, a, b, left, refseq in windows:
+        where = "%d-%d" % (a, b)
+        if b > len(seq) or (b < len(seq) and seq[b] not in "Nn"):
+            return ("the window of %s, which the log places at %s of the fake sequence, ends "
+                    "elsewhere there (no separator after it)" % (indel, where))
+        flank = seq[a:a + left]
+        if len(refseq) >= left and (len(flank) < left or any(
+                r.upper() not in _STANDS_FOR.get(c.upper(), c.upper())
+                for c, r in zip(flank, refseq[:left]))):
+            return ("the window of %s, which the log places at %s of the fake sequence, does "
+                    "not hold there the %d reference bases before the record that the log "
+                    "records" % (indel, where, left))
+    return None
+
+
+def fake_genome_disagreement(fake_dir, log_dir, dataset):
+    """(chromosome, how) of the first chromosome of fake-indel genome ``fake_dir``
+    (Genomes/<genome>+<dataset>_INDELS: fake_<dataset>_<chrom>/fake<chrom>.fa) whose
+    windows are not those its indel log in ``log_dir`` records (fake_window_disagreement),
+    or None."""
+    prefix = "fake_%s_" % dataset
+    try:
+        names = sorted(n for n in os.listdir(fake_dir) if n.startswith(prefix))
+    except OSError:
+        return None
+    for name in names:
+        chrom = name[len(prefix):]
+        how = fake_window_disagreement(os.path.join(fake_dir, name, "fake%s.fa" % chrom),
+                                       log_path(log_dir, chrom))
+        if how:
+            return chrom, how
+    return None
+
+
+def fake_genome_refusal(workdir, genome, dataset, who="build-index-only"):
+    """Why ``who`` (build-index-only, or "this search": the search script's STEP 1 with the
+    enrichment in place and no variant index of the dataset that serves it, which it builds
+    from that enrichment) must not build an index of ``dataset`` from the enrichment in place
+    in ``workdir``: its fake-indel genome and the dataset's indel logs come from two
+    enrichments (fake_genome_disagreement), and so then do its enriched genome and the
+    dataset's dictionaries and tiers, which a download installs with the logs; an index built
+    from the one would be read with the other, every indel row misplaced (its windows are
+    another width) and the SNP side another enrichment's. None where they agree."""
+    enriched = os.path.join(workdir, "Genomes", "%s+%s" % (genome, dataset))
+    logs = os.path.join(workdir, "Dictionaries", "log_indels_%s" % dataset)
+    found = fake_genome_disagreement(enriched + "_INDELS", logs, dataset)
+    if not found:
+        return None
+    every = enrichment_stores(workdir, genome, dataset)
+    return ("the fake-indel genome %s_INDELS and the indel logs %s of %s come from two "
+            "enrichments: on %s, %s. With the fake-indel genome goes the enriched genome %s, "
+            "and with the logs the dataset's dictionaries and dict-less tiers (a download "
+            "installs an index's dictionaries and logs, not the enrichment they come from), so "
+            "an index %s built from the enrichment in place would be read with another "
+            "enrichment's logs, dictionaries and tiers: every indel row misplaced, and the SNP "
+            "alleles and carriers of two enrichments mixed. Put the enrichment those come with "
+            "in place of this one (rm -rf %s %s; of a published index, its enriched-genome "
+            "kit, docs/PRECOMPUTED_INDEXES.md), or remove all of the dataset that comes from "
+            "an enrichment (rm -rf %s) and run build-index-only again, which enriches it anew."
+            % (enriched, logs, dataset, found[0], found[1], enriched,
+               "that build-index-only" if who == "build-index-only" else "that this search",
+               quote(enriched), quote(enriched + "_INDELS"), " ".join(quote(d) for d in every)))
+
+
 def main(argv):
-    """``indel_window.py reenrichment <workdir> <genome> <dataset> [<library>...]``: the
-    search script's check before it enriches a dataset itself (STEP 1): the refusal
-    (reenrichment_refusal) on stdout, exit 3; nothing, exit 0."""
-    if len(argv) < 5 or argv[1] != "reenrichment":
+    """The search script's checks of a dataset (STEP 1), each the refusal on stdout, exit 3,
+    or nothing, exit 0: ``indel_window.py reenrichment <workdir> <genome> <dataset>
+    [<library>...]`` before it enriches the dataset itself (reenrichment_refusal);
+    ``indel_window.py fakecheck <workdir> <genome> <dataset>`` before it builds an index of it
+    from the enrichment in place (fake_genome_refusal)."""
+    if len(argv) < 5 or argv[1] not in ("reenrichment", "fakecheck"):
         sys.stderr.write("usage: indel_window.py reenrichment <workdir> <genome> <dataset> "
-                         "[<library>...]\n")
+                         "[<library>...] | fakecheck <workdir> <genome> <dataset>\n")
         return 2
-    why = reenrichment_refusal(argv[2], argv[3], argv[4], argv[5:], who="this search")
+    if argv[1] == "reenrichment":
+        why = reenrichment_refusal(argv[2], argv[3], argv[4], argv[5:], who="this search")
+    else:
+        why = fake_genome_refusal(argv[2], argv[3], argv[4], who="this search")
     if why:
         print(why)
         return 3

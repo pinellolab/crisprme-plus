@@ -198,6 +198,16 @@ def window_rows(chrom, left, right):
     return out
 
 
+def window_fake(chrom, left, right):
+    """The fake-indel FASTA whose windows lie where window_rows' rows place them (their
+    FAKEPOS fields), an N after each and Ns between them, of A and T alone (no NRG)."""
+    seq = ""
+    for k, (pos, ref, alt) in enumerate(((100, "A", "AT"), (200, "ACG", "A"))):
+        a, b = 100 * k, 100 * k + left + len(alt) + right
+        seq += "N" * (a - len(seq)) + ("AT" * 50)[:b - a] + "N"
+    return f">fake{chrom}\n{seq}\n"
+
+
 def _write_log(path, records):
     with gzip.open(path, "wt") as fh:
         fh.write(LOG_HEADER + "\n")
@@ -1029,8 +1039,10 @@ class IndexSide(_Fixture):
         _write_log(os.path.join(logs, "logchrB.txt.gz"), window_rows("chrB", 25, 27))
         # (sub-indexes with no target, whose record this stub's empty .bin files would not
         # get: index_fit records an index of a format it reads)
-        res, indexed = self.run_index({"chrA": f">fakechrA\n{NO_NRG}\n",
-                                       "chrB": f">fakechrB\n{NO_NRG}\n",
+        # (each fake-indel genome cut by the windows its log records, as add-variants cuts
+        # it: one whose windows are another width is refused, _window_disagreement)
+        res, indexed = self.run_index({"chrA": window_fake("chrA", 30, 30),
+                                       "chrB": window_fake("chrB", 25, 27),
                                        "chrC": f">fakechrC\n{NO_NRG}\n"},
                                       STUB_NO_BIN="fakechrA,fakechrB,fakechrC")
         self.assertEqual((res.returncode, res.stderr), (0, ""))
@@ -1038,6 +1050,29 @@ class IndexSide(_Fixture):
         for chrom, want in (("chrA", [30, 30]), ("chrB", [25, 27]), ("chrC", None)):
             with open(os.path.join(self.sub(chrom), ".index_meta.json")) as fh:
                 self.assertEqual(json.load(fh).get("indel_window"), want, chrom)
+
+    def test_a_fake_genome_of_other_windows_than_its_log_is_refused(self):
+        """W-R2-F1's class: a fake-indel genome cut by windows of another width than its indel
+        log records (a download installs an archive's logs beside an enrichment made here by
+        another CRISPRitz) is not indexed: the sub-index would record the log's windows, and
+        be read with that log, every indel row misplaced. The others are built."""
+        logs = os.path.join(self.tmp, "Dictionaries", "log_indels_ds")
+        os.makedirs(logs)
+        _write_log(os.path.join(logs, "logchrA.txt.gz"), window_rows("chrA", 30, 30))
+        _write_log(os.path.join(logs, "logchrB.txt.gz"), window_rows("chrB", 30, 30))
+        res, indexed = self.run_index({"chrA": window_fake("chrA", 30, 30),
+                                       "chrB": window_fake("chrB", 25, 27)},
+                                      STUB_NO_BIN="fakechrA,fakechrB")
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        # (its first window's end falls among the Ns this fixture puts between two windows;
+        # the next one's past the sequence's end)
+        self.assertIn("ERROR: the fake-indel genome of chrB (%s) and its indel log, in %s, come "
+                      "from two enrichments: the window of chrB_200_ACG_A, which the log places "
+                      "at 100-161 of the fake sequence, ends elsewhere there (no separator after "
+                      "it)." % (os.path.join(self.tmp, "Genomes", "ref+ds_INDELS", "fake_ds_chrB"),
+                                logs), res.stderr)
+        self.assertIn("Indexing failed for INDELs in chrB\n", res.stdout)
+        self.assertEqual(indexed, ["chrA"])
 
     def test_a_normal_build_is_unchanged(self):
         res, indexed = self.run_index({"chrA": f">fakechrA\n{WITH_NRG}\n",

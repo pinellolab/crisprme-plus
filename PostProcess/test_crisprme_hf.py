@@ -1437,6 +1437,43 @@ class TestFakeIndelWindowNotes(unittest.TestCase):
         with mock.patch.object(hf.index_fit, "engine_index_format", return_value=2):
             self.assertEqual([n for n in self.notes() if "variant index" in n], [])
 
+    def test_an_enrichment_in_place_of_other_windows_is_warned_of(self):
+        """A download installs an archive's indel logs (30/30) beside the enrichment of the
+        dataset made here by CRISPRitz 2.9.1 (25/27): its fake-indel genome disagrees with
+        them (indel_window.fake_genome_disagreement), and an index built from it would be read
+        with the archive's logs, dictionaries and tiers. Nothing for one of the archive's."""
+        import random
+
+        rng = random.Random(3)
+        ref = "".join(rng.choice("ACGT") for _ in range(200))
+
+        def cut(left, right):
+            start = 100 - 1 - left
+            win = ref[start:99] + ref[99] + "T" + ref[100:100 + right]
+            return start, win
+
+        start, win = cut(30, 30)
+        with gzip.open(os.path.join(self.logs, "logchr1.txt.gz"), "wt") as fh:
+            fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n"
+                     "chr1_%d-%d_1\tS1\trs1\t0.1\tchr1_100_%s_%sT\t0,%d\t%s\n"
+                     % (start, 100 + 30, ref[99], ref[99], len(win), ref[start:start + len(win)]))
+        fake = os.path.join(self.tmp, "Genomes", "hg38+ds_INDELS", "fake_ds_chr1")
+        os.makedirs(fake)
+        for (left, right), warned in (((25, 27), True), ((30, 30), False)):
+            with open(os.path.join(fake, "fakechr1.fa"), "w") as fh:
+                fh.write(">fakechr1\n%s\nN\n" % cut(left, right)[1])
+            notes = [n for n in self.notes() if "enrichment of ds in place" in n]
+            self.assertEqual(len(notes), int(warned), notes)
+        enriched = os.path.join(self.tmp, "Genomes", "hg38+ds")
+        with open(os.path.join(fake, "fakechr1.fa"), "w") as fh:
+            fh.write(">fakechr1\n%s\nN\n" % cut(25, 27)[1])
+        notes = [n for n in self.notes() if "enrichment of ds in place" in n]
+        self.assertTrue(notes[0].startswith(
+            "WARNING: the enrichment of ds in place (%s, and its fake-indel genome %s_INDELS) is "
+            "another one than the archive's: on chr1, the window of chr1_100_" % (
+                enriched, enriched)), notes)
+        self.assertIn("(rm -rf '%s' '%s_INDELS')" % (enriched, enriched), notes[0])
+
     def test_another_index_the_logs_no_longer_match_is_warned_of(self):
         self.log(30, 30)
         self.index("20-NRG_2_hg38+ds_INDELS", (30, 30))
