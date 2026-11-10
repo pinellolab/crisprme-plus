@@ -73,10 +73,11 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   chromosome. The SNP pieces read the chromosome's dictionary keys from a copy written once a
   chromosome: JSON, which loads as data whoever wrote it (it sits in the run's output folder,
   which its group can write under a umask of 002, and loading a pickle runs what it names),
-  made 0600 in a pieces' folder made 0700. The indel pieces read the windows of the indel log
-  their lines need. The analysis' arguments reach the pieces through a file of a folder only the
-  run can write (`tempfile.mkdtemp`), never a name another user of a shared `/tmp` could make
-  first.
+  made 0600 in a pieces' folder made 0700 (modes that keep others from reading or writing it,
+  not from putting a folder of their own in the place of the pieces' one where they can write
+  the output folder). The indel pieces read the windows of the indel log their lines need. The
+  analysis' arguments reach the pieces through a file of a folder the pool makes in `$TMPDIR`
+  (`tempfile.mkdtemp`), never under a name another user of a shared `/tmp` could make first.
   `log_verbose.txt` keeps one piece's output and what the others add, but their own run times,
   the notes one process ends a chromosome with (the pre-check's count, the dense windows),
   which the merge writes from the pieces' counts, and the chromosome's run time ("Post-analysis
@@ -140,10 +141,34 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   (about 4 s on chr22, 27 s on IGH).
 
 ### Fixed
-- **A temporary file is made where only the run's user can reach it, never under a name another
-  user could make first.** A review of the post-analysis in pieces found it loading a pickle,
-  which runs what it names, from the run's output folder (never released: the pieces' copy is
-  JSON); a sweep of CRISPRme for the same class found these in released code:
+- **A search loads no Python module from the folder it is run from.** Every `complete-search`
+  runs the CRISPR-Bulge scorer's health check before it searches, as `python -c`, which puts
+  the working directory first on Python's path: run from a data folder its group can write (a
+  umask of 002 leaves it so), a module another member of the group put there (a `json.py`)
+  ran as the user. The health check, the scorer's self-test (`scorer-env check`,
+  complete-test), the look-up of the scorer env's python and the search script's pre-build of
+  the annotation's index now run Python isolated (`-I`), and so do the developer benchmarks;
+  the AoU retrieval script (`paper/`) checks its packages the way its steps import them.
+- **The web app's Settings Retry runs no command read back from a file.** Retry re-ran a failed
+  job with the shell command its folder's `Settings/<job>/cmd.json` held, through a shell: a
+  member of the data folder's group could write that file, and Retry ran their command as the
+  web app's user. A job is an argument list now, run without a shell and kept in the server's
+  memory for its Retry; no `cmd.json` is written or read. A job the server did not launch since
+  it last started is started again from its card. A job's folder is made by the job, never one
+  that was there before.
+- **What a job reads back of its own files no longer reaches a shell as the shell's own text.**
+  A sweep for the class found these, each read from a file or a folder another user could
+  write: the guides of the guide file (`process_summaries.py`), the header of the indel
+  search's part files (`pool_search_indels.py`), the names of the CFD graph files
+  (`assemble_cfd_graphs.py`, which `post_analysis_only.sh` runs), and, on the results' region
+  page, the guide (which the job's guide list vouched for) and the annotation of the job's
+  annotated targets. Each is quoted, or its file removed without a shell, or (the region
+  page's guide) checked to be letters: a line or a name put there runs nothing, and the files
+  are those of before.
+- **A temporary name is one the run made, never one another user could make first.** A review
+  of the post-analysis in pieces found it loading a pickle, which runs what it names, from the
+  run's output folder (never released: the pieces' copy is JSON); a sweep of CRISPRme for the
+  same class found these in released code:
   - The COSMIC-free copy of an annotation whose folder cannot hold it (a read-only or shared
     install) was written into `$CRISPRME_TMPDIR`, the working directory or `/tmp` under a fixed
     name (`.nocosmic.<annotation>`), by a strip writing beside it under one made of its process
@@ -159,9 +184,13 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   - `PostProcess/validate_indel_snp_coords.py`, a developer's check, wrote its overlaid genome
     under a name `tempfile.mktemp` gave: in a folder of its own now.
 
-  A test of the unit-test job (`test_no_code_from_files`) keeps the class out: over every
-  module but the tests, no pickle, marshal, shelve or the like (their loads run what a file
-  names), no `eval` or `exec`, no YAML load but `safe_load`, no `tempfile.mktemp`; in the shell
-  scripts, no `eval`, no `mktemp -u` and no name added to the one `mktemp` made. A folder
-  others can write still lets them change a search's inputs and results: on a shared machine,
-  keep the data and output folders writable by you alone (`docs/TROUBLESHOOTING.md` §7).
+  A test of the unit-test job (`test_no_code_from_files`) keeps out what a scan of the source
+  can show of the class: over every module but the tests, no pickle, marshal, shelve or the
+  like (their loads run what a file names), no `eval` or `exec`, no YAML load but `safe_load`,
+  no `tempfile.mktemp`, no `python -c`, `-m` or `-` that is not isolated; in the shell scripts,
+  no `eval`, no `mktemp -u`, no name added to the one `mktemp` made, no `python -c`, `-m` or
+  `-` that is not isolated. A folder others can write still lets them do more than change a
+  search's inputs and results: stop it, swap a folder it made there (the pieces' folder among
+  them), put links it writes through, and change what older parts of the pipeline pass to a
+  shell. On a shared machine, keep the data, output and temporary folders writable by you
+  alone (`docs/TROUBLESHOOTING.md` §7).

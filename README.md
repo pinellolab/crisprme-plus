@@ -175,7 +175,10 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 > `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
 > `PATH` — prefer `apptainer run` (or prefix `bash -lc`). A home it cannot write in (`--no-home`,
 > or `--home` on a read-only folder) is fine: matplotlib's caches then go to a temporary folder
-> ([Troubleshooting](docs/TROUBLESHOOTING.md) §1).
+> ([Troubleshooting](docs/TROUBLESHOOTING.md) §1). On a machine other people use, keep the data
+> folder, the output folders and the temporary folder writable by you alone (a umask of 022, or
+> `chmod go-w`): whoever can write them can change a search and more, as
+> [Troubleshooting](docs/TROUBLESHOOTING.md) §7 explains.
 
 **The prebuilt SpCas9 NRR (NAA, NAG, NGA, NGG) variant indexes.** NRR is the default PAM
 since 2.10.0 (it was NRG = NAG + NGG). All carry searchable indels genome-wide with SNP+SNP /

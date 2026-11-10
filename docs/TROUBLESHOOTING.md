@@ -175,13 +175,44 @@ Independent `complete-search` jobs can run in parallel, but give each job its ow
 long-standing collision where two jobs stripping the same COSMIC-containing annotation
 raced on a temp file is fixed in 2.7.10.)
 
-On a machine other people use, keep the data folder and the output folders writable by you
-alone (a umask of 022 or 077, or `chmod go-w` on them): anyone who can write a folder can
-change the inputs and the results of a search there. What a search reads back of its own
-files is data only (since 2.10.0 the post-analysis in pieces passes its dictionary keys as
-JSON, made 0600 in a folder made 0700, and a test keeps every way of loading a file that runs
-code out of CRISPRme), and its temporary files and folders are made under names no one else
-could make first (`tempfile.mkdtemp`, `mkstemp`, `mktemp -d`).
+On a machine other people use, keep the data folder, the output folders and the temporary
+folder (`$TMPDIR`, or `CRISPRME_TMPDIR` when set) writable by you alone (a umask of 022 or
+077, or `chmod go-w` on them; a shared temporary folder such as `/tmp` will do while it is
+sticky). Anyone who can write a folder a search or the web app works in can do more there
+than change the inputs and the results:
+
+- stop the search, by making first a name it makes there (the post-analysis's
+  `<output>.pieces` folder, for one);
+- rename a folder the search made there and put their own in its place (a rename needs only
+  write access to the folder that holds it), and put links in it, which the search then
+  writes through, over files of yours elsewhere;
+- put lines and names in the files it reads there (its inputs, and the files it writes and
+  reads back), which older parts of the pipeline still pass to shell commands; and, in a
+  temporary folder that is not sticky, replace the modules TensorFlow writes there and then
+  imports.
+
+What holds wherever you run it, since 2.10.0:
+
+- nothing CRISPRme runs takes Python code from the folder it is run from: every
+  `python -c`, `-m` or `-` it runs is isolated (`-I`). Up to 2.10.0 the scorer's health check, which every search runs
+  first from the folder you run `crisprme.py` in, loaded a module put there;
+- no file a search or the web app writes is loaded as code (they are JSON or text), and the
+  web app's Settings Retry re-runs a job with the command the server launched it with, kept
+  in its memory and run without a shell. Up to 2.10.0 it ran through a shell the command a
+  job's `Settings/<job>/cmd.json` held;
+- the values a review found going from a job's files into shell commands as the shell's own
+  text are quoted or checked now: the guides of the guide file, the indel targets' header,
+  the names of the CFD graph files, and the guide and the annotation of the results' region
+  page;
+- temporary files and folders are made under names no one else could make first
+  (`tempfile.mkdtemp`, `mkstemp`, `mktemp -d`); in a sticky or private temporary folder no
+  one else can replace them.
+
+A test of the unit-test job (`test_no_code_from_files`) keeps out of CRISPRme what a scan of
+the source can show: loads that run code (pickle and the like, `eval`, `exec`, YAML loads but
+`safe_load`), a temporary name made by name only, and a `python -c`, `-m` or `-` that is not
+isolated. It cannot follow every value read back into a shell command, which is one more
+reason to keep these folders yours.
 
 ---
 

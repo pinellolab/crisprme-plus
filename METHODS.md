@@ -1178,9 +1178,12 @@ search's threads, bring it back. None changes a row.
   folder, which other members of its group can write under a umask of 002, so it is JSON, the
   dictionary's own format, which loads as data whoever wrote it (a pickle runs what it names
   when loaded), made 0600 in a pieces' folder the pool makes 0700; a file there that is not
-  such a copy stops the piece. A merge joins the pieces' files into
-  the chromosome's: the rows in order, the companions keeping the first row of each identity as
-  one process does, the dense-window BED one line a window. A CRISPR-Bulge score depends in its
+  such a copy stops the piece. Those modes keep others from reading or writing the pieces'
+  files, not from changing what a piece reads: in an output folder they can write, they can
+  rename the pieces' folder and put their own in its place (`docs/TROUBLESHOOTING.md` §7). A
+  merge joins the pieces' files into the chromosome's: the rows in order, the companions
+  keeping the first row of each identity as one process does, the dense-window BED one line a
+  window. A CRISPR-Bulge score depends in its
   last bits on which rows share a batch of the scorer (the 2.10.0 cost judges measured 80 of
   890,496 population-level chr22 rows differing, by up to 1.2e-5 relative, when one
   chromosome's rows were scored in other batches), so the pieces leave their rows unscored and
@@ -1191,8 +1194,10 @@ search's threads, bring it back. None changes a row.
   the notes a chromosome ends with (the pre-check's count, the dense windows), which the merge
   writes from the pieces' counts as one process writes them, and the chromosome's run time
   ("Post-analysis SNP of chr22: done in 101.2 s (16 pieces)"). The analysis' arguments reach
-  the pieces through a file of a folder only the run can write. `CRISPRME_POSTPROC_PIECES=0`
-  (or false, no or off, in any case) runs one process a chromosome.
+  the pieces through a file of a folder the pool makes in `$TMPDIR` (`tempfile.mkdtemp`),
+  which no one else can replace where `$TMPDIR` is sticky, as `/tmp` is, or the user's own.
+  `CRISPRME_POSTPROC_PIECES=0` (or false, no or off, in any case) runs one process a
+  chromosome.
 - **The indel store read once a span.** A per-sample SNP post-analysis reads the phased indel
   store around its targets, to take off a SNP row the carriers whose haplotype holds an indel
   in the target (§4). It read the store's surroundings once per raw target, and a dense window
