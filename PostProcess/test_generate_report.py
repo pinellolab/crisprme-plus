@@ -49,6 +49,7 @@ import glob
 import gzip
 import inspect
 import io
+import json
 import os
 import re
 import sys
@@ -4814,3 +4815,100 @@ class TestAssemblyExportSchemaIsUniform(unittest.TestCase):
         staged_at = src.index("_combined_validation_panel_html(")
         self.assertLess(set_at, staged_at, "drop set must be set before exports are staged")
         self.assertLess(schema_at, staged_at, "schema must be decided before exports are staged")
+
+
+@unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
+class TestTheReportSaysWhatTheDensityGuardWithheld(unittest.TestCase):
+    """(2.10.0, review r2 of lane M, M-R2-N2.) The sites-only density guard
+    (sites_only_guard.py) writes a BED a chromosome and side of a sites-only dataset's
+    search, saying in its second line how many candidates it withheld of how many, and one
+    line a region of them. The report reads them all (load_density_guard), bundles their
+    regions as one file (data/sites_only_density_guard.bed) and says in the inputs card
+    what the guard withheld, of which dataset, and where the regions are listed
+    (render_guard_row); a sites-only search run with the guard turned off says so, and a
+    search with no sites-only dataset has no such row. The BEDs here are the guard's own,
+    written by sites_only_guard.run on raw targets of windows of 2^20 and 2^24 sequences."""
+
+    setUp = TestGenerateReport.setUp
+    _build_and_extract = TestGenerateReport._build_and_extract
+    _read = staticmethod(TestGenerateReport._read)
+    _dpath = staticmethod(TestGenerateReport._dpath)
+
+    DENSE = "QQQQQQQQQQACGTACGTACGTA"     # 4^10 = 2^20 sequences: withheld at 20 bits
+    DENSER = "QQQQQQQQQQQQACGTACGTACG"    # 4^12 = 2^24
+    PLAIN = "CTAACAGTTGCTTTTATCACAGG"
+
+    def _guard_beds(self):
+        """The guard's BEDs of chr22 (two candidates of three withheld, one region) and chr7
+        (one of two, one region), SNP side, in the run's result folder."""
+        import sites_only_guard as sog
+        dicts = os.path.join(self.tmp, "Dictionaries")
+        reg = os.path.join(dicts, "registry_hg38_mega")
+        os.makedirs(reg)
+        with open(os.path.join(reg, "reg_chr22.idx"), "w") as fh:
+            json.dump({"aggregation": "info_af", "data_type": "sites-only"}, fh)
+
+        def raw(dna, chrom, pos):
+            return "\t".join(["X", _GUIDE + "NNN", dna, chrom, str(pos), str(pos), "+",
+                              "3", "0", "3"]) + "\n"
+
+        beds = []
+        for chrom, lines in (("chr22", [raw(self.DENSE, "chr22", 100),
+                                        raw(self.DENSER, "chr22", 104),
+                                        raw(self.PLAIN, "chr22", 900)]),
+                             ("chr7", [raw(self.DENSE, "chr7", 5000),
+                                       raw(self.PLAIN, "chr7", 7000)])):
+            targets = os.path.join(self.tmp, f"targets.{chrom}.txt")
+            with open(targets, "w") as fh:
+                fh.writelines(lines)
+            bed = os.path.join(self.tmp, f"hg38+hg38_mega_NRG_g_4_1_1_{chrom}.snp"
+                               + gr.GUARD_SUFFIX)
+            sog.run("snp", targets, dicts, "hg38_mega", chrom, bed, bits=20)
+            beds.append(bed)
+        return beds
+
+    def test_the_guard_is_read_bundled_and_shown(self):
+        beds = self._guard_beds()
+        guard = gr.load_density_guard(self.tmp)
+        self.assertEqual((guard["bits"], guard["datasets"], guard["regions"]),
+                         (20, {"hg38_mega": {"snp": [5, 3]}}, 2))
+        regions = [ln for bed in beds for ln in self._read(bed).splitlines(True)
+                   if not ln.startswith("#")]
+        self.assertEqual(sorted(guard["lines"]), sorted(regions))
+        _zip, names, extract = self._build_and_extract()
+        self.assertIn("data/sites_only_density_guard.bed", names)
+        bundled = self._read(self._dpath(extract, "sites_only_density_guard.bed")).splitlines(True)
+        self.assertEqual(bundled[:2], [
+            "## CRISPRme sites-only density guard: the regions of the candidates withheld "
+            "(windows of 2^20 sequences or more)\n",
+            "#chrom\tstart\tend\tguide\tcandidates_withheld\tmax_bits\n"])
+        self.assertEqual(sorted(bundled[2:]), sorted(regions))
+        html = self._read(self._dpath(extract, "report.html"))
+        row = re.search(r'<tr><td class="k">Sites-only density guard</td><td>(.*?)</td></tr>',
+                        html, flags=re.S)
+        self.assertIsNotNone(row)
+        self.assertIn("of <code>hg38_mega</code>, 3 of 5 SNP candidates", row.group(1))
+        self.assertIn("Their 2 region(s) are listed in", row.group(1))
+        self.assertIn('href="data/sites_only_density_guard.bed"', row.group(1))
+
+    def test_the_row_of_a_search_the_guard_did_not_touch(self):
+        # no BED: the guard turned off in a search of a sites-only dataset (.Params.txt
+        # Sites_only_density_guard -1, the gate's sidecar frequency_bound), or no
+        # sites-only dataset at all
+        self.assertIsNone(gr.load_density_guard(self.tmp))
+        off = gr.render_guard_row(None, None, {"frequency_bound": True}, "-1")
+        self.assertEqual(off[0], "Sites-only density guard")
+        self.assertTrue(off[1].startswith(
+            "Turned off for this search (<code>--no-sites-only-density-guard</code>)"))
+        for gate, bits in (({"frequency_bound": True}, "20"), ({"frequency_bound": False}, "-1"),
+                           (None, "-1"), (None, None)):
+            with self.subTest(gate=gate, bits=bits):
+                self.assertIsNone(gr.render_guard_row(None, None, gate, bits))
+        # a BED whose second line is not the guard's counts is not read
+        with open(os.path.join(self.tmp, "x" + gr.GUARD_SUFFIX), "w") as fh:
+            fh.write("#chrom\tstart\tend\n" "chr22\t1\t2\n")
+        self.assertIsNone(gr.load_density_guard(self.tmp))
+        _zip, names, extract = self._build_and_extract()
+        self.assertNotIn("data/sites_only_density_guard.bed", names)
+        self.assertNotIn("Sites-only density guard",
+                         self._read(self._dpath(extract, "report.html")))
