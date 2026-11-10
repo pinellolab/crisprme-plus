@@ -99,8 +99,10 @@ def check(rows, root=ROOT):
                                     f"own (its panel's first build writes it, its first publish "
                                     f"uploads it): {NO_COMMAND!r}, not {command!r}")
                 continue
-            error = (f"no {what} command" if command in ("", NO_COMMAND)
-                     else bash_syntax_error(command))
+            if command in ("", NO_COMMAND):
+                problems.append(f"{r['archive']}: no {what} command")
+                continue
+            error = bash_syntax_error(command)
             if error:
                 problems.append(f"{r['archive']}: its {what} command is not one bash can run "
                                 f"({error}); a note goes in the notes column")
