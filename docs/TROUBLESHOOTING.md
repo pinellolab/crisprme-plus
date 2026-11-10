@@ -194,8 +194,10 @@ than change the inputs and the results:
 What holds wherever you run it, since 2.10.0:
 
 - nothing CRISPRme runs takes Python code from the folder it is run from: every
-  `python -c`, `-m` or `-` it runs is isolated (`-I`). Up to 2.10.0 the scorer's health check, which every search runs
-  first from the folder you run `crisprme.py` in, loaded a module put there;
+  `python -c`, `-m` or `-` it runs is isolated (`-I`), and `--debug` keeps the `PostProcess/`
+  beside the `crisprme.py` that runs. Up to 2.10.0 the scorer's health check, which every
+  search runs first from the folder you run `crisprme.py` in, loaded a module put there, and
+  `--debug` took that folder's `PostProcess/` for its own;
 - no file a search or the web app writes is loaded as code (they are JSON or text), and the
   web app's Settings Retry re-runs a job with the command the server launched it with, kept
   in its memory and run without a shell. Up to 2.10.0 it ran through a shell the command a
@@ -204,9 +206,11 @@ What holds wherever you run it, since 2.10.0:
   text are quoted or checked now: the guides of the guide file, the indel targets' header,
   the names of the CFD graph files, and the guide and the annotation of the results' region
   page;
-- temporary files and folders are made under names no one else could make first
-  (`tempfile.mkdtemp`, `mkstemp`, `mktemp -d`); in a sticky or private temporary folder no
-  one else can replace them.
+- the temporary files and folders it makes with `tempfile.mkdtemp`, `mkstemp` or `mktemp -d`
+  take names no one else could make first. Where they are made, in the temporary folder or
+  (the annotation temp folders, without `CRISPRME_TMPDIR`) in the working directory, only a
+  sticky or private folder keeps others from replacing them; and the intermediate files a
+  search writes in its output folder keep fixed names (such as `<file>.tmp`).
 
 A test of the unit-test job (`test_no_code_from_files`) keeps out of CRISPRme what a scan of
 the source can show: loads that run code (pickle and the like, `eval`, `exec`, YAML loads but

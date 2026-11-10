@@ -148,7 +148,10 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   ran as the user. The health check, the scorer's self-test (`scorer-env check`,
   complete-test), the look-up of the scorer env's python and the search script's pre-build of
   the annotation's index now run Python isolated (`-I`), and so do the developer benchmarks;
-  the AoU retrieval script (`paper/`) checks its packages the way its steps import them.
+  the AoU retrieval script (`paper/`) checks its packages the way its steps import them. And
+  `--debug` keeps the `PostProcess/` beside the `crisprme.py` that runs: it took the working
+  directory's whenever there was one, and loaded the `memory_check.py` there at start-up,
+  whatever the subcommand.
 - **The web app's Settings Retry runs no command read back from a file.** Retry re-ran a failed
   job with the shell command its folder's `Settings/<job>/cmd.json` held, through a shell: a
   member of the data folder's group could write that file, and Retry ran their command as the
@@ -165,8 +168,8 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   annotated targets. Each is quoted, or its file removed without a shell, or (the region
   page's guide) checked to be letters: a line or a name put there runs nothing, and the files
   are those of before.
-- **A temporary name is one the run made, never one another user could make first.** A review
-  of the post-analysis in pieces found it loading a pickle, which runs what it names, from the
+- **Three temporary names another user could make first are now the run's own.** A review of
+  the post-analysis in pieces found it loading a pickle, which runs what it names, from the
   run's output folder (never released: the pieces' copy is JSON); a sweep of CRISPRme for the
   same class found these in released code:
   - The COSMIC-free copy of an annotation whose folder cannot hold it (a read-only or shared
