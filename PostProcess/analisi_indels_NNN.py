@@ -32,8 +32,7 @@ NOTE: Verify if it is compatible with PAM at the beginning.
 #     can carry more mismatches than the engine counted on the IUPAC-coded genome, and
 #     is dropped past this cap as past --mm.
 
-import pickle
-from typing import final  # to read CFD matrices
+from typing import final
 from supportFunctions.loadSample import associateSample
 import re
 import multiprocessing

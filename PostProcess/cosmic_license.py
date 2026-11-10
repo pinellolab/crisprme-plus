@@ -21,6 +21,7 @@ strip COSMIC from the active annotation when the licence has not been attested.
 """
 
 import gzip
+import io
 import json
 import os
 from typing import Tuple
@@ -112,15 +113,30 @@ def strip_cosmic(in_bed: str, out_bed: str) -> Tuple[int, int]:
     # (one renames it away, the other hits FileNotFoundError). The final os.replace to
     # the shared out_bed is atomic and the content is identical, so last-writer-wins.
     tmp = out_bed + f".{os.getpid()}.tmp"
-    # compression of the temp file must match the FINAL name, not the ".tmp" suffix
-    dst_open = gzip.open(tmp, "wt") if out_bed.endswith(".gz") else open(tmp, "wt")
-    with _open_maybe_gz(in_bed, "rt") as src, dst_open as dst:
-        for line in src:
-            if line and line[0] not in "#\n" and is_cosmic_row(line):
-                dropped += 1
-                continue
-            dst.write(line)
-            if line.strip() and line[0] != "#":
-                kept += 1
-    os.replace(tmp, out_bed)
+    # Made here, never through a name that already stands (O_EXCL): in a folder other
+    # users can write (a shared data folder's Annotations/), one of them could have put a
+    # link there under this name, to a file of the user's that the strip would then
+    # overwrite with the annotation's lines. Such a name raises OSError (FileExistsError),
+    # which the caller takes as a folder it cannot write. Its mode is open()'s, the umask's.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(fd, "wb") as raw:
+            # compression of the temp file must match the FINAL name, not the ".tmp" suffix
+            dst_open = (gzip.open(raw, "wt") if out_bed.endswith(".gz")
+                        else io.TextIOWrapper(raw))
+            with _open_maybe_gz(in_bed, "rt") as src, dst_open as dst:
+                for line in src:
+                    if line and line[0] not in "#\n" and is_cosmic_row(line):
+                        dropped += 1
+                        continue
+                    dst.write(line)
+                    if line.strip() and line[0] != "#":
+                        kept += 1
+        os.replace(tmp, out_bed)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return kept, dropped

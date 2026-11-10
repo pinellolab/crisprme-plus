@@ -7,7 +7,6 @@ import bisect
 import json
 import gzip
 import os
-import pickle
 import numpy as np
 import pandas as pd
 import time
@@ -98,6 +97,8 @@ except Exception:  # module absent in an old deploy -> no filter
 import haplotype_precheck as _hpc
 import cbulge_rows as _cbr
 import analysis_notes as _notes
+# and the dictionary copy a post-analysis in pieces reads (postproc_pool: stdlib)
+import postproc_pool as _pp
 
 # Two-pass POPULATION-LEVEL analysis (docs/DESIGN_2.5.1_two_pass_fast_mode.md) -- the
 # DEFAULT since 2.5.3. Driven by the internal CRISPRME_FAST_MODE env var ("1" = default
@@ -227,7 +228,8 @@ _PIECE = os.environ.get("CRISPRME_POSTPROC_PIECE", "0") == "1"
 # is analysed as one process analyses it. The dictionary keys are read from
 # CRISPRME_POSTPROC_DICT, a copy of the chromosome's dictionary holding only those keys
 # (and its phasing), which the pool writes once a chromosome by running this script with
-# CRISPRME_POSTPROC_PREPARE=<that copy>: it starts up, writes the copy and stops.
+# CRISPRME_POSTPROC_PREPARE=<that copy>: it starts up, writes the copy and stops. The copy
+# is JSON (postproc_pool.write_dict_copy), which loads as data whoever wrote the file.
 _RANGE = None
 if os.environ.get("CRISPRME_POSTPROC_RANGE"):
     _first, _last = os.environ["CRISPRME_POSTPROC_RANGE"].split(":")
@@ -2868,17 +2870,18 @@ _iupac_spans = []
 _dict_copy = None
 if _DICT_COPY is not None:
     # a piece: the dictionary keys of the whole chromosome, read once by the pool
-    # (CRISPRME_POSTPROC_PREPARE below); never silently without them
-    with open(_DICT_COPY, "rb") as _fh:
-        _dict_copy = pickle.load(_fh)
+    # (CRISPRME_POSTPROC_PREPARE below); never silently without them (a file that is not
+    # such a copy stops the piece). A file of the run's output folder: it is read as JSON,
+    # which runs no code whoever wrote it.
+    _dict_copy = _pp.read_dict_copy(_DICT_COPY)
 try:
     _needed_keys = _collect_needed_dict_keys(sys.argv[3], current_chr, _iupac_spans)
     # 2.10.0: read before the dictionary, which then also reads the alleles around a
     # target an indel of the store changes
     _snp_indels = _read_snp_row_indels(_iupac_spans, _needed_keys)
     if _dict_copy is not None:
-        mydict = {k: v for k, v in _dict_copy["dict"].items() if k in _needed_keys}
-        haplotype_check = _dict_copy["haplo"]
+        haplotype_check, _copied = _dict_copy
+        mydict = {k: v for k, v in _copied.items() if k in _needed_keys}
     else:
         mydict, haplotype_check = _load_dict_targeted(sys.argv[2], _needed_keys)
     _dict_keys_read = _needed_keys
@@ -2888,10 +2891,12 @@ try:
         f"(only the positions its targets span); haplotype processing {haplotype_check}"
     )
     if _PREPARE is not None:
-        with open(_PREPARE + ".tmp", "wb") as _fh:
-            pickle.dump({"haplo": haplotype_check, "dict": mydict}, _fh,
-                        protocol=pickle.HIGHEST_PROTOCOL)
-        os.replace(_PREPARE + ".tmp", _PREPARE)
+        try:
+            _pp.write_dict_copy(_PREPARE, haplotype_check, mydict)
+        except (TypeError, ValueError, OSError) as _copy_err:
+            # no copy: each piece then reads the dictionary itself, as one process does
+            print(f"No dictionary copy for the pieces of {current_chr} (each reads the "
+                  f"dictionary itself): {_copy_err}")
 except Exception as _dict_err:  # keep going with no SNP annotation, never crash here
     print("No dict found (or unreadable) for", current_chr, "-", _dict_err)
 if _PREPARE is not None:

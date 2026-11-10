@@ -18,8 +18,9 @@ count them:
     the same with the pre-check on and off, a skipped target keeps its reference row, and the
     run says how many it skipped; bulged targets (an RNA or a DNA bulge) are skipped and kept
     on the dictionary path and the observed one, a minus-strand target is read at its forward
-    positions, a registry-only dataset's rows are left alone; a dense window two alignments
-    share is one BED line;
+    positions, a registry-only dataset's rows are left alone, a sample whose fixing ALT is the
+    second of a three-allele column is a candidate; a dense window two alignments share is one
+    BED line;
   * complete-search's warning above 1 DNA + 1 RNA bulge, its cap rule and the counts it quotes.
 
 Run with:
@@ -757,6 +758,38 @@ class BulgesAndTheDictionaryPath(_PostAnalysis):
         self.assertEqual(dense, [])
         self.assertIn("Haplotype pre-check on chrT: 0 of 1 raw target(s)", said)
         self.assertIn("S1", {s for r in rows for s in r[12].split(",")})
+
+    _CODE3 = {frozenset("ACG"): "V", frozenset("CGT"): "B", frozenset("AGT"): "D",
+              frozenset("ACT"): "H"}
+
+    def test_a_fixing_alt_a_column_lists_second_counts(self):
+        """The candidates of a window are the samples listed for any ALT of its columns
+        (review r3 of lane S, its mutant A7: a mask built from each column's first ALT passed
+        every test, the real-script columns all holding one ALT). Column 3 holds three
+        alleles: the reference and a first ALT S2 carries, both mismatching the guide, and a
+        second, the guide's base, that S1 alone carries. With column 15 a mismatch no variant
+        fixes and a budget of 1, S1's single fix makes a row: kept with S1's row, on the
+        dictionary path and the observed one, the files those with the pre-check off."""
+        site = list(_G + "TGG")
+        g3 = site[3]
+        ref3 = _MISMATCHING[g3]
+        alt1 = next(b for b in "ACGT" if b not in (g3, ref3))
+        site[3], site[15] = ref3, _MISMATCHING[site[15]]
+        site = "".join(site)
+        for path, others in (("dictionary", self.WITHIN), ("observed", self.OVER)):
+            with self.subTest(path=path):
+                codes = {3: self._CODE3[frozenset((ref3, alt1, g3))]}
+                entries = {(0, 3): "S2:1|0;%s,%s;rs3a;0.1$S1:0|1;%s,%s;rs3b;0.1" % (
+                    ref3, alt1, ref3, g3)}
+                for c, gts in others.items():
+                    alt = _TRANSITION[site[c]]
+                    codes[c] = _CODE2[frozenset((site[c], alt))]
+                    entries[(0, c)] = "%s;%s,%s;rs%d;0.1" % (gts, site[c], alt, c)
+                self.write_inputs([site], [(0, _site_window(site, codes), "+")], entries)
+                rows, said, dense = self.same_on_and_off("1", CRISPRME_FAST_MODE="0")
+                self.assertEqual(len(dense), path == "observed", dense)
+                self.assertIn("Haplotype pre-check on chrT: 0 of 1 raw target(s)", said)
+                self.assertIn("S1", {s for r in rows for s in r[12].split(",")}, rows)
 
     def test_the_k_skip_takes_the_bulge_off(self):
         """Population-level with --max-degeneracy 1, two mismatches and a bulge, a budget of

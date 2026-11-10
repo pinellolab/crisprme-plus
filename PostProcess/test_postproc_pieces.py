@@ -8,12 +8,17 @@ merged into the files one process writes, byte for byte.
     with a scorer whose output depends on the whole batch, against the loop of one process;
   * cbulge_rows.score_rows scores a batch whose rows it nearly all nulls at once (it read a
     list of them for each row);
-  * the companions keep the first row of each identity, as one process does; the dense-window
-    BED keeps one line a window, the one resultIntegrator reads first; the four-allele
-    positions are the sorted union; the CFD graphs are summed;
+  * the companions keep the first row of each identity, as one process does, merge_snp too
+    where two pieces hold one; the dense-window BED keeps one line a window, the one
+    resultIntegrator reads first, whichever piece lists it first; the four-allele positions
+    are the sorted union; the CFD graphs are summed;
   * postproc_pool cuts a chromosome into contiguous ranges, runs the stages of every
     chromosome on one pool, and stops at the first failure; a piece's output goes to its own
     file, and the log keeps one piece's start-up and what the others add;
+  * the SNP pieces' copy of the dictionary keys sits in the run's output folder, which its
+    group can write under a umask of 002: it is JSON (it was a pickle, and loading one runs
+    what it names), made 0600 through a name nothing stood under, in a pieces' folder made
+    0700; a pickle planted where a piece reads its copy runs nothing, and stops the piece;
   * through the real scripts: new_simple_analysis.py and analisi_indels_NNN.py run as one
     process and as pieces (CRISPRME_POSTPROC_RANGE, CRISPRME_POSTPROC_PIECE) then merged give
     the same files, byte for byte, with the pre-check on and off (the pieces skip and keep
@@ -197,14 +202,18 @@ class MergedFiles(unittest.TestCase):
                      + "chrT\t10\t33\tG\t3\tS1\tACRTYW\t3.00\t0\t1\n"
                      + "chrT\t9\t33\tG\t3\tS1\tACRTYW\t3.00\t0\t0\n")
         out = os.path.join(self.tmp, "m.bed")
-        merge_pieces.merge_hvdr(out, [a, b])
-        with open(out) as fh:
-            got = fh.read()
-        # the upper-case letters sort first; sorted by start, end, guide
-        self.assertEqual(got, head
-                         + "chrT\t9\t33\tG\t3\tS1\tACRTYW\t3.00\t0\t0\n"
-                         + "chrT\t10\t33\tG\t3\tS1\tACRTYW\t3.00\t0\t1\n"
-                         + "chrT\t50\t73\tG\t3\tS1\tAAA\t3.00\t0\t0\n")
+        # whichever piece lists it first (review r3 of lane S, its mutant D4: keeping a
+        # window's last line passed when the smallest came last)
+        for order in ((a, b), (b, a)):
+            with self.subTest(order=[os.path.basename(p) for p in order]):
+                merge_pieces.merge_hvdr(out, list(order))
+                with open(out) as fh:
+                    got = fh.read()
+                # the upper-case letters sort first; sorted by start, end, guide
+                self.assertEqual(got, head
+                                 + "chrT\t9\t33\tG\t3\tS1\tACRTYW\t3.00\t0\t0\n"
+                                 + "chrT\t10\t33\tG\t3\tS1\tACRTYW\t3.00\t0\t1\n"
+                                 + "chrT\t50\t73\tG\t3\tS1\tAAA\t3.00\t0\t0\n")
 
     def test_companions_keep_the_first_row_of_an_identity(self):
         head = "# a note\n#Chromosome\tPosition\tDirection\tcrRNA\tDNA\tSNP\tPhase_Confirmation\n"
@@ -217,6 +226,34 @@ class MergedFiles(unittest.TestCase):
         with open(out) as fh:
             self.assertEqual(fh.read(), head + "chrT\t1\t+\tG\tD\ts1\tCONFIRMED\n"
                              + "chrT\t2\t+\tG\tD\ts1\tPUTATIVE\n")
+
+    def test_merge_snp_keeps_the_first_row_of_an_identity_across_pieces(self):
+        """merge_snp merges each SNP companion keeping the first row of each identity, as one
+        process writes them: a window whose alignments a cut put in two pieces gives each a
+        row of the same identity. (Review r3 of lane S, its mutant D3: merge_snp merging them
+        with no identity kept both, and no test saw it, as the real-script fixtures write no
+        companion: they need the dict-less tiers.)"""
+        pieces = []
+        for i in range(2):
+            p = os.path.join(self.tmp, "p%d" % i)
+            pieces.append(p)
+            for name in (".bestCFD.txt", ".bestmmblg.txt"):
+                self.put("p%d%s" % (i, name), "#Bulge_type\tcrRNA\tDNA\n")
+            for name, identity in merge_pieces._SNP_COMPANIONS.items():
+                rows = ["\t".join(["shared"] * len(identity) + ["piece %d" % i]),
+                        "\t".join(["own %d" % i] * len(identity) + ["piece %d" % i])]
+                self.put("p%d.%s" % (i, name), "# a note\n#" + "\t".join(identity + ("Note",))
+                         + "\n" + "\n".join(rows) + "\n")
+        merge_pieces.merge_snp(os.path.join(self.tmp, "m"), pieces)
+        for name, identity in merge_pieces._SNP_COMPANIONS.items():
+            with self.subTest(companion=name):
+                with open(os.path.join(self.tmp, "m." + name)) as fh:
+                    got = fh.read().splitlines()
+                self.assertEqual(got, [
+                    "# a note", "#" + "\t".join(identity + ("Note",)),
+                    "\t".join(["shared"] * len(identity) + ["piece 0"]),
+                    "\t".join(["own 0"] * len(identity) + ["piece 0"]),
+                    "\t".join(["own 1"] * len(identity) + ["piece 1"])])
 
     def test_four_allele_union_and_graph_sum(self):
         a = self.put("a.q", "#chrom\tstart\tend\nchrT\t9\t10\nchrT\t3\t4\n")
@@ -231,6 +268,82 @@ class MergedFiles(unittest.TestCase):
         merge_pieces.merge_cfd_graph(out, [g1, g2])
         with open(out) as fh:
             self.assertEqual(fh.read(), "ref\tvar\n0\t5\n2\t2\n")
+
+
+class _RunsCodeWhenLoaded(object):
+    """What a pickle can hold: loading it calls the function it names, here os.mkdir(mark)
+    (any function would do: os.system, exec)."""
+
+    def __init__(self, mark):
+        self.mark = mark
+
+    def __reduce__(self):
+        return (os.mkdir, (self.mark,))
+
+
+class TheDictionaryCopy(unittest.TestCase):
+    """The SNP pieces' copy of the chromosome's dictionary keys (postproc_pool.write_dict_copy,
+    read_dict_copy): a file of the run's output folder, which other members of its group can
+    write under a umask of 002, so it is JSON, which loads as data whoever wrote it (it was a
+    pickle, which runs what it names: review r3 of lane S, S-R3-1), and it is made 0600
+    through a name nothing stood under."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="pieces_copy_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.path = os.path.join(self.tmp, postproc_pool.DICT_COPY_NAME)
+
+    def test_round_trip_json_0600(self):
+        entries = {"chrT,5": "S1:1|0;A,G;rs1;0.1$S2:0|1;A,C;rs2;0.2", "chrT,9": "\u00e9;x"}
+        old = os.umask(0o002)
+        try:
+            postproc_pool.write_dict_copy(self.path, 1, entries)
+        finally:
+            os.umask(old)
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o600)
+        with open(self.path) as fh:
+            self.assertEqual(json.load(fh), {"haplo": True, "dict": entries})
+        haplo, got = postproc_pool.read_dict_copy(self.path)
+        self.assertIs(haplo, True)
+        self.assertEqual(got, entries)
+        self.assertEqual(list(got), list(entries))  # in the order of the dictionary
+        self.assertEqual(os.listdir(self.tmp), [postproc_pool.DICT_COPY_NAME])
+
+    def test_entries_json_cannot_hold_exactly_make_no_copy(self):
+        import decimal
+        for bad in ({"chrT,5": decimal.Decimal("0.1")}, {"chrT,5": float("nan")}):
+            with self.subTest(bad=bad):
+                with self.assertRaises((TypeError, ValueError)):
+                    postproc_pool.write_dict_copy(self.path, False, bad)
+                self.assertEqual(os.listdir(self.tmp), [])
+
+    def test_never_through_a_name_already_there(self):
+        """A link put where the copy is first written (another user's, to a file of the
+        user's): the write fails, and the file it names is left as it was."""
+        victim = os.path.join(self.tmp, "victim.txt")
+        with open(victim, "w") as fh:
+            fh.write("mine\n")
+        os.symlink(victim, self.path + ".tmp")
+        with self.assertRaises(FileExistsError):
+            postproc_pool.write_dict_copy(self.path, True, {"chrT,5": "x"})
+        with open(victim) as fh:
+            self.assertEqual(fh.read(), "mine\n")
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_a_file_that_is_no_copy_is_refused_and_runs_nothing(self):
+        mark = os.path.join(self.tmp, "ran")
+        with open(self.path, "wb") as fh:
+            import pickle
+            pickle.dump(_RunsCodeWhenLoaded(mark), fh, protocol=0)  # ASCII, so UTF-8 too
+        for text in (None, "[1, 2]", '{"haplo": 1, "dict": {}}', '{"haplo": true}'):
+            with self.subTest(text=text):
+                if text is not None:
+                    with open(self.path, "w") as fh:
+                        fh.write(text)
+                with self.assertRaises(ValueError) as err:
+                    postproc_pool.read_dict_copy(self.path)
+                self.assertIn(self.path, str(err.exception))
+                self.assertFalse(os.path.exists(mark))
 
 
 class ThePool(unittest.TestCase):
@@ -380,9 +493,23 @@ touch "$d/finished_$chrom"
 
 _FAKE_SCRIPT = r"""#!/usr/bin/env python3
 # the analysis script of a piece: its arguments and range in the run's log; on stdout what
-# one process says, its start-up and its run times
-import os, sys
-with open(os.path.join(os.environ["FAKE_DIR"], "script.log"), "a") as fh:
+# one process says, its start-up and its run times. The pool's start-up of a SNP stage
+# (CRISPRME_POSTPROC_PREPARE) writes the dictionary copy as new_simple_analysis.py does; a
+# piece given one writes in copies.log the modes of the copy and of its folder
+import os, stat, sys
+d = os.environ["FAKE_DIR"]
+prepare = os.environ.get("CRISPRME_POSTPROC_PREPARE")
+if prepare:
+    sys.path.insert(0, os.environ["FAKE_HERE"])
+    import postproc_pool
+    postproc_pool.write_dict_copy(prepare, True, {"chrT,1": "S1:1|0;A,G;rs1;0.1"})
+    raise SystemExit(0)
+copy = os.environ.get("CRISPRME_POSTPROC_DICT")
+if copy:
+    with open(os.path.join(d, "copies.log"), "a") as fh:
+        fh.write("%s %o %o\n" % (copy, stat.S_IMODE(os.stat(copy).st_mode),
+                                 stat.S_IMODE(os.stat(os.path.dirname(copy)).st_mode)))
+with open(os.path.join(d, "script.log"), "a") as fh:
     fh.write(" ".join(sys.argv[1:]) + " " + os.environ.get("CRISPRME_POSTPROC_RANGE", "-")
              + "\n")
 print("Loaded 3 SNP dictionary entr(y/ies) for chrT")
@@ -450,9 +577,9 @@ class TheStageThroughAFakeDriver(unittest.TestCase):
             with open(path, "w") as fh:
                 fh.write(text)
             os.chmod(path, 0o755)
-        saved = {k: os.environ.get(k) for k in ("TMPDIR", "FAKE_DIR", "LINES",
+        saved = {k: os.environ.get(k) for k in ("TMPDIR", "FAKE_DIR", "FAKE_HERE", "LINES",
                                                  "CRISPRME_POSTPROC_PIECES")}
-        os.environ.update(TMPDIR=self.tmpdir, FAKE_DIR=self.d, LINES="90",
+        os.environ.update(TMPDIR=self.tmpdir, FAKE_DIR=self.d, FAKE_HERE=HERE, LINES="90",
                           CRISPRME_POSTPROC_PIECES="1")
         saved_tempdir = _tf.tempdir
         _tf.tempdir = None  # read TMPDIR again
@@ -477,13 +604,13 @@ class TheStageThroughAFakeDriver(unittest.TestCase):
         postproc_pool._call = call
         self.addCleanup(setattr, postproc_pool, "_call", real_call)
 
-    def run_stage(self):
+    def run_stage(self, prepare_dict=False):
         import contextlib
         import io
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             postproc_pool.run_stage("snp", ["chrT"], 3, lambda c, st: [self.driver, c, st],
-                                    self.script, min_lines=30)
+                                    self.script, prepare_dict=prepare_dict, min_lines=30)
         return out.getvalue()
 
     def read(self, name):
@@ -530,6 +657,30 @@ class TheStageThroughAFakeDriver(unittest.TestCase):
         finally:
             postproc_pool.subprocess.call = real
         self.assertEqual(seen, [0o700])
+
+    def test_the_pieces_folder_and_the_dictionary_copy_are_the_users_alone(self):
+        """The pieces' folder sits in the run's output folder, which takes the umask (002 on
+        shared nodes: its group can write it). The pool makes it 0700, and the copy of the
+        dictionary its pieces read is made 0600 there, as JSON (review r3 of lane S, S-R3-1:
+        group-writable, and a pickle, which ran what it named)."""
+        with open(os.path.join(self.d, "dict"), "w") as fh:  # the chromosome's dictionary
+            fh.write("{}")
+        cwd = os.getcwd()
+        os.chdir(self.d)  # the manifest names the dictionary "dict", as the driver writes it
+        self.addCleanup(os.chdir, cwd)
+        old = os.umask(0o002)
+        try:
+            self.run_stage(prepare_dict=True)
+        finally:
+            os.umask(old)
+        copies = self.read("copies.log")
+        self.assertEqual(len(copies), 3, copies)
+        for line in copies:
+            path, mode, folder_mode = line.split()
+            self.assertEqual(os.path.basename(path), "dictionary.json")
+            self.assertEqual(os.path.dirname(path), os.path.join(self.d, "out_chrT.pieces"))
+            self.assertEqual((mode, folder_mode), ("600", "700"))
+        self.assertFalse(os.path.exists(os.path.join(self.d, "out_chrT.pieces")))
 
     def test_the_chromosome_says_its_own_run_time(self):
         """The pieces' "Done chrT <s>" and "ANALYSIS COMPLETE IN <s>" are theirs: the log
@@ -756,7 +907,7 @@ class PiecesThroughTheRealScripts(unittest.TestCase):
         whole_out = self.run_script([fasta, dct, targets, pam, whole, "4"], env)
         n_lines = len(self.rows)
         prefixes, piece_outs = [], []
-        prep = os.path.join(d, "dict.pkl")
+        prep = os.path.join(d, "dictionary.json")
         self.run_script([fasta, dct, targets, pam, os.path.join(d, "prep"), "4"],
                         dict(env, CRISPRME_POSTPROC_PREPARE=prep))
         self.assertTrue(os.path.exists(prep))
@@ -805,6 +956,60 @@ class PiecesThroughTheRealScripts(unittest.TestCase):
                                     for s in r[12].split(",") if s not in ("n", "NA")}
                         self.assertEqual(carriers, {"S2"} if together else set(),
                                          (kind, n_cols, together))
+
+    def test_the_dictionary_copy_is_json_and_the_users_alone(self):
+        """The start-up of the pieces (CRISPRME_POSTPROC_PREPARE) writes the dictionary keys of
+        the chromosome's lines as JSON, the dictionary's own format, 0600 whatever the umask:
+        its entries those of the dictionary."""
+        d = os.path.join(self.tmp, "copy")
+        fasta, dct, targets, pam = self.write(d)
+        prep = os.path.join(d, "dictionary.json")
+        old = os.umask(0o002)
+        try:
+            self.run_script([fasta, dct, targets, pam, os.path.join(d, "prep"), "4"],
+                            {"CRISPRME_FAST_MODE": "0", "CRISPRME_POSTPROC_PREPARE": prep})
+        finally:
+            os.umask(old)
+        self.assertEqual(os.stat(prep).st_mode & 0o777, 0o600)
+        with open(prep) as fh:
+            copy = json.load(fh)
+        with open(dct) as fh:
+            dictionary = json.load(fh)
+        self.assertEqual(sorted(copy), ["dict", "haplo"])
+        self.assertIs(copy["haplo"], True)
+        self.assertTrue(copy["dict"])
+        self.assertEqual(copy["dict"], {k: dictionary[k] for k in copy["dict"]})
+
+    def test_a_piece_runs_no_code_from_a_copy_others_can_write(self):
+        """Review r3 of lane S (S-R3-1): the pieces read the copy from the pieces' folder of the
+        run's output folder, and under a umask of 002 the folder's group could replace it
+        between the start-up and a piece's load. A pickle was loaded there, and loading one
+        runs what it names, as the user who runs the search. A pickle that makes a folder when
+        loaded, group-writable as such a member would leave it, where a piece reads its copy:
+        the piece runs none of it, and stops, naming the file."""
+        d = os.path.join(self.tmp, "planted")
+        fasta, dct, targets, pam = self.write(d)
+        mark = os.path.join(d, "ran_code_from_the_copy")
+        import pickle
+        for name, protocol in (("dictionary.json", 0), ("dictionary.pkl", 4)):
+            with self.subTest(name=name, protocol=protocol):
+                copy = os.path.join(d, name)
+                with open(copy, "wb") as fh:
+                    pickle.dump(_RunsCodeWhenLoaded(mark), fh, protocol=protocol)
+                os.chmod(copy, 0o664)
+                e = {k: v for k, v in os.environ.items() if not k.startswith("CRISPRME_")}
+                e.update(CRISPRME_SKIP_SCORER_ENV="1", CRISPRME_FAST_MODE="0",
+                         CRISPRME_POSTPROC_PIECE="1",
+                         CRISPRME_POSTPROC_RANGE="1:%d" % len(self.rows),
+                         CRISPRME_POSTPROC_DICT=copy)
+                done = subprocess.run(
+                    [sys.executable, os.path.join(HERE, "new_simple_analysis.py"), fasta, dct,
+                     targets, pam, os.path.join(d, "piece"), "4"],
+                    cwd=HERE, env=e, capture_output=True, text=True)
+                self.assertFalse(os.path.exists(mark), "a piece ran code its copy named")
+                self.assertNotEqual(done.returncode, 0, done.stdout[-2000:])
+                self.assertIn("%s is not a dictionary copy of the post-analysis" % copy,
+                              done.stderr)
 
     def test_population_level_pieces_are_one_process(self):
         whole, merged = self.one_and_pieces(3, CRISPRME_FAST_MODE="1")

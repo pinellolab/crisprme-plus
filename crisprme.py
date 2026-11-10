@@ -1512,10 +1512,14 @@ def _apply_cosmic_license(args: List[str], annotationfile: str) -> str:
         except OSError:
             # annotation dir not writable (read-only / shared install): fall back to a
             # roomy writable base -- $CRISPRME_TMPDIR, else the cwd data disk, else the
-            # tempfile default -- rather than assuming /tmp has room.
+            # tempfile default -- rather than assuming /tmp has room. In a folder of this
+            # run's own there (mkdtemp: 0700, a new name), removed with the annotation
+            # temp folders: a fixed name in a shared /tmp is one any other user of the
+            # machine can make first, the run then writing through it and reading it back.
             import tempfile
-            base_dir = _writable_tmp_base() or tempfile.gettempdir()
-            stripped = os.path.join(base_dir, f".nocosmic.{base}")
+            tmpdir = tempfile.mkdtemp(prefix="crisprme_nocosmic_", dir=_writable_tmp_base())
+            _ANNOTATION_TMPDIRS.append(tmpdir)
+            stripped = os.path.join(tmpdir, f".nocosmic.{base}")
             _kept, dropped = _c.strip_cosmic(annotationfile, stripped)
         print(
             "[complete-search] COSMIC EXCLUDED from annotation (licence-safe default): "
@@ -2907,6 +2911,25 @@ def _record_built_index_source(outputfolder: str, genomedir: str, index_name: st
         )
 
 
+def _per_sample_post_analysis_note() -> str:
+    """What the per-sample banner says of its post-analysis (2.10.0), as the switches set it:
+    the haplotype pre-check (--no-haplotype-precheck sets CRISPRME_HAPLOTYPE_PRECHECK=0 before
+    the banner) and the pieces (CRISPRME_POSTPROC_PIECES=0), read as the post-analysis reads
+    them (haplotype_precheck.switch_on: 0, false, no or off, in any case)."""
+    import haplotype_precheck as _hpc  # PostProcess is on sys.path (script_path)
+    precheck = _hpc.switch_on(os.environ, "CRISPRME_HAPLOTYPE_PRECHECK")
+    pieces = _hpc.switch_on(os.environ, "CRISPRME_POSTPROC_PIECES")
+    return (
+        "Its post-analysis "
+        + ("skips the raw targets no sample can have (the haplotype pre-check)" if precheck
+           else "expands every raw target (the haplotype pre-check is off: "
+                "--no-haplotype-precheck or CRISPRME_HAPLOTYPE_PRECHECK=0)")
+        + (" and runs in pieces over the --thread workers" if pieces
+           else " and runs one process a chromosome (CRISPRME_POSTPROC_PIECES=0)")
+        + "; pass --population-level for each window's worst case instead."
+    )
+
+
 def complete_search() -> None:
     warn_low_memory()  # non-fatal low-memory warning (Docker Desktop, etc.)
     args = input_args[2:]  # retrieve complete-search input arguments
@@ -3845,15 +3868,15 @@ def complete_search() -> None:
                 f"AF they give as 0, or not at all, has no frequency. "
                 f"To get the tiers, rebuild the index with build-index-only "
                 f"--samplesID, or download a prebuilt one (crisprme.py download --what index "
-                f"--index-name NRR_3_hg38+hg38_HGDP1kGP). Its post-analysis skips the raw targets no sample can have (the haplotype pre-check) and runs in pieces over the --thread workers; pass --population-level for each window's worst case instead."
+                f"--index-name NRR_3_hg38+hg38_HGDP1kGP). {_per_sample_post_analysis_note()}"
             )
         else:
             print(
                 "[complete-search] PER-SAMPLE analysis (%s): resolving per-sample genotypes "
                 "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and exact "
                 "joint AF. Requires a genotyped index (sites-only panels have no genotypes to resolve "
-                "-- the population-level analysis runs instead). Its post-analysis skips the raw targets no sample can have (the haplotype pre-check) and runs in pieces over the --thread workers; pass --population-level for each window's worst case instead."
-                % _why
+                "-- the population-level analysis runs instead). %s"
+                % (_why, _per_sample_post_analysis_note())
             )
     # the pre-flight has passed: the samples lists taken without --samplesID, for the pipeline
     if samples_taken:

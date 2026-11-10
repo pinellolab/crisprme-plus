@@ -7,8 +7,9 @@ batch is one request to the CRISPR-Bulge worker, and the model's floats depend o
 rows share it (the request is cut into mini-batches of the model's own size, and a row's
 float can change in its last bits with the rows beside it), so a row's score can differ in
 its last printed digit from one batching to another (measured by the 2.10.0 cost judges:
-9 of 10,227 per-sample and 80 of 890,497 population-level chr22 rows, relative difference
-up to 1.2e-5, when one chromosome's rows were scored in other batches). That is why this
+9 of 10,227 per-sample and 80 of 890,496 population-level chr22 rows, relative difference
+up to 1.2e-5, when one chromosome's rows were scored in other batches; the judges' file has
+890,497 lines with its header). That is why this
 lives in one place: a post-analysis
 cut into pieces (pool_post_analisi_snp.py, pool_post_analisi_indel.py) leaves the
 CRISPR-Bulge scoring to the merge of its pieces (merge_pieces.py), which forms exactly the

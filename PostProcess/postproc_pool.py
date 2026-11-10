@@ -17,9 +17,10 @@ goes through three steps on the pool's workers:
    whole file, so each line is analysed as one process analyses it. The SNP side first
    reads the dictionary keys of the whole chromosome once (CRISPRME_POSTPROC_PREPARE), for
    the pieces to read them from a small copy (CRISPRME_POSTPROC_DICT) instead of streaming
-   the whole dictionary each. Then merge_pieces.py joins the pieces' files into the
-   chromosome's, byte for byte those of one process (the CRISPR-Bulge scores in the batches
-   one process forms);
+   the whole dictionary each: a JSON file (write_dict_copy, read_dict_copy) in the pieces'
+   folder, which only the run's user can open. Then merge_pieces.py joins the pieces' files
+   into the chromosome's, byte for byte those of one process (the CRISPR-Bulge scores in the
+   batches one process forms);
 3. the driver's "finish" stage (adjust_cols.py and, for indels, remove_bad_indel_targets.py).
 
 A chromosome with too few lines for two pieces runs its analysis as one process, as
@@ -39,6 +40,7 @@ stderr write as a failure).
 """
 
 import heapq
+import json
 import os
 import re
 import shutil
@@ -94,6 +96,54 @@ def data_lines(path):
         for _ in fh:
             n += 1
     return n
+
+
+# The SNP side's dictionary copy: the dictionary keys a chromosome's lines need and its
+# phasing, which the start-up (CRISPRME_POSTPROC_PREPARE) reads once for the chromosome's
+# pieces (CRISPRME_POSTPROC_DICT). It is a file of the run's output folder, which other
+# members of that folder's group can write where the umask lets them (002 on many shared
+# nodes), so loading it must run no code whoever wrote it: JSON, the dictionary's own
+# format, which loads as data only. (The first copy, a pickle, ran whatever its file named
+# when a piece loaded it: 2.10.0 lane S review r3.) It is also made where only the run's
+# user can open it: in the pieces' folder (made 0700) and created 0600, never through a
+# name that already stood (O_EXCL).
+DICT_COPY_NAME = "dictionary.json"
+
+
+def write_dict_copy(path, haplo, entries):
+    """Write the dictionary copy ``path``: {"haplo": the phasing, "dict": the entries}, as
+    JSON, created 0600 beside it and then renamed onto it. Entries JSON cannot hold exactly
+    (a number other than an int or a float, a float that is not finite) raise TypeError or
+    ValueError before any file is made; the pieces then read the dictionary themselves, as
+    one process does."""
+    text = json.dumps({"haplo": bool(haplo), "dict": entries}, allow_nan=False)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def read_dict_copy(path):
+    """The dictionary copy ``path`` (write_dict_copy) as (haplo, entries); a file that is not
+    one raises ValueError, so a piece never runs without it."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            copy = json.load(fh)
+    except ValueError as err:  # not UTF-8 JSON (json.JSONDecodeError, UnicodeDecodeError)
+        raise ValueError(f"{path} is not a dictionary copy of the post-analysis: {err}") \
+            from None
+    if (not isinstance(copy, dict) or not isinstance(copy.get("haplo"), bool)
+            or not isinstance(copy.get("dict"), dict)):
+        raise ValueError(f"{path} is not a dictionary copy of the post-analysis")
+    return copy["haplo"], copy["dict"]
 
 
 class TaskPool(object):
@@ -283,7 +333,7 @@ def run_stage(kind, chroms, workers, driver_args, script, prepare_dict=False,
         a = list(args)
         a[out_at] = os.path.join(pdir, "prepare")
         env = dict(base_env)
-        dict_copy = os.path.join(pdir, "dictionary.pkl")
+        dict_copy = os.path.join(pdir, DICT_COPY_NAME)
         env["CRISPRME_POSTPROC_PREPARE"] = dict_copy
         # its output is the start-up's, which the first piece's repeats
         _call_logged([script] + a, os.path.join(pdir, "prepare.log"), env=env,
@@ -317,7 +367,11 @@ def run_stage(kind, chroms, workers, driver_args, script, prepare_dict=False,
             return
         pdir = args[out_at] + ".pieces"
         shutil.rmtree(pdir, ignore_errors=True)
-        os.makedirs(pdir)
+        # the pieces' files, the dictionary copy among them, for the run's user alone (the
+        # output folder takes the umask, and 002 lets its group write there); anything left
+        # under this name that the line above could not remove (another user's folder, a
+        # link) stops the stage (FileExistsError), and is never used
+        os.makedirs(pdir, mode=0o700)
         rngs = ranges(lines, n)
         _say([f"Post-analysis {kind.upper()} of {chrom}: {lines} line(s) in {n} piece(s)"])
         dict_path = args[1] if kind == "snp" else None

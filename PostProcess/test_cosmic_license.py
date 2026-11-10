@@ -121,6 +121,48 @@ class TestStripCosmicConcurrency(unittest.TestCase):
             self.assertNotIn("_COSMIC", body)      # output still valid + cosmic-free
             self.assertIn("ENCODE_cCRE_1", body)
 
+    def test_never_through_a_name_already_there(self):
+        """The strip writes beside its output, in Annotations/ of a data folder others may
+        write (a lab's), under a name made of its process id. Another user could have put a
+        link there first, to a file of the user's: the strip then overwrote that file with
+        the annotation's lines (2.10.0). It makes its own file now (O_EXCL): a name that
+        already stands fails it (the caller then strips into a folder of the run's own), and
+        the file the link names is left as it was."""
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "ann.bed")
+            with open(src, "w") as fh:
+                fh.writelines(_BED_ROWS)
+            victim = os.path.join(d, "victim.txt")
+            with open(victim, "w") as fh:
+                fh.write("mine\n")
+            for out in (os.path.join(d, ".nocosmic.ann.bed"),
+                        os.path.join(d, ".nocosmic.ann.bed.gz")):
+                with self.subTest(out=os.path.basename(out)):
+                    link = out + ".%d.tmp" % os.getpid()
+                    os.symlink(victim, link)
+                    with self.assertRaises(FileExistsError):
+                        cl.strip_cosmic(src, out)
+                    with open(victim) as fh:
+                        self.assertEqual(fh.read(), "mine\n")
+                    self.assertFalse(os.path.exists(out))
+                    os.remove(link)
+                    # and with no such name, the strip as before, its mode the umask's
+                    old = os.umask(0o022)
+                    try:
+                        self.assertEqual(cl.strip_cosmic(src, out), (3, 2))
+                    finally:
+                        os.umask(old)
+                    self.assertEqual(os.stat(out).st_mode & 0o777, 0o644)
+                    opener = gzip.open if out.endswith(".gz") else open
+                    with opener(out, "rt") as fh:
+                        self.assertEqual(fh.read(), "".join(
+                            r for r in _BED_ROWS if "_COSMIC" not in r))
+                    self.assertEqual(sorted(os.listdir(d)), sorted(
+                        ["ann.bed", "victim.txt"]
+                        + [os.path.basename(p) for p in
+                           (os.path.join(d, ".nocosmic.ann.bed"),
+                            os.path.join(d, ".nocosmic.ann.bed.gz")) if os.path.exists(p)]))
+
     def test_tmp_name_is_not_the_racy_fixed_suffix(self):
         """Guard the fix: the temp must not be the fixed '<out_bed>.tmp' that races."""
         import inspect

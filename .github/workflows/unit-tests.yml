@@ -691,15 +691,27 @@ jobs:
         # them; and the real new_simple_analysis.py with the pre-check on and off (the same
         # files): a skipped target's reference row, bulged targets (RNA, DNA) skipped and kept
         # on the dictionary path and the observed one, a minus-strand target, a registry-only
-        # dataset's rows; one BED line a dense window; the K-skip; the wide-budget warning.
+        # dataset's rows, a fixing ALT a three-allele column lists second; one BED line a
+        # dense window; the K-skip; the wide-budget warning.
         working-directory: PostProcess
         run: python -m unittest test_haplotype_precheck -v
 
       - name: "Option P (2.10.0): a chromosome's post-analysis in pieces, merged byte for byte"
-        # merge_pieces scores CRISPR-Bulge in the batches one process forms; the pool's
-        # ranges and its first-failure stop; the real new_simple_analysis.py and
-        # analisi_indels_NNN.py as one process and as pieces merged give the same files, and
-        # analisi_indels_NNN.py the same with its carriers-first pre-check on and off (a
-        # target at exactly the budget among them); the notes say what is off.
+        # merge_pieces scores CRISPR-Bulge in the batches one process forms, and keeps one
+        # line a dense window and the first companion row of an identity whatever piece holds
+        # them; the pool's ranges and its first-failure stop; its pieces' folder 0700 and their
+        # dictionary copy JSON and 0600, in which a planted pickle runs nothing; the real
+        # new_simple_analysis.py and analisi_indels_NNN.py as one process and as pieces merged
+        # give the same files, and analisi_indels_NNN.py the same with its carriers-first
+        # pre-check on and off (a target at exactly the budget among them); the notes say
+        # what is off.
         working-directory: PostProcess
         run: python -m unittest test_postproc_pieces -v
+
+      - name: "No code loads a file in a way that runs code, nor takes a temporary name another user can make first"
+        # The pieces once read a pickle from the run's output folder, which its group could
+        # replace (2.10.0, the review of lane S, round 3): over every module's parse tree but
+        # the tests, no pickle, marshal, shelve or the like, no eval or exec, no unsafe YAML
+        # load, no tempfile.mktemp; in the shell scripts, no eval and no name mktemp did not make.
+        working-directory: PostProcess
+        run: python -m unittest test_no_code_from_files -v
