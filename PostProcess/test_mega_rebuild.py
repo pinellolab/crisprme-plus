@@ -226,6 +226,78 @@ class TheRecipe(bio._Fixture):
         with open(sid) as fh:
             self.assertEqual(fh.read(), self.SAMPLES_ID.replace("\tNA\n", "\tunknown\n"))
 
+    def test_a_second_record_of_one_allele_is_left_out_of_every_part(self):
+        """One REF>ALT on two PASS records at a position (the as-run merge wrote 8 indels
+        so, genome-wide, long deletions with one AF_max on both lines): the build input
+        keeps the more frequent record (INFO/AF = AF_max; on a tie the earlier), so the
+        enricher, which gives each indel record a window and a log row of its own, the
+        indel frequencies and the registry read one record each, and the checks pass. With
+        both records the checks of chr21 failed ("1 allele(s) on more than one row";
+        review r1 of lane M, M-R1-3). (The stub enricher windows one insertion whatever the
+        VCF: the build input is what the real one reads.)"""
+        for chrom, seq in bio.GENOME.items():
+            path = os.path.join(self.src, f"mega.{chrom}.afmax.vcf.gz")
+            with gzip.open(path, "rt") as fh:
+                lines = fh.read().splitlines()
+            lines += [
+                # the insertion at 26 again, its AF_max the first one's (a tie)
+                "\t".join([chrom, "26", ".", seq[25], seq[25] + "T", ".", "PASS",
+                           "AF_HGDP=0.125;AF_max=0.25"]),
+                # the SNV at 11 again, more frequent: its frequencies are the allele's
+                "\t".join([chrom, "11", "rs9", "A", "G", ".", ".",
+                           "AF_HGDP=0.5;AF_max=0.5"]),
+            ]
+            head = [ln for ln in lines if ln.startswith("#")]
+            body = sorted((ln for ln in lines if not ln.startswith("#")),
+                          key=lambda ln: int(ln.split("\t")[1]))
+            write_vcf(path, [ln.split("\t") for ln in body],
+                      header=[h for h in head if h.startswith("##") and
+                              not h.startswith("##fileformat")])
+        done = self.rebuild()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("SUMMARY: 2 chroms, 2 SNP alleles + 2 indel-path alleles, ALL PASS",
+                      done.stdout)
+        self.assertIn("second_records_of_one_allele=2", done.stdout)
+        self.assertIn("2 left out as a second record of one REF>ALT", done.stderr)
+        vdir = self.path("VCFs", "hg38_mega")
+        with gzip.open(os.path.join(vdir, "mega.chr1.build.vcf.gz"), "rt") as fh:
+            body = [ln.rstrip("\n").split("\t") for ln in fh if not ln.startswith("#")]
+        self.assertEqual([(r[1], r[2], r[7]) for r in body], [
+            ("11", "rs9", "AF_HGDP=0.5;AF_max=0.5;AF=0.5"),
+            ("26", "rs2", "AF_TOPMed=0.25;AF_max=0.25;AF=0.25")])
+        import build_mega_indel_af as bmi
+        store = bmi.IndelAfReader(self.path("Dictionaries", "indel_af_hg38_mega",
+                                            "indel_af_chr1.tsv.gz"))
+        seq = bio.GENOME["chr1"]
+        self.assertEqual(store.lookup(26, seq[25], seq[25] + "T"),
+                         {"TOPMed": 0.25, "AF_max": 0.25})
+        from tier0_registry import RegistryReader, GLOBAL_GROUP_ID
+        reg = RegistryReader(self.path("Dictionaries", "registry_hg38_mega", "reg_chr1.bin"),
+                             self.path("Dictionaries", "registry_hg38_mega", "reg_chr1.idx"))
+        self.assertAlmostEqual(reg.lookup(11, "G")[GLOBAL_GROUP_ID].allele_freq(), 0.5,
+                               places=3)
+        reg.close()
+
+    def test_another_pam_on_the_finished_install_names_no_samples_id(self):
+        """The recipe's way to another PAM is build-index-only on the finished install
+        (its header): that build keeps the registry and the indel frequencies in place and
+        says where a sites-only dataset's come from, not to run it again with --samplesID,
+        which such a dataset has none of (review r1 of lane M, M-R1-N2)."""
+        done = self.rebuild()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        nrr = os.path.join(REPO, "PAMs", "20bp-NRR-SpCas9.txt")
+        shutil.copy(nrr, self.path("PAMs", os.path.basename(nrr)))
+        rc, out, err = self.finish(self.start(command=[
+            "build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam",
+            self.path("PAMs", os.path.basename(nrr)), "--bDNA", "1", "--bRNA", "1",
+            "--thread", "2", "--path", self.work, "--vcf", self.path("VCFs", "hg38_mega")]))
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertIn("NOTE [build-index-only]: hg38_mega is a sites-only dataset: its "
+                      "registry", out)
+        self.assertIn("not from --samplesID", out)
+        self.assertNotIn("run this again with --samplesID", out)
+        self.assertTrue(os.path.isdir(self.lib("20-NRR_2_hg38+hg38_mega")))
+
     def test_the_checks_fail_a_registry_that_reads_every_record(self):
         # the shipped mega's registry read every record whatever its FILTER: the checks
         # of the recipe catch it (the LOW_VQSLOD SNV at 31 is no allele the genome codes)

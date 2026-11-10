@@ -8,9 +8,13 @@ What the enricher reads (its docs/MULTIALLELIC_ENRICHMENT.md, re-derived here, n
 from build_mega_registry.py, which this checks): the records whose FILTER is PASS or '.';
 a SNP allele is an ALT of one upper-case A, C, G or T over a REF of one base; an indel-path
 allele is one of a record whose REF or ALT is longer than one base, of another length or
-both longer than one base, not symbolic, at POS 26 or more (a window from the chromosome's
-start); one REF>ALT on two records is one allele, with the more frequent record's
-frequencies (the higher AF_max, the build input's INFO/AF; on a tie, the earlier).
+both longer than one base, not symbolic, at POS LEFT or more (a window from the chromosome's
+start: LEFT the window's left flank, 26 with the 25/27 window of CRISPRitz 2.10.0's enricher,
+read from the indel log with --log); one REF>ALT on two records is one allele, with the more
+frequent record's frequencies (the higher AF_max, the build input's INFO/AF; on a tie, the
+earlier): the build input keeps that record alone (prepare_mega_build_vcf.py), as the
+enricher, which merges two SNP records of one allele in its dictionaries, gives each indel
+record a window and a log row of its own.
 
 Checks, each a FAIL with its first examples:
   * registry: its records are exactly the SNP alleles (every one read back by position and
@@ -27,7 +31,8 @@ Checks, each a FAIL with its first examples:
     IUPAC code stays as it is; a reference IUPAC base adds nothing of its own), and differs
     from the reference nowhere else;
   * --build-vcf-dir DIR (VCFs/<dataset>/, mega.<chrom>.build.vcf.gz): the build input holds
-    the VCF's PASS and '.' records, each with INFO/AF its AF_max.
+    the VCF's PASS and '.' records, one record of each REF>ALT (the more frequent), each
+    with INFO/AF its AF_max.
 
 Usage: verify_mega_chrom.py <gw_dir> <reg_dir> <indel_dir> <chrom> [<chrom>...]
           [--log DIR] [--enriched DIR --reference DIR] [--build-vcf-dir DIR]
@@ -54,7 +59,31 @@ _IUPAC = {frozenset("AG"): "R", frozenset("CT"): "Y", frozenset("CG"): "S",
           frozenset("CGT"): "B", frozenset("AGT"): "D", frozenset("ACT"): "H",
           frozenset("ACG"): "V", frozenset("ACGT"): "Q"}
 _REFERENCE_CODES = set(_BASES) | set("RYSWKMBDHV")
+# the enricher's left flank of a fake-indel window (25/27 in CRISPRitz 2.10.0's enricher): no
+# window of an indel at POS < LEFT. --log reads it from the indel log (window_left_of_log).
 LEFT = 26
+
+
+def window_left_of_log(log_dir, chrom):
+    """The left flank of the enricher's fake-indel windows, as the chromosome's indel log
+    shows it: an indel's POS less its window's start (its CHR, <chrom>_<start>-<end>_<n>), or
+    None when the log has no row to read."""
+    for name in ("log%s.txt.gz" % chrom, "log%s.txt" % chrom):
+        path = os.path.join(log_dir, name)
+        if not os.path.isfile(path):
+            continue
+        opener = gzip.open if path.endswith(".gz") else open
+        with opener(path, "rt") as fh:
+            hdr = fh.readline().rstrip("\n").split("\t")
+            ix = {h: i for i, h in enumerate(hdr)}
+            for line in fh:
+                f = line.rstrip("\n").split("\t")
+                try:
+                    start = int(f[ix["CHR"]].rsplit("_", 2)[-2].split("-")[0])
+                    return int(f[ix["indel"]].rsplit("_", 3)[1]) - start
+                except (KeyError, IndexError, ValueError):
+                    continue
+    return None
 
 
 def _info(info):
@@ -91,10 +120,25 @@ def _afs(info, k, n):
     return afs, mx
 
 
-def read_source(vcf):
+def _rank(info, k, n):
+    """How two records of one allele are told apart: the higher AF_max (the build input's
+    INFO/AF), 0 when it is missing or unreadable, as the enricher ranks INFO/AF; on a tie,
+    the earlier."""
+    vals = _info(info).get("AF_max", "").split(",")
+    try:
+        return float(vals[k]) if len(vals) == n else 0.0
+    except ValueError:
+        return 0.0
+
+
+def read_source(vcf, left=LEFT):
     """({(pos, REF, ALT): (afs, af_max)} of the SNP alleles, the same of the indel-path
-    alleles, the number of PASS/'.' records), as the enricher reads the VCF."""
-    snps, indels, n_pass = {}, {}, 0
+    alleles, the number of PASS/'.' records, the number of them the build input keeps), as
+    the enricher reads the VCF: one record of each REF>ALT, the more frequent (_rank),
+    gives the allele's frequencies, and a record is left out when another one has each of
+    its ALTs; ``left``, the enricher's left flank (no window of an indel at POS < left)."""
+    best = {}     # (pos, REF, ALT) -> (rank, record, k, ALTs of the record, INFO)
+    alleles = []  # the (pos, REF, ALT) of each PASS/'.' record's ALTs, in record order
     with gzip.open(vcf, "rt") as fh:
         for line in fh:
             if line[0] == "#":
@@ -102,26 +146,31 @@ def read_source(vcf):
             f = line.rstrip("\n").split("\t")
             if len(f) < 8 or f[6] not in _PASS:
                 continue
-            n_pass += 1
             pos, ref, alts, info = int(f[1]), f[3], f[4].split(","), f[7]
-            n = len(alts)
+            keys = []
             for k, a in enumerate(alts):
-                if len(ref) == 1 and a in _BASES:
-                    store = snps
-                elif ((len(ref) > 1 or any(len(x) > 1 for x in alts)) and "<" not in ref
-                      and "<" not in a and (len(a) != len(ref) or (len(a) > 1 and len(ref) > 1))
-                      and pos >= LEFT):
-                    store = indels
-                else:
-                    continue
-                afs, mx = _afs(info, k, n)
-                if not afs:
-                    continue
                 key = (pos, ref, a)
-                have = store.get(key)
-                if have is None or (mx or 0.0) > (have[1] or 0.0):
-                    store[key] = (afs, mx)
-    return snps, indels, n_pass
+                keys.append(key)
+                rank = _rank(info, k, len(alts))
+                if key not in best or rank > best[key][0]:
+                    best[key] = (rank, len(alleles), k, alts, info)
+            alleles.append(keys)
+    snps, indels = {}, {}
+    for (pos, ref, a), (_rank_of, _i, k, alts, info) in best.items():
+        if len(ref) == 1 and a in _BASES:
+            store = snps
+        elif ((len(ref) > 1 or any(len(x) > 1 for x in alts)) and "<" not in ref
+              and "<" not in a and (len(a) != len(ref) or (len(a) > 1 and len(ref) > 1))
+              and pos >= left):
+            store = indels
+        else:
+            continue
+        afs, mx = _afs(info, k, len(alts))
+        if afs:
+            store[(pos, ref, a)] = (afs, mx)
+    n_build = sum(1 for i, keys in enumerate(alleles)
+                  if any(best[key][1:3] == (i, k) for k, key in enumerate(keys)))
+    return snps, indels, len(alleles), n_build
 
 
 def _registry_keys(reg):
@@ -211,11 +260,13 @@ def check_log(log_dir, chrom, indels, errs):
     return rows
 
 
-def check_build_vcf(path, n_pass, errs):
+def check_build_vcf(path, n_build, errs):
+    """The build input: ``n_build`` records (the source's PASS/'.' ones, one of each
+    REF>ALT), every one PASS or '.', INFO/AF its AF_max, and no REF>ALT on two of them."""
     if not os.path.isfile(path):
         errs.append("no build input %s" % path)
         return
-    n, bad = 0, 0
+    n, bad, seen, twice = 0, 0, set(), 0
     with gzip.open(path, "rt") as fh:
         for line in fh:
             if line[0] == "#":
@@ -228,13 +279,21 @@ def check_build_vcf(path, n_pass, errs):
                 if bad <= 3:
                     errs.append("build input %s:%s FILTER %s AF %s AF_max %s" % (
                         f[0], f[1], f[6], kv.get("AF"), kv.get("AF_max")))
-    if n != n_pass:
-        errs.append("build input %d records, the source's PASS/. records %d" % (n, n_pass))
+            for a in f[4].split(","):
+                key = (f[1], f[3], a)
+                twice += key in seen
+                seen.add(key)
+    if n != n_build:
+        errs.append("build input %d records, the source's PASS/. records less those of a "
+                    "REF>ALT another one has %d" % (n, n_build))
+    if twice:
+        errs.append("build input: %d REF>ALT(s) on more than one record" % twice)
 
 
 def verify(gw, regd, indd, chrom, log=None, enriched=None, reference=None, build_dir=None):
     vcf = os.path.join(gw, "mega.%s.afmax.vcf.gz" % chrom)
-    snps, indels, n_pass = read_source(vcf)
+    left = (window_left_of_log(log, chrom) if log else None) or LEFT
+    snps, indels, n_pass, n_build = read_source(vcf, left)
     errs = []
     reg = RegistryReader(os.path.join(regd, "reg_%s.bin" % chrom),
                          os.path.join(regd, "reg_%s.idx" % chrom))
@@ -289,7 +348,11 @@ def verify(gw, regd, indd, chrom, log=None, enriched=None, reference=None, build
                                os.path.join(reference, "%s.fa" % chrom), snps, errs)
         extra.append("coded_positions=%d" % coded)
     if build_dir:
-        check_build_vcf(os.path.join(build_dir, "mega.%s.build.vcf.gz" % chrom), n_pass, errs)
+        check_build_vcf(os.path.join(build_dir, "mega.%s.build.vcf.gz" % chrom), n_build, errs)
+    if n_build != n_pass:
+        extra.append("second_records_of_one_allele=%d" % (n_pass - n_build))
+    if left != LEFT:
+        extra.append("window_left=%d" % left)
     ok = not errs
     print("%s: %s  pass_records=%d snp_alleles=%d indel_alleles=%d registry=%d indel_store=%d"
           " %s %s" % (chrom, "PASS" if ok else "FAIL", n_pass, len(snps), len(indels),

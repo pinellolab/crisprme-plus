@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import heapq
 import sys
 import time
 
@@ -1005,104 +1006,178 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
 
 
 # The offsets of a row's first base past its start (_haplotype_cluster_position), read once
-# per target and REF text: the merge's chain reads them, and the fold of each cluster again.
-# Emptied at each guide and chromosome.
+# per target and REF text: the merge's placement reads them, and the fold of each cluster
+# again. Emptied at each guide and chromosome.
 _FIRST_BASE_MEMO = {}
 
 
-def _inside_offset(row):
-    """How far past its Cluster_Position a row is on the haplotype carrying its indel
-    (_haplotype_cluster_position): more than 0 for a row whose first base is one an
-    insertion adds, which since 2.10.0 starts at the insertion's anchor; 0 for any other."""
+def _inside_place(row):
+    """(anchor, place on the haplotype) of a row whose first base is one an insertion adds;
+    None for any other row. Since 2.10.0 such a row starts at the insertion's anchor
+    (indel_snp_cis.reference_start): its Position is the anchor whatever its bulges, and its
+    place on the haplotype carrying the insertion (_haplotype_cluster_position) is past its
+    Cluster_Position by the rank of its first base among the inserted ones, the same for
+    one target's alignments before one PAM."""
     if not _holds_indel_token(row[snp_info]):
-        return 0
-    return max(0, _haplotype_cluster_position(row, _FIRST_BASE_MEMO) - int(row[pos]))
+        return None
+    place = _haplotype_cluster_position(row, _FIRST_BASE_MEMO)
+    if place <= int(row[pos]):
+        return None
+    return int(row[pos - 1]), place
 
 
-def _clusters(lines):
+def _max_shift(path):
+    """The largest difference between a row's Cluster_Position and its Position in the
+    merge's input ``path``: the most an alignment's bulges move its Cluster_Position off its
+    start, and so the most a row that starts inside an insertion is off the insertion's
+    anchor. _clusters reads the rows by their place in the chain through a window this
+    wide. One pass over the file, reading two columns of each line."""
+    shift = 0
+    with open(path) as fh:
+        fh.readline()
+        for line in fh:
+            f = line.split("\t", pos + 1)
+            try:
+                d = abs(int(f[pos]) - int(f[pos - 1]))
+            except (IndexError, ValueError):
+                continue
+            if d > shift:
+                shift = d
+    return shift
+
+
+def _clusters(lines, shift=0):
     """The merge clusters of ``lines`` (sorted by guide, chromosome and Cluster_Position),
-    each a list of rows in file order, in the order of their Cluster_Positions.
+    each a list of rows in file order, in the order of their places.
 
     Rows within --merge bp (tau) of the previous one are one cluster, chained: one row of a
     population-level search. Since 2.10.0 a row that starts on a base an insertion adds
     starts at the insertion's anchor (indel_snp_cis.reference_start), up to the
     insertion's length before where 2.8.1 placed it, and the alignments that start inside
-    one insertion are one site, at the anchor (decision (d), 2026-11-06: an indel row can
-    join a reference row's site there). Chained like any other row, such a row bridged two
-    clusters 2.8.1 kept apart, and a site of its own left the results for a neighbour's
-    cluster: on hg38_mega chr22, population-level, chr22:36,838,374 + of VEGFA site 3 and
-    chr22:47,379,217 + of EMX1 (the insertion rows chr22_36838378_A_ATGTG... and
-    chr22_47379212_A_AGGAGG... moved to their anchors, between them and the next cluster).
-    So the chain is made of the other rows, and a row starting inside an insertion joins
-    the cluster within tau of its Cluster_Position -- of two, the one nearer its place on
-    the haplotype, the next on a tie (where 2.8.1 had it) -- or, with none, a cluster with
-    the others of its kind within tau of it: it joins a site, and never chains two."""
+    one insertion are one site, at the anchor (decision (d), 2026-11-06: such a site can
+    join a reference row's there).
+
+    Chained like any other row, such a row bridged two clusters 2.8.1 kept apart, and a
+    site of its own left the results for a neighbour's cluster: on hg38_mega chr22,
+    population-level, chr22:36,838,374 + of VEGFA site 3 and chr22:47,379,217 + of EMX1
+    (the insertion rows chr22_36838378_A_ATGTG... and chr22_47379212_A_AGGAGG... moved to
+    their anchors, between them and the next cluster). Placed one by one, each by its own
+    Cluster_Position, they split one target in two: its alignments before one PAM with
+    different bulges have different Cluster_Positions (on the + strand with a 3' PAM a DNA
+    bulge adds one, an RNA bulge takes one off), so with a site on either side the plain
+    alignment joined one and its bulged alignment the other, and the fold
+    (_fold_same_carriers), which works within a cluster, wrote both: chr22:45,890,432 (+)
+    of VEGFA site 3 twice on HGDP + 1000 Genomes, CFD 0.179 and 0.172, one insertion and
+    one carrier.
+
+    So the chain is made of the other rows, and the rows that start inside an insertion
+    at one anchor are placed together, one unit, which joins the cluster whose rows lie
+    within tau of its rows (of their Cluster_Positions, the smallest to a cluster before
+    the unit, the largest to one after it) -- of two, the one nearer its place on the
+    haplotype (the nearest of its rows'), the next on a tie, where 2.8.1 had it -- or, with
+    none, a cluster with the other such units within tau of it: a unit joins one site and
+    never chains two. Its rows reach the merge in the order of their Cluster_Positions, up
+    to a bulge's length (``shift``, _max_shift) either side of their anchor, so the rows are
+    taken in the order of their place in the chain, the anchor for a unit's row and the
+    Cluster_Position for any other, through a window of ``shift`` bp: every row of a unit
+    is in when it is placed. A row's place, and so its cluster, does not depend on the
+    order of the rows of one Cluster_Position, which the three merges sort differently
+    (each must make the same clusters: their alternative alignments are pasted line by
+    line). Without such rows the clusters are those of the plain chain, as up to 2.8.1."""
     group = None
+    window = []      # (place in the chain, 1 for a unit's row, seq, row, cp, haplotype place)
     current = None   # [last Cluster_Position of its chain, [(seq, row)]]
-    pending = []     # (seq, row, Cluster_Position, place on the haplotype) to be placed
+    pending = []     # [anchor, lowest cp, highest cp, nearest haplotype place, [(seq, row)]]
     seq = 0
 
     def place(nxt_cp):
         """Clusters to emit before a chain row of Cluster_Position nxt_cp (None: the group's
-        end) starts a cluster of its own, and the rows of ``pending`` that join it."""
+        end) starts a cluster of its own, and the rows of the ``pending`` units that join
+        it."""
         out, joins, alone = [], [], []
-        for item in pending:
-            _s, _r, cp, hp = item
-            to_cur = current is not None and cp - current[0] <= tau
-            to_next = nxt_cp is not None and nxt_cp - cp <= tau
+        for unit in pending:
+            _at, lo, hi, hp, rows = unit
+            to_cur = current is not None and lo - current[0] <= tau
+            to_next = nxt_cp is not None and nxt_cp - hi <= tau
             if to_cur and to_next:
                 if abs(nxt_cp - hp) <= abs(hp - current[0]):
-                    joins.append(item)
+                    joins.extend(rows)
                 else:
-                    current[1].append(item[:2])
+                    current[1].extend(rows)
             elif to_cur:
-                current[1].append(item[:2])
+                current[1].extend(rows)
             elif to_next:
-                joins.append(item)
+                joins.extend(rows)
             else:
-                alone.append(item)
+                alone.append(unit)
         if current is not None:
             out.append(current[1])
         chain, last = [], None
-        for item in alone:
-            if chain and item[2] - last > tau:
+        for _at, lo, hi, _hp, rows in alone:
+            if chain and lo - last > tau:
                 out.append(chain)
                 chain = []
-            chain.append(item[:2])
-            last = item[2]
+            chain.extend(rows)
+            last = hi if last is None else max(last, hi)
         if chain:
             out.append(chain)
-        return out, [j[:2] for j in joins]
+        return out, joins
+
+    def take(item):
+        """Take one row in its place in the chain; return the clusters it completes."""
+        nonlocal current, pending
+        at, in_unit, s, row, cp, hp = item
+        if in_unit:
+            if pending and pending[-1][0] == at:
+                unit = pending[-1]
+                unit[1], unit[2], unit[3] = min(unit[1], cp), max(unit[2], cp), min(unit[3], hp)
+                unit[4].append((s, row))
+            else:
+                pending.append([at, cp, cp, hp, [(s, row)]])
+            return []
+        if current is not None and at - current[0] <= tau:
+            # the chain goes on: the units held lie within it
+            for unit in pending:
+                current[1].extend(unit[4])
+            pending = []
+            current[0] = at
+            current[1].append((s, row))
+            return []
+        done, joins = place(at)
+        pending = []
+        current = [at, joins + [(s, row)]]
+        return done
+
+    def drain():
+        """The clusters of the rest of a guide and chromosome."""
+        out = []
+        while window:
+            out.extend(take(heapq.heappop(window)))
+        out.extend(place(None)[0])
+        return out
 
     for line in lines:
         row = line.split("\t")
         key = (row[true_guide], row[chrom])
         if key != group:
             if group is not None:
-                done, _joins = place(None)
-                for c in done:
+                for c in drain():
                     yield [r for _s, r in sorted(c, key=lambda x: x[0])]
             current, pending, group = None, [], key
             _FIRST_BASE_MEMO.clear()
         cp = int(row[pos])
-        if _inside_offset(row):
-            pending.append((seq, row, cp, cp + _inside_offset(row)))
-        elif current is not None and cp - current[0] <= tau:
-            # the chain goes on: the inside rows held lie within it
-            current[1].extend(item[:2] for item in pending)
-            pending = []
-            current[0] = cp
-            current[1].append((seq, row))
+        inside = _inside_place(row)
+        if inside is None:
+            heapq.heappush(window, (cp, 0, seq, row, cp, cp))
         else:
-            done, joins = place(cp)
-            for c in done:
-                yield [r for _s, r in sorted(c, key=lambda x: x[0])]
-            pending = []
-            current = [cp, joins + [(seq, row)]]
+            heapq.heappush(window, (inside[0], 1, seq, row, cp, inside[1]))
         seq += 1
+        # every row still to come is at cp - shift or after in the chain
+        while window and window[0][0] < cp - shift:
+            for c in take(heapq.heappop(window)):
+                yield [r for _s, r in sorted(c, key=lambda x: x[0])]
     if group is not None:
-        done, _joins = place(None)
-        for c in done:
+        for c in drain():
             yield [r for _s, r in sorted(c, key=lambda x: x[0])]
 
 
@@ -1121,13 +1196,14 @@ sort_criteria = str(sys.argv[11])
 # -1 is to get the correct "python enumeration" from the bash script
 
 start = time.time()
+shift = _max_shift(sys.argv[1])
 with open(sys.argv[1], "r") as fileIn:
     header = fileIn.readline()
     with open(sys.argv[2], "w") as fileOut:
         with open(sys.argv[2] + ".discarded_samples", "w") as fileOut_disc:
             fileOut.write(header)
             fileOut_disc.write(header)
-            for cluster in _clusters(fileIn):
+            for cluster in _clusters(fileIn, shift):
                 get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info)
 
 print("Merging done in: " + str(time.time() - start))

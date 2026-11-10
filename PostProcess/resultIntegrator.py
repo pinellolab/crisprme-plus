@@ -402,11 +402,15 @@ try:
             _bits = _f[7] if len(_f) > 7 else ""
             # a BED of 2.8.1 has no such column: its note said so of every window
             _greedy = _f[9] != "0" if len(_f) > 9 else True
+            # 2.10.0: "withheld", a window the sites-only density guard took out of a
+            # sites-only dataset's post-analysis (sites_only_guard.py): no row of it
+            _withheld = len(_f) > 9 and _f[9] == "withheld"
             hvdr_by_chrom.setdefault(_chrom, IntervalTree())[_s - 1 : _e + 1] = (
                 _nvar,
                 _iupac,
                 _bits,
                 _greedy,
+                _withheld,
             )
 except Exception as _hvdr_err:  # never break integration on a bad/missing bed
     print("high-variant-density BED join skipped:", _hvdr_err)
@@ -441,11 +445,18 @@ def _hvdr_note(chrom, pos, greedy=True):
     hits = tree[pos]
     if not hits:
         return "NA"
-    nvar, iupac, bits, window_greedy = sorted(hits)[0].data
+    nvar, iupac, bits, window_greedy, withheld = sorted(hits)[0].data
     note = "high_variant_density (%s variants%s)" % (
         nvar, ", 2^%s sequences" % bits if bits else ""
     )
-    if greedy or window_greedy:
+    if withheld:
+        # the sites-only density guard withheld the window's candidates of a sites-only
+        # dataset (the mega) from its post-analysis: none of its alignments is a row
+        note += (
+            ": the sites-only density guard withheld a sites-only dataset's alignments "
+            "of this window; other haplotype alignments may exist"
+        )
+    elif greedy or window_greedy:
         note += (
             ": a greedy worst-case alignment is reported here; additional haplotype "
             "alignments may exist"

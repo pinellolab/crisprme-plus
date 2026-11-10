@@ -6,9 +6,12 @@
 # the index then reads one set of records, the ones CRISPRitz's enricher reads:
 #
 #   1. the build input (PostProcess/prepare_mega_build_vcf.py): only the records whose
-#      FILTER is PASS or '.', and INFO/AF = AF_max for SNVs and indels alike (the global
+#      FILTER is PASS or '.', INFO/AF = AF_max for SNVs and indels alike (the global
 #      frequency the enricher writes into the indel log; the as-run merge wrote no AF, so
-#      every indel row of the shipped mega showed none);
+#      every indel row of the shipped mega showed none), and one record of each REF>ALT,
+#      the more frequent (the enricher merges two SNP records of one allele, but gives each
+#      indel record a window and a log row of its own; the as-run merge wrote 8 indels on
+#      two lines genome-wide, none on chr22 or chr14);
 #   2. the presence genotype (PostProcess/synth_sites_gt.py): one pseudo-sample, MEGA,
 #      carrying every ALT of every record, so the enricher windows every indel (it windows
 #      an indel a sample carries; a sites-only VCF has none);
@@ -23,7 +26,8 @@
 #   5. the registry (PostProcess/build_mega_registry.py) and the per-source indel
 #      frequencies (PostProcess/build_mega_indel_af.py) from the build input, both reading
 #      it as the enricher does: FILTER PASS or '.', the SNP ALTs it codes, every allele of a
-#      line, one REF>ALT on two records merged into the more frequent (INFO/AF);
+#      line, an allele once; no indel within the windows' left flank of the chromosome's
+#      start, the flank read from the indel log just built;
 #   6. samplesIDs/<dataset>.samplesID.txt, the file a search names (--samplesID): the registry's
 #      sources as pseudo-samples, as the shipped install has it (one already there is kept);
 #   7. the build input VCFs left in VCFs/<dataset>/ (sites-only), the checks of
@@ -161,7 +165,8 @@ say "presence genotype $PRESENCE taken out of the indel log; per-sample dictiona
 for c in "${CHROMS[@]}"; do
   B="$STAGE/prepared/mega.$c.build.vcf.gz"
   run "$PYTHON" "$PP/build_mega_registry.py" --vcf "$B" --chrom "$c" --out-dir "$D/registry_$DATASET"
-  run "$PYTHON" "$PP/build_mega_indel_af.py" --vcf "$B" --chrom "$c" --out-dir "$D/indel_af_$DATASET"
+  run "$PYTHON" "$PP/build_mega_indel_af.py" --vcf "$B" --chrom "$c" --out-dir "$D/indel_af_$DATASET" \
+    --log-dir "$L"
   mv "$B" "$B.tbi" "$VDIR/"
 done
 rmdir "$STAGE/prepared" "$STAGE"

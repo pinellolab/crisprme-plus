@@ -155,10 +155,21 @@ class TheModeOfASearchWithASitesOnlyDataset(bio._Fixture):
                       "runs instead.", out)
         self.assertIn("[complete-search] POPULATION-LEVEL analysis", out)
         self.assertNotIn("PER-SAMPLE analysis", out)
-        # with no mode flag, as it was
+        # with no mode flag, as it was: no word of the per-sample mode. Since 2.10.0 (plan
+        # decision D6) the carrier gate says that it checks the sites-only rows against the
+        # frequency bound alone, with no phased panel to read: that line, and no other one
+        # naming them (up to review r1 of lane M this test held no line of the search to
+        # name them, M-R1-2)
         mode, alt, out = self.mode_of("mega\n")
         self.assertEqual((mode, alt), ("population-level", "no-alt-alignments"))
-        self.assertNotIn("sites-only", out.replace("sites-only / unphased", ""))
+        self.assertNotIn("--per-sample has nothing to resolve", out)
+        self.assertNotIn("Sites-only, with no genotypes to resolve", out)
+        gate = ("[complete-search] Carrier gate: no phased panel to check the sites-only rows "
+                "against")
+        self.assertIn(gate, out)
+        self.assertNotIn("sites-only", "\n".join(
+            ln for ln in out.replace("sites-only / unphased", "").splitlines()
+            if not ln.startswith(gate)))
 
     def test_a_registry_with_no_data_type_is_sites_only_by_its_aggregation(self):
         # a mega index built before the manifest had one, and not stamped since

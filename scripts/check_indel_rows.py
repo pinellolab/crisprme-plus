@@ -367,8 +367,8 @@ cluster reached only through a SNP row over the run's --max-degeneracy),
 limit-density-guard (a cluster reached only through a sites-only dataset's row whose window
 spells 2^bits sequences or more, which the run's sites-only density guard withheld),
 limit-insertion-site (a population-level target whose rows within --merge bp are not as good
-as it, one of them naming an insertion, that the chain of every row takes to a row that is:
-the near row can be the next site's, below),
+as it, one of them starting inside an insertion, that the chain of every row takes to a row
+that is: the near row can be the next site's, below),
 limit-capped-window (a cluster of a per-sample run of 2.8.x without alternative alignments
 reached only through a capped window's greedy row, above),
 limit-contig-end (a record within one target of a
@@ -504,14 +504,17 @@ sites-only density guard (2.10.0; the bits on the second line of the run's
 its positions' options at or over the bound, as the window's letters spell it -- is one
 CRISPRme does not write, which a chain never counts on (limit-density-guard where a cluster
 reaches a row as good as a target only through it); a genotyped dataset's rows are not
-guarded. The merge chains a row that starts inside an insertion into a site within --merge bp
-of its anchor and lets it chain none (2.10.0): the chain this checker follows is the chain of
-every row, a superset of CRISPRme's around such a row, and the row within --merge bp of a
-target, which it takes for the target's cluster's, can then be the next site's -- an
-insertion row the merge placed there. A target whose near rows are not as good as it, one of
-them naming an insertion, is limit-insertion-site (non-gating) where the chain of every row
-reaches a row that is, and a miss where it does not; this checker can thus take a row of
-the next site for a target's there (its own coverage gap). The
+guarded. The merge (2.10.0) places the rows that start inside an insertion at one anchor
+together, as one site that joins the site within --merge bp of its rows and chains none:
+the chain this checker follows is the chain of every row, a superset of CRISPRme's around
+such rows, and the row within --merge bp of a target, which it takes for the target's
+cluster's, can then be the next site's -- an insertion's row the merge placed there. A
+target whose near rows are not as good as it, one of them starting inside an insertion (its
+first base one the insertion adds, row_first_k, read on the target's own window), is
+limit-insertion-site (non-gating) where the chain of every row reaches a row that is, and a
+miss where it does not; this checker can thus take a row of the next site for a target's
+there (its own coverage gap). A near row that names an insertion and starts on a reference
+base is chained like any other row: not as good as the target, it is a miss. The
 carrier gate (2.10.0) ranks a population-level row and labels it in its companion and the
 report, leaving the integrated results and their alternative alignments as they are: it
 changes nothing this checker reads. An alt of a VCF line that lists several ALTs whose
@@ -2036,8 +2039,8 @@ def read_rows(path, table, chrom=None, lo=None, hi=None, margin=0, pam_5prime=Fa
     integrated line's (guide, Cluster Position of each block, the fewest-mm+b block's
     edits under each sorting criterion, the highest-CFD block's CFD -- recomputed from
     its aligned strings when ``cfd_model`` is given, the value the merge sorts on, else
-    as printed --, line, whether a block of the line names an insertion) for the
-    per-cluster completeness check; ``bad`` (a list) gets
+    as printed --, line, the (Cluster Position, block) of each block of the line naming an
+    insertion) for the per-cluster completeness check; ``bad`` (a list) gets
     the lines shorter than the header, ``novar`` (a list) the ALT-origin blocks of
     [lo, hi) that name no variant."""
     csv.field_size_limit(1 << 30)
@@ -2065,7 +2068,7 @@ def read_rows(path, table, chrom=None, lo=None, hi=None, margin=0, pam_5prime=Fa
             guide = (guide_of(row[col["Spacer+PAM"]], pam_len, pam_5prime)
                      if "Spacer+PAM" in col else "")
             line_blocks = []
-            names_ins = False   # a block of the line names an insertion (locus)
+            ins_blocks = []   # (Cluster Position, block) of each naming an insertion (locus)
             for b in BLOCKS:
                 try:
                     start = int(row[col["Start_coordinate_(%s)" % b]])
@@ -2082,7 +2085,6 @@ def read_rows(path, table, chrom=None, lo=None, hi=None, margin=0, pam_5prime=Fa
                                                   pam_5prime)))
                 origin = row[col["REF/ALT_origin_(%s)" % b]]
                 var = row[col["Variant_info_genome_(%s)" % b]]
-                names_ins = names_ins or _names_insertion(var)
                 cfd_col = col.get("CFD_score_(%s)" % b)
                 block = {
                     "table": table, "line": line_no, "block": b, "chrom": ch,
@@ -2108,6 +2110,8 @@ def read_rows(path, table, chrom=None, lo=None, hi=None, margin=0, pam_5prime=Fa
                     if origin == "alt" and novar is not None and block["own"]:
                         novar.append(block)
                     continue
+                if _names_insertion(var):
+                    ins_blocks.append((line_blocks[-1][1], block))
                 out.append(block)
             if loci is not None and line_blocks:
                 try:
@@ -2133,7 +2137,7 @@ def read_rows(path, table, chrom=None, lo=None, hi=None, margin=0, pam_5prime=Fa
                 except KeyError:
                     pass
                 loci.setdefault((guide, ch), []).append(
-                    (guide, [c for _b, c in line_blocks], crit, cfd, line_no, names_ins))
+                    (guide, [c for _b, c in line_blocks], crit, cfd, line_no, ins_blocks))
     return out
 
 
@@ -5156,7 +5160,8 @@ def resolve(win, ctx, rep, reported, al, carriers, lids, demands, demand_of, pop
             # every carrier CRISPRme's documented rules report it for
             ok, why, cut, via = reported.locus(
                 guide, chrom, cl, d, lambda wide: cluster_chain(
-                    win, ctx, guide, cl, reported.merge, wide))
+                    win, ctx, guide, cl, reported.merge, wide),
+                inside=lambda blk: (row_first_k(win, blk) or 0) > 0)
             if ok and via == {"insertion-site"}:
                 # the rows near it are not as good as it, one of them names an insertion
                 # and can be the next site's (2.10.0's merge), and the chain of every row
@@ -5878,9 +5883,10 @@ OPEN_TEXT = {
                      "reading of the slot through a repeat keeps the target's bases "
                      "(METHODS section 4, 2.10.0), which this checker's cluster chain does "
                      "not model (its own coverage gap)",
-    "insertion-site": "a row within --merge bp of the target that names an insertion and "
-                      "is not as good as it, which can be the next site's: since 2.10.0 a "
-                      "row that starts inside an insertion joins one site and chains none "
+    "insertion-site": "a row within --merge bp of the target that starts inside an "
+                      "insertion and is not as good as it, which can be the next site's: "
+                      "since 2.10.0 the rows that start inside an insertion at one anchor "
+                      "are placed together, join one site and chain none "
                       "(remove_contiguous_samples), and this checker follows the chain of "
                       "every row, a superset of the merge's, so the row as good as the "
                       "target that it reaches may be another site's (its own coverage gap)"}
@@ -6347,7 +6353,7 @@ class Reported(object):
                 i += 1
         return out
 
-    def locus(self, guide, chrom, c, d, chain):
+    def locus(self, guide, chrom, c, d, chain, inside=None):
         """(ok, why, cut, via) for a target of Cluster Position c in a run with one row per
         merge cluster. The cluster's row is an integrated line with a block within
         --merge bp of c, or of a Cluster Position chained to c (chain(wide): those of the
@@ -6359,14 +6365,19 @@ class Reported(object):
         the rows CRISPRme may write or not that the cluster reaches such a row only
         through (empty when it needs none) -- the verdict then rests on what no
         documented rule settles --, or "insertion-site": the rows within --merge bp of c
-        are not as good as the target, one of them names an insertion, and the chain of
-        every row reaches one that is (since 2.10.0 a row that starts inside an
-        insertion is one site's and chains none: the near row can be the next site's)."""
+        are not as good as the target, one of them starts inside an insertion (its block
+        within --merge bp of c names one and ``inside`` says its first base is one the
+        insertion adds: row_first_k), and the chain of every row reaches one that is (since
+        2.10.0 the rows that start inside an insertion are one site, which joins one site
+        and chains none: the near row can be the next site's). A near row that names an
+        insertion and starts on a reference base the merge chains like any other: it is the
+        target's site's, and not as good, a miss (up to review r1 of lane M any near row
+        naming an insertion was let through, M-R1-N1)."""
         pos, lines = self.loci.get((guide, chrom), ([], []))
         near = self.near(pos, [c])
         if near:
             ok, why = self.good(near, lines, d)
-            if ok or not any(len(lines[k]) > 5 and lines[k][5] for k in near):
+            if ok or not any(self._unit_near(lines[k], c, inside) for k in near):
                 return ok, why, False, set()
             # a row within --merge bp of it that names an insertion can be the next
             # site's: since 2.10.0 a row that starts inside an insertion joins one site and
@@ -6393,6 +6404,14 @@ class Reported(object):
         if via and far and self.good(far, lines, d)[0]:
             return True, why, cut, via
         return False, why, cut, set()
+
+    def _unit_near(self, line, c, inside):
+        """Whether an integrated line has a block within --merge bp of c that starts inside
+        an insertion (locus): one naming an insertion whose first base ``inside`` says is
+        one the insertion adds (no ``inside``: any block naming one)."""
+        blocks = line[5] if len(line) > 5 and line[5] else ()
+        return any(abs(cp - c) <= self.merge and (inside is None or inside(blk))
+                   for cp, blk in blocks)
 
     def good(self, near, lines, d):
         """(ok, why): whether one of the integrated lines ``near`` is as good as the

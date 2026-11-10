@@ -12,15 +12,20 @@ every indel-path allele of the merged VCF it records each source's `AF_<dataset>
 annotate an indel off-target with per-dataset AF exactly like the SNP registry does for
 SNPs.
 
-The VCF is read exactly as CRISPRitz 2.10.0's enricher reads it
+The VCF is read as CRISPRitz 2.10.0's enricher reads it
 (build_mega_registry.read_as_enricher): only the records whose FILTER is `PASS` or `.`;
 the alleles it puts in a fake-indel window (a REF or ALT longer than one base, an MNV
-included, no symbolic allele), each ALT of a line listing several with its own AF; one
-REF>ALT on two records is one entry, with the frequencies of the more frequent record
-(the higher `INFO/AF`; on a tie, the earlier), the rule by which the enricher merges an
-allele's entries; and no indel within 26 bases of the chromosome's start, for which the
-enricher writes no window. Up to CRISPRme 2.8.1 it read every record whatever its
-FILTER, and merged a repeated key by the highest frequency of each source.
+included, no symbolic allele), each ALT of a line listing several with its own AF; and no
+indel within the window's left flank of the chromosome's start (26 bases with the 25/27
+window of CRISPRitz 2.10.0's enricher; --log-dir reads it from the indel log), for which
+the enricher writes no window. The store holds an allele once: of one REF>ALT on two
+records, the more frequent record's frequencies (the higher `INFO/AF`; on a tie, the
+earlier). The enricher gives each indel record a window and a log row of its own (it
+merges two records of one allele only for SNPs, in its dictionaries), so the recipe's
+build input holds one record of each REF>ALT (prepare_mega_build_vcf.py) and the store,
+the log and the windows then agree (verify_mega_chrom.py checks it). Up to CRISPRme 2.8.1
+it read every record whatever its FILTER, and merged a repeated key by the highest
+frequency of each source.
 
 Format: one gzipped TSV per chromosome, `indel_af_<chrom>.tsv.gz`, columns
 `pos<TAB>ref<TAB>alt<TAB>AF_<ds1>..AF_<dsN><TAB>AF_max` with a `#`-comment header
@@ -29,7 +34,7 @@ dict keyed by (pos, ref, alt) for O(1) lookup during post-analysis.
 
 Usage:
   build_mega_indel_af.py --vcf mega.chrN.build.vcf.gz --chrom chrN --out-dir DIR
-      [--datasets 1000G2021,HGDP,gnomAD,TOPMed,AoU]
+      [--datasets 1000G2021,HGDP,gnomAD,TOPMed,AoU] [--log-dir Dictionaries/log_indels_<ds>]
 Writes <out-dir>/indel_af_<chrom>.tsv.gz.
 """
 import argparse
@@ -47,8 +52,31 @@ __all__ = ["DEFAULT_DATASET_META", "_parse_info_afs", "IndelAfReader",
            "build_indel_af_store", "iter_indel_af_records"]
 
 # The enricher writes no fake-indel window for an indel whose window would start before
-# the chromosome (indel_to_fasta: POS - 26 < 0), so no row can name it.
+# the chromosome (indel_to_fasta: POS - 26 < 0 with its 25/27 window), so no row can name
+# it. The window is the enricher's: window_left_of_log reads it from a built indel log.
 WINDOW_LEFT = 26
+
+
+def window_left_of_log(log_dir, chrom):
+    """The left flank of the enricher's fake-indel windows as the chromosome's indel log
+    shows it (an indel's POS less its window's start, the CHR column's
+    <chrom>_<start>-<end>_<n>), or None when there is no log row to read."""
+    for name in ("log%s.txt.gz" % chrom, "log%s.txt" % chrom):
+        path = os.path.join(log_dir, name)
+        if not os.path.isfile(path):
+            continue
+        opener = gzip.open if path.endswith(".gz") else open
+        with opener(path, "rt") as fh:
+            hdr = fh.readline().rstrip("\n").split("\t")
+            ix = {h: i for i, h in enumerate(hdr)}
+            for line in fh:
+                f = line.rstrip("\n").split("\t")
+                try:
+                    start = int(f[ix["CHR"]].rsplit("_", 2)[-2].split("-")[0])
+                    return int(f[ix["indel"]].rsplit("_", 3)[1]) - start
+                except (KeyError, IndexError, ValueError):
+                    continue
+    return None
 
 
 def _is_indel(ref, alt):
@@ -76,13 +104,13 @@ def _parse_af_max(info, k=0, n_alts=1):
     return None
 
 
-def iter_indel_af_records(vcf, datasets, chrom=None, stats=None):
+def iter_indel_af_records(vcf, datasets, chrom=None, stats=None, window_left=WINDOW_LEFT):
     """Yield (pos:str, ref, alt, af_by_dataset:dict, af_max:float|None) for each
     indel-path allele of a sites-only merged VCF, read as CRISPRitz's enricher reads it
     (build_mega_registry.read_as_enricher, kind "indel"): FILTER PASS or '.'; each ALT
     of a line listing several with its own AFs (the k-th of each list); one REF>ALT on
     two records once, with the more frequent record's frequencies; none within
-    WINDOW_LEFT bases of the chromosome's start (``stats["no_window"]``). ``chrom``
+    ``window_left`` bases of the chromosome's start (``stats["no_window"]``). ``chrom``
     (optional) restricts to one contig (defends against a multi-contig VCF whose same-POS
     records on different chroms would otherwise collide by key)."""
     if stats is None:
@@ -90,19 +118,21 @@ def iter_indel_af_records(vcf, datasets, chrom=None, stats=None):
     stats.setdefault("no_window", 0)
     for pos, ref, alt, _rsid, afs, _rank, info, k, n in read_as_enricher(
             vcf, "indel", datasets, chrom=chrom, stats=stats):
-        if pos - WINDOW_LEFT < 0:
+        if pos - window_left < 0:
             stats["no_window"] += 1
             continue
         yield str(pos), ref, alt, afs, _parse_af_max(info, k, n)
 
 
-def build_indel_af_store(vcf, chrom, out_dir, dataset_meta=None, stats=None):
+def build_indel_af_store(vcf, chrom, out_dir, dataset_meta=None, stats=None,
+                         window_left=WINDOW_LEFT):
     """Write <out_dir>/indel_af_<chrom>.tsv.gz. Returns (record count, path).
 
     Atomic: writes a .tmp then os.replace, so an interrupted build never leaves a
     truncated store that a resume would trust (the gt_indel_chr1 lesson). Keys are
     unique (one REF>ALT read once, iter_indel_af_records), so IndelAfReader's dict
-    cannot silently drop a record. ``stats`` (a dict): read_as_enricher's counts."""
+    cannot silently drop a record. ``stats`` (a dict): read_as_enricher's counts;
+    ``window_left``: the enricher's left flank (window_left_of_log)."""
     dataset_meta = dataset_meta or DEFAULT_DATASET_META
     labels = list(dataset_meta)
     datasets = set(labels)
@@ -118,7 +148,7 @@ def build_indel_af_store(vcf, chrom, out_dir, dataset_meta=None, stats=None):
     stats.setdefault("no_window", 0)
     for pos, ref, alt, _rsid, afs, rank, info, k, n in read_as_enricher(
             vcf, "indel", datasets, chrom=chrom, stats=stats):
-        if pos - WINDOW_LEFT < 0:
+        if pos - window_left < 0:
             stats["no_window"] += 1
             continue
         key = (int(pos), ref.upper(), alt.upper())
@@ -195,17 +225,22 @@ def main(argv=None):
     ap.add_argument("--chrom", required=True)
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--datasets", default=",".join(DEFAULT_DATASET_META))
+    ap.add_argument("--log-dir", default=None,
+                    help="the dataset's indel log folder (Dictionaries/log_indels_<ds>/): the "
+                    "enricher's left flank is read from it (default: %d)" % WINDOW_LEFT)
     args = ap.parse_args(argv)
     labels = [d.strip() for d in args.datasets.split(",") if d.strip()]
     meta = {d: DEFAULT_DATASET_META[d] for d in labels if d in DEFAULT_DATASET_META}
+    left = (window_left_of_log(args.log_dir, args.chrom) if args.log_dir else None) \
+        or WINDOW_LEFT
     stats = {}
     n, out = build_indel_af_store(args.vcf, args.chrom, args.out_dir,
-                                  dataset_meta=meta, stats=stats)
+                                  dataset_meta=meta, stats=stats, window_left=left)
     sys.stderr.write("mega indel-AF store %s: %d indels -> %s (%d alleles of records "
                      "outside FILTER PASS/. skipped; %d with no AF; %d within %d bases of "
                      "the start, which no window holds)\n"
                      % (args.chrom, n, out, stats.get("filtered", 0), stats.get("no_af", 0),
-                        stats.get("no_window", 0), WINDOW_LEFT))
+                        stats.get("no_window", 0), left))
     return 0
 
 

@@ -186,9 +186,12 @@ def read_as_enricher(path, kind, datasets, chrom=None, stats=None):
     ("snp": the SNP alleles the enricher codes; "indel": those it puts in a fake-indel
     window) of a sites-only merged VCF, ONE per REF>ALT at a position: of an allele on
     two records, the more frequent record's (af_rank; on a tie, the earlier), as the
-    enricher merges one allele's entries; ``info``, ``k`` and ``n`` are that record's
-    INFO, the allele's index on its line and the line's ALT count. In file order of each
-    allele's first record.
+    enricher merges two SNP records of one allele in its dictionaries. It merges no indel
+    records (each gets a fake-indel window and a log row of its own), so the recipe's build
+    input holds one record of each REF>ALT (prepare_mega_build_vcf.py), and this reads it as
+    the enricher does, the log's rows one an allele (verify_mega_chrom.py checks it).
+    ``info``, ``k`` and ``n`` are that record's INFO, the allele's index on its line and the
+    line's ALT count. In file order of each allele's first record.
 
     ``stats`` (a dict) counts, by ALT, every allele of the VCF, so nothing is silently
     dropped: ``filtered`` (a record of another FILTER than PASS_FILTERS), ``snps`` /

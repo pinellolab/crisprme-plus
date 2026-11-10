@@ -18,6 +18,19 @@ rebuilds the mega from those same VCFs, and every part of the index reads the sa
     so every indel row of the shipped mega showed none. An ``AF`` the input already
     has is replaced. A record without ``AF_max`` gets no ``AF``.
 
+  * one record of each REF>ALT at a position: of an allele on two PASS/'.' records, the
+    more frequent record's (its INFO/AF, AF_max; on a tie, the earlier), as the enricher
+    merges two SNP records of one allele in its dictionaries. The enricher merges no
+    indel records: each gets a fake-indel window and an indel-log row of its own, while the
+    indel frequencies (build_mega_indel_af.py), the registry and the checks
+    (verify_mega_chrom.py) hold an allele once. So the build input holds one record each,
+    and every part reads one. The as-run merge wrote 8 such indels genome-wide (long
+    deletions on chr1, chr4, chr7, chr10 (3), chr13 and chr21, each on two lines with one
+    AF_max) and no SNV: with both lines, chr21's check failed ("1 allele(s) on more than
+    one row"). A duplicated ALT of a line listing several leaves that line, with its
+    Number=A and Number=R INFO values (a line with sample columns stops the run: its
+    genotypes would need recoding).
+
 Every other byte of a kept record is the input's: its ALTs (every allele of a line that
 lists several), ID, QUAL and the other INFO keys, in their order. The header gains the
 ``AF`` INFO line (where it has none) and a ``##CRISPRme_mega_build=`` line saying what was
@@ -28,13 +41,20 @@ A ``.gz`` output is BGZF (pysam), so ``tabix`` indexes it, as synth_sites_gt.py 
 STDLIB only, but for the BGZF writer.
 """
 import gzip
+import os
+import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from build_mega_registry import af_rank  # noqa: E402  (the enricher's rank of two records)
 
 PASS_FILTERS = ("PASS", ".")
 AF_HEADER = ('##INFO=<ID=AF,Number=A,Type=Float,Description="Global allele frequency: '
              'the maximum per-source frequency (AF_max) of the merged sources">')
 BUILD_MARK = ("##CRISPRme_mega_build=records whose FILTER is PASS or '.' only; "
-              "INFO/AF = AF_max (prepare_mega_build_vcf.py)")
+              "INFO/AF = AF_max; one record of each REF>ALT, the more frequent "
+              "(prepare_mega_build_vcf.py)")
+_INFO_NUMBER = re.compile(r'^##INFO=<ID=([^,>]+),Number=([^,>]+)')
 
 
 def _open_read(path):
@@ -71,23 +91,87 @@ def with_af_max(info):
     return ";".join(kept + ["AF=" + afmax]), True
 
 
+def _without_alts(f, drop, number_of):
+    """Record ``f`` without its ALTs of the indices ``drop``, and their values of each INFO
+    key the header gives one value an ALT (Number=A) or an allele (Number=R)."""
+    if len(f) > 8:
+        sys.exit("prepare_mega_build_vcf: %s:%s lists a REF>ALT another record has, on a line "
+                 "with sample columns: its genotypes would need recoding" % (f[0], f[1]))
+    alts = f[4].split(",")
+    keep = [k for k in range(len(alts)) if k not in drop]
+    info = []
+    for kv in (f[7].split(";") if f[7] not in ("", ".") else []):
+        key, sep, value = kv.partition("=")
+        values = value.split(",")
+        number = number_of.get(key)
+        if sep and number == "A" and len(values) == len(alts):
+            kv = key + "=" + ",".join(values[k] for k in keep)
+        elif sep and number == "R" and len(values) == len(alts) + 1:
+            kv = key + "=" + ",".join([values[0]] + [values[k + 1] for k in keep])
+        info.append(kv)
+    return f[:4] + [",".join(alts[k] for k in keep)] + f[5:7] + [";".join(info) or "."]
+
+
+def collapse(records, number_of, stats):
+    """The records of one position (FILTER PASS or '.', INFO/AF set), one record of each
+    REF>ALT: of an allele on several, the more frequent record's (af_rank, the enricher's
+    rank of INFO/AF; on a tie, the earlier). Another record of it loses the allele: the
+    whole line when it is its only ALT (``stats["collapsed"]``), else that ALT
+    (``stats["alts_collapsed"]``)."""
+    best = {}
+    for i, f in enumerate(records):
+        alts = f[4].split(",")
+        for k, alt in enumerate(alts):
+            rank = af_rank(f[7], k, len(alts))
+            have = best.get((f[3], alt))
+            if have is None or rank > have[0]:
+                best[(f[3], alt)] = (rank, i, k)
+    out = []
+    for i, f in enumerate(records):
+        alts = f[4].split(",")
+        drop = {k for k, alt in enumerate(alts) if best[(f[3], alt)][1:] != (i, k)}
+        if not drop:
+            out.append(f)
+        elif len(drop) == len(alts):
+            stats["collapsed"] += 1
+        else:
+            stats["alts_collapsed"] += len(drop)
+            out.append(_without_alts(f, drop, number_of))
+    return out
+
+
 def prepare(inp, out):
     """Write the build input of ``inp`` to ``out``; return its counts: ``records`` (in),
-    ``kept``, ``filtered`` (another FILTER), ``af`` (kept records given an AF),
+    ``kept``, ``filtered`` (another FILTER), ``collapsed`` (a PASS/'.' record whose every
+    ALT another record of its position has, more frequent: left out), ``alts_collapsed``
+    (such ALTs taken off a line that keeps others), ``af`` (kept records given an AF),
     ``no_af_max`` (kept records with no AF_max, so no AF)."""
-    stats = {"records": 0, "kept": 0, "filtered": 0, "af": 0, "no_af_max": 0}
+    stats = {"records": 0, "kept": 0, "filtered": 0, "collapsed": 0, "alts_collapsed": 0,
+             "af": 0, "no_af_max": 0}
     w, is_bgzf = _open_write(out)
 
     def emit(s):
         w.write(s.encode() if is_bgzf else s)
 
+    def flush(block):
+        for f in collapse(block, number_of, stats):
+            stats["kept"] += 1
+            stats["af" if "AF_max=" in f[7] and any(
+                kv.startswith("AF=") for kv in f[7].split(";")) else "no_af_max"] += 1
+            emit("\t".join(f) + "\n")
+
     has_af_header = False
+    number_of = {"AF": "A"}
+    block = []   # the PASS/'.' records of one position
     try:
         with _open_read(inp) as fh:
             for line in fh:
                 if line.startswith("##"):
                     if line.startswith("##INFO=<ID=AF,"):
                         has_af_header = True
+                    m = _INFO_NUMBER.match(line)
+                    if m:
+                        number_of[m.group(1)] = m.group(2)
                     emit(line)
                     continue
                 if line.startswith("#CHROM"):
@@ -103,10 +187,12 @@ def prepare(inp, out):
                 if len(f) < 8 or f[6] not in PASS_FILTERS:
                     stats["filtered"] += 1
                     continue
-                f[7], got = with_af_max(f[7])
-                stats["kept"] += 1
-                stats["af" if got else "no_af_max"] += 1
-                emit("\t".join(f) + "\n")
+                f[7], _got = with_af_max(f[7])
+                if block and (f[0], f[1]) != (block[0][0], block[0][1]):
+                    flush(block)
+                    block = []
+                block.append(f)
+            flush(block)
     finally:
         if w is not sys.stdout:
             w.close()
@@ -120,8 +206,10 @@ def main(argv=None):
     st = prepare(argv[0], argv[1])
     sys.stderr.write(
         "prepare_mega_build_vcf: %d records -> %d kept (FILTER PASS or '.'), %d of another "
-        "FILTER left out; INFO/AF = AF_max on %d, %d with no AF_max -> %s\n"
-        % (st["records"], st["kept"], st["filtered"], st["af"], st["no_af_max"], argv[1]))
+        "FILTER left out, %d left out as a second record of one REF>ALT (%d ALT(s) taken off "
+        "a line that keeps others); INFO/AF = AF_max on %d, %d with no AF_max -> %s\n"
+        % (st["records"], st["kept"], st["filtered"], st["collapsed"], st["alts_collapsed"],
+           st["af"], st["no_af_max"], argv[1]))
     return 0
 
 

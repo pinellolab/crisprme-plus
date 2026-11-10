@@ -36,6 +36,20 @@ saying the bound, the dataset, the chromosome and the counts; for the indel side
 regions are on the reference, each window placed by its fake-indel contig's start (the
 log's window), so an insertion's region can run a few bases past it. One line on stdout.
 
+The withheld windows go to the dense-region list as well, which resultIntegrator notes
+every row by (High_variant_density_region) and the report bundles:
+``<out stem>.high_variant_density_regions.bed``, the columns of the post-analysis's own
+(new_simple_analysis), its ``greedy`` column ``withheld`` (no row of the window was
+written: the guard withheld its candidates). The SNP side lists each window as the SNP
+post-analysis lists a dense one, one line a window (start, end, guide; of the raw targets
+of one window the line resultIntegrator reads first, the smallest variants, letters and
+bits), so the list is the one the post-analysis writes without the guard, and a row the
+guard keeps in such a window (a reference row, a genotyped dataset's) keeps its note; and
+the four-allele positions of those windows go to ``<out stem>.four_allele_positions.bed``,
+as the post-analysis lists those of every window it reads. The indel side, whose
+post-analysis lists no dense window, lists one line a region of ``<out>`` (its densest
+window's letters, on the fake-indel contig).
+
 usage: sites_only_guard.py snp|indel <targets file> <Dictionaries folder> <dataset> <chrom>
                            <bed out>
 
@@ -56,6 +70,39 @@ import window_density as _wd
 ENV = "CRISPRME_SITES_ONLY_GUARD"
 BED_SUFFIX = ".sites_only_density_guard.bed"
 BED_HEADER = "#chrom\tstart\tend\tguide\tcandidates_withheld\tmax_bits\n"
+# the dense-region list's columns (new_simple_analysis.py writes them; resultIntegrator and
+# the report read them by place), and the greedy column's value for a window the guard withheld
+HVDR_SUFFIX = ".high_variant_density_regions.bed"
+HVDR_HEADER = ("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\tbits"
+               "\tfour_allele\tgreedy\n")
+WITHHELD = "withheld"
+FOUR_ALLELE_SUFFIX = ".four_allele_positions.bed"
+# the complement of a window's letters, IUPAC codes included (new_simple_analysis's table;
+# Q, every base, is its own)
+_COMPLEMENT = str.maketrans("ACTGRYSWMKHDBVactgryswmkhdbv", "TGACYRSWKMDHVBtgacyrswkmdhvb")
+
+
+def companion_paths(bed_out):
+    """(dense-region list, four-allele positions) written beside the guard's BED ``bed_out``."""
+    stem = bed_out[:-len(".bed")] if bed_out.endswith(".bed") else bed_out
+    return stem + HVDR_SUFFIX, stem + FOUR_ALLELE_SUFFIX
+
+
+def forward_letters(dna, strand):
+    """A raw target's window as the SNP post-analysis lists it: its letters without the
+    bulge gaps, on the forward strand (new_simple_analysis's replaceTarget)."""
+    letters = dna.replace("-", "")
+    return letters.translate(_COMPLEMENT)[::-1] if strand == "-" else letters
+
+
+def hvdr_line(chrom, start, end, guide, letters, n_seq):
+    """One line of the dense-region list for a window the guard withheld: its span, guide,
+    variant columns, no carriers (a sites-only dataset has none), letters, bits, four-allele
+    positions, and ``withheld`` where the post-analysis says whether a greedy worst case
+    stands for it."""
+    return "%s\t%d\t%d\t%s\t%d\t.\t%s\t%.2f\t%d\t%s\n" % (
+        chrom, start, end, guide, _wd.variant_columns(letters), letters, _wd.bits(n_seq),
+        len(_wd.four_allele_offsets(letters)), WITHHELD)
 
 
 def guard_bits(environ=None):
@@ -146,7 +193,9 @@ def run(kind, targets, dictionaries, dataset, chrom, bed_out, bits=None):
         if not place.rows:
             raise ValueError(f"no indel log of {chrom} in log_indels_{dataset}/ to place "
                              f"its windows on the reference by")
-    regions = {}   # (guide, start) -> [end, max bits, candidates]
+    regions = {}   # (guide, start) -> [end, max bits, candidates, letters of the densest]
+    windows = {}   # SNP side: (start, end, guide) -> (variants, letters, bits) to list it by
+    quads = set()  # SNP side: the four-allele positions of the withheld windows
     total = withheld = 0
     tmp = targets + ".guard.tmp"
     with open(targets) as fh, open(tmp, "w") as out:
@@ -176,35 +225,69 @@ def run(kind, targets, dictionaries, dataset, chrom, bed_out, bits=None):
                 continue
             withheld += 1
             end = start + len(dna) - dna.count("-")
-            key = (f[1].replace("-", ""), start)
+            guide = f[1].replace("-", "")
+            key = (guide, start)
             have = regions.get(key)
-            b = _wd.bits(_wd.sequences(dna))
+            n_seq = _wd.sequences(dna)
+            b = _wd.bits(n_seq)
+            letters = forward_letters(dna, f[6] if len(f) > 6 else "+")
             if have is None:
-                regions[key] = [end, b, 1]
+                regions[key] = [end, b, 1, letters, n_seq]
             else:
                 if end > have[0]:
                     have[0] = end
                 if b > have[1]:
-                    have[1] = b
+                    have[1], have[3], have[4] = b, letters, n_seq
                 have[2] += 1
+            if kind == "snp":
+                # listed as the SNP post-analysis lists a dense window: one line a window,
+                # the one resultIntegrator reads first (_record_dense_window)
+                rep = ("%d" % _wd.variant_columns(letters), letters, "%.2f" % b)
+                wkey = (start, start + len(letters), guide)
+                if wkey not in windows or rep < windows[wkey][0]:
+                    windows[wkey] = (rep, n_seq)
+                # and its four-allele positions, as it lists those of every window it reads
+                # (_note_four_allele: Q is its own complement, so a minus-strand window is
+                # only read backwards)
+                if "Q" in dna or "q" in dna:
+                    window = dna.replace("-", "")
+                    if f[6] == "-":
+                        window = window[::-1]
+                    quads.update(start + o for o in _wd.four_allele_offsets(window))
     lines = []
     by_guide = {}
-    for (guide, start), (end, b, n) in regions.items():
-        by_guide.setdefault(guide, []).append((start, end, b, n))
+    for (guide, start), (end, b, n, letters, n_seq) in regions.items():
+        by_guide.setdefault(guide, []).append((start, end, b, n, letters, n_seq))
     for guide in sorted(by_guide):
         cur = None
-        for start, end, b, n in sorted(by_guide[guide]):
+        for start, end, b, n, letters, n_seq in sorted(by_guide[guide]):
             if cur is not None and start <= cur[1]:
                 cur[1] = max(cur[1], end)
-                cur[2] = max(cur[2], b)
+                if b > cur[2]:
+                    cur[2], cur[4], cur[5] = b, letters, n_seq
                 cur[3] += n
             else:
                 if cur is not None:
                     lines.append((cur[0], guide, cur))
-                cur = [start, end, b, n]
+                cur = [start, end, b, n, letters, n_seq]
         if cur is not None:
             lines.append((cur[0], guide, cur))
     lines.sort(key=lambda t: (t[0], t[1]))
+    hvdr_out, quads_out = companion_paths(bed_out)
+    with open(hvdr_out + ".tmp", "w") as fh:
+        fh.write(HVDR_HEADER)
+        if kind == "snp":
+            for wkey in sorted(windows):
+                (_nvar, letters, _bits), n_seq = windows[wkey]
+                fh.write(hvdr_line(chrom, wkey[0], wkey[1], wkey[2], letters, n_seq))
+        else:
+            for _s, guide, (start, end, _b, _n, letters, n_seq) in lines:
+                fh.write(hvdr_line(chrom, start, end, guide, letters, n_seq))
+    if quads:
+        with open(quads_out + ".tmp", "w") as fh:
+            fh.write("#chrom\tstart\tend\n")
+            for p in sorted(quads):
+                fh.write("%s\t%d\t%d\n" % (chrom, p, p + 1))
     with open(bed_out + ".tmp", "w") as bed:
         bed.write(f"## CRISPRme sites-only density guard: candidates of the sites-only dataset "
                   f"{dataset} whose window spells 2^{bits} sequences or more, withheld from "
@@ -213,14 +296,19 @@ def run(kind, targets, dictionaries, dataset, chrom, bed_out, bits=None):
         bed.write(f"## bits={bits}\tdataset={dataset}\tchrom={chrom}\tkind={kind}\t"
                   f"candidates={total}\twithheld={withheld}\n")
         bed.write(BED_HEADER)
-        for _s, guide, (start, end, b, n) in lines:
+        for _s, guide, (start, end, b, n, _letters, _n_seq) in lines:
             bed.write(f"{chrom}\t{start}\t{end}\t{guide}\t{n}\t{b:.2f}\n")
     os.replace(bed_out + ".tmp", bed_out)
+    os.replace(hvdr_out + ".tmp", hvdr_out)
+    if quads:
+        os.replace(quads_out + ".tmp", quads_out)
     os.replace(tmp, targets)
     what = "SNP" if kind == "snp" else "indel"
+    listed = (f"{len(windows):,} window(s)" if kind == "snp" else f"the {len(lines):,} region(s)")
     print(f"Sites-only density guard ({dataset}, {chrom}, {what}): {withheld:,} of "
           f"{total:,} candidate(s) in windows of 2^{bits} sequences or more withheld, in "
-          f"{len(lines):,} region(s); listed in {os.path.basename(bed_out)}", flush=True)
+          f"{len(lines):,} region(s); listed in {os.path.basename(bed_out)}, and {listed} "
+          f"in the dense-region list {os.path.basename(hvdr_out)}", flush=True)
     return total, withheld
 
 
@@ -252,7 +340,8 @@ def main(argv=None):
     try:
         run(kind, targets, dictionaries, dataset, chrom, bed_out)
     except Exception as err:  # noqa: BLE001 - the guard never fails the run
-        for p in (targets + ".guard.tmp", bed_out + ".tmp"):
+        for p in (targets + ".guard.tmp", bed_out + ".tmp",
+                  *(c + ".tmp" for c in companion_paths(bed_out))):
             try:
                 os.remove(p)
             except OSError:

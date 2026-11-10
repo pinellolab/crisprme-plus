@@ -5890,9 +5890,20 @@ def build_index_only() -> None:
         # an INDELS index), leaves them as they are: it said, loud on stderr, that the index
         # was MISSING them (emptyidx F6).
         _gt_kept = os.path.isdir(os.path.join(workdir, "Dictionaries", f"genotypes_{vcf_name}"))
-        print(f"NOTE [build-index-only]: no --samplesID given: the dict-less tiers in place "
-              f"({_reg_dir}{' and its genotype store' if _gt_kept else ''}) are kept as they "
-              f"are, not rebuilt. To rebuild them, run this again with --samplesID.", flush=True)
+        if _sites_only or _registry_data_type(_reg_dir) == "sites-only":
+            # a finished sites-only install (the mega) built for another PAM: its registry
+            # and indel frequencies come from its INFO AF fields, which no --samplesID gives
+            print(f"NOTE [build-index-only]: {vcf_name} is a sites-only dataset: its registry "
+                  f"({_reg_dir}) and indel frequencies in place are kept as they are. They "
+                  f"come from its VCFs' INFO AF fields, not from --samplesID: "
+                  f"PostProcess/build_mega_registry.py and PostProcess/build_mega_indel_af.py "
+                  f"(seq_script/merge_panels/mega_rebuild.sh runs the whole recipe).",
+                  flush=True)
+        else:
+            print(f"NOTE [build-index-only]: no --samplesID given: the dict-less tiers in place "
+                  f"({_reg_dir}{' and its genotype store' if _gt_kept else ''}) are kept as "
+                  f"they are, not rebuilt. To rebuild them, run this again with --samplesID.",
+                  flush=True)
     elif not db_to_samplesid and _sites_only and not samples_listing:
         # A sites-only dataset (the mega) has no genotypes: no --samplesID would give its
         # tiers, and the WARNING below told the user to run with one (stderr, which fails

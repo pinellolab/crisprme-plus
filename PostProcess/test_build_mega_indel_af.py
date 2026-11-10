@@ -206,5 +206,43 @@ class TestReadAsTheEnricher(unittest.TestCase):
         self.assertEqual(stats["no_window"], 1)
 
 
+    def test_the_window_is_the_one_the_indel_log_shows(self):
+        """The left flank of the enricher's windows is read from the indel log the build
+        wrote (--log-dir): with CRISPRitz 2.10.0's 25/27 window an indel at POS 26 has a
+        window, with a wider one (lane W's 30/30 makes the flank 31 here) it has none, and
+        no row can name it. Up to review r1 of lane M the 26 was fixed in the code, which
+        a wider window would have left wrong at the start of every chromosome."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        rows = [("chr22", 26, ".", "GA", "G", "AF_HGDP=0.1;AF_max=0.1"),
+                ("chr22", 31, ".", "TC", "T", "AF_HGDP=0.1;AF_max=0.1")]
+        vcf = os.path.join(d, "mega.chr22.build.vcf.gz")
+        _write_vcf(vcf, rows)
+        logs = os.path.join(d, "log_indels_hg38_mega")
+        os.makedirs(logs)
+        with gzip.open(os.path.join(logs, "logchr22.txt.gz"), "wt") as fh:
+            fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n"
+                     "chr22_0-62_1\t\t.\t0.1\tchr22_31_TC_T\t0,61\tN\n")
+        self.assertEqual(bi.window_left_of_log(logs, "chr22"), 31)
+        self.assertIsNone(bi.window_left_of_log(logs, "chr21"))
+        out = os.path.join(d, "store")
+        import subprocess
+        done = subprocess.run([sys.executable, os.path.join(_HERE, "build_mega_indel_af.py"),
+                               "--vcf", vcf, "--chrom", "chr22", "--out-dir", out,
+                               "--log-dir", logs], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("1 within 31 bases of the start", done.stderr)
+        r = bi.IndelAfReader(os.path.join(out, "indel_af_chr22.tsv.gz"))
+        self.assertIsNone(r.lookup(26, "GA", "G"))
+        self.assertIsNotNone(r.lookup(31, "TC", "T"))
+        # without a log, the window of CRISPRitz 2.10.0's enricher
+        done = subprocess.run([sys.executable, os.path.join(_HERE, "build_mega_indel_af.py"),
+                               "--vcf", vcf, "--chrom", "chr22", "--out-dir", out],
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIsNotNone(bi.IndelAfReader(os.path.join(out, "indel_af_chr22.tsv.gz"))
+                             .lookup(26, "GA", "G"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
