@@ -12,8 +12,8 @@ the combined list, which the batteries download does not ship).
 The fixture uses a two-source `NRG_3_hg38+hg38_1000G_HGDP`-style name as a representative
 combined (`<ref>+hg38_<A>_<B>`) panel to exercise the A_B token parsing + the union of two
 per-dataset sample lists. That specific index has since been RETIRED from HF (superseded by
-the SHAPEIT5 re-phased single-token `hg38_HGDP1kGP` panel, whose `NRR_3_hg38+hg38_HGDP1kGP` is
-the default index since 2.10.0); it is
+the SHAPEIT5 re-phased single-token `hg38_HGDP1kGP` panel, whose `20-NRR_3_hg38+hg38_HGDP1kGP`
+is the default index since 2.10.0, `NRR_3_hg38+hg38_HGDP1kGP` in 2.8.1); it is
 kept here only as a generic two-source mechanism fixture, not as a claim that it is shipped.
 
 Standalone (no pytest); builds its own mock install and exits non-zero on failure, so it

@@ -1124,9 +1124,10 @@ and the `release-crisprme` skill.
   `PAMs/20bp-NRR-SpCas9.txt` ships with CRISPRme, and a download of the PAM files (`download --what
   pams`, and so `--what all`) installs it where the data repo has none (the repo's `pams/` holds the
   NRG, NGG and PAM-less files). The web form selects it when it is installed (then NRG, then NGG, as
-  before), `download --what all` fetches the reference index `NRR_3_hg38`, and every surface that
-  names the recommended index names `NRR_3_hg38+hg38_HGDP1kGP` (and its HPRC and mega panels):
-  the README's and the website's commands, the one-click installers (`docs/install.sh`,
+  before), `download --what all` fetches the reference index `20-NRR_3_hg38` (2.8.1's `NRR_3_hg38`
+  where it cannot), and every surface that names the recommended index names
+  `20-NRR_3_hg38+hg38_HGDP1kGP` (and its HPRC and mega panels; 2.8.1's archive was
+  `NRR_3_hg38+hg38_HGDP1kGP`): the README's and the website's commands, the one-click installers (`docs/install.sh`,
   `docs/install.ps1`), the Docker Quickstart, the web user guide, the CLI guide,
   PRECOMPUTED_INDEXES, METHODS, the Hugging Face cards, RELEASE_CHECKLIST's default-index gate, the
   help of `download`, `setup` and `complete-test`, complete-test's advice when no index is
@@ -1898,13 +1899,16 @@ and the `release-crisprme` skill.
   that is published.** The refusal said to download `<PAM>_<N>_<genome>` with N the search's
   bulges + 1: `NRR_2_hg38` for a search of 1 DNA and 1 RNA bulge, the default, where every index
   published is of N = 3, so the download it advised stopped on `No index 'NRR_2_hg38' found`. It
-  names the one of N = 3 for up to 2 bulges (`NRR_3_hg38`), "if it is published", as the refusal
-  for want of a variant index does, and its other route, to run without `--index-path`, names
+  names the one of N = 3 for up to 2 bulges, under the name of 2.10.0, which says the guide length
+  and the side (`20-NRR_3_hg38` for a 20-nt guide), "if it is published", as the refusal for want
+  of a variant index does, and its other route, to run without `--index-path`, names
   what such a search does since 2.10.0: it takes an index of the working directory's library,
   pruned to the PAM where only such a one serves it, and builds one from the genome where none
   does (it said that it builds one). On chr22 with HGDP + 1000 Genomes, both refusals of a search of
-  1 + 1 bulge under an empty `--index-path` name `NRR_3_hg38`, which the Hub holds, and the Hub
-  holds no `NRR_2_hg38` (`download` stops on it), nor an `NGCG_3_hg38`. Covered by
+  1 + 1 bulge under an empty `--index-path` name `20-NRR_3_hg38`, the reference index of the
+  index set that the rebuild for 2.10.0 publishes in `lucapinello/crisprme-indexes-format2`
+  (2.8.1's of N = 3, `NRR_3_hg38`, is in `lucapinello/crisprme-data`); no repo holds an
+  `NRR_2_hg38` (`download` stops on it), nor an `NGCG_3_hg38`. Covered by
   `PostProcess/test_index_resolution.py` and `test_bulge_cap.py`.
 - **A variant index of `--index-path` whose dictionaries are not in the working directory is
   named.** complete-search said "No prebuilt variant index found" for a dataset whose variant

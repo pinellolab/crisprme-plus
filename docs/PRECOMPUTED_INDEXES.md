@@ -84,8 +84,12 @@ and an 8-nt PAM-less index cost the same, every position being a site); a downlo
 `NNN_3` archive of 2.8.1 says so. A guide of another length than its index's is served within
 the rule of [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)
 (`built + N >= guide + bDNA + (1 if bRNA > 0, else 0)`: the 20-nt general index serves a 21-nt
-guide at up to 1 bulge of each type, and on the command line at 2 DNA bulges and no RNA bulge
-too), else it needs an index of its own, which `build-index-only` builds (below).
+guide at up to 1 DNA bulge with up to 2 RNA bulges, or at 2 DNA bulges with none, a 22-nt guide
+at 1 DNA bulge with none of RNA, or up to 2 RNA bulges with none of DNA, and a 23-nt guide
+without bulges; the web, whose cap is one number for both types (`index_fit.bulge_cap`), at up
+to 1 of each for a 21-nt guide and none for a longer one), else it needs an index of its own,
+which `build-index-only` builds (below). Its rows are not always those of an index built for
+the guide's length (**The PAM-less (general) indexes**, below).
 
 The three variant panels are **complementary**, not alternatives:
 
@@ -206,10 +210,17 @@ so one index answers any 3′ PAM no longer than that flank when the search pass
 A 5′ PAM (Cas12a) needs a dedicated index: these indexes store the flank on the 3′ side of
 the guide, so a 5′ search does not use them (the TTTN indexes of 2.10.0 serve Cas12a).
 The general index of 2.10.0, `20-NNNNNNNN_3_*`, and 2.8.1's `NNN_3_*` and `NNNNNNNN_3_*` were
-built for a 20-nt guide, with N = 3. That also serves a 21-nt guide at up
-to 1 bulge of each type, byte-identically to an index built for it (so the shipped 21-nt SaCas9
-PAM files work on the 8-nt-flank indexes with `--prune-pam`); a longer guide needs its own
-index ([METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+built for a 20-nt guide, with N = 3. That also serves a 21-nt guide within the rule above (so the
+shipped 21-nt SaCas9 PAM files work on the 8-nt-flank indexes with `--prune-pam`), but its rows
+are not always those of an index built for 21-nt guides: they can differ next to a contig end or
+an `N` run, and, with bulges, at a few other sites
+([METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering); CRISPRitz's
+`docs/INDEX_FORMAT.md`, section 5.1). The fake-indel genome a variant index's `_INDELS` index
+searches has an `N` run about every 56 bases: on chr22's (hg38_mega's), the 21-nt SaCas9 guide
+at 4 mismatches + 1 DNA + 1 RNA bulge gave 456 rows of 149,688 in the engine's search of
+`20-NNNNNNNN_3` that an index built for 21-nt guides does not give (on chr22's reference
+sequence, the same 2,664,778 rows). For the rows of a guide length, search an index built for
+it, which the search takes first where one is installed; a longer guide needs its own index.
 They read the same variant data and `Dictionaries/` as the dedicated index for the
 same panel — those tiers are PAM-independent — and a `--prune-pam` run over one gives the
 dedicated index's report for that PAM: from an index of format 2 (2.10.0's), at any flank

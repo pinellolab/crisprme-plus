@@ -255,9 +255,17 @@ store the flank on the 3′ side of the guide, so a 5′ search does not use the
 An index also fixes how many bases it stores per site, from the guide length it was built
 for and its `N` (`20-NRR_3`: N = 3, up to 2 bulges of each type). An index built for a 20-nt
 guide with N = 3 also serves a 21-nt guide (the shipped 21-nt SaCas9 PAM files,
-`21bp-NNGRRT-SaCas9.txt` and `21bp-NNNRRT-SaCas9KKH.txt`) at up to 1 bulge of each type,
-byte-identically to an index built for it. A guide past that needs its own index, which the
-search builds, under a name of its own (rule:
+`21bp-NNGRRT-SaCas9.txt` and `21bp-NNNRRT-SaCas9KKH.txt`): from the web at up to 1 bulge of each
+type, from the command line at any budget the rule allows (up to 1 DNA bulge with up to 2 RNA
+bulges, or 2 DNA bulges with none). Its rows are not always those of an index built for 21-nt
+guides: they can differ next to a contig end or an `N` run, and, with bulges, at a few other
+sites. The `_INDELS` index of a variant index searches a fake-indel genome with an `N` run about
+every 56 bases: on chr22's (hg38_mega's), the 21-nt SaCas9 guide at 4 mismatches + 1 DNA + 1 RNA
+bulge gave 456 rows of 149,688 in the engine's search of the 20-nt general index that an index
+built for 21-nt guides does not give, RNA bulges at the guide's first base (on chr22's
+reference sequence, the same 2,664,778 rows). For the rows of a guide length, search an index
+built for it, which the search takes first where one is installed. A guide past that needs its
+own index, which the search builds, under a name of its own (rule:
 [methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
 
 The older name `<PAM>_<N>_<genome>` says neither the guide length an index was built for nor

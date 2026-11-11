@@ -58,7 +58,10 @@ python scripts/hf_sha256sums.py lucapinello/crisprme-data | diff - SHA256SUMS
 That final diff must be empty: it is the check that what is on the Hub is
 byte-for-byte what was validated. For a repo that does not exist yet, the staged
 file alone is the whole list (`LC_ALL=C sort -k2 staged.sha256`, the order the
-script writes).
+script writes). The rebuild of 2.10.0's indexes publishes them with `publish-index`, which
+packs each archive, uploads it and deletes it, so there is nothing staged to hash:
+`lucapinello/crisprme-indexes-format2`'s list is written from the Hub after the upload
+(`seq_script/rebuild/README.md`, rule 3).
 
 ## Each panel's Dictionaries and genotype store, once (2.10.0)
 

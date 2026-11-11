@@ -51,9 +51,15 @@ it serves for its own guide length (`index_fit.fits`).
    (`hprc_build.sh`), into the image: their working directories and inputs lie there, and `$RUN`
    binds the working directories and the repository's checkout (mega's recipe runs the
    repository's `PostProcess/` in the image).
-3. **Publish each panel as a unit**, then write `indexes/SHA256SUMS` with
-   `scripts/hf_sha256sums.py lucapinello/crisprme-indexes-format2 --staged staged.sha256` and
-   check it against the Hub after the upload (`docs/hf/README.md`).
+3. **Publish each panel as a unit**, then write `indexes/SHA256SUMS` from the Hub's own
+   checksums once its uploads are done, `python scripts/hf_sha256sums.py
+   lucapinello/crisprme-indexes-format2 > SHA256SUMS`, and upload it as `indexes/SHA256SUMS`
+   (`docs/hf/README.md`). `publish-index` packs each archive, uploads it and deletes it, so no
+   archive is left to hash before its upload, and `--staged staged.sha256`, which checks that
+   the Hub holds what was hashed where it was built, has nothing to read: this list lets a user
+   check a download against the Hub, and what the Hub holds is checked on archives downloaded
+   from it (`docs/RELEASE_CHECKLIST.md`: every published variant archive can find indels,
+   checked in the archive).
 4. **Upload the set's PAM files** to `pams/` of `lucapinello/crisprme-data`, which
    `download --what pams` installs: every `pam_file` of the set and the search PAMs its indexes
    serve (`22bp-NNGRRT-SaCas9.txt`, `21bp-NNGRRT-SaCas9.txt`, `20bp-TTTV-Cas12a.txt`,

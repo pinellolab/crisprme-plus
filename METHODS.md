@@ -2477,8 +2477,11 @@ under `--prune-pam`; up to 3 bulges), the 136 inside the rule are byte-identical
 dedicated index and the 110 outside it all differ, up to an empty result. Another 70 cells, of
 variant searches (SNP and indel rows, with no bulges too, through the index) and of a 5′ PAM,
 fall on the same side of the rule. So a published 20-nt N = 3 index serves a 21-nt guide at up
-to 1 bulge of each type, a 22-nt guide with one bulge of one type, a 23-nt guide with no bulge
-through the index, and no longer guide. An index built for this very guide is preferred to one
+to 1 DNA bulge with up to 2 RNA bulges, or at 2 DNA bulges with none, a 22-nt guide at 1 DNA
+bulge with none of RNA, or at up to 2 RNA bulges with none of DNA, a 23-nt guide with no bulge
+through the index, and no longer guide (the web, whose cap is one number for both bulge types,
+`index_fit.bulge_cap`, at up to 1 of each for a 21-nt guide, and none for a longer one). An
+index built for this very guide is preferred to one
 that merely fits. With none that fits, a search builds its own under a name that says its guide
 length (`<guide>-<PAM>_<N>_<genome>`, **Index names** above), beside an index of the older name
 `<PAM>_<N>_<genome>` built for another guide, which it stopped on before 2.10.0, as

@@ -71,17 +71,20 @@ CRISPRme mirror (minutes, not the multi-hour legacy setup):
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 NRR reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name 20-NRR_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (HGDP + 1000 Genomes, 4,091 samples, re-phased)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 ```
+
+(`:latest` is the newest release, whose index names these are; to pin a release instead, see
+the [Docker Quickstart](DOCKER_QUICKSTART.md)'s note on reproducibility.)
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
@@ -101,7 +104,7 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.8.1 crisprme.py web-interface
+  pinellolab/crisprme:latest crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
@@ -460,7 +463,7 @@ queued and the interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.8.1 crisprme.py web-interface
+>   pinellolab/crisprme:latest crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme && crisprme.py web-interface)
 > ```
