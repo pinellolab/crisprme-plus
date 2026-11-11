@@ -53,7 +53,7 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   not admit: a raw target needing more than K gives none under the cap, and only its reference
   row is written. It writes what the cap alone writes (its unit test compares the bound with
   every choice; on chr22 the README guide's population-level search with K = 4 skips 753,990 of
-  its 764,435 raw targets with a variant letter and takes 8 to 10 min on 16 threads, 17 to 18
+  its 764,435 raw targets with a variant letter and takes 8 to 10 min on 16 threads, 16 to 18
   min with the K-skip off, with the same files), and the switch above turns it off too (the log
   then says the K-skip is off). `--max-degeneracy` stays off by default.
 - **The post-analysis runs each chromosome in pieces over the search's threads.** Up to now the
@@ -125,7 +125,7 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   8 to 11 min per sample (16 threads). On a small panel it can still be the faster: on HPRC (232
   samples) 9 to 12 min against 14 to 17 min per sample, the post-analysis costing about the same
   in both modes and the per-sample run writing more (the alternative alignments, the
-  observed-haplotypes sidecar); with mega beside HGDP + 1000 Genomes, 50 to 55 min against 96 to
+  observed-haplotypes sidecar); with mega beside HGDP + 1000 Genomes, 49 to 55 min against 96 to
   107 min, 54 to 62 min of which the per-sample report (the whole search of both datasets). They
   now say it is a resolution choice whose speed depends on the panel, and what the default
   search costs (README, "What the default search costs"; METHODS.md §5).

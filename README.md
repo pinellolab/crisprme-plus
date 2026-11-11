@@ -920,7 +920,7 @@ without these steps, on the same node), about what one bulge costs (8 min at 4 +
 Genomes, a dense panel of 4,091 samples, per sample is thus the faster mode; on a small panel
 such as HPRC (232 samples) the same search of chr22 took 14 to 17 min per sample against 9 to 12
 min population-level, and with mega beside HGDP + 1000 Genomes 96 to 107 min per sample (54 to
-62 min of it the report) against 50 to 55 min (the whole search of both datasets). Genome-wide
+62 min of it the report) against 49 to 55 min (the whole search of both datasets). Genome-wide
 it has not been timed yet on the indexes of the rebuild for 2.10.0 (its release gates do): from
 its parts we expect about 1.5 to 4 h per sample on 16 threads, against 2.8.1's 1.2 h on 32
 threads and an estimated 9 to 11 h without these steps (METHODS.md says how).
@@ -1110,7 +1110,7 @@ its purpose and usage:
   **use K >= 4 there.** With the cap, a population-level search skips before expanding them the
   raw targets every row of which would rest on more than K columns (the K-skip), and writes
   what the cap alone writes (the README guide's search of chr22 at K = 4: 8 to 10 min, against
-  17 to 18 min with the K-skip off and 23 to 32 min without the cap, on 16 threads).
+  16 to 18 min with the K-skip off and 23 to 32 min without the cap, on 16 threads).
 
 - `--no-haplotype-precheck` (*Optional*)
   <br>Turn off the exact haplotype pre-check of a per-sample search, its carriers-first twin on

@@ -1150,7 +1150,7 @@ search's threads, bring it back. None changes a row.
   is written. It writes what the cap alone writes (its unit test compares D_min with every
   choice): on chr22 the README guide's population-level search with `--max-degeneracy 4` skips
   753,990 of its 764,435 raw targets with a variant letter (98.6%) and takes 8 to 10 min on 16
-  threads (17 to 18 min with the K-skip off, the same files; each pair of runs started
+  threads (16 to 18 min with the K-skip off, the same files; each pair of runs started
   together). Use K = 4 or more in a population-level search (above). The K-skip reads the
   ALTs listed at a raw target's variant columns, to tell which columns an ALT can fix, and no
   sample's haplotype. `--no-haplotype-precheck` (or
@@ -1302,7 +1302,7 @@ or less, the indels about 3.5 min) and the per-sample run writing what the popul
 does not (the alternative alignments, the observed-haplotypes sidecar) and integrating its rows
 for longer; beside mega (HGDP + 1000 Genomes and mega, NRR: each dataset searched and
 post-analysed in turn, then the rows of both merged, integrated and reported) the per-sample
-search took 96 to 107 min, 54 to 62 min of it its report, against 50 to 55 min population-level
+search took 96 to 107 min, 54 to 62 min of it its report, against 49 to 55 min population-level
 (the whole runs, the two started together; a search of several datasets writes its `log.txt`
 anew for each, so the times there are its last dataset's). Choose the mode for what it reports.
 
