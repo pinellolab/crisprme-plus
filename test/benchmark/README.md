@@ -180,7 +180,8 @@ whose records contradict each other, a search made with `CRISPRME_INDEL_SNP=0` (
 `log_verbose.txt` notes it since 2.10.0: none of the per-carrier resolution applies), one
 that read a genotyped dataset's indels with no phased indel store (its `log_verbose.txt`
 notes it since 2.10.0, `NOTE [indel-snp]: no phased indel genotype store of ...`: their
-carriers are the indel log's, their slot unknown), one
+carriers are the indel log's, their slot unknown), a run of 2.10.0 whose `log_verbose.txt`
+is gone where its VCF holds indel or MNV records (only the log says either of the two), one
 whose records do not say how its release read data that makes it matter (every allele of a
 split site or the last record, the INDELS index's format, the phased indel store's FILTER
 rule: the check reads them from `.indexes_searched.txt`, the indexes' `.bin` headers, the

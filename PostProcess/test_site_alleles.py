@@ -380,6 +380,26 @@ class TheDictionaryDecode(unittest.TestCase):
                          [("A", {"S": "1|0", "X": "1|0", "Z": "0|1"}),
                           ("T", {"S": "0|1", "Y": "1|1"})])
 
+    def test_an_snv_alt_written_in_lower_case_is_no_allele_in_any_reader(self):
+        """C-R3-1: C>G (S1) beside C>g (S2) at one position. CRISPRitz codes no ALT written
+        in lower case, so its genome holds G from the first line alone, and its dictionary
+        lists both lines. Every reader keeps g apart from G: the Tier-1 compile and the SNP
+        path's decode list it as written (and look up only the bases a target's column
+        holds), and the indel path's reader of a classic install keeps the ACGT alts, so g
+        is no allele there, as on the Tier-1 path. That reader read the ALT in upper case:
+        g merged into G, S2 a carrier of G, with the more frequent line's ID and AF."""
+        value = "S1:1|0;C,G;rs1;0.1$S2:0|1;C,g;rs2;0.2"
+        self.assertEqual(isc.parse_dict_value(value), [("C", "G", "rs1", "0.1", {"S1": "1|0"})])
+        tier1 = [(alt, gts) for _pos, _ref, alt, _rs, gts in
+                 tier0_compile._emit_key("chrT,105", value, "chrT,")]
+        self.assertEqual(tier1, [("G", {"S1": "1|0"}), ("g", {"S2": "0|1"})])
+        snps, samples, _rs, _af, _info = sar.legacy_5tuple_from_entry(value, "chrT", 104)
+        self.assertEqual((snps, samples), (["G", "g"], [["S1:1|0"], ["S2:0|1"]]))
+        # its REF is read in upper case: c>G beside C>G is one allele, in this reader too
+        value = "S1:1|0;C,G;rs1;0.1$S2:0|1;c,G;rs2;0.2"
+        self.assertEqual(isc.parse_dict_value(value),
+                         [("C", "G", "rs2", "0.2", {"S1": "1|0", "S2": "0|1"})])
+
     def test_a_star_beside_an_snv_tells_its_index_in_every_reader(self):
         """A line G>T,* (a spanning deletion's '*' as its second ALT): CRISPRitz lists the
         '*' too, and W, a carrier of the '*' alone, tells that its index is 2, so S's 1|2

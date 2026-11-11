@@ -5468,9 +5468,11 @@ class ReleaseTwoTen(Base):
                      "written before CRISPRme 2.10.0: ...\n")
         sem, _why = C.run_semantics(case.res, vcfs, ["chr21"], ["v"], "hg38")
         self.assertFalse(sem.store_filter(vcfs[0], "chr21"))
+        self.assertTrue(sem.values[("v", "chr21")]["store"])
         os.remove(os.path.join(case.res, "log_verbose.txt"))
         sem, _why = C.run_semantics(case.res, vcfs, ["chr21"], ["v"], "hg38")
         self.assertIsNone(sem.values[("v", "chr21")]["store_filter"])
+        self.assertIsNone(sem.values[("v", "chr21")]["store"])
         lib = os.path.join(case.tmp, "work", "genome_library")
         shutil.rmtree(os.path.join(lib, "20-NRG_3_hg38+v_INDELS"))
         with open(os.path.join(case.res, "log_verbose.txt"), "w") as fh:
@@ -5902,6 +5904,41 @@ class StageTwoARoundThree(Base):
                 fh.write("STARTING ANALYSIS FOR v\n" + other_run)
             rc, found = case.run()
             self.assertEqual((rc, gating(found)), (0, []), (other_run, found))
+
+    def test_a_run_of_2_10_0_without_its_log_is_refused_where_its_vcf_holds_indels(self):
+        """C-R3-4: only the log_verbose.txt of a run of 2.10.0 says that the run read a
+        genotyped dataset's indels with no phased store, or that its SNP+indel co-occurrence
+        was off (the NOTEs above). A run whose log is gone was read as a default run that
+        read its store: the review's world WDNS (wd.py, its store removed) without its log
+        gave 43 gating findings, each of them the reading the NOTE refuses. Such a run
+        cannot say how it read its indels: refused (exit 2) in every mode where the VCF
+        holds indel or MNV records whose FILTER passes; the same run with its log is
+        checked, a run of 2.10.0 without its log whose VCF holds no such record is checked,
+        and so is a run before 2.10.0, whose log records neither (as before)."""
+        case, _ = world_indel_snp(self.tmp)
+        as_2100(case, log=None)
+        for mode in ("soundness", "completeness", "both"):
+            rc, _found = case.run(mode=mode)
+            self.assertEqual(rc, 2, mode)
+        with open(os.path.join(case.res, "log_verbose.txt"), "w") as fh:
+            fh.write("STARTING ANALYSIS FOR v\n")
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        # an MNV is a record of the indel path too; an SNV alone is not (completeness:
+        # a chromosome is read with no row on it)
+        seq = PRE + GUIDE[:5] + "C" + GUIDE[6:] + "TGG" + POST
+        snv = (len(PRE) + 6, "C", GUIDE[5], {"S05": "1|0"})
+        mnv = (len(PRE) + 6, "CA", GUIDE[5] + "T", {"S06": "1|0"})
+        assert seq[mnv[0] - 1:mnv[0] + 1] == mnv[1]
+        for recs, refused in (([snv], False), ([snv, mnv], True)):
+            tmp = tempfile.mkdtemp(dir=self.tmp)
+            other = as_2100(Case(tmp, seq, recs, []), log=None)
+            rc, found = other.run(mode="completeness")
+            self.assertEqual(rc, 2 if refused else 0, (recs, found))
+        # a run before 2.10.0 (no .indexes_searched.txt) without its log: checked
+        case, _ = world_indel_snp(os.path.join(self.tmp, "old"))
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
 
 
 def code_lines(path):

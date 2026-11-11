@@ -473,7 +473,11 @@ and the `release-crisprme` skill.
     phased indel genotype store of <dataset> on <chrom>`): each indel's carriers are then
     its indel log's, their slot unknown, not the store's phased reading the check models
     (the review's world WD, a deletion on two lines, with its store removed: 43 gating
-    findings per sample and 6 population-level, every one that reading). An index keeps
+    findings per sample and 6 population-level, every one that reading). Only the log says
+    either, so a run of this release whose `log_verbose.txt` is gone is refused where a VCF
+    given holds indel or MNV records whose FILTER passes (the check read it as a default run
+    that read its store: the same world, store removed, without its log, gave the 43
+    findings); a run of an earlier release records neither, and is read as before. An index keeps
     a target's site, its PAM and the guide's length of bases from it, not its alignment, so
     a target is read by its site: one that runs past its fake-indel window (25 bases before
     the record's first REF base, 27 after its last), or whose site's guide region does (an
@@ -702,7 +706,7 @@ and the `release-crisprme` skill.
     variant bases than the SNP they carry (chr22:11333697 (−), chr22_11333716_T_G: HG00271,
     HG00318, HG00369, HG00379, HG00864, NA06991, NA06993, NA18547), where the HGDP + 1000
     Genomes run alone lists them on an alignment that holds it (report-only).
-  - Wired in: `PostProcess/test_check_indel_rows.py` (227 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (228 unit and mutation tests: a right
     row raises nothing gating, each corruption of it is caught, each documented limit and
     overlapping slot comes out under its own class, the checker's coverage gaps under
     theirs; the refusals; each release's reading of the data, told from a run's records;
@@ -927,9 +931,10 @@ and the `release-crisprme` skill.
   (the earlier on a tie) as it is, as the enricher does (`site_alleles.merge_gt`: CRISPRitz's
   `_gt_union`'s output on 20 pairs of calls, in its test; up to the integration it read a pair not
   phased alike as unphased, `1|0` beside `0/1` giving `1/0` where the enricher's entry holds
-  `1|0`). They read an SNV's REF in upper case, as VCF 4.x does, and its ALT as written: CRISPRitz
-  codes C>G and c>G alike but lists them as two entries of G (its dictionary compares an SNV's
-  REF and ALT as written), which are one allele (`site_alleles.read_records`). Up to the
+  `1|0`). They read an SNV's REF in upper case, as VCF 4.x does, and its ALT as written (the
+  indel path's reader of a classic install's dictionary read the ALT in upper case: see Fixed):
+  CRISPRitz codes C>G and c>G alike but lists them as two entries of G (its dictionary compares
+  an SNV's REF and ALT as written), which are one allele (`site_alleles.read_records`). Up to the
   integration such a pair stopped the Tier-1 compile: on the review's world WSNVCASE,
   `build-index-only --samplesID` failed with `duplicate (pos, alt) record (1004, 'G')`; it now
   builds, and the rows are those of the same calls written on one line. A classic install read
@@ -2145,6 +2150,25 @@ and the `release-crisprme` skill.
   before 2.10.0; the real-data check refuses such a run (above). Covered by
   `PostProcess/test_indel_overlaid_rows.py` (the real `analisi_indels_NNN.py`: an MNV on two
   lines, in one case and in two, a deletion on two lines without the store, and the note).
+- **The indel path of a classic install reads an SNV's ALT as written: a carrier of an ALT
+  written in lower case, which CRISPRitz does not code, is no longer listed on a target of the
+  coded ALT** (since 2.8.1; an install without the Tier-1 store, such as an index built without
+  `--samplesID`). Where an indel's fake-indel window holds a SNP code, the indel path reads
+  each carrier's SNP alleles from the Tier-1 store, keeping the ALTs A, C, G and T, or on a
+  classic install from the per-sample dictionary (`indel_snp_cis.parse_dict_value`), which
+  read the ALT in upper case. CRISPRitz codes no ALT written in lower case but lists it in its
+  dictionary, so a line C>g beside C>G at one position was read as a second line of G: its
+  carriers were listed on targets of G that their genome does not hold, and G took the ID and
+  AF of the more frequent of the two lines. On the review's world WLOWALT (a deletion whose
+  target C>G makes perfect, the line C>G and the line C>g each with two carriers; S05 holds the
+  deletion on both slots and g on the first) a classic install listed S01 and S05 on the
+  deletion's CFD-1.0 row, and a Tier-1 install S01 alone; the reader now keeps the ALT as
+  written, which its base filter drops as the Tier-1 path does, and both installs list S01
+  alone, their rows the same. The real-data check refuses a run whose VCF holds an SNV ALT in
+  lower case (above), so it judged no such row. No published panel's chr22 holds an SNV whose
+  ALT is written in lower case (HGDP + 1000 Genomes, HPRC and mega). Covered by
+  `PostProcess/test_site_alleles.py` and `test_indel_overlaid_rows.py` (the real
+  `analisi_indels_NNN.py` on a Tier-1 and a classic install of that world).
 - **An indel row whose first base is one an insertion adds is placed at the insertion**
   (every release with the fake-indel genome; both modes, any PAM).
   - The engine reports where the target's first aligned base (the leftmost, on either strand)

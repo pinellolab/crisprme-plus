@@ -541,7 +541,10 @@ chromosome with no phased indel store (NOTE [indel-snp]: no phased indel genotyp
 <dataset> on <chrom>, since 2.10.0: an index built with CRISPRME_INDEL_SNP=0, or a store
 whose compile failed) where the VCF given holds indels: each indel's carriers are then its
 indel log's, their slot unknown, and the store's phased reading modeled here does not
-apply (a run of an earlier CRISPRme so made records nothing that tells it).
+apply (a run of an earlier CRISPRme so made records nothing that tells it). Only the log
+says either, so a run of 2.10.0 whose log_verbose.txt is gone is REFUSED where a VCF given
+holds indel or MNV records whose FILTER passes (read as a default run that read its store,
+one made either way would be judged by a reading it did not make).
 
 PRECONDITION. The search read each genotyped dataset's genotypes (its Tier-1 genotype
 store, or classic dictionaries), as every index CRISPRme installs or builds with
@@ -2593,9 +2596,10 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
     an earlier record's ALT at a split site, and the last only where an index of format 1
     served it, or where the enriched genome holds the last ALT alone there, or where its
     index of format 2 flags no Q while its VCF has four bases at a position; the phased
-    indel store applies the FILTER rule but where the run's log notes an older store
-    (none where the log is gone). What none of them tells is None: main refuses the run
-    where it matters."""
+    indel store applies the FILTER rule but where the run's log notes an older store, and
+    was read but where the log notes that there was none (neither where the log is gone,
+    nor then whether the SNP+indel co-occurrence was on). What none of them tells is None:
+    main refuses the run where it matters."""
     log = _read_log(resdir)
     if log is not None and OPT_OUT in log:
         return None, "opt-out"
@@ -2646,7 +2650,9 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
         for ch in chroms:
             val = {}
             val["store_filter"] = None if log is None else (ds, ch) not in old
-            val["store"] = (ds, ch) not in no_store
+            # only the log says that the run read no store (its NOTE), or that the
+            # co-occurrence was off (OPT_OUT): with the log gone neither is known
+            val["store"] = None if log is None else (ds, ch) not in no_store
             fmt = None
             heads = [bin_header(b) for b in _bins_of(indels_dir, ch)]
             heads = [h for h in heads if h is not None]
@@ -2689,6 +2695,17 @@ def four_base_position(vcf, chrom):
             pos, held = r["pos1"], {r["ref"].upper()}
         held |= {a.upper() for a in r["alts"] if len(a) == 1}
         if held >= set("ACGT"):
+            return True
+    return False
+
+
+def indel_path_records(vcf, chrom):
+    """Whether ``vcf`` has a record on ``chrom`` whose FILTER passes with an indel or MNV ALT
+    (a symbolic ALT or a '*' is neither): a record the indel path reads."""
+    for r in vcf.records(chrom, 0, 1 << 31):
+        if r["filter"] in PASS_FILTERS and any(
+                "<" not in a and a != "*" and (len(a) != len(r["ref"]) or len(a) > 1)
+                for a in r["alts"]):
             return True
     return False
 
@@ -7017,6 +7034,17 @@ def main(argv=None):
                                "PASS or '.', which its log tells; the run has no "
                                "log_verbose.txt), and %s holds indel records of another "
                                "FILTER there" % (ds or v.path, ch, v.path))
+            # a run of 2.10.0 records only in its log that its SNP+indel co-occurrence was
+            # off (OPT_OUT) or that it read a dataset's indels with no phased store
+            # (NO_STORE): with the log gone it reads as a default run that read its store,
+            # and either would be judged by a reading it did not make
+            if sem.release2100 and val.get("store") is None and indel_path_records(v, ch):
+                unknown.append(
+                    "whether its SNP+indel co-occurrence was on (CRISPRME_INDEL_SNP=0 turns "
+                    "it off)%s -- its log_verbose.txt says so since 2.10.0, and the run has "
+                    "none -- and %s holds indel or MNV records on %s"
+                    % (" or whether it read the indels of %s with their phased indel "
+                       "genotype store" % (ds or v.path) if v.samples else "", v.path, ch))
             if val.get("all_alleles") is None and split_sites(v, ch, most=1, telling=False):
                 unknown.append("whether the variant genome of %s on %s codes every allele "
                                "of a split SNP site (CRISPRitz 2.10.0) or the last "

@@ -236,7 +236,12 @@ Each source VCF is normalized so that variant records are directly comparable:
   of repeated REF>ALTs counted none). An SNV whose ALT is written in lower case is
   never searched: CRISPRitz codes no lower-case ALT, though its dictionary lists the
   carriers (the input validator's full scan warns of such records and says how to write
-  the VCF in upper case; the published panels' chr22 holds none). CRISPRme's own merge of
+  the VCF in upper case; the published panels' chr22 holds none). Every reader reads that
+  ALT as written, so none reads it as an allele of the genome: the indel path keeps only
+  the ALTs A, C, G and T (up to the integration its reader of a classic install's
+  dictionary, `indel_snp_cis.parse_dict_value`, read the ALT in upper case, as 2.8.1 did, so
+  C>g beside C>G was read as G and its carriers were listed on targets of G, which their
+  genome does not hold). CRISPRme's own merge of
   two listings of one allele (`site_alleles.merge_gt`, for a dictionary that lists one
   twice) reads them by that rule too; it read two calls not phased alike as unphased.
 - **Consistent coordinates and contigs** (reference build, chromosome naming)
@@ -1977,7 +1982,12 @@ genotyped dataset's indels on a chromosome with no phased indel store, where the
 indels (an index built with `CRISPRME_INDEL_SNP=0`, or a store whose compile failed; a
 search of 2.10.0 notes it in its `log_verbose.txt`: `NOTE [indel-snp]: no phased indel
 genotype store of <dataset> on <chrom>`): each indel's carriers are then its indel log's,
-their slot unknown (§4), not the store's phased reading modeled here.
+their slot unknown (§4), not the store's phased reading modeled here. Only the log says
+either, so a run of 2.10.0 whose `log_verbose.txt` is gone is refused where a VCF given
+holds indel or MNV records whose FILTER passes: it would be read as a default run that read
+its store, and a run made either way judged by a reading it did not make (a deletion on two
+lines read with no store gave 43 gating findings so). A run of an earlier CRISPRme records
+neither, and is read as before.
 CRISPRme's documented reading of a carrier (§4: the one-indel window, resolved with each
 carrier's own SNP alleles, so that a row lists a carrier only where those give its target;
 the second indel read from either end of the target through the indel, each base the indel

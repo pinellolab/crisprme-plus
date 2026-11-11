@@ -1265,7 +1265,11 @@ def parse_dict_value(value):
     allele index (site_alleles.read_records) among every alt of one character the value
     lists, a '*' too (the Tier-1 store's compile, tier0_compile.iter_dict_records, reads
     them so: a carrier of the '*' alone tells its index); malformed entries are
-    skipped."""
+    skipped. The REF is read in upper case (C>G beside c>G, which CRISPRitz codes alike,
+    is one allele) and the ALT as written, as the Tier-1 compile reads them: CRISPRitz
+    codes no ALT written in lower case, so C>g is no allele of the genome and the base
+    filter drops it, as the Tier-1 path keeps only ACGT alts (read in upper case, its
+    carriers were read as carriers of G)."""
     out = []
     for entry in str(value).split("$"):
         parts = entry.split(";")
@@ -1274,7 +1278,7 @@ def parse_dict_value(value):
         refalt = parts[1].strip().split(",")
         if len(refalt) < 2:
             continue
-        ref, alt = refalt[0].strip().upper(), refalt[1].strip().upper()
+        ref, alt = refalt[0].strip().upper(), refalt[1].strip()
         if len(ref) != 1 or len(alt) != 1:
             continue
         carriers = {}

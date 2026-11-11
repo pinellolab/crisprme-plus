@@ -30,7 +30,8 @@ on them and its rows checked:
     copies;
   * a classic dictionary install (no Tier-1 store: the per-sample SNP dictionary), a
     sites-only panel (no genotypes), no phased indel store (which the run notes in its
-    log), CRISPRME_INDEL_SNP=0 and --max-total-edits;
+    log), CRISPRME_INDEL_SNP=0 and --max-total-edits; an SNV whose ALT is written in lower
+    case, which CRISPRitz does not code, is no allele on a Tier-1 or a classic install;
   * a record written on two VCF lines, in one case and in two, is one allele: an indel
     read from the store, an MNV (which no store holds) and an indel without the store
     read from the indel log, each window's rows listing the carriers of both lines.
@@ -385,6 +386,8 @@ class World(object):
         enriched = list(self.ref)
         alleles = {}
         for pos1, ref, alt, _rs, _g in self.snps:
+            if alt != alt.upper():
+                continue  # CRISPRitz codes no ALT written in lower case
             alleles.setdefault(pos1, {ref}).add(alt)
         for pos1, bases in alleles.items():
             enriched[pos1 - 1] = CODE[frozenset(bases)]
@@ -957,6 +960,39 @@ class OtherInstalls(_Base):
                 self.assertEqual(sorted((r["dna"], r["samples"], r["rsid"]) for r in best),
                                  [(GUIDE + "TGG", "S01,S02,S03", "rs_A_indel"),
                                   (GUIDE + "TGG", "S01,S02,S03", "rs_A_indel_2")])
+
+    def test_an_snv_alt_written_in_lower_case_is_not_read(self):
+        """C-R3-1 (the review's world WLOWALT): a deletion R (TC>T) makes a target that an
+        SNV q makes perfect (C>G, the guide's base 4; the reference C). q is written on two
+        VCF lines, C>G (S01, S03) and C>g (S04, S05). CRISPRitz codes no ALT written in
+        lower case: its genome codes q from C>G alone, and its dictionary lists both lines.
+        S05 holds R on both slots and g on the first, which reads the reference C there, so
+        R's perfect target is S01's alone (R and G on its second slot). A Tier-1 install's
+        indel path reads the ACGT alts only; a classic install's reader of the dictionary
+        read the ALT in upper case, g as G, and listed S05 on the perfect target too."""
+        g = GUIDE
+        m0 = 5600
+        w = World()
+        w._put(m0, g[:3] + "C" + g[4:10] + "C" + g[10:] + "TGG")
+        w.ref = "".join(w.seq)
+        w.indels.append((m0 + 10, g[9] + "C", g[9], "rs_R_indel",
+                         {"S01": "1|1", "S02": "1|0", "S03": "1|0", "S04": "0|1", "S05": "1|1"}))
+        w._snp("R", m0 + 4, "C", "G", {"S01": "0|1", "S03": "0|1"})
+        w._snp("R", m0 + 4, "C", "g", {"S04": "1|0", "S05": "1|0"})
+        got = {}
+        for install, tiers in (("tier1", ("registry", "tier1", "indelgt")),
+                               ("classic", ("dict", "indelgt"))):
+            tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_lc_alt_%s_" % install)
+            self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+            fx = _Fixture(tmp, w, tiers=tiers)
+            self.assertEqual(fx.proc.returncode, 0,
+                             fx.proc.stdout[-2000:] + fx.proc.stderr[-2000:])
+            got[install] = sorted(
+                (r["dna"], r["samples"], r["cfd"]) for r in fx.rows()
+                if int(r["var"].split(",")[0].split("_")[1]) == m0 + 10)
+            best = [(dna, samples) for dna, samples, cfd in got[install] if cfd == 1.0]
+            self.assertEqual(best, [(g + "TGG", "S01")], install)
+        self.assertEqual(got["classic"], got["tier1"])
 
     def test_a_store_of_an_earlier_release_is_noted(self):
         """A phased indel store written before 2.10.0 (its .done marker without the FILTER
