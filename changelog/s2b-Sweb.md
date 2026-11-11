@@ -25,7 +25,19 @@ said the web app reads through such links, was corrected in place.
   results pages write (`zip`, `grep >`, `to_csv`), the COSMIC record and the
   concurrent-searches setting, and the download progress a Settings job writes; and the cache
   of the results tables, pickles Flask-Caching loads, kept in `Cache/` of the data folder,
-  where another user's pickle ran as the web app's user when it was loaded.
+  where another user's pickle ran as the web app's user when it was loaded. Three more of the
+  kind: the personal-assembly results page read the two haplotypes' folders the combined
+  job's `.Params.txt` names (which another user can write, in a combined job folder they can
+  make) through a link put in `Results/` under that name, a `..` or a path, and
+  showed the results of any search of the user's on the page and in its Custom Ranking
+  tables; a folder the web app made for files of its own in a folder others can write, and
+  then used by its name, could be renamed away and a link to a folder of the user's put in
+  its place, so that the Personal Risk Card's plots moved every file of that folder into the
+  job's `imgs/`, which the download route served, an uploaded genome or personal-assembly
+  bundle was unpacked into it (a bundle's `.ssh/authorized_keys` into the user's home), and
+  the sorting of an annotation wrote over files there; and the concurrent searches setting,
+  read with `open()` and written back whole, readable by all, copied a JSON file of the
+  user's that a link at its name named into the data folder.
 
   Each such file now goes through `PostProcess/safe_files.py`: every folder below the data
   folder is opened in turn with `O_NOFOLLOW` (`openat`), so no link is followed at any step;
@@ -36,23 +48,31 @@ said the web app reads through such links, was corrected in place.
   known to be a regular file; a folder is removed within the folder that holds it
   (`shutil.rmtree(dir_fd=)`), and an upload is moved only if it is a regular file. The
   download route refuses a link at any step of its path (403), and an empty, `.` or `..` step
-  (404). A program the pages run on a job's files (the region page's `grep` and `awk`, the
-  plots, the radar chart) reads copies of them or its standard input, with no shell, and
-  writes in a folder of the web app's own whose files are then renamed into the job's folder;
-  the archives are made in Python. A Settings job's folder is writable by the web app's user
-  alone, and the tables' cache is in a folder of the server's own in the temporary folder
-  (`tempfile.mkdtemp`, removed at exit; in memory when that folder is writable by others and
-  not sticky). A link is followed only where no one else can have put it: a link of the
-  user's (or of the data folder's owner, or root) in a folder only they can write, or a sticky
-  one of theirs, such as a genome linked to a shared copy, a VCF dataset registered from a
-  server folder, or `Results/` or `Settings/` linked onto a volume; in a folder the group can
-  write the web app refuses those too, and below `Results/` and `Settings/` it follows none.
+  (404). A folder one of its files names (the assembly page's haplotype folders) must be a
+  folder of `Results/` named alone, and is read as the others are. A program the pages run on
+  a job's files (the region page's `grep` and `awk`, the plots, the radar chart) reads copies
+  of them or its standard input, with no shell, and writes in a folder of the web app's own
+  whose files are then renamed into the job's folder; the archives are made in Python. A
+  folder the web app makes for files of its own in a folder others can write (those
+  programs' outputs, an upload unpacked, an annotation sorted) is made under a name no one
+  could make first, mode 0700, checked to be that very folder, and then used through its
+  descriptor alone (`/proc/self/fd/<n>`), never by its name again. A Settings job's folder
+  is writable by the web app's user alone, and the tables' cache is in a folder of the
+  server's own in the temporary folder (`tempfile.mkdtemp`, removed at exit; in memory when
+  that folder is writable by others and not sticky). A link is followed only where no one
+  else can have put it: a link of the user's (or of the data folder's owner, or root) in a
+  folder only they can write, or a sticky one of theirs, such as a genome linked to a shared
+  copy, a VCF dataset registered from a server folder, or `Results/` or `Settings/` linked
+  onto a volume; in a folder the group can write the web app refuses those too, and below
+  `Results/` and `Settings/` it follows none.
 
   Tests: `test_safe_files` (the unit-test job: each kind of file, link, FIFO and hard link, at
-  each step), `test_web_no_links` (web-e2e's image step: the six cases of the live check, and
-  each case the inventory added, through the real Dash server's Flask test client and the
-  real functions that write, each refused and a legitimate file still read or served), and
-  `test_settings_progress` (the Settings page's readers and writers, without Dash). Each fails
-  on the code before. `docs/TROUBLESHOOTING.md` §7 says what this protects and what a shared
-  server still needs: the search and the commands the web app starts still write through
-  links in folders others can write, and the web app has no login.
+  each step, and the web app's own folders, renamed with a link put in their place),
+  `test_web_no_links` (web-e2e's image step: the six cases of the live check, each case the
+  inventory added, and each the review of the fix found, through the real Dash server's Flask
+  test client and the real functions that write, each refused and a legitimate file still
+  read or served), and `test_settings_progress` (the Settings page's readers and writers,
+  without Dash). Each fails on the code before. `docs/TROUBLESHOOTING.md` §7 says what this
+  protects and what a shared server still needs: the search and the commands the web app
+  starts still write through links in folders others can write, and the web app has no
+  login.

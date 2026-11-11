@@ -18,7 +18,6 @@ import os
 import json
 import gzip
 import re
-import tempfile
 
 # personal_assembly lives in PostProcess/ (like assembly_reconcile). crisprme.py's
 # sys.path inserts never reach the web app (`crisprme.py web-interface` runs
@@ -2632,26 +2631,28 @@ def sort_annotation(annotationfile: str) -> str:
         raise subprocess.SubprocessError(
             f"Annotation file not found: {annotationfile}"
         )
-    # Each intermediate file in a temporary folder of the web app's own beside the file
-    # (the same file system: the result is renamed), and the result renamed over the .gz
-    # with no link followed (safe_files): the decompressed, the sorted and the bgzipped
-    # file were written beside it, by name, through any link another user put there under
-    # those names. The source read with no link followed either; the plain file, when
-    # there, stays as it was.
-    with tempfile.TemporaryDirectory(prefix=".crisprme-sort-",
-                                     dir=os.path.dirname(gz_path)) as tmp:
+    # Each intermediate file in a folder of the web app's own beside the file (the same
+    # file system: the result is renamed), and the result renamed over the .gz with no link
+    # followed (safe_files): the decompressed, the sorted and the bgzipped file were written
+    # beside it, by name, through any link another user put there under those names. The
+    # source read with no link followed either; the plain file, when there, stays as it
+    # was. The folder is used through its descriptor alone (safe_files.private_dir: one made
+    # by name in a folder others write could be renamed away, and a link put in its place).
+    with safe_files.private_dir(os.path.dirname(gz_path), cwd, ".crisprme-sort-") as tmp:
         if source == gz_path:
-            plain = _decompress_file(gz_path, os.path.join(tmp, "plain.bed"))
-            with open(plain, "rb") as fin, open(os.path.join(tmp, "sorted.bed"), "w") as out:
+            plain = _decompress_file(gz_path, os.path.join(tmp.path, "plain.bed"))
+            with open(plain, "rb") as fin, \
+                    open(os.path.join(tmp.path, "sorted.bed"), "w") as out:
                 code = subprocess.call(["sort-bed", "-"], stdin=fin, stdout=out)
             if code != 0:
                 raise subprocess.SubprocessError("Sorting BED file failed")
         else:
-            _sort_bed(plain_path, os.path.join(tmp, "sorted.bed"))
-        code = subprocess.call(["bgzip", "-f", os.path.join(tmp, "sorted.bed")])
+            _sort_bed(plain_path, os.path.join(tmp.path, "sorted.bed"))
+        code = subprocess.call(["bgzip", "-f", os.path.join(tmp.path, "sorted.bed")],
+                               pass_fds=(tmp.fd,))
         if code != 0:
             raise subprocess.SubprocessError("Compressing and indexing file failed")
-        safe_files.replace_from(os.path.join(tmp, "sorted.bed.gz"), gz_path, cwd)
+        safe_files.replace_from(os.path.join(tmp.path, "sorted.bed.gz"), gz_path, cwd)
     return gz_path
 
 
@@ -3015,12 +3016,13 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
 
     fresh = safe_files.is_file(active_gz, cwd) and _sig_now() == sig
     if not fresh:
-        # merged in a temporary folder of the web app's own beside it, sorted and bgzipped
-        # there (sort_annotation), and renamed over .active.<genome>.bed.gz with no link
-        # followed (safe_files): the merged file (.building), the plain one and the
-        # signature were written by name, through any link another user put there
-        with tempfile.TemporaryDirectory(prefix=".crisprme-active-", dir=d) as tmp:
-            merged = os.path.join(tmp, os.path.basename(active))
+        # merged in a folder of the web app's own beside it, sorted and bgzipped there
+        # (sort_annotation), and renamed over .active.<genome>.bed.gz with no link followed
+        # (safe_files): the merged file (.building), the plain one and the signature were
+        # written by name, through any link another user put there. The folder is used
+        # through its descriptor alone (safe_files.private_dir, as sort_annotation's).
+        with safe_files.private_dir(d, cwd, ".crisprme-active-") as tmp:
+            merged = os.path.join(tmp.path, os.path.basename(active))
             with open(merged, "w") as out:
                 for m in members:
                     fh = (_open_gz_text(m) if m.endswith(".gz")
@@ -3030,7 +3032,7 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
                             if need_strip and _c and _c.is_cosmic_row(line):
                                 continue  # COSMIC excluded until a licence is attested
                             out.write(line)
-            sorted_gz = _sort_and_bgzip(merged)
+            sorted_gz = _sort_and_bgzip(merged, tmp.fd)
             safe_files.replace_from(sorted_gz, active_gz, cwd)
         if os.path.lexists(active):  # (a plain one an earlier release left)
             with contextlib.suppress(OSError):
@@ -3052,15 +3054,16 @@ def _decompress_file(fname: str, outfname: str) -> str:
     return outfname
 
 
-def _sort_and_bgzip(plain: str) -> str:
+def _sort_and_bgzip(plain: str, folder_fd: int) -> str:
     """``plain``, a BED file of a folder of the caller's own, sorted and bgzipped beside it:
-    ``<plain>.gz`` (the merged active annotation: build_active_annotation)."""
+    ``<plain>.gz`` (the merged active annotation: build_active_annotation). ``folder_fd``,
+    the folder's descriptor, which bgzip inherits (safe_files.private_dir)."""
     sorted_bed = plain + ".sorted"
     with open(plain, "rb") as fin, open(sorted_bed, "w") as out:
         code = subprocess.call(["sort-bed", "-"], stdin=fin, stdout=out)
     if code != 0:
         raise subprocess.SubprocessError("Sorting BED file failed")
-    code = subprocess.call(["bgzip", "-f", sorted_bed])
+    code = subprocess.call(["bgzip", "-f", sorted_bed], pass_fds=(folder_fd,))
     if code != 0:
         raise subprocess.SubprocessError("Compressing and indexing file failed")
     os.replace(sorted_bed + ".gz", plain + ".gz")

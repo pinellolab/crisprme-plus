@@ -157,12 +157,26 @@ class TestReadsFollowNoLink(_Data):
         with self.assertRaises(safe_files.RefusedPath):
             safe_files.read_text(fasta, self.data)
 
-    def test_open_nofollow_refuses_a_link_at_the_last_step(self):
-        link = self.plant("x_integrated_results.tsv", self.secret)
-        with self.assertRaises(safe_files.RefusedPath):
-            safe_files.open_nofollow(link)
-        with safe_files.open_nofollow(os.path.join(self.job, "log.txt")) as fh:
-            self.assertEqual(fh.read(), "Job\tDone\n")
+    def test_a_link_in_a_folder_a_job_file_names_is_refused_at_every_step(self):
+        # the assembly results page reads a haplotype's folder that the combined job's
+        # .Params.txt names (Paternal_dir, which another user can write): a link to a
+        # folder of the user's put in Results/ under that name, or a '..' in it, was
+        # followed by a read that refused a link at the last step alone (the review of
+        # the fix, F1)
+        os.makedirs(os.path.join(self.home, "results"))
+        with open(os.path.join(self.home, "results", "x_integrated_results.tsv"), "w") as fh:
+            fh.write(SECRET)
+        os.symlink(os.path.join(self.home, "results"),
+                   os.path.join(self.data, "Results", "hap_link"))
+        rel = os.path.relpath(os.path.join(self.home, "results"),
+                              os.path.join(self.data, "Results"))
+        for folder in ("hap_link", rel):
+            with self.subTest(folder=folder):
+                hap = os.path.join(self.data, "Results", folder)
+                self.assertEqual(safe_files.glob(hap, "*_integrated_results.tsv", self.data), [])
+                with self.assertRaises(safe_files.RefusedPath):
+                    safe_files.read_text(os.path.join(hap, "x_integrated_results.tsv"),
+                                         self.data)
 
     def test_opened_path_names_the_very_file_opened(self):
         log = os.path.join(self.job, "log.txt")
@@ -337,6 +351,124 @@ class TestWhatOtherCodeOpens(_Data):
             link = self.plant("planted.txt", self.secret)
             with self.assertRaises(safe_files.RefusedPath):
                 safe_files.send_file(link, self.data)
+
+
+@unittest.skipUnless(os.path.isdir("/proc/self/fd"), "private_dir needs /proc/self/fd (Linux)")
+class TestPrivateDir(_Data):
+    """A folder the web app makes for its own files in a folder others can write (a job's
+    folder: a program's outputs; Annotations/, Genomes/, Assemblies/: an upload unpacked).
+    Made by mkdtemp and used by its name, it could be renamed away within that folder and
+    a link to a folder of the user's put under its name: the web app then wrote into that
+    folder and moved its files out, into the job's imgs/, which it serves (the review of
+    the fix, F2, a rename of the folder itself after it was made)."""
+
+    def swap(self, name):
+        """Another user, once the folder is there: renamed within the folder holding it, and
+        a link to a folder of the user's (home/) put in its place."""
+        os.rename(os.path.join(self.job, name), os.path.join(self.job, name + ".moved"))
+        os.symlink(self.home, os.path.join(self.job, name))
+
+    def made(self):
+        return [n for n in os.listdir(self.job) if n.startswith(".crisprme-")]
+
+    def test_a_private_folder_is_reached_by_its_descriptor_whatever_its_name_becomes(self):
+        with safe_files.private_dir(self.job, self.data) as d:
+            (name,) = self.made()
+            st = os.stat(os.path.join(self.job, name))
+            self.assertEqual(stat.S_IMODE(st.st_mode), 0o700)
+            self.swap(name)
+            with open(os.path.join(d.path, "out.png"), "w") as fh:  # (a program's output)
+                fh.write("OUTPUT\n")
+            self.assertEqual(os.listdir(d.path), ["out.png"])
+            self.assertTrue(os.path.isfile(os.path.join(self.job, name + ".moved", "out.png")))
+            self.assertEqual(sorted(os.listdir(self.home)), ["secret.txt", "victim.txt"])
+            # what is moved out of it is its own file, never one of the user's
+            safe_files.replace_from(os.path.join(d.path, "out.png"),
+                                    os.path.join(self.job, "out.png"), self.data)
+            with open(os.path.join(self.job, "out.png")) as fh:
+                self.assertEqual(fh.read(), "OUTPUT\n")
+        self.assertEqual(sorted(os.listdir(self.home)), ["secret.txt", "victim.txt"])
+        self.assertEqual(os.listdir(os.path.join(self.job, name + ".moved")), [])
+
+    def test_a_program_inherits_it(self):
+        import subprocess
+        with safe_files.private_dir(self.job, self.data, ".crisprme-") as d:
+            self.swap(self.made()[0])
+            code = subprocess.call([sys.executable, "-c",
+                                    f"open({d.path + '/child.txt'!r}, 'w').write('C')"],
+                                   pass_fds=(d.fd,))
+            self.assertEqual(code, 0)
+            self.assertEqual(os.listdir(d.path), ["child.txt"])
+        self.assertEqual(sorted(os.listdir(self.home)), ["secret.txt", "victim.txt"])
+
+    def test_it_is_removed_with_what_is_in_it_and_nothing_else(self):
+        with safe_files.private_dir(self.job, self.data) as d:
+            os.makedirs(os.path.join(d.path, "imgs", "deep"))
+            os.symlink(self.home, os.path.join(d.path, "imgs", "to_home"))
+            with open(os.path.join(d.path, "imgs", "deep", "x"), "w") as fh:
+                fh.write("x")
+        self.assertEqual(self.made(), [])
+        self.assertEqual(sorted(os.listdir(self.home)), ["secret.txt", "victim.txt"])
+
+    def test_a_folder_put_under_its_name_before_it_is_opened_is_refused_and_kept(self):
+        # a folder of the user's that the group can write can be moved into its place: it
+        # is neither used nor emptied
+        other = os.path.join(self.data, "Results", "OTHERJOB")
+        os.makedirs(other)
+        os.chmod(other, 0o775)
+        with open(os.path.join(other, "result.tsv"), "w") as fh:
+            fh.write("RESULT\n")
+        real_mkdir = os.mkdir
+
+        def mkdir_then_swap(name, mode=0o777, *, dir_fd=None):
+            real_mkdir(name, mode, dir_fd=dir_fd)
+            if str(name).startswith(".crisprme-"):
+                os.rmdir(name, dir_fd=dir_fd)
+                os.rename(other, os.path.join(self.job, name))
+
+        from unittest import mock
+        with mock.patch.object(safe_files.os, "mkdir", mkdir_then_swap):
+            with self.assertRaises(safe_files.RefusedPath):
+                with safe_files.private_dir(self.job, self.data):
+                    self.fail("used")  # pragma: no cover
+        (name,) = self.made()
+        with open(os.path.join(self.job, name, "result.tsv")) as fh:
+            self.assertEqual(fh.read(), "RESULT\n")
+
+    def test_a_link_put_under_its_name_before_it_is_opened_is_refused(self):
+        real_mkdir = os.mkdir
+
+        def mkdir_then_link(name, mode=0o777, *, dir_fd=None):
+            real_mkdir(name, mode, dir_fd=dir_fd)
+            if str(name).startswith(".crisprme-"):
+                os.rmdir(name, dir_fd=dir_fd)
+                os.symlink(self.home, name, dir_fd=dir_fd)
+
+        from unittest import mock
+        with mock.patch.object(safe_files.os, "mkdir", mkdir_then_link):
+            with self.assertRaises(safe_files.RefusedPath):
+                with safe_files.private_dir(self.job, self.data):
+                    self.fail("used")  # pragma: no cover
+        self.assertEqual(sorted(os.listdir(self.home)), ["secret.txt", "victim.txt"])
+
+    def test_a_regular_file_is_moved_into_it_and_a_link_is_not(self):
+        with safe_files.private_dir(self.job, self.data) as d:
+            os.mkdir(os.path.join(d.path, "unpacked"))
+            safe_files.move_into(os.path.join(self.job, "log.txt"), self.data,
+                                 os.path.join(d.path, "unpacked", "in.txt"))
+            self.assertEqual(os.listdir(os.path.join(d.path, "unpacked")), ["in.txt"])
+            link = self.plant("planted.txt", self.secret)
+            with self.assertRaises(safe_files.RefusedPath):
+                safe_files.move_into(link, self.data, os.path.join(d.path, "x.txt"))
+            self.assertEqual(sorted(os.listdir(d.path)), ["unpacked"])
+        self.assertTrue(os.path.islink(link))  # (left where it was)
+
+    def test_the_folder_it_is_made_in_is_reached_with_the_rules(self):
+        os.symlink(self.home, os.path.join(self.data, "Results", "evil"))
+        with self.assertRaises(safe_files.RefusedPath):
+            with safe_files.private_dir(os.path.join(self.data, "Results", "evil"), self.data):
+                self.fail("used")  # pragma: no cover
+        self.assertEqual(sorted(os.listdir(self.home)), ["secret.txt", "victim.txt"])
 
 
 if __name__ == "__main__":

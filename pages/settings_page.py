@@ -213,10 +213,14 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
 
     genomes = os.path.dirname(dest_dir)
     # Genomes/ a folder, or a link the user made (safe_files: one another user put in a data
-    # folder they can write is refused); the stage in it is the web app's alone (mkdtemp)
+    # folder they can write is refused); the stage in it is the web app's alone, used through
+    # its descriptor and removed at the end (safe_files.private_dir): one mkdtemp made there
+    # was used by its name, which whoever can write Genomes/ could rename away and put a link
+    # in place of, to a folder of the user's that the upload was then unpacked into
     safe_files.makedirs(genomes, current_working_directory)
-    stage = tempfile.mkdtemp(prefix=f".upload_{assembly}_", dir=genomes)
-    try:
+    with safe_files.private_dir(genomes, current_working_directory,
+                                f".upload_{assembly}_") as stage_dir:
+        stage = stage_dir.path
         unpacked = os.path.join(stage, "unpacked")
         os.makedirs(unpacked)
         # (the upload's .part read, and moved, with no link followed: safe_files)
@@ -230,9 +234,9 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
                     gzip.GzipFile(fileobj=raw) as fin, open(
                         os.path.join(unpacked, f"{assembly}.fa"), "wb") as fout:
                 shutil.copyfileobj(fin, fout)
-        else:
-            safe_files.rename(part_path, os.path.join(unpacked, f"{assembly}.fa"),
-                              current_working_directory)
+        else:  # (into the stage, which only this process can write: move_into)
+            safe_files.move_into(part_path, current_working_directory,
+                                 os.path.join(unpacked, f"{assembly}.fa"))
         # not a hidden file: macOS tar puts each file's extended attributes in a
         # ._<name> member beside it (._chr1.fa), which every search read as a chromosome
         # and failed on (a search lists a genome's chromosomes as every .fa file there)
@@ -288,8 +292,6 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
                 elif os.path.isdir(old):
                     os.rename(old, dest_dir)
             raise
-    finally:
-        shutil.rmtree(stage, ignore_errors=True)
 
 
 def _vcf_upload_problem(name: str, dataset: str) -> Optional[str]:
@@ -395,7 +397,12 @@ def _finalize_upload(
         scratch = part_path + ext  # import_archive picks zip vs tar by extension
         safe_files.rename(part_path, scratch, current_working_directory)
         try:
-            return personal_assembly.import_archive(scratch, current_working_directory)
+            # (read with no link followed, from the descriptor opened here: import_archive
+            # opened it by name, in a folder others can write, where another user could put
+            # a link meanwhile)
+            with safe_files.open_read(scratch, current_working_directory, "rb") as archive:
+                return personal_assembly.import_archive(scratch, current_working_directory,
+                                                        fileobj=archive)
         finally:
             if os.path.lexists(scratch):
                 safe_files.remove(scratch, current_working_directory)

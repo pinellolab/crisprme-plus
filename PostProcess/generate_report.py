@@ -106,7 +106,7 @@ import sys
 import tempfile
 from datetime import datetime
 
-import safe_files  # (PostProcess/: the web page's reads follow no link: nofollow below)
+import safe_files  # (PostProcess/: the web pages' reads follow no link: safe_root below)
 
 import matplotlib
 
@@ -1337,7 +1337,7 @@ def dedupe_reference_rows(df, cols):
 # --------------------------------------------------------------------------- #
 # Aggregated Specificity Score (.<jobid>.acfd_CFD.txt)
 # --------------------------------------------------------------------------- #
-def read_specificity_score(result_dir, job_id, guides, criterion="CFD", nofollow=False):
+def read_specificity_score(result_dir, job_id, guides, criterion="CFD", safe_root=None):
     """Read an aggregated specificity score (0-100) from the acfd sidecar.
 
     ``criterion`` selects the scorer the aggregate is built from: "CFD" (the primary,
@@ -1349,16 +1349,17 @@ def read_specificity_score(result_dir, job_id, guides, criterion="CFD", nofollow
     File format (process_summaries.py): ``<guide>\\t<score>\\tNA\\tNA`` where
     <score> = 100/(100+sum_scores) in [0,1). The report/web convert it to 0-100 via
     x*100 and show "score not available" when x>=1 (i.e. no scoreable off-targets).
-    Returns a display string.
+    Returns a display string. ``safe_root``: the web results pages' data folder, the file
+    then read as safe_files reaches it from there (``_open_text``).
     """
     _na = f"{criterion} score not available"  # back-compat: "CFD score not available"
     if not result_dir:
         return _na
     acfd_file = os.path.join(result_dir, f".{job_id}.acfd_{criterion}.txt")
-    if not os.path.isfile(acfd_file):
+    if not _is_file(acfd_file, safe_root):
         return _na
-    try:  # (nofollow: the web pages' read, _open_text)
-        with _open_text(acfd_file, nofollow) as handle:
+    try:  # (safe_root: the web pages' read, _open_text)
+        with _open_text(acfd_file, safe_root) as handle:
             lines = [ln for ln in handle.read().strip().split("\n") if ln.strip()]
     except OSError:
         return _na
@@ -1397,7 +1398,7 @@ def read_specificity_score(result_dir, job_id, guides, criterion="CFD", nofollow
 # could drift apart).
 # --------------------------------------------------------------------------- #
 def load_general_target_count(hap_dir: str, hap_output_name: str, guide: str,
-                              nofollow: bool = False):
+                              safe_root: Optional[str] = None):
     """Real per-haplotype MM x bulge count grid -- built the SAME way
     complete-search's own per-haplotype report.html builds its Section-1
     matrix (`build_mmb_matrix()` on that haplotype's `integrated_results.tsv`,
@@ -1432,18 +1433,21 @@ def load_general_target_count(hap_dir: str, hap_output_name: str, guide: str,
 
     Still returns only the REFERENCE half (assembly-search never runs with
     `--vcf`, so the VARIANT half `build_mmb_matrix()` always also returns is
-    structurally all-zero here) -- same contract as before 2026-09-10."""
-    integrated_tsv = resolve_integrated_tsv(hap_dir)
+    structurally all-zero here) -- same contract as before 2026-09-10.
+
+    ``safe_root``: the web results pages' data folder, each file then read as safe_files
+    reaches it from there (``_open_text``)."""
+    integrated_tsv = resolve_integrated_tsv(hap_dir, safe_root)
     if integrated_tsv is None:
         return None
     try:
         compression = "gzip" if integrated_tsv.endswith(".gz") else None
-        source = (safe_files.open_nofollow(integrated_tsv, "rb") if nofollow
-                  else integrated_tsv)  # (nofollow: the web pages' read, _open_text)
-        df = pd.read_csv(
-            source, sep="\t", dtype=str, compression=compression,
-            na_filter=False, low_memory=False,
-        )
+        kwargs = dict(sep="\t", dtype=str, compression=compression, na_filter=False,
+                      low_memory=False)
+        if safe_root is not None:  # (the web pages' read, _open_text)
+            df = safe_files.read_csv(integrated_tsv, safe_root, **kwargs)
+        else:
+            df = pd.read_csv(integrated_tsv, **kwargs)
     except (OSError, pd.errors.ParserError):
         return None
     cols = _resolve(df.columns, list(_COLS.keys()))
@@ -1452,7 +1456,7 @@ def load_general_target_count(hap_dir: str, hap_output_name: str, guide: str,
         if guide_mask.any():
             df = df[guide_mask]
     df = dedupe_reference_rows(df, cols)
-    meta = build_summary_meta(hap_dir, integrated_tsv, df, cols, nofollow=nofollow)
+    meta = build_summary_meta(hap_dir, integrated_tsv, df, cols, safe_root=safe_root)
     matrix = build_mmb_matrix(df, cols, meta)
     if not matrix or not matrix.get("groups"):
         return None
@@ -1533,20 +1537,28 @@ def build_grid_row_cells(
 # --------------------------------------------------------------------------- #
 # Summary metadata: .Params.txt / .version.txt / filename fallback
 # --------------------------------------------------------------------------- #
-def _open_text(path, nofollow=False):
-    """``path`` opened as text; with ``nofollow`` (the web results pages' reads) a regular
-    file with one name reached with no link at its last step (safe_files.open_nofollow): a
-    link another user put in a search's folder was read, and shown, by the web app."""
-    return safe_files.open_nofollow(path) if nofollow else open(path)
+def _open_text(path, safe_root=None):
+    """``path`` opened as text; with ``safe_root``, the web results pages' data folder, as
+    safe_files reaches it from there: each folder below it opened in turn with no link
+    followed, no ``..``, and the file a regular one. A link another user put in a search's
+    folder, or in Results/ under the name of the folder a job's file gives (the assembly
+    page's haplotype folders), was read, and shown, by the web app."""
+    return safe_files.open_read(path, safe_root) if safe_root is not None else open(path)
 
 
-def _read_kv_sidecar(path, nofollow=False):
+def _is_file(path, safe_root=None):
+    """``os.path.isfile(path)``; with ``safe_root``, safe_files' (``_open_text``)."""
+    return safe_files.is_file(path, safe_root) if safe_root is not None else \
+        os.path.isfile(path)
+
+
+def _read_kv_sidecar(path, safe_root=None):
     """Read a tab-separated ``key\\tvalue`` sidecar (Params.txt/.version.txt)."""
     out = {}
-    if not path or not os.path.isfile(path):
+    if not path or not _is_file(path, safe_root):
         return out
     try:
-        with _open_text(path, nofollow) as handle:
+        with _open_text(path, safe_root) as handle:
             for line in handle:
                 line = line.rstrip("\n")
                 if "\t" not in line:
@@ -1653,29 +1665,36 @@ INDEXES_SEARCHED_FILE = ".indexes_searched.txt"
 
 
 def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None,
-                       nofollow=False):
+                       safe_root=None):
     """Collect summary metadata used by the header card and matrix.
 
     Returns a dict with resolved guide list, nuclease, pam, genome, datasets, mm,
     bdna, brna, bmax, max_edits, date, version, and the canonical partition
     counts (n_total, n_variant, n_reference, n_ontarget, n_offtarget), and
     reference_only (True when the search used no variant dataset).
+
+    ``safe_root``: the web results pages' data folder, each file then read as safe_files
+    reaches it from there (``_open_text``).
     """
     params = {}
     version = None
     date = None
     if result_dir:
-        params = _read_kv_sidecar(os.path.join(result_dir, ".Params.txt"), nofollow)
+        params = _read_kv_sidecar(os.path.join(result_dir, ".Params.txt"), safe_root)
         if not params:
-            params = _read_kv_sidecar(os.path.join(result_dir, "Params.txt"), nofollow)
-        ver = _read_kv_sidecar(os.path.join(result_dir, ".version.txt"), nofollow)
+            params = _read_kv_sidecar(os.path.join(result_dir, "Params.txt"), safe_root)
+        ver = _read_kv_sidecar(os.path.join(result_dir, ".version.txt"), safe_root)
         version = ver.get("crisprme_version")
         for probe in (".Params.txt", "Params.txt", os.path.basename(tsv_path)):
             candidate = os.path.join(result_dir, probe)
-            if os.path.isfile(candidate):
-                date = datetime.fromtimestamp(
-                    os.path.getmtime(candidate)
-                ).strftime("%Y-%m-%d")
+            try:
+                mtime = (safe_files.stat_file(candidate, safe_root).st_mtime
+                         if safe_root is not None else os.path.getmtime(candidate)
+                         if os.path.isfile(candidate) else None)
+            except OSError:
+                mtime = None
+            if mtime is not None:
+                date = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
                 break
     if params_override:
         params = {**params, **params_override}
@@ -1695,7 +1714,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None,
     search_mode = "population-level"
     if result_dir:
         try:
-            with _open_text(os.path.join(result_dir, ".search_mode"), nofollow) as _smf:
+            with _open_text(os.path.join(result_dir, ".search_mode"), safe_root) as _smf:
                 _sm = _smf.read().strip().lower()
                 if _sm in ("per-sample", "full"):  # "full" = legacy 2.5.3 alias
                     search_mode = "per-sample"
@@ -1716,7 +1735,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None,
         for _name, _into in ((".untiered_datasets", untiered),
                              (".variant_datasets", searched)):
             try:
-                with _open_text(os.path.join(result_dir, _name), nofollow) as _udf:
+                with _open_text(os.path.join(result_dir, _name), safe_root) as _udf:
                     _into.extend(_l.strip() for _l in _udf if _l.strip())
             except OSError:
                 pass
@@ -1757,7 +1776,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None,
     if result_dir:
         try:
             with _open_text(os.path.join(result_dir, ".vcf_list_searched.txt"),
-                            nofollow) as _vl:
+                            safe_root) as _vl:
                 vcf_names = list(dict.fromkeys(
                     os.path.basename(os.path.normpath(_l.strip())) for _l in _vl
                     if _l.strip() and _l.strip() != "_"))
@@ -1826,7 +1845,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None,
     # Prune_pam: complete-search records the flag in the parameters, given or taken by
     # itself; the search script records it in the record where the search took it by itself:
     # one the web launched, or one complete-search took it for ("auto").
-    taken = _read_kv_sidecar(os.path.join(result_dir, INDEXES_SEARCHED_FILE), nofollow) \
+    taken = _read_kv_sidecar(os.path.join(result_dir, INDEXES_SEARCHED_FILE), safe_root) \
         if result_dir else {}
     indexes = []
     if taken.get("Reference_index"):
@@ -5437,19 +5456,25 @@ To obtain a commercial license, contact
 # --------------------------------------------------------------------------- #
 # TSV resolution
 # --------------------------------------------------------------------------- #
-def resolve_integrated_tsv(result_dir):
+def resolve_integrated_tsv(result_dir, safe_root=None):
     """Find the finalized integrated_results TSV in a result folder.
 
     Matches results_page.py:2298-2300 (glob ``*integrated_results.tsv``). Prefers
     the renamed ``<guide>+..._integrated_results.tsv`` over the intermediate
-    ``.bestMerge.txt.integrated_results.tsv``.
+    ``.bestMerge.txt.integrated_results.tsv``. ``safe_root``: the web results pages'
+    data folder, the folder then listed as safe_files reaches it from there
+    (``_open_text``).
     """
-    candidates = sorted(
-        glob.glob(os.path.join(result_dir, "*integrated_results.tsv"))
-    )
-    candidates += sorted(
-        glob.glob(os.path.join(result_dir, "*integrated_results.tsv.gz"))
-    )
+    if safe_root is not None:
+        candidates = safe_files.glob(result_dir, "*integrated_results.tsv", safe_root)
+        candidates += safe_files.glob(result_dir, "*integrated_results.tsv.gz", safe_root)
+    else:
+        candidates = sorted(
+            glob.glob(os.path.join(result_dir, "*integrated_results.tsv"))
+        )
+        candidates += sorted(
+            glob.glob(os.path.join(result_dir, "*integrated_results.tsv.gz"))
+        )
     if not candidates:
         return None
     candidates.sort(key=lambda p: ("bestMerge" in os.path.basename(p), p))

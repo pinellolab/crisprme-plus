@@ -10,7 +10,11 @@ the web app reads, serves and writes found more of the kind, here too: the statu
 banner, the History table, the Settings index labels; the chunked and the dcc.Upload
 uploads, the email settings (with the password), the tables' filter, the mode file and a
 search's logs; and the tables' cache, pickles kept in Cache/ of the data folder, which
-Flask-Caching loads.
+Flask-Caching loads. The review of the fix found the assembly results page reading the
+haplotype folders a job's .Params.txt names through a link or a '..'; and, beyond it, the
+folders the web app made for files of its own in folders others can write and then used by
+name (a program's outputs, an upload unpacked, an annotation sorted), and the concurrent
+searches setting, read through a link and written back whole.
 
 Each case runs through the real Dash server (index.app's Flask test client: the requests a
 browser sends, the callbacks' JSON) or the real function that writes, in a data folder whose
@@ -439,6 +443,342 @@ class TestWritersTheInventoryAdded(_DataFolder):
             st = os.stat(path)
             self.assertEqual(stat.S_IMODE(st.st_mode), 0o700)
             self.assertEqual(st.st_uid, os.geteuid())
+
+
+# ===================================================================================
+# What the review of the fix found (websec-refix-r1)
+# ===================================================================================
+GUIDE = "CTAACAGTTGCTTTTATCACNNN"
+_NEEDS_SORT_TOOLS = unittest.skipUnless(shutil.which("sort-bed") and shutil.which("bgzip"),
+                                        "BEDOPS sort-bed or bgzip not on PATH")
+
+
+def _dna_guide():
+    """A guide no file but the one it is written in holds: 20 random bases and NGG."""
+    return "".join(secrets.choice("ACGT") for _ in range(20)) + "NGG"
+
+
+def _integrated(path, guide, chrom):
+    """A haplotype's complete-search integrated_results.tsv: one site, of the guide
+    ``guide`` (the assembly page shows each guide of the haplotypes' results), on the
+    chromosome ``chrom`` (its tables show each site's)."""
+    from assembly_reconcile import PRED_COLS
+    cols = PRED_COLS + ["Bulge_type_(fewest_mm+b)"]
+    row = {c: "0" for c in cols}
+    row.update({"Spacer+PAM": guide, "Chromosome": chrom, "Start_coordinate_(fewest_mm+b)": "100",
+                "Strand_(fewest_mm+b)": "+", "Aligned_spacer+PAM_(fewest_mm+b)": guide,
+                "Aligned_protospacer+PAM_REF_(fewest_mm+b)": guide[:-3] + "AGG",
+                "Aligned_protospacer+PAM_ALT_(fewest_mm+b)": "NA",
+                "CFD_score_(fewest_mm+b)": "1.0", "Bulge_type_(fewest_mm+b)": "X"})
+    with open(path, "w") as fh:
+        fh.write("\t".join(cols) + "\n" + "\t".join(row[c] for c in cols) + "\n")
+
+
+def _swap(folder, starts, target):
+    """Another user, once the web app's folder of its own is there in ``folder`` (the one
+    folder whose name starts with ``starts``): renamed within ``folder`` (write access to
+    it is all a rename there needs), and a link to ``target``, a folder of the user's, put
+    under its name. Its name."""
+    (name,) = [n for n in os.listdir(folder) if n.startswith(starts)
+               and not os.path.islink(os.path.join(folder, n))]
+    os.rename(os.path.join(folder, name), os.path.join(folder, name + ".moved"))
+    os.symlink(target, os.path.join(folder, name))
+    return name
+
+
+def _tar_gz(members):
+    """A .tar.gz holding the regular files ``members`` ({name: bytes})."""
+    import io
+    import tarfile
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+@_NEEDS_DASH
+class TestTheAssemblyPage(_DataFolder):
+    """The personal-assembly results page reads each haplotype's complete-search folder,
+    named by the combined job's .Params.txt (Paternal_dir, Maternal_dir): a file of a job
+    folder, which another user can write, in a combined job folder they can make. A link to
+    a folder of the user's that they put in Results/ under the name they wrote there, a
+    name going up out of Results/ ('..'), or a path, was followed, and the results there
+    shown on the page and in its Custom Ranking tables (the review of the fix, F1: the
+    reads refused a link at the last step alone)."""
+
+    def setUp(self):
+        super().setUp()
+        self.alice = os.path.join(self.home, "alice_results")  # a search of the user's
+        os.makedirs(self.alice)
+        self.alice_guide = _dna_guide()
+        _integrated(os.path.join(self.alice, "x_integrated_results.tsv"), self.alice_guide,
+                    self.token)
+
+    def combined(self, job, paternal, maternal):
+        d = self.folder("Results", f"{job}_combined")
+        self.write(os.path.join(d, ".Params.txt"), f"1\tGenome_type\tassembly\n"
+                   f"2\tPaternal_dir\t{paternal}\n3\tMaternal_dir\t{maternal}\n")
+        self.write(os.path.join(d, f"{job}_combined_hg38.tsv"),
+                   "origin\tSpacer+PAM_paternal\tSpacer+PAM_maternal\nboth\tACGT\tACGT\n")
+        for hap in ("paternal", "maternal"):  # (the haplotypes' sites the tables show)
+            self.write(os.path.join(d, f"{hap}_offtargets_not_lifted.bed"), "chr9\t1\t2\t0\n")
+        return f"{job}_combined"
+
+    def shown(self, job):
+        """The page (/result?job=<job>) and the Custom Ranking tables of the haplotypes'
+        own sites, as the browser gets them."""
+        code, text = self.page("/result", f"?job={job}")
+        self.assertEqual(code, 200)
+        texts = [text]
+        for site_set in ("paternal_unmappable", "maternal_unmappable"):
+            code, table = self.call(
+                "assembly-site-set-dropdown", "value",
+                {"assembly-site-set-dropdown.value": site_set,
+                 "assembly-sort-by-dropdown.value": "CFD_score_(fewest_mm+b)",
+                 "assembly-sort-order-radio.value": "desc",
+                 "assembly-region-filter-store.data": None},
+                {"url.search": f"?job={job}"}, output="assembly-results-table.data")
+            self.assertEqual(code, 200)
+            texts.append(table)
+        return "\n".join(texts)
+
+    def test_a_link_in_results_a_dot_dot_or_a_path_as_a_haplotype_s_folder(self):
+        os.symlink(self.alice, os.path.join(self.data, "Results", "hap_link"))
+        up = os.path.relpath(self.alice, os.path.join(self.data, "Results"))
+        for kind, name in (("LINK", "hap_link"), ("UP", up), ("PATH", self.alice)):
+            with self.subTest(kind=kind):
+                text = self.shown(self.combined(f"EVIL{kind}", name, name))
+                self.assertNoSecret(text)
+                self.assertNotIn(self.alice_guide, text)
+
+    def test_a_haplotype_s_own_folder_is_read_as_before(self):
+        guide = _dna_guide()
+        for hap in ("paternal", "maternal"):
+            d = self.folder("Results", f"ASMJOB01_{hap}")
+            _integrated(os.path.join(d, "g_integrated_results.tsv"), guide, f"chrOWN{hap}")
+        text = self.shown(self.combined("ASMJOB01", "ASMJOB01_paternal", "ASMJOB01_maternal"))
+        self.assertIn(guide, text)  # (the page's guide summary)
+        self.assertIn("chrOWNpaternal", text)  # (the tables of each haplotype's own sites)
+        self.assertIn("chrOWNmaternal", text)
+
+
+def _variant_job(d, job):
+    """What the results pages read for a finished search of a variant dataset (a minimal
+    copy, as test_web_results_links makes it): the Personal Risk Card's inputs."""
+    import sqlite3
+
+    import pandas as pd
+    with open(os.path.join(d, ".Params.txt"), "w") as f:
+        f.write("Genome_selected\thg38\nGenome_ref\thg38\nGenome_idx\tNRG_2_hg38+hg38_x\n"
+                "Pam\tNRG\nMax_bulges\t2\nMismatches\t4\nDNA\t1\nRNA\t1\nMax_total_edits\t6\n"
+                "Nuclease\tSpCas9\nRef_comp\tTrue\n")
+    with open(os.path.join(d, ".guides.txt"), "w") as f:
+        f.write(GUIDE + "\n")
+    rows = []
+    for i, (mmb, samples) in enumerate(((0, "S1,S2"), (0, "S1"), (3, "S2"), (4, "NA"))):
+        row = {"Spacer+PAM": GUIDE, "Chromosome": "chr1"}
+        for crit in ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE"):
+            row.update({f"Start_coordinate_({crit})": 1000 * (i + 1), f"Mismatches_({crit})": mmb,
+                        f"Bulges_({crit})": 0, f"Bulge_type_({crit})": "X",
+                        f"Mismatches+bulges_({crit})": mmb, f"Variant_samples_({crit})": samples})
+        row["CFD_score_(highest_CFD)"] = 1.0 - 0.2 * i
+        row["CRISPR_BULGE_score_(highest_CRISPR_BULGE)"] = 1.0 - 0.2 * i
+        rows.append(row)
+    df = pd.DataFrame(rows)
+    df.to_csv(os.path.join(d, f"{GUIDE}+NRG_hg38+hg38_x_4+2_integrated_results.tsv"),
+              sep="\t", index=False)
+    with sqlite3.connect(os.path.join(d, f".{job}.db")) as conn:
+        df.to_sql("final_table", conn, index=False)
+    with open(os.path.join(d, ".sampleID.txt"), "w") as f:
+        f.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+                "S1\tPOPA\tSUPX\tmale\nS2\tPOPB\tSUPX\tfemale\n")
+    for crit in ("CFD", "CRISPR-Bulge", "fewest"):
+        with open(os.path.join(d, f"{job}.summary_by_samples.{GUIDE}_{crit}.txt"), "w") as f:
+            f.write(f"{GUIDE}\nSample\tSex\tPopulation\tSuper Population\tTargets in Sample\t"
+                    "Targets in Population\tTargets in Super Population\tPAM Creation\n"
+                    "S1\tmale\tPOPA\tSUPX\t2\t2\t3\t0\nS2\tfemale\tPOPB\tSUPX\t2\t2\t3\t1\n")
+    with open(os.path.join(d, ".dropdown.json"), "w") as f:
+        f.write("CFD")
+
+
+@_NEEDS_DASH
+class TestTheWebAppsOwnFolders(_DataFolder):
+    """A folder the web app makes for files of its own in a folder others can write (a
+    job's folder: a program's outputs; Genomes/ and Assemblies/: an upload unpacked;
+    Annotations/ and a job's folder: an annotation sorted), made by mkdtemp and then used
+    by its name. Another user who renamed it, within the folder that holds it, and put a
+    link to a folder of the user's under its name had the web app write into that folder,
+    unpack a request's archive into it, and move every file of it into the job's imgs/,
+    which the download route then served (the review of the fix, F2, in a form it did not
+    take: a rename of the folder itself once it is made). Each is used through its
+    descriptor now (safe_files.private_dir); here the rename comes at the worst time."""
+
+    def setUp(self):
+        super().setUp()
+        self.alice = os.path.join(self.home, "alice_dir")  # a folder of the user's
+        os.makedirs(self.alice)
+        self.key = os.path.join(self.alice, "private_key.txt")
+        with open(self.key, "w") as fh:
+            fh.write(self.token + "\n")
+        os.chmod(self.key, 0o600)
+
+    def assertAliceUnchanged(self, extra=()):
+        self.assertEqual(sorted(os.listdir(self.alice)), sorted(["private_key.txt", *extra]))
+        with open(self.key) as fh:
+            self.assertEqual(fh.read(), self.token + "\n")
+
+    def test_the_risk_card_plots_move_no_file_of_the_user_s_into_imgs(self):
+        job = "CARDJOB01"
+        d = self.folder("Results", job)
+        _variant_job(d, job)
+        self.folder("Results", job, "imgs")
+        real_copy_in, swapped = rp._job_copy_in, []
+
+        def copy_in(src, scratch):  # (the first copy into the plots' folder: renamed now)
+            if not swapped:
+                swapped.append(_swap(d, ".crisprme-", self.alice))
+            return real_copy_in(src, scratch)
+
+        def plots(cmd, pass_fds=()):  # the plots, drawn where CRISPRme_plots_personal.py would
+            if cmd[1].endswith("CRISPRme_plots_personal.py"):
+                for kind in ("CFD", "CRISPR_BULGE", "fewest"):
+                    open(os.path.join(cmd[-2], f"CRISPRme_{kind}_top_1000_log_for_main_text_"
+                                               f"{cmd[-1]}.png"), "wb").close()
+            return 0
+
+        with mock.patch.object(rp, "_job_copy_in", copy_in), \
+                mock.patch.object(rp.subprocess, "call", plots):
+            code, _text = self.call(
+                "button-sample-card", "n_clicks", {"button-sample-card.n_clicks": 1},
+                {"target_filter_dropdown.value": "CFD", "dropdown-sample-card.value": "S1",
+                 "general-profile-table.selected_cells": [{"row": 0}],
+                 "general-profile-table.data": [{"Guide": GUIDE}],
+                 "url.search": f"?job={job}"})
+        self.assertEqual(swapped and code, 200)
+        self.assertAliceUnchanged()  # nothing written there, nothing moved out of it
+        self.assertFalse(os.path.lexists(os.path.join(d, "imgs", "private_key.txt")))
+        r = self.client.get(f"/Results/{job}/imgs/private_key.txt")
+        self.assertNoSecret(r.get_data(as_text=True))
+        for kind in ("personal", "private"):  # (the card's plots went in, as before)
+            self.assertTrue(os.path.isfile(os.path.join(
+                d, "imgs", f"CRISPRme_CFD_top_1000_log_for_main_text_{GUIDE}.S1.{kind}.png")))
+
+    def test_a_genome_upload_is_unpacked_into_no_folder_of_the_user_s(self):
+        genomes = os.path.join(self.data, "Genomes")
+        real_extract, swapped = sp.safe_tar.extract, []
+
+        def extract(tar, dest, members=None):  # (the stage renamed as the archive unpacks)
+            swapped.append(_swap(genomes, ".upload_", self.alice))
+            return real_extract(tar, dest, members)
+
+        with mock.patch.object(sp.safe_tar, "extract", extract):
+            r = self.client.post("/settings/upload-chunk",
+                                 data=_tar_gz({"chr1.fa": b">chr1\nACGTACGTAC\n"}),
+                                 headers={"X-Target": "genome", "X-File-Name": "hgswap.tar.gz",
+                                          "X-Chunk-Index": "0", "X-Total-Chunks": "1"})
+        self.assertTrue(swapped)
+        self.assertAliceUnchanged()
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        with open(os.path.join(genomes, "hgswap", "chr1.fa")) as fh:  # (installed as before)
+            self.assertEqual(fh.read(), ">chr1\nACGTACGTAC\n")
+
+    def test_a_bundle_upload_is_unpacked_into_no_folder_of_the_user_s(self):
+        # a bundle's one top folder named .ssh: unpacked through a link put in place of the
+        # fixed <individual>.importing, a key of the request's went into ~/.ssh
+        assemblies = os.path.join(self.data, "Assemblies")
+        real_extract, swapped = sp.safe_tar.extract, []
+
+        def extract(tar, dest, members=None):
+            swapped.append(_swap(assemblies, (".importing", ".ssh.importing"), self.alice))
+            return real_extract(tar, dest, members)
+
+        with mock.patch.object(sp.safe_tar, "extract", extract):
+            self.client.post("/settings/upload-chunk",
+                             data=_tar_gz({".ssh/authorized_keys": b"ssh-ed25519 AAAA other\n"}),
+                             headers={"X-Target": "assembly-bundle", "X-File-Name": "b.tar.gz",
+                                      "X-Chunk-Index": "0", "X-Total-Chunks": "1"})
+        self.assertTrue(swapped)
+        self.assertAliceUnchanged()
+        self.assertFalse(os.path.lexists(os.path.join(assemblies, ".ssh")))
+
+    @_NEEDS_SORT_TOOLS
+    def test_an_annotation_is_sorted_in_no_folder_of_the_user_s(self):
+        import gzip
+        job = self.folder("Results", "ANNJOB01")
+        ann = self.write(os.path.join(job, "ann.bed"), "chr1\t900\t1500\tb\nchr1\t10\t500\ta\n")
+        own = self.write(os.path.join(self.alice, "sorted.bed"), "ALICE-OWN\n")
+        real_sort_bed, swapped = pu._sort_bed, []
+
+        def sort_bed(fname, outfname):
+            swapped.append(_swap(job, ".crisprme-sort-", self.alice))
+            return real_sort_bed(fname, outfname)
+
+        with mock.patch.object(pu, "_sort_bed", sort_bed):
+            gz = pu.sort_annotation(ann)
+        self.assertTrue(swapped)
+        self.assertAliceUnchanged(extra=["sorted.bed"])
+        with open(own) as fh:
+            self.assertEqual(fh.read(), "ALICE-OWN\n")
+        with gzip.open(gz, "rt") as fh:
+            self.assertEqual(fh.read(), "chr1\t10\t500\ta\nchr1\t900\t1500\tb\n")
+
+    @_NEEDS_SORT_TOOLS
+    def test_the_active_annotation_is_built_in_no_folder_of_the_user_s(self):
+        import gzip
+        anns = os.path.join(self.data, "Annotations")
+        for name, rows in (("a.hg38.bed", "chr1\t10\t500\tpromoter\n"),
+                           ("b.hg38.bed", "chr1\t900\t1500\tenhancer\n")):
+            self.write(os.path.join(anns, name), rows)
+        pu.write_enabled_annotations("hg38", ["a.hg38.bed", "b.hg38.bed"])
+        real_sort, swapped = pu._sort_and_bgzip, []
+
+        def sort_and_bgzip(plain, *args):
+            swapped.append(_swap(anns, ".crisprme-active-", self.alice))
+            return real_sort(plain, *args)
+
+        with mock.patch.object(pu, "_sort_and_bgzip", sort_and_bgzip):
+            active, _gencode = pu.build_active_annotation("hg38")
+        self.assertTrue(swapped)
+        self.assertAliceUnchanged()
+        self.assertEqual(active, ".active.hg38.bed.gz")
+        with gzip.open(os.path.join(anns, active), "rt") as fh:
+            self.assertEqual(fh.read(), "chr1\t10\t500\tpromoter\nchr1\t900\t1500\tenhancer\n")
+
+
+@_NEEDS_DASH
+class TestTheConcurrentSearchesSetting(_DataFolder):
+    """Settings' Save of the concurrent searches read .crisprme_app_config.json in the data
+    folder with open() and wrote back over it, readable by all, what it read with the value
+    added: a link put there to a JSON file of the user's (a registry's credentials, say)
+    had that file copied into the data folder, and the page showed the value it held."""
+
+    def test_the_setting_is_read_and_saved_through_no_link(self):
+        import app_settings
+        creds = os.path.join(self.home, "creds.json")
+        with open(creds, "w") as fh:
+            json.dump({"auths": {"registry.example.org": {"auth": self.token}},
+                       "max_concurrent_jobs": 7}, fh)
+        os.chmod(creds, 0o600)
+        cfg = self.link(os.path.join(self.data, app_settings.CONFIG_FILE), creds)
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("CRISPRME_MAX_CONCURRENT_JOBS", "CRISPRME_CONFIG_DIR")}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(app_settings.get_max_concurrent_jobs(), 2)  # (what the page shows)
+            code, text = self.call("max-jobs-save-btn", "n_clicks",
+                                   {"max-jobs-save-btn.n_clicks": 1}, {"max-jobs-input.value": 3})
+            self.assertEqual(code, 200)
+            self.assertIn("Saved: up to 3", text)
+            self.assertEqual(app_settings.get_max_concurrent_jobs(), 3)
+        self.assertFalse(os.path.islink(cfg))
+        with open(cfg) as fh:
+            saved = fh.read()
+        self.assertNoSecret(saved)
+        self.assertEqual(json.loads(saved), {"max_concurrent_jobs": 3})
+        with open(creds) as fh:
+            self.assertIn(self.token, fh.read())
 
 
 if __name__ == "__main__":

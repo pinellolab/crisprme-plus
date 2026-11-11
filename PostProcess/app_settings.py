@@ -16,7 +16,6 @@ so a change made in Settings takes effect on the next app restart.
 
 import json
 import os
-import tempfile
 
 CONFIG_FILE = ".crisprme_app_config.json"
 DEFAULT_MAX_JOBS = 2
@@ -30,6 +29,17 @@ def _config_path(workdir=None):
 
 def _clamp(n):
     return max(1, min(int(n), MAX_JOBS_CAP))
+
+
+def _read_config(path):
+    """The JSON of the config file ``path``, read with no link another user put followed
+    (safe_files): the web Settings page reads and writes it in the data folder, which the
+    folder's group may write under a umask of 002. open() followed a link put at its name,
+    to a JSON file of the user's elsewhere (credentials, say), which a Save then wrote whole
+    into the data folder, readable by the group (and the page showed the value it held)."""
+    import safe_files  # (PostProcess/, as this module; the standard library only)
+
+    return json.loads(safe_files.read_text(path, os.path.dirname(path) or os.curdir))
 
 
 def env_override():
@@ -53,8 +63,7 @@ def get_max_concurrent_jobs(workdir=None, default=DEFAULT_MAX_JOBS):
     if pinned is not None:
         return pinned
     try:
-        with open(_config_path(workdir)) as fh:
-            return _clamp(json.load(fh).get("max_concurrent_jobs", default))
+        return _clamp(_read_config(_config_path(workdir)).get("max_concurrent_jobs", default))
     except (OSError, ValueError, TypeError):
         return _clamp(default)
 
@@ -64,29 +73,21 @@ def set_max_concurrent_jobs(n, workdir=None):
 
     Takes effect at the next app restart (the process pool is built at startup).
     """
+    import safe_files  # (PostProcess/, as this module; the standard library only)
+
     n = _clamp(n)
     path = _config_path(workdir)
-    cfg = {}
-    try:
-        with open(path) as fh:
-            cfg = json.load(fh)
+    try:  # (read with no link another user put followed: _read_config)
+        cfg = _read_config(path)
     except (OSError, ValueError):
         cfg = {}
     if not isinstance(cfg, dict):
         cfg = {}
     cfg["max_concurrent_jobs"] = n
-    # a temporary name of its own (mkstemp: O_EXCL, O_NOFOLLOW) renamed over the file: open()
-    # wrote through a link another user put at its name (the web Settings page saves it in
-    # the data folder, which a group may write)
-    fd, tmp = tempfile.mkstemp(prefix=CONFIG_FILE + ".", suffix=".tmp",
-                               dir=os.path.dirname(path) or ".")
-    try:
-        with os.fdopen(fd, "w") as fh:
-            json.dump(cfg, fh, indent=2)
-        os.chmod(tmp, 0o644)  # (readable, as open() made it: mkstemp makes it 0600)
-        os.replace(tmp, path)
-    except BaseException:
-        if os.path.lexists(tmp):
-            os.remove(tmp)
-        raise
+    # a temporary name of its own (O_EXCL, O_NOFOLLOW) renamed over the file, readable as
+    # open() made it (safe_files.write_text): open() wrote through a link another user put
+    # at its name (the web Settings page saves it in the data folder, which a group may
+    # write)
+    safe_files.write_text(path, os.path.dirname(path) or os.curdir,
+                          json.dumps(cfg, indent=2), perm=0o644)
     return n

@@ -106,7 +106,6 @@ import re
 import os
 import shutil
 import sys
-import tempfile
 import threading
 import contextlib
 
@@ -216,15 +215,18 @@ def _grep_awk(src: str, guide: str, program: str, out=None, awk_vars: Tuple[str,
 
 @contextlib.contextmanager
 def _job_scratch(job_directory: str):
-    """A folder of the web app's own in the job's folder (mkdtemp: 0700, a name of its own),
-    removed when the block ends: a program the pages run reads copies of its inputs made
-    there (_job_copy_in) and writes its outputs there, renamed into the job's folder with
-    no link followed (_job_publish). It opened the job's files by name, links and all."""
-    tmp = tempfile.mkdtemp(prefix=".crisprme-", dir=job_directory)
-    try:
-        yield tmp
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    """A folder of the web app's own in the job's folder (safe_files.private_dir: 0700, a
+    name of its own), removed when the block ends: a program the pages run reads copies of
+    its inputs made there (_job_copy_in) and writes its outputs there, renamed into the
+    job's folder with no link followed (_job_publish). It opened the job's files by name,
+    links and all. Its ``path`` reaches that very folder, through its descriptor, whatever is
+    renamed in the job's folder meanwhile, and a program given a path below it inherits the
+    descriptor (``pass_fds=(scratch.fd,)``): one mkdtemp made there was used by its name, so
+    whoever can write the job's folder could rename it away and put a link to a folder of
+    the user's under its name, which the pages then wrote into, and moved every file of into
+    the job's imgs/, which they serve (the review of the fix, F2)."""
+    with safe_files.private_dir(job_directory, current_working_directory) as scratch:
+        yield scratch
 
 
 def _job_copy_in(src: str, scratch: str) -> str:
@@ -1162,6 +1164,23 @@ def _assembly_job_params(job_directory: str) -> Dict[str, str]:
     return params
 
 
+def _assembly_hap_dir(params: Dict[str, str], hap: str) -> Optional[str]:
+    """``Results/<name>``, one haplotype's complete-search folder, its name the combined
+    job's .Params.txt gives (Paternal_dir, Maternal_dir), or None: when there is no such
+    name, the name is not one folder's (a ``/``, ``..`` or ``.``: as history_page's
+    _assembly_max_total_edits takes it), or the folder is not one reached with no link
+    followed (safe_files). The .Params.txt is a file of a job folder, which another user
+    can write: a link to a folder of the user's that they put in Results/ under the name
+    they wrote there, or a name that goes up out of Results/, was read, and its results
+    shown (the review of the fix, F1). Each file of the folder is read with no link
+    followed at any step, from the data folder down (the readers' ``safe_root``)."""
+    name = params.get("Paternal_dir" if hap == "paternal" else "Maternal_dir")
+    if not name or os.path.basename(name) != name or name in (os.curdir, os.pardir):
+        return None
+    folder = os.path.join(current_working_directory, RESULTS_DIR, name)
+    return folder if safe_files.is_dir(folder, current_working_directory) else None
+
+
 def _assembly_mappable_frame(job_directory: str) -> Tuple[pd.DataFrame, List[str]]:
     """The reconciled hg38 table (`both`/`paternal_only`/`maternal_only`
     rows) -- same loading + display-column trimming result_page_assembly()
@@ -1222,16 +1241,15 @@ def _assembly_unmappable_frame(job_directory: str, hap: str) -> pd.DataFrame:
     coordinate at all), in that haplotype's own native columns -- the exact
     same rows the old per-haplotype 'private' Details table showed."""
     params = _assembly_job_params(job_directory)
-    dirname_key = "Paternal_dir" if hap == "paternal" else "Maternal_dir"
-    hap_dir_name = params.get(dirname_key)
-    if not hap_dir_name:
+    hap_results_dir = _assembly_hap_dir(params, hap)
+    if hap_results_dir is None:
         return pd.DataFrame()
-    hap_results_dir = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name)
     try:
-        prefix = find_results_prefix(hap_results_dir)
+        prefix = find_results_prefix(hap_results_dir, current_working_directory)
         hap_predictions = load_crisprme_predictions(
             hap_results_dir, prefix, merge_bp=3,
-            cols=PRED_COLS + ["Bulge_type_(fewest_mm+b)"], nofollow=True,
+            cols=PRED_COLS + ["Bulge_type_(fewest_mm+b)"],
+            safe_root=current_working_directory,
         )
     except (FileNotFoundError, OSError):
         return pd.DataFrame()
@@ -1292,16 +1310,15 @@ def _assembly_haplotype_private_frame(job_directory: str) -> Tuple[pd.DataFrame,
     params = _assembly_job_params(job_directory)
 
     def _hap_predictions(hap: str) -> pd.DataFrame:
-        dirname_key = "Paternal_dir" if hap == "paternal" else "Maternal_dir"
-        hap_dir_name = params.get(dirname_key)
-        if not hap_dir_name:
+        hap_results_dir = _assembly_hap_dir(params, hap)
+        if hap_results_dir is None:
             return pd.DataFrame()
-        hap_results_dir = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name)
         try:
-            prefix = find_results_prefix(hap_results_dir)
+            prefix = find_results_prefix(hap_results_dir, current_working_directory)
             preds = load_crisprme_predictions(
                 hap_results_dir, prefix, merge_bp=3,
-                cols=PRED_COLS + ["Bulge_type_(fewest_mm+b)"], nofollow=True,
+                cols=PRED_COLS + ["Bulge_type_(fewest_mm+b)"],
+                safe_root=current_working_directory,
             )
         except (FileNotFoundError, OSError):
             return pd.DataFrame()
@@ -1668,14 +1685,15 @@ def result_page_assembly(job_id: str) -> html.Div:
     # summary table/CFD distribution/position-tally plots below.
     hap_predictions_all: Dict[str, pd.DataFrame] = {}
     hap_results_dirs: Dict[str, str] = {}
-    for hap, dirname_key in (("paternal", "Paternal_dir"), ("maternal", "Maternal_dir")):
-        hap_dir_name = params.get(dirname_key)
-        if not hap_dir_name:
+    for hap in ("paternal", "maternal"):
+        # (a folder of Results/ the job's .Params.txt names, its files read with no link
+        # followed at any step: _assembly_hap_dir)
+        hap_results_dir = _assembly_hap_dir(params, hap)
+        if hap_results_dir is None:
             continue
-        hap_results_dir = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name)
         hap_results_dirs[hap] = hap_results_dir
         try:
-            prefix = find_results_prefix(hap_results_dir)
+            prefix = find_results_prefix(hap_results_dir, current_working_directory)
             # merge_bp hardcoded to 3: matches the --merge value
             # submit_assembly_search_job's cmd always passes today (not yet
             # user-configurable). Must match what the job actually ran with
@@ -1689,7 +1707,8 @@ def result_page_assembly(job_id: str) -> html.Div:
             # column complete-search's own summary table has.
             hap_predictions = load_crisprme_predictions(
                 hap_results_dir, prefix, merge_bp=3,
-                cols=PRED_COLS + ["Bulge_type_(fewest_mm+b)"], nofollow=True,
+                cols=PRED_COLS + ["Bulge_type_(fewest_mm+b)"],
+                safe_root=current_working_directory,
             )
         except (FileNotFoundError, OSError):
             continue
@@ -1706,7 +1725,9 @@ def result_page_assembly(job_id: str) -> html.Div:
     # complete-search results page, not a new formula invented here.
     guide_nuclease = "?"
     for hap in ("paternal", "maternal"):
-        hap_params_path = os.path.join(hap_results_dirs.get(hap, ""), PARAMS_FILE)
+        if hap not in hap_results_dirs:
+            continue
+        hap_params_path = os.path.join(hap_results_dirs[hap], PARAMS_FILE)
         if _job_isfile(hap_params_path):
             with _job_open(hap_params_path) as hp:
                 for line in hp:
@@ -1741,16 +1762,16 @@ def result_page_assembly(job_id: str) -> html.Div:
         row = {"Guide": guide, "Nuclease": guide_nuclease}
         for hap, label in (("paternal", "Paternal"), ("maternal", "Maternal")):
             hap_df = hap_predictions_all.get(hap)
-            hap_dir_name = params.get(f"{label}_dir")
             if hap_df is not None:
                 row[f"Total off-targets ({label})"] = int(
                     (hap_df["Spacer+PAM"] == guide).sum()
                 )
             else:
                 row[f"Total off-targets ({label})"] = "?"
-            if hap_dir_name and hap in hap_results_dirs:
+            if hap in hap_results_dirs:  # (the folder's name is its job id: _assembly_hap_dir)
                 row[f"Specificity score ({label})"] = read_specificity_score(
-                    hap_results_dirs[hap], hap_dir_name, [guide], nofollow=True
+                    hap_results_dirs[hap], os.path.basename(hap_results_dirs[hap]), [guide],
+                    safe_root=current_working_directory,
                 )
             else:
                 row[f"Specificity score ({label})"] = "CFD score not available"
@@ -1765,19 +1786,12 @@ def result_page_assembly(job_id: str) -> html.Div:
     grid_by_guide: Dict[str, Dict] = {}
     _n_mm_cols = 0
     for guide in guides_seen:
-        pat_dir_name = params.get("Paternal_dir")
-        mat_dir_name = params.get("Maternal_dir")
-        pat_grid = (
-            _load_general_target_count(hap_results_dirs["paternal"], pat_dir_name, guide,
-                                       nofollow=True)
-            if pat_dir_name and "paternal" in hap_results_dirs
-            else None
-        )
-        mat_grid = (
-            _load_general_target_count(hap_results_dirs["maternal"], mat_dir_name, guide,
-                                       nofollow=True)
-            if mat_dir_name and "maternal" in hap_results_dirs
-            else None
+        pat_grid, mat_grid = (
+            _load_general_target_count(hap_results_dirs[hap],
+                                       os.path.basename(hap_results_dirs[hap]), guide,
+                                       safe_root=current_working_directory)
+            if hap in hap_results_dirs else None
+            for hap in ("paternal", "maternal")
         )
         _n_mm_cols = max(
             _n_mm_cols,
@@ -1933,15 +1947,12 @@ def result_page_assembly(job_id: str) -> html.Div:
     have_combined_zip = bool(output_base) and _job_isfile(combined_zip_path)
 
     hap_links = []
-    for hap, label, dirname_key in (
-        ("paternal", "Paternal", "Paternal_dir"),
-        ("maternal", "Maternal", "Maternal_dir"),
-    ):
-        hap_dir_name = params.get(dirname_key)
-        if not hap_dir_name:
+    for hap, label in (("paternal", "Paternal"), ("maternal", "Maternal")):
+        if hap not in hap_results_dirs:  # (a folder of Results/: _assembly_hap_dir)
             continue
+        hap_dir_name = os.path.basename(hap_results_dirs[hap])
         zip_name = f"{hap_dir_name}_report.zip"
-        zip_path = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name, zip_name)
+        zip_path = os.path.join(hap_results_dirs[hap], zip_name)
         if _job_isfile(zip_path):
             hap_links.append(
                 html.A(
@@ -2428,14 +2439,10 @@ def result_page_assembly(job_id: str) -> html.Div:
     # laid out side by side).
     graphical_blocks = []
     lollipop_cols = []
-    for hap, label, dirname_key in (
-        ("paternal", "Paternal", "Paternal_dir"),
-        ("maternal", "Maternal", "Maternal_dir"),
-    ):
-        hap_dir_name = params.get(dirname_key)
-        if not hap_dir_name:
+    for hap, label in (("paternal", "Paternal"), ("maternal", "Maternal")):
+        if hap not in hap_results_dirs:  # (a folder of Results/: _assembly_hap_dir)
             continue
-        imgs_dir = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name, "imgs")
+        imgs_dir = os.path.join(hap_results_dirs[hap], "imgs")
         img_paths = sorted(_job_glob(os.path.join(
             imgs_dir, "CRISPRme_CFD_top_1000_log_for_main_text_*.png")))
         encoded = [p for p in ((path, _encode_png(path)) for path in img_paths) if p[1]]
@@ -3597,7 +3604,7 @@ def cluster_page(job_id: str, hash_term: str) -> html.Div:
                 f"An error occurred while running head -1 {file_to_grep} > "
                 f"{cluster_grep_result}")
         with _job_scratch(job_dir) as scratch:
-            result = os.path.join(scratch, os.path.basename(cluster_grep_result))
+            result = os.path.join(scratch.path, os.path.basename(cluster_grep_result))
             with open(result, "wb") as out:
                 out.write(_head_line(hidden_best))  # (head -1 .<job>.bestMerge.txt)
                 out.flush()
@@ -3619,7 +3626,7 @@ def cluster_page(job_id: str, hash_term: str) -> html.Div:
                     # for all targets
             # TODO: review this part
             subprocess.call(["python", f"{app_directory}/PostProcess/change_headers_bestMerge.py",
-                             result, f"{result}.tmp"])
+                             result, f"{result}.tmp"], pass_fds=(scratch.fd,))
             if os.path.isfile(f"{result}.tmp"):
                 os.replace(f"{result}.tmp", result)
             safe_files.replace_from(result, cluster_grep_result, current_working_directory)
@@ -3641,7 +3648,7 @@ def cluster_page(job_id: str, hash_term: str) -> html.Div:
         # Example    job_id.chr_pos.guide.scomposition.txt (made, as the shell's > made it,
         # in a folder of the web app's own and renamed into the job's: see above)
         with _job_scratch(job_dir) as scratch:
-            decomp = os.path.join(scratch, os.path.basename(decomp_fname))
+            decomp = os.path.join(scratch.path, os.path.basename(decomp_fname))
             with open(decomp, "wb") as out:
                 _grep_awk(hidden_best, guide, region + ' && $13!="n"', out)
             safe_files.replace_from(decomp, decomp_fname, current_working_directory)
@@ -6040,15 +6047,15 @@ def update_images_tabs(
     # imgs/ with no link followed (_job_scratch: the script read its inputs and wrote the
     # chart by name, through a link another user put there)
     with _job_scratch(job_directory) as scratch:
-        out = os.path.join(scratch, "imgs")
+        out = os.path.join(scratch.path, "imgs")
         os.mkdir(out)
         cmd = ["python", f"{app_directory}/PostProcess/generate_img_radar_chart.py", guide,
                _job_copy_in(f"{job_directory}/.guide_dict_{guide}_{filter_criterion}.json",
-                            scratch),
+                            scratch.path),
                _job_copy_in(f"{job_directory}/.motif_dict_{guide}_{filter_criterion}.json",
-                            scratch),
+                            scratch.path),
                mm, str(bulge), f"TOTAL_{filter_criterion}", f"{out}/"]
-        code = subprocess.call(cmd)
+        code = subprocess.call(cmd, pass_fds=(scratch.fd,))
         if code != 0:
             raise ValueError(f'An error occurred while running "{" ".join(cmd)}"')
         _job_publish(out, os.path.join(job_directory, IMGS_DIR))
@@ -6314,11 +6321,12 @@ def generate_sample_card(
         # into imgs/ with no link followed (_job_scratch: the script read the targets and
         # wrote the plots by name, through a link another user put there)
         with _job_scratch(job_directory) as scratch:
-            personal_copy = _job_copy_in(targets_personal_fname, scratch)
-            private_copy = _job_copy_in(targets_private_fname, scratch)
+            personal_copy = _job_copy_in(targets_personal_fname, scratch.path)
+            private_copy = _job_copy_in(targets_private_fname, scratch.path)
             code = subprocess.call(
                 crisprme_plots_personal
-                + [personal_copy, f"{scratch}/", f"{guide}.{sample}.personal"]
+                + [personal_copy, f"{scratch.path}/", f"{guide}.{sample}.personal"],
+                pass_fds=(scratch.fd,),
             )
             if code != 0:
                 raise subprocess.SubprocessError(
@@ -6328,13 +6336,14 @@ def generate_sample_card(
             # personal ones, so "Top 100 Private Targets" showed the personal plot again
             code = subprocess.call(
                 crisprme_plots_personal
-                + [private_copy, f"{scratch}/", f"{guide}.{sample}.private"]
+                + [private_copy, f"{scratch.path}/", f"{guide}.{sample}.private"],
+                pass_fds=(scratch.fd,),
             )
             if code != 0:
                 raise subprocess.SubprocessError(
                     f"Failed private targets plot generation on sample {sample}"
                 )
-            _job_publish(scratch, imgsdir, keep=(os.path.basename(personal_copy),
+            _job_publish(scratch.path, imgsdir, keep=(os.path.basename(personal_copy),
                                                  os.path.basename(private_copy)))
     # compress private targets file for download
     targets_private_zip = os.path.join(
@@ -6938,16 +6947,17 @@ def update_content_tab(
         )
         # Dropdown chromosomes
         try:
-            # read chromosomes from FASTA files
+            # read chromosomes from FASTA files: the genome's folder, its name the job's
+            # .Params.txt gives (which another user can write), listed with no link another
+            # user put followed and no '..' (safe_files): the names of the FASTA files of
+            # any folder of the user's were shown
+            genome_folder = os.path.join(current_working_directory, "Genomes", genome_selected)
             onlyfile = [
                 f
-                for f in os.listdir(
-                    os.path.join(current_working_directory, "Genomes", genome_selected)
-                )
+                for f in safe_files.listdir(genome_folder, current_working_directory)
                 if (
-                    os.path.isfile(
-                        os.path.join(current_working_directory, "Genomes", genome_selected, f)
-                    )
+                    safe_files.is_file(os.path.join(genome_folder, f),
+                                       current_working_directory)
                     and (f.endswith(".fa") or f.endswith(".fasta"))
                 )
             ]

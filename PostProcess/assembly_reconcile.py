@@ -220,13 +220,17 @@ def add_copy_annotations(
     ).drop(columns=["_cluster_id"])
 
 
-def find_results_prefix(results_dir: str) -> str:
+def find_results_prefix(results_dir: str, safe_root: Optional[str] = None) -> str:
     """Derives a haplotype's CRISPRme results filename prefix by locating its
     `*_integrated_results.tsv` file, rather than reconstructing CRISPRme's
     internal naming convention (guide+PAM+genome+mm+bMax) by hand.
 
     Args:
         results_dir: A `complete-search` output folder.
+        safe_root: The web results pages' data folder: the folder is then
+            listed as safe_files reaches it from there, with no link another
+            user put in it followed at any step and no `..` (the pages name it
+            from a file of a job folder, which another user can write).
 
     Returns:
         The filename prefix shared by `<prefix>_integrated_results.tsv` and
@@ -237,7 +241,12 @@ def find_results_prefix(results_dir: str) -> str:
             is found (e.g. a multi-guide run, not yet supported here).
     """
     suffix = "_integrated_results.tsv"
-    matches = glob.glob(os.path.join(results_dir, f"*{suffix}"))
+    if safe_root is not None:
+        import safe_files  # (PostProcess/, as this module)
+
+        matches = safe_files.glob(results_dir, f"*{suffix}", safe_root)
+    else:
+        matches = glob.glob(os.path.join(results_dir, f"*{suffix}"))
     if len(matches) != 1:
         raise FileNotFoundError(
             f"Expected exactly one *{suffix} file in {results_dir}, found "
@@ -939,7 +948,7 @@ def load_chrom_alias(chrom_alias_file: str) -> Tuple[Dict[str, str], Dict[str, s
 
 def load_crisprme_predictions(
     results_dir: str, prefix: str, merge_bp: int, cols: Optional[List[str]] = None,
-    nofollow: bool = False,
+    safe_root: Optional[str] = None,
 ) -> pd.DataFrame:
     """Loads one haplotype's CRISPRme output into one deduplicated,
     one-row-per-genomic-locus table.
@@ -980,6 +989,8 @@ def load_crisprme_predictions(
         merge_bp: Passed to `cluster_collapse` -- should match the `--merge`
             value used for this haplotype's `complete-search` run.
         cols: Result columns to keep. Defaults to `PRED_COLS`.
+        safe_root: The web results pages' data folder: the file is then read
+            as safe_files reaches it from there (see `find_results_prefix`).
 
     Returns:
         One row per genomic locus, with a stable `off_target_id` column.
@@ -988,14 +999,16 @@ def load_crisprme_predictions(
         cols = PRED_COLS
 
     integrated_file = os.path.join(results_dir, f"{prefix}_integrated_results.tsv")
-    # nofollow (the web results pages): a regular file with one name, reached with no link at
-    # its last step (safe_files.open_nofollow): a link another user put there was read
-    source = integrated_file
-    if nofollow:
+    if safe_root is not None:
+        # the web results pages: each folder from the data folder down opened in turn with
+        # no link followed, and the file a regular one (safe_files): a link another user put
+        # in Results/ under the name a job's .Params.txt gives, or a '..' in that name, was
+        # followed, and another user's results, or any file of the user's, shown
         import safe_files  # (PostProcess/, as this module)
 
-        source = safe_files.open_nofollow(integrated_file, "rb")
-    combined = pd.read_csv(source, sep="\t", usecols=cols)
+        combined = safe_files.read_csv(integrated_file, safe_root, sep="\t", usecols=cols)
+    else:
+        combined = pd.read_csv(integrated_file, sep="\t", usecols=cols)
 
     mmb = (
         pd.to_numeric(combined["Mismatches_(fewest_mm+b)"], errors="coerce")

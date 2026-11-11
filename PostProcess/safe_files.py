@@ -21,7 +21,11 @@ round 5, S-R5-2). Each such file goes through this module:
   only once it is known to be a regular file;
 - a file with another name (a hard link) is refused, read or written, in a folder others can
   write: a hard link to a file of the user's can be made where the system lets anyone link a
-  file they cannot read (``fs.protected_hardlinks=0``).
+  file they cannot read (``fs.protected_hardlinks=0``);
+- a folder the web app makes there for files of its own (a program's outputs, an upload
+  unpacked) is used through its descriptor alone (``private_dir``), never by its name again:
+  whoever can write the folder that holds it could rename it away and put a link in its
+  place.
 
 ``links``, the rule for a link below the data folder's own folders: ``"none"`` refuses every
 one; ``"own"`` follows one only where no one else can have put it: a link owned by the user
@@ -49,7 +53,7 @@ import secrets
 import shutil
 import stat
 import zipfile
-from typing import IO, Iterator, List, Optional
+from typing import IO, Iterator, List, NamedTuple, Optional
 
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _NOFOLLOW = os.O_NOFOLLOW
@@ -469,17 +473,36 @@ def rename(src: str, dst: str, root: str, *, dst_links: Optional[str] = None) ->
     replaced, and ``src`` must be a regular file with no other name (a link there is
     refused). One put in place of ``src`` while it is moved is taken back out of ``dst``."""
     with _Walk(src, root) as swalk, _Walk(dst, root, dst_links) as dwalk:
-        fd = _open_leaf(swalk, os.O_RDONLY | os.O_NONBLOCK, follow=False)
-        try:
-            st = os.fstat(fd)
-            os.replace(swalk.name, dwalk.name, src_dir_fd=swalk.fd, dst_dir_fd=dwalk.fd)
-            now = os.stat(dwalk.name, dir_fd=dwalk.fd, follow_symlinks=False)
-            if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
-                with contextlib.suppress(OSError):
-                    os.unlink(dwalk.name, dir_fd=dwalk.fd)
-                raise RefusedPath(src, "replaced by another file while it was moved")
-        finally:
-            os.close(fd)
+        _move_regular(swalk, src, dwalk.fd, dwalk.name)
+
+
+def _move_regular(swalk: _Walk, src: str, dst_fd: int, dst_name: str) -> None:
+    """``rename``'s move of the file ``swalk`` reached to ``dst_name`` in the folder
+    ``dst_fd``."""
+    fd = _open_leaf(swalk, os.O_RDONLY | os.O_NONBLOCK, follow=False)
+    try:
+        st = os.fstat(fd)
+        os.replace(swalk.name, dst_name, src_dir_fd=swalk.fd, dst_dir_fd=dst_fd)
+        now = os.stat(dst_name, dir_fd=dst_fd, follow_symlinks=False)
+        if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
+            with contextlib.suppress(OSError):
+                os.unlink(dst_name, dir_fd=dst_fd)
+            raise RefusedPath(src, "replaced by another file while it was moved")
+    finally:
+        os.close(fd)
+
+
+def move_into(src: str, root: str, dst: str) -> None:
+    """Renames the regular file ``src`` (as ``rename`` takes it) to ``dst``, a path in a
+    folder of this process's own (``private_dir``'s ``path``, or a folder made below it),
+    which is taken as it is: no one else can put a name there (and ``path`` is itself a
+    link, to the folder's descriptor)."""
+    folder = os.open(os.path.dirname(dst), _DIR_FLAGS)
+    try:
+        with _Walk(src, root) as swalk:
+            _move_regular(swalk, src, folder, os.path.basename(dst))
+    finally:
+        os.close(folder)
 
 
 def replace_from(src: str, dst: str, root: str) -> None:
@@ -522,27 +545,105 @@ def opened_path(path: str, root: str, links: Optional[str] = None) -> Iterator[s
         os.close(fd)
 
 
-def open_nofollow(path: str, mode: str = "r", *, encoding: Optional[str] = None,
-                  errors: Optional[str] = None) -> IO:
-    """The file ``path`` opened to read with ``O_NOFOLLOW`` and ``O_NONBLOCK``, a regular file
-    with no other name: the rule for the last step of a path alone, for a function of
-    PostProcess/ that reads a search's result file the web pages show (the folders above
-    it are the pages' to check, which they do with the walk above)."""
-    if mode not in ("r", "rb", "rt"):
-        raise ValueError(f"open_nofollow: mode {mode!r}")
+class PrivateDir(NamedTuple):
+    """A folder of ``private_dir``'s: ``path``, the name of its descriptor
+    (``/proc/self/fd/<fd>``), and ``fd``, which a program given a path below it must
+    inherit (subprocess's ``pass_fds=(d.fd,)``)."""
+    path: str
+    fd: int
+
+
+def _empty_dir(fd: int) -> None:
+    """Removes everything in the folder ``fd`` (each name in it, never what a link there
+    names), through its descriptor."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | _NOFOLLOW | _CLOEXEC)
-    except OSError as e:
-        if e.errno in _LINK_ERRNOS and os.path.islink(path):
-            raise RefusedPath(path, f"{os.path.basename(path)} is a link, which is not "
-                                    "followed there") from None
-        raise
-    st = os.fstat(fd)
-    if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
+        names = os.listdir(fd)
+    except OSError:
+        return
+    for name in names:
+        with contextlib.suppress(OSError):
+            if stat.S_ISDIR(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode):
+                shutil.rmtree(name, ignore_errors=True, dir_fd=fd)
+            else:
+                os.unlink(name, dir_fd=fd)
+
+
+@contextlib.contextmanager
+def private_dir(folder: str, root: str, prefix: str = ".crisprme-", *,
+                links: Optional[str] = None) -> Iterator[PrivateDir]:
+    """A folder of this process's own, made in the folder ``folder`` (reached with the rules
+    above) under a name no one could make first, mode 0700, and used through its descriptor
+    alone: every path below ``path`` (``/proc/self/fd/<fd>``) reaches the very folder made
+    here, whatever is renamed or put in ``folder`` meanwhile. Removed, with what is in it,
+    when the block ends.
+
+    ``folder`` may be one others can write (a job's folder, ``Annotations/``, ``Genomes/``,
+    ``Assemblies/``): a folder made there by ``tempfile.mkdtemp`` and then used by its name
+    could be renamed away within ``folder`` by anyone who can write it (a rename there needs
+    no more), and a link to a folder of the user's put under its name, which the web app
+    then wrote into, unpacked an upload into, and moved files out of by that name. A
+    program given a path below it inherits ``fd`` (``pass_fds``). Linux only (there is no
+    other way to reach a folder below a descriptor by name): elsewhere OSError."""
+    proc = "/proc/self/fd"
+    if not os.path.isdir(proc):
+        raise OSError(errno.ENOTSUP, "no /proc/self/fd here, to reach a folder by its "
+                                     "descriptor", folder)
+    with _Walk(folder, root, links, whole=True) as walk:
+        for _ in range(100):
+            name = f"{prefix}{secrets.token_hex(8)}"
+            try:
+                os.mkdir(name, 0o700, dir_fd=walk.fd)
+                break
+            except FileExistsError:
+                continue
+        else:  # pragma: no cover
+            raise FileExistsError(errno.EEXIST, "no free name for a private folder", folder)
+        try:
+            fd = os.open(name, _DIR_FLAGS | _NOFOLLOW, dir_fd=walk.fd)
+        except OSError as e:
+            if e.errno in _LINK_ERRNOS:
+                raise RefusedPath(os.path.join(folder, name), "replaced by a link as soon as "
+                                                              "it was made") from None
+            raise
+        try:
+            # the folder made here, not one another user put under its name meanwhile (a
+            # folder of the user's that the group can write can be moved there, and one of
+            # theirs, which root can write into): only an empty, private one, owned by
+            # whoever a file this process makes in it is owned by, passes (another such
+            # folder of this process's, then). Checked before anything in it is used, or
+            # removed.
+            st = os.fstat(fd)
+            if not stat.S_ISDIR(st.st_mode) or st.st_mode & 0o077 or os.listdir(fd):
+                raise RefusedPath(os.path.join(folder, name), "replaced by another folder as "
+                                                              "soon as it was made")
+            try:
+                probe = os.open(".owner", os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW
+                                | _CLOEXEC, 0o600, dir_fd=fd)
+            except OSError:
+                raise RefusedPath(os.path.join(folder, name), "replaced by another folder as "
+                                                              "soon as it was made") from None
+            try:
+                mine = os.fstat(probe).st_uid
+            finally:
+                os.close(probe)
+                os.unlink(".owner", dir_fd=fd)
+            if st.st_uid != mine:
+                raise RefusedPath(os.path.join(folder, name), "replaced by another folder as "
+                                                              "soon as it was made")
+            parent = os.dup(walk.fd)
+        except BaseException:
+            os.close(fd)
+            raise
+    try:
+        yield PrivateDir(f"{proc}/{fd}", fd)
+    finally:
+        _empty_dir(fd)
+        with contextlib.suppress(OSError):  # its name, when that is still this folder
+            now, mine = os.stat(name, dir_fd=parent, follow_symlinks=False), os.fstat(fd)
+            if (now.st_dev, now.st_ino) == (mine.st_dev, mine.st_ino):
+                os.rmdir(name, dir_fd=parent)
         os.close(fd)
-        raise RefusedPath(path, "not a regular file with one name")
-    fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) & ~os.O_NONBLOCK)
-    return _fdopen(fd, mode, encoding, errors, None)
+        os.close(parent)
 
 
 def sqlite_connect(path: str, root: str):
