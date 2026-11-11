@@ -938,7 +938,8 @@ def load_chrom_alias(chrom_alias_file: str) -> Tuple[Dict[str, str], Dict[str, s
 
 
 def load_crisprme_predictions(
-    results_dir: str, prefix: str, merge_bp: int, cols: Optional[List[str]] = None
+    results_dir: str, prefix: str, merge_bp: int, cols: Optional[List[str]] = None,
+    nofollow: bool = False,
 ) -> pd.DataFrame:
     """Loads one haplotype's CRISPRme output into one deduplicated,
     one-row-per-genomic-locus table.
@@ -987,7 +988,14 @@ def load_crisprme_predictions(
         cols = PRED_COLS
 
     integrated_file = os.path.join(results_dir, f"{prefix}_integrated_results.tsv")
-    combined = pd.read_csv(integrated_file, sep="\t", usecols=cols)
+    # nofollow (the web results pages): a regular file with one name, reached with no link at
+    # its last step (safe_files.open_nofollow): a link another user put there was read
+    source = integrated_file
+    if nofollow:
+        import safe_files  # (PostProcess/, as this module)
+
+        source = safe_files.open_nofollow(integrated_file, "rb")
+    combined = pd.read_csv(source, sep="\t", usecols=cols)
 
     mmb = (
         pd.to_numeric(combined["Mismatches_(fewest_mm+b)"], errors="coerce")

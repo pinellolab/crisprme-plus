@@ -106,6 +106,8 @@ import sys
 import tempfile
 from datetime import datetime
 
+import safe_files  # (PostProcess/: the web page's reads follow no link: nofollow below)
+
 import matplotlib
 
 # never touch an X server (pipeline convention, CRISPRme_plots.py:21)
@@ -1335,7 +1337,7 @@ def dedupe_reference_rows(df, cols):
 # --------------------------------------------------------------------------- #
 # Aggregated Specificity Score (.<jobid>.acfd_CFD.txt)
 # --------------------------------------------------------------------------- #
-def read_specificity_score(result_dir, job_id, guides, criterion="CFD"):
+def read_specificity_score(result_dir, job_id, guides, criterion="CFD", nofollow=False):
     """Read an aggregated specificity score (0-100) from the acfd sidecar.
 
     ``criterion`` selects the scorer the aggregate is built from: "CFD" (the primary,
@@ -1355,8 +1357,8 @@ def read_specificity_score(result_dir, job_id, guides, criterion="CFD"):
     acfd_file = os.path.join(result_dir, f".{job_id}.acfd_{criterion}.txt")
     if not os.path.isfile(acfd_file):
         return _na
-    try:
-        with open(acfd_file) as handle:
+    try:  # (nofollow: the web pages' read, _open_text)
+        with _open_text(acfd_file, nofollow) as handle:
             lines = [ln for ln in handle.read().strip().split("\n") if ln.strip()]
     except OSError:
         return _na
@@ -1394,7 +1396,8 @@ def read_specificity_score(result_dir, job_id, guides, criterion="CFD"):
 # so both callers use one real implementation instead of two copies that
 # could drift apart).
 # --------------------------------------------------------------------------- #
-def load_general_target_count(hap_dir: str, hap_output_name: str, guide: str):
+def load_general_target_count(hap_dir: str, hap_output_name: str, guide: str,
+                              nofollow: bool = False):
     """Real per-haplotype MM x bulge count grid -- built the SAME way
     complete-search's own per-haplotype report.html builds its Section-1
     matrix (`build_mmb_matrix()` on that haplotype's `integrated_results.tsv`,
@@ -1435,8 +1438,10 @@ def load_general_target_count(hap_dir: str, hap_output_name: str, guide: str):
         return None
     try:
         compression = "gzip" if integrated_tsv.endswith(".gz") else None
+        source = (safe_files.open_nofollow(integrated_tsv, "rb") if nofollow
+                  else integrated_tsv)  # (nofollow: the web pages' read, _open_text)
         df = pd.read_csv(
-            integrated_tsv, sep="\t", dtype=str, compression=compression,
+            source, sep="\t", dtype=str, compression=compression,
             na_filter=False, low_memory=False,
         )
     except (OSError, pd.errors.ParserError):
@@ -1447,7 +1452,7 @@ def load_general_target_count(hap_dir: str, hap_output_name: str, guide: str):
         if guide_mask.any():
             df = df[guide_mask]
     df = dedupe_reference_rows(df, cols)
-    meta = build_summary_meta(hap_dir, integrated_tsv, df, cols)
+    meta = build_summary_meta(hap_dir, integrated_tsv, df, cols, nofollow=nofollow)
     matrix = build_mmb_matrix(df, cols, meta)
     if not matrix or not matrix.get("groups"):
         return None
@@ -1528,13 +1533,20 @@ def build_grid_row_cells(
 # --------------------------------------------------------------------------- #
 # Summary metadata: .Params.txt / .version.txt / filename fallback
 # --------------------------------------------------------------------------- #
-def _read_kv_sidecar(path):
+def _open_text(path, nofollow=False):
+    """``path`` opened as text; with ``nofollow`` (the web results pages' reads) a regular
+    file with one name reached with no link at its last step (safe_files.open_nofollow): a
+    link another user put in a search's folder was read, and shown, by the web app."""
+    return safe_files.open_nofollow(path) if nofollow else open(path)
+
+
+def _read_kv_sidecar(path, nofollow=False):
     """Read a tab-separated ``key\\tvalue`` sidecar (Params.txt/.version.txt)."""
     out = {}
     if not path or not os.path.isfile(path):
         return out
     try:
-        with open(path) as handle:
+        with _open_text(path, nofollow) as handle:
             for line in handle:
                 line = line.rstrip("\n")
                 if "\t" not in line:
@@ -1640,7 +1652,8 @@ REFERENCE_ONLY_DATASETS = "none (no variant dataset searched)"
 INDEXES_SEARCHED_FILE = ".indexes_searched.txt"
 
 
-def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
+def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None,
+                       nofollow=False):
     """Collect summary metadata used by the header card and matrix.
 
     Returns a dict with resolved guide list, nuclease, pam, genome, datasets, mm,
@@ -1652,10 +1665,10 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     version = None
     date = None
     if result_dir:
-        params = _read_kv_sidecar(os.path.join(result_dir, ".Params.txt"))
+        params = _read_kv_sidecar(os.path.join(result_dir, ".Params.txt"), nofollow)
         if not params:
-            params = _read_kv_sidecar(os.path.join(result_dir, "Params.txt"))
-        ver = _read_kv_sidecar(os.path.join(result_dir, ".version.txt"))
+            params = _read_kv_sidecar(os.path.join(result_dir, "Params.txt"), nofollow)
+        ver = _read_kv_sidecar(os.path.join(result_dir, ".version.txt"), nofollow)
         version = ver.get("crisprme_version")
         for probe in (".Params.txt", "Params.txt", os.path.basename(tsv_path)):
             candidate = os.path.join(result_dir, probe)
@@ -1682,7 +1695,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     search_mode = "population-level"
     if result_dir:
         try:
-            with open(os.path.join(result_dir, ".search_mode")) as _smf:
+            with _open_text(os.path.join(result_dir, ".search_mode"), nofollow) as _smf:
                 _sm = _smf.read().strip().lower()
                 if _sm in ("per-sample", "full"):  # "full" = legacy 2.5.3 alias
                     search_mode = "per-sample"
@@ -1703,7 +1716,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         for _name, _into in ((".untiered_datasets", untiered),
                              (".variant_datasets", searched)):
             try:
-                with open(os.path.join(result_dir, _name)) as _udf:
+                with _open_text(os.path.join(result_dir, _name), nofollow) as _udf:
                     _into.extend(_l.strip() for _l in _udf if _l.strip())
             except OSError:
                 pass
@@ -1743,7 +1756,8 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     vcf_names = []
     if result_dir:
         try:
-            with open(os.path.join(result_dir, ".vcf_list_searched.txt")) as _vl:
+            with _open_text(os.path.join(result_dir, ".vcf_list_searched.txt"),
+                            nofollow) as _vl:
                 vcf_names = list(dict.fromkeys(
                     os.path.basename(os.path.normpath(_l.strip())) for _l in _vl
                     if _l.strip() and _l.strip() != "_"))
@@ -1812,7 +1826,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     # Prune_pam: complete-search records the flag in the parameters, given or taken by
     # itself; the search script records it in the record where the search took it by itself:
     # one the web launched, or one complete-search took it for ("auto").
-    taken = _read_kv_sidecar(os.path.join(result_dir, INDEXES_SEARCHED_FILE)) \
+    taken = _read_kv_sidecar(os.path.join(result_dir, INDEXES_SEARCHED_FILE), nofollow) \
         if result_dir else {}
     indexes = []
     if taken.get("Reference_index"):

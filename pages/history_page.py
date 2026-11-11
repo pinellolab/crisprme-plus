@@ -24,6 +24,8 @@ import os
 import pathlib
 import sys
 
+import safe_files  # (PostProcess/, on sys.path from pages_utils: no link another user put is followed)
+
 SUMMARYTABCOLS = [
     "Job", "Genome", "Variants", "Mismatches", "DNA bulge", "RNA bulge", "Max edits", "PAM", "Number of Guides", "Start"
 ]
@@ -115,10 +117,13 @@ def retrieve_resultsdirs(resultsdir: str) -> List[str]:
         A list of strings, where each string is the path to a valid result
         directory.
     """
+    # (folders and files reached with no link another user put followed: safe_files)
+    root = os.path.dirname(os.path.normpath(resultsdir))
     return [
         d
-        for d in os.listdir(resultsdir)
-        if os.path.isdir(os.path.join(resultsdir, d)) and os.path.isfile(os.path.join(resultsdir, d, PARAMS_FILE))
+        for d in safe_files.listdir(resultsdir, root)
+        if safe_files.is_dir(os.path.join(resultsdir, d), root)
+        and safe_files.is_file(os.path.join(resultsdir, d, PARAMS_FILE), root)
     ]
 
 def read_params(paramsfile: str, jobid: str) -> Dict[str, str]:
@@ -138,8 +143,9 @@ def read_params(paramsfile: str, jobid: str) -> Dict[str, str]:
     Raises:
         IOError: If an error occurs while reading the parameters file.
     """
-    try:
-        with open(paramsfile, mode="r") as infile:
+    try:  # (no link another user put followed: safe_files)
+        with safe_files.open_read(paramsfile,
+                                  safe_files.job_root(os.path.dirname(paramsfile))) as infile:
             params = {
                 fields[0]: fields[1] 
                 for line in infile 
@@ -169,8 +175,9 @@ def read_job_info(logfile: str, jobid: str) -> Optional[str]:
     Returns:
         The start-time string, or ``None`` if the job has not started.
     """
-    try:
-        with open(logfile, mode="r") as infile:
+    try:  # (no link another user put followed: safe_files)
+        with safe_files.open_read(logfile,
+                                  safe_files.job_root(os.path.dirname(logfile))) as infile:
             log = infile.read()  # read job log data
     except OSError:
         return None  # log not written yet (brand-new/queued dir)
@@ -193,8 +200,9 @@ def count_guides(guidesfile: str, jobid: str) -> int:
     Raises:
         IOError: If an error occurs while reading the guides file.
     """
-    try:
-        with open(guidesfile, mode="r") as infile:
+    try:  # (no link another user put followed: safe_files)
+        with safe_files.open_read(guidesfile,
+                                  safe_files.job_root(os.path.dirname(guidesfile))) as infile:
             return len(infile.read().strip().split("\n"))
     except OSError as e:
         raise IOError(f"An error occurred while collecting results in {jobid}") from e
@@ -245,10 +253,11 @@ def _is_assembly_params(paramsfile: str) -> bool:
     """Same content-substring check index.py's _is_assembly_job() uses,
     applied to a .Params.txt path retrieve_resultsdirs() already confirmed
     exists."""
-    try:
-        with open(paramsfile) as f:
+    try:  # (no link another user put followed: safe_files)
+        with safe_files.open_read(paramsfile,
+                                  safe_files.job_root(os.path.dirname(paramsfile))) as f:
             return "Genome_type\tassembly" in f.read()
-    except OSError:
+    except (OSError, ValueError):
         return False
 
 
@@ -257,7 +266,8 @@ def _read_assembly_params_file(paramsfile: str) -> Dict[str, str]:
     (index, key, value) -- unlike read_params()'s 2-column (key, value)
     complete-search format."""
     params: Dict[str, str] = {}
-    with open(paramsfile) as f:
+    # (no link another user put followed: safe_files)
+    with safe_files.open_read(paramsfile, safe_files.job_root(os.path.dirname(paramsfile))) as f:
         for line in f:
             fields = line.rstrip("\n").split("\t")
             if len(fields) >= 3:
@@ -289,14 +299,17 @@ def _assembly_max_total_edits(params: Dict[str, str], results_directory: str) ->
     mirrors results_page.py's own fallback for the same gap: read it back
     from either haplotype's own (complete-search-written) .Params.txt, both
     run with the same mm/bDNA/bRNA/max-total-edits by construction."""
+    root = os.path.dirname(os.path.normpath(results_directory))
     for dirname_key in ("Paternal_dir", "Maternal_dir"):
         hap_dir = params.get(dirname_key)
-        if not hap_dir:
+        # a folder of Results/ (the name is read from a file), read with no link another
+        # user put followed (safe_files)
+        if not hap_dir or os.path.basename(hap_dir) != hap_dir or hap_dir in (".", ".."):
             continue
         hap_params_path = os.path.join(results_directory, hap_dir, PARAMS_FILE)
-        if not os.path.isfile(hap_params_path):
+        if not safe_files.is_file(hap_params_path, root):
             continue
-        with open(hap_params_path) as f:
+        with safe_files.open_read(hap_params_path, root) as f:
             for line in f:
                 fields = line.rstrip("\n").split("\t")
                 if len(fields) >= 2 and fields[0] == "Max_total_edits":
@@ -331,9 +344,9 @@ def _assembly_history_row(jobid: str, params: Dict[str, str], results_directory:
         # Job_start field -- the file's own mtime is a reasonable stand-in
         # so these still sort/display sensibly rather than erroring.
         params_path = os.path.join(results_directory, jobid, PARAMS_FILE)
-        try:
-            start = datetime.fromtimestamp(
-                os.path.getmtime(params_path)
+        try:  # (no link another user put followed: safe_files)
+            start = datetime.fromtimestamp(safe_files.stat_file(
+                params_path, os.path.dirname(os.path.normpath(results_directory))).st_mtime
             ).strftime("%Y-%m-%d %H:%M:%S")
         except OSError:
             start = "-"
@@ -388,9 +401,9 @@ def construct_history_summary(results: List[str]) -> pd.DataFrame:
                     os.path.join(results_directory, jobid, LOG_FILE), jobid
                 )
                 if not jobinfo:
-                    try:
-                        jobinfo = datetime.fromtimestamp(
-                            os.path.getmtime(paramsfile)
+                    try:  # (no link another user put followed: safe_files)
+                        jobinfo = datetime.fromtimestamp(safe_files.stat_file(
+                            paramsfile, current_working_directory).st_mtime
                         ).strftime("%Y-%m-%d %H:%M:%S")
                     except OSError:
                         jobinfo = "-"
@@ -463,8 +476,7 @@ def get_available_results() -> pd.DataFrame:
     """
     # retrieve results stored in Results folder
     results_directory = os.path.join(current_working_directory, RESULTS_DIR)
-    results_dirs = retrieve_resultsdirs(results_directory) 
-    assert len(results_dirs) <= len(os.listdir(results_directory))  # empty results are skipped
+    results_dirs = retrieve_resultsdirs(results_directory)
     return construct_history_summary(results_dirs)
 
 

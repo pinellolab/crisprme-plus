@@ -335,10 +335,18 @@ class TestRiskCardPlots(_Tmp):
         self.assertEqual(len(plots), 2)
         personal = os.path.join(d, f"{job}.S1.{GUIDE}.personal_targets.tsv")
         private = os.path.join(d, f"{job}.S1.{GUIDE}.private_targets.tsv")
-        self.assertEqual(plots[0][2], personal)
+        # (each drawn from a copy of the job's file, made in a folder of the web app's own in
+        # the job's folder, where the plots go before they are renamed into imgs/:
+        # results_page._job_scratch)
+        self.assertEqual(os.path.basename(plots[0][2]), os.path.basename(personal))
+        self.assertEqual(os.path.dirname(os.path.dirname(plots[0][2])), d)
         self.assertEqual(plots[0][-1], f"{GUIDE}.S1.personal")
-        self.assertEqual(plots[1][2], private)
+        self.assertEqual(os.path.basename(plots[1][2]), os.path.basename(private))
         self.assertEqual(plots[1][-1], f"{GUIDE}.S1.private")
+        for kind in ("personal", "private"):
+            self.assertTrue(os.path.isfile(os.path.join(
+                d, "imgs", f"CRISPRme_CFD_top_1000_log_for_main_text_{GUIDE}.S1.{kind}.png")))
+        self.assertEqual([n for n in os.listdir(d) if n.startswith(".crisprme-")], [])
         # and the two files hold what their names say
         self.assertEqual(len(pd.read_csv(personal, sep="\t")), 2)  # S1 carries 2 sites
         self.assertEqual(len(pd.read_csv(private, sep="\t")), 1)   # 1 of them only S1

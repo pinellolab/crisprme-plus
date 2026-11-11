@@ -134,16 +134,19 @@ jobs:
       # (the rest of test_assembly_annotate, which no other job names, test_app_settings' start
       # of the web app, and test_web_shell_safety's pages, with bedtools, BEDOPS and zip),
       # crisprme.py's start-up (test_no_code_from_files: --debug from a folder holding another
-      # user's PostProcess/), and the index resolver in the image. A skip here would be the
-      # same nothing, so the step fails on any skip but the two the image cannot help: no
-      # en_US locale, no ps (the unit-tests job runs that one).
+      # user's PostProcess/), the index resolver in the image, and the pages that follow no
+      # link another user put in the data folder (test_web_no_links, through the real Dash
+      # server: Dash, BEDOPS). A skip here would be the same nothing, so the step fails on any
+      # skip but the two the image cannot help: no en_US locale, no ps (the unit-tests job
+      # runs that one).
       - name: "Tests that need the image's tools (BEDOPS, minimap2, impg, crisprme.py's imports, Dash)"
         run: |
           set -o pipefail
           docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
             python -m unittest test_assembly_annotate test_assembly_reconcile \
               test_complete_search_flags test_post_process_tempdir test_index_resolution \
-              test_app_settings test_web_shell_safety test_no_code_from_files -v \
+              test_app_settings test_web_shell_safety test_no_code_from_files \
+              test_web_no_links -v \
             2>&1 | tee in-image-tests.log
           if grep -E "skipped ['\"]" in-image-tests.log \
               | grep -vE "en_US.UTF-8 is not installed|no ps here to compare"; then

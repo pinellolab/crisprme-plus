@@ -38,6 +38,7 @@ from typing import List, Optional
 from unittest import mock
 
 import genome_in_use  # (PostProcess/: the rule _genome_upload_problem reads)
+import safe_files  # (PostProcess/: how the page reads, writes and moves the data folder's files)
 import safe_tar  # (PostProcess/: how _install_uploaded_genome unpacks an archive)
 
 _SETTINGS_PAGE = os.path.join(
@@ -82,6 +83,10 @@ def _load_functions(names=_NAMES, **overrides):
     tree = ast.parse(src)
     ns = {
         "os": os,
+        "io": io,
+        "contextlib": contextlib,
+        "safe_files": safe_files,
+        "tempfile": tempfile,
         "time": time,
         "json": json,
         "re": re,
@@ -120,13 +125,24 @@ def _load_functions(names=_NAMES, **overrides):
 _NS = _load_functions()
 
 
-class TestReadProgress(unittest.TestCase):
-    read_progress = staticmethod(_NS["_read_progress"])
+class _InDataFolder(unittest.TestCase):
+    """A job folder of Settings/ in a data folder of its own, which the helpers of _NS read
+    under (their current_working_directory): they read a job's files as safe_files does,
+    in the data folder only."""
 
     def _jobdir(self):
-        d = tempfile.mkdtemp()
-        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        d = os.path.join(root, "Settings", "set_ABCDEFGH12")
+        os.makedirs(d)
+        before = _NS["current_working_directory"]
+        _NS["current_working_directory"] = root + os.sep
+        self.addCleanup(_NS.__setitem__, "current_working_directory", before)
         return d
+
+
+class TestReadProgress(_InDataFolder):
+    read_progress = staticmethod(_NS["_read_progress"])
 
     def _write(self, jobdir, payload):
         with open(os.path.join(jobdir, "progress.json"), "w") as fh:
@@ -196,13 +212,8 @@ class TestRenderProgressBar(unittest.TestCase):
         self.assertIsNotNone(out)
 
 
-class TestFullJobLog(unittest.TestCase):
+class TestFullJobLog(_InDataFolder):
     full_log = staticmethod(_NS["_full_job_log"])
-
-    def _jobdir(self):
-        d = tempfile.mkdtemp()
-        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
-        return d
 
     def test_no_logs(self):
         self.assertIn("No log files", self.full_log(self._jobdir()))
@@ -230,13 +241,8 @@ class TestFullJobLog(unittest.TestCase):
         self.assertNotIn("row0\n", out)  # head dropped
 
 
-class TestGenotypesDegradedWarning(unittest.TestCase):
+class TestGenotypesDegradedWarning(_InDataFolder):
     warn = staticmethod(_NS["_genotypes_degraded_warning"])
-
-    def _jobdir(self):
-        d = tempfile.mkdtemp()
-        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
-        return d
 
     def test_none_without_verbose(self):
         self.assertIsNone(self.warn(self._jobdir()))
@@ -400,15 +406,20 @@ class TestSettingsJobdir(_JobDirCase):
 
     def test_symlinked_settings_root_still_accepted(self):
         # a data dir whose Settings/ is itself a symlink (e.g. onto a volume) is a
-        # legitimate layout: job dirs inside it must still resolve
+        # legitimate layout: job dirs inside it must still resolve. In a data folder that
+        # only its user can write: in one its group can write (a umask of 002), another
+        # user could put their own link there, and none is followed (safe_files)
         volume = os.path.join(self.cwd, "volume", "Settings")
         os.makedirs(os.path.join(volume, _GOOD_ID))
         data = os.path.join(self.cwd, "data")
         os.makedirs(data)
+        os.chmod(data, 0o755)
         os.symlink(volume, os.path.join(data, "Settings"))
         self.ns["current_working_directory"] = data
         self.assertEqual(self.ns["_settings_jobdir"](_GOOD_ID),
                          os.path.join(data, "Settings", _GOOD_ID))
+        os.chmod(data, 0o775)
+        self.assertIsNone(self.ns["_settings_jobdir"](_GOOD_ID))
 
 
 class TestJobCallbacksRefuseBadIds(_JobDirCase):
@@ -888,6 +899,7 @@ class TestGenomeTarUpload(unittest.TestCase):
         root, cwd, _outside, ns = self.sandbox()
         volume = os.path.join(root, "volume")
         os.makedirs(volume)
+        os.chmod(cwd, 0o755)  # (only its user writes the data folder: a link there is theirs)
         os.symlink(volume, os.path.join(cwd, "Genomes"))
         part = self.upload(cwd, "myasm.tar.gz", self.GOOD[0][1])
         self.assertEqual(ns["_finalize_upload"]("genome", part, "myasm.tar.gz", "", ""), "myasm")
@@ -1329,6 +1341,13 @@ class TestDatasetSamplesID(_SamplesIDCase):
         server = os.path.join(self.cwd, "server")
         _write_vcf(os.path.join(server, "cohort.chr1.vcf.gz"), ["A", "B"])
         os.symlink(server, os.path.join(self.cwd, "VCFs", "cohort"))
+        # read through the link, in a VCFs/ only the user writes; in one its group writes
+        # (a umask of 002) another user could put a link of theirs there, and none is
+        # followed (safe_files): no list is written from it
+        os.chmod(os.path.join(self.cwd, "VCFs"), 0o775)
+        self.assertIsNone(self.ns["_write_dataset_samplesid"]("cohort"))
+        self.assertFalse(os.path.exists(self.sid("cohort")))
+        os.chmod(os.path.join(self.cwd, "VCFs"), 0o755)
         self.assertEqual(self.ns["_write_dataset_samplesid"]("cohort"), self.sid("cohort"))
         self.assertIn("B\tcohort\tunknown\tunknown\n", self.read(self.sid("cohort")))
 
@@ -1464,19 +1483,17 @@ class TestSampleListTakesInstalledMetadata(_SamplesIDCase):
         self.ns["_write_dataset_samplesid"]("walkz")
         old = self.read(self.sid("walkz"))
         self.vcf("walkz", "walkz.chr2.vcf.gz", ["S1", "S2"])
-        replace, stops = os.replace, []
+        write, stops = safe_files.write_bytes, []
 
-        def stopped_replace(src, dst):
-            if dst == self.sid("walkz"):
-                stops.append(dst)
+        def stopped_write(path, root, data, **kwargs):  # (the list goes in through it)
+            if path == self.sid("walkz"):
+                stops.append(path)
                 raise OSError("stopped")
-            return replace(src, dst)
+            return write(path, root, data, **kwargs)
 
-        self.ns["os"] = type("os_", (), {"__getattr__": lambda _s, n: getattr(os, n),
-                                         "replace": staticmethod(stopped_replace)})()
-        with self.assertRaises(OSError):
+        with mock.patch.object(safe_files, "write_bytes", stopped_write), \
+                self.assertRaises(OSError):
             self.ns["_write_dataset_samplesid"]("walkz")
-        self.ns["os"] = os
         self.assertEqual(stops, [self.sid("walkz")])
         self.assertEqual(self.read(self.sid("walkz")), old)
         self.assertEqual(self.ns["_own_list"]("walkz"), old)
@@ -2453,6 +2470,7 @@ class TestRemoveTakesAnItemTheCardLists(unittest.TestCase):
                   os.path.join(shared, "genome_library"))
         os.symlink(os.path.join(shared, "genome_library"),
                    os.path.join(self.cwd, "genome_library"))
+        os.chmod(self.cwd, 0o755)  # (the user's own link, in a data folder only they write)
         before = _tree(self.root)
         for item in self.crafted():
             with self.subTest(item=item):
@@ -2692,3 +2710,159 @@ class TestThePageDoesNotPublish(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --- no link another user put in Settings/ or the data folder is followed -------------
+# Settings/ and the data folder's folders are writable by its group under a umask of 002,
+# and the web app listens on every network interface: the Settings FAILED banner and Show
+# full log showed what a link put at a job's log named, any file of the user's, and a job
+# wrote its log through one (the review of lane S, round 5, S-R5-2). The page's readers
+# and writers go through safe_files now: run here as the page runs them, extracted.
+class TestNoLinkAnotherUserPutIsFollowed(_JobDirCase):
+    names = ["_JOB_ID_RE", "_settings_jobdir", "_new_job_id", "_full_job_log",
+             "_error_tail", "_read_progress", "_genotypes_degraded_warning", "_job_failed",
+             "_run_settings_job", "_LAUNCHED_JOBS", "_LAUNCHED_JOBS_LOCK", "_launch_job_cmd",
+             "_write_vcf_marker", "refresh_settings_job", "_PROGRESS_STALE_SECONDS",
+             "_toggle_settings_full_log"]
+    stubs = {
+        "_render_failure": lambda stage, jobdir, job_id: ("failure", stage, jobdir, job_id),
+        "_build_dirs_left_warning": lambda jobdir: None,
+        "_render_all_tables": lambda: "tables",
+        "_render_storage": lambda: "storage",
+        "_render_progress_bar": lambda stage, prog: None,
+        "_JOB_STALE_SECONDS": 1800,
+        "_BENIGN_ERR_PATTERNS": (),
+        "subprocess": subprocess,
+        "settings_executor": _SyncExecutor(),
+    }
+
+    def setUp(self):
+        super().setUp()
+        for d in (self.cwd, self.settings):  # (as under a umask of 002)
+            os.chmod(d, 0o775)
+        self.home = os.path.join(self.cwd, "home")  # (a folder of the user's elsewhere)
+        os.makedirs(self.home)
+        self.secret = os.path.join(self.home, "secret.txt")
+        with open(self.secret, "w") as fh:
+            fh.write("SECRET-OF-THE-USER\nSamples degraded\n"
+                     "Download genome\tQueued\nDownload genome\tStart\n"
+                     "Download genome\tFAILED\n")
+        self.victim = os.path.join(self.home, "victim.txt")
+        with open(self.victim, "w") as fh:
+            fh.write("VICTIM\n")
+
+    def planted_job(self, job_id, links, files=None):
+        """Settings/<job_id>, which another user made (group-writable), with links to the
+        secret at the names ``links`` and the files ``files``."""
+        jobdir = self.make_job(job_id, files or {})
+        os.chmod(jobdir, 0o775)
+        for name in links:
+            os.symlink(self.secret, os.path.join(jobdir, name))
+        return jobdir
+
+    def victim_text(self):
+        with open(self.victim) as fh:
+            return fh.read()
+
+    def test_the_log_readers_show_nothing_a_link_names(self):
+        jobdir = self.planted_job(_GOOD_ID, ["log_error.txt", "log_verbose.txt"])
+        text = self.ns["_full_job_log"](jobdir)
+        self.assertNotIn("SECRET", text)
+        self.assertIn("not shown", text)
+        tail = self.ns["_error_tail"](os.path.join(jobdir, "log_error.txt"))
+        self.assertNotIn("SECRET", tail)
+        self.assertIsNone(self.ns["_genotypes_degraded_warning"](jobdir))
+        hidden, shown = self.ns["_toggle_settings_full_log"](1, True, _GOOD_ID)
+        self.assertIs(hidden, False)
+        self.assertNotIn("SECRET", shown)
+        # a job's own logs are read as before
+        jobdir = self.make_job("set_OWNLOGS000", {"log_error.txt": "Traceback: boom\n",
+                                                  "log_verbose.txt": "Samples degraded\n"})
+        self.assertIn("boom", self.ns["_full_job_log"](jobdir))
+        self.assertEqual(self.ns["_error_tail"](os.path.join(jobdir, "log_error.txt")),
+                         "Traceback: boom")
+        self.assertIsNotNone(self.ns["_genotypes_degraded_warning"](jobdir))
+
+    def test_the_progress_and_the_state_of_a_job_are_not_read_through_a_link(self):
+        progress = os.path.join(self.home, "progress.json")
+        with open(progress, "w") as fh:
+            json.dump({"pct": 42.0, "bytes_done": 1, "bytes_total": 2,
+                       "updated": time.time()}, fh)
+        jobdir = self.planted_job(_GOOD_ID, ["log.txt"])
+        os.symlink(progress, os.path.join(jobdir, "progress.json"))
+        self.assertIsNone(self.ns["_read_progress"](jobdir))
+        self.assertFalse(self.ns["_job_failed"](jobdir))  # (its log.txt is the secret's)
+        with self.assertRaises(_PreventUpdate):
+            self.ns["refresh_settings_job"](1, _GOOD_ID)
+
+    def test_a_job_folder_that_is_a_link_is_refused_wherever_it_leads(self):
+        # one that stays inside Settings/ too: no job folder is a link
+        real = self.make_job("set_REALJOB000", {"log.txt": "S\tStart\nS\tFAILED\n"})
+        os.symlink(real, os.path.join(self.settings, "set_ALIAS00000"))
+        self.assertIsNone(self.ns["_settings_jobdir"]("set_ALIAS00000"))
+        self.assertEqual(self.ns["_settings_jobdir"]("set_REALJOB000"), real)
+
+    def test_a_job_writes_no_log_through_a_link(self):
+        jobdir = self.make_job(_GOOD_ID, {"log.txt": "Download genome\tQueued\n"})
+        os.chmod(jobdir, 0o775)
+        os.symlink(self.victim, os.path.join(jobdir, "log_verbose.txt"))
+        self.ns["_run_settings_job"](["echo", "WRITTEN-BY-THE-JOB"], jobdir, "Download genome")
+        self.assertEqual(self.victim_text(), "VICTIM\n")
+        with open(os.path.join(jobdir, "log.txt")) as fh:
+            self.assertIn("Download genome\tFAILED", fh.read())
+
+    def test_a_job_folder_is_writable_by_the_web_app_s_user_alone(self):
+        self.ns["_launch_job_cmd"] = _load_functions(
+            ["_JOB_ID_RE", "_new_job_id", "_settings_jobdir", "_run_settings_job",
+             "_LAUNCHED_JOBS", "_LAUNCHED_JOBS_LOCK", "_launch_job_cmd"],
+            current_working_directory=self.cwd, subprocess=subprocess,
+            settings_executor=_SyncExecutor())["_launch_job_cmd"]
+        job = self.ns["_launch_job_cmd"](["true"], "Download genome")
+        st = os.stat(os.path.join(self.settings, job))
+        self.assertEqual(stat.S_IMODE(st.st_mode) & 0o077, 0)
+        with open(os.path.join(self.settings, job, "log.txt")) as fh:
+            self.assertIn("Download genome\tEnd", fh.read())
+
+    def test_the_vcf_marker_is_written_through_no_link(self):
+        vcfs = os.path.join(self.cwd, "VCFs")
+        os.makedirs(vcfs)
+        os.chmod(vcfs, 0o775)
+        os.symlink(self.victim, os.path.join(vcfs, ".walk.refgenome"))
+        self.ns["_write_vcf_marker"]("walk", "hg38")
+        self.assertEqual(self.victim_text(), "VICTIM\n")
+        with open(os.path.join(vcfs, ".walk.refgenome")) as fh:
+            self.assertEqual(fh.read(), "hg38")
+
+
+class TestTheSampleListsAreWrittenThroughNoLink(_SamplesIDCase):
+    """The sample list of a VCF dataset added in Settings, the record of the lists this page
+    wrote and the --samplesID listing: each was written by name, the list and the record
+    through a temporary name the page's process and thread made (predictable), through a
+    link another user put there."""
+
+    def setUp(self):
+        super().setUp()
+        for d in ("samplesIDs", "VCFs"):
+            os.chmod(os.path.join(self.cwd, d), 0o775)
+        self.victim = os.path.join(self.cwd, "victim.txt")
+        with open(self.victim, "w") as fh:
+            fh.write("VICTIM\n")
+
+    def victim_text(self):
+        with open(self.victim) as fh:
+            return fh.read()
+
+    def test_the_list_its_record_and_its_listing(self):
+        sdir = os.path.join(self.cwd, "samplesIDs")
+        tid = threading.get_ident()
+        for name in ("walk.samplesID.txt", ".walk.samplesID.sha256", ".walk.samplesID.list",
+                     f".walk.samplesID.txt.{os.getpid()}.{tid}.tmp",
+                     f".walk.samplesID.sha256.{os.getpid()}.{tid}.tmp"):
+            os.symlink(self.victim, os.path.join(sdir, name))
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1", "S2"])
+        # (a list linked in by another user is not the page's: it is left, as one of
+        # anywhere else is, and passed on; the link itself is never written through)
+        self.ns["_write_dataset_samplesid"]("walk")
+        self.ns["_samplesid_listing"]("walk")
+        self.ns["_record_own_lists"]("walk", "x")
+        self.assertEqual(self.victim_text(), "VICTIM\n")

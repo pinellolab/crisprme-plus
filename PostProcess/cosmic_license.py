@@ -24,6 +24,7 @@ import gzip
 import io
 import json
 import os
+import tempfile
 from typing import Tuple
 
 # stored under <data_dir>/Annotations/
@@ -61,15 +62,25 @@ def get_cosmic_license(annotations_dir: str) -> dict:
 
 
 def set_cosmic_license(annotations_dir: str, enabled: bool, attestation: str = "") -> None:
-    """Persist the COSMIC attestation atomically (tmp + os.replace)."""
+    """Persist the COSMIC attestation atomically: a temporary file of a name of its own
+    (mkstemp: O_EXCL, O_NOFOLLOW) renamed over the record. A fixed temporary name was
+    written through a link another user put there under it (the web Settings writes this
+    record, in Annotations/, which a group may write)."""
     os.makedirs(annotations_dir, exist_ok=True)
-    tmp = license_path(annotations_dir) + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(
-            {"version": 1, "enabled": bool(enabled), "attestation": attestation or ""},
-            fh,
-        )
-    os.replace(tmp, license_path(annotations_dir))
+    fd, tmp = tempfile.mkstemp(prefix=f"{COSMIC_LICENSE_FILE}.", suffix=".tmp",
+                               dir=annotations_dir)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(
+                {"version": 1, "enabled": bool(enabled), "attestation": attestation or ""},
+                fh,
+            )
+        os.chmod(tmp, 0o644)  # (readable as the fixed name was: mkstemp makes it 0600)
+        os.replace(tmp, license_path(annotations_dir))
+    except BaseException:
+        if os.path.lexists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def _open_maybe_gz(path: str, mode: str):

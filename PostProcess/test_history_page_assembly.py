@@ -25,6 +25,8 @@ from typing import Dict, Optional
 
 import pandas as pd
 
+import safe_files  # (PostProcess/: how the History page reads a job's files)
+
 _HISTORY_PAGE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pages", "history_page.py"
 )
@@ -51,7 +53,7 @@ def _load_functions():
     # inlined here with their known, stable values instead of importing it.
     ns = {
         "os": os, "datetime": datetime, "Dict": Dict, "Optional": Optional,
-        "PARAMS_FILE": ".Params.txt", "GUIDES_FILE": ".guides.txt",
+        "PARAMS_FILE": ".Params.txt", "GUIDES_FILE": ".guides.txt", "safe_files": safe_files,
     }
     found = set()
     for node in tree.body:
@@ -319,7 +321,7 @@ def _load_history_table():
         "List": __import__("typing").List, "Optional": Optional,
         "Tuple": __import__("typing").Tuple, "html": _Html, "URL": "",
         "PARAMS_FILE": ".Params.txt", "GUIDES_FILE": ".guides.txt", "LOG_FILE": "log.txt",
-        "RESULTS_DIR": "Results", "re": re,
+        "RESULTS_DIR": "Results", "re": re, "safe_files": safe_files,
     }
     names = set(_NAMES) | {"read_params", "process_genome", "construct_history_summary",
                            "history_table_body_", "_job_link"}

@@ -1738,11 +1738,19 @@ class TestResultsPages(_WebFolder):
         rp.update_images_tabs("2", [{"row": 0}], "CFD", f"?job={self.JOB}",
                               [{"Guide": GUIDE}])
         with open(recorded) as fh:
-            # the words of the command 2.8.0 ran
-            self.assertEqual(json.load(fh), [
-                GUIDE, f"{self.job}/.guide_dict_{GUIDE}_CFD.json",
-                f"{self.job}/.motif_dict_{GUIDE}_CFD.json", "2", "0", "TOTAL_CFD",
-                f"{self.job}/imgs/"])
+            # the words of the command 2.8.0 ran, but for the paths: copies of the inputs and
+            # the folder of the chart, in a folder of the web app's own in the job's folder,
+            # renamed into imgs/ afterwards (results_page._job_scratch: the script read and
+            # wrote the job's files by name, through a link another user put there)
+            words = json.load(fh)
+        scratch = os.path.dirname(words[1])
+        self.assertEqual(os.path.dirname(scratch), self.job)
+        self.assertTrue(os.path.basename(scratch).startswith(".crisprme-"))
+        self.assertEqual(words, [
+            GUIDE, f"{scratch}/.guide_dict_{GUIDE}_CFD.json",
+            f"{scratch}/.motif_dict_{GUIDE}_CFD.json", "2", "0", "TOTAL_CFD",
+            f"{scratch}/imgs/"])
+        self.assertFalse(os.path.exists(scratch))  # (gone with what was renamed out of it)
         for mm, guide in (("2", "G;touch${IFS}MARK_f;#"), ("2;touch${IFS}MARK_g;#", GUIDE)):
             with self.subTest(mm=mm, guide=guide):
                 rp.update_images_tabs(mm, [{"row": 0}], "CFD", f"?job={self.JOB}",

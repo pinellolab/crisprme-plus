@@ -200,7 +200,6 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   `test_indel_empty_chromosome` (the indel targets' header) and `test_web_shell_safety` (the
   region page). A folder others can write still lets them do more than change a search's
   inputs and results: stop it, swap a folder it made there (the pieces' folder among them),
-  put links it writes through, or that the web app reads through (the job logs it shows, the
-  files it serves for download: anyone who can reach the web app then reads files of yours),
-  and change what older parts of the pipeline pass to a shell. On a shared machine, keep the
-  data, output and temporary folders writable by you alone (`docs/TROUBLESHOOTING.md` §7).
+  put links it writes through (the web app follows none: Security), and change what older
+  parts of the pipeline pass to a shell. On a shared machine, keep the data, output and
+  temporary folders writable by you alone (`docs/TROUBLESHOOTING.md` §7).

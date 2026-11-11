@@ -16,6 +16,7 @@ so a change made in Settings takes effect on the next app restart.
 
 import json
 import os
+import tempfile
 
 CONFIG_FILE = ".crisprme_app_config.json"
 DEFAULT_MAX_JOBS = 2
@@ -71,7 +72,21 @@ def set_max_concurrent_jobs(n, workdir=None):
             cfg = json.load(fh)
     except (OSError, ValueError):
         cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
     cfg["max_concurrent_jobs"] = n
-    with open(path, "w") as fh:
-        json.dump(cfg, fh, indent=2)
+    # a temporary name of its own (mkstemp: O_EXCL, O_NOFOLLOW) renamed over the file: open()
+    # wrote through a link another user put at its name (the web Settings page saves it in
+    # the data folder, which a group may write)
+    fd, tmp = tempfile.mkstemp(prefix=CONFIG_FILE + ".", suffix=".tmp",
+                               dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(cfg, fh, indent=2)
+        os.chmod(tmp, 0o644)  # (readable, as open() made it: mkstemp makes it 0600)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.lexists(tmp):
+            os.remove(tmp)
+        raise
     return n

@@ -126,6 +126,16 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_web_shell_safety -v
 
+      - name: "No link another user put in the data folder is followed (safe_files; the pages' cases in web-e2e's image)"
+        # The web app followed a link a member of the data folder's group put in Results/,
+        # Settings/ and the job folders in them: it showed and served any file of the user's
+        # to anyone who could reach it, and wrote through one (2.10.0, the review of lane S,
+        # round 5, S-R5-2). How safe_files reads, writes and serves a file runs here; the
+        # pages' cases, through the real Dash server, run in web-e2e's in-image step
+        # (test_web_no_links), and the Settings page's here too (test_settings_progress).
+        working-directory: PostProcess
+        run: python -m unittest test_safe_files -v
+
       - name: HF fallback contract (hf_fetch must raise so callers fall back)
         working-directory: PostProcess
         run: python -m unittest test_hf_downloads.TestHfFetchFallbackContract -v

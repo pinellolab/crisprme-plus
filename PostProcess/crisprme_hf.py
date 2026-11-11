@@ -587,10 +587,19 @@ class _ProgressReporter:
             "updated": now,
         }
         try:
-            tmp = self.path + ".tmp"
-            with open(tmp, "w") as fh:
-                json.dump(payload, fh)
-            os.replace(tmp, self.path)
+            # a temporary name of its own (mkstemp: O_EXCL, O_NOFOLLOW) renamed over the file:
+            # the fixed <file>.tmp was written through a link another user put there under
+            # that name (the web Settings job's folder holds the file)
+            fd, tmp = tempfile.mkstemp(prefix=os.path.basename(self.path) + ".",
+                                       suffix=".tmp", dir=os.path.dirname(self.path) or ".")
+            try:
+                with os.fdopen(fd, "w") as fh:
+                    json.dump(payload, fh)
+                os.replace(tmp, self.path)
+            except BaseException:
+                if os.path.lexists(tmp):
+                    os.remove(tmp)
+                raise
         except OSError:
             pass  # progress reporting is best-effort; never raise
 

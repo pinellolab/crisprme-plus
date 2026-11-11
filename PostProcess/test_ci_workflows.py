@@ -223,11 +223,12 @@ class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
     tests and test_app_settings' start of the web app skipped too, and test_assembly_annotate
     was in no workflow. All pass in the image, where no job ran them. test_web_shell_safety's
     checks of the web pages, which need Dash and bedtools, skip there too, and so does
-    test_no_code_from_files' run of crisprme.py --debug, which needs Biopython (2.10.0)."""
+    test_no_code_from_files' run of crisprme.py --debug, which needs Biopython (2.10.0), and
+    test_web_no_links, the pages through the real Dash server (2.10.0)."""
 
     MODULES = ("test_assembly_annotate", "test_assembly_reconcile", "test_complete_search_flags",
                "test_post_process_tempdir", "test_index_resolution", "test_app_settings",
-               "test_web_shell_safety", "test_no_code_from_files")
+               "test_web_shell_safety", "test_no_code_from_files", "test_web_no_links")
 
     def in_image_step(self):
         text = workflow("web-e2e.yml")
