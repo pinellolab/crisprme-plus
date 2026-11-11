@@ -220,12 +220,13 @@ What holds wherever you run it, since 2.10.0:
   FIFO, a device or, in a folder others can write, a hard link. A file it writes whole is made
   under a name of its own (`O_EXCL`) and renamed over its name, so a link there is replaced,
   not written through, and a log is opened with `O_NOFOLLOW`; a program it runs on a job's
-  files (the plots, the region page's lookup, the zips) reads copies or its standard input,
-  and writes in a folder of the web app's own. A link is followed only where no one else can
-  have put it: a link of yours in a folder only you can write (or a sticky one of yours), such
-  as a genome linked to a shared copy, a VCF dataset registered from a server folder, or
-  `Results/` or `Settings/` linked onto a volume; in a folder your group can write, the web
-  app refuses those too, and below `Results/` and `Settings/` it follows none. A Settings
+  files (the plots, the radar chart, the region page's lookup) reads copies of them or its
+  standard input and writes in a folder of the web app's own, and the zips are made in
+  Python. A link is followed only where no one else can have put it: a link of yours in a
+  folder only you can write (or a sticky one of yours), such as a genome linked to a shared
+  copy, a VCF dataset registered from a server folder, or `Results/` or `Settings/` linked
+  onto a volume; in a folder your group can write, the web app refuses those too, and below
+  `Results/` and `Settings/` it follows none. A Settings
   job's folder is writable by you alone, and the cache of the results tables, pickles that
   Flask-Caching loads, is in a folder of the server's own in the temporary folder (in memory
   when that folder is not private or sticky), no longer in `Cache/` of the data folder, which

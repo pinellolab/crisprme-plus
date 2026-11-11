@@ -110,7 +110,7 @@ import tempfile
 import threading
 import contextlib
 
-import safe_files  # (PostProcess/, on sys.path from pages_utils: no link another user put is followed)
+import safe_files  # (PostProcess/, on sys.path from pages_utils: follows no link)
 
 
 # -------------------------------------------------------------------------------
@@ -500,7 +500,8 @@ def result_page(job_id: str) -> html.Div:
         handle.close()
     # Load mismatches
     try:
-        with _job_open(os.path.join(current_working_directory, RESULTS_DIR, value, PARAMS_FILE)) as p:
+        with _job_open(os.path.join(current_working_directory, RESULTS_DIR, value,
+                                    PARAMS_FILE)) as p:
             all_params = p.read()
             real_genome_name = (
                 next(s for s in all_params.split("\n") if "Genome_idx" in s)
@@ -2435,7 +2436,8 @@ def result_page_assembly(job_id: str) -> html.Div:
         if not hap_dir_name:
             continue
         imgs_dir = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name, "imgs")
-        img_paths = sorted(_job_glob(os.path.join(imgs_dir, "CRISPRme_CFD_top_1000_log_for_main_text_*.png")))
+        img_paths = sorted(_job_glob(os.path.join(
+            imgs_dir, "CRISPRme_CFD_top_1000_log_for_main_text_*.png")))
         encoded = [p for p in ((path, _encode_png(path)) for path in img_paths) if p[1]]
         if not encoded:
             continue
@@ -3260,7 +3262,8 @@ def update_iupac_decomposition_table_cluster(
     chromosome = chr_pos.split("-")[0]
     position = chr_pos.split("-")[1]
     try:
-        with _job_open(os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)) as handle:
+        with _job_open(os.path.join(current_working_directory, RESULTS_DIR, job_id,
+                                    PARAMS_FILE)) as handle:
             all_params = handle.read()
             genome_type_f = (
                 next(s for s in all_params.split("\n") if "Genome_selected" in s)
@@ -3381,7 +3384,8 @@ def update_table_cluster(
     chromosome = chr_pos.split("-")[0]
     position = chr_pos.split("-")[1]
     try:
-        with _job_open(os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)) as handle:
+        with _job_open(os.path.join(current_working_directory, RESULTS_DIR, job_id,
+                                    PARAMS_FILE)) as handle:
             all_params = handle.read()
             genome_type_f = (
                 next(s for s in all_params.split("\n") if "Genome_selected" in s)
@@ -3930,7 +3934,8 @@ def update_table_sample(
     guide = hash_term[: hash_term.find("-Sample-")]
     sample = str(hash_term[hash_term.rfind("-") + 1 :])
     try:
-        with _job_open(os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)) as handle:
+        with _job_open(os.path.join(current_working_directory, RESULTS_DIR, job_id,
+                                    PARAMS_FILE)) as handle:
             all_params = handle.read()
             genome_type_f = (
                 next(s for s in all_params.split("\n") if "Genome_selected" in s)

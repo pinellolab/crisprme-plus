@@ -24,7 +24,7 @@ import os
 import pathlib
 import sys
 
-import safe_files  # (PostProcess/, on sys.path from pages_utils: no link another user put is followed)
+import safe_files  # (PostProcess/, on sys.path from pages_utils: follows no link)
 
 SUMMARYTABCOLS = [
     "Job", "Genome", "Variants", "Mismatches", "DNA bulge", "RNA bulge", "Max edits", "PAM", "Number of Guides", "Start"

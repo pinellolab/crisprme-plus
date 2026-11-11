@@ -24,7 +24,7 @@ import dash_bootstrap_components as dbc
 
 import os
 
-import safe_files  # (PostProcess/, on sys.path from pages_utils: no link another user put is followed)
+import safe_files  # (PostProcess/, on sys.path from pages_utils: follows no link)
 
 
 # The URL fragment main_page.change_url opens a job's status page with when it did
