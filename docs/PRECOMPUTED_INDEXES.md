@@ -660,7 +660,10 @@ the panel's index download) — no rebuild.
 The published kit is produced **once** from the source variants; reproduce it (or make a kit for
 your **own** VCF) with the full workflow below. Each dataset's authoritative, validated recipe lives
 in its own document — summarized here with the key provenance and filters, and linked for the
-complete protocol.
+complete protocol. 2.10.0's kits and indexes of HGDP + 1000 Genomes are built on all of hg38
+(455 contigs, as `download --what genome` installs it, as the reference indexes are), those of
+HPRC and mega on its chromosomes chr1-22, X and Y alone (24 contigs), as 2.8.1's default index of
+each panel was (`seq_script/rebuild/README.md`, rule 1).
 
 ### HGDP + 1000 Genomes (re-phased, genotyped)
 

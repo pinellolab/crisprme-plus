@@ -133,11 +133,13 @@ and the `release-crisprme` skill.
   phased indel genotypes (HGDP + 1000 Genomes, HPRC; mega, sites-only, a bundle alone); and the
   enriched-genome kits. `NNN_3` is not built again. The rebuild follows it, one working
   directory per panel so that a panel's indexes share its one Dictionaries, each with hg38 in
-  `Genomes/hg38` as 2.8.1's indexes were built: all of it for the reference indexes (455
-  contigs, as `download --what genome` installs it), its chromosomes chr1-22, X and Y alone for
-  each variant panel (the 24 contigs of every variant index of 2.8.1; mega's recipe refuses a
-  genome folder that holds any other FASTA, and a working directory of all of hg38, which the
-  README said, stopped the rebuild at mega's build, after hours of the other panels'). The D7
+  `Genomes/hg38` as 2.8.1's default index of each panel was built: all of it (455 contigs, as
+  `download --what genome` installs it) for the reference indexes and HGDP + 1000 Genomes (2.8.1's
+  NRR, NGG and NNN indexes of the panel; its NRG index held 24), its chromosomes chr1-22, X and Y
+  alone for HPRC and mega (the 24 contigs of 2.8.1's indexes of those panels; mega's recipe
+  refuses a genome folder that holds any other FASTA, and a working directory of all of hg38,
+  which the README said for every panel, stopped the rebuild at mega's build, after hours of the
+  other panels'). The D7
   readiness audit runs `seq_script/rebuild/check_index_set.py` before any build: each PAM file gives its
   row's PAM, side and spacer; N is the build's bulges + 1; each name is the one
   `build-index-only` gives the build (`index_fit.index_name`), and routes to the format-2 repo;
@@ -156,9 +158,10 @@ and the `release-crisprme` skill.
   command, and every variant index published `--dictless`, so that a panel's indexes name one
   Dictionaries bundle. `--commands` prints the rebuild as one script, every build command, then
   every publish command; it stops before its first command where one of those variables is not
-  set or a working directory's genome folder is not what the rebuild builds on (a variant
-  panel's holding a FASTA but chr1-22, X and Y, or not those of the reference's; mega's merged
-  VCFs not of its genome folder's chromosomes; on a test genome of chr22, chr22 alone), and at
+  set or a working directory's genome folder is not what the rebuild builds on (HGDP + 1000
+  Genomes' not the reference's; HPRC's or mega's holding a FASTA but chr1-22, X and Y, or not
+  those of the reference's; mega's merged VCFs not of its genome folder's chromosomes; a test
+  genome of chr22 runs), and at
   the first command that fails (each ends in `|| exit`: `set -e` does not stop at a command of
   an `&&` list but its last; and the HGDP + 1000 Genomes and HPRC recipes now stop at a step
   that fails, under Fixed). The check runs it dry, every program it calls stubbed, in temporary

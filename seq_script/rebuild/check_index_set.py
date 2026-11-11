@@ -81,8 +81,8 @@ WEB_BULGES = 2
 VARIABLES = {
     "REF": "the working directory of the reference indexes, holding all of hg38 in Genomes/hg38, "
            "as crisprme.py download --what genome installs it",
-    "HGDP": "the working directory of hg38_HGDP1kGP, holding the chromosomes chr1-22, X and Y "
-            "of hg38 in Genomes/hg38, one FASTA each, and no other",
+    "HGDP": "the working directory of hg38_HGDP1kGP, holding all of hg38 in Genomes/hg38, as the "
+            "reference working directory does",
     "HPRC": "the working directory of hg38_HPRC, holding the chromosomes chr1-22, X and Y of "
             "hg38 in Genomes/hg38, one FASTA each, and no other",
     "MEGA": "the working directory of hg38_mega, holding the chromosomes chr1-22, X and Y of "
@@ -101,15 +101,18 @@ VARIABLES = {
 # The ones that may be set empty (RUN: the release installed where the script runs)
 MAY_BE_EMPTY = ("RUN",)
 # What each working directory's genome folder, Genomes/hg38, holds (README, rule 1), as 2.8.1's
-# indexes were built: the reference indexes on all of hg38 (455 contigs, as `download --what
-# genome` installs it), every variant index on its chromosomes chr1-22, X and Y alone (each of
-# 2.8.1's variant indexes holds those 24 contigs), the same in every panel; mega's recipe
-# builds every chromosome of its merged VCFs, mega.<chr>.afmax.vcf.gz (those 24 in
-# vcfs/hg38_mega), and refuses a genome folder that holds any other FASTA. The rebuild's script
-# checks the genome folders of the working directories it uses before its first command
-# (commands_script).
+# default index of each panel was built (the contigs of the published archives): all of hg38
+# (455 contigs, as `download --what genome` installs it) for the reference indexes and for HGDP
+# + 1000 Genomes (2.8.1's NRR, NGG and NNN indexes of the panel; its NRG index held chr1-22, X
+# and Y), its chromosomes chr1-22, X and Y alone (PRIMARY) for HPRC and mega (both of 2.8.1's
+# indexes of each); mega's recipe builds every chromosome of its merged VCFs,
+# mega.<chr>.afmax.vcf.gz (those 24 in vcfs/hg38_mega), and refuses a genome folder that holds
+# any other FASTA. "REF": the reference working directory's FASTAs; "PRIMARY": those of them
+# that are chr1-22, X and Y. The rebuild's script checks the genome folders of the working
+# directories it uses before its first command (commands_script).
 PRIMARY = tuple(f"chr{c}" for c in [*range(1, 23), "X", "Y"])
 _PRIMARY_RE = "^chr([1-9]|1[0-9]|2[0-2]|X|Y)$"
+GENOME_FOLDERS = {"HGDP": "REF", "HPRC": "PRIMARY", "MEGA": "PRIMARY"}
 # A panel's recipe that builds every chromosome of its sources: the variable of their folder,
 # and how a file of one chromosome is named there (<prefix><chr><suffix>)
 SOURCE_CHROMOSOMES = {"MEGA": ("MEGA_SRC", "mega.", ".afmax.vcf.gz")}
@@ -453,14 +456,15 @@ def pending(root=ROOT):
 
 def _genome_checks(used):
     """The lines of the rebuild's script that check, before its first command, the genome
-    folders of the working directories it uses (README, rule 1; PRIMARY): each variant panel's
-    Genomes/hg38 holds FASTAs of chr1-22, X and Y alone, the same in every panel, and, where the
-    script uses $REF, those of $REF's (all of hg38: on a test genome of chr22, chr22); a panel
-    whose recipe builds every chromosome of its sources (SOURCE_CHROMOSOMES: mega's), the
-    chromosomes of those sources. Otherwise the variant indexes would hold more contigs than
-    2.8.1's, or fewer chromosomes than the reference, and mega's recipe stops on the extra
-    FASTAs, after hours of the other panels' builds."""
-    panels = [v for v in ("HGDP", "HPRC", "MEGA") if v in used]
+    folders of the working directories it uses (README, rule 1; GENOME_FOLDERS): HGDP + 1000
+    Genomes' Genomes/hg38 holds the FASTAs of $REF's (all of hg38); HPRC's and mega's those of
+    them that are chr1-22, X and Y, and no other; where the script does not use $REF, HPRC's
+    and mega's are FASTAs of chr1-22, X and Y alone, the same in both (on a test genome of chr22,
+    chr22); and a panel whose recipe builds every chromosome of its sources (SOURCE_CHROMOSOMES:
+    mega's), the chromosomes of those sources. Otherwise a panel's indexes would hold other
+    contigs than 2.8.1's of the panel, and mega's recipe stops on a FASTA it does not build,
+    after hours of the other panels' builds."""
+    panels = [v for v in GENOME_FOLDERS if v in used]
     if not panels:
         return []
     lines = [
@@ -472,26 +476,36 @@ def _genome_checks(used):
     ]
     if "REF" in used:
         lines += [
-            "_want=$(_chroms \"$REF/Genomes/hg38\" .fa | grep -E \"$_primary\" || true)",
+            "_all=$(_chroms \"$REF/Genomes/hg38\" .fa)",
+            "_want=$(printf '%s\\n' $_all | grep -E \"$_primary\" || true)",
             "[ -n \"$_want\" ] || _stop \"$REF/Genomes/hg38 (\\$REF) holds no FASTA of chr1-22, "
             "X or Y: the working directory of the reference indexes holds all of hg38 there, as "
             "crisprme.py download --what genome installs it\"",
         ]
     else:
-        lines.append("_want=")
+        lines.append("_all=; _want=")
+    panel_of = {name: panel for panel, name in WORKDIR.items()}
     for v in panels:
+        panel = panel_of[v]
+        lines += [f"_got=$(_chroms \"${v}/Genomes/hg38\" .fa)",
+                  f"[ -n \"$_got\" ] || _stop \"${v}/Genomes/hg38 (\\${v}) holds no FASTA\""]
+        if GENOME_FOLDERS[v] == "REF":
+            lines.append(
+                f"[ -z \"$_all\" ] || [ \"$_got\" = \"$_all\" ] || _stop \"${v}/Genomes/hg38 "
+                f"(\\${v}) holds $(set -- $_got; echo $#) FASTA(s), not the $(set -- $_all; echo $#) of "
+                f"\\$REF's: the working directory of {panel} holds all of hg38, as the "
+                f"reference's does, as 2.8.1's default index of the panel was built\"")
+            continue
+        refuses = "; its recipe refuses any other FASTA" if v in SOURCE_CHROMOSOMES else ""
         lines += [
-            f"_got=$(_chroms \"${v}/Genomes/hg38\" .fa)",
-            f"[ -n \"$_got\" ] || _stop \"${v}/Genomes/hg38 (\\${v}) holds no FASTA: a variant "
-            f"panel's working directory holds the chromosomes chr1-22, X and Y of hg38 there\"",
             "_bad=$(printf '%s\\n' $_got | grep -vE \"$_primary\" || true)",
-            f"[ -z \"$_bad\" ] || _stop \"${v}/Genomes/hg38 (\\${v}) holds $(echo $_bad): a variant "
-            f"panel's working directory holds the chromosomes chr1-22, X and Y of hg38 alone, one "
-            f"FASTA each, as 2.8.1's variant indexes do; mega's recipe refuses any other FASTA\"",
+            f"[ -z \"$_bad\" ] || _stop \"${v}/Genomes/hg38 (\\${v}) holds $(echo $_bad): the "
+            f"working directory of {panel} holds the chromosomes chr1-22, X and Y of hg38 alone, "
+            f"one FASTA each, as 2.8.1's indexes of the panel were built{refuses}\"",
             "[ -n \"$_want\" ] || _want=$_got",
             f"[ \"$_got\" = \"$_want\" ] || _stop \"${v}/Genomes/hg38 (\\${v}) holds $(echo $_got),"
-            f" not $(echo $_want): every variant panel's working directory holds the chromosomes "
-            f"chr1-22, X and Y of the reference's\"",
+            f" not $(echo $_want): the working directory of {panel} holds the chromosomes chr1-22, "
+            f"X and Y of the reference's\"",
         ]
     for v, (src, prefix, suffix) in SOURCE_CHROMOSOMES.items():
         if v in panels and src in used:
@@ -667,9 +681,11 @@ def dry_run(rows, root=ROOT, manifest=MANIFEST):
             work[panel] = env[name] = os.path.join(t, "work", name)
             genome = os.path.join(work[panel], "Genomes", "hg38")
             os.makedirs(genome)
-            # (README, rule 1: all of hg38 for the reference, as download installs it, a
-            # mitochondrion and an alt contig among the rest; chr1-22, X and Y for a panel)
-            for c in PRIMARY + (("chrM", "chr10_GL383545v1_alt") if panel == "-" else ()):
+            # (README, rule 1: all of hg38, as download installs it, a mitochondrion and an alt
+            # contig among the rest, for the reference and HGDP + 1000 Genomes; chr1-22, X and Y
+            # for HPRC and mega)
+            every = GENOME_FOLDERS.get(name, "REF") == "REF"
+            for c in PRIMARY + (("chrM", "chr10_GL383545v1_alt") if every else ()):
                 open(os.path.join(genome, f"{c}.fa"), "w").close()
         for r in rows:
             w = work.get(r["panel"])

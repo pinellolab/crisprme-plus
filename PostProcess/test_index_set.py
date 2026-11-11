@@ -30,11 +30,13 @@ def _row(rows, archive):
     return next(r for r in rows if r["archive"] == archive)
 
 
-# hg38's chromosomes chr1-22, X and Y, what each variant panel's working directory holds
+# hg38's chromosomes chr1-22, X and Y, what the working directories of HPRC and mega hold
 # (seq_script/rebuild/README.md, rule 1), and, with the mitochondrion and two of the 431 alt,
-# random and chrUn contigs, all of hg38 as `download --what genome` installs it
+# random and chrUn contigs, all of hg38 as `download --what genome` installs it, what the
+# reference's and HGDP + 1000 Genomes' hold: as 2.8.1's default index of each panel was built
 PRIMARY = tuple(f"chr{c}" for c in [*range(1, 23), "X", "Y"])
 HG38 = PRIMARY + ("chrM", "chr10_GL383545v1_alt", "chrUn_KI270302v1")
+GENOMES = {"REF": HG38, "HGDP": HG38, "HPRC": PRIMARY, "MEGA": PRIMARY}
 
 
 class TheSetHolds(unittest.TestCase):
@@ -412,8 +414,8 @@ class TheRebuildRuns(unittest.TestCase):
 
     def run_on_genomes(self, genomes=None, mega_src=None):
         """The rebuild's script run from the repository's root on working directories whose
-        Genomes/hg38 hold the FASTAs ``genomes`` names ({variable: [contig, ...]}; chr1-22, X
-        and Y where it names none), mega's merged VCFs of ``mega_src`` (those 24 if None),
+        Genomes/hg38 hold the FASTAs ``genomes`` names ({variable: [contig, ...]}; GENOMES's
+        where it names none), mega's merged VCFs of ``mega_src`` (chr1-22, X and Y if None),
         every other variable set, and no program of the image on PATH: (exit status, stderr,
         whether a command ran: its first makes $REF/PAMs)."""
         import shutil
@@ -425,7 +427,7 @@ class TheRebuildRuns(unittest.TestCase):
             for v in ("REF", "HGDP", "HPRC", "MEGA"):
                 env[v] = os.path.join(t, v)
                 os.makedirs(os.path.join(env[v], "Genomes", "hg38"))
-                for c in genomes.get(v, PRIMARY):
+                for c in genomes.get(v, GENOMES[v]):
                     open(os.path.join(env[v], "Genomes", "hg38", c + ".fa"), "w").close()
             for v in ("SIF", "RP", "META", "HPRC_SRC", "P1KG", "MEGA_SRC"):
                 env[v] = os.path.join(t, v)
@@ -436,31 +438,41 @@ class TheRebuildRuns(unittest.TestCase):
                                  cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
             return got.returncode, got.stderr, os.path.exists(os.path.join(env["REF"], "PAMs"))
 
-    def test_a_panel_s_genome_folder_of_all_of_hg38_stops_it_first(self):
+    def test_a_genome_folder_of_all_of_hg38_for_hprc_or_mega_stops_it_first(self):
         """The README said to put all of hg38 in every working directory, as download
         installs it; mega's recipe refuses any FASTA but the chromosomes of its merged VCFs,
         so the rebuild stopped at mega's build after hours of the other panels' (the stage-2b
-        review of lane D, D-R3-1), and the other panels' indexes would have held 455 contigs
-        where 2.8.1's hold 24. The script stops on it before its first command."""
-        for panel in ("HGDP", "MEGA"):
+        review of lane D, D-R3-1), and HPRC's indexes would have held 455 contigs where 2.8.1's
+        hold 24. The script stops on it before its first command."""
+        for v, panel in (("HPRC", "hg38_HPRC"), ("MEGA", "hg38_mega")):
             with self.subTest(panel=panel):
-                rc, err, ran = self.run_on_genomes({"REF": HG38, panel: HG38})
+                rc, err, ran = self.run_on_genomes({v: HG38})
                 self.assertEqual(rc, 2, err)
                 self.assertFalse(ran, "a command ran")
-                self.assertIn(f"/{panel}/Genomes/hg38 (${panel}) holds chr10_GL383545v1_alt chrM "
-                              f"chrUn_KI270302v1: a variant panel's working directory holds the "
+                self.assertIn(f"/{v}/Genomes/hg38 (${v}) holds chr10_GL383545v1_alt chrM "
+                              f"chrUn_KI270302v1: the working directory of {panel} holds the "
                               f"chromosomes chr1-22, X and Y of hg38 alone", err)
 
+    def test_hgdp_s_genome_folder_of_chr1_22_x_and_y_alone_stops_it_first(self):
+        # its indexes would hold 24 contigs, where 2.8.1's default index of the panel (NRR, and
+        # NGG and NNN) holds all 455 of hg38 (2.8.1's NRG index of the panel held 24)
+        rc, err, ran = self.run_on_genomes({"HGDP": PRIMARY})
+        self.assertEqual(rc, 2, err)
+        self.assertFalse(ran, "a command ran")
+        self.assertIn("/HGDP/Genomes/hg38 ($HGDP) holds 24 FASTA(s), not the 27 of $REF's: the "
+                      "working directory of hg38_HGDP1kGP holds all of hg38, as the reference's "
+                      "does", err)
+
     def test_a_panel_without_a_chromosome_of_the_reference_s_stops_it_first(self):
-        rc, err, ran = self.run_on_genomes({"REF": HG38, "HPRC": PRIMARY[:-1]})
+        rc, err, ran = self.run_on_genomes({"HPRC": PRIMARY[:-1]})
         self.assertEqual(rc, 2, err)
         self.assertFalse(ran, "a command ran")
         self.assertIn("/HPRC/Genomes/hg38 ($HPRC) holds chr1 chr10", err)
-        self.assertIn("every variant panel's working directory holds the chromosomes chr1-22, "
-                      "X and Y of the reference's", err)
+        self.assertIn("the working directory of hg38_HPRC holds the chromosomes chr1-22, X and Y "
+                      "of the reference's", err)
 
     def test_mega_s_merged_vcfs_of_other_chromosomes_stop_it_first(self):
-        rc, err, ran = self.run_on_genomes({"REF": HG38}, mega_src=PRIMARY[:-1])
+        rc, err, ran = self.run_on_genomes(mega_src=PRIMARY[:-1])
         self.assertEqual(rc, 2, err)
         self.assertFalse(ran, "a command ran")
         self.assertIn("($MEGA_SRC) holds mega.<chr>.afmax.vcf.gz of chr1 chr10", err)
@@ -471,7 +483,7 @@ class TheRebuildRuns(unittest.TestCase):
         # (as the D7 readiness audit's chr22 dry run of every index type: its first command
         # runs, and stops here, where no crisprme.py is on PATH)
         rc, err, ran = self.run_on_genomes(
-            {"REF": ("chr22", "chrM"), "HGDP": ("chr22",), "HPRC": ("chr22",),
+            {"REF": ("chr22", "chrM"), "HGDP": ("chr22", "chrM"), "HPRC": ("chr22",),
              "MEGA": ("chr22",)}, mega_src=("chr22",))
         self.assertTrue(ran, err)
         self.assertIn("rebuild: the build of 20-NRR_3_hg38 failed", err)

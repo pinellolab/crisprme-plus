@@ -35,24 +35,27 @@ it serves for its own guide length (`index_fit.fits`).
 
 1. **One working directory per panel**, every index of the panel built in it (`$HGDP`, `$HPRC`,
    `$MEGA`; `$REF` for the reference indexes), each with hg38 in `Genomes/hg38`, one FASTA per
-   contig, as 2.8.1's indexes were built: `$REF`'s holds all of hg38, as `crisprme.py download
-   --what genome` installs it (455 contigs, chrM and the alt, random and chrUn ones among them,
-   which 2.8.1's reference indexes hold); `$HGDP`'s, `$HPRC`'s and `$MEGA`'s hold its chromosomes
-   chr1-22, X and Y alone, the 24 contigs every variant index of 2.8.1 holds (HGDP + 1000 Genomes
-   has no variant on chrY, whose index there is the reference's). mega's recipe builds every
-   chromosome of the merged VCFs in `$MEGA_SRC` (those 24 in `vcfs/hg38_mega`) and refuses a
-   genome folder that holds any other FASTA. Copy them from the reference's:
+   contig, as 2.8.1's default index of each panel was built (the contigs of its archives):
+   `$REF`'s and `$HGDP`'s hold all of hg38, as `crisprme.py download --what genome` installs it
+   (455 contigs, chrM and the alt, random and chrUn ones among them, as 2.8.1's reference indexes
+   and its NRR, NGG and NNN indexes of HGDP + 1000 Genomes hold; its NRG index of the panel held
+   chr1-22, X and Y); `$HPRC`'s and `$MEGA`'s hold its chromosomes chr1-22, X and Y alone, the 24
+   contigs of 2.8.1's indexes of those panels. mega's recipe builds every chromosome of the merged
+   VCFs in `$MEGA_SRC` (those 24 in `vcfs/hg38_mega`) and refuses a genome folder that holds any
+   other FASTA. Copy them from the reference's:
 
    ```bash
-   for d in $HGDP $HPRC $MEGA; do
+   mkdir -p $HGDP/Genomes && cp -r $REF/Genomes/hg38 $HGDP/Genomes/
+   for d in $HPRC $MEGA; do
      mkdir -p $d/Genomes/hg38
      for c in chr{1..22} chrX chrY; do cp $REF/Genomes/hg38/$c.fa $d/Genomes/hg38/; done
    done
    ```
 
    The rebuild's script checks the genome folders before its first command (rule 5); on a test
-   of a few chromosomes, each panel's holds the ones the reference's holds of chr1-22, X and Y,
-   and mega's merged VCFs are of those. The first build enriches the genome and writes the
+   of a few chromosomes, `$HGDP`'s holds the FASTAs of the reference's, `$HPRC`'s and `$MEGA`'s
+   those of them that are of chr1-22, X and Y, and mega's merged VCFs are of those. The first
+   build enriches the genome and writes the
    Dictionaries; each later PAM re-indexes the same enriched genome ("Enriched genome already
    present"). So the panel's indexes share one Dictionaries, whose
    fingerprint every one of their manifests records: `publish-index` uploads the bundle and the
@@ -122,8 +125,8 @@ of a panel's indexes names one Dictionaries bundle. Then the check runs `--comma
 dry: every program it calls stubbed (`crisprme.py`, `hf`, `pigz`, `tar`, `sha256sum`, a recipe;
 `apptainer` called directly fails), from a copy of the repository's root made of links, in
 temporary working directories that hold `Genomes/hg38` as rule 1 says (all of hg38 for the
-reference, chr1-22, X and Y for each panel, and mega's merged VCFs of those) and what the builds
-leave. It must run to its end, which it does only where every script it calls is there, every
+reference and HGDP + 1000 Genomes, chr1-22, X and Y for HPRC and mega, and mega's merged VCFs of
+those) and what the builds leave. It must run to its end, which it does only where every script it calls is there, every
 PAM file a build reads is in place, every path a command hands a program or a recipe is there,
 and every index of the set is published from its working directory; and it must write nothing
 into the repository's root. `PostProcess/test_index_set.py` runs the check and the dry run in
