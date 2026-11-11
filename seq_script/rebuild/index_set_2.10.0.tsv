@@ -12,11 +12,14 @@
 # is called by its repository path; a build first copies its PAM file from the repository's PAMs/
 # into its working directory's; - for a panel companion, which the panel's first build writes and
 # its first publish-index uploads), notes (- for none). The commands' variables
-# (check_index_set.VARIABLES): $REF, $HGDP, $HPRC, $MEGA, one working directory per panel, each
-# holding hg38 in Genomes/hg38, every index of a panel built in it, so that they share its one
-# Dictionaries bundle; $RUN, the prefix that runs a command in the release image (empty where the
-# release is installed); $SIF, that image, which the HGDP + 1000 Genomes and HPRC recipes run;
-# $RP, $META, $HPRC_SRC, $P1KG, $MEGA_SRC, the recipes' inputs.
+# (check_index_set.VARIABLES): $REF, $HGDP, $HPRC, $MEGA, one working directory per panel, every
+# index of a panel built in it, so that they share its one Dictionaries bundle, each with hg38 in
+# Genomes/hg38, as 2.8.1's indexes were built: all of it in $REF's (as crisprme.py download --what
+# genome installs it), its chromosomes chr1-22, X and Y alone in each variant panel's (mega's recipe
+# refuses any other FASTA), which the rebuild's script checks first; $RUN, the prefix that runs a
+# command in the release image (empty where the release is installed); $SIF, that image, which the
+# HGDP + 1000 Genomes and HPRC recipes run; $RP, $META, $HPRC_SRC, $P1KG, $MEGA_SRC, the recipes'
+# inputs.
 archive	kind	panel	pam_file	pam	side	spacer	bmax	bdna	brna	repo	replaces	build	publish	notes
 20-NRR_3_hg38	reference	-	PAMs/20bp-NRR-SpCas9.txt	NRR	3'	20	3	2	2	lucapinello/crisprme-indexes-format2	NRR_3_hg38	mkdir -p $REF/PAMs && cp PAMs/20bp-NRR-SpCas9.txt $REF/PAMs/ && (cd $REF && $RUN crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt --bDNA 2 --bRNA 2 --thread 16 --path $REF)	$RUN crisprme.py publish-index --index $REF/genome_library/20-NRR_3_hg38	-
 20-NGG_3_hg38	reference	-	PAMs/20bp-NGG-SpCas9.txt	NGG	3'	20	3	2	2	lucapinello/crisprme-indexes-format2	NGG_3_hg38	mkdir -p $REF/PAMs && cp PAMs/20bp-NGG-SpCas9.txt $REF/PAMs/ && (cd $REF && $RUN crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt --bDNA 2 --bRNA 2 --thread 16 --path $REF)	$RUN crisprme.py publish-index --index $REF/genome_library/20-NGG_3_hg38	-

@@ -1837,7 +1837,9 @@ class TheDocsNameTheFolderABuildWrites(unittest.TestCase):
 
     def test_the_panel_recipes_print_the_folder_their_build_wrote(self):
         # as a CRISPRme before 2.10.0 names it (the as-run SIFs and overlay), and as 2.10.0
-        # does, for the PAM the recipe takes by default or another one (PAM=...)
+        # does, for the PAM the recipe takes by default or another one (PAM=...), after a
+        # build that succeeded (BUILD_EXIT=0: the rebuild's recipes stop at one that failed,
+        # test_panel_recipes)
         for recipe, ds in (("hgdp1kgp_build.sh", "hg38_HGDP1kGP"),
                            ("hprc_build.sh", "hg38_HPRC"),
                            ("onekg2021_build.sh", "hg38_1000G2021")):
@@ -1849,7 +1851,8 @@ class TheDocsNameTheFolderABuildWrites(unittest.TestCase):
                     for folder in (name, name + "_INDELS"):
                         os.makedirs(os.path.join(build, "genome_library", folder))
                     run = subprocess.run(["bash", "-c", after_build], capture_output=True,
-                                         text=True, env={**os.environ, "B": build})
+                                         text=True,
+                                         env={**os.environ, "B": build, "BUILD_EXIT": "0"})
                     self.assertEqual(run.stdout.splitlines()[1:],
                                      [f"index: {build}/genome_library/{name} (+ _INDELS)"])
                     self.assertEqual(run.stderr, "")

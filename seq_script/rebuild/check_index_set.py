@@ -79,10 +79,14 @@ WEB_BULGES = 2
 # --commands' script stops before its first command where one is not set. No text here may hold
 # a '}', a '$', a '`', a '"' or a "'": each goes into the script's ${NAME:?text} (_VARIABLE_TEXT).
 VARIABLES = {
-    "REF": "the working directory of the reference indexes, holding hg38 in Genomes/hg38",
-    "HGDP": "the working directory of hg38_HGDP1kGP, holding hg38 in Genomes/hg38",
-    "HPRC": "the working directory of hg38_HPRC, holding hg38 in Genomes/hg38",
-    "MEGA": "the working directory of hg38_mega, holding hg38 in Genomes/hg38",
+    "REF": "the working directory of the reference indexes, holding all of hg38 in Genomes/hg38, "
+           "as crisprme.py download --what genome installs it",
+    "HGDP": "the working directory of hg38_HGDP1kGP, holding the chromosomes chr1-22, X and Y "
+            "of hg38 in Genomes/hg38, one FASTA each, and no other",
+    "HPRC": "the working directory of hg38_HPRC, holding the chromosomes chr1-22, X and Y of "
+            "hg38 in Genomes/hg38, one FASTA each, and no other",
+    "MEGA": "the working directory of hg38_mega, holding the chromosomes chr1-22, X and Y of "
+            "hg38 in Genomes/hg38, one FASTA each, and no other",
     "RUN": "the prefix that runs a command in the release image, empty where the release is "
            "installed: apptainer exec --bind <the folders> <the image> "
            "/usr/local/bin/_entrypoint.sh",
@@ -96,12 +100,27 @@ VARIABLES = {
 }
 # The ones that may be set empty (RUN: the release installed where the script runs)
 MAY_BE_EMPTY = ("RUN",)
+# What each working directory's genome folder, Genomes/hg38, holds (README, rule 1), as 2.8.1's
+# indexes were built: the reference indexes on all of hg38 (455 contigs, as `download --what
+# genome` installs it), every variant index on its chromosomes chr1-22, X and Y alone (each of
+# 2.8.1's variant indexes holds those 24 contigs), the same in every panel; mega's recipe
+# builds every chromosome of its merged VCFs, mega.<chr>.afmax.vcf.gz (those 24 in
+# vcfs/hg38_mega), and refuses a genome folder that holds any other FASTA. The rebuild's script
+# checks the genome folders of the working directories it uses before its first command
+# (commands_script).
+PRIMARY = tuple(f"chr{c}" for c in [*range(1, 23), "X", "Y"])
+_PRIMARY_RE = "^chr([1-9]|1[0-9]|2[0-2]|X|Y)$"
+# A panel's recipe that builds every chromosome of its sources: the variable of their folder,
+# and how a file of one chromosome is named there (<prefix><chr><suffix>)
+SOURCE_CHROMOSOMES = {"MEGA": ("MEGA_SRC", "mega.", ".afmax.vcf.gz")}
 # What a text of VARIABLES may not hold
 _VARIABLE_TEXT = re.compile(r"[}$`\"']")
 # Each panel's working directory, the variable that names it
 WORKDIR = {"-": "REF", "hg38_HGDP1kGP": "HGDP", "hg38_HPRC": "HPRC", "hg38_mega": "MEGA"}
 # The programs of the release image, which a command runs through $RUN
 IMAGE_PROGRAMS = ("crisprme.py", "hf", "huggingface-cli", "pigz", "python", "python3")
+# The programs that upload to the Hub, whose repo a command names (hf upload <repo> ...)
+UPLOADERS = ("hf", "huggingface-cli")
 # The repository's folders a command names a path in, read from the repository's root (PAMs/
 # names the working directory's after a cd into it)
 REPOSITORY_FOLDERS = ("seq_script", "scripts", "PostProcess", "PAMs")
@@ -192,14 +211,18 @@ def simple_commands(command):
 
 @functools.lru_cache(maxsize=None)
 def script_inputs(path):
-    """The inputs recipe ``path`` reads from a path of the cluster it was written on unless it
-    is given them: (NAME, default) for each NAME=${NAME:-<absolute path>} whose NAME it reads
-    after."""
+    """The inputs recipe ``path`` reads from a path it was written with unless it is given
+    them: (NAME, default) for each NAME=${NAME:-<default>} whose NAME it reads after, its
+    default an absolute path (of the cluster it was written on), a command that names one, or
+    a path under another of its variables ($B, the working directory: HGDP + 1000 Genomes'
+    RP=${RP:-$B} reads the re-phased BCFs from there). A default that is a command of no
+    absolute path (mega's PP, the repository's PostProcess/), a relative path or no path is not
+    one."""
     with open(path) as fh:
         text = fh.read()
     found = []
-    for m in re.finditer(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\$\{\1:-(/[^}]*|\$\([^)]*\s/[^)]*\))\}",
-                         text, re.M):
+    for m in re.finditer(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\$\{\1:-(/[^}]*|\$\([^)]*\s/[^)]*\)"
+                         r"|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?:/[^}]*)?)\}", text, re.M):
         name = m.group(1)
         if re.search(r"\$\{?%s\b" % name, text[m.end():]):
             found.append((name, m.group(2)))
@@ -248,6 +271,22 @@ def check_commands(r, root=ROOT):
             if program in IMAGE_PROGRAMS and not in_image:
                 problems.append(f"{a}: its {what} command runs {program} outside the release "
                                 f"image: $RUN {program}")
+            rest = words[2:] if in_image else words[1:]
+            if program in UPLOADERS and rest[:1] == ["upload"]:
+                repo = (rest[1:2] or [""])[0]
+                if repo != crisprme_hf.FORMAT2_HF_REPO:
+                    problems.append(f"{a}: its {what} command uploads to {repo or 'no repo'}, "
+                                    f"not {crisprme_hf.FORMAT2_HF_REPO}: the set goes to the "
+                                    f"repo of index format 2 alone (decision C2), and an "
+                                    f"upload elsewhere replaces what 2.8.1 reads")
+            if "--hf-repo" in rest:
+                repo = (rest[rest.index("--hf-repo") + 1:][:1] or [""])[0]
+                if repo != crisprme_hf.FORMAT2_HF_REPO:
+                    problems.append(f"{a}: its {what} command names the repo {repo or '(none)'}"
+                                    f", not {crisprme_hf.FORMAT2_HF_REPO}")
+            if "--token" in rest:
+                problems.append(f"{a}: its {what} command passes --token: a token goes in "
+                                f"HF_TOKEN, never in the manifest")
             if program == "cd" and depth == 0:
                 problems.append(f"{a}: its {what} command moves the directory of every command "
                                 f"after it: its cd goes inside ( ), the commands running from "
@@ -289,6 +328,11 @@ def check_commands(r, root=ROOT):
                             f"PAMs/{base}")
     if kind in INDEX_KINDS and f"--index ${own}/genome_library/{a}" not in r["publish"]:
         problems.append(f"{a}: its publish command does not publish ${own}/genome_library/{a}")
+    if kind == "variant" and "--dictless" not in r["publish"].split():
+        problems.append(f"{a}: its publish command does not pass --dictless: the panel's "
+                        f"Dictionaries bundle would carry its per-sample dictionaries "
+                        f"(dictionaries_{r['panel']}), which the other indexes of the panel do "
+                        f"not name, and differ in fingerprint from theirs")
     return problems
 
 
@@ -304,6 +348,12 @@ def check(rows, root=ROOT):
         if _VARIABLE_TEXT.search(text):
             problems.append(f"VARIABLES[{name!r}] holds one of }} $ ` \" ', which the rebuild's "
                             f"script cannot hold in ${{{name}:?...}}")
+    read = {name for r in rows for what in ("build", "publish") if r[what] != NO_COMMAND
+            for name in variables(r[what])}
+    for name in VARIABLES:
+        if name not in read:
+            problems.append(f"VARIABLES[{name!r}]: no command reads ${name}: a command lost an "
+                            f"input it needs, or the entry goes")
     for script in PENDING_SCRIPTS:
         if os.path.exists(os.path.join(root, script)):
             problems.append(f"{script}: this tree holds it, so it is no longer pending: take it "
@@ -401,11 +451,67 @@ def pending(root=ROOT):
             if not os.path.exists(os.path.join(root, script))]
 
 
+def _genome_checks(used):
+    """The lines of the rebuild's script that check, before its first command, the genome
+    folders of the working directories it uses (README, rule 1; PRIMARY): each variant panel's
+    Genomes/hg38 holds FASTAs of chr1-22, X and Y alone, the same in every panel, and, where the
+    script uses $REF, those of $REF's (all of hg38: on a test genome of chr22, chr22); a panel
+    whose recipe builds every chromosome of its sources (SOURCE_CHROMOSOMES: mega's), the
+    chromosomes of those sources. Otherwise the variant indexes would hold more contigs than
+    2.8.1's, or fewer chromosomes than the reference, and mega's recipe stops on the extra
+    FASTAs, after hours of the other panels' builds."""
+    panels = [v for v in ("HGDP", "HPRC", "MEGA") if v in used]
+    if not panels:
+        return []
+    lines = [
+        "# the genome folders, before any command (seq_script/rebuild/README.md, rule 1)",
+        "_chroms() { local f; for f in \"$1/${3:-}\"*\"$2\"; do [ -e \"$f\" ] || continue; "
+        "f=${f##*/}; f=${f#\"${3:-}\"}; printf '%s\\n' \"${f%\"$2\"}\"; done | LC_ALL=C sort; }",
+        "_stop() { echo \"rebuild: $*\" >&2; exit 2; }",
+        f"_primary='{_PRIMARY_RE}'",
+    ]
+    if "REF" in used:
+        lines += [
+            "_want=$(_chroms \"$REF/Genomes/hg38\" .fa | grep -E \"$_primary\" || true)",
+            "[ -n \"$_want\" ] || _stop \"$REF/Genomes/hg38 (\\$REF) holds no FASTA of chr1-22, "
+            "X or Y: the working directory of the reference indexes holds all of hg38 there, as "
+            "crisprme.py download --what genome installs it\"",
+        ]
+    else:
+        lines.append("_want=")
+    for v in panels:
+        lines += [
+            f"_got=$(_chroms \"${v}/Genomes/hg38\" .fa)",
+            f"[ -n \"$_got\" ] || _stop \"${v}/Genomes/hg38 (\\${v}) holds no FASTA: a variant "
+            f"panel's working directory holds the chromosomes chr1-22, X and Y of hg38 there\"",
+            "_bad=$(printf '%s\\n' $_got | grep -vE \"$_primary\" || true)",
+            f"[ -z \"$_bad\" ] || _stop \"${v}/Genomes/hg38 (\\${v}) holds $(echo $_bad): a variant "
+            f"panel's working directory holds the chromosomes chr1-22, X and Y of hg38 alone, one "
+            f"FASTA each, as 2.8.1's variant indexes do; mega's recipe refuses any other FASTA\"",
+            "[ -n \"$_want\" ] || _want=$_got",
+            f"[ \"$_got\" = \"$_want\" ] || _stop \"${v}/Genomes/hg38 (\\${v}) holds $(echo $_got),"
+            f" not $(echo $_want): every variant panel's working directory holds the chromosomes "
+            f"chr1-22, X and Y of the reference's\"",
+        ]
+    for v, (src, prefix, suffix) in SOURCE_CHROMOSOMES.items():
+        if v in panels and src in used:
+            lines += [
+                f"_src=$(_chroms \"${src}\" {suffix} {prefix})",
+                f"[ \"$_src\" = \"$(_chroms \"${v}/Genomes/hg38\" .fa)\" ] || _stop \"${src} "
+                f"(\\${src}) holds {prefix}<chr>{suffix} of $(echo $_src), and ${v}/Genomes/hg38 "
+                f"the FASTAs of $(echo $(_chroms \"${v}/Genomes/hg38\" .fa)): the recipe builds "
+                f"every chromosome of its sources, and refuses a genome folder that holds the "
+                f"FASTA of another or lacks one of theirs\"",
+            ]
+    return lines
+
+
 def commands_script(rows, manifest=MANIFEST):
     """The rebuild as one script bash runs from the repository's root: it stops before its first
-    command where a variable the commands read is not set, then runs every build command, then
-    every publish command, in the manifest's order, and stops at the first that fails: each
-    ends in || exit, as set -e does not stop at a command of an && list but its last."""
+    command where a variable the commands read is not set, or a working directory's genome
+    folder is not what the rebuild builds on (_genome_checks), then runs every build command,
+    then every publish command, in the manifest's order, and stops at the first that fails:
+    each ends in || exit, as set -e does not stop at a command of an && list but its last."""
     used = []
     for r in rows:
         for what in ("build", "publish"):
@@ -423,6 +529,7 @@ def commands_script(rows, manifest=MANIFEST):
     for name in sorted(used, key=lambda v: list(VARIABLES).index(v) if v in VARIABLES else 99):
         text = VARIABLES.get(name, "a variable of the manifest")
         lines.append(f': "${{{name}{"?" if name in MAY_BE_EMPTY else ":?"}{text}}}"')
+    lines += _genome_checks(used)
     for what in ("build", "publish"):
         lines.append(f"# {what}")
         for r in rows:
@@ -558,7 +665,12 @@ def dry_run(rows, root=ROOT, manifest=MANIFEST):
         work = {}
         for panel, name in WORKDIR.items():
             work[panel] = env[name] = os.path.join(t, "work", name)
-            os.makedirs(os.path.join(work[panel], "Genomes", "hg38"))
+            genome = os.path.join(work[panel], "Genomes", "hg38")
+            os.makedirs(genome)
+            # (README, rule 1: all of hg38 for the reference, as download installs it, a
+            # mitochondrion and an alt contig among the rest; chr1-22, X and Y for a panel)
+            for c in PRIMARY + (("chrM", "chr10_GL383545v1_alt") if panel == "-" else ()):
+                open(os.path.join(genome, f"{c}.fa"), "w").close()
         for r in rows:
             w = work.get(r["panel"])
             if w and r["kind"] in INDEX_KINDS:
@@ -570,6 +682,9 @@ def dry_run(rows, root=ROOT, manifest=MANIFEST):
         for name in ("RP", "HPRC_SRC", "MEGA_SRC"):
             env[name] = os.path.join(inputs, name)
             os.makedirs(env[name])
+        for v, (src, prefix, suffix) in SOURCE_CHROMOSOMES.items():
+            for c in PRIMARY:
+                open(os.path.join(env[src], f"{prefix}{c}{suffix}"), "w").close()
         for name in ("SIF", "META", "P1KG"):
             env[name] = os.path.join(inputs, name)
             open(env[name], "w").close()

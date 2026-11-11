@@ -30,6 +30,13 @@ def _row(rows, archive):
     return next(r for r in rows if r["archive"] == archive)
 
 
+# hg38's chromosomes chr1-22, X and Y, what each variant panel's working directory holds
+# (seq_script/rebuild/README.md, rule 1), and, with the mitochondrion and two of the 431 alt,
+# random and chrUn contigs, all of hg38 as `download --what genome` installs it
+PRIMARY = tuple(f"chr{c}" for c in [*range(1, 23), "X", "Y"])
+HG38 = PRIMARY + ("chrM", "chr10_GL383545v1_alt", "chrUn_KI270302v1")
+
+
 class TheSetHolds(unittest.TestCase):
     def setUp(self):
         self.rows = cis.read_manifest()
@@ -198,6 +205,67 @@ class TheCheckFindsWhatItIsFor(unittest.TestCase):
         self.assertTrue([p for p in problems if p.startswith(
             "genotypes_hg38_HPRC: a companion has no publish command of its own")], problems)
 
+    def test_an_archive_listed_twice(self):
+        # (the check found it before; nothing made it happen: the stage-2b review of lane D,
+        # D-R3-5)
+        rows = self.rows + [copy.deepcopy(_row(self.rows, "TTTN-20_3_hg38"))]
+        self.assertIn("TTTN-20_3_hg38: listed 2 times", cis.check(rows))
+
+    # The ways the review of lane D (D-R3-5) found a manifest wrong that the check and its dry
+    # run took: each is found now.
+
+    def test_a_kit_uploaded_to_a_repo_of_2_8_1(self):
+        # it would replace 2.8.1's kit in the repo 2.8.1 reads (decision C2)
+        kit = _row(self.rows, "build-inputs/hg38_HGDP1kGP")
+        problems = self.mutated("build-inputs/hg38_HGDP1kGP", publish=kit["publish"].replace(
+            "upload lucapinello/crisprme-indexes-format2", "upload lucapinello/crisprme-data", 1))
+        self.assertIn("build-inputs/hg38_HGDP1kGP: its publish command uploads to "
+                      "lucapinello/crisprme-data, not lucapinello/crisprme-indexes-format2: the "
+                      "set goes to the repo of index format 2 alone (decision C2), and an upload "
+                      "elsewhere replaces what 2.8.1 reads", problems)
+
+    def test_a_publish_that_names_another_repo(self):
+        r = _row(self.rows, "20-NGG_3_hg38")
+        problems = self.mutated("20-NGG_3_hg38",
+                                publish=r["publish"] + " --hf-repo lucapinello/crisprme-data")
+        self.assertIn("20-NGG_3_hg38: its publish command names the repo "
+                      "lucapinello/crisprme-data, not lucapinello/crisprme-indexes-format2",
+                      problems)
+
+    def test_a_token_in_a_command(self):
+        r = _row(self.rows, "20-NGG_3_hg38")
+        problems = self.mutated("20-NGG_3_hg38", publish=r["publish"] + " --token hf_x")
+        self.assertIn("20-NGG_3_hg38: its publish command passes --token: a token goes in "
+                      "HF_TOKEN, never in the manifest", problems)
+
+    def test_a_variant_index_published_with_its_per_sample_dictionaries(self):
+        # its bundle would carry dictionaries_<panel> (152 GB of HGDP + 1000 Genomes), and
+        # differ in fingerprint from the one the panel's other indexes name
+        r = _row(self.rows, "20-NGG_3_hg38+hg38_HGDP1kGP")
+        problems = self.mutated("20-NGG_3_hg38+hg38_HGDP1kGP",
+                                publish=r["publish"].replace(" --dictless", ""))
+        self.assertTrue([p for p in problems if p.startswith(
+            "20-NGG_3_hg38+hg38_HGDP1kGP: its publish command does not pass --dictless")],
+            problems)
+
+    def test_a_recipe_input_left_to_a_default_under_the_working_directory(self):
+        # hgdp1kgp_build.sh's RP=${RP:-$B}: the re-phased BCFs from the working directory
+        r = _row(self.rows, "TTTN-23_3_hg38+hg38_HGDP1kGP")
+        problems = self.mutated("TTTN-23_3_hg38+hg38_HGDP1kGP",
+                                build=r["build"].replace("RP=$RP ", ""))
+        self.assertIn("TTTN-23_3_hg38+hg38_HGDP1kGP: seq_script/merge_panels/hgdp1kgp_build.sh "
+                      "reads RP from $B unless it is given it: its build command gives RP=",
+                      problems)
+
+    def test_an_input_no_command_reads(self):
+        # mega's merged VCFs, dropped from its recipe's call: the recipe would stop on its
+        # usage, after hours of the other panels' builds
+        r = _row(self.rows, "20-NRR_3_hg38+hg38_mega")
+        problems = self.mutated("20-NRR_3_hg38+hg38_mega",
+                                build=r["build"].replace(" $MEGA_SRC", ""))
+        self.assertIn("VARIABLES['MEGA_SRC']: no command reads $MEGA_SRC: a command lost an "
+                      "input it needs, or the entry goes", problems)
+
 
 
 class TheRebuildRuns(unittest.TestCase):
@@ -341,6 +409,85 @@ class TheRebuildRuns(unittest.TestCase):
         for script in cis.PENDING_SCRIPTS:
             self.assertIn(f"{script}: this tree holds it, so it is no longer pending: take it out "
                           f"of check_index_set.PENDING_SCRIPTS", problems)
+
+    def run_on_genomes(self, genomes=None, mega_src=None):
+        """The rebuild's script run from the repository's root on working directories whose
+        Genomes/hg38 hold the FASTAs ``genomes`` names ({variable: [contig, ...]}; chr1-22, X
+        and Y where it names none), mega's merged VCFs of ``mega_src`` (those 24 if None),
+        every other variable set, and no program of the image on PATH: (exit status, stderr,
+        whether a command ran: its first makes $REF/PAMs)."""
+        import shutil
+        import subprocess
+        import tempfile
+        genomes = genomes or {}
+        with tempfile.TemporaryDirectory() as t:
+            env = {"PATH": "/usr/bin:/bin", "HOME": t, "LC_ALL": "C", "RUN": ""}
+            for v in ("REF", "HGDP", "HPRC", "MEGA"):
+                env[v] = os.path.join(t, v)
+                os.makedirs(os.path.join(env[v], "Genomes", "hg38"))
+                for c in genomes.get(v, PRIMARY):
+                    open(os.path.join(env[v], "Genomes", "hg38", c + ".fa"), "w").close()
+            for v in ("SIF", "RP", "META", "HPRC_SRC", "P1KG", "MEGA_SRC"):
+                env[v] = os.path.join(t, v)
+                os.makedirs(env[v])
+            for c in PRIMARY if mega_src is None else mega_src:
+                open(os.path.join(env["MEGA_SRC"], f"mega.{c}.afmax.vcf.gz"), "w").close()
+            got = subprocess.run([shutil.which("bash"), "-c", cis.commands_script(self.rows)],
+                                 cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+            return got.returncode, got.stderr, os.path.exists(os.path.join(env["REF"], "PAMs"))
+
+    def test_a_panel_s_genome_folder_of_all_of_hg38_stops_it_first(self):
+        """The README said to put all of hg38 in every working directory, as download
+        installs it; mega's recipe refuses any FASTA but the chromosomes of its merged VCFs,
+        so the rebuild stopped at mega's build after hours of the other panels' (the stage-2b
+        review of lane D, D-R3-1), and the other panels' indexes would have held 455 contigs
+        where 2.8.1's hold 24. The script stops on it before its first command."""
+        for panel in ("HGDP", "MEGA"):
+            with self.subTest(panel=panel):
+                rc, err, ran = self.run_on_genomes({"REF": HG38, panel: HG38})
+                self.assertEqual(rc, 2, err)
+                self.assertFalse(ran, "a command ran")
+                self.assertIn(f"/{panel}/Genomes/hg38 (${panel}) holds chr10_GL383545v1_alt chrM "
+                              f"chrUn_KI270302v1: a variant panel's working directory holds the "
+                              f"chromosomes chr1-22, X and Y of hg38 alone", err)
+
+    def test_a_panel_without_a_chromosome_of_the_reference_s_stops_it_first(self):
+        rc, err, ran = self.run_on_genomes({"REF": HG38, "HPRC": PRIMARY[:-1]})
+        self.assertEqual(rc, 2, err)
+        self.assertFalse(ran, "a command ran")
+        self.assertIn("/HPRC/Genomes/hg38 ($HPRC) holds chr1 chr10", err)
+        self.assertIn("every variant panel's working directory holds the chromosomes chr1-22, "
+                      "X and Y of the reference's", err)
+
+    def test_mega_s_merged_vcfs_of_other_chromosomes_stop_it_first(self):
+        rc, err, ran = self.run_on_genomes({"REF": HG38}, mega_src=PRIMARY[:-1])
+        self.assertEqual(rc, 2, err)
+        self.assertFalse(ran, "a command ran")
+        self.assertIn("($MEGA_SRC) holds mega.<chr>.afmax.vcf.gz of chr1 chr10", err)
+        self.assertIn("the recipe builds every chromosome of its sources, and refuses a genome "
+                      "folder that holds the FASTA of another or lacks one of theirs", err)
+
+    def test_a_test_genome_of_one_chromosome_runs(self):
+        # (as the D7 readiness audit's chr22 dry run of every index type: its first command
+        # runs, and stops here, where no crisprme.py is on PATH)
+        rc, err, ran = self.run_on_genomes(
+            {"REF": ("chr22", "chrM"), "HGDP": ("chr22",), "HPRC": ("chr22",),
+             "MEGA": ("chr22",)}, mega_src=("chr22",))
+        self.assertTrue(ran, err)
+        self.assertIn("rebuild: the build of 20-NRR_3_hg38 failed", err)
+
+    def test_a_kit_packed_into_the_repository_s_root(self):
+        # (the dry run found it before; nothing made it happen: D-R3-5)
+        kit = _row(self.rows, "build-inputs/hg38_HGDP1kGP")["build"]
+        packed = kit.replace("(cd $HGDP && tar -cf - Genomes/", "tar -cf - $HGDP/Genomes/") \
+            .replace(" Genomes/hg38+hg38_HGDP1kGP_INDELS", " $HGDP/Genomes/hg38+hg38_HGDP1kGP_INDELS") \
+            .rstrip(")")
+        self.assertNotEqual(packed, kit)
+        rows = copy.deepcopy(self.rows)
+        _row(rows, "build-inputs/hg38_HGDP1kGP")["build"] = packed
+        dry = cis.dry_run(rows)
+        self.assertIn("the rebuild's script, run dry, writes into the repository's root: "
+                      "hg38_HGDP1kGP.SHA256SUMS, hg38_HGDP1kGP.tar.gz", dry)
 
     def test_a_text_the_script_cannot_hold(self):
         import unittest.mock

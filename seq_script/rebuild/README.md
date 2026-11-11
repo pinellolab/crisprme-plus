@@ -34,10 +34,27 @@ it serves for its own guide length (`index_fit.fits`).
 ## Rules the rebuild keeps
 
 1. **One working directory per panel**, every index of the panel built in it (`$HGDP`, `$HPRC`,
-   `$MEGA`; `$REF` for the reference indexes), each holding hg38 in `Genomes/hg38` (one FASTA per
-   chromosome, as `crisprme.py download --what genome` installs it). The first build enriches the
-   genome and writes the Dictionaries; each later PAM re-indexes the same enriched genome
-   ("Enriched genome already present"). So the panel's indexes share one Dictionaries, whose
+   `$MEGA`; `$REF` for the reference indexes), each with hg38 in `Genomes/hg38`, one FASTA per
+   contig, as 2.8.1's indexes were built: `$REF`'s holds all of hg38, as `crisprme.py download
+   --what genome` installs it (455 contigs, chrM and the alt, random and chrUn ones among them,
+   which 2.8.1's reference indexes hold); `$HGDP`'s, `$HPRC`'s and `$MEGA`'s hold its chromosomes
+   chr1-22, X and Y alone, the 24 contigs every variant index of 2.8.1 holds (HGDP + 1000 Genomes
+   has no variant on chrY, whose index there is the reference's). mega's recipe builds every
+   chromosome of the merged VCFs in `$MEGA_SRC` (those 24 in `vcfs/hg38_mega`) and refuses a
+   genome folder that holds any other FASTA. Copy them from the reference's:
+
+   ```bash
+   for d in $HGDP $HPRC $MEGA; do
+     mkdir -p $d/Genomes/hg38
+     for c in chr{1..22} chrX chrY; do cp $REF/Genomes/hg38/$c.fa $d/Genomes/hg38/; done
+   done
+   ```
+
+   The rebuild's script checks the genome folders before its first command (rule 5); on a test
+   of a few chromosomes, each panel's holds the ones the reference's holds of chr1-22, X and Y,
+   and mega's merged VCFs are of those. The first build enriches the genome and writes the
+   Dictionaries; each later PAM re-indexes the same enriched genome ("Enriched genome already
+   present"). So the panel's indexes share one Dictionaries, whose
    fingerprint every one of their manifests records: `publish-index` uploads the bundle and the
    genotype store with the panel's first index, skips them for the others (the repo holds them,
    the same), and refuses to publish an index built against another build of them
@@ -68,13 +85,14 @@ it serves for its own guide length (`index_fit.fits`).
    repo's NGG, NNN and NRG files only, and the web offers no other PAM.
 5. **The commands run from the repository's root**, each on its own: a `cd` is inside `( )`, so no
    command moves the next; a recipe is called by its repository path (`seq_script/merge_panels/`),
-   with every input it would otherwise read from a path of the cluster it was written on (`$RP`,
-   `$META` of HGDP + 1000 Genomes; `$HPRC_SRC`, `$P1KG` of HPRC; `$MEGA_SRC` of mega); each build
+   with every input it would otherwise read from a path it was written with, the cluster's or its
+   working directory's (`$RP`, `$META` of HGDP + 1000 Genomes; `$HPRC_SRC`, `$P1KG` of HPRC;
+   `$MEGA_SRC` of mega), and stops, with a non-zero status, at a step that fails; each build
    first copies its PAM file from the repository's `PAMs/` into its working directory's `PAMs/`,
    which a working directory set up by `download` does not hold (rule 4), and reads it there; and
    every file a publish uploads is named by its working directory. `--commands` prints them as one
-   script, which stops before its first command where one of these variables is not set, and at
-   the first command that fails.
+   script, which stops before its first command where one of these variables is not set or a
+   working directory's genome folder is not as rule 1 says, and at the first command that fails.
 
 ## Commands
 
@@ -92,19 +110,36 @@ variant index's reference index is in the set; every variant panel has one bundl
 and a genotyped one (HGDP + 1000 Genomes, HPRC) one genotype store and one store of phased indel
 genotypes; and every index archive of 2.8.1 is replaced by exactly one archive of the set, the
 one a download of it names; and every build and publish command is one bash reads (`bash -n`),
-a companion having none, and keeps rule 5: each command reads only the variables above, in its
+a companion having none, and keeps rule 5: each command reads only the variables above, and
+each of them is read by one (a variable no command reads is an input a command lost), in its
 own panel's working directory, with no `cd` outside `( )` and no repository path after one;
-every script it calls is the repository's, and given the inputs it reads from the cluster's
-paths otherwise; each build copies its PAM file and reads that one; `crisprme.py`, `hf` and
-`pigz` run through `$RUN`. Then the check runs `--commands`' script dry: every program it calls
-stubbed (`crisprme.py`, `hf`, `pigz`, `tar`, `sha256sum`, a recipe; `apptainer` called directly
-fails), from a copy of the repository's root made of links, in temporary working directories
-that hold `Genomes/hg38` and what the builds leave. It must run to its end, which it does only
-where every script it calls is there, every PAM file a build reads is in place, every path a
-command hands a program or a recipe is there, and every index of the set is published from its
-working directory; and it must write nothing into the repository's root.
-`PostProcess/test_index_set.py` runs the check and the dry run in the unit tests, and makes each
-of these failures happen once.
+every script it calls is the repository's, and given every input it would otherwise read from
+a path it was written with (one of the cluster's, or its working directory's: HGDP + 1000
+Genomes' `RP=${RP:-$B}`); each build copies its PAM file and reads that one; `crisprme.py`,
+`hf` and `pigz` run through `$RUN`; every upload goes to the format-2 repo and no command passes
+a token (`HF_TOKEN` holds it); and every variant index is published `--dictless`, so that each
+of a panel's indexes names one Dictionaries bundle. Then the check runs `--commands`' script
+dry: every program it calls stubbed (`crisprme.py`, `hf`, `pigz`, `tar`, `sha256sum`, a recipe;
+`apptainer` called directly fails), from a copy of the repository's root made of links, in
+temporary working directories that hold `Genomes/hg38` as rule 1 says (all of hg38 for the
+reference, chr1-22, X and Y for each panel, and mega's merged VCFs of those) and what the builds
+leave. It must run to its end, which it does only where every script it calls is there, every
+PAM file a build reads is in place, every path a command hands a program or a recipe is there,
+and every index of the set is published from its working directory; and it must write nothing
+into the repository's root. `PostProcess/test_index_set.py` runs the check and the dry run in
+the unit tests, mutates the set and its commands, and checks that each mutation is found: by
+the check and by the dry run where both can see it (a recipe called after a `cd`, a PAM file
+not copied, a kit packed after a `cd` that moves the next commands, a program of the image run
+on the host, a script the repository does not have, a text the script cannot hold), by the dry
+run alone (a kit uploaded from the repository's root, or packed into it), and by the check
+alone where the dry run cannot see it (an input left to a recipe's default, a variable the
+rebuild does not set, or one no command reads, another panel's working directory, a pending
+script the tree holds, an upload to another repo, a token, a variant index published with its
+per-sample dictionaries, and the set's own errors); it runs the script on genome folders that
+are not as rule 1 says, which stops before its first command. `PostProcess/test_panel_recipes.py`
+runs the HGDP + 1000 Genomes and HPRC recipes on stubs: each stops, with a non-zero status, at a
+step that fails (the samples, a chromosome's VCF, the build), and a chromosome of the genome
+folder without its source stops it.
 
 The mega rows follow lane M's full rebuild of `hg38_mega` (decision D2: PASS/'.' records, AF =
 AF_max, its registry and indel allele frequencies consistent), from the merged VCFs
