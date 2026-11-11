@@ -47,7 +47,8 @@
 # PATHS are as-run cluster paths; override via env.
 # EXIT STATUS: non-zero at the first step that fails (the samples of the BCFs, a chromosome's
 # VCF-PREP, the build), so that a rebuild that runs it stops there; a chromosome the genome folder
-# holds needs its re-phased BCF (one it does not hold, on a test genome, is not built).
+# holds needs its re-phased BCF (one it does not hold, on a test genome, is not built, whether $RP
+# holds its BCF or not).
 set -u
 SIF=${SIF:-/srv/local/lp698_crisprme_v262_cleanroom/crisprme.sif}       # apptainer image w/ crisprme v2.6.2 env
 # PAR-aware chrX ploidy overlay: 4 PostProcess files carrying the position-routed
@@ -104,11 +105,12 @@ echo "=== VCF-PREP $(date +%H:%M:%S) ==="
 for c in $CHRS; do
   out="$B/VCFs/hg38_HGDP1kGP/hgdp1kgp.$c.norm.vcf.gz"
   [ -s "$out.tbi" ] && { echo "[$c] exists -> skip"; continue; }
+  # the genome folder first: a chromosome it does not hold is not built (a test genome of a few
+  # chromosomes, whose $RP holds every chromosome's BCF, as the real one does); one it holds
+  # needs its BCF
+  [ -e "$GENOME/$c.fa" ] || { echo "[$c] not in $GENOME -> skip"; continue; }
   in="$RP/hgdp1kg.$c.rephased.bcf"
-  if [ ! -s "$in" ]; then
-    [ -e "$GENOME/$c.fa" ] && { echo "[error] [$c] no re-phased BCF $in, and $GENOME holds $c" >&2; exit 1; }
-    echo "[$c] not in $GENOME -> skip"; continue
-  fi
+  [ -s "$in" ] || { echo "[error] [$c] no re-phased BCF $in, and $GENOME holds $c" >&2; exit 1; }
   if [ "$c" = "chrX" ]; then
     run "set -o pipefail; mkdir -p /tmp/sort_$c; bcftools view $in -Ou \
           | bcftools +fixploidy -Ou -- -p $B/chrX.ploidy.txt -s $B/chrX.sex.txt \

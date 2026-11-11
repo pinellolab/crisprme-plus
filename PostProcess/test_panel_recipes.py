@@ -11,14 +11,21 @@ D-R3-4). The steps before were silent too: a pipeline without pipefail took the 
 last stage, so a VCF cut short by a stage that failed got its .tbi and was built on (and a run
 again skipped it); a chromosome of the genome folder whose source was missing was skipped; and
 a samples file of no sample was built on. Each now stops the recipe with a non-zero status. A
-chromosome the genome folder does not hold (a test genome of chr22) is still not built, and a
-build that succeeds still exits 0 (those two pass on the recipes before too).
+build that succeeds still exits 0 (that passes on the recipes before too).
+
+A chromosome the genome folder does not hold (a test genome of chr22, or of a few chromosomes) is
+not built, and no stage reads its source, whether the source folder holds it or not: the real
+ones hold every chromosome's. The recipes of the first fix took a source that was there for a
+chromosome to build, ran its pipeline on a FASTA the genome folder did not hold, and stopped at
+chr1 (the review of that fix, D-R4-1); the recipes before ran it too, and went on past its
+failure.
 
 Hermetic: the recipes run on stubs (apptainer, bcftools, tabix, zcat, crisprme.py) in a
 temporary directory; nothing of the image runs.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -43,9 +50,11 @@ cmd=${cmd//\/opt\/conda\/bin/$STUB_BIN}
 exec bash -c "$cmd"
 '''
 # a stage named in STUB_FAIL writes part of its output, then fails (as one killed between two
-# records does: the stages after it read a stream that ends there)
+# records does: the stages after it read a stream that ends there); every call is written to
+# STUB_CALLS
 _BCFTOOLS = r'''#!/usr/bin/env bash
 sub=$1; shift
+printf '%s %s\n' "$sub" "$*" >> "$STUB_CALLS"
 case "$sub" in
   query)
     [ -e "${2:-}" ] || { echo "stub bcftools: no input ${2:-}" >&2; exit 1; }
@@ -112,6 +121,8 @@ class _RecipeCases:
             os.mkdir(os.path.join(self.t, d))
         self.log = os.path.join(self.t, "builds.log")
         open(self.log, "w").close()
+        self.calls = os.path.join(self.t, "bcftools.log")
+        open(self.calls, "w").close()
         self.genome("chr22")
         self.env = self.make_inputs()
 
@@ -123,7 +134,8 @@ class _RecipeCases:
     def run_recipe(self, **env):
         base = {"PATH": os.pathsep.join([self.bin, "/usr/bin", "/bin"]), "HOME": self.t,
                 "LC_ALL": "C", "STUB_BIN": self.bin, "STUB_TMP": os.path.join(self.t, "stubtmp"),
-                "STUB_LOG": self.log, "STUB_INDEX": self.INDEX, "SIF": "image.sif",
+                "STUB_LOG": self.log, "STUB_CALLS": self.calls, "STUB_INDEX": self.INDEX,
+                "SIF": "image.sif",
                 "B": os.path.join(self.t, "B"), "GENOME": os.path.join(self.t, "G"),
                 "PAM": os.path.join(self.t, "pam.txt"), "THREADS": "1"}
         base.update(self.env)
@@ -137,6 +149,43 @@ class _RecipeCases:
 
     def tbi(self, chrom):
         return os.path.join(self.t, "B", "VCFs", self.DATASET, self.vcf_name(chrom) + ".tbi")
+
+    def chromosomes(self):
+        """The chromosomes the recipe builds where the genome folder holds them (its CHRS)."""
+        with open(os.path.join(RECIPES, self.RECIPE)) as fh:
+            return re.search(r'^CHRS="([^"]+)"$', fh.read(), re.M).group(1).split()
+
+    def chromosomes_read(self):
+        """The chromosomes whose source or FASTA a bcftools stage was handed."""
+        with open(self.calls) as fh:
+            return sorted(set(re.findall(
+                r"[./](chr[0-9XYM]+)\.(?:rephased\.bcf|HPRC\.vcfwave\.vcf\.gz|fa)\b", fh.read())))
+
+    def vcfs_made(self):
+        return sorted(os.listdir(os.path.join(self.t, "B", "VCFs", self.DATASET)))
+
+    def check_a_test_genome_beside_every_source(self, chroms):
+        """The genome folder of chroms, the source folder of every chromosome of the recipe's
+        (as the real ones hold): those chromosomes are built, and no other's source is read."""
+        every = self.chromosomes()
+        self.assertTrue(set(chroms) < set(every) and len(every) >= 23, every)
+        self.genome(*chroms)
+        for c in every:
+            self.source(c)
+        got = self.run_recipe()
+        self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
+        self.assertEqual(len(self.builds()), 1)
+        self.assertEqual(self.vcfs_made(),
+                         sorted(n for c in chroms for n in (self.vcf_name(c),
+                                                            self.vcf_name(c) + ".tbi")))
+        self.assertEqual(self.chromosomes_read(), sorted(chroms),
+                         "a stage read the source of a chromosome the genome folder does not hold")
+
+    def test_a_test_genome_of_chr22_beside_every_chromosome_s_source(self):
+        self.check_a_test_genome_beside_every_source(["chr22"])
+
+    def test_a_test_genome_of_a_few_chromosomes_beside_every_chromosome_s_source(self):
+        self.check_a_test_genome_beside_every_source(["chr21", "chr22"])
 
     def test_a_build_that_succeeds_exits_0(self):
         # (on a genome folder of chr22 alone: the recipe's other chromosomes are not built)
@@ -182,13 +231,17 @@ class HgdpRecipe(_RecipeCases, unittest.TestCase):
     def vcf_name(self, chrom):
         return f"hgdp1kgp.{chrom}.norm.vcf.gz"
 
-    def make_inputs(self):
-        """chr22's re-phased BCF (to the stub, its samples, one a line) and gnomAD's metadata
-        (the sample, then is_female in column 80, the population and region in 176 and
-        177)."""
-        self.bcf = os.path.join(self.t, "SRC", "hgdp1kg.chr22.rephased.bcf")
-        with open(self.bcf, "w") as fh:
+    def source(self, chrom):
+        """chrom's re-phased BCF (to the stub, its samples, one a line)."""
+        path = os.path.join(self.t, "SRC", f"hgdp1kg.{chrom}.rephased.bcf")
+        with open(path, "w") as fh:
             fh.write("S1\nS2\n")
+        return path
+
+    def make_inputs(self):
+        """chr22's re-phased BCF and gnomAD's metadata (the sample, then is_female in column
+        80, the population and region in 176 and 177)."""
+        self.bcf = self.source("chr22")
         meta = os.path.join(self.t, "meta.tsv")
         with open(meta, "w") as fh:
             for row in [["s"] + ["x"] * 176] + [[s] + ["x"] * 78 + ["false"] + ["x"] * 95
@@ -220,21 +273,25 @@ class HprcRecipe(_RecipeCases, unittest.TestCase):
     def vcf_name(self, chrom):
         return f"hprc.{chrom}.norm.vcf.gz"
 
+    HEADER = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\n"
+
+    def source(self, chrom, header=HEADER):
+        """chrom's VCF (plain text: the stub zcat reads it)."""
+        path = os.path.join(self.t, "SRC", f"ALL.{chrom}.HPRC.vcfwave.vcf.gz")
+        with open(path, "w") as fh:
+            fh.write(f"##fileformat=VCFv4.2\n{header}{chrom}\t1\t.\tA\tC\t.\t.\t.\tGT\t0|1\t1|1\n")
+        return path
+
     def make_inputs(self):
-        """chr22's VCF (plain text: the stub zcat reads it) and the 1000 Genomes samples."""
-        self.vcf = os.path.join(self.t, "SRC", "ALL.chr22.HPRC.vcfwave.vcf.gz")
-        self.write_vcf("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\n")
+        """chr22's VCF and the 1000 Genomes samples."""
+        self.source("chr22")
         p1kg = os.path.join(self.t, "p1kg.txt")
         with open(p1kg, "w") as fh:
             fh.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\nHG1\tGBR\tEUR\tmale\n")
         return {"SRC": os.path.join(self.t, "SRC"), "P1KG": p1kg}
 
-    def write_vcf(self, header):
-        with open(self.vcf, "w") as fh:
-            fh.write(f"##fileformat=VCFv4.2\n{header}chr22\t1\t.\tA\tC\t.\t.\t.\tGT\t0|1\t1|1\n")
-
     def test_the_samples_of_the_vcf_unread_stop_it(self):
-        self.write_vcf("")  # no #CHROM line: no sample to read
+        self.source("chr22", header="")  # no #CHROM line: no sample to read
         got = self.run_recipe()
         self.assertNotEqual(got.returncode, 0, got.stdout)
         self.assertIn("cannot read the samples", got.stderr)

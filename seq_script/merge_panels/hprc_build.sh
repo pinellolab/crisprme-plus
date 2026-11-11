@@ -35,7 +35,8 @@
 # apptainer SIF ($SIF) with bcftools/tabix/python3 + the crisprme conda env.
 # EXIT STATUS: non-zero at the first step that fails (a chromosome's NORM, the samples of the
 # VCFs, the build), so that a rebuild that runs it stops there; a chromosome the genome folder
-# holds needs its VCF (one it does not hold, on a test genome, is not built).
+# holds needs its VCF (one it does not hold, on a test genome, is not built, whether $SRC holds its
+# VCF or not).
 set -u
 SIF=${SIF:-/srv/local/lp698/crisprme_v254.sif}                 # apptainer image w/ crisprme env
 B=${B:-/srv/local/lp698/hprc_build}                            # build working dir (--path)
@@ -61,11 +62,12 @@ echo "=== NORM $(date +%H:%M:%S) ==="
 for c in $CHRS; do
   out="$B/VCFs/hg38_HPRC/hprc.$c.norm.vcf.gz"
   [ -s "$out.tbi" ] && { echo "[$c] exists -> skip"; continue; }
+  # the genome folder first: a chromosome it does not hold is not built (a test genome of a few
+  # chromosomes, whose $SRC holds every chromosome's VCF, as the real one does); one it holds
+  # needs its VCF
+  [ -e "$GENOME/$c.fa" ] || { echo "[$c] not in $GENOME -> skip"; continue; }
   in="$SRC/ALL.$c.HPRC.vcfwave.vcf.gz"
-  if [ ! -s "$in" ]; then
-    [ -e "$GENOME/$c.fa" ] && { echo "[error] [$c] no HPRC VCF $in, and $GENOME holds $c" >&2; exit 1; }
-    echo "[$c] not in $GENOME -> skip"; continue
-  fi
+  [ -s "$in" ] || { echo "[error] [$c] no HPRC VCF $in, and $GENOME holds $c" >&2; exit 1; }
   run "set -o pipefail; bcftools norm -m -any -f $GENOME/$c.fa $in -Ou \
         | bcftools +fill-tags -Ou -- -t AF,AC,AN \
         | bcftools sort -Oz -o $out - && tabix -f -p vcf $out" \

@@ -54,13 +54,15 @@ it serves for its own guide length (`index_fit.fits`).
 
    The rebuild's script checks the genome folders before its first command (rule 5); on a test
    of a few chromosomes, `$HGDP`'s holds the FASTAs of the reference's, `$HPRC`'s and `$MEGA`'s
-   those of them that are of chr1-22, X and Y, and mega's merged VCFs are of those. The first
-   build enriches the genome and writes the Dictionaries; each later PAM re-indexes the same
-   enriched genome ("Enriched genome already present"). So the panel's indexes share one
-   Dictionaries, whose fingerprint every one of their manifests records: `publish-index` uploads
-   the bundle and the genotype store with the panel's first index, skips them for the others (the
-   repo holds them, the same), and refuses to publish an index built against another build of them
-   (`--replace-companions` replaces them, for a whole panel built again).
+   those of them that are of chr1-22, X and Y, and mega's merged VCFs are of those (the HGDP +
+   1000 Genomes and HPRC recipes build the chromosomes of their genome folder alone, whatever
+   other chromosomes' sources `$RP` and `$HPRC_SRC` hold). The first build enriches the genome and
+   writes the Dictionaries; each later PAM re-indexes the same enriched genome ("Enriched genome
+   already present"). So the panel's indexes share one Dictionaries, whose fingerprint every one
+   of their manifests records: `publish-index` uploads the bundle and the genotype store with the
+   panel's first index, skips them for the others (the repo holds them, the same), and refuses to
+   publish an index built against another build of them (`--replace-companions` replaces them,
+   for a whole panel built again).
 2. **Build with the release image only** (the CRISPRme and CRISPRitz the release ships), after the
    D7 readiness audit: no fix that can change index creation is pending. `$SIF` is that image,
    which the HGDP + 1000 Genomes and HPRC recipes run themselves, and `$RUN` the prefix that runs
@@ -140,7 +142,9 @@ token, a variant index published with its per-sample dictionaries, and the set's
 runs the script on genome folders that are not as rule 1 says, which stops before its first
 command. `PostProcess/test_panel_recipes.py` runs the HGDP + 1000 Genomes and HPRC recipes on
 stubs: each stops, with a non-zero status, at a step that fails (the samples, a chromosome's VCF,
-the build), and a chromosome of the genome folder without its source stops it.
+the build), and a chromosome of the genome folder without its source stops it; on a test genome
+of chr22, or of chr21 and chr22, beside a source folder of every chromosome's source, each builds
+those chromosomes alone and reads no other's source.
 
 The mega rows follow lane M's full rebuild of `hg38_mega` (decision D2: PASS/'.' records, AF =
 AF_max, its registry and indel allele frequencies consistent), from the merged VCFs

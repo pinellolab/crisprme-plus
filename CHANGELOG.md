@@ -1333,10 +1333,13 @@ and the `release-crisprme` skill.
   samples of the source could not be read, was built on. Each step now stops the recipe with a
   non-zero status (the build's own exit status for a failed build), and a VCF that fails leaves
   no `.tbi`, so a run again redoes it. A chromosome the genome folder does not hold is still not
-  built (a test genome of chr22), and a build that succeeds writes what it wrote before (on
-  chr22 with the release image: the same VCF records, samples files and index). Covered by
-  `PostProcess/test_panel_recipes.py` (the recipes on stubs: 9 of its 11 tests fail on the
-  recipes before; the other two, each recipe's build that succeeds, pass on both).
+  built, and no stage reads its source now: on a test genome of a few chromosomes beside the
+  real source folders, which hold every chromosome's, the recipes ran each other chromosome's
+  pipeline against a FASTA that is not there, which failed unseen. A build that succeeds writes
+  what it wrote before (on chr22 with the release image: the same VCF records, samples files and
+  index). Covered by `PostProcess/test_panel_recipes.py` (the recipes on stubs: 13 of its 15
+  tests fail on the recipes before; the other two, each recipe's build that succeeds, pass on
+  both).
 - **An index folder that holds a macOS AppleDouble file is read by its own trees.** macOS `tar` and
   `cp` leave an AppleDouble file `._<name>` beside each file they copy onto a volume without
   extended attributes. Every reader of an index took `._NGG_chr22_1.bin`, which opens with no
