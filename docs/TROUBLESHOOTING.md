@@ -183,9 +183,13 @@ than change the inputs and the results:
 
 - stop the search, by making first a name it makes there (the post-analysis's
   `<output>.pieces` folder, for one);
-- rename a folder the search made there and put their own in its place (a rename needs only
-  write access to the folder that holds it), and put links in it, which the search then
-  writes through, over files of yours elsewhere;
+- rename a folder the search or the web app made there and put their own in its place (a
+  rename needs only write access to the folder that holds it), and put links in it, which
+  they then write through, over files of yours elsewhere;
+- put links where the web app reads (in `Results/`, `Settings/` and the job folders in them),
+  which it follows: the job logs it shows and the files it serves for download can then be
+  files of yours elsewhere, which anyone who can reach the web app reads (it listens on every
+  network interface, `0.0.0.0`);
 - put lines and names in the files it reads there (its inputs, and the files it writes and
   reads back), which older parts of the pipeline still pass to shell commands; and, in a
   temporary folder that is not sticky, replace the modules TensorFlow writes there and then
@@ -215,8 +219,13 @@ What holds wherever you run it, since 2.10.0:
 A test (`test_no_code_from_files`, in the unit-test job and the web image's) keeps out of
 CRISPRme what a scan of the source can show: loads that run code (pickle and the like, `eval`,
 `exec`, YAML loads but `safe_load`), a temporary name made by name only, and a `python -c`,
-`-m` or `-` that is not isolated; and it runs `crisprme.py --debug` and the scripts fixed here
-on what another user could put in their folders. It cannot follow every value read back into a
+`-m` or `-` that is not isolated. It also runs `process_summaries.py` and
+`assemble_cfd_graphs.py` on a line or a name another user could put in a search's folder and,
+in the web image's step, `crisprme.py --debug` from a folder holding someone else's
+`PostProcess/`. The other fixes above have tests of their own: `test_scorer_env` (the scorer's
+health check, its self-test and the look-up of its env's python), `test_settings_progress`
+(the Retry), `test_indel_empty_chromosome` (the indel targets' header) and
+`test_web_shell_safety` (the region page). The scan cannot follow every value read back into a
 shell command, which is one more reason to keep these folders yours.
 
 ---

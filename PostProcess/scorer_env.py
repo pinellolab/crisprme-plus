@@ -207,17 +207,17 @@ def _run(cmd: List[str], **kw) -> subprocess.CompletedProcess:
 def env_python(name: str) -> Optional[str]:
     """Absolute path to the env's python, or None if the env is absent.
 
-    Resolved via ``<manager> run -n <name> python -c ...`` once (authoritative,
-    location-independent). Callers should invoke the worker via THIS absolute path,
-    NOT ``<manager> run`` — the latter captures/buffers stdio and breaks the
-    streaming worker protocol (Phase-0 finding).
+    Resolved via ``<manager> run -n <name> python -I -c ...`` once (authoritative,
+    location-independent; isolated: see the note above this function). Callers should
+    invoke the worker via THIS absolute path, NOT ``<manager> run`` — the latter
+    captures/buffers stdio and breaks the streaming worker protocol (Phase-0 finding).
     """
     mgr = detect_env_manager()
     if not mgr:
         return None
     exe, _ = mgr
     try:
-        # isolated (-I), as the probes below: see _run
+        # isolated (-I), as the probes below: see the note above env_python
         cp = _run([exe, "run", "-n", name, "python", "-I", "-c",
                    "import sys;print(sys.executable)"])
         if cp.returncode == 0:
@@ -484,7 +484,7 @@ def health_check(name: str = DEFAULT_ENV) -> dict:
         "print(json.dumps({'py':pv,'vers':vers,'bad':bad}))\n"
     )
     try:
-        cp = _run([py, "-I", "-c", probe])  # isolated: see _run
+        cp = _run([py, "-I", "-c", probe])  # isolated: see the note above env_python
         payload = json.loads(cp.stdout.strip().splitlines()[-1]) if cp.stdout.strip() else {}
     except Exception as e:
         rec["status"] = ERROR
@@ -538,7 +538,7 @@ def selftest(name: str = DEFAULT_ENV) -> tuple:
         "print(json.dumps(s.CRISPR_BULGE_predict_list(sg, off)))\n"
     )
     try:
-        cp = _run([py, "-I", "-c", code])  # isolated: see _run
+        cp = _run([py, "-I", "-c", code])  # isolated: see the note above env_python
         r = json.loads(cp.stdout.strip().splitlines()[-1]) if cp.stdout.strip() else None
     except Exception as e:  # noqa: BLE001
         return False, "self-test failed to run: %s" % e

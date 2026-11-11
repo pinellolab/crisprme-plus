@@ -319,13 +319,14 @@ class TestProbeVersions(unittest.TestCase):
 
 
 class TheProbesRunNoCodeOfTheWorkingDirectory(unittest.TestCase):
-    """Every complete-search runs the health check before it searches, from the folder the
-    user runs crisprme.py in: the data folder, which the members of its group can write under
-    a umask of 002. The probe ran as "python -c", which puts the working directory first on
-    sys.path, so a json.py one of them put there ran as the user, on the probe's first
-    "import json"; the self-test (scorer-env check, complete-test) did the same (2.10.0, the
-    review of lane S, round 4, S-R4-1). Both run isolated (-I) now: a module planted in the
-    working directory runs nothing, and the probes still work."""
+    """Every complete-search (complete-test's too) runs the health check before it searches,
+    from the folder the user runs crisprme.py in: the data folder, which the members of its
+    group can write under a umask of 002. The probe ran as "python -c", which puts the
+    working directory first on sys.path, so a json.py one of them put there ran as the user,
+    on the probe's first "import json"; the self-test, which scorer-env check runs, did the
+    same (2.10.0, the review of lane S, round 4, S-R4-1). Both run isolated (-I) now, and so
+    does the look-up of the env's python: a module planted in the working directory runs
+    nothing, and the probes still work."""
 
     PLANTED = ("json", "sitecustomize", "usercustomize", "importlib", "crispr_bulge_score",
                "tensorflow", "numpy", "pandas", "pkg_resources")

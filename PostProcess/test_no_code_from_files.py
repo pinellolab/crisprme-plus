@@ -32,12 +32,17 @@ is another), and no Python run on -c, -m or - that is not isolated. The Dockerfi
 step and the CI workflows, which run in folders the build and the checkout make, are not
 scanned.
 
-WhatASearchReadsBackRunsNothing runs the scripts the sweep fixed on a line or a name another
-user could put in a search's folder, and TheDebugFlagRunsNoModuleOfTheWorkingDirectory
-crisprme.py --debug from a folder holding a PostProcess/ of someone else's. These are the forms a scan of the source and those runs
-show: a folder others can write still lets them swap a folder a search made there, put links
-it writes through and change what older parts of the pipeline read, so keep data, output and
-temporary folders writable by you alone (docs/TROUBLESHOOTING.md section 7).
+WhatASearchReadsBackRunsNothing runs two of the scripts the sweep fixed, process_summaries.py
+and assemble_cfd_graphs.py, on a line or a name another user could put in a search's folder
+(the other fixes have tests of their own: test_indel_empty_chromosome, the indel search's
+merge on a planted header; test_web_shell_safety, the results' region page on a planted guide
+and annotation; test_settings_progress, the Retry; test_scorer_env, the probes), and
+TheDebugFlagRunsNoModuleOfTheWorkingDirectory runs crisprme.py --debug from a folder holding a
+PostProcess/ of someone else's (where crisprme.py's imports are: web-e2e's image step). These
+are the forms a scan of the source and those runs show: a folder others can write still lets
+them swap a folder a search made there, put links it writes through or the web app reads
+through, and change what older parts of the pipeline read, so keep data, output and temporary
+folders writable by you alone (docs/TROUBLESHOOTING.md section 7).
 
 Run with:
     cd PostProcess && python3 -m unittest test_no_code_from_files -v

@@ -142,16 +142,16 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
 
 ### Fixed
 - **A search loads no Python module from the folder it is run from.** Every `complete-search`
-  runs the CRISPR-Bulge scorer's health check before it searches, as `python -c`, which puts
-  the working directory first on Python's path: run from a data folder its group can write (a
-  umask of 002 leaves it so), a module another member of the group put there (a `json.py`)
-  ran as the user. The health check, the scorer's self-test (`scorer-env check`,
-  complete-test), the look-up of the scorer env's python and the search script's pre-build of
-  the annotation's index now run Python isolated (`-I`), and so do the developer benchmarks;
-  the AoU retrieval script (`paper/`) checks its packages the way its steps import them. And
-  `--debug` keeps the `PostProcess/` beside the `crisprme.py` that runs: it took the working
-  directory's whenever there was one, and loaded the `memory_check.py` there at start-up,
-  whatever the subcommand.
+  (`complete-test`'s too) runs the CRISPR-Bulge scorer's health check before it searches, as
+  `python -c`, which puts the working directory first on Python's path: run from a data folder
+  its group can write (a umask of 002 leaves it so), a module another member of the group put
+  there (a `json.py`) ran as the user. The health check, the scorer's self-test (which
+  `scorer-env check` runs), the look-up of the scorer env's python and the search script's
+  pre-build of the annotation's index now run Python isolated (`-I`), and so do the developer
+  benchmarks; the AoU retrieval script (`paper/`) checks its packages the way its steps import
+  them. And `--debug` keeps the `PostProcess/` beside the `crisprme.py` that runs: it took the
+  working directory's whenever there was one, and loaded the `memory_check.py` there at
+  start-up, whatever the subcommand.
 - **The web app's Settings Retry runs no command read back from a file.** Retry re-ran a failed
   job with the shell command its folder's `Settings/<job>/cmd.json` held, through a shell: a
   member of the data folder's group could write that file, and Retry ran their command as the
@@ -192,9 +192,15 @@ indexes this release built", which these steps bring to 8.4 min, both on 8 threa
   marshal, shelve or the like (their loads run what a file names), no `eval` or `exec`, no YAML
   load but `safe_load`, no `tempfile.mktemp`, no `python -c`, `-m` or `-` that is not isolated;
   in the shell scripts, no `eval`, no `mktemp -u`, no name added to the one `mktemp` made, no
-  `python -c`, `-m` or `-` that is not isolated; and it runs `crisprme.py --debug` and the
-  scripts fixed here on a planted folder, line or name. A folder others can write still lets them do more than change a
-  search's inputs and results: stop it, swap a folder it made there (the pieces' folder among
-  them), put links it writes through, and change what older parts of the pipeline pass to a
-  shell. On a shared machine, keep the data, output and temporary folders writable by you
-  alone (`docs/TROUBLESHOOTING.md` §7).
+  `python -c`, `-m` or `-` that is not isolated. It also runs `process_summaries.py` and
+  `assemble_cfd_graphs.py` on a planted line or name and, in the image's step,
+  `crisprme.py --debug` from a folder holding a planted `PostProcess/`. The other fixes have
+  tests of their own: `test_scorer_env` (the scorer's health check, its self-test and the
+  look-up of its env's python), `test_settings_progress` (the Retry),
+  `test_indel_empty_chromosome` (the indel targets' header) and `test_web_shell_safety` (the
+  region page). A folder others can write still lets them do more than change a search's
+  inputs and results: stop it, swap a folder it made there (the pieces' folder among them),
+  put links it writes through, or that the web app reads through (the job logs it shows, the
+  files it serves for download: anyone who can reach the web app then reads files of yours),
+  and change what older parts of the pipeline pass to a shell. On a shared machine, keep the
+  data, output and temporary folders writable by you alone (`docs/TROUBLESHOOTING.md` §7).
