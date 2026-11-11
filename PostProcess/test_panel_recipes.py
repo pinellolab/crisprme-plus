@@ -188,7 +188,8 @@ class _RecipeCases:
         self.check_a_test_genome_beside_every_source(["chr21", "chr22"])
 
     def test_a_build_that_succeeds_exits_0(self):
-        # (on a genome folder of chr22 alone: the recipe's other chromosomes are not built)
+        # (a genome folder and a source folder of chr22 alone, so chr21 has nothing to be built
+        # from; beside a source folder of every chromosome, the test genome cases above)
         got = self.run_recipe()
         self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
         self.assertEqual(len(self.builds()), 1)
