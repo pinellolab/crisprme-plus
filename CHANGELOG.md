@@ -125,69 +125,65 @@ and the `release-crisprme` skill.
 - **The index set of 2.10.0, the rebuild manifest** (`seq_script/rebuild/index_set_2.10.0.tsv`,
   `seq_script/rebuild/README.md`; the lean set approved on 2026-11-08). Every archive the rebuild
   builds and publishes, one line each, with its panel, PAM file, PAM, side, spacer length, N, the
-  build's bulges, the archives of 2.8.1 it replaces, and its build and publish commands: SpCas9
-  NRR 20-nt on the reference, HGDP + 1000 Genomes, HPRC and mega; NGG and NRG 20-nt, the general
-  PAM-less index (an 8-nt 3′ flank, 20-nt guide), SaCas9 NNGRRN 22-nt and Cas12a TTTN 5′ at 20
-  and 23 nt, each on the reference and HGDP + 1000 Genomes; every index of N = 3 (up to 2 bulges
-  of each type, the web's ceiling); each panel's Dictionaries bundle, genotype store and
-  phased indel genotypes (HGDP + 1000 Genomes, HPRC; mega, sites-only, a bundle alone); and the
-  enriched-genome kits. `NNN_3` is not built again. The rebuild follows it, one working
-  directory per panel so that a panel's indexes share its one Dictionaries, each with hg38 in
-  `Genomes/hg38` as 2.8.1's default index of each panel was built: all of it (455 contigs, as
-  `download --what genome` installs it) for the reference indexes and HGDP + 1000 Genomes (2.8.1's
-  NRR, NGG and NNN indexes of the panel; its NRG index held 24), its chromosomes chr1-22, X and Y
-  alone for HPRC and mega (the 24 contigs of 2.8.1's indexes of those panels; mega's recipe
-  refuses a genome folder that holds any other FASTA, and a working directory of all of hg38,
-  which the README said for every panel, stopped the rebuild at mega's build, after hours of the
-  other panels'). The D7
-  readiness audit runs `seq_script/rebuild/check_index_set.py` before any build: each PAM file gives its
-  row's PAM, side and spacer; N is the build's bulges + 1; each name is the one
-  `build-index-only` gives the build (`index_fit.index_name`), and routes to the format-2 repo;
-  each index serves its own guide at 2 + 2 bulges (`index_fit.fits`); each variant index's
-  reference index is in the set; each panel has its companions once; every index archive of
-  2.8.1 is replaced by exactly one archive of the set, the one a download of it names; every
-  build and publish command is one bash reads (`bash -n`: a note has a column of its own, and a
-  panel companion, which the panel's first build writes and its first `publish-index` uploads,
-  has no command, `-`), and one the rebuild runs as written: from the repository's root, each
-  on its own (a `cd` only inside `( )`, so no command moves the next), a recipe called by its
-  repository path and given every input it would otherwise read from a path it was written with
-  (the cluster's, or its working directory's), each build first copying its PAM file from the
-  repository's `PAMs/` into its working directory's, `crisprme.py`, `hf` and `pigz` run in the
-  release image (`$RUN`), each command in its own panel's working directory, with the variables
-  the README lists, each read by a command; every upload to the format-2 repo, no token in a
-  command, and every variant index published `--dictless`, so that a panel's indexes name one
+  build's bulges, the archives of 2.8.1 it replaces, and its build and publish commands: SpCas9 NRR
+  20-nt on the reference, HGDP + 1000 Genomes, HPRC and mega; NGG and NRG 20-nt, the general
+  PAM-less index (an 8-nt 3′ flank, 20-nt guide), SaCas9 NNGRRN 22-nt and Cas12a TTTN 5′ at 20 and
+  23 nt, each on the reference and HGDP + 1000 Genomes; every index of N = 3 (up to 2 bulges of
+  each type, the web's ceiling); each panel's Dictionaries bundle, genotype store and phased indel
+  genotypes (HGDP + 1000 Genomes, HPRC; mega, sites-only, a bundle alone); and the enriched-genome
+  kits. `NNN_3` is not built again. The rebuild follows it, one working directory per panel so that
+  a panel's indexes share its one Dictionaries, each with hg38 in `Genomes/hg38` as 2.8.1's default
+  index of each panel was built: all of it (455 contigs, as `download --what genome` installs it)
+  for the reference indexes and HGDP + 1000 Genomes (2.8.1's NRR, NGG and NNN indexes of the panel;
+  its NRG index held 24), its chromosomes chr1-22, X and Y alone for HPRC and mega (the 24 contigs
+  of 2.8.1's indexes of those panels; mega's recipe refuses a genome folder that holds any other
+  FASTA, and a working directory of all of hg38, which the README said for every panel, stopped the
+  rebuild at mega's build, after hours of the other panels'). The D7 readiness audit runs
+  `seq_script/rebuild/check_index_set.py` before any build: each PAM file gives its row's PAM, side
+  and spacer; N is the build's bulges + 1; each name is the one `build-index-only` gives the build
+  (`index_fit.index_name`), and routes to the format-2 repo; each index serves its own guide at 2 +
+  2 bulges (`index_fit.fits`); each variant index's reference index is in the set; each panel has
+  its companions once; every index archive of 2.8.1 is replaced by exactly one archive of the set,
+  the one a download of it names; every build and publish command is one bash reads (`bash -n`: a
+  note has a column of its own, and a panel companion, which the panel's first build writes and its
+  first `publish-index` uploads, has no command, `-`), and one the rebuild runs as written: from
+  the repository's root, each on its own (a `cd` only inside `( )`, so no command moves the next),
+  a recipe called by its repository path and given every input it would otherwise read from a path
+  it was written with (the cluster's, or its working directory's), each build first copying its PAM
+  file from the repository's `PAMs/` into its working directory's, `crisprme.py`, `hf` and `pigz`
+  run in the release image (`$RUN`), each command in its own panel's working directory, with the
+  variables the README lists, each read by a command; every upload to the format-2 repo, no token
+  in a command, and every variant index published `--dictless`, so that a panel's indexes name one
   Dictionaries bundle. `--commands` prints the rebuild as one script, every build command, then
-  every publish command; it stops before its first command where one of those variables is not
-  set or a working directory's genome folder is not what the rebuild builds on (HGDP + 1000
-  Genomes' not the reference's; HPRC's or mega's holding a FASTA but chr1-22, X and Y, or not
-  those of the reference's; mega's merged VCFs not of its genome folder's chromosomes; a test
-  genome of chr22 runs), and at
-  the first command that fails (each ends in `|| exit`: `set -e` does not stop at a command of
-  an `&&` list but its last; and the HGDP + 1000 Genomes and HPRC recipes now stop at a step
-  that fails, under Fixed). The check runs it dry, every program it calls stubbed, in temporary
-  working directories that hold the genome folders and sources the rebuild takes, from a copy
-  of the repository's root made of links: it runs to its end only where every script it calls
-  is there, every PAM file a build reads is in place and every file a publish uploads is where
-  the command says, and writes nothing into the repository's root. mega's build calls
-  `seq_script/merge_panels/mega_rebuild.sh`, the recipe of its full rebuild (decision D2), from
-  the merged VCFs `mega.<chr>.afmax.vcf.gz`. Covered by `PostProcess/test_index_set.py`, which
-  mutates the set and its commands and checks that each mutation is found: by the check and the
-  dry run where both can see it, by the dry run alone (a kit uploaded from the repository's root,
-  or packed into it), and by the check alone where the dry run cannot (an input left to a
-  recipe's default, a variable the rebuild does not set or no command reads, another panel's
-  working directory, a pending script the tree holds, an upload to another repo, a token, a
-  variant index published with its per-sample dictionaries, and the set's own errors); and which
-  runs the script on genome folders the rebuild does not take, where it stops before its first
-  command. The PAM files the set builds ship in `PAMs/`:
-  `20bp-NNNNNNNN-NO-PAM.txt` (the general index), `22bp-NNGRRN-SaCas9.txt` and
-  `20bp-TTTN-Cas12a.txt`; and so do PAM files for the searches its indexes are published for,
+  every publish command; it stops before its first command where one of those variables is not set
+  or a working directory's genome folder is not what the rebuild builds on (HGDP + 1000 Genomes'
+  not the reference's; HPRC's or mega's holding a FASTA but chr1-22, X and Y, or not those of the
+  reference's; mega's merged VCFs not of its genome folder's chromosomes; a test genome of chr22
+  runs), and at the first command that fails (each ends in `|| exit`: `set -e` does not stop at a
+  command of an `&&` list but its last; and the HGDP + 1000 Genomes and HPRC recipes now stop at a
+  step that fails, under Fixed). The check runs it dry, every program it calls stubbed, in
+  temporary working directories that hold the genome folders and sources the rebuild takes, from a
+  copy of the repository's root made of links: it runs to its end only where every script it calls
+  is there, every PAM file a build reads is in place and every file a publish uploads is where the
+  command says, and writes nothing into the repository's root. mega's build calls
+  `seq_script/merge_panels/mega_rebuild.sh`, the recipe of its full rebuild (decision D2), from the
+  merged VCFs `mega.<chr>.afmax.vcf.gz`. Covered by `PostProcess/test_index_set.py`, which mutates
+  the set and its commands and checks that each mutation is found: by the check and the dry run
+  where both can see it, by the dry run alone (a kit uploaded from the repository's root, or packed
+  into it), and by the check alone where the dry run cannot (an input left to a recipe's default, a
+  variable the rebuild does not set or no command reads, another panel's working directory, a
+  pending script the tree holds, an upload to another repo, a token, a variant index published with
+  its per-sample dictionaries, and the set's own errors); and which runs the script on genome
+  folders the rebuild does not take, where it stops before its first command. The PAM files the set
+  builds ship in `PAMs/`: `20bp-NNNNNNNN-NO-PAM.txt` (the general index), `22bp-NNGRRN-SaCas9.txt`
+  and `20bp-TTTN-Cas12a.txt`; and so do PAM files for the searches its indexes are published for,
   which no shipped file gave: `22bp-NNGRRT-SaCas9.txt` (the CEP290 guides, served by the 22-nt
   NNGRRN index, pruned) and `20bp-TTTV-Cas12a.txt` (served by `TTTN-20`). `download --what pams`
-  installs the data repo's `pams/` (and the default `20bp-NRR-SpCas9.txt`), so the release
-  uploads these there (`docs/RELEASE_CHECKLIST.md`); until then the web of a working directory
-  set up by `download` offers none of them. `crisprme.py setup` wrote its own
-  `22bp-NNGRRN-SaCas9.txt`, with a 23-nt guide (25 N, then GRRN), over the shipped one: it now
-  writes the shipped file's 22-nt guide (`test_setup_legacy_database`).
+  installs the data repo's `pams/` (and the default `20bp-NRR-SpCas9.txt`), so the release uploads
+  these there (`docs/RELEASE_CHECKLIST.md`); until then the web of a working directory set up by
+  `download` offers none of them. `crisprme.py setup` wrote its own `22bp-NNGRRN-SaCas9.txt`, with
+  a 23-nt guide (25 N, then GRRN), over the shipped one: it now writes the shipped file's 22-nt
+  guide (`test_setup_legacy_database`).
 - **Every index CRISPRme builds records what it holds, in `.index_meta.json`.** `build-index-only`,
   a search's own build and each sub-index of an INDELS index write the index format, the build
   PAM, its side, the flank and guide lengths, the budget, whether the PAM is all `N` and whether the
