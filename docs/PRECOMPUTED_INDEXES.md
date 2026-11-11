@@ -504,7 +504,10 @@ Here `<PAM_MOTIF>` is the PAM region token itself — the IUPAC motif without th
 > same two indexes, which it names, since 2.10.0, for the guide length and the side
 > (`20-<PAM_MOTIF>_3_hg38+hg38_<ds>` and its `_INDELS` for a 20-nt guide and a 3′ PAM). Use it
 > if you also have the dataset's `Dictionaries/`/`VCFs/` staged; otherwise the two
-> `crispritz`/`pool_index_indels` calls above need only the enriched kit.
+> `crispritz`/`pool_index_indels` calls above need only the enriched kit. For **mega** the kit is
+> not optional: an enrichment of its sites-only VCFs holds no fake-indel window (CRISPRitz windows
+> an indel only where a sample carries it), so without the kit `build-index-only` refuses the
+> dataset beside its indel logs, rather than enrich it anew with no indel off-target (METHODS §4).
 
 ### Step 4 — search with the new-PAM index
 
@@ -719,9 +722,14 @@ than its windows hold (METHODS §4). A dataset of 2.9.1's windows that you built
 enriched again with 2.10.0's as `build-index-only` run on it says: by removing its enrichment
 and all that was built from it (its genomes, dictionaries, indel logs and dict-less tiers, and
 every index of it), which the command names by absolute path, then running it again, since a
-2.9.1 enrichment differs from a 2.10.0 one in its SNPs too; a dataset is never enriched anew
-beside the stores of an enrichment of other windows (a search or a build refuses it, naming
-them). Post-analysis resolves each indel
+2.9.1 enrichment differs from a 2.10.0 one in its SNPs too; a dataset is not enriched anew
+beside the stores of an earlier enrichment whose records tell other windows (its indel logs, an
+INDELS index of it, or a variant index of it in index format 1; a search or a build refuses it,
+naming them). The sites-only mega is not enriched anew beside the windows of its kit that its
+indel logs or INDELS indexes record, whatever their width: an enrichment of its VCFs, which name
+no sample, holds no window, so its windows come from its enriched-genome kit (built with a
+synthetic sample, `mega_build_indels.sh`), and the advice on it is its kit, or its archive and
+kit of CRISPRme 2.10.0. Post-analysis resolves each indel
 target on its carriers' own haplotypes (each gets the SNP alleles it carries, so a row
 lists only the individuals that have its sequence, or, where the phase is unknown, those
 whose own alleles allow it, PUTATIVE, split multi-allelic SNP sites aside on an index

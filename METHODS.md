@@ -582,20 +582,25 @@ goes with it: the advice names, each by absolute path, the dataset's enriched an
 genomes, its dictionaries and indel logs, its dict-less tiers and every index of it in the
 working directory's library, those the run builds next included
 (`indel_window.enrichment_stores`; its phased indel genotype store and a sites-only registry
-come from its VCFs alone, and stay). It used to name the genomes and, by a path relative to the
-shell's directory, the INDELS indexes alone, and the dataset enriched anew kept the earlier
-enrichment's tiers, taken as emitted, and its variant index, kept as built: on stage 2a's 2.9.1
-enrichment of chr22 the README guide's per-sample search then lost a row at a site written on
-two records (chr22:22,888,378, whose carrier HG03453 holds the first record's ALT, which the
+come from its VCFs alone, and stay: a registry whose manifest says sites-only by its `data_type`
+or, as every published mega's, which has none, by its aggregation of INFO AF fields,
+`indel_window.registry_data_type`; read by its `data_type` alone, the published mega's registry
+was named in the rm, and its dataset refused for it). It used to name the genomes and, by a path
+relative to the shell's directory, the INDELS indexes alone, and the dataset enriched anew kept
+the earlier enrichment's tiers, taken as emitted, and its variant index, kept as built: on stage
+2a's 2.9.1 enrichment of chr22 the README guide's per-sample search then lost a row at a site
+written on two records (chr22:22,888,378, whose carrier HG03453 holds the first record's ALT,
+which the
 kept tiers did not list), and failed the check. Followed word for word there now (the rm it
 prints run from another directory, its every path absolute), the advice gives a fresh 2.10.0
 build's dataset, file for file: its genomes, dictionaries, indel logs, tiers, phased indel
 store and indexes, their records included (2.8.1's reference index stays, which is no
 dataset's), and the README guide's per-sample search on it gives that build's tables, byte for
 byte, and passes the check (41 findings, 0 gating) (without the IntOGen driver annotation that
-2.8.1 install holds and the fresh build's folder does not; with it, the IntOGen column of 50
-rows differs, nothing else). With the enriched genome alone removed, as the old advice and a
-disk clean-up leave it, build-index-only refuses the dataset before it builds anything, and
+2.8.1 install holds and the fresh build's folder does not; with it, the IntOGen column differs,
+on 50 rows of the integrated table and 145 lines of the alternative alignments, and nothing
+else). With the enriched genome alone removed, as the old advice and a disk clean-up leave it,
+build-index-only refuses the dataset before it builds anything, and
 changes nothing; with its variant index removed too, the README guide's search refuses it
 before it enriches it. A dataset whose finished enrichment is not in place is not enriched anew
 beside the stores an earlier enrichment of other windows left, its tiers or an index of it (its
@@ -604,18 +609,53 @@ indel logs tell its windows, or an INDELS index of it, or a variant index of it 
 anything, as does a search that would enrich the dataset itself
 (`indel_window.reenrichment_refusal`), naming what to remove; beside the stores of an
 enrichment of the installed CRISPRitz's windows, the same enrichment of the same VCFs, a
-dataset is enriched anew as before. Nor is an index built from an enrichment in place whose
-fake-indel genome holds other windows than the dataset's indel logs record
-(`indel_window.fake_window_disagreement`: each window where its log row's `FAKEPOS` places it,
-an `N` after it, its left flank the row's `refseq`), as where a download installs an index's
-logs, dictionaries and tiers beside an enrichment made by another CRISPRitz: such a build
-recorded the logs' windows on each INDELS sub-index, which every search then read with those
-logs, every indel row misplaced. build-index-only, `pool_index_indels` and a search that would
-build an index from it refuse it, and `download --what index` warns of it; on every row of the
-chr22 enrichments of the configurations below (HGDP + 1000 Genomes at 30/30 and at 25/27,
-CRISPRitz 2.9.1's own, HPRC, its unphased copy, the mega, the self-test's) genome and logs
-agree, and a 25/27 genome read with 30/30 logs, or the other way round, disagrees at its first
-window. The wider windows make the fake-indel genome 14% larger
+dataset is enriched anew as before. The refusal goes by what the earlier enrichment's records
+tell: with its logs, its INDELS indexes and every variant index of format 1 removed, its tiers
+or a variant index of format 2 that CRISPRitz 2.10.0 built from its genome are not caught. A
+sites-only dataset (its VCFs name no sample, told by them, else by its registry:
+`indel_window.sites_only`), as the mega, is not enriched anew beside the fake-indel windows its
+logs or INDELS indexes record, whatever their width: CRISPRitz writes a window only for an indel
+a sample of the VCF carries, so an enrichment of its VCFs holds none (the mega's own SNP-side
+build has, on chr22, a fake-indel genome of a header alone and an indel log of no row), and its
+windows come from an enriched-genome kit whose indels a synthetic sample carries
+(`seq_script/merge_panels/mega_build_indels.sh`). Enriched anew, it would lose every indel
+off-target, as CRISPRme 2.8.1 did, silently; every message on such a dataset points to its kit,
+to its archive and kit of CRISPRme 2.10.0, or to that script, not to build-index-only
+(`indel_window.sites_only_way`: build-index-only's warning, the refusals, and the search's and
+the indel search's notes of windows too short). On chr22, with the published mega's registry (no
+`data_type`) and its kit's indel log of 25/27, neither kit nor index in place, build-index-only
+refuses the dataset in 1 s, building nothing and naming no registry (it named the registry in
+its rm and advised a new build; with the registry read as sites-only and nothing else changed,
+it enriched the VCFs anew, the log then of no row); beside the kit's log of 30/30 it refuses
+too, saying to put the kit back; with the 25/27 kit in place it builds (its INDELS index records
+25/27) and warns with that advice, whose rm, run from another directory, leaves the registry,
+the indel frequencies, the phased indel store and the VCFs; and with the kit's fake-indel genome
+beside the log of 30/30 it refuses in 3 s, before the reference index, its second way out the
+kit built again. Nor is an index built from an enrichment in place whose fake-indel genome holds
+other windows than the dataset's indel logs record (`indel_window.fake_window_disagreement`:
+each window where its log row's `FAKEPOS` places it, an `N` after it, its left flank the row's
+`refseq`), as where a download installs an index's logs, dictionaries and tiers beside an
+enrichment made by another CRISPRitz: such a build recorded the logs' windows on each INDELS
+sub-index, which every search then read with those logs, every indel row misplaced.
+build-index-only refuses it before it builds anything (the reference index included, which it
+built first, hours on a whole genome); a search that would build an index from it refuses it
+before it puts the SNP codes on that genome, which the overlay places by the logs (a search that
+found a variant index of the dataset in place came to the overlay without the check, and so
+rewrote the genome before `pool_index_indels` refused, naming nothing to remove: on stage 2a's
+2.9.1 enrichment of chr22 beside logs of 30/30, 641,930 codes at the wrong bases, which then
+disagreed with its own logs too); the overlay itself refuses such a genome
+(`overlay_indel_snps.NotItsLog`), `pool_index_indels` a chromosome so cut, and
+`download --what index` warns of it. There, its INDELS index removed, the README guide's search
+now refuses in 89 s, naming what to put back or remove, its fake-indel genome unchanged, and
+build-index-only refuses in 1 s, building nothing (60 s before, the reference index built
+first); on that enrichment with its own logs, the same search builds the INDELS index from it,
+records 25/27 on it, and gives stage 2a's tables (but for the IntOGen column, whose BED that copy
+lacks), passing
+the check (18 findings, 0 gating). On every row of the chr22 enrichments of the configurations
+below (HGDP + 1000 Genomes at 30/30 and at 25/27, CRISPRitz 2.9.1's own, HPRC, its unphased
+copy, the mega, the self-test's) genome and logs agree, and a 25/27 genome read with 30/30 logs,
+or the other way round, disagrees at its first window. The wider windows make the fake-indel
+genome 14% larger
 there (15.6 MB against 13.7 MB) and an INDELS index 21% to 22% (NRG's 61.2 MB against 50.6,
 SaCas9's `NNGRRT` 8.7 MB against 7.1), and CRISPRitz's search of it about 30% slower: on one
 thread, as the indel search runs it on a chromosome, 33 s against 25 for the README guide

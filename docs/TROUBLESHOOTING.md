@@ -246,14 +246,32 @@ builds its tiers and index; or put the earlier enrichment back and search it as 
 hold targets of up to 27 bases, guide, PAM and DNA bulges counted, 26 at an MNV). Beside the stores
 of an enrichment of the installed CRISPRitz's windows, a dataset is enriched anew as before.
 `build-index-only` run on an enrichment of 2.9.1's windows in place says how to enrich it with
-2.10.0's in the same way (METHODS §4).
+2.10.0's in the same way (METHODS §4). The refusal goes by what the earlier enrichment's records
+tell (its indel logs, an INDELS index of it, or a variant index of it in index format 1): with
+all of those removed, nothing tells its windows, and its tiers or a variant index of format 2
+left in place are not caught.
+
+**A sites-only dataset (`hg38_mega`).** The message reads `... would enrich it anew from its
+VCFs; but hg38_mega is sites-only: its VCFs name no sample, and CRISPRitz writes a fake-indel
+window only for an indel a sample carries, so an enrichment of them holds none, while its indel
+logs or its INDELS indexes record windows of ...`, whatever their width. The mega's windows come
+from its enriched-genome kit, whose indels a synthetic sample carries
+(`seq_script/merge_panels/mega_build_indels.sh`): enriched anew from its VCFs, it would lose
+every indel off-target. Put its kit back (`Genomes/hg38+hg38_mega` and `_INDELS`: download the
+kit, [Precomputed indexes](PRECOMPUTED_INDEXES.md)) and build or search as before; for the
+windows of 2.10.0, install its archive and kit of CRISPRme 2.10.0 in place of what the message
+lists, or build the kit again that way. Its registry, which comes from its VCFs alone (their
+INFO AF fields), is never in that list.
 
 ## 13. A build or a search says a fake-indel genome and its indel logs come from two enrichments
 
-**Symptom.** `build-index-only`, or a variant search that would build an index, stops with
+**Symptom.** `build-index-only`, before it builds anything, or a variant search that would
+build an index from the enrichment in place (the INDELS index it lacks beside a variant index in
+place, say), before it puts the SNP codes on the fake-indel genome, stops with
 `The fake-indel genome Genomes/<genome>+<dataset>_INDELS and the indel logs ... come from two
 enrichments: on <chrom>, the window of ... ends elsewhere there`; or `download --what index`
-warns that `the enrichment of <dataset> in place ... is another one than the archive's`.
+warns that `the enrichment of <dataset> in place ... is another one than the archive's`. Nothing
+is changed: the SNP overlay, which places each code by the logs, refuses such a genome too.
 
 **Cause.** The dataset's indel logs, dictionaries and tiers came one way (a download of an index
 installs them) and its enriched and fake-indel genomes another (an enrichment made here, by
@@ -264,4 +282,6 @@ would be read with the other enrichment's logs: every indel row misplaced.
 message says (`rm -rf` of the enriched and the fake-indel genome), and install the published
 index's enriched-genome kit ([Precomputed indexes](PRECOMPUTED_INDEXES.md)); or remove all of the
 dataset that comes from an enrichment (the message lists it) and run `build-index-only` with its
-VCFs and `--samplesID`, which enriches it anew.
+VCFs and `--samplesID`, which enriches it anew. For a sites-only dataset (`hg38_mega`) the second
+way is to build its kit again with a synthetic sample (`seq_script/merge_panels/mega_build_indels.sh`),
+as the message says: an enrichment of its VCFs would hold no fake-indel window.
