@@ -1707,10 +1707,12 @@ while read vcf_f; do
 			# dataset's tiers and indexes, here or in the --index-path library -- which this
 			# and every later search would read with the new one, disagreeing with it in its
 			# SNPs (2.9.1 enriched only the last ALT of a site written on several records):
-			# refused, as build-index-only refuses it (indel_window.reenrichment_refusal).
+			# refused, as build-index-only refuses it (indel_window.reenrichment_refusal). Nor,
+			# of a sites-only dataset (its VCFs name no sample), beside the fake-indel windows
+			# of its enriched-genome kit, which no enrichment of its VCFs writes.
 			_enr_libs=("$current_working_directory/genome_library")
 			[ "$ref_lib" -ef "${_enr_libs[0]}" ] || _enr_libs+=("$ref_lib")
-			_enr_why=$(python "$starting_dir/indel_window.py" reenrichment "$current_working_directory" "$ref_name" "$vcf_name" "${_enr_libs[@]}")
+			_enr_why=$(python "$starting_dir/indel_window.py" reenrichment --vcf "$vcf_folder" "$current_working_directory" "$ref_name" "$vcf_name" "${_enr_libs[@]}")
 			if [ $? = 3 ]; then
 				printf "ERROR: %s\n" "$_enr_why" >&2
 				rm -rf "$_run_tmp"
@@ -1780,7 +1782,7 @@ while read vcf_f; do
 		# record, which come from another enrichment with its dictionaries and tiers (a
 		# download installs an index's, not the enrichment they come from), as build-index-
 		# only refuses it (indel_window.fake_genome_refusal).
-		_enr_why=$(python "$starting_dir/indel_window.py" fakecheck "$current_working_directory" "$ref_name" "$vcf_name")
+		_enr_why=$(python "$starting_dir/indel_window.py" fakecheck --vcf "$vcf_folder" "$current_working_directory" "$ref_name" "$vcf_name")
 		if [ $? = 3 ]; then
 			printf "ERROR: %s\n" "$_enr_why" >&2
 			exit 1
@@ -2047,6 +2049,19 @@ while read vcf_f; do
 			# every later run would keep it.
 			if [ -d "$indels_out/.building" ]; then
 				printf "ERROR: %s is unfinished: a build-index-only run is writing it, or stopped before it was done. Let that run finish, or run build-index-only again to its end, then run this search again\n" "$indels_out" >&2
+				exit 1
+			fi
+			# Nor from a fake-indel genome that the dataset's indel logs do not describe: they
+			# come from two enrichments (a download installs an index's logs, dictionaries and
+			# tiers beside an enrichment made here by another CRISPRitz). Checked before the
+			# SNP overlay below, which places each code by the logs and would write them at the
+			# wrong bases of the genome in place, then refused at pool_index_indels with the
+			# genome rewritten; a search that found a variant index of the dataset in place
+			# came here without STEP 1's check (indel_window.fake_genome_refusal, which names
+			# what to put back or remove).
+			_enr_why=$(python "$starting_dir/indel_window.py" fakecheck --vcf "$vcf_folder" "$current_working_directory" "$ref_name" "$vcf_name")
+			if [ $? = 3 ]; then
+				printf "ERROR: %s\n" "$_enr_why" >&2
 				exit 1
 			fi
 			_lock="${indels_index_dir}.lock"

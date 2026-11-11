@@ -518,7 +518,9 @@ def _window_notes():
     """What this search says, on stdout (the run's log_verbose.txt), of the fake-indel
     windows of the dataset when its targets (the PAM file's guide and PAM) with the DNA
     bulges it allows need more bases than they hold (indel_window.target_note): such indel
-    off-targets are held by no index. The windows are those the indel logs record."""
+    off-targets are held by no index. The windows are those the indel logs record; how a
+    sites-only dataset gets wider ones is not by enriching it again (indel_window.sites_only,
+    of its VCFs in vcf_dir or its registry)."""
     import indel_window
 
     try:
@@ -530,8 +532,11 @@ def _window_notes():
         widths = set().union(*indel_window.dataset_windows(log_indels_dir).values())
     except (OSError, ValueError, EOFError):
         return []
-    return [n for n in (indel_window.target_note(w, len(seq), bdna, "indel search", vcf_name)
-                        for w in sorted(widths)) if n]
+    notes = [w for w in sorted(widths)
+             if indel_window.target_note(w, len(seq), bdna, "indel search", vcf_name)]
+    sites = notes and indel_window.sites_only(current_working_directory, vcf_name, vcf_dir)
+    return [indel_window.target_note(w, len(seq), bdna, "indel search", vcf_name, bool(sites))
+            for w in notes]
 
 
 def search_indels(chrom):

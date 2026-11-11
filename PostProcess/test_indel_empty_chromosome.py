@@ -893,6 +893,18 @@ class SearchSide(_Fixture):
                       "differ at their first base, an MNV or complex record), guide, PAM and "
                       "DNA bulges counted; this search's targets need up to 28 (a 27-nt guide "
                       "and PAM with 1 DNA bulge)", res.stdout)
+        self.assertIn("enrich ds again with it (build-index-only) to search them.", res.stdout)
+        # a sites-only dataset (its VCFs name no sample, as the mega's) is not sent to
+        # build-index-only, whose enrichment of them holds no window (W-R3-F1)
+        shutil.rmtree(os.path.join(self.tmp, "work"))
+        shutil.rmtree(os.path.join(self.tmp, "out"))
+        res, _lines = self.run_search({"chrA": window_rows("chrA", 25, 27)}, {"chrA": True},
+                                      true_pam="NNGRRT", pam=sa, vcfs=["chrA"])
+        self.assertEqual(res.stderr, "")
+        self.assertIn("To search them: ds is sites-only: its VCFs name no sample", res.stdout)
+        self.assertIn("install its archive and enriched-genome kit of CRISPRme 2.10.0",
+                      res.stdout)
+        self.assertNotIn("enrich ds again", res.stdout)
         shutil.rmtree(os.path.join(self.tmp, "work"))
         shutil.rmtree(os.path.join(self.tmp, "out"))
         res, _lines = self.run_search({"chrA": window_rows("chrA", 30, 30)}, {"chrA": True},

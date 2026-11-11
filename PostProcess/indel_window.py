@@ -39,6 +39,16 @@ dataset enriched anew beside the stores of an earlier enrichment of other window
 by build-index-only and by a search that enriches it itself (reenrichment_refusal; the search
 script calls ``indel_window.py reenrichment``).
 
+A sites-only dataset (sites_only: its VCFs name no sample; the mega) is the exception to
+enriching anew: CRISPRitz writes a fake-indel window only for an indel a sample of the VCF
+carries, so an enrichment of its VCFs holds none, and the windows it has come from an
+enriched-genome kit whose indels a synthetic sample carries
+(seq_script/merge_panels/mega_build_indels.sh). It is not enriched anew beside windows of
+such a kit, whatever their width (reenrichment_refusal), and every advice on it points to its
+archive and kit of CRISPRme 2.10.0, or that script, not to build-index-only (sites_only_way).
+Its registry, built from its VCFs' INFO AF fields, is no store of an enrichment
+(registry_data_type).
+
 Stdlib only.
 """
 
@@ -262,12 +272,14 @@ def mismatched_indexes(library, dataset, log_dir):
     return out
 
 
-def target_note(window, target_len, bdna, who, dataset):
+def target_note(window, target_len, bdna, who, dataset, sites=False):
     """What a search of targets ``target_len`` long (guide + PAM) with up to ``bdna`` DNA
     bulges says of ``dataset``, whose fake-indel windows are ``window`` (left, right): None
     where every such target fits (reach); else a WARNING (``who``: the search's name for
     itself) that the indel off-targets of more bases than the window holds are not
-    reported."""
+    reported, and, for windows narrower than CRISPRitz 2.10.0's, how to have its windows: by
+    enriching the dataset again with build-index-only, or, for a sites-only one (``sites``:
+    sites_only), whose windows no enrichment of its VCFs writes, as sites_only_way says."""
     if window is None:
         return None
     want = target_len + bdna
@@ -279,9 +291,14 @@ def target_note(window, target_len, bdna, who, dataset):
              "MNV or complex record)" % (full, mnv))
     how = "a %d-nt guide and PAM" % target_len + (
         " with %d DNA bulge%s" % (bdna, "" if bdna == 1 else "s") if bdna else "")
-    advice = ("" if tuple(window) == WINDOW_2100 else
-              " CRISPRitz 2.10.0 writes windows of 30 bases on either side, which hold up to "
-              "31: enrich %s again with it (build-index-only) to search them." % dataset)
+    if tuple(window) == WINDOW_2100:
+        advice = ""
+    elif sites:
+        advice = (" CRISPRitz 2.10.0 writes windows of 30 bases on either side, which hold up "
+                  "to 31. To search them: %s." % sites_only_way(dataset))
+    else:
+        advice = (" CRISPRitz 2.10.0 writes windows of 30 bases on either side, which hold up "
+                  "to 31: enrich %s again with it (build-index-only) to search them." % dataset)
     return ("WARNING [%s]: the fake-indel windows of %s hold %d reference bases before each "
             "indel and %d after it, so a target that holds an indel there holds %s, guide, PAM "
             "and DNA bulges counted; this search's targets need up to %d (%s): such indel "
@@ -311,21 +328,91 @@ def dataset_indexes(library, genome, dataset):
             and os.path.isdir(os.path.join(library, name))]
 
 
-def _sites_only_registry(registry):
-    """Whether the registry ``registry`` says, in the manifest of a chromosome
-    (reg_<chrom>.idx), that it is of a sites-only dataset."""
+def registry_data_type(registry):
+    """The data type the registry folder ``registry`` gives in a chromosome's manifest
+    (reg_<chrom>.idx; dataset-wide, so the first that tells is enough): its ``data_type``,
+    else "sites-only" where its ``aggregation`` is "info_af" -- a registry built from VCFs'
+    INFO AF fields (PostProcess/build_mega_registry.py) before the manifest had a data_type,
+    as every published mega's -- as crisprme.py's _registry_data_type and
+    tier0_registry._classify_data_type read it. None where no manifest tells."""
     try:
         names = sorted(n for n in os.listdir(registry) if n.startswith("reg_")
                        and n.endswith(".idx"))
     except OSError:
-        return False
+        return None
     for name in names:
         try:
             with open(os.path.join(registry, name)) as fh:
-                return json.load(fh).get("data_type") == "sites-only"
-        except (OSError, ValueError, AttributeError):
+                manifest = json.load(fh)
+        except (OSError, ValueError):
             continue
+        if not isinstance(manifest, dict):
+            continue
+        kind = manifest.get("data_type") or (
+            "sites-only" if manifest.get("aggregation") == "info_af" else None)
+        if kind:
+            return kind
+    return None
+
+
+def _sites_only_registry(registry):
+    """Whether the registry ``registry`` is of a sites-only dataset (registry_data_type):
+    built from its VCFs' INFO AF fields, not from an enrichment's dictionaries."""
+    return registry_data_type(registry) == "sites-only"
+
+
+def _vcf_names_a_sample(path):
+    """Whether the bgzipped VCF ``path`` names a sample on its #CHROM line (no for one that
+    cannot be read, as the input validator's _vcf_header_samples has it)."""
+    try:
+        with gzip.open(path, "rt") as fh:
+            for line in fh:
+                if line.startswith("#CHROM"):
+                    return len(line.rstrip("\n").split("\t")) > 9
+                if not line.startswith("#"):
+                    break
+    except (OSError, EOFError, ValueError):
+        pass
     return False
+
+
+def sites_only(workdir, dataset, vcf_dir=None):
+    """Whether variant dataset ``dataset`` of working directory ``workdir`` is sites-only:
+    its VCFs name no sample, so an enrichment of them writes no fake-indel window (CRISPRitz's
+    add-variants writes one for an indel a sample carries), and the windows it has come from
+    an enriched-genome kit whose indels a synthetic sample carries
+    (seq_script/merge_panels/mega_build_indels.sh, as the published mega's). Told by its
+    VCFs, those of ``vcf_dir`` (as crisprme.py's _sites_only_vcfs: .vcf.gz files, none naming
+    a sample), where there are any to read, else by its registry (registry_data_type)."""
+    if vcf_dir:
+        try:
+            vcfs = sorted(os.path.join(vcf_dir, n) for n in os.listdir(vcf_dir)
+                          if n.endswith(".vcf.gz"))
+        except OSError:
+            vcfs = []
+        if vcfs:
+            return not any(_vcf_names_a_sample(v) for v in vcfs)
+    return _sites_only_registry(os.path.join(workdir, "Dictionaries", "registry_%s" % dataset))
+
+
+def sites_only_why(dataset):
+    """Why sites-only dataset ``dataset`` (sites_only) is not given fake-indel windows by
+    enriching it anew from its VCFs."""
+    return ("%s is sites-only: its VCFs name no sample, and CRISPRitz writes a fake-indel "
+            "window only for an indel a sample carries, so an enrichment of them holds none"
+            % dataset)
+
+
+def sites_only_way(dataset):
+    """How sites-only dataset ``dataset`` (sites_only) gets the fake-indel windows of
+    CRISPRitz 2.10.0, not from build-index-only (sites_only_why): from its archive and
+    enriched-genome kit of CRISPRme 2.10.0, or its kit built again with a synthetic sample
+    (seq_script/merge_panels/mega_build_indels.sh)."""
+    return ("%s (so build-index-only would leave it with no indel off-target); its windows "
+            "come from its enriched-genome kit, whose indels a synthetic sample carries: "
+            "install its archive and enriched-genome kit of CRISPRme 2.10.0 "
+            "(docs/PRECOMPUTED_INDEXES.md), or build its kit again that way "
+            "(seq_script/merge_panels/mega_build_indels.sh)" % sites_only_why(dataset))
 
 
 def _holds_a_file(directory):
@@ -349,7 +436,8 @@ def _indexes(workdir, genome, dataset, libraries):
 
 def _tiers(workdir, dataset):
     """The dict-less tiers build-index-only emits from the dataset's dictionaries:
-    Dictionaries/registry_<dataset> (not a sites-only one) and genotypes_<dataset>."""
+    Dictionaries/registry_<dataset> (not a sites-only one, built from the VCFs' INFO AF
+    fields: _sites_only_registry) and genotypes_<dataset>."""
     dicts = os.path.join(workdir, "Dictionaries")
     registry = os.path.join(dicts, "registry_%s" % dataset)
     return ([] if _sites_only_registry(registry) else [registry]) + [
@@ -367,8 +455,9 @@ def enrichment_stores(workdir, genome, dataset, libraries=(), present=True):
     ``libraries``). With ``present``, those that are there (a tier where it holds a file).
     Not what comes from its VCFs alone, the same from any enrichment of them: its phased
     indel genotype store, and a sites-only registry (the mega's, which
-    PostProcess/build_mega_registry.py writes from its VCFs' INFO AF fields, its manifest
-    says so) with its indel frequencies."""
+    PostProcess/build_mega_registry.py writes from its VCFs' INFO AF fields, as its manifest
+    says: its data_type, or, in every published mega's, its aggregation, registry_data_type)
+    with its indel frequencies."""
     own = [os.path.join(workdir, "Genomes", "%s+%s%s" % (genome, dataset, s))
            for s in ("", "_INDELS")] + [
         os.path.join(workdir, "Dictionaries", "%s_%s" % (k, dataset))
@@ -380,15 +469,16 @@ def enrichment_stores(workdir, genome, dataset, libraries=(), present=True):
     return own + tiers + _indexes(workdir, genome, dataset, libraries)
 
 
-def earlier_windows(workdir, genome, dataset, libraries=()):
+def earlier_windows(workdir, genome, dataset, libraries=(), variant=True):
     """The fake-indel windows that the records of the enrichment of ``dataset`` of genome
     ``genome`` in ``workdir`` tell -- of an earlier one, where a new one is to be made: its
     indel logs' (Dictionaries/log_indels_<dataset>: dataset_windows), each INDELS sub-index's
     of the dataset (index_window: the one it records, or 25/27 for one of index format 1),
-    and 25/27 for a variant index of the dataset of format 1 where the installed CRISPRitz
-    writes format 2 (only CRISPRitz 2.9.1 and earlier build one, from an enrichment of
-    theirs, whose windows were 25/27). A set: empty where nothing tells (no log row, no
-    such index)."""
+    and, with ``variant``, 25/27 for a variant index of the dataset of format 1 where the
+    installed CRISPRitz writes format 2 (only CRISPRitz 2.9.1 and earlier build one, from an
+    enrichment of theirs, whose windows were 25/27; without, only what holds windows tells,
+    a log row or an INDELS sub-index). A set: empty where nothing tells (no log row, no such
+    index)."""
     index_fit = _index_fit()
     found = set()
     try:
@@ -409,36 +499,66 @@ def earlier_windows(workdir, genome, dataset, libraries=()):
                     w = index_window(os.path.join(idx, sub))
                     if w is not None:
                         found.add(w)
-        elif newer and set(index_fit.bin_formats(idx)) == {1}:
+        elif variant and newer and set(index_fit.bin_formats(idx)) == {1}:
             found.add(OLD_WINDOW)
     return found
 
 
-def reenrichment_refusal(workdir, genome, dataset, libraries=(), who="build-index-only"):
+def reenrichment_refusal(workdir, genome, dataset, libraries=(), who="build-index-only",
+                         vcf_dir=None):
     """Why ``who`` (build-index-only, or "this search": the search script's STEP 1, where a
     search enriches a dataset itself) must not enrich variant dataset ``dataset`` of genome
-    ``genome`` anew in ``workdir``, its finished enrichment not in place; None where nothing
-    stands in the way. Stores built from an earlier enrichment of it are in place, its tiers
-    or its indexes (enrichment_stores; ``libraries``: those a search reads besides the
-    working directory's), and that enrichment was another CRISPRitz's, as its records tell
-    by fake-indel windows other than those the installed CRISPRitz writes (earlier_windows,
-    engine_window): one of 2.9.1 or earlier, whose enrichment differs in its SNPs too (it
-    enriched only the last ALT of a site written on several records). Enriched anew, the
-    dataset would hold stores of two enrichments, which a search reads together: the alleles
-    its indexes match and the carriers its tiers give would disagree. An earlier enrichment
-    of the installed CRISPRitz's windows gives the same enrichment of the same VCFs: what
-    was built from it is kept, as before. The removal named is of everything that comes
-    from the earlier enrichment (enrichment_stores), with its dictionaries and indel logs,
-    which a new enrichment writes again (a search's own moves its files in beside them)."""
+    ``genome`` anew in ``workdir`` from its VCFs (``vcf_dir``), its finished enrichment not in
+    place; None where nothing stands in the way. Stores built from an earlier enrichment of
+    it are in place, its tiers or its indexes (enrichment_stores; ``libraries``: those a
+    search reads besides the working directory's), and that enrichment was another
+    CRISPRitz's, as its records tell by fake-indel windows other than those the installed
+    CRISPRitz writes (earlier_windows, engine_window): one of 2.9.1 or earlier, whose
+    enrichment differs in its SNPs too (it enriched only the last ALT of a site written on
+    several records). Enriched anew, the dataset would hold stores of two enrichments, which a
+    search reads together: the alleles its indexes match and the carriers its tiers give
+    would disagree. An earlier enrichment of the installed CRISPRitz's windows gives the same
+    enrichment of the same VCFs: what was built from it is kept, as before. The removal named
+    is of everything that comes from the earlier enrichment (enrichment_stores), with its
+    dictionaries and indel logs, which a new enrichment writes again (a search's own moves
+    its files in beside them).
+
+    But not that of a sites-only dataset (sites_only, the mega) whose indel logs or INDELS
+    indexes hold windows, whatever their width: an enrichment of its VCFs holds none, they
+    came from an enriched-genome kit whose indels a synthetic sample carries, and enriched
+    anew it would lose every indel off-target, its new indel logs holding no row (CRISPRme
+    2.8.1 did so, silently). That kit is to be put back in place, or the dataset's archive
+    and kit of CRISPRme 2.10.0 installed (sites_only_way)."""
+    enriched = os.path.join(workdir, "Genomes", "%s+%s" % (genome, dataset))
+    engine = engine_window()
+    if sites_only(workdir, dataset, vcf_dir):
+        kit = sorted(earlier_windows(workdir, genome, dataset, libraries, variant=False))
+        if kit:
+            return ("no finished enrichment of %s is in place (%s), so %s would enrich it anew "
+                    "from its VCFs; but %s, while its indel logs or its INDELS indexes record "
+                    "windows of %s, which came from an enriched-genome kit whose indels a "
+                    "synthetic sample carries (seq_script/merge_panels/mega_build_indels.sh, "
+                    "as the published mega's). Enriched anew, it would lose every indel "
+                    "off-target: the new enrichment's indel logs hold no row, and its INDELS "
+                    "indexes no window. Put that kit back in place (%s and %s_INDELS: "
+                    "of a published dataset, its enriched-genome kit, "
+                    "docs/PRECOMPUTED_INDEXES.md), from which a build or a search builds the "
+                    "index it needs%s."
+                    % (dataset, enriched, who, sites_only_why(dataset),
+                       " and ".join(describe(w) for w in kit), enriched, enriched,
+                       "" if kit == [engine] else
+                       "; or, for the windows of the installed CRISPRitz (%s), install the "
+                       "dataset's archive and enriched-genome kit of CRISPRme 2.10.0 in place "
+                       "of all that came from that kit (rm -rf %s), or build its kit again that "
+                       "way" % (describe(engine), " ".join(quote(d) for d in enrichment_stores(
+                           workdir, genome, dataset, libraries)))))
     built = ([d for d in _tiers(workdir, dataset) if _holds_a_file(d)]
              + _indexes(workdir, genome, dataset, libraries))
     if not built:
         return None
-    engine = engine_window()
     other = sorted(earlier_windows(workdir, genome, dataset, libraries) - {engine})
     if not other:
         return None
-    enriched = os.path.join(workdir, "Genomes", "%s+%s" % (genome, dataset))
     then = ("then run build-index-only again, which enriches the dataset anew and builds its "
             "index, and its tiers with --samplesID, from that enrichment (a build or a search "
             "builds each other index of it again where it needs it)"
@@ -454,7 +574,9 @@ def reenrichment_refusal(workdir, genome, dataset, libraries=(), who="build-inde
             "several records, 2.10.0 enriches every one), and a search would read the stores "
             "of the two enrichments together, with carriers or rows wrong or lost. Remove "
             "them, with the dataset's dictionaries and indel logs, which the new enrichment "
-            "writes again (rm -rf %s), %s; or put back the enrichment they were built from "
+            "writes again (rm -rf %s), %s (of a published dataset, its archive and "
+            "enriched-genome kit of CRISPRme 2.10.0 may be installed instead: "
+            "docs/PRECOMPUTED_INDEXES.md); or put back the enrichment they were built from "
             "(%s and %s_INDELS), on which they are searched as they are."
             % (dataset, enriched, who, describe(engine), " and ".join(describe(w) for w in other),
                ", ".join(built), " ".join(quote(d) for d in enrichment_stores(
@@ -550,21 +672,34 @@ def fake_genome_disagreement(fake_dir, log_dir, dataset):
     return None
 
 
-def fake_genome_refusal(workdir, genome, dataset, who="build-index-only"):
+def fake_genome_refusal(workdir, genome, dataset, who="build-index-only", vcf_dir=None):
     """Why ``who`` (build-index-only, or "this search": the search script's STEP 1 with the
     enrichment in place and no variant index of the dataset that serves it, which it builds
-    from that enrichment) must not build an index of ``dataset`` from the enrichment in place
-    in ``workdir``: its fake-indel genome and the dataset's indel logs come from two
-    enrichments (fake_genome_disagreement), and so then do its enriched genome and the
-    dataset's dictionaries and tiers, which a download installs with the logs; an index built
-    from the one would be read with the other, every indel row misplaced (its windows are
-    another width) and the SNP side another enrichment's. None where they agree."""
+    from that enrichment, and its STEP 2 before it puts the SNP codes on the fake-indel
+    genome in place and builds the INDELS index it lacks from it) must not build an index of
+    ``dataset`` from the enrichment in place in ``workdir``: its fake-indel genome and the
+    dataset's indel logs come from two enrichments (fake_genome_disagreement), and so then do
+    its enriched genome and the dataset's dictionaries and tiers, which a download installs
+    with the logs; an index built from the one would be read with the other, every indel row
+    misplaced (its windows are another width) and the SNP side another enrichment's, and the
+    SNP overlay, which places each code by the logs, would rewrite the fake-indel genome with
+    codes at the wrong bases. None where they agree. The second way out it names, enriching
+    the dataset anew, is not that of a sites-only one (sites_only: ``vcf_dir`` its VCFs),
+    whose windows no enrichment of its VCFs writes: building its kit again is
+    (sites_only_way)."""
     enriched = os.path.join(workdir, "Genomes", "%s+%s" % (genome, dataset))
     logs = os.path.join(workdir, "Dictionaries", "log_indels_%s" % dataset)
     found = fake_genome_disagreement(enriched + "_INDELS", logs, dataset)
     if not found:
         return None
-    every = enrichment_stores(workdir, genome, dataset)
+    every = " ".join(quote(d) for d in enrichment_stores(workdir, genome, dataset))
+    anew = ("or build that kit again with a synthetic sample "
+            "(seq_script/merge_panels/mega_build_indels.sh), in place of all of the dataset "
+            "that comes from an enrichment (rm -rf %s): %s, so build-index-only would enrich "
+            "it anew with no indel off-target" % (every, sites_only_why(dataset))
+            if sites_only(workdir, dataset, vcf_dir) else
+            "or remove all of the dataset that comes from an enrichment (rm -rf %s) and run "
+            "build-index-only again, which enriches it anew" % every)
     return ("the fake-indel genome %s_INDELS and the indel logs %s of %s come from two "
             "enrichments: on %s, %s. With the fake-indel genome goes the enriched genome %s, "
             "and with the logs the dataset's dictionaries and dict-less tiers (a download "
@@ -573,27 +708,35 @@ def fake_genome_refusal(workdir, genome, dataset, who="build-index-only"):
             "enrichment's logs, dictionaries and tiers: every indel row misplaced, and the SNP "
             "alleles and carriers of two enrichments mixed. Put the enrichment those come with "
             "in place of this one (rm -rf %s %s; of a published index, its enriched-genome "
-            "kit, docs/PRECOMPUTED_INDEXES.md), or remove all of the dataset that comes from "
-            "an enrichment (rm -rf %s) and run build-index-only again, which enriches it anew."
+            "kit, docs/PRECOMPUTED_INDEXES.md), %s."
             % (enriched, logs, dataset, found[0], found[1], enriched,
                "that build-index-only" if who == "build-index-only" else "that this search",
-               quote(enriched), quote(enriched + "_INDELS"), " ".join(quote(d) for d in every)))
+               quote(enriched), quote(enriched + "_INDELS"), anew))
 
 
 def main(argv):
-    """The search script's checks of a dataset (STEP 1), each the refusal on stdout, exit 3,
-    or nothing, exit 0: ``indel_window.py reenrichment <workdir> <genome> <dataset>
-    [<library>...]`` before it enriches the dataset itself (reenrichment_refusal);
-    ``indel_window.py fakecheck <workdir> <genome> <dataset>`` before it builds an index of it
-    from the enrichment in place (fake_genome_refusal)."""
+    """The search script's checks of a dataset, each the refusal on stdout, exit 3, or
+    nothing, exit 0: ``indel_window.py reenrichment [--vcf <dir>] <workdir> <genome>
+    <dataset> [<library>...]`` before it enriches the dataset itself (STEP 1:
+    reenrichment_refusal); ``indel_window.py fakecheck [--vcf <dir>] <workdir> <genome>
+    <dataset>`` before it builds an index of it from the enrichment in place (STEP 1, and
+    STEP 2 before the SNP overlay of the fake-indel genome and its INDELS index:
+    fake_genome_refusal). ``--vcf``: the dataset's VCF folder, which tells a sites-only one
+    (sites_only)."""
+    vcf_dir = None
+    if len(argv) > 3 and argv[2] == "--vcf":
+        vcf_dir, argv = argv[3], argv[:2] + argv[4:]
     if len(argv) < 5 or argv[1] not in ("reenrichment", "fakecheck"):
-        sys.stderr.write("usage: indel_window.py reenrichment <workdir> <genome> <dataset> "
-                         "[<library>...] | fakecheck <workdir> <genome> <dataset>\n")
+        sys.stderr.write("usage: indel_window.py reenrichment [--vcf <dir>] <workdir> <genome> "
+                         "<dataset> [<library>...] | fakecheck [--vcf <dir>] <workdir> "
+                         "<genome> <dataset>\n")
         return 2
     if argv[1] == "reenrichment":
-        why = reenrichment_refusal(argv[2], argv[3], argv[4], argv[5:], who="this search")
+        why = reenrichment_refusal(argv[2], argv[3], argv[4], argv[5:], who="this search",
+                                   vcf_dir=vcf_dir)
     else:
-        why = fake_genome_refusal(argv[2], argv[3], argv[4], who="this search")
+        why = fake_genome_refusal(argv[2], argv[3], argv[4], who="this search",
+                                  vcf_dir=vcf_dir)
     if why:
         print(why)
         return 3

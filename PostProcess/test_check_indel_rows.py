@@ -4965,6 +4965,14 @@ class ReleaseTwoTen(Base):
         self.assertEqual(len(said), 1, none)
         self.assertTrue(said[0].endswith("INDELS format 2, fake-indel windows none: no indel "
                                          "record)"), said[0])
+        # a sites-only VCF (the mega's) with no indel record there reads none too (W-R3-N2)
+        write_sites_only_vcf(case.vcf, "chr21", [(len(PRE) + 6, "C", GUIDE[5])])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, found = case.run("completeness")
+        sites = [x for x in err.getvalue().splitlines() if "read as a run of" in x]
+        self.assertEqual(len(sites), 1, err.getvalue())
+        self.assertTrue(sites[0].endswith("fake-indel windows none: no indel record)"), sites[0])
         repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(repo, "docs", "RELEASE_CHECKLIST.md")) as fh:
             checks = [x for x in fh.read().splitlines() if 'grep -o "fake-indel windows' in x]

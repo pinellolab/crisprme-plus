@@ -40,6 +40,13 @@ import indel_window
 # enriched genome iff it is one of these.
 _IUPAC_AMBIG = set("RYSWKMBDHVQryswkmbdhvq")
 
+
+class NotItsLog(ValueError):
+    """A fake-indel FASTA that the indel log given with it does not describe
+    (indel_window.fake_window_disagreement): the two come from two enrichments, and the
+    overlay, which places each code by the log's windows, would write codes at the wrong
+    bases. Nothing is overlaid."""
+
 def map_fake_offset_to_real(k, start_position, ref_len, alt_len, left_flank):
     """Map a 0-based offset ``k`` within a fake sub-sequence to its 0-based real
     reference position (enricher ``genomeStr`` coordinate), or ``None`` if ``k`` is
@@ -179,7 +186,18 @@ def overlay_fake_chromosome(fake_fa, enriched_fa, log_path, out_fa=None, owner=N
     function, a FASTA overlaid in place none of whose bases changes is left as it
     is, and ``before_write()`` is called before one that changes is replaced: the
     overlay of a fake-indel genome in place marks it unfinished only once it is about
-    to change it (crisprme.py's _overlay_in_place)."""
+    to change it (crisprme.py's _overlay_in_place).
+
+    A FASTA its log does not describe (another enrichment's: its windows of another width,
+    as where a download installs an archive's logs beside an enrichment made here by another
+    CRISPRitz) raises NotItsLog, and is left as it was: overlaid by that log, every code
+    would land on the wrong base, and the genome would then disagree with its own logs too.
+    Every caller checks the two first (crisprme.py, the search script: indel_window); this is
+    the overlay's own guard."""
+    how = indel_window.fake_window_disagreement(fake_fa, log_path)
+    if how:
+        raise NotItsLog(f"the fake-indel genome {fake_fa} and the indel log {log_path} come "
+                        f"from two enrichments: {how}. Nothing was overlaid")
     enriched = read_enriched_chromosome(enriched_fa)
     records = list(parse_log_indels(log_path))
 

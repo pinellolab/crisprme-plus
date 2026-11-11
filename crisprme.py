@@ -4195,7 +4195,9 @@ def _indel_window_notes(dataset_dirs: List[str], target_len: int, bdna: int) -> 
     fake-indel windows hold no target of ``target_len`` bases (guide and PAM) with ``bdna``
     DNA bulges that holds an indel (indel_window.target_note): the windows its indel logs
     record (Dictionaries/log_indels_<dataset>), each width once; for a dataset with no logs
-    yet, which the search enriches itself, those the installed CRISPRitz writes."""
+    yet, which the search enriches itself, those the installed CRISPRitz writes. How a
+    sites-only dataset gets wider windows is not by enriching it again
+    (indel_window.sites_only, sites_only_way)."""
     notes = []
     for d in dataset_dirs:
         name = os.path.basename(os.path.normpath(d))
@@ -4207,16 +4209,21 @@ def _indel_window_notes(dataset_dirs: List[str], target_len: int, bdna: int) -> 
                 widths = set()
         else:
             widths = {indel_window.engine_window()}
+        sites = None  # (read once a note is due: indel_window.sites_only)
         for w in sorted(widths):
-            note = indel_window.target_note(w, target_len, bdna, "complete-search", name)
-            if note:
-                notes.append(note)
+            if not indel_window.target_note(w, target_len, bdna, "complete-search", name):
+                continue
+            if sites is None:
+                sites = indel_window.sites_only(current_working_directory, name, d)
+            notes.append(indel_window.target_note(w, target_len, bdna, "complete-search", name,
+                                                  sites))
     return notes
 
 
 def _enrichment_window_notes(enriched: str, indels_out: str, log_dir: str, genome_ref: str,
                              vcf_name: str, reused: bool = True,
-                             building: Tuple[str, ...] = ()) -> List[str]:
+                             building: Tuple[str, ...] = (),
+                             vcf_dir: "Optional[str]" = None) -> List[str]:
     """What build-index-only says of the enrichment its index is built on: one in place
     (``reused``: this run did not make it) whose fake-indel windows, which its indel logs
     ``log_dir`` record (indel_window), are of another width than those the installed
@@ -4233,7 +4240,13 @@ def _enrichment_window_notes(enriched: str, indels_out: str, log_dir: str, genom
     of the earlier one. Either way, one WARNING for each INDELS index of the dataset in the
     working directory's genome_library built from windows those logs do not record (an
     index kept beside an enrichment made again), which every search refuses. Nothing for an
-    enrichment of the installed CRISPRitz's windows whose indexes agree with its logs."""
+    enrichment of the installed CRISPRitz's windows whose indexes agree with its logs. A
+    sites-only dataset (indel_window.sites_only: ``vcf_dir`` its VCFs, which name no sample;
+    the mega) is not enriched again that way, as no enrichment of its VCFs writes a window:
+    its windows come from its enriched-genome kit, and the WARNING says to install its
+    archive and kit of CRISPRme 2.10.0, or to build that kit again, in place of what it names
+    (indel_window.sites_only_way); its registry, built from its VCFs' INFO AF fields, is not
+    named (indel_window.enrichment_stores)."""
     engine = indel_window.engine_window()
     try:
         widths = set().union(*indel_window.dataset_windows(log_dir).values()) if reused \
@@ -4255,6 +4268,7 @@ def _enrichment_window_notes(enriched: str, indels_out: str, log_dir: str, genom
             f"{' and '.join(indel_window.describe(x) for x in logged)}: they come from two "
             f"enrichments, and every search of it refuses it. Remove it (rm -rf "
             f"{indel_window.quote(idx)}) and build it again with build-index-only.")
+    _sites = indel_window.sites_only(workdir, vcf_name, vcf_dir) if widths - {engine} else False
     for w in sorted(widths - {engine}):
         notes.append(
             f"WARNING [build-index-only]: the enrichment of {vcf_name} in place ({enriched}) "
@@ -4268,15 +4282,24 @@ def _enrichment_window_notes(enriched: str, indels_out: str, log_dir: str, genom
             f", against {indel_window.reach(engine)} on windows of "
             f"{indel_window.describe(engine)}: the indel off-targets of a longer target are in no "
             f"INDELS index built from it. Every search reads each window's width from its log, so "
-            f"its rows are right. To enrich {vcf_name} with the installed CRISPRitz's windows, "
-            f"remove that enrichment and all that was built from it, as an enrichment of another "
-            f"CRISPRitz differs in its SNPs too (2.9.1 enriched only the last ALT of a site "
-            f"written on several records) and a search would read stores of the two together: "
-            f"its genomes, dictionaries, indel logs and dict-less tiers, and every index of the "
-            f"dataset (rm -rf {_rm}; and any copy of those indexes in a library you search with "
-            f"--index-path), then run build-index-only again, which enriches the dataset anew "
-            f"and builds its index, and its tiers with --samplesID, from that enrichment (a "
-            f"build or a search builds each other index of it again where it needs it).")
+            f"its rows are right. "
+            + (f"For the installed CRISPRitz's windows: {indel_window.sites_only_way(vcf_name)}. "
+               f"Either replaces that enrichment and all that was built from it, as a search would "
+               f"read stores of the two together: its genomes, dictionaries, indel logs and "
+               f"dict-less tiers, and every index of the dataset, which go first (rm -rf {_rm}; "
+               f"and any copy of those indexes in a library you search with --index-path)."
+               if _sites else
+               f"To enrich {vcf_name} with the installed CRISPRitz's windows, "
+               f"remove that enrichment and all that was built from it, as an enrichment of another "
+               f"CRISPRitz differs in its SNPs too (2.9.1 enriched only the last ALT of a site "
+               f"written on several records) and a search would read stores of the two together: "
+               f"its genomes, dictionaries, indel logs and dict-less tiers, and every index of the "
+               f"dataset (rm -rf {_rm}; and any copy of those indexes in a library you search with "
+               f"--index-path), then run build-index-only again, which enriches the dataset anew "
+               f"and builds its index, and its tiers with --samplesID, from that enrichment (a "
+               f"build or a search builds each other index of it again where it needs it; of a "
+               f"published dataset, its archive and enriched-genome kit of CRISPRme 2.10.0 may be "
+               f"installed instead: docs/PRECOMPUTED_INDEXES.md)."))
     return notes
 
 
@@ -5432,11 +5455,20 @@ def build_index_only() -> None:
     # A dataset whose finished enrichment is not in place is enriched anew (STEP 1): not
     # beside what an earlier enrichment of another CRISPRitz left -- its dict-less tiers and
     # its indexes, kept (the tiers taken as emitted, an index in place as built) -- which a
-    # search would read with the new one, disagreeing with it in its SNPs
-    # (indel_window.reenrichment_refusal). Refused before anything is built.
+    # search would read with the new one, disagreeing with it in its SNPs, nor, for a
+    # sites-only dataset, beside the windows of its kit, which no enrichment of its VCFs
+    # writes (indel_window.reenrichment_refusal). Refused before anything is built. One in
+    # place whose fake-indel genome its indel logs do not describe (two enrichments) is
+    # refused before anything is built too, not after the reference index, which takes
+    # hours on a whole genome (indel_window.fake_genome_refusal; checked again below, as the
+    # enrichment is taken).
     if vcf_given and not (os.path.isdir(enriched)
                           and not os.path.isdir(os.path.join(enriched, ".building"))):
-        _why = indel_window.reenrichment_refusal(workdir, genome_ref, vcf_name)
+        _why = indel_window.reenrichment_refusal(workdir, genome_ref, vcf_name, vcf_dir=vcfdir)
+        if _why:
+            error(_why[0].upper() + _why[1:])
+    elif vcf_given:
+        _why = indel_window.fake_genome_refusal(workdir, genome_ref, vcf_name, vcf_dir=vcfdir)
         if _why:
             error(_why[0].upper() + _why[1:])
     # A search takes the index and the variant genomes of a genome by the folder's name
@@ -5869,7 +5901,7 @@ def build_index_only() -> None:
         # dictionaries and tiers, not the enrichment they come from, beside one made here by
         # another CRISPRitz), and an index built from it would be read with the other's
         # (indel_window.fake_genome_refusal): its overlay too would misplace every code.
-        _why = indel_window.fake_genome_refusal(workdir, genome_ref, vcf_name)
+        _why = indel_window.fake_genome_refusal(workdir, genome_ref, vcf_name, vcf_dir=vcfdir)
         if _why:
             error(_why[0].upper() + _why[1:])
         # One that came another way may lack the SNP codes. Overlaid only at STEP 3,
@@ -5889,7 +5921,7 @@ def build_index_only() -> None:
     # window's width from its log row, so its rows are right, but a target that needs more
     # bases than a window holds is in no index. Said, with how to enrich it again.
     for _note in _enrichment_window_notes(enriched, indels_out, indel_dict, genome_ref,
-                                          vcf_name, _reused, (snp_idx, indels_idx)):
+                                          vcf_name, _reused, (snp_idx, indels_idx), vcfdir):
         print(_note, flush=True)
     # STEP 1b (ADDITIVE): emit the dictless tiers (Tier-0 registry + Tier-1 genotype
     # store) per chromosome, FROM the per-sample dicts just produced -- WITHOUT
