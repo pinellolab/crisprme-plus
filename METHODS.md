@@ -795,11 +795,22 @@ of every row, and 2.8.1, wrote it once). The merge reads the rows in the order o
 the chain (a unit's at its anchor; a target's alignments inside the insertion reach the merge
 before its alignment on a reference base, and go with it) through a window as wide as the
 largest bulge shift of the input, so every row of a unit is in when it is placed, every
-alignment of a target is in one cluster whatever its bulges and `--merge`, and the clusters do
-not depend on the order of the rows of one cluster position, which the three merges sort
-differently. The case is rare: a search of seven guides at 4 mismatches and 2 + 2 bulges (1000
-Genomes chr22, NGG, population-level) writes the same 54,430 rows either way, no target twice, one
-row (an insertion's) more than the chain of every row. In the `hg38_mega` search above (the
+alignment of a target whose bases fix its place on the haplotype is in one cluster whatever its
+bulges and `--merge` (in a tandem repeat, below), and the clusters do not depend on the order of
+the rows of one cluster position, which the three merges sort differently. The case is rare: a
+search of seven guides at 4 mismatches and 2 + 2 bulges (1000 Genomes chr22, NGG,
+population-level) writes the same 54,430 rows either way, no target twice, one row (an
+insertion's) more than the chain of every row. A known limit remains in tandem repeats: the
+merge reads each row's place from its own bases, the first place on the haplotype they fit
+(`indel_snp_cis.row_first_base`), and in a repeat that a target lies wholly in, the target's
+alignments, each with its own bases, can fit different earlier places, one even the anchor base
+(a row of the chain); they are then not taken for one target, can go to two clusters, and the
+target can be written twice (review r3 of lane M: a model of microsatellites around the
+anchors, at 1 DNA and 1 RNA bulge and `--merge` 3, split 134 targets and wrote 15 twice in
+10,000 trials, where the chain of every row split none). No search of real data checked has
+such a target: the merge inputs of the `hg38_mega` searches of chr22 and chr14 (§5), of the 2 + 2
+search in both modes and of the gate's README and repeat-rich runs (§8) split none. In the
+`hg38_mega` search above (the
 sites-only density guard of §5 off, as the chain of every row had none) the merge writes 89 rows
 more than the chain of every row did, and none fewer: 88 at starts where that chain wrote none --
 30 sites CRISPRme 2.8.1 wrote at the same place (the two above among them), 34 sites of 2.8.1 that
@@ -2134,8 +2145,10 @@ cluster chain never counts on (`limit-density-guard` where a cluster reaches a r
 target only through it); a genotyped dataset's rows are not guarded. Since 2.10.0 the rows that
 start inside an insertion at one anchor are placed together, as one merge site that joins one
 site and chains none, but for those of a target that has an alignment starting on a reference
-base, which go with it, at the target's place on the haplotype, up to the insertion's length
-past their own cluster position (§4); so the row within `--merge` bases of a population-level
+base, which go with it, at the target's place on the haplotype, past their own cluster
+position by the rank of their first base among the inserted ones, at most the DNA and RNA
+bulges together (such a target's plain alignment starts at most `--bDNA` bases past the
+anchor; §4); so the row within `--merge` bases of a population-level
 target can be the next site's: a target whose near rows are not as good as it, one of them
 starting inside an insertion (its first base one the insertion adds, read by the check from the
 row's own target on the haplotype of its variants), is `limit-insertion-site` (non-gating) where

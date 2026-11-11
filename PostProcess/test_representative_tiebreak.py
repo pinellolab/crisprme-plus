@@ -1079,7 +1079,16 @@ class TheClustersHoldWholeTargets(unittest.TestCase):
     targets' places (a target with a row on a reference base is placed by it, and the
     rows of the targets wholly inside an insertion join one site and chain none); and the
     rows of the targets wholly inside the insertions at one anchor are in one cluster
-    (decision (d))."""
+    (decision (d)).
+
+    What this covers: targets whose bases fix their place on the haplotype. The model's
+    reference and insertions are random bases, and a trial in which the merge reads a
+    row's place other than the model's (a repeat that its bases also fit at an earlier
+    place: row_first_base reads the first) is skipped, and counted, not checked. With
+    random bases there are few or none (none in the 600 trials drawn here), so a target
+    wholly inside a tandem repeat, whose alignments the merge can read at different
+    places and put in two clusters, is not tested here: that is a known limit (METHODS
+    section 4; review r3 of lane M, whose model of microsatellites found it)."""
 
     N = 23  # a target's bases on its haplotype aligned with no bulge (20 + the PAM)
     BUDGETS = [(1, 1), (2, 1), (1, 2), (2, 2), (3, 3), (0, 2), (2, 0), (3, 1), (1, 3), (0, 0)]

@@ -2377,7 +2377,8 @@ and the `release-crisprme` skill.
 - **The rows that start inside an insertion at one anchor are placed together, as one site that
   joins one site and chains none, and a target's alignments go with its alignment on a reference
   base: two sites of 2.8.1 no longer leave a population-level search's results, and no target is
-  written twice.** Since this release such a row starts at the
+  written twice, but for one that lies wholly in a tandem repeat (a known limit, below).** Since
+  this release such a row starts at the
   insertion's anchor, up to the insertion's length before where 2.8.1 placed it, and the merge
   chained it like any other row: between two sites 2.8.1 kept apart, it joined them, and the one
   whose row was weaker left the integrated results for the other's alternative alignments. On

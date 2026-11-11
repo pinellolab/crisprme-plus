@@ -1115,10 +1115,21 @@ def _clusters(lines, shift=0):
     go with it, at its Cluster_Position, where 2.8.1 placed them all; the unit holds the
     targets that lie wholly inside the insertion. They reach the merge before it (their
     Cluster_Positions are smaller, by the rank of their first base among the inserted
-    ones) and are still in the window then (it starts at the anchor or before, at most
-    ``shift`` bp before its Cluster_Position), so every alignment of a target is in one
-    cluster, whatever its bulges and --merge, and a row's cluster still does not depend on
-    the order of the rows of one Cluster_Position."""
+    ones, at most the DNA and RNA bulges together) and are still in the window then (it
+    starts at the anchor or before, at most ``shift`` bp before its Cluster_Position), so
+    every alignment of a target is in one cluster, whatever its bulges and --merge, and a
+    row's cluster still does not depend on the order of the rows of one Cluster_Position.
+
+    That holds for a target whose bases fix its place on the haplotype. Each row's place
+    is read from its own bases (row_first_base), the first place they fit: in a tandem
+    repeat that a target lies wholly in, an alignment's bases can also fit an earlier
+    place, and one target's alignments, each with its own bases, can be read at different
+    places, one even on the anchor base (a row of the chain); they are then not taken for
+    one target and can go to two clusters, and the target be written twice. In a model of
+    such repeats (review r3 of lane M: microsatellites around the anchors, 1 DNA + 1 RNA
+    bulge, --merge 3) that split 134 targets and wrote 15 twice in 10,000 trials, where
+    the chain of every row split none; no search of real data checked has such a target
+    (METHODS section 4, a known limit)."""
     group = None
     # (place in the chain, 1 for a unit's row, seq, row, cp, haplotype place, its target:
     # (strand, haplotype place, insertion) for a unit's row, None for a row of the chain)

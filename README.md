@@ -1190,7 +1190,12 @@ its purpose and usage:
 - `--merge` (*Optional - Default: 3*)
   <br>Defines the window size (in base pairs) used to merge closely spaced 
   off-targets. Pivot targets are selected based on the highest score (e.g., 
-  CFD, CRISPR-Bulge) or criteria defined by the `--sorting-criteria`. 
+  CFD, CRISPR-Bulge) or criteria defined by the `--sorting-criteria`. Since 2.10.0 the
+  alignments that start inside one insertion (at its anchor, where such a row now starts) are
+  placed together: they join the one site within this window and chain no two sites, and a
+  target's alignments go with its alignment that starts on a reference base. So two written
+  rows can lie within this window of each other, one of them an insertion's row beside a site
+  it does not chain. See METHODS §4.
 
 - `--sorting-criteria-scoring` (*Optional - Default: `mm+bulges,mm`*)
   <br>Specifies sorting criteria for merging when using CFD/CRISPR-Bulge scores. 
