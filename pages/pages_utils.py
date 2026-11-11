@@ -432,10 +432,10 @@ def results_job_dir(job_id) -> Optional[str]:
     return jobdir
 
 
-def _first_line(path: str) -> str:
-    """The first line of the file ``path`` of the data folder, read with no link another user
-    put followed (safe_files)."""
-    with safe_files.open_read(path, current_working_directory) as fh:
+def _first_line(path: str, root: Optional[str] = None) -> str:
+    """The first line of the file ``path`` of the data folder (``root``, by default the web
+    app's), read with no link another user put followed (safe_files)."""
+    with safe_files.open_read(path, root or current_working_directory) as fh:
         return fh.readline()
 
 
@@ -1615,8 +1615,9 @@ def index_build_pam(index_dir: str) -> "tuple":
         k = len(parsed[0])
         named = (parsed[3] + k, k if parsed[4] == 3 else -k)
     p = os.path.join(index_dir, ".pam_build")
-    try:  # (its name is shown in the index's label: no link another user put followed)
-        parts = _first_line(p).split()
+    try:  # (its name is shown in the index's label: no link another user put followed; the
+        # index folder, <data>/genome_library/<name>, says the data folder)
+        parts = _first_line(p, safe_files.job_root(index_dir)).split()
         recorded = parts[0], int(parts[1]), int(parts[2])
     except (OSError, ValueError, IndexError):
         recorded = None
@@ -1751,8 +1752,9 @@ def _index_side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) 
     five_prime = index_fit.built_five_prime(index_dir)
     if five_prime is not None:
         return (not five_prime) == three_prime
-    try:  # (no link another user put followed: safe_files)
-        recorded = int(_first_line(os.path.join(index_dir, ".pam_build")).split()[-1])
+    try:  # (no link another user put followed: safe_files; the data folder, the index's)
+        recorded = int(_first_line(os.path.join(index_dir, ".pam_build"),
+                                   safe_files.job_root(index_dir)).split()[-1])
     except (OSError, ValueError, IndexError):
         recorded = 0
     if recorded:

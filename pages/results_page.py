@@ -267,9 +267,13 @@ def _perfect_match_sites(integrated_tsv):
     in a search of several guides each guide has its own on-target.
     """
     try:
-        import pandas as pd
+        import os
 
-        header = _job_read_csv(integrated_tsv, sep="\t", nrows=0).columns.tolist()
+        import pandas as pd
+        import safe_files  # (PostProcess/: the job's file read with no link followed)
+
+        root = safe_files.job_root(os.path.dirname(integrated_tsv))  # (<data>/Results/<job>)
+        header = safe_files.read_csv(integrated_tsv, root, sep="\t", nrows=0).columns.tolist()
 
         def _col(*cands):
             for c in cands:
@@ -285,7 +289,7 @@ def _perfect_match_sites(integrated_tsv):
         if not mmb:
             return []
         usecols = [c for c in (guide, mmb, chrom, pos, strand) if c]
-        df = _job_read_csv(integrated_tsv, sep="\t", usecols=usecols, dtype=str)
+        df = safe_files.read_csv(integrated_tsv, root, sep="\t", usecols=usecols, dtype=str)
         mask = pd.to_numeric(df[mmb], errors="coerce") == 0
         seen, out = set(), []
         for _, r in df[mask].iterrows():
