@@ -797,31 +797,33 @@ before its alignment on a reference base, and go with it) through a window as wi
 largest bulge shift of the input, so every row of a unit is in when it is placed, every
 alignment of a target is in one cluster whatever its bulges and `--merge`, and the clusters do
 not depend on the order of the rows of one cluster position, which the three merges sort
-differently. In the `hg38_mega` search above (the sites-only density guard of §5 off, as the
-chain of every row had none) the merge writes 89 rows more than the chain of every row did, and
-none fewer: 88 at starts where that chain wrote none -- 30 sites CRISPRme 2.8.1 wrote at the same
-place (the two above among them), 34 sites of 2.8.1 that start inside an insertion, now at its
-anchor, and 24 sites that rows inside an insertion joined to a neighbour with 2.8.1's merge too
-(as chr22:22,585,904 (−) of EMX1, CFD 0.317, eight bases from the chr22:22,585,896 site of the
-same CFD) -- and an insertion's row at chr22:24,800,533 (+) of VEGFA site 3 that joins the site
-after it, no farther from its targets' place on the haplotype than the site before it, whose
-reference row starts at that same base: two rows with one start, each another target. No two
-written rows are alignments of one target (each row's PAM placed on the haplotype of its
-variants, in each of the three views), and 22 lie within `--merge` bases of a neighbour's (by
-cluster position), each an insertion's row at its anchor beside a site it does not chain (none
-with the chain of every row). Placing a target by its alignment on a reference base changes
-none of this search's rows, nor those of the searches of the rebuilt mega of §5 (chr22 and
-chr14): with 1 DNA and 1 RNA bulge the units of review r1 of lane M split no target there. On the
-HGDP + 1000 Genomes index (chr22, the three repeat-rich guides of §8, NRG, 4
-mismatches, 1 DNA and 1 RNA bulge) it writes 11 rows more than the chain of every row
-population-level and 12 per sample, and none fewer, each target once (chr22:45,890,432 (+) of
-VEGFA site 3 one row, as with the chain of every row; chr22:38,937,540 (+), a SNP row of CFD
-0.134 an insertion's rows had joined to a deletion row's site six bases before, now leads a site
-of its own), and 5 and 6 pairs of its rows lie within `--merge` bases of each other (by cluster
-position), each an insertion's row at its anchor beside a site it does not chain. Within a site,
-the alignments that name the same variants with the same carriers are one entry, the best, as on
-every row: they are one target's alignments with different bulges. The
-merge compares indel rows there at their cluster position on the haplotype carrying the indel,
+differently. The case is rare: a search of seven guides at 4 mismatches and 2 + 2 bulges (1000
+Genomes chr22, NGG, population-level) writes the same 54,430 rows either way, no target twice, one
+row (an insertion's) more than the chain of every row. In the `hg38_mega` search above (the
+sites-only density guard of §5 off, as the chain of every row had none) the merge writes 89 rows
+more than the chain of every row did, and none fewer: 88 at starts where that chain wrote none --
+30 sites CRISPRme 2.8.1 wrote at the same place (the two above among them), 34 sites of 2.8.1 that
+start inside an insertion, now at its anchor, and 24 sites that rows inside an insertion joined to
+a neighbour with 2.8.1's merge too (as chr22:22,585,904 (−) of EMX1, CFD 0.317, eight bases from
+the chr22:22,585,896 site of the same CFD) -- and an insertion's row at chr22:24,800,533 (+) of
+VEGFA site 3 that joins the site after it, no farther from its targets' place on the haplotype
+than the site before it, whose reference row starts at that same base: two rows with one start,
+each another target. No two written rows are alignments of one target (each row's PAM placed on
+the haplotype of its variants, in each of the three views), and 22 lie within `--merge` bases of a
+neighbour's (by cluster position), each an insertion's row at its anchor beside a site it does not
+chain (none with the chain of every row). Placing a target by its alignment on a reference base
+changes none of this search's rows, nor those of the searches of the rebuilt mega of §5 (chr22 and
+chr14) or of the real-data check's gate runs of §8: with 1 DNA and 1 RNA bulge the units of review
+r1 of lane M split no target there. On the HGDP + 1000 Genomes index (chr22, the three repeat-rich
+guides of §8, NRG, 4 mismatches, 1 DNA and 1 RNA bulge) it writes 11 rows more than the chain of
+every row population-level and 12 per sample, and none fewer, each target once (chr22:45,890,432
+(+) of VEGFA site 3 one row, as with the chain of every row; chr22:38,937,540 (+), a SNP row of
+CFD 0.134 an insertion's rows had joined to a deletion row's site six bases before, now leads a
+site of its own), and 5 and 6 pairs of its rows lie within `--merge` bases of each other (by
+cluster position), each an insertion's row at its anchor beside a site it does not chain. Within a
+site, the alignments that name the same variants with the same carriers are one entry, the best,
+as on every row: they are one target's alignments with different bulges. The merge compares indel
+rows there at their cluster position on the haplotype carrying the indel,
 which on a row that starts inside an insertion is past the anchor by the rank of its first base
 among the inserted ones, read from the row's bases (`indel_snp_cis.row_first_base`). Two
 alignments whose cluster positions on that haplotype differ are two targets of it, as many bases

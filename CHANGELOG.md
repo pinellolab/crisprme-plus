@@ -2403,7 +2403,9 @@ and the `release-crisprme` skill.
   before it while that alignment opened the site after it (review r2 of lane M: with 2 DNA and 2
   RNA bulges, another target's 2-RNA-bulge alignment from the insertion's first base, one base
   after a site, took the unit there, and the target was two rows, CFD 0.500 and its 2-DNA-bulge
-  alignment from the anchor base 0.300; the chain of every row, and 2.8.1, wrote it once). The
+  alignment from the anchor base 0.300; the chain of every row, and 2.8.1, wrote it once; rare:
+  a search of seven guides at 4 mismatches and 2 + 2 bulges, 1000 Genomes chr22, NGG,
+  population-level, writes the same 54,430 rows with whole-target units, no target twice). The
   rows are read in the order of their place in the chain (a unit's at its anchor) through a window
   of the input's largest bulge shift, so a unit's rows are all in when it is placed and a target's
   alignments inside the insertion, which reach the merge before its alignment on a reference
@@ -2429,19 +2431,20 @@ and the `release-crisprme` skill.
   target (each row's PAM placed on the haplotype of its variants, in each of the three views; with
   the first version, one, at chr22:22,263,574 (+)); 22 lie within `--merge` bases of a
   neighbour's, each an insertion's row beside a site it does not chain (none with the chain of
-  every row). Whole-target units change none of the rows of this search, nor those of the rebuilt
-  mega's chr22 and chr14 searches (METHODS section 5): at 1 + 1 bulges the units of review r1 of
-  lane M split no target there. On the gate's repeat-rich runs (HGDP + 1000 Genomes chr22, the
-  three guides, NRG, 4 mismatches and 1 + 1 bulges) it writes 11 rows more population-level and 12
-  per sample than the
-  chain of every row, and none fewer (the first version: 14 and 15, chr22:45,890,432 (+) and
-  chr22:39,091,378 (+) twice among them); each target is one row, those two as with the chain of
-  every row, and chr22:38,937,540 (+) of VEGFA site 3, a SNP row of CFD 0.134 that an insertion's
-  rows had joined to a deletion row's site six bases before, now leads a site of its own; 5 and 6
-  pairs of rows lie within `--merge` bases of each other, each an insertion's row at its anchor
-  beside a site it does not chain. The real-data check passes both runs (0 gating findings;
-  population-level 163 notes of a carrier's slot read as METHODS §4 reads it and 70 row blocks
-  with overlapping alleles, for 160 and 67, the rest as before). The real-data check's cluster
+  every row). Whole-target units change none of the rows of this search, nor those of the
+  rebuilt mega's chr22 and chr14 searches (METHODS section 5) or of the real-data check's gate
+  runs (HGDP + 1000 Genomes chr22, HPRC and its unphased copy, NRR beside the rebuilt mega): at
+  1 + 1 bulges the units of review r1 of lane M split no target there. On the gate's repeat-rich
+  runs (HGDP + 1000 Genomes chr22, the three guides, NRG, 4 mismatches and 1 + 1 bulges) it
+  writes 11 rows more population-level and 12 per sample than the chain of every row, and none
+  fewer (the first version: 14 and 15, chr22:45,890,432 (+) and chr22:39,091,378 (+) twice among
+  them); each target is one row, those two as with the chain of every row, and chr22:38,937,540
+  (+) of VEGFA site 3, a SNP row of CFD 0.134 that an insertion's rows had joined to a deletion
+  row's site six bases before, now leads a site of its own; 5 and 6 pairs of rows lie within
+  `--merge` bases of each other, each an insertion's row at its anchor beside a site it does not
+  chain. The real-data check passes both runs (0 gating findings; population-level 163 notes of
+  a carrier's slot read as METHODS §4 reads it and 70 row blocks with overlapping alleles, for
+  160 and 67, the rest as before). The real-data check's cluster
   chain is the chain of every row, a superset of the
   merge's around such rows, and it took the row within `--merge` bases of a target for the
   target's cluster's: on the gate's repeat-rich population-level run (HGDP + 1000 Genomes chr22,
