@@ -509,11 +509,12 @@ together, as one site that joins the site within --merge bp of its rows and chai
 for the rows of a target that has an alignment starting on a reference base, which go with
 that alignment, at the target's place on the haplotype, past their own Cluster Position by
 the rank of their first base among the inserted ones (at most bDNA + bRNA, since such a
-target's plain alignment starts at most bDNA bases past the anchor): the chain this checker
-follows is the chain of every row, a superset of CRISPRme's around such rows, and the row
-within --merge bp of a target, which it takes for the target's cluster's, can then be the
-next site's -- an insertion's row the merge placed there. A target whose near rows are not as good as it, one of them starting inside an
-insertion (its first base one the insertion adds, row_first_k, read on the target's own window), is
+target's place, where its alignment with no bulge starts, is at most bDNA bases past the
+anchor): the chain this checker follows is the chain of every row, a superset of CRISPRme's
+around such rows, and the row within --merge bp of a target, which it takes for the target's
+cluster's, can then be the next site's -- an insertion's row the merge placed there. A
+target whose near rows are not as good as it, one of them starting inside an insertion (its
+first base one the insertion adds, row_first_k, read on the target's own window), is
 limit-insertion-site (non-gating) where the chain of every row reaches a row that is, and a
 miss where it does not; this checker can thus take a row of the next site for a target's
 there (its own coverage gap). A near row that names an insertion and starts on a reference

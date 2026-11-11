@@ -196,8 +196,10 @@ SNP+indel co-occurrence; download whichever you need with `--what index --index-
 > individual) with a min-AF bound and **no named carriers**; run it after a genotyped-index
 > run when you need maximal allele-frequency breadth. Since 2.10.0 a mega search withholds
 > its windows of 2<sup>20</sup> sequences or more by default (the sites-only density guard:
-> whole sites in the immunoglobulin loci and some tandem repeats, each a combination of two or
-> more variants, listed in the dense-region files and noted on the rows there), and the
+> in the immunoglobulin loci and some tandem repeats, where their rows are combinations of
+> several variants nobody is known to carry; a site there is written from the alignments the
+> guard keeps, and leaves the results where it keeps none; the windows are listed in the
+> dense-region files and noted on the rows there), and the
 > carrier gate ranks its combinations below the frequency bound after the others;
 > `--no-sites-only-density-guard` analyses every window, at several times the search time.
 > Grab the others any time from the web

@@ -721,12 +721,13 @@ and the `release-crisprme` skill.
   both records its log held that deletion twice. Not run genome-wide: the release's readiness
   audit (D7) comes first. The rebuild moves some sites: with every allele coded, the chain of
   rows within `--merge` bases runs further, so a site the shipped mega reports as a
-  single-variant row can lie inside a neighbouring site whose row is a combination (five guides,
-  4 mismatches and 1 + 1 bulges, population-level: 6 on chr22 and 11 on chr14, up to CFD 0.193
-  at chr14:104,215,539 (+) of VEGFA site 3, and one reference site on each), and where the
-  frequency bound (D6, below) ranks that combination after the others, the single-variant site
-  leaves the main tables with it (3 on chr22 and 5 on chr14, CFD up to 0.017; METHODS
-  section 5).
+  single-variant (or reference) row can lie inside a neighbouring site whose row is a
+  combination (five guides, 4 mismatches and 1 + 1 bulges, population-level, read by the merge's
+  clusters: 7 single-variant sites on chr22 and 14 on chr14, up to CFD 0.193 at
+  chr14:104,215,539 (+) of VEGFA site 3, and 3 and 2 reference sites, CFD up to 0.013), and
+  where the frequency bound (D6, below) ranks that combination after the others, the site it
+  holds leaves the main tables with it (3 and 8 single-variant sites, CFD up to 0.017, and 2 and
+  1 reference sites, CFD 0.001 or less; METHODS section 5).
   METHODS section 2, `docs/PRECOMPUTED_INDEXES.md` (mega), `seq_script/merge_panels/README.md`.
   Covered by `PostProcess/test_mega_rebuild.py` (the recipe end to end on the stub engine, the
   samplesID file it writes or keeps, and its checks failing on a registry that reads every
@@ -766,13 +767,20 @@ and the `release-crisprme` skill.
   against 30.6 min, side by side on a shared node; 1.37 again on the merge of review r2 of lane M,
   44.7 against 32.6 min, and 1.42 and 1.46 in two other measurements; unguarded 136.5 min, 4.46
   times, and 4.37 and 4.9 in two others), and it writes 20,810 rows against the unguarded
-  search's 20,940, 130 fewer: 321 sites, each a combination of two or more variants, are gone, and
-  191 are written from another alignment of their site, all 56 single-variant rows the rebuild
-  adds kept; on chr14 (IGH) 3,373,484 of 3,651,632 and 34,248,990 of 36,946,128, and 1.57 times
+  search's 20,940, 130 fewer; of the unguarded search's sites (the merge's clusters of the two
+  searches' merge inputs), 232, each written as a combination of 4 to 17 variants (203 in IGL),
+  are gone, 81 are written from another alignment (26 at the same start), 48 are split into 150
+  by the withheld alignments that chained them, and 20,579 as before (321 rows not written, 191
+  new, each a combination of three or more variants), every site it changes written unguarded as
+  a combination of four or more variants, all 56 single-variant rows the rebuild adds kept; on
+  chr14 (IGH) 3,373,484 of 3,651,632 and 34,248,990 of 36,946,128, and 1.57 times
   (72.0 against 45.9 min; 1.53 and 1.73 in two other measurements; unguarded, 12 to 16 h were
-  projected). On the shipped mega's chr22 it writes 20,093 rows against 20,099 unguarded: 7
-  sites, each a combination of 11 to 16 variants in IGL or a (TA)n repeat, are gone, and 1 is
-  written from another alignment of its site. METHODS section 5. Covered by
+  projected). On the shipped mega's chr22 it writes 20,093 rows against 20,099 unguarded; of the
+  unguarded search's sites (the merge's clusters of the two searches' merge inputs), 7, each
+  written as a combination of 11 to 16 variants in IGL or a (TA)n repeat, are gone, 1 is split
+  in two (chr22:22,905,391 (−) of ACTGAAATCTGTAAGCAGGC a site of its own, the chr22:22,905,398
+  (−) site it was chained to written from another alignment), 2 more are written from another
+  alignment at the same start, and 20,089 as before. METHODS section 5. Covered by
   `PostProcess/test_sites_only_guard.py` and `test_complete_search_flags.py` (a value of the flag
   that is no number of bits, or outside 1 to 64, and both flags together are refused before the
   output folder is made); the real-data indel check reads a run's guard from its BEDs and takes
@@ -2417,7 +2425,16 @@ and the `release-crisprme` skill.
   every target in one cluster, the clusters independent of that order, and, outside the units, the
   plain chain of the targets' places, in 20,000 trials (`test_representative_tiebreak.py` runs
   600 of them; with the units of the first round, 72 of those 600 split a target; that round's
-  fuzz, 12,000 random inputs against an independent reading of the rule, modelled no target). On
+  fuzz, 12,000 random inputs against an independent reading of the rule, modelled no target).
+  Its random bases fix each target's place: a trial whose rows the merge reads at other places
+  than the model's, in a repeat, is skipped, and none of the 20,000 was. A known limit remains
+  in tandem repeats: the merge reads each row's place from its own bases, the first place on the
+  haplotype they fit (`indel_snp_cis.row_first_base`), and in a repeat that a target lies wholly
+  in, the target's alignments can fit different earlier places, one even the anchor base; they
+  are then not taken for one target, can go to two clusters, and the target can be written twice
+  (review r3 of lane M: a model of microsatellites around the anchors, 1 DNA and 1 RNA bulge and
+  `--merge` 3, split 134 targets and wrote 15 twice in 10,000 trials, where the chain of every
+  row split none; no search of real data checked has such a target; METHODS section 4). On
   `hg38_mega` chr22, population-level (five guides, NRG, 4 mismatches and 1 + 1 bulges, the
   sites-only density guard off, as the chain of every row had none), the merge writes 89 rows more
   than the chain of every row did and none fewer (the

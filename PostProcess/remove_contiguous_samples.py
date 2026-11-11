@@ -1125,10 +1125,10 @@ def _clusters(lines, shift=0):
     repeat that a target lies wholly in, an alignment's bases can also fit an earlier
     place, and one target's alignments, each with its own bases, can be read at different
     places, one even on the anchor base (a row of the chain); they are then not taken for
-    one target and can go to two clusters, and the target be written twice. In a model of
+    one target, can go to two clusters, and the target can be written twice. A model of
     such repeats (review r3 of lane M: microsatellites around the anchors, 1 DNA + 1 RNA
-    bulge, --merge 3) that split 134 targets and wrote 15 twice in 10,000 trials, where
-    the chain of every row split none; no search of real data checked has such a target
+    bulge, --merge 3) split 134 targets and wrote 15 twice in 10,000 trials, where the
+    chain of every row split none; no search of real data checked has such a target
     (METHODS section 4, a known limit)."""
     group = None
     # (place in the chain, 1 for a unit's row, seq, row, cp, haplotype place, its target:
