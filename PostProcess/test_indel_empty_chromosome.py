@@ -935,6 +935,27 @@ class SearchSide(_Fixture):
             os.path.join(self.work, "VCFs", "ds"),
             os.path.join(self.work, "Dictionaries", "registry_ds"),
             os.path.join(self.work, "Dictionaries", "indel_af_ds")), res.stdout)
+        # the same from complete-test --chrom's view of the working directory, which the run
+        # removes when it ends: every path named is the working directory's, none the view's
+        # (the dataset sites-only by its registry there, the view's VCFs/ being empty)
+        shutil.rmtree(os.path.join(self.tmp, "work"))
+        shutil.rmtree(os.path.join(self.tmp, "out"))
+        registry = os.path.join(self.tmp, "work", "Dictionaries", "registry_ds")
+        os.makedirs(registry)
+        with open(os.path.join(registry, "reg_chrA.idx"), "w") as fh:
+            fh.write('{"n_records": 1, "aggregation": "info_af", "databases": {}}')
+        res, _lines = self.run_search({"chrA": window_rows("chrA", 25, 27)}, {"chrA": True},
+                                      true_pam="NNGRRT", pam=sa, view="chrA")
+        self.assertIn("To search them: ds is sites-only", res.stdout, res.stderr)
+        gone = re.search(r"which go first \(rm -rf ([^;]*); and any copy", res.stdout)
+        self.assertIsNotNone(gone, res.stdout)
+        named = re.findall(r"'([^']*)'", gone.group(1))
+        self.assertIn(os.path.join(self.work, "Dictionaries", "log_indels_ds"), named)
+        self.assertIn(self.idx, named)
+        self.assertNotIn(os.path.join(self.work, "Dictionaries", "registry_ds"), named)
+        for path in named + re.findall(r"rm -rf '([^']*)'", res.stdout):
+            self.assertTrue(path.startswith(self.work + os.sep), path)
+            self.assertNotIn(ct.CHROMVIEWPREFIX, path)
         shutil.rmtree(os.path.join(self.tmp, "work"))
         shutil.rmtree(os.path.join(self.tmp, "out"))
         res, _lines = self.run_search({"chrA": window_rows("chrA", 30, 30)}, {"chrA": True},
