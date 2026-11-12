@@ -99,6 +99,22 @@ them; use the rebuilt `NNN_3` archives with CRISPRme+ 2.8.1 or later (see below)
 The two genotyped panels ship a `genotypes_hg38_*` companion that enables
 `--per-sample` resolution (CONFIRMED *cis* + exact joint AF + named carriers).
 
+**The mega for CRISPRme+ 2.10.0** is rebuilt from the same merged VCFs (`vcfs/hg38_mega`) by
+`seq_script/merge_panels/mega_rebuild.sh`, with CRISPRitz 2.10.0 (index format 2, every allele
+of a split site coded): its registry and its indel frequencies hold exactly the records its
+genome codes, those whose FILTER is `PASS` or `.` (the archives above, of 2.8.1, list every
+record of the VCF, 2,442,989 SNVs outside `PASS` among them), one allele once (of an allele on
+two records, the more frequent record's: 8 long deletions genome-wide), and its indel log carries
+each indel's `AF_max`, so an indel row shows its frequency. Searched with CRISPRme+ 2.10.0, a
+sites-only dataset's candidates in windows of 2^20 sequences or more (the immunoglobulin loci
+above all) are withheld and listed in the dense-region files, and noted on the rows there
+(`--no-sites-only-density-guard` analyses them all), and its
+rows of two or more variants whose frequencies fail the bound (product under 1e-06, or the
+rarest under 0.001) are ranked after the others; with the guard a search of it took 1.37 to 1.46
+(chr22) and 1.53 to 1.73 (chr14) times the shipped mega's, at 4 mismatches and 1 + 1 bulges. The
+rebuilt archives are published with the release, in the location of the 2.10.0 indexes; the ones
+above stay for earlier releases.
+
 ### Other PAMs
 
 | PAM | Indexes | When to use |

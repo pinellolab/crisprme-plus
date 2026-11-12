@@ -351,6 +351,68 @@ through the fake-indel genome and **are** per-dataset frequency-annotated via a 
 `indel_af` sidecar (per-dataset `AF_<dataset>` + `AF_max`), which the report reads for the
 mega panel.
 
+**The mega rebuilt for CRISPRme 2.10.0** (`seq_script/merge_panels/mega_rebuild.sh`) comes from
+the same merged VCFs (`mega.<chr>.afmax.vcf.gz`, `vcfs/hg38_mega` on the Hub), and every part of
+it reads one set of records, those CRISPRitz's enricher reads:
+
+1. the build input (`prepare_mega_build_vcf.py`) keeps the records whose FILTER is `PASS` or
+   `.` (the merge carried HGDP-2019's `LOW_VQSLOD` and `ExcHet` onto 2,442,989 SNVs and
+   1,885,916 indels genome-wide, which the enricher skips and the registry of the shipped mega
+   held), sets `INFO/AF` to `AF_max`, SNVs and indels alike (the one global frequency the
+   enricher writes into the indel log; the as-run merge wrote no `AF`, so no indel row of the
+   shipped mega showed one; it wrote no `AF_max` on chrY, whose 177,968 PASS records then get the
+   largest of their sources' frequencies, which `AF_max` is, as `AF_max` and `AF`), and keeps one
+   record of each REF>ALT at a position: of an allele
+   on two records, the more frequent record (its `INFO/AF`; on a tie, the earlier). The enricher
+   merges two SNP records of one allele in its dictionaries, by that rule, but gives each indel
+   record a fake-indel window and an indel-log row of its own, while the indel frequencies, the
+   registry and the checks hold an allele once. The as-run merge wrote no SNV twice and 8
+   indels genome-wide on two lines each, long deletions whose two lines carry one `AF_max`
+   (chr1 1, chr4 1, chr7 1, chr10 3, chr13 1, chr21 1; none on chr22 or chr14): with both lines
+   the checks of chr21 failed ("1 allele(s) on more than one row"), and with one they pass;
+2. one presence genotype, `MEGA`, carrying every ALT of every record (`synth_sites_gt.py`),
+   lets the enricher window the indels; one `build-index-only` without `--samplesID` then
+   builds the enriched genome (every PASS SNV allele coded, `Q` at a four-allele position), the
+   SNP index, the fake-indel genome and its INDELS index (index format 2) and the indel log;
+   the presence sample is taken out of the log, and the per-sample dictionaries, which name it,
+   removed (`build-index-only` builds no genotype store or phased indel store for a
+   sites-only dataset);
+3. the registry (`build_mega_registry.py`) and the per-dataset indel frequencies
+   (`build_mega_indel_af.py`) read the build input as the enricher does: FILTER `PASS` or `.`;
+   a SNP allele is an upper-case A, C, G or T over a REF of one base, each ALT of a line of
+   several with its own frequencies (a `*`, an `N` or a lower-case base is coded by no one and
+   in no store); an indel-path allele is one the enricher windows (an MNV included, none
+   within the window's left flank of the chromosome's start: 26 bases with CRISPRitz 2.10.0's
+   25/27 window, read from the indel log the build wrote, an indel's POS less its window's
+   start); an allele once (the build input holds one record of each). Up to 2.8.1 the registry
+   read every record whatever its FILTER, and the indel frequencies took each source's highest
+   of a repeated key; and `samplesIDs/<dataset>.samplesID.txt`, which a search names, lists the
+   sources as pseudo-samples, as the shipped install does;
+4. `verify_mega_chrom.py` reads the source VCF on its own and checks every store against it:
+   the registry's records are exactly the SNP alleles (each source's frequency within half a
+   count of its own, the global group exactly `AF_max` as a count over the summed nominal allele
+   numbers of the sources that carry the allele), the indel frequencies' and the indel
+   log's exactly the indel-path alleles (one log row each, no sample, `AF` = `AF_max`), the
+   enriched genome codes exactly the registry's alleles and differs from the reference
+   nowhere else, and the build input is the source's `PASS` and `.` records, one of each
+   REF>ALT (the more frequent), none on two records.
+
+Measured on chr22 and chr14 (NRG, a budget of 2 DNA and 2 RNA bulges, as published): every
+check passes (chr22: 982,192 of the 1,101,148 records pass FILTER, 759,909 SNP alleles in the
+registry at 742,436 coded positions, 222,283 indel-path alleles in the indel frequencies and the
+log; chr14: 1,882,699 of 2,001,087, 1,460,360 SNP alleles at 1,435,025 positions, 422,339
+indel-path alleles), and the SNP and INDELS indexes and the indel log are byte for byte those of
+the two-build recipe the D2 judges validated (`mega_build_indels.sh` beside a separate SNP
+build); the recipe run again with this release's final scripts gives the same files. On chr21
+every check passes too (956,135 of 1,046,879 records; one a second record of one deletion, left
+out of the build input, which with both records gave the indel log that deletion twice and failed
+the checks), and on chrY (177,968 of 187,824 records, each given the `AF_max` of its sources;
+136,043 SNP and 41,925 indel-path alleles, every indel-log row with its frequency). The registry
+of the rebuilt mega holds exactly what its genome codes, so a row names no SNV outside `PASS` and
+`.`, and every indel row shows its frequency. The recipe was not run genome-wide: the release's
+readiness audit comes first; its first step alone, run over the 24 merged VCFs, finds the 8
+duplicated deletions above and chrY's missing `AF_max`, and nothing else of the kind.
+
 The two modes are therefore complementary: the genotyped panel gives phased,
 cis-capable frequencies over a curated sample set; the mega gives one-scan,
 frequency-annotated coverage across the widest set of population resources.
@@ -373,11 +435,13 @@ target's column, only the ALTs the column's code holds: its dictionary and the t
 from it list what the enrichment coded, so an ALT the code does not hold is another
 position's. It reads a Q column's ALTs only at such a position (a Q at a bulge boundary can be
 a neighbouring position's), so on an index with the tiers alone it takes the position from
-this list. A sites-only registry is read from its VCF, every record of it, and lists ALTs the
-enrichment never coded: on an index built by CRISPRitz 2.9.1 or earlier, which codes the last
-PASS record of a split site alone (Homogenization, above), the site's earlier records, and on
-any index non-PASS records. Each is the panel's own allele at its own position, so the
-post-analysis of a sites-only dataset substitutes every ALT its registry lists at a variant
+this list. A sites-only registry built before CRISPRme 2.10.0 was read from its VCF, every
+record of it, and lists ALTs the enrichment never coded: on an index built by CRISPRitz 2.9.1 or
+earlier, which codes the last PASS record of a split site alone (Homogenization, above), the
+site's earlier records, and on any index non-PASS records (the mega rebuilt for 2.10.0 reads its
+records as the enricher does, above, and lists what its genome codes). Each is the panel's own
+allele at its own position, so the post-analysis of a sites-only dataset substitutes every ALT
+its registry lists at a variant
 column, whatever the column's code, a Q included, as up to 2.8.1. A target that only such an
 ALT brings within the search's budget is still not found on such an index; a mega index
 rebuilt by CRISPRitz 2.10.0 codes every PASS ALT.
@@ -865,39 +929,110 @@ alignment was read, from reference bases the target does not hold. Alignments th
 bases of one insertion therefore share the anchor. The merge takes a guide's rows on one
 chromosome for one site while the cluster position of each (its start, less its RNA bulges and
 plus its DNA bulges on the + strand with a 3′ PAM and on the − strand with a 5′ one) is within
-`--merge` bases (3 by default) of the one before, on either strand and whatever their bases,
-and keeps one row to represent the site, the others being its alternative alignments:
-alignments that start on bases of one insertion are now one site, and such a row can join the
-site of a reference or SNP row that starts near the anchor (on the HGDP + 1000 Genomes index,
-the README guide's chr22:21052642 (−) of 2.8.1, 4 bases from the reference row at 21052638 (−),
-is now 21052639, one of that row's alternative alignments). Within a site, the alignments that
-name the same variants with the same carriers are one entry, the best, as on every row: they
-are one target's alignments with different bulges. The merge compares indel rows there at their
-cluster position on the haplotype carrying the indel, which on a row that starts inside an
-insertion is past the anchor by the rank of its first base among the inserted ones, read from
-the row's bases (`indel_snp_cis.row_first_base`). Two alignments whose cluster positions on
-that haplotype differ are two targets of it, as many bases apart as 2.8.1 placed them, and both
-are listed, as the site's row or one of its alternative alignments (a population-level run
-lists only each site's row); one target's alignments with different bulges before one PAM fold
-into the best, as up to 2.8.1, also when they start on different bases an insertion adds. Two
-copies of one target inside an insertion (a repeat it holds) make the same row at the anchor,
-its bases, REF alignment and variants the same, and that row is listed once, with the carriers
-of both, where 2.8.1 listed each copy at its own start; its `PAM_creation` is created when
-either copy's PAM is (below). A bulged alignment of the second copy,
-which 2.8.1 folded into that copy's row, then has no row of its own copy to fold into and is
-listed as one of the site's alternative alignments (the SNP+indel oracle's X2). With the TRAC
-guide (CTCTCAGCTGGTACACGGCA) on that index, two alleles of chr22:50193929 that insert 96 bases,
-a 48-base unit twice, with one carrier each, hold the CFD-0 alignment CTACTCAGgaGGgACA-GGCtGAG
-(−) in both copies, which 2.8.1 listed at 50193950 and 50193998 and 2.10.0 lists once per
-allele, at 50193928. Such a row's ALT alignment begins mid-insertion: on the + strand its first
-bases are the last bases the insertion adds that the target holds (TTAT, the 7th to 10th of
-G>GCAATCATTAT, in a 2.8.0 alternative alignment at chr22:22322768). Its REF alignment holds the
-reference bases from the anchor on, as many as the target holds, so it begins with the anchor
-base, which the target does not hold, and past the insertion it is out of register with the ALT
-by the number of inserted bases the target holds, less one. On the − strand both are shown
-reverse-complemented, in the target's orientation: the ALT ends mid-insertion (with a 3′ PAM,
-its PAM holds those inserted bases) and the REF ends with the anchor's complement.
-`CFD_score_REF` and the REF seed and non-seed counts are read from that REF alignment.
+`--merge` bases (3 by default) of the one before, on either strand and whatever their bases, and
+keeps one row to represent the site, the others being its alternative alignments: alignments
+that start on bases of one insertion are now one site, and such a row can join the site of a
+reference or SNP row that starts near the anchor (on the HGDP + 1000 Genomes index, the README
+guide's chr22:21052642 (−) of 2.8.1, 4 bases from the reference row at 21052638 (−), is now
+21052639, one of that row's alternative alignments). The rows that start inside an insertion at
+one anchor are placed together, as one unit (but for those of a target that has an alignment
+starting on a reference base, below), and the unit joins one site and chains none
+(2.10.0): the chain is made of the other rows, and the unit joins the site whose rows lie within
+`--merge` bases of its rows' cluster positions (the smallest of them to a site before it, the
+largest to a site after it; of two such sites, the one nearer its place on the haplotype, the
+first base where one of its rows starts, the next on a tie, where 2.8.1 had it), or, with none,
+a site with the other such units within `--merge` bases. Chained like any other row, such a row
+stood up to the insertion's length before its place on the haplotype, between two sites 2.8.1
+kept apart, and joined them: on `hg38_mega` chr22, population-level (five guides, NRG, 4
+mismatches, 1 DNA and 1 RNA bulge), chr22:36,838,374 (+) of VEGFA site 3 and chr22:47,379,217
+(+) of EMX1, rows of 2.8.1, left the results for the next cluster's alternative alignments when
+the insertion rows chr22_36838378_A_ATGTG... and chr22_47379212_A_AGGAGG... moved to their
+anchors. Placed one by one, each by its own cluster position, the rows split one target: its
+alignments before one PAM with different bulges have different cluster positions (a DNA bulge
+adds one, an RNA bulge takes one off), so with a site on either side the plain alignment joined
+one and its bulged alignment the other, two rows of one off-target (chr22:45,890,432 (+) of
+VEGFA site 3 on HGDP + 1000 Genomes, CFD 0.179 and 0.172, one insertion and one carrier; review
+r1 of lane M). A unit is made of whole targets: a target whose alignments start partly inside
+the insertion and partly on a reference base before it (the anchor base itself, or one before
+it, with DNA bulges) is placed by its alignment on a reference base, a row of the chain at the
+target's place on the haplotype, and its alignments inside the insertion go with it (one
+strand, place on the haplotype and insertion), where 2.8.1 placed them all; the unit holds the
+targets that lie wholly inside the insertion. Held in the unit, those alignments could go to
+the site before it while the alignment on a reference base opened the site after it, and the
+target was written twice: with 2 DNA and 2 RNA bulges, another target's 2-RNA-bulge alignment
+from the insertion's first base, one base after a site, took the unit there, and the target's
+2-DNA-bulge alignment from the anchor base was a site of its own (review r2 of lane M; the chain
+of every row, and 2.8.1, wrote it once). The merge reads the rows in the order of their place in
+the chain (a unit's at its anchor; a target's alignments inside the insertion reach the merge
+before its alignment on a reference base, and go with it) through a window as wide as the
+largest bulge shift of the input, so every row of a unit is in when it is placed, every
+alignment of a target whose bases fix its place on the haplotype is in one cluster whatever its
+bulges and `--merge` (in a tandem repeat, below), and the clusters do not depend on the order of
+the rows of one cluster position, which the three merges sort differently. The case is rare: a
+search of seven guides at 4 mismatches and 2 + 2 bulges (1000 Genomes chr22, NGG,
+population-level) writes the same 54,430 rows either way, no target twice, one row (an
+insertion's) more than the chain of every row. A known limit remains in tandem repeats: the
+merge reads each row's place from its own bases, the first place on the haplotype they fit
+(`indel_snp_cis.row_first_base`), and in a repeat that a target lies wholly in, the target's
+alignments, each with its own bases, can fit different earlier places, one even the anchor base
+(a row of the chain); they are then not taken for one target, can go to two clusters, and the
+target can be written twice (review r3 of lane M: a model of microsatellites around the
+anchors, at 1 DNA and 1 RNA bulge and `--merge` 3, split 134 targets and wrote 15 twice in
+10,000 trials, where the chain of every row split none). No search of real data checked has
+such a target, each row's target placed by its PAM on the haplotype of its variants: the merge
+inputs of the `hg38_mega` searches of chr22 (shipped and rebuilt, guarded and not) and chr14
+(§5), of the 2 + 2 search in both modes, and of the gate's README population-level and
+repeat-rich runs (§8) split none. In the
+`hg38_mega` search above (the
+sites-only density guard of §5 off, as the chain of every row had none) the merge writes 89 rows
+more than the chain of every row did, and none fewer: 88 at starts where that chain wrote none --
+30 sites CRISPRme 2.8.1 wrote at the same place (the two above among them), 34 sites of 2.8.1 that
+start inside an insertion, now at its anchor, and 24 sites that rows inside an insertion joined to
+a neighbour with 2.8.1's merge too (as chr22:22,585,904 (−) of EMX1, CFD 0.317, eight bases from
+the chr22:22,585,896 site of the same CFD) -- and an insertion's row at chr22:24,800,533 (+) of
+VEGFA site 3 that joins the site after it, no farther from its targets' place on the haplotype
+than the site before it, whose reference row starts at that same base: two rows with one start,
+each another target. No two written rows are alignments of one target (each row's PAM placed on
+the haplotype of its variants, in each of the three views), and 22 lie within `--merge` bases of a
+neighbour's (by cluster position), each an insertion's row at its anchor beside a site it does not
+chain (none with the chain of every row). Placing a target by its alignment on a reference base
+changes none of this search's rows, nor those of the searches of the rebuilt mega of §5 (chr22 and
+chr14) or of the real-data check's gate runs of §8: with 1 DNA and 1 RNA bulge the units of review
+r1 of lane M split no target there. On the HGDP + 1000 Genomes index (chr22, the three repeat-rich
+guides of §8, NRG, 4 mismatches, 1 DNA and 1 RNA bulge) it writes 11 rows more than the chain of
+every row population-level and 12 per sample, and none fewer, each target once (chr22:45,890,432
+(+) of VEGFA site 3 one row, as with the chain of every row; chr22:38,937,540 (+), a SNP row of
+CFD 0.134 an insertion's rows had joined to a deletion row's site six bases before, now leads a
+site of its own), and 5 and 6 pairs of its rows lie within `--merge` bases of each other (by
+cluster position), each an insertion's row at its anchor beside a site it does not chain. Within a
+site, the alignments that name the same variants with the same carriers are one entry, the best,
+as on every row: they are one target's alignments with different bulges. The merge compares indel
+rows there at their cluster position on the haplotype carrying the indel,
+which on a row that starts inside an insertion is past the anchor by the rank of its first base
+among the inserted ones, read from the row's bases (`indel_snp_cis.row_first_base`). Two
+alignments whose cluster positions on that haplotype differ are two targets of it, as many bases
+apart as 2.8.1 placed them, and both are listed, as the site's row or one of its alternative
+alignments (a population-level run lists only each site's row); one target's alignments with
+different bulges before one PAM fold into the best, as up to 2.8.1, also when they start on
+different bases an insertion adds. Two copies of one target inside an insertion (a repeat it
+holds) make the same row at the anchor, its bases, REF alignment and variants the same, and that
+row is listed once, with the carriers of both, where 2.8.1 listed each copy at its own start;
+its `PAM_creation` is created when either copy's PAM is (below). A bulged alignment of the
+second copy, which 2.8.1 folded into that copy's row, then has no row of its own copy to fold
+into and is listed as one of the site's alternative alignments (the SNP+indel oracle's X2). With
+the TRAC guide (CTCTCAGCTGGTACACGGCA) on that index, two alleles of chr22:50193929 that insert
+96 bases, a 48-base unit twice, with one carrier each, hold the CFD-0 alignment
+CTACTCAGgaGGgACA-GGCtGAG (−) in both copies, which 2.8.1 listed at 50193950 and 50193998 and
+2.10.0 lists once per allele, at 50193928. Such a row's ALT alignment begins mid-insertion: on
+the + strand its first bases are the last bases the insertion adds that the target holds (TTAT,
+the 7th to 10th of G>GCAATCATTAT, in a 2.8.0 alternative alignment at chr22:22322768). Its REF
+alignment holds the reference bases from the anchor on, as many as the target holds, so it
+begins with the anchor base, which the target does not hold, and past the insertion it is out of
+register with the ALT by the number of inserted bases the target holds, less one. On the −
+strand both are shown reverse-complemented, in the target's orientation: the ALT ends
+mid-insertion (with a 3′ PAM, its PAM holds those inserted bases) and the REF ends with the
+anchor's complement. `CFD_score_REF` and the REF seed and non-seed counts are read from that REF
+alignment.
 
 **`Variant_info_spacer+PAM`.** Each variant is numbered as on a SNP row, by its distance from
 the target's first aligned base to the variant's POS base, the first base being 1: on
@@ -1205,6 +1340,105 @@ complementary controls:
   starts), the rows lying in a dense window fall from 281 to 2, and 47 to 49 of the 100
   sites with the highest CFD leave the top 100, as the ties at the 100th CFD fall. Its
   per-sample search changes no row, its multi-variant rows being CONFIRMED haplotypes.
+- **The sites-only density guard (2.10.0).** A sites-only dataset (`mega`) has no genotypes to
+  tell which combinations of a window's alleles anyone carries, so its post-analysis reports
+  each window's worst case, in every search. With every allele coded (CRISPRitz 2.10.0) its
+  windows in the immunoglobulin loci and some tandem repeats spell 2^40 sequences and more: they
+  match nearly any guide, their rows are combinations of ten to seventeen variants (on chr22 the
+  three CFD-1.0 rows of the rebuilt mega lie in the (TA)n repeat at chr22:24,238,761-774, with
+  products of frequencies of 1e-29 to 1e-33), and their candidates cost most of a mega search's
+  time (on chr14 the rebuilt mega gives 13 times the shipped one's SNP and 23 times its indel
+  candidates, 92-93% of them in windows of 2^20 sequences or more). So `sites_only_guard.py`
+  withholds, from a sites-only dataset's SNP and indel post-analysis (whose registry manifest
+  says it is sites-only), every raw candidate whose window -- the letters of its aligned target,
+  on the variant genome or the fake-indel contig, read as F above -- spells 2^bits sequences or
+  more (`window_density.guard_withholds`; 20 bits, `window_density.SITES_ONLY_GUARD_BITS`,
+  `complete-search --sites-only-density-guard N`, `--no-sites-only-density-guard` off), before
+  the post-analysis reads it, so their time is not spent. The regions they lie in go to
+  `<out>_<chrom>.snp.sites_only_density_guard.bed` and `...indel.sites_only_density_guard.bed`
+  (one line per region of overlapping windows of a guide, on the reference; an indel window
+  placed by its contig's window start), which the report merges into
+  `sites_only_density_guard.bed` and counts in its inputs card; the run's `log_verbose.txt` says
+  per chromosome how many it withheld. The windows themselves go to the dense-region list as the
+  post-analysis lists a dense window
+  (`...sites_only_density_guard.high_variant_density_regions.bed`, in its columns, `greedy`
+  `withheld`): the SNP side one line a window (start, end, guide; of the candidates of one
+  window, the line `resultIntegrator` reads first), so the list is the one the post-analysis
+  writes with the guard off, and the window's four-allele positions in
+  `...sites_only_density_guard.four_allele_positions.bed`, as the post-analysis lists those of
+  every window it reads; the indel side, whose post-analysis lists no dense window, one line a
+  region of the BED above, its densest window's letters (on the fake-indel contig), its `greedy`
+  column `withheld-region`. The reference rows there, and every row of a genotyped dataset
+  (resolved per sample, or checked by the carrier gate, which drops none), are reported as
+  always, and keep the note `High_variant_density_region` gives a row in a dense window, which
+  says that the guard withheld a sites-only dataset's alignments of that window (other haplotype
+  alignments may exist); a row that no window covers and an indel region does is noted by the
+  region ("... withheld a sites-only dataset's indel alignments in this region"), a region,
+  wider than its windows, coming after them. Against the same search unguarded (below), of the
+  20,617 rows of both the notes of 20,480 are the same, 101 rows in a withheld window name the
+  same window in the guard's wording, 34 rows that no window covers get an indel region's note,
+  and 2 rows whose site the guard changed (another alignment its best) differ in their
+  four-allele positions; none loses its note (with the windows in the guard's own BED alone, 19
+  rows lost their dense-window note and 89 got another: review r1 of lane M). Measured with five
+  guides (the README guide, ACTGAAATCTGTAAGCAGGC, TRAC, EMX1 and VEGFA site 3; NRG, 4
+  mismatches, 1 DNA and 1 RNA bulge, population-level, eight threads; the runs side by side on
+  one shared node, so their times compare with one another only): on chr22 the guard withholds
+  107,038 of the rebuilt mega's 280,112 SNP candidates and 5,782,488 of its 7,476,229 indel
+  candidates (three quarters of these in the (TA)n repeat at chr22:24,238,749-24,238,997), in
+  338 regions, lists 2,925 SNP windows, their 243 four-allele positions and 161 indel regions in
+  the dense-region list, and the search takes 41.9 min, 1.37 times the shipped mega's 30.6 min
+  (1.46 times in an earlier measurement under a higher load), where unguarded it takes 136.5 min
+  (4.46 times; 4.6 in the earlier measurement); measured again on the merge of review r2 of lane
+  M (the shipped mega searched with the code before this lane's, d3722b0, all eight searches of
+  chr22 and chr14 started together), 44.7 against 32.6 min, 1.37 times, and unguarded 142.3 min,
+  4.37 times (the review measured 1.42 and 4.9). It writes 20,810 rows against the unguarded
+  search's 20,940, 130 fewer. Site by site (the merge's clusters of the two searches' merge
+  inputs, the guarded one a subset of the unguarded one), of the unguarded search's 20,940 sites
+  20,579 are written as before; 232, each written as a combination of 4 to 17 variants (CFD up
+  to 0.857; 203 of them in IGL), are gone, every alignment of theirs withheld (none of those
+  49,643 alignments a reference or single-variant one); 81 are written from another alignment
+  of the site, the one written unguarded withheld (26 of them from one that starts where it did,
+  which a count of rows by their start does not see); and 48 are split into 150 sites, the
+  withheld alignments having chained them (the three CFD-1.0 sites above among them, each now
+  two to nine sites of CFD up to 0.341). So 321 rows of the unguarded search are not written
+  (232, 55 and 34 of the split sites') and 191 are new (55 and 136), each a combination of three
+  or more variants; it keeps all 56 single-variant rows the rebuild adds over the shipped mega,
+  and of the 107 rows at CFD 0.2 or more the rebuild adds, 41 remain (rows told apart by their
+  highest-CFD start). Every site the guard changes is written unguarded as a combination of four
+  or more variants. The 100 rows that lead the
+  five guides' CFD rankings hold 81 combinations below the frequency bound unguarded and 61
+  guarded (none once D6 ranks them after the others, below). On chr14 it withholds 3,373,484 of
+  3,651,632 SNP candidates (97 % of them in IGH) and 34,248,990 of 36,946,128 indel candidates,
+  in 655 regions, and the search takes 72.0 min, 1.57 times the shipped mega's 45.9 min (as in
+  the earlier measurement; measured again as above, 74.2 against 48.4 min, 1.53 times, and the
+  review measured 1.73 against the shipped mega searched with this release's code; unguarded,
+  it was projected at 12 to 16 h). On the shipped mega's
+  chr22 it withholds 1,474 SNP and 18,675 indel candidates, and the search writes 20,093 rows
+  against 20,099 unguarded. Site by site: of the unguarded search's 20,099 sites, 20,089 are
+  written as before; 7, each written as a combination of 11 to 16 variants in IGL or in a (TA)n
+  repeat at chr22:18,201,771-18,201,794, are gone, every alignment of theirs withheld; 1 is
+  split in two: chr22:22,905,391 (−) of ACTGAAATCTGTAAGCAGGC (11 variants) is a site of its own
+  once the guard withheld the alignments that chained it to the chr22:22,905,398 (−) site, and
+  that site is written from another alignment (12 variants, CFD 0.005, where the one written
+  unguarded has 14 and 0.027); and 2 more in IGL are written from another alignment that starts
+  where the one written unguarded did (CFD 0.016 for 0.018, and 0.006 for 0.084), which a count
+  of rows by their start does not see. The rebuild itself, guard or none, moves some sites: with
+  every allele coded, the chain of rows within `--merge` bases runs further, so a site the
+  shipped mega reports as a single-variant row, or as a reference row, can lie inside a
+  neighbouring site whose row is a combination (a population-level search lists one row a site).
+  Read by the merge's clusters (a shipped row at whose start, guide and strand the rebuild's
+  search writes no row, its alignment in a site of the rebuild's merge input whose written row is
+  a combination; the shipped and the rebuilt mega both guarded), with the five guides that is 7
+  single-variant sites on chr22 (CFD up to 0.041: chr22:20,251,930 (−) of VEGFA site 3, an
+  insertion, inside the chr22:20,251,921 site, whose row is a five-variant combination of CFD
+  0.138) and 14 on chr14 (up to 0.193: chr14:104,215,539 (+) of VEGFA site 3, a PASS deletion,
+  inside the chr14:104,215,528 site, whose row is a three-variant combination of CFD 0.263
+  within the frequency bound), and 3 reference sites on chr22 (CFD up to 0.013) and 2 on chr14
+  (0.001). Where that combination is below the frequency bound, D6 ranks it after the others,
+  and the site it holds leaves the main tables with it: 3 of the 7 single-variant sites on chr22
+  (CFD up to 0.002: chr22:39,602,033 (−) of EMX1, inside the chr22:39,602,023 site) and 8 of the
+  14 on chr14 (up to 0.017: chr14:105,864,254 (−) of TRAC, inside a seven-variant combination of
+  CFD 0.363), and 2 of the 3 reference sites on chr22 and 1 of the 2 on chr14 (CFD 0.001 or less).
 
 Together these keep genome-wide variant search tractable while making any bound
 that was applied explicit and reviewable, and, unless `--max-degeneracy` is given,
@@ -1397,9 +1631,11 @@ the search without it (`--no-prioritize-observed`).
   form's check box), against the phased HGDP + 1000 Genomes genotypes (4,091 samples, 8,182
   haplotypes on an autosome): the genotype oracle, which an installed
   `NRG_3_hg38+hg38_HGDP1kGP` index brings, or `download --what genotype-oracle` installs
-  alone (`CRISPRME_GENOTYPE_TIER` names another folder). Without it the search says so and the
-  rows are reported unchecked. A per-sample search needs no gate: its rows name their cis
-  carriers. A row does not say which dataset it comes from, so the gate reads every phased
+  alone (`CRISPRME_GENOTYPE_TIER` names another folder). Without it the search says so, and the
+  rows are checked against the frequency bound alone (C2, below). A per-sample search of
+  genotyped datasets alone needs no gate: its rows name their cis carriers (beside a sites-only
+  dataset the gate reads that dataset's rows, below). A row does not say which dataset it comes
+  from, so the gate reads every phased
   store the search has: a variant is in a panel when the panel holds its POS, REF and ALT (a
   REF that differs is counted, and said, as a normalization difference).
 - **Tiers**, for each of a row's three alignments (highest CFD, fewest mismatches + bulges,
@@ -1455,13 +1691,47 @@ the search without it (`--no-prioritize-observed`).
     frequencies; linkage is not modelled), is given, and below a threshold (3 by default,
     `--gate-min-expected`; 0 turns it off) the state is `too rare to tell`. Ranked after the
     others all the same.
-  - **C2**: two or more variants, one or more of them not in the panel: absence of evidence,
-    not evidence of absence, as the combination may be a real haplotype of an ancestry the
-    panel has few samples of. Kept in its place. The safeguards' frequency bound (the
-    product of the variants' frequencies at least 1e-06 and the rarest at least 0.001) is
-    given as information and applied to nothing: a SNP's frequency is the dataset's registry's
-    (on `mega`, `AF_max`), an indel's that of its indel frequencies (`indel_af_<vcf>/`), or
-    else the row's own.
+  - **C2**: two or more variants, one or more of them not in the panel: absence of evidence, not
+    evidence of absence, as the combination may be a real haplotype of an ancestry the panel has
+    few samples of. Kept in its place, but for the bound below. The safeguards' frequency bound
+    (the product of the variants' frequencies at least 1e-06 and the rarest at least 0.001; a
+    SNP's frequency is a dataset's registry's, an indel's that of its indel frequencies,
+    `indel_af_<vcf>/`, or else the row's own, read in a sites-only dataset's first and then in
+    the others' in the search's order) is given with each C2 alignment. Beside a genotyped
+    dataset a SNP both list so takes the sites-only dataset's frequency, the rows the bound
+    demotes being that dataset's (up to review r2 of lane M the search's first dataset to list
+    it gave it: beside HGDP + 1000 Genomes, 5 of the 344 C2 verdicts of the README guide's NRR
+    search population-level, and 5 of the 362 per sample, were below the bound only by that
+    panel's own frequency of a SNP, a singleton of its 8,182 haplotypes where the mega's
+    `AF_max` is 0.002, as chr22:12,420,161 C>T; the frequencies shown with the A and C1 rows of
+    such a search come so too). On `mega` an indel's is its `AF_max`, and a SNP's the registry's
+    global group: the largest of the sources' frequencies (`AF_max`) held as a count over the
+    summed nominal allele numbers of the sources that carry the allele (round(AF_max x AN) /
+    AN), so for a rare allele of one small source up to about a tenth off the VCF's `AF_max` (on
+    the rebuilt mega's chr22, 4,761 of the 4,762 verdicts below are those the VCF's `AF_max`
+    gives). **In a search of a
+    sites-only dataset a C2 alignment below it is ranked after the others** (state `below the
+    frequency bound`; plan decision D6: demote and label, never drop), as a C1 one is: such a
+    combination is one no panel can check and no person is expected to carry (on chr22 the
+    rebuilt mega's top rows by CFD were 10- to 17-variant combinations). Elsewhere the bound is
+    information only. With no phased panel to read (a sites-only dataset searched without the
+    genotype oracle; status `bound`) the gate still runs: every alignment of two or more
+    variants is C2 (`not checked against phased haplotypes (no panel)`), checked against the
+    bound alone. In a per-sample search beside a genotyped dataset the gate reads only the rows
+    that name no carrier (the sites-only dataset's; the others name their cis carriers).
+    Measured on the rebuilt mega's chr22 (five guides -- the README guide, ACTGAAATCTGTAAGCAGGC,
+    TRAC, EMX1 and VEGFA site 3 --, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, population-level,
+    the density guard on, no oracle: status `bound`): by each row's highest-CFD alignment B
+    4,387 and C2 4,762, 2,157 of them below the bound and ranked after the others; of the 100
+    rows that lead the five guides' CFD rankings (20 each), 67 were combinations of two or more
+    variants, 61 of them below the bound, and 5 single-variant and 28 reference rows; once the
+    demoted rows are ranked after the others, 25 combinations (none below the bound), 22
+    single-variant and 53 reference rows. The shipped mega in the same search: C2 4,065, 1,571
+    below the bound; 40 of its top 100 below it, then none. On the rebuilt mega's chr14 (IGH;
+    the same search): B 6,452 and C2 6,330, 3,235 of them below the bound; its top 100 held 70
+    combinations below the bound and hold none once they are ranked after the others (73
+    reference, 15 single-variant rows and 12 combinations within the bound). The integrated
+    results are the same rows either way.
 - **Output.** `..._carrier_gate.tsv` beside the integrated results, one line per alignment
   that uses a variant (the row's line, the alignment, the variants, tier, state, panel, the
   haplotypes that carry them together and their samples, E, the frequency product and
@@ -2140,7 +2410,25 @@ per-sample run of 2.10.0 writes no greedy row of a window over `CRISPRME_IUPAC_C
 joins a cluster; its `--max-degeneracy K` (§5) cuts back or leaves out a SNP row resting on
 more than K ambiguous columns, so in a cluster chain an alignment over more than K positions
 of several options is a row CRISPRme may write or not (`limit-max-degeneracy`); an indel row
-is not cut. The carrier gate (§5) ranks and labels population-level rows in its companion
+is not cut. The sites-only density guard (§5) withholds a sites-only dataset's candidate whose
+window spells 2^bits sequences or more (the bits read from the run's
+`*.sites_only_density_guard.bed`), so such a row -- the product of its positions' options at or
+over the bound, as the window's letters spell it -- is one CRISPRme does not write, which a
+cluster chain never counts on (`limit-density-guard` where a cluster reaches a row as good as a
+target only through it); a genotyped dataset's rows are not guarded. Since 2.10.0 the rows that
+start inside an insertion at one anchor are placed together, as one merge site that joins one
+site and chains none, but for those of a target that has an alignment starting on a reference
+base, which go with it, at the target's place on the haplotype, past their own cluster
+position by the rank of their first base among the inserted ones, at most the DNA and RNA
+bulges together (such a target's place, where its alignment with no bulge starts, is at most
+`--bDNA` bases past the anchor; §4); so the row within `--merge` bases of a population-level
+target can be the next site's: a target whose near rows are not as good as it, one of them
+starting inside an insertion (its first base one the insertion adds, read by the check from the
+row's own target on the haplotype of its variants), is `limit-insertion-site` (non-gating) where
+the chain of every row, which the check follows, reaches a row that is (its own coverage gap); a
+near row that names an insertion and starts on a reference base is chained like any other row,
+and is a miss when it is not as good as the target. The carrier gate (§5) ranks and labels
+population-level rows in its companion
 and the report and leaves the integrated results and their alternative alignments as they
 are, so it changes nothing the check reads. A run made with the SNP+indel co-occurrence off
 (`CRISPRME_INDEL_SNP=0`, which a search of 2.10.0 notes in its `log_verbose.txt`) is
@@ -2377,7 +2665,7 @@ two-indel targets at 66 records, overlapping alleles at 22), three repeat-rich g
 `GGGTGGGGGGAGTTTGCTCC`) per sample and
 population-level (per sample 8,289 notes where a listed carrier's slot, read as §4 reads
 it, holds the target, 1,082 row blocks and 1,457 records with overlapping alleles, 1,284
-two-indel targets; population-level 160 notes, 67 row blocks and the same 1,457 records,
+two-indel targets; population-level 163 notes, 70 row blocks and the same 1,457 records,
 271 two-indel targets), the HPRC chr22 panel (9,125 MNVs, 4.5% of its calls with a missing
 allele) and a copy of it with every fourth sample unphased, both modes (3 row blocks of an
 MNV whose carrier CRISPRme resolves PUTATIVE, as it documents; 6 two-indel targets; 17 and
@@ -2389,7 +2677,11 @@ naming SNVs of `hg38_mega`'s VCF whose FILTER passes, per sample 615,803 lines o
 alternative alignments at one (AT)n repeat, chr22:24,238,700-24,238,900, where `hg38_mega`
 lists several SNVs and indels at almost every position; completeness counts the 127,735
 indel records of chr22 only `hg38_mega` holds and the 32,178 the search skips for their
-FILTER; 19 and 9 two-indel targets, 8 overlapping records); each read as a run of 2.10.0
+FILTER; 19 and 9 two-indel targets, 8 overlapping records; so measured before the sites-only
+density guard of §5, which withholds the repeat's densest windows: with it, beside the mega
+the recipe of §2 rebuilt, 85,953 and 689 such row blocks, 11,414 lines at the repeat, the
+same 127,735 records and none skipped, its build input holding only `PASS` records, and the
+same two-indel targets and overlapping records); each read as a run of 2.10.0
 from its own records (every allele, a store of `PASS` and `.`, an INDELS index of format
 2, fake-indel windows of 30/30), as is the README per-sample search with 2.10.0's code on
 the indexes of CRISPRitz 2.9.1 (the last record of a split site, a store of every FILTER,

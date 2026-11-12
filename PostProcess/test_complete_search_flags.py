@@ -521,6 +521,45 @@ class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
 
 
 @unittest.skipUnless(_importable(), "crisprme.py dependencies not installed")
+class TestTheSitesOnlyDensityGuardFlags(unittest.TestCase):
+    """--sites-only-density-guard N and --no-sites-only-density-guard (2.10.0): a value
+    that is no whole number of bits, one outside 1 to 64, and both flags together are one
+    'Error: ...' line and exit 1 before Results/<output> is made, as the other input
+    errors (TestAnInputErrorIsOneLineBeforeAnyWork)."""
+
+    GUIDE = TestAnInputErrorIsOneLineBeforeAnyWork.GUIDE
+    setUp = TestAnInputErrorIsOneLineBeforeAnyWork.setUp
+    pam = TestAnInputErrorIsOneLineBeforeAnyWork.pam
+    search = TestAnInputErrorIsOneLineBeforeAnyWork.search
+    assertRefused = TestAnInputErrorIsOneLineBeforeAnyWork.assertRefused
+
+    def test_a_value_that_is_no_number_of_bits(self):
+        pam = self.pam("20bp-NGG-SpCas9.txt")
+        for given in (("x",), ("2.5",), ()):
+            with self.subTest(given=given):
+                self.assertRefused(
+                    self.search(pam, "--sites-only-density-guard", *given),
+                    "Please provide a whole number of bits for --sites-only-density-guard "
+                    "(e.g. 20: windows of 2^20 sequences or more)")
+
+    def test_a_value_out_of_range(self):
+        pam = self.pam("20bp-NGG-SpCas9.txt")
+        for given in ("0", "-1", "65"):
+            with self.subTest(given=given):
+                self.assertRefused(
+                    self.search(pam, "--sites-only-density-guard", given),
+                    "--sites-only-density-guard takes 1 to 64 bits (20 by default); "
+                    "--no-sites-only-density-guard turns it off")
+
+    def test_both_flags(self):
+        self.assertRefused(
+            self.search(self.pam("20bp-NGG-SpCas9.txt"), "--sites-only-density-guard", "20",
+                        "--no-sites-only-density-guard"),
+            "--sites-only-density-guard and --no-sites-only-density-guard are mutually "
+            "exclusive")
+
+
+@unittest.skipUnless(_importable(), "crisprme.py dependencies not installed")
 class TestTheHelpMakesNoFolder(unittest.TestCase):
     """crisprme.py with no argument prints the help, and made the seven folders of a data
     folder (Annotations/, Dictionaries/, Genomes/, PAMs/, Results/, VCFs/, samplesIDs/)

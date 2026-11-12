@@ -186,7 +186,7 @@ SNP+SNP / SNP+indel co-occurrence; download whichever you need with `--what inde
 |---|---|---|---|
 | **HGDP + 1000 Genomes** — `20-NRR_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP (925) + 1000 Genomes (3,166), genotyped, **jointly SHAPEIT5-re-phased** — 4,091 samples | **CONFIRMED cis** throughout; named per-sample carriers + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) | most use cases; the broadest fully-phased panel of real observed haplotypes |
 | **HPRC pangenome** — `20-NRR_3_hg38+hg38_HPRC` | HPRC Release 2 Minigraph-Cactus (`hprc-v2.0-mc-grch38`) — 232 assembly-derived genomes incl. CHM13, phased | CONFIRMED cis + named carriers; captures **pangenome-specific** variation | assembly-derived / pangenome variation |
-| **mega (sites-only)** — `20-NRR_3_hg38+hg38_mega` | 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us (aggregate) | **sites-only** — union of allele frequencies, no genotypes; every multi-variant/co-occurring off-target is **PUTATIVE** with a min-AF bound and **no named carriers** | a conservative worst-case screen when you must not miss a rare allele from ANY of five databases (escalate here after a genotyped-index run) |
+| **mega (sites-only)** — `20-NRR_3_hg38+hg38_mega` | 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us (aggregate) | **sites-only** — union of allele frequencies, no genotypes; every multi-variant/co-occurring off-target is **PUTATIVE** with a min-AF bound and **no named carriers** | a conservative worst-case screen when you must not miss a rare allele from ANY of five databases (escalate here after a genotyped-index run); since 2.10.0 its windows of 2<sup>20</sup> sequences or more (the immunoglobulin loci, some tandem repeats) are withheld and listed by default (`--no-sites-only-density-guard` analyses them), and its combinations below the frequency bound are ranked after the others |
 
 > **Which variant index should I pick?** You only need **one** — if unsure, use the
 > **recommended default HGDP + 1000 Genomes** (`20-NRR_3_hg38+hg38_HGDP1kGP`, downloaded in step 2):
@@ -198,7 +198,15 @@ SNP+SNP / SNP+indel co-occurrence; download whichever you need with `--what inde
 > screen across five databases — it is **sites-only**, so every co-occurring off-target is
 > **PUTATIVE** (a worst-case reconstruction that may or may not exist in any real
 > individual) with a min-AF bound and **no named carriers**; run it after a genotyped-index
-> run when you need maximal allele-frequency breadth. Grab the others any time from the web
+> run when you need maximal allele-frequency breadth. Since 2.10.0 a mega search withholds
+> its windows of 2<sup>20</sup> sequences or more by default (the sites-only density guard:
+> in the immunoglobulin loci and some tandem repeats, where their rows are combinations of
+> several variants nobody is known to carry; a site there is written from the alignments the
+> guard keeps, and leaves the results where it keeps none; the windows are listed in the
+> dense-region files and noted on the rows there), and the
+> carrier gate ranks its combinations below the frequency bound after the others;
+> `--no-sites-only-density-guard` analyses every window, at several times the search time.
+> Grab the others any time from the web
 > **Settings** or by re-running the download with a different `--index-name`.
 
 A variant index also fetches its PAM's reference index (`20-NRR_3_hg38` for the default) if it is
@@ -1080,6 +1088,31 @@ its purpose and usage:
   chromosome how many were cut back and left out, and the report states the cap. Variant
   searches only.
 
+- `--sites-only-density-guard <bits>` / `--no-sites-only-density-guard` (*Optional*, on by
+  default at 20 bits; 1 to 64)
+  <br>The **sites-only density guard** (since 2.10.0). A sites-only dataset (the `mega` panel)
+  has no genotypes to tell which combinations of a window's alleles anyone carries, and with
+  every allele coded its windows in the immunoglobulin loci and some tandem repeats spell
+  2<sup>20</sup> sequences and more: they match nearly any guide, as combinations of ten
+  variants and more, and their candidates cost most of a mega search's time. The guard
+  withholds, from the SNP and the indel post-analysis of a sites-only dataset, every
+  candidate whose window spells 2<sup>bits</sup> sequences or more, and lists the regions
+  they lie in (`*.sites_only_density_guard.bed`, merged into the report's
+  `sites_only_density_guard.bed`; the report's inputs card says how many) and the windows
+  themselves in the dense-region list
+  (`*.sites_only_density_guard.high_variant_density_regions.bed`,
+  the columns of the post-analysis's own, `greedy` = `withheld`; the SNP side one line a
+  window, its four-allele positions too, the indel side one line a region, `withheld-region`,
+  which notes only a row no window covers). The reference rows
+  there, and every row of a genotyped dataset, are reported as always, and keep the note
+  `High_variant_density_region` gives a row in a dense window, which says the guard withheld a
+  sites-only dataset's alignments of that window; the run's `log_verbose.txt` says per
+  chromosome what it withheld. `--no-sites-only-density-guard` analyses every candidate.
+  Measured at 4 mismatches and 1 + 1 bulges, a search of the mega rebuilt for 2.10.0 with the
+  guard took 1.37 to 1.46 (chr22) and 1.53 to 1.73 (chr14) times the shipped mega's, in several
+  measurements side by side on shared nodes; unguarded, 4.4 to 4.9 times on chr22, and the chr14
+  search was projected at 12 to 16 h. See METHODS §5.
+
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP
   post-analysis. Reports each observed haplotype with CONFIRMED cis phasing, named carrier
@@ -1129,10 +1162,20 @@ its purpose and usage:
   turns the gate off. `--prioritize-observed` checks a **sites-only** dataset's rows (the
   `mega` panel) against the phased HGDP + 1000 Genomes genotypes (the genotype oracle: see
   `download --what genotype-oracle`; an installed index of `hg38_HGDP1kGP` (`20-NRR_3_hg38+hg38_HGDP1kGP`) brings it
-  too). `--gate-min-expected` (default 3) is the number of panel haplotypes expected to carry
-  a combination if its variants were independent below which the gate calls a combination
-  none carries "too rare to tell" (ranked after the others all the same); 0 turns that
-  distinction off. A per-sample search needs no gate: its rows name their cis carriers. See
+  too). In a search of a sites-only dataset a C2 row — one no panel can check — whose
+  variants' frequencies fail the safeguards' bound (their product under 1e-06, or the rarest
+  under 0.001; on `mega` a SNP's `AF_max` as its registry holds it, a count over the nominal
+  allele number of the sources that carry it, and an indel's `AF_max`, also for a variant that a
+  genotyped dataset searched beside it lists) is ranked after the others as a C1 row is, labelled
+  `... (below the 1e-06 / 0.001 bound, ranked after the others)`, and dropped from nothing;
+  without the oracle every row of two or more variants of the sites-only dataset is checked
+  against the bound alone (`not checked against phased haplotypes (no panel)`). In a
+  per-sample search beside a genotyped dataset the gate reads the rows that name no carrier,
+  the sites-only dataset's. `--gate-min-expected` (default 3) is the number of panel haplotypes
+  expected to carry a combination if its variants were independent below which the gate calls
+  a combination none carries "too rare to tell" (ranked after the others all the same); 0 turns
+  that distinction off. A per-sample search of genotyped datasets alone needs no gate: its rows
+  name their cis carriers (beside a sites-only dataset it reads that dataset's rows, above). See
   METHODS §5.
 
 - `--compute-backend {cpu,cuda,metal}` (*Optional*)
@@ -1169,7 +1212,12 @@ its purpose and usage:
 - `--merge` (*Optional - Default: 3*)
   <br>Defines the window size (in base pairs) used to merge closely spaced 
   off-targets. Pivot targets are selected based on the highest score (e.g., 
-  CFD, CRISPR-Bulge) or criteria defined by the `--sorting-criteria`. 
+  CFD, CRISPR-Bulge) or criteria defined by the `--sorting-criteria`. Since 2.10.0 the
+  alignments that start inside one insertion (at its anchor, where such a row now starts) are
+  placed together: they join the one site within this window and chain no two sites, and a
+  target's alignments go with its alignment that starts on a reference base. So two written
+  rows can lie within this window of each other, one of them an insertion's row beside a site
+  it does not chain. See METHODS §4.
 
 - `--sorting-criteria-scoring` (*Optional - Default: `mm+bulges,mm`*)
   <br>Specifies sorting criteria for merging when using CFD/CRISPR-Bulge scores. 
@@ -2148,8 +2196,10 @@ is under `data/`). Reading top to bottom:
   index such a CRISPRitz built, nor its SNP on one without the tiers. Of the indexes published
   until the rebuild for 2.10.0 this affects only HPRC's chrY (a known limit:
   [§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)); CRISPRitz 2.10.0 finds each
-  record's `AF` by its key. The mega's VCF has no `INFO/AF` at all, so none of its indels has a
-  frequency there, and the report's `indel_af.tsv` gives their per-dataset ones.
+  record's `AF` by its key. The shipped mega's VCF has no `INFO/AF` at all, so none of its indels
+  has a frequency there, and the report's `indel_af.tsv` gives their per-dataset ones; the mega
+  rebuilt for 2.10.0 (`seq_script/merge_panels/mega_rebuild.sh`) sets `INFO/AF` to `AF_max`, so
+  its indel rows show the global frequency as its SNP rows do.
 - **Key off-target table columns** — in the per-site table (and every download TSV):
   - **Chromosome / Position / Direction (`+`/`-`)** — where the off-target is and on which strand.
   - **crRNA vs DNA (aligned)** — the guide and the genomic sequence aligned; `-` marks a bulge.

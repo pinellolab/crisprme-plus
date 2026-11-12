@@ -383,6 +383,11 @@ carriers of a target in budget that runs past its fake-indel window, or whose si
 region does, held by no index), limit-window-edge (the same, of a target whose site an
 INDELS index of format 1 does not hold, at the window's edge), limit-max-degeneracy (a
 cluster reached only through a SNP row over the run's --max-degeneracy),
+limit-density-guard (a cluster reached only through a sites-only dataset's row whose window
+spells 2^bits sequences or more, which the run's sites-only density guard withheld),
+limit-insertion-site (a population-level target whose rows within --merge bp are not as good
+as it, one of them starting inside an insertion, that the chain of every row takes to a row
+that is: the near row can be the next site's, below),
 limit-capped-window (a cluster of a per-sample run of 2.8.x without alternative alignments
 reached only through a capped window's greedy row, above),
 limit-contig-end (a record within one target of a
@@ -528,6 +533,27 @@ cluster (limit-capped-window is 2.8.x's). --max-degeneracy K (2.10.0; its .Param
 Max_degeneracy) cuts back or leaves out a SNP row resting on more than K ambiguous
 columns, so in a cluster chain an alignment over more than K positions of several options
 is a row CRISPRme may write or not (limit-max-degeneracy); an indel row is not cut. The
+sites-only density guard (2.10.0; the bits on the second line of the run's
+*.sites_only_density_guard.bed) withholds a sites-only dataset's candidate whose window spells
+2^bits sequences or more from its SNP and indel post-analysis, so such a row -- the product of
+its positions' options at or over the bound, as the window's letters spell it -- is one
+CRISPRme does not write, which a chain never counts on (limit-density-guard where a cluster
+reaches a row as good as a target only through it); a genotyped dataset's rows are not
+guarded. The merge (2.10.0) places the rows that start inside an insertion at one anchor
+together, as one site that joins the site within --merge bp of its rows and chains none, but
+for the rows of a target that has an alignment starting on a reference base, which go with
+that alignment, at the target's place on the haplotype, past their own Cluster Position by
+the rank of their first base among the inserted ones (at most bDNA + bRNA, since such a
+target's place, where its alignment with no bulge starts, is at most bDNA bases past the
+anchor): the chain this checker follows is the chain of every row, a superset of CRISPRme's
+around such rows, and the row within --merge bp of a target, which it takes for the target's
+cluster's, can then be the next site's -- an insertion's row the merge placed there. A
+target whose near rows are not as good as it, one of them starting inside an insertion (its
+first base one the insertion adds, row_first_k, read on the target's own window), is
+limit-insertion-site (non-gating) where the chain of every row reaches a row that is, and a
+miss where it does not; this checker can thus take a row of the next site for a target's
+there (its own coverage gap). A near row that names an insertion and starts on a reference
+base is chained like any other row: not as good as the target, it is a miss. The
 carrier gate (2.10.0) ranks a population-level row and labels it in its companion and the
 report, leaving the integrated results and their alternative alignments as they are: it
 changes nothing this checker reads. An alt of a VCF line that lists several ALTs whose
@@ -2119,7 +2145,8 @@ def read_rows(path, table, chrom=None, lo=None, hi=None, margin=0, pam_5prime=Fa
     integrated line's (guide, Cluster Position of each block, the fewest-mm+b block's
     edits under each sorting criterion, the highest-CFD block's CFD -- recomputed from
     its aligned strings when ``cfd_model`` is given, the value the merge sorts on, else
-    as printed --, line) for the per-cluster completeness check; ``bad`` (a list) gets
+    as printed --, line, the (Cluster Position, block) of each block of the line naming an
+    insertion) for the per-cluster completeness check; ``bad`` (a list) gets
     the lines shorter than the header, ``novar`` (a list) the ALT-origin blocks of
     [lo, hi) that name no variant."""
     csv.field_size_limit(1 << 30)
@@ -2147,6 +2174,7 @@ def read_rows(path, table, chrom=None, lo=None, hi=None, margin=0, pam_5prime=Fa
             guide = (guide_of(row[col["Spacer+PAM"]], pam_len, pam_5prime)
                      if "Spacer+PAM" in col else "")
             line_blocks = []
+            ins_blocks = []   # (Cluster Position, block) of each naming an insertion (locus)
             for b in BLOCKS:
                 try:
                     start = int(row[col["Start_coordinate_(%s)" % b]])
@@ -2188,6 +2216,8 @@ def read_rows(path, table, chrom=None, lo=None, hi=None, margin=0, pam_5prime=Fa
                     if origin == "alt" and novar is not None and block["own"]:
                         novar.append(block)
                     continue
+                if _names_insertion(var):
+                    ins_blocks.append((line_blocks[-1][1], block))
                 out.append(block)
             if loci is not None and line_blocks:
                 try:
@@ -2213,8 +2243,18 @@ def read_rows(path, table, chrom=None, lo=None, hi=None, margin=0, pam_5prime=Fa
                 except KeyError:
                     pass
                 loci.setdefault((guide, ch), []).append(
-                    (guide, [c for _b, c in line_blocks], crit, cfd, line_no))
+                    (guide, [c for _b, c in line_blocks], crit, cfd, line_no, ins_blocks))
     return out
+
+
+def _names_insertion(var):
+    """True when a Variant_info_genome field names an insertion (a token whose ALT is
+    longer than its REF)."""
+    for t in str(var).split(","):
+        q = t.rsplit("_", 3)
+        if len(q) == 4 and q[1].isdigit() and len(q[3]) > len(q[2]):
+            return True
+    return False
 
 
 def result_tables(resdir):
@@ -2808,6 +2848,28 @@ def indel_path_records(vcf, chrom):
     return False
 
 
+GUARD_SUFFIX = ".sites_only_density_guard.bed"
+
+
+def run_guard_bits(resdir):
+    """The bits of a run's sites-only density guard (CRISPRme 2.10.0): its post-analysis
+    withholds a sites-only dataset's candidates whose window spells 2^bits sequences or
+    more, and says so in a BED per chromosome and side (``## bits=<n>`` on its second
+    line). None when the run wrote none: no sites-only dataset, the guard off, a release
+    before it."""
+    for path in sorted(glob.glob(os.path.join(resdir, "*" + GUARD_SUFFIX))):
+        try:
+            with open(path) as fh:
+                fh.readline()
+                second = fh.readline()
+        except OSError:
+            continue
+        m = re.match(r"## bits=(-?\d+)", second)
+        if m:
+            return int(m.group(1))
+    return None
+
+
 def run_params(resdir):
     """The run's .Params.txt as {key: value} (empty when it has none)."""
     out = {}
@@ -3037,6 +3099,9 @@ class Ctx(object):
         self.sem = None
         # the run's --max-degeneracy (its .Params.txt's Max_degeneracy, 2.10.0), or None
         self.max_degeneracy = None
+        # the run's sites-only density guard (2.10.0): the bits of its
+        # *.sites_only_density_guard.bed files, or None where it wrote none
+        self.guard_bits = None
 
     def full(self, guide):
         return (self.pam_motif + guide) if self.pam_5prime else (guide + self.pam_motif)
@@ -5348,7 +5413,21 @@ def resolve(win, ctx, rep, reported, al, carriers, lids, demands, demand_of, pop
             # every carrier CRISPRme's documented rules report it for
             ok, why, cut, via = reported.locus(
                 guide, chrom, cl, d, lambda wide: cluster_chain(
-                    win, ctx, guide, cl, reported.merge, wide))
+                    win, ctx, guide, cl, reported.merge, wide),
+                inside=lambda blk: (row_first_k(win, blk) or 0) > 0)
+            if ok and via == {"insertion-site"}:
+                # the rows near it are not as good as it, one of them names an insertion
+                # and can be the next site's (2.10.0's merge), and the chain of every row
+                # reaches a row that is: counted, not judged (this checker's own gap)
+                rep.add(False, "limit-insertion-site", row,
+                        "%d sample(s) hold this target, and the rows within %d bp of it are "
+                        "not as good as it (%s); one of them names an insertion and can be "
+                        "the next site's, and the chain of every row reaches a row as good "
+                        "as it: %s (%d of them listed on a row naming the record): %s"
+                        % (len(who), reported.merge, why, OPEN_TEXT["insertion-site"],
+                           reported.on_rows(guide, who, tok0), ",".join(who[:12])),
+                        samples=",".join(who))
+                continue
             if ok and via:
                 # its cluster reaches a row as good as it only through rows CRISPRme may
                 # write or not, which no documented rule settles: counted, not judged
@@ -5693,11 +5772,11 @@ def snp_row_sets(win, ctx, lo, hi):
     """[lo, hi) of the reference as the reference and SNP rows CRISPRme can write there see
     it: base-set sequences (snp_row_seqs, whatever indels may take a per-sample row's
     carriers off)."""
-    return [sets for sets, _drops in snp_row_seqs(win, ctx, lo, hi)]
+    return [sets for sets, _drops, _so in snp_row_seqs(win, ctx, lo, hi)]
 
 
 def snp_row_seqs(win, ctx, lo, hi):
-    """[(sets, drops)]: [lo, hi) of the reference as the reference and SNP rows CRISPRme can
+    """[(sets, drops, sites_only)]: [lo, hi) of the reference as the reference and SNP rows CRISPRme can
     write there see it: base-set sequences (any base of a set, as CRISPRitz reads an IUPAC
     code). A population-level run's SNP rows are the worst case of each engine alignment
     over the SNP alleles of the enriched genome (new_simple_analysis's worst-case
@@ -5714,9 +5793,12 @@ def snp_row_seqs(win, ctx, lo, hi):
     changes the target's bases (METHODS section 4; one whose indel call is unphased
     stays), so the slot's targets such an indel touches are rows CRISPRme may write or not
     (a repeat read through keeps the carrier), and the rest rows it writes. A sequence
-    some slot gives with no such indel has none (empty)."""
+    some slot gives with no such indel has none (empty). ``sites_only``: the sequence is a
+    sites-only dataset's alone (the rows the sites-only density guard reads,
+    ctx.guard_bits)."""
     base = [frozenset((b,)) for b in win.refseq[lo:hi]]
     out = {tuple(base): {frozenset()}}
+    kinds = {tuple(base): {False}}   # sets -> {whether a sites-only dataset gives them}
     by_vcf = defaultdict(list)
     indels = defaultdict(list)   # dataset -> its indels whose REF meets [lo - 1, hi)
     for lid in win.lines_in(max(0, lo - 1), hi):
@@ -5736,6 +5818,8 @@ def snp_row_seqs(win, ctx, lo, hi):
             for a in [a for a in als if a.filtered is None]:
                 sets[a.lo - lo] = sets[a.lo - lo] | {a.body}
             out.setdefault(tuple(sets), set()).add(frozenset())
+            # (the rows of a sites-only dataset alone: the density guard's to withhold)
+            kinds.setdefault(tuple(sets), set()).add(not win.vcfs[vi].samples)
             continue
         at = defaultdict(list)    # position -> the dataset's alleles there
         for a in als:
@@ -5787,11 +5871,12 @@ def snp_row_seqs(win, ctx, lo, hi):
     res = []
     for x in sorted(out, key=lambda x: [sorted(y) for y in x]):
         ds = out[x]
+        so = kinds.get(x, {False}) == {True}
         if frozenset() in ds:
-            res.append((list(x), frozenset()))
+            res.append((list(x), frozenset(), so))
         else:
             for d in sorted(ds, key=lambda d: sorted(a.key for a in d)):
-                res.append((list(x), d))
+                res.append((list(x), d, so))
     return res
 
 
@@ -5851,27 +5936,34 @@ def filtered_sets(win, ctx, lo, hi):
 
 
 def snp_row_cps(win, ctx, guide, full, a, b):
-    """(certain, capped, dropped, filtered): the Cluster Positions of the in-budget alignments of the
+    """(certain, capped, dropped, filtered, degenerate, guarded): the Cluster Positions of the in-budget alignments of the
     guide, both strands, on [a, b) of the reference as its reference and SNP rows see it
     (snp_row_seqs), those of a per-sample run's capped windows' greedy worst-case rows
     (capped_sets: alignments over more than CRISPRME_IUPAC_CAP variant positions), and
     those of a per-sample slot's SNP targets that an indel of the slot touches (rows
     CRISPRme writes only where its reading of the slot through a repeat keeps the
     carrier), and those of a sites-only dataset's SNP rows through one of its SNVs whose
-    FILTER is outside PASS_FILTERS (filtered_sets), read a piece at a time -- each piece
-    reaching one target and its bulges into the next, so that every alignment lies whole
-    in the piece where it starts -- and kept on the window."""
+    FILTER is outside PASS_FILTERS (filtered_sets), those over the run's --max-degeneracy
+    (degenerate), and those of a sites-only dataset's SNP rows the run's sites-only density
+    guard withheld (guarded: a window of 2^bits sequences or more), read a piece at a time
+    -- each piece reaching one target and its bulges into the next, so that every alignment
+    lies whole in the piece where it starts -- and kept on the window."""
     span = len(full) + max(ctx.bdna, ctx.brna) + 2
     out, capped, dropped, filtered, degenerate = set(), set(), set(), set(), set()
+    held = set()
     for c in range(max(0, a) // CHUNK, max(a, b - 1) // CHUNK + 1):
         got = win.snpcps.get((guide, c))
         if got is None:
             lo = c * CHUNK
             hi = min(len(win.refseq), lo + CHUNK + span)
             places = [(q, 0) for q in range(lo, hi)]
-            rows, maybe, degen = set(), set(), set()
+            rows, maybe, degen, guarded = set(), set(), set(), set()
             k = ctx.max_degeneracy
-            for sets, drops in snp_row_seqs(win, ctx, lo, hi):
+            for sets, drops, so in snp_row_seqs(win, ctx, lo, hi):
+                # the sites-only density guard withholds a sites-only dataset's candidate
+                # whose window spells 2^bits sequences or more: no such row is written
+                guard = ctx.guard_bits if (so and ctx.guard_bits is not None
+                                           and ctx.guard_bits >= 0) else None
                 # --max-degeneracy K: a SNP row resting on more than K ambiguous columns is
                 # cut back or left out (METHODS section 5), so an alignment over more than
                 # K positions of several options is a row CRISPRme may write or not
@@ -5886,9 +5978,14 @@ def snp_row_cps(win, ctx, guide, full, a, b):
                     rows |= sure
                     maybe |= touched
                 else:
-                    got_rows = feasible_cps(ctx, full, sets, places)
+                    got_rows = feasible_cps(ctx, full, sets, places, guard=guard)
+                    if guard is not None:
+                        got_rows, withheld = got_rows
+                        guarded |= withheld
                     if cut:
-                        keep = feasible_cps(ctx, full, sets, places, sparse=k)
+                        keep = feasible_cps(ctx, full, sets, places, sparse=k, guard=guard)
+                        if guard is not None:
+                            keep = keep[0]
                         degen |= got_rows - keep
                         got_rows = keep
                     rows |= got_rows
@@ -5899,13 +5996,15 @@ def snp_row_cps(win, ctx, guide, full, a, b):
             for sets, als in filtered_sets(win, ctx, lo, hi):
                 filt |= feasible_cps(ctx, full, sets, places, drops=als)[1]
             got = win.snpcps[(guide, c)] = (rows, dense - rows, maybe - rows, filt - rows,
-                                            degen - rows)
+                                            degen - rows, guarded - rows)
         out |= got[0]
         capped |= got[1]
         dropped |= got[2]
         filtered |= got[3]
         degenerate |= got[4]
-    return out, capped - out, dropped - out, filtered - out, degenerate - out
+        held |= got[5]
+    return (out, capped - out, dropped - out, filtered - out, degenerate - out,
+            held - out)
 
 
 def sites_only_cps(win, ctx, full, al, lo, hi):
@@ -5917,8 +6016,13 @@ def sites_only_cps(win, ctx, full, al, lo, hi):
     anchor included (METHODS section 4), so an SNV at the record's own position is in no
     row of the window. The overlay codes the enriched genome's SNVs: those whose FILTER
     passes (PASS_FILTERS): every allele of a split site on a genome of CRISPRitz 2.10.0, the
-    last record of one on a genome of 2.9.1 or earlier (so_shadowed)."""
-    out = set()
+    last record of one on a genome of 2.9.1 or earlier (so_shadowed). Returns (rows,
+    guarded): with the run's sites-only density guard (ctx.guard_bits) an alignment whose
+    window spells 2^bits sequences or more is no row the run writes (the guard withheld its
+    candidate), and its Cluster Position is in ``guarded`` unless another alignment's row
+    is there."""
+    out, guarded = set(), set()
+    guard = ctx.guard_bits if (ctx.guard_bits is not None and ctx.guard_bits >= 0) else None
     for vi in sorted({win.line_vcf[a.line] for a in win.by_key.get(al.key, ())
                       if win.line_sites_only[a.line]}):
         hap = make_hap(win.refseq, [al], lo, hi)
@@ -5930,8 +6034,12 @@ def sites_only_cps(win, ctx, full, al, lo, hi):
                             if win.line_vcf[x.line] == vi and x not in win.shadowed
                             and x.filtered is None and x not in win.so_shadowed)
             sets.append(frozenset(opts))
-        out |= feasible_cps(ctx, full, sets, hap.place)
-    return out
+        got = feasible_cps(ctx, full, sets, hap.place, guard=guard)
+        if guard is not None:
+            got, withheld = got
+            guarded |= withheld
+        out |= got
+    return out, guarded - out
 
 
 def record_cps(win, ctx, guide, al, e=None):
@@ -5956,7 +6064,10 @@ def record_cps(win, ctx, guide, al, e=None):
     out, opened = set(), defaultdict(set)
     if al.lo - one >= 0 and al.hi + one <= len(win.refseq):
         lo, hi = max(0, al.lo - reach), min(len(win.refseq), al.hi + reach)
-        out |= sites_only_cps(win, ctx, full, al, lo, hi)
+        so_rows, so_guarded = sites_only_cps(win, ctx, full, al, lo, hi)
+        out |= so_rows
+        for c in so_guarded:
+            opened[c].add("guard")
         if e is None:
             carriers = set()
             for a in win.by_key.get(al.key, ()):
@@ -5991,7 +6102,9 @@ OPEN_CLASS = (("overlap", "limit-overlapping-records"),
               ("capped", "limit-capped-window"),
               ("filtered", "limit-filtered-record"),
               ("degeneracy", "limit-max-degeneracy"),
-              ("snp-row-indel", "coverage-snp-row-indel"))
+              ("guard", "limit-density-guard"),
+              ("snp-row-indel", "coverage-snp-row-indel"),
+              ("insertion-site", "limit-insertion-site"))
 OPEN_TEXT = {
     "overlap": "the rows of a slot whose alleles overlap, which no documented rule says "
                "CRISPRme writes or not (the one-record reading of a slot whose record meets "
@@ -6011,11 +6124,22 @@ OPEN_TEXT = {
     "degeneracy": "a SNP row resting on more ambiguous columns than the run's "
                   "--max-degeneracy, which CRISPRme cuts back to one within it or leaves "
                   "out (METHODS section 5)",
+    "guard": "a row of a sites-only dataset whose window spells 2^bits sequences or more, "
+             "which the run's sites-only density guard withheld from the post-analysis "
+             "(METHODS section 5; its *.sites_only_density_guard.bed lists the regions)",
     "snp-row-indel": "a per-sample SNP row of a haplotype whose slot also holds an indel "
                      "that touches the target: CRISPRme drops such a carrier unless its "
                      "reading of the slot through a repeat keeps the target's bases "
                      "(METHODS section 4, 2.10.0), which this checker's cluster chain does "
-                     "not model (its own coverage gap)"}
+                     "not model (its own coverage gap)",
+    "insertion-site": "a row within --merge bp of the target that starts inside an "
+                      "insertion and is not as good as it, which can be the next site's: "
+                      "since 2.10.0 the rows that start inside an insertion at one anchor "
+                      "are placed together, join one site and chain none, or go with their "
+                      "target's alignment on a reference base, at its place on the haplotype "
+                      "(remove_contiguous_samples), and this checker follows the chain of "
+                      "every row, a superset of the merge's, so the row as good as the "
+                      "target that it reaches may be another site's (its own coverage gap)"}
 
 
 def chain_cps(win, ctx, guide, full, a, b):
@@ -6024,9 +6148,12 @@ def chain_cps(win, ctx, guide, full, a, b):
     touches it (record_cps; a merge cluster holds the rows of every record, and the
     alleles of one multi-allelic site put their targets a few bases apart) -- and
     {Cluster Position: why} of the rows it may write or not (OPEN_CLASS)."""
-    rows, capped, dropped, filtered, degenerate = snp_row_cps(win, ctx, guide, full, a, b)
+    rows, capped, dropped, filtered, degenerate, guarded = snp_row_cps(win, ctx, guide,
+                                                                        full, a, b)
     out = set(rows)
     opened = defaultdict(set)
+    for c in guarded:
+        opened[c].add("guard")
     for c in degenerate:
         opened[c].add("degeneracy")
     for c in capped:
@@ -6047,12 +6174,15 @@ def chain_cps(win, ctx, guide, full, a, b):
     return out, {c: w for c, w in opened.items() if c not in out}
 
 
-def feasible_cps(ctx, full, sets, places, dense=None, drops=None, sparse=None):
+def feasible_cps(ctx, full, sets, places, dense=None, drops=None, sparse=None, guard=None):
     """The Cluster Positions of the PAM sites of ``sets`` (both strands) where some
     alignment of the guide is in budget (with ``dense``, only alignments over more than
     that many positions of several options: a capped window; with ``sparse``, only those
     over at most that many: a row --max-degeneracy cannot cut). With ``drops`` (alleles),
-    (those of alignments whose target no allele of ``drops`` touches, those of the rest)."""
+    (those of alignments whose target no allele of ``drops`` touches, those of the rest).
+    With ``guard`` (bits; not with ``drops``), (those of alignments whose window spells
+    fewer than 2^guard sequences -- the product of its positions' options --, those of
+    the rest: the candidates the sites-only density guard withholds)."""
     n = len(full)
     pam_len, p5 = ctx.pam_len, ctx.pam_5prime
     motif = full[:pam_len] if p5 else full[n - pam_len:]
@@ -6090,11 +6220,21 @@ def feasible_cps(ctx, full, sets, places, dense=None, drops=None, sparse=None):
                 if drops and any(touches(x, places[off][0], places[off + end - beg - 1][0])
                                  for x in drops):
                     touched.add(cp)
+                elif guard is not None and _spells(piece) >= 1 << guard:
+                    touched.add(cp)
                 else:
                     out.add(cp)
-    if drops is not None:
+    if drops is not None or guard is not None:
         return out, touched - out
     return out
+
+
+def _spells(piece):
+    """How many sequences a stretch of base sets spells: the product of their sizes."""
+    n = 1
+    for x in piece:
+        n *= len(x)
+    return n
 
 
 def chain_from(c0, cps, merge):
@@ -6468,7 +6608,7 @@ class Reported(object):
                 i += 1
         return out
 
-    def locus(self, guide, chrom, c, d, chain):
+    def locus(self, guide, chrom, c, d, chain, inside=None):
         """(ok, why, cut, via) for a target of Cluster Position c in a run with one row per
         merge cluster. The cluster's row is an integrated line with a block within
         --merge bp of c, or of a Cluster Position chained to c (chain(wide): those of the
@@ -6479,11 +6619,31 @@ class Reported(object):
         chain stopped at its limit (cluster_chain). ``via``: the reasons (OPEN_CLASS) of
         the rows CRISPRme may write or not that the cluster reaches such a row only
         through (empty when it needs none) -- the verdict then rests on what no
-        documented rule settles."""
+        documented rule settles --, or "insertion-site": the rows within --merge bp of c
+        are not as good as the target, one of them starts inside an insertion (its block
+        within --merge bp of c names one and ``inside`` says its first base is one the
+        insertion adds: row_first_k), and the chain of every row reaches one that is (since
+        2.10.0 the rows that start inside an insertion are one site, which joins one site
+        and chains none, or go with their target's alignment on a reference base, at the
+        target's place on the haplotype: the near row can be the next site's). A near row
+        that names an insertion and starts on a reference base the merge chains like any
+        other: it is the target's site's, and not as good, a miss (up to review r1 of lane M
+        any near row naming an insertion was let through, M-R1-N1)."""
         pos, lines = self.loci.get((guide, chrom), ([], []))
         near = self.near(pos, [c])
         if near:
             ok, why = self.good(near, lines, d)
+            if ok or not any(self._unit_near(lines[k], c, inside) for k in near):
+                return ok, why, False, set()
+            # a row within --merge bp of it that names an insertion can be the next
+            # site's: since 2.10.0 a row that starts inside an insertion joins one site and
+            # chains none (remove_contiguous_samples), so the target's own row may lie
+            # further along the chain of every row, which this checker follows (a
+            # superset of the merge's around such a row): counted there, not judged
+            members, cut, _w = chain(False)
+            far = self.near(pos, members) - near
+            if far and self.good(far, lines, d)[0]:
+                return True, why, cut, {"insertion-site"}
             return ok, why, False, set()
         members, cut, _w = chain(False)
         near = self.near(pos, members)
@@ -6501,13 +6661,21 @@ class Reported(object):
             return True, why, cut, via
         return False, why, cut, set()
 
+    def _unit_near(self, line, c, inside):
+        """Whether an integrated line has a block within --merge bp of c that starts inside
+        an insertion (locus): one naming an insertion whose first base ``inside`` says is
+        one the insertion adds (no ``inside``: any block naming one)."""
+        blocks = line[5] if len(line) > 5 and line[5] else ()
+        return any(abs(cp - c) <= self.merge and (inside is None or inside(blk))
+                   for cp, blk in blocks)
+
     def good(self, near, lines, d):
         """(ok, why): whether one of the integrated lines ``near`` is as good as the
         target in both blocks (locus)."""
         why = []
         crit = self.criterion
         for k in sorted(near):
-            _g, _clusters, r_crit, r_cfd, ln = lines[k]
+            _g, _clusters, r_crit, r_cfd, ln = lines[k][:5]
             v = r_crit.get(crit) if r_crit else None
             if v is not None and v > d.best[crit]:
                 why.append("the row at line %d has a fewest-mm+b block of %d (%s)"
@@ -7115,6 +7283,7 @@ def main(argv=None):
             with open(p) as fh:
                 m = re.search(r"--max-degeneracy\s+(\d+)", fh.read())
         ctx.max_degeneracy = int(m.group(1)) if m else None
+    ctx.guard_bits = run_guard_bits(args.results)
     full_n = max(len(ctx.full(g)) for g in guides)   # the longest site of a guide
     # a genotyped dataset whose indels the run read with no phased store (its log's NOTE):
     # each indel's carriers the indel log's, their slot unknown, which is not modeled

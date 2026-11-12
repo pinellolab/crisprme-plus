@@ -877,7 +877,8 @@ def _af_only_counts(af, an_nominal, n_called):
 
 def compile_registry_from_info_af(records, dataset_meta, out_bin, out_idx,
                                   compress=False,
-                                  block_records=DEFAULT_BLOCK_RECORDS):
+                                  block_records=DEFAULT_BLOCK_RECORDS,
+                                  manifest_extra=None):
     """Compile a SITES-ONLY merged VCF's per-dataset AF INFO fields into the
     mmap registry (the "mega" all-source index) -- NO genotypes required.
 
@@ -899,6 +900,8 @@ def compile_registry_from_info_af(records, dataset_meta, out_bin, out_idx,
         allele-number denominator shown for that dataset (use each cohort's true
         2N so the displayed AN is meaningful and AF is precise).
       out_bin/out_idx: registry binary + json manifest paths.
+      manifest_extra: a dict whose keys the manifest gains (build_mega_registry: which
+        records of the VCF the registry holds).
 
     Returns the manifest dict (also written to out_idx).
     """
@@ -949,7 +952,8 @@ def compile_registry_from_info_af(records, dataset_meta, out_bin, out_idx,
 
     return _write_registry(recs, _af_groups, {}, taxonomy, out_bin, out_idx,
                            alt_index="1", aggregation="info_af",
-                           compress=compress, block_records=block_records)
+                           compress=compress, block_records=block_records,
+                           manifest_extra=manifest_extra)
 
 
 def _choose_count_width(max_count):

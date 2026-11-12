@@ -35,7 +35,14 @@ a sites-only dataset (the genotype oracle, opt-in) -- and gives the alignment a 
       (state "indel in the target");
   C2  two or more variants, one or more not in the panel: it cannot say. The safeguards'
       frequency bound (the product of the variants' frequencies >= 1e-6 and the rarest
-      >= 0.001) is given with them, as information, and applied to nothing.
+      >= 0.001) is given with them. In a search of a sites-only dataset (the mega: no
+      genotypes, so its rows are the worst case of each window, the immunoglobulin loci's
+      combinations of 10 to 17 variants among them) a C2 alignment below the bound is
+      ranked after the others, as a C1 one is (state "below the frequency bound": plan
+      decision D6, demote and label, never drop); elsewhere the bound is information only.
+      With no phased panel to read (a sites-only dataset searched without the genotype
+      oracle) every alignment of two or more variants is C2, checked against the bound
+      alone.
 
 A haplotype holds a row only when it holds the row's target: on a phased slot that carries
 the row's SNPs, an indel of the store that changes the bases the target covers means the slot
@@ -51,8 +58,11 @@ for two ALTs on one slot).
 
 The gate changes no row and drops none: it writes a companion TSV (<results>_carrier_gate.tsv,
 one line per alignment that uses a variant) and a sidecar the report reads
-(.carrier_gate.json). The report ranks the C1 rows after the others, in a tier of their own,
-with the factual label of each tier.
+(.carrier_gate.json). The report ranks the C1 rows, and the C2 rows below the frequency bound
+of a sites-only dataset, after the others, in a table of their own, with the factual label of
+each tier. In a per-sample search the gate reads only the rows that name no carrier (a
+sites-only dataset's, which are the population-level analysis's in every search): the
+others name their cis carriers.
 
 STDLIB ONLY (with the repository's tier readers).
 """
@@ -90,14 +100,27 @@ SAME_SCORE_COUNT = "A_same_score"
 TOO_RARE = "too rare to tell"
 INDEL_IN_TARGET = "indel in the target"
 NOT_IN_PANEL = "not in the panel"
+# D6: a C2 alignment of a sites-only search whose frequencies fail the bound
+BELOW_BOUND = "below the frequency bound"
+# the counts of the sidecar hold the tiers, and this key the C2 rows below the bound
+BELOW_BOUND_COUNT = "C2_below_bound"
 
 # D2: below this many expected haplotypes a zero says little ("too rare to tell"). A
 # parameter (complete-search --gate-min-expected); 0 gives every C1 row the same state.
 MIN_EXPECTED = 3.0
-# The safeguards' frequency bound, shown for a multi-variant row and applied to nothing
-# (D6): the product of the variants' frequencies and the rarest of them.
+# The safeguards' frequency bound (plan section 2.3, decision D6): the product of the
+# variants' frequencies and the rarest of them. A C2 alignment of a sites-only search below
+# it is ranked after the others (BELOW_BOUND); elsewhere it is shown only.
 FREQ_BOUND_PRODUCT = 1e-6
 FREQ_BOUND_RAREST = 0.001
+
+
+def below_bound(af_product, af_min):
+    """True when frequencies fail the bound: the product below FREQ_BOUND_PRODUCT or the
+    rarest below FREQ_BOUND_RAREST; False when they are not known (None)."""
+    if af_product is None or af_min is None:
+        return False
+    return af_product < FREQ_BOUND_PRODUCT or af_min < FREQ_BOUND_RAREST
 
 # the oracle a sites-only search is checked against (download --what genotype-oracle)
 ORACLE_PANEL = "hg38_HGDP1kGP"
@@ -728,7 +751,7 @@ class Verdict(object):
 
     def label(self):
         """The factual text the report shows (ASCII: it goes into the TSV downloads too)."""
-        hap_of = f"{self.panel_haplotypes:,} {self.panel} haplotypes"
+        hap_of = f"{(self.panel_haplotypes or 0):,} {self.panel} haplotypes"
         if self.tier == TIER_A:
             if self.state in SAME_SCORE_STATES:
                 rest = self.n_variants - len(self.kept)
@@ -764,13 +787,18 @@ class Verdict(object):
             if self.state == TOO_RARE:
                 return text + f"; too rare to tell (expected {self.expected:.2g})"
             return text + f" (expected {self.expected:.3g})"
-        text = (f"not checked: {self.missing} of {self.n_variants} variants not in "
-                f"{self.panel or 'the panel'}")
+        if self.panel_haplotypes is None:
+            # no phased panel read at all (a sites-only search without the oracle)
+            text = "not checked against phased haplotypes (no panel)"
+        else:
+            text = (f"not checked: {self.missing} of {self.n_variants} variants not in "
+                    f"{self.panel or 'the panel'}")
         if self.af_product is not None:
-            inside = (self.af_product >= FREQ_BOUND_PRODUCT
-                      and self.af_min >= FREQ_BOUND_RAREST)
+            inside = not below_bound(self.af_product, self.af_min)
             text += (f"; frequency product {self.af_product:.1e}, rarest {self.af_min:.1e}"
-                     f" ({'within' if inside else 'below'} the 1e-06 / 0.001 bound)")
+                     f" ({'within' if inside else 'below'} the 1e-06 / 0.001 bound"
+                     + (", ranked after the others" if self.state == BELOW_BOUND else "")
+                     + ")")
         return text
 
 
@@ -921,11 +949,13 @@ def classify(variants, panels, span=None, min_expected=MIN_EXPECTED, af_of=None,
 # --------------------------------------------------------------------------- #
 # The gate over a search's integrated results
 # --------------------------------------------------------------------------- #
-def _read_rows(results, pam=None):
+def _read_rows(results, pam=None, unlisted_only=False):
     """{chromosome: [Alignment]} of every alignment of the integrated results that uses a
     variant (row: its 1-based data line; cfd: the CFD the row shows, where the alignment
     has one -- the ranking by CRISPR-Bulge score has no CFD column; pam: the search's
-    PAM)."""
+    PAM). ``unlisted_only``: only the alignments that name no carrier (their
+    Variant_samples empty), a sites-only dataset's, in a per-sample search whose other
+    rows name their cis carriers."""
     by_chrom = {}
     with open(results) as fh:
         header = fh.readline().rstrip("\n").split("\t")
@@ -935,13 +965,17 @@ def _read_rows(results, pam=None):
         for block in BLOCKS:
             try:
                 cols.append((block, [ix[f"{c}_({block})"] for c in _BLOCK_COLUMNS],
-                             ix.get(f"CFD_score_({block})")))
+                             ix.get(f"CFD_score_({block})"),
+                             ix.get(f"Variant_samples_({block})")))
             except KeyError:
                 continue
         for row, line in enumerate(fh, start=1):
             f = line.rstrip("\n").split("\t")
-            for block, (si, sti, ci_, ai, pi, oi, vi, mi), fi in cols:
+            for block, (si, sti, ci_, ai, pi, oi, vi, mi), fi, smi in cols:
                 if vi >= len(f) or str(f[oi]).strip().lower() != "alt":
+                    continue
+                if unlisted_only and smi is not None and smi < len(f) \
+                        and f[smi].strip() not in ("", "NA", "n", ".", "-"):
                     continue
                 variants = parse_variants(f[vi])
                 if not variants:
@@ -970,7 +1004,7 @@ def _maf_values(field):
 
 def _gate_chromosome(job):
     """Tier every alignment of one chromosome's rows: (chrom, lines, counts, panel facts)."""
-    chrom, rows, dictionaries, panel_specs, datasets, min_expected, genome = job
+    chrom, rows, dictionaries, panel_specs, datasets, min_expected, genome, bound = job
     seq_at = None
     fasta = os.path.join(genome, f"{chrom}.fa") if genome else None
     if fasta and os.path.isfile(fasta):
@@ -990,8 +1024,16 @@ def _gate_chromosome(job):
     panels = [PanelChrom(name, root, chrom, role, wanted, seq_at)
               for name, root, role in panel_specs]
     panels = [p for p in panels if p.gt is not None or p.indels is not None]
+    # the frequencies of the bound: a sites-only dataset's first (on mega a SNP's AF_max as
+    # its registry holds it, an indel's from its indel frequencies), then the other
+    # datasets', in the search's order. Beside a genotyped dataset the rows the bound
+    # demotes are the sites-only dataset's, and a SNP both list took the genotyped
+    # dataset's own frequency when that dataset came first in the search (HGDP + 1000
+    # Genomes, then mega: a singleton of its 8,182 haplotypes where the mega's AF_max is
+    # 0.002; review r2 of lane M)
+    ordered = sorted(datasets, key=lambda d: dataset_kind(dictionaries, d) != "sites-only")
     registries = []
-    for name in datasets:
+    for name in ordered:
         rb = os.path.join(dictionaries, f"registry_{name}", f"reg_{chrom}.bin")
         ri = os.path.join(dictionaries, f"registry_{name}", f"reg_{chrom}.idx")
         if os.path.isfile(rb) and os.path.isfile(ri):
@@ -1004,7 +1046,7 @@ def _gate_chromosome(job):
     # as its registry gives for a SNP); a genotyped dataset's rows carry theirs (MAF)
     at_indels = {v[1] for aln in rows for v in aln.variants if not is_snp(v)}
     indel_afs = []
-    for name in datasets:
+    for name in ordered:
         path = os.path.join(dictionaries, f"indel_af_{name}", f"indel_af_{chrom}.tsv.gz")
         if at_indels and os.path.isfile(path):
             try:
@@ -1041,23 +1083,36 @@ def _gate_chromosome(job):
                aln.block == CB_BLOCK)
         verdict = cache.get(key)
         if verdict is None:
+            fallback = _maf_values(aln.maf)
             if panels:
-                fallback = _maf_values(aln.maf)
-                bound = af_of if registries or indel_afs else None
-                verdict = classify(variants, panels, span, min_expected, bound, aln)
-                if verdict.af_product is None and len(variants) >= 2 \
-                        and len(fallback) == len(variants):
-                    verdict.af_product = math.prod(fallback)
-                    verdict.af_min = min(fallback)
+                freq_of = af_of if registries or indel_afs else None
+                verdict = classify(variants, panels, span, min_expected, freq_of, aln)
             else:
+                # no phased panel at all: one variant is B, more are C2 (no panel)
                 verdict = Verdict(TIER_B if len(variants) == 1 else TIER_C2,
                                   NOT_IN_PANEL if len(variants) == 1 else "",
+                                  panel_haplotypes=None if len(variants) > 1 else 0,
                                   missing=len(variants), n_variants=len(variants))
+                if len(variants) >= 2 and (registries or indel_afs):
+                    afs = [af_of(v) for v in variants]
+                    if all(a is not None for a in afs):
+                        verdict.af_product, verdict.af_min = math.prod(afs), min(afs)
+            if verdict.af_product is None and len(variants) >= 2 \
+                    and len(fallback) == len(variants):
+                verdict.af_product = math.prod(fallback)
+                verdict.af_min = min(fallback)
+            # D6: in a search of a sites-only dataset a C2 combination below the frequency
+            # bound is ranked after the others; never dropped
+            if bound and verdict.tier == TIER_C2 and below_bound(verdict.af_product,
+                                                                 verdict.af_min):
+                verdict.state = BELOW_BOUND
             cache[key] = verdict
         if aln.block == BLOCKS[0]:
             counts[verdict.tier] = counts.get(verdict.tier, 0) + 1
             if verdict.state in SAME_SCORE_STATES:
                 counts[SAME_SCORE_COUNT] = counts.get(SAME_SCORE_COUNT, 0) + 1
+            if verdict.state == BELOW_BOUND:
+                counts[BELOW_BOUND_COUNT] = counts.get(BELOW_BOUND_COUNT, 0) + 1
         lines.append((aln.row, BLOCKS.index(aln.block), "\t".join((
             str(aln.row), aln.block, aln.guide, chrom, str(aln.start), aln.strand,
             ",".join(_token(v) for v in variants),
@@ -1086,13 +1141,16 @@ def _gate_chromosome(job):
 
 
 def run_gate(results, out_path, dictionaries, panel_specs, datasets,
-             min_expected=MIN_EXPECTED, threads=1, genome=None, pam=None):
+             min_expected=MIN_EXPECTED, threads=1, genome=None, pam=None, bound=False,
+             unlisted_only=False):
     """Write the companion of ``results`` to ``out_path``; return (counts, panel facts).
     ``panel_specs``: [(panel name, Dictionaries folder holding its stores, role)];
     ``genome``: the reference genome folder (<chrom>.fa), for holds_target; ``pam``: the
-    search's PAM (Pam), read over an alignment's PAM region."""
-    by_chrom = _read_rows(results, pam)
-    jobs = [(chrom, rows, dictionaries, panel_specs, datasets, min_expected, genome)
+    search's PAM (Pam), read over an alignment's PAM region; ``bound``: the search has a
+    sites-only dataset, whose C2 rows below the frequency bound are ranked after the others
+    (D6); ``unlisted_only``: only the alignments that name no carrier (_read_rows)."""
+    by_chrom = _read_rows(results, pam, unlisted_only)
+    jobs = [(chrom, rows, dictionaries, panel_specs, datasets, min_expected, genome, bound)
             for chrom, rows in sorted(by_chrom.items(), key=lambda kv: -len(kv[1]))]
     if threads > 1 and len(jobs) > 1:
         from multiprocessing import Pool
@@ -1129,7 +1187,9 @@ def run_gate(results, out_path, dictionaries, panel_specs, datasets,
             "# an indel in the target): the report ranks these after every other row. Tier C2:\n"
             "# a variant not in the panel, so the panel cannot say. Expected: the panel\n"
             "# haplotypes expected to carry the variants together if they were independent.\n"
-            "# AF_product / AF_min: the frequency bound (>= 1e-06 / >= 0.001), shown only.\n"
+            "# AF_product / AF_min: the frequency bound (>= 1e-06 / >= 0.001). In a search of\n"
+            "# a sites-only dataset a C2 alignment below it (State: below the frequency bound)\n"
+            "# is ranked after every other row too; elsewhere it is shown only.\n"
         )
         out.write("#" + "\t".join(COMPANION_COLUMNS) + "\n")
         for _row, _b, text in lines:
@@ -1189,36 +1249,58 @@ def plan_panels(dictionaries, datasets, mode, prioritize, oracle=None):
     population-level search of a genotyped dataset is checked against its own store),
     "on" (--prioritize-observed: a sites-only dataset is checked against the oracle too,
     in either mode), "off". Status: "run", "off", "per-sample" (nothing to check: the
-    per-sample rows name their cis carriers), "opt-in" (sites-only only, not asked),
-    "untiered" (a genotyped dataset with the classic dictionaries alone: the gate reads the
-    phased store build-index-only --samplesID writes), "no-panel" (no phased store),
-    "no-oracle" (asked, the oracle not installed)."""
+    per-sample rows name their cis carriers), "bound" (a sites-only dataset with no phased
+    panel to read -- not asked for the oracle, or asked and the oracle not installed: its
+    rows are checked against the frequency bound alone, D6), "untiered" (a genotyped
+    dataset with the classic dictionaries alone: the gate reads the phased store
+    build-index-only --samplesID writes), "no-panel" (no phased store). A per-sample search
+    of a sites-only dataset beside a genotyped one reads the genotyped datasets' stores for
+    the sites-only rows (gate_scope: the rows that name no carrier), as a population-level
+    one does. (Up to the plan's D6 a sites-only dataset not asked for the oracle had
+    status "opt-in", and one asked without it "no-oracle": nothing was run.)"""
     if prioritize == "off":
         return "off", []
     kinds = {d: dataset_kind(dictionaries, d) for d in datasets}
     genotyped = [d for d in datasets if kinds[d] == "genotyped"]
     sites_only = [d for d in datasets if kinds[d] == "sites-only"]
     panels = []
-    if mode == "population-level" or prioritize == "on":
+    if mode == "population-level" or prioritize == "on" or sites_only:
         panels.extend((d, dictionaries, "own") for d in genotyped)
     if prioritize == "on" and sites_only:
         found = find_oracle(dictionaries, oracle)
-        if found is None:
-            if not panels:
-                return "no-oracle", []
-        elif not any(os.path.realpath(os.path.join(root, f"genotypes_{n}"))
-                     == os.path.realpath(os.path.join(found[1], f"genotypes_{found[0]}"))
-                     for n, root, _r in panels):
+        if found is not None and not any(
+                os.path.realpath(os.path.join(root, f"genotypes_{n}"))
+                == os.path.realpath(os.path.join(found[1], f"genotypes_{found[0]}"))
+                for n, root, _r in panels):
             panels.append((found[0], found[1], "oracle"))
     if panels:
         return "run", panels
+    if sites_only:
+        return "bound", []
     if mode == "per-sample" and genotyped:
         return "per-sample", []
-    if sites_only and prioritize != "on":
-        return "opt-in", []
     if mode == "population-level" and any(kinds[d] == "untiered" for d in datasets):
         return "untiered", []
     return "no-panel", []
+
+
+def gate_scope(dictionaries, datasets, mode, prioritize):
+    """(bound, unlisted_only) of a search's gate: ``bound``, the search has a sites-only
+    dataset, whose C2 rows below the frequency bound are ranked after the others (D6);
+    ``unlisted_only``, a per-sample search of one, whose gate reads only the rows that
+    name no carrier (the sites-only dataset's: the others name their cis carriers)."""
+    if prioritize == "off":
+        return False, False
+    sites_only = any(dataset_kind(dictionaries, d) == "sites-only" for d in datasets)
+    return sites_only, sites_only and mode == "per-sample"
+
+
+def oracle_missing(dictionaries, datasets, prioritize, oracle=None):
+    """True when --prioritize-observed asks for the genotype oracle a sites-only dataset
+    is checked against, and it is not installed."""
+    return (prioritize == "on"
+            and any(dataset_kind(dictionaries, d) == "sites-only" for d in datasets)
+            and find_oracle(dictionaries, oracle) is None)
 
 
 def companion_path(results):
@@ -1264,15 +1346,26 @@ def main(argv=None):
                                           META_NAME)
     status, panels = plan_panels(args.dictionaries, datasets, args.mode,
                                  args.prioritize_observed, args.oracle or None)
+    bound, unlisted = gate_scope(args.dictionaries, datasets, args.mode,
+                                 args.prioritize_observed)
+    no_oracle = oracle_missing(args.dictionaries, datasets, args.prioritize_observed,
+                               args.oracle or None)
     meta = {"status": status, "min_expected": args.min_expected, "panels": [],
             "counts": {}, "companion": None, "mode": args.mode,
-            "prioritize_observed": args.prioritize_observed}
-    if status == "run":
+            "prioritize_observed": args.prioritize_observed,
+            "frequency_bound": bound, "rows": "no carrier listed" if unlisted else "all",
+            "oracle_missing": no_oracle}
+    if no_oracle:
+        print("Carrier gate: --prioritize-observed asked to check the sites-only rows against "
+              f"the phased {ORACLE_PANEL} genotypes, which are not installed "
+              f"(Dictionaries/genotypes_{ORACLE_PANEL}/, or CRISPRME_GENOTYPE_TIER). Install "
+              "them with: crisprme.py download --what genotype-oracle", flush=True)
+    if status in ("run", "bound"):
         out = companion_path(args.results)
         counts, facts = run_gate(args.results, out, args.dictionaries, panels, datasets,
                                  args.min_expected, max(1, args.threads),
                                  args.genome or None,
-                                 read_pam(args.pam) if args.pam else None)
+                                 read_pam(args.pam) if args.pam else None, bound, unlisted)
         meta["counts"] = counts
         meta["companion"] = os.path.basename(out)
         for name, root, role in panels:
@@ -1283,26 +1376,32 @@ def main(argv=None):
         named = ", ".join(f"{p['name']} ({p.get('samples', 0):,} samples)"
                           for p in meta["panels"])
         same = counts.get(SAME_SCORE_COUNT, 0)
-        print(f"Carrier gate: the rows' variant combinations checked against the phased "
-              f"genotypes of {named}: A {counts.get(TIER_A, 0):,} ({same:,} of them on a "
-              f"haplotype that reaches the row's CFD without every variant), B "
-              f"{counts.get(TIER_B, 0):,}, C1 {counts.get(TIER_C1, 0):,} (ranked after the "
-              f"others), C2 {counts.get(TIER_C2, 0):,} (by the highest-CFD alignment of each "
-              f"row); {os.path.basename(out)}", flush=True)
+        below = counts.get(BELOW_BOUND_COUNT, 0)
+        scope = (" (the rows that name no carrier: the sites-only dataset's)"
+                 if unlisted else "")
+        bound_text = (f", {below:,} of them below the frequency bound (product of the "
+                      f"variants' frequencies >= 1e-06, rarest >= 0.001) and ranked after the "
+                      f"others" if bound else "")
+        if status == "run":
+            print(f"Carrier gate: the rows' variant combinations{scope} checked against the "
+                  f"phased genotypes of {named}: A {counts.get(TIER_A, 0):,} ({same:,} of "
+                  f"them on a haplotype that reaches the row's CFD without every variant), "
+                  f"B {counts.get(TIER_B, 0):,}, C1 {counts.get(TIER_C1, 0):,} (ranked after "
+                  f"the others), C2 {counts.get(TIER_C2, 0):,}{bound_text} (by the "
+                  f"highest-CFD alignment of each row); {os.path.basename(out)}", flush=True)
+        else:
+            print(f"Carrier gate: no phased panel to check the sites-only rows{scope} "
+                  f"against (complete-search --prioritize-observed reads the phased "
+                  f"{ORACLE_PANEL} genotypes): their combinations of two or more variants "
+                  f"were checked against the frequency bound alone: C2 "
+                  f"{counts.get(TIER_C2, 0):,}{bound_text}, B {counts.get(TIER_B, 0):,} "
+                  f"(one variant) (by the highest-CFD alignment of each row); "
+                  f"{os.path.basename(out)}", flush=True)
         mism = sum(p.get("ref_mismatches", 0) for p in meta["panels"])
         if mism:
             print(f"Carrier gate: {mism:,} variant lookup(s) found the panel's REF different "
                   f"from the row's: those variants were taken as not in the panel (the "
                   f"dataset and the panel were not normalized alike there)", flush=True)
-    elif status == "no-oracle":
-        print("Carrier gate: --prioritize-observed asked to check the sites-only rows against "
-              f"the phased {ORACLE_PANEL} genotypes, which are not installed "
-              f"(Dictionaries/genotypes_{ORACLE_PANEL}/, or CRISPRME_GENOTYPE_TIER): the "
-              "rows are reported unchecked. Install them with: crisprme.py download --what "
-              "genotype-oracle", flush=True)
-    elif status == "opt-in":
-        print("Carrier gate: not run on a sites-only dataset unless asked "
-              "(--prioritize-observed).", flush=True)
     elif status == "untiered":
         print("Carrier gate: not run: the search's genotyped datasets have the classic "
               "per-sample dictionaries alone, not the phased genotype store it reads "

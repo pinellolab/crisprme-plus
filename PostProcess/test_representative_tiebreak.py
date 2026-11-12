@@ -650,27 +650,34 @@ class AlignmentsStartingInsideOneInsertion(unittest.TestCase):
     _merge = IndelRowsKeepTheirOwnCarriers._merge
     INDEL = IndelRowsKeepTheirOwnCarriers.INDEL
 
-    def _site(self, ins):
-        """The insertion's token, and the haplotype carrying it."""
-        anchor = self.REFSEQ[100]
-        return ("chr1_101_%s_%s" % (anchor, anchor + ins),
-                self.REFSEQ[:101] + ins + self.REFSEQ[101:])
+    def _site(self, ins, anchor=100):
+        """The insertion's token, and the haplotype carrying it (the insertion after the
+        0-based ``anchor``)."""
+        base = self.REFSEQ[anchor]
+        return ("chr1_%d_%s_%s" % (anchor + 1, base, base + ins),
+                self.REFSEQ[:anchor + 1] + ins + self.REFSEQ[anchor + 1:])
 
     def _inside(self, ins, k, n, strand="+", cfd="1.000", total=0, dna_bulges=0,
-                samples="S1", rsid="rs1", af="0.1"):
+                samples="S1", rsid="rs1", af="0.1", rna_bulges=0, anchor=100):
         """A row of the alignment whose first base (the leftmost) is the k-th base the
-        insertion adds, its target the n bases from there; a DNA bulge one base of them."""
-        token, hap = self._site(ins)
-        bases, ref = hap[100 + k:100 + k + n], self.REFSEQ[100:100 + n]
+        insertion adds, its target the n bases from there; a DNA bulge one base of them,
+        an RNA bulge one base of the guide facing none (a gap in the target)."""
+        token, hap = self._site(ins, anchor)
+        bases, ref = hap[anchor + k:anchor + k + n], self.REFSEQ[anchor:anchor + n]
         if strand == "-":
             bases, ref = _rc(bases), _rc(ref)
+        if rna_bulges:
+            bases = bases[:5] + "-" + bases[5:]
         r = self._row(bases, cfd, total, samples, snp=token, rsid=rsid, af=af)
         r[3], r[7] = ref, strand
-        r[5] = "100"  # the anchor
-        # the Cluster_Position: the start, plus the DNA bulges on the + strand, 3' PAM
-        r[CLUSTER_POS_COL] = str(100 + (dna_bulges if strand == "+" else 0))
+        r[5] = str(anchor)  # the anchor
+        # the Cluster_Position: the start, plus the DNA bulges and less the RNA bulges on
+        # the + strand, 3' PAM
+        r[CLUSTER_POS_COL] = str(anchor + ((dna_bulges - rna_bulges) if strand == "+" else 0))
         if dna_bulges:
             r[0], r[1], r[9] = "DNA", "-" + GUIDE, str(dna_bulges)
+        if rna_bulges:
+            r[0], r[9] = "RNA", str(rna_bulges)
         return r
 
     def test_other_targets_of_one_insertion_stay_as_alternatives(self):
@@ -757,6 +764,198 @@ class AlignmentsStartingInsideOneInsertion(unittest.TestCase):
                          (self.T2, [hap[100:123]]))
 
 
+    def test_an_insertion_row_at_its_anchor_chains_no_two_sites(self):
+        """A row starting inside an insertion stands at the anchor, k bases before where
+        2.8.1 placed it, and chained there it joined two sites 2.8.1 kept apart: on
+        hg38_mega chr22, population-level, chr22:36,838,374 + of VEGFA site 3 (a deletion
+        row, 2 bases before such a row's anchor) left the results for the cluster of the
+        reference row 3 bases after it, its place on the haplotype. It joins one site --
+        the one nearer its place on the haplotype -- and chains none: two clusters, two
+        rows, on both branches. Without the row starting inside, the same two."""
+        ins = "AT" + self.T2 + "CA"
+        inside = self._inside(ins, 3, 23)            # Cluster_Position 100, haplotype 103
+        before = _row("GGACTGAAATCTGTAAGCAGGCAGG"[:23], "0.200", 3, cluster_pos=98,
+                      position=98)
+        after = _row(self.T1, "0.400", 2, cluster_pos=103, position=103)
+        for rows in ([before, inside, after], [before, after]):
+            for sort_order in ("score", "total"):
+                with self.subTest(n=len(rows), sort_order=sort_order):
+                    best, alt = self._merge([list(r) for r in rows], sort_order)
+                    # the site before the anchor keeps its row
+                    self.assertEqual(len(best), 2)
+                    self.assertIn(before[DNA_COL], [r[DNA_COL] for r in best])
+                    if len(rows) == 3:
+                        # the inside row is in the cluster of the site after its anchor,
+                        # whose row it is (the better), that site's alignment its
+                        # alternative
+                        self.assertIn(inside[DNA_COL], [r[DNA_COL] for r in best])
+                        self.assertEqual([r[DNA_COL] for r in alt], [after[DNA_COL]])
+                    else:
+                        self.assertEqual(alt, [])
+
+    def test_an_insertion_row_with_no_site_near_is_a_site_of_its_own(self):
+        """The rows that start inside an insertion with no other row within --merge bp
+        are a cluster of their own, the insertion's targets one site, and they chain no
+        site to another insertion's: here a second insertion 3 bases on (its anchor at
+        103) has a site 3 bases past its anchor (106), and joins it; the first one's
+        rows, 6 bases from that site, stay a site of their own. Chained like any other
+        row (up to the merge of this release), the first insertion's rows reached the
+        site through the second's: one cluster, one row."""
+        ins = "AT" + self.T1 + "CA" + self.T2 + "TC"
+        rows = [self._inside(ins, 3, 23), self._inside(ins, 28, 23, cfd="0.900"),
+                self._inside("GA" + self.T2 + "TT", 3, 23, cfd="0.300", total=2, anchor=103),
+                _row(self.T1, "0.400", 2, cluster_pos=106, position=106)]
+        for sort_order in ("score", "total"):
+            with self.subTest(sort_order=sort_order):
+                best, alt = self._merge([list(r) for r in rows], sort_order)
+                self.assertEqual(sorted(r[CLUSTER_POS_COL] for r in best), ["100", "106"])
+                self.assertEqual(sorted(r[CLUSTER_POS_COL] for r in alt), ["100", "103"])
+                # the first insertion's site: its two targets, the best the row
+                self.assertIn(self.T1, [r[DNA_COL] for r in best])
+                self.assertEqual([r[19] for r in best if r[CLUSTER_POS_COL] == "100"], ["1"])
+
+    def test_one_targets_bulged_alignments_between_two_sites_stay_one_row(self):
+        """One target inside an insertion (on the haplotype at 103, 3 bases past the
+        anchor) aligned without a bulge (Cluster_Position 100) and with a DNA bulge
+        (Cluster_Position 101), between a site 3 bases before the anchor (97) and one 3
+        bases after the bulged alignment (104): the rows of one insertion are placed
+        together, with the site nearer their place on the haplotype, and the bulged
+        alignment folds into the other. Placed each by its own Cluster_Position, the plain
+        one joined the site before and the bulged one the site after: two rows of one
+        off-target (chr22:45,890,432 (+) of VEGFA site 3 on HGDP + 1000 Genomes, CFD 0.179
+        and 0.172, one insertion and one carrier; review r1 of lane M, M-R1-1)."""
+        ins = "AT" + self.T2 + "CA"
+        plain = self._inside(ins, 3, 23, cfd="0.400", total=2)
+        bulged = self._inside(ins, 2, 24, cfd="0.300", total=3, dna_bulges=1)
+        before = _row("GGACTGAAATCTGTAAGCAGGCAGG"[:23], "0.100", 4, cluster_pos=97,
+                      position=97)
+        after = _row(self.T1, "0.100", 4, cluster_pos=104, position=104)
+        self.assertEqual((plain[CLUSTER_POS_COL], bulged[CLUSTER_POS_COL]), ("100", "101"))
+        for sort_order in ("score", "total"):
+            with self.subTest(sort_order=sort_order):
+                best, alt = self._merge([list(r) for r in (before, plain, bulged, after)],
+                                        sort_order)
+                self.assertEqual(sorted(r[DNA_COL] for r in best),
+                                 sorted([before[DNA_COL], plain[DNA_COL]]))
+                self.assertEqual([r[DNA_COL] for r in alt], [after[DNA_COL]])
+
+    def test_an_rna_bulge_alignment_of_one_target_stays_with_the_plain_one(self):
+        """One target inside an insertion aligned without a bulge (Cluster_Position 100)
+        and with an RNA bulge (99: one base fewer, from the next inserted base), a site 3
+        bases before the RNA-bulge alignment (96) and one 4 bases after the plain one
+        (104): the insertion's rows are within --merge bp of the first site and join it,
+        both; the RNA-bulge alignment folds into the plain one, and the site after keeps
+        its row. Placed each by its own Cluster_Position, the RNA-bulge alignment joined
+        the site before and the plain one, 4 bases from either, was a site of its own: two
+        rows of one off-target."""
+        ins = "AT" + self.T2 + "CA"
+        plain = self._inside(ins, 3, 23, cfd="0.400", total=2)
+        rna = self._inside(ins, 4, 22, cfd="0.300", total=3, rna_bulges=1)
+        before = _row("GGACTGAAATCTGTAAGCAGGCAGG"[:23], "0.100", 4, cluster_pos=96,
+                      position=96)
+        after = _row(self.T1, "0.200", 4, cluster_pos=104, position=104)
+        self.assertEqual((rna[CLUSTER_POS_COL], plain[CLUSTER_POS_COL]), ("99", "100"))
+        for sort_order in ("score", "total"):
+            with self.subTest(sort_order=sort_order):
+                best, alt = self._merge([list(r) for r in (before, rna, plain, after)],
+                                        sort_order)
+                self.assertEqual(sorted(r[DNA_COL] for r in best),
+                                 sorted([plain[DNA_COL], after[DNA_COL]]))
+                self.assertEqual([r[DNA_COL] for r in alt], [before[DNA_COL]])
+
+    def test_the_clusters_do_not_depend_on_the_order_of_rows_of_one_place(self):
+        """(A guard of what the merge kept, not a change.) The three merges sort the rows
+        of one Cluster_Position differently (the CFD, the edits, the CRISPR-Bulge score),
+        and their alternative alignments are pasted line by line, so they must make the
+        same clusters: rows of one Cluster_Position in any order, the same rows written."""
+        ins = "AT" + self.T2 + "CA"
+        unit = [self._inside(ins, 3, 23, cfd="0.400", total=2),
+                self._inside(ins, 2, 24, cfd="0.300", total=3, dna_bulges=1),
+                self._inside(ins, 4, 22, cfd="0.200", total=3, rna_bulges=1)]
+        chain = [_row("GGACTGAAATCTGTAAGCAGGCAGG"[:23], "0.100", 4, cluster_pos=97,
+                      position=97),
+                 _row(self.T1, "0.100", 4, cluster_pos=101, position=101),
+                 _row(self.T1[:-1] + "A", "0.050", 4, cluster_pos=101, position=101),
+                 _row(self.T1, "0.150", 4, cluster_pos=104, position=104)]
+        rows = sorted(unit + chain, key=lambda r: int(r[CLUSTER_POS_COL]))
+        seen = set()
+        for flip in (False, True):
+            ordered = sorted(rows, key=lambda r: (int(r[CLUSTER_POS_COL]),
+                                                  r[DNA_COL] if not flip else
+                                                  "".join(chr(255 - ord(c)) for c in r[DNA_COL])))
+            best, alt = self._merge([list(r) for r in ordered])
+            seen.add((tuple(sorted(r[DNA_COL] for r in best)),
+                      tuple(sorted(r[DNA_COL] for r in alt))))
+        self.assertEqual(len(seen), 1, seen)
+
+    def _on_reference(self, ins, start, n, cfd, total, dna_bulges=0, samples="S1"):
+        """A row naming the insertion whose first base is the reference base ``start`` (the
+        anchor, 100, or one before it), its target the n bases of the haplotype from there:
+        a row of the chain like any other, its Cluster_Position the start plus its DNA
+        bulges (+ strand, 3' PAM)."""
+        token, hap = self._site(ins)
+        r = self._row(hap[start:start + n], cfd, total, samples, snp=token)
+        r[3], r[5] = self.REFSEQ[start:start + n], str(start)
+        r[CLUSTER_POS_COL] = str(start + dna_bulges)
+        if dna_bulges:
+            r[0], r[1], r[9] = "DNA", "-" * dna_bulges + GUIDE, str(dna_bulges)
+        return r
+
+    def _target_written(self, rows, target):
+        """The rows of ``target`` (its aligned DNA) the best file holds, on each branch."""
+        out = {}
+        for sort_order in ("score", "total"):
+            best, _alt = self._merge([list(r) for r in rows], sort_order)
+            out[sort_order] = sorted(r[DNA_COL] for r in best if r[DNA_COL] in target)
+        return out
+
+    def test_a_targets_alignment_from_the_anchor_base_goes_with_its_alignments_inside(self):
+        """2 DNA + 2 RNA bulges (review r2 of lane M, M-R2-1). Target T, its first base the
+        insertion's 2nd (on the haplotype at 102), aligned plain (Cluster_Position 100) and
+        with a DNA bulge from the 1st inserted base (101), both inside the insertion, and
+        with 2 DNA bulges from the anchor base itself: a row of the chain like any other,
+        at 102. Another target's 2-RNA-bulge alignment from the 1st inserted base (98, on
+        the haplotype at 99) and a reference row at 98. The rows inside the insertion were
+        one unit, which went to the site before, nearer its first place (99), while T's
+        alignment from the anchor base was a site of its own: T written twice, CFD 0.500
+        and 0.300 (the chain of every row, and 2.8.1, wrote it once). A target with an
+        alignment on a reference base is placed by it: its alignments inside go with it,
+        and T is one row, the best of its alignments."""
+        ins = "AT" + self.T2 + "CA"
+        plain = self._inside(ins, 2, 23, cfd="0.500", total=2)
+        dna1 = self._inside(ins, 1, 24, cfd="0.400", total=3, dna_bulges=1)
+        dna2 = self._on_reference(ins, 100, 25, "0.300", 4, dna_bulges=2)
+        other = self._inside(ins, 1, 21, cfd="0.100", total=4, rna_bulges=2)
+        ref = _row("GGACTGAAATCTGTAAGCAGGCAGG"[:23], "0.200", 4, cluster_pos=98, position=98)
+        self.assertEqual([r[CLUSTER_POS_COL] for r in (ref, other, plain, dna1, dna2)],
+                         ["98", "98", "100", "101", "102"])
+        target = {plain[DNA_COL], dna1[DNA_COL], dna2[DNA_COL]}
+        self.assertEqual(len(target), 3)
+        rows = [ref, other, plain, dna1, dna2]
+        self.assertEqual(self._target_written(rows, target),
+                         {"score": [plain[DNA_COL]], "total": [plain[DNA_COL]]})
+        # the reference row keeps its site, the other target's alignment its alternative
+        best, alt = self._merge([list(r) for r in rows])
+        self.assertEqual(sorted(r[DNA_COL] for r in best), sorted([ref[DNA_COL], plain[DNA_COL]]))
+        self.assertEqual([r[DNA_COL] for r in alt], [other[DNA_COL]])
+
+    def test_a_targets_alignment_from_a_base_before_the_anchor_goes_with_them_too(self):
+        """The same with 3 DNA bulges: T's alignment from the base before the anchor (99,
+        Cluster_Position 102) is the one on a reference base, and the alignments inside go
+        with it all the same (a rule for the anchor base alone would leave it a site of its
+        own): T is one row."""
+        ins = "AT" + self.T2 + "CA"
+        plain = self._inside(ins, 2, 23, cfd="0.500", total=2)
+        dna1 = self._inside(ins, 1, 24, cfd="0.400", total=3, dna_bulges=1)
+        dna3 = self._on_reference(ins, 99, 26, "0.300", 5, dna_bulges=3)
+        other = self._inside(ins, 1, 21, cfd="0.100", total=4, rna_bulges=2)
+        ref = _row("GGACTGAAATCTGTAAGCAGGCAGG"[:23], "0.200", 4, cluster_pos=98, position=98)
+        self.assertEqual(dna3[CLUSTER_POS_COL], "102")
+        target = {plain[DNA_COL], dna1[DNA_COL], dna3[DNA_COL]}
+        self.assertEqual(self._target_written([ref, other, plain, dna1, dna3], target),
+                         {"score": [plain[DNA_COL]], "total": [plain[DNA_COL]]})
+
+
 # Runs the real merge script in a fresh interpreter with indel_snp_cis.row_first_base
 # counting its calls, and prints their number.
 _COUNTING_MERGE = """
@@ -836,6 +1035,200 @@ class OneTargetsAlignmentsInsideALongInsertion(unittest.TestCase):
         # (the rsID and AF of each folded row together, as the lists follow the variants)
         self.assertEqual((best[0][DNA_COL], best[0][16], best[0][17]), (self.T1, ".,rs1", "0.2,0.1"))
         self.assertEqual(alt[0][DNA_COL], self.T2)
+
+
+
+def _merge_module():
+    """remove_contiguous_samples.py's definitions, in this process, with the columns
+    merge_close_targets_cfd.sh passes (0-based); its run as a script is cut off."""
+    import types
+    path = os.path.join(PP, "remove_contiguous_samples.py")
+    with open(path) as fh:
+        src = fh.read()
+    cut = src.find('\nif __name__ == "__main__":')
+    if cut < 0:
+        cut = src.index("\ntau = int(sys.argv[3])")
+    if PP not in sys.path:
+        sys.path.insert(0, PP)
+    mod = types.ModuleType("remove_contiguous_samples_defs")
+    mod.__file__ = path
+    exec(compile(src[:cut], path, "exec"), mod.__dict__)
+    mod.chrom, mod.pos, mod.total, mod.true_guide, mod.snp_info, mod.cfd = 4, 6, 10, 15, 18, 20
+    return mod
+
+
+class TheClustersHoldWholeTargets(unittest.TestCase):
+    """(2.10.0, review r2 of lane M.) The merge's clusters (_clusters) of rows drawn from a
+    model of targets: a random reference, random insertions of 1 to 12 bases after an
+    anchor (now and then two at one anchor), and targets on them, each a PAM's placement on
+    a haplotype (the reference, or one carrying one insertion). Each alignment of a target
+    with nd DNA and nr RNA bulges within the budget (some left out at random) is a row as
+    the indel post-analysis writes it: its bases, REF text, Position and Cluster_Position,
+    so the merge reads each row's place on the haplotype itself (_inside_place,
+    row_first_base). A search has one PAM side: with a 3' PAM a + strand alignment's first
+    base is s - nd + nr and its Cluster_Position its start plus nd less nr, a - strand
+    one's first base is s; with a 5' PAM the other way round. A row whose first base is an
+    inserted one starts at the anchor; one past the insertion holds none of its bases and
+    is a reference row (another target, on the reference).
+
+    Over 1+1 to 3+3 bulges and --merge 0 to 6: every target's rows are in one cluster (the
+    first merge of this release wrote a target twice at 2 DNA + 2 RNA bulges and more,
+    M-R2-1); the clusters do not depend on the order of the rows of one Cluster_Position;
+    with no indel row they are the plain chain of every row; restricted to the rows of
+    the targets that have a row on a reference base they are the plain chain of their
+    targets' places (a target with a row on a reference base is placed by it, and the
+    rows of the targets wholly inside an insertion join one site and chain none); and the
+    rows of the targets wholly inside the insertions at one anchor are in one cluster
+    (decision (d)).
+
+    What this covers: targets whose bases fix their place on the haplotype. The model's
+    reference and insertions are random bases, and a trial in which the merge reads a
+    row's place other than the model's (a repeat that its bases also fit at an earlier
+    place: row_first_base reads the first) is skipped, and counted, not checked. With
+    random bases there are few or none (none in the 600 trials drawn here), so a target
+    wholly inside a tandem repeat, whose alignments the merge can read at different
+    places and put in two clusters, is not tested here: that is a known limit (METHODS
+    section 4; review r3 of lane M, whose model of microsatellites found it)."""
+
+    N = 23  # a target's bases on its haplotype aligned with no bulge (20 + the PAM)
+    BUDGETS = [(1, 1), (2, 1), (1, 2), (2, 2), (3, 3), (0, 2), (2, 0), (3, 1), (1, 3), (0, 0)]
+    TAUS = [0, 1, 2, 3, 3, 3, 4, 5, 6]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = _merge_module()
+
+    def _trial(self, rng):
+        """(rows, {row id: (target, its place, 'in' | 'chain' | 'ref', anchor)}, budget)."""
+        bd, br = rng.choice(self.BUDGETS)
+        kinds = ["L+", "L+", "F-"] if rng.random() < 0.7 else ["F+", "L-", "L-"]
+        ref = "".join(rng.choice("ACGT") for _ in range(420))
+        rows, model = [], {}
+
+        def target(ins, s):
+            kind = rng.choice(kinds)
+            hap = ins[3] if ins else ref
+            combos = [(nd, nr) for nd in range(bd + 1) for nr in range(br + 1)]
+            for nd, nr in [c for c in combos if rng.random() < 0.6] or [rng.choice(combos)]:
+                if kind[0] == "L":  # the left end moves with the bulges
+                    f, e, adj = s - nd + nr, s + self.N, nd - nr
+                else:
+                    f, e, adj = s, s + self.N + nd - nr, 0
+                if f < 0 or e > len(hap):
+                    continue
+                bases, m = hap[f:e], e - f
+                if ins is not None and f <= ins[0] + ins[1] and e - 1 >= ins[0] + 1:
+                    a, n_ins, token, _h = ins
+                    start = a if f > a else f
+                    reftext, snp = ref[start:start + m], token
+                    tag, place = "T|%s|%s|%d" % (token, kind, s), s
+                    where = "in" if f > a else "chain"
+                else:
+                    start = f - ins[1] if ins is not None and f > ins[0] + ins[1] else f
+                    reftext, snp = "n", "n"
+                    tag, place, where = "R|%s|%d" % (kind, start + adj), start + adj, "ref"
+                strand = kind[1]
+                dna = bases if strand == "+" else _rc(bases)
+                if reftext != "n" and strand == "-":
+                    reftext = _rc(reftext)
+                for _ in range(nr):  # an RNA bulge: a gap in the target
+                    i = rng.randint(1, len(dna) - 1)
+                    dna = dna[:i] + "-" + dna[i:]
+                r = ["X"] * 22
+                r[2], r[3], r[4], r[5] = dna, reftext, "chr1", str(start)
+                r[6], r[7], r[10], r[13] = str(start + adj), strand, str(nd + nr), str(len(rows))
+                r[15], r[18], r[20] = "GUIDE", snp, "0.5"
+                rows.append(r)
+                model[r[13]] = (tag, place, where, ins[0] if ins else None)
+
+        x = 40
+        while x < 330:
+            x += rng.randint(1, 9)
+            u = rng.random()
+            if u < 0.6:
+                for allele in range(1 if rng.random() < 0.85 else 2):
+                    n_ins = rng.randint(1, 12)
+                    ins = "".join(rng.choice("ACGT") for _ in range(n_ins))
+                    token = "chr1_%d_%s_%s" % (x + 1, ref[x], ref[x] + ins)
+                    site = (x, n_ins, token, ref[:x + 1] + ins + ref[x + 1:])
+                    for _t in range(rng.randint(1, 4) if allele == 0 else 1):
+                        target(site, x + rng.randint(-4, n_ins + 3))
+            elif u < 0.85:
+                target(None, x)
+        return rows, model, (bd, br)
+
+    def _clusters(self, rows, tau):
+        mod = self.mod
+        mod.tau = tau
+        mod._FIRST_BASE_MEMO.clear()
+        shift = max(abs(int(r[6]) - int(r[5])) for r in rows)
+        return list(mod._clusters(["\t".join(r) for r in rows], shift))
+
+    @staticmethod
+    def _chain(items, tau):
+        out, cur, last = [], [], None
+        for place, rid in sorted(items):
+            if cur and place - last > tau:
+                out.append(sorted(cur))
+                cur = []
+            cur.append(rid)
+            last = place
+        if cur:
+            out.append(sorted(cur))
+        return sorted(out)
+
+    def test_the_clusters_of_rows_of_random_targets(self):
+        import random
+        rng = random.Random(20261110)
+        seen = {"targets split": 0, "inside rows read elsewhere": 0}
+        trials = 0
+        while trials < 600:
+            rows, model, budget = self._trial(rng)
+            if not rows:
+                continue
+            memo = {}
+            if any(self.mod._haplotype_cluster_position(r, memo) != model[r[13]][1]
+                   for r in rows if model[r[13]][2] != "ref"):
+                # a repeat the model does not follow: the row's bases are at an earlier place
+                seen["inside rows read elsewhere"] += 1
+                continue
+            trials += 1
+            tau = rng.choice(self.TAUS)
+            got = self._clusters(sorted(rows, key=lambda r: (int(r[6]), rng.random())), tau)
+            part = sorted(sorted(r[13] for r in c) for c in got)
+            cluster_of = {r[13]: i for i, c in enumerate(got) for r in c}
+            with self.subTest(trial=trials, budget=budget, tau=tau):
+                by_target = {}
+                for rid, (tag, _p, _w, _a) in model.items():
+                    by_target.setdefault(tag, set()).add(cluster_of[rid])
+                split = sorted(t for t, cs in by_target.items() if len(cs) > 1)
+                seen["targets split"] += bool(split)
+                self.assertEqual(split, [], "a target's rows in two clusters")
+                again = self._clusters(sorted(rows, key=lambda r: (int(r[6]), rng.random())), tau)
+                self.assertEqual(sorted(sorted(r[13] for r in c) for c in again), part,
+                                 "the clusters follow the order of rows of one place")
+                if all(w == "ref" for _t, _p, w, _a in model.values()):
+                    self.assertEqual(part, self._chain([(int(r[6]), r[13]) for r in rows], tau))
+                kinds = {}
+                for tag, _p, w, _a in model.values():
+                    kinds.setdefault(tag, set()).add(w)
+                wholly_inside = {t for t, k in kinds.items() if k == {"in"}}
+                placed = [(p, rid) for rid, (t, p, _w, _a) in model.items()
+                          if t not in wholly_inside]
+                ids = {rid for _p, rid in placed}
+                self.assertEqual(sorted(c for c in (sorted(i for i in c if i in ids)
+                                                    for c in part) if c),
+                                 self._chain(placed, tau),
+                                 "an insertion's unit chained two sites, or a target with a "
+                                 "row on a reference base was not placed by it")
+                units = {}
+                for rid, (t, _p, _w, a) in model.items():
+                    if t in wholly_inside:
+                        units.setdefault(a, set()).add(cluster_of[rid])
+                self.assertEqual({a: cs for a, cs in units.items() if len(cs) > 1}, {},
+                                 "the targets wholly inside one anchor's insertions in two sites")
+        # the trials are not idle: most hold rows inside an insertion and bulged alignments
+        self.assertLess(seen["inside rows read elsewhere"], 60)
 
 
 if __name__ == "__main__":
