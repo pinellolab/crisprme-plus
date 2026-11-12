@@ -4562,6 +4562,7 @@ class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
             "--vcf", self.path("VCFs", "ds")])
 
     def test_the_advice_on_its_kit_in_place_names_no_registry_nor_build_index_only(self):
+        import indel_window  # (PostProcess/: the text of the recipe's way, rebuild_kit_way)
         rc, out, err = self.run_bio()
         self.assertEqual((rc, err), (0, ""))
         self.sites_only()
@@ -4576,10 +4577,16 @@ class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
             "off-target); its windows come from its enriched-genome kit, whose indels a "
             "synthetic sample carries: install its archive and enriched-genome kit of CRISPRme "
             "2.10.0 (docs/PRECOMPUTED_INDEXES.md), or build its kit again that way "
-            "(seq_script/merge_panels/mega_rebuild.sh). Either replaces that enrichment "
-            "and all that was built from it", out)
+            + indel_window.rebuild_kit_way("ds", self.work, "hg38") + ". Either replaces that "
+            "enrichment and all that was built from it", out)
         self.assertNotIn("run build-index-only again", out)
-        m = re.search(r"\(rm -rf ([^;)]*)[;)]", out)
+        # IR1-F2: the kit built again goes in place of the dataset's VCFs, registry and indel
+        # frequencies too, which the recipe writes anew (by absolute path) ...
+        self.assertIn("(rm -rf %s)" % " ".join(
+            "'%s'" % self.path(*p) for p in (("VCFs", "ds"), ("Dictionaries", "registry_ds"),
+                                             ("Dictionaries", "indel_af_ds"))), out)
+        # ... and the removal of what came from the enrichment names no registry (W-R3-F1)
+        m = re.search(r"Either replaces .*?\(rm -rf ([^;)]*)[;)]", out, re.S)
         self.assertNotIn("registry_ds", m.group(1))
         for d in (self.path("Genomes", "hg38+ds"), self.path("Genomes", "hg38+ds_INDELS"),
                   self.path("Dictionaries", "log_indels_ds"), self.lib(VAR), self.lib(INDELS)):
@@ -4637,7 +4644,10 @@ class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
                 "record windows of 25/34" % self.path("Genomes", "hg38+ds"), err)
             self.assertIn("Put that kit back in place (%s and %s_INDELS" % (
                 (self.path("Genomes", "hg38+ds"),) * 2), err)
-            self.assertNotIn("registry_ds", err)
+            # no registry in the removal of what came from the kit (the recipe's own
+            # replacement of it, IR1-F2, comes after, in the kit built again)
+            self.assertNotIn("registry_ds", err.split("or build its kit again that way")[0])
+            self.assertEqual("registry_ds" in err, (left, right) == (30, 30), err)
             self.assertNotIn("build-index-only again", err)
             self.assertEqual("rm -rf" in err, (left, right) == (30, 30), err)
             self.assertEqual(self.calls()[calls:], [])

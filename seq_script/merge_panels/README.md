@@ -57,7 +57,9 @@ names, as the shipped install has it); and `PostProcess/verify_mega_chrom.py` ch
 against the source VCF read on its own.
 Validated on chr22 and chr14 (METHODS section 2); not run genome-wide before the release's
 readiness audit. Usage: `mega_rebuild.sh <install_dir> <merged_vcf_dir> [chrom ...]` (its
-header has the environment it reads).
+header has the environment it reads), in a working directory that holds none of the dataset (it
+refuses one that holds its VCFs or a part it builds, before it makes anything there); to put the
+kit it built in a data folder in place of the dataset's, `docs/TROUBLESHOOTING.md` §12.
 
 **Whole-genome mega build scripts (as-run up to 2.8.1, in this folder):**
 `mega_gw_merge.sh` (the GW 24-contig 5-source merge driver around `merge_mega_sites.sh`)

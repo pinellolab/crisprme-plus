@@ -406,18 +406,56 @@ def sites_only_why(dataset):
             % dataset)
 
 
-def sites_only_way(dataset):
+def rebuild_kit_way(dataset, workdir=None, genome=None):
+    """How the kit of sites-only dataset ``dataset`` is built again with a synthetic sample
+    and put in its place in working directory ``workdir`` (of genome ``genome``): the end of
+    the sentence "build its kit again ...". The recipe (seq_script/merge_panels/mega_rebuild.sh,
+    the mega's of 2.10.0) builds a dataset whole, its VCFs, registry and indel frequencies too,
+    in a working directory that holds none of it, and refuses one that holds any part of it
+    before it makes anything there; a data folder keeps the dataset's VCFs, registry and indel
+    frequencies after the removal a message names (they come from its VCFs alone, the same
+    from any enrichment), so the recipe runs in a new working directory, and what it builds is
+    moved in, those three replaced too. Up to the integration review of 2.10.0 (IR1-F2) the
+    advice named the recipe alone, and the recipe, run in the folder that removal left,
+    refused its VCFs after it had made its staging folder there. Paths by absolute path where
+    ``workdir`` is given, for a shell in any directory (docs/TROUBLESHOOTING.md section 12 has
+    the commands)."""
+    genome = genome or "<genome>"
+    where = quote(workdir) if workdir else "the working directory"
+
+    def here(path):
+        return quote(os.path.join(workdir, path)) if workdir else path
+
+    return ("with seq_script/merge_panels/mega_rebuild.sh in a new working directory of its "
+            "own, whose Genomes/%s holds the FASTAs of the chromosomes to build and no other, "
+            "beside the PAM file (the recipe refuses one that holds a part of %s it builds, its "
+            "VCFs among them, and makes nothing there), from the merged VCFs "
+            "mega.<chrom>.afmax.vcf.gz "
+            "(download --what vcf --dataset %s); then put what it built in place of %s's own "
+            "in %s: remove there the dataset's VCFs, registry and indel frequencies too, which "
+            "the recipe wrote anew (rm -rf %s %s %s), and move in Genomes/%s+%s and "
+            "Genomes/%s+%s_INDELS, the indexes of %s of its genome_library (not its reference "
+            "index), Dictionaries/log_indels_%s, registry_%s and indel_af_%s, and VCFs/%s "
+            "(docs/TROUBLESHOOTING.md section 12 has the commands)"
+            % (genome, dataset, dataset, dataset, where, here("VCFs/%s" % dataset),
+               here("Dictionaries/registry_%s" % dataset),
+               here("Dictionaries/indel_af_%s" % dataset), genome, dataset, genome, dataset,
+               dataset, dataset, dataset, dataset, dataset))
+
+
+def sites_only_way(dataset, workdir=None, genome=None):
     """How sites-only dataset ``dataset`` (sites_only) gets the fake-indel windows of
     CRISPRitz 2.10.0, not from build-index-only (sites_only_why): from its archive and
     enriched-genome kit of CRISPRme 2.10.0, or its kit built again with a synthetic sample
     (seq_script/merge_panels/mega_rebuild.sh, the mega's recipe of 2.10.0: the enriched
     genome, the fake-indel genome and their indexes in one build; mega_build_indels.sh, up to
-    2.8.1's, builds the fake-indel half alone)."""
+    2.8.1's, builds the fake-indel half alone), in a new working directory and moved in
+    (rebuild_kit_way: ``workdir`` and ``genome``, where given, the dataset's)."""
     return ("%s (so build-index-only would leave it with no indel off-target); its windows "
             "come from its enriched-genome kit, whose indels a synthetic sample carries: "
             "install its archive and enriched-genome kit of CRISPRme 2.10.0 "
-            "(docs/PRECOMPUTED_INDEXES.md), or build its kit again that way "
-            "(seq_script/merge_panels/mega_rebuild.sh)" % sites_only_why(dataset))
+            "(docs/PRECOMPUTED_INDEXES.md), or build its kit again that way %s"
+            % (sites_only_why(dataset), rebuild_kit_way(dataset, workdir, genome)))
 
 
 def _holds_a_file(directory):
@@ -552,11 +590,13 @@ def reenrichment_refusal(workdir, genome, dataset, libraries=(), who="build-inde
                     % (dataset, enriched, who, sites_only_why(dataset),
                        " and ".join(describe(w) for w in kit), enriched, enriched,
                        "" if kit == [engine] else
-                       "; or, for the windows of the installed CRISPRitz (%s), install the "
-                       "dataset's archive and enriched-genome kit of CRISPRme 2.10.0 in place "
-                       "of all that came from that kit (rm -rf %s), or build its kit again that "
-                       "way" % (describe(engine), " ".join(quote(d) for d in enrichment_stores(
-                           workdir, genome, dataset, libraries)))))
+                       "; or, for the windows of the installed CRISPRitz (%s), remove all "
+                       "that came from that kit (rm -rf %s) and install the dataset's archive "
+                       "and enriched-genome kit of CRISPRme 2.10.0 in its place, or build its "
+                       "kit again that way %s"
+                       % (describe(engine), " ".join(quote(d) for d in enrichment_stores(
+                           workdir, genome, dataset, libraries)),
+                          rebuild_kit_way(dataset, workdir, genome))))
     built = ([d for d in _tiers(workdir, dataset) if _holds_a_file(d)]
              + _indexes(workdir, genome, dataset, libraries))
     if not built:
@@ -698,10 +738,10 @@ def fake_genome_refusal(workdir, genome, dataset, who="build-index-only", vcf_di
     if not found:
         return None
     every = " ".join(quote(d) for d in enrichment_stores(workdir, genome, dataset))
-    anew = ("or build that kit again with a synthetic sample "
-            "(seq_script/merge_panels/mega_rebuild.sh), in place of all of the dataset "
-            "that comes from an enrichment (rm -rf %s): %s, so build-index-only would enrich "
-            "it anew with no indel off-target" % (every, sites_only_why(dataset))
+    anew = ("or remove all of the dataset that comes from an enrichment (rm -rf %s) and "
+            "build that kit again, its indels carried by a synthetic sample, %s: %s, so "
+            "build-index-only would enrich it anew with no indel off-target"
+            % (every, rebuild_kit_way(dataset, workdir, genome), sites_only_why(dataset))
             if sites_only(workdir, dataset, vcf_dir) else
             "or remove all of the dataset that comes from an enrichment (rm -rf %s) and run "
             "build-index-only again, which enriches it anew" % every)

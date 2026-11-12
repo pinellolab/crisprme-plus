@@ -918,9 +918,19 @@ and the `release-crisprme` skill.
   holds leaves the main tables with it (3 and 8 single-variant sites, CFD up to 0.017, and 2 and
   1 reference sites, CFD 0.001 or less; METHODS section 5).
   METHODS section 2, `docs/PRECOMPUTED_INDEXES.md` (mega), `seq_script/merge_panels/README.md`.
+  The recipe builds the dataset whole, its VCFs, registry and indel frequencies too, in a
+  working directory that holds none of it, and refuses one that holds the dataset's VCFs or a
+  part it builds (its kit, indel logs, registry, indel frequencies, dictionaries or indexes)
+  before it makes anything there; up to the integration review of 2.10.0 it checked the VCF
+  folder alone, after it had made its staging folder (`.mega_rebuild_hg38_mega/prepared`),
+  which a refusal left behind, and a kit left in place would have been reused by its
+  `build-index-only`. To put a kit it built in a data folder, run it in a new working directory
+  and move its parts in place of the dataset's (`docs/TROUBLESHOOTING.md` §12 has the commands).
   Covered by `PostProcess/test_mega_rebuild.py` (the recipe end to end on the stub engine, the
   samplesID file it writes or keeps, and its checks failing on a registry that reads every
-  record), `test_prepare_mega_build_vcf.py` and `test_synth_sites_gt.py`.
+  record; a working directory that holds a part of the dataset refused with nothing made there,
+  and the flow of §12 run end to end), `test_prepare_mega_build_vcf.py` and
+  `test_synth_sites_gt.py`.
 - **The sites-only density guard: of a sites-only dataset, the candidates in windows of 2^20
   sequences or more are withheld from the SNP and the indel post-analysis, and listed.** A
   sites-only dataset (the mega) has no genotypes to tell which combinations of a window's alleles
@@ -1205,12 +1215,18 @@ and the `release-crisprme` skill.
   so; up to 2.8.1 `mega_build_indels.sh` built its fake-indel half); enriched anew, as CRISPRme
   2.8.1 did silently, it lost every indel off-target. Every message on it points to that kit,
   its archive and kit of CRISPRme 2.10.0, or that recipe, not to `build-index-only`, and names
-  no registry
-  of it in an rm (the refusal and the advice on the published mega named its registry, and
-  advised a new build). On chr22, with the published registry and its kit's log of 25/27 or 30/30
-  and no kit, `build-index-only` refuses the mega in 1 s, nothing built, no registry named; with
-  the 25/27 kit in place it builds and warns with that advice, whose rm leaves the registry, the
-  indel frequencies and the VCFs. Nor is an index built from an enrichment in place whose
+  no registry of it in the rm of what came from the kit (the refusal and the advice on the
+  published mega named its registry, and advised a new build). The recipe is named with the
+  flow that works: run in a new working directory, as it builds the dataset whole, its VCFs,
+  registry and indel frequencies too, then its parts moved in place of the dataset's, those
+  three replaced, each path named (`docs/TROUBLESHOOTING.md` §12 has the commands); the
+  messages named the recipe alone, and run in the folder their rm left, which keeps the
+  dataset's VCFs, it refused them (the integration review of 2.10.0). On chr22, with the
+  published registry and its kit's log of 25/27 or 30/30 and no kit, `build-index-only` refuses
+  the mega in 1 s, nothing built, no registry named; with the 25/27 kit in place it builds and
+  warns with that advice, whose rm leaves the registry, the indel frequencies and the VCFs, and
+  the flow it gives rebuilds the kit and searches it. Nor is an index built from an enrichment
+  in place whose
   fake-indel genome
   holds other windows than the dataset's indel logs record
   (`indel_window.fake_window_disagreement`: each window where its log row's `FAKEPOS` places

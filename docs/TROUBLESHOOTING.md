@@ -375,6 +375,47 @@ windows of 2.10.0, install its archive and kit of CRISPRme 2.10.0 in place of wh
 lists, or build the kit again that way. Its registry, which comes from its VCFs alone (their
 INFO AF fields), is never in that list.
 
+**Building the mega's kit again.** The recipe builds the dataset whole, its VCFs, registry and
+indel frequencies too, in a working directory that holds none of it: it refuses one that holds
+the dataset's VCFs, or a part it builds, and makes nothing there. The data folder keeps the
+mega's VCFs, registry and indel frequencies after the removal a message names, so run the
+recipe in a new working directory, then put what it built in place of the dataset's, those
+three replaced too. With `DATA` the data folder, `NEW` a new folder outside it, `SRC` a folder
+of the merged VCFs the mega is built from, `mega.<chrom>.afmax.vcf.gz`, each an absolute path
+(`crisprme.py download --what vcf --dataset hg38_mega --path <dir>` fetches them into
+`<dir>/VCFs/hg38_mega`; a 2.8.1 install's `VCFs/hg38_mega` holds them, so give it as `SRC`
+before you remove it), and `REPO` the CRISPRme repository (`/opt/conda/opt/crisprme` in the
+image):
+
+```bash
+# a new working directory: the FASTAs of the chromosomes the mega is built on and no other
+# (chr1-22, X and Y), and the PAM file
+mkdir -p "$NEW/Genomes/hg38" "$NEW/PAMs"
+for c in chr{1..22} chrX chrY; do ln -s "$DATA/Genomes/hg38/$c.fa" "$NEW/Genomes/hg38/"; done
+cp "$DATA/PAMs/20bp-NRR-SpCas9.txt" "$NEW/PAMs/"
+PAM=PAMs/20bp-NRR-SpCas9.txt bash "$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"
+# in the data folder: first what the message lists (the rm -rf it prints), then the dataset's
+# VCFs, registry and indel frequencies, which the recipe wrote anew
+rm -rf "$DATA/VCFs/hg38_mega" "$DATA/Dictionaries/registry_hg38_mega" \
+  "$DATA/Dictionaries/indel_af_hg38_mega"
+# what the recipe built, moved in (not its reference index, genome_library/<guide>-<PAM>_<N>_hg38)
+mv "$NEW/Genomes/hg38+hg38_mega" "$NEW/Genomes/hg38+hg38_mega_INDELS" "$DATA/Genomes/"
+mv "$NEW"/genome_library/*_hg38+hg38_mega "$NEW"/genome_library/*_hg38+hg38_mega_INDELS \
+  "$DATA/genome_library/"
+mv "$NEW/Dictionaries/log_indels_hg38_mega" "$NEW/Dictionaries/registry_hg38_mega" \
+  "$NEW/Dictionaries/indel_af_hg38_mega" "$DATA/Dictionaries/"
+mv "$NEW/VCFs/hg38_mega" "$DATA/VCFs/"
+[ -e "$DATA/samplesIDs/hg38_mega.samplesID.txt" ] \
+  || mv "$NEW/samplesIDs/hg38_mega.samplesID.txt" "$DATA/samplesIDs/"
+```
+
+For a container install, give the recipe its `RUN` prefix (its header). Its last step,
+`verify_mega_chrom.py`, prints `ALL PASS` for every chromosome. The index it built is of its
+PAM; for another, run `build-index-only --pam <it>` on the data folder, which reuses the kit.
+Up to the integration review of 2.10.0 the messages named the recipe alone, and the recipe, run
+in the folder their removal left, refused its VCFs after it had made its staging folder
+(`.mega_rebuild_hg38_mega/prepared`) there.
+
 ## 13. A build or a search says a fake-indel genome and its indel logs come from two enrichments
 
 **Symptom.** `build-index-only`, before it builds anything, or a variant search that would
@@ -396,6 +437,8 @@ index's enriched-genome kit ([Precomputed indexes](PRECOMPUTED_INDEXES.md)); or 
 dataset that comes from an enrichment (the message lists it) and run `build-index-only` with its
 VCFs and `--samplesID`, which enriches it anew. For a sites-only dataset (`hg38_mega`) the second
 way is to build its kit again with a synthetic sample (`seq_script/merge_panels/mega_rebuild.sh`,
-the enriched genome, the fake-indel genome and their indexes in one build, in a working
-directory whose `VCFs/hg38_mega` the recipe fills itself), as the message says: an enrichment of
-its VCFs would hold no fake-indel window.
+the enriched genome, the fake-indel genome and their indexes in one build), as the message says:
+an enrichment of its VCFs would hold no fake-indel window. The recipe runs in a new working
+directory, and what it built goes in place of all of the dataset that comes from an enrichment
+(the message lists it) and of the dataset's VCFs, registry and indel frequencies, which it
+writes anew: the commands are in section 12, "Building the mega's kit again".

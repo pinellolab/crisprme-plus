@@ -128,9 +128,9 @@ exec "PYTHON" "CRISPRME" "$@"
 '''
 
 
-@unittest.skipUnless(HAVE_PYSAM, "pysam (BGZF and tabix) not installed")
-class TheRecipe(bio._Fixture):
-    """mega_rebuild.sh end to end on two chromosomes, the stub engine under it."""
+class _Recipe(bio._Fixture):
+    """The recipe's fixture: the two-chromosome genome, the merged VCFs of each chromosome and
+    the stub engine (TheRecipe, TheRecipeInAFolderOfTheDataset)."""
 
     def setUp(self):
         super().setUp()
@@ -168,6 +168,11 @@ class TheRecipe(bio._Fixture):
                    PYTHON=sys.executable, PP=HERE)
         return subprocess.run(["bash", RECIPE, self.work, self.src], env=env,
                               capture_output=True, text=True, timeout=600)
+
+
+@unittest.skipUnless(HAVE_PYSAM, "pysam (BGZF and tabix) not installed")
+class TheRecipe(_Recipe):
+    """mega_rebuild.sh end to end on two chromosomes, the stub engine under it."""
 
     def test_every_store_reads_the_records_the_enricher_reads(self):
         done = self.rebuild()
@@ -342,6 +347,166 @@ class TheRecipe(bio._Fixture):
         ok, _ns, _ni = vm.verify(self.src, reg, self.path("Dictionaries", "indel_af_hg38_mega"),
                                  "chr1")
         self.assertTrue(ok)
+
+
+def _listing(root):
+    """Every file, folder and link below ``root``, as relative paths (a link's own name)."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        for n in dirnames + filenames:
+            out.append(os.path.relpath(os.path.join(dirpath, n), root))
+    return sorted(out)
+
+
+def _content(path):
+    """A file's bytes, those it holds uncompressed where it is gzip or BGZF (whose header
+    holds the time it was written)."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    return gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data
+
+
+def _section_12_commands():
+    """The commands of docs/TROUBLESHOOTING.md section 12, "Building the mega's kit again":
+    the first bash block after that paragraph's title."""
+    with open(os.path.join(REPO, "docs", "TROUBLESHOOTING.md")) as fh:
+        text = fh.read()
+    start = text.index("**Building the mega's kit again.**", text.index("## 12. "))
+    block = text.index("```bash\n", start) + len("```bash\n")
+    return text[block:text.index("```", block)]
+
+
+@unittest.skipUnless(HAVE_PYSAM, "pysam (BGZF and tabix) not installed")
+class TheRecipeInAFolderOfTheDataset(_Recipe):
+    """IR1-F2, the integration review r1 of 2.10.0: the advice on a sites-only dataset named
+    the recipe after a removal that leaves the dataset's VCFs, registry and indel frequencies in
+    the data folder (they come from its VCFs alone), and the recipe, run there with the merged
+    VCF as its source, refused the folder for its VCFs, after it had made its staging folder
+    (.mega_rebuild_hg38_mega/prepared) and Dictionaries there. It refuses a working directory
+    that holds the dataset's VCFs, or any part it builds, before it makes anything; and the flow
+    the advice gives, the recipe in a new working directory, then its parts moved in place of
+    the dataset's (docs/TROUBLESHOOTING.md section 12, its commands run here as written, the
+    chromosomes and the PAM those of this genome), puts a kit back that a build reads."""
+
+    PARTS = [("Genomes", "hg38+hg38_mega"), ("Genomes", "hg38+hg38_mega_INDELS"),
+             ("Dictionaries", "dictionaries_hg38_mega"), ("Dictionaries", "log_indels_hg38_mega"),
+             ("Dictionaries", "registry_hg38_mega"), ("Dictionaries", "indel_af_hg38_mega"),
+             ("Dictionaries", "genotypes_hg38_mega"), ("Dictionaries", "indel_genotypes_hg38_mega"),
+             ("genome_library", "20-NRG_2_hg38+hg38_mega"),
+             ("genome_library", "20-NRG_2_hg38+hg38_mega_INDELS")]
+
+    def the_kit(self, root):
+        """The parts of hg38_mega the recipe builds, in ``root``, as {relative path: bytes}."""
+        out = {}
+        for top in ("Genomes", "Dictionaries", "genome_library", "VCFs", "samplesIDs"):
+            for rel in _listing(os.path.join(root, top)):
+                path = os.path.join(root, top, rel)
+                if "hg38_mega" in rel and os.path.isfile(path):
+                    out[os.path.join(top, rel)] = _content(path)
+        return out
+
+    def advice_rm(self):
+        """The removal the advice names (indel_window.enrichment_stores): all of the dataset
+        that comes from an enrichment; its VCFs, registry and indel frequencies stay."""
+        import indel_window as iw
+        for p in iw.enrichment_stores(self.work, "hg38", "hg38_mega"):
+            shutil.rmtree(p)
+        self.assertTrue(os.path.isdir(self.path("VCFs", "hg38_mega")))
+        self.assertTrue(os.path.isdir(self.path("Dictionaries", "registry_hg38_mega")))
+        self.assertTrue(os.path.isdir(self.path("Dictionaries", "indel_af_hg38_mega")))
+
+    def refused(self, *named):
+        """The recipe run in the working directory: refused, each of ``named`` said, nothing
+        made there and no engine called."""
+        before, calls = _listing(self.work), len(self.calls())
+        done = self.rebuild()
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertEqual([p for p in _listing(self.work) if p not in before], [], done.stderr)
+        self.assertEqual(_listing(self.work), before)
+        self.assertEqual(len(self.calls()), calls)
+        for n in named:
+            self.assertIn(n, done.stderr)
+        self.assertIn("and nothing was made there: run this recipe in a new working directory",
+                      done.stderr)
+        self.assertIn("docs/TROUBLESHOOTING.md section 12", done.stderr)
+
+    def test_a_folder_that_holds_the_datasets_vcfs_is_refused_with_nothing_made(self):
+        # the data folder as the advice's removal leaves it: the merged VCFs, the registry and
+        # the indel frequencies of the dataset (advice_flow.sh of the integration review)
+        vdir = self.path("VCFs", "hg38_mega")
+        os.makedirs(vdir)
+        shutil.copy(os.path.join(self.src, "mega.chr1.afmax.vcf.gz"), vdir)
+        for part in ("registry_hg38_mega", "indel_af_hg38_mega"):
+            os.makedirs(self.path("Dictionaries", part))
+        self.refused("%s already holds VCFs: this recipe writes the dataset's VCFs itself" % vdir,
+                     self.path("Dictionaries", "registry_hg38_mega") + " is there",
+                     self.path("Dictionaries", "indel_af_hg38_mega") + " is there")
+        self.assertFalse(os.path.exists(self.path(".mega_rebuild_hg38_mega")))
+
+    def test_a_folder_that_holds_a_part_it_builds_is_refused_with_nothing_made(self):
+        # a kit, a log, a store or an index of the dataset in place: build-index-only would
+        # reuse the kit (an earlier one's windows), or a store would be left beside this one's
+        for part in self.PARTS:
+            with self.subTest(part=os.path.join(*part)):
+                p = self.path(*part)
+                os.makedirs(p)
+                try:
+                    self.refused("[error] %s is there: this recipe builds it" % p)
+                finally:
+                    shutil.rmtree(p)
+                    for top in ("Genomes", "Dictionaries", "genome_library"):
+                        if os.path.isdir(self.path(top)) and not os.listdir(self.path(top)) \
+                                and top != "Genomes":
+                            os.rmdir(self.path(top))
+        # and with none of it there, it builds as before
+        done = self.rebuild()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+
+    def test_the_commands_of_section_12_put_a_rebuilt_kit_in_place(self):
+        done = self.rebuild()   # the dataset as an install holds it, the data folder its own
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        kit = self.the_kit(self.work)
+        self.assertTrue(any(k.startswith("Genomes/hg38+hg38_mega_INDELS/") for k in kit), kit)
+        self.advice_rm()
+        self.refused("already holds VCFs")
+        new = os.path.join(self.root, "new")
+        commands = _section_12_commands()
+        self.assertIn('bash "$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"',
+                      commands)
+        commands = (commands.replace("chr{1..22} chrX chrY", " ".join(bio.GENOME))
+                    .replace("20bp-NRR-SpCas9.txt", os.path.basename(bio.PAM)))
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("STUB_", "CRISPRME_"))}
+        env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
+                   PYTHONPATH=os.path.join(bio.SHARED, "py"),
+                   MPLCONFIGDIR=os.path.join(bio.SHARED, "mpl"), STUB_LOG=self.log,
+                   STUB_MARK=self.mark, STUB_RELEASE=self.release, BDNA="1", BRNA="1",
+                   THREADS="2", PYTHON=sys.executable, PP=HERE, DATA=self.work, NEW=new,
+                   SRC=self.src, REPO=REPO)
+        ran = subprocess.run(["bash", "-euc", commands], cwd=self.root, env=env,
+                             capture_output=True, text=True, timeout=600)
+        self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+        self.assertIn("SUMMARY: 2 chroms, 2 SNP alleles + 2 indel-path alleles, ALL PASS",
+                      ran.stdout)
+        # the same kit, back in the data folder; nothing of the dataset left in the new folder
+        got = self.the_kit(self.work)
+        self.assertEqual(sorted(got), sorted(kit))
+        for name in kit:
+            self.assertEqual(got[name], kit[name], name)
+        # (the data folder had its samplesID file: the recipe's, the same, stays where it is)
+        self.assertEqual(sorted(self.the_kit(new)), ["samplesIDs/hg38_mega.samplesID.txt"])
+        self.assertFalse(os.path.exists(self.path(".mega_rebuild_hg38_mega")))
+        # a build of another PAM on the data folder reads it (the recipe's header: another PAM
+        # is build-index-only on the finished install, which reuses its enrichment)
+        nrr = os.path.join(REPO, "PAMs", "20bp-NRR-SpCas9.txt")
+        shutil.copy(nrr, self.path("PAMs", os.path.basename(nrr)))
+        rc, out, err = self.finish(self.start(command=[
+            "build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam",
+            self.path("PAMs", os.path.basename(nrr)), "--bDNA", "1", "--bRNA", "1",
+            "--thread", "2", "--path", self.work, "--vcf", self.path("VCFs", "hg38_mega")]))
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertNotIn("WARNING [build-index-only]", out)
+        self.assertTrue(os.path.isdir(self.lib("20-NRR_2_hg38+hg38_mega")))
+        self.assertTrue(os.path.isdir(self.lib("20-NRR_2_hg38+hg38_mega_INDELS")))
 
 
 if __name__ == "__main__":

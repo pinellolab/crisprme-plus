@@ -741,6 +741,15 @@ each panel was (`seq_script/rebuild/README.md`, rule 1).
    `build-index-only` without `--samplesID` for the SNP index). Run it genome-wide only after
    the release's readiness audit. Design rationale:
    [`docs/DESIGN_mega_index.md`](DESIGN_mega_index.md).
+
+   The recipe builds the dataset whole, its VCFs, registry and indel frequencies too, in a
+   working directory that holds none of it: `Genomes/hg38` with the FASTAs of the chromosomes
+   to build and no other, and the PAM file. One that holds the dataset's VCFs, or a part the
+   recipe builds (its kit, indel logs, registry, indel frequencies or indexes), is refused
+   before anything is made there. To put a kit it built in a data folder in place of the
+   dataset's (the advice of a build or a search on a sites-only dataset whose kit is not that
+   of the installed CRISPRitz), run it in a new working directory and move its parts in:
+   [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §12 has the commands.
 4. **Up to 2.8.1: searchable indels** (the shipped mega's). `seq_script/merge_panels/mega_build_indels.sh`
    adds a synthetic `MEGA` pseudo-sample so the enricher materializes fake contigs, builds the
    `_INDELS` genome, then strips the pseudo-sample back out; the registry and the indel

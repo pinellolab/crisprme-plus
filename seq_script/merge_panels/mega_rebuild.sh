@@ -38,7 +38,10 @@
 # USAGE
 #   mega_rebuild.sh <install_dir> <merged_vcf_dir> [chrom ...]
 #     <install_dir>     a CRISPRme working directory holding Genomes/$GENOME/<chrom>.fa (one
-#                       FASTA per chromosome) and the PAM file; the index is built there
+#                       FASTA per chromosome) and the PAM file, and nothing of $DATASET: one
+#                       that holds its VCFs, or a part this recipe builds, is refused before
+#                       anything is made there. The index is built there; to put it in a data
+#                       folder in place of a dataset's, docs/TROUBLESHOOTING.md section 12
 #     <merged_vcf_dir>  the folder of mega.<chrom>.afmax.vcf.gz (the source VCFs)
 #     chrom ...         the chromosomes to build (default: every mega.*.afmax.vcf.gz there).
 #                       Genomes/$GENOME must hold exactly these chromosomes' FASTAs: the
@@ -97,10 +100,31 @@ done
 VDIR="$INSTALL/VCFs/$DATASET"
 STAGE="$INSTALL/.mega_rebuild_$DATASET"
 D="$INSTALL/Dictionaries"
-mkdir -p "$VDIR" "$STAGE/prepared" "$D"
+# The recipe builds the dataset whole, its VCFs too, in a working directory that holds none of
+# it: one that holds its VCFs, or a part this recipe builds (which build-index-only would reuse,
+# or a store of an earlier build left beside this one's), is refused before anything is made
+# there. Up to the integration review of 2.10.0 (IR1-F2) the VCF folder was checked after the
+# folders below were made, so a refusal left an empty .mega_rebuild_<dataset>/prepared behind.
+HELD=()
 if ls "$VDIR"/*.vcf* >/dev/null 2>&1; then
-  echo "[error] $VDIR already holds VCFs: this recipe writes the dataset's VCFs itself" >&2; exit 1
+  echo "[error] $VDIR already holds VCFs: this recipe writes the dataset's VCFs itself" >&2
+  HELD+=("$VDIR")
 fi
+for p in "$INSTALL/Genomes/$GENOME+$DATASET" "$INSTALL/Genomes/$GENOME+${DATASET}_INDELS" \
+         "$D/dictionaries_$DATASET" "$D/log_indels_$DATASET" "$D/registry_$DATASET" \
+         "$D/indel_af_$DATASET" "$D/genotypes_$DATASET" "$D/indel_genotypes_$DATASET" \
+         "$INSTALL"/genome_library/*"_$GENOME+$DATASET" \
+         "$INSTALL"/genome_library/*"_$GENOME+${DATASET}_INDELS"; do
+  if [ -e "$p" ] || [ -L "$p" ]; then
+    echo "[error] $p is there: this recipe builds it" >&2
+    HELD+=("$p")
+  fi
+done
+if [ "${#HELD[@]}" -gt 0 ]; then
+  echo "[error] $INSTALL holds ${#HELD[@]} part(s) of $DATASET, and nothing was made there: run this recipe in a new working directory (its Genomes/$GENOME the FASTAs of the chromosomes to build alone, and the PAM file), then move what it builds in place of the dataset's (docs/TROUBLESHOOTING.md section 12)" >&2
+  exit 1
+fi
+mkdir -p "$VDIR" "$STAGE/prepared" "$D"
 
 # 1-2. the build input, and its presence-genotype copy the enricher reads
 for c in "${CHROMS[@]}"; do

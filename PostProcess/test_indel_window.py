@@ -394,13 +394,20 @@ class ADatasetEnrichedAnew(_EngineCase):
             self.assertIn("Put that kit back in place (%s and %s_INDELS: of a published "
                           "dataset, its enriched-genome kit" % ((os.path.join(g, "hg38+ds"),) * 2),
                           why)
-            self.assertNotIn("registry_ds", why)
+            # (the removal of what came from the kit names no registry: it comes from the
+            # VCFs alone; the recipe's own replacement of it, IR1-F2, is after)
+            self.assertNotIn("registry_ds", why.split("or build its kit again that way")[0])
             self.assertNotIn("build-index-only again", why)
             self.assertEqual("rm -rf" in why, window != (30, 30), why)
             if window != (30, 30):
-                self.assertIn("install the dataset's archive and enriched-genome kit of "
-                              "CRISPRme 2.10.0 in place of all that came from that kit (rm -rf "
-                              "'%s')" % os.path.join(d, "log_indels_ds"), why)
+                self.assertIn("remove all that came from that kit (rm -rf '%s') and install "
+                              "the dataset's archive and enriched-genome kit of CRISPRme 2.10.0 "
+                              "in its place, or build its kit again that way with "
+                              "seq_script/merge_panels/mega_rebuild.sh in a new working "
+                              "directory of its own" % os.path.join(d, "log_indels_ds"), why)
+                self.assertIn(iw.rebuild_kit_way("ds", w, "hg38"), why)
+            else:
+                self.assertNotIn("registry_ds", why)
             # by its registry alone, its VCFs not there
             with self.engine(engine30):
                 self.assertTrue(iw.reenrichment_refusal(w, "hg38", "ds").startswith(
@@ -447,11 +454,86 @@ class ADatasetEnrichedAnew(_EngineCase):
                       "would leave it with no indel off-target); its windows come from its "
                       "enriched-genome kit, whose indels a synthetic sample carries: install its "
                       "archive and enriched-genome kit of CRISPRme 2.10.0 "
-                      "(docs/PRECOMPUTED_INDEXES.md), or build its kit again that way "
-                      "(seq_script/merge_panels/mega_rebuild.sh).", note)
+                      "(docs/PRECOMPUTED_INDEXES.md), or build its kit again that way with "
+                      "seq_script/merge_panels/mega_rebuild.sh in a new working directory of its "
+                      "own, whose Genomes/<genome> holds the FASTAs of the chromosomes to build "
+                      "and no other", note)
+        self.assertTrue(note.endswith(iw.rebuild_kit_way("hg38_mega") + "."), note)
         self.assertNotIn("enrich hg38_mega again", note)
         self.assertIn("enrich ds again with it (build-index-only) to search them.",
                       iw.target_note((25, 27), 27, 1, "complete-search", "ds"))
+
+
+class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
+    """IR1-F2, the integration review r1 of 2.10.0: the advice on a sites-only dataset said to
+    build its kit again with seq_script/merge_panels/mega_rebuild.sh, in place of what its rm
+    named, which leaves the dataset's VCFs, registry and indel frequencies (they come from its
+    VCFs alone); the recipe, run in that folder with the merged VCFs as its source, refused it
+    ("... VCFs/hg38_mega already holds VCFs"). The advice gives the flow that works: the recipe
+    in a new working directory of its own (it refuses one that holds a part it builds), then
+    the dataset's VCFs, registry and indel frequencies removed too, by absolute path, and each
+    part the recipe built moved in; and docs/TROUBLESHOOTING.md section 12, which it names, has
+    those commands (test_mega_rebuild runs them)."""
+
+    PARTS = ("Genomes/hg38+hg38_mega and Genomes/hg38+hg38_mega_INDELS",
+             "the indexes of hg38_mega of its genome_library (not its reference index)",
+             "Dictionaries/log_indels_hg38_mega, registry_hg38_mega and indel_af_hg38_mega, "
+             "and VCFs/hg38_mega")
+
+    def check(self, said, workdir):
+        self.assertIn("build its kit again that way with seq_script/merge_panels/mega_rebuild.sh"
+                      " in a new working directory of its own, whose Genomes/hg38 holds the "
+                      "FASTAs of the chromosomes to build and no other, beside the PAM file (the "
+                      "recipe refuses one that holds a part of hg38_mega it builds, its VCFs "
+                      "among them, and makes nothing there), from the merged VCFs "
+                      "mega.<chrom>.afmax.vcf.gz "
+                      "(download --what vcf --dataset hg38_mega)", said)
+        three = ("VCFs/hg38_mega", "Dictionaries/registry_hg38_mega",
+                 "Dictionaries/indel_af_hg38_mega")
+        self.assertIn("remove there the dataset's VCFs, registry and indel frequencies too, "
+                      "which the recipe wrote anew (rm -rf %s)" % " ".join(
+                          iw.quote(os.path.join(workdir, p)) if workdir else p for p in three),
+                      said)
+        for part in self.PARTS:
+            self.assertIn(part, said)
+        self.assertIn("(docs/TROUBLESHOOTING.md section 12 has the commands)", said)
+
+    def test_each_message_gives_the_flow(self):
+        self.check("or " + iw.sites_only_way("hg38_mega", "/data/w", "hg38"), "/data/w")
+        note = iw.target_note((25, 27), 27, 1, "complete-search", "hg38_mega", sites=True)
+        self.check(note.replace("<genome>", "hg38"), None)
+
+    def test_section_12_has_its_commands(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(os.path.dirname(here), "docs", "TROUBLESHOOTING.md")) as fh:
+            text = fh.read()
+        section = text[text.index("## 12. "):text.index("## 13. ")]
+        start = section.index("**Building the mega's kit again.**")
+        block = section[section.index("```bash\n", start):]
+        block = block[:block.index("```", 8)].replace("\\\n", " ")
+        lines = [ln.split("#")[0].strip() for ln in block.splitlines()]
+        lines = [" ".join(ln.split()) for ln in lines if ln]
+        # the recipe in a new working directory of the mega's chromosomes alone, with the PAM
+        self.assertIn('mkdir -p "$NEW/Genomes/hg38" "$NEW/PAMs"', lines)
+        self.assertIn('PAM=PAMs/20bp-NRR-SpCas9.txt bash '
+                      '"$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"', lines)
+        # the three the recipe writes anew, removed from the data folder
+        self.assertIn('rm -rf "$DATA/VCFs/hg38_mega" "$DATA/Dictionaries/registry_hg38_mega" '
+                      '"$DATA/Dictionaries/indel_af_hg38_mega"', lines)
+        # each part the messages name, moved in (and the recipe's reference index not)
+        moved = " ".join(ln for ln in lines if ln.startswith(("mv ", "[ -e")))
+        for part in ('"$NEW/Genomes/hg38+hg38_mega"', '"$NEW/Genomes/hg38+hg38_mega_INDELS"',
+                     '"$NEW"/genome_library/*_hg38+hg38_mega ',
+                     '"$NEW"/genome_library/*_hg38+hg38_mega_INDELS',
+                     '"$NEW/Dictionaries/log_indels_hg38_mega"',
+                     '"$NEW/Dictionaries/registry_hg38_mega"',
+                     '"$NEW/Dictionaries/indel_af_hg38_mega"', '"$NEW/VCFs/hg38_mega"',
+                     '"$NEW/samplesIDs/hg38_mega.samplesID.txt"'):
+            self.assertIn(part, moved)
+        self.assertNotIn("genome_library/*_hg38 ", moved)
+        # and the section says, as the recipe does, that it makes nothing in a folder it refuses
+        self.assertIn("it refuses one that holds the dataset's VCFs, or a part it builds, and "
+                      "makes nothing there", " ".join(section.split()))
 
 
 class AFakeGenomeAndItsLogs(unittest.TestCase):
@@ -559,15 +641,17 @@ class AFakeGenomeAndItsLogs(unittest.TestCase):
             fh.write('{"aggregation": "info_af"}')
         why = iw.fake_genome_refusal(w, "hg38", "ds")
         self.assertNotIn("build-index-only again", why)
-        self.assertNotIn(reg, why)
+        # (the removal of what comes from an enrichment names no registry; the recipe's own
+        # replacement of it, IR1-F2, is after)
+        self.assertNotIn(reg, why.split("and build that kit again")[0])
         self.assertTrue(why.endswith(
-            "or build that kit again with a synthetic sample "
-            "(seq_script/merge_panels/mega_rebuild.sh), in place of all of the dataset "
-            "that comes from an enrichment (rm -rf '%s' '%s'): ds is sites-only: its VCFs name "
-            "no sample, and CRISPRitz writes a fake-indel window only for an indel a sample "
-            "carries, so an enrichment of them holds none, so build-index-only would enrich it "
-            "anew with no indel off-target." % (os.path.join(w, "Genomes", "hg38+ds_INDELS"),
-                                                logs)), why)
+            "or remove all of the dataset that comes from an enrichment (rm -rf '%s' '%s') and "
+            "build that kit again, its indels carried by a synthetic sample, %s: ds is "
+            "sites-only: its VCFs name no sample, and CRISPRitz writes a fake-indel window only "
+            "for an indel a sample carries, so an enrichment of them holds none, so "
+            "build-index-only would enrich it anew with no indel off-target." % (
+                os.path.join(w, "Genomes", "hg38+ds_INDELS"), logs,
+                iw.rebuild_kit_way("ds", w, "hg38"))), why)
 
     def test_the_recipe_the_advice_names_builds_the_whole_kit(self):
         """The advice on a sites-only dataset says to build its kit again with a synthetic
@@ -600,7 +684,8 @@ class AFakeGenomeAndItsLogs(unittest.TestCase):
         with open(os.path.join(reg, "reg_chrT.idx"), "w") as fh:
             fh.write('{"aggregation": "info_af"}')
         why = iw.fake_genome_refusal(w, "hg38", "ds")
-        self.assertIn("or build that kit again with a synthetic sample", why)
+        self.assertIn("and build that kit again, its indels carried by a synthetic sample, "
+                      "with seq_script/merge_panels/mega_rebuild.sh", why)
         named |= set(re.findall(r"seq_script/merge_panels/[A-Za-z0-9_]+\.sh", why))
         manifest = os.path.join(repo, "seq_script", "rebuild", "index_set_2.10.0.tsv")
         with open(manifest) as fh:
