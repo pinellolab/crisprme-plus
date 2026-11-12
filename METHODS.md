@@ -2583,10 +2583,20 @@ target when it reads the target's bases from the row's start through the row's r
 base the record
 puts in the target at its place, and the base after them (a second insertion between the
 start and the record lengthens the stretch and pushes some of them out of it, which makes
-another target, one that needs two indel-path records). Two alleles of one slot whose REF
-spans meet — a SNP at an insertion's own position, a SNP on a base a deletion removes, one
-complex allele split into overlapping records, two ALTs at one position phased onto one
-haplotype — describe one stretch twice, so the VCF gives no sequence there. Where every
+another target, one that needs two indel-path records), and the slot's SNP alts in the
+stretch read are the SNPs the row names, no other: a row names the SNP alts its haplotypes
+hold in its target (§4), and in a repeat a slot can read a row's bases at an insertion's
+anchor from another base the insertion adds, through an SNP the row does not name, which is
+another row's target (1000 Genomes chr22, VEGFA site 3, 4 mismatches, 2 DNA and 2 RNA
+bulges, per sample: at chr22:26,153,539 (+) the haplotypes of G>GGGTGGT and 26,153,546 C>T
+read the target from the 4th added base, 55 carriers on the row naming the two, and those
+that also hold 26,153,549 T>G read the same bases from the 1st added base, the SNP their
+target's 15th base, 18 carriers on the row naming the three; read from any added base, the
+check demanded the 18 on the first row too, three gating findings on a right row). Two
+alleles of one slot whose REF spans meet — a SNP at an insertion's own position, a SNP on a
+base a deletion removes, one complex allele split into overlapping records, two ALTs at one
+position phased onto one haplotype — describe one stretch twice, so the VCF gives no
+sequence there. Where every
 allele that meets the record's REF is one §4 reads the slot without (another allele at the
 record's own position, an allele only on bases it deletes, an MNV) and no allele kept
 meets one left out, the slot is read without them: the one reading that holds the record,

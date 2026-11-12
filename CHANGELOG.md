@@ -509,7 +509,16 @@ and the `release-crisprme` skill.
     carrier of every target).
   - **The truth is the VCF.** A slot holds a row's target when it reads the target's bases
     from the row's start through the row's record: each base the record puts in the target
-    at its place, and the base after them. Two alleles of one slot whose REF spans meet give
+    at its place, and the base after them, its SNP alts in the stretch read the row's named
+    SNPs and no other (a row names the SNP alts its haplotypes hold in its target, METHODS
+    section 4: in a repeat, a slot can read a row's bases at an insertion's anchor from
+    another base the insertion adds through an SNP the row does not name, which is another
+    row's target; read from any added base, the check demanded 18 carriers of
+    chr22:26,153,539 (+) of VEGFA site 3, on 1000 Genomes chr22 at 4 mismatches, 2 DNA and 2
+    RNA bulges, per sample, on the row of G>GGGTGGT and 26,153,546 C>T, which their haplotype
+    reads only through 26,153,549 T>G, from the 1st added base, where CRISPRme lists them on
+    the row of the three: three gating `carrier-missing` on a right row, M-R3-N2). Two
+    alleles of one slot whose REF spans meet give
     no sequence; where every allele that meets the record's REF is one METHODS section 4
     reads the slot without (another allele at the record's own position, an allele only on
     bases it deletes, an MNV) the slot is read without them, and a listed carrier must hold
