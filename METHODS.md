@@ -743,7 +743,8 @@ moved in place of the dataset's: of all that came from the kit in place, which e
 names for removal first by absolute path (`indel_window.kit_removal`; the search's notes named
 none up to the review of wave 1c-a, and the kit they left kept the recipe's parts out), and of
 those three (`indel_window.rebuild_kit_way`; `docs/TROUBLESHOOTING.md` §12, whose commands
-remove each part by name). On chr22, with the published mega's registry (no
+remove each part by name once the recipe has built the whole dataset, and change nothing in
+the data folder where it fails). On chr22, with the published mega's registry (no
 `data_type`) and its kit's indel log of 25/27, neither kit nor index in place, build-index-only
 refuses the dataset in 1 s, building nothing and naming no registry (it named the registry in
 its rm and advised a new build; with the registry read as sites-only and nothing else changed,

@@ -596,6 +596,24 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
         # and the section says, as the recipe does, that it makes nothing in a folder it refuses
         self.assertIn("it refuses one that holds the dataset's VCFs, or a part it builds, and "
                       "makes nothing there", " ".join(section.split()))
+        # W1C-B2R2-1, the review of wave 1c-a: the commands ran on whatever failed before them,
+        # and took the PAM file from the data folder, which one that CRISPRme 2.8.1 set up
+        # lacks: the recipe built nothing, and the removal took the dataset whole. They run in
+        # a subshell that stops at the first command that fails, the PAM file the
+        # repository's, and the data folder is changed only after the recipe, once every part
+        # the moves take is there (test_mega_rebuild runs them so, with no -e of its own)
+        self.assertEqual((lines[0], lines[1], lines[2], lines[-1]),
+                         ("```bash", "(", "set -eu", ")"))
+        self.assertIn('cp "$REPO/PAMs/20bp-NRR-SpCas9.txt" "$NEW/PAMs/"', lines)
+        self.assertFalse([ln for ln in lines if "$DATA/PAMs" in ln])
+        recipe = next(i for i, ln in enumerate(lines) if "mega_rebuild.sh" in ln)
+        checked = next(i for i, ln in enumerate(lines) if ln.startswith('[ -d "$NEW/$p" ] ||'))
+        changes = [i for i, ln in enumerate(lines) if "$DATA" in ln and
+                   ln.startswith(("rm ", "mv ", "[ -e", "mkdir "))]
+        self.assertTrue(changes)
+        self.assertLess(recipe, checked)
+        self.assertLess(checked, min(changes))
+        self.assertIn("stops at the first command that fails", " ".join(section.split()))
 
 
 class AFakeGenomeAndItsLogs(unittest.TestCase):

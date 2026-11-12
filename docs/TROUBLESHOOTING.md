@@ -384,20 +384,36 @@ folder: the commands below remove each such part by name first, whatever a messa
 dictionaries, indel logs, tiers and every index of the dataset, which the messages name for
 removal too) and the dataset's VCFs, registry and indel frequencies, which the recipe wrote
 anew. Remove any copy of the dataset's indexes in a library you search with `--index-path`
-too. With `DATA` the data folder, `NEW` a new folder outside it, `SRC` a folder of the
-merged VCFs the mega is built from, `mega.<chrom>.afmax.vcf.gz`, each an absolute path
+too. The commands are bash, in a subshell that stops at the first command that fails
+(`set -eu`, an unset variable among them): nothing in the data folder is removed or moved
+unless the recipe has built the whole dataset and passed its checks, and every part they move
+in is there. A mistyped `SRC`, a missing chromosome FASTA or a disk that fills during the
+recipe stops them with the data folder as it was; remove `NEW`, which the recipe refuses once
+it holds a part, and run them again. With `DATA` the data folder, `NEW` a new folder outside
+it on the same file system (so that each move is a rename, which needs no space), `SRC` a
+folder of the merged VCFs the mega is built from, `mega.<chrom>.afmax.vcf.gz`, each an absolute path
 (`crisprme.py download --what vcf --dataset hg38_mega --path <dir>` fetches them into
-`<dir>/VCFs/hg38_mega`; a 2.8.1 install's `VCFs/hg38_mega` holds them, so give it as `SRC`
-before you remove it), and `REPO` the CRISPRme repository (`/opt/conda/opt/crisprme` in the
-image):
+`<dir>/VCFs/hg38_mega`; a 2.8.1 install's `VCFs/hg38_mega` holds them, so you can give it as
+`SRC`: it is removed only after the recipe has built the dataset from it), and `REPO` the
+CRISPRme repository of 2.10.0 (`/opt/conda/opt/crisprme` in the image), whose `PAMs/` holds
+the recipe's PAM file (a data folder that CRISPRme 2.8.1 set up has none of NRR):
 
 ```bash
+(
+set -eu  # stop at the first command that fails: the data folder changes only after the recipe
 # a new working directory: the FASTAs of the chromosomes the mega is built on and no other
-# (chr1-22, X and Y), and the PAM file
+# (chr1-22, X and Y), and the PAM file, the repository's
 mkdir -p "$NEW/Genomes/hg38" "$NEW/PAMs"
 for c in chr{1..22} chrX chrY; do ln -s "$DATA/Genomes/hg38/$c.fa" "$NEW/Genomes/hg38/"; done
-cp "$DATA/PAMs/20bp-NRR-SpCas9.txt" "$NEW/PAMs/"
+cp "$REPO/PAMs/20bp-NRR-SpCas9.txt" "$NEW/PAMs/"
 PAM=PAMs/20bp-NRR-SpCas9.txt bash "$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"
+# each part the recipe built that the moves below take, there before anything is removed
+for p in Genomes/hg38+hg38_mega Genomes/hg38+hg38_mega_INDELS Dictionaries/log_indels_hg38_mega \
+  Dictionaries/registry_hg38_mega Dictionaries/indel_af_hg38_mega VCFs/hg38_mega; do
+  [ -d "$NEW/$p" ] || { echo "no $NEW/$p: the data folder is left as it was" >&2; exit 1; }
+done
+ls -d "$NEW"/genome_library/*_hg38+hg38_mega "$NEW"/genome_library/*_hg38+hg38_mega_INDELS
+mkdir -p "$DATA/Genomes" "$DATA/genome_library" "$DATA/Dictionaries" "$DATA/VCFs" "$DATA/samplesIDs"
 # in the data folder, every part of the dataset the recipe built (each it refuses where it
 # runs): the kit in place and all that was built from it, its indexes among them
 # (<PAM>_<N>_hg38+hg38_mega and its _INDELS, of every PAM), then the dataset's VCFs,
@@ -418,9 +434,10 @@ mv "$NEW/Dictionaries/log_indels_hg38_mega" "$NEW/Dictionaries/registry_hg38_meg
 mv "$NEW/VCFs/hg38_mega" "$DATA/VCFs/"
 [ -e "$DATA/samplesIDs/hg38_mega.samplesID.txt" ] \
   || mv "$NEW/samplesIDs/hg38_mega.samplesID.txt" "$DATA/samplesIDs/"
+)
 ```
 
-For a container install, give the recipe its `RUN` prefix (its header). Its last step,
+For a container install, export the recipe's `RUN` prefix first (its header). Its last step,
 `verify_mega_chrom.py`, prints `ALL PASS` for every chromosome. The index it built is of its
 PAM; for another, run `build-index-only --pam <it>` on the data folder, which reuses the kit.
 Up to the integration review of 2.10.0 the messages named the recipe alone, and the recipe, run
@@ -429,7 +446,10 @@ in the folder their removal left, refused its VCFs after it had made its staging
 note of windows too short named no removal of the kit in place, and these commands removed the
 VCFs, registry and indel frequencies alone: run from the state that note left, every move of
 the kit failed (`Directory not empty`), and `build-index-only` and every search then refused the
-dataset, its new INDELS index beside the old kit's indel logs.
+dataset, its new INDELS index beside the old kit's indel logs. Up to the review of that fix,
+these commands ran on whatever failed before them, and took the PAM file from the data folder,
+which a 2.8.1 install's lacks: the recipe, refused for it, built nothing, and the removal took
+the dataset whole, the merged VCFs given as `SRC` among them.
 
 ## 13. A build or a search says a fake-indel genome and its indel logs come from two enrichments
 
@@ -456,5 +476,6 @@ the enriched genome, the fake-indel genome and their indexes in one build), as t
 an enrichment of its VCFs would hold no fake-indel window. The recipe runs in a new working
 directory, and what it built goes in place of all of the dataset that comes from an enrichment
 (the message lists it) and of the dataset's VCFs, registry and indel frequencies, which it
-writes anew: the commands, which remove each of those parts by name, are in section 12,
+writes anew: the commands, which remove each of those parts by name once the recipe has built
+the whole dataset, and change nothing in the data folder where it fails, are in section 12,
 "Building the mega's kit again".

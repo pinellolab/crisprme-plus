@@ -465,28 +465,36 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
         done = self.rebuild()
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
-    def section_12(self):
-        """The commands of docs/TROUBLESHOOTING.md section 12, run as written in bash -eu (the
-        chromosomes and the PAM those of this genome), DATA the working directory, NEW a new
-        folder beside it, SRC the merged VCFs; then what each says is checked: the recipe's
-        checks pass, nothing of the dataset is left in the new folder but its samplesID file
-        (the data folder has its own, which stays), and no staging folder in the data folder.
-        Returns the run."""
-        new = os.path.join(self.root, "new")
+    def run_section_12(self, src=None, chroms=None, **stub):
+        """The commands of docs/TROUBLESHOOTING.md section 12, run as a user pastes them into
+        bash, with no -e or -u of the shell's own (the chromosomes and the PAM those of this
+        genome, or the chromosomes ``chroms``), DATA the working directory, NEW a new folder
+        beside it, SRC the merged VCFs (or ``src``), REPO the repository; ``stub``: more of the
+        stub engine's environment. Returns the run. Up to the review of wave 1c-a this test
+        ran them in bash -eu, which a user's shell does not add, and so it missed a removal
+        that ran after the recipe had failed (W1C-B2R2-1)."""
         commands = _section_12_commands()
         self.assertIn('bash "$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"',
                       commands)
-        commands = (commands.replace("chr{1..22} chrX chrY", " ".join(bio.GENOME))
+        commands = (commands.replace("chr{1..22} chrX chrY", chroms or " ".join(bio.GENOME))
                     .replace("20bp-NRR-SpCas9.txt", os.path.basename(bio.PAM)))
         env = {k: v for k, v in os.environ.items() if not k.startswith(("STUB_", "CRISPRME_"))}
         env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
                    PYTHONPATH=os.path.join(bio.SHARED, "py"),
                    MPLCONFIGDIR=os.path.join(bio.SHARED, "mpl"), STUB_LOG=self.log,
                    STUB_MARK=self.mark, STUB_RELEASE=self.release, BDNA="1", BRNA="1",
-                   THREADS="2", PYTHON=sys.executable, PP=HERE, DATA=self.work, NEW=new,
-                   SRC=self.src, REPO=REPO)
-        ran = subprocess.run(["bash", "-euc", commands], cwd=self.root, env=env,
-                             capture_output=True, text=True, timeout=600)
+                   THREADS="2", PYTHON=sys.executable, PP=HERE, DATA=self.work,
+                   NEW=os.path.join(self.root, "new"), SRC=src or self.src, REPO=REPO, **stub)
+        return subprocess.run(["bash", "-c", commands], cwd=self.root, env=env,
+                              capture_output=True, text=True, timeout=600)
+
+    def section_12(self):
+        """section 12's commands (run_section_12), and what each says checked: the recipe's
+        checks pass, nothing of the dataset is left in the new folder but its samplesID file
+        (the data folder has its own, which stays), and no staging folder in the data folder.
+        Returns the run."""
+        new = os.path.join(self.root, "new")
+        ran = self.run_section_12()
         self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
         self.assertIn("SUMMARY: 2 chroms, 2 SNP alleles + 2 indel-path alleles, ALL PASS",
                       ran.stdout)
@@ -524,6 +532,46 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
         self.section_12()
         # the same kit, back in the data folder, which a build of another PAM reads
         self.kit_in_place(kit)
+
+    def test_section_12_in_a_data_folder_that_crisprme_2_8_1_set_up(self):
+        """W1C-B2R2-1, the review of wave 1c-a: section 12 copied the recipe's PAM file from
+        the data folder's PAMs/, where CRISPRme 2.8.1 put none of NRR (2.10.0's default): run
+        there, the copy and then the recipe failed, and the removal that came next took the
+        whole dataset (on chr22, 16 entries of hg38_mega down to its samplesID file). The PAM
+        file comes from the repository, and the commands run as written in a data folder
+        whose PAMs/ lacks it."""
+        kit = self.an_earlier_kit_in_place()
+        os.remove(self.path("PAMs", os.path.basename(bio.PAM)))
+        self.section_12()
+        self.kit_in_place(kit)
+
+    def test_section_12_leaves_the_data_folder_as_it_was_when_the_recipe_fails(self):
+        """W1C-B2R2-1, the review of wave 1c-a: section 12's removal and moves ran whatever the
+        recipe did, and a pasted block has no set -e: a recipe that failed, for a mistyped SRC,
+        a FASTA of no chromosome it builds in its genome folder, or its build failing (a full
+        disk, an engine that stops), left a data folder with no hg38_mega at all, its merged
+        VCFs given as SRC among what was removed. The commands stop at the first command that
+        fails now, and the data folder is as it was: every file, folder and link, and each
+        file's bytes."""
+        self.an_earlier_kit_in_place()
+        before = bio.tree(self.work)
+        new = os.path.join(self.root, "new")
+        for why, kw in (("a mistyped SRC", dict(src=os.path.join(self.root, "merged_typo"))),
+                        ("a FASTA of no chromosome it builds",
+                         dict(chroms=" ".join(list(bio.GENOME) + ["chr3"]))),
+                        ("its build failing", dict(STUB_FAIL="add-variants"))):
+            with self.subTest(why=why):
+                shutil.rmtree(new, ignore_errors=True)
+                ran = self.run_section_12(**kw)
+                self.assertNotEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+                self.assertNotIn("ALL PASS", ran.stdout)
+                self.assertEqual(bio.tree(self.work), before, ran.stdout + ran.stderr)
+                if why == "its build failing":   # (the recipe got as far as its build)
+                    self.assertTrue(os.path.isdir(os.path.join(new, ".mega_rebuild_hg38_mega")),
+                                    ran.stderr)
+                shutil.rmtree(new, ignore_errors=True)
+        # and with nothing in the way, as written, they put the recipe's kit in place
+        self.section_12()
 
     SACAS9 = os.path.join(REPO, "PAMs", "21bp-NNGRRT-SaCas9.txt")
     EARLIER = "an_earlier_kit.txt"
