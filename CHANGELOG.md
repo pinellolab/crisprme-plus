@@ -517,7 +517,12 @@ and the `release-crisprme` skill.
     chr22:26,153,539 (+) of VEGFA site 3, on 1000 Genomes chr22 at 4 mismatches, 2 DNA and 2
     RNA bulges, per sample, on the row of G>GGGTGGT and 26,153,546 C>T, which their haplotype
     reads only through 26,153,549 T>G, from the 1st added base, where CRISPRme lists them on
-    the row of the three: three gating `carrier-missing` on a right row, M-R3-N2). Two
+    the row of the three: three gating `carrier-missing` on a right row, M-R3-N2). A listed
+    carrier whose own target holds a second indel and not a SNP the row names, pushed out of
+    it, which CRISPRme's reading of a second indel keeps (a known limit of 2.10.0, METHODS
+    section 4), is so counted as `limit-two-indels`, not passed: NA20515 on chr22:50,299,296
+    (+) of VEGFA site 1 in the seven-guide search at 2 DNA and 2 RNA bulges; no row of the
+    2.10.0 integration's 17 gate runs lists such a carrier. Two
     alleles of one slot whose REF spans meet give
     no sequence; where every allele that meets the record's REF is one METHODS section 4
     reads the slot without (another allele at the record's own position, an allele only on

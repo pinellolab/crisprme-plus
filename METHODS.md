@@ -848,7 +848,17 @@ haplotype** (`indel_snp_cis.resolve_target`):
   the target's first base on or up to its last base, through the indel (not in a stretch
   that another of its variants lengthened, pushing the indel out of it). In a tandem repeat
   a unit gained or lost at the target's edge leaves the bases as they are (the repeat puts
-  the same bases back), so such a carrier keeps its row; one whose second indel changes the
+  the same bases back), so such a carrier keeps its row. That row is the window's target's: it
+  names the SNP alts the haplotype holds at the window's code columns, not those of the
+  carrier's own target, which holds its second indel (no row names two indel-path records).
+  Where the second indel pushes a SNP the row names out of the stretch read, the carrier's
+  own target does not hold that SNP, and the row names it all the same: a known limit of
+  2.10.0, which the haplotype scan of 2.10.1 is to read on each carrier's own bases. On
+  1000 Genomes chr22, the search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges,
+  per sample, lists one such carrier: NA20515 on chr22:50,299,296 (+) of VEGFA site 1, whose
+  50,299,313 C>CG pushes the row's 50,299,316 T>G out of its target (its own target holds the
+  insertion 50,299,300 T>TG and that second one); no row of the 2.10.0 integration's 17 gate
+  runs lists such a carrier. One whose second indel changes the
   bases is not listed for it, on any indel row (§8, residuals), nor one whose bases cannot
   be read either way: each way meets an unphased or missing SNP call, an unphased indel
   that does not itself change the target, or two of its variants that overlap, two records
@@ -2600,7 +2610,11 @@ bulges, per sample: at chr22:26,153,539 (+) the haplotypes of G>GGGTGGT and 26,1
 read the target from the 4th added base, 55 carriers on the row naming the two, and those
 that also hold 26,153,549 T>G read the same bases from the 1st added base, the SNP their
 target's 15th base, 18 carriers on the row naming the three; read from any added base, the
-check demanded the 18 on the first row too, three gating findings on a right row). Two
+check demanded the 18 on the first row too, three gating findings on a right row; a listed
+carrier whose own target holds a second indel and not a SNP the row names, pushed out of it,
+which §4's reading of a second indel keeps, is so counted as the documented limit
+`limit-two-indels`, not passed: NA20515 above, and no row of the 2.10.0 integration's 17 gate
+runs lists such a carrier). Two
 alleles of one slot whose REF spans meet — a SNP at an insertion's own position, a SNP on a
 base a deletion removes, one complex allele split into overlapping records, two ALTs at one
 position phased onto one haplotype — describe one stretch twice, so the VCF gives no

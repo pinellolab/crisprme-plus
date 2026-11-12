@@ -160,7 +160,14 @@ limit (counted and listed under its own class, non-gating) or not (gating):
     (limit-two-indels) -- unless CRISPRme's reading of the slot against the window's
     target of the same bases, start and variants holds (a repeat unit gained or lost at
     the target's edge puts them back), where it keeps the carrier and completeness
-    demands that row;
+    demands that row. The row it keeps such a carrier on names the window's SNP alts, not
+    those of the carrier's own target, which holds the second indel: where that indel
+    pushes a SNP the row names out of the stretch read, the slot's reading holds other SNP
+    alts than the row names, so THE TRUTH lists it on no row of one indel-path record, and
+    its listing is limit-two-indels (documented: second-indel) -- a known limit of 2.10.0
+    (METHODS section 4): one carrier on 1000 Genomes chr22 at 4 mismatches and 2 DNA and 2
+    RNA bulges (NA20515, chr22:50,299,296 (+), VEGFA site 1), and no row of the 2.10.0
+    integration's 17 gate runs lists such a carrier;
   * another allele at the record's own position is a phasing artefact, a variant only on
     bases the record deletes changes nothing, and an overlapping indel at another position
     takes the slot off (limit-overlapping-records; a listed carrier the rule takes off is
@@ -309,7 +316,9 @@ the merge of ``remove_contiguous_samples.py``).
   rank of the row's first base among the bases an insertion adds (0 on any other base), as
   the fix branch's merge compares rows that start inside one insertion (c3a75fe; at
   d7a6fff it compared the Cluster Position alone, which folds two targets of one
-  insertion). CRISPRme's fold key holds no strand, while the alignments of one target
+  insertion), the rank the first place of the row's bases that holds every SNV it names
+  (row_first_k, as CRISPRme's row_first_base since 2.10.0). CRISPRme's fold key holds no
+  strand, while the alignments of one target
   share theirs: rows of the other strand are other targets, which a fold across strands
   would lose, so a fold group is taken on one strand. A fold group is NO WORSE than a
   target when its fewest-mm+b block's key under the sorting criteria is at most the least
