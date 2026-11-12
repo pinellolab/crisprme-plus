@@ -203,6 +203,47 @@ Each source VCF is normalized so that variant records are directly comparable:
   line of several ALTs lists it, whose calls of it are first written as a split record's
   (that ALT `1`, every other called allele `0`: a `1|2` reads `0|1` for its second ALT).
   Up to 2.9.1 the later record's entry replaced the earlier one, whose carriers were lost.
+  An indel written on two lines is one allele too, in one case or in two: VCF 4.x reads REF
+  and ALT whatever their case, and so does the fake-indel window (CRISPRitz writes the ALT
+  in place of the REF, and the search reads the window in upper case), so CRISPRme reads an
+  indel's or MNV's REF and ALT in upper case. The phased indel genotype store keeps a line
+  per record, as the VCF writes it, and its readers (the indel path's, the SNP rows' and the
+  carrier gate's) key each in upper case and merge the two lines by the same rule; the
+  indel path names the record in upper case (`indel_snp_cis.record_name`: CRISPRitz's indel
+  log names each line as written), so the rows of the two fake-indel windows CRISPRitz cuts
+  for it fold into one, with the carriers of both lines and the ID and frequency of each, as
+  two datasets that give one variant do. The store holds no MNV (its REF and ALT of one
+  length), and an install may have no store (an index built with `CRISPRME_INDEL_SNP=0`, or a
+  store whose compile failed, which a search notes in its `log_verbose.txt`, once per
+  chromosome): the indel path then reads a record's carriers from CRISPRitz's indel log,
+  phase unknown, those of every line of the record (each line's window lists its own; a
+  target with a SNP code in its window read the first window's on both, up to the
+  integration, so a carrier only the second line listed was on no row of it). Up to 2.10.0's
+  integration each reader kept the
+  later line's carriers alone, so a carrier only the earlier line listed lost its phased
+  genotype and was listed on no row of the indel, or on some of its alignments only; two
+  lines written in two cases (TG>T beside tg>t) were two records, the carriers of one target
+  split over two rows named in two cases; and the carrier gate, which reads a row's variants
+  in upper case, found no indel written in lower case in its panel. HPRC chr22 writes 179
+  indels on two lines: 39 in one case (1,400 carrier listings on the earlier line only) and
+  140 in two (8,755 carrier listings on one of the two only, 917 carriers on both), and
+  1,546 indel records in lower case. CRISPRitz's dictionary compares an SNV's REF and ALT as
+  written, so C>G beside c>G, coded alike, are two entries of G there; CRISPRme's readers of
+  it (the Tier-0 and Tier-1 compiles, the dictionary path of the SNP post-analysis, the
+  indel path) read an SNV's REF in upper case and merge the two as one allele by the same
+  rule (`site_alleles.read_records`; up to the integration such a pair stopped the Tier-1
+  compile of the chromosome, `duplicate (pos, alt) record`, and the input validator's survey
+  of repeated REF>ALTs counted none). An SNV whose ALT is written in lower case is
+  never searched: CRISPRitz codes no lower-case ALT, though its dictionary lists the
+  carriers (the input validator's full scan warns of such records and says how to write
+  the VCF in upper case; the published panels' chr22 holds none). Every reader reads that
+  ALT as written, so none reads it as an allele of the genome: the indel path keeps only
+  the ALTs A, C, G and T (up to the integration its reader of a classic install's
+  dictionary, `indel_snp_cis.parse_dict_value`, read the ALT in upper case, as 2.8.1 did, so
+  C>g beside C>G was read as G and its carriers were listed on targets of G, which their
+  genome does not hold). CRISPRme's own merge of
+  two listings of one allele (`site_alleles.merge_gt`, for a dictionary that lists one
+  twice) reads them by that rule too; it read two calls not phased alike as unphased.
 - **Consistent coordinates and contigs** (reference build, chromosome naming)
   across datasets.
 
@@ -573,11 +614,24 @@ haplotype** (`indel_snp_cis.resolve_target`):
   they hold next to the indel (Variant info, rsID, MAF). A SNP with several alts on one VCF
   line keeps its raw genotype under each alt (2|1 under A and under T), so each genotype is
   first read against its own alt's allele index: the index every carrier of the alt holds,
-  less, where that leaves several, the indexes the position's other alts settle (each alt of
-  one character the dictionary lists there, the `*` of a spanning deletion among them; an
-  indel's ALT is in no entry); where the genotypes still cannot tell (every carrier of two
-  alts is 1|2, or of an SNV and an indel of its line) no slot can be tied to the alt and the
-  carrier is resolved as an unphased one;
+  less, where that leaves several, the indexes the position's other alts of a line of several
+  ALTs settle (each alt of one character the dictionary lists there, the `*` of a spanning
+  deletion among them; an indel's ALT is in no entry). An alt whose carriers hold no index
+  but 0 and 1 settles none: the dictionary lists a position's every line, and the `1` of a
+  line of one ALT (or of the entry CRISPRitz 2.10.0 merges from two lines, written as one of
+  a line of one ALT) numbers its own line, not the other line's ALTs (C>G beside C>A,CT, a
+  carrier 1|2 of the second: read with C>G's `1` taken off, A was tied to `2`, the
+  insertion's number, and read on the insertion's slot, so the carrier lost its target of A
+  and the deletion beside it). Within one line of several ALTs no such alt settles an index
+  another needs: a carrier of two one-base ALTs is listed under both, with both indexes.
+  Where the genotypes still cannot tell (every carrier of two alts is 1|2, or of an SNV and
+  an indel or a `*` of its line, also beside a line of one ALT of the position) no slot can be
+  tied to the alt and the carrier is resolved as an unphased one. Two lines of several ALTs
+  at one position are not told apart: an alt of one can be tied to an index of the other's
+  (the input validator warns of such positions, among each VCF's first 1,000 records on
+  every run and in the whole file with `--full_input_validate`; none is in the published
+  panels' chr22, and every line of several ALTs of HF's raw HPRC `vcfwave` chr22 VCF is
+  alone at its position);
 - a sequence whose PAM no longer satisfies the searched motif, or whose mismatches,
   recounted on the concrete sequence, exceed `--mm` or `--max-total-edits`, is **dropped**:
   a raw target that no individual carries gives no row;
@@ -1776,15 +1830,34 @@ real CLI, but only there.
 **Validation (the indel path on real data).** `scripts/check_indel_rows.py` is an
 independent checker of the indel path on a real panel, added in 2.10.0. It imports only
 Python's standard library and no code of CRISPRme's variant or indel machinery, and copies
-none: its inputs are what a user has — the reference FASTA, the VCF(s) the search read, the
+none (a unit test compares its code lines with those of every Python file of the
+repository's tree, in every folder, the unit tests aside: no run of four is the same, a run
+of imports aside; its rules are written from this text): its
+inputs are what a user has — the reference FASTA, the VCF(s) the search read, the
 samples list (the samplesID files; by default the run's `.sampleID.txt`, which CRISPRme
 writes from them), the guide, the PAM file, the search budget and the result folder (the CFD
 tables are read as data) — and it writes each sample's haplotypes itself from the VCF 4.x
 definition of a record, keeps its own map from haplotype bases to reference coordinates, and
-aligns with its own exhaustive aligner. **The truth is the VCF, as the search read it.** A
+aligns with its own exhaustive aligner. A row of 2.10.0 names an indel or MNV record in
+upper case and an SNV record as the VCF writes it (an earlier release names every record as
+written, some HPRC records in lower case), and the check reads them, as every record, with
+REF and ALT in upper case, as VCF 4.x reads them; an SNV whose ALT is written in lower case,
+which CRISPRitz does not code while its dictionary lists the carriers (§2), is not modeled:
+a run whose VCF holds one near a row or a record it checks is refused (exit 2).
+**The truth is the VCF, as the search read it.** A
 slot is the reference with every ALT allele its genotype puts there of the records CRISPRme
-reads (FILTER, below), and it holds a row's target when it reads
-the target's bases from the row's start through the row's record: each base the record
+reads (FILTER, below); two lines of one REF>ALT at a position are one allele (§2), a sample's
+calls of it on both merged by §2's rule, an indel's (or MNV's) on every release, in one case
+or in two (its two lines are read so by 2.10.0, from the phased store or, for an MNV or
+without a store, from the indel log's carriers of both; a release that read two lines in
+one case as the later line alone lost the carriers only the earlier lists, one that read
+two lines in two cases as two records split one target's carriers over two rows, and one
+that gave the second window of an MNV the first window's log carriers lost, on a target
+with a SNP code, the carriers only the second line lists, which the check finds), an SNV's
+where every allele is coded (releases, below), its REF in either case (C>G beside c>G);
+and a slot holds a row's
+target when it reads the target's bases from the row's start through the row's record: each
+base the record
 puts in the target at its place, and the base after them (a second insertion between the
 start and the record lengthens the stretch and pushes some of them out of it, which makes
 another target, one that needs two indel-path records). Two alleles of one slot whose REF
@@ -1880,8 +1953,17 @@ entry, which the search reads (§2: taken from CRISPRitz's documentation, not fr
 code), and a slot holding two ALTs of one position is resolved PUTATIVE (§4), the truth there
 (above); with the last record alone coded, an earlier line of the same REF>ALT is an earlier
 record of the site, whose carriers that dictionary lost (its entry was the last line's:
-`limit-last-alt-wins`). The INDELS index's format is that of its `.bin` files, else the
-run's format-1 NOTE of it (§9). The phased indel store holds only the records whose FILTER passes but where the run's
+`limit-last-alt-wins`), and so is every line before a last line whose ALT is a `*` alone:
+2.9.1's dictionary entry of the position is the `*`'s, while its genome keeps the code the
+earlier lines wrote (a `*` adds no base, and one base writes no code), so their ALTs are
+searched and their carriers are in no store. A position whose lines the two releases read
+otherwise (two lines of an SNV ALT, or such a line before a last `*` line) is one where the
+reading matters. Where every allele is coded, two lines that each list several ALTs at one
+position (§4: their allele numbers are not told apart) are not modeled: a run whose VCF
+holds one near a row or a record it checks is refused, the check stopping at the first work
+unit that meets one (as for an SNV ALT in lower case, above). The INDELS index's format is
+that of its `.bin` files, else the run's format-1 NOTE of it (§9). The phased indel store
+holds only the records whose FILTER passes but where the run's
 `log_verbose.txt` notes a store written before 2.10.0 for the dataset and chromosome (without
 the log, a run whose genotyped VCF holds an indel record of another FILTER is refused). A
 per-sample run of 2.10.0 writes no greedy row of a window over `CRISPRME_IUPAC_CAP`, so none
@@ -1895,13 +1977,25 @@ are, so it changes nothing the check reads. A run made with the SNP+indel co-occ
 refused: every SNP code of its fake-indel genomes read as the reference, its indel rows name
 no SNP and list every carrier of their indel, and its SNP rows keep a carrier whose
 haplotype holds an indel in the target, none of the per-carrier resolution modeled here (a
-run of an earlier CRISPRme made so records nothing that tells it).
+run of an earlier CRISPRme made so records nothing that tells it). So is a run that read a
+genotyped dataset's indels on a chromosome with no phased indel store, where the VCF holds
+indels (an index built with `CRISPRME_INDEL_SNP=0`, or a store whose compile failed; a
+search of 2.10.0 notes it in its `log_verbose.txt`: `NOTE [indel-snp]: no phased indel
+genotype store of <dataset> on <chrom>`): each indel's carriers are then its indel log's,
+their slot unknown (§4), not the store's phased reading modeled here. Only the log says
+either, so a run of 2.10.0 whose `log_verbose.txt` is gone is refused where a VCF given
+holds indel or MNV records whose FILTER passes: it would be read as a default run that read
+its store, and a run made either way judged by a reading it did not make (a deletion on two
+lines read with no store gave 43 gating findings so). A run of an earlier CRISPRme records
+neither, and is read as before.
 CRISPRme's documented reading of a carrier (§4: the one-indel window, resolved with each
 carrier's own SNP alleles, so that a row lists a carrier only where those give its target;
 the second indel read from either end of the target through the indel, each base the indel
 puts in the target at its place, before any unphased call; the phasing artefact and the
 complex allele, the PUTATIVE carriers of MNVs and of multi-ALT alts the genotypes cannot
-tie by §4's rule, the last record of a split site) is re-implemented from this text only to
+tie by §4's rule — over the dictionary's alts of one character at the position, an alt whose
+carriers hold no index but 0 and 1 settling none —, the last record of a split site) is
+re-implemented from this text only to
 classify a disagreement as a documented limit (counted, non-gating, a PUTATIVE tie included)
 or a failure. An MNV beside the record is in no store CRISPRme reads (§4): a target that needs it
 needs two indel-path records (the two-indel limit), while a carrier listed for a sequence
@@ -1949,10 +2043,14 @@ documents, and fails. It runs two ways:
   sorts on the CFD, then on the same criteria; where a run names
   `--sorting-criteria-scoring`, which a later branch hands the CFD file, a tie no worse
   under either is accepted) — since the merge keeps, of the rows of one site, variant list
-  and carrier set, the first by each file's order (§4): a row with exactly that target and
-  variants whose fold group (the rows of its site naming those variants with its carrier
-  set, which two alignments of one target always share) is no worse, or rows of its site
-  naming the same variants with the target's own carrier set that are no worse — every
+  and carrier set, the first by each file's order (§4): the rows that list the sample with
+  exactly that target and variants, whose fold groups (the rows of their site naming those
+  variants with one of their carrier sets, which two alignments of one target with one
+  carrier set always share) are together no worse, or rows of its site naming the same
+  variants with the target's own carrier sets that are together no worse (a PUTATIVE
+  co-carrier listed on some of the target's alignments only splits them between two carrier
+  sets, §4, each set's block its best: the alignment of the fewest edits can stand in one
+  and the one of the highest CFD in the other) — every
   carrier both the documented reading and its own haplotypes list for it, and besides them
   only carriers either lists or the reading leaves open (the documented reading only
   classifies: a carrier it would list against the carrier's haplotypes vetoes no fold; a
@@ -2043,8 +2141,10 @@ such a run is not to be checked.
 The SNP-only rows of a per-sample run can be checked report-only (`--snp-rows report`):
 their strings, their target and that each named variant lies in it, their listed carriers,
 and the phased carriers a row of their site leaves out, each carrier read as §4 reads a
-SNP row's carriers — an individual with an SNV call of unknown phase in the target is
-listed for every non-empty subset of its variants there (`limit-snp-row-unphased`); the
+SNP row's carriers — an individual with an SNV call of unknown phase in the target, or with
+an alt of a line of several ALTs whose number the genotypes cannot tie (read as one copy on
+an unknown slot), is listed for every non-empty subset of its variants there
+(`limit-snp-row-unphased`); the
 merge joins the carriers of a site's SNP rows of one variant list (its key for a SNP row
 is the Cluster Position and the variants, no alignment), so a carrier may be listed for
 another alignment of the site its slot holds; and since 2.10.0 a carrier whose slot of the

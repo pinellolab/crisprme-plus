@@ -99,6 +99,74 @@ def test_compile_and_reader_roundtrip():
         os.remove(store)
 
 
+def test_an_indel_written_on_two_lines_is_one_allele():
+    """R3B-N1: two VCF lines of one indel REF>ALT (HPRC chr22 writes 39 indels so) are one
+    allele (decision B2): the store keeps a line per record, and its reader merges them,
+    every carrier of either kept, a carrier of both with its two calls merged as CRISPRitz
+    2.10.0's enricher merges two listings of one SNV (site_alleles.merge_gt). The reader
+    kept the later line alone: HG2 and HG3, on the earlier only, lost their phased
+    genotype, and HG1 its slot 0 (the review's world WD: S02 and S03 on no row)."""
+    vcf_text = (
+        "##fileformat=VCFv4.2\n##contig=<ID=chr22>\n"
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\tHG3\tHG4\n"
+        "chr22\t100\t.\tAT\tA\t.\tPASS\t.\tGT\t1|0\t0|1\t1/0\t0/1\n"
+        "chr22\t100\t.\tAT\tA\t.\tPASS\t.\tGT\t0|1\t0|0\t0|0\t1|0\n")
+    fd, vcf = tempfile.mkstemp(suffix=".vcf.gz")
+    os.close(fd)
+    with gzip.open(vcf, "wt") as fh:
+        fh.write(vcf_text)
+    fd, store = tempfile.mkstemp(suffix=".tsv.gz")
+    os.close(fd)
+    try:
+        assert big.compile_indel_genotypes(vcf, store) == 2   # one line per record
+        r = big.IndelGenotypeReader(store)
+        # HG4: 0/1 then 1|0, not phased alike, one copy each: the earlier, as it is
+        assert r.carriers_dict(100, "AT", "A") == {"HG1": "1|1", "HG2": "0|1", "HG3": "1/0",
+                                                   "HG4": "0/1"}
+        assert r.indels() == [(100, "AT", "A")]
+    finally:
+        os.remove(vcf)
+        _cleanup(store)
+    assert big.merge_store_carriers("A:1|0,B:0|1", "A:0|1,C:1") == "A:1|1,B:0|1,C:1"
+    assert big.merge_store_carriers("A:1|0", "A:0/1") == "A:1|0"
+    assert big.merge_store_carriers("", "A:0|1") == "A:0|1"
+    assert big.merge_store_carriers("A:0|1", "") == "A:0|1"
+
+
+def test_an_indel_written_in_two_cases_is_one_allele():
+    """C-R1-1: VCF 4.x reads REF and ALT whatever their case, and so does the fake-indel
+    window; HPRC's vcfwave writes 140 indels of chr22 on two lines in two cases
+    (chr22:23541792 TG>T beside tg>t). The store keeps each line as the VCF writes it,
+    and its reader keyed it so: the two lines were two indels, and the lower-case one was
+    found by no upper-case lookup. Now one allele, keyed in upper case, its carriers
+    merged as for two lines written alike: HG1 holds the deletion on both slots, HG2 (the
+    lower-case line's alone) keeps its call."""
+    vcf_text = (
+        "##fileformat=VCFv4.2\n##contig=<ID=chr22>\n"
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\tHG3\n"
+        "chr22\t100\t.\tTG\tT\t.\tPASS\t.\tGT\t1|0\t0|0\t0|1\n"
+        "chr22\t100\t.\ttg\tt\t.\tPASS\t.\tGT\t0|1\t1|0\t0|0\n"
+        "chr22\t300\t.\tAc\ta\t.\tPASS\t.\tGT\t0|0\t0|1\t0|0\n")
+    fd, vcf = tempfile.mkstemp(suffix=".vcf.gz")
+    os.close(fd)
+    with gzip.open(vcf, "wt") as fh:
+        fh.write(vcf_text)
+    fd, store = tempfile.mkstemp(suffix=".tsv.gz")
+    os.close(fd)
+    try:
+        assert big.compile_indel_genotypes(vcf, store) == 3   # one line per record
+        r = big.IndelGenotypeReader(store)
+        want = {"HG1": "1|1", "HG3": "0|1", "HG2": "1|0"}
+        assert r.carriers_dict(100, "TG", "T") == want
+        assert r.carriers_dict(100, "tg", "t") == want
+        assert r.carriers_dict(300, "AC", "A") == {"HG2": "0|1"}
+        assert r.indels() == [(100, "TG", "T"), (300, "AC", "A")]
+    finally:
+        os.remove(vcf)
+        _cleanup(store)
+    assert big.store_key(100, "tg", "t") == "100_TG_T"
+
+
 def test_keep_samples_panel_filter():
     vcf = _write_vcf(gz=True)
     try:

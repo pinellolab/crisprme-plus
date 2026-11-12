@@ -316,6 +316,25 @@ class SnpColumn(object):
 _gt_tokens = site_alleles.gt_tokens
 
 
+def record_name(name):
+    """The name of an indel or MNV record, '<contig>_<POS>_<REF>_<ALT>' as CRISPRitz's
+    indel log writes it, with REF and ALT in upper case (split from the right: a contig
+    name can hold '_'). VCF 4.x reads REF and ALT whatever their case, and so does the
+    fake-indel window (CRISPRitz writes the ALT in place of the REF, and the search reads
+    the window in upper case), while the log keeps the VCF's text: HPRC's vcfwave writes
+    1,546 indel records of chr22 in lower case, 140 of them beside a line of the same
+    indel in upper case (chr22:23541792 TG>T and tg>t). Named as written, such two lines
+    were two records, the carriers of one target split over two rows; named so, they are
+    one, as two lines of one indel written alike are (the merge folds their rows, and the
+    readers of the phased indel store merge their carriers:
+    build_indel_genotypes.merge_store_carriers)."""
+    head, sep, alt = name.rpartition("_")
+    contig_pos, sep2, ref = head.rpartition("_")
+    if not sep or not sep2:
+        return name
+    return "%s_%s_%s" % (contig_pos, ref.upper(), alt.upper())
+
+
 def kept_bases(ref, alt):
     """How many bases REF and ALT share at the start (the VCF anchor base): the REF
     bases a haplotype carrying the variant keeps. The rest of REF is deleted or
@@ -970,8 +989,9 @@ def biallelic_site(rec):
     record holds, but a record with several alts on one line (C>A,T) keeps its raw
     genotype under every alt its sample carries: S:2|1 is listed under A and under T.
     The allele index of an alt is the token all its carriers share, and when that
-    leaves more than one (a single carrier, 2|1), the one no other alt of the position
-    needs; the record's own alt then reads "1", any other allele "0": 2|1 is 0|1 under
+    leaves more than one (a single carrier, 2|1), the one no other alt of the position's
+    lines of several ALTs needs (a line of one ALT there settles none: its 1 is its own
+    line's); the record's own alt then reads "1", any other allele "0": 2|1 is 0|1 under
     A, 1|0 under T. Where the genotypes cannot say which index is the alt (every carrier
     of two alts is 1|2) no slot can be tied to it: "1/0", one copy on an unknown slot,
     so the carrier is resolved PUTATIVE on the alleles it does carry. A position with
@@ -1245,7 +1265,11 @@ def parse_dict_value(value):
     allele index (site_alleles.read_records) among every alt of one character the value
     lists, a '*' too (the Tier-1 store's compile, tier0_compile.iter_dict_records, reads
     them so: a carrier of the '*' alone tells its index); malformed entries are
-    skipped."""
+    skipped. The REF is read in upper case (C>G beside c>G, which CRISPRitz codes alike,
+    is one allele) and the ALT as written, as the Tier-1 compile reads them: CRISPRitz
+    codes no ALT written in lower case, so C>g is no allele of the genome and the base
+    filter drops it, as the Tier-1 path keeps only ACGT alts (read in upper case, its
+    carriers were read as carriers of G)."""
     out = []
     for entry in str(value).split("$"):
         parts = entry.split(";")
@@ -1254,7 +1278,7 @@ def parse_dict_value(value):
         refalt = parts[1].strip().split(",")
         if len(refalt) < 2:
             continue
-        ref, alt = refalt[0].strip().upper(), refalt[1].strip().upper()
+        ref, alt = refalt[0].strip().upper(), refalt[1].strip()
         if len(ref) != 1 or len(alt) != 1:
             continue
         carriers = {}

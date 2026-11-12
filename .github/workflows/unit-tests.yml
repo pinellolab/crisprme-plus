@@ -367,7 +367,9 @@ jobs:
         # limit-window-reach; no capped greedy row in a 2.10.0 run's chain; a SNP row over
         # --max-degeneracy a row it may write or not; refused where the records do not
         # tell and it matters), a search with CRISPRME_INDEL_SNP=0 (its log's NOTE:
-        # refused), and the
+        # refused), one that read a genotyped dataset's indels with no phased indel store
+        # (its log's NOTE: refused), a run of 2.10.0 without its log where the VCF holds
+        # indels or MNVs (only the log says either: refused), and the
         # SNP-row report (report-only) reading a SNP row's carriers as METHODS section 4
         # does: a named variant outside the target, the 2.10.0 drop of a carrier whose slot
         # holds an indel that changes the target (read through a repeat at its edge, an

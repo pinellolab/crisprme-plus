@@ -690,7 +690,31 @@ mmblg_best = open(outputFile + ".bestmmblg_INDEL.txt", "w")
 mmblg_best.write(header + "\tCFD\n")  # Write header
 
 
+import indel_snp_cis as _isc
+
 INDELS_tree = IntervalTree()
+# record name -> its carriers as the indel log lists them ("S1,S2,..."), over every line
+# of the record: two lines of one indel or MNV REF>ALT at a position, in one case or in
+# two, are one allele (decision B2), and the log gives each line a window of its own with
+# its own carriers. _indel_carriers reads them where the phased indel store holds none of
+# the record: an MNV (the store keeps indels only) or an indel where no store is
+# installed. (A value is the log's own string, shared with INDELS_tree, but for a record
+# on two or more lines.)
+_log_carriers = {}
+
+
+def _log_union(first, more):
+    """The carriers of two indel-log lines of one record ("S1,S2,..."), the first's
+    first, each once."""
+    out = [s for s in first.split(",") if s]
+    have = set(out)
+    for s in more.split(","):
+        if s and s not in have:
+            have.add(s)
+            out.append(s)
+    return ",".join(out)
+
+
 # prefer a gzip-compressed indel log (log<chrom>.txt.gz) when present so batteries
 # installs keep the logs compressed on disk and read them on the fly; fall back to plain
 _logbase = os.path.realpath(sys.argv[4]) + "/log" + current_chr + ".txt"
@@ -703,16 +727,24 @@ with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, 
         fake_pos = splitted[5].strip().split(",")  # inizio,fine del fakechr
         # start       end fakechr          #pos_vera,samples,rsID,MAF,INDELinfo,start_fake,ref_seq
         # (the rsID is the record's first ID: CRISPRitz add-variants writes no other into
-        # the indel log, whatever the number of ALTs; METHODS section 8)
+        # the indel log, whatever the number of ALTs; METHODS section 8). The record is
+        # named with REF and ALT in upper case (indel_snp_cis.record_name): two lines of
+        # one indel or MNV written in two cases are one record, as the phased store's
+        # readers read them (2.10.0; the log keeps the VCF's case), and its carriers are
+        # those of every line (_log_carriers).
+        _name = _isc.record_name(splitted[4])
         INDELS_tree[int(fake_pos[0]) : int(fake_pos[1])] = [
             splitted[0],
             splitted[1],
             splitted[2],
             splitted[3],
-            splitted[4],
+            _name,
             int(fake_pos[0]),
             splitted[6],
         ]
+        _seen = _log_carriers.get(_name)
+        _log_carriers[_name] = (splitted[1] if _seen is None
+                                else _log_union(_seen, splitted[1]))
 # datastore = datastore.to_dict(orient='index')
 
 # [indel-snp] SNP+indel co-occurrence (default-on; CRISPRME_INDEL_SNP=0 opts out).
@@ -766,6 +798,14 @@ if _indel_snp:
                       "dataset's VCFs writes it again.", flush=True)
     except Exception:  # noqa: BLE001 - phased indel GT optional (-> PUTATIVE)
         _indelgt = None
+    if _indelgt is None and any(_log_carriers.values()):
+        # a genotyped dataset's indels read without their phased store (an index built with
+        # CRISPRME_INDEL_SNP=0, or a store whose compile failed): the run's own record of it
+        print(f"NOTE [indel-snp]: no phased indel genotype store of {_vcf} on {current_chr}: "
+              "each indel's carriers are its indel log's, their phase unknown, so a carrier of "
+              "an indel target with a SNP code gets the strongest target its own SNP alleles "
+              "allow (PUTATIVE), and a second indel on its haplotype is not read. "
+              "build-index-only with the dataset's VCFs writes it.", flush=True)
     if _reg is not None:
         try:
             _cooc_out = open(outputFile + ".indel_snp_cooc.tsv", "w")
@@ -1207,7 +1247,14 @@ def _window_breakers(dna, real_of, offsets, ipos, iref, ialt, istart, indel_data
 
 def _indel_carriers(indel_data, ipos, iref, ialt):
     """The indel's carriers (indel_snp_cis.IndelCarriers): its phased genotypes from
-    the indel store, else the indel log's carriers with their phase unknown."""
+    the indel store, else the indel log's carriers with their phase unknown, those of
+    every line of the record (_log_carriers). Cached by the record's name, which the
+    windows of its lines share: two lines of one REF>ALT at a position, in one case or
+    in two, are one allele, the store merging their genotypes and _log_carriers their
+    log carriers. (The log fallback read the window's own carriers into that cache, so
+    the second window of an MNV on two lines, which the store does not hold, or of an
+    indel where no store is installed, read the first window's: a carrier only the
+    second line lists was on no row of a target with a SNP code.)"""
     key = indel_data[4]
     carriers = _igt_cache.get(key)
     if carriers is None:
@@ -1216,7 +1263,8 @@ def _indel_carriers(indel_data, ipos, iref, ialt):
             carriers = _isc.IndelCarriers(igt)
         else:
             carriers = _isc.IndelCarriers(
-                {s: "0/1" for s in indel_data[1].split(",") if s}, phase_known=False)
+                {s: "0/1" for s in _log_carriers.get(key, indel_data[1]).split(",") if s},
+                phase_known=False)
         _cache_put(_igt_cache, key, carriers, 1 + len(carriers.parsed))
     return carriers
 

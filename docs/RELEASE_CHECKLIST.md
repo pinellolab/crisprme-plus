@@ -147,8 +147,10 @@ for mode in per-sample population-level; do
   #   missed: per sample on the per-sample run, where every carrier target must be
   #   reported for its carrier by rows of its site and strand no worse than its best
   #   alignment by the merge's sort keys (--sorting-criteria, then the CFD at three
-  #   decimals and the criteria again) -- the fold group of the row that lists it, or the
-  #   rows a fold puts it under; per merge cluster on the population-level run, which keeps
+  #   decimals and the criteria again) -- the fold groups of the rows that list it,
+  #   together, or the rows a fold puts it under, together (a PUTATIVE co-carrier can split
+  #   one target's alignments between two carrier sets); per merge cluster on the
+  #   population-level run, which keeps
   #   one row per cluster -- its row must have no more edits than each target and at least
   #   its CFD, at the three decimals the merge sorts on; the checker reads the mode from
   #   Results/*/.alt_mode, the cap from .Params.txt, the criteria from .command_line.txt
@@ -234,6 +236,9 @@ done
 #     without its genotype store that says so (its log_verbose.txt's "Registry-only
 #     install" line, or a --per-sample search run population-level), a search made with
 #     CRISPRME_INDEL_SNP=0 (its log_verbose.txt's "SNP+indel co-occurrence is off" NOTE),
+#     one that read a genotyped dataset's indels with no phased indel store (its
+#     log_verbose.txt's "no phased indel genotype store" NOTE), a run of 2.10.0 with no
+#     log_verbose.txt where its VCF holds indel or MNV records (only the log says either),
 #     one whose records do not say how its release read data that makes it matter (a split
 #     SNP site where nothing tells every allele from the last record, an INDELS index of
 #     no known format where a target can lie at a window's edge, a store's FILTER rule

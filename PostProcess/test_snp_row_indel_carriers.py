@@ -271,6 +271,35 @@ class StoreReader(unittest.TestCase):
             self.assertTrue(st.covers(LO - 50, HI + 50))
             self.assertFalse(st.covers(LO - 51, HI))
 
+    def test_an_indel_the_store_holds_twice_is_one(self):
+        """R3B-N1: an indel written on two VCF lines has two lines in the store; the SNP rows'
+        reader takes it once, its carriers merged (build_indel_genotypes.
+        merge_store_carriers). It listed the indel twice and kept the later line's carriers:
+        S1, on the earlier line only, kept a SNP row its slot's indel changes."""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s.tsv.gz")
+            near = _ins_inside()
+            _write_store(path, [(near, {"S1": "1|0", "S2": "0|1"}), (near, {"S2": "1|0"})])
+            ns = _load_pure_functions({})
+            st = ns["_SnpRowIndels"](path, [(LO, HI)], 50)
+            self.assertEqual(st.indels, [near])
+            self.assertEqual(st.carriers(near), {"S1": "1|0", "S2": "1|1"})
+
+    def test_an_indel_the_store_holds_in_two_cases_is_one(self):
+        """C-R1-1: two lines of one indel in two cases (HPRC chr22: 140, tg>t beside TG>T)
+        are one allele, read in upper case (build_indel_genotypes.store_key), their
+        carriers merged. Keyed as written, the SNP rows' reader held two indels at one
+        position, a slot with both of them one with two records of one base."""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s.tsv.gz")
+            near = _ins_inside()
+            low = (near[0], near[1].lower(), near[2].lower())
+            _write_store(path, [(near, {"S1": "1|0", "S2": "0|1"}), (low, {"S2": "1|0"})])
+            ns = _load_pure_functions({})
+            st = ns["_SnpRowIndels"](path, [(LO, HI)], 50)
+            self.assertEqual(st.indels, [near])
+            self.assertEqual(st.carriers(near), {"S1": "1|0", "S2": "1|1"})
+
     def test_touching_junction_rule(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "s.tsv.gz")
