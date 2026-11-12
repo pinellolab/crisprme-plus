@@ -31,6 +31,7 @@ Run with:
     cd PostProcess && python3 -m unittest test_postproc_pieces -v
 """
 
+import gzip
 import json
 import os
 import random
@@ -1187,6 +1188,211 @@ class IndelPiecesThroughTheRealScript(unittest.TestCase):
     def notes(text):
         return [line for line in text.splitlines()
                 if line.startswith(("indel-snp: ", "WARNING [indel-snp]: ", "WARNING: "))]
+
+
+def _run_measured(argv, env, timeout=600):
+    """Runs ``argv`` (cwd PostProcess/): (return code, stdout, stderr, the peak resident
+    memory of that process alone, in kB: the greatest VmHWM its /proc status gave, read
+    every 20 ms while it ran). Its own: one process's CRISPR-Bulge scorer is a worker
+    process of its own (scorer_runner), which wait4's rusage would count in."""
+    peak = 0
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen(argv, cwd=HERE, env=env, stdout=out, stderr=err)
+        deadline = time.time() + timeout
+        status = "/proc/%d/status" % proc.pid
+        while proc.poll() is None:
+            try:
+                with open(status) as fh:
+                    for line in fh:
+                        if line.startswith("VmHWM:"):
+                            peak = max(peak, int(line.split()[1]))
+            except (OSError, ValueError, IndexError):
+                pass
+            if time.time() > deadline:
+                proc.kill()
+                proc.wait()
+                break
+            time.sleep(0.02)
+        out.seek(0)
+        err.seek(0)
+        return (proc.returncode, out.read().decode(errors="replace"),
+                err.read().decode(errors="replace"), peak)
+
+
+@unittest.skipUnless(_gnu_wc(), "analisi_indels_NNN.py reads GNU wc -l")
+@unittest.skipUnless(os.path.isfile("/proc/self/status"),
+                     "no /proc here, to read a process's peak memory")
+class AnIndelPieceHoldsTheCarriersOfItsOwnRecords(unittest.TestCase):
+    """IR1-F1 of the integration review of 2.10.0: a piece of the indel post-analysis read the
+    carriers of every line of its chromosome's indel log into _log_carriers, then kept the
+    windows its lines read, so that each of the 8 pieces of the README search of chr22 of
+    HGDP + 1000 Genomes held the log's 340 MB of carrier text (419 MB at start-up, against 82
+    to 95 MB before lane C's carriers met lane S's pieces; 1,086 MB at its peak), and every
+    concurrent piece of chr1 or chr2 would hold some 2 GB. A piece reads in the carriers of
+    the records it keeps a window of alone, those of all of a record's lines, as one process
+    lists them.
+
+    The world of test_indel_overlaid_rows' test_a_piece_lists_the_carriers_of_both_lines_of_
+    an_mnv (the MNV M on two lines at one POS, in two cases) and EXTRA more records whose
+    windows no target reads, each listing CARRIERS carriers (the long log) or one (the short
+    log), one of them at M's POS between M's two lines. The memory check: the peak memory of a
+    run on the long log less that of the same run on the short one, which is most of the extra
+    carrier text for one process (its tree holds the extra windows: the measure sees the text)
+    and a small part of it for a piece, the whole range of lines in one piece or one of M's
+    windows. Each piece holding one of M's windows lists the carriers of both of M's lines
+    (and not the record between them), the extra records change no row, and the piece of the
+    whole range merged is one process's files; with the log in the order of its POS, as an
+    enricher writes it from a sorted VCF (a piece reads it once), and in the world's own
+    order, where a POS comes after a greater one (it reads it a second time)."""
+
+    EXTRA = 6000
+    CARRIERS = 1100  # "X00001," and on: 7 bytes each, 7.7 kB a record, some 45 MB in all
+    FILES = IndelPiecesThroughTheRealScript.FILES
+
+    def setUp(self):
+        import test_indel_overlaid_rows as tio
+        self.tio = tio
+        self.tmp = tempfile.mkdtemp(prefix="pieces_indel_mem_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        g = tio.GUIDE
+        m0 = 5600
+        w = tio.World()
+        w._put(m0, g[:3] + "TT" + g[5:] + "TGG")
+        w.ref = "".join(w.seq)
+        w.indels.append((m0 + 4, "TT", g[3:5], "rs_M_mnv", {"S01": "1|0", "S02": "0|1"}))
+        w.indels.append((m0 + 4, "tt", g[3:5].lower(), "rs_M_mnv_2",
+                         {"S01": "0|1", "S03": "1|0"}))
+        w._snp("M", m0 + 13, g[12], "C", {"S04": "1|0"})
+        self.m_pos = m0 + 4
+        self.fx = tio._Fixture(self.tmp, w, env={"PYTHONHASHSEED": "0"})
+        self.assertEqual(self.fx.proc.returncode, 0, self.fx.proc.stderr[-2000:])
+        self.logd = os.path.join(self.tmp, "Dictionaries", "log_indels_" + tio.VCF)
+        self.plain = os.path.join(self.logd, "log%s.txt" % tio.CHROM)
+        with open(self.plain) as fh:
+            self.header = fh.readline()
+            self.lines = fh.readlines()
+        os.remove(self.plain)  # the runs below read the .gz of each variant
+        # M's two windows, and the lines of the + strand targets each holds (a piece each)
+        windows = w.fake_windows()
+        _fake, starts, rows_in = tio.engine_targets(windows)
+        self.n_lines = len(rows_in)
+        self.m_ranges = []
+        for k, (ind, _s, win) in enumerate(windows):
+            if not ind[3].startswith("rs_M_mnv"):
+                continue
+            lo, hi = starts[k], starts[k] + len(win)
+            lines = [n for n, r in enumerate(rows_in, 1)
+                     if r[6] == "+" and lo <= int(r[4]) < hi]
+            self.assertTrue(lines, ind[3])
+            self.assertEqual(lines, list(range(lines[0], lines[-1] + 1)))
+            self.m_ranges.append((lines[0], lines[-1]))
+        self.assertEqual(len(self.m_ranges), 2)
+        self.fake_end = sum(len(win) + 1 for _i, _s, win in windows)
+        self.env = {k: v for k, v in os.environ.items()
+                    if k not in ("MAMBA_EXE", "CONDA_EXE", "CRISPRME_CONDA_EXE")}
+        self.env["PATH"] = os.path.dirname(sys.executable) + ":/usr/bin:/bin"
+        self.env["PYTHONHASHSEED"] = "0"
+        try:
+            import intervaltree  # noqa: F401
+        except ImportError:  # (CI's light image: the stub the fixture wrote)
+            self.env["PYTHONPATH"] = (os.path.join(self.tmp, "stub") + os.pathsep
+                                      + self.env.get("PYTHONPATH", ""))
+
+    def write_log(self, order, long_carriers):
+        """The indel log (gzip, which the analyzer reads first) of the world's lines and the
+        extra records: in the order of POS (stable: a POS's lines in the world's order, the
+        extra record at M's POS after M's first line) or the world's (the extra ones after).
+        Returns the bytes of the extra carrier text."""
+        samples = ",".join("X%05d" % i for i in range(1, self.CARRIERS + 1)) \
+            if long_carriers else "X00001"
+        extra = []
+        for i in range(self.EXTRA):
+            pos = self.m_pos if i == 0 else 10 + i
+            fake = self.fake_end + 1000 + 100 * i  # past the fake chromosome: no target
+            extra.append("%s_%d-%d_%d\t%s\trs_x%d\t0.1\t%s_%d_%s_%s\t%d,%d\t%s\n" % (
+                self.tio.CHROM, pos, pos + 30, i + 1, samples, i, self.tio.CHROM, pos, "A",
+                "AC" if i else "GG", fake, fake + 60, "A" * 60))
+        if order == "pos":
+            pos_of = lambda line: int(line.split("\t")[4].rsplit("_", 3)[1])  # noqa: E731
+            body = sorted(self.lines + extra[1:], key=pos_of)
+            first_m = next(k for k, line in enumerate(body)
+                           if line.split("\t")[2] == "rs_M_mnv")
+            body.insert(first_m + 1, extra[0])
+            self.assertEqual([line.split("\t")[2] for line in body[first_m:first_m + 3]],
+                             ["rs_M_mnv", "rs_x0", "rs_M_mnv_2"])
+        else:
+            body = self.lines + extra
+        with gzip.open(self.plain + ".gz", "wt", compresslevel=1) as fh:
+            fh.write(self.header)
+            fh.writelines(body)
+        return self.EXTRA * len(samples)
+
+    def run_analyzer(self, name, rng=None):
+        """One process (``rng`` None) or a piece of the lines ``rng``: (prefix, stdout, peak
+        memory in kB)."""
+        prefix = os.path.join(self.tmp, "out", name)
+        argv = [sys.executable, self.tio.ANALYZER, "",
+                os.path.join(self.tmp, "targets.cluster.txt"), prefix, self.logd,
+                os.path.join(self.tmp, "pam.txt"), "4",
+                os.path.join(self.tmp, self.tio.CHROM + ".fa"),
+                os.path.join(self.tmp, "guides.txt"), "1", "1"]
+        env = dict(self.env)
+        if rng is not None:
+            env.update(CRISPRME_POSTPROC_PIECE="1", CRISPRME_POSTPROC_RANGE="%d:%d" % rng)
+        rc, out, err, peak = _run_measured(argv, env)
+        self.assertEqual(rc, 0, out[-2000:] + err[-2000:])
+        self.assertGreater(peak, 0, "no VmHWM read of the run")
+        if rng is not None:
+            self.assertEqual(err, "")
+        return prefix, out, peak
+
+    def m_rows(self, prefix):
+        with open(prefix + ".bestCFD_INDEL.txt") as fh:
+            next(fh)
+            rows = [line.rstrip("\n").split("\t") for line in fh]
+        return [(c[2], c[12]) for c in rows if float(c[20]) == 1.0
+                and int(c[17].split(",")[0].split("_")[1]) == self.m_pos]
+
+    def check(self, order, one_process):
+        g = self.tio.GUIDE
+        whole = (1, self.n_lines)
+        peaks, files = {}, {}
+        for long_carriers in (False, True):
+            text_kb = self.write_log(order, long_carriers) // 1024
+            tag = "long" if long_carriers else "short"
+            p, _out, peaks["piece_" + tag] = self.run_analyzer("%s_piece_%s" % (order, tag),
+                                                               whole)
+            merged = os.path.join(self.tmp, "out", "%s_merged_%s" % (order, tag))
+            merge_pieces.merge_indel(merged, [p])
+            files["piece_" + tag] = _files(merged, self.FILES)
+            if one_process or long_carriers:
+                o, _out, peaks["one_" + tag] = self.run_analyzer("%s_one_%s" % (order, tag))
+                files["one_" + tag] = _files(o, self.FILES)
+        for k, rng in enumerate(self.m_ranges):
+            with self.subTest(order=order, m_window=k):
+                p, _out, peaks["m%d_long" % k] = self.run_analyzer(
+                    "%s_m%d_long" % (order, k), rng)
+                self.assertEqual(self.m_rows(p), [(g + "TGG", "S01,S02,S03")])
+        said = "%s: peaks %s kB, the extra carrier text %d kB" % (order, peaks, text_kb)
+        # the memory check: a piece holds no carriers of the records it keeps no window of
+        self.assertLess(peaks["piece_long"] - peaks["piece_short"], text_kb // 4, said)
+        for k in range(len(self.m_ranges)):
+            self.assertLess(peaks["m%d_long" % k] - peaks["piece_short"], text_kb // 4, said)
+        if one_process:  # one process holds them: the measure sees the text
+            self.assertGreater(peaks["one_long"] - peaks["one_short"], text_kb * 3 // 5, said)
+        # the extra records change no row, and the piece is one process's files
+        self.assertTrue(files["one_long"][".bestCFD_INDEL.txt"].count(b"\n") > 2)
+        for variant in ("piece_short", "piece_long") + (("one_short",) if one_process else ()):
+            self.assertEqual(sorted(files[variant]), sorted(files["one_long"]), variant)
+            for name in files["one_long"]:
+                self.assertEqual(files[variant][name], files["one_long"][name],
+                                 (variant, name))
+
+    def test_a_piece_of_a_log_in_the_order_of_its_pos_reads_it_once(self):
+        self.check("pos", one_process=True)
+
+    def test_a_piece_of_a_log_out_of_that_order_reads_it_twice(self):
+        self.check("world", one_process=False)
 
 
 if __name__ == "__main__":

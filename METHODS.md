@@ -1630,9 +1630,15 @@ search's threads, bring it back. None changes a row.
   whole chromosome (the spans of every line, the phased indel store read around them, the
   dictionary keys they need, which the pool reads once a chromosome into a copy the pieces
   load; on the indel side the windows of the indel log that hold its lines' positions, the
-  windows its lines read, and the carriers every line of the log lists, as one process reads
-  them: a record written on two VCF lines has a window for each, and its rows list the carriers
-  of both, the other line's window held or not), then analyses its own lines. The copy is a file of the run's output
+  windows its lines read, and the carriers of every line of the records those windows are of,
+  as one process lists them: a record written on two VCF lines has a window for each, and its
+  rows list the carriers of both, the other line's window held or not), then analyses its own
+  lines. The carriers of the records an indel piece holds no window of, most of the log, it
+  does not keep: up to the integration review of 2.10.0 every piece kept those of the whole
+  log, 340 MB of text on chr22 of HGDP + 1000 Genomes, and held 425 MB once it had read it, at
+  8 pieces (407 MB at 16), where it now holds 88 to 101 MB (45 to 59 MB at 16; one process,
+  641 MB; `test_postproc_pieces` measures a piece's memory with and without such carriers).
+  The copy is a file of the run's output
   folder, which other members of its group can write under a umask of 002, so it is JSON, the
   dictionary's own format, which loads as data whoever wrote it (a pickle runs what it names
   when loaded), made 0600 in a pieces' folder the pool makes 0700; a file there that is not

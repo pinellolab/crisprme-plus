@@ -1077,13 +1077,17 @@ and the `release-crisprme` skill.
   made 0600 in a pieces' folder made 0700 (modes that keep others from reading or writing it,
   not from putting a folder of their own in the place of the pieces' one where they can write
   the output folder). The indel pieces read the windows of the indel log their lines need, and
-  the carriers of every line of it: a record on two VCF lines (an MNV, or an indel read without
-  its phased store) lists the carriers of both, whichever window a piece holds (a piece reading
-  the carriers of its own windows alone would drop the other line's:
-  `test_indel_overlaid_rows`). The analysis' arguments reach the pieces through a file of a
-  folder the pool makes in `$TMPDIR` (`tempfile.mkdtemp`), never under a name another user of a
-  shared `/tmp` could make first. `log_verbose.txt` keeps one piece's output and what the
-  others add, but their own run times,
+  the carriers of every line of the records those windows are of: a record on two VCF lines (an
+  MNV, or an indel read without its phased store) lists the carriers of both, whichever window
+  a piece holds (a piece reading the carriers of its own windows alone would drop the other
+  line's: `test_indel_overlaid_rows`), and a piece keeps none of the carriers of the records it
+  holds no window of (the integration of 2.10.0 had each piece keep those of every line of the
+  log, 340 MB of text on chr22 of HGDP + 1000 Genomes: 425 MB a piece once it had read the log,
+  at 8 pieces, where it is 88 to 101 MB: `test_postproc_pieces`). The analysis' arguments reach
+  the pieces through a
+  file of a folder the pool makes in `$TMPDIR` (`tempfile.mkdtemp`), never under a name another
+  user of a shared `/tmp` could make first. `log_verbose.txt` keeps one piece's output and what
+  the others add, but their own run times,
   the notes one process ends a chromosome with (the pre-check's count, the dense windows),
   which the merge writes from the pieces' counts, and the chromosome's run time ("Post-analysis
   SNP of chr22: done in 101.2 s (16 pieces)").

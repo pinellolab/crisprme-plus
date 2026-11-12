@@ -643,10 +643,16 @@ import indel_snp_cis as _isc
 # its own carriers. _indel_carriers reads them where the phased indel store holds none of
 # the record: an MNV (the store keeps indels only) or an indel where no store is
 # installed. (A value is the log's own string, shared with INDELS_tree, but for a record
-# on two or more lines.) Every line of the log is read into it, a piece's too
-# (_build_indels_tree): the other line of a record can hold a window none of the piece's
-# lines reads.
+# on two or more lines.) One process reads every record of the log into it; a piece
+# (_build_indels_tree) the records it keeps a window of, each with the carriers of all of
+# its lines, the other line's window kept or not (the other line of a record can hold a
+# window none of the piece's lines reads). The carriers of the records a piece keeps no
+# window of are the bulk of the log, 340 MB of text on chr22 of HGDP + 1000 Genomes, which
+# each of up to --thread pieces held up to the integration review of 2.10.0 (IR1-F1).
 _log_carriers = {}
+# whether a line of the indel log lists a carrier: the note on a genotyped dataset's indels
+# read without their phased store (below) goes by the whole log, in a piece too
+_log_lists_carriers = False
 
 
 def _log_union(first, more):
@@ -659,6 +665,28 @@ def _log_union(first, more):
             have.add(s)
             out.append(s)
     return ",".join(out)
+
+
+def _add_carriers(name, carriers):
+    """The carriers of one more line of the record ``name``, in the log's order of its
+    lines, into _log_carriers."""
+    seen = _log_carriers.get(name)
+    if seen is None:
+        _log_carriers[name] = carriers
+    elif seen != carriers:
+        _log_carriers[name] = _log_union(seen, carriers)
+
+
+def _record_pos(name):
+    """The POS of a record's name, '<contig>_<POS>_<REF>_<ALT>' as record_name writes it
+    (split from the right: a contig name can hold '_'), or None."""
+    parts = name.rsplit("_", 3)
+    if len(parts) != 4:
+        return None
+    try:
+        return int(parts[1])
+    except ValueError:
+        return None
 
 
 # 2.10.0, option P: a piece of a post-analysis cut into pieces (pool_post_analisi_indel.py)
@@ -696,16 +724,29 @@ if _RANGE is not None and (all(os.path.isfile(f) for f in _tier_files) or
                 pass
     _range_positions = sorted(_rp)
 
-def _build_indels_tree(positions):
-    """The windows of the indel log as an interval tree on the fake chromosome: all of
-    them, or (``positions``, sorted) those that hold one of the positions. Every line's
-    carriers go into _log_carriers, whatever ``positions`` keeps."""
-    tree = IntervalTree()
+def _open_indel_log():
     # prefer a gzip-compressed indel log (log<chrom>.txt.gz) when present so batteries
     # installs keep the logs compressed on disk and read them on the fly; fall back to plain
     _logbase = os.path.realpath(sys.argv[4]) + "/log" + current_chr + ".txt"
     _logpath = _logbase + ".gz" if os.path.exists(_logbase + ".gz") else _logbase
-    with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, "r")) as log:
+    return gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, "r")
+
+
+def _build_indels_tree(positions):
+    """The windows of the indel log as an interval tree on the fake chromosome: all of
+    them, or (``positions``, sorted) those that hold one of the positions; and into
+    _log_carriers, the carriers of every line of each record the tree holds a window of,
+    in the log's order of lines, as one process lists them (all of them: every record).
+
+    The lines of one record share its POS. A piece reads the log once where the log holds
+    each POS in one run of lines, as an enricher writes it from a VCF sorted by position:
+    a run's lines are kept until the run ends, and the carriers of those of a record the
+    piece keeps a window of are then read in. Where a POS comes after a greater one (a log
+    no build writes), the carriers of the records kept are read in a second pass."""
+    global _log_lists_carriers
+    tree = IntervalTree()
+    run_pos, run, run_kept, in_runs = None, [], set(), True
+    with _open_indel_log() as log:
         # print('indel processing:', current_chr)
         log.readline()
         for entry in log:
@@ -719,15 +760,24 @@ def _build_indels_tree(positions):
             # readers read them (2.10.0; the log keeps the VCF's case), and its carriers are
             # those of every line (_log_carriers).
             _name = _isc.record_name(splitted[4])
-            _seen = _log_carriers.get(_name)
-            if _seen is None:
-                _log_carriers[_name] = splitted[1]
-            elif _seen != splitted[1]:
-                _log_carriers[_name] = _log_union(_seen, splitted[1])
-            if positions is not None:
+            if splitted[1]:
+                _log_lists_carriers = True
+            if positions is None:
+                _add_carriers(_name, splitted[1])
+            else:
+                _pos = _record_pos(_name)
+                if _pos is None or _pos != run_pos:
+                    for _n, _c in run:  # the run of the POS before has ended
+                        if _n in run_kept:
+                            _add_carriers(_n, _c)
+                    if _pos is None or (run_pos is not None and _pos < run_pos):
+                        in_runs = False
+                    run_pos, run, run_kept = _pos, [], set()
+                run.append((_name, splitted[1]))
                 _k = bisect.bisect_left(positions, int(fake_pos[0]))
                 if _k == len(positions) or positions[_k] >= int(fake_pos[1]):
                     continue  # holds no position of this piece's lines
+                run_kept.add(_name)
             tree[int(fake_pos[0]) : int(fake_pos[1])] = [
                 splitted[0],
                 splitted[1],
@@ -737,6 +787,19 @@ def _build_indels_tree(positions):
                 int(fake_pos[0]),
                 splitted[6],
             ]
+    for _n, _c in run:
+        if _n in run_kept:
+            _add_carriers(_n, _c)
+    if not in_runs:
+        kept = set(_log_carriers)
+        _log_carriers.clear()
+        with _open_indel_log() as log:
+            log.readline()
+            for entry in log:
+                splitted = entry.strip().split("\t")
+                _name = _isc.record_name(splitted[4])
+                if _name in kept:
+                    _add_carriers(_name, splitted[1])
     return tree
 
 
@@ -795,7 +858,7 @@ if _indel_snp:
                       "dataset's VCFs writes it again.", flush=True)
     except Exception:  # noqa: BLE001 - phased indel GT optional (-> PUTATIVE)
         _indelgt = None
-    if _indelgt is None and any(_log_carriers.values()):
+    if _indelgt is None and _log_lists_carriers:
         # a genotyped dataset's indels read without their phased store (an index built with
         # CRISPRME_INDEL_SNP=0, or a store whose compile failed): the run's own record of it
         print(f"NOTE [indel-snp]: no phased indel genotype store of {_vcf} on {current_chr}: "
