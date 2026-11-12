@@ -1740,12 +1740,19 @@ class AnArchiveSaysItsFormat(_Index):
         record on the manifest (indel_window: [left, right] reference bases around each
         indel), the windows of the enrichment its INDELS index was built from; none where its
         logs hold no row, or windows of two widths (logs of two enrichments), and none for a
-        reference index."""
+        reference index. Each build of the panel's logs goes to a repo of its own: a repo holds
+        one build of a panel's companions, its Dictionaries bundle among them, and refuses an
+        index of another (lane D; the integration of stage 2b, where this test published the
+        four builds to one repo and the second was refused)."""
         self.engine(2)
         idx = self.layout()
         logs = os.path.join(self.tmp, "src", "Dictionaries", "log_indels_hg38_ds")
-        sink = os.path.join(self.tmp, "sink")
-        os.makedirs(sink)
+        sinks = []
+
+        def sink():
+            sinks.append(os.path.join(self.tmp, "sink%d" % len(sinks)))
+            os.makedirs(sinks[-1])
+            return sinks[-1]
 
         def log(chrom, left, right):   # one insertion A>AT at POS 100, as add-variants logs it
             with open(os.path.join(logs, "log%s.txt" % chrom), "w") as fh:
@@ -1753,16 +1760,17 @@ class AnArchiveSaysItsFormat(_Index):
                          "%s_%d-%d_1\tS1\trs1\t0.1\t%s_100_A_AT\t0,%d\tN\n"
                          % (chrom, 99 - left, 100 + right, chrom, left + 2 + right))
 
-        self.assertNotIn("indel_window", self.manifest(self.publish(idx, sink)))  # no row
+        self.assertNotIn("indel_window", self.manifest(self.publish(idx, sink())))  # no row
         log("chr22", 30, 30)
-        self.assertEqual(self.manifest(self.publish(idx, sink))["indel_window"], [30, 30])
+        self.assertEqual(self.manifest(self.publish(idx, sink()))["indel_window"], [30, 30])
         log("chr22", 25, 27)
-        self.assertEqual(self.manifest(self.publish(idx, sink))["indel_window"], [25, 27])
+        self.assertEqual(self.manifest(self.publish(idx, sink()))["indel_window"], [25, 27])
         log("chr21", 30, 30)
-        self.assertNotIn("indel_window", self.manifest(self.publish(idx, sink)))
+        last = sink()
+        self.assertNotIn("indel_window", self.manifest(self.publish(idx, last)))
         ref = os.path.join(self.tmp, "src", "genome_library", "NGG_2_hg38")
         one_target_bin(os.path.join(ref, "NGG_chr22_1.bin"), "NGG", fmt=2)
-        self.assertNotIn("indel_window", self.manifest(self.publish(ref, sink)))
+        self.assertNotIn("indel_window", self.manifest(self.publish(ref, last)))
 
     def test_download_says_at_once_an_archive_the_engine_cannot_read(self):
         import contextlib

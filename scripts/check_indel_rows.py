@@ -2857,14 +2857,15 @@ def run_guard_bits(resdir):
     more, and says so in a BED per chromosome and side (``## bits=<n>`` on its second
     line). None when the run wrote none: no sites-only dataset, the guard off, a release
     before it."""
+    # (read from the BED's own text, as the run wrote it: the checker shares no code with
+    # CRISPRme's reader of it, sites_only_guard.read_bed_counts)
     for path in sorted(glob.glob(os.path.join(resdir, "*" + GUARD_SUFFIX))):
         try:
-            with open(path) as fh:
-                fh.readline()
-                second = fh.readline()
+            with open(path) as bed:
+                head = list(itertools.islice(bed, 2))
         except OSError:
             continue
-        m = re.match(r"## bits=(-?\d+)", second)
+        m = re.match(r"## bits=(-?\d+)", head[1]) if len(head) == 2 else None
         if m:
             return int(m.group(1))
     return None

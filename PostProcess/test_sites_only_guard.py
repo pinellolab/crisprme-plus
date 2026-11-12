@@ -361,13 +361,25 @@ class TestThePostAnalysisRunsIt(unittest.TestCase):
     variant targets before the analysis reads them, with the dataset's Dictionaries."""
 
     def step(self, script, kind):
+        """The guard's call: after the chromosome's variant targets are cut, before the
+        analysis that reads them. Lane S's option P (2.10.0) gave each script a "finish"
+        stage, the steps after the analysis once the pool has merged its pieces: it calls the
+        analysis with no targets ("" "") and exits before they are cut, so there is nothing
+        for the guard to withhold there (the integration of stage 2b: this test took that
+        call, the first in the file, for the analysis)."""
+        import re
         with open(os.path.join(HERE, script)) as fh:
             text = fh.read()
+        name = "./scriptAnalisiNNN_v3.sh" if kind == "snp" else "./analisi_indels_NNN.sh"
+        cut = text.index('targets_tsv_alt_chrom"\n', 0)
         call = text.index("python sites_only_guard.py " + kind)
-        analysis = text.index("./scriptAnalisiNNN_v3.sh" if kind == "snp"
-                              else "./analisi_indels_NNN.sh")
-        self.assertLess(text.index('targets_tsv_alt_chrom"\n', 0), call)
+        analysis = text.index(name + " \\\n", cut)  # the call that reads the targets
+        self.assertLess(cut, call)
         self.assertLess(call, analysis)
+        for at in [m.start() for m in re.finditer(re.escape(name), text)]:
+            if at != analysis:  # the finish stage's: no targets, and before they are cut
+                self.assertLess(at, cut)
+                self.assertTrue(text[at:].startswith(name + ' "" ""'), text[at:at + 80])
         return text[call:text.index("\n\n", call)]
 
     def test_both_sides(self):
