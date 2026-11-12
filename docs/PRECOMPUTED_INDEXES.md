@@ -639,7 +639,10 @@ Here `<PAM_MOTIF>` is the PAM region token itself — the IUPAC motif without th
 > same two indexes, which it names, since 2.10.0, for the guide length and the side
 > (`20-<PAM_MOTIF>_3_hg38+hg38_<ds>` and its `_INDELS` for a 20-nt guide and a 3′ PAM). Use it
 > if you also have the dataset's `Dictionaries/`/`VCFs/` staged; otherwise the two
-> `crispritz`/`pool_index_indels` calls above need only the enriched kit.
+> `crispritz`/`pool_index_indels` calls above need only the enriched kit. For **mega** the kit is
+> not optional: an enrichment of its sites-only VCFs holds no fake-indel window (CRISPRitz windows
+> an indel only where a sample carries it), so without the kit `build-index-only` refuses the
+> dataset beside its indel logs, rather than enrich it anew with no indel off-target (METHODS §4).
 
 ### Step 4 — search with the new-PAM index
 
@@ -807,6 +810,14 @@ names its panel's companions by name and fingerprint:
   with, by name and fingerprint (the SHA-256 of one line per file, its path, size and SHA-256,
   a gzip header's timestamp read as zeros): `download` fetches each once per panel, and checks
   it against the repo's record of it, `<name>.json`.
+- `indel_window` — (a variant index published by CRISPRme 2.10.0 or later) the reference
+  bases each fake-indel window holds before an indel and after it, as the index's indel
+  logs record them: `[30, 30]` for one CRISPRitz 2.10.0 built (an archive without the field,
+  every one published up to 2.8.1, holds 25 and 27). `download --what index` says when an
+  archive's windows are not the installed CRISPRitz's, and warns of an index of the dataset
+  already installed from another enrichment (an INDELS index of other windows, or a variant
+  index of index format 1 beside an archive of 30/30), which a search would read with the
+  archive's dictionaries ([METHODS §4](../METHODS.md#snpindel-off-targets-each-carriers-own-haplotype)).
 
 The manifest is surfaced (build timestamp / display name) when the index is
 downloaded, and old fields are ignored by older consumers — the index directory
@@ -861,7 +872,26 @@ crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.tx
 With co-occurrence on, the build (a) compiles a per-chromosome **phased indel
 genotype store** (`Dictionaries/indel_genotypes_<vcf>/`) and (b) **overlays SNP IUPAC
 codes** onto the fake-indel genome flanks before indexing the `_INDELS` companion, so
-the indel search can match SNP+indel haplotypes. Post-analysis resolves each indel
+the indel search can match SNP+indel haplotypes. Each indel's fake-indel window holds 30
+reference bases on either side of it in an index CRISPRitz 2.10.0 built (25 before and 27
+after in one of 2.9.1, every archive published up to CRISPRme 2.8.1), so a target of guide,
+PAM and DNA bulges up to 31 bases (27, 26 at an MNV) holds its indel there; the width is read
+from each archive's own indel logs, which every INDELS sub-index records it was built from, and a
+search refuses an INDELS index installed beside indel logs of other windows (a 2.8.1
+archive's index beside the logs of a 2.10.0 one, say: two archives of one panel and one
+release share their logs, and are searched as usual), and says when its targets need more
+than its windows hold (METHODS §4). A dataset of 2.9.1's windows that you built yourself is
+enriched again with 2.10.0's as `build-index-only` run on it says: by removing its enrichment
+and all that was built from it (its genomes, dictionaries, indel logs and dict-less tiers, and
+every index of it), which the command names by absolute path, then running it again, since a
+2.9.1 enrichment differs from a 2.10.0 one in its SNPs too; a dataset is not enriched anew
+beside the stores of an earlier enrichment whose records tell other windows (its indel logs, an
+INDELS index of it, or a variant index of it in index format 1; a search or a build refuses it,
+naming them). The sites-only mega is not enriched anew beside the windows of its kit that its
+indel logs or INDELS indexes record, whatever their width: an enrichment of its VCFs, which name
+no sample, holds no window, so its windows come from its enriched-genome kit (built with a
+synthetic sample, `mega_build_indels.sh`), and the advice on it is its kit, or its archive and
+kit of CRISPRme 2.10.0. Post-analysis resolves each indel
 target on its carriers' own haplotypes (each gets the SNP alleles it carries, so a row
 lists only the individuals that have its sequence, or, where the phase is unknown, those
 whose own alleles allow it, PUTATIVE, split multi-allelic SNP sites aside on an index

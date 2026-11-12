@@ -564,8 +564,9 @@ and the `release-crisprme` skill.
     lines: right rows failed, `carrier-without-variants`).
   - **Releases**: where CRISPRme's and CRISPRitz's releases read the data otherwise, the
     check reads which one made the run from the run's own records and prints the reading
-    it took (`read as a run of CRISPRme 2.10.0 or later (<dataset> on <chrom>: every allele,
-    store of PASS and '.', INDELS format 2)`). A run of 2.10.0 writes `.indexes_searched.txt`
+    it took on stderr (`read as a run of CRISPRme 2.10.0 or later (<dataset> on <chrom>: every
+    allele, store of PASS and '.', INDELS format 2, fake-indel windows 30/30)` on an index
+    this release built). A run of 2.10.0 writes `.indexes_searched.txt`
     (and `.carrier_gate.json`); one without them is an earlier CRISPRme's (CRISPRitz 2.9.1
     or earlier: index format 1, the last record of a split site, a store of every FILTER).
     Of a run of 2.10.0, the variant genome codes every allele where its variant index's
@@ -606,10 +607,13 @@ and the `release-crisprme` skill.
     that read its store: the same world, store removed, without its log, gave the 43
     findings); a run of an earlier release records neither, and is read as before. An index keeps
     a target's site, its PAM and the guide's length of bases from it, not its alignment, so
-    a target is read by its site: one that runs past its fake-indel window (25 bases before
-    the record's first REF base, 27 after its last), or whose site's guide region does (an
-    RNA-bulged target at the window's first base), is held by no index, and its carriers are
-    counted (`limit-window-reach`), as are, on an INDELS index of format 1, those of a
+    a target is read by its site: one that runs past its fake-indel window (the reference
+    bases before the record's first REF base and after its last that the run's indel log
+    records: 30 and 30 on an enrichment of CRISPRitz 2.10.0, 25 and 27 on one of 2.9.1; else
+    its INDELS index's record, else 25/27 for an index of format 1, a run of 2.10.0 that
+    says none refused where its VCF has indel records), or whose site's guide region does
+    (an RNA-bulged target at the window's first base), is held by no index, and its carriers
+    are counted (`limit-window-reach`), as are, on an INDELS index of format 1, those of a
     target whose site's guide region ends within the budget of the window's edge
     (`limit-window-edge`), which an index of format 2 holds. A cluster reached only
     through a SNP row over the run's `--max-degeneracy` is `limit-max-degeneracy`; the
@@ -734,17 +738,19 @@ and the `release-crisprme` skill.
     never read), a run made with `--population-level` or no mode flag records nothing else
     that tells it apart, and is not to be checked.
   - Measured on this release itself (its code over the 2.8.1 image with CRISPRitz 2.10.0,
-    every index built by `build-index-only` with it, of format 2, each search from a clean
-    environment), chr22 of HGDP + 1000 Genomes (4,091 samples), the README guide, NRG, 4
+    every index built by `build-index-only` with it, of format 2, on fake-indel windows of
+    30/30, each search from a clean environment), chr22 of HGDP + 1000 Genomes (4,091
+    samples), the README guide, NRG, 4
     mismatches + 1 + 1: soundness and completeness pass in both modes (both, with the
     per-sample run's SNP-row report, about 2.5 min with `--jobs 16`; limits: 8 two-indel
     targets, 4 records with overlapping alleles and the checker's coverage gap for one
     carrier's slot near two records; no split-site target, every allele being coded). So do
     NRR and the TRAC guide per sample (19 and 20 two-indel targets, 8 overlapping records
     each), SaCas9's `CACTTTGGGAGGCCGAGGCGG` with `NNGRRT` per sample at 2 mismatches without
-    bulges (the 2,103 targets at a fake-indel window's first base reported) and at 4 + 1 + 1
-    (16 records whose carriers hold a target that runs past its window,
-    `limit-window-reach`, 2,121 carrier listings), three repeat-rich guides (VEGFA site 3,
+    bulges (the 2,103 targets that start at the first base of a window of 25/27 reported)
+    and at 4 + 1 + 1 (the targets of the 16 records whose carriers held a target past a
+    window of 25/27, `limit-window-reach`, 2,121 carrier listings, reported), three
+    repeat-rich guides (VEGFA site 3,
     EMX1, VEGFA site 1) in both modes, HPRC chr22 (9,125 MNVs, 4.5% of its calls with a
     missing allele) and a copy of it with every fourth sample unphased in both modes, and
     the default index beside the sites-only `hg38_mega` in both modes (2,254,806 and 666 row
@@ -798,7 +804,7 @@ and the `release-crisprme` skill.
     and passes on this release's, and `test/indel_snp_oracle/known_check_indel_rows.tsv`
     lists nothing. A search whose targets reach 27 nt (SaCas9: a 21-nt guide and a 6-nt PAM)
     lost, on an INDELS index of format 1 (CRISPRitz 2.9.1), those that start at a fake-indel
-    window's first base (on chr22 of HGDP + 1000 Genomes, `CACTTTGGGAGGCCGAGGCGG` with
+    window's first base (of 25/27; on chr22 of HGDP + 1000 Genomes, `CACTTTGGGAGGCCGAGGCGG` with
     `NNGRRT`, 2 mismatches, per sample: 2,103 carrier targets at 6 records, 2,088 of them
     the insertion chr22:17325232 A>AT's, the same on two fresh searches; an SpCas9 target,
     24 nt at most in these searches, never starts there holding its record): an index of
@@ -884,6 +890,156 @@ and the `release-crisprme` skill.
   moves up only to a patch that fixes something CRISPRme depends on, so it can be below the
   image's (decision D5; `docs/RELEASING.md`, the release checklist and the release skill say so,
   where the checklist and the skill had tied the two).
+- **The fake-indel window is 30 reference bases on either side of an indel (CRISPRitz 2.10.0; 25
+  before and 27 after up to 2.9.1), and every reader takes each window's width from its own
+  indel log row.** A target of L bases (guide and PAM) with b DNA bulges holds an indel's change
+  on its window only where L + b <= LEFT + 2 and L + b <= RIGHT + 1 (LEFT + 1 at an MNV or complex
+  record): 31 on 2.10.0's windows, every published index's motif at up to 2 DNA bulges (LEFT =
+  RIGHT = Lmax - 1 + bmax, Lmax = 29: a 21-nt guide and an 8-nt PAM, the longest the general K=8
+  index serves; bmax = 2, the web's most DNA bulges), 27 (26 at an MNV) on 2.9.1's, which a
+  27-nt site (SaCas9's 21-nt guide, Cas12a at 23 nt) with a DNA bulge, and a 28-nt one (CEP290's
+  22-nt SaCas9 guide) at every budget, exceeded whatever the index (METHODS §4).
+  `overlay_indel_snps.LEFT_FLANK = 25` was the one place CRISPRme held the width. Read against a
+  window of 30, it mapped the window's bases from its 26th through the ALT's last to the wrong
+  reference position, or to none where they have one; the bases before and after them mapped
+  right, and rows kept their places (the post-analysis places a row by `POS - 1 - start`). So the
+  overlay left the five flank bases before the REF without their SNP codes, or gave them a
+  neighbour's (all five went uncoded only for an ALT of five or more bases), and gave the ALT's
+  last five bases (all of a shorter ALT) codes, where none belongs, but for two cases that read
+  right by chance: at an MNV, whose REF and ALT have one length, the flank bases past the ALT's
+  length kept their own codes (three of the five at a 2-base MNV), and an ALT longer than five
+  bases kept its bases before its last five uncoded. And an SNP+indel row next to the indel
+  named a wrong SNP allele or carrier, or was lost (on the test windows of 30/30, which hold
+  indels only, 9 of 40 rows lost, 2 with other carriers, and 7 wrong rows written).
+  The constant is gone:
+  `indel_window` takes a window's left flank from its log row, `POS - 1 - start` (the start its
+  `CHR` field records), which `map_fake_offset_to_real`, `overlay_sub_fasta`, `count_coded`,
+  `parse_log_indels` and `indel_snp_cis.build_offset_to_real` (now given the indel's POS) take,
+  so an index of either release, published or reused, reads right. Each INDELS sub-index
+  records the windows it was built from (`.index_meta.json`'s `indel_window`; 25/27 is
+  inferred for an index of format 1, which only CRISPRitz 2.9.1 and earlier build). A search
+  refuses a sub-index beside an indel log of other windows (an index kept beside an enrichment
+  made again: the log would place every row of it wrong), and so does `build-index-only` of
+  one in place, which also warns of any other INDELS index of the dataset so mismatched and of
+  an enrichment in place whose windows the installed CRISPRitz does not write (`crispritz.py`'s
+  `INDEL_LEFT`/`INDEL_RIGHT`), saying how to enrich the dataset again: an enrichment of 25/27 is
+  one of CRISPRitz 2.9.1 or earlier, which differs from one of 2.10.0 in its SNPs too (2.9.1
+  enriched only the last ALT of a site written on several records: 1,711,938 SNPs on chr22 of
+  HGDP + 1000 Genomes against 1,757,775), so the advice removes all that came from it, each
+  path absolute and quoted: its enriched and fake-indel genomes, its dictionaries and indel
+  logs, its dict-less tiers and every index of the dataset in the working directory's library
+  (`indel_window.enrichment_stores`; its phased indel genotype store and a sites-only registry
+  come from its VCFs alone, and stay: one whose manifest says so by its `data_type` or, as every
+  published mega's, which has none, by its aggregation of INFO AF fields,
+  `indel_window.registry_data_type`). A dataset whose finished enrichment is not in place is
+  not enriched anew beside the stores an earlier enrichment of other windows left (its tiers or
+  an index of it, which its indel logs, an INDELS index of it, or a variant index of it in index
+  format 1 tell; with all of those removed, nothing tells them): `build-index-only` refuses
+  before it builds anything, and so does a search that would enrich the dataset itself (the
+  search script runs `indel_window.py reenrichment`), each naming what to remove; beside the
+  stores of an enrichment of the installed CRISPRitz's windows, the same enrichment of the same
+  VCFs, a dataset is enriched anew as before. A sites-only dataset (its VCFs name no sample,
+  else its registry says so: `indel_window.sites_only`), as the mega, is not enriched anew
+  beside the windows its logs or INDELS indexes record, whatever their width: CRISPRitz writes a
+  window for an indel where a sample carries it, so an enrichment of its VCFs holds none, and
+  its windows come from an enriched-genome kit whose indels a synthetic sample carries
+  (`seq_script/merge_panels/mega_build_indels.sh`); enriched anew, as CRISPRme 2.8.1 did
+  silently, it lost every indel off-target. Every message on it points to that kit, its archive
+  and kit of CRISPRme 2.10.0, or that script, not to `build-index-only`, and names no registry
+  of it in an rm (the refusal and the advice on the published mega named its registry, and
+  advised a new build). On chr22, with the published registry and its kit's log of 25/27 or 30/30
+  and no kit, `build-index-only` refuses the mega in 1 s, nothing built, no registry named; with
+  the 25/27 kit in place it builds and warns with that advice, whose rm leaves the registry, the
+  indel frequencies and the VCFs. Nor is an index built from an enrichment in place whose
+  fake-indel genome
+  holds other windows than the dataset's indel logs record
+  (`indel_window.fake_window_disagreement`: each window where its log row's `FAKEPOS` places
+  it, an `N` after it, its left flank the row's `refseq`), as where a download installs an
+  index's logs, dictionaries and tiers beside an enrichment made by another CRISPRitz: such a
+  build recorded the logs' windows on each INDELS sub-index, and every search read it with
+  them, every indel row misplaced. `build-index-only` refuses that enrichment before it builds
+  anything (it built the reference index first), a search before it builds an index from it and
+  before it puts the SNP codes on its fake-indel genome (one that found a variant index of the
+  dataset in place overlaid that genome by the other enrichment's logs first, 641,930 codes at the
+  wrong bases of chr22, and only `pool_index_indels` then refused it, naming nothing to remove),
+  the overlay itself refuses such a genome (`overlay_indel_snps.NotItsLog`), `pool_index_indels`
+  a chromosome so cut, and `download --what index` warns of it. On stage 2a's 2.9.1 enrichment
+  beside 30/30 logs, its INDELS index removed, the README guide's search refuses in 89 s, the
+  genome unchanged, and `build-index-only` in 1 s, nothing built; with its own logs the search
+  builds that index from it (25/27 recorded) and gives stage 2a's tables. On every row of the
+  chr22 enrichments of the gate
+  configurations (HGDP + 1000 Genomes at 30/30 and at 25/27, CRISPRitz 2.9.1's own, HPRC, its
+  unphased copy, the mega, the self-test's) genome and logs agree, and a 25/27 genome read
+  with 30/30 logs, or the other way round, disagrees at its first window. `complete-search`
+  warns on its console and in its parameters
+  (`Indel_window_note`), and the indel search in its `log_verbose.txt` (the only place a web
+  search says it), when the search's targets with its DNA bulges need more bases than a
+  dataset's windows hold. `download --what
+  index` says when an archive's windows are not the installed CRISPRitz's (2.8.1's 25/27) and
+  names any other INDELS index of the dataset its logs no longer match, any other variant
+  index of it in index format 1 beside the logs of an archive of 30/30 (an earlier CRISPRitz's,
+  from an enrichment of its own, whose alleles a search would read with the archive's
+  carriers), and an enrichment of it in place that the archive's logs do not describe;
+  `publish-index` records the windows in the archive's manifest. The input validator's warning of an indel near a
+  chromosome's start takes the installed CRISPRitz's window (a POS below 31, was 26) and says
+  that the enricher skips it (it said Python wraps the slice, which 2.9.1 fixed). The
+  real-data check reads the windows from the run's own indel log (else its INDELS index's
+  record), and refuses a run of 2.10.0 that says neither where its VCF has indel records,
+  saying why (no indel log of the dataset in the run's working directory, a log with no row,
+  or one whose rows hold two widths); a chromosome whose VCF holds no indel record reads
+  `fake-indel windows none: no indel record`, which gate 4c accepts (it failed a genome-wide
+  check of a panel with a chromosome free of indels).
+  Measured on chr22 of HGDP + 1000 Genomes (4,091 samples), each dataset enriched anew and every
+  index built by `build-index-only`, against the same searches on windows of 25/27 (this
+  release's code before the change, its CRISPRitz writing 2.9.1's windows): the README guide
+  (NRG per sample and population-level, NRR), the TRAC guide, the three repeat-rich guides
+  population-level, HPRC chr22 and its unphased copy in both modes, the default index beside
+  `hg38_mega` population-level, SaCas9's 21-nt `CACTTTGGGAGGCCGAGGCGG` at 2 mismatches, CEP290's
+  two 22-nt `NNGRRN` guides (4 mismatches, without bulges and with 1 + 1) and HBB's 23-nt Cas12a
+  guide give the same rows, line for line; per sample the three guides and the index beside
+  `hg38_mega` give the same integrated rows, and the same alternative alignments but for their
+  CRISPR-Bulge columns (8 of 93,753 and 5,303 of 762,645 lines: the same score printed in
+  another format, a difference in its sixth digit, which the model's float32 scoring takes from
+  the batch it scores a target in, or the CRISPR-Bulge block naming another of a site's
+  near-tied alignments; on 25/27 the search beside `hg38_mega` gives the same rows, byte for
+  byte, with this release's code before the change as with stage 2a's). SaCas9's 21-nt guide at
+  4 + 1 + 1, 3 + 2 + 0 and 2 + 1 + 1, its 22-nt and 23-nt forms (`G`/`AG` before it) at 2
+  mismatches with up to 2 DNA bulges, and a 23-nt Cas12a guide of the same Alu (`TTTG`
+  `GGAGGCCGAGGCGGGCGGATCAC`, 2 + 2 + 0) report the targets that 25/27 held in no index, the
+  carriers the check counted under `limit-window-reach` there (from 3 records and 2,098 carrier
+  listings to 66 and 10,924 a search; METHODS §8): each on a row of its own or among the
+  alternative alignments of a site it joins, whose rows then count it in `Other_motifs` (at two
+  sites a recovered alignment heads the row, the one it replaced listed among the alternative
+  alignments; at one it replaces the worse alignment 25/27 held of the same target; at one it
+  takes the block of fewest mismatches and bulges, which places a bulge at the other of two
+  equal bases in three alternative alignments). Nothing else changed. Every run passes the check
+  (0 gating) with no `limit-window-reach` line, and the general K=8 index (`--prune-pam`) gives
+  the dedicated `NNGRRT` index's rows for the 21-nt guide at 2 + 1 + 1 byte for byte, on either
+  width. At the window's design point, a 29-base site (the same guide with CjCas9's 8-nt
+  `NNNNRYAC`) at 2 mismatches and 2 DNA bulges, the general index gives a dedicated
+  `NNNNRYAC` index's rows byte for byte, and both pass the check with no `limit-window-reach`
+  line, where on 25/27 the search says its targets exceed the windows and the check counts 6
+  records (22 carrier listings) past them. The 23-nt SaCas9 guide at 3 DNA bulges (32 bases,
+  past what 30/30 holds) says so on its console, in `Indel_window_note` and in its log, and the
+  check counts its targets past the window under
+  `limit-window-reach` (10 records, 1,910 carrier listings). On an enrichment of 25/27,
+  `complete-search` says so on the same three channels. On stage 2a's enrichment of CRISPRitz
+  2.9.1 (format-1 NRG indexes, 25/27), `build-index-only`'s advice, its rm run from another
+  directory, gives a fresh 2.10.0 build's dataset file for file (genomes, dictionaries, indel
+  logs, tiers, phased indel store and indexes, their records included; 2.8.1's reference index
+  stays, which is no dataset's), and the README guide's per-sample search on it that build's
+  tables byte for byte, passing the check (41 findings, 0 gating; without the IntOGen driver
+  annotation that 2.8.1 install holds and the fresh build's folder does not, with which the
+  IntOGen column differs, on 50 integrated rows and 145 lines of the alternative alignments,
+  and nothing else), where the advice before this fix left the
+  2.9.1 tiers and variant index in place, and that search then lost a row (1 gating finding);
+  with the enriched genome alone removed, `build-index-only` refuses the dataset and changes
+  nothing, and with the variant index removed too, that search refuses it before it enriches
+  it. The fake-indel genome is 14% larger (15.6 MB against 13.7 MB on chr22), an INDELS index
+  21% to 22%, and CRISPRitz's search of it about 30% slower (one thread on chr22: 33 s against
+  25 for the README guide, 114 against 89 for the three repeat-rich guides), for targets in a
+  flank, which the post-analysis drops: the README guide's whole per-sample search took 96 min
+  against 95 (METHODS §4).
 - **The two known limits of CRISPRitz `add-variants` that 2.8.1 stated are given as those of an
   index CRISPRitz 2.9.1 or earlier built, every one published until the rebuild for this
   release.** At a split multi-allelic site only the last record's ALT is searched, and a record

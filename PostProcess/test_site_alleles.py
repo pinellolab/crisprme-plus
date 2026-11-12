@@ -541,7 +541,7 @@ class TheFourAlleleCode(unittest.TestCase):
     def test_the_overlay_copies_q_onto_the_fake_indel_flanks(self):
         enriched = "ACGTQACGTACGTACGTACGTACGTACGTACGT"
         sub = "ACGTAACGTACGTACGTACGTACGTAACGTACG"
-        got = overlay_indel_snps.overlay_sub_fasta(sub, 0, "T", "TA", enriched)
+        got = overlay_indel_snps.overlay_sub_fasta(sub, 0, "T", "TA", 25, enriched)
         self.assertEqual(got[4], "Q")
 
     def test_the_indel_resolver_reads_a_q_column(self):

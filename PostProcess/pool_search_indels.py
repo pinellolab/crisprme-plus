@@ -477,6 +477,68 @@ def _missing_index(chrom, indexed_fakechrom, raw_fakechrom):
             f"{_rebuild(raw_fakechrom, fasta)}")
 
 
+def _window_mismatch(chrom, indexed_fakechrom, raw_fakechrom):
+    """The ERROR for ``chrom`` when its sub-index of the INDELS index was built from
+    fake-indel windows (the ones it records, index_fit.write_index_meta's
+    indel_window.META_KEY, or 25/27 for one of index format 1, which only CRISPRitz 2.9.1
+    and earlier build: indel_window.index_window) of another width than the chromosome's
+    indel log holds: the two come from two enrichments (an index kept beside an enrichment
+    made again with CRISPRitz 2.10.0, say), so the log maps no target of that index right
+    (each window's start, ALT and FAKEPOS are another enrichment's), and every indel row
+    of it would be wrong. None where they agree, or either does not tell (a sub-index of
+    format 2 that records none: its rows are mapped by its log's own windows, as every
+    reader of the log maps them, whatever their width)."""
+    import indel_window
+
+    recorded = indel_window.index_window(indexed_fakechrom) \
+        if os.path.isdir(indexed_fakechrom) else None
+    path = indel_window.log_path(log_indels_dir, chrom)
+    if recorded is None or path is None:
+        return None
+    try:
+        logged = indel_window.log_windows(path)
+    except (OSError, ValueError, EOFError):
+        return None
+    if not logged or logged == {recorded}:
+        return None
+    try:  # (the FASTAs index-genome would index there)
+        fasta = any(f.strip().split(".")[-1] == "fa" for f in os.listdir(raw_fakechrom))
+    except OSError:
+        fasta = False
+    return (f"ERROR: the indel index of {chrom} ({_outside_view(indexed_fakechrom)}) was built "
+            f"from fake-indel windows of {indel_window.describe(recorded)} reference bases (before "
+            f"an indel's REF and after it), while the indel log {_outside_view(path)} holds windows "
+            f"of {' and '.join(indel_window.describe(w) for w in sorted(logged))}: the index and "
+            f"the log come from two enrichments, and the log would place every indel off-target "
+            f"of {chrom} wrong. Install the index and its dictionaries from one build or one "
+            f"download. Rebuild it{_rebuild(raw_fakechrom, fasta)}")
+
+
+def _window_notes():
+    """What this search says, on stdout (the run's log_verbose.txt), of the fake-indel
+    windows of the dataset when its targets (the PAM file's guide and PAM) with the DNA
+    bulges it allows need more bases than they hold (indel_window.target_note): such indel
+    off-targets are held by no index. The windows are those the indel logs record; how a
+    sites-only dataset gets wider ones is not by enriching it again (indel_window.sites_only,
+    of its VCFs in vcf_dir or its registry)."""
+    import indel_window
+
+    try:
+        seq, _size = _pam_line(pam_file)
+        bdna = int(bDNA)
+    except (OSError, ValueError):
+        return []
+    try:
+        widths = set().union(*indel_window.dataset_windows(log_indels_dir).values())
+    except (OSError, ValueError, EOFError):
+        return []
+    notes = [w for w in sorted(widths)
+             if indel_window.target_note(w, len(seq), bdna, "indel search", vcf_name)]
+    sites = notes and indel_window.sites_only(current_working_directory, vcf_name, vcf_dir)
+    return [indel_window.target_note(w, len(seq), bdna, "indel search", vcf_name, bool(sites))
+            for w in notes]
+
+
 def search_indels(chrom):
     """Run the per-chromosome indel off-target search for one fake-indel chromosome.
 
@@ -518,6 +580,11 @@ def search_indels(chrom):
         f"{ref_name}+{vcf_name}_INDELS",
         f"fake_{vcf_name}_{chrom}",
     )
+    said = _window_mismatch(chrom, indexed_fakechrom, _outside_view(raw_fakechrom))
+    if said:
+        sys.stderr.write(said + "\n")
+        sys.stderr.flush()
+        return REFUSED
     if os.path.isdir(indexed_fakechrom) and not _holds_bin(indexed_fakechrom):
         empty, said = _empty_index(chrom, indexed_fakechrom, _outside_view(raw_fakechrom))
         if empty:
@@ -556,6 +623,8 @@ def search_indels(chrom):
 
 log_indels_dir = os.path.join(current_working_directory, "Dictionaries", "log_indels_" + vcf_name)
 chrs = _dataset_chroms(vcf_dir, log_indels_dir)
+for _note in _window_notes():
+    print(_note, flush=True)
 
 # cpus = len(os.sched_getaffinity(0))
 # if cpus - 3 < 10:

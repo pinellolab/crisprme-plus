@@ -368,8 +368,8 @@ class PerHaplotypeCases(unittest.TestCase):
         A>ACTT at 148517302, whose only carrier HG00344 also holds T>TC at 148517301
         on the same slot (a C inserted next to the anchor, inside the target)."""
         dna = "AgTaAGAAgMaGTAAG-AGGCTRG"
-        real_of = isc.build_offset_to_real(dna, 48764595, "-", 48764590, 148517276,
-                                           "A", "ACTT")
+        real_of = isc.build_offset_to_real(dna, 48764595, "-", 48764590, 148517302,
+                                           148517276, "A", "ACTT")
         reals = [r for r in real_of if r is not None]
         self.assertEqual((min(reals), max(reals)), (148517281, 148517300))
         self.assertFalse(isc.changes_span(148517301, "T", "TC", 148517281, 148517300))

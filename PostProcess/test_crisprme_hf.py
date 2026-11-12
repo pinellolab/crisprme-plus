@@ -1359,5 +1359,132 @@ class TestStructuralCheckWhenSizesEmpty(unittest.TestCase):
         )
 
 
+class TestFakeIndelWindowNotes(unittest.TestCase):
+    """What a download of a variant index says of its fake-indel windows, which the indel
+    logs it installs record (crisprme_hf._window_notes): nothing for the installed
+    CRISPRitz's windows; a NOTE for an archive of other windows (2.8.1's 25/27), with the
+    longest target they hold; a WARNING for another INDELS index of the dataset built from
+    windows the logs no longer record, which every search refuses."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="hf_windows_")
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+        self.lib = os.path.join(self.tmp, "genome_library")
+        self.logs = os.path.join(self.tmp, "Dictionaries", "log_indels_ds")
+        os.makedirs(self.logs)
+
+    def log(self, left, right):
+        with gzip.open(os.path.join(self.logs, "logchr1.txt.gz"), "wt") as fh:
+            fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n"
+                     "chr1_%d-%d_1\tS1\trs1\t0.1\tchr1_100_A_AT\t0,%d\tN\n"
+                     % (99 - left, 100 + right, left + 2 + right))
+
+    def index(self, name, window=None, format1=False):
+        sub = os.path.join(self.lib, name, "NRG_2_fakechr1")
+        os.makedirs(sub)
+        if window is not None:
+            with open(os.path.join(sub, ".index_meta.json"), "w") as fh:
+                fh.write('{"index_format": 2, "indel_window": [%d, %d]}' % window)
+        if format1:  # (the head of a tree of index format 1: 2.9.1's)
+            with open(os.path.join(sub, "NRG_fakechr1_1.bin"), "wb") as fh:
+                fh.write(b"\x01\x00\x00\x00\x14\x00\x00\x00")
+
+    def notes(self):
+        with mock.patch.object(hf.indel_window, "engine_window", return_value=(30, 30)):
+            return hf._window_notes(self.lib, self.tmp, "20-NRG_2_hg38+ds", "ds")
+
+    def test_the_installed_engines_windows_say_nothing(self):
+        self.log(30, 30)
+        self.index("20-NRG_2_hg38+ds_INDELS", (30, 30))
+        self.assertEqual(self.notes(), [])
+
+    def test_an_archive_of_other_windows_is_said(self):
+        self.log(25, 27)
+        self.index("20-NRG_2_hg38+ds_INDELS", format1=True)
+        notes = self.notes()
+        self.assertEqual(len(notes), 1, notes)
+        self.assertTrue(notes[0].startswith(
+            "NOTE: index '20-NRG_2_hg38+ds' holds fake-indel windows of 25 reference bases "
+            "before an indel and 27 after it"), notes)
+        self.assertIn("a target that holds an indel there holds up to 27 bases, guide, PAM "
+                      "and DNA bulges counted (26 at a record whose REF and ALT differ at "
+                      "their first base), against 31", notes[0])
+
+    def test_a_variant_index_of_an_earlier_crispritz_is_warned_of(self):
+        """W-R2-F1's class: an archive of 2.10.0 (30/30) downloaded beside a variant index of
+        the dataset that CRISPRitz 2.9.1 built (index format 1), from an enrichment that
+        differs from the archive's in its SNPs too: a search of it reads its alleles with the
+        archive's carriers. Not the downloaded index, nor one of format 2; nor anything for
+        an archive of 25/27, which 2.9.1's enrichment made too."""
+        self.log(30, 30)
+        self.index("20-NRG_2_hg38+ds_INDELS", (30, 30))
+        for name, head in (("NRG_3_hg38+ds", b"\x01\x00\x00\x00\x14\x00\x00\x00"),
+                           ("20-NRG_2_hg38+ds", b"\x01\x00\x00\x00\x14\x00\x00\x00"),
+                           ("20-NRR_2_hg38+ds", b"CZI\xfe\x02\x00\x00\x00")):
+            os.makedirs(os.path.join(self.lib, name))
+            with open(os.path.join(self.lib, name, "NRG_chr1_1.bin"), "wb") as fh:
+                fh.write(head)
+        with mock.patch.object(hf.index_fit, "engine_index_format", return_value=2):
+            notes = self.notes()
+        self.assertEqual(len(notes), 1, notes)
+        self.assertTrue(notes[0].startswith(
+            "WARNING: the variant index %s is of index format 1: CRISPRitz 2.9.1 or earlier "
+            "built it, from an enrichment of its own, of fake-indel windows of 25/27, and the "
+            "indel logs of ds installed now (%s) record windows of 30/30: they come from two "
+            "enrichments" % (os.path.join(self.lib, "NRG_3_hg38+ds"), self.logs)), notes)
+        self.assertIn("(rm -rf '%s')" % os.path.join(self.lib, "NRG_3_hg38+ds"), notes[0])
+        self.log(25, 27)
+        with mock.patch.object(hf.index_fit, "engine_index_format", return_value=2):
+            self.assertEqual([n for n in self.notes() if "variant index" in n], [])
+
+    def test_an_enrichment_in_place_of_other_windows_is_warned_of(self):
+        """A download installs an archive's indel logs (30/30) beside the enrichment of the
+        dataset made here by CRISPRitz 2.9.1 (25/27): its fake-indel genome disagrees with
+        them (indel_window.fake_genome_disagreement), and an index built from it would be read
+        with the archive's logs, dictionaries and tiers. Nothing for one of the archive's."""
+        import random
+
+        rng = random.Random(3)
+        ref = "".join(rng.choice("ACGT") for _ in range(200))
+
+        def cut(left, right):
+            start = 100 - 1 - left
+            win = ref[start:99] + ref[99] + "T" + ref[100:100 + right]
+            return start, win
+
+        start, win = cut(30, 30)
+        with gzip.open(os.path.join(self.logs, "logchr1.txt.gz"), "wt") as fh:
+            fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n"
+                     "chr1_%d-%d_1\tS1\trs1\t0.1\tchr1_100_%s_%sT\t0,%d\t%s\n"
+                     % (start, 100 + 30, ref[99], ref[99], len(win), ref[start:start + len(win)]))
+        fake = os.path.join(self.tmp, "Genomes", "hg38+ds_INDELS", "fake_ds_chr1")
+        os.makedirs(fake)
+        for (left, right), warned in (((25, 27), True), ((30, 30), False)):
+            with open(os.path.join(fake, "fakechr1.fa"), "w") as fh:
+                fh.write(">fakechr1\n%s\nN\n" % cut(left, right)[1])
+            notes = [n for n in self.notes() if "enrichment of ds in place" in n]
+            self.assertEqual(len(notes), int(warned), notes)
+        enriched = os.path.join(self.tmp, "Genomes", "hg38+ds")
+        with open(os.path.join(fake, "fakechr1.fa"), "w") as fh:
+            fh.write(">fakechr1\n%s\nN\n" % cut(25, 27)[1])
+        notes = [n for n in self.notes() if "enrichment of ds in place" in n]
+        self.assertTrue(notes[0].startswith(
+            "WARNING: the enrichment of ds in place (%s, and its fake-indel genome %s_INDELS) is "
+            "another one than the archive's: on chr1, the window of chr1_100_" % (
+                enriched, enriched)), notes)
+        self.assertIn("(rm -rf '%s' '%s_INDELS')" % (enriched, enriched), notes[0])
+
+    def test_another_index_the_logs_no_longer_match_is_warned_of(self):
+        self.log(30, 30)
+        self.index("20-NRG_2_hg38+ds_INDELS", (30, 30))
+        self.index("20-NGG_2_hg38+ds_INDELS", format1=True)   # 2.8.1's, kept
+        notes = self.notes()
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("WARNING: the INDELS index %s was built from fake-indel windows of 25/27 "
+                      "reference bases, and the indel logs of ds installed now (%s) record "
+                      "windows of 30/30" % (os.path.join(self.lib, "20-NGG_2_hg38+ds_INDELS"),
+                                            self.logs), notes[0])
+
+
 if __name__ == "__main__":
     unittest.main()

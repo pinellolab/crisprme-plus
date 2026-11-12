@@ -34,9 +34,9 @@ import sys
 
 import index_fit
 
-# More targets than one fake-indel window gives (both strands of its 2 x ~25 bases and the
-# indel's, short in every published dataset): a tree that holds more spans several windows, and
-# so an N between them.
+# More targets than one fake-indel window gives (both strands of its 2 x 30 reference bases,
+# 25 and 27 up to CRISPRitz 2.9.1, and the indel's, short in every published dataset): a tree
+# that holds more spans several windows, and so an N between them.
 ONE_WINDOW = 50000
 
 

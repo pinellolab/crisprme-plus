@@ -69,9 +69,14 @@ and the format version, then the body, then the magic again), though this crispr
 states no INDEX_FORMAT, as CRISPRitz 2.9.1's states none. add-variants pads the fake
 contig of chromosome $STUB_BIG_FAKE with a megabase of N (and this stub lifts any
 file-size limit of its own), and with $STUB_GZ_BLOCKED leaves a directory where the
-last dictionary's .gz would go.
+last dictionary's .gz would go. Its fake-indel windows hold 25 bases before an indel and
+34 after it, which this crispritz.py states (INDEL_LEFT, INDEL_RIGHT), as CRISPRitz
+2.10.0's states its own (30 and 30).
 """
 import json, os, resource, shutil, struct, sys, time
+
+INDEL_LEFT = 25
+INDEL_RIGHT = 34
 
 if os.environ.get("STUB_BIG_FAKE"):
     resource.setrlimit(resource.RLIMIT_FSIZE, (resource.getrlimit(resource.RLIMIT_FSIZE)[1],) * 2)
@@ -3275,10 +3280,10 @@ BEFORE = {
             "b27b5953fb0c4677  genome_library/20-NRG_2_hg38+ds/NRG_chr2_1.bin",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
-            "d9f701cbadb490ab  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/.index_meta.json",
+            "fe69ec7e9c3b2235  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/.index_meta.json",
             "13a14310b8ce8302  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/",
-            "d9f701cbadb490ab  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/.index_meta.json",
+            "fe69ec7e9c3b2235  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/.index_meta.json",
             "103c77c7195d36be  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
             "dir  genome_library/20-NRG_2_hg38/",
             "d9f701cbadb490ab  genome_library/20-NRG_2_hg38/.index_meta.json",
@@ -3367,10 +3372,10 @@ BEFORE = {
             "b27b5953fb0c4677  genome_library/20-NRG_2_hg38+ds/NRG_chr2_1.bin",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
-            "d9f701cbadb490ab  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/.index_meta.json",
+            "fe69ec7e9c3b2235  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/.index_meta.json",
             "13a14310b8ce8302  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
             "dir  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/",
-            "d9f701cbadb490ab  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/.index_meta.json",
+            "fe69ec7e9c3b2235  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/.index_meta.json",
             "103c77c7195d36be  genome_library/20-NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
             "dir  genome_library/20-NRG_2_hg38/",
             "d9f701cbadb490ab  genome_library/20-NRG_2_hg38/.index_meta.json",
@@ -4109,14 +4114,522 @@ class AStoreOfAnEarlierReleaseIsWrittenAgain(_Fixture):
             self.assertEqual(fh.read().splitlines()[1:], ["FILTER\tPASS,."])
 
 
+class TheFakeIndelWindowsAreTheEnrichments(_Fixture):
+    """The fake-indel windows: each INDELS sub-index records those its chromosome's indel
+    log records (here the stub's, 25 bases before an indel and 34 after it); a re-run beside
+    the logs and fake-indel genome of an enrichment of other windows (put in place with
+    their SNP codes, the index kept) refuses that index, which every search refuses too; and
+    a re-run on an enrichment in place whose windows the installed CRISPRitz does not write
+    says so, with the longest target they hold, and how to enrich the dataset again
+    (crisprme._enrichment_window_notes)."""
+
+    def reenrich(self, left, right):
+        """The indel logs and the fake-indel genome of ds, as an enrichment of windows of
+        left/right reference bases writes them (the stub's insertion at 26, its window from
+        26 - 1 - left), with their SNP codes on (the stub's SNP at 11, coded R in the enriched
+        genome), as the build that made them overlaid them."""
+        for chrom, seq in GENOME.items():
+            pos, start = 26, 26 - 1 - left
+            end = pos - 1 + 1 + right
+            contig = list(seq[start:pos] + "T" + seq[pos:end])
+            contig[10 - start] = "R"   # the SNP at 11's code, overlaid
+            contig = "".join(contig)
+            with gzip.open(self.path("Dictionaries", "log_indels_ds", "log%s.txt.gz" % chrom),
+                           "wt") as fh:
+                fh.write("%s\n%s_%d-%d_1\tS2\trs_%s_26\t0.25\t%s_26_%s_%sT\t0,%d\t%s\n" % (
+                    LOG_HEADER, chrom, start, end, chrom, chrom, seq[25], seq[25], len(contig),
+                    seq[start:start + len(contig)]))
+            _write(self.path("Genomes", "hg38+ds_INDELS", "fake_ds_%s" % chrom,
+                             "fake%s.fa" % chrom), ">fake%s\n%s\n" % (chrom, contig))
+
+    def test_each_sub_index_records_its_windows_and_one_of_others_is_refused(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        for chrom in ("chr1", "chr2"):
+            with open(self.lib(INDELS) + "/NRG_2_fake%s/.index_meta.json" % chrom) as fh:
+                self.assertEqual(json.load(fh)["indel_window"], [25, 34])
+        self.reenrich(20, 30)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("The INDELS index %s was built from fake-indel windows of 25/34 reference "
+                      "bases (before an indel's REF and after it; NRG_2_fakechr1), while the "
+                      "indel logs %s record windows of 20/30: the index and the logs come "
+                      "from two enrichments, and every search refuses them. Remove the index "
+                      "(rm -rf '%s') and run build-index-only again"
+                      % (self.lib(INDELS), self.path("Dictionaries", "log_indels_ds"),
+                         self.lib(INDELS)), err)
+        self.assertIn("WARNING [build-index-only]: the INDELS index %s was built from "
+                      "fake-indel windows of 25/34 reference bases, and the indel logs of ds "
+                      "(%s) record windows of 20/30" % (
+                          self.lib(INDELS), self.path("Dictionaries", "log_indels_ds")), out)
+        # complete-search says, on its console, that its targets (a 23-nt guide and PAM with
+        # a DNA bulge) need more than such windows hold (it stops later, at this stub's
+        # search, which a search refuses at the index: test_indel_empty_chromosome)
+        rc, out, err = self.run_search()
+        self.assertIn("WARNING [complete-search]: the fake-indel windows of ds hold 20 "
+                      "reference bases before each indel and 30 after it, so a target that "
+                      "holds an indel there holds up to 22 bases (21 at a record whose REF and "
+                      "ALT differ at their first base, an MNV or complex record), guide, PAM "
+                      "and DNA bulges counted; this search's targets need up to 24 (a 23-nt "
+                      "guide and PAM with 1 DNA bulge): such indel off-targets are held by no "
+                      "index and not reported. CRISPRitz 2.10.0 writes windows of 30 bases on "
+                      "either side, which hold up to 31: enrich ds again with it "
+                      "(build-index-only) to search them.", out)
+        with open(self.path("Results", "search", "Params.txt")) as fh:
+            self.assertIn("Indel_window_note\tWARNING [complete-search]: the fake-indel "
+                          "windows of ds hold 20", fh.read())
+
+    def test_an_enrichment_in_place_of_other_windows_is_said(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertNotIn("fake-indel windows", out)
+        # the installed CRISPRitz now writes 30/30: the enrichment in place holds 25/34
+        stub = os.path.join(self.bin, "crispritz.py")
+        with open(stub) as fh:
+            text = fh.read()
+        _write(stub, text.replace("INDEL_LEFT = 25\nINDEL_RIGHT = 34\n",
+                                  "INDEL_LEFT = 30\nINDEL_RIGHT = 30\n"))
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("WARNING [build-index-only]: the enrichment of ds in place (%s) holds "
+                      "fake-indel windows of 25 reference bases before an indel and 34 after "
+                      "it (its indel logs, %s), and the installed CRISPRitz writes 30 and 30: "
+                      "a target that holds an indel there holds up to 27 bases, guide, PAM "
+                      "and DNA bulges counted (26 at a record whose REF and ALT differ at "
+                      "their first base), against 31 on windows of 30/30: the indel "
+                      "off-targets of a longer target are in no INDELS index built from it. "
+                      "Every search reads each window's width from its log, so its rows are "
+                      "right." % (
+                          self.path("Genomes", "hg38+ds"),
+                          self.path("Dictionaries", "log_indels_ds")), out)
+
+
+class ADatasetIsEnrichedAnewWhole(_Fixture):
+    """W-R2-F1: an enrichment of another CRISPRitz than the installed one (its fake-indel
+    windows not those the installed crispritz.py states: here the stub's 25/34, which it
+    goes on writing, beside an installed CRISPRitz that states 30/30) differs from a new
+    one in its SNPs too, as 2.9.1's does from 2.10.0's at every split site. So what was
+    built from it -- the dict-less tiers, every index of the dataset -- must go with it: the
+    advice of the warning on such an enrichment in place removes all of it, by absolute
+    path; and a dataset enriched anew beside those stores, by build-index-only or by a search
+    that enriches it itself, is refused, saying what to remove (indel_window.reenrichment_
+    refusal). An earlier enrichment of the installed CRISPRitz's windows gives the same
+    enrichment: a dataset enriched anew beside its stores is built as before. Each store of
+    the earlier enrichment holds a file of its own here, which no store of the new one
+    holds."""
+
+    MARK = "earlier_enrichment.txt"
+
+    def engine(self, left, right):
+        stub = os.path.join(self.bin, "crispritz.py")
+        with open(stub) as fh:
+            text = re.sub(r"INDEL_LEFT = \d+\nINDEL_RIGHT = \d+\n",
+                          f"INDEL_LEFT = {left}\nINDEL_RIGHT = {right}\n", fh.read())
+        _write(stub, text)
+
+    def mark_earlier(self):
+        """A file of its own in each store the earlier enrichment gave, or was built from it."""
+        stores = [self.path("Genomes", d) for d in ("hg38+ds", "hg38+ds_INDELS")] + [
+            self.path("Dictionaries", f"{k}_ds")
+            for k in ("dictionaries", "log_indels", "registry", "genotypes")] + [
+            self.lib(VAR), self.lib(INDELS)]
+        for d in stores:
+            if os.path.isdir(d):
+                _write(os.path.join(d, self.MARK), "built from the earlier enrichment\n")
+        return stores
+
+    def marks_left(self):
+        return sorted(os.path.relpath(os.path.join(d, f), self.work)
+                      for d, _, files in os.walk(self.work) for f in files if f == self.MARK)
+
+    def rm_of(self, text):
+        """The rm command a message gives, run from another directory than the working one
+        (as from a shell anywhere: build-index-only --path), its exit status."""
+        m = re.search(r"\(rm -rf ([^;)]*)[;)]", text)
+        self.assertIsNotNone(m, text)
+        done = subprocess.run(["bash", "-c", "rm -rf " + m.group(1)], cwd=self.root,
+                              capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""), m.group(1))
+        return m.group(1)
+
+    def test_the_warnings_advice_followed_gives_a_fresh_enrichments_dataset(self):
+        """The reviewer's F1A in miniature. Before the fix the advice removed the enriched
+        genome and, by a path relative to the shell's directory, the INDELS indexes: the
+        dataset enriched anew kept the tiers (taken as emitted) and the variant index (kept
+        as built) of the earlier enrichment, and, from another directory, its INDELS index."""
+        self.engine(30, 30)
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        fresh = self.outputs()
+        self.fresh()
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.mark_earlier()
+        self.engine(30, 30)
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("WARNING [build-index-only]: the enrichment of ds in place", out)
+        removed = self.rm_of(out)
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("Enriching hg38 with ds (add-variants)...", out)
+        self.assertEqual(self.marks_left(), [])
+        self.assertEqual(self.outputs(), fresh)
+        for d in (self.path("Genomes", "hg38+ds"), self.path("Dictionaries", "registry_ds"),
+                  self.path("Dictionaries", "genotypes_ds"), self.lib(VAR), self.lib(INDELS)):
+            self.assertIn(f"'{d}'", removed)
+        self.assertNotIn("indel_genotypes_ds", removed)   # (its VCFs', the same from any)
+
+    def test_the_advice_names_the_indexes_this_run_builds(self):
+        """W-R3-N1 (the reviewer's M2): the advice names the indexes the run that prints it
+        builds next from the enrichment (here those of another PAM, NGG, none of them there
+        yet), which would stay beside a new enrichment otherwise."""
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.engine(30, 30)
+        ngg = os.path.join(REPO, "PAMs", "20bp-NGG-SpCas9.txt")
+        rc, out, err = self.run_bio(command=[
+            "build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", ngg,
+            "--bDNA", "1", "--bRNA", "1", "--thread", "2", "--path", self.work,
+            "--vcf", self.path("VCFs", "ds"), "--samplesID", self.path("samples.txt")])
+        self.assertEqual((rc, err), (0, ""))
+        m = re.search(r"\(rm -rf ([^;)]*)[;)]", out)
+        self.assertIsNotNone(m, out)
+        for name in ("20-NGG_2_hg38+ds", "20-NGG_2_hg38+ds_INDELS", VAR, INDELS):
+            self.assertIn("'%s'" % self.lib(name), m.group(1))
+        self.assertTrue(os.path.isdir(self.lib("20-NGG_2_hg38+ds_INDELS")))
+
+    def test_a_search_sees_the_stores_in_the_library_it_reads(self):
+        """W-R3-N1 (the reviewer's M20): the stores of an earlier enrichment that refuse a
+        search's own enrichment include the dataset's indexes in the library it reads
+        (--index-path), here the only ones left of it, its tiers removed."""
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        rc, out, err = self.run_bio(command=[   # (the reference index a 2 + 2 search opens)
+            "build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
+            "--bDNA", "2", "--bRNA", "2", "--thread", "2", "--path", self.work])
+        self.assertEqual((rc, err), (0, ""))
+        lib = os.path.join(self.root, "library")
+        os.makedirs(lib)
+        for name in ("20-NRG_3_hg38", VAR, INDELS):
+            os.rename(self.lib(name), os.path.join(lib, name))
+        for d in (("Genomes", "hg38+ds"), ("Genomes", "hg38+ds_INDELS"),
+                  ("Dictionaries", "registry_ds"), ("Dictionaries", "genotypes_ds")):
+            shutil.rmtree(self.path(*d))
+        self.engine(30, 30)
+        calls = len(self.calls())
+        rc, out, err = self.run_search("--index-path", lib, bulges="2")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("ERROR: no finished enrichment of ds is in place (%s), so this search "
+                      "would enrich it anew" % self.path("Genomes", "hg38+ds"), err)
+        self.assertIn("left what was built from it: %s, %s." % (
+            os.path.join(lib, VAR), os.path.join(lib, INDELS)), err)
+        self.assertEqual([c for c in self.calls()[calls:] if c.startswith("add-variants ")], [])
+
+    def test_a_dataset_enriched_anew_beside_another_crispritzs_stores_is_refused(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        fresh = self.outputs()
+        # the enrichment gone, of the installed CRISPRitz's windows: enriched anew, as before
+        shutil.rmtree(self.path("Genomes", "hg38+ds"))
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("Enriching hg38 with ds (add-variants)...", out)
+        self.assertEqual(self.outputs(), fresh)
+        # and of another's: refused, before anything is built, saying what to remove
+        self.mark_earlier()
+        shutil.rmtree(self.path("Genomes", "hg38+ds"))
+        self.engine(30, 30)
+        before, calls = self.outputs(), len(self.calls())
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(
+            "Error: No finished enrichment of ds is in place (%s), so build-index-only would "
+            "enrich it anew with the installed CRISPRitz, whose fake-indel windows are 30/30; "
+            "but an earlier enrichment of it, whose records tell windows of 25/34 (CRISPRitz "
+            "2.9.1 and earlier wrote 25/27), left what was built from it: %s. An enrichment "
+            "of another CRISPRitz differs in its SNPs too" % (
+                self.path("Genomes", "hg38+ds"), ", ".join(
+                    [self.path("Dictionaries", "registry_ds"),
+                     self.path("Dictionaries", "genotypes_ds"), self.lib(VAR),
+                     self.lib(INDELS)])), err)
+        self.assertEqual(self.calls()[calls:], [])
+        self.assertEqual(self.outputs(), before)
+        self.rm_of(err)
+        self.assertEqual(self.marks_left(), [])
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(self.outputs(), fresh)
+
+    def test_a_search_that_would_enrich_it_beside_them_is_refused_too(self):
+        """A search enriches a dataset itself where no variant index of it serves it and its
+        enriched genome is not in place, its dictionaries and logs passing complete-search's
+        check: it moved its dictionaries and logs in beside the earlier ones and read the
+        earlier tiers, and later searches the earlier indexes."""
+        def gone():
+            for d in (("Genomes", "hg38+ds"), ("Genomes", "hg38+ds_INDELS"),
+                      ("genome_library", VAR)):
+                shutil.rmtree(self.path(*d))
+
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        gone()
+        rc, out, err = self.run_web_search()   # (the installed CRISPRitz's windows)
+        self.assertNotIn("no finished enrichment", err)
+        self.assertEqual(sum(c.startswith("add-variants ") for c in self.calls()), 2, err)
+        self.fresh()
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        gone()
+        self.engine(30, 30)
+        said = ("ERROR: no finished enrichment of ds is in place (%s), so this search would "
+                "enrich it anew with the installed CRISPRitz, whose fake-indel windows are "
+                "30/30; but an earlier enrichment of it, whose records tell windows of 25/34 "
+                "(CRISPRitz 2.9.1 and earlier wrote 25/27), left what was built from it: %s." % (
+                    self.path("Genomes", "hg38+ds"), ", ".join(
+                        [self.path("Dictionaries", "registry_ds"),
+                         self.path("Dictionaries", "genotypes_ds"), self.lib(INDELS)])))
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(said, err)
+        self.assertIn("then run build-index-only with the dataset's VCFs and its --samplesID",
+                      err)
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(said, err)
+        self.assertEqual(sum(c.startswith("add-variants ") for c in self.calls()), 1)
+
+
+class AnEnrichmentInPlaceIsItsLogsOwn(_Fixture):
+    """The class of W-R2-F1 again: a download installs an index's indel logs, dictionaries and
+    tiers, not the enrichment they come from, beside one made here by another CRISPRitz,
+    whose fake-indel windows were another width (here the stub's 25/34 beside logs of 20/30).
+    build-index-only built an index from that enrichment and recorded the logs' windows on
+    its INDELS sub-indexes, and so did a search that builds one: every indel row read with the
+    other enrichment's log, misplaced, and its overlay misplaced every code. As the refusal of
+    an INDELS index of other windows says (remove it and run build-index-only again, which
+    builds it from the enrichment in place), the INDELS index is gone here: each refuses the
+    enrichment in place, saying what to put back or remove, and builds nothing from it
+    (indel_window.fake_genome_refusal; pool_index_indels' _window_disagreement)."""
+
+    def archive_logs(self, left, right):
+        """The indel logs of ds as an archive of windows left/right holds them."""
+        for chrom, seq in GENOME.items():
+            pos, start = 26, 26 - 1 - left
+            end = pos - 1 + 1 + right
+            win = seq[start:pos] + "T" + seq[pos:end]
+            with gzip.open(self.path("Dictionaries", "log_indels_ds", "log%s.txt.gz" % chrom),
+                           "wt") as fh:
+                fh.write("%s\n%s_%d-%d_1\tS2\trs_%s_26\t0.25\t%s_26_%s_%sT\t0,%d\t%s\n" % (
+                    LOG_HEADER, chrom, start, end, chrom, chrom, seq[25], seq[25], len(win),
+                    seq[start:start + len(win)]))
+
+    def said(self, who):
+        chrom, seq = "chr1", GENOME["chr1"]
+        return ("he fake-indel genome %s_INDELS and the indel logs %s of ds come from two "
+                "enrichments: on %s, the window of %s_26_%s_%sT, which the log places at 0-52 of "
+                "the fake sequence, ends elsewhere there (no separator after it). With the "
+                "fake-indel genome goes the enriched genome %s, and with the logs the dataset's "
+                "dictionaries and dict-less tiers (a download installs an index's dictionaries "
+                "and logs, not the enrichment they come from), so an index %s built from the "
+                "enrichment in place" % (
+                    self.path("Genomes", "hg38+ds"), self.path("Dictionaries", "log_indels_ds"),
+                    chrom, chrom, seq[25], seq[25], self.path("Genomes", "hg38+ds"), who))
+
+    def test_build_index_only_refuses_it(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.archive_logs(20, 30)
+        shutil.rmtree(self.lib(INDELS))
+        # before it builds anything: the reference index too, which it built first, hours on
+        # a whole genome (W-R3-N3)
+        shutil.rmtree(self.lib(REF))
+        before, calls = self.outputs(), len(self.calls())
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("Error: T" + self.said("that build-index-only"), err)
+        self.assertEqual(self.calls()[calls:], [])
+        self.assertEqual(self.outputs(), before)   # nothing overlaid, nothing built
+
+    def test_a_search_that_builds_its_index_from_it_refuses_it(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.archive_logs(20, 30)
+        # its variant index in place, the search builds the INDELS index it lacks: refused
+        # before it puts the SNP codes on the fake-indel genome by the other enrichment's
+        # logs (W-R3-F2: it overlaid it first, 641,930 codes on chr22 at the wrong bases, and
+        # only pool_index_indels then refused, naming nothing to remove)
+        shutil.rmtree(self.lib(INDELS))
+        genome = tree(self.path("Genomes", "hg38+ds_INDELS"))
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("ERROR: t" + self.said("that this search"), err)
+        self.assertIn("(rm -rf '%s' '%s_INDELS'; of a published index, its enriched-genome kit" % (
+            (self.path("Genomes", "hg38+ds"),) * 2), err)
+        self.assertNotIn("overlay_indel_snps", out)
+        self.assertEqual(tree(self.path("Genomes", "hg38+ds_INDELS")), genome)
+        self.assertFalse(os.path.isdir(self.lib(INDELS)))
+        # pool_index_indels, run straight (docs/PRECOMPUTED_INDEXES.md, Step 3), refuses it too
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("STUB_", "CRISPRME_"))}
+        env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
+                   STUB_LOG=self.log)
+        done = subprocess.run([sys.executable, os.path.join(HERE, "pool_index_indels.py"),
+                               self.path("Genomes", "hg38+ds_INDELS") + "/", PAM, "NRG", "hg38",
+                               "ds", "2", "2", self.lib(VAR)], cwd=self.root, env=env,
+                              capture_output=True, text=True)
+        self.assertIn("ERROR: the fake-indel genome of chr1 (", done.stderr)
+        self.assertIn(") and its indel log, in %s, come from two enrichments: the window of "
+                      "chr1_26_" % self.path("Dictionaries", "log_indels_ds"), done.stderr)
+        self.assertEqual(tree(self.path("Genomes", "hg38+ds_INDELS")), genome)
+        # with no variant index of the dataset either, it would build both: refused first
+        shutil.rmtree(self.lib(VAR))
+        calls = len(self.calls())
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("ERROR: t" + self.said("that this search"), err)
+        self.assertEqual([c for c in self.calls()[calls:] if c.startswith("index-genome hg38+ds")],
+                         [])
+
+
+class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
+    """W-R3-F1: a sites-only dataset (the mega: its VCFs name no sample) has fake-indel
+    windows only from its enriched-genome kit, whose indels a synthetic sample carries
+    (seq_script/merge_panels/mega_build_indels.sh), as CRISPRitz writes a window only for an
+    indel a sample carries; its registry comes from its VCFs' INFO AF fields, and the published
+    mega's manifest says so by its aggregation alone, with no data_type. build-index-only took
+    that registry for a store of the enrichment, named it in its advice's rm and refused the
+    dataset for it, and advised building again, which enriches the VCFs anew with no window
+    (the reviewer's MG1); with the registry read as sites-only, it enriched them anew, its indel
+    logs replaced by logs of no row, as CRISPRme 2.8.1 did. Here the stub's windows, 25/34,
+    stand for the published kit's 25/27, beside an installed CRISPRitz of 30/30."""
+
+    def sites_only(self):
+        """ds made sites-only, as the published mega is installed: VCFs that name no sample,
+        a registry of INFO AF fields whose manifests have no data_type, no genotypes."""
+        for chrom, seq in GENOME.items():
+            with gzip.open(self.path("VCFs", "ds", f"ds.{chrom}.vcf.gz"), "wt") as fh:
+                fh.write("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
+                         f"{chrom}\t11\trs_{chrom}_11\tA\tG\t.\tPASS\tAF=0.25\n"
+                         f"{chrom}\t26\trs_{chrom}_26\t{seq[25]}\t{seq[25]}T\t.\tPASS\tAF=0.25\n")
+            _write(self.path("Dictionaries", "registry_ds", f"reg_{chrom}.idx"),
+                   '{"n_records": 1, "aggregation": "info_af", "databases": {}}')
+        shutil.rmtree(self.path("Dictionaries", "genotypes_ds"))
+
+    def engine(self, left, right):
+        stub = os.path.join(self.bin, "crispritz.py")
+        with open(stub) as fh:
+            text = re.sub(r"INDEL_LEFT = \d+\nINDEL_RIGHT = \d+\n",
+                          f"INDEL_LEFT = {left}\nINDEL_RIGHT = {right}\n", fh.read())
+        _write(stub, text)
+
+    def run_sites_only(self):
+        """build-index-only of ds without --samplesID, as a sites-only dataset is built."""
+        return self.run_bio(command=[
+            "build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
+            "--bDNA", "1", "--bRNA", "1", "--thread", "2", "--path", self.work,
+            "--vcf", self.path("VCFs", "ds")])
+
+    def test_the_advice_on_its_kit_in_place_names_no_registry_nor_build_index_only(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.sites_only()
+        self.engine(30, 30)
+        rc, out, err = self.run_sites_only()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("WARNING [build-index-only]: the enrichment of ds in place", out)
+        self.assertIn(
+            "For the installed CRISPRitz's windows: ds is sites-only: its VCFs name no sample, "
+            "and CRISPRitz writes a fake-indel window only for an indel a sample carries, so an "
+            "enrichment of them holds none (so build-index-only would leave it with no indel "
+            "off-target); its windows come from its enriched-genome kit, whose indels a "
+            "synthetic sample carries: install its archive and enriched-genome kit of CRISPRme "
+            "2.10.0 (docs/PRECOMPUTED_INDEXES.md), or build its kit again that way "
+            "(seq_script/merge_panels/mega_build_indels.sh). Either replaces that enrichment "
+            "and all that was built from it", out)
+        self.assertNotIn("run build-index-only again", out)
+        m = re.search(r"\(rm -rf ([^;)]*)[;)]", out)
+        self.assertNotIn("registry_ds", m.group(1))
+        for d in (self.path("Genomes", "hg38+ds"), self.path("Genomes", "hg38+ds_INDELS"),
+                  self.path("Dictionaries", "log_indels_ds"), self.lib(VAR), self.lib(INDELS)):
+            self.assertIn(f"'{d}'", m.group(1))
+        done = subprocess.run(["bash", "-c", "rm -rf " + m.group(1)], cwd=self.root,
+                              capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertTrue(os.path.isfile(self.path("Dictionaries", "registry_ds", "reg_chr1.idx")))
+
+    def test_a_searchs_window_note_points_to_its_kit(self):
+        """complete-search's note of windows its targets exceed (here 20/30, which hold up to
+        22 bases, for a 23-nt site with a DNA bulge) does not send a sites-only dataset to
+        build-index-only."""
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.sites_only()
+        for chrom, seq in GENOME.items():   # (its kit's windows 20/30, its SNP codes on)
+            start, end = 26 - 1 - 20, 26 + 30
+            contig = list(seq[start:26] + "T" + seq[26:end])
+            contig[10 - start] = "R"
+            contig = "".join(contig)
+            with gzip.open(self.path("Dictionaries", "log_indels_ds", "log%s.txt.gz" % chrom),
+                           "wt") as fh:
+                fh.write("%s\n%s_%d-%d_1\t\trs_%s_26\t0.25\t%s_26_%s_%sT\t0,%d\t%s\n" % (
+                    LOG_HEADER, chrom, start, end, chrom, chrom, seq[25], seq[25], len(contig),
+                    seq[start:start + len(contig)]))
+            _write(self.path("Genomes", "hg38+ds_INDELS", "fake_ds_%s" % chrom,
+                             "fake%s.fa" % chrom), ">fake%s\n%s\n" % (chrom, contig))
+        rc, out, err = self.run_search(samples=False)
+        self.assertIn("WARNING [complete-search]: the fake-indel windows of ds hold 20 "
+                      "reference bases before each indel and 30 after it", out)
+        self.assertIn("To search them: ds is sites-only: its VCFs name no sample", out)
+        self.assertNotIn("enrich ds again", out)
+
+    def test_it_is_not_enriched_anew_beside_its_kits_windows(self):
+        """The reviewer's MG1 in miniature: the published registry and the kit's indel logs,
+        neither the kit nor an index, and the sites-only VCFs."""
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.sites_only()
+        for d in (("Genomes", "hg38+ds"), ("Genomes", "hg38+ds_INDELS"),
+                  ("Dictionaries", "dictionaries_ds"), ("genome_library", VAR),
+                  ("genome_library", INDELS)):
+            shutil.rmtree(self.path(*d))
+        before, calls = self.outputs(), len(self.calls())
+        for left, right in ((30, 30), (25, 34)):   # (25/34: the installed CRISPRitz's, too)
+            self.engine(left, right)
+            rc, out, err = self.run_sites_only()
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn(
+                "Error: No finished enrichment of ds is in place (%s), so build-index-only would "
+                "enrich it anew from its VCFs; but ds is sites-only: its VCFs name no sample, "
+                "and CRISPRitz writes a fake-indel window only for an indel a sample carries, so "
+                "an enrichment of them holds none, while its indel logs or its INDELS indexes "
+                "record windows of 25/34" % self.path("Genomes", "hg38+ds"), err)
+            self.assertIn("Put that kit back in place (%s and %s_INDELS" % (
+                (self.path("Genomes", "hg38+ds"),) * 2), err)
+            self.assertNotIn("registry_ds", err)
+            self.assertNotIn("build-index-only again", err)
+            self.assertEqual("rm -rf" in err, (left, right) == (30, 30), err)
+            self.assertEqual(self.calls()[calls:], [])
+            self.assertEqual(self.outputs(), before)
+        # a search that would enrich it itself refuses it too
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("ERROR: no finished enrichment of ds is in place (%s), so this search "
+                      "would enrich it anew from its VCFs; but ds is sites-only" % (
+                          self.path("Genomes", "hg38+ds")), err)
+        self.assertEqual([c for c in self.calls()[calls:] if c.startswith("add-variants ")], [])
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix: but for the
     names of the indexes, which since 2.10.0 say the guide length and the side (BEFORE is
     the record of the code before the fix with NRG_2_hg38 named 20-NRG_2_hg38, which a
-    --record of 2.10.0 gives, byte for byte), and the .done marker of each chromosome's
+    --record of 2.10.0 gives, byte for byte), the .done marker of each chromosome's
     phased indel genotypes, which since 2.10.0 says, after its record count, that the store
-    holds only records whose FILTER is PASS or '.' (build_indel_genotypes.FILTER_MARK)."""
+    holds only records whose FILTER is PASS or '.' (build_indel_genotypes.FILTER_MARK), and
+    the record of each INDELS sub-index (.index_meta.json), which since 2.10.0 says the
+    fake-indel windows it was built from, as its chromosome's indel log records them
+    (indel_window: the stub's 25 and 34)."""
 
     maxDiff = None
 

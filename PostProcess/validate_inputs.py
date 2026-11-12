@@ -74,9 +74,6 @@ MIN_VCF_DATA_FIELDS = 8
 # hit it -- worst case is under-warned data loss, never a wrongly-blessed run.)
 ENRICHER_PASS_VALUES = ("PASS", ".")
 STRUCTURAL_VARIANT_LEN = 50
-# enricher.py:302 builds indel context as genomeStr[pos-26 : pos+26+len(ref)];
-# a negative start silently wraps via Python slicing instead of erroring
-INDEL_START_PROXIMITY = 26
 # the records of each VCF the lightweight pass reads for lines listing several ALTs
 MULTI_ALT_SCAN_RECORDS = 1000
 # warn (not error) below this PASS ratio; a dataset legitimately restricted to
@@ -85,6 +82,20 @@ FILTER_PASS_WARN_RATIO = 0.10
 # mock file CRISPRme substitutes for optional file arguments; skip content
 # checks against it
 MOCK_FILENAME = "vuoto.txt"
+
+
+def indel_start_proximity() -> int:
+    """The first POS at which the installed CRISPRitz's enricher writes an indel's
+    fake-indel window: one more than the reference bases the window holds before the
+    record (indel_window.engine_window: 31 for CRISPRitz 2.10.0, whose windows hold 30;
+    26 up to 2.9.1, 25). The enricher skips an indel at a POS below it, with a warning on
+    stdout, so no indel off-target is searched there."""
+    try:
+        import indel_window
+    except ImportError:  # (imported as PostProcess.validate_inputs)
+        from PostProcess import indel_window
+
+    return indel_window.engine_window()[0] + 1
 
 
 class Issue(NamedTuple):
@@ -1514,9 +1525,12 @@ def check_vcf_full_scan(
       (common with merged cohorts) causes silently wrong haplotype/sample
       attribution. The validator can only warn here; the real fix belongs in
       `new_simple_analysis.py`.
-    - Indels within 26bp of a chromosome start: `enricher.py:322`'s
-      `pos-26` context window goes negative, and Python silently wraps a
-      negative slice index to the end of the string instead of erroring.
+    - Indels nearer a chromosome's start than the installed CRISPRitz's
+      fake-indel window reaches (a POS below `indel_start_proximity()`: 31
+      with 2.10.0's windows of 30 bases, 26 with 2.9.1's of 25): the enricher
+      skips such a record, with a warning on stdout (up to 2.9.0 its window's
+      negative slice wrapped to the chromosome's end instead), so no indel
+      off-target is searched there.
     - AF/ALT allele-count consistency, SNP path: `enricher.py`'s
       `add_to_dict_snps` indexes the comma-separated AF list by each
       single-character ALT allele's 1-indexed position in the full ALT list.
@@ -1570,6 +1584,7 @@ def check_vcf_full_scan(
     phased_seen = False
     unphased_seen = False
     indel_near_start_count = 0
+    indel_start = indel_start_proximity()
     out_of_bounds_count = 0
     af_index_overflow_count = 0
     indel_af_index_overflow_count = 0
@@ -1647,7 +1662,7 @@ def check_vcf_full_scan(
                 is_indel = any(len(a) != len(ref) for a in alt_alleles)
                 if is_indel:
                     try:
-                        if int(pos_str) < INDEL_START_PROXIMITY:
+                        if int(pos_str) < indel_start:
                             indel_near_start_count += 1
                     except ValueError:
                         pass
@@ -1880,11 +1895,13 @@ def check_vcf_full_scan(
         issues.append(
             Issue(
                 WARN,
-                f"{fname}: {indel_near_start_count} indel(s) within "
-                f"{INDEL_START_PROXIMITY}bp of the chromosome start — "
-                "enricher.py's context window goes negative here, and Python "
-                "silently wraps the slice to the end of the sequence instead "
-                "of erroring, corrupting that variant's FASTA record",
+                f"{fname}: {indel_near_start_count} indel(s) at a POS below "
+                f"{indel_start}, with fewer than {indel_start - 1} reference bases between the "
+                f"chromosome start and the record — the enricher (CRISPRitz add-variants) "
+                f"skips such an indel, "
+                f"with a warning on stdout: its fake-indel window holds "
+                f"{indel_start - 1} reference bases before the record, so no indel "
+                f"off-target is searched at it",
             )
         )
     return issues

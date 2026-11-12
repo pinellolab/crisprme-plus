@@ -1534,6 +1534,46 @@ class TestCheckVcfFullScan(unittest.TestCase):
             issues = self._scan(tmp, records)
             self.assertEqual(issues, [])
 
+    @staticmethod
+    @contextlib.contextmanager
+    def _engine(tmp, lines):
+        """A crispritz.py on PATH holding ``lines`` (the engine the validator reads its
+        fake-indel window from: index_fit._engine_value), its cache cleared."""
+        from PostProcess import index_fit
+
+        bindir = os.path.join(tmp, "bin")
+        os.makedirs(bindir)
+        exe = os.path.join(bindir, "crispritz.py")
+        write_text(exe, "".join(line + "\n" for line in lines))
+        os.chmod(exe, 0o755)
+        index_fit._engine_cache.clear()
+        with mock.patch.dict(os.environ, {"PATH": bindir}):
+            try:
+                yield
+            finally:
+                index_fit._engine_cache.clear()
+
+    def test_indel_start_follows_the_engines_fake_indel_window(self):
+        """CRISPRitz 2.10.0 writes 30 reference bases before an indel (its crispritz.py's
+        INDEL_LEFT), so its enricher skips an indel at a POS below 31: one at 28 or 30
+        warns, one at 31 does not. 2.9.1 (no INDEL_LEFT: 25) skipped one below 26 only."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._engine(tmp, ['VERSION = "2.10.0"', "INDEL_LEFT = 30", "INDEL_RIGHT = 30"]):
+                self.assertEqual(vi.indel_start_proximity(), 31)
+                for pos, warns in ((28, True), (30, True), (31, False)):
+                    issues = self._scan(tmp, [vcf_record(pos=pos, ref="A", alt="AT")])
+                    self.assertEqual(len(issues), int(warns), (pos, issues))
+                    if warns:
+                        self.assertIn("a POS below 31, with fewer than 30 reference bases "
+                                      "between the chromosome start and the record",
+                                      issues[0].message)
+                        self.assertIn("fake-indel window holds 30 reference bases",
+                                      issues[0].message)
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._engine(tmp, ['VERSION = "2.9.1"']):
+                self.assertEqual(vi.indel_start_proximity(), 26)
+                self.assertEqual(self._scan(tmp, [vcf_record(pos=28, ref="A", alt="AT")]), [])
+
 
 # ===========================================================================
 # run_full end-to-end

@@ -131,13 +131,16 @@ limit (counted and listed under its own class, non-gating) or not (gating):
     (the truth there, as for a call of unknown phase: THE TRUTH), and two listings of one
     REF>ALT at a position are one allele, on a line of several ALTs too; on one of 2.9.1 or
     earlier, only the last of several SNP records at one position, of the same REF>ALT too,
-    or a last line of a '*' alone (limit-last-alt-wins) (RELEASES) --, and 25 reference
-    bases before the record's first
-    REF base and 27 after its last. An index keeps a site, a PAM and the guide's length of
-    bases from it (its guide region), not an alignment: a target that runs past the window,
-    or whose site's guide region does (one with an RNA bulge reaches past the target's own
-    end), is held by no index (limit-window-reach; a 27-nt target with a DNA bulge,
-    SaCas9's say), and one whose site's guide region ends within the INDELS index's budget
+    or a last line of a '*' alone (limit-last-alt-wins) (RELEASES) --, and the reference
+    bases before the record's first REF base and after its last that the run's indel log
+    records (30 and 30 on an enrichment of CRISPRitz 2.10.0, 25 and 27 on one of 2.9.1 or
+    earlier: each row's window start and end, record_window). An index keeps a site, a PAM
+    and the guide's length of bases from it (its guide region), not an alignment: a target
+    that runs past the window, or whose site's guide region does (one with an RNA bulge
+    reaches past the target's own end), is held by no index (limit-window-reach; on windows
+    of 25/27 a 27-nt target with a DNA bulge, SaCas9's say; on windows of 30/30 one of more
+    than 31 bases, guide, PAM and DNA bulges counted), and one whose site's guide region
+    ends within the INDELS index's budget
     of the window's edge (the pad the budget's DNA bulges use) by none of format 1
     (limit-window-edge, an index of CRISPRitz 2.9.1 or earlier: 2.10.0's format 2 holds
     it);
@@ -615,10 +618,15 @@ IUPAC = {
     "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG", "N": "ACGT",
 }
 BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
-# the fake-indel window CRISPRitz's enricher writes for a record (enricher.py: the bases
-# genome[POS-26 : POS+26+len(REF)], the REF in it replaced by the ALT): 25 reference bases
-# before the record's first REF base and 27 after its last, a separator N on either side
-WINDOW_BEFORE, WINDOW_AFTER = 25, 27
+# the fake-indel window CRISPRitz's enricher writes for a record: the reference bases
+# before the record's first REF base, the REF replaced by the ALT, and the reference bases
+# after its last, a separator N on either side. Its width is read from the run's indel log
+# (Semantics.window, indel_log_window), whose CHR field holds each window's start and end:
+# 30 and 30 bases with CRISPRitz 2.10.0, 25 and 27 (enricher.py: genome[POS-26 :
+# POS+26+len(REF)]) with 2.9.1 and earlier, which is the window of a run that writes no
+# record of its own (CRISPRme up to 2.8.1)
+OLD_WINDOW = (25, 27)
+LOG_ROWS = 200   # the rows of an indel log read for its window's width
 PUTATIVE_CAP = 10  # positions of unknown phase enumerated per carrier and record
 IUPAC_CAP = 10     # CRISPRME_IUPAC_CAP's default: a window over it is capped (METHODS 5)
 NO_VARIANT = ("", "NA", "n")
@@ -2406,6 +2414,10 @@ class Semantics(object):
                    1 does not hold a target whose site's guide region ends within bMax
                    bases of its fake-indel window's edge (the separator N in its pad),
                    which one of format 2 holds (CRISPRitz 2.10.0; window_cut);
+      window       the reference bases its fake-indel windows hold before a record's first
+                   REF base and after its last: (30, 30) for an enrichment of CRISPRitz
+                   2.10.0, (25, 27) for one of 2.9.1 or earlier, read from the run's indel
+                   log (indel_log_window) or else its INDELS index's record (window_cut);
       capped       whether a per-sample run may report a window over CRISPRME_IUPAC_CAP by
                    its greedy worst-case row (the classic dictionaries up to 2.8.1; 2.10.0
                    enumerates the carriers' haplotypes there).
@@ -2435,6 +2447,11 @@ class Semantics(object):
     def indels(self, vcf, chrom):
         """(format, pad) of the INDELS index of the VCF's dataset on ``chrom``."""
         return self._get(vcf, chrom, "indels") or (None, None)
+
+    def window(self, vcf, chrom):
+        """(before, after) of the fake-indel windows of the VCF's dataset on ``chrom``, or
+        None where the run's records do not say."""
+        return self._get(vcf, chrom, "window")
 
     @property
     def capped(self):
@@ -2501,6 +2518,67 @@ def _bins_of(index_dir, chrom):
                 "_%s_" % chrom in name:
             out.append(path)
     return out
+
+
+def indel_log_window(path, rows=LOG_ROWS):
+    """(before, after) of the fake-indel windows of the indel log ``path``
+    (log<chrom>.txt[.gz] of Dictionaries/log_indels_<dataset>, CRISPRitz's add-variants),
+    from its first ``rows`` rows: each row's CHR field <chrom>_<start>-<end>_<id> holds its
+    window's start and end (0-based, the end exclusive and not cut at the chromosome's end)
+    and its indel field <chrom>_<POS>_<REF>_<ALT> the record, so the window holds
+    POS - 1 - start bases before the record's first REF base and end - (POS - 1 + len(REF))
+    after its last. None for a log with no row (or none of that layout); a ValueError for
+    one whose rows hold two widths, which no one enrichment writes."""
+    opener = gzip.open if path.endswith(".gz") else open
+    found, n = set(), 0
+    with opener(path, "rt") as fh:
+        for line in fh:
+            f = line.rstrip("\n").split("\t")
+            if f[0] == "CHR" or len(f) < 5:
+                continue
+            try:
+                head, _id = f[0].rsplit("_", 1)
+                span = head.rsplit("_", 1)[1]
+                start, end = (int(x) for x in span.rsplit("-", 1))
+                _c, pos, ref, _alt = f[4].rsplit("_", 3)
+                first = int(pos) - 1
+            except (IndexError, ValueError) as exc:
+                raise ValueError("%s holds a row of no indel log's layout (%s)" % (path, exc))
+            found.add((first - start, end - first - len(ref)))
+            n += 1
+            if n >= rows:
+                break
+    if len(found) > 1:
+        raise ValueError("%s holds fake-indel windows of %s bases" % (
+            path, " and ".join("%d/%d" % w for w in sorted(found))))
+    return next(iter(found)) if found else None
+
+
+def _log_of(workdir, dataset, chrom):
+    """The indel log of ``dataset`` on ``chrom`` in the run's working directory, or None."""
+    for name in ("log%s.txt.gz" % chrom, "log%s.txt" % chrom):
+        path = os.path.join(workdir, "Dictionaries", "log_indels_" + dataset, name)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _recorded_window(indels_dir, chrom):
+    """The fake-indel windows the sub-index of ``chrom`` in the INDELS index ``indels_dir``
+    records it was built from (CRISPRme 2.10.0: .index_meta.json's indel_window), or
+    None."""
+    if not indels_dir or not os.path.isdir(indels_dir):
+        return None
+    for name in sorted(os.listdir(indels_dir)):
+        if name.endswith("fake" + chrom):
+            try:
+                with open(os.path.join(indels_dir, name, ".index_meta.json")) as fh:
+                    w = json.load(fh).get("indel_window")
+            except (OSError, ValueError, AttributeError):
+                continue
+            if isinstance(w, list) and len(w) == 2 and all(isinstance(x, int) for x in w):
+                return tuple(w)
+    return None
 
 
 def _budget_of(name):
@@ -2616,7 +2694,7 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
     values = {}
     if not release2100:
         values[(None, None)] = {"all_alleles": False, "store_filter": False,
-                                "indels": (1, None)}
+                                "indels": (1, None), "window": OLD_WINDOW}
         return Semantics(False, values, dataset_of), None
     old = set()
     no_store = set()
@@ -2661,6 +2739,26 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
             elif indels_name and indels_name in format1:
                 fmt = 1
             val["indels"] = (fmt, _budget_of(indels_name))
+            # the fake-indel windows: the run's indel log's, else its INDELS index's record,
+            # else, for an index of format 1 (built by CRISPRitz 2.9.1 or earlier, whose
+            # enricher wrote no other), 25/27. (The indel log has a name of its own: `log`,
+            # the run's log_verbose.txt, says every chromosome's store rule above.)
+            ilog = _log_of(workdir, ds, ch) if ds else None
+            window, why_none = None, (
+                "the run's working directory holds no indel log of it, "
+                "Dictionaries/log_indels_%s/log%s.txt[.gz]" % (ds or "<dataset>", ch))
+            if ilog:
+                try:
+                    window = indel_log_window(ilog)
+                    why_none = "its indel log %s holds no row" % ilog
+                except ValueError as exc:   # (two widths: no one enrichment's log)
+                    why_none = str(exc)
+                except (OSError, EOFError) as exc:
+                    why_none = "its indel log %s cannot be read (%s)" % (ilog, exc)
+            val["window"] = window or _recorded_window(indels_dir, ch) or (
+                OLD_WINDOW if fmt == 1 else None)
+            if val["window"] is None:   # (refused where it matters: main says why)
+                val["window_why"] = why_none
             alls = None
             var_heads = [h for h in (bin_header(b) for b in _bins_of(var_dir, ch)) if h]
             if var_heads and all(h[0] == 1 for h in var_heads):
@@ -4614,6 +4712,28 @@ def one_record_reading(win, main_al, slot_hap, alleles, t, toks, lo, hi, unknown
     return None
 
 
+def reach_example(window, full_n):
+    """The shortest target that runs past a fake-indel window of ``window`` (before, after),
+    for a guide and PAM of ``full_n`` bases, said as a limit-window-reach line's example: a
+    target of L bases with b DNA bulges holds its record's change only where L + b <=
+    min(before + 2, after + 1) (one fewer at an MNV), so the fewest DNA bulges past it."""
+    need = max(min(window[0] + 2, window[1] + 1) + 1 - full_n, 0)
+    return "a target of a %d-nt guide and PAM%s" % (
+        full_n, "" if not need else " with a DNA bulge" if need == 1
+        else " with %d DNA bulges" % need)
+
+
+def record_window(win, al):
+    """(before, after): the reference bases the fake-indel window of record ``al`` holds
+    before its first REF base and after its last, as the run's records say them
+    (Semantics.window: its indel log); OLD_WINDOW for the readings before 2.10.0 (``sem``
+    None), and where a run of 2.10.0 does not say (main refuses such a run where a target
+    can reach a window's edge)."""
+    sem = win.sem
+    w = sem.window(win.vcfs[win.line_vcf[al.line]], win.chrom) if sem is not None else None
+    return w or OLD_WINDOW
+
+
 def window_cut(win, ctx, main_al, place, strand, full_n):
     """Why CRISPRme's search cannot hold a target of record ``main_al`` whose bases lie at
     ``place`` on a haplotype carrying it, or None. A CRISPRitz index keeps a target's site,
@@ -4621,22 +4741,23 @@ def window_cut(win, ctx, main_al, place, strand, full_n):
     site's guide region is the guide's length of bases from the PAM (``full_n``: the guide's
     length plus the PAM's), so it reaches past a target with RNA bulges and stops short of
     one with DNA bulges, by the difference of their lengths. 'reach' for one that runs past
-    the record's fake-indel window (WINDOW_BEFORE reference bases before its first REF base,
-    WINDOW_AFTER after its last: the separator N lies beyond, whatever the index), its own
+    the record's fake-indel window (record_window: the reference bases before its first REF
+    base and after its last, the run's; the separator N lies beyond, whatever the index), its own
     bases or its site's guide region (an index of either format drops a site whose guide
     region holds an N); 'edge' for one an INDELS index of format 1 leaves out: its site's
     pad, the index's budget of bases past the guide region's far end (the end away from
     the PAM), holds the separator N (CRISPRitz 2.9.1 drops such a site at build time;
     2.10.0, format 2, keeps it, its pad allowed to run into an N). Only where the run's
     records say the format (main refuses a run where they do not and it matters)."""
-    lo_w = main_al.lo - WINDOW_BEFORE
-    hi_w = main_al.hi + WINDOW_AFTER     # exclusive
+    before, after = record_window(win, main_al)
+    lo_w = main_al.lo - before
+    hi_w = main_al.hi + after     # exclusive
     first, last = place[0], place[-1]
     if (first[1] == 0 and first[0] < lo_w) or last[0] >= hi_w:
         return "reach"
     left = (strand == "+") != ctx.pam_5prime      # the guide's far end on the left
     if left:
-        d = first[0] - lo_w if first[1] == 0 else WINDOW_BEFORE
+        d = first[0] - lo_w if first[1] == 0 else before
     else:
         d = hi_w - 1 - last[0]
     # the window's bases past the site's guide region (beyond the target's own end: the
@@ -5009,11 +5130,12 @@ def comp_record(win, ctx, rep, reported, al, carriers, guide, full, lo, hi, popm
             "table": "completeness", "chrom": chrom, "start": al.lo, "var": tok},
             "%d sample(s) hold a target of %s in budget that runs past its fake-indel "
             "window (%d bases before the record's first REF base, %d after its last), or "
-            "whose site's guide region does (a target of a %d-nt guide and PAM with a DNA "
-            "bulge, or with an RNA bulge at the window's first base, say), which no index "
-            "holds (METHODS section 4): not demanded (%d of them listed on a row naming "
-            "the record): %s" % (len(who), tok, WINDOW_BEFORE, WINDOW_AFTER, len(full),
-                                 reported.on_rows(guide, who, tok), ",".join(who[:12])),
+            "whose site's guide region does (%s, or one with an RNA bulge at the window's "
+            "first base, say), which no index holds (METHODS section 4): not demanded (%d "
+            "of them listed on a row naming the record): %s"
+            % (len(who), tok, record_window(win, al)[0], record_window(win, al)[1],
+               reach_example(record_window(win, al), len(full)),
+               reported.on_rows(guide, who, tok), ",".join(who[:12])),
             samples=",".join(who))
     if cut.get("edge"):
         who = sorted(cut["edge"])
@@ -7021,6 +7143,9 @@ def main(argv=None):
             % ", ".join(storeless[:6] + (["..."] if len(storeless) > 6 else [])))
         return 2
     unknown = []
+    # (the datasets and chromosomes whose windows no record tells, and whose VCF holds no
+    # indel record there: no window to tell, which the reading says as such)
+    no_indel = set()
     for ch in sorted(chroms):
         for v in vcfs_for.get(ch, ()):
             ds = sem.dataset_of.get(v.path)
@@ -7053,11 +7178,27 @@ def main(argv=None):
                                "-- and %s has such sites there"
                                % (ds or v.path, ch, v.path))
             fmt, pad = val.get("indels") or (None, None)
+            window = val.get("window")
+            if window is None and sem.release2100 and v.samples is not None:
+                if any(r["filter"] in PASS_FILTERS and any(
+                        len(a) != len(r["ref"]) or len(a) > 1 for a in r["alts"])
+                       for r in v.records(ch, 0, 1 << 31)):
+                    unknown.append("the fake-indel windows of %s on %s (%s, and its INDELS "
+                                   "index records none), and %s holds indel records there: "
+                                   "whether a target reaches a window's edge depends on them "
+                                   "(25/27 bases up to CRISPRitz 2.9.1, 30/30 since 2.10.0)"
+                                   % (ds or v.path, ch, val.get("window_why") or
+                                      "the run's working directory holds no indel log of it",
+                                      v.path))
+                else:
+                    no_indel.add((ds, ch))
             # the nearest a site holding a base of its record lies to the window's first
             # base: its PAM ending on the record's first REF base (an MNV's first replaced
-            # base), WINDOW_BEFORE bases in, its guide region from full_n - 1 bases before
+            # base), the window's bases before it in, its guide region from full_n - 1
+            # bases before
+            before = (window or OLD_WINDOW)[0]
             if fmt is None and v.samples is not None and \
-                    WINDOW_BEFORE + 1 - full_n < (pad or max(args.bdna, args.brna) + 1):
+                    before + 1 - full_n < (pad or max(args.bdna, args.brna) + 1):
                 unknown.append("the index format of the INDELS index of %s on %s (its "
                                "%s names no index found, and its log no format-1 NOTE of "
                                "it), and a target of this guide, PAM and budget can lie at "
@@ -7070,12 +7211,14 @@ def main(argv=None):
         return 2
     sys.stderr.write("check_indel_rows: read as a run of CRISPRme %s (%s)\n" % (
         "2.10.0 or later" if sem.release2100 else "2.8.1 or earlier",
-        "; ".join("%s%s: %s, store %s, INDELS format %s" % (
+        "; ".join("%s%s: %s, store %s, INDELS format %s, fake-indel windows %s" % (
             k[0] or "every dataset", " on %s" % k[1] if k[1] else "",
             {True: "every allele", False: "the last record of a split site"}.get(
                 v.get("all_alleles"), "no split SNP site to tell"),
             "of PASS and '.'" if v.get("store_filter") else "of every FILTER",
-            (v.get("indels") or (None,))[0]) for k, v in sorted(
+            (v.get("indels") or (None,))[0],
+            "%d/%d" % v["window"] if v.get("window") else
+            "none: no indel record" if k in no_indel else "not told") for k, v in sorted(
                 sem.values.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))))
         or "no chromosome to read it for"))
     if not ref.keep_all:

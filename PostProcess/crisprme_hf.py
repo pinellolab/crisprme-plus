@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 
 import safe_tar  # (PostProcess/: each archive is unpacked with safe modes, owned by this user)
 import index_fit  # (PostProcess/: an index's format, whether this install reads it, its name's two forms)
+import indel_window  # (PostProcess/: the fake-indel windows an index's indel logs record)
 
 # Default HuggingFace dataset repo. Overridable per-invocation with --hf-repo or
 # the CRISPRME_HF_REPO environment variable (e.g. switch to a pinellolab org
@@ -2563,6 +2564,12 @@ def download_component(
             # dataset + its samples in the --vcf / --samplesID list files the web
             # builds per-search but a CLI complete-search reads from disk.
             _ensure_search_lists(workdir, vcf_name)
+            # The fake-indel windows of the index, which its indel logs record: said where
+            # they are not the installed CRISPRitz's (an archive of CRISPRme 2.8.1 or
+            # earlier: 25/27), and of any other INDELS index of the dataset here, built
+            # from windows the logs just installed no longer record (_window_notes).
+            for _note in _window_notes(local_dir, workdir, install_name, vcf_name):
+                sys.stdout.write(_note + "\n")
         return os.path.join(local_dir, install_name)
 
     # flat components: annotations, pams, samples
@@ -2744,6 +2751,88 @@ def _make_genotypes_tarball(tarball: str, genotypes_dir: str) -> None:
         tf.add(genotypes_dir, arcname=arcname)
 
 
+def _window_notes(local_dir, workdir, install_name, vcf_name):
+    """What a download of variant index ``install_name`` says of its fake-indel windows,
+    which the dataset's indel logs (Dictionaries/log_indels_<vcf_name>) record
+    (indel_window): a NOTE where they are not the installed CRISPRitz's (an archive of
+    CRISPRme 2.8.1 or earlier: 25/27 against 2.10.0's 30/30), with the longest target that
+    holds an indel there; a WARNING for each other INDELS index of the dataset in
+    ``local_dir`` built from windows the logs no longer record, which every search
+    refuses; and one for each other variant index of the dataset there of index format 1
+    where the installed CRISPRitz writes format 2 and the logs record other windows than
+    25/27: an earlier CRISPRitz built it, from an enrichment of its own, which differs from
+    the archive's in its SNPs too (2.9.1 enriched only the last ALT of a site written on
+    several records), and a search of it reads its alleles with the archive's carriers; and
+    one where the dataset's fake-indel genome in the working directory holds other windows
+    than the logs record (indel_window.fake_genome_disagreement): the enrichment in place is
+    another one than the archive's, which build-index-only, and a search that would build an
+    index from it, refuse. Read-only, and never fatal."""
+    logs = os.path.join(workdir, "Dictionaries", f"log_indels_{vcf_name}")
+    notes = []
+    try:
+        widths = set().union(*indel_window.dataset_windows(logs).values())
+        engine = indel_window.engine_window()
+        for w in sorted(widths - {engine}):
+            notes.append(
+                f"NOTE: index '{install_name}' holds fake-indel windows of {w[0]} reference "
+                f"bases before an indel and {w[1]} after it (its indel logs, {logs}), and the "
+                f"installed CRISPRitz writes {engine[0]} and {engine[1]}: a target that holds "
+                f"an indel there holds up to {indel_window.reach(w)} bases, guide, PAM and DNA "
+                f"bulges counted"
+                + (f" ({indel_window.reach(w, mnv=True)} at a record whose REF and ALT differ "
+                   f"at their first base)" if indel_window.reach(w, mnv=True) != indel_window.reach(w)
+                   else "") +
+                f", against {indel_window.reach(engine)}. Every "
+                f"search reads each window's width from its log, and says when its targets "
+                f"need more than its windows hold.")
+        for idx, w, logged in indel_window.mismatched_indexes(local_dir, vcf_name, logs):
+            if os.path.basename(idx) == f"{install_name}_INDELS":
+                continue
+            notes.append(
+                f"WARNING: the INDELS index {idx} was built from fake-indel windows of "
+                f"{indel_window.describe(w)} reference bases, and the indel logs of "
+                f"{vcf_name} installed now ({logs}) record windows of "
+                f"{' and '.join(indel_window.describe(x) for x in logged)}: they come from two "
+                f"enrichments, and every search of it refuses it. Download its index again, or "
+                f"remove it (rm -rf {indel_window.quote(idx)}) and build it with "
+                f"build-index-only.")
+        _genome = ((index_fit.parse_index_name(install_name) or (None,) * 3)[2]
+                   or "").partition("+")[0]
+        if widths and widths != {indel_window.OLD_WINDOW} and \
+                (index_fit.engine_index_format() or 2) >= 2:
+            for idx in indel_window.dataset_indexes(local_dir, _genome, vcf_name):
+                if idx.endswith("_INDELS") or os.path.basename(idx) == install_name or \
+                        set(index_fit.bin_formats(idx)) != {1}:
+                    continue
+                notes.append(
+                    f"WARNING: the variant index {idx} is of index format 1: CRISPRitz 2.9.1 "
+                    f"or earlier built it, from an enrichment of its own, of fake-indel windows "
+                    f"of 25/27, and the indel logs of {vcf_name} installed now ({logs}) record "
+                    f"windows of {' and '.join(indel_window.describe(x) for x in sorted(widths))}"
+                    f": they come from two enrichments, which differ in their SNPs too (2.9.1 "
+                    f"enriched only the last ALT of a site written on several records), and a "
+                    f"search of it would read the alleles it holds with the carriers of the "
+                    f"other. Download its index again, or remove it (rm -rf "
+                    f"{indel_window.quote(idx)}) and build it with build-index-only.")
+        _enriched = os.path.join(workdir, "Genomes", f"{_genome}+{vcf_name}")
+        _odd = indel_window.fake_genome_disagreement(_enriched + "_INDELS", logs, vcf_name) \
+            if _genome else None
+        if _odd:
+            notes.append(
+                f"WARNING: the enrichment of {vcf_name} in place ({_enriched}, and its "
+                f"fake-indel genome {_enriched}_INDELS) is another one than the archive's: on "
+                f"{_odd[0]}, {_odd[1]}, in the indel logs installed now ({logs}). An index built "
+                f"from it would be read with the archive's logs, dictionaries and tiers, so "
+                f"build-index-only, and a search that would build one from it, refuse it. "
+                f"Remove it (rm -rf {indel_window.quote(_enriched)} "
+                f"{indel_window.quote(_enriched + '_INDELS')}); to build an index of another "
+                f"PAM, install the archive's enriched-genome kit "
+                f"(docs/PRECOMPUTED_INDEXES.md).")
+    except (OSError, ValueError, EOFError) as exc:
+        notes.append(f"NOTE: could not read the fake-indel windows of {vcf_name} ({exc}).")
+    return notes
+
+
 def publish_index(
     index_dir: str,
     repo: Optional[str] = None,
@@ -2853,6 +2942,17 @@ def publish_index(
     index_meta = index_fit.read_index_meta(index_dir)
     if index_meta:
         manifest["index_meta"] = index_meta
+    # the fake-indel windows of a variant index, which its indel logs record (indel_window):
+    # what its card states, (left, right) reference bases around each indel
+    _vcf = index_name.partition("+")[2]
+    if _vcf:
+        try:
+            _w = indel_window.dataset_window(os.path.join(
+                os.path.dirname(os.path.dirname(index_dir)), "Dictionaries", f"log_indels_{_vcf}"))
+        except (OSError, ValueError, EOFError):
+            _w = None
+        if _w is not None:
+            manifest["indel_window"] = list(_w)
     parts = index_name.rsplit("_", 2)
     if len(parts) == 3:
         manifest["pam"], manifest["index_bmax"], manifest["genome"] = (

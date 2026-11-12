@@ -66,6 +66,7 @@ the layout the real one writes.
 
 import ast
 import gzip
+import json
 import os
 import re
 import shutil
@@ -185,6 +186,28 @@ def _gnu_sed():
         return False
 
 
+def window_rows(chrom, left, right):
+    """Two indel log rows as CRISPRitz's add-variants writes them, of fake-indel windows of
+    ``left`` reference bases before the record's REF and ``right`` after it (an insertion
+    at 100 and a deletion at 200)."""
+    out = []
+    for k, (pos, ref, alt) in enumerate(((100, "A", "AT"), (200, "ACG", "A"))):
+        out.append("%s_%d-%d_%d\tS1\trs%d\t0.1\t%s_%d_%s_%s\t%d,%d\tACGT" % (
+            chrom, pos - 1 - left, pos - 1 + len(ref) + right, k + 1, k, chrom, pos, ref, alt,
+            100 * k, 100 * k + left + len(alt) + right))
+    return out
+
+
+def window_fake(chrom, left, right):
+    """The fake-indel FASTA whose windows lie where window_rows' rows place them (their
+    FAKEPOS fields), an N after each and Ns between them, of A and T alone (no NRG)."""
+    seq = ""
+    for k, (pos, ref, alt) in enumerate(((100, "A", "AT"), (200, "ACG", "A"))):
+        a, b = 100 * k, 100 * k + left + len(alt) + right
+        seq += "N" * (a - len(seq)) + ("AT" * 50)[:b - a] + "N"
+    return f">fake{chrom}\n{seq}\n"
+
+
 def _write_log(path, records):
     with gzip.open(path, "wt") as fh:
         fh.write(LOG_HEADER + "\n")
@@ -230,7 +253,7 @@ class SearchSide(_Fixture):
 
     def run_search(self, logs, bins, records=(), fakes=None, true_pam="NRG", pam=NRG,
                    bulges=("1", "1"), vcfs=(), pam_files=None, pam_build=None, view=None,
-                   listed="ds", no_trees=()):
+                   listed="ds", no_trees=(), metas=None):
         """bins: chrom -> whether its sub-index holds a .bin (a chromosome left out has
         none); records: the chromosomes whose sub-index holds the record of a build with
         no target; fakes: chrom -> the sequence of its fake-indel contig, written where
@@ -241,7 +264,8 @@ class SearchSide(_Fixture):
         complete-test --chrom does, from complete_test's own view of the working directory;
         listed: how the search's --vcf list spells the dataset; no_trees: the chromosomes
         whose sub-index holds a directory x.bin and a file named .bin, neither of them a
-        tree searchTST loads."""
+        tree searchTST loads; metas: chrom -> the record of what its sub-index holds
+        (.index_meta.json, index_fit.write_index_meta)."""
         cwd = self.work = os.path.join(self.tmp, "work")
         self.true_pam = true_pam
         logdir = os.path.join(cwd, "Dictionaries", "log_indels_ds")
@@ -263,6 +287,9 @@ class SearchSide(_Fixture):
             if chrom in no_trees:
                 os.makedirs(os.path.join(d, "x.bin"))
                 open(os.path.join(d, ".bin"), "w").close()
+            if chrom in (metas or {}):
+                with open(os.path.join(d, ".index_meta.json"), "w") as fh:
+                    json.dump(metas[chrom], fh)
         if pam_build is not None:
             os.makedirs(os.path.join(cwd, "genome_library", f"{true_pam}_3_ref+ds"))
             with open(os.path.join(cwd, "genome_library", f"{true_pam}_3_ref+ds", ".pam_build"), "w") as fh:
@@ -820,6 +847,73 @@ class SearchSide(_Fixture):
         self.assertEqual([ln.split("\t")[3] for ln in lines[1:] if ln], ["fakechrA", "fakechrB"])
         self.assertNotIn("target in the indels", res.stdout)
 
+    def test_a_sub_index_of_other_windows_than_its_log_is_refused(self):
+        """A sub-index built from fake-indel windows of another width than its chromosome's
+        indel log records (an index kept beside an enrichment made again with CRISPRitz
+        2.10.0): the log would place every indel row of it wrong. One of index format 1,
+        which only CRISPRitz 2.9.1 and earlier build (25/27), beside a log of 30/30, and
+        one that records 30/30 beside a log of 25/27, are refused, saying both widths; one
+        that records the log's own windows is searched."""
+        for metas, rows, built, logged in (
+                (None, window_rows("chrA", 30, 30), "25/27", "30/30"),
+                ({"chrA": {"index_format": 2, "indel_window": [30, 30]}},
+                 window_rows("chrA", 25, 27), "30/30", "25/27")):
+            with self.subTest(built=built):
+                shutil.rmtree(os.path.join(self.tmp, "work"), ignore_errors=True)
+                shutil.rmtree(os.path.join(self.tmp, "out"), ignore_errors=True)
+                open(self.stub_log, "w").close()
+                res, lines = self.run_search({"chrA": rows}, {"chrA": True}, metas=metas)
+                self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+                self.assertIsNone(lines)
+                self.assertIn("ERROR: the indel index of chrA (%s) was built from fake-indel "
+                              "windows of %s reference bases" % (
+                                  os.path.join(self.idx, "NRG_3_fakechrA"), built), res.stderr)
+                self.assertIn("holds windows of %s: the index and the log come from two "
+                              "enrichments" % logged, res.stderr)
+                self.assertEqual(self.searched(), [])
+        shutil.rmtree(os.path.join(self.tmp, "work"))
+        shutil.rmtree(os.path.join(self.tmp, "out"))
+        res, lines = self.run_search({"chrA": window_rows("chrA", 30, 30)}, {"chrA": True},
+                                     metas={"chrA": {"index_format": 2, "indel_window": [30, 30]}})
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.searched(), ["chrA"])
+
+    def test_a_search_whose_targets_need_more_than_the_windows_hold_says_so(self):
+        """A 27-nt SaCas9 site (21-nt guide and NNGRRT) with a DNA bulge needs 28 bases,
+        and a window of 25/27 holds up to 27 around an indel (26 at an MNV): the search
+        says so on stdout (the run's log_verbose.txt). On windows of 30/30 (up to 31) it
+        says nothing."""
+        sa = "N" * 21 + "NNGRRT 6"
+        res, _lines = self.run_search({"chrA": window_rows("chrA", 25, 27)}, {"chrA": True},
+                                      true_pam="NNGRRT", pam=sa)
+        self.assertEqual(res.stderr, "")
+        self.assertIn("WARNING [indel search]: the fake-indel windows of ds hold 25 reference "
+                      "bases before each indel and 27 after it, so a target that holds an "
+                      "indel there holds up to 27 bases (26 at a record whose REF and ALT "
+                      "differ at their first base, an MNV or complex record), guide, PAM and "
+                      "DNA bulges counted; this search's targets need up to 28 (a 27-nt guide "
+                      "and PAM with 1 DNA bulge)", res.stdout)
+        self.assertIn("enrich ds again with it (build-index-only) to search them.", res.stdout)
+        # a sites-only dataset (its VCFs name no sample, as the mega's) is not sent to
+        # build-index-only, whose enrichment of them holds no window (W-R3-F1)
+        shutil.rmtree(os.path.join(self.tmp, "work"))
+        shutil.rmtree(os.path.join(self.tmp, "out"))
+        res, _lines = self.run_search({"chrA": window_rows("chrA", 25, 27)}, {"chrA": True},
+                                      true_pam="NNGRRT", pam=sa, vcfs=["chrA"])
+        self.assertEqual(res.stderr, "")
+        self.assertIn("To search them: ds is sites-only: its VCFs name no sample", res.stdout)
+        self.assertIn("install its archive and enriched-genome kit of CRISPRme 2.10.0",
+                      res.stdout)
+        self.assertNotIn("enrich ds again", res.stdout)
+        shutil.rmtree(os.path.join(self.tmp, "work"))
+        shutil.rmtree(os.path.join(self.tmp, "out"))
+        res, _lines = self.run_search({"chrA": window_rows("chrA", 30, 30)}, {"chrA": True},
+                                      true_pam="NNGRRT", pam=sa,
+                                      metas={"chrA": {"index_format": 2,
+                                                      "indel_window": [30, 30]}})
+        self.assertEqual(res.stderr, "")
+        self.assertNotIn("fake-indel windows", res.stdout)
+
     def test_every_line_of_a_worker_reaches_the_log(self):
         chroms = [f"chr{c}" for c in "ABCDEF"]
         self.env["PYTHONPATH"] = self.pool_exit_shim()
@@ -945,6 +1039,52 @@ class IndexSide(_Fixture):
         self.assertIn(f"Indexing INDELs in chrB: could not write {self.sub('chrB')[len(self.tmp) + 1:]}"
                       f"/{NO_TARGETS} (", res.stdout)
         self.assertIn("Indexing failed for INDELs in chrB\n", res.stdout)
+
+    def test_each_sub_index_records_the_windows_its_log_records(self):
+        """Each sub-index records the fake-indel windows its chromosome's indel log
+        (Dictionaries/log_indels_<dataset> of the working directory that holds Genomes/)
+        records, (left, right) reference bases around an indel, which a search reads beside
+        the log (pool_search_indels' _window_mismatch); none where the log tells none."""
+        logs = os.path.join(self.tmp, "Dictionaries", "log_indels_ds")
+        os.makedirs(logs)
+        _write_log(os.path.join(logs, "logchrA.txt.gz"), window_rows("chrA", 30, 30))
+        _write_log(os.path.join(logs, "logchrB.txt.gz"), window_rows("chrB", 25, 27))
+        # (sub-indexes with no target, whose record this stub's empty .bin files would not
+        # get: index_fit records an index of a format it reads)
+        # (each fake-indel genome cut by the windows its log records, as add-variants cuts
+        # it: one whose windows are another width is refused, _window_disagreement)
+        res, indexed = self.run_index({"chrA": window_fake("chrA", 30, 30),
+                                       "chrB": window_fake("chrB", 25, 27),
+                                       "chrC": f">fakechrC\n{NO_NRG}\n"},
+                                      STUB_NO_BIN="fakechrA,fakechrB,fakechrC")
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(indexed, ["chrA", "chrB", "chrC"])
+        for chrom, want in (("chrA", [30, 30]), ("chrB", [25, 27]), ("chrC", None)):
+            with open(os.path.join(self.sub(chrom), ".index_meta.json")) as fh:
+                self.assertEqual(json.load(fh).get("indel_window"), want, chrom)
+
+    def test_a_fake_genome_of_other_windows_than_its_log_is_refused(self):
+        """W-R2-F1's class: a fake-indel genome cut by windows of another width than its indel
+        log records (a download installs an archive's logs beside an enrichment made here by
+        another CRISPRitz) is not indexed: the sub-index would record the log's windows, and
+        be read with that log, every indel row misplaced. The others are built."""
+        logs = os.path.join(self.tmp, "Dictionaries", "log_indels_ds")
+        os.makedirs(logs)
+        _write_log(os.path.join(logs, "logchrA.txt.gz"), window_rows("chrA", 30, 30))
+        _write_log(os.path.join(logs, "logchrB.txt.gz"), window_rows("chrB", 30, 30))
+        res, indexed = self.run_index({"chrA": window_fake("chrA", 30, 30),
+                                       "chrB": window_fake("chrB", 25, 27)},
+                                      STUB_NO_BIN="fakechrA,fakechrB")
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        # (its first window's end falls among the Ns this fixture puts between two windows;
+        # the next one's past the sequence's end)
+        self.assertIn("ERROR: the fake-indel genome of chrB (%s) and its indel log, in %s, come "
+                      "from two enrichments: the window of chrB_200_ACG_A, which the log places "
+                      "at 100-161 of the fake sequence, ends elsewhere there (no separator after "
+                      "it)." % (os.path.join(self.tmp, "Genomes", "ref+ds_INDELS", "fake_ds_chrB"),
+                                logs), res.stderr)
+        self.assertIn("Indexing failed for INDELs in chrB\n", res.stdout)
+        self.assertEqual(indexed, ["chrA"])
 
     def test_a_normal_build_is_unchanged(self):
         res, indexed = self.run_index({"chrA": f">fakechrA\n{WITH_NRG}\n",

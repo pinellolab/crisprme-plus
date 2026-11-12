@@ -57,9 +57,12 @@ tabix index written by this file's own writer), and rows in the column layout of
 import contextlib
 import gzip
 import io
+import json
 import os
+import re
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -4616,14 +4619,47 @@ def write_bin(path, fmt, flags=0, guide_len=20, pam="NRG", budget=2):
         fh.write(b"\0" * 64)
 
 
+def write_indel_log(path, vcf, window):
+    """The indel log CRISPRitz's add-variants writes of ``vcf`` (log<chrom>.txt of
+    Dictionaries/log_indels_<dataset>), as far as the checker reads it: one row per
+    indel-path ALT of a PASS or '.' record (an indel or an MNV), its CHR field holding its
+    fake-indel window's start and end, ``window`` = (before, after) reference bases around
+    the record's REF (POS - 1 - before, POS - 1 + len(REF) + after)."""
+    before, after = window
+    rows, k = [], 0
+    with gzip.open(vcf, "rt") as fh:
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            f = line.rstrip("\n").split("\t")
+            if f[6] not in ("PASS", "."):
+                continue
+            pos, ref = int(f[1]), f[3]
+            for alt in f[4].split(","):
+                if alt.startswith("<") or alt == "*" or not (
+                        len(alt) != len(ref) or (len(alt) > 1 and len(ref) > 1)):
+                    continue
+                k += 1
+                rows.append("%s_%d-%d_%d\tS01\t.\t0.1\t%s_%d_%s_%s\t0,1\tN" % (
+                    f[0], pos - 1 - before, pos - 1 + len(ref) + after, k, f[0], pos, ref,
+                    alt))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n" +
+                 "".join(r + "\n" for r in rows))
+
+
 def as_2100(case, log="", var_flags=4, var_format=2, indels_format=2, enriched=None,
-            budget=2, guide_len=20, pam="NRG"):
+            budget=2, guide_len=20, pam="NRG", window=(25, 27)):
     """Lay ``case`` out as a run of CRISPRme 2.10.0 of dataset v: its results folder moved
     to work/Results/run, with .Params.txt (Genome_idx), .indexes_searched.txt and (``log``
     not None) log_verbose.txt; the variant index and the INDELS index it names in
     work/genome_library, a .bin of the format given each (``var_format`` None: no variant
     index, as for a search without bulges); ``enriched``: the variant genome, written as
-    work/Genomes/hg38+v/chr21.enriched.fa."""
+    work/Genomes/hg38+v/chr21.enriched.fa; ``window`` (None: none): the (before, after)
+    of the fake-indel windows the dataset's indel log, work/Dictionaries/log_indels_v,
+    records (write_indel_log): 25/27, an enrichment of CRISPRitz 2.9.1 or earlier, unless
+    a test says otherwise (30/30: 2.10.0's)."""
     work = os.path.join(case.tmp, "work")
     lib = os.path.join(work, "genome_library")
     res = os.path.join(work, "Results", "run")
@@ -4651,6 +4687,9 @@ def as_2100(case, log="", var_flags=4, var_format=2, indels_format=2, enriched=N
     if enriched is not None:
         os.makedirs(os.path.join(work, "Genomes", "hg38+v"), exist_ok=True)
         write_fasta(os.path.join(work, "Genomes", "hg38+v", "chr21.enriched.fa"), enriched)
+    if window is not None:
+        write_indel_log(os.path.join(work, "Dictionaries", "log_indels_v",
+                                     "log%s.txt" % case.chrom), case.vcf, window)
     return case
 
 
@@ -4831,11 +4870,13 @@ class ReleaseTwoTen(Base):
         case, _ = world_indel_snp(plain)
         self.assertEqual(said(case), ["check_indel_rows: read as a run of CRISPRme 2.8.1 or "
                                       "earlier (every dataset: the last record of a split "
-                                      "site, store of every FILTER, INDELS format 1)"])
-        as_2100(case, var_flags=0)
+                                      "site, store of every FILTER, INDELS format 1, "
+                                      "fake-indel windows 25/27)"])
+        as_2100(case, var_flags=0, window=(30, 30))
         self.assertEqual(said(case), ["check_indel_rows: read as a run of CRISPRme 2.10.0 or "
                                       "later (v on chr21: no split SNP site to tell, store "
-                                      "of PASS and '.', INDELS format 2)"])
+                                      "of PASS and '.', INDELS format 2, fake-indel windows "
+                                      "30/30)"])
         seq = PRE + GUIDE[:4] + other(GUIDE[4]) + GUIDE[5:10] + "C" + GUIDE[10:] + "TGG" + POST
         snp, ref_b = len(PRE) + 5, seq[len(PRE) + 4]
         third = next(x for x in "ACGT" if x not in (ref_b, GUIDE[4]))
@@ -4847,7 +4888,111 @@ class ReleaseTwoTen(Base):
                                       "later (no chromosome to read it for)"])
         self.assertEqual(said(case, mode="completeness", budget=("0", "0", "0", "0")),
                          ["check_indel_rows: read as a run of CRISPRme 2.10.0 or later (v on "
-                          "chr21: every allele, store of PASS and '.', INDELS format 2)"])
+                          "chr21: every allele, store of PASS and '.', INDELS format 2, "
+                          "fake-indel windows 25/27)"])
+
+    def printed_reading(self, window):
+        """The stderr of a check of a run of 2.10.0 (dataset v on chr21; its variant index
+        codes every allele, its store 2.10.0's), whose indel log records fake-indel windows
+        of ``window``."""
+        tmp = os.path.join(self.tmp, "w%d" % window[0])
+        os.makedirs(tmp)
+        case, _ = world_indel_snp(tmp)
+        as_2100(case, window=window)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            case.run()
+        return err.getvalue()
+
+    def test_the_documented_reading_is_the_printed_one(self):
+        """W-R1-F3: the CHANGELOG and RELEASE_CHECKLIST (gate 4c) quote the reading the check
+        prints (on stderr) of a run on an index this release built as the check prints it,
+        its fake-indel windows 30/30 included; gate 4c's check of that reading passes such a
+        run and fails one of other windows, or of windows its records do not tell."""
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        err = self.printed_reading((30, 30))
+        said = [x for x in err.splitlines() if "read as a run of" in x]
+        self.assertEqual(len(said), 1, err)
+        printed = said[0].split("(v on chr21: ", 1)[1][:-1]
+        self.assertTrue(printed.endswith("INDELS format 2, fake-indel windows 30/30"), printed)
+        with open(os.path.join(repo, "docs", "RELEASE_CHECKLIST.md")) as fh:
+            checklist = fh.read()
+        quote = " ".join(re.sub(r"\n#\s+", " ", checklist).split())
+        m = re.search(r'"read as a run of CRISPRme 2\.10\.0 or later \(\.\.\. ([^"]*)\)"', quote)
+        self.assertIsNotNone(m, "RELEASE_CHECKLIST 4c quotes no reading")
+        self.assertEqual(m.group(1), printed)
+        with open(os.path.join(repo, "CHANGELOG.md")) as fh:
+            changelog = " ".join(fh.read().split())
+        m = re.search(r"`read as a run of CRISPRme 2\.10\.0 or later \(<dataset> on <chrom>: "
+                      r"([^`]*)\)`", changelog)
+        self.assertIsNotNone(m, "the CHANGELOG quotes no reading")
+        self.assertEqual(m.group(1), printed)
+        checks = [x for x in checklist.splitlines() if 'grep -o "fake-indel windows' in x]
+        self.assertEqual(len(checks), 2, checks)   # (per chromosome, and genome-wide)
+        gate = os.path.join(self.tmp, "gate")
+        os.makedirs(gate)
+        told = self.printed_reading((25, 27))
+        for text, passes in ((err, True), (told, False),
+                             (err.replace("windows 30/30", "windows not told"), False)):
+            for name in ("indelrows_per-sample_soundness.err", "indelrows_gw_readme.err"):
+                with open(os.path.join(gate, name), "w") as fh:
+                    fh.write(text)
+            for line in checks:
+                out = subprocess.run(["bash", "-c", line], capture_output=True, text=True,
+                                     env={"GATE": gate, "mode": "per-sample",
+                                          "check": "soundness", "g": "readme:guide.txt",
+                                          "PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+                self.assertEqual(out.stdout.strip(), "" if passes else "GATE_FAILED",
+                                 (line, text[-300:]))
+
+    def test_a_chromosome_without_an_indel_reads_no_window(self):
+        """W-R2-N2: a chromosome whose VCF holds no indel record has no fake-indel window (its
+        indel log no row, its INDELS index none recorded): its reading says so, "fake-indel
+        windows none: no indel record", where it said "not told" as of a run whose records do
+        not tell them, and the run is checked; gate 4c passes a genome-wide check that reads it
+        beside chromosomes of 30/30 (it failed every such check of a panel with a chromosome
+        free of indels), and still fails one of windows not told."""
+        tmp = os.path.join(self.tmp, "snp_only")
+        os.makedirs(tmp)
+        seq = PRE + GUIDE[:5] + "C" + GUIDE[6:] + "TGG" + POST
+        case = as_2100(Case(tmp, seq, [(len(PRE) + 6, "C", GUIDE[5], {"S05": "1|0"})], []),
+                       window=(30, 30))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):   # (checked: every chromosome the VCF holds)
+            rc, found = case.run("completeness")
+        none = err.getvalue()
+        self.assertEqual((rc, gating(found)), (0, []), none)
+        said = [x for x in none.splitlines() if "read as a run of" in x]
+        self.assertEqual(len(said), 1, none)
+        self.assertTrue(said[0].endswith("INDELS format 2, fake-indel windows none: no indel "
+                                         "record)"), said[0])
+        # a sites-only VCF (the mega's) with no indel record there reads none too (W-R3-N2)
+        write_sites_only_vcf(case.vcf, "chr21", [(len(PRE) + 6, "C", GUIDE[5])])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, found = case.run("completeness")
+        sites = [x for x in err.getvalue().splitlines() if "read as a run of" in x]
+        self.assertEqual(len(sites), 1, err.getvalue())
+        self.assertTrue(sites[0].endswith("fake-indel windows none: no indel record)"), sites[0])
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(repo, "docs", "RELEASE_CHECKLIST.md")) as fh:
+            checks = [x for x in fh.read().splitlines() if 'grep -o "fake-indel windows' in x]
+        self.assertEqual(len(checks), 2, checks)
+        gate = os.path.join(self.tmp, "gate")
+        os.makedirs(gate)
+        told = self.printed_reading((30, 30))
+        for text, passes in ((told + none, True), (none, False),
+                             (told + none.replace("none: no indel record", "not told"), False)):
+            for name in ("indelrows_per-sample_soundness.err", "indelrows_gw_readme.err"):
+                with open(os.path.join(gate, name), "w") as fh:
+                    fh.write(text)
+            for line in checks:
+                out = subprocess.run(["bash", "-c", line], capture_output=True, text=True,
+                                     env={"GATE": gate, "mode": "per-sample",
+                                          "check": "soundness", "g": "readme:guide.txt",
+                                          "PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+                self.assertEqual(out.stdout.strip(), "" if passes else "GATE_FAILED",
+                                 (line, text[-300:]))
 
     def test_two_alts_of_one_position_on_a_slot_are_putative(self):
         """Every allele coded, a slot can hold two ALTs of one position (split records
@@ -5356,6 +5501,118 @@ class ReleaseTwoTen(Base):
         self.assertEqual((rc, gating(found)), (0, []), found)
         self.assertIn("limit-window-reach", classes(found), found)
 
+    def test_the_fake_indel_window_is_the_runs_own(self):
+        """The fake-indel window is read from the run's indel log (each row's window start
+        and end): on windows of 25/27 (CRISPRitz 2.9.1) a DNA-bulged SaCas9 target that
+        starts a base before the window is held by no index (limit-window-reach, not
+        demanded); on windows of 30/30 (2.10.0) it is in the window, demanded, and a missing
+        row fails. Read as 25/27 whatever the log, it was never demanded."""
+        seq, recs, _start = world_window_edge(self.tmp, bulged=True)
+        budget = ("2", "1", "0", "3")
+        for window, want in (((25, 27), (0, "limit-window-reach")),
+                             ((30, 30), (1, "missing-row"))):
+            tmp = os.path.join(self.tmp, "w%d" % window[0])
+            os.makedirs(tmp)
+            case = as_2100(Case(tmp, seq, recs, [], pam=SA_PAM), budget=2, guide_len=21,
+                           pam="NNGRRT", window=window)
+            rc, found = case.run(mode="completeness", budget=budget, guide=G21)
+            self.assertEqual(rc, want[0], (window, found))
+            self.assertIn(want[1], classes(gating(found) if want[0] else found),
+                          (window, found))
+            if not want[0]:
+                self.assertEqual(gating(found), [], found)
+                line = [f[2] for f in found if f[1] == "limit-window-reach"][0]
+                self.assertIn("(25 bases before the record's first REF base, 27 after its "
+                              "last), or whose site's guide region does (a target of a 27-nt "
+                              "guide and PAM with a DNA bulge, or one with an RNA bulge at the "
+                              "window's first base, say)", line)
+
+    def test_the_reach_example_is_the_windows(self):
+        """The example a limit-window-reach line gives is the shortest target past the run's
+        own windows: L + b past min(LEFT + 2, RIGHT + 1), a 27-nt SaCas9 target with a DNA
+        bulge on 25/27, a 29-nt one with 3 on 30/30 (with one it fits), any 33-nt one."""
+        self.assertEqual(C.reach_example((25, 27), 27),
+                         "a target of a 27-nt guide and PAM with a DNA bulge")
+        self.assertEqual(C.reach_example((30, 30), 29),
+                         "a target of a 29-nt guide and PAM with 3 DNA bulges")
+        self.assertEqual(C.reach_example((30, 30), 23),
+                         "a target of a 23-nt guide and PAM with 9 DNA bulges")
+        self.assertEqual(C.reach_example((30, 30), 33), "a target of a 33-nt guide and PAM")
+
+    def test_a_run_whose_records_say_no_window_is_refused(self):
+        """A run of 2.10.0 whose working directory holds no indel log of the dataset, and
+        whose INDELS index records no window (index_meta's indel_window), does not say the
+        fake-indel windows its targets were searched in: refused (exit 2) where its VCF has
+        indel records. With the INDELS sub-index's record of 30/30 it is read so (the
+        DNA-bulged target is demanded)."""
+        seq, recs, _start = world_window_edge(self.tmp, bulged=True)
+        budget = ("2", "1", "0", "3")
+        case = as_2100(Case(self.tmp, seq, recs, [], pam=SA_PAM), budget=2, guide_len=21,
+                       pam="NNGRRT", window=None)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, _found = case.run(mode="completeness", budget=budget, guide=G21)
+        self.assertEqual(rc, 2)
+        self.assertIn("the fake-indel windows of v on chr21", err.getvalue())
+        sub = os.path.join(self.tmp, "work", "genome_library", "21-NNGRRT_2_hg38+v_INDELS",
+                           "NNGRRT_2_fakechr21")
+        with open(os.path.join(sub, ".index_meta.json"), "w") as fh:
+            json.dump({"index_format": 2, "indel_window": [30, 30]}, fh)
+        rc, found = case.run(mode="completeness", budget=budget, guide=G21)
+        self.assertEqual(rc, 1, found)
+        self.assertIn("missing-row", classes(gating(found)), found)
+
+    def test_the_refusal_says_why_the_windows_are_not_told(self):
+        """W-R1-N4.5: the refusal of a run whose records do not tell its fake-indel windows
+        says why: no indel log of the dataset in the working directory; one with no row;
+        one whose rows hold two widths, which no one enrichment writes; one with a row of
+        no indel log's layout."""
+        seq, recs, _start = world_window_edge(self.tmp, bulged=True)
+        budget = ("2", "1", "0", "3")
+        case = as_2100(Case(self.tmp, seq, recs, [], pam=SA_PAM), budget=2, guide_len=21,
+                       pam="NNGRRT", window=None)
+        log = os.path.join(self.tmp, "work", "Dictionaries", "log_indels_v", "logchr21.txt")
+        head = "CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n"
+        row = "chr21_%d-%d_%d\tS01\t.\t0.1\tchr21_%d_A_AT\t0,1\tN\n"
+        pos = recs[0][0]
+        for body, said in (
+                (None, "the run's working directory holds no indel log of it, "
+                       "Dictionaries/log_indels_v/logchr21.txt[.gz]"),
+                (head, "its indel log %s holds no row" % log),
+                (head + row % (pos - 26, pos + 27, 1, pos)
+                 + row % (pos - 31, pos + 30, 2, pos),
+                 "%s holds fake-indel windows of 25/27 and 30/30 bases" % log),
+                (head + "chr21\tS01\t.\t0.1\tchr21_%d_A_AT\t0,1\tN\n" % pos,
+                 "%s holds a row of no indel log's layout" % log)):
+            if body is not None:
+                os.makedirs(os.path.dirname(log), exist_ok=True)
+                with open(log, "w") as fh:
+                    fh.write(body)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc, _found = case.run(mode="completeness", budget=budget, guide=G21)
+            self.assertEqual(rc, 2, err.getvalue())
+            self.assertIn("the fake-indel windows of v on chr21 (%s" % said, err.getvalue())
+
+    def test_indel_log_window(self):
+        """indel_log_window reads a log's windows from its rows (CHR <chrom>_<start>-<end>_<id>,
+        indel <chrom>_<POS>_<REF>_<ALT>), a chromosome name holding '_' or '-' too; a log
+        of two widths is no one enrichment's (ValueError); one with no row says none."""
+        path = os.path.join(self.tmp, "logchrUn_K-1.txt")
+        rows = ["chrUn_K-1_%d-%d_%d\tS01\t.\t0.1\tchrUn_K-1_%d_%s_%s\t0,1\tN"
+                % (p - 31, p - 1 + len(r) + 30, k, p, r, a)
+                for k, (p, r, a) in enumerate(((100, "A", "AT"), (200, "ACG", "A"),
+                                               (300, "AC", "TG")))]
+        write_text = lambda body: open(path, "w").write(  # noqa: E731
+            "CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n" + body)
+        write_text("".join(r + "\n" for r in rows))
+        self.assertEqual(C.indel_log_window(path), (30, 30))
+        write_text(rows[0] + "\n" + "chr1_74-127_9\tS01\t.\t0.1\tchr1_100_A_AT\t0,1\tN\n")
+        with self.assertRaises(ValueError):
+            C.indel_log_window(path)
+        write_text("")
+        self.assertIsNone(C.indel_log_window(path))
+
     def test_window_cut(self):
         """window_cut on its own: 25 reference bases before the record's first REF base and
         27 after its last; the site's guide region, the guide's length from the PAM
@@ -5403,6 +5660,19 @@ class ReleaseTwoTen(Base):
         right = [(99, 1)] + [(q, 0) for q in range(100, 125)]
         self.assertEqual(C.window_cut(win, ctx, al_, right, "-", 27), "edge")
         self.assertIsNone(C.window_cut(win, ctx, al_, right, "-", 26))
+        # the run's windows of 30/30 (CRISPRitz 2.10.0, its indel log): 30 bases before the
+        # REF's first base (99) and 30 after its last
+        win.sem = C.Semantics(True, {(None, None): {"indels": (2, 2), "window": (30, 30)}}, {})
+        wide = [(q, 0) for q in range(69, 100)] + [(99, 1)]          # 69 = 99 - 30
+        self.assertIsNone(C.window_cut(win, ctx, al_, wide, "+", 27))
+        self.assertEqual(C.window_cut(win, ctx, al_, [(68, 0)] + wide, "+", 27), "reach")
+        self.assertIsNone(C.window_cut(win, ctx, al_, [(99, 1)] + [(q, 0) for q in
+                                                                range(100, 130)], "+", 27))
+        self.assertEqual(C.window_cut(win, ctx, al_, [(99, 1)] + [(q, 0) for q in
+                                                               range(100, 131)], "+", 27),
+                         "reach")
+        self.assertIsNone(C.window_cut(win, ctx, al_, [(q, 0) for q in range(73, 99)]
+                                       + [(99, 1)], "+", 27))         # rna0 of 25/27
 
     def test_a_run_of_2_10_0_writes_no_capped_greedy_row(self):
         """A per-sample run of 2.10.0 reports a window over CRISPRME_IUPAC_CAP by the
@@ -5480,6 +5750,94 @@ class ReleaseTwoTen(Base):
                      "2.9.1 or earlier): it lacks ...\n")
         sem, _why = C.run_semantics(case.res, vcfs, ["chr21"], ["v"], "hg38")
         self.assertEqual(sem.indels(vcfs[0], "chr21"), (1, 3))
+
+    def test_every_chromosome_reads_the_store_from_the_runs_own_log(self):
+        """W-R1-F1: run_semantics reads each chromosome's store FILTER rule from the run's
+        log_verbose.txt, whatever chromosomes come before it. The indel log it reads a
+        chromosome's fake-indel windows from (Dictionaries/log_indels_<dataset>) never takes
+        that log's place. With a log_verbose.txt that notes no older store, every chromosome
+        reads 2.10.0's store, chr21 after chr20 (which has no indel log) too. With one that
+        notes chr21's store as older, chr21 alone reads it so. Without log_verbose.txt none
+        is told, chr22 after chr21 (which has an indel log) too."""
+        seq, recs, row, _D, _J = world_filter_second("PASS")
+        case = Case(self.tmp, seq, recs, [row])
+        vcfs = [C.Vcf(case.vcf)]
+        as_2100(case, log="", indels_format=2, budget=3)
+        chroms = ["chr20", "chr21", "chr22"]
+
+        def stores():
+            sem, _why = C.run_semantics(case.res, vcfs, chroms, ["v"], "hg38")
+            return [sem.values[("v", ch)]["store_filter"] for ch in chroms]
+
+        self.assertEqual(stores(), [True, True, True])
+        with open(os.path.join(case.res, "log_verbose.txt"), "w") as fh:
+            fh.write("NOTE [indel-snp]: the phased indel genotype store of v on chr21 was "
+                     "written before CRISPRme 2.10.0: ...\n")
+        self.assertEqual(stores(), [True, False, True])
+        os.remove(os.path.join(case.res, "log_verbose.txt"))
+        self.assertEqual(stores(), [None, None, None])
+
+    def add_chromosome(self, case, chrom, records):
+        """A second chromosome of the run's dataset v: its reference beside chr21's, and a
+        VCF of its own in the same folder as v.vcf.gz (read as v, the run's one dataset).
+        Returns the VCF's path."""
+        seq = PRE + GUIDE + "TGG" + POST + PRE
+        write_fasta(os.path.join(case.tmp, "Genomes", chrom + ".fa"), seq, chrom)
+        path = os.path.join(os.path.dirname(case.vcf), "v_%s.vcf.gz" % chrom)
+        write_vcf(path, chrom, [(p, seq[p - 1:p - 1 + n], alt, gts, filt)
+                                for p, n, alt, gts, filt in records])
+        return path
+
+    def check_all(self, case, vcfs):
+        """main in completeness mode without --chrom (every chromosome the VCFs hold), as a
+        genome-wide check runs: (exit status, stderr)."""
+        out = os.path.join(case.tmp, "all.tsv")
+        argv = ["--results", case.res, "--reference", os.path.join(case.tmp, "Genomes"),
+                "--pam", case.pam, "--mm", "4", "--bDNA", "1", "--bRNA", "1",
+                "--max-total-edits", "6", "--mode", "completeness", "--guide", GUIDE,
+                "--out", out]
+        for v in vcfs:
+            argv += ["--vcf", v]
+        made = fill_markers(case.res)
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                rc = C.main(argv)
+        finally:
+            for p in made:
+                os.remove(p)
+        return rc, err.getvalue()
+
+    def test_a_check_of_every_chromosome_reads_the_runs_own_log(self):
+        """W-R1-F1 through main, in completeness mode without --chrom. The run's log notes
+        chr21's store as one written before 2.10.0 (which keeps J, so the row listing S02
+        alone is right). With a second VCF of the dataset for chr20, which sorts first and
+        has no indel log, chr21 is still read as that older store and the run passes."""
+        seq, recs, row, _D, _J = world_filter_second("LowQual")
+        case = as_2100(Case(self.tmp, seq, recs, [row]))
+        with open(os.path.join(case.res, "log_verbose.txt"), "w") as fh:
+            fh.write("NOTE [indel-snp]: the phased indel genotype store of v on chr21 was "
+                     "written before CRISPRme 2.10.0: it holds ...\n")
+        v20 = self.add_chromosome(case, "chr20", [(len(PRE) + 3, 1, "A" if GUIDE[2] != "A"
+                                                   else "C", {"S01": "1|0"}, "PASS")])
+        rc, err = self.check_all(case, [case.vcf, v20])
+        self.assertEqual(rc, 0, err)
+        self.assertRegex(err, r"v on chr21: [^;]*store of every FILTER")
+        self.assertRegex(err, r"v on chr20: [^;]*store of PASS and '\.'")
+
+    def test_a_run_without_its_log_is_refused_on_every_chromosome(self):
+        """W-R1-F1 through main, the other way: a run of 2.10.0 with no log_verbose.txt does
+        not say which indels its store held, so a chr22 VCF holding a LowQual indel is
+        refused (exit 2), though chr21's indel log sorts before it; chr21, whose indels all
+        pass, is not."""
+        seq, recs, row, _D, _J = world_filter_second("PASS")
+        case = as_2100(Case(self.tmp, seq, recs, [row]), log=None)
+        v22 = self.add_chromosome(case, "chr22", [(len(PRE) + 5, 2, GUIDE[4],
+                                                   {"S03": "1|0"}, "LowQual")])
+        rc, err = self.check_all(case, [case.vcf, v22])
+        self.assertEqual(rc, 2, err)
+        self.assertIn("which indels the phased indel genotype store of v held on chr22", err)
+        self.assertNotIn("held on chr21", err)
 
 
 # --------------------------------------------------------------------------- #

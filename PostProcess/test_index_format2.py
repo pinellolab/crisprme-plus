@@ -1735,6 +1735,35 @@ class AnArchiveSaysItsFormat(_Index):
         shutil.rmtree(os.path.join(self.tmp, "src"))
         return self.layout(mixed=True)
 
+    def test_publish_records_the_fake_indel_windows(self):
+        """W-R1-N3.3: publish-index puts the fake-indel windows a variant index's indel logs
+        record on the manifest (indel_window: [left, right] reference bases around each
+        indel), the windows of the enrichment its INDELS index was built from; none where its
+        logs hold no row, or windows of two widths (logs of two enrichments), and none for a
+        reference index."""
+        self.engine(2)
+        idx = self.layout()
+        logs = os.path.join(self.tmp, "src", "Dictionaries", "log_indels_hg38_ds")
+        sink = os.path.join(self.tmp, "sink")
+        os.makedirs(sink)
+
+        def log(chrom, left, right):   # one insertion A>AT at POS 100, as add-variants logs it
+            with open(os.path.join(logs, "log%s.txt" % chrom), "w") as fh:
+                fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n"
+                         "%s_%d-%d_1\tS1\trs1\t0.1\t%s_100_A_AT\t0,%d\tN\n"
+                         % (chrom, 99 - left, 100 + right, chrom, left + 2 + right))
+
+        self.assertNotIn("indel_window", self.manifest(self.publish(idx, sink)))  # no row
+        log("chr22", 30, 30)
+        self.assertEqual(self.manifest(self.publish(idx, sink))["indel_window"], [30, 30])
+        log("chr22", 25, 27)
+        self.assertEqual(self.manifest(self.publish(idx, sink))["indel_window"], [25, 27])
+        log("chr21", 30, 30)
+        self.assertNotIn("indel_window", self.manifest(self.publish(idx, sink)))
+        ref = os.path.join(self.tmp, "src", "genome_library", "NGG_2_hg38")
+        one_target_bin(os.path.join(ref, "NGG_chr22_1.bin"), "NGG", fmt=2)
+        self.assertNotIn("indel_window", self.manifest(self.publish(ref, sink)))
+
     def test_download_says_at_once_an_archive_the_engine_cannot_read(self):
         import contextlib
         import io

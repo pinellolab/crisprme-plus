@@ -30,7 +30,7 @@ with open(LOG) as fh:
         c=line.rstrip("\n").split("\t")
         if len(c)<6: continue
         fs,fe=map(int,c[5].split(","))
-        sp=int(c[0].split("_")[1].split("-")[0])
+        sp=int(c[0].rsplit("_",1)[0].rsplit("-",1)[0].rsplit("_",1)[1])  # the window's start (its left flank: POS-1-sp)
         p=c[4].split("_"); ref,alt=p[-2],p[-1]; pos=int(p[-2-1]) if False else int(c[4].split("_")[1])
         recs.append((fs,fe,sp,ref,alt,pos,c[4]))
 recs.sort(); starts=[r[0] for r in recs]
@@ -52,7 +52,7 @@ with open(TGT) as fh:
 def used_cols(line, r):
     fs,fe,sp,ref,alt,pos,desc=r
     dna,guide,strand=line[2],line[1],line[6]
-    real_of=isc.build_offset_to_real(dna,int(line[4]),strand,fs,sp,ref,alt)
+    real_of=isc.build_offset_to_real(dna,int(line[4]),strand,fs,pos,sp,ref,alt)
     cols=[]
     for j,ch in enumerate(dna):
         gj=guide[j]
@@ -127,7 +127,7 @@ for r,tl in chosen:
     # enriched window for this fake segment's real positions (+ a small margin)
     reals={}
     for k in range(fe-fs):
-        rp=ov.map_fake_offset_to_real(k, sp, len(ref), len(alt))
+        rp=ov.map_fake_offset_to_real(k, sp, len(ref), len(alt), pos - 1 - sp)
         if rp is not None and 0<=rp<len(E): reals[rp]=E[rp]
     # SNP ref/alt (forward) at each overlapping dict position + genotypes
     snps={}
@@ -143,7 +143,7 @@ for r,tl in chosen:
             fake_off = None
             # find the fake offset within [fs,fe) that maps to this real (search)
             for kk in range(fe-fs):
-                if ov.map_fake_offset_to_real(kk, sp, len(ref), len(alt))==real:
+                if ov.map_fake_offset_to_real(kk, sp, len(ref), len(alt), pos - 1 - sp)==real:
                     fake_off=fs+kk; break
             if fake_off is None: continue
             fbase=FSEQ[fake_off].upper()
