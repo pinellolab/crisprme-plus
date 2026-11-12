@@ -6420,6 +6420,119 @@ class StageTwoARoundThree(Base):
         self.assertEqual((rc, gating(found)), (0, []), found)
 
 
+# (GGT)4 + G11: a guide of a GGT repeat and a run of G, and its PAM GGG
+REPEAT_TARGET = "GGTGGTGGTGGTGGGGGGGGGGG"
+REPEAT_GUIDE = REPEAT_TARGET[:20]
+
+
+def world_repeat_places():
+    """M-R3-N2 (chr22:26,153,539 (+), VEGFA site 3, 2 DNA + 2 RNA bulges) in miniature, with
+    no mismatch and no bulge: an insertion of two units of a GGT repeat, A>AGGTGGT, before
+    the reference's GGTGGTGGT and a run of G, and an SNV that turns the third reference
+    unit's T into a G. The target (GGT)4 G11 is on every haplotype of the insertion, at one
+    of two places: from the 4th added base on the haplotype of the insertion alone (S01,
+    S02; and S05, whose SNV is on its other slot), where the target holds the third unit's
+    T as the reference has it; from the 1st added base on the haplotype of the insertion
+    and the SNV (S03, S04), where the target holds the SNV, its 15th base. S06 holds the SNV
+    alone. Both rows start at the insertion's anchor, with the same bases: the insertion's
+    row lists S01, S02 and S05, the row of the insertion and the SNV S03 and S04 (METHODS
+    section 4: the haplotypes left with one sequence form one row, which names the SNP alts
+    they hold). Returns (reference, records, the insertion's row, the other row)."""
+    seq = LONG + PRE + "A" + "GGTGGTGGT" + "G" * 11 + POST
+    anchor0 = len(LONG) + len(PRE)
+    assert seq[anchor0] == "A" and seq[anchor0 + 9] == "T"
+    ins = (anchor0 + 1, "A", "AGGTGGT",
+           {"S01": "1|0", "S02": "0|1", "S03": "1|0", "S04": "0|1", "S05": "1|0"})
+    snv = (anchor0 + 10, "T", "G", {"S03": "1|0", "S04": "0|1", "S05": "0|1", "S06": "1|1"})
+    ref = seq[anchor0:anchor0 + 23]
+    row_ins = row_fields("chr21", anchor0, "+", REPEAT_GUIDE + "NNN", ref, REPEAT_TARGET,
+                         "GGG", 0, 0, "X", tok("chr21", ins), "S01,S02,S05",
+                         spacer=REPEAT_GUIDE + "NNN")
+    row_both = row_fields("chr21", anchor0, "+", REPEAT_GUIDE + "NNN", ref, REPEAT_TARGET,
+                          "GGG", 0, 0, "X", "%s,%s" % (tok("chr21", ins), tok("chr21", snv)),
+                          "S03,S04", spacer=REPEAT_GUIDE + "NNN")
+    return seq, [ins, snv], row_ins, row_both
+
+
+class RepeatPlaces(Base):
+    """A haplotype holds a row's target where its SNP alts in the target are the ones the
+    row names (M-R3-N2). In a repeat, a target that starts inside an insertion starts at
+    the anchor whichever added base it starts on, and another haplotype can read the same
+    bases there from another added base through an SNV the row does not name: that reading
+    is another row's target, the row naming the SNV too."""
+
+    def test_two_places_of_one_target_in_a_repeat_are_two_rows(self):
+        """CRISPRme's two rows are right: S03 and S04 hold the target from the 1st added
+        base through the SNV, and are listed on the row that names it; the row naming the
+        insertion alone, whose target their haplotype holds from no added base without the
+        SNV, does not list them. The check read their reading of the same bases at the
+        anchor as the insertion's row's target and demanded them there (carrier-missing,
+        gating, on each block), at any budget."""
+        seq, recs, row_ins, row_both = world_repeat_places()
+        case = Case(self.tmp, seq, recs, [row_ins, row_both])
+        for budget in (("0", "0", "0", "0"), ("4", "1", "1", "6"), ("4", "2", "2", "6")):
+            rc, found = case.run(mode="soundness", budget=budget, guide=REPEAT_GUIDE)
+            self.assertEqual((rc, gating(found)), (0, []), (budget, found))
+        rc, found = case.run(mode="both", budget=("0", "0", "0", "0"), guide=REPEAT_GUIDE)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_carrier_listed_for_its_target_at_the_other_place_is_caught(self):
+        """CRISPRme listing S03 and S04 on the insertion's row (whose bases their haplotype
+        holds at the anchor only through the SNV the row does not name), with no row naming
+        the SNV, lists them for a target they do not have: soundness fails them on that row
+        (variant-missing: their slot holds a variant inside the target the row does not
+        name), which it let pass as long as it read their other place as the row's, and
+        completeness misses their own target."""
+        seq, recs, row_ins, _row_both = world_repeat_places()
+        wrong = set_field(row_ins, samples="S01,S02,S03,S04,S05")
+        case = Case(self.tmp, seq, recs, [wrong])
+        rc, found = case.run(mode="soundness", budget=("0", "0", "0", "0"),
+                             guide=REPEAT_GUIDE)
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                         {("variant-missing", "S03,S04")}, found)
+        rc, found = case.run(mode="completeness", budget=("0", "0", "0", "0"),
+                             guide=REPEAT_GUIDE)
+        self.assertEqual({f[3] for f in gating(found) if f[1] == "missing-row"},
+                         {"S03", "S04"}, found)
+
+    def test_a_named_snv_outside_the_reading_is_no_listing_either(self):
+        """The row's named SNV on the slot, but not in the slot's reading of the row's bases:
+        the run of G is one base short of the target (an A after ten G), and an SNV A>G at
+        that base (s1) completes it, the target then read from the insertion's 4th added base
+        (the row of the insertion and s1: S01). The SNV of the third unit's T (s2) makes the
+        target from the 1st added base, which ends before s1's base (the row of the
+        insertion and s2: S03). S07 holds the insertion, s1 and s2 on one slot: it reads the
+        bases from the 1st added base through s2, not through s1 (whose base its target does
+        not reach), and from the 4th added base not at all (s2 is in the way). S07 is on the
+        row naming s2, and not on the row naming s1, which the check demanded it on for the
+        s1 its slot holds elsewhere (carrier-missing)."""
+        seq = LONG + PRE + "A" + "GGTGGTGGT" + "G" * 10 + "A" + POST
+        anchor0 = len(LONG) + len(PRE)
+        assert seq[anchor0 + 9] == "T" and seq[anchor0 + 20] == "A"
+        ins = (anchor0 + 1, "A", "AGGTGGT",
+               {"S01": "1|0", "S02": "0|1", "S03": "1|0", "S07": "1|0"})
+        s1 = (anchor0 + 21, "A", "G", {"S01": "1|0", "S07": "1|0"})
+        s2 = (anchor0 + 10, "T", "G", {"S03": "1|0", "S07": "1|0"})
+        ref = seq[anchor0:anchor0 + 23]
+
+        def row(var, samples):
+            return row_fields("chr21", anchor0, "+", REPEAT_GUIDE + "NNN", ref, REPEAT_TARGET,
+                              "GGG", 0, 0, "X", ",".join(tok("chr21", v) for v in var),
+                              samples, spacer=REPEAT_GUIDE + "NNN")
+        rows = [row([ins, s1], "S01"), row([ins, s2], "S03,S07")]
+        case = Case(self.tmp, seq, [ins, s1, s2], rows)
+        for mode in ("soundness", "both"):
+            rc, found = case.run(mode=mode, budget=("0", "0", "0", "0"), guide=REPEAT_GUIDE)
+            self.assertEqual((rc, gating(found)), (0, []), (mode, found))
+        # S07 listed on the row naming s1 is listed for a target it does not have
+        case = Case(self.tmp, seq, [ins, s1, s2], [row([ins, s1], "S01,S07"), rows[1]])
+        rc, found = case.run(mode="soundness", budget=("0", "0", "0", "0"),
+                             guide=REPEAT_GUIDE)
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({f[3] for f in gating(found)}, {"S07"}, found)
+
+
 def code_lines(path):
     """[(line number, text)] of a Python file's code lines: comments, docstrings (a string
     that is a statement) and blank lines left out, whitespace collapsed."""
