@@ -604,12 +604,12 @@ class _Fixture(unittest.TestCase):
         return self.finish(self.start(**kw))
 
     def run_search(self, *options, pam=PAM, bulges="1", vcfs="ds\n", samples=True, genome=None,
-                   again=False):
+                   again=False, environ=None):
         """complete-search --vcf here, as a user runs it next (CFD only, as no
         CRISPR-Bulge env is here), into an output folder of its own, with PAM file pam,
         bulges of each type, the --vcf list vcfs, and options; without --samplesID if not
         samples, of the genome folder genome rather than Genomes/hg38, and, again, into the
-        output folder an earlier run left."""
+        output folder an earlier run left; environ: more of its environment."""
         if not again:
             shutil.rmtree(self.path("Results", "search"), ignore_errors=True)
         _write(self.path("guides.txt"), GENOME["chr1"][:20] + "NNN\n")
@@ -620,7 +620,8 @@ class _Fixture(unittest.TestCase):
                    "--guide", self.path("guides.txt"), "--pam", pam, "--mm", "4",
                    "--bDNA", bulges, "--bRNA", bulges, "--output", "search", "--thread", "2",
                    *options]
-        return self.finish(self.start(command=command, CRISPRME_SKIP_SCORER_ENV="1"))
+        return self.finish(self.start(command=command, CRISPRME_SKIP_SCORER_ENV="1",
+                                      **(environ or {})))
 
     def run_web_search(self, **environ):
         """The search the web UI launches (pages/main_page.py): the search script run
@@ -2744,9 +2745,10 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
     BANNER = ("[complete-search] PER-SAMPLE analysis ({}): resolving per-sample genotypes "
               "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and "
               "exact joint AF. Requires a genotyped index (sites-only panels have no genotypes "
-              "to resolve -- the population-level analysis runs instead). Slower, and can be "
-              "intractable on dense panels; pass --population-level for the fast worst-case "
-              "screen.\n")
+              "to resolve -- the population-level analysis runs instead). Its post-analysis "
+              "skips the raw targets no sample can have (the haplotype pre-check) and runs in "
+              "pieces over the --thread workers; pass --population-level for each window's "
+              "worst case instead.\n")
     # a population-level search's, which {} splits where it says what --per-sample gives
     POPULATION = ("[complete-search] POPULATION-LEVEL analysis: the SNP variant post-analysis "
                   "reports one WORST-POSSIBLE off-target per variant window (no 2^k haplotype "
@@ -2794,8 +2796,10 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
                     "at all, has no frequency. To get the tiers, rebuild the index with "
                     "build-index-only "
                     "--samplesID, or download a prebuilt one (crisprme.py download --what index "
-                    "--index-name 20-NRR_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
-                    "dense panels; pass --population-level for the fast worst-case screen.\n", out)
+                    "--index-name 20-NRR_3_hg38+hg38_HGDP1kGP). Its post-analysis skips the raw "
+                    "targets no sample can have (the haplotype pre-check) and runs in pieces "
+                    "over the --thread workers; pass --population-level for each window's worst "
+                    "case instead.\n", out)
                 # (and no frequency "the VCF gives": a variant has the AF that add-variants
                 # copied, none where its record has AF at another place in INFO than the
                 # first record's, test_generate_report)
@@ -2838,6 +2842,34 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
         self.assertIn(self.POPULATION.format(""), out)
         self.assertIsNone(self.recorded())
         self.assertIsNone(self.recorded(".variant_datasets"))
+
+    def test_its_post_analysis_note_says_what_the_switches_turned_off(self):
+        """The banner said the post-analysis skips the raw targets no sample can have and runs
+        in pieces with --no-haplotype-precheck or CRISPRME_POSTPROC_PIECES=0 too (the review of
+        lane S, round 3): it says what each leaves, as the post-analysis reads them (0, false,
+        no or off, in any case)."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        on = ("Its post-analysis skips the raw targets no sample can have (the haplotype "
+              "pre-check) and runs in pieces over the --thread workers; ")
+        precheck_off = ("Its post-analysis expands every raw target (the haplotype pre-check "
+                        "is off: --no-haplotype-precheck or CRISPRME_HAPLOTYPE_PRECHECK=0) ")
+        pieces_off = "and runs one process a chromosome (CRISPRME_POSTPROC_PIECES=0); "
+        for options, environ, said in (
+                (("--no-haplotype-precheck",), {},
+                 precheck_off + "and runs in pieces over the --thread workers; "),
+                ((), {"CRISPRME_HAPLOTYPE_PRECHECK": "Off"},
+                 precheck_off + "and runs in pieces over the --thread workers; "),
+                ((), {"CRISPRME_POSTPROC_PIECES": "0"},
+                 "Its post-analysis skips the raw targets no sample can have (the haplotype "
+                 "pre-check) " + pieces_off),
+                (("--no-haplotype-precheck",), {"CRISPRME_POSTPROC_PIECES": "no"},
+                 precheck_off + pieces_off)):
+            with self.subTest(options=options, environ=environ):
+                rc, out, err = self.run_search("--per-sample", *options, environ=environ)
+                self.assertIn("Launching job ", out, out + err)
+                self.assertIn(self.BANNER.format("--per-sample").replace(on, said), out)
+                self.assertNotIn(on, out)
 
     def test_beside_a_dataset_with_them_it_records_every_dataset_it_searches(self):
         # ds with its tiers, and du: the same dataset as a build without --samplesID has it

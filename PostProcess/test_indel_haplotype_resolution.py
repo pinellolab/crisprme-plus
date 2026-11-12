@@ -954,7 +954,13 @@ class TheAnalyzerUsesIt(unittest.TestCase):
                       self._src("analisi_indels_NNN.py"))
         self.assertIn('max_total_edits=${13:--1}', self._src("analisi_indels_NNN.sh"))
         self.assertIn('max_total_edits=${14:--1}', self._src("post_analisi_indel.sh"))
-        self.assertIn("{chrom} {max_total_edits}", self._src("pool_post_analisi_indel.py"))
+        # (since 2.10.0 an argument list, the cap after the chromosome, then the stage)
+        self.assertIn("annotation_file, pam_file, dict_folder, final_res, final_res_alt, chrom,\n"
+                      "            str(max_total_edits), stage]",
+                      self._src("pool_post_analisi_indel.py"))
+        self.assertIn('max_total_edits=${14:--1}\n# 2.10.0, option P: all (default), cluster or '
+                      'finish (analisi_indels_NNN.sh)\nstage=${15:-all}',
+                      self._src("post_analisi_indel.sh"))
         sub = self._src("submit_job_automated_new_multiple_vcfs.sh")
         self.assertIn('$final_res $final_res_alt $ncpus "$max_total_edits"', sub)
 

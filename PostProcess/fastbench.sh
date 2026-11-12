@@ -20,7 +20,7 @@ CHROM=chr22
 
 echo "==== FASTBENCH start $(date -u) ===="
 echo "code HEAD: $(cd /srv/local/lp698/fastbench_ck && git rev-parse --short HEAD 2>/dev/null) + overlay"
-python3 -c "import sys; sys.path.insert(0,'$CODE'); import twopass_emit; print('twopass_emit import OK')" || exit 3
+python3 -I -c "import sys; sys.path.insert(0,'$CODE'); import twopass_emit; print('twopass_emit import OK')" || exit 3
 
 # --- Phase 0: produce the chr22 observed cluster (once) --------------------------
 CLUSTER="$BENCH/$CHROM.total.cluster.txt"
@@ -59,7 +59,7 @@ SRC=$?; S1=$(date +%s)
 echo "[SLOW] end $(date -u) rc=$SRC elapsed=$((S1-S0))s rows=$(wc -l < "$BENCH/out_slow.bestmmblg.txt" 2>/dev/null)"
 tail -2 "$BENCH/slow.log"
 
-echo "==== TIMING: FAST=$((F1-F0))s  SLOW=$((S1-S0))s  speedup=$(python3 -c "print('%.1fx' % (($S1-$S0)/max(1,($F1-$F0))))") ===="
+echo "==== TIMING: FAST=$((F1-F0))s  SLOW=$((S1-S0))s  speedup=$(python3 -I -c "print('%.1fx' % (($S1-$S0)/max(1,($F1-$F0))))") ===="
 
 # --- Phase 3: no-miss + worst-possible comparison --------------------------------
 ./fastbench_compare.py "$BENCH/out_slow.bestmmblg.txt" "$BENCH/out_fast.bestmmblg.txt"

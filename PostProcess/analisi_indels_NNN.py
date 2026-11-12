@@ -32,8 +32,7 @@ NOTE: Verify if it is compatible with PAM at the beginning.
 #     can carry more mismatches than the engine counted on the IUPAC-coded genome, and
 #     is dropped past this cap as past --mm.
 
-import pickle
-from typing import final  # to read CFD matrices
+from typing import final
 from supportFunctions.loadSample import associateSample
 import re
 import multiprocessing
@@ -60,6 +59,12 @@ except Exception:  # pragma: no cover - module always shipped alongside
 # Clean-room CFD base scorer + its JSON tables (own implementation of Doench et al.,
 # Nat. Biotechnol. 2016), replacing the inherited calc_cfd/revcom/get_mm_pam_scores.
 from cfd_score import cfd as _cfd_clean, cfd_tables as _cfd_tables
+# 2.10.0: the CRISPR-Bulge scoring of a batch of rows, shared with the SNP post-analysis
+# and the merge of a post-analysis cut into pieces (cbulge_rows), and the carriers-first
+# pre-check of an overlaid target (haplotype_precheck: pure, stdlib).
+import cbulge_rows as _cbr
+import haplotype_precheck as _hpc
+import analysis_notes as _notes
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -455,80 +460,10 @@ def preprocess_CFD_score(target):
 
 
 def preprocess_CRISPR_BULGE_score(cluster_targets):
-    """CRISPR-Bulge scoring (analogue of the retired legacy-scorer preprocessing path, indel path).
-
-    Identical output contract + alt/ref two-pass + null semantics as the CRISPR-Bulge path,
-    but scores the aligned (sgRNA, off-target) pair only (NO 29-nt genomic window) via
-    the scorer-runner (dedicated cbulge env; graceful -1.0 if absent). Unscoreable rows
-    (N in aligned DNA, or length mismatch) get an equal-length dummy then are nulled by
-    index, so CRISPR-Bulge's per-row len(sg)==len(off) requirement always holds.
-    """
-    import scorer_runner  # lazy: only when CRISPR-Bulge is selected
-
-    cluster_scored = list()
-    index_to_null = list()
-
-    if not do_scores:
-        for target in cluster_targets:
-            t = target.copy()
-            t[-2] = "{:.6g}".format(-1)
-            t.append("{:.6g}".format(-1))
-            cluster_scored.append(t)
-        return cluster_scored
-
-    # seq_len=24 model: faithfully scores a protospacer+PAM alignment with AT MOST ONE 1-bp
-    # bulge. Score ONLY what the model represents and NULL (-1) everything else so a value is
-    # always trustworthy: N in the aligned off, sg/off length mismatch, >1 gap column (>=2
-    # bulges OR a single >=2-bp bulge), or over-length (>24). Nulled rows fall back to CFD
-    # (PRIMARY) + mismatches/bulges. We deliberately do NOT collapse/reduce multi-bulge
-    # alignments to one bulge -- an adversarial review showed the naive reduction corrupts the
-    # alignment and its "conservative" direction is unprovable for a non-monotonic GRU (silent
-    # under-flag risk). Multi-bulge OTs are the rare, heavily-disrupted tail; CFD + edit distance
-    # carry them. A scoreable equal-length dummy is substituted for nulled rows.
-    _MAXLEN = 24
-    _SG_DUMMY = "A" * 20 + "NGG"
-    _OFF_DUMMY = "A" * 20 + "AGG"
-
-    def _pair(target, off_field, index):
-        sg = str(target[1])[: len(str(target[1])) - 3] + "NGG"
-        off = str(off_field)
-        total_gaps = sg.count("-") + off.count("-")
-        if (("N" in off) or ("n" in off) or (len(off) != len(sg))
-                or total_gaps > 1 or len(sg) > _MAXLEN):
-            index_to_null.append(index)
-            return _SG_DUMMY, _OFF_DUMMY
-        return sg, off
-
-    pairs_alt = [_pair(t, t[2], i) for i, t in enumerate(cluster_targets)]
-    scores_alt = scorer_runner.CRISPR_BULGE_predict_list(
-        [p[0] for p in pairs_alt], [p[1] for p in pairs_alt])
-
-    pairs_ref = []
-    for i, target in enumerate(cluster_targets):
-        ref = str(target[-3]) if "n" not in str(target[-3]) else str(target[2])
-        pairs_ref.append(_pair(target, ref, i))
-    scores_ref = scorer_runner.CRISPR_BULGE_predict_list(
-        [p[0] for p in pairs_ref], [p[1] for p in pairs_ref])
-
-    # CRISPR-Bulge scores at FULL precision ("{:.6g}") -- the 95%-recall sensitive
-    # default (1.9e-4) is below the old 3-decimal floor (see cb_operating_point).
-    for index, target in enumerate(cluster_targets):
-        t = target.copy()
-        if index in index_to_null:
-            s = -1
-            t[-2] = "{:.6g}".format(s)
-            t.append("{:.6g}".format(s))
-        else:
-            if t[-2] == 55:
-                t[-2] = "{:.6g}".format(scores_alt[index])
-                t.append("{:.6g}".format(scores_alt[index]))
-            if t[-2] == 33:
-                t[-2] = "{:.6g}".format(scores_ref[index])
-                t.append("{:.6g}".format(scores_alt[index]))
-        cluster_scored.append(t)
-
-    return cluster_scored
-
+    """CRISPR-Bulge scores of one batch of rows: cbulge_rows.score_rows (one body, shared
+    with the SNP post-analysis and with the merge of a post-analysis cut into pieces,
+    merge_pieces.py, which scores the pieces' rows in the batches one process forms)."""
+    return _cbr.score_rows(cluster_targets, do_scores)
 
 def calculate_scores(cluster_to_save):
     # function to calculate score for each input target
@@ -683,8 +618,18 @@ current_guide_chr_pos_direction = "no"
 cfd_best = open(outputFile + ".bestCFD_INDEL.txt", "w")
 cfd_best.write(header + "\tCFD\n")  # Write header
 
-crispr_bulge_best = open(outputFile + ".bestCRISPR_BULGE_INDEL.txt", "w")
-crispr_bulge_best.write(header + "\tCFD\n")
+# 2.10.0, option P: in a piece of a post-analysis cut into pieces (pool_post_analisi_indel.py,
+# CRISPRME_POSTPROC_PIECE=1), the rows' CRISPR-Bulge scores are left to the merge
+# (merge_pieces.py), which scores them in exactly the batches one process forms: the rows go
+# unscored to <out>.cbulge_rows.jsonl, each with its input line
+_PIECE = os.environ.get("CRISPRME_POSTPROC_PIECE", "0") == "1"
+if _PIECE:
+    crispr_bulge_best = None
+    cbulge_rows_out = open(outputFile + ".cbulge_rows.jsonl", "w")
+else:
+    crispr_bulge_best = open(outputFile + ".bestCRISPR_BULGE_INDEL.txt", "w")
+    crispr_bulge_best.write(header + "\tCFD\n")
+    cbulge_rows_out = None
 
 mmblg_best = open(outputFile + ".bestmmblg_INDEL.txt", "w")
 mmblg_best.write(header + "\tCFD\n")  # Write header
@@ -692,14 +637,15 @@ mmblg_best.write(header + "\tCFD\n")  # Write header
 
 import indel_snp_cis as _isc
 
-INDELS_tree = IntervalTree()
 # record name -> its carriers as the indel log lists them ("S1,S2,..."), over every line
 # of the record: two lines of one indel or MNV REF>ALT at a position, in one case or in
 # two, are one allele (decision B2), and the log gives each line a window of its own with
 # its own carriers. _indel_carriers reads them where the phased indel store holds none of
 # the record: an MNV (the store keeps indels only) or an indel where no store is
 # installed. (A value is the log's own string, shared with INDELS_tree, but for a record
-# on two or more lines.)
+# on two or more lines.) Every line of the log is read into it, a piece's too
+# (_build_indels_tree): the other line of a record can hold a window none of the piece's
+# lines reads.
 _log_carriers = {}
 
 
@@ -715,36 +661,86 @@ def _log_union(first, more):
     return ",".join(out)
 
 
-# prefer a gzip-compressed indel log (log<chrom>.txt.gz) when present so batteries
-# installs keep the logs compressed on disk and read them on the fly; fall back to plain
-_logbase = os.path.realpath(sys.argv[4]) + "/log" + current_chr + ".txt"
-_logpath = _logbase + ".gz" if os.path.exists(_logbase + ".gz") else _logbase
-with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, "r")) as log:
-    # print('indel processing:', current_chr)
-    log.readline()
-    for entry in log:
-        splitted = entry.strip().split("\t")
-        fake_pos = splitted[5].strip().split(",")  # inizio,fine del fakechr
-        # start       end fakechr          #pos_vera,samples,rsID,MAF,INDELinfo,start_fake,ref_seq
-        # (the rsID is the record's first ID: CRISPRitz add-variants writes no other into
-        # the indel log, whatever the number of ALTs; METHODS section 8). The record is
-        # named with REF and ALT in upper case (indel_snp_cis.record_name): two lines of
-        # one indel or MNV written in two cases are one record, as the phased store's
-        # readers read them (2.10.0; the log keeps the VCF's case), and its carriers are
-        # those of every line (_log_carriers).
-        _name = _isc.record_name(splitted[4])
-        INDELS_tree[int(fake_pos[0]) : int(fake_pos[1])] = [
-            splitted[0],
-            splitted[1],
-            splitted[2],
-            splitted[3],
-            _name,
-            int(fake_pos[0]),
-            splitted[6],
-        ]
-        _seen = _log_carriers.get(_name)
-        _log_carriers[_name] = (splitted[1] if _seen is None
-                                else _log_union(_seen, splitted[1]))
+# 2.10.0, option P: a piece of a post-analysis cut into pieces (pool_post_analisi_indel.py)
+# analyses the lines first..last (1-based, the header not counted) of the chromosome's whole
+# cluster file, CRISPRME_POSTPROC_RANGE="first:last"; every other start-up step is one
+# process's. Its windows of the indel log are those that hold one of its lines' positions
+# (each line reads the windows holding its position: the same ones), where the per-sample
+# SNP genotypes come from the Tier-1 store; on a classic dictionary install, whose
+# dictionary positions are read for every line of the file (_overlaid_positions), all of
+# them, as one process reads them.
+_RANGE = None
+if os.environ.get("CRISPRME_POSTPROC_RANGE"):
+    _first, _last = os.environ["CRISPRME_POSTPROC_RANGE"].split(":")
+    _RANGE = (int(_first), int(_last))
+_range_positions = None
+_tier_files = [os.path.join(os.path.dirname(os.path.realpath(sys.argv[4])),
+                            "genotypes_" + os.path.basename(os.path.realpath(sys.argv[4]))[
+                                len("log_indels_"):], "gt_" + current_chr + ext)
+               for ext in (".bin", ".idx")]
+if _RANGE is not None and (all(os.path.isfile(f) for f in _tier_files) or
+                           os.environ.get("CRISPRME_INDEL_SNP", "1")
+                           not in ("1", "true", "True", "yes")):
+    _rp = set()
+    with open(resultsFile) as _fh:
+        _fh.readline()  # header
+        for _n, _ln in enumerate(_fh, 1):
+            if _n < _RANGE[0]:
+                continue
+            if _n > _RANGE[1]:
+                break
+            _f = _ln.split("\t", 5)
+            try:
+                _rp.add(int(_f[4]))
+            except (IndexError, ValueError):
+                pass
+    _range_positions = sorted(_rp)
+
+def _build_indels_tree(positions):
+    """The windows of the indel log as an interval tree on the fake chromosome: all of
+    them, or (``positions``, sorted) those that hold one of the positions. Every line's
+    carriers go into _log_carriers, whatever ``positions`` keeps."""
+    tree = IntervalTree()
+    # prefer a gzip-compressed indel log (log<chrom>.txt.gz) when present so batteries
+    # installs keep the logs compressed on disk and read them on the fly; fall back to plain
+    _logbase = os.path.realpath(sys.argv[4]) + "/log" + current_chr + ".txt"
+    _logpath = _logbase + ".gz" if os.path.exists(_logbase + ".gz") else _logbase
+    with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, "r")) as log:
+        # print('indel processing:', current_chr)
+        log.readline()
+        for entry in log:
+            splitted = entry.strip().split("\t")
+            fake_pos = splitted[5].strip().split(",")  # inizio,fine del fakechr
+            # start       end fakechr          #pos_vera,samples,rsID,MAF,INDELinfo,start_fake,ref_seq
+            # (the rsID is the record's first ID: CRISPRitz add-variants writes no other into
+            # the indel log, whatever the number of ALTs; METHODS section 8). The record is
+            # named with REF and ALT in upper case (indel_snp_cis.record_name): two lines of
+            # one indel or MNV written in two cases are one record, as the phased store's
+            # readers read them (2.10.0; the log keeps the VCF's case), and its carriers are
+            # those of every line (_log_carriers).
+            _name = _isc.record_name(splitted[4])
+            _seen = _log_carriers.get(_name)
+            if _seen is None:
+                _log_carriers[_name] = splitted[1]
+            elif _seen != splitted[1]:
+                _log_carriers[_name] = _log_union(_seen, splitted[1])
+            if positions is not None:
+                _k = bisect.bisect_left(positions, int(fake_pos[0]))
+                if _k == len(positions) or positions[_k] >= int(fake_pos[1]):
+                    continue  # holds no position of this piece's lines
+            tree[int(fake_pos[0]) : int(fake_pos[1])] = [
+                splitted[0],
+                splitted[1],
+                splitted[2],
+                splitted[3],
+                _name,
+                int(fake_pos[0]),
+                splitted[6],
+            ]
+    return tree
+
+
+INDELS_tree = _build_indels_tree(_range_positions)
 # datastore = datastore.to_dict(orient='index')
 
 # [indel-snp] SNP+indel co-occurrence (default-on; CRISPRME_INDEL_SNP=0 opts out).
@@ -920,7 +916,7 @@ def _cache_put(cache, key, value, n):
     return value
 # how the overlaid targets were resolved (printed at the end, on stdout)
 _ovl_stats = {"targets": 0, "rows": 0, "dropped": 0, "putative": 0, "unmapped": 0,
-              "second_indel": 0, "flank": 0}
+              "second_indel": 0, "flank": 0, "prechecked": 0}
 
 
 def _snp_record(pos1):
@@ -1271,6 +1267,51 @@ def _indel_carriers(indel_data, ipos, iref, ialt):
     return carriers
 
 
+# 2.10.0, the carriers-first pre-check of an overlaid target (haplotype_precheck): every row
+# indel_snp_cis.resolve_target writes holds, at each code column, the reference base or a
+# base one of the indel's carriers carries there, so when no carrier, free to take at each
+# column any of those, reaches the budget and the PAM, the target has no row. On with the
+# SNP side's pre-check, in either analysis mode (CRISPRME_HAPLOTYPE_PRECHECK=0, complete-search
+# --no-haplotype-precheck, turns both off, and the notes at the end of the chromosome say so;
+# so do false, no and off, in any case: haplotype_precheck.switch_on).
+_PRECHECK = _hpc.switch_on(os.environ, "CRISPRME_HAPLOTYPE_PRECHECK")
+_sample_bits = _hpc.SampleBits()
+_snp_masks = {}      # (pos1, forward alt) -> the samples the genotype source lists for it
+_carrier_masks = {}  # indel token -> the indel's carriers
+
+
+def _carriers_can_have_it(line, cols, token, carriers):
+    """False when no carrier of the window's indel can have a row of the overlaid target
+    ``line`` (haplotype_precheck.indel_target_possible); True otherwise, and always with
+    the pre-check off."""
+    if not _PRECHECK:
+        return True
+    everyone = _carrier_masks.get(token)
+    if everyone is None:
+        everyone = _sample_bits.mask(carriers.parsed)
+        if len(_carrier_masks) > 100000:
+            _carrier_masks.clear()
+        _carrier_masks[token] = everyone
+    columns = []
+    for c in cols:
+        base_masks = {}
+        if c.known:
+            for shown, (alt_fwd, gts) in c.alts.items():
+                m = _snp_masks.get((c.pos1, alt_fwd))
+                if m is None:
+                    m = _sample_bits.mask(gts)
+                    if len(_snp_masks) > 200000:
+                        _snp_masks.clear()
+                    _snp_masks[(c.pos1, alt_fwd)] = m
+                base_masks[shown] = base_masks.get(shown, 0) | m
+        columns.append((c.col, c.ref, c.known, c.code, base_masks))
+    return _hpc.indel_target_possible(
+        line[1], line[2], _isc.pam_columns(len(line[2]), pam, pam_at_beginning),
+        range(len(line[2]))[pos_beg:pos_end], allowed_mms, max_total_edits, int(line[8]),
+        columns, everyone, everyone, max_dna_bulges=max_dna_bulges,
+        max_rna_bulges=max_rna_bulges, code_bases=lambda m: _isc._CODE.get(m, ""))
+
+
 def _overlaid_rows(line, final_result, indel_data, amb):
     """Resolve an overlaid indel target per carrier haplotype (indel_snp_cis).
 
@@ -1319,6 +1360,14 @@ def _overlaid_rows(line, final_result, indel_data, amb):
     if have_gt:
         # the indel's phased carriers (the store), else the log's, phase unknown
         carriers = _indel_carriers(indel_data, _ipos, _iref, _ialt)
+        # 2.10.0, carriers first: when no carrier of the indel can have a row of this
+        # target, it has none, and the second indels that break a slot (the window
+        # breakers, read on the phased store) are not read
+        if not _carriers_can_have_it(line, cols, indel_data[4], carriers):
+            _ovl_stats["targets"] += 1
+            _ovl_stats["dropped"] += 1
+            _ovl_stats["prechecked"] += 1
+            return []
         if carriers.phase_known:
             others = _window_breakers(
                 line[2], real_of,
@@ -1431,27 +1480,10 @@ def _second_indel_rows(line, final_result, indel_data):
     return [fr]
 
 
-def _report_overlaid():
-    """One stdout line on how the overlaid targets were resolved (stdout only:
-    the pipeline treats any stderr write as a fatal stage failure)."""
-    if _ovl_stats["flank"]:
-        print("indel-snp: %d target(s) of the fake-indel windows lie in a flank and hold "
-              "no base of the indel: not indel off-targets, dropped"
-              % _ovl_stats["flank"], flush=True)
-    if _ovl_stats["second_indel"]:
-        print("indel-snp: %d target(s) without a SNP code lost the carriers whose "
-              "haplotype holds a second indel that changes their bases"
-              % _ovl_stats["second_indel"], flush=True)
-    if not _ovl_stats["targets"]:
-        return
-    print("indel-snp: %s overlaid target(s) resolved per carrier haplotype into %d "
-          "row(s) (%d PUTATIVE); %d had no carrier with a target there"
-          % (_ovl_stats["targets"], _ovl_stats["rows"], _ovl_stats["putative"],
-             _ovl_stats["dropped"]), flush=True)
-    if _ovl_stats["unmapped"]:
-        print("WARNING [indel-snp]: %d IUPAC column(s) of %s did not map onto the "
-              "reference base they code; they were resolved without genotypes"
-              % (_ovl_stats["unmapped"], current_chr), flush=True)
+def _note_counts():
+    """The counts the notes at the end are written from (analysis_notes.indel_counts):
+    how the overlaid targets were resolved, and the rows of another contig dropped."""
+    return {"overlaid": dict(_ovl_stats), "foreign_rows": foreign_rows}
 
 
 def _reference_pam(final_result, ref_aligned, hap_start=None):
@@ -1609,6 +1641,9 @@ def _queue_row(final_result, hap_start=None):
 # A classic dictionary install (an index built without --samplesID) has no Tier-1
 # store: the per-sample genotypes live in the SNP dictionary, read here for the
 # positions the overlaid targets and the second indels need (_overlaid_positions).
+# (A piece reads them for every line of the file too, so it needs every window.)
+if _indel_snp and _gt is None and _range_positions is not None:
+    INDELS_tree = _build_indels_tree(None)
 if _indel_snp and _gt is None:
     _dict_path = os.path.join(_droot, "dictionaries_" + _vcf,
                               "my_dict_" + current_chr + ".json")
@@ -1656,14 +1691,58 @@ datastore = None
 
 global_start = time.time()
 
+_BEST_HEADER = (
+    "#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches"
+    "\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF"
+    "\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster")
+
+
+def _write_scored(rows, lines):
+    """Score a batch of rows and write them: CFD to the CFD and fewest-edits files,
+    CRISPR-Bulge to its own; in a piece, the CRISPR-Bulge rows go unscored to
+    <out>.cbulge_rows.jsonl, each with its input line (``lines``), for the merge."""
+    if _PIECE:
+        for target in rows:
+            t = preprocess_CFD_score(target.copy())
+            # remove count of tmp_mms
+            t.pop(-2)
+            cfd_best.write("\t".join(t) + "\t" + str(0) + "\n")
+            mmblg_best.write("\t".join(t) + "\t" + str(0) + "\n")
+        for ln, target in zip(lines, rows):
+            cbulge_rows_out.write(json.dumps([ln, target]) + "\n")
+        return
+    clusters_with_scores = calculate_scores(rows)
+    for count, cluster in enumerate(clusters_with_scores):
+        for target in cluster:
+            if count == 0:  # CFD target
+                # remove count of tmp_mms
+                target.pop(-2)
+                # save CFD targets
+                cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
+                # save mm-bul targets
+                mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
+            if count == 1:  # CRISPR-Bulge target
+                # remove count of tmp_mms
+                target.pop(-2)
+                # save CRISPR-Bulge targets
+                crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
+
+
 # list saving all the targets reported in chr##
 cluster_to_save = list()
+# the input line of each of its rows (a piece hands it to the merge with the row)
+cluster_lines = list()
+line_no = 0
 # rows carrying another contig's label (see the check in the loop); counted so the
 # run reports them instead of dropping them silently
 foreign_rows = 0
 
 for line in inResult:
     # print("line in INDEL analysis", line)
+    line_no += 1
+    if _RANGE is not None and not _RANGE[0] <= line_no <= _RANGE[1]:
+        continue  # another piece's line
+    rows_before = len(cluster_to_save)
 
     line = line.strip().split("\t")
     # print(line)
@@ -1756,117 +1835,60 @@ for line in inResult:
     for _row in (_overlaid_rows(line, final_result, indel_data, _amb) if _amb
                  else _second_indel_rows(line, final_result, indel_data)):
         _queue_row(_row, hap_start_target)
+    cluster_lines.extend([line_no] * (len(cluster_to_save) - rows_before))
 
-    if len(cluster_to_save) >= 100000:
+    if len(cluster_to_save) >= _cbr.BATCH_ROWS:
         # after reading 100k lines from file and creating the cluster, start processing it
-        clusters_with_scores = calculate_scores(cluster_to_save)
-
-        for count, cluster in enumerate(clusters_with_scores):
-            for target in cluster:
-                if count == 0:  # CFD target
-                    # remove count of tmp_mms
-                    target.pop(-2)
-                    # save CFD targets
-                    cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
-                    # save mm-bul targets
-                    mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
-                if count == 1:  # CRISPR-Bulge target
-                    # remove count of tmp_mms
-                    target.pop(-2)
-                    # save CRISPR-Bulge targets
-                    crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
+        _write_scored(cluster_to_save, cluster_lines)
         cluster_to_save = list()
+        cluster_lines = list()
 
+# the rest of the rows (none: nothing to score)
 if len(cluster_to_save):
-    pass
-else:
-    # skip processing and return empty file
-    # close open files
-    cfd_best.close()
-    mmblg_best.close()
-    crispr_bulge_best.close()
-    if _cooc_out is not None:
-        _cooc_out.close()
-    if _indel_af_out is not None:
-        _indel_af_out.close()
-    # update header
-    os.system(
-        "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
-        + outputFile
-        + ".bestCFD_INDEL.txt"
-    )
-    os.system(
-        "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
-        + outputFile
-        + ".bestCRISPR_BULGE_INDEL.txt"
-    )
-    os.system(
-        "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
-        + outputFile
-        + ".bestmmblg_INDEL.txt"
-    )
-    _report_overlaid()
-    # print exit messagge and exit 0
-    print("Done", current_chr, time.time() - start_time)
-    print("ANALYSIS COMPLETE IN", time.time() - global_start)
-    exit(0)
-
-# start processing scores after the whole target file is read
-clusters_with_scores = calculate_scores(cluster_to_save)
-
-for count, cluster in enumerate(clusters_with_scores):
-    for target in cluster:
-        # print(target)
-        if count == 0:  # CFD target
-            # remove count of tmp_mms
-            target.pop(-2)
-            # save CFD targets
-            # print('CFD', target)
-            cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
-            # save mm-bul targets
-            mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
-        if count == 1:  # CRISPR-Bulge target
-            # remove count of tmp_mms
-            target.pop(-2)
-            # print('CRISPR-Bulge', target)
-            # save CRISPR-Bulge targets
-            crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
+    _write_scored(cluster_to_save, cluster_lines)
 
 cfd_best.close()
 mmblg_best.close()
-crispr_bulge_best.close()
+if crispr_bulge_best is not None:
+    crispr_bulge_best.close()
+if cbulge_rows_out is not None:
+    cbulge_rows_out.close()
 if _cooc_out is not None:
     _cooc_out.close()
 if _indel_af_out is not None:
     _indel_af_out.close()
 
+# update header
 os.system(
-    "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
+    "sed -i '1s/.*/" + _BEST_HEADER + "/' "
     + outputFile
     + ".bestCFD_INDEL.txt"
 )
+if not _PIECE:
+    os.system(
+        "sed -i '1s/.*/" + _BEST_HEADER + "/' "
+        + outputFile
+        + ".bestCRISPR_BULGE_INDEL.txt"
+    )
+else:
+    # the merge's: how to score the CRISPR-Bulge rows, and what the notes at the end of the
+    # chromosome are written from
+    with open(outputFile + ".piece.json", "w") as _fh:
+        json.dump({"do_scores": do_scores, "lines": line_no, "chrom": current_chr,
+                   "notes": {"counts": _note_counts(), "precheck_on": _PRECHECK}}, _fh)
 os.system(
-    "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
-    + outputFile
-    + ".bestCRISPR_BULGE_INDEL.txt"
-)
-os.system(
-    "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
+    "sed -i '1s/.*/" + _BEST_HEADER + "/' "
     + outputFile
     + ".bestmmblg_INDEL.txt"
 )
 
 
-if foreign_rows:
-    # STDOUT only -- this pipeline treats any stderr write as a fatal stage
-    # failure (`[ -s $logerror ]`), so warning on stderr would abort the search.
-    print(
-        "WARNING: %d indel target row(s) in the %s subset carried another "
-        "contig's label and were dropped; they would otherwise have been "
-        "reported against %s indels they do not belong to."
-        % (foreign_rows, current_chr, current_chr)
-    )
-_report_overlaid()
+# the notes at the end of the chromosome: a contig's rows dropped, how the overlaid targets
+# were resolved (STDOUT only -- this pipeline treats any stderr write as a fatal stage
+# failure, `[ -s $logerror ]`). A piece of a post-analysis cut into pieces writes none: the
+# merge writes the chromosome's from the counts in its <out>.piece.json.
+if not _PIECE:
+    _notes.write(_notes.indel_lines(current_chr, _note_counts(), _PRECHECK))
 
 print("Done", current_chr, time.time() - start_time)
 

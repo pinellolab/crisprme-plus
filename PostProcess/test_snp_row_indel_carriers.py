@@ -394,16 +394,21 @@ class DictionaryPath(ObservedPath):
 
 class DenseWindowBed(unittest.TestCase):
     """The high-variant-density BED lists a dense window's samples with an alt, also one
-    whose haplotype an indel took off the window's rows: it is unchanged by the filter."""
+    whose haplotype an indel took off the window's rows: it is unchanged by the filter.
+    (Since 2.10.0 the run lists the window from its raw target before it is decomposed,
+    _record_dense_window, and writes the BED at the end, one line a window: hvdr_line.)"""
 
     def test_bed_keeps_the_dropped_sample(self):
         fx = _Fixture({"S1": "1|0", "S2": "1|0"},
                       [(_ins_inside(), {"S1": "1|0", "S2": "0|1"})])
         fx.ns["IUPAC_CAP"] = 0  # every window is logged
-        bed = fx.ns["hvdr_bed"]
+        fx.ns["_record_dense_window"](fx.split)
         rows = fx.run()
         self.assertEqual(fx.snp_carriers(rows), {"S2"})
-        self.assertEqual(bed.getvalue().rstrip("\n").split("\t")[5], "S1,S2")
+        lines = [fx.ns["hvdr_line"]("chrT", key, rec)
+                 for key, rec in sorted(fx.ns["_hvdr_records"].items())]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].rstrip("\n").split("\t")[5], "S1,S2")
 
 
 class RunTimeWiring(unittest.TestCase):
@@ -445,6 +450,25 @@ class RunTimeWiring(unittest.TestCase):
             _write_store(store, [(_edge_del(), {"S1": "1|0"})])  # changes nothing
             st = ns["_SnpRowIndels"](store, spans, 500)
             self.assertEqual(ns["_snp_indel_frame_keys"](st, spans, "chrT"), set())
+
+    def test_a_span_many_alignments_share_is_read_once(self):
+        """A dense window has a hundred raw targets or more, one per alignment, over the same
+        span: the store is read around each span once (2.10.0; reading it once per raw target
+        took 227 s on chr22 and an hour on IGH), with the same keys."""
+        with tempfile.TemporaryDirectory() as d:
+            cluster = os.path.join(d, "c.txt")
+            dna = G[:5] + "M" + G[6:] + "TGG"
+            low = dna[:2] + dna[2].lower() + dna[3:]
+            with open(cluster, "w") as fh:
+                fh.write("header\n")
+                for _ in range(3):
+                    for window in (dna, low):
+                        fh.write("\t".join(["X", G + "NGG", window, "chrT", str(T0)]) + "\n")
+            ns = _load_pure_functions({})
+            spans = []
+            keys = ns["_collect_needed_dict_keys"](cluster, "chrT", spans)
+            self.assertEqual(spans, [(LO, HI)])
+            self.assertEqual(len(keys), HI - LO + 1)
 
 
 class OptOutGate(unittest.TestCase):

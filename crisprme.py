@@ -89,15 +89,11 @@ if __name__ == "__main__":  # (run as the command, not loaded by a test)
 
 if "--debug" in input_args:
     print("DEBUG MODE")
-    # Switch to cwd-relative PostProcess ONLY when running from a source checkout
-    # (cwd actually has PostProcess/). Otherwise keep the __file__-based path
-    # resolved above, so --debug does not break the import when cwd is unrelated to
-    # the install -- e.g. the web assembly-search job runs with cwd set to the
-    # Results output dir, which has no PostProcess/ (ModuleNotFoundError otherwise).
-    _dbg_pp = current_working_directory + "PostProcess/"
-    if os.path.isdir(_dbg_pp):
-        script_path = _dbg_pp
-        corrected_web_path = current_working_directory
+    # --debug keeps the PostProcess/ resolved above, beside the crisprme.py that runs (a
+    # source checkout's own, run from it or not). Up to 2.10.0 it took the working
+    # directory's PostProcess/ whenever there was one, and loaded its memory_check.py at
+    # once (below): a folder another member of the data folder's group put there (a umask
+    # of 002 lets them) ran as the user (2.10.0, the review of lane S, round 4).
 
 # Load the non-fatal low-memory warning from the PostProcess directory by
 # explicit file path: crisprme.py is installed in bin/, so PostProcess is not
@@ -714,7 +710,25 @@ def print_help_complete_search() -> None:
         "break the PAM, and the row's allele fits. A worst-case alignment (population-level, "
         "or a dense window's) is cut back to the strongest within it; any other row resting "
         "on more without such carriers is left out. Rows resting on 2 or more such columns "
-        "are rarely carried by anyone. Variant searches only; off by default [OPTIONAL]\n"
+        "are rarely carried by anyone, but not never: in a population-level search, whose rows "
+        "no phased carrier confirms, a K below 4 leaves out off-targets real people carry "
+        "(per-sample rows of the IGH locus rest on up to 4 such columns), so use K >= 4 there. "
+        "A population-level search with it skips, before expanding them, the raw targets "
+        "every row of which would rest on more than K such columns (the K-skip: it reads "
+        "the ALTs listed at each variant column and writes what the cap leaves, faster). "
+        "Variant searches only; off by default "
+        "[OPTIONAL]\n"
+        "\t--no-haplotype-precheck, turn off the exact haplotype pre-check of a per-sample "
+        "search: before a raw target of the variant genome is expanded into the haplotypes "
+        "its carriers have, it is tested against the samples' genotypes, and skipped (its "
+        "reference row is still written) when no sample, free to take at each variant column "
+        "the reference base or any ALT it carries there, reaches the mismatch budget and the "
+        "PAM; the same carriers-first test skips an overlaid indel target no carrier of its "
+        "indel can have, in either analysis mode. It also turns off the K-skip of "
+        "--max-degeneracy; the log says per chromosome which of them is off. The results "
+        "are the same either way (none skips a target a row can come from); off, a dense "
+        "region's raw targets are each expanded, as up to 2.8.1 "
+        "(CRISPRME_HAPLOTYPE_PRECHECK=0 does the same) [OPTIONAL]\n"
         "\t--sites-only-density-guard, the bits of the sites-only density guard (default 20): "
         "of a sites-only dataset (e.g. the mega panel), whose rows no genotype checks, the "
         "candidates whose window spells 2^bits sequences or more are withheld from its SNP "
@@ -734,14 +748,20 @@ def print_help_complete_search() -> None:
         "cis phasing + named carrier samples + exact joint AF (the resolution the genotyped "
         "indexes are built for). Requires a genotyped index (no-op with a warning on "
         "sites-only panels); on one without the dict-less tiers (built without --samplesID) "
-        "it names the carrier samples only. Slower, and can be intractable on dense panels "
-        "(measured 49h+ "
-        "without completing on a 4x-density panel) [OPTIONAL]\n"
-        "\t--population-level, force the fast population-level analysis: one worst-possible "
+        "it names the carrier samples only. Its post-analysis skips the raw targets no "
+        "sample's genotypes can produce (the haplotype pre-check: --no-haplotype-precheck) "
+        "and, as the population-level one, runs in pieces over the --thread workers; up to "
+        "2.8.1 it could be intractable on dense panels (measured 49h+ without completing on a "
+        "4x-density panel) [OPTIONAL]\n"
+        "\t--population-level, force the population-level analysis: one worst-possible "
         "PUTATIVE representative per variant window, exact worst-case CFD, dataset-level "
-        "allele frequencies -- lossless for detection, tractable on any panel. Use this to "
-        "opt OUT of per-sample on a phased index (e.g. a very dense / high-edit / "
-        "genome-wide search) [OPTIONAL]\n"
+        "allele frequencies -- lossless for detection. A genotype-resolution choice, not a "
+        "speed one: which mode is faster depends on the panel. On a dense panel of many "
+        "samples, such as the default HGDP + 1000 Genomes index, the per-sample analysis is "
+        "(its haplotype pre-check skips the dense windows' raw targets nobody carries); on a "
+        "small panel such as HPRC, or beside mega, the population-level one can be "
+        "(METHODS.md section 5). Use this to opt OUT of per-sample on a phased index "
+        "[OPTIONAL]\n"
         "\t(DEFAULT, no flag: CRISPRme+ auto-selects the mode by index type -- PER-SAMPLE on "
         "a genotyped + PHASED index [e.g. the HGDP+1000G default: CONFIRMED cis + named "
         "carriers], POPULATION-LEVEL otherwise [sites-only / unphased / hybrid / "
@@ -882,7 +902,8 @@ _COMPLETE_SEARCH_FLAGS = frozenset(
         "--be-window", "--compute-backend", "--full_input_validate",
         "--gene_annotation", "--genome", "--guide", "--index-path",
         "--keep-intermediates", "--max-degeneracy", "--max-total-edits", "--merge",
-        "--mm", "--no-alt-alignments", "--output", "--pam", "--per-sample",
+        "--mm", "--no-alt-alignments", "--no-haplotype-precheck", "--output", "--pam",
+        "--per-sample",
         "--personal_annotation", "--population-level", "--prune-pam",
         "--report-full", "--samplesID", "--sequence", "--sorting-criteria",
         "--sorting-criteria-scoring", "--thread", "--vcf",
@@ -1551,10 +1572,14 @@ def _apply_cosmic_license(args: List[str], annotationfile: str) -> str:
         except OSError:
             # annotation dir not writable (read-only / shared install): fall back to a
             # roomy writable base -- $CRISPRME_TMPDIR, else the cwd data disk, else the
-            # tempfile default -- rather than assuming /tmp has room.
+            # tempfile default -- rather than assuming /tmp has room. In a folder of this
+            # run's own there (mkdtemp: 0700, a new name), removed with the annotation
+            # temp folders: a fixed name in a shared /tmp is one any other user of the
+            # machine can make first, the run then writing through it and reading it back.
             import tempfile
-            base_dir = _writable_tmp_base() or tempfile.gettempdir()
-            stripped = os.path.join(base_dir, f".nocosmic.{base}")
+            tmpdir = tempfile.mkdtemp(prefix="crisprme_nocosmic_", dir=_writable_tmp_base())
+            _ANNOTATION_TMPDIRS.append(tmpdir)
+            stripped = os.path.join(tmpdir, f".nocosmic.{base}")
             _kept, dropped = _c.strip_cosmic(annotationfile, stripped)
         print(
             "[complete-search] COSMIC EXCLUDED from annotation (licence-safe default): "
@@ -2750,6 +2775,46 @@ def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[s
     return prune_flank.wider_flank_notes(indexes, motif, genomedir, "complete-search")
 
 
+def _every_allele_variant_index(vcf_dirs: List[str], genome: str, index_path: str) -> bool:
+    """True when a variant dataset of the search is searched on an index that codes every
+    allele of a split site (CRISPRitz 2.10.0's enrichment, whose indexes are in index format
+    2): one of its installed variant indexes (SNP or INDELS) is of format 2, or none is
+    installed and the installed CRISPRitz builds format 2 (it will build one)."""
+    libs = _variant_libraries(index_path)
+    for vdir in vcf_dirs:
+        dataset = f"{genome}+{os.path.basename(os.path.normpath(vdir))}"
+        found = False
+        for lib in libs:
+            for name in sorted(_listdir(lib)):
+                idx = os.path.join(lib, name)
+                if not (name.endswith(f"_{dataset}") or name.endswith(f"_{dataset}_INDELS")) \
+                        or not os.path.isdir(idx):
+                    continue
+                found = True
+                if index_fit.every_allele_index(idx):
+                    return True
+        if not found and index_fit.engine_index_format() == 2:
+            return True
+    return False
+
+
+def _warn_wide_bulge_budget(vcf_dirs: List[str], genome: str, index_path: str, mm: int,
+                            bdna: int, brna: int, max_total_edits: int = -1) -> "Optional[str]":
+    """A stdout warning (2.10.0) for a variant search allowing more than 1 DNA + 1 RNA bulge
+    in alignments of more edits than --max-total-edits 3 allows (index_fit.wide_bulge_budget)
+    on an index that codes every allele (_every_allele_variant_index): there the variant
+    search of the densest regions grows by orders of magnitude, a cost no step after the
+    search removes (the haplotype pre-check acts on the raw targets the search wrote).
+    Returns the warning's text, which .Params.txt keeps (Bulge_budget_note), or None. The
+    search script says it again in log_verbose.txt (index_fit.py wide-budget), a web
+    search's too."""
+    note = index_fit.wide_bulge_note(mm, bdna, brna, max_total_edits)
+    if note is None or not _every_allele_variant_index(vcf_dirs, genome, index_path):
+        return None
+    print(f"WARNING [complete-search]: {note}", flush=True)
+    return note
+
+
 def _variant_libraries(index_path: str) -> List[str]:
     """The libraries a search reads a variant index from, in the order it reads them: the
     --index-path library (``index_path``, "_" for none), then the working directory's
@@ -2945,6 +3010,25 @@ def _record_built_index_source(outputfolder: str, genomedir: str, index_name: st
         )
 
 
+def _per_sample_post_analysis_note() -> str:
+    """What the per-sample banner says of its post-analysis (2.10.0), as the switches set it:
+    the haplotype pre-check (--no-haplotype-precheck sets CRISPRME_HAPLOTYPE_PRECHECK=0 before
+    the banner) and the pieces (CRISPRME_POSTPROC_PIECES=0), read as the post-analysis reads
+    them (haplotype_precheck.switch_on: 0, false, no or off, in any case)."""
+    import haplotype_precheck as _hpc  # PostProcess is on sys.path (script_path)
+    precheck = _hpc.switch_on(os.environ, "CRISPRME_HAPLOTYPE_PRECHECK")
+    pieces = _hpc.switch_on(os.environ, "CRISPRME_POSTPROC_PIECES")
+    return (
+        "Its post-analysis "
+        + ("skips the raw targets no sample can have (the haplotype pre-check)" if precheck
+           else "expands every raw target (the haplotype pre-check is off: "
+                "--no-haplotype-precheck or CRISPRME_HAPLOTYPE_PRECHECK=0)")
+        + (" and runs in pieces over the --thread workers" if pieces
+           else " and runs one process a chromosome (CRISPRME_POSTPROC_PIECES=0)")
+        + "; pass --population-level for each window's worst case instead."
+    )
+
+
 def complete_search() -> None:
     warn_low_memory()  # non-fatal low-memory warning (Docker Desktop, etc.)
     args = input_args[2:]  # retrieve complete-search input arguments
@@ -3006,10 +3090,11 @@ def complete_search() -> None:
     # Context-aware DEFAULT (2.8.0): on a genotyped + PHASED index the per-sample
     # resolution (CONFIRMED cis + named carriers + exact joint AF) is what the panel is
     # built for, so it is the DEFAULT; population-level otherwise (sites-only / unphased /
-    # hybrid / reference / unknown -- where per-sample buys little or nothing and the fast
+    # hybrid / reference / unknown -- where per-sample buys little or nothing and the
     # worst-case screen is the right call). Explicit flags always win and are mutually
-    # exclusive: --per-sample forces genotype resolution, --population-level forces the fast
-    # worst-case screen. (data_type is read from the Phase-2.1 registry manifest.)
+    # exclusive: --per-sample forces genotype resolution, --population-level forces the
+    # worst-case screen (a resolution choice: which mode is faster depends on the panel,
+    # METHODS.md section 5). (data_type is read from the Phase-2.1 registry manifest.)
     _force_ps = "--per-sample" in args
     _force_pop = "--population-level" in args
     if _force_ps and _force_pop:
@@ -3073,9 +3158,9 @@ def complete_search() -> None:
         print(
             "[complete-search] genotyped + PHASED index detected -> PER-SAMPLE analysis "
             "by DEFAULT: CONFIRMED cis phasing + named carrier samples + exact joint "
-            "allele frequency. Pass --population-level for the fast worst-case screen "
-            "(recommended on a very dense / high-edit / genome-wide search, where "
-            "per-sample resolution can be slow).",
+            "allele frequency. Pass --population-level for each window's worst case "
+            "instead (a resolution choice: which mode is faster depends on the panel, "
+            "METHODS.md section 5).",
             flush=True,
         )
     # The pre-2.5.4 --fast / --full flags were removed (no aliases). argparse-free parsing
@@ -3338,6 +3423,12 @@ def complete_search() -> None:
                 flush=True,
             )
     os.environ["CRISPRME_MAX_DEGENERACY"] = str(max_degeneracy)
+    # 2.10.0: the exact haplotype pre-check of a per-sample search, and its carriers-first
+    # twin on the indel side (new_simple_analysis.py, analisi_indels_NNN.py), are on unless
+    # --no-haplotype-precheck turns them off (as CRISPRME_HAPLOTYPE_PRECHECK=0 in the
+    # environment does); inherited by the post-analysis like CRISPRME_FAST_MODE
+    if "--no-haplotype-precheck" in args:
+        os.environ["CRISPRME_HAPLOTYPE_PRECHECK"] = "0"
 
     # the sites-only density guard's bits (_check_sites_only_guard, read before the output
     # folder is made), for the post-analysis: CRISPRME_SITES_ONLY_GUARD, -1 is off
@@ -3414,6 +3505,7 @@ def complete_search() -> None:
     # needs it serves it (_prune_on_its_own; the search script decides the same, for a web
     # search too): said here first, and recorded in the run's Params.txt.
     prune_auto = None
+    wide_budget_note = None  # _warn_wide_bulge_budget's, for .Params.txt
     if not prune_pam:
         prune_auto = _prune_on_its_own(
             index_path, genome_ref,
@@ -3426,6 +3518,9 @@ def complete_search() -> None:
         _refuse_no_variant_index(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
             bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
+        wide_budget_note = _warn_wide_bulge_budget(
+            resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref,
+            index_path, mm, bDNA, bRNA, max_total_edits)
     if variant and index_path != "_" and (bDNA or bRNA):
         _refuse_no_reference_index(index_path, genome_ref, pam_char, max(bDNA, bRNA) + 1,
                                    prune_pam, not pam_begin, total_pam_len - pam_len, bDNA, bRNA,
@@ -3579,6 +3674,8 @@ def complete_search() -> None:
             p.write("Prune_pam_note\t" + " ".join(prune_notes) + "\n")
         if window_notes:  # (a single physical line, as Pruning_note)
             p.write("Indel_window_note\t" + " ".join(window_notes) + "\n")
+        if wide_budget_note:  # the stdout WARNING above 1 DNA + 1 RNA bulge, kept with the run
+            p.write("Bulge_budget_note\t" + wide_budget_note + "\n")
         if prune_pam:  # given, or taken by the search itself (the report says which)
             p.write("Prune_pam\t" + ("auto" if prune_auto else "given") + "\n")
         p.write("Annotation\t" + str(annotation_name) + "\n")
@@ -3915,17 +4012,15 @@ def complete_search() -> None:
                 f"AF they give as 0, or not at all, has no frequency. "
                 f"To get the tiers, rebuild the index with build-index-only "
                 f"--samplesID, or download a prebuilt one (crisprme.py download --what index "
-                f"--index-name 20-NRR_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
-                f"dense panels; pass --population-level for the fast worst-case screen."
+                f"--index-name 20-NRR_3_hg38+hg38_HGDP1kGP). {_per_sample_post_analysis_note()}"
             )
         else:
             print(
                 "[complete-search] PER-SAMPLE analysis (%s): resolving per-sample genotypes "
                 "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and exact "
                 "joint AF. Requires a genotyped index (sites-only panels have no genotypes to resolve "
-                "-- the population-level analysis runs instead). Slower, and can be intractable on "
-                "dense panels; pass --population-level for the fast worst-case screen."
-                % _why
+                "-- the population-level analysis runs instead). %s"
+                % (_why, _per_sample_post_analysis_note())
             )
     # the pre-flight has passed: the samples lists taken without --samplesID, for the pipeline
     if samples_taken:

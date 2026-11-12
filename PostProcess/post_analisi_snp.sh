@@ -17,6 +17,8 @@ dict_folder=${10}
 final_res=${11}
 final_res_alt=${12}
 key=${13}
+# 2.10.0, option P: all (default), cluster or finish (scriptAnalisiNNN_v3.sh)
+stage=${14:-all}
 
 # reference and alternative crispritz targets files
 targets_tsv_ref="$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
@@ -28,6 +30,14 @@ fi
 
 # start chromosome data processing
 chrom=$key
+targets_chrom_prefix="$output_folder/${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${annotation_name}_${mm}_${bDNA}_${bRNA}_${key}"
+if [ "$stage" = "finish" ]; then
+    # the steps after the analysis, once the pool has merged its pieces
+    ./scriptAnalisiNNN_v3.sh "" "" "$targets_chrom_prefix" "$annotation_file" \
+        "${dict_folder}/my_dict_${key}.json" "${ref_folder}/${key}.fa" "$mm" "$bDNA" "$bRNA" \
+        "$guide_file" "$pam_file" "$output_folder" finish
+    exit $?
+fi
 echo "Processing SNPs for ${chrom}"
 
 # extract chrom-specific reference and alternative targets (the name as text: unquoted,
@@ -47,7 +57,6 @@ python sites_only_guard.py snp "$targets_tsv_alt_chrom" "$(dirname "${dict_folde
     "$output_folder/${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}_${chrom}.snp.sites_only_density_guard.bed"
 
 # perform targets analysis by chromosome (scores, annotation, etc.)
-targets_chrom_prefix="$output_folder/${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${annotation_name}_${mm}_${bDNA}_${bRNA}_${key}"
 ./scriptAnalisiNNN_v3.sh \
     "$targets_tsv_ref_chrom" \
     "$targets_tsv_alt_chrom" \
@@ -58,7 +67,8 @@ targets_chrom_prefix="$output_folder/${ref_name}+${vcf_name}_${pam_name}_${guide
     "$mm" "$bDNA" "$bRNA" \
     "$guide_file" \
     "$pam_file" \
-    "$output_folder"
+    "$output_folder" \
+    "$stage"
 
 # remove chrom-specific targets tsv files
 rm $targets_tsv_ref_chrom $targets_tsv_alt_chrom  

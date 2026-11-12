@@ -56,13 +56,16 @@ def validate(enriched_fa, fake_fa, log_path, dict_path, sample=200):
     assert t and m == t, f"fake-flank vs enriched[start+k] mismatch: {m}/{t}"
     print(f"[1] fake flank == enriched[start+k]: {m}/{t} (100%)")
 
-    # 2) run the overlay; every changed base is an IUPAC code, lengths preserved
-    out = tempfile.mktemp(suffix=".fa")
-    changed = ov.overlay_fake_chromosome(fake_fa, enriched_fa, log_path, out_fa=out)
-    with open(out) as fh:
-        fh.readline()
-        over = "".join(l.strip() for l in fh)
-    os.remove(out)
+    # 2) run the overlay; every changed base is an IUPAC code, lengths preserved. Into a
+    # folder of its own (mkdtemp, 0700): a name tempfile.mktemp gave was free when given,
+    # and another user of a shared /tmp could put a link there before the overlay wrote
+    # through it
+    with tempfile.TemporaryDirectory(prefix="crisprme_overlay_check_") as work:
+        out = os.path.join(work, "overlaid.fa")
+        changed = ov.overlay_fake_chromosome(fake_fa, enriched_fa, log_path, out_fa=out)
+        with open(out) as fh:
+            fh.readline()
+            over = "".join(l.strip() for l in fh)
     assert len(over) == len(orig), "overlay changed the fake genome length!"
     diffs = [i for i in range(len(orig)) if orig[i] != over[i]]
     assert all(over[i] in AMB for i in diffs), "an overlaid base is not IUPAC"

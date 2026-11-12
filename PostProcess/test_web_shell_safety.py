@@ -84,6 +84,13 @@ offer for the genome, PAM and dataset selected, and the Max edits slider's maxim
 follows them), before anything is written. The reference Submit made its job folder before
 int() refused the Max edits value: it checks that value first.
 
+And up to 2.10.0 the results' region page (cluster_page) ran through a shell what two files
+of the job's folder held, a folder others may write (its group, under a umask of 002): a
+"guide" put in the job's guide list passed the check that the link's guide is one of the job's,
+and an annotation put in its annotated targets went into the lookup's command (the review of
+lane S, round 4). A guide is looked up only if it is letters too, and the annotation reaches
+awk as a quoted value.
+
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
 normal value still works; a job id holding '../' reads, writes and removes nothing
@@ -1123,7 +1130,12 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
     genome folders with the names its archive gives (one holding such a name is no longer
     imported: test_personal_assembly; one imported before can be searched).
     post_analisi_snp.sh is a stand-in here, which records its arguments, in the folder the
-    post-analysis runs in (the search runs it in PostProcess/)."""
+    post-analysis runs in (the search runs it in PostProcess/). Since 2.10.0 (option P) the
+    pool runs it with a stage, last: "all" (the whole post-analysis of a chromosome, with
+    CRISPRME_POSTPROC_PIECES=0), or "cluster" and "finish" around the analysis it runs itself
+    in pieces with the arguments the "cluster" stage writes to CRISPRME_POSTPROC_MANIFEST
+    (the stand-ins write a clustered file of one line, so the analysis, a stand-in too, runs
+    once a chromosome, as one piece)."""
 
     def setUp(self):
         super().setUp()
@@ -1131,8 +1143,16 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
         os.makedirs(self.post)
         stand_in = os.path.join(self.post, "post_analisi_snp.sh")
         with open(stand_in, "w") as fh:
-            fh.write('#!/bin/bash\nprintf "%s\\0" "$@" >> "$(dirname "$0")/args"\n')
+            fh.write('#!/bin/bash\nprintf "%s\\0" "$@" >> "$(dirname "$0")/args"\n'
+                     'if [ "${14}" = cluster ]; then\n'
+                     '  c="$(dirname "$0")/cluster.$$"; printf "#h\\nx\\n" > "$c"\n'
+                     '  printf "%s\\n" fa dict "$c" pam "${13}" 4 > "$CRISPRME_POSTPROC_MANIFEST"\n'
+                     'fi\n')
         os.chmod(stand_in, 0o755)
+        analysis = os.path.join(self.post, "new_simple_analysis.py")
+        with open(analysis, "w") as fh:
+            fh.write('#!/bin/bash\nprintf "%s\\0" "$@" >> "$(dirname "$0")/analyses"\n')
+        os.chmod(analysis, 0o755)
         self.genome = os.path.join(self.data, "Genomes", "hg38")
         self.job = os.path.join(self.data, "Results", "JOB1")
         os.makedirs(self.job)
@@ -1144,21 +1164,30 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
                      os.path.join(self.job, "final_results_JOB1.altMerge.txt")]
         self.before = self.outside_files()
 
-    def post_analysis(self):
+    def post_analysis(self, pieces="0"):
         """pool_post_analisi_snp.py, run as the search runs it, and the arguments of each
-        run of post_analisi_snp.sh it made."""
+        run of post_analisi_snp.sh it made (with its stage, last), and of the analysis."""
         record = os.path.join(self.post, "args")
-        if os.path.exists(record):
-            os.remove(record)
+        analyses = os.path.join(self.post, "analyses")
+        for old in (record, analyses):
+            if os.path.exists(old):
+                os.remove(old)
+        env = dict(os.environ, CRISPRME_POSTPROC_PIECES=pieces, TMPDIR=self.post)
         done = subprocess.run(
             [sys.executable, os.path.join(HERE, "pool_post_analisi_snp.py")] + self.head + ["1"],
-            cwd=self.post, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+            cwd=self.post, stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env)
+        self.analyses = []
+        if os.path.exists(analyses):
+            with open(analyses, "rb") as fh:
+                words = [w.decode() for w in fh.read().split(b"\0")[:-1]]
+            os.remove(analyses)
+            self.analyses = [words[i:i + 6] for i in range(0, len(words), 6)]
         words = []
         if os.path.exists(record):
             with open(record, "rb") as fh:
                 words = [w.decode() for w in fh.read().split(b"\0")[:-1]]
             os.remove(record)
-        return done, [words[i:i + 13] for i in range(0, len(words), 13)]
+        return done, [words[i:i + 14] for i in range(0, len(words), 14)]
 
     def test_a_fasta_named_with_a_command_runs_nothing(self):
         # a FASTA of sequence chr1 named so: the search's own check of the folder reads the
@@ -1186,8 +1215,17 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
                 fh.write(f">{name}\n" + SEQ + "\n")
         done, runs = self.post_analysis()
         self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertEqual(sorted(runs), [self.head + [chrom]
+        self.assertEqual(sorted(runs), [self.head + [chrom, "all"]
                                         for chrom in ("HLA-A*01:01", "chr1", "chr2")])
+        self.assertEqual(self.markers(), [])
+        # in pieces (the default): "cluster" then "finish" a chromosome, the analysis between
+        # them run with the arguments the cluster stage wrote, each name one argument
+        done, runs = self.post_analysis(pieces="1")
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        names = ("HLA-A*01:01", "chr1", "chr2")
+        self.assertEqual(sorted(runs), sorted(self.head + [chrom, stage] for chrom in names
+                                              for stage in ("cluster", "finish")))
+        self.assertEqual(sorted(a[4] for a in self.analyses), sorted(names))
         self.assertEqual(self.markers(), [])
 
 
@@ -1615,6 +1653,36 @@ class TestResultsPages(_WebFolder):
                 self.assertEqual(page.children.children, "The selected position does not exist")
         page = rp.cluster_page(self.OUT, f"{GUIDE}-Pos-chr1-1000")
         self.assertEqual(page.children.children, "The selected result does not exist")
+        self.assertNothingRun()
+
+    # The guide list and the annotated targets are files of the job's folder, which others
+    # may write (its group, under a umask of 002): a "guide" put in the list passed the check
+    # that the link's guide is the job's, and an annotation put in the annotated targets went
+    # into the lookup's command, both through the shell, as the web app's user (2.10.0, the
+    # review of lane S, round 4)
+    def test_a_region_link_runs_no_guide_the_job_s_guide_list_holds(self):
+        planted = f"{GUIDE};touch${{IFS}}MARK_guide;#"
+        with open(os.path.join(self.job, ".guides.txt"), "a") as fh:
+            fh.write(planted + "\n")
+        page = rp.cluster_page(self.JOB, f"{planted}-Pos-chr1-1000")
+        self.assertEqual(self.markers(), [])
+        self.assertEqual(getattr(page.children, "children", None),
+                         "The selected position does not exist")
+        self.assertNothingRun()
+
+    def test_a_region_link_runs_no_annotation_the_job_s_targets_hold(self):
+        with open(os.path.join(self.job, f"{self.JOB}.Annotation.targets.txt"), "w") as fh:
+            fh.write(f"X\t{GUIDE}\tY\tchr1\t1\t1000\t'; touch MARK_annotation; echo '\n")
+        # (the lookup's first command reads .bestMerge.txt of the web app's working
+        # directory, its name as it is, and stops the page without one: one there, which
+        # anyone who can write the data folder can make, lets it reach the annotation's)
+        with open(os.path.join(self.data, ".bestMerge.txt"), "w") as fh:
+            fh.write("#Bulge_type\tcrRNA\n")
+        page = rp.cluster_page(self.JOB, f"{GUIDE}-Pos-chr1-1000")
+        self.assertEqual(self.markers(), [])
+        self.assertEqual(page.children[0].children, "Selected Position: chr1 - 1000")
+        with open(os.path.join(self.job, f"{self.JOB}.chr1_1000.{GUIDE}.txt")) as fh:
+            self.assertNotIn("MARK", fh.read())
         self.assertNothingRun()
 
     def test_a_sample_link(self):

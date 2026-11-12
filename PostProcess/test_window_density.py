@@ -564,8 +564,10 @@ def _tier_path(window, ref, mydict, fast=False, cap=10, max_degeneracy=-1, do_sc
                guide=GUIDE, pam="NRG"):
     """The real iupac_decomposition on the observed haplotypes of the dict-less tiers (through
     test_phased_haplotype's harness) for one plus-strand window at chrT 0 of the 3' PAM
-    ``pam``: its rows, its lines of the high-variant-density BED, and the --max-degeneracy
-    counts. ``do_scores``: with the CFD tables, as a run whose guides are scored."""
+    ``pam``: its rows, its lines of the high-variant-density BED (which the main loop records
+    from the raw target before it is decomposed: _record_dense_window), and the
+    --max-degeneracy counts. ``do_scores``: with the CFD tables, as a run whose guides are
+    scored."""
     bed = io.StringIO()
     ns = _load_pure_functions(dict(
         genomeStr=ref, current_chr="chrT", myreg=None, mygt=_GtSentinel(), mydict=mydict,
@@ -580,8 +582,10 @@ def _tier_path(window, ref, mydict, fast=False, cap=10, max_degeneracy=-1, do_sc
     split = ["X", crrna, window, "chrT", "0", "0", "+", "0", "0", "0", pam, "y", "NA", "NA",
              "NA", "NA", "NA", "NA"]
     cluster = []
+    ns["_record_dense_window"](split)
     ns["iupac_decomposition"](split, crrna, guide, cluster)
-    lines = [line.split("\t") for line in bed.getvalue().splitlines()]
+    lines = [ns["hvdr_line"]("chrT", key, rec).rstrip("\n").split("\t")
+             for key, rec in sorted(ns["_hvdr_records"].items())]
     return cluster, lines, ns["_degeneracy_counts"]
 
 

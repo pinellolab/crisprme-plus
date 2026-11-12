@@ -103,10 +103,9 @@ CRISPRme+ 2.10.0). Only if you run CRISPRme against an older, unpinned CRISPRitz
 ## 4. Per-sample runs need memory (and a genotyped index)
 
 Per-sample analysis resolves genotypes across the whole panel (e.g. 4,091 individuals
-for the HGDP+1000G index) and is both slower and more memory-hungry than the
-population-level analysis. On a large panel budget **tens of GB of RAM** per run. It is
-the default on a genotyped + phased index (HGDP + 1000 Genomes, HPRC), and `--per-sample`
-forces it on any other genotyped one.
+for the HGDP+1000G index) and reads the panel's genotype store: on a large panel budget
+**tens of GB of RAM** per run. It is the default on a genotyped + phased index (HGDP +
+1000 Genomes, HPRC), and `--per-sample` forces it on any other genotyped one.
 
 - `--per-sample` requires a **genotyped** index. It no-ops (with a warning) on a
   sites-only index such as `20-NRR_3_hg38+hg38_mega`.
@@ -116,7 +115,14 @@ forces it on any other genotyped one.
   naming the carriers of an indel alone (the index holds them), and `--per-sample`
   falls back to it with a `WARNING` that names the dataset: re-download without
   `--no-genotypes` to get carriers.
-- If you only need site-level results, pass `--population-level` — it is much lighter.
+- If you only need site-level results, pass `--population-level`. Which mode is faster
+  depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele, a
+  population-level search reads no haplotype, so nothing skips the raw targets of the dense
+  windows of the immunoglobulin loci, which a per-sample search skips when no sample can have
+  them: on HGDP + 1000 Genomes (4,091 samples) the README guide's population-level search of
+  chr22 took 23 to 32 min against 8 to 11 min per sample. On a small panel it can be the faster:
+  on HPRC (232 samples) 9 to 12 min against 14 to 17 min per sample (16 threads; METHODS.md
+  §5).
   On a phased index leaving out `--per-sample` is not enough, since per-sample is that
   index's default; population-level is the default only on a sites-only, unphased,
   hybrid or reference-only index.
@@ -169,14 +175,70 @@ Independent `complete-search` jobs can run in parallel, but give each job its ow
 long-standing collision where two jobs stripping the same COSMIC-containing annotation
 raced on a temp file is fixed in 2.7.10.)
 
+On a machine other people use, keep the data folder, the output folders and the temporary
+folder (`$TMPDIR`, or `CRISPRME_TMPDIR` when set) writable by you alone (a umask of 022 or
+077, or `chmod go-w` on them; a shared temporary folder such as `/tmp` will do while it is
+sticky). Anyone who can write a folder a search or the web app works in can do more there
+than change the inputs and the results:
+
+- stop the search, by making first a name it makes there (the post-analysis's
+  `<output>.pieces` folder, for one);
+- rename a folder the search or the web app made there and put their own in its place (a
+  rename needs only write access to the folder that holds it), and put links in it, which
+  they then write through, over files of yours elsewhere;
+- put links where the web app reads (in `Results/`, `Settings/` and the job folders in them),
+  which it follows: the job logs it shows and the files it serves for download can then be
+  files of yours elsewhere, which anyone who can reach the web app reads (it listens on every
+  network interface, `0.0.0.0`);
+- put lines and names in the files it reads there (its inputs, and the files it writes and
+  reads back), which older parts of the pipeline still pass to shell commands; and, in a
+  temporary folder that is not sticky, replace the modules TensorFlow writes there and then
+  imports.
+
+What holds wherever you run it, since 2.10.0:
+
+- Python looks for no module in the folder CRISPRme is run from: every `python -c`, `-m` or
+  `-` it runs is isolated (`-I`), and `--debug` keeps the `PostProcess/` beside the
+  `crisprme.py` that runs. Up to 2.10.0 the scorer's health check, which every search runs
+  first from the folder you run `crisprme.py` in, loaded a module put there, and `--debug` took
+  that folder's `PostProcess/` for its own;
+- no file CRISPRme writes is loaded as code (they are JSON or text; TensorFlow's own
+  modules, above, aside), and the web app's Settings Retry re-runs a job with the command the
+  server launched it with, kept in its memory and run without a shell. Up to 2.10.0 it ran
+  through a shell the command a job's `Settings/<job>/cmd.json` held;
+- the values a review found going from a job's files into shell commands as the shell's own
+  text are quoted or checked now: the guides of the guide file, the indel targets' header,
+  the names of the CFD graph files, and the guide and the annotation of the results' region
+  page;
+- the temporary files and folders it makes with `tempfile.mkdtemp`, `mkstemp` or `mktemp -d`
+  take names no one else could make first. Where they are made, in the temporary folder or
+  (the annotation temp folders, without `CRISPRME_TMPDIR`) in the working directory, only a
+  sticky or private folder keeps others from replacing them; and the intermediate files a
+  search writes in its output folder keep fixed names (such as `<file>.tmp`).
+
+A test (`test_no_code_from_files`, in the unit-test job and the web image's) keeps out of
+CRISPRme what a scan of the source can show: loads that run code (pickle and the like, `eval`,
+`exec`, YAML loads but `safe_load`), a temporary name made by name only, and a `python -c`,
+`-m` or `-` that is not isolated. It also runs `process_summaries.py` and
+`assemble_cfd_graphs.py` on a line or a name another user could put in a search's folder and,
+in the web image's step, `crisprme.py --debug` from a folder holding someone else's
+`PostProcess/`. The other fixes above have tests of their own: `test_scorer_env` (the scorer's
+health check, its self-test and the look-up of its env's python), `test_settings_progress`
+(the Retry), `test_indel_empty_chromosome` (the indel targets' header) and
+`test_web_shell_safety` (the region page). The scan cannot follow every value read back into a
+shell command, which is one more reason to keep these folders yours.
+
 ---
 
 ## 8. Very high `--thread` can stall post-analysis
 
-The post-analysis pool is bounded by `--thread`. On many-core nodes, extremely high
-values (e.g. `--thread 200`) can stall the per-chromosome pool. A value in the
-**16–32** range is a good balance on large machines; raising it further rarely helps
-and can hurt.
+The post-analysis pool is bounded by `--thread` (and by memory; at most 32 workers unless
+`CRISPRME_POSTPROC_MAX_WORKERS` says otherwise). Since 2.10.0 it runs each chromosome in
+pieces over those workers, so a dense locus no longer runs on one core
+(`CRISPRME_POSTPROC_PIECES=0` runs one process a chromosome, as before). On many-core
+nodes, extremely high values (e.g. `--thread 200`) stalled the per-chromosome pool of
+earlier releases. A value in the **16–32** range is a good balance on large machines;
+raising it further rarely helps and can hurt.
 
 ---
 

@@ -6,8 +6,9 @@ network-free CI does NOT install, so — like test_history_page_assembly.py /
 test_sanitize_job_name.py — the pure helper functions are EXTRACTED from source
 via ast and exec'd with a tiny namespace (stdlib + light stubs for html/dbc).
 This keeps the progress-JSON parsing, ETA formatting, full-log assembly, the
-genotypes-degraded detector, and the retry-command round-trip covered in CI
-without a Dash runtime. The job-id guard (_settings_jobdir) is covered the same
+genotypes-degraded detector, and the Retry of a job (the command the server
+launched it with, never one read from its folder) covered in CI without a Dash
+runtime. The job-id guard (_settings_jobdir) is covered the same
 way, through the undecorated Retry / Show-full-log / progress callbacks, and so
 is the genome .tar.gz upload's member vetting (_finalize_upload), run on
 archives the tests build.
@@ -25,6 +26,7 @@ import re
 import shutil
 import stat
 import string
+import subprocess
 import tarfile
 import tempfile
 import threading
@@ -85,6 +87,7 @@ def _load_functions(names=_NAMES, **overrides):
         "re": re,
         "random": random,
         "string": string,
+        "threading": threading,
         "List": List,
         "Optional": Optional,
         "html": _StubModule(),
@@ -106,7 +109,9 @@ def _load_functions(names=_NAMES, **overrides):
             if targets & set(names):
                 exec(ast.get_source_segment(src, node), ns)  # noqa: S102 - trusted own source
                 found |= targets
-    missing = set(names) - found
+    # (the job registry is new in 2.10.0: without it, as up to 2.10.0, the tests of a Retry
+    # still run, and fail on what the page then did, not on a missing name)
+    missing = set(names) - found - {"_LAUNCHED_JOBS", "_LAUNCHED_JOBS_LOCK"}
     if missing:
         raise AssertionError(f"Not found in pages/settings_page.py: {sorted(missing)}")
     return ns
@@ -259,8 +264,10 @@ class TestGenotypesDegradedWarning(unittest.TestCase):
 
 # --- job-id guard --------------------------------------------------------------
 # A Settings job id comes back from the browser as dcc.Store data, which a client
-# can set to anything. It must never become a path outside Settings/: Retry runs
-# <jobdir>/cmd.json with shell=True, and the log readers return file contents.
+# can set to anything. It must never become a path outside Settings/: Retry
+# decides from <jobdir>/log.txt whether to re-run a job, and the log readers
+# return file contents. (Up to 2.10.0 Retry also ran <jobdir>/cmd.json through a
+# shell; it runs only the command the server launched the job with now.)
 _GOOD_ID = "set_ABCDEFGH12"  # the shape _new_job_id makes
 _LINK_ID = "set_LINKOUT000"  # job-shaped, but a symlink out of Settings/
 
@@ -294,11 +301,11 @@ class _JobDirCase(unittest.TestCase):
         with open(os.path.join(self.outside, "log.txt"), "w") as fh:
             fh.write("Outside\tQueued\nOutside\tStart\nOutside\tFAILED\n")
         os.symlink(self.outside, os.path.join(self.settings, _LINK_ID))
-        self.launched = []  # (cmd, stage) pairs handed to _launch_job_cmd
+        self.launched = []  # (argv, stage) pairs handed to _launch_job_cmd
         self.opened = []  # real path of every file the extracted code opens
 
-        def _launch(cmd, stage):  # records instead of running anything
-            self.launched.append((cmd, stage))
+        def _launch(argv, stage):  # records instead of running anything
+            self.launched.append((argv, stage))
             return "set_NEWJOB0001"
 
         def _open(path, *args, **kwargs):
@@ -414,6 +421,8 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
         "_JOB_ID_RE",
         "_settings_jobdir",
         "_job_failed",
+        "_LAUNCHED_JOBS",
+        "_LAUNCHED_JOBS_LOCK",
         "_relaunch_job",
         "_full_job_log",
         "_retry_settings_job",
@@ -444,16 +453,41 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
         self.assertEqual(self.launched, [])
         self.assertEqual(self.outside_reads(), [])
 
-    def test_retry_failed_job_relaunches_recorded_command(self):
-        cmd = "crisprme.py download --what index --index-name NRG_3_hg38 --path /data"
+    def launched_by_the_server(self, job_id, argv, stage):
+        """Record ``job_id`` as _launch_job_cmd does when it launches ``argv``."""
+        self.ns["_LAUNCHED_JOBS"][job_id] = (list(argv), stage)
+
+    def test_retry_failed_job_relaunches_the_command_it_was_launched_with(self):
+        argv = ["crisprme.py", "download", "--what", "index", "--index-name", "NRG_3_hg38",
+                "--path", "/data"]
         self.make_job(_GOOD_ID, {
             "log.txt": "Download index\tQueued\nDownload index\tStart\nDownload index\tFAILED\n",
-            "cmd.json": json.dumps({"cmd": cmd, "stage": "Download index"}),
         })
+        self.launched_by_the_server(_GOOD_ID, argv, "Download index")
         out = self.ns["_retry_settings_job"](1, _GOOD_ID)
         self.assertEqual(out[0], "set_NEWJOB0001")
         self.assertIs(out[1], False)
-        self.assertEqual(self.launched, [(cmd, "Download index")])
+        self.assertEqual(self.launched, [(argv, "Download index")])
+
+    def test_retry_never_runs_a_cmd_json_of_the_job_folder(self):
+        # Settings/ is as writable as the data folder (its group's, under a umask of 002),
+        # and up to 2.10.0 Retry ran the "cmd" of <jobdir>/cmd.json through a shell, as the
+        # web app's user (the review of lane S, round 4, S-R4-2): a failed job's cmd.json
+        # another user wrote is never read to be run, whether this server launched the job
+        # (it re-runs its own command) or not (nothing runs)
+        planted = json.dumps({"cmd": "touch /tmp/PLANTED-BY-ANOTHER-USER",
+                              "stage": "Download genome"})
+        failed = "Download genome\tQueued\nDownload genome\tStart\nDownload genome\tFAILED\n"
+        self.make_job(_GOOD_ID, {"log.txt": failed, "cmd.json": planted})
+        out = self.ns["_retry_settings_job"](1, _GOOD_ID)
+        self.assertEqual(self.launched, [])
+        self.assertIs(out[0], _NO_UPDATE)  # the neutral "could not retry"
+        own = ["crisprme.py", "download", "--what", "genome", "--ref", "hg38", "--source",
+               "ucsc", "--path", "/data"]
+        self.launched_by_the_server(_GOOD_ID, own, "Download genome")
+        out = self.ns["_retry_settings_job"](1, _GOOD_ID)
+        self.assertEqual(self.launched, [(own, "Download genome")])
+        self.assertEqual(out[0], "set_NEWJOB0001")
 
     def test_retry_only_reruns_a_job_the_banner_shows_failed(self):
         # Retry is offered only on the FAILED banner, but the job id is client
@@ -473,10 +507,11 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
         for i, (label, log, retry) in enumerate(cases):
             with self.subTest(label):
                 job_id = f"set_STATE{i:05d}"
-                files = {"cmd.json": json.dumps({"cmd": f"echo job{i}", "stage": "S"})}
+                files = {}
                 if log is not None:
                     files["log.txt"] = log
                 jobdir = self.make_job(job_id, files)
+                self.launched_by_the_server(job_id, ["echo", f"job{i}"], "S")
                 try:
                     banner = self.ns["refresh_settings_job"](1, job_id)[0]
                 except _PreventUpdate:
@@ -485,7 +520,7 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
                 del self.launched[:]
                 out = self.ns["_retry_settings_job"](1, job_id)
                 if retry:
-                    self.assertEqual(self.launched, [(f"echo job{i}", "S")])
+                    self.assertEqual(self.launched, [(["echo", f"job{i}"], "S")])
                     self.assertEqual(out[0], "set_NEWJOB0001")
                 else:
                     self.assertEqual(self.launched, [])
@@ -496,11 +531,12 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
         # an index with the server's token: one it left failed is not re-run, maintainer
         # mode or not (the page does not publish: TestThePageDoesNotPublish)
         stage = "Publish index"
-        cmd = "crisprme.py publish-index --index /data/genome_library/NRG_3_hg38 --path /data"
+        argv = ["crisprme.py", "publish-index", "--index", "/data/genome_library/NRG_3_hg38",
+                "--path", "/data"]
         self.make_job(_GOOD_ID, {
             "log.txt": f"{stage}\tQueued\n{stage}\tStart\n{stage}\tFAILED\n",
-            "cmd.json": json.dumps({"cmd": cmd, "stage": stage}),
         })
+        self.launched_by_the_server(_GOOD_ID, argv, stage)
         for maintainer in (False, True):
             with self.subTest(maintainer=maintainer):
                 self.ns["MAINTAINER_MODE"] = maintainer
@@ -536,6 +572,74 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
         self.assertEqual(out[0], ("failure", "Download index", jobdir, _GOOD_ID))
         self.assertIs(out[1], True)
         self.assertIsNone(out[4])
+
+
+class _SyncExecutor:
+    """The page's single-slot executor, run at once in this process."""
+
+    def submit(self, fn, *args):
+        fn(*args)
+
+
+class TestSettingsJobsRunWithoutAShell(unittest.TestCase):
+    """A Settings job, launched, run and retried by the page's own functions (with the
+    executor run at once): its argv runs as it is, without a shell, in a folder of its own,
+    and Retry re-runs the command the server launched it with, whatever its folder holds.
+    Up to 2.10.0 a job was a shell command, written to its folder's cmd.json, which Retry ran
+    through a shell: a member of the data folder's group (a umask of 002 lets it write
+    Settings/) rewrote it, and Retry ran theirs as the web app's user (the review of lane S,
+    round 4, S-R4-2)."""
+
+    names = ["_JOB_ID_RE", "_new_job_id", "_settings_jobdir", "_run_settings_job",
+             "_LAUNCHED_JOBS", "_LAUNCHED_JOBS_LOCK", "_launch_job_cmd", "_job_failed",
+             "_relaunch_job"]
+
+    def setUp(self):
+        self.cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cwd, ignore_errors=True)
+        self.settings = os.path.join(self.cwd, "Settings")
+        os.makedirs(self.settings)
+        self.ns = _load_functions(self.names, current_working_directory=self.cwd,
+                                  subprocess=subprocess, settings_executor=_SyncExecutor())
+
+    def read(self, job_id, name):
+        with open(os.path.join(self.settings, job_id, name)) as fh:
+            return fh.read()
+
+    def test_a_job_runs_its_argv_as_it_is(self):
+        args = ["a;touch SEMICOLON", "$(touch SUBSTITUTION)", "`touch BACKTICKS`", "b c", "*"]
+        job = self.ns["_launch_job_cmd"](["printf", "%s\\n"] + args, "Download genome")
+        self.assertEqual(self.read(job, "log.txt"),
+                         "Download genome\tQueued\nDownload genome\tStart\nDownload genome\tEnd\n")
+        self.assertEqual(self.read(job, "log_verbose.txt"), "".join(a + "\n" for a in args))
+        self.assertEqual(sorted(os.listdir(self.cwd)), ["Settings"])  # nothing a shell made
+        self.assertEqual(os.listdir(self.settings), [job])
+        self.assertNotIn("cmd.json", os.listdir(os.path.join(self.settings, job)))
+
+    def test_retry_reruns_the_servers_command_whatever_the_folder_holds(self):
+        job = self.ns["_launch_job_cmd"](["false"], "Download genome")
+        self.assertTrue(self.ns["_job_failed"](os.path.join(self.settings, job)))
+        # another member of the data folder's group writes a command where up to 2.10.0
+        # the job's was kept
+        planted = os.path.join(self.cwd, "PLANTED")
+        with open(os.path.join(self.settings, job, "cmd.json"), "w") as fh:
+            json.dump({"cmd": f"touch {planted}", "stage": "Download genome"}, fh)
+        again = self.ns["_relaunch_job"](job)
+        self.assertIsNotNone(again)
+        self.assertNotEqual(again, job)
+        self.assertFalse(os.path.exists(planted))
+        self.assertEqual(self.ns["_LAUNCHED_JOBS"][again], (["false"], "Download genome"))
+        self.assertIn("Download genome\tFAILED", self.read(again, "log.txt"))  # ran false again
+
+    def test_a_job_folder_another_user_made_is_never_taken(self):
+        theirs = os.path.join(self.settings, "set_THEIRS0000")
+        os.makedirs(theirs)
+        ids = iter(["set_THEIRS0000", "set_MINE000000"])
+        self.ns["_new_job_id"] = lambda prefix="set": next(ids)
+        job = self.ns["_launch_job_cmd"](["true"], "Download genome")
+        self.assertEqual(job, "set_MINE000000")
+        self.assertEqual(os.listdir(theirs), [])
+        self.assertIn("Download genome\tEnd", self.read(job, "log.txt"))
 
 
 # --- genome .tar.gz upload -----------------------------------------------------
@@ -1834,7 +1938,7 @@ class TestSettingsRefusesNamesAShellReads(unittest.TestCase):
         self.launched = []
         self.ns = _load_functions(
             ["_validate_name", "_unusable_in_shell", "_genome_upload_problem", "add_genome",
-             "_write_vcf_marker", "add_vcf", "_fb_refresh", "add_pam", "_shlex_quote",
+             "_write_vcf_marker", "add_vcf", "_fb_refresh", "add_pam",
              "fetch_from_hprc", "_uploads_dir", "_unsafe_tar_member", "_genome_upload_assembly",
              "_install_uploaded_genome", "_vcf_upload_problem", "_finalize_upload",
              "_GENOME_UPLOAD_EXTENSIONS", "_genome_upload_kind_problem", "_UPLOAD_REFUSALS",
@@ -1854,7 +1958,7 @@ class TestSettingsRefusesNamesAShellReads(unittest.TestCase):
             PreventUpdate=_PreventUpdate,
             no_update=_NO_UPDATE,
             launch_settings_job=lambda argv, stage: self.launched.append(argv) or "job",
-            launch_settings_job_raw=lambda cmd, stage: self.launched.append(cmd) or "job",
+            launch_settings_job_raw=lambda argv, stage: self.launched.append(argv) or "job",
             _start=lambda job: (job, False, "started"),
             _preflight_disk=lambda need: None,
             _catalog_size=lambda component, name: 0,
@@ -1925,7 +2029,7 @@ class TestSettingsRefusesNamesAShellReads(unittest.TestCase):
                              lambda out: self.assert_says_shell(out[2]))
         self.assertEqual(self.ns["fetch_from_hprc"](1, "HG01255"), ("job", False, "started"))
         self.assertEqual(len(self.launched), 1)
-        self.assertIn(" HG01255 --data-dir ", self.launched[0])
+        self.assertEqual(self.launched[0][2:], ["HG01255", "--data-dir", self.cwd])
 
     def upload(self, *args, **kwargs):
         self.ns["request"] = _Request(*args, **kwargs)

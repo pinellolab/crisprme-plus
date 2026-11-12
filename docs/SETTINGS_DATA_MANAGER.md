@@ -218,4 +218,11 @@ Run any subcommand with `--help` for its full option list.
 Downloads and index builds run in the background on a dedicated slot (so they
 never slow down searches) and report **live progress** in the Activity panel.
 When one finishes, the installed-data and storage panels update automatically and
-the new data is immediately available in the search form.
+the new data is immediately available in the search form. One that fails shows its
+log and a **Retry**, which runs it again with the command the server launched it with
+(a download resumes what it had fetched). The server keeps that command in memory, not
+in a file of `Settings/`, which others may be able to write (2.10.0): after a restart
+of the web app, start the operation again from its card. Whoever can write `Settings/`
+can still put links in it, which the log panel follows: anyone who can reach the web
+app can then read files of yours through them. Keep the data folder writable by you
+alone ([Troubleshooting](TROUBLESHOOTING.md) §7).

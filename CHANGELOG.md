@@ -394,6 +394,12 @@ and the `release-crisprme` skill.
   the 100 sites with the highest CFD leave the top 100, as the ties at the 100th CFD fall (the
   second and third, CFD 0.299 at chr22:22358032 in IGL and 0.275 at chr22:49464611, rest on 11 and 2
   columns). The per-sample search changes no row: its multi-variant rows are CONFIRMED haplotypes.
+  On the index CRISPRitz 2.10.0 builds from the same VCF (every allele coded), the per-sample
+  search with K from 1 to 4 withholds one row (chr22:22,881,183 (−), CFD 0.002, a PUTATIVE
+  alignment of one carrier) and saves no time, the cap acting after the genotypes are read; in a
+  population-level search a K below 4 leaves out off-targets real people carry (IGH's CONFIRMED
+  per-sample rows rest on up to 4 columns: 103 lost at K = 1, none at K = 4), so use K >= 4 there
+  (the K-skip entry under Added; METHODS.md §5).
 
 - **A dedicated index serves the PAMs its own holds.** An `NRR` index stores every site of `NGG`,
   `NAG`, `NGA`, `NAA` and `NRG`, an `NRG` index every site of `NGG` and `NAG`, as concrete bases in
@@ -762,13 +768,14 @@ and the `release-crisprme` skill.
     of the alternative alignments at one (AT)n repeat of chr22; completeness counts the
     127,735 indel records only `hg38_mega` holds and the 32,178 whose FILTER the search
     skips; before the sites-only density guard: with it, beside the rebuilt mega, 85,953 and 689
-    row blocks, 11,414 lines at that repeat), each read as a run of 2.10.0 from its records, as
-    is the README per-sample search with this release's code on the indexes of CRISPRitz 2.9.1
-    (format 1, the last record of a split site, a store of every FILTER), which passes too (4
-    `limit-last-alt-wins` lines). That search takes 6.5 min there and 97 min on the indexes this
-    release built, its SNP post-analysis 1 min against 76, in the windows every allele coded
-    makes dense (7,493 on chr22, 7,255 hyperdense). The SNP+indel oracle with the
-    second deletions of its sites O and Q, the insertion of Y1 and an MNV marked `LowQual`
+    row blocks, 11,414 lines at that repeat), each read as a run of 2.10.0 from its records, as is
+    the README per-sample search with this release's code on the indexes of CRISPRitz 2.9.1 (format
+    1, the last record of a split site, a store of every FILTER), which passes too (4
+    `limit-last-alt-wins` lines). That search takes 6.5 min there and, on 8 threads, 97 min on the
+    indexes this release built without its haplotype pre-check and post-analysis in pieces (8.4 min
+    with them: METHODS.md §5), its SNP post-analysis 1 min against 76, in the windows every allele
+    coded makes dense (7,493 on chr22, 7,255 hyperdense). The SNP+indel oracle with the second
+    deletions of its sites O and Q, the insertion of Y1 and an MNV marked `LowQual`
     passes in both modes, and fails where the run read a store of every FILTER (14 and 6
     gating findings); the same world searched with `CRISPRME_INDEL_SNP=0` is refused
     (2.8.2's checker gave 166 and 77 gating findings there). On the documented chr22
@@ -1493,7 +1500,9 @@ and the `release-crisprme` skill.
   caps a window of two-allele columns where the count of columns did, so that on an index whose
   windows hold no other variant column the unit changes nothing: on the published HGDP + 1000
   Genomes index, whose chr22 holds no three-allele column, the README guide's searches of chr22 list
-  the same 565 windows over the cap as with 2.8.1 (8,155 lines, per sample and population-level),
+  the same 565 windows over the cap as with 2.8.1 (8,155 lines, per sample and population-level,
+  in the BED's form of one line per raw target, now one a window: the per-window BED entry under
+  Changed),
   the notes giving the windows' sequences (and per sample no greedy worst case: Fixed, below); their
   rows differ from 2.8.1's otherwise only as entries under Fixed say: the order of their rsID and AF
   lists; per sample, the carriers whose haplotype holds an indel in the target, whom a SNP row no

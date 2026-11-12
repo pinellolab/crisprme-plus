@@ -27,6 +27,6 @@ echo "[SLICE SLOW] start $(date -u)"; S0=$(date +%s)
 SRC=$?; S1=$(date +%s)
 echo "[SLICE SLOW] end $(date -u) rc=$SRC elapsed=$((S1-S0))s rows=$(wc -l < "$SLICE/out_slow.bestmmblg.txt" 2>/dev/null)"
 
-echo "==== SLICE TIMING: FAST=$((F1-F0))s  SLOW=$((S1-S0))s  speedup=$(python3 -c "print('%.2fx' % (($S1-$S0)/max(1,($F1-$F0))))") ===="
+echo "==== SLICE TIMING: FAST=$((F1-F0))s  SLOW=$((S1-S0))s  speedup=$(python3 -I -c "print('%.2fx' % (($S1-$S0)/max(1,($F1-$F0))))") ===="
 ./fastbench_compare.py "$SLICE/out_slow.bestmmblg.txt" "$SLICE/out_fast.bestmmblg.txt"
 echo "==== SLICE BENCH done $(date -u) ===="

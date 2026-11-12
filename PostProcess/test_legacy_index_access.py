@@ -470,7 +470,7 @@ class WebSettingsOffersAndRoutesLegacyIndexes(unittest.TestCase):
 
     PAGE = pathlib.Path(__file__).resolve().parent.parent / "pages" / "settings_page.py"
     WANT = ("_fmt_size", "_catalog_size", "_hf_options", "add_index_hf",
-            "launch_settings_job", "_shlex_quote")
+            "launch_settings_job")
 
     def setUp(self):
         self.src = self.PAGE.read_text()
@@ -492,7 +492,7 @@ class WebSettingsOffersAndRoutesLegacyIndexes(unittest.TestCase):
             "current_working_directory": workdir,
             "_hf_catalog": lambda component: catalog if component == "index" else [],
             "_preflight_disk": lambda need: None,
-            "_launch_job_cmd": lambda cmd, stage: launched.append(cmd) or "job",
+            "_launch_job_cmd": lambda argv, stage: launched.append(argv) or "job",
             "_start": lambda job: ("started", job),
         }
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(self.PAGE), "exec"), env)
@@ -512,8 +512,8 @@ class WebSettingsOffersAndRoutesLegacyIndexes(unittest.TestCase):
             launched.clear()
             env["add_index_hf"](1, name)
             self.assertEqual(len(launched), 1, name)
-            self.assertIn(f"download --what index --index-name {env['_shlex_quote'](name)}",
-                          launched[0])
+            self.assertEqual(launched[0], ["crisprme.py", "download", "--what", "index",
+                                           "--index-name", name, "--path", workdir])
             self.assertNotIn("--hf-repo", launched[0])
 
     def test_the_catalog_is_the_default_one(self):

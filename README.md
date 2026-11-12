@@ -25,7 +25,7 @@ through an interactive web-based interface.
 - **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. Since 2.8.1 an indel row lists only the individuals whose own haplotype has its sequence; where the phase is unknown, those whose own alleles allow it (PUTATIVE); on an install without SNP genotypes (`download --what index --no-genotypes`), every carrier of the indel where a SNP makes the site with it (PUTATIVE). Since 2.10.0 a per-sample SNP row does not list an individual whose haplotype holding its SNPs also holds an indel that changes the target (where that indel's phase is unknown, it stays, PUTATIVE; `CRISPRME_INDEL_SNP=0` turns this off too). Split multi-allelic SNP sites are the exception on an index CRISPRitz 2.9.1 or earlier built, as every one published until the rebuild for 2.10.0 ([§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)). An indel off-target is searched in a window of 30 reference bases on either side of its indel (CRISPRitz 2.10.0; 25 before and 27 after up to 2.9.1), which holds a target of up to 31 bases, guide, PAM and DNA bulges counted (27 on 2.9.1's, 26 at an MNV): a search whose targets need more says so, and each window's width is read from its index's own indel log, so an index of either release reads right. ([methods](METHODS.md#snpindel-off-targets-each-carriers-own-haplotype))
 - **Complementary production indexes** — the **recommended default** is the phased **HGDP + 1000 Genomes** index of the default SpCas9 **NRR** PAM (`20-NRR_3_hg38+hg38_HGDP1kGP`: 4,091 samples, jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout), with the **HPRC pangenome** and the sites-only five-source **mega** alternatives. All carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence — see the [index comparison table below](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) and [`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md). (Per-source retrieval recipes for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us are in [`paper/reproducibility/variant-datasets/`](paper/reproducibility/variant-datasets/).)
 - **One index, many PAMs (`--prune-pam`)** — a **PAM-less** index stores the raw genomic flank instead of a fixed PAM, and the PAM you pass is applied during the search, so one index answers any 3′ PAM no longer than that flank (a 3-nt flank serves NRG, NGG, NAG, …). Measured genome-wide on HGDP + 1000 Genomes for one guide, a PAM-less index with `--prune-pam` returned a **byte-identical** report to a dedicated NRG index at both a 3-nt and an 8-nt flank. A flank wider than the PAM, in an index built by CRISPRitz 2.9.1 or earlier (index format 1, as every one published until the rebuild for 2.10.0 is), does not index a PAM at a contig's very end (+ strand) or start (− strand): on hg38 at an 8-nt flank, 145 + 101 NGG and 308 + 241 NRG sites, none on a primary chromosome; the search says so when it uses such a flank. An index of format 2, which CRISPRitz 2.10.0 writes, has no such limit. The trade is size — 2.8.1's 3-nt PAM-less variant index is 110 GB against 28 GB for its `NRG_3_hg38+hg38_HGDP1kGP` — and pruning happens as results are emitted, so it is not *faster* than a dedicated index; it is worth it when you expect to search several PAMs over one genome. Since 2.10.0 a search prunes by itself, from the command line or the web form, whenever no installed index serves it unpruned, and a dedicated index serves any PAM its own holds the same way (an NRR index serves NGG, NAG, NGA and NRG). ([methods](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering))
-- **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection, tractable on any panel) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the fast worst-case screen on a phased index; add **`--per-sample`** to force resolution on any genotyped index (on a sites-only index, which has no genotypes, it runs the population-level analysis, with a warning). This is a **genotype-resolution** dial, not a speed dial — for a single guide the two modes take about the same time; the resolution cost shows up only on dense/aggregate panels. The report states which mode was used. ([methods](METHODS.md#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis))
+- **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the worst-case screen on a phased index; add **`--per-sample`** to force resolution on any genotyped index (on a sites-only index, which has no genotypes, it runs the population-level analysis, with a warning). This is a **genotype-resolution** dial, not a speed dial: which mode is faster depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele, per-sample is the faster on a dense panel of many samples such as the default HGDP + 1000 Genomes one (its haplotype pre-check skips the dense windows' raw targets nobody carries), and population-level can be on a small panel such as HPRC, or beside mega ([Search speed](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces)). The report states which mode was used. ([methods](METHODS.md#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis))
 - **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in population-level runs (`--population-level` on a genotyped index, or the default on sites-only/unphased indexes), **on** in per-sample runs (the default on genotyped+phased indexes, or under `--per-sample`) — on **both the CLI and the web**; override on the CLI with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
 - **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, calibrated per-scorer risk card, precision-recall curves, **recommended validation panel**, annotated top hits, per-tier downloads, legend). The panel keys bulges on **CRISPR-Bulge at a principled sensitive threshold** — the **95%-recall operating point** on a 40-guide held-out benchmark (`CB ≥ 1.9×10⁻⁴`; selectable to 90 % / 95 % / 99 % recall via `CRISPRME_CB_RECALL_TARGET`) — plus a high-CFD rescue for no-/single-bulge sites and all perfect/near-perfect and functional / cancer-gene hits, so the shipped panel *is* the recommended default set. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
@@ -63,9 +63,13 @@ that matter most:
   genotyped+PHASED index (`HGDP1kGP` — the default; also `HPRC`) resolving
   CONFIRMED cis + named carriers + exact joint AF, or population-level otherwise
   (sites-only/unphased/hybrid/reference-only; lossless for detection, works on any index).
-  Add **`--population-level`** to opt out of per-sample on a phased index (e.g. a very
-  dense / high-edit / genome-wide search); add **`--per-sample`** to force resolution. The
-  two flags are mutually exclusive. It is a genotype-resolution dial, not a speed dial.
+  Add **`--population-level`** to opt out of per-sample on a phased index (for each
+  window's worst case rather than its carriers' haplotypes); add **`--per-sample`** to force
+  resolution. The two flags are mutually exclusive. It is a genotype-resolution dial, not a
+  speed dial: on the indexes CRISPRitz 2.10.0 builds the per-sample analysis is the faster on
+  a dense panel of many samples such as the default HGDP + 1000 Genomes one, and the
+  population-level one can be on a small panel such as HPRC, or beside mega (see **What the
+  default search costs** below).
 - **Index.** You only need one; pick by what you're after (full detail in the index
   table in the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build)
   below):
@@ -171,7 +175,10 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 > `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
 > `PATH` — prefer `apptainer run` (or prefix `bash -lc`). A home it cannot write in (`--no-home`,
 > or `--home` on a read-only folder) is fine: matplotlib's caches then go to a temporary folder
-> ([Troubleshooting](docs/TROUBLESHOOTING.md) §1).
+> ([Troubleshooting](docs/TROUBLESHOOTING.md) §1). On a machine other people use, keep the data
+> folder, the output folders and the temporary folder writable by you alone (a umask of 022, or
+> `chmod go-w`): whoever can write them can change a search and more, as
+> [Troubleshooting](docs/TROUBLESHOOTING.md) §7 explains.
 
 **The prebuilt indexes (CRISPRme 2.10.0).** NRR (NAA, NAG, NGA, NGG) is the default PAM since
 2.10.0 (it was NRG = NAG + NGG). Since 2.10.0 the indexes are built by CRISPRitz 2.10.0 in index
@@ -338,14 +345,17 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 #   CRISPR-Bulge scorer's validated single-bulge domain. Raise the caps for a deeper search,
 #   but also raise --max-total-edits to their sum or alignments over the budget are PRUNED
 #   (e.g. --mm 6 --bDNA 2 --bRNA 2 is a 10-edit budget → add --max-total-edits 10 to keep all).
+#   On the indexes CRISPRitz 2.10.0 builds, more than 1 DNA + 1 RNA bulge makes the variant
+#   search of the dense loci explode (see "What the default search costs"): raise --mm first.
 #   Uses --per-sample here to resolve per-sample genotypes — CONFIRMED cis phasing throughout
 #   (the whole HGDP + 1000 Genomes panel is jointly re-phased) + named carrier samples + exact joint
 #   allele frequency — recommended for genotyped panels / clinical validation. On HGDP1kGP (a
 #   genotyped+phased index) per-sample is already the default; pass --population-level to switch to
-#   the worst-possible representatives (removes the per-haplotype enumeration wall that makes
-#   dense/aggregate panels intractable). --per-sample is a genotype-resolution mode,
-#   not a speed mode: for a single guide the runtimes are comparable, but it can be intractable on
-#   dense/aggregate panels; on a sites-only index (mega) it cannot resolve carriers and is inert.
+#   the worst-possible representatives. --per-sample is a genotype-resolution mode, not a speed
+#   mode: on HGDP1kGP, a dense panel of many samples, it is the faster one (its haplotype
+#   pre-check skips the dense windows' raw targets nobody carries), on a small panel such as
+#   HPRC it can be the slower; on a sites-only index (mega) it cannot resolve carriers and is
+#   inert.
 #   COSMIC cancer annotations ship in the bundle but are OFF by default (licence-gated) — enable
 #   with `crisprme.py cosmic-license enable`; IntOGen cancer-driver flags are on by default.
 
@@ -918,9 +928,38 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
     --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4
 # ^ the recommended default: 4 mismatches + 1 DNA + 1 RNA bulge = a 6-edit budget, matching
 #   the default --max-total-edits 6, so nothing (incl. SNP+indel co-occurrences) is pruned.
-#   Raise the per-type caps for a deeper search, but raise --max-total-edits to their sum too.
+#   Raise the per-type caps for a deeper search, but raise --max-total-edits to their sum too
+#   (more than 1 DNA + 1 RNA bulge: see "What the default search costs" below).
 # shareable report: crisprme.py generate-report --result-dir Results/my_search
 ```
+
+**What the default search costs.** On the indexes CRISPRitz 2.10.0 builds, which code every
+allele of a split site, the immunoglobulin loci (IGL on chr22, IGH on chr14, IGK on chr2) hold
+most of a variant search's raw targets: on chr22 the README guide at the default budget gives
+766,427 SNP and 4,487,567 indel raw targets, 98.6% and 99.9% of them in IGL. The bulges drive
+it: before the steps below, the README guide's per-sample search of chr22 took 4 min at
+4 + 0 + 0, 8 min with one bulge of either type and 96 min at 4 + 1 + 1 (the 2.10.0 cost judges,
+16 threads, on a loaded node). The post-analysis now skips the raw targets no sample's genotypes
+can produce (the exact haplotype pre-check), skips the overlaid indel targets no carrier of
+their indel can have, and runs each chromosome in pieces over the `--thread` workers, with the
+same results: on 16 threads the default search of chr22 takes 8 to 11 min per sample (98 min
+without these steps, on the same node), about what one bulge costs (8 min at 4 + 1 + 0 or
+4 + 0 + 1), and 23 to 32 min population-level (121 min without these steps). On HGDP + 1000
+Genomes, a dense panel of 4,091 samples, per sample is thus the faster mode; on a small panel
+such as HPRC (232 samples) the same search of chr22 took 14 to 17 min per sample against 9 to 12
+min population-level, and with mega beside HGDP + 1000 Genomes 96 to 107 min per sample (54 to
+62 min of it the report) against 49 to 55 min (the whole search of both datasets). Genome-wide
+it has not been timed yet on the indexes of the rebuild for 2.10.0 (its release gates do): from
+its parts we expect about 1.5 to 4 h per sample on 16 threads, against 2.8.1's 1.2 h on 32
+threads and an estimated 9 to 11 h without these steps (METHODS.md says how).
+Above 1 DNA + 1 RNA bulge the variant search itself explodes in those loci (IGL alone, at the
+default `--max-total-edits` of 6: 5.1 million SNP raw targets at 4 + 2 + 1, 33.7 million at
+4 + 2 + 2, where the indel search wrote 204 million and needed 157 GB of memory; with the cap
+raised to the budget's sum, 7.9 and 93.8 million SNP raw targets), and `complete-search` warns,
+unless `--max-total-edits` 3 or less bounds the alignments (6 + 2 + 2 at a cap of 3 wrote fewer
+raw targets there than the default). For a wider search, raise `--mm` first.
+See METHODS.md
+[§5](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces).
 
 The example below shows **every** argument (a classic setup with a custom VCF
 config file and base-editing options); see the
@@ -1051,9 +1090,12 @@ its purpose and usage:
   <br>Maximum allowable DNA bulge size. If omitted (together with `--bRNA`), it defaults to
   **1** (one DNA bulge), bounded by the bulge depth the installed index supports — the
   recommended single-bulge default (the CRISPR-Bulge ML scorer's validated domain). Pass it
-  explicitly for a deeper search. If no index the search can use holds bulges (in the working
-  directory's `genome_library/` or at `--index-path`; a reference index that can be built from
-  the `--genome` folder counts), the search stays bulge-free and prints a `WARNING` that says so.
+  explicitly for a deeper search; on the indexes CRISPRitz 2.10.0 builds, more than 1 DNA + 1 RNA
+  bulge makes the variant search of the dense loci explode and `complete-search` warns (see
+  **What the default search costs**), so raise `--mm` first. If no index the search can use
+  holds bulges (in the working directory's `genome_library/` or at `--index-path`; a reference
+  index that can be built from the `--genome` folder counts), the search stays bulge-free and
+  prints a `WARNING` that says so.
 
 - `--bRNA` (*Optional*, default `1`)
   <br>Maximum allowable RNA bulge size. See `--bDNA` — defaults to one RNA bulge when neither
@@ -1063,7 +1105,11 @@ its purpose and usage:
   <br>Cap on the combined number of edits (mismatches + DNA/RNA bulges) considered
   per candidate off-target, and — when `--bDNA/--bRNA` are omitted — the budget the
   per-type bulge caps are derived from. Lower values speed up dense-variant searches;
-  raise it to recover targets with many simultaneous edits. A **positive** value is
+  raise it to recover targets with many simultaneous edits. On an index that codes every
+  allele (CRISPRitz 2.10.0), more than 1 DNA + 1 RNA bulge makes the variant search of the
+  dense loci explode unless this cap is 3 or less: `complete-search` warns, keeps the warning
+  in the run's `.Params.txt`, and the run's `log_verbose.txt` has it (a web search's too; see
+  **What the default search costs**). A **positive** value is
   required: set it to `mm + bDNA + bRNA` (the sum of the per-type caps) to keep every
   requested-depth alignment; **negative values are rejected**. (This is a different
   knob from the `CRISPRME_IUPAC_CAP` environment variable, where `-1` disables the
@@ -1086,7 +1132,27 @@ its purpose and usage:
   (population-level, or a dense window's) is cut back to the strongest within the cap; any
   other row resting on more without such carriers is left out. `complete-search` says per
   chromosome how many were cut back and left out, and the report states the cap. Variant
-  searches only.
+  searches only. It saves no time per sample (it acts after the genotypes are read). In a
+  population-level search, whose rows no phased carrier confirms, a K below 4 leaves out
+  off-targets real people carry (CONFIRMED rows of the IGH locus rest on up to 4 such columns):
+  **use K >= 4 there.** With the cap, a population-level search skips before expanding them the
+  raw targets every row of which would rest on more than K columns (the K-skip), and writes
+  what the cap alone writes (the README guide's search of chr22 at K = 4: 8 to 10 min, against
+  16 to 18 min with the K-skip off and 23 to 32 min without the cap, on 16 threads).
+
+- `--no-haplotype-precheck` (*Optional*)
+  <br>Turn off the exact haplotype pre-check of a per-sample search, its carriers-first twin on
+  the indel side (which runs in either analysis mode) and the K-skip above; the notes each
+  chromosome ends with in `log_verbose.txt` say which of them is off. Before a raw target of
+  the variant genome is expanded into the haplotypes its carriers have, it is tested against
+  the samples' genotypes, and skipped (its reference row is still written) when no sample, free
+  to take at each variant column the reference base or any ALT it carries there, reaches the
+  mismatch budget and the PAM. The results are the same either way (it never skips a target a
+  row comes from); off, a dense region's raw targets are each expanded, as up to 2.8.1.
+  `CRISPRME_HAPLOTYPE_PRECHECK` set to 0, false, no or off (in any case) does the same. (The
+  post-analysis runs each chromosome in pieces over the `--thread` workers;
+  `CRISPRME_POSTPROC_PIECES=0`, read the same way, runs it as one process a chromosome, as up to
+  2.8.1; the files are the same.)
 
 - `--sites-only-density-guard <bits>` / `--no-sites-only-density-guard` (*Optional*, on by
   default at 20 bits; 1 to 64)
@@ -1128,12 +1194,14 @@ its purpose and usage:
   or use a prebuilt index. On a genotyped+PHASED index (HGDP + 1000
   Genomes (the default), or HPRC) this is already the context-aware default; on
   a sites-only index (`mega`) it cannot resolve carriers (no genotypes) and
-  `complete-search` warns. Can be slow / intractable on dense or aggregate panels. To opt
-  out of per-sample on a phased index use **`--population-level`**, which runs one
-  worst-possible representative per variant window (exact worst-case CFD, dataset-level
-  allele frequencies), lossless for detection and tractable on any panel. It replaces the
-  removed `--full` flag; `--per-sample` is a genotype-resolution dial, not a speed dial
-  (see METHODS §5).
+  `complete-search` warns. Its post-analysis skips the raw targets no sample can have (see
+  `--no-haplotype-precheck`). To opt out of per-sample on a phased index use
+  **`--population-level`**, which runs one worst-possible representative per variant window
+  (exact worst-case CFD, dataset-level allele frequencies), lossless for detection; on the
+  indexes CRISPRitz 2.10.0 builds it is the slower on a dense panel of many samples such as
+  HGDP + 1000 Genomes, and can be the faster on a small panel such as HPRC, or beside mega
+  (see **What the default search costs**). It replaces the removed `--full` flag;
+  `--per-sample` is a genotype-resolution dial, not a speed dial (see METHODS §5).
 
 - `--no-prioritize-observed` / `--prioritize-observed` / `--gate-min-expected <E>` (*Optional*)
   <br>The **carrier gate** (since 2.10.0). A population-level row of a genotyped dataset takes,
@@ -2234,7 +2302,8 @@ is under `data/`). Reading top to bottom:
   tiers.** In a high-variant-density
   window CRISPRme does **not** fabricate a synthetic cross-sample "worst-case" haplotype under
   `--per-sample`; it reports the real observed haplotypes (exact carriers) and flags the dense region in
-  `high_variant_density_regions.bed`. A population-level run (`--population-level`, or the default on a
+  `high_variant_density_regions.bed` (one line a dense window since 2.10.0, with the samples carrying
+  an ALT there). A population-level run (`--population-level`, or the default on a
   sites-only/unphased index) still reports the conservative worst-case representative, as it should for a screen,
   and its carrier gate ranks one no haplotype carries after the others (`--no-prioritize-observed`).
   Since 2.10.0 the same holds on an index without the tiers (one built without `--samplesID`, such as

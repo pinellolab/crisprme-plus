@@ -560,11 +560,14 @@ the same on a window of two-allele columns), and the default cap is 10 (METHODS.
   alignment, whose listed carriers need not carry every variant in it; METHODS.md §5).
 - Every capped window is still logged to **`<out>.high_variant_density_regions.bed`** so approximated
   regions are visible, never silent; the reference off-target row keeps the locus in the table. So is
-  every window of 2^20 sequences or more, whatever the cap. Its `greedy` column says whether a greedy
-  worst-case alignment stands for the window (0 on the observed-haplotype path per sample, and for a
-  hyperdense window a per-sample search enumerated within the cap); only then, or for a row that
-  names no carrier (a sites-only dataset's), does `High_variant_density_region` say so, and under
-  `--per-sample` it says otherwise that the haplotypes its carriers have are reported.
+  every window of 2^20 sequences or more, whatever the cap. Since 2.10.0 the file holds one line a
+  window, read from every raw target of the search before the haplotype pre-check skips any
+  (METHODS.md §5), its carriers the samples carrying an ALT of the window. Its `greedy` column
+  says whether a greedy worst-case alignment stands for the window (0 on the observed-haplotype
+  path per sample, and for a hyperdense window a per-sample search enumerated within the cap);
+  only then, or for a row that names no carrier (a sites-only dataset's), does
+  `High_variant_density_region` say so, and under `--per-sample` it says otherwise that the
+  haplotypes its carriers have are reported.
 - The **`observed_haplotypes.tsv`** report companion lists, for every multi-haplotype site, EACH real
   observed haplotype with its variant set, both scores (CFD + CRISPR-Bulge), carriers and AF — so the
   full per-sample set a dense site contributes is visible, not just the per-cluster representative.

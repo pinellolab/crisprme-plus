@@ -113,7 +113,9 @@ jobs:
         run: python -m unittest test_crisprme_hf -v
 
       - name: "Web Settings download progress + failure relay (2.8.1; AST-extracted, no Dash)"
-        # with the names Settings refuses, which CRISPRme takes into shell commands
+        # with the names Settings refuses, which CRISPRme takes into shell commands; a job runs
+        # its argv without a shell, in a folder of its own, and Retry re-runs the command the
+        # server launched it with, never a cmd.json of the job's folder (2.10.0)
         working-directory: PostProcess
         run: python -m unittest test_settings_progress -v
 
@@ -507,7 +509,9 @@ jobs:
 
       - name: "Modular scorer env-manager + runner (env lifecycle/state + subprocess protocol; no TF)"
         # scorer_env: detect env manager, create-command shape, atomic state file,
-        # health-check probe. scorer_runner: real stdin/stdout worker protocol against
+        # health-check probe, which with the self-test runs isolated (-I): a module put in the
+        # working directory, the data folder a search runs from, runs nothing (2.10.0).
+        # scorer_runner: real stdin/stdout worker protocol against
         # a stdlib fake worker + graceful-degradation paths. Neither needs TensorFlow.
         # test_crispr_bulge_fidelity, the CRISPR-Bulge fidelity gate, needs TensorFlow and
         # the Refined_TrueOT dataset, so here it skips: what this checks is that it imports
@@ -607,6 +611,8 @@ jobs:
         # and the index set of 2.10.0 against the code, its rebuild run dry with every
         # program stubbed (test_index_set), and the HGDP + 1000 Genomes and HPRC recipes it
         # calls, run on stubs, stopping at a step that fails (test_panel_recipes).
+        # And the indel search's merge takes the header of its part files in as the line it is:
+        # a "$(...)" another user put there runs nothing (2.10.0).
         working-directory: PostProcess
         run: >
           python -m unittest test_indel_header_injection test_complete_search_flags
@@ -696,3 +702,39 @@ jobs:
         # and the report's dense-region column and inputs card.
         working-directory: PostProcess
         run: python -m unittest test_window_density test_sites_only_guard -v
+
+      - name: "The haplotype pre-check, its carriers-first indel twin and the K-skip (2.10.0): exact against every choice"
+        # haplotype_precheck against a brute-force enumeration of every choice of alleles,
+        # counted as new_simple_analysis's finalizer and indel_snp_cis.resolve_target count
+        # them; and the real new_simple_analysis.py with the pre-check on and off (the same
+        # files): a skipped target's reference row, bulged targets (RNA, DNA) skipped and kept
+        # on the dictionary path and the observed one, a minus-strand target, a registry-only
+        # dataset's rows, a fixing ALT a three-allele column lists second; one BED line a
+        # dense window; the K-skip; the wide-budget warning.
+        working-directory: PostProcess
+        run: python -m unittest test_haplotype_precheck -v
+
+      - name: "Option P (2.10.0): a chromosome's post-analysis in pieces, merged byte for byte"
+        # merge_pieces scores CRISPR-Bulge in the batches one process forms, and keeps one
+        # line a dense window and the first companion row of an identity whatever piece holds
+        # them; the pool's ranges and its first-failure stop; its pieces' folder 0700 and their
+        # dictionary copy JSON and 0600, in which a planted pickle runs nothing; the real
+        # new_simple_analysis.py and analisi_indels_NNN.py as one process and as pieces merged
+        # give the same files, and analisi_indels_NNN.py the same with its carriers-first
+        # pre-check on and off (a target at exactly the budget among them); the notes say
+        # what is off.
+        working-directory: PostProcess
+        run: python -m unittest test_postproc_pieces -v
+
+      - name: "What a scan of the source shows of loading code and of temporary names, and read-back values that reach a shell (2.10.0)"
+        # The pieces once read a pickle from the run's output folder, which its group could
+        # replace (2.10.0, the review of lane S, round 3), and every search ran the scorer's
+        # health check as "python -c" from the data folder (round 4): over every module's parse
+        # tree but the tests, no pickle, marshal, shelve or the like, no eval or exec, no unsafe
+        # YAML load, no tempfile.mktemp, no python -c, -m or - that is not isolated (-I); in the
+        # shell scripts, no eval, no name mktemp did not make, no python -c, -m or - that is not
+        # isolated. And process_summaries.py and assemble_cfd_graphs.py run nothing a line or a
+        # name another user put in a search's folder holds. What it cannot see, a folder others
+        # can write still allows (docs/TROUBLESHOOTING.md section 7).
+        working-directory: PostProcess
+        run: python -m unittest test_no_code_from_files -v

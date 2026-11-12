@@ -105,6 +105,7 @@ from werkzeug.security import safe_join
 import errno
 import re
 import os
+import shlex
 
 
 # -------------------------------------------------------------------------------
@@ -3343,7 +3344,11 @@ def cluster_page(job_id: str, hash_term: str) -> html.Div:
     # The guide, chromosome and position are the link's (its #hash), which a client can
     # set to any text, and the commands below run them through a shell: only a guide of
     # the job, a position of digits and a chromosome name of characters a shell takes as
-    # they are (shlex.quote leaves them unquoted) are looked up.
+    # they are (shlex.quote leaves them unquoted) are looked up. A guide of the job is
+    # one its guides.txt lists, a file of the job's folder, which others may write (its
+    # group, under a umask of 002): it is looked up only if it is letters too, as every
+    # guide is (2.10.0, the review of lane S, round 4: a line put there ran through the
+    # shell as the web app's user).
     try:
         with open(
             os.path.join(current_working_directory, RESULTS_DIR, job_id, GUIDES_FILE)
@@ -3353,6 +3358,7 @@ def cluster_page(job_id: str, hash_term: str) -> html.Div:
         job_guides = []
     if (
         guide not in job_guides
+        or not re.fullmatch(r"[A-Za-z]+", guide)
         or not re.fullmatch(r"[0-9]+", position)
         or not re.fullmatch(r"[A-Za-z0-9_@%+=:,.]+", chromosome)
     ):
@@ -3444,6 +3450,9 @@ def cluster_page(job_id: str, hash_term: str) -> html.Div:
                 stderr=subprocess.PIPE,
             )
             out, err = get_annotation.communicate()
+            # read from a file of the job's folder, which others may write: it reaches awk
+            # as a variable's value, quoted, never as the shell's or awk's own text (it ran
+            # through the shell as the web app's user; 2.10.0, the review of lane S, round 4)
             annotation_type = out.decode("UTF-8").strip().split("\t")[-1]
             os.popen(
                 put_header_cmd
@@ -3456,13 +3465,13 @@ def cluster_page(job_id: str, hash_term: str) -> html.Div:
                 + "/"
                 + job_id
                 + file_to_grep
-                + " | awk '$6=="
+                + " | awk -v annotation_type="
+                + shlex.quote(annotation_type)
+                + " '$6=="
                 + position
                 + ' && $4=="'
                 + chromosome
-                + '" {###print $0"\\t'
-                + annotation_type
-                + "\"}' >> "
+                + '" {###print $0"\\t"annotation_type}\' >> '
                 + cluster_grep_result
             ).read()
         else:  # NOTE HEADER NOT SAVED

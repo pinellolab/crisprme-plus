@@ -64,7 +64,11 @@ if [ "$OS" = "Darwin" ]; then
   APPS="${HOME}/Applications"; mkdir -p "$APPS"
   APP="${APPS}/${APP_NAME}.app"
   rm -rf "$APP"
-  SRC="$(mktemp -t crisprme_app).applescript"
+  # the launcher's source, in a folder only this user can open (mktemp -d: 0700): a name
+  # beside the file mktemp -t makes was not made by it, so in a shared /tmp another user
+  # could have put a file there first, its text then compiled into the app
+  SRC_DIR="$(mktemp -d -t crisprme_app)"
+  SRC="${SRC_DIR}/CRISPRme.applescript"
   cat > "$SRC" <<'OSA'
 -- CRISPRme+ launcher. Three actions: Start / Update / Stop.
 -- Data (a ~70 GB download, ~150 GB once installed) lives in a user-chosen folder,
@@ -231,7 +235,7 @@ on run
 end run
 OSA
   osacompile -o "$APP" "$SRC" 2>/dev/null
-  rm -f "$SRC"
+  rm -rf "${SRC_DIR:?}"
   # zero-warning open: strip the quarantine flag (installed by a script the user ran)
   xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
   say "${GRN}Installed:${NC} ${APP}"

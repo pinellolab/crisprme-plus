@@ -3683,15 +3683,18 @@ def index_page() -> html.Div:
                         [
                             html.B("Population-level"),
                             " reports one worst-possible off-target per variant window "
-                            "(exact worst-case CFD; CRISPR-Bulge is a best-effort screen). It stays "
-                            "tractable on any panel and is lossless for detection, but does NOT "
+                            "(exact worst-case CFD; CRISPR-Bulge is a best-effort screen). It is "
+                            "lossless for detection, but does NOT "
                             "compute per-sample carriers, CONFIRMED cis phasing or exact joint "
-                            "allele frequency. ",
+                            "allele frequency. Which mode is faster depends on the panel: "
+                            "per-sample on a dense panel of many samples such as the default "
+                            "HGDP + 1000 Genomes one, population-level on a small one such as "
+                            "HPRC. ",
                             html.B("Per-sample"),
                             " resolves per-sample genotypes into observed haplotypes (named "
                             "carriers + CONFIRMED cis + exact joint AF) — recommended for "
-                            "genotyped panels / clinical validation, but slower and can be "
-                            "intractable on dense panels. It requires a genotyped panel; on a "
+                            "genotyped panels / clinical validation; it skips the dense "
+                            "windows' combinations nobody carries. It requires a genotyped panel; on a "
                             "sites-only (aggregate) panel there are no genotypes to resolve, so "
                             "it falls back to the population-level analysis.",
                         ],

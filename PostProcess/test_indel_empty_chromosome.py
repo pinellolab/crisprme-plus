@@ -105,7 +105,8 @@ if sys.argv[1] == "search":
         # a search of the fake-indel genome itself, which takes no bulge (its row at 20)
         row = f"X\tACGT\tACGT\tfake{chrom}\t20\t20\t+\t1\t0\t1"
     with open(out_name + ".targets.txt", "w") as fh:
-        fh.write(HEADER + "\n")
+        # (STUB_FIRST_LINE: a first line another user put in the part file)
+        fh.write(os.environ.get("STUB_FIRST_LINE", HEADER) + "\n")
         fh.write(row + "\n")
 elif sys.argv[1] == "index-genome":
     # What crispritz.py index-genome writes: genome_library/<PAM>_<bMax>_<name>, made
@@ -402,6 +403,21 @@ class SearchSide(_Fixture):
         self.assertIn("No indels on chrB", res.stdout)
         self.assertEqual(lines[0], HEADER)
         self.assertEqual([ln for ln in lines[1:] if ln], ["X\tACGT\tACGT\tfakechrA\t10\t10\t+\t1\t0\t1"])
+
+    def test_a_first_line_a_part_file_holds_runs_nothing(self):
+        # The merge takes the header from a chromosome's part file, a file of the output
+        # folder, which others may write (its group, under a umask of 002), and put it into
+        # its sed command as the shell's own text, where a "$(...)" or a backquote in it ran
+        # (2.10.0, the review of lane S, round 4): it goes in as the line it is
+        planted = "#Bulge type\t$(touch MARK_substitution)\t`touch MARK_backquotes`\tcrRNA"
+        self.env["STUB_FIRST_LINE"] = planted
+        res, lines = self.run_search(LOGS_AB, {"chrA": True, "chrB": True})
+        marks = [os.path.join(r, f) for r, _d, fs in os.walk(self.tmp) for f in fs
+                 if f.startswith("MARK")]
+        self.assertEqual(marks, [])
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(lines[0], planted)
+        self.assertEqual(len([ln for ln in lines[1:] if ln]), 2)
 
     def test_no_chromosome_with_indels_still_writes_a_targets_file(self):
         res, lines = self.run_search({"chrA": [], "chrB": []}, {"chrA": False, "chrB": False})
