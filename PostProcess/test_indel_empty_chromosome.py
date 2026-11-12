@@ -69,6 +69,7 @@ import gzip
 import json
 import os
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -254,7 +255,7 @@ class SearchSide(_Fixture):
 
     def run_search(self, logs, bins, records=(), fakes=None, true_pam="NRG", pam=NRG,
                    bulges=("1", "1"), vcfs=(), pam_files=None, pam_build=None, view=None,
-                   listed="ds", no_trees=(), metas=None):
+                   listed="ds", no_trees=(), metas=None, enriched=False):
         """bins: chrom -> whether its sub-index holds a .bin (a chromosome left out has
         none); records: the chromosomes whose sub-index holds the record of a build with
         no target; fakes: chrom -> the sequence of its fake-indel contig, written where
@@ -266,7 +267,8 @@ class SearchSide(_Fixture):
         listed: how the search's --vcf list spells the dataset; no_trees: the chromosomes
         whose sub-index holds a directory x.bin and a file named .bin, neither of them a
         tree searchTST loads; metas: chrom -> the record of what its sub-index holds
-        (.index_meta.json, index_fit.write_index_meta)."""
+        (.index_meta.json, index_fit.write_index_meta); enriched: the dataset's enriched
+        genome in place (Genomes/ref+ds)."""
         cwd = self.work = os.path.join(self.tmp, "work")
         self.true_pam = true_pam
         logdir = os.path.join(cwd, "Dictionaries", "log_indels_ds")
@@ -295,6 +297,10 @@ class SearchSide(_Fixture):
             os.makedirs(os.path.join(cwd, "genome_library", f"{true_pam}_3_ref+ds"))
             with open(os.path.join(cwd, "genome_library", f"{true_pam}_3_ref+ds", ".pam_build"), "w") as fh:
                 fh.write(pam_build)
+        if enriched:
+            os.makedirs(os.path.join(cwd, "Genomes", "ref+ds"))
+            with open(os.path.join(cwd, "Genomes", "ref+ds", "chrA.enriched.fa"), "w") as fh:
+                fh.write(">chrA\nACGT\n")
         for chrom, seq in (fakes or {}).items():
             d = os.path.join(cwd, "Genomes", "ref+ds_INDELS", f"fake_ds_{chrom}")
             os.makedirs(d)
@@ -894,6 +900,66 @@ class SearchSide(_Fixture):
         self.assertEqual((res.returncode, res.stderr), (0, ""))
         self.assertEqual(self.searched(), ["chrA"])
 
+    def test_the_rebuild_of_a_sub_index_of_other_windows_names_its_variant_index(self):
+        """W1C-B2R2-2, the review of wave 1c-a: the refusal of a sub-index of other windows
+        than its log named the INDELS index alone for its rebuild. A build makes the variant
+        index of its name with it, from the same enrichment, and that one holds no window to
+        tell: after the kit of 2.10.0 had replaced 2.8.1's beside the mega's SaCas9 indexes a
+        search had built from the old one, the rebuild it gave ("Variant index already
+        present") built the INDELS index alone, and the next search read the old kit's variant
+        index with no word, 16 targets of chr22 lost. Where the variant index is there, each
+        way the refusal gives removes it too: the build-index-only command (the VCFs and the
+        PAM file here), this search again (the enrichment in place, with no VCFs), or, with no
+        enriched genome either, the download, or the enriched genome put back first. Where it
+        is not, the refusal reads as before."""
+        rows, meta = window_rows("chrA", 30, 30), {"chrA": {"index_format": 2,
+                                                          "indel_window": [25, 27]}}
+        fake = {"chrA": window_fake("chrA", 30, 30)}
+        variant = os.path.join(self.tmp, "work", "genome_library", "NRG_3_ref+ds")
+        enriched = os.path.join(self.tmp, "work", "Genomes", "ref+ds")
+        for case, kw, ends in (
+                ("VCFs here", dict(vcfs=["chrA"]),
+                 lambda: (": rm -rf '%s' '%s' && crisprme.py build-index-only --genome "
+                          "'%s/Genomes/ref' --pam '%s/pam.txt' --bDNA 2 --bRNA 2 --vcf '%s' "
+                          "--path '%s'\n" % (self.idx, variant, self.work, self.tmp,
+                                              self.vcf_dir, self.work))),
+                ("the enrichment in place", dict(enriched=True),
+                 lambda: (": remove both with rm -rf '%s' '%s' and run this search again, "
+                          "which builds them anew from the enrichment in place, %s and the "
+                          "fake-indel genome in %s/Genomes/ref+ds_INDELS\n" % (
+                              self.idx, variant, enriched, self.work))),
+                ("neither", {},
+                 lambda: (": for an index you downloaded, download it again: rm -rf '%s' && "
+                          "crisprme.py download --what index --index-name NRG_3_ref+ds --path "
+                          "'%s'; for one you built, put its enriched genome back in '%s' and run "
+                          "this search again, which then says how to rebuild them\n" % (
+                              self.idx, self.work, enriched)))):
+            with self.subTest(case=case):
+                shutil.rmtree(os.path.join(self.tmp, "work"), ignore_errors=True)
+                shutil.rmtree(os.path.join(self.tmp, "out"), ignore_errors=True)
+                open(self.stub_log, "w").close()
+                res, lines = self.run_search({"chrA": rows}, {"chrA": True}, metas=meta,
+                                             fakes=fake, pam_build="pam.txt 23 3\n", **kw)
+                self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+                self.assertIsNone(lines)
+                self.assertIn("The variant index of its name (%s) was built with it, from the "
+                              "same enrichment, which it holds no window to tell: it goes too, "
+                              "or it would be searched with the dataset's dictionaries, its "
+                              "alleles another enrichment's. Rebuild them" % variant, res.stderr)
+                self.assertTrue(res.stderr.endswith(ends()), res.stderr)
+                self.assertEqual(self.searched(), [])
+        # with no variant index of its name there, the INDELS index alone, as before
+        shutil.rmtree(os.path.join(self.tmp, "work"))
+        shutil.rmtree(os.path.join(self.tmp, "out"))
+        res, lines = self.run_search({"chrA": rows}, {"chrA": True}, metas=meta, fakes=fake,
+                                     vcfs=["chrA"])
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertNotIn("variant index", res.stderr)
+        self.assertTrue(res.stderr.endswith(
+            "download. Rebuild it: rm -rf '%s' && crisprme.py build-index-only --genome "
+            "'%s/Genomes/ref' --pam '%s/pam.txt' --bDNA 2 --bRNA 2 --vcf '%s' --path '%s'\n" % (
+                self.idx, self.work, self.tmp, self.vcf_dir, self.work)), res.stderr)
+
     def test_a_search_whose_targets_need_more_than_the_windows_hold_says_so(self):
         """A 27-nt SaCas9 site (21-nt guide and NNGRRT) with a DNA bulge needs 28 bases,
         and a window of 25/27 holds up to 27 around an indel (26 at an MNV): the search
@@ -922,15 +988,18 @@ class SearchSide(_Fixture):
                       res.stdout)
         self.assertNotIn("enrich ds again", res.stdout)
         # and what goes first, as build-index-only's warning says: all that came from its kit
-        # in place, each part by absolute path, its indel logs and INDELS index among it, and
-        # the three the recipe writes anew by absolute path too (the note named the three
-        # alone, relative, and section 12's commands then left the kit in place: W1C-B1)
+        # in place, each part by absolute path, its indel logs among it, and its indexes by
+        # their patterns, which take those built after the note too, and the three the recipe
+        # writes anew by absolute path too (the note named the three alone, relative, and
+        # section 12's commands then left the kit in place: W1C-B1; then the indexes in
+        # place alone, and its own flow left those its search built next: W1C-B2R2-2)
         self.assertIn("Either replaces its kit in place and all that was built from it",
                       res.stdout)
         gone = re.search(r"which go first \(rm -rf ([^;]*); and any copy", res.stdout)
         self.assertIsNotNone(gone, res.stdout)
-        self.assertEqual(gone.group(1), "'%s' '%s'" % (
-            os.path.join(self.work, "Dictionaries", "log_indels_ds"), self.idx))
+        lib = os.path.dirname(self.idx)
+        self.assertEqual(gone.group(1), "'%s' %s/*_[0-9]_ref+ds %s/*_[0-9]_ref+ds_INDELS" % (
+            os.path.join(self.work, "Dictionaries", "log_indels_ds"), lib, lib))
         self.assertIn("(rm -rf '%s' '%s' '%s')" % (
             os.path.join(self.work, "VCFs", "ds"),
             os.path.join(self.work, "Dictionaries", "registry_ds"),
@@ -949,9 +1018,9 @@ class SearchSide(_Fixture):
         self.assertIn("To search them: ds is sites-only", res.stdout, res.stderr)
         gone = re.search(r"which go first \(rm -rf ([^;]*); and any copy", res.stdout)
         self.assertIsNotNone(gone, res.stdout)
-        named = re.findall(r"'([^']*)'", gone.group(1))
+        named = shlex.split(gone.group(1))
         self.assertIn(os.path.join(self.work, "Dictionaries", "log_indels_ds"), named)
-        self.assertIn(self.idx, named)
+        self.assertIn(os.path.join(self.work, "genome_library", "*_[0-9]_ref+ds_INDELS"), named)
         self.assertNotIn(os.path.join(self.work, "Dictionaries", "registry_ds"), named)
         for path in named + re.findall(r"rm -rf '([^']*)'", res.stdout):
             self.assertTrue(path.startswith(self.work + os.sep), path)

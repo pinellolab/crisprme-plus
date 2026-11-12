@@ -300,7 +300,7 @@ def _holds_vcfs(vcf_folder):
         return False
 
 
-def _rebuild(raw_fakechrom, fasta):
+def _rebuild(raw_fakechrom, fasta, with_variant=False):
     """How to rebuild the INDELS index this search reads, the end of "Rebuild it", by what
     is here. With the dataset's VCFs, the build-index-only command, with the PAM file the
     index was built with, that does it, with the enrichment that makes the fake-indel
@@ -313,10 +313,17 @@ def _rebuild(raw_fakechrom, fasta):
     another PAM, built with one that is not in _pam_dirs): the steps are said in words,
     never as a command with a blank to fill in. complete-test --chrom's view may not hold
     that genome, and an INDELS index built there would go with the view, so that run sends
-    the user to a run that does build it."""
+    the user to a run that does build it. ``with_variant``: the INDELS index is of another
+    enrichment than the dataset's indel logs (_window_mismatch), and the variant index of its
+    name, built with it, goes with it where it is there (indel_window.with_its_variant_index),
+    for the build, or this search with the enriched genome in place, to build both from the
+    enrichment in place; a download swaps in both from one archive."""
+    import indel_window
+
     cwd = os.path.normpath(_outside_view(current_working_directory))
     indels_index = os.path.join(os.path.normpath(_outside_view(index_library)),
                                 f"{variant_index}_INDELS")
+    also = indel_window.with_its_variant_index(indels_index)[1:] if with_variant else []
     # (a downloaded index comes without the fake-indel genome. download skips an index
     # whose INDELS index is in place, and else swaps in both from one archive: a variant
     # index left there survives a download that fails, as for an index that is not on
@@ -329,16 +336,30 @@ def _rebuild(raw_fakechrom, fasta):
     vcfs = next((d for d in (_outside_view(vcf_dir), named) if _holds_vcfs(d)), None)
     own = _own_pam()
     pam = _pam_file_of(*own) if own else pam_file
+    it = "them" if also else "it"
     if fasta and not (vcfs and pam):
         search = ("complete-test without --chrom, or a complete-search of this index,"
                   if _in_chrom_view() else "this search again,")
-        return (f": remove the INDELS index with rm -rf '{indels_index}' and run {search} which "
-                f"builds it anew from the fake-indel genome in {os.path.dirname(raw_fakechrom)}")
+        enriched = os.path.join(cwd, "Genomes", f"{ref_name}+{vcf_name}")
+        if not also:
+            return (f": remove the INDELS index with rm -rf '{indels_index}' and run {search} "
+                    f"which builds it anew from the fake-indel genome in "
+                    f"{os.path.dirname(raw_fakechrom)}")
+        if os.path.isdir(enriched):
+            # (the search builds a missing variant index from the enriched genome in place)
+            return (f": remove both with rm -rf '{indels_index}' '{also[0]}' and run {search} "
+                    f"which builds them anew from the enrichment in place, {enriched} and the "
+                    f"fake-indel genome in {os.path.dirname(raw_fakechrom)}")
+        # (no enriched genome here to build the variant index from, nor the VCFs and the PAM
+        # file of a build: the search would build the INDELS index alone)
+        return (f": for an index you downloaded, download it again: {download}; for one you "
+                f"built, put its enriched genome back in '{enriched}' and run {search} which "
+                f"then says how to rebuild them")
     if not vcfs:
         return (f": for an index you downloaded, download it again: {download}; for one you "
                 f"built, put its VCFs back in '{named}' and run this search again, which then "
-                f"gives the command that rebuilds it")
-    remove = [indels_index]
+                f"gives the command that rebuilds {it}")
+    remove = [indels_index] + also
     again = ""
     if not fasta:
         # build-index-only makes that genome as it enriches, and with an enriched
@@ -488,7 +509,10 @@ def _window_mismatch(chrom, indexed_fakechrom, raw_fakechrom):
     (each window's start, ALT and FAKEPOS are another enrichment's), and every indel row
     of it would be wrong. None where they agree, or either does not tell (a sub-index of
     format 2 that records none: its rows are mapped by its log's own windows, as every
-    reader of the log maps them, whatever their width)."""
+    reader of the log maps them, whatever their width). The rebuild it names removes the
+    variant index of the INDELS index's name too, where it is there (_rebuild): up to the
+    review of wave 1c-a (W1C-B2R2-2) it named the INDELS index alone, whose build kept the
+    variant index of the other enrichment, and the search then read it with no word."""
     import indel_window
 
     recorded = indel_window.index_window(indexed_fakechrom) \
@@ -506,13 +530,22 @@ def _window_mismatch(chrom, indexed_fakechrom, raw_fakechrom):
         fasta = any(f.strip().split(".")[-1] == "fa" for f in os.listdir(raw_fakechrom))
     except OSError:
         fasta = False
+    # (the variant index of its name, which a build makes with it from one enrichment, and
+    # which holds no window to tell its own: indel_window.with_its_variant_index)
+    paired = indel_window.with_its_variant_index(os.path.join(
+        os.path.normpath(_outside_view(index_library)), f"{variant_index}_INDELS"))[1:]
     return (f"ERROR: the indel index of {chrom} ({_outside_view(indexed_fakechrom)}) was built "
             f"from fake-indel windows of {indel_window.describe(recorded)} reference bases (before "
             f"an indel's REF and after it), while the indel log {_outside_view(path)} holds windows "
             f"of {' and '.join(indel_window.describe(w) for w in sorted(logged))}: the index and "
             f"the log come from two enrichments, and the log would place every indel off-target "
             f"of {chrom} wrong. Install the index and its dictionaries from one build or one "
-            f"download. Rebuild it{_rebuild(raw_fakechrom, fasta)}")
+            f"download."
+            + (f" The variant index of its name ({paired[0]}) was built with it, from the same "
+               f"enrichment, which it holds no window to tell: it goes too, or it would be "
+               f"searched with the dataset's dictionaries, its alleles another enrichment's."
+               if paired else "")
+            + f" Rebuild {'them' if paired else 'it'}{_rebuild(raw_fakechrom, fasta, True)}")
 
 
 def _window_notes():

@@ -57,6 +57,7 @@ Stdlib only.
 import gzip
 import json
 import os
+import shlex
 import sys
 
 # The window of CRISPRitz 2.9.1 and earlier (enricher.py: genome[POS-26 : POS+26+len(REF)]),
@@ -286,11 +287,13 @@ def target_note(window, target_len, bdna, who, dataset, sites=False, workdir=Non
     the removal of all that came from its kit in place first (kit_removal: in working
     directory ``workdir`` of genome ``genome``, the indexes of ``libraries`` too, the
     libraries the search reads besides the working directory's), as build-index-only's
-    warning names it. Up to the review of wave 1c-a (W1C-B1) the note named only the removal
-    of the dataset's VCFs, registry and indel frequencies, which the recipe writes anew:
-    followed with docs/TROUBLESHOOTING.md section 12, the kit was left in place, every part
-    the recipe built failed to move in, and build-index-only and every search then refused
-    the dataset."""
+    warning names it, the indexes by their patterns, which take those the search builds from
+    that kit after the note too (index_patterns). Up to the review of wave 1c-a (W1C-B1) the
+    note named only the removal of the dataset's VCFs, registry and indel frequencies, which
+    the recipe writes anew: followed with docs/TROUBLESHOOTING.md section 12, the kit was left
+    in place, every part the recipe built failed to move in, and build-index-only and every
+    search then refused the dataset; up to its review (W1C-B2R2-2) it named the indexes in
+    place when it was printed, and the note's own flow left those the search built next."""
     if window is None:
         return None
     want = target_len + bdna
@@ -339,6 +342,36 @@ def dataset_indexes(library, genome, dataset):
     return [os.path.join(library, name) for name in names
             if not name.startswith(".") and (index_fit.parse_index_name(name) or "xxx")[2] in rests
             and os.path.isdir(os.path.join(library, name))]
+
+
+def index_patterns(library, genome, dataset):
+    """The shell patterns, for the rm -rf of an advice, of every index of variant dataset
+    ``dataset`` of genome ``genome`` in ``library``: <library>/*_[0-9]_<genome>+<dataset> and
+    the same with _INDELS (the folder and the names quoted where they hold a character the
+    shell reads, shlex.quote, the pattern not). They take each such index, of every PAM and
+    either form of the name (<PAM>_<N>_..., <guide>-<PAM>_<N>_...), whenever it was built:
+    those a search builds from the kit in place after its note is printed among them, which
+    no list of the indexes in place can name (the review of wave 1c-a, W1C-B2R2-2); and no
+    other: not the reference index (<PAM>_<N>_<genome>), nor an index of another dataset, nor
+    one of a genome whose name ends in _<genome> (<PAM>_<N>_x_<genome>+<dataset>), nor a
+    hidden folder, as docs/TROUBLESHOOTING.md section 12 removes them."""
+    return ["%s*_[0-9]_%s" % (shlex.quote(os.path.join(library, "")),
+                              shlex.quote("%s+%s%s" % (genome, dataset, s)))
+            for s in ("", "_INDELS")]
+
+
+def with_its_variant_index(indels_index):
+    """The removal an advice names for ``indels_index`` (<...>_INDELS), whose fake-indel
+    windows tell another enrichment than the dataset's indel logs: that index and, where it is
+    there, the variant index of its name, as paths. A build makes the two together, from one
+    enrichment, and nothing tells the variant index's (it holds no window): removed alone, the
+    INDELS index was built anew from the enrichment in place, by build-index-only or the next
+    search, and the variant index of the earlier one was kept, which every later search read
+    with the dataset's dictionaries, its alleles another enrichment's (the review of wave
+    1c-a, W1C-B2R2-2: the SaCas9 index of the mega that a search had built from CRISPRme
+    2.8.1's kit, searched after the kit of 2.10.0 had replaced it)."""
+    variant = indels_index[:-len("_INDELS")] if indels_index.endswith("_INDELS") else None
+    return [indels_index] + ([variant] if variant and os.path.isdir(variant) else [])
 
 
 def registry_data_type(registry):
@@ -512,6 +545,14 @@ def enrichment_stores(workdir, genome, dataset, libraries=(), present=True):
     PostProcess/build_mega_registry.py writes from its VCFs' INFO AF fields, as its manifest
     says: its data_type, or, in every published mega's, its aggregation, registry_data_type)
     with its indel frequencies."""
+    return (_enrichment_parts(workdir, genome, dataset, present)
+            + _indexes(workdir, genome, dataset, libraries))
+
+
+def _enrichment_parts(workdir, genome, dataset, present=True):
+    """What of the dataset comes from its enrichment but its indexes (enrichment_stores): its
+    enriched and fake-indel genomes, dictionaries, indel logs and dict-less tiers, as paths;
+    with ``present``, those that are there (a tier where it holds a file)."""
     own = [os.path.join(workdir, "Genomes", "%s+%s%s" % (genome, dataset, s))
            for s in ("", "_INDELS")] + [
         os.path.join(workdir, "Dictionaries", "%s_%s" % (k, dataset))
@@ -520,24 +561,39 @@ def enrichment_stores(workdir, genome, dataset, libraries=(), present=True):
     if present:
         own = [d for d in own if os.path.lexists(d)]
         tiers = [d for d in tiers if _holds_a_file(d)]
-    return own + tiers + _indexes(workdir, genome, dataset, libraries)
+    return own + tiers
 
 
 def kit_removal(what, dataset, workdir=None, genome=None, libraries=(), stores=None):
     """The sentence of the advice on sites-only dataset ``dataset`` (after sites_only_way)
     that names what either way of having the kit of CRISPRitz 2.10.0 replaces, ``what``
     ("that enrichment", "its kit in place") and all that was built from it, to be removed
-    first: its genomes, dictionaries, indel logs and dict-less tiers, and every index of it
-    (``stores``, else enrichment_stores of working directory ``workdir`` and genome
-    ``genome``, the indexes of ``libraries`` too), each by absolute path; without either,
-    their names in a working directory, its indexes by a pattern (<PAM>_<N>_<genome>+<dataset>,
-    as docs/TROUBLESHOOTING.md section 12 removes them). Build-index-only's warning
-    and a search's note of windows too short say it; the refusals name that removal before
+    first: its genomes, dictionaries, indel logs and dict-less tiers, and every index of it.
+    With ``stores``, those paths, each by absolute path (build-index-only's warning: the
+    stores in place and the indexes it builds next). Else, in working directory ``workdir``
+    of genome ``genome``, the parts of the kit in place by absolute path (_enrichment_parts)
+    and the indexes of the dataset by their patterns (index_patterns), in the working
+    directory's genome_library and in each of ``libraries`` (the libraries the search reads
+    besides): a search's note of windows too short is printed before the search builds an
+    index, and the search then builds its variant and INDELS indexes of the dataset from the
+    kit in place, which its note named by none of their names up to the review of wave 1c-a
+    (W1C-B2R2-2: the note's own flow left the SaCas9 indexes a search had built from 2.8.1's
+    kit, and the next SaCas9 search, refused for the INDELS index, read the variant index of
+    the old kit once that one had been built again). Without either, their names in a working
+    directory, its indexes by a pattern too (<PAM>_<N>_<genome>+<dataset>, as
+    docs/TROUBLESHOOTING.md section 12 removes them). The refusals name that removal before
     the way (rebuild_kit_way)."""
-    if stores is None and workdir:
-        stores = enrichment_stores(workdir, genome, dataset, libraries)
+    after = ", of every PAM, those a search builds from it after this note among them"
     if stores is not None:
-        names = " ".join(quote(p) for p in stores)
+        names, after = " ".join(quote(p) for p in stores), ""
+    elif workdir:
+        libraries_once = []
+        for lib in [os.path.join(workdir, "genome_library")] + list(libraries):
+            if all(os.path.realpath(lib) != os.path.realpath(seen) for seen in libraries_once):
+                libraries_once.append(lib)
+        names = " ".join([quote(p) for p in _enrichment_parts(workdir, genome, dataset)]
+                         + [p for lib in libraries_once
+                            for p in index_patterns(lib, genome, dataset)])
     else:
         g = genome or "<genome>"
         names = " ".join(["Genomes/%s+%s" % (g, dataset), "Genomes/%s+%s_INDELS" % (g, dataset)]
@@ -547,8 +603,8 @@ def kit_removal(what, dataset, workdir=None, genome=None, libraries=(), stores=N
                             "genome_library/*_[0-9]_%s+%s_INDELS" % (g, dataset)])
     return ("Either replaces %s and all that was built from it, as a search would read stores "
             "of the two together: its genomes, dictionaries, indel logs and dict-less tiers, "
-            "and every index of the dataset, which go first (rm -rf %s; and any copy of those "
-            "indexes in a library you search with --index-path)." % (what, names))
+            "and every index of the dataset%s, which go first (rm -rf %s; and any copy of "
+            "those indexes in a library you search with --index-path)." % (what, after, names))
 
 
 def earlier_windows(workdir, genome, dataset, libraries=(), variant=True):

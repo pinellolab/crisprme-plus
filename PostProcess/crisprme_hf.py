@@ -2797,14 +2797,21 @@ def _window_notes(local_dir, workdir, install_name, vcf_name):
         for idx, w, logged in indel_window.mismatched_indexes(local_dir, vcf_name, logs):
             if os.path.basename(idx) == f"{install_name}_INDELS":
                 continue
+            # (with the variant index of its name, built with it from one enrichment, which
+            # no window tells: indel_window.with_its_variant_index, W1C-B2R2-2)
+            pair = indel_window.with_its_variant_index(idx)
             notes.append(
                 f"WARNING: the INDELS index {idx} was built from fake-indel windows of "
                 f"{indel_window.describe(w)} reference bases, and the indel logs of "
                 f"{vcf_name} installed now ({logs}) record windows of "
                 f"{' and '.join(indel_window.describe(x) for x in logged)}: they come from two "
                 f"enrichments, and every search of it refuses it. Download its index again, or "
-                f"remove it (rm -rf {indel_window.quote(idx)}) and build it with "
-                f"build-index-only.")
+                + (f"remove it and the variant index of its name, {pair[1]}, built with it from "
+                   f"the same enrichment, which it holds no window to tell (rm -rf "
+                   f"{' '.join(indel_window.quote(p) for p in pair)}), and build them with "
+                   f"build-index-only." if len(pair) > 1 else
+                   f"remove it (rm -rf {indel_window.quote(idx)}) and build it with "
+                   f"build-index-only."))
         _genome = ((index_fit.parse_index_name(install_name) or (None,) * 3)[2]
                    or "").partition("+")[0]
         if widths and widths != {indel_window.OLD_WINDOW} and \

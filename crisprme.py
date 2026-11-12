@@ -4502,13 +4502,22 @@ def _enrichment_window_notes(enriched: str, indels_out: str, log_dir: str, genom
     _stores = indel_window.enrichment_stores(workdir, genome_ref, vcf_name, present=False)
     _rm = " ".join(indel_window.quote(d) for d in dict.fromkeys(_stores + list(building)))
     for idx, w, logged in indel_window.mismatched_indexes(library, vcf_name, log_dir):
+        # (with the variant index of its name, built with it from one enrichment, which no
+        # window tells: removed alone, the INDELS index was built anew and the variant index
+        # of the other enrichment searched with no word, W1C-B2R2-2 of the wave 1c-a review)
+        _pair = indel_window.with_its_variant_index(idx)
         notes.append(
             f"WARNING [build-index-only]: the INDELS index {idx} was built from fake-indel "
             f"windows of {indel_window.describe(w)} reference bases, and the indel logs of "
             f"{vcf_name} ({log_dir}) record windows of "
             f"{' and '.join(indel_window.describe(x) for x in logged)}: they come from two "
-            f"enrichments, and every search of it refuses it. Remove it (rm -rf "
-            f"{indel_window.quote(idx)}) and build it again with build-index-only.")
+            f"enrichments, and every search of it refuses it. "
+            + (f"Remove it and the variant index of its name, {_pair[1]}, built with it from "
+               f"the same enrichment, which it holds no window to tell (rm -rf "
+               f"{' '.join(indel_window.quote(p) for p in _pair)}), and build them again with "
+               f"build-index-only." if len(_pair) > 1 else
+               f"Remove it (rm -rf {indel_window.quote(idx)}) and build it again with "
+               f"build-index-only."))
     _sites = indel_window.sites_only(workdir, vcf_name, vcf_dir) if widths - {engine} else False
     for w in sorted(widths - {engine}):
         notes.append(
@@ -6612,7 +6621,10 @@ def build_index_only() -> None:
             _unmark_unfinished(_igt_dir)
     # STEP 2: index the enriched (SNP) genome
     _refuse_locked_build(snp_idx)
-    if not os.path.isdir(snp_idx):
+    # (one in place before this run, whose enrichment nothing tells: it holds no window. Its
+    # INDELS index, built with it, may tell another enrichment than the logs', below)
+    _snp_kept = os.path.isdir(snp_idx)
+    if not _snp_kept:
         print(f"Building variant index {os.path.basename(snp_idx)}...", flush=True)
         _build_index_dir(
             f"crispritz.py index-genome {genome_ref}+{vcf_name} {enriched}/ "
@@ -6740,7 +6752,10 @@ def build_index_only() -> None:
         # nor one built from fake-indel windows other than those the dataset's indel logs
         # record, which every search refuses (pool_search_indels' _window_mismatch): the
         # index and the logs come from two enrichments, and the logs would place every
-        # indel row wrong
+        # indel row wrong. The variant index of its name, found in place by this run, was
+        # built with it, from that enrichment, and goes with it: removed alone, the INDELS
+        # index was built anew and that variant index kept, which every search then read
+        # with the dataset's dictionaries (W1C-B2R2-2 of the review of wave 1c-a)
         for _fk, _sub in _indels_subindexes():
             _rec = (indel_window.index_window(os.path.join(indels_idx, _sub))
                     if os.path.isdir(os.path.join(indels_idx, _sub)) else None)
@@ -6751,9 +6766,14 @@ def build_index_only() -> None:
                     f"{indel_window.describe(_rec)} reference bases (before an indel's REF and "
                     f"after it; {_sub}), while the indel logs {indel_dict} record windows of "
                     f"{indel_window.describe(_log)}: the index and the logs come from two "
-                    f"enrichments, and every search refuses them. Remove the index "
-                    f"(rm -rf '{indels_idx}') and run build-index-only again, which builds it "
-                    f"from the enrichment in place."
+                    f"enrichments, and every search refuses them. "
+                    + (f"Remove it and the variant index of its name, {snp_idx}, which this "
+                       f"run found in place, built with it from the same enrichment, which it "
+                       f"holds no window to tell (rm -rf '{indels_idx}' '{snp_idx}'), and run "
+                       f"build-index-only again, which builds both from the enrichment in "
+                       f"place." if _snp_kept else
+                       f"Remove the index (rm -rf '{indels_idx}') and run build-index-only "
+                       f"again, which builds it from the enrichment in place.")
                 )
         print(f"Indels index already present: {indels_idx}", flush=True)
     _write_pam_build(snp_idx, pamfile)

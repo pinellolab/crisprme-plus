@@ -686,7 +686,11 @@ each INDELS sub-index records the windows it was built from (`.index_meta.json`'
 earlier build), and a search refuses one beside an indel log of other windows (the two come
 from two enrichments, and the log would place every row of it wrong), as build-index-only
 does of one in place, which also warns of an enrichment in place whose windows the
-installed CRISPRitz does not write, and says how to enrich the dataset again. An enrichment of
+installed CRISPRitz does not write, and says how to enrich the dataset again. Each names for
+the rebuild the variant index of the INDELS index's name too, which a build makes with it from
+one enrichment and which holds no window to tell its own (`indel_window.with_its_variant_index`;
+up to the review of wave 1c-a they named the INDELS index alone, whose rebuild kept the variant
+index of the other enrichment, which every later search read with no word). An enrichment of
 25/27 is one of CRISPRitz 2.9.1 or earlier, which differs from one of 2.10.0 in its SNPs too
 (2.9.1 enriched only the last ALT of a site written on several records: on chr22 of HGDP +
 1000 Genomes its registry holds 1,711,938 SNPs, 2.10.0's 1,757,775), so all that comes from it
@@ -740,11 +744,14 @@ the indel search's notes of windows too short). The recipe builds the dataset wh
 registry and indel frequencies too, and refuses a working directory that holds any of it before
 it makes anything there, so the messages name it run in a new working directory, its parts then
 moved in place of the dataset's: of all that came from the kit in place, which each message
-names for removal first by absolute path (`indel_window.kit_removal`; the search's notes named
-none up to the review of wave 1c-a, and the kit they left kept the recipe's parts out), and of
-those three (`indel_window.rebuild_kit_way`; `docs/TROUBLESHOOTING.md` §12, whose commands
-remove each part by name once the recipe has built the whole dataset, and change nothing in
-the data folder where it fails). On chr22, with the published mega's registry (no
+names for removal first by absolute path, a search's note the dataset's indexes by pattern,
+which take those the search builds from that kit after it is printed too
+(`indel_window.kit_removal`, `index_patterns`; the search's notes named none up to the review
+of wave 1c-a, and the kit they left kept the recipe's parts out, and then the indexes in place
+alone, so that a note's own flow left the SaCas9 indexes its search had built next from 2.8.1's
+kit), and of those three (`indel_window.rebuild_kit_way`; `docs/TROUBLESHOOTING.md` §12, whose
+commands remove each part by name once the recipe has built the whole dataset, and change
+nothing in the data folder where it fails). On chr22, with the published mega's registry (no
 `data_type`) and its kit's indel log of 25/27, neither kit nor index in place, build-index-only
 refuses the dataset in 1 s, building nothing and naming no registry (it named the registry in
 its rm and advised a new build; with the registry read as sites-only and nothing else changed,

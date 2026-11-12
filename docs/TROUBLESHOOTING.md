@@ -449,7 +449,9 @@ the kit failed (`Directory not empty`), and `build-index-only` and every search 
 dataset, its new INDELS index beside the old kit's indel logs. Up to the review of that fix,
 these commands ran on whatever failed before them, and took the PAM file from the data folder,
 which a 2.8.1 install's lacks: the recipe, refused for it, built nothing, and the removal took
-the dataset whole, the merged VCFs given as `SRC` among them.
+the dataset whole, the merged VCFs given as `SRC` among them; and the note named the indexes
+of the dataset in place when it was printed, so its own flow left those its search then built
+from the old kit, which a later search read.
 
 ## 13. A build or a search says a fake-indel genome and its indel logs come from two enrichments
 

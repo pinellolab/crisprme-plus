@@ -17,6 +17,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -513,24 +514,37 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
         (rebuild_kit_way's, relative to the working directory), and none of the kit in place:
         followed with section 12, the kit stayed, every part the recipe built failed to move
         in, and build-index-only and every search then refused the dataset. As
-        build-index-only's warning does, the note names that removal now, each part by
-        absolute path (kit_removal): the kit's genomes and indel logs, and every index of the
-        dataset, in the working directory's genome_library and in a library the search reads
-        besides; not its registry, its indel frequencies or its VCFs (they come from its VCFs
-        alone), nor the reference index."""
+        build-index-only's warning does, the note names that removal now (kit_removal): the
+        kit's genomes and indel logs, each by absolute path, and every index of the dataset,
+        in the working directory's genome_library and in a library the search reads besides,
+        by its patterns (index_patterns); not its registry, its indel frequencies or its VCFs
+        (they come from its VCFs alone), nor the reference index. W1C-B2R2-2, the review of
+        the fix: the note named the indexes in place when it was printed, and the search then
+        built its own indexes of the dataset from the old kit (a SaCas9 search, beside 2.8.1's
+        mega), which the note's own flow left in place, and a later search read: run as a
+        shell runs it, its rm takes those built after the note too, in either library, and
+        not an index of another genome or dataset, the reference index or a hidden folder."""
         top = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, top, True)
         w, lib = os.path.join(top, "work"), os.path.join(top, "lib")
         kit = [("Genomes", "hg38+hg38_mega"), ("Genomes", "hg38+hg38_mega_INDELS"),
-               ("Dictionaries", "log_indels_hg38_mega"), ("genome_library", "NGG_2_hg38+hg38_mega"),
-               ("genome_library", "20-NRR_2_hg38+hg38_mega_INDELS")]
+               ("Dictionaries", "log_indels_hg38_mega")]
+        indexes = [("genome_library", "NGG_2_hg38+hg38_mega"),
+                   ("genome_library", "20-NRR_2_hg38+hg38_mega_INDELS")]
         kept = [("Dictionaries", "registry_hg38_mega"), ("VCFs", "hg38_mega"),
                 ("Dictionaries", "indel_af_hg38_mega"), ("genome_library", "20-NRR_2_hg38")]
-        for part in kit + kept:
+        for part in kit + indexes + kept:
             os.makedirs(os.path.join(w, *part))
         with open(os.path.join(w, "Dictionaries", "registry_hg38_mega", "reg_chr1.idx"), "w") as fh:
             fh.write('{"n_records": 1, "aggregation": "info_af", "databases": {}}')
         os.makedirs(os.path.join(lib, "20-NRR_2_hg38+hg38_mega"))
+        # (built after the note, by its search: the indexes of its PAM, from the kit in place)
+        later = [os.path.join(w, "genome_library", "21-NNGRRT_2_hg38+hg38_mega"),
+                 os.path.join(w, "genome_library", "21-NNGRRT_2_hg38+hg38_mega_INDELS"),
+                 os.path.join(lib, "21-NNGRRT_2_hg38+hg38_mega_INDELS")]
+        others = [os.path.join(w, "genome_library", n) for n in (
+            "21-NNGRRT_2_hg38", "20-NRR_2_x_hg38+hg38_mega", "20-NRR_2_hg38+hg38_HGDP1kGP",
+            "20-NRR_2_hg38+hg38_mega.lock", ".20-NRR_2_hg38+hg38_mega")]
         for who in ("complete-search", "indel search"):
             note = iw.target_note((25, 27), 27, 1, who, "hg38_mega", sites=True, workdir=w,
                                   genome="hg38", libraries=[lib])
@@ -538,14 +552,34 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
             m = re.search(r"\. Either replaces its kit in place and all that was built from it, "
                           r"as a search would read stores of the two together: its genomes, "
                           r"dictionaries, indel logs and dict-less tiers, and every index of the "
-                          r"dataset, which go first \(rm -rf ([^;]*); and any copy of those "
+                          r"dataset, of every PAM, those a search builds from it after this note "
+                          r"among them, which go first \(rm -rf ([^;]*); and any copy of those "
                           r"indexes in a library you search with --index-path\)\.$", note)
             self.assertIsNotNone(m, note)
-            self.assertEqual(sorted(shlex.split(m.group(1))), sorted(
-                [os.path.join(w, *p) for p in kit]
-                + [os.path.join(lib, "20-NRR_2_hg38+hg38_mega")]))
+            self.assertEqual(shlex.split(m.group(1)), [os.path.join(w, *p) for p in kit] + [
+                os.path.join(w, "genome_library", "*_[0-9]_hg38+hg38_mega"),
+                os.path.join(w, "genome_library", "*_[0-9]_hg38+hg38_mega_INDELS"),
+                os.path.join(lib, "*_[0-9]_hg38+hg38_mega"),
+                os.path.join(lib, "*_[0-9]_hg38+hg38_mega_INDELS")])
             for part in kept:
                 self.assertNotIn(iw.quote(os.path.join(w, *part)), m.group(1))
+            if who != "complete-search":
+                continue
+            # the rm as a shell runs it, after the search built its own indexes
+            for d in later + others:
+                os.makedirs(d)
+            done = subprocess.run(["bash", "-c", "rm -rf " + m.group(1)], cwd=top,
+                                  capture_output=True, text=True)
+            self.assertEqual((done.returncode, done.stderr), (0, ""))
+            for part in kit + indexes:
+                self.assertFalse(os.path.lexists(os.path.join(w, *part)), part)
+            for d in later + [os.path.join(lib, "20-NRR_2_hg38+hg38_mega")]:
+                self.assertFalse(os.path.lexists(d), d)
+            for d in others + [os.path.join(w, *p) for p in kept]:
+                self.assertTrue(os.path.isdir(d), d)
+            for part in kit + indexes:
+                os.makedirs(os.path.join(w, *part))
+            os.makedirs(os.path.join(lib, "20-NRR_2_hg38+hg38_mega"))
 
     def test_section_12_has_its_commands(self):
         here = os.path.dirname(os.path.abspath(__file__))
@@ -614,6 +648,40 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
         self.assertLess(recipe, checked)
         self.assertLess(checked, min(changes))
         self.assertIn("stops at the first command that fails", " ".join(section.split()))
+
+
+class TheIndexesOfADataset(unittest.TestCase):
+    """index_patterns, the shell patterns an advice names a dataset's indexes by, whenever
+    they were built; and with_its_variant_index, an INDELS index of another enrichment than
+    the logs with the variant index of its name, built with it (W1C-B2R2-2, the review of
+    wave 1c-a)."""
+
+    def test_the_patterns_take_the_datasets_indexes_and_no_other(self):
+        pats = iw.index_patterns("/data/w/genome_library", "hg38", "hg38_mega")
+        self.assertEqual(pats, ["/data/w/genome_library/*_[0-9]_hg38+hg38_mega",
+                                "/data/w/genome_library/*_[0-9]_hg38+hg38_mega_INDELS"])
+        for name, ours in (("NGG_2_hg38+hg38_mega", True), ("20-NRR_2_hg38+hg38_mega", True),
+                           ("21-NNGRRT_2_hg38+hg38_mega_INDELS", True),
+                           ("TTTV-23_3_hg38+hg38_mega", True),
+                           ("20-NRR_2_hg38", False), ("20-NRR_2_x_hg38+hg38_mega", False),
+                           ("20-NRR_2_hg38+hg38_HGDP1kGP", False),
+                           ("20-NRR_2_hg38+hg38_mega.lock", False),
+                           ("20-NRR_2_hg38+x_hg38_mega", False)):
+            got = any(fnmatch.fnmatchcase("/data/w/genome_library/" + name, p) for p in pats)
+            self.assertEqual(got, ours, name)
+        # a folder or a name the shell reads is quoted, the pattern not
+        self.assertEqual(iw.index_patterns("/data/my lib", "hg38", "a b"),
+                         ["'/data/my lib/'*_[0-9]_'hg38+a b'",
+                          "'/data/my lib/'*_[0-9]_'hg38+a b_INDELS'"])
+
+    def test_an_indels_index_goes_with_its_variant_index(self):
+        top = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, top, True)
+        indels = os.path.join(top, "21-NNGRRT_2_hg38+hg38_mega_INDELS")
+        os.makedirs(indels)
+        self.assertEqual(iw.with_its_variant_index(indels), [indels])
+        os.makedirs(indels[: -len("_INDELS")])
+        self.assertEqual(iw.with_its_variant_index(indels), [indels, indels[: -len("_INDELS")]])
 
 
 class AFakeGenomeAndItsLogs(unittest.TestCase):

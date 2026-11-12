@@ -1226,13 +1226,23 @@ and the `release-crisprme` skill.
   windows too short as well, and §12's commands remove each part of the dataset by name: those
   notes named none (the review of the fix), and the kit they left in place kept every part the
   recipe built from moving in, after which `build-index-only` and every search refused the
-  dataset (`test_mega_rebuild` runs §12 from the state such a note leaves). §12's commands run
-  in a subshell that stops at the first command that fails, take the recipe's PAM file from the
-  repository, and remove nothing from the data folder until the recipe has built the whole
-  dataset, passed its checks and left every part they move in: they ran on whatever failed
-  before them, and took the PAM file from the data folder, which one that CRISPRme 2.8.1 set up
-  lacks, so the recipe built nothing and the removal took the dataset whole, the merged VCFs
-  given as `SRC` among them (the review of the fix's fix, wave 1c-a). On chr22, with the
+  dataset (`test_mega_rebuild` runs §12 from the state such a note leaves). A note names the
+  dataset's indexes by pattern (`<PAM>_<N>_<genome>+<dataset>` and its `_INDELS`, in the working
+  directory's library and in the `--index-path` one), which takes those its search builds from
+  the old kit after it is printed: it named the indexes in place when it was printed, and its
+  own flow left the SaCas9 indexes a search beside 2.8.1's mega had built next, the next SaCas9
+  search reading that variant index of the old kit (on chr22, 16 targets of a clean flow's
+  missing and 2 others reported). An INDELS
+  index of another enrichment than the dataset's indel logs is named for its rebuild with the
+  variant index of its name, which a build makes with it from one enrichment and which holds no
+  window to tell its own, by the search's refusal, by `build-index-only`'s warning and by the
+  download's: they named the INDELS index alone, and its rebuild kept that variant index. §12's
+  commands run in a subshell that stops at the first command that fails, take the recipe's PAM
+  file from the repository, and remove nothing from the data folder until the recipe has built
+  the whole dataset, passed its checks and left every part they move in: they ran on whatever
+  failed before them, and took the PAM file from the data folder, which one that CRISPRme 2.8.1
+  set up lacks, so the recipe built nothing and the removal took the dataset whole, the merged
+  VCFs given as `SRC` among them (the review of the fix's fix, wave 1c-a). On chr22, with the
   published registry and its kit's log of 25/27 or 30/30 and no kit, `build-index-only` refuses
   the mega in 1 s, nothing built, no registry named; with the 25/27 kit in place it builds and
   warns with that advice, whose rm leaves the registry, the indel frequencies and the VCFs, and

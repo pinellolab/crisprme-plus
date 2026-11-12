@@ -1480,10 +1480,24 @@ class TestFakeIndelWindowNotes(unittest.TestCase):
         self.index("20-NGG_2_hg38+ds_INDELS", format1=True)   # 2.8.1's, kept
         notes = self.notes()
         self.assertEqual(len(notes), 1, notes)
+        old = os.path.join(self.lib, "20-NGG_2_hg38+ds_INDELS")
         self.assertIn("WARNING: the INDELS index %s was built from fake-indel windows of 25/27 "
                       "reference bases, and the indel logs of ds installed now (%s) record "
-                      "windows of 30/30" % (os.path.join(self.lib, "20-NGG_2_hg38+ds_INDELS"),
-                                            self.logs), notes[0])
+                      "windows of 30/30" % (old, self.logs), notes[0])
+        self.assertTrue(notes[0].endswith("remove it (rm -rf '%s') and build it with "
+                                          "build-index-only." % old), notes[0])
+        # with the variant index of its name, built with it from one enrichment, which holds
+        # no window to tell: a rebuild of the INDELS index alone kept it, and every search of
+        # that PAM read it with the archive's dictionaries (W1C-B2R2-2, the review of wave
+        # 1c-a: the SaCas9 pair a search had built from 2.8.1's kit of the mega)
+        os.makedirs(old[: -len("_INDELS")])
+        notes = self.notes()
+        self.assertEqual(len(notes), 1, notes)
+        self.assertTrue(notes[0].endswith(
+            "Download its index again, or remove it and the variant index of its name, %s, "
+            "built with it from the same enrichment, which it holds no window to tell (rm -rf "
+            "'%s' '%s'), and build them with build-index-only." % (
+                old[: -len("_INDELS")], old, old[: -len("_INDELS")])), notes[0])
 
 
 if __name__ == "__main__":

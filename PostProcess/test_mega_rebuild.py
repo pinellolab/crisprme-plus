@@ -159,7 +159,8 @@ class _Recipe(bio._Fixture):
                          .replace("PYTHON", sys.executable).replace("CRISPRME", bio.CRISPRME))
             os.chmod(p, 0o755)
 
-    def rebuild(self):
+    def rebuild(self, install=None):
+        """The recipe, run in the working directory, or in ``install``."""
         env = {k: v for k, v in os.environ.items() if not k.startswith(("STUB_", "CRISPRME_"))}
         env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
                    PYTHONPATH=os.path.join(bio.SHARED, "py"),
@@ -167,7 +168,7 @@ class _Recipe(bio._Fixture):
                    STUB_MARK=self.mark, STUB_RELEASE=self.release,
                    PAM="PAMs/" + os.path.basename(bio.PAM), BDNA="1", BRNA="1", THREADS="2",
                    PYTHON=sys.executable, PP=HERE)
-        return subprocess.run(["bash", RECIPE, self.work, self.src], env=env,
+        return subprocess.run(["bash", RECIPE, install or self.work, self.src], env=env,
                               capture_output=True, text=True, timeout=600)
 
 
@@ -591,11 +592,13 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
             bio._write(self.path(*part, self.EARLIER), "an earlier kit's\n")
         return kit
 
-    def a_searchs_note(self):
+    def a_searchs_note(self, bulges=0):
         """complete-search beside the kit in place, as a user runs it (the real CLI, the stub
         engine, whose windows of 25/34 hold up to 26 bases at an MNV): a SaCas9 site, 21 nt and
-        NNGRRT, needs 27 with no bulge, so it prints its note on hg38_mega, the one line
-        returned."""
+        NNGRRT, needs 27 with no bulge (28 with ``bulges`` of each type, 1), so it prints its
+        note on hg38_mega, the one line returned. With bulges, the search then builds its
+        variant and INDELS indexes of hg38_mega from the kit in place (and stops at the stub's
+        search, which it has none of)."""
         guide = os.path.join(self.root, "guide_sa.txt")
         for path, text in ((guide, bio.GENOME["chr1"][:21] + "NNNNNN\n"),
                            (os.path.join(self.root, "vcfs_mega.txt"), "hg38_mega\n"),
@@ -606,20 +609,22 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
             "complete-search", "--genome", self.path("Genomes", "hg38"),
             "--vcf", os.path.join(self.root, "vcfs_mega.txt"),
             "--samplesID", os.path.join(self.root, "samples_mega.txt"), "--guide", guide,
-            "--pam", self.SACAS9, "--mm", "0", "--bDNA", "0", "--bRNA", "0", "--output", "note",
-            "--thread", "2"], CRISPRME_SKIP_SCORER_ENV="1"), timeout=300)
+            "--pam", self.SACAS9, "--mm", "0", "--bDNA", str(bulges), "--bRNA", str(bulges),
+            "--output", "note", "--thread", "2"], CRISPRME_SKIP_SCORER_ENV="1"), timeout=300)
         notes = [ln for ln in out.splitlines() if ln.startswith(
             "WARNING [complete-search]: the fake-indel windows of hg38_mega hold 25 reference "
             "bases before each indel and 34 after it")]
         self.assertEqual(len(notes), 1, out + err)
-        self.assertIn("this search's targets need up to 27 (a 27-nt guide and PAM)", notes[0])
+        self.assertIn("this search's targets need up to %d (a 27-nt guide and PAM%s)" % (
+            27 + bulges, " with 1 DNA bulge" if bulges else ""), notes[0])
         self.assertIn("docs/TROUBLESHOOTING.md section 12 has the commands", notes[0])
         return notes[0]
 
     @staticmethod
     def removals(said):
-        """The arguments of each ``rm -rf`` a message says, as written."""
-        arg = r"(?:'(?:[^']|'\\'')*'|[^\s;)'(]+)"
+        """The arguments of each ``rm -rf`` a message says, as written (a word of quoted and
+        unquoted parts, a pattern among them, whole)."""
+        arg = r"(?:'(?:[^']|'\\'')*'|[^\s;)'(]+)+"
         return [m.group(1) for m in re.finditer(r"rm -rf (%s(?:\s+%s)*)" % (arg, arg), said)]
 
     def section_12_after_the_note(self, every):
@@ -652,20 +657,79 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
 
     def test_section_12_after_the_first_removal_a_searchs_note_names(self):
         said = self.section_12_after_the_note(every=False)
-        # (the three, by absolute path, and then that of the kit in place)
+        # (the three, by absolute path, and then that of the kit in place: its parts by
+        # absolute path, the dataset's indexes by their patterns, indel_window.index_patterns)
         self.assertEqual(len(said), 2, said)
         self.assertEqual(said[0], " ".join("'%s'" % self.path(*p) for p in (
             ("VCFs", "hg38_mega"), ("Dictionaries", "registry_hg38_mega"),
             ("Dictionaries", "indel_af_hg38_mega"))))
         for part in (("Genomes", "hg38+hg38_mega"), ("Genomes", "hg38+hg38_mega_INDELS"),
-                     ("Dictionaries", "log_indels_hg38_mega"),
-                     ("genome_library", "NGG_2_hg38+hg38_mega"),
-                     ("genome_library", "20-NRG_2_hg38+hg38_mega_INDELS")):
+                     ("Dictionaries", "log_indels_hg38_mega")):
             self.assertIn("'%s'" % self.path(*part), said[1])
+        for pattern in ("*_[0-9]_hg38+hg38_mega", "*_[0-9]_hg38+hg38_mega_INDELS"):
+            self.assertIn(self.path("genome_library", pattern), said[1].split())
         self.assertNotIn("registry_hg38_mega", said[1])
 
     def test_section_12_after_every_removal_a_searchs_note_names(self):
         self.section_12_after_the_note(every=True)
+
+    def test_the_flow_a_note_gives_leaves_no_index_its_search_built_from_the_old_kit(self):
+        """W1C-B2R2-2, the review of wave 1c-a: a search's note of windows too short named the
+        removal of the indexes of the dataset in place when it was printed, and the search
+        then built its own from the kit in place (a SaCas9 search with bulges beside 2.8.1's
+        mega: 21-NNGRRT_2_hg38+hg38_mega and its _INDELS, from the kit of 25/27). The note's
+        own flow (its removal of the kit, the recipe in a new working directory, its removal of
+        the three, the moves it names) put the recipe's kit in place and left those two
+        indexes: the next SaCas9 search, refused for the INDELS index, read that variant index
+        of the old kit once its own advice had built the INDELS index again (16 targets lost
+        on chr22). The note names the dataset's indexes by their patterns now, which take
+        those its search builds after it: its flow, followed as it says, leaves none of them,
+        and a build reads the kit with no warning."""
+        kit = self.an_earlier_kit_in_place()
+        built = ("21-NNGRRT_2_hg38+hg38_mega", "21-NNGRRT_2_hg38+hg38_mega_INDELS")
+        for name in built:
+            self.assertFalse(os.path.lexists(self.lib(name)), name)
+        note = self.a_searchs_note(bulges=1)
+        for name in built:   # (built after the note, from the kit in place: the old one)
+            self.assertTrue(os.path.isdir(self.lib(name)), name)
+            bio._write(os.path.join(self.lib(name), self.EARLIER), "an earlier kit's\n")
+        three, gone = self.removals(note)
+        # the note's removal of the kit in place and all that was built from it, first
+        done = subprocess.run(["bash", "-c", "rm -rf " + gone], cwd=self.root,
+                              capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""), gone)
+        # the recipe in a new working directory of its own, whose Genomes/hg38 holds the
+        # FASTAs of the chromosomes to build and no other, beside the PAM file
+        new = os.path.join(self.root, "new")
+        os.makedirs(os.path.join(new, "Genomes", "hg38"))
+        for chrom in bio.GENOME:
+            os.symlink(self.path("Genomes", "hg38", chrom + ".fa"),
+                       os.path.join(new, "Genomes", "hg38", chrom + ".fa"))
+        os.makedirs(os.path.join(new, "PAMs"))
+        shutil.copy(bio.PAM, os.path.join(new, "PAMs"))
+        done = self.rebuild(new)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        # then the note's removal of the dataset's VCFs, registry and indel frequencies, and
+        # the moves it names
+        done = subprocess.run(["bash", "-c", "rm -rf " + three], cwd=self.root,
+                              capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""), three)
+        self.assertIn("move in Genomes/hg38+hg38_mega and Genomes/hg38+hg38_mega_INDELS, the "
+                      "indexes of hg38_mega of its genome_library (not its reference index), "
+                      "Dictionaries/log_indels_hg38_mega, registry_hg38_mega and "
+                      "indel_af_hg38_mega, and VCFs/hg38_mega", note)
+        for part in (("Genomes", "hg38+hg38_mega"), ("Genomes", "hg38+hg38_mega_INDELS"),
+                     ("Dictionaries", "log_indels_hg38_mega"),
+                     ("Dictionaries", "registry_hg38_mega"),
+                     ("Dictionaries", "indel_af_hg38_mega"), ("VCFs", "hg38_mega")):
+            os.rename(os.path.join(new, *part), self.path(*part))
+        for name in os.listdir(os.path.join(new, "genome_library")):
+            if "+hg38_mega" in name:
+                os.rename(os.path.join(new, "genome_library", name), self.lib(name))
+        # no index the search built from the old kit, nor any other of it, is left
+        for name in built + ("NGG_2_hg38+hg38_mega", "NGG_2_hg38+hg38_mega_INDELS"):
+            self.assertFalse(os.path.lexists(self.lib(name)), name)
+        self.kit_in_place(kit)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

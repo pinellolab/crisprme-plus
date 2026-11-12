@@ -4183,17 +4183,26 @@ class TheFakeIndelWindowsAreTheEnrichments(_Fixture):
         self.reenrich(20, 30)
         rc, out, err = self.run_bio()
         self.assertEqual(rc, 1, out + err)
+        # (with the variant index of its name, which this run found in place: built with it,
+        # from one enrichment, which it holds no window to tell, W1C-B2R2-2)
         self.assertIn("The INDELS index %s was built from fake-indel windows of 25/34 reference "
                       "bases (before an indel's REF and after it; NRG_2_fakechr1), while the "
                       "indel logs %s record windows of 20/30: the index and the logs come "
-                      "from two enrichments, and every search refuses them. Remove the index "
-                      "(rm -rf '%s') and run build-index-only again"
+                      "from two enrichments, and every search refuses them. Remove it and the "
+                      "variant index of its name, %s, which this run found in place, built "
+                      "with it from the same enrichment, which it holds no window to tell "
+                      "(rm -rf '%s' '%s'), and run build-index-only again, which builds both "
+                      "from the enrichment in place."
                       % (self.lib(INDELS), self.path("Dictionaries", "log_indels_ds"),
-                         self.lib(INDELS)), err)
+                         self.lib(VAR), self.lib(INDELS), self.lib(VAR)), err)
         self.assertIn("WARNING [build-index-only]: the INDELS index %s was built from "
                       "fake-indel windows of 25/34 reference bases, and the indel logs of ds "
-                      "(%s) record windows of 20/30" % (
-                          self.lib(INDELS), self.path("Dictionaries", "log_indels_ds")), out)
+                      "(%s) record windows of 20/30: they come from two enrichments, and every "
+                      "search of it refuses it. Remove it and the variant index of its name, "
+                      "%s, built with it from the same enrichment, which it holds no window to "
+                      "tell (rm -rf '%s' '%s'), and build them again with build-index-only." % (
+                          self.lib(INDELS), self.path("Dictionaries", "log_indels_ds"),
+                          self.lib(VAR), self.lib(INDELS), self.lib(VAR)), out)
         # complete-search says, on its console, that its targets (a 23-nt guide and PAM with
         # a DNA bulge) need more than such windows hold (it stops later, at this stub's
         # search, which a search refuses at the index: test_indel_empty_chromosome)
@@ -4210,6 +4219,56 @@ class TheFakeIndelWindowsAreTheEnrichments(_Fixture):
         with open(self.path("Results", "search", "Params.txt")) as fh:
             self.assertIn("Indel_window_note\tWARNING [complete-search]: the fake-indel "
                           "windows of ds hold 20", fh.read())
+
+    def test_the_advice_on_another_pams_indels_index_of_other_windows_rebuilds_both(self):
+        """W1C-B2R2-2, the review of wave 1c-a: build-index-only warned of another PAM's
+        INDELS index of other windows than the logs (the SaCas9 one a search had built from
+        2.8.1's kit of the mega, after the kit of 2.10.0 had replaced it), naming it alone;
+        followed, the build of that PAM kept the variant index of its name ("Variant index
+        already present"), built with it from the old kit, and every search of that PAM then
+        read it. The warning names the variant index with it, and followed as written, both
+        are built from the enrichment in place."""
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        ngg = os.path.join(REPO, "PAMs", "20bp-NGG-SpCas9.txt")
+        args = ["build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", ngg,
+                "--bDNA", "1", "--bRNA", "1", "--thread", "2", "--path", self.work,
+                "--vcf", self.path("VCFs", "ds"), "--samplesID", self.path("samples.txt")]
+        rc, out, err = self.run_bio(command=args)
+        self.assertEqual((rc, err), (0, ""))
+        var, indels = self.lib("20-NGG_2_hg38+ds"), self.lib("20-NGG_2_hg38+ds_INDELS")
+        # (the NGG pair, as an enrichment of other windows built it: its sub-indexes record
+        # 30/30, and its variant index holds a file of its own)
+        for chrom in GENOME:
+            meta = os.path.join(indels, "NGG_2_fake%s" % chrom, ".index_meta.json")
+            with open(meta) as fh:
+                record = json.load(fh)
+            self.assertEqual(record["indel_window"], [25, 34])
+            record["indel_window"] = [30, 30]
+            _write(meta, json.dumps(record))
+        _write(os.path.join(var, "an_earlier_enrichment.txt"), "built from it\n")
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        warned = [ln for ln in out.splitlines()
+                  if ln.startswith("WARNING [build-index-only]: the INDELS index %s " % indels)]
+        self.assertEqual(len(warned), 1, out)
+        self.assertIn("Remove it and the variant index of its name, %s, built with it from the "
+                      "same enrichment, which it holds no window to tell (rm -rf '%s' '%s'), and "
+                      "build them again with build-index-only." % (var, indels, var), warned[0])
+        gone = re.search(r"\(rm -rf ([^)]*)\)", warned[0]).group(1)
+        done = subprocess.run(["bash", "-c", "rm -rf " + gone], cwd=self.root,
+                              capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        rc, out, err = self.run_bio(command=args)
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertIn("Building variant index 20-NGG_2_hg38+ds", out)
+        self.assertFalse(os.path.exists(os.path.join(var, "an_earlier_enrichment.txt")))
+        for chrom in GENOME:
+            with open(os.path.join(indels, "NGG_2_fake%s" % chrom, ".index_meta.json")) as fh:
+                self.assertEqual(json.load(fh)["indel_window"], [25, 34])
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertNotIn("WARNING [build-index-only]", out)
 
     def test_an_enrichment_in_place_of_other_windows_is_said(self):
         rc, out, err = self.run_bio()
@@ -4629,9 +4688,20 @@ class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
                       r"which go first \(rm -rf ([^;)]*); and any copy of those indexes", out)
         self.assertIsNotNone(m, out)
         for d in (self.path("Genomes", "hg38+ds"), self.path("Genomes", "hg38+ds_INDELS"),
-                  self.path("Dictionaries", "log_indels_ds"), self.lib(VAR), self.lib(INDELS)):
+                  self.path("Dictionaries", "log_indels_ds")):
             self.assertIn(f"'{d}'", m.group(1))
+        # (its indexes by their patterns, which take those this search built after the note
+        # too: it named those in place, and its own flow left the rest, W1C-B2R2-2)
+        for pattern in ("*_[0-9]_hg38+ds", "*_[0-9]_hg38+ds_INDELS"):
+            self.assertIn(self.path("genome_library", pattern), m.group(1).split())
         self.assertNotIn("registry_ds", m.group(1))
+        built = [n for n in os.listdir(self.path("genome_library")) if "+ds" in n]
+        self.assertIn(VAR, built)
+        done = subprocess.run(["bash", "-c", "rm -rf " + m.group(1)], cwd=self.root,
+                              capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual([n for n in os.listdir(self.path("genome_library")) if "+ds" in n], [])
+        self.assertTrue(os.path.isdir(self.lib(REF)))
         self.assertIn("(rm -rf %s)" % " ".join(
             "'%s'" % self.path(*p) for p in (("VCFs", "ds"), ("Dictionaries", "registry_ds"),
                                              ("Dictionaries", "indel_af_ds"))), out)
