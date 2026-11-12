@@ -274,14 +274,23 @@ def mismatched_indexes(library, dataset, log_dir):
     return out
 
 
-def target_note(window, target_len, bdna, who, dataset, sites=False):
+def target_note(window, target_len, bdna, who, dataset, sites=False, workdir=None, genome=None,
+                libraries=()):
     """What a search of targets ``target_len`` long (guide + PAM) with up to ``bdna`` DNA
     bulges says of ``dataset``, whose fake-indel windows are ``window`` (left, right): None
     where every such target fits (reach); else a WARNING (``who``: the search's name for
     itself) that the indel off-targets of more bases than the window holds are not
     reported, and, for windows narrower than CRISPRitz 2.10.0's, how to have its windows: by
     enriching the dataset again with build-index-only, or, for a sites-only one (``sites``:
-    sites_only), whose windows no enrichment of its VCFs writes, as sites_only_way says."""
+    sites_only), whose windows no enrichment of its VCFs writes, as sites_only_way says, with
+    the removal of all that came from its kit in place first (kit_removal: in working
+    directory ``workdir`` of genome ``genome``, the indexes of ``libraries`` too, the
+    libraries the search reads besides the working directory's), as build-index-only's
+    warning names it. Up to the review of wave 1c-a (W1C-B1) the note named only the removal
+    of the dataset's VCFs, registry and indel frequencies, which the recipe writes anew:
+    followed with docs/TROUBLESHOOTING.md section 12, the kit was left in place, every part
+    the recipe built failed to move in, and build-index-only and every search then refused
+    the dataset."""
     if window is None:
         return None
     want = target_len + bdna
@@ -297,7 +306,9 @@ def target_note(window, target_len, bdna, who, dataset, sites=False):
         advice = ""
     elif sites:
         advice = (" CRISPRitz 2.10.0 writes windows of 30 bases on either side, which hold up "
-                  "to 31. To search them: %s." % sites_only_way(dataset))
+                  "to 31. To search them: %s. %s"
+                  % (sites_only_way(dataset, workdir, genome),
+                     kit_removal("its kit in place", dataset, workdir, genome, libraries)))
     else:
         advice = (" CRISPRitz 2.10.0 writes windows of 30 bases on either side, which hold up "
                   "to 31: enrich %s again with it (build-index-only) to search them." % dataset)
@@ -510,6 +521,34 @@ def enrichment_stores(workdir, genome, dataset, libraries=(), present=True):
         own = [d for d in own if os.path.lexists(d)]
         tiers = [d for d in tiers if _holds_a_file(d)]
     return own + tiers + _indexes(workdir, genome, dataset, libraries)
+
+
+def kit_removal(what, dataset, workdir=None, genome=None, libraries=(), stores=None):
+    """The sentence of the advice on sites-only dataset ``dataset`` (after sites_only_way)
+    that names what either way of having the kit of CRISPRitz 2.10.0 replaces, ``what``
+    ("that enrichment", "its kit in place") and all that was built from it, to be removed
+    first: its genomes, dictionaries, indel logs and dict-less tiers, and every index of it
+    (``stores``, else enrichment_stores of working directory ``workdir`` and genome
+    ``genome``, the indexes of ``libraries`` too), each by absolute path; without either,
+    their names in a working directory, its indexes by a pattern (<PAM>_<N>_<genome>+<dataset>,
+    as docs/TROUBLESHOOTING.md section 12 removes them). Build-index-only's warning
+    and a search's note of windows too short say it; the refusals name that removal before
+    the way (rebuild_kit_way)."""
+    if stores is None and workdir:
+        stores = enrichment_stores(workdir, genome, dataset, libraries)
+    if stores is not None:
+        names = " ".join(quote(p) for p in stores)
+    else:
+        g = genome or "<genome>"
+        names = " ".join(["Genomes/%s+%s" % (g, dataset), "Genomes/%s+%s_INDELS" % (g, dataset)]
+                         + ["Dictionaries/%s_%s" % (k, dataset)
+                            for k in ("dictionaries", "log_indels", "genotypes")]
+                         + ["genome_library/*_[0-9]_%s+%s" % (g, dataset),
+                            "genome_library/*_[0-9]_%s+%s_INDELS" % (g, dataset)])
+    return ("Either replaces %s and all that was built from it, as a search would read stores "
+            "of the two together: its genomes, dictionaries, indel logs and dict-less tiers, "
+            "and every index of the dataset, which go first (rm -rf %s; and any copy of those "
+            "indexes in a library you search with --index-path)." % (what, names))
 
 
 def earlier_windows(workdir, genome, dataset, libraries=(), variant=True):

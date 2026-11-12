@@ -1221,7 +1221,12 @@ and the `release-crisprme` skill.
   registry and indel frequencies too, then its parts moved in place of the dataset's, those
   three replaced, each path named (`docs/TROUBLESHOOTING.md` §12 has the commands); the
   messages named the recipe alone, and run in the folder their rm left, which keeps the
-  dataset's VCFs, it refused them (the integration review of 2.10.0). On chr22, with the
+  dataset's VCFs, it refused them (the integration review of 2.10.0). Every message names the
+  removal of the kit in place, by absolute path, the search's and the indel search's notes of
+  windows too short as well, and §12's commands remove each part of the dataset by name: those
+  notes named none (the review of the fix), and the kit they left in place kept every part the
+  recipe built from moving in, after which `build-index-only` and every search refused the
+  dataset (`test_mega_rebuild` runs §12 from the state such a note leaves). On chr22, with the
   published registry and its kit's log of 25/27 or 30/30 and no kit, `build-index-only` refuses
   the mega in 1 s, nothing built, no registry named; with the 25/27 kit in place it builds and
   warns with that advice, whose rm leaves the registry, the indel frequencies and the VCFs, and

@@ -521,7 +521,10 @@ def _window_notes():
     bulges it allows need more bases than they hold (indel_window.target_note): such indel
     off-targets are held by no index. The windows are those the indel logs record; how a
     sites-only dataset gets wider ones is not by enriching it again (indel_window.sites_only,
-    of its VCFs in vcf_dir or its registry)."""
+    of its VCFs in vcf_dir or its registry), and its kit in place goes first, each part named
+    by absolute path in the working directory as the user knows it (_outside_view), its
+    indexes in the library the search reads too (indel_window.kit_removal; the note named
+    none of it up to the review of wave 1c-a, W1C-B1)."""
     import indel_window
 
     try:
@@ -536,7 +539,9 @@ def _window_notes():
     notes = [w for w in sorted(widths)
              if indel_window.target_note(w, len(seq), bdna, "indel search", vcf_name)]
     sites = notes and indel_window.sites_only(current_working_directory, vcf_name, vcf_dir)
-    return [indel_window.target_note(w, len(seq), bdna, "indel search", vcf_name, bool(sites))
+    workdir = os.path.normpath(_outside_view(current_working_directory))
+    return [indel_window.target_note(w, len(seq), bdna, "indel search", vcf_name, bool(sites),
+                                     workdir, ref_name, [_outside_view(index_library)])
             for w in notes]
 
 

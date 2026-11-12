@@ -4620,6 +4620,21 @@ class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
                       "reference bases before each indel and 30 after it", out)
         self.assertIn("To search them: ds is sites-only: its VCFs name no sample", out)
         self.assertNotIn("enrich ds again", out)
+        # and, as build-index-only's warning does, what goes first: all that came from the kit
+        # in place, by absolute path, no registry; then the three the recipe writes anew, by
+        # absolute path too. The note named the three alone, relative to the working
+        # directory, and section 12's commands, run from the state it left, failed to move
+        # the kit in (W1C-B1, the review of wave 1c-a)
+        m = re.search(r"Either replaces its kit in place and all that was built from it, .*?"
+                      r"which go first \(rm -rf ([^;)]*); and any copy of those indexes", out)
+        self.assertIsNotNone(m, out)
+        for d in (self.path("Genomes", "hg38+ds"), self.path("Genomes", "hg38+ds_INDELS"),
+                  self.path("Dictionaries", "log_indels_ds"), self.lib(VAR), self.lib(INDELS)):
+            self.assertIn(f"'{d}'", m.group(1))
+        self.assertNotIn("registry_ds", m.group(1))
+        self.assertIn("(rm -rf %s)" % " ".join(
+            "'%s'" % self.path(*p) for p in (("VCFs", "ds"), ("Dictionaries", "registry_ds"),
+                                             ("Dictionaries", "indel_af_ds"))), out)
 
     def test_it_is_not_enriched_anew_beside_its_kits_windows(self):
         """The reviewer's MG1 in miniature: the published registry and the kit's indel logs,

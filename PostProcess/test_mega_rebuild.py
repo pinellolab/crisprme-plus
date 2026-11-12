@@ -24,6 +24,7 @@ Run: cd PostProcess && python -m unittest test_mega_rebuild -v
 
 import gzip
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -386,7 +387,9 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
     that holds the dataset's VCFs, or any part it builds, before it makes anything; and the flow
     the advice gives, the recipe in a new working directory, then its parts moved in place of
     the dataset's (docs/TROUBLESHOOTING.md section 12, its commands run here as written, the
-    chromosomes and the PAM those of this genome), puts a kit back that a build reads."""
+    chromosomes and the PAM those of this genome), puts a kit back that a build reads. W1C-B1,
+    the review of wave 1c-a: so it does from the state a search's note of windows too short
+    leaves, the kit in place, whichever removal of the note's is run first."""
 
     PARTS = [("Genomes", "hg38+hg38_mega"), ("Genomes", "hg38+hg38_mega_INDELS"),
              ("Dictionaries", "dictionaries_hg38_mega"), ("Dictionaries", "log_indels_hg38_mega"),
@@ -462,13 +465,13 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
         done = self.rebuild()
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
-    def test_the_commands_of_section_12_put_a_rebuilt_kit_in_place(self):
-        done = self.rebuild()   # the dataset as an install holds it, the data folder its own
-        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-        kit = self.the_kit(self.work)
-        self.assertTrue(any(k.startswith("Genomes/hg38+hg38_mega_INDELS/") for k in kit), kit)
-        self.advice_rm()
-        self.refused("already holds VCFs")
+    def section_12(self):
+        """The commands of docs/TROUBLESHOOTING.md section 12, run as written in bash -eu (the
+        chromosomes and the PAM those of this genome), DATA the working directory, NEW a new
+        folder beside it, SRC the merged VCFs; then what each says is checked: the recipe's
+        checks pass, nothing of the dataset is left in the new folder but its samplesID file
+        (the data folder has its own, which stays), and no staging folder in the data folder.
+        Returns the run."""
         new = os.path.join(self.root, "new")
         commands = _section_12_commands()
         self.assertIn('bash "$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"',
@@ -487,16 +490,19 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
         self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
         self.assertIn("SUMMARY: 2 chroms, 2 SNP alleles + 2 indel-path alleles, ALL PASS",
                       ran.stdout)
-        # the same kit, back in the data folder; nothing of the dataset left in the new folder
+        self.assertEqual(sorted(self.the_kit(new)), ["samplesIDs/hg38_mega.samplesID.txt"])
+        self.assertFalse(os.path.exists(self.path(".mega_rebuild_hg38_mega")))
+        return ran
+
+    def kit_in_place(self, kit):
+        """The data folder holds the kit ``kit`` (the_kit's), file for file and no other part
+        of the dataset, and a build of another PAM on it reads it (the recipe's header: another
+        PAM is build-index-only on the finished install, which reuses its enrichment), with no
+        warning."""
         got = self.the_kit(self.work)
         self.assertEqual(sorted(got), sorted(kit))
         for name in kit:
             self.assertEqual(got[name], kit[name], name)
-        # (the data folder had its samplesID file: the recipe's, the same, stays where it is)
-        self.assertEqual(sorted(self.the_kit(new)), ["samplesIDs/hg38_mega.samplesID.txt"])
-        self.assertFalse(os.path.exists(self.path(".mega_rebuild_hg38_mega")))
-        # a build of another PAM on the data folder reads it (the recipe's header: another PAM
-        # is build-index-only on the finished install, which reuses its enrichment)
         nrr = os.path.join(REPO, "PAMs", "20bp-NRR-SpCas9.txt")
         shutil.copy(nrr, self.path("PAMs", os.path.basename(nrr)))
         rc, out, err = self.finish(self.start(command=[
@@ -508,6 +514,110 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
         self.assertTrue(os.path.isdir(self.lib("20-NRR_2_hg38+hg38_mega")))
         self.assertTrue(os.path.isdir(self.lib("20-NRR_2_hg38+hg38_mega_INDELS")))
 
+    def test_the_commands_of_section_12_put_a_rebuilt_kit_in_place(self):
+        done = self.rebuild()   # the dataset as an install holds it, the data folder its own
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        kit = self.the_kit(self.work)
+        self.assertTrue(any(k.startswith("Genomes/hg38+hg38_mega_INDELS/") for k in kit), kit)
+        self.advice_rm()
+        self.refused("already holds VCFs")
+        self.section_12()
+        # the same kit, back in the data folder, which a build of another PAM reads
+        self.kit_in_place(kit)
+
+    SACAS9 = os.path.join(REPO, "PAMs", "21bp-NNGRRT-SaCas9.txt")
+    EARLIER = "an_earlier_kit.txt"
+
+    def an_earlier_kit_in_place(self):
+        """The data folder with the dataset's kit in place, as an install holds it, and what
+        an earlier kit leaves beside the parts the recipe builds (a file of its own in each of
+        its genomes and its indel logs, and the indexes of another PAM, as 2.8.1's mega has
+        NGG's): the kit the recipe builds, which must replace it (the_kit's, as built here)."""
+        done = self.rebuild()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        kit = self.the_kit(self.work)
+        for part in (("Genomes", "hg38+hg38_mega"), ("Genomes", "hg38+hg38_mega_INDELS"),
+                     ("Dictionaries", "log_indels_hg38_mega"),
+                     ("genome_library", "NGG_2_hg38+hg38_mega"),
+                     ("genome_library", "NGG_2_hg38+hg38_mega_INDELS")):
+            bio._write(self.path(*part, self.EARLIER), "an earlier kit's\n")
+        return kit
+
+    def a_searchs_note(self):
+        """complete-search beside the kit in place, as a user runs it (the real CLI, the stub
+        engine, whose windows of 25/34 hold up to 26 bases at an MNV): a SaCas9 site, 21 nt and
+        NNGRRT, needs 27 with no bulge, so it prints its note on hg38_mega, the one line
+        returned."""
+        guide = os.path.join(self.root, "guide_sa.txt")
+        for path, text in ((guide, bio.GENOME["chr1"][:21] + "NNNNNN\n"),
+                           (os.path.join(self.root, "vcfs_mega.txt"), "hg38_mega\n"),
+                           (os.path.join(self.root, "samples_mega.txt"),
+                            "hg38_mega.samplesID.txt\n")):
+            bio._write(path, text)
+        rc, out, err = self.finish(self.start(command=[
+            "complete-search", "--genome", self.path("Genomes", "hg38"),
+            "--vcf", os.path.join(self.root, "vcfs_mega.txt"),
+            "--samplesID", os.path.join(self.root, "samples_mega.txt"), "--guide", guide,
+            "--pam", self.SACAS9, "--mm", "0", "--bDNA", "0", "--bRNA", "0", "--output", "note",
+            "--thread", "2"], CRISPRME_SKIP_SCORER_ENV="1"), timeout=300)
+        notes = [ln for ln in out.splitlines() if ln.startswith(
+            "WARNING [complete-search]: the fake-indel windows of hg38_mega hold 25 reference "
+            "bases before each indel and 34 after it")]
+        self.assertEqual(len(notes), 1, out + err)
+        self.assertIn("this search's targets need up to 27 (a 27-nt guide and PAM)", notes[0])
+        self.assertIn("docs/TROUBLESHOOTING.md section 12 has the commands", notes[0])
+        return notes[0]
+
+    @staticmethod
+    def removals(said):
+        """The arguments of each ``rm -rf`` a message says, as written."""
+        arg = r"(?:'(?:[^']|'\\'')*'|[^\s;)'(]+)"
+        return [m.group(1) for m in re.finditer(r"rm -rf (%s(?:\s+%s)*)" % (arg, arg), said)]
+
+    def section_12_after_the_note(self, every):
+        """W1C-B1, the review of wave 1c-a: a search's note of windows too short on a
+        sites-only dataset named only the removal of the dataset's VCFs, registry and indel
+        frequencies (relative to the working directory), and none of the kit in place. Run
+        from the state it left, the kit in place, section 12's commands, which removed only
+        those three too, failed to move the kit the recipe built in ('Directory not empty'),
+        and the data folder was left with the old kit's genomes and indel logs beside the new
+        indexes, registry and indel frequencies, which build-index-only and every search then
+        refused. The note names the removal of all that came from the kit now, by absolute
+        path, and section 12 removes every part of the dataset the recipe builds by name.
+        Here the note's first removal alone, the three, as the review's flow ran it, or
+        (``every``) every removal it names, each from the data folder; then section 12 as
+        written: the kit the recipe builds is in place, the earlier kit's parts and its
+        indexes of another PAM gone, and a build reads it."""
+        kit = self.an_earlier_kit_in_place()
+        note = self.a_searchs_note()
+        said = self.removals(note)
+        self.assertTrue(said, note)
+        for args in (said if every else said[:1]):
+            done = subprocess.run(["bash", "-c", "rm -rf " + args], cwd=self.work,
+                                  capture_output=True, text=True)
+            self.assertEqual((done.returncode, done.stderr), (0, ""), args)
+        self.section_12()
+        self.kit_in_place(kit)
+        for name in ("NGG_2_hg38+hg38_mega", "NGG_2_hg38+hg38_mega_INDELS"):
+            self.assertFalse(os.path.lexists(self.lib(name)), name)
+        return said
+
+    def test_section_12_after_the_first_removal_a_searchs_note_names(self):
+        said = self.section_12_after_the_note(every=False)
+        # (the three, by absolute path, and then that of the kit in place)
+        self.assertEqual(len(said), 2, said)
+        self.assertEqual(said[0], " ".join("'%s'" % self.path(*p) for p in (
+            ("VCFs", "hg38_mega"), ("Dictionaries", "registry_hg38_mega"),
+            ("Dictionaries", "indel_af_hg38_mega"))))
+        for part in (("Genomes", "hg38+hg38_mega"), ("Genomes", "hg38+hg38_mega_INDELS"),
+                     ("Dictionaries", "log_indels_hg38_mega"),
+                     ("genome_library", "NGG_2_hg38+hg38_mega"),
+                     ("genome_library", "20-NRG_2_hg38+hg38_mega_INDELS")):
+            self.assertIn("'%s'" % self.path(*part), said[1])
+        self.assertNotIn("registry_hg38_mega", said[1])
+
+    def test_section_12_after_every_removal_a_searchs_note_names(self):
+        self.section_12_after_the_note(every=True)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

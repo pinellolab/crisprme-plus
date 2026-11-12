@@ -739,8 +739,11 @@ build-index-only
 the indel search's notes of windows too short). The recipe builds the dataset whole, its VCFs,
 registry and indel frequencies too, and refuses a working directory that holds any of it before
 it makes anything there, so the messages name it run in a new working directory, its parts then
-moved in place of the dataset's, those three replaced (`indel_window.rebuild_kit_way`;
-`docs/TROUBLESHOOTING.md` §12). On chr22, with the published mega's registry (no
+moved in place of the dataset's: of all that came from the kit in place, which each message
+names for removal first by absolute path (`indel_window.kit_removal`; the search's notes named
+none up to the review of wave 1c-a, and the kit they left kept the recipe's parts out), and of
+those three (`indel_window.rebuild_kit_way`; `docs/TROUBLESHOOTING.md` §12, whose commands
+remove each part by name). On chr22, with the published mega's registry (no
 `data_type`) and its kit's indel log of 25/27, neither kit nor index in place, build-index-only
 refuses the dataset in 1 s, building nothing and naming no registry (it named the registry in
 its rm and advised a new build; with the registry read as sites-only and nothing else changed,

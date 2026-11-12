@@ -11,8 +11,11 @@ record).
 Run: python -m unittest test_indel_window -v
 """
 
+import fnmatch
 import gzip
 import os
+import re
+import shlex
 import shutil
 import tempfile
 import unittest
@@ -458,7 +461,8 @@ class ADatasetEnrichedAnew(_EngineCase):
                       "seq_script/merge_panels/mega_rebuild.sh in a new working directory of its "
                       "own, whose Genomes/<genome> holds the FASTAs of the chromosomes to build "
                       "and no other", note)
-        self.assertTrue(note.endswith(iw.rebuild_kit_way("hg38_mega") + "."), note)
+        self.assertTrue(note.endswith(iw.rebuild_kit_way("hg38_mega") + ". " + iw.kit_removal(
+            "its kit in place", "hg38_mega")), note)
         self.assertNotIn("enrich hg38_mega again", note)
         self.assertIn("enrich ds again with it (build-index-only) to search them.",
                       iw.target_note((25, 27), 27, 1, "complete-search", "ds"))
@@ -503,6 +507,46 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
         note = iw.target_note((25, 27), 27, 1, "complete-search", "hg38_mega", sites=True)
         self.check(note.replace("<genome>", "hg38"), None)
 
+    def test_a_searchs_note_names_the_removal_of_the_kit_in_place(self):
+        """W1C-B1, the review of wave 1c-a: a search's note on a sites-only dataset named only
+        the removal of its VCFs, registry and indel frequencies, which the recipe writes anew
+        (rebuild_kit_way's, relative to the working directory), and none of the kit in place:
+        followed with section 12, the kit stayed, every part the recipe built failed to move
+        in, and build-index-only and every search then refused the dataset. As
+        build-index-only's warning does, the note names that removal now, each part by
+        absolute path (kit_removal): the kit's genomes and indel logs, and every index of the
+        dataset, in the working directory's genome_library and in a library the search reads
+        besides; not its registry, its indel frequencies or its VCFs (they come from its VCFs
+        alone), nor the reference index."""
+        top = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, top, True)
+        w, lib = os.path.join(top, "work"), os.path.join(top, "lib")
+        kit = [("Genomes", "hg38+hg38_mega"), ("Genomes", "hg38+hg38_mega_INDELS"),
+               ("Dictionaries", "log_indels_hg38_mega"), ("genome_library", "NGG_2_hg38+hg38_mega"),
+               ("genome_library", "20-NRR_2_hg38+hg38_mega_INDELS")]
+        kept = [("Dictionaries", "registry_hg38_mega"), ("VCFs", "hg38_mega"),
+                ("Dictionaries", "indel_af_hg38_mega"), ("genome_library", "20-NRR_2_hg38")]
+        for part in kit + kept:
+            os.makedirs(os.path.join(w, *part))
+        with open(os.path.join(w, "Dictionaries", "registry_hg38_mega", "reg_chr1.idx"), "w") as fh:
+            fh.write('{"n_records": 1, "aggregation": "info_af", "databases": {}}')
+        os.makedirs(os.path.join(lib, "20-NRR_2_hg38+hg38_mega"))
+        for who in ("complete-search", "indel search"):
+            note = iw.target_note((25, 27), 27, 1, who, "hg38_mega", sites=True, workdir=w,
+                                  genome="hg38", libraries=[lib])
+            self.check(note, w)
+            m = re.search(r"\. Either replaces its kit in place and all that was built from it, "
+                          r"as a search would read stores of the two together: its genomes, "
+                          r"dictionaries, indel logs and dict-less tiers, and every index of the "
+                          r"dataset, which go first \(rm -rf ([^;]*); and any copy of those "
+                          r"indexes in a library you search with --index-path\)\.$", note)
+            self.assertIsNotNone(m, note)
+            self.assertEqual(sorted(shlex.split(m.group(1))), sorted(
+                [os.path.join(w, *p) for p in kit]
+                + [os.path.join(lib, "20-NRR_2_hg38+hg38_mega")]))
+            for part in kept:
+                self.assertNotIn(iw.quote(os.path.join(w, *part)), m.group(1))
+
     def test_section_12_has_its_commands(self):
         here = os.path.dirname(os.path.abspath(__file__))
         with open(os.path.join(os.path.dirname(here), "docs", "TROUBLESHOOTING.md")) as fh:
@@ -517,9 +561,27 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
         self.assertIn('mkdir -p "$NEW/Genomes/hg38" "$NEW/PAMs"', lines)
         self.assertIn('PAM=PAMs/20bp-NRR-SpCas9.txt bash '
                       '"$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"', lines)
-        # the three the recipe writes anew, removed from the data folder
-        self.assertIn('rm -rf "$DATA/VCFs/hg38_mega" "$DATA/Dictionaries/registry_hg38_mega" '
-                      '"$DATA/Dictionaries/indel_af_hg38_mega"', lines)
+        # in the data folder, every part of the dataset the recipe builds, each it refuses in
+        # its working directory, removed by name, whatever a message's own rm left: the kit in
+        # place and all that was built from it, then the three the recipe writes anew. The
+        # removal named the three alone, and a search's note named no other (W1C-B1)
+        (rm,) = [ln + " " for ln in lines if ln.startswith("rm -rf ")]
+        with open(os.path.join(os.path.dirname(here), "seq_script", "merge_panels",
+                               "mega_rebuild.sh")) as fh:
+            refused = set(re.findall(r'"\$D/([a-z_]+)_\$DATASET"', fh.read()))
+        self.assertEqual(refused, {"dictionaries", "log_indels", "registry", "indel_af",
+                                   "genotypes", "indel_genotypes"})
+        for part in (['"$DATA/Genomes/hg38+hg38_mega" ', '"$DATA/Genomes/hg38+hg38_mega_INDELS" ',
+                      '"$DATA"/genome_library/*_[0-9]_hg38+hg38_mega ',
+                      '"$DATA"/genome_library/*_[0-9]_hg38+hg38_mega_INDELS ',
+                      '"$DATA/VCFs/hg38_mega" ']
+                     + ['"$DATA/Dictionaries/%s_hg38_mega" ' % k for k in sorted(refused)]):
+            self.assertIn(part, rm)
+        # (the dataset's indexes of every PAM and either form of the name, not an index of
+        # another genome whose name ends in _hg38, nor the reference index)
+        for name, theirs in (("NGG_2_hg38+hg38_mega", True), ("20-NRR_2_hg38+hg38_mega", True),
+                             ("20-NRG_2_x_hg38+hg38_mega", False), ("20-NRR_2_hg38", False)):
+            self.assertEqual(fnmatch.fnmatchcase(name, "*_[0-9]_hg38+hg38_mega"), theirs, name)
         # each part the messages name, moved in (and the recipe's reference index not)
         moved = " ".join(ln for ln in lines if ln.startswith(("mv ", "[ -e")))
         for part in ('"$NEW/Genomes/hg38+hg38_mega"', '"$NEW/Genomes/hg38+hg38_mega_INDELS"',

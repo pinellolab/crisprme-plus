@@ -748,8 +748,11 @@ each panel was (`seq_script/rebuild/README.md`, rule 1).
    recipe builds (its kit, indel logs, registry, indel frequencies or indexes), is refused
    before anything is made there. To put a kit it built in a data folder in place of the
    dataset's (the advice of a build or a search on a sites-only dataset whose kit is not that
-   of the installed CRISPRitz), run it in a new working directory and move its parts in:
-   [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §12 has the commands.
+   of the installed CRISPRitz), run it in a new working directory, remove from the data folder
+   every part of the dataset it built (the kit in place and all that was built from it, which
+   the advice names for removal first, and the dataset's VCFs, registry and indel
+   frequencies) and move its parts in: [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §12 has
+   the commands, which remove each of those parts by name.
 4. **Up to 2.8.1: searchable indels** (the shipped mega's). `seq_script/merge_panels/mega_build_indels.sh`
    adds a synthetic `MEGA` pseudo-sample so the enricher materializes fake contigs, builds the
    `_INDELS` genome, then strips the pseudo-sample back out; the registry and the indel

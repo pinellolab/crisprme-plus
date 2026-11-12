@@ -3562,7 +3562,8 @@ def complete_search() -> None:
     # said here for each variant dataset whose windows are too short for this search
     # (_indel_window_notes), and into the run's Params.txt
     window_notes = (_indel_window_notes(resolve_vcf_dataset_dirs(vcfdir, current_working_directory),
-                                        total_pam_len, bDNA) if variant else [])
+                                        total_pam_len, bDNA, genome_ref, index_path)
+                    if variant else [])
     for _note in window_notes:
         print(_note, flush=True)
     if bMax != 0:
@@ -4424,14 +4425,18 @@ def _indel_log_window(log_dir: str, subdir: str):
     return next(iter(found)) if len(found) == 1 else None
 
 
-def _indel_window_notes(dataset_dirs: List[str], target_len: int, bdna: int) -> List[str]:
+def _indel_window_notes(dataset_dirs: List[str], target_len: int, bdna: int,
+                        genome_ref: "Optional[str]" = None, index_path: str = "_") -> List[str]:
     """What complete-search says of each variant dataset of ``dataset_dirs`` whose
     fake-indel windows hold no target of ``target_len`` bases (guide and PAM) with ``bdna``
     DNA bulges that holds an indel (indel_window.target_note): the windows its indel logs
     record (Dictionaries/log_indels_<dataset>), each width once; for a dataset with no logs
     yet, which the search enriches itself, those the installed CRISPRitz writes. How a
     sites-only dataset gets wider windows is not by enriching it again
-    (indel_window.sites_only, sites_only_way)."""
+    (indel_window.sites_only, sites_only_way), and its kit in place goes first, each part
+    named by absolute path: of the working directory and genome ``genome_ref``, its indexes
+    in the --index-path library ``index_path`` too ("_": none) (indel_window.kit_removal;
+    the note named none of it up to the review of wave 1c-a, W1C-B1)."""
     notes = []
     for d in dataset_dirs:
         name = os.path.basename(os.path.normpath(d))
@@ -4449,8 +4454,10 @@ def _indel_window_notes(dataset_dirs: List[str], target_len: int, bdna: int) -> 
                 continue
             if sites is None:
                 sites = indel_window.sites_only(current_working_directory, name, d)
-            notes.append(indel_window.target_note(w, target_len, bdna, "complete-search", name,
-                                                  sites))
+            notes.append(indel_window.target_note(
+                w, target_len, bdna, "complete-search", name, sites,
+                os.path.normpath(current_working_directory), genome_ref,
+                [index_path] if index_path not in (None, "", "_") else []))
     return notes
 
 
@@ -4519,10 +4526,8 @@ def _enrichment_window_notes(enriched: str, indels_out: str, log_dir: str, genom
             f"its rows are right. "
             + (f"For the installed CRISPRitz's windows: "
                f"{indel_window.sites_only_way(vcf_name, workdir, genome_ref)}. "
-               f"Either replaces that enrichment and all that was built from it, as a search would "
-               f"read stores of the two together: its genomes, dictionaries, indel logs and "
-               f"dict-less tiers, and every index of the dataset, which go first (rm -rf {_rm}; "
-               f"and any copy of those indexes in a library you search with --index-path)."
+               + indel_window.kit_removal("that enrichment", vcf_name,
+                                          stores=list(dict.fromkeys(_stores + list(building))))
                if _sites else
                f"To enrich {vcf_name} with the installed CRISPRitz's windows, "
                f"remove that enrichment and all that was built from it, as an enrichment of another "

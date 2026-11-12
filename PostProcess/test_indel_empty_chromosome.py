@@ -921,6 +921,20 @@ class SearchSide(_Fixture):
         self.assertIn("install its archive and enriched-genome kit of CRISPRme 2.10.0",
                       res.stdout)
         self.assertNotIn("enrich ds again", res.stdout)
+        # and what goes first, as build-index-only's warning says: all that came from its kit
+        # in place, each part by absolute path, its indel logs and INDELS index among it, and
+        # the three the recipe writes anew by absolute path too (the note named the three
+        # alone, relative, and section 12's commands then left the kit in place: W1C-B1)
+        self.assertIn("Either replaces its kit in place and all that was built from it",
+                      res.stdout)
+        gone = re.search(r"which go first \(rm -rf ([^;]*); and any copy", res.stdout)
+        self.assertIsNotNone(gone, res.stdout)
+        self.assertEqual(gone.group(1), "'%s' '%s'" % (
+            os.path.join(self.work, "Dictionaries", "log_indels_ds"), self.idx))
+        self.assertIn("(rm -rf '%s' '%s' '%s')" % (
+            os.path.join(self.work, "VCFs", "ds"),
+            os.path.join(self.work, "Dictionaries", "registry_ds"),
+            os.path.join(self.work, "Dictionaries", "indel_af_ds")), res.stdout)
         shutil.rmtree(os.path.join(self.tmp, "work"))
         shutil.rmtree(os.path.join(self.tmp, "out"))
         res, _lines = self.run_search({"chrA": window_rows("chrA", 30, 30)}, {"chrA": True},

@@ -375,13 +375,17 @@ windows of 2.10.0, install its archive and kit of CRISPRme 2.10.0 in place of wh
 lists, or build the kit again that way. Its registry, which comes from its VCFs alone (their
 INFO AF fields), is never in that list.
 
-**Building the mega's kit again.** The recipe builds the dataset whole, its VCFs, registry and
-indel frequencies too, in a working directory that holds none of it: it refuses one that holds
-the dataset's VCFs, or a part it builds, and makes nothing there. The data folder keeps the
-mega's VCFs, registry and indel frequencies after the removal a message names, so run the
-recipe in a new working directory, then put what it built in place of the dataset's, those
-three replaced too. With `DATA` the data folder, `NEW` a new folder outside it, `SRC` a folder
-of the merged VCFs the mega is built from, `mega.<chrom>.afmax.vcf.gz`, each an absolute path
+**Building the mega's kit again.** The recipe builds the dataset whole, its VCFs, registry
+and indel frequencies too, in a working directory that holds none of it: it refuses one that
+holds the dataset's VCFs, or a part it builds, and makes nothing there. So run it in a new
+working directory, then put what it built in place of every part of the dataset in the data
+folder: the commands below remove each such part by name first, whatever a message's own
+`rm -rf` removed or left, namely the kit in place and all that was built from it (its genomes,
+dictionaries, indel logs, tiers and every index of the dataset, which the messages name for
+removal too) and the dataset's VCFs, registry and indel frequencies, which the recipe wrote
+anew. Remove any copy of the dataset's indexes in a library you search with `--index-path`
+too. With `DATA` the data folder, `NEW` a new folder outside it, `SRC` a folder of the
+merged VCFs the mega is built from, `mega.<chrom>.afmax.vcf.gz`, each an absolute path
 (`crisprme.py download --what vcf --dataset hg38_mega --path <dir>` fetches them into
 `<dir>/VCFs/hg38_mega`; a 2.8.1 install's `VCFs/hg38_mega` holds them, so give it as `SRC`
 before you remove it), and `REPO` the CRISPRme repository (`/opt/conda/opt/crisprme` in the
@@ -394,9 +398,16 @@ mkdir -p "$NEW/Genomes/hg38" "$NEW/PAMs"
 for c in chr{1..22} chrX chrY; do ln -s "$DATA/Genomes/hg38/$c.fa" "$NEW/Genomes/hg38/"; done
 cp "$DATA/PAMs/20bp-NRR-SpCas9.txt" "$NEW/PAMs/"
 PAM=PAMs/20bp-NRR-SpCas9.txt bash "$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"
-# in the data folder: first what the message lists (the rm -rf it prints), then the dataset's
-# VCFs, registry and indel frequencies, which the recipe wrote anew
-rm -rf "$DATA/VCFs/hg38_mega" "$DATA/Dictionaries/registry_hg38_mega" \
+# in the data folder, every part of the dataset the recipe built (each it refuses where it
+# runs): the kit in place and all that was built from it, its indexes among them
+# (<PAM>_<N>_hg38+hg38_mega and its _INDELS, of every PAM), then the dataset's VCFs,
+# registry and indel frequencies, which the recipe wrote anew
+rm -rf "$DATA/Genomes/hg38+hg38_mega" "$DATA/Genomes/hg38+hg38_mega_INDELS" \
+  "$DATA/Dictionaries/dictionaries_hg38_mega" "$DATA/Dictionaries/log_indels_hg38_mega" \
+  "$DATA/Dictionaries/genotypes_hg38_mega" "$DATA/Dictionaries/indel_genotypes_hg38_mega" \
+  "$DATA"/genome_library/*_[0-9]_hg38+hg38_mega \
+  "$DATA"/genome_library/*_[0-9]_hg38+hg38_mega_INDELS \
+  "$DATA/VCFs/hg38_mega" "$DATA/Dictionaries/registry_hg38_mega" \
   "$DATA/Dictionaries/indel_af_hg38_mega"
 # what the recipe built, moved in (not its reference index, genome_library/<guide>-<PAM>_<N>_hg38)
 mv "$NEW/Genomes/hg38+hg38_mega" "$NEW/Genomes/hg38+hg38_mega_INDELS" "$DATA/Genomes/"
@@ -414,7 +425,11 @@ For a container install, give the recipe its `RUN` prefix (its header). Its last
 PAM; for another, run `build-index-only --pam <it>` on the data folder, which reuses the kit.
 Up to the integration review of 2.10.0 the messages named the recipe alone, and the recipe, run
 in the folder their removal left, refused its VCFs after it had made its staging folder
-(`.mega_rebuild_hg38_mega/prepared`) there.
+(`.mega_rebuild_hg38_mega/prepared`) there. Up to the review of its fix (wave 1c-a), a search's
+note of windows too short named no removal of the kit in place, and these commands removed the
+VCFs, registry and indel frequencies alone: run from the state that note left, every move of
+the kit failed (`Directory not empty`), and `build-index-only` and every search then refused the
+dataset, its new INDELS index beside the old kit's indel logs.
 
 ## 13. A build or a search says a fake-indel genome and its indel logs come from two enrichments
 
@@ -441,4 +456,5 @@ the enriched genome, the fake-indel genome and their indexes in one build), as t
 an enrichment of its VCFs would hold no fake-indel window. The recipe runs in a new working
 directory, and what it built goes in place of all of the dataset that comes from an enrichment
 (the message lists it) and of the dataset's VCFs, registry and indel frequencies, which it
-writes anew: the commands are in section 12, "Building the mega's kit again".
+writes anew: the commands, which remove each of those parts by name, are in section 12,
+"Building the mega's kit again".
