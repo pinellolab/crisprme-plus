@@ -22,8 +22,9 @@ from dash import dcc
 from dash import html
 import dash_bootstrap_components as dbc
 
-import shutil
 import os
+
+import safe_files  # (PostProcess/, on sys.path from pages_utils: follows no link)
 
 
 # The URL fragment main_page.change_url opens a job's status page with when it did
@@ -58,9 +59,10 @@ def _failure_text(job_directory: str) -> str:
     way until then; one of a genome folder it cannot search as it is says what
     genome_layout.py says of it. Any other failure gets the general text, which said
     to submit again in each of those too."""
-    try:
-        with open(os.path.join(job_directory, "log_error.txt"), errors="replace") as fh:
-            lines = fh.read().splitlines()
+    try:  # (no link followed: safe_files)
+        lines = safe_files.read_text(os.path.join(job_directory, "log_error.txt"),
+                                     safe_files.job_root(job_directory),
+                                     errors="replace").splitlines()
     except OSError:
         lines = []
     for at, line in enumerate(lines):
@@ -89,21 +91,22 @@ def _search_failed(job_directory: str) -> bool:
     holds its log.txt and a log_error.txt that is not empty. The page offers Remove
     result for such a search only, and remove_result removes no other."""
     error_log = os.path.join(job_directory, "log_error.txt")
-    return (
-        os.path.isfile(os.path.join(job_directory, LOG_FILE))
-        and os.path.isfile(error_log)
-        and os.path.getsize(error_log) > 0
-    )
+    cwd = safe_files.job_root(job_directory)  # (each a regular file reached with no link)
+    try:
+        return (safe_files.is_file(os.path.join(job_directory, LOG_FILE), cwd)
+                and safe_files.getsize(error_log, cwd) > 0)
+    except OSError:
+        return False
 
 
 def is_assembly_folder(job_directory: str) -> bool:
     """Whether a job folder is a personal-assembly search's, per its .Params.txt
     (written by submit_assembly_search_job), as the routes to a job's pages tell
     (index._is_assembly_job), which open its status page."""
-    try:
-        with open(os.path.join(job_directory, PARAMS_FILE)) as params_handle:
-            return "Genome_type\tassembly" in params_handle.read()
-    except OSError:
+    try:  # (no link followed: safe_files)
+        return "Genome_type\tassembly" in safe_files.read_text(
+            os.path.join(job_directory, PARAMS_FILE), safe_files.job_root(job_directory))
+    except (OSError, ValueError):
         return False
 
 
@@ -182,28 +185,30 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
         raise TypeError(f"Expected {str.__name__}, gopt {type(dir_name).__name__}")
     if n is None:
         raise PreventUpdate
-    # recover job directories
-    job_data = [
-        d
-        for d in os.listdir(os.path.join(current_working_directory, RESULTS_DIR))
-        if os.path.isdir(os.path.join(current_working_directory, RESULTS_DIR, d))
-    ]
-    current_job_directory = os.path.join(
-        current_working_directory, RESULTS_DIR, dir_name.split("=")[-1]
-    )
-    if dir_name.split("=")[-1] in job_data:
+    # the job folder (the URL's id: a folder of Results/, reached with no link) and the
+    # regular files in it: a link another user put there is not a file of the job's, and
+    # none is read (safe_files)
+    cwd = current_working_directory
+    job_id = dir_name.split("=")[-1]
+    current_job_directory = os.path.join(cwd, RESULTS_DIR, job_id)
+    if (job_id not in ("", os.curdir, os.pardir) and os.path.basename(job_id) == job_id
+            and safe_files.is_dir(current_job_directory, cwd)):
+        try:
+            names = safe_files.listdir(current_job_directory, cwd)
+        except OSError:
+            names = []
         job_data = [
             f
-            for f in os.listdir(current_job_directory)
+            for f in names
             if (
                 not f.startswith(".")
-                and os.path.isfile(os.path.join(current_job_directory, f))
+                and safe_files.is_file(os.path.join(current_job_directory, f), cwd)
             )
         ]
-        if os.path.exists(os.path.join(current_job_directory, GUIDES_FILE[1:])):
+        if GUIDES_FILE[1:] in job_data:
             try:
-                with open(
-                    os.path.join(current_job_directory, GUIDES_FILE[1:])
+                with safe_files.open_read(
+                    os.path.join(current_job_directory, GUIDES_FILE[1:]), cwd
                 ) as handle_guides:
                     n_guides = len(handle_guides.read().strip().split("\n"))
             except OSError as e:
@@ -212,7 +217,9 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
             n_guides = -1
         if LOG_FILE in job_data:
             try:
-                with open(os.path.join(current_job_directory, LOG_FILE)) as handle_log:
+                with safe_files.open_read(
+                    os.path.join(current_job_directory, LOG_FILE), cwd
+                ) as handle_log:
                     done = 0
                     index_status = html.P("To do", style={"color": "red"})
                     search_status = html.P("To do", style={"color": "red"})
@@ -225,8 +232,8 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
                     # check if variants are required
                     variants = False
                     try:
-                        with open(
-                            os.path.join(current_job_directory, PARAMS_FILE)
+                        with safe_files.open_read(
+                            os.path.join(current_job_directory, PARAMS_FILE), cwd
                         ) as handle_params:
                             if "Ref_comp\tTrue" in handle_params.read():
                                 variants = True
@@ -536,8 +543,9 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
             True,
         )
     log_path = os.path.join(job_dir, LOG_FILE)
-    if not os.path.isfile(log_path):
-        if os.path.isfile(os.path.join(job_dir, QUEUE_FILE)):
+    cwd = safe_files.job_root(job_dir)  # (each read with no link followed: safe_files)
+    if not safe_files.is_file(log_path, cwd):
+        if safe_files.is_file(os.path.join(job_dir, QUEUE_FILE), cwd):
             queued = html.P("Queued", style={"color": "red"})
             return (
                 {"visibility": "hidden"}, queued, queued, queued, "",
@@ -546,8 +554,10 @@ def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
             )
         return ({"visibility": "hidden"}, not_avail, not_avail, not_avail, "", "", True)
 
-    with open(log_path, errors="replace") as handle_log:
-        current_log = handle_log.read()
+    try:
+        current_log = safe_files.read_text(log_path, cwd, errors="replace")
+    except OSError:
+        return ({"visibility": "hidden"}, not_avail, not_avail, not_avail, "", "", True)
 
     paternal_started = (
         "Running paternal haplotype search" in current_log
@@ -626,18 +636,19 @@ def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
     combined_dir = results_job_dir(dir_name.split("=")[-1])
     if combined_dir is None or not is_assembly_folder(combined_dir):
         raise PreventUpdate
+    cwd = safe_files.job_root(combined_dir)  # (each read with no link followed: safe_files)
     try:
-        with open(os.path.join(combined_dir, LOG_FILE), errors="replace") as handle_log:
-            failed, reconciled = _assembly_search_ended(handle_log.read())
+        failed, reconciled = _assembly_search_ended(safe_files.read_text(
+            os.path.join(combined_dir, LOG_FILE), cwd, errors="replace"))
     except OSError:  # no log yet: queued
         raise PreventUpdate
     if not failed or reconciled:  # running, or finished
         raise PreventUpdate
     dirs_to_remove = [combined_dir]
     params_path = os.path.join(combined_dir, PARAMS_FILE)
-    if os.path.isfile(params_path):
+    if safe_files.is_file(params_path, cwd):
         params = {}
-        with open(params_path) as pf:
+        with safe_files.open_read(params_path, cwd) as pf:
             for line in pf:
                 fields = line.rstrip("\n").split("\t")
                 if len(fields) >= 3:
@@ -649,7 +660,9 @@ def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
                 if sibling_dir is not None:
                     dirs_to_remove.append(sibling_dir)
     for d in dirs_to_remove:
-        shutil.rmtree(d, ignore_errors=True)
+        # within Results/, reached with no link: a folder renamed into its place meanwhile
+        # is never removed (safe_files)
+        safe_files.rmtree(d, cwd, ignore_errors=True)
     return html.P("Results deleted")
 
 
@@ -670,11 +683,13 @@ def show_assembly_full_log(n: int, dir_name: str, currently_hidden: bool) -> Tup
     if job_dir is None:
         return False, "No log file found for this job yet."
     path = os.path.join(job_dir, LOG_FILE)
-    if not os.path.isfile(path):
+    try:  # no link followed (safe_files): one another user put there is not read
+        lines = safe_files.read_text(path, safe_files.job_root(job_dir),
+                                     errors="replace").splitlines(keepends=True)
+    except FileNotFoundError:
         return False, "No log file found for this job yet."
-    try:
-        with open(path, errors="replace") as fh:
-            lines = fh.readlines()
+    except safe_files.RefusedPath as exc:
+        return False, f"({LOG_FILE} not shown: {exc.why})"
     except OSError as exc:
         return False, f"(could not read {LOG_FILE}: {exc})"
     tail = 400
@@ -859,8 +874,9 @@ def remove_result(n: int, dir_name: str) -> html.P:
         current_job_directory = results_job_dir(dir_name.split("=")[-1])
         if current_job_directory is None or not _search_failed(current_job_directory):
             raise PreventUpdate
-        # remove job data
-        shutil.rmtree(current_job_directory)
+        # remove job data, within Results/, reached with no link: a folder renamed into its
+        # place meanwhile is never removed (safe_files)
+        safe_files.rmtree(current_job_directory, safe_files.job_root(current_job_directory))
         return html.P("Results deleted")
     return None
 
@@ -892,11 +908,14 @@ def show_full_log(n: int, dir_name: str, currently_hidden: bool) -> Tuple[bool, 
         ("log_verbose.txt (tail)", "log_verbose.txt", 400),
     ):
         path = os.path.join(job_dir, fname)
-        if not os.path.isfile(path):
+        try:  # no link followed (safe_files): one another user put there is not read
+            lines = safe_files.read_text(path, safe_files.job_root(job_dir),
+                                         errors="replace").splitlines(keepends=True)
+        except FileNotFoundError:
             continue
-        try:
-            with open(path, "r", errors="replace") as fh:
-                lines = fh.readlines()
+        except safe_files.RefusedPath as exc:
+            sections.append(f"===== {label} =====\n(not shown: {exc.why})")
+            continue
         except OSError as exc:
             sections.append(f"===== {label} =====\n(could not read: {exc})")
             continue

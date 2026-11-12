@@ -183,13 +183,9 @@ than change the inputs and the results:
 
 - stop the search, by making first a name it makes there (the post-analysis's
   `<output>.pieces` folder, for one);
-- rename a folder the search or the web app made there and put their own in its place (a
-  rename needs only write access to the folder that holds it), and put links in it, which
-  they then write through, over files of yours elsewhere;
-- put links where the web app reads (in `Results/`, `Settings/` and the job folders in them),
-  which it follows: the job logs it shows and the files it serves for download can then be
-  files of yours elsewhere, which anyone who can reach the web app reads (it listens on every
-  network interface, `0.0.0.0`);
+- rename a folder the search made there and put their own in its place (a rename needs only
+  write access to the folder that holds it), and put links in it, which the search then
+  writes through, over files of yours elsewhere (the web app follows none: below);
 - put lines and names in the files it reads there (its inputs, and the files it writes and
   reads back), which older parts of the pipeline still pass to shell commands; and, in a
   temporary folder that is not sticky, replace the modules TensorFlow writes there and then
@@ -203,9 +199,10 @@ What holds wherever you run it, since 2.10.0:
   first from the folder you run `crisprme.py` in, loaded a module put there, and `--debug` took
   that folder's `PostProcess/` for its own;
 - no file CRISPRme writes is loaded as code (they are JSON or text; TensorFlow's own
-  modules, above, aside), and the web app's Settings Retry re-runs a job with the command the
-  server launched it with, kept in its memory and run without a shell. Up to 2.10.0 it ran
-  through a shell the command a job's `Settings/<job>/cmd.json` held;
+  modules, above, and the web app's table cache, in a folder of the server's own, below,
+  aside), and the web app's Settings Retry re-runs a job with the command the server
+  launched it with, kept in its memory and run without a shell. Up to 2.10.0 it ran through
+  a shell the command a job's `Settings/<job>/cmd.json` held;
 - the values a review found going from a job's files into shell commands as the shell's own
   text are quoted or checked now: the guides of the guide file, the indel targets' header,
   the names of the CFD graph files, and the guide and the annotation of the results' region
@@ -214,19 +211,71 @@ What holds wherever you run it, since 2.10.0:
   take names no one else could make first. Where they are made, in the temporary folder or
   (the annotation temp folders, without `CRISPRME_TMPDIR`) in the working directory, only a
   sticky or private folder keeps others from replacing them; and the intermediate files a
-  search writes in its output folder keep fixed names (such as `<file>.tmp`).
+  search writes in its output folder keep fixed names (such as `<file>.tmp`);
+- the web app follows no link another user put in its data folder. Every file it reads,
+  serves or writes there (a search's logs, parameters and results, the downloads of
+  `/Results/<path>`, the Settings jobs' logs, the uploads, the email settings, the
+  concurrent searches setting, the annotation manifest, the sample lists, the PAM files, an
+  index's label) is reached one folder at a time with `O_NOFOLLOW` (`openat`), and must be a
+  regular file with no other name: not a link, a FIFO, a device or, in a folder others can
+  write, a hard link. A folder that one of its files names (the personal-assembly results
+  page reads the two haplotypes' folders the combined job's `.Params.txt` names) must be a
+  folder of `Results/` named alone: a link, a `..` or a path there is refused. A file it
+  writes whole is made under a name of its own (`O_EXCL`) and renamed over its name, so a
+  link there is replaced, not written through, and a log is opened with `O_NOFOLLOW`; a
+  program it runs on a job's files (the plots, the radar chart, the region page's lookup)
+  reads copies of them or its standard input, and the zips are made in Python. A folder it
+  makes for files of its own in a folder others can write (a program's outputs in a job's
+  folder, an uploaded genome or personal-assembly bundle unpacked in `Genomes/` or
+  `Assemblies/`, an annotation sorted) is used through its descriptor alone (Linux's
+  `/proc/self/fd`), never by its name again: renamed away, with a link put in its place, its
+  name leads nowhere the web app writes. A link is followed only where no one else can have
+  put it: a link of yours in a folder only you can write (or a sticky one of yours), such as
+  a genome linked to a shared copy, a VCF dataset registered from a server folder, or
+  `Results/` or `Settings/` linked onto a volume; in a folder your group can write, the web
+  app refuses those too, and below `Results/` and `Settings/` it follows none. A Settings
+  job's folder is writable by you alone, and the cache of the results tables, pickles that
+  Flask-Caching loads, is in a folder of the server's own in the temporary folder (in memory
+  when that folder is not private or sticky), no longer in `Cache/` of the data folder, which
+  can be deleted. Up to 2.10.0 the web app followed such links: it showed and served files of
+  yours to anyone who could reach it (it listens on every network interface, `0.0.0.0`), the
+  results of any search of yours too, through the haplotype folder a combined job's
+  `.Params.txt` named; it wrote through them, a chunked upload's data, the email password and
+  a job's logs among what it wrote, and through a link put in place of a folder it had made:
+  an uploaded archive unpacked into a folder of yours (a bundle's `.ssh/` into your home),
+  and every file of a folder of yours moved into a job's `imgs/`, which it then served; it
+  copied a JSON file of yours that a link named into the data folder, readable by all, when
+  the concurrent searches setting was saved; and another user's pickle in `Cache/` ran as you
+  when it was loaded.
 
-A test (`test_no_code_from_files`, in the unit-test job and the web image's) keeps out of
-CRISPRme what a scan of the source can show: loads that run code (pickle and the like, `eval`,
-`exec`, YAML loads but `safe_load`), a temporary name made by name only, and a `python -c`,
-`-m` or `-` that is not isolated. It also runs `process_summaries.py` and
-`assemble_cfd_graphs.py` on a line or a name another user could put in a search's folder and,
-in the web image's step, `crisprme.py --debug` from a folder holding someone else's
-`PostProcess/`. The other fixes above have tests of their own: `test_scorer_env` (the scorer's
-health check, its self-test and the look-up of its env's python), `test_settings_progress`
-(the Retry), `test_indel_empty_chromosome` (the indel targets' header) and
-`test_web_shell_safety` (the region page). The scan cannot follow every value read back into a
-shell command, which is one more reason to keep these folders yours.
+What a shared server still needs, with all of the above:
+
+- the search, and the other commands the web app starts (a download, an index build), still
+  follow links in the folders they write and write through them, as the list above says: keep
+  the data folder, the output folders and the temporary folder writable by you alone, or the
+  web app refuses the links of yours there as well;
+- the web app has no login: anyone who can reach its port can start searches and download,
+  upload and delete data in Settings. On a machine others can reach, let only those you trust
+  reach it (a firewall, or Docker's `-p 127.0.0.1:8080:8080` and an SSH tunnel: README,
+  Local Web Interface);
+- a folder that others can write through an ACL its mode bits do not show (macOS, NFSv4)
+  counts as yours: the web app follows your links there.
+
+`test_safe_files` (in the unit-test job) tests how the web app opens a file of its data folder
+and uses a folder it makes there, `test_web_no_links` (in the web image's step) the pages that
+read, serve and write one, through the real Dash server, each with a link another user put
+there or a folder of the web app's renamed and a link put in its place, and
+`test_settings_progress` the Settings page's, without Dash. A test (`test_no_code_from_files`,
+in the unit-test job and the web image's) keeps out of CRISPRme what a scan of the source can
+show: loads that run code (pickle and the like, `eval`, `exec`, YAML loads but `safe_load`), a
+temporary name made by name only, and a `python -c`, `-m` or `-` that is not isolated. It also
+runs `process_summaries.py` and `assemble_cfd_graphs.py` on a line or a name another user could
+put in a search's folder and, in the web image's step, `crisprme.py --debug` from a folder
+holding someone else's `PostProcess/`. The other fixes above have tests of their own:
+`test_scorer_env` (the scorer's health check, its self-test and the look-up of its env's
+python), `test_settings_progress` (the Retry), `test_indel_empty_chromosome` (the indel targets'
+header) and `test_web_shell_safety` (the region page). The scan cannot follow every value read
+back into a shell command, which is one more reason to keep these folders yours.
 
 ---
 

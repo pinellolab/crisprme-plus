@@ -143,10 +143,13 @@ class TestSearchReuse(unittest.TestCase):
         --prioritize-observed) goes to the search as CRISPRME_PRIORITIZE_OBSERVED, and a job
         run with it is not reused for one without it (nor the reverse)."""
         first = self.finish(self.submit())
-        self.assertIn(" CRISPRME_PRIORITIZE_OBSERVED=auto ", self.pool.submit.call_args[0][1])
+        # (the search's environment: mp._run_search_job's argument after its argv)
+        self.assertEqual(self.pool.submit.call_args[0][2]["CRISPRME_PRIORITIZE_OBSERVED"],
+                         "auto")
         url = self.submit(gate=True)
         self.assertNotEqual(url[1], f"?job={first}")
-        self.assertIn(" CRISPRME_PRIORITIZE_OBSERVED=on ", self.pool.submit.call_args[0][1])
+        self.assertEqual(self.pool.submit.call_args[0][2]["CRISPRME_PRIORITIZE_OBSERVED"],
+                         "on")
         job = self.finish(url)
         with open(os.path.join(self.tmp, "Results", job, mp.REUSE_KEY_FILE)) as f:
             self.assertTrue(json.load(f)["prioritize_observed"])

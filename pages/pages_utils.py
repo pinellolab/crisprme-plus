@@ -10,6 +10,7 @@ from glob import glob
 from dash import html
 import pandas as pd
 
+import contextlib
 import subprocess
 import base64
 import sys
@@ -29,6 +30,7 @@ if _POSTPROCESS_PATH not in sys.path:
     sys.path.insert(0, _POSTPROCESS_PATH)
 import personal_assembly  # noqa: E402
 import index_fit  # noqa: E402
+import safe_files  # noqa: E402  (no link another user put in the data folder is followed)
 
 
 # Define DNA alphabet
@@ -417,16 +419,33 @@ _JOB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 def results_job_dir(job_id) -> Optional[str]:
     """``<cwd>/Results/<job_id>`` when that is a job folder and ``job_id`` has the form of
     the search form's ids, else None: refuses a traversal (``../x``), an absolute path, a
-    name with any other character (a shell reads some), a non-string, and a folder whose
-    real path leaves Results/ (a link)."""
+    name with any other character (a shell reads some), a non-string, and a job folder that
+    is a link, wherever it leads (safe_files: Results/ itself may be a link the user made
+    onto a volume). The files in it are read through safe_files, which follows no link
+    there either."""
     if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
         return None
-    root = os.path.realpath(os.path.join(current_working_directory, RESULTS_DIR))
     jobdir = os.path.join(current_working_directory, RESULTS_DIR, job_id)
-    real = os.path.realpath(jobdir)
-    if not os.path.isdir(jobdir) or real == root or os.path.commonpath([root, real]) != root:
+    if not safe_files.is_dir(jobdir, current_working_directory):
         return None
     return jobdir
+
+
+def _first_line(path: str, root: Optional[str] = None) -> str:
+    """The first line of the file ``path`` of the data folder (``root``, by default the web
+    app's), read with no link another user put followed (safe_files)."""
+    with safe_files.open_read(path, root or current_working_directory) as fh:
+        return fh.readline()
+
+
+def _open_gz_text(path: str):
+    """The gzipped file ``path`` of the data folder opened as text (errors replaced), read with
+    no link another user put followed (safe_files)."""
+    fd = safe_files.open_fd(path, current_working_directory)
+    try:  # (gzip leaves a file object it is given open: it opens its own, of this very file)
+        return gzip.open(safe_files.fd_path(fd), "rt", errors="replace")
+    finally:
+        os.close(fd)
 
 
 def write_json(dropdown_value: str, job_id: str) -> None:
@@ -453,13 +472,9 @@ def write_json(dropdown_value: str, job_id: str) -> None:
     if job_directory is None:
         raise FileNotFoundError(f"No job folder Results/{job_id}")
     dropdown_json_file = os.path.join(job_directory, ".dropdown.json")
-    try:
-        handle = open(dropdown_json_file, mode="w")
-        handle.write(f"{dropdown_value}")
-    except OSError as e:
-        raise e
-    finally:
-        handle.close()
+    # a link another user put at its name is replaced, never written through (safe_files)
+    safe_files.write_text(dropdown_json_file, safe_files.job_root(job_directory),
+                          f"{dropdown_value}")
 
 
 def read_json(job_id: str) -> str:
@@ -482,19 +497,14 @@ def read_json(job_id: str) -> str:
     if job_directory is None:
         raise FileNotFoundError(f"No job folder Results/{job_id}")
     dropdown_json_file = os.path.join(job_directory, ".dropdown.json")
-    if not os.path.isfile(dropdown_json_file):
-        raise FileNotFoundError(f"Unable to locate {dropdown_json_file}")
-    try:
-        handle = open(dropdown_json_file, mode="r")
-        while True:
-            line = handle.readline().strip()
-            if not line:
-                break
-            filter_criterion = line
-    except OSError as e:
-        raise e
-    finally:
-        handle.close()
+    # (no link followed: safe_files)
+    text = safe_files.read_text(dropdown_json_file, safe_files.job_root(job_directory))
+    filter_criterion = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            break
+        filter_criterion = line
     assert filter_criterion in FILTERING_CRITERIA
     return filter_criterion
 
@@ -1213,9 +1223,8 @@ def vcf_reference_genome(dataset: str) -> Optional[str]:
     # behind by a failed/aborted download (before the VCFs/<dataset>/ dir was
     # created) must not pair a stale genome with a later dataset of the same name.
     if os.path.isfile(marker) and os.path.exists(os.path.join(cwd, VCFS_DIR, dataset)):
-        try:
-            with open(marker) as fh:
-                g = fh.read().strip()
+        try:  # (no link another user put followed: safe_files)
+            g = safe_files.read_text(marker, cwd).strip()
             if g:
                 return g
         except OSError:
@@ -1370,9 +1379,8 @@ def assembly_individual(root_dir: str, artifact_name: str) -> Optional[Tuple[str
     marker = os.path.join(
         current_working_directory, root_dir, f".{artifact_name}.assembly_individual"
     )
-    try:
-        with open(marker) as fh:
-            line = fh.read().strip()
+    try:  # (no link another user put followed: safe_files)
+        line = safe_files.read_text(marker, current_working_directory).strip()
     except OSError:
         return None
     individual, _sep, haplotype = line.partition("\t")
@@ -1509,11 +1517,10 @@ def get_available_indexes() -> List:
         # .display_label sidecar), else the parsed convention label
         custom = ""
         lf = os.path.join(p, ".display_label")
-        if os.path.isfile(lf):
-            try:
-                custom = open(lf).read().strip()
-            except OSError:
-                custom = ""
+        try:  # (shown as the index's label: no link another user put followed, safe_files)
+            custom = safe_files.read_text(lf, current_working_directory).strip()
+        except OSError:
+            custom = ""
         label = custom or _friendly_index_label(d)
         # provenance: report the PAM the index was actually built with (from the
         # .pam_build sidecar), so a pamless index makes clear which PAM geometry it
@@ -1557,9 +1564,8 @@ def pam_motif(pam_value: str) -> Optional[str]:
     folders are named. Reads PAMs/<value>.txt and extracts the PAM substring the
     same way ``build-index-only`` / ``index-genome`` do. Returns None on error.
     """
-    try:
-        with open(os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt")) as fh:
-            line = fh.readline()
+    try:  # (no link another user put followed: safe_files)
+        line = _first_line(os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt"))
         seq = line.split()[0]
         pos = int(line.split()[1])
         n = abs(pos)
@@ -1576,9 +1582,8 @@ def pam_geometry(pam_value: str) -> "tuple":
     compatible with the same index only if their total sequence length and
     orientation agree. Reads PAMs/<value>.txt; returns ``(None, None)`` on error.
     """
-    try:
-        with open(os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt")) as fh:
-            line = fh.readline()
+    try:  # (no link another user put followed: safe_files)
+        line = _first_line(os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt"))
         seq = line.split()[0]
         pos = int(line.split()[1])
         return len(seq), pos
@@ -1609,9 +1614,9 @@ def index_build_pam(index_dir: str) -> "tuple":
         k = len(parsed[0])
         named = (parsed[3] + k, k if parsed[4] == 3 else -k)
     p = os.path.join(index_dir, ".pam_build")
-    try:
-        with open(p) as fh:
-            parts = fh.readline().split()
+    try:  # (its name is shown in the index's label: no link another user put followed; the
+        # index folder, <data>/genome_library/<name>, says the data folder)
+        parts = _first_line(p, safe_files.job_root(index_dir)).split()
         recorded = parts[0], int(parts[1]), int(parts[2])
     except (OSError, ValueError, IndexError):
         recorded = None
@@ -1637,8 +1642,7 @@ def index_build_pam(index_dir: str) -> "tuple":
         for f in sorted(os.listdir(pams_dir)):
             if not f.endswith(".txt") or f.startswith("."):
                 continue
-            with open(os.path.join(pams_dir, f)) as _pf:
-                seq, pos = _pf.readline().split()[:2]
+            seq, pos = _first_line(os.path.join(pams_dir, f)).split()[:2]
             pos = int(pos)
             region = seq[: abs(pos)] if pos < 0 else seq[-abs(pos) :]
             if region == motif:
@@ -1747,9 +1751,9 @@ def _index_side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) 
     five_prime = index_fit.built_five_prime(index_dir)
     if five_prime is not None:
         return (not five_prime) == three_prime
-    try:
-        with open(os.path.join(index_dir, ".pam_build")) as fh:
-            recorded = int(fh.readline().split()[-1])
+    try:  # (no link another user put followed: safe_files; the data folder, the index's)
+        recorded = int(_first_line(os.path.join(index_dir, ".pam_build"),
+                                   safe_files.job_root(index_dir)).split()[-1])
     except (OSError, ValueError, IndexError):
         recorded = 0
     if recorded:
@@ -1915,10 +1919,14 @@ def write_pamless_pam_file(pam: str, geometry: Dict, enzyme: str = "Custom") -> 
     else:
         name, line = f"{pam}-{guide}bp-{enzyme}", f"{pam}{'N' * guide} -{len(pam)}\n"
     path = os.path.join(current_working_directory, PAMS_DIR, name + ".txt")
-    if not os.path.exists(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as fh:
-            fh.write(line)
+    if not os.path.lexists(path):
+        # made anew, never through a link another user put at its name (safe_files)
+        safe_files.makedirs(os.path.dirname(path), current_working_directory)
+        try:
+            with safe_files.create(path, current_working_directory) as fh:
+                fh.write(line)
+        except FileExistsError:  # made meanwhile
+            pass
     return name
 
 
@@ -2179,14 +2187,15 @@ def _vcf_folder_has_samples(vdir: str) -> Optional[bool]:
     """Whether the .vcf.gz files of the VCF folder ``vdir`` genotype samples: True when
     the #CHROM header of one of them has sample columns, False when each one read has
     none (a sites-only dataset), None when the folder holds no readable one."""
-    try:
-        files = sorted(f for f in os.listdir(vdir) if f.endswith(".vcf.gz"))
+    try:  # (no link another user put followed: safe_files)
+        files = sorted(f for f in safe_files.listdir(vdir, current_working_directory)
+                       if f.endswith(".vcf.gz"))
     except OSError:
         return None
     found = None
     for fname in files:
         try:
-            with gzip.open(os.path.join(vdir, fname), "rt", errors="replace") as fh:
+            with _open_gz_text(os.path.join(vdir, fname)) as fh:
                 for line in fh:
                     if line.startswith("#CHROM"):
                         if len(line.rstrip("\r\n").split("\t")) > 9:
@@ -2204,13 +2213,14 @@ def _unreadable_vcf(vdir: str) -> Optional[str]:
     """The first .vcf.gz file of the VCF folder ``vdir`` with no readable #CHROM header (not
     gzip, cut short, or no VCF), from which Settings writes no sample list
     (settings_page._vcf_header_samples, the same rule), or None."""
-    try:
-        files = sorted(f for f in os.listdir(vdir) if f.endswith(".vcf.gz"))
+    try:  # (no link another user put followed: safe_files)
+        files = sorted(f for f in safe_files.listdir(vdir, current_working_directory)
+                       if f.endswith(".vcf.gz"))
     except OSError:
         return None
     for fname in files:
         try:
-            with gzip.open(os.path.join(vdir, fname), "rt", errors="replace") as fh:
+            with _open_gz_text(os.path.join(vdir, fname)) as fh:
                 for line in fh:
                     if line.startswith("#CHROM"):
                         break
@@ -2253,11 +2263,11 @@ def variant_dataset_data_type(genome: str, dataset_value: str) -> Optional[str]:
         regdir = os.path.join(dic, name)
         if not os.path.isdir(regdir):
             continue
-        try:
-            for f in sorted(os.listdir(regdir)):
+        try:  # (shown as the dataset's label: no link another user put followed)
+            for f in sorted(safe_files.listdir(regdir, current_working_directory)):
                 if f.startswith("reg_") and f.endswith(".idx"):
-                    with open(os.path.join(regdir, f)) as fh:
-                        dt = json.load(fh).get("data_type")
+                    dt = json.loads(safe_files.read_text(
+                        os.path.join(regdir, f), current_working_directory)).get("data_type")
                     return dt or None  # all chroms share it; one read suffices
         except (OSError, ValueError):
             pass
@@ -2352,11 +2362,11 @@ def variant_dataset_sample_count(genome: str, dataset_value: str) -> int:
         regdir = os.path.join(dic, name)
         if not os.path.isdir(regdir):
             continue
-        try:
-            for f in sorted(os.listdir(regdir)):
+        try:  # (no link another user put followed: safe_files)
+            for f in sorted(safe_files.listdir(regdir, current_working_directory)):
                 if f.startswith("reg_") and f.endswith(".idx"):
-                    with open(os.path.join(regdir, f)) as fh:
-                        dbs = json.load(fh).get("databases") or {}
+                    dbs = json.loads(safe_files.read_text(
+                        os.path.join(regdir, f), current_working_directory)).get("databases") or {}
                     return sum(int(d.get("sample_count", 0) or 0) for d in dbs.values())
         except (OSError, ValueError, AttributeError):
             pass
@@ -2529,8 +2539,11 @@ def _sort_bed(fname: str, outfname: str) -> str:
     Raises:
         SystemExit: If sorting fails.
     """
-    with open(outfname, "w") as out:
-        code = subprocess.call(["sort-bed", fname], stdout=out)
+    # (read with no link another user put followed, and written in a folder of the
+    # caller's own: sort_annotation)
+    with safe_files.open_read(fname, current_working_directory, "rb") as fin, \
+            open(outfname, "w") as out:
+        code = subprocess.call(["sort-bed", "-"], stdin=fin, stdout=out)
     if code != 0:
         raise subprocess.SubprocessError("Sorting BED file failed")
     assert os.path.isfile(outfname)
@@ -2562,49 +2575,31 @@ def compress_file(fname: str) -> str:
         gz_path, plain_path = fname, fname[:-3]
     else:
         gz_path, plain_path = f"{fname}.gz", fname
+    cwd = current_working_directory
     # defensively clean up cruft left behind by interrupted runs so a stale
     # temporary or lock file cannot corrupt the shared annotation directory
     for cruft in (f"{plain_path}.tmp", f"{gz_path}.tmp", f"{gz_path}.tbi.lock"):
         if os.path.isfile(cruft):
-            subprocess.call(["rm", "-f", cruft])
+            with contextlib.suppress(OSError):
+                safe_files.remove(cruft, cwd)
     # idempotent path: the plain file was already compressed by a previous run
     # (bgzip -f had removed it) - reuse the existing .gz instead of failing
-    if not os.path.isfile(plain_path):
-        if os.path.isfile(gz_path):
+    if not safe_files.is_file(plain_path, cwd):
+        if safe_files.is_file(gz_path, cwd):
             return gz_path
         raise subprocess.SubprocessError(
             f"Cannot compress file, neither {plain_path} nor {gz_path} found"
         )
-    # non-destructive compression: keep the source file (-k) and overwrite any
-    # stale .gz (-f) so re-submitting the same job is safe
-    code = subprocess.call(["bgzip", "-k", "-f", plain_path])
-    if code != 0:
-        raise subprocess.SubprocessError("Compressing and indexing file failed")
+    # non-destructive compression: the source file kept, and any stale .gz replaced so
+    # re-submitting the same job is safe; read and written with no link another user put
+    # followed (safe_files: bgzip -f wrote the .gz by name, through a link there)
+    with safe_files.open_read(plain_path, cwd, "rb") as fin, \
+            safe_files.replace(gz_path, cwd, "wb") as fout:
+        code = subprocess.call(["bgzip", "-c"], stdin=fin, stdout=fout)
+        if code != 0:
+            raise subprocess.SubprocessError("Compressing and indexing file failed")
     assert os.path.isfile(gz_path)
     return gz_path
-
-
-def _mv_file(fname: str, outfname: str) -> str:
-    """Renames or moves a file to a new location.
-
-    Uses the mv command to move or rename the specified file. Raises an error if 
-    the operation fails.
-
-    Args:
-        fname: Path to the source file.
-        outfname: Path to the destination file.
-
-    Returns:
-        The path to the moved or renamed file.
-
-    Raises:
-        SystemExit: If the move or rename operation fails.
-    """
-    code = subprocess.call(["mv", fname, outfname])
-    if code != 0:
-        raise subprocess.SubprocessError("Renaming file failed")
-    assert os.path.isfile(outfname)
-    return outfname
 
 
 def sort_annotation(annotationfile: str) -> str:
@@ -2627,25 +2622,38 @@ def sort_annotation(annotationfile: str) -> str:
         gz_path, plain_path = annotationfile, annotationfile[:-3]
     else:
         gz_path, plain_path = f"{annotationfile}.gz", annotationfile
-    decompressed_here = False
-    if not os.path.isfile(plain_path):
-        if os.path.isfile(gz_path):
-            _decompress_file(gz_path, plain_path)
-            decompressed_here = True
+    cwd = current_working_directory
+    if safe_files.is_file(plain_path, cwd):
+        source = plain_path
+    elif safe_files.is_file(gz_path, cwd):
+        source = gz_path
+    else:
+        raise subprocess.SubprocessError(
+            f"Annotation file not found: {annotationfile}"
+        )
+    # Each intermediate file in a folder of the web app's own beside the file (the same
+    # file system: the result is renamed), and the result renamed over the .gz with no link
+    # followed (safe_files): the decompressed, the sorted and the bgzipped file were written
+    # beside it, by name, through any link another user put there under those names. The
+    # source read with no link followed either; the plain file, when there, stays as it
+    # was. The folder is used through its descriptor alone (safe_files.private_dir: one made
+    # by name in a folder others write could be renamed away, and a link put in its place).
+    with safe_files.private_dir(os.path.dirname(gz_path), cwd, ".crisprme-sort-") as tmp:
+        if source == gz_path:
+            plain = _decompress_file(gz_path, os.path.join(tmp.path, "plain.bed"))
+            with open(plain, "rb") as fin, \
+                    open(os.path.join(tmp.path, "sorted.bed"), "w") as out:
+                code = subprocess.call(["sort-bed", "-"], stdin=fin, stdout=out)
+            if code != 0:
+                raise subprocess.SubprocessError("Sorting BED file failed")
         else:
-            raise subprocess.SubprocessError(
-                f"Annotation file not found: {annotationfile}"
-            )
-    annotationfile_sorted = _sort_bed(plain_path, f"{plain_path}.tmp.sorted.bed")
-    annotationfile_sorted_bgzip = compress_file(annotationfile_sorted)
-    result = _mv_file(annotationfile_sorted_bgzip, gz_path)
-    # clean up the intermediate sorted BED (compress_file keeps its source with
-    # -k, so remove it here) to avoid leaving cruft in the shared annotation dir
-    if os.path.isfile(annotationfile_sorted):
-        subprocess.call(["rm", "-f", annotationfile_sorted])
-    if decompressed_here and os.path.isfile(plain_path):
-        subprocess.call(["rm", plain_path])
-    return result
+            _sort_bed(plain_path, os.path.join(tmp.path, "sorted.bed"))
+        code = subprocess.call(["bgzip", "-f", os.path.join(tmp.path, "sorted.bed")],
+                               pass_fds=(tmp.fd,))
+        if code != 0:
+            raise subprocess.SubprocessError("Compressing and indexing file failed")
+        safe_files.replace_from(os.path.join(tmp.path, "sorted.bed.gz"), gz_path, cwd)
+    return gz_path
 
 
 # --- annotation manager ---------------------------------------------------------
@@ -2704,7 +2712,7 @@ def read_enabled_annotations(genome: str) -> List[str]:
     d = _annotations_dir()
     installed = set(os.listdir(d)) if os.path.isdir(d) else set()
     path = _enabled_manifest_path()
-    if not os.path.isfile(path):
+    if not os.path.lexists(path):
         if g == "hg38":
             b = resolve_builtin_annotation()
             defaults = [b] if b else []
@@ -2715,10 +2723,10 @@ def read_enabled_annotations(genome: str) -> List[str]:
                 defaults.append(BUILTIN_INTOGEN_HG38)
             return defaults
         return []
-    try:
-        with open(path) as fh:
-            names = list(json.load(fh).get("genomes", {}).get(g, {}).get("enabled", []))
-    except (json.JSONDecodeError, OSError):
+    try:  # (no link another user put followed: safe_files)
+        names = list(json.loads(safe_files.read_text(path, current_working_directory))
+                     .get("genomes", {}).get(g, {}).get("enabled", []))
+    except (ValueError, OSError, AttributeError):
         names = []
     return [
         n for n in names
@@ -2729,20 +2737,21 @@ def read_enabled_annotations(genome: str) -> List[str]:
 def write_enabled_annotations(genome: str, enabled: List[str]) -> None:
     """Persist the enabled annotation list for a genome (atomic tmp + replace)."""
     g = _norm_genome(genome)
-    os.makedirs(_annotations_dir(), exist_ok=True)
+    cwd = current_working_directory
+    safe_files.makedirs(_annotations_dir(), cwd)
     path = _enabled_manifest_path()
     manifest = {"version": 1, "genomes": {}}
-    if os.path.isfile(path):
-        try:
-            with open(path) as fh:
-                manifest = json.load(fh)
-        except (json.JSONDecodeError, OSError):
+    if os.path.lexists(path):
+        try:  # (no link another user put followed: safe_files)
+            manifest = json.loads(safe_files.read_text(path, cwd))
+        except (ValueError, OSError):
             manifest = {"version": 1, "genomes": {}}
+    if not isinstance(manifest, dict):
+        manifest = {"version": 1, "genomes": {}}
     manifest.setdefault("genomes", {})[g] = {"enabled": list(dict.fromkeys(enabled))}
-    tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(manifest, fh, indent=2)
-    os.replace(tmp, path)
+    # through a temporary name of its own renamed over it: a link another user put at the
+    # manifest's name, or at the fixed temporary name this used, is never written through
+    safe_files.write_text(path, cwd, json.dumps(manifest, indent=2))
 
 
 def is_annotation_enabled(genome: str, name: str) -> bool:
@@ -2766,10 +2775,9 @@ def read_email_config() -> Dict[str, str]:
         "password_set": False,
     }
     path = _email_config_path()
-    if os.path.isfile(path):
-        try:
-            with open(path) as fh:
-                saved = json.load(fh)
+    if os.path.lexists(path):
+        try:  # (no link another user put followed: safe_files)
+            saved = json.loads(safe_files.read_text(path, current_working_directory))
             if isinstance(saved, dict):
                 cfg["smtp_host"] = str(saved.get("smtp_host", cfg["smtp_host"]))
                 cfg["smtp_port"] = int(saved.get("smtp_port", cfg["smtp_port"]))
@@ -2804,11 +2812,11 @@ def write_email_config(
         return "Sender must be a valid email address."
     path = _email_config_path()
     existing_pw = ""
-    if os.path.isfile(path):
-        try:
-            with open(path) as fh:
-                existing_pw = json.load(fh).get("password", "") or ""
-        except (json.JSONDecodeError, OSError):
+    if os.path.lexists(path):
+        try:  # (no link another user put followed: safe_files)
+            existing_pw = json.loads(safe_files.read_text(
+                path, current_working_directory)).get("password", "") or ""
+        except (ValueError, OSError, AttributeError):
             existing_pw = ""
     cfg = {
         "smtp_host": str(smtp_host).strip(),
@@ -2827,11 +2835,11 @@ def write_email_config(
             )
         password = existing_pw
     cfg["password"] = password
-    tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(cfg, fh, indent=2)
-    os.chmod(tmp, 0o600)  # the file holds an app password
-    os.replace(tmp, path)
+    # the file holds an app password: made 0600, under a temporary name of its own (O_EXCL,
+    # O_NOFOLLOW), and renamed over the name (safe_files). It went through the fixed name
+    # .email.json.tmp, where a link, or a file, another user put took the password
+    safe_files.write_text(path, current_working_directory, json.dumps(cfg, indent=2),
+                          perm=0o600)
     return None
 
 
@@ -2844,9 +2852,16 @@ def validate_annotation_bed(path: str) -> Optional[str]:
     tab-separated columns, integer start<=end, and a non-empty whitespace-free
     label. Handles .bed and .bed.gz.
     """
-    if not os.path.isfile(path):
+    # a file of the data folder (an upload's .part) read with no link another user put
+    # followed (safe_files); one elsewhere (a temporary file of the page's own) as it is
+    in_data = path.startswith(os.path.join(current_working_directory, ""))
+    try:
+        size = (safe_files.getsize(path, current_working_directory) if in_data
+                else os.path.getsize(path) if os.path.isfile(path) else None)
+    except OSError:
+        size = None
+    if size is None:
         return f"File not found: {os.path.basename(path)}"
-    size = os.path.getsize(path)
     if size == 0:
         return "Annotation file is empty."
     if size > MAX_ANNOTATION_BYTES:
@@ -2854,10 +2869,14 @@ def validate_annotation_bed(path: str) -> Optional[str]:
             f"Annotation file is too large ({size // (1024 * 1024)} MB > "
             f"{MAX_ANNOTATION_BYTES // (1024 * 1024)} MB)."
         )
-    opener = gzip.open if path.endswith(".gz") else open
     checked = 0
     try:
-        with opener(path, "rt") as fh:
+        if in_data:
+            fh = (_open_gz_text(path) if path.endswith(".gz")
+                  else safe_files.open_read(path, current_working_directory))
+        else:
+            fh = gzip.open(path, "rt") if path.endswith(".gz") else open(path, "rt")
+        with fh:
             for lineno, line in enumerate(fh, 1):
                 s = line.rstrip("\n")
                 if not s or s.startswith(("#", "track", "browser")):
@@ -2911,16 +2930,29 @@ def _cosmic_mod():
             return None
 
 
+def _cosmic_record() -> Dict:
+    """The COSMIC attestation record (cosmic_license.get_cosmic_license's), read with no link
+    another user put followed (safe_files): its attestation is shown in Settings. {} when
+    there is none, or it cannot be read."""
+    c = _cosmic_mod()
+    if not c:
+        return {}
+    try:
+        data = json.loads(safe_files.read_text(c.license_path(_annotations_dir()),
+                                               current_working_directory))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def cosmic_license_enabled() -> bool:
     """True only if the user has attested a COSMIC licence in Settings (default False)."""
-    c = _cosmic_mod()
-    return bool(c and c.cosmic_enabled(_annotations_dir()))
+    return bool(_cosmic_record().get("enabled", False))
 
 
 def cosmic_license_attestation() -> str:
     """The stored COSMIC attestation text (empty when none)."""
-    c = _cosmic_mod()
-    return c.get_cosmic_license(_annotations_dir()).get("attestation", "") if c else ""
+    return _cosmic_record().get("attestation", "") or ""
 
 
 def set_cosmic_license(enabled: bool, attestation: str = "") -> bool:
@@ -2957,9 +2989,11 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
     # during the merge below. The cosmic state is folded into the cache signature so the
     # active bed is rebuilt when the attestation is toggled.
     _c = _cosmic_mod()
-    cosmic_ok = bool(_c and _c.cosmic_enabled(d))
+    cosmic_ok = bool(_c) and cosmic_license_enabled()
     need_strip = (not cosmic_ok) and any("cosmic" in n.lower() for n in enabled)
-    members = [os.path.join(d, n) for n in enabled if os.path.isfile(os.path.join(d, n))]
+    cwd = current_working_directory
+    # (each member read with no link another user put followed: safe_files)
+    members = [os.path.join(d, n) for n in enabled if safe_files.is_file(os.path.join(d, n), cwd)]
     if not members:
         return ("vuoto.txt", "vuoto.txt")
     # fast path: a single built-in bundle is used as-is ONLY when there is nothing to
@@ -2969,38 +3003,68 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
     active = os.path.join(d, f"{ACTIVE_ANNOTATION_PREFIX}{g}.bed")
     active_gz = active + ".gz"
     sig_path = os.path.join(d, f"{ACTIVE_ANNOTATION_PREFIX}{g}.sig")
+    stats = {m: safe_files.stat_file(m, cwd) for m in members}
     sig = "|".join(sorted(enabled)) + f"||cosmic={'on' if cosmic_ok else 'off'}||" + ";".join(
-        f"{os.path.basename(m)}:{os.path.getsize(m)}:{int(os.path.getmtime(m))}" for m in members
+        f"{os.path.basename(m)}:{stats[m].st_size}:{int(stats[m].st_mtime)}" for m in members
     )
-    fresh = (
-        os.path.isfile(active_gz)
-        and os.path.isfile(sig_path)
-        and open(sig_path).read() == sig
-    )
+
+    def _sig_now():
+        try:
+            return safe_files.read_text(sig_path, cwd)
+        except OSError:
+            return None
+
+    fresh = safe_files.is_file(active_gz, cwd) and _sig_now() == sig
     if not fresh:
-        tmp = active + ".building"
-        with open(tmp, "w") as out:
-            for m in members:
-                opener = gzip.open if m.endswith(".gz") else open
-                with opener(m, "rt") as fh:
-                    for line in fh:
-                        if need_strip and _c and _c.is_cosmic_row(line):
-                            continue  # COSMIC excluded until a licence is attested
-                        out.write(line)
-        os.replace(tmp, active)
-        sort_annotation(active)  # sort + bgzip -> active_gz
-        if os.path.isfile(active):
-            os.remove(active)  # drop the plain intermediate; keep only the .gz
-        with open(sig_path, "w") as fh:
-            fh.write(sig)
+        # merged in a folder of the web app's own beside it, sorted and bgzipped there
+        # (sort_annotation), and renamed over .active.<genome>.bed.gz with no link followed
+        # (safe_files): the merged file (.building), the plain one and the signature were
+        # written by name, through any link another user put there. The folder is used
+        # through its descriptor alone (safe_files.private_dir, as sort_annotation's).
+        with safe_files.private_dir(d, cwd, ".crisprme-active-") as tmp:
+            merged = os.path.join(tmp.path, os.path.basename(active))
+            with open(merged, "w") as out:
+                for m in members:
+                    fh = (_open_gz_text(m) if m.endswith(".gz")
+                          else safe_files.open_read(m, cwd))
+                    with fh:
+                        for line in fh:
+                            if need_strip and _c and _c.is_cosmic_row(line):
+                                continue  # COSMIC excluded until a licence is attested
+                            out.write(line)
+            sorted_gz = _sort_and_bgzip(merged, tmp.fd)
+            safe_files.replace_from(sorted_gz, active_gz, cwd)
+        if os.path.lexists(active):  # (a plain one an earlier release left)
+            with contextlib.suppress(OSError):
+                safe_files.remove(active, cwd)
+        safe_files.write_text(sig_path, cwd, sig)
     return (os.path.basename(active_gz), gencode)
 
 
 def _decompress_file(fname: str, outfname: str) -> str:
-    """Decompresses a bgzipped file to a specified output file."""
-    with open(outfname, "wb") as out:
-        code = subprocess.call(["gunzip", "-k", "-c", fname], stdout=out)
+    """Decompresses the bgzipped file ``fname`` of the data folder, read with no link another
+    user put followed (safe_files), to ``outfname``, a file of a folder of the caller's own
+    (sort_annotation)."""
+    with safe_files.open_read(fname, current_working_directory, "rb") as fin, \
+            open(outfname, "wb") as out:
+        code = subprocess.call(["gunzip", "-c"], stdin=fin, stdout=out)
     if code != 0:
         raise subprocess.SubprocessError("Decompressing annotation file failed")
     assert os.path.isfile(outfname)
     return outfname
+
+
+def _sort_and_bgzip(plain: str, folder_fd: int) -> str:
+    """``plain``, a BED file of a folder of the caller's own, sorted and bgzipped beside it:
+    ``<plain>.gz`` (the merged active annotation: build_active_annotation). ``folder_fd``,
+    the folder's descriptor, which bgzip inherits (safe_files.private_dir)."""
+    sorted_bed = plain + ".sorted"
+    with open(plain, "rb") as fin, open(sorted_bed, "w") as out:
+        code = subprocess.call(["sort-bed", "-"], stdin=fin, stdout=out)
+    if code != 0:
+        raise subprocess.SubprocessError("Sorting BED file failed")
+    code = subprocess.call(["bgzip", "-f", sorted_bed], pass_fds=(folder_fd,))
+    if code != 0:
+        raise subprocess.SubprocessError("Compressing and indexing file failed")
+    os.replace(sorted_bed + ".gz", plain + ".gz")
+    return plain + ".gz"

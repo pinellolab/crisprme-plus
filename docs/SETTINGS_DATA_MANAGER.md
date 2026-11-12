@@ -128,16 +128,17 @@ Bulge-enabled searches need a genome **index**.
 ### Add a VCF dataset
 Variant datasets are large, so they are **fetched server-side** rather than
 uploaded from the browser: from HuggingFace, an existing server folder already on
-the machine (registered in place), or a chunked upload for a local file. An upload
-takes a dataset's `.vcf.gz` files and their `.tbi` or `.csi` index, into a dataset
-added by upload or download: a server folder registered as a dataset is read where
-it is, and nothing is uploaded into it (copy the file into that folder). Pick the
-reference genome the VCF is called against on the card first: the search form
-offers the dataset for that genome, whatever the dataset's name. Your VCF does
-**not** need special preparation — a single multi-chromosome `.vcf.gz` is
-**auto-split per chromosome** when you build an index from it (its `.tbi` is
-optional: CRISPRme indexes a bgzip or plain-gzip file itself), and a SNP-only VCF
-(no indels) builds a complete SNP variant index.
+the machine (registered in place, through a link the page makes in `VCFs/`, which it
+follows where `VCFs/` is writable by you alone: see below), or a chunked upload for a
+local file. An upload takes a dataset's `.vcf.gz` files and their `.tbi` or `.csi`
+index, into a dataset added by upload or download: a server folder registered as a
+dataset is read where it is, and nothing is uploaded into it (copy the file into
+that folder). Pick the reference genome the VCF is called against on the card
+first: the search form offers the dataset for that genome, whatever the dataset's
+name. Your VCF does **not** need special preparation — a single multi-chromosome
+`.vcf.gz` is **auto-split per chromosome** when you build an index from it (its
+`.tbi` is optional: CRISPRme indexes a bgzip or plain-gzip file itself), and a
+SNP-only VCF (no indels) builds a complete SNP variant index.
 
 A search reads the dataset's samples from `samplesIDs/<dataset>.samplesID.txt`
 (tab-separated `#SAMPLE_ID POPULATION_ID SUPERPOPULATION_ID SEX`). When the dataset
@@ -222,7 +223,19 @@ the new data is immediately available in the search form. One that fails shows i
 log and a **Retry**, which runs it again with the command the server launched it with
 (a download resumes what it had fetched). The server keeps that command in memory, not
 in a file of `Settings/`, which others may be able to write (2.10.0): after a restart
-of the web app, start the operation again from its card. Whoever can write `Settings/`
-can still put links in it, which the log panel follows: anyone who can reach the web
-app can then read files of yours through them. Keep the data folder writable by you
-alone ([Troubleshooting](TROUBLESHOOTING.md) §7).
+of the web app, start the operation again from its card. A job's folder in `Settings/`
+is writable by the web app's user alone, and the page follows no link another user put
+in `Settings/`, nor anywhere else in the data folder (2.10.0): up to 2.10.0 the log
+panel showed what a link put at a job's log named, any file of yours, to anyone who could
+reach the web app, and a job wrote its log through one. An uploaded genome or
+personal-assembly bundle is unpacked in a folder the page makes for it in `Genomes/` or
+`Assemblies/` and uses through its descriptor alone: another user who renames that folder
+and puts a link to a folder of yours in its place gets nothing written there (up to 2.10.0
+the upload was unpacked into that folder of yours). The concurrent searches setting is read
+and saved with no link followed (up to 2.10.0 its Save copied a JSON file of yours that a
+link named into the data folder). In a data folder your group can write, the page does not
+follow your own links there either: a VCF dataset registered from a server folder, a genome
+linked to a shared copy or `Settings/` linked onto a volume is read only where the folder
+that holds the link is writable by you alone. The commands it starts still write through
+links in folders others can write: keep the data folder writable by you alone
+([Troubleshooting](TROUBLESHOOTING.md) §7).

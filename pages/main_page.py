@@ -88,8 +88,8 @@ from dash import html
 from dash import dcc
 
 import collections
+import contextlib
 import subprocess
-import filecmp
 import json
 import random
 import re
@@ -97,11 +97,11 @@ import shlex
 import shutil
 import sys
 import string
-import threading
 import os
 
 # personal_assembly lives in PostProcess/, put on sys.path by pages_utils (imported above).
 import personal_assembly
+import safe_files  # (PostProcess/, as personal_assembly: no link another user put is followed)
 
 # memory_check lives in PostProcess/, put on sys.path by pages_utils (imported above).
 # Defensive fallback so the web form never fails to render if it is unavailable.
@@ -162,12 +162,13 @@ def _reuse_key(
     CRISPRme version. Plus the job name typed: a new name asks for a new job, which is
     also how a user runs an identical search again."""
     files = []
+    cwd = current_working_directory
     for name in (annotation_name, gencode_name):
-        path = os.path.join(current_working_directory, ANNOTATIONS_DIR, name)
-        if not os.path.isfile(path) and os.path.isfile(f"{path}.gz"):
+        path = os.path.join(cwd, ANNOTATIONS_DIR, name)
+        if not safe_files.is_file(path, cwd) and safe_files.is_file(f"{path}.gz", cwd):
             path = f"{path}.gz"
-        try:
-            st = os.stat(path)
+        try:  # (written in the job's .reuse_key.json: no link another user put followed)
+            st = safe_files.stat_file(path, cwd)
             files.append(f"{os.path.basename(path)}:{st.st_size}:{int(st.st_mtime)}")
         except OSError:
             files.append(name)  # "vuoto.txt": no annotation
@@ -189,9 +190,9 @@ def _same_reuse_key(job_dir: str, key: Dict[str, object]) -> bool:
     """True when the earlier job in job_dir recorded this reuse key. A job with none
     (made before 2.8.1, or not by this form) never matches: what it ran with is not
     known."""
-    try:
-        with open(os.path.join(job_dir, REUSE_KEY_FILE)) as fh:
-            return json.load(fh) == key
+    try:  # (no link followed: safe_files)
+        return json.loads(safe_files.read_text(os.path.join(job_dir, REUSE_KEY_FILE),
+                                               safe_files.job_root(job_dir))) == key
     except (OSError, ValueError):
         return False
 
@@ -256,7 +257,8 @@ def _ensure_samplesid(genome_selected: str, vcf_folder: str) -> None:
         return  # cannot synthesize from components
     seen, rows = set(), []
     for c in comps:
-        with open(c) as handle:
+        # (no link another user put followed: safe_files)
+        with safe_files.open_read(c, current_working_directory) as handle:
             for line in handle:
                 if line.startswith("#") or not line.strip():
                     continue
@@ -264,21 +266,13 @@ def _ensure_samplesid(genome_selected: str, vcf_folder: str) -> None:
                 if key not in seen:
                     seen.add(key)
                     rows.append(line.rstrip("\n"))
-    # through a hidden temporary file (this thread's) renamed into place: one that a
-    # full disk cut short would be taken for whole by every later search (the test above)
-    tmp = os.path.join(sdir, f".{os.path.basename(target)}.{os.getpid()}."
-                             f"{threading.get_ident()}.tmp")
+    # through a hidden temporary file of its own renamed into place: one that a full disk
+    # cut short would be taken for whole by every later search (the test above); never
+    # through a link another user put at a name (safe_files)
     try:
-        with open(tmp, "w") as out:
-            out.write("\n".join(rows) + "\n")
-        os.replace(tmp, target)
+        safe_files.write_text(target, current_working_directory, "\n".join(rows) + "\n")
     except OSError:
         pass
-    finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
 
 
 def _samplesid_makeable(genome_selected: str, vcf_folder: str) -> bool:
@@ -387,8 +381,8 @@ def _parse_pam(pam: str) -> Optional[Tuple[int, bool, int]]:
     if guide_seqlen is None:
         return None
     pam_file = os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
-    try:
-        with open(pam_file) as handle_pam:
+    try:  # (no link another user put followed: safe_files)
+        with safe_files.open_read(pam_file, current_working_directory) as handle_pam:
             line = handle_pam.readline()
             index_pam_value = int(line.split()[-1])
     except (OSError, ValueError, IndexError):
@@ -507,9 +501,12 @@ def _run_assembly_search_job(cmd: str, combined_dir: str, note: str = "") -> Non
     """
     queue_file = os.path.join(combined_dir, QUEUE_FILE)
     log_path = os.path.join(combined_dir, LOG_FILE)
+    # the log written, and queue.txt removed, with no link followed (safe_files): a link
+    # another user put at log.txt's name was written through
+    root = safe_files.job_root(combined_dir)
     try:
-        if os.path.isfile(queue_file):
-            os.remove(queue_file)
+        if os.path.lexists(queue_file):
+            safe_files.remove(queue_file, root)
         # assembly-search's real dependencies (liftOver, minimap2, impg, ...)
         # are conda binaries, not Python packages -- sys.executable fixes
         # which `python` runs, but a dev server started without `conda
@@ -518,7 +515,7 @@ def _run_assembly_search_job(cmd: str, combined_dir: str, note: str = "") -> Non
         env = os.environ.copy()
         env_bin = os.path.dirname(sys.executable)
         env["PATH"] = env_bin + os.pathsep + env.get("PATH", "")
-        with open(log_path, "a") as log_out:
+        with safe_files.open_append(log_path, root) as log_out:
             if note:
                 log_out.write(f"{note}\n")
                 log_out.flush()
@@ -527,8 +524,9 @@ def _run_assembly_search_job(cmd: str, combined_dir: str, note: str = "") -> Non
             )
             proc.wait()
     except Exception as e:  # pragma: no cover - defensive
-        with open(log_path, "a") as log_out:
-            log_out.write(f"\n[web] launcher error: {e}\n")
+        with contextlib.suppress(OSError):
+            with safe_files.open_append(log_path, root) as log_out:
+                log_out.write(f"\n[web] launcher error: {e}\n")
 
 
 @app.callback(
@@ -795,15 +793,17 @@ def submit_assembly_search_job(
 
     results_root = os.path.join(current_working_directory, RESULTS_DIR)
     combined_dir = os.path.join(results_root, f"{job_id}_combined")
+    # its folder made and its files written with no link followed (safe_files)
+    cwd = current_working_directory
     try:
-        os.makedirs(combined_dir)
+        safe_files.makedirs(results_root, cwd)
+        safe_files.mkdir(combined_dir, cwd)
     except OSError as error:
         raise ValueError(f"An error occurred while creating {combined_dir}: {error}")
-    open(os.path.join(combined_dir, QUEUE_FILE), "a").close()
+    safe_files.touch(os.path.join(combined_dir, QUEUE_FILE), cwd)
 
     guide_file = os.path.join(combined_dir, GUIDES_FILE)
-    with open(guide_file, "w") as gf:
-        gf.write("\n".join(guide_lines) + "\n")
+    safe_files.write_text(guide_file, cwd, "\n".join(guide_lines) + "\n")
     pam_file = os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
 
     # Written by the web layer, not by crisprme.py itself -- assembly_search()
@@ -828,7 +828,7 @@ def submit_assembly_search_job(
         ("Maternal_dir", f"{job_id}_maternal"),
         ("Combined_dir", f"{job_id}_combined"),
     ]
-    with open(os.path.join(combined_dir, PARAMS_FILE), "w") as pf:
+    with safe_files.replace(os.path.join(combined_dir, PARAMS_FILE), cwd) as pf:
         for i, (key, value) in enumerate(params_lines, start=1):
             pf.write(f"{i}\t{key}\t{value}\n")
 
@@ -1249,15 +1249,20 @@ def change_url(
             job_id = f"{safe_job_name}_{job_id}"
     result_dir = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     # create results directory (no shell: the path is safe, but avoid the shell
-    # entirely so a directory name can never be parsed as a command)
+    # entirely so a directory name can never be parsed as a command), and every file of
+    # the job, with no link followed (safe_files): the job's folder is in Results/, which
+    # the data folder's group may write, and a link another user put in it was written
+    # through, over a file of the user's elsewhere
     try:
-        os.makedirs(result_dir)
+        safe_files.makedirs(os.path.join(current_working_directory, RESULTS_DIR),
+                            current_working_directory)
+        safe_files.mkdir(result_dir, current_working_directory)
     except OSError as error:
         raise ValueError(f"An error occurred while creating {result_dir}: {error}")
     # NOTE test command for queue
     queue_file = os.path.join(current_working_directory, RESULTS_DIR, job_id, QUEUE_FILE)
     try:
-        open(queue_file, "a").close()
+        safe_files.touch(queue_file, current_working_directory)
     except OSError as error:
         raise ValueError(f"An error occurred while creating {queue_file}: {error}")
     # ---- Set search parameters
@@ -1285,7 +1290,8 @@ def change_url(
         sample_list = None
     sample_list = []
     try:
-        with open(os.path.join(result_dir, ".list_vcfs.txt"), mode="w") as handle_vcf:
+        with safe_files.replace(os.path.join(result_dir, ".list_vcfs.txt"),
+                                current_working_directory) as handle_vcf:
             if not ref_var:
                 vcf_folder = "_"
                 handle_vcf.write(f"{vcf_folder}\n")
@@ -1312,8 +1318,8 @@ def change_url(
     except OSError as e:
         raise e
     try:
-        with open(
-            os.path.join(result_dir, ".samplesID.txt"), mode="w"
+        with safe_files.replace(
+            os.path.join(result_dir, ".samplesID.txt"), current_working_directory
         ) as handle_samples:
             for e in sample_list:
                 handle_samples.write(f"{e}\n")
@@ -1327,8 +1333,9 @@ def change_url(
     if "email" in adv_opts and check_mail_address(dest_email):
         send_email = True
         try:
-            with open(os.path.join(result_dir, EMAIL_FILE), mode="w") as handle_mail:
-                handle_mail.write(_notification_entry(dest_email, job_id))
+            safe_files.write_text(os.path.join(result_dir, EMAIL_FILE),
+                                  current_working_directory,
+                                  _notification_entry(dest_email, job_id))
         except OSError as e:
             raise e
     else:
@@ -1336,9 +1343,10 @@ def change_url(
     # manage PAM
     pam_len = 0
     pam_begin = False
-    try:
-        with open(
-            os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
+    try:  # (no link another user put followed: safe_files)
+        with safe_files.open_read(
+            os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt"),
+            current_working_directory,
         ) as handle_pam:
             pam_char = handle_pam.readline()
             index_pam_value = pam_char.split()[-1]
@@ -1413,15 +1421,15 @@ def change_url(
         pam_to_indexing = ("N" * 25) + pam_char + " " + index_pam_value
     # store PAMs file
     try:
-        with open(os.path.join(result_dir, PAMS_FILE), mode="w") as handle_pam:
-            handle_pam.write(pam_to_file)
+        safe_files.write_text(os.path.join(result_dir, PAMS_FILE),
+                              current_working_directory, pam_to_file)
     except OSError as e:
         raise e
     pams_file = os.path.join(result_dir, PAMS_FILE)
     guides_file = os.path.join(result_dir, GUIDES_FILE)
     if text_guides:
         try:
-            with open(guides_file, mode="w") as handle_guides:
+            with safe_files.replace(guides_file, current_working_directory) as handle_guides:
                 if pam_begin:
                     text_guides = "N" * pam_len + text_guides.replace(
                         "\n", "\n" + "N" * pam_len
@@ -1511,7 +1519,8 @@ def change_url(
     max_total_edits = max(1, max_total_edits)
     # Create .Params.txt file
     try:
-        with open(os.path.join(result_dir, PARAMS_FILE), mode="w") as handle_params:
+        with safe_files.replace(os.path.join(result_dir, PARAMS_FILE),
+                                current_working_directory) as handle_params:
             handle_params.write(f"Genome_selected\t{genome_selected}\n")
             handle_params.write(f"Genome_ref\t{genome_ref}\n")
             if search_index:
@@ -1557,251 +1566,127 @@ def change_url(
         safe_job_name, prioritize_observed,
     )
     try:
-        with open(os.path.join(result_dir, REUSE_KEY_FILE), mode="w") as handle_key:
-            json.dump(reuse_key, handle_key, sort_keys=True)
+        safe_files.write_text(os.path.join(result_dir, REUSE_KEY_FILE),
+                              current_working_directory, json.dumps(reuse_key, sort_keys=True))
     except OSError as e:
         raise e
     # ---- Check if input parameters (mms, bulges, pam, guides, genome) match
-    # those of previous searches (and their reuse key: see above)
+    # those of previous searches (and their reuse key: see above). Each file of an earlier
+    # job is read, and written, with no link followed (safe_files): the folders of Results/
+    # are as writable as the data folder, and a link another user put in one was read, and
+    # written through (its log.txt, its email.txt), when an identical search was sent to it.
+    cwd = current_working_directory
+    results_root = os.path.join(cwd, RESULTS_DIR)
     computed_results_dirs = [
         d
-        for d in os.listdir(os.path.join(current_working_directory, RESULTS_DIR))
+        for d in safe_files.listdir(results_root, cwd)
         if (
-            os.path.isdir(os.path.join(current_working_directory, RESULTS_DIR, d))
-            and not d.startswith(".")  # ignore hidden directories
+            not d.startswith(".")  # ignore hidden directories
+            and safe_files.is_dir(os.path.join(results_root, d), cwd)
         )
     ]
     computed_results_dirs.remove(job_id)  # remove current job results
+    params_current = safe_files.read_bytes(os.path.join(result_dir, PARAMS_FILE), cwd)
     for res_dir in computed_results_dirs:
-        if os.path.exists(
-            os.path.join(current_working_directory, RESULTS_DIR, res_dir, PARAMS_FILE)
-        ):
-            if filecmp.cmp(
-                os.path.join(
-                    current_working_directory, RESULTS_DIR, res_dir, PARAMS_FILE
-                ),
-                os.path.join(result_dir, PARAMS_FILE),
-            ) and _same_reuse_key(
-                os.path.join(current_working_directory, RESULTS_DIR, res_dir), reuse_key
-            ):
-                try:
-                    # old job guides
-                    guides_old = (
-                        open(
-                            os.path.join(
-                                current_working_directory,
-                                RESULTS_DIR,
-                                res_dir,
-                                GUIDES_FILE,
-                            )
+        res_path = os.path.join(results_root, res_dir)
+        try:  # (none, or one refused: not an earlier search of these parameters)
+            same_params = safe_files.read_bytes(os.path.join(res_path, PARAMS_FILE), cwd) == (
+                params_current)
+        except OSError:
+            continue
+        if same_params and _same_reuse_key(res_path, reuse_key):
+            try:  # old job guides
+                guides_old = safe_files.read_text(os.path.join(res_path, GUIDES_FILE),
+                                                  cwd).split("\n")
+            except OSError:
+                continue
+            # current job guides
+            guides_current = safe_files.read_text(os.path.join(result_dir, GUIDES_FILE),
+                                                  cwd).split("\n")
+            if collections.Counter(guides_old) == collections.Counter(guides_current):
+                email_path = os.path.join(res_path, EMAIL_FILE)
+                if safe_files.is_file(os.path.join(res_path, LOG_FILE), cwd):  # log file found
+                    adj_date = False
+                    try:
+                        log_data = safe_files.read_text(os.path.join(res_path, LOG_FILE), cwd)
+                    except OSError:
+                        continue
+                    if "Job\tDone" in log_data:
+                        adj_date = True
+                        date_new = subprocess.Popen(
+                            ["echo $(date)"],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            shell=True,
                         )
-                        .read()
-                        .split("\n")
-                    )
-                    # current job guides
-                    guides_current = (
-                        open(
-                            os.path.join(
-                                current_working_directory,
-                                RESULTS_DIR,
-                                job_id,
-                                GUIDES_FILE,
-                            )
+                        out, err = date_new.communicate()
+                        # its "Job Done" line takes today's date (the results
+                        # are kept 3 days from it), and every other line stays
+                        # as it is: it dropped the last line, the report's,
+                        # which comes after it, and added a second "Job Done"
+                        # with no line end (FV :335)
+                        date_write = "".join(
+                            f"Job\tDone\t{out.decode('UTF-8').strip()}\n"
+                            if line.startswith("Job\tDone") else line
+                            for line in log_data.splitlines(keepends=True)
                         )
-                        .read()
-                        .split("\n")
-                    )
-                except OSError as e:
-                    raise e
-                if collections.Counter(guides_old) == collections.Counter(
-                    guides_current
-                ):
-                    if os.path.exists(
-                        os.path.join(
-                            current_working_directory, RESULTS_DIR, res_dir, LOG_FILE
-                        )
-                    ):  # log file found
-                        adj_date = False
-                        try:
-                            with open(
-                                os.path.join(
-                                    current_working_directory,
-                                    RESULTS_DIR,
-                                    res_dir,
-                                    LOG_FILE,
-                                )
-                            ) as handle_log:
-                                log_data = handle_log.read()
-                                if "Job\tDone" in log_data:
-                                    adj_date = True
-                                    date_new = subprocess.Popen(
-                                        ["echo $(date)"],
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
-                                        shell=True,
-                                    )
-                                    out, err = date_new.communicate()
-                                    # its "Job Done" line takes today's date (the results
-                                    # are kept 3 days from it), and every other line stays
-                                    # as it is: it dropped the last line, the report's,
-                                    # which comes after it, and added a second "Job Done"
-                                    # with no line end (FV :335)
-                                    date_write = "".join(
-                                        f"Job\tDone\t{out.decode('UTF-8').strip()}\n"
-                                        if line.startswith("Job\tDone") else line
-                                        for line in log_data.splitlines(keepends=True)
-                                    )
-                        except OSError as e:
-                            raise e
-                        # Only dedup onto a prior run that FINISHED CLEANLY. A
-                        # failed/incomplete prior result (no "Job\tDone", or a
-                        # non-empty log_error.txt -- e.g. left behind by a bug that
-                        # has since been fixed) must NOT be resurfaced: reusing it
-                        # shows "The selected result encountered some errors, please
-                        # remove it and try to submit again". Skip it so THIS
-                        # submission runs fresh instead of inheriting the old error.
-                        _prev_err = os.path.join(
-                            current_working_directory, RESULTS_DIR, res_dir, "log_error.txt"
-                        )
-                        _prev_failed = (
-                            os.path.exists(_prev_err) and os.path.getsize(_prev_err) > 0
-                        )
-                        if (not adj_date) or _prev_failed:
-                            continue  # unhealthy prior result -> do not dedup onto it
-                        if adj_date:
-                            try:
-                                with open(
-                                    os.path.join(
-                                        current_working_directory,
-                                        RESULTS_DIR,
-                                        res_dir,
-                                        LOG_FILE,
-                                    ),
-                                    mode="w+",
-                                ) as handle_log:
-                                    assert date_write
-                                    handle_log.write(date_write)
-                            except OSError as e:
-                                raise e
-                            if send_email:
-                                # Send mail with file in job_id dir with link to
-                                # job already done, note that job_id directory
-                                # will be deleted
-                                try:
-                                    with open(
-                                        os.path.join(
-                                            current_working_directory,
-                                            RESULTS_DIR,
-                                            res_dir,
-                                            EMAIL_FILE,
-                                        ),
-                                        mode="w+",
-                                    ) as handle_email:
-                                        handle_email.write(_notification_entry(dest_email, res_dir))
-                                except OSError as e:
-                                    raise e
-                        elif send_email:
-                            # Job is not finished yet. Add current user's email
-                            # to email.txt
-                            if os.path.exists(
-                                os.path.join(
-                                    current_working_directory,
-                                    RESULTS_DIR,
-                                    res_dir,
-                                    EMAIL_FILE,
-                                )
-                            ):
-                                try:
-                                    with open(
-                                        os.path.join(
-                                            current_working_directory,
-                                            RESULTS_DIR,
-                                            res_dir,
-                                            EMAIL_FILE,
-                                        ),
-                                        mode="a+",
-                                    ) as handle_email:
-                                        handle_email.write("--OTHEREMAIL--")
-                                        handle_email.write(_notification_entry(dest_email, res_dir))
-                                except OSError as e:
-                                    raise e
+                    # Only dedup onto a prior run that FINISHED CLEANLY. A
+                    # failed/incomplete prior result (no "Job\tDone", or a
+                    # non-empty log_error.txt -- e.g. left behind by a bug that
+                    # has since been fixed) must NOT be resurfaced: reusing it
+                    # shows "The selected result encountered some errors, please
+                    # remove it and try to submit again". Skip it so THIS
+                    # submission runs fresh instead of inheriting the old error.
+                    try:
+                        _prev_failed = safe_files.getsize(
+                            os.path.join(res_path, "log_error.txt"), cwd) > 0
+                    except FileNotFoundError:
+                        _prev_failed = False
+                    except OSError:  # (refused: not a clean run's)
+                        _prev_failed = True
+                    if (not adj_date) or _prev_failed:
+                        continue  # unhealthy prior result -> do not dedup onto it
+                    if adj_date:
+                        assert date_write
+                        safe_files.write_text(os.path.join(res_path, LOG_FILE), cwd, date_write)
+                        if send_email:
+                            # Send mail with file in job_id dir with link to
+                            # job already done, note that job_id directory
+                            # will be deleted
+                            safe_files.write_text(email_path, cwd,
+                                                  _notification_entry(dest_email, res_dir))
+                    elif send_email:
+                        # Job is not finished yet. Add current user's email
+                        # to email.txt
+                        if os.path.lexists(email_path):
+                            with safe_files.open_append(email_path, cwd) as handle_email:
+                                handle_email.write("--OTHEREMAIL--")
+                                handle_email.write(_notification_entry(dest_email, res_dir))
+                        else:
+                            safe_files.write_text(email_path, cwd,
+                                                  _notification_entry(dest_email, res_dir))
+                    # (within Results/, reached with no link: safe_files; it ran rm -r
+                    # through a shell)
+                    safe_files.rmtree(result_dir, cwd)
+                    return "/load", f"?job={res_dir}", REUSED_HASH
+                else:
+                    # log file not found
+                    # we may have entered a job directory that was in queue
+                    if safe_files.is_file(os.path.join(res_path, QUEUE_FILE), cwd):
+                        if send_email:
+                            if os.path.lexists(email_path):
+                                with safe_files.open_append(email_path, cwd) as handle_email:
+                                    handle_email.write("--OTHEREMAIL--")
+                                    handle_email.write(
+                                        _notification_entry(dest_email, res_dir))
                             else:
-                                try:
-                                    with open(
-                                        os.path.join(
-                                            current_working_directory,
-                                            RESULTS_DIR,
-                                            res_dir,
-                                            EMAIL_FILE,
-                                        ),
-                                        mode="w+",
-                                    ) as handle_email:
-                                        handle_email.write(_notification_entry(dest_email, res_dir))
-                                except OSError as e:
-                                    raise e
-                        current_job_dir = os.path.join(
-                            current_working_directory, RESULTS_DIR, job_id
-                        )
-                        cmd = f"rm -r {current_job_dir}"
-                        code = subprocess.call(cmd, shell=True)
-                        if code != 0:
-                            raise ValueError(f"An error occurred while running {cmd}")
-                        return "/load", f"?job={res_dir}", REUSED_HASH
-                    else:
-                        # log file not found
-                        # we may have entered a job directory that was in queue
-                        if os.path.exists(
-                            os.path.join(
-                                current_working_directory,
-                                RESULTS_DIR,
-                                res_dir,
-                                QUEUE_FILE,
-                            )
-                        ):
-                            if send_email:
-                                if os.path.exists(
-                                    os.path.join(
-                                        current_working_directory,
-                                        RESULTS_DIR,
-                                        res_dir,
-                                        EMAIL_FILE,
-                                    )
-                                ):
-                                    try:
-                                        with open(
-                                            os.path.join(
-                                                current_working_directory,
-                                                RESULTS_DIR,
-                                                res_dir,
-                                                EMAIL_FILE,
-                                            ),
-                                            mode="a+",
-                                        ) as handle_email:
-                                            handle_email.write("--OTHEREMAIL--")
-                                            handle_email.write(
-                                                _notification_entry(dest_email, res_dir))
-                                    except OSError as e:
-                                        raise e
-                                else:
-                                    try:
-                                        with open(
-                                            os.path.join(
-                                                current_working_directory,
-                                                RESULTS_DIR,
-                                                res_dir,
-                                                EMAIL_FILE,
-                                            ),
-                                            mode="w+",
-                                        ) as handle_email:
-                                            handle_email.write(
-                                                _notification_entry(dest_email, res_dir))
-                                    except OSError as e:
-                                        raise e
-                            # this job directory never runs: remove it, as above
-                            # (left behind, a later identical search could be sent
-                            # to it and wait for ever)
-                            shutil.rmtree(result_dir, ignore_errors=True)
-                            return ("/load", f"?job={res_dir}", REUSED_HASH)
+                                safe_files.write_text(
+                                    email_path, cwd, _notification_entry(dest_email, res_dir))
+                        # this job directory never runs: remove it, as above
+                        # (left behind, a later identical search could be sent
+                        # to it and wait for ever)
+                        safe_files.rmtree(result_dir, cwd, ignore_errors=True)
+                        return ("/load", f"?job={res_dir}", REUSED_HASH)
     # merge default is 3 nt wide
     merge_default = 3
     print(
@@ -1838,25 +1723,28 @@ def change_url(
     # outright on a read-only install; the shared bundle + gencode are read-only INPUTS
     # (already sorted at build/enable time). Empty ("vuoto.txt") placeholders also go
     # to the job dir so a read-only install never has to touch Annotations/.
+    # (each copied, and made, with no link followed: safe_files; the copies are sorted and
+    # bgzipped in folders of the web app's own: sort_annotation, compress_file)
+    cwd = current_working_directory
     if annotation_name != "vuoto.txt":
-        _ann_src = annotation if os.path.isfile(annotation) else f"{annotation}.gz"
+        _ann_src = annotation if safe_files.is_file(annotation, cwd) else f"{annotation}.gz"
         _ann_job = os.path.join(result_dir, os.path.basename(_ann_src))
-        shutil.copyfile(_ann_src, _ann_job)
+        _copy_into_job(_ann_src, _ann_job)
         annotation = sort_annotation(_ann_job)
     else:
         annotation = os.path.join(result_dir, annotation_name)
-        if not os.path.isfile(annotation):
-            code = subprocess.call(f"touch {annotation}", shell=True)
+        if not os.path.lexists(annotation):
+            safe_files.touch(annotation, cwd)
 
     if gencode_name != "vuoto.txt":
-        _gc_src = gencode if os.path.isfile(gencode) else f"{gencode}.gz"
+        _gc_src = gencode if safe_files.is_file(gencode, cwd) else f"{gencode}.gz"
         _gc_job = os.path.join(result_dir, os.path.basename(_gc_src))
-        shutil.copyfile(_gc_src, _gc_job)
+        _copy_into_job(_gc_src, _gc_job)
         gencode = _gc_job if _gc_job.endswith(".gz") else compress_file(_gc_job)
     else:
         gencode = os.path.join(result_dir, gencode_name)
-        if not os.path.isfile(gencode):
-            code = subprocess.call(f"touch {gencode}", shell=True)
+        if not os.path.lexists(gencode):
+            safe_files.touch(gencode, cwd)
 
     # max_total_edits (submit_job arg 26) was computed above as the single source of
     # truth and written to .Params.txt; reuse it here so Params and the actual search
@@ -1889,10 +1777,9 @@ def change_url(
     # generate_report.build_summary_meta falls back to "population-level" and would mislabel
     # a per-sample web run (CONFIRMED cis carriers shown as pop-level "poss. chimera", and a
     # spurious "re-run with --per-sample" note). per-sample <=> fast_env == "0".
-    try:
-        os.makedirs(result_dir, exist_ok=True)
-        with open(os.path.join(result_dir, ".search_mode"), "w") as _sm:
-            _sm.write("per-sample" if fast_env == "0" else "population-level")
+    try:  # (no link followed: safe_files)
+        safe_files.write_text(os.path.join(result_dir, ".search_mode"), cwd,
+                              "per-sample" if fast_env == "0" else "population-level")
     except OSError:
         pass
     # and, as complete-search does, the variant datasets of the search without the
@@ -1905,7 +1792,7 @@ def change_url(
     # no allele-frequency registry, its search reports none of its variants
     # (samplesid_problem), and none of that holds of it
     try:
-        with open(vcfs) as _lv:
+        with safe_files.open_read(vcfs, cwd) as _lv:
             _named = list(dict.fromkeys(
                 os.path.basename(os.path.normpath(_l.strip())) for _l in _lv
                 if _l.strip() and _l.strip() != "_"))
@@ -1920,10 +1807,10 @@ def change_url(
                 _searched.append(_vn)
                 _untiered.append(_vn)
         if _untiered:
-            with open(os.path.join(result_dir, ".untiered_datasets"), "w") as _ud:
-                _ud.write("".join(f"{_vn}\n" for _vn in _untiered))
-            with open(os.path.join(result_dir, ".variant_datasets"), "w") as _vd:
-                _vd.write("".join(f"{_vn}\n" for _vn in _searched))
+            safe_files.write_text(os.path.join(result_dir, ".untiered_datasets"), cwd,
+                                  "".join(f"{_vn}\n" for _vn in _untiered))
+            safe_files.write_text(os.path.join(result_dir, ".variant_datasets"), cwd,
+                                  "".join(f"{_vn}\n" for _vn in _searched))
     except OSError:
         pass
     # every argument quoted: the genome's and PAM's names in the paths as Settings took
@@ -1935,15 +1822,38 @@ def change_url(
             current_working_directory, gencode, EMAIL_FILE if send_email else "_", be_start,
             be_stop, be_nt, sorting_criteria_scoring, sorting_criteria, False, "PASS,.", "_",
             max_total_edits]
-    cmd = (
-        f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} "
-        f"CRISPRME_REPORT_FULL={report_full_env} CRISPRME_PRIORITIZE_OBSERVED={gate_env} "
-        + " ".join(shlex.quote(str(a)) for a in args)
-        + f" 1> {shlex.quote(log_verbose)} 2>{shlex.quote(log_error)}"
-    )
-    # run job
-    pool_executor.submit(subprocess.run, cmd, shell=True)
+    env = {"CRISPRME_FAST_MODE": fast_env, "CRISPRME_EMIT_ALT_ALIGNMENTS": alt_env,
+           "CRISPRME_REPORT_FULL": report_full_env, "CRISPRME_PRIORITIZE_OBSERVED": gate_env}
+    # run job: its argv, with no shell, its logs opened by the job (_run_search_job)
+    pool_executor.submit(_run_search_job, [str(a) for a in args], env, log_verbose, log_error,
+                         current_working_directory)
     return ("/load", f"?job={job_id}", "")
+
+
+def _copy_into_job(src: str, dst: str) -> None:
+    """Copies the file ``src`` of the data folder into the job folder as ``dst``, read and
+    written with no link another user put followed (safe_files; shutil.copyfile opened
+    both by name)."""
+    with safe_files.open_read(src, current_working_directory, "rb") as fin, \
+            safe_files.replace(dst, current_working_directory, "wb") as fout:
+        shutil.copyfileobj(fin, fout, 1 << 20)
+
+
+def _run_search_job(argv: List[str], env: Dict[str, str], log_verbose: str, log_error: str,
+                    root: str) -> None:
+    """Runs a search: ``argv`` (submit_job's command line) with no shell, ``env`` added to
+    the environment, its stdout and stderr into the job's log_verbose.txt and
+    log_error.txt, opened with no link followed (safe_files). Module-level (picklable) so it
+    can be submitted to the search pool. It ran through a shell whose 1> and 2> opened the
+    logs by name, through a link another user put in the job's folder under one of them,
+    over a file of the user's elsewhere (the review of lane S, round 5, S-R5-2): a log that
+    is refused leaves the search not run, as the server's stderr says."""
+    try:
+        with safe_files.open_write(log_verbose, root) as out, \
+                safe_files.open_write(log_error, root) as err:
+            subprocess.run(argv, stdout=out, stderr=err, env=dict(os.environ, **env))
+    except OSError as e:
+        sys.stderr.write(f"[crisprme] search not run: {e}\n")
 
 
 def _notification_entry(address: str, job_id: str) -> str:
@@ -2196,9 +2106,10 @@ def check_input(
     # value, which names the file read)
     pam_char = None
     if pam in pams:
-        try:
-            with open(
-                os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
+        try:  # (no link another user put followed: safe_files)
+            with safe_files.open_read(
+                os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt"),
+                current_working_directory,
             ) as handle_pam:
                 pam_char = handle_pam.readline()
                 index_pam_value = int(pam_char.split()[-1])

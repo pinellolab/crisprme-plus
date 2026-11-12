@@ -43,7 +43,6 @@ from __future__ import annotations
 import datetime
 import json
 import os
-import shutil
 import tarfile
 import zipfile
 from typing import Dict, List, Optional
@@ -411,21 +410,34 @@ def _safe_members_top_dir(names: List[str]) -> Optional[str]:
     return tops.pop()
 
 
-def import_archive(archive_path: str, cwd: str) -> str:
+def import_archive(archive_path: str, cwd: str, fileobj=None) -> str:
     """Extract a personal-assembly bundle archive into ``Assemblies/`` and
     validate it. The archive must contain exactly one top-level ``<individual>/``
     directory holding the bundle structure + ``metadata.json``. Returns the
     individual name on success; raises ``BundleError`` (a ``ValueError``) with a
-    clear reason otherwise (and leaves nothing half-extracted)."""
+    clear reason otherwise (and leaves nothing half-extracted).
+
+    ``fileobj``: the archive, opened by the caller (the web's upload, read with no link
+    followed: safe_files), ``archive_path`` then giving its kind by its extension alone.
+    It is unpacked in a folder of this process's own in ``Assemblies/``, used through its
+    descriptor alone (safe_files.private_dir): the fixed ``<individual>.importing`` it was
+    unpacked into by name could be renamed away, or made first, by whoever can write
+    ``Assemblies/``, and a link to a folder of the user's put in its place, which a
+    request's archive was then unpacked into (``<individual>/...`` in it: a ``.ssh`` or
+    ``.local`` of theirs, for one)."""
+    import safe_files  # (PostProcess/, as this module; the standard library only)
+
     assemblies_root = os.path.join(cwd, ASSEMBLIES_DIR)
-    os.makedirs(assemblies_root, exist_ok=True)
+    safe_files.makedirs(assemblies_root, cwd)
 
     if archive_path.endswith((".tar.gz", ".tgz")):
-        opener = lambda: tarfile.open(archive_path, "r:gz")  # noqa: E731
+        opener = lambda: (tarfile.open(archive_path, "r:gz") if fileobj is None  # noqa: E731
+                          else tarfile.open(fileobj=fileobj, mode="r:gz"))
         namer = lambda a: a.getnames()  # noqa: E731
         is_tar = True
     elif archive_path.endswith(".zip"):
-        opener = lambda: zipfile.ZipFile(archive_path)  # noqa: E731
+        opener = lambda: zipfile.ZipFile(  # noqa: E731
+            archive_path if fileobj is None else fileobj)
         namer = lambda a: a.namelist()  # noqa: E731
         is_tar = False
     else:
@@ -440,16 +452,13 @@ def import_archive(archive_path: str, cwd: str) -> str:
                 "and no absolute or '..' paths"
             )
         dest = os.path.join(assemblies_root, os.path.basename(top))
-        if os.path.exists(dest):
+        if os.path.lexists(dest):
             raise BundleError(
                 f"an assembly named {os.path.basename(top)!r} already exists -- "
                 "delete it first or rename the bundle's top folder"
             )
-        staging = dest + ".importing"
-        if os.path.exists(staging):
-            shutil.rmtree(staging, ignore_errors=True)
-        os.makedirs(staging)
-        try:
+        with safe_files.private_dir(assemblies_root, cwd, ".importing-") as staging_dir:
+            staging = staging_dir.path
             # Defense-in-depth: _safe_members_top_dir already rejected absolute
             # and '..' members, but also (1) refuse tar symlink/hardlink/device
             # entries -- a symlink member could otherwise redirect a later
@@ -479,6 +488,4 @@ def import_archive(archive_path: str, cwd: str) -> str:
             if err:
                 raise BundleError(f"invalid personal-assembly bundle: {err}")
             os.replace(extracted, dest)
-        finally:
-            shutil.rmtree(staging, ignore_errors=True)
     return os.path.basename(top)
