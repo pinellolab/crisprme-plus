@@ -61,21 +61,29 @@ def get_cosmic_license(annotations_dir: str) -> dict:
         return {}
 
 
+def license_record(enabled: bool, attestation: str = "") -> str:
+    """The text of the attestation record: what set_cosmic_license writes, and what the web
+    Settings write through safe_files (pages_utils.set_cosmic_license)."""
+    return json.dumps({"version": 1, "enabled": bool(enabled), "attestation": attestation or ""})
+
+
 def set_cosmic_license(annotations_dir: str, enabled: bool, attestation: str = "") -> None:
     """Persist the COSMIC attestation atomically: a temporary file of a name of its own
-    (mkstemp: O_EXCL, O_NOFOLLOW) renamed over the record. A fixed temporary name was
-    written through a link another user put there under it (the web Settings writes this
-    record, in Annotations/, which a group may write)."""
+    (mkstemp: O_EXCL, O_NOFOLLOW), its mode set through its descriptor, renamed over the
+    record. Annotations/, where the record is, may be writable by a group, and anyone who can
+    write it can rename the temporary file away and put a link in its place: a fixed
+    temporary name was written through a link another user put there under it, and a mode
+    set by the temporary file's name (os.chmod) followed such a link, making the file it
+    names readable by all, the email settings with their app password say (the review of
+    wave 1c-a, A1). The web Settings write the record through safe_files
+    (pages_utils.set_cosmic_license)."""
     os.makedirs(annotations_dir, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=f"{COSMIC_LICENSE_FILE}.", suffix=".tmp",
                                dir=annotations_dir)
     try:
         with os.fdopen(fd, "w") as fh:
-            json.dump(
-                {"version": 1, "enabled": bool(enabled), "attestation": attestation or ""},
-                fh,
-            )
-        os.chmod(tmp, 0o644)  # (readable as the fixed name was: mkstemp makes it 0600)
+            os.fchmod(fh.fileno(), 0o644)  # (readable as the fixed name was: mkstemp makes 0600)
+            fh.write(license_record(enabled, attestation))
         os.replace(tmp, license_path(annotations_dir))
     except BaseException:
         if os.path.lexists(tmp):

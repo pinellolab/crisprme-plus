@@ -781,5 +781,68 @@ class TestTheConcurrentSearchesSetting(_DataFolder):
             self.assertIn(self.token, fh.read())
 
 
+@_NEEDS_DASH
+class TestTheCosmicRecord(_DataFolder):
+    """The review of wave 1c-a, A1: Settings > COSMIC licence > Save wrote the record,
+    Annotations/.cosmic_license.json, through cosmic_license.set_cosmic_license, which set
+    its temporary file's mode by that file's name (os.chmod): another user who can write
+    Annotations/ (the group, under a umask of 002) and renamed that file away as soon as it
+    was made, a link put in its place, made the file the link names readable by all (here
+    the secret, 0600, as the email settings and their app password are), and the web app
+    starts the save for anyone who can reach it. It went to a folder Annotations/ was a link
+    to, too. The record is written through safe_files now, as the other files of
+    Annotations/ are."""
+
+    def save(self):
+        return self.call("cosmic-license-save-btn", "n_clicks",
+                         {"cosmic-license-save-btn.n_clicks": 1},
+                         {"cosmic-license-checkbox.value": ["attested"]})
+
+    def test_the_record_is_written_through_no_link(self):
+        from test_cosmic_license import a_link_at_each_new_temporary_name
+        anns = os.path.join(self.data, "Annotations")
+        record = os.path.join(anns, ".cosmic_license.json")
+        with open(self.secret) as fh:
+            secret_text = fh.read()
+        # a link put at the temporary name as soon as the file is made: neither changed nor
+        # followed (the record then is that link, which the web app reads no more than any
+        # other: COSMIC stays excluded)
+        with a_link_at_each_new_temporary_name(
+                self.secret, lambda n: ".cosmic_license.json." in n and n.endswith(".tmp")) \
+                as taken:
+            code, text = self.save()
+        self.assertEqual(code, 200)
+        self.assertEqual(len(taken), 1, taken)  # (the other user's step was taken)
+        self.assertNoSecret(text)
+        self.assertEqual(stat.S_IMODE(os.stat(self.secret).st_mode), 0o600)
+        with open(self.secret) as fh:
+            self.assertEqual(fh.read(), secret_text)
+        self.assertFalse(pu.cosmic_license_enabled())
+        # a link at the record's name: replaced, not written through
+        os.remove(record)
+        self.link(record, self.victim)
+        code, text = self.save()
+        self.assertEqual(code, 200)
+        self.assertIn("Saved: COSMIC licence attested", text)
+        self.assertVictimUnchanged()
+        st = os.lstat(record)
+        self.assertTrue(stat.S_ISREG(st.st_mode))
+        mask = os.umask(0)
+        os.umask(mask)
+        self.assertEqual(stat.S_IMODE(st.st_mode), 0o644 & ~mask)
+        self.assertTrue(pu.cosmic_license_enabled())
+        self.assertEqual(pu.cosmic_license_attestation(), "attested via web Settings")
+        # Annotations/ a link to a folder of the user's, in a data folder the group can
+        # write: refused, nothing written there, and the page says so
+        theirs = os.path.join(self.home, "annotations")
+        os.makedirs(theirs)
+        shutil.rmtree(anns)
+        self.link(anns, theirs)
+        code, text = self.save()
+        self.assertEqual(code, 200)
+        self.assertIn("Could not save the COSMIC setting", text)
+        self.assertEqual(os.listdir(theirs), [])
+
+
 if __name__ == "__main__":
     unittest.main()

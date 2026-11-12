@@ -2956,12 +2956,22 @@ def cosmic_license_attestation() -> str:
 
 
 def set_cosmic_license(enabled: bool, attestation: str = "") -> bool:
-    """Persist the COSMIC licence attestation. Returns False if the helper is
-    unavailable (COSMIC then stays excluded, the safe default)."""
+    """Persist the COSMIC licence attestation (cosmic_license.license_record's text) through
+    safe_files, as the other files of Annotations/ are written: the folder reached with no
+    link another user put there followed, and the record made under a name of its own
+    (O_CREAT|O_EXCL|O_NOFOLLOW), its mode given as it is made, then renamed over its name.
+    cosmic_license.set_cosmic_license, which this called, set its temporary file's mode by
+    that file's name, which followed a link another user put in its place, making a file of
+    the user's readable by all (the review of wave 1c-a, A1). Returns False if the helper is
+    unavailable (COSMIC then stays excluded, the safe default); a path refused, or a folder
+    that cannot be written, raises OSError (RefusedPath)."""
     c = _cosmic_mod()
     if not c:
         return False
-    c.set_cosmic_license(_annotations_dir(), enabled, attestation)
+    cwd = current_working_directory
+    safe_files.makedirs(_annotations_dir(), cwd)
+    safe_files.write_text(c.license_path(_annotations_dir()), cwd,
+                          c.license_record(enabled, attestation), perm=0o644)
     return True
 
 

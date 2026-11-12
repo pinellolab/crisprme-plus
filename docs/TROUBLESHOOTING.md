@@ -214,8 +214,8 @@ What holds wherever you run it, since 2.10.0:
   search writes in its output folder keep fixed names (such as `<file>.tmp`);
 - the web app follows no link another user put in its data folder. Every file it reads,
   serves or writes there (a search's logs, parameters and results, the downloads of
-  `/Results/<path>`, the Settings jobs' logs, the uploads, the email settings, the
-  concurrent searches setting, the annotation manifest, the sample lists, the PAM files, an
+  `/Results/<path>`, the Settings jobs' logs, the uploads, the email, concurrent searches
+  and COSMIC licence settings, the annotation manifest, the sample lists, the PAM files, an
   index's label) is reached one folder at a time with `O_NOFOLLOW` (`openat`), and must be a
   regular file with no other name: not a link, a FIFO, a device or, in a folder others can
   write, a hard link. A folder that one of its files names (the personal-assembly results

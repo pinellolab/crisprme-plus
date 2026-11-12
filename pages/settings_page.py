@@ -3115,7 +3115,13 @@ def _cosmic_license_save(n, value):
     if n is None or ONLINE:
         raise PreventUpdate
     attested = bool(value) and "attested" in value
-    ok = set_cosmic_license(attested, "attested via web Settings" if attested else "")
+    try:
+        ok = set_cosmic_license(attested, "attested via web Settings" if attested else "")
+    except OSError as e:  # (a link another user put in the way, refused, or no write access)
+        return html.Span(
+            f"Could not save the COSMIC setting ({e}); it is as it was.",
+            style={"color": "#b00"},
+        )
     if not ok:
         return html.Span(
             "Could not persist the COSMIC setting (licence helper unavailable); "
