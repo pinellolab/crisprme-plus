@@ -360,6 +360,40 @@ def test_row_first_base_reference_start_and_ambiguity():
     assert isc.row_first_base("+", 100, alt, ref[100:123], (101, "TA", "GC"), ()) == 100
 
 
+def test_row_first_base_holds_the_snp_alts_the_row_names():
+    """M-R3-N2's open question 2, as the synthetic site P through the real CLI wrote it: an
+    insertion of two GGT units after the anchor A, then (GGT)6, an A, a G. The perfect target
+    B = (GGT)7 GG reads from the 1st added base on the insertion alone; with the SNV A>G at
+    that A it reads from the 1st added base too (the SNV past its end) and from the 4th,
+    where the SNV is its 22nd base, the PAM's first G. The row of the insertion and the SNV
+    is the 4th place's: up to now it was placed at the 1st (the smallest k), its SNV
+    numbered 25 in a target of 23 bases (Variant_info_spacer+PAM 25A>G), its cluster
+    position on the haplotype 3 short. On the - strand alike."""
+    a = 100
+    ref = "N" * 99 + "C" + "A" + "GGT" * 6 + "A" + "G" + "C" + "N" * 40
+    assert ref[a] == "A" and ref[119] == "A"
+    ins, snv = (a + 1, "A", "AGGTGGT"), (120, "A", "G")
+    b = "GGT" * 7 + "GG"
+    ref_text = ref[a:a + 23]
+    assert isc.row_first_base("+", a, b, ref_text, ins, []) == a + 1
+    assert isc.row_first_base("+", a, b, ref_text, ins, [snv]) == a + 4
+    assert isc.row_first_base("-", a, _rc(b), _rc(ref_text), ins, [snv]) == a + 4
+    first, places = isc.variant_places("+", a, b, ref_text, [ins, snv])
+    assert (first, places) == (a + 4, [a + 1, 126])
+    assert places[1] - first == 22          # resultIntegrator's number: the 22nd base
+    # site Q: three units added, the SNV in the 7th place's protospacer (its 19th base)
+    # and the 4th place's PAM (its 22nd): the row is listed once (the copies rule) and
+    # placed at the 4th, the first place that holds the SNV
+    ref = "N" * 99 + "C" + "A" + "GGT" * 4 + "GG" + "T" + "A" + "G" + "T" + "GG" + "C" + "N" * 40
+    ins, snv = (a + 1, "A", "AGGTGGTGGT"), (117, "A", "G")
+    assert ref[116] == "A"
+    ref_text = ref[a:a + 23]
+    assert isc.row_first_base("+", a, b, ref_text, ins, []) == a + 1
+    assert isc.row_first_base("+", a, b, ref_text, ins, [snv]) == a + 4
+    # a SNP the row names that no place of these bases holds: the smallest k, as before
+    assert isc.row_first_base("+", a, b, ref_text, ins, [(160, "N", "G")]) == a + 1
+
+
 def test_variant_places_snps_past_a_deletion_and_snp_rows():
     # a SNP past a 3-base deletion is 3 back; one before it keeps its place
     toks = [(101, "TCAC", "T"), (95, "A", "G"), (110, "C", "T")]
@@ -373,8 +407,9 @@ def test_variant_places_snps_past_a_deletion_and_snp_rows():
 
 def _row_first_base_base_by_base(strand, start, alt_aligned, ref_aligned, indel, snps=()):
     """row_first_base as c3a75fe wrote it: the haplotype built one base at a time
-    (haplotype_base_kind), then a slice compared at each k. The model the sliced one must
-    give back."""
+    (haplotype_base_kind), then a slice compared at each k, the first that holds every SNP
+    alt the row names taken (2.10.0, M-R3-N2; else the first k at all). The model the
+    sliced one must give back."""
     ipos, iref, ialt = indel
     if len(ialt) <= len(iref) or start != ipos - 2 + len(iref) - isc.shared_tail(iref, ialt):
         return start
@@ -392,15 +427,25 @@ def _row_first_base_base_by_base(strand, start, alt_aligned, ref_aligned, indel,
             hap.append(refb[p - start] if 0 <= p - start < n else "?")
         else:
             hap.append(ialt[h - ipos + 1].upper())
+    put = {}
     for pos1, _r, alt in snps:
         at = isc.haplotype_place(pos1, ipos, iref, ialt)
         if at is not None and 0 <= at - 1 - start < len(hap):
             hap[at - 1 - start] = alt.upper()
+            put[at - 1 - start] = len(alt)
+    # each SNP alt's bases in the joined haplotype (a multi-base alt shifts those after it)
+    held = [(i + sum(put[j] - 1 for j in put if j < i),
+             i + sum(put[j] - 1 for j in put if j < i) + max(1, put[i]) - 1) for i in put]
     hap = "".join(hap)
+    first = None
     for k in range(more + 1):
         if hap[k:k + n] == target:
-            return start + k
-    return start
+            if first is None:
+                first = k
+            # 2.10.0 (M-R3-N2): the first place whose reading holds every SNP alt named
+            if all(k <= lo and hi < k + n for lo, hi in held):
+                return start + k
+    return start + first if first is not None else start
 
 
 def test_row_first_base_equals_the_base_by_base_reading():

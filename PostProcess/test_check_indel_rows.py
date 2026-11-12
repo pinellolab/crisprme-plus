@@ -6490,6 +6490,45 @@ class RepeatPlaces(Base):
             rc, found = case.run(mode="both", budget=budget, guide=REPEAT_GUIDE)
             self.assertEqual((rc, gating(found)), (0, []), (budget, found))
 
+    def test_a_row_whose_snv_lies_past_a_lower_place_is_read_at_its_own(self):
+        """Open question 2 of M-R3-N2 (the synthetic site P through the real CLI): two GGT
+        units inserted after the anchor A, then (GGT)6, a C, a G (the site has an A where
+        this world has the C, which NRG, this world's PAM, would read as a PAM). The perfect
+        target (GGT)7 GG of the guide (GGT)6 GG reads from the 1st added base on every
+        haplotype of the insertion (the insertion's row: S01-S05), and with the SNV C>G at
+        that C also from the 4th, where the SNV is its 22nd base (the row of the insertion
+        and the SNV:
+        S03, S04). On the reference with that row's variants the bases read from both
+        places, and the check read the row at the 1st, where the SNV is past the target's
+        end: variant-outside-target, and the listed carriers lacked the target (gating). The
+        row's place is the first one whose reading holds the SNVs it names, as CRISPRme's
+        row_first_base takes it since 2.10.0; its carriers hold the target there, and
+        completeness finds each target on its own row."""
+        guide = "GGT" * 6 + "GG"
+        target = guide + "TGG"
+        seq = LONG + PRE + "C" + "A" + "GGT" * 6 + "C" + "G" + "C" + POST
+        anchor0 = len(LONG) + len(PRE) + 1
+        assert seq[anchor0] == "A" and seq[anchor0 + 19] == "C"
+        ins = (anchor0 + 1, "A", "AGGTGGT",
+               {"S01": "1|0", "S02": "0|1", "S03": "1|0", "S04": "0|1", "S05": "1|0"})
+        snv = (anchor0 + 20, "C", "G", {"S03": "1|0", "S04": "0|1", "S05": "0|1", "S06": "1|1"})
+        ref = seq[anchor0:anchor0 + 23]
+
+        def row(var, samples):
+            return row_fields("chr21", anchor0, "+", guide + "NNN", ref, target, "TGG", 0, 0,
+                              "X", ",".join(tok("chr21", v) for v in var), samples,
+                              spacer=guide + "NNN")
+        rows = [row([ins], "S01,S02,S03,S04,S05"), row([ins, snv], "S03,S04")]
+        case = Case(self.tmp, seq, [ins, snv], rows)
+        for mode, budget in (("soundness", ("4", "1", "1", "6")), ("both", ("0", "0", "0", "0"))):
+            rc, found = case.run(mode=mode, budget=budget, guide=guide)
+            self.assertEqual((rc, gating(found)), (0, []), (mode, found))
+        # the row of the insertion and the SNV listing S05, whose SNV is on its other slot:
+        # caught (its slot holds the target at the 1st place only, without the SNV)
+        case = Case(self.tmp, seq, [ins, snv], [rows[0], row([ins, snv], "S03,S04,S05")])
+        rc, found = case.run(mode="soundness", budget=("0", "0", "0", "0"), guide=guide)
+        self.assertEqual({f[3] for f in gating(found)}, {"S05"}, found)
+
     def test_a_carrier_listed_for_its_target_at_the_other_place_is_caught(self):
         """CRISPRme listing S03 and S04 on the insertion's row (whose bases their haplotype
         holds at the anchor only through the SNV the row does not name), with no row naming

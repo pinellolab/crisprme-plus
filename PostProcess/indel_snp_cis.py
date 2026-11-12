@@ -521,10 +521,18 @@ def row_first_base(strand, start, alt_aligned, ref_aligned, indel, snps=()):
     do: the target is the haplotype's bases from its first base on, and the haplotype
     from ``start`` on is the REF text's first base when it is a reference one, the ALT's
     bases, then the REF text's bases past the indel, with the SNP alts the row names. The
-    smallest k at which they are the target's is taken: two places can hold the same
-    target only in a repeat the target lies wholly in, where they hold the same bases (the
-    smaller is the base itself on a row starting on a reference base). None of them,
-    which a row the post-analysis wrote never gives: ``start``.
+    smallest k at which they are the target's and that holds every SNP alt the row names
+    is taken: the row names the SNP alts its haplotypes hold in its target (the post-
+    analysis names those at the code columns of the place it resolved), so a place where
+    the same bases read without one of them is another row's target (2.10.0, M-R3-N2: in
+    a GGT repeat, a target read from the 1st and the 4th added base, the row's SNP the 4th
+    place's 22nd base and past the 1st place's end, was placed at the 1st, its SNP
+    numbered 25 in a target of 23 bases). Two places can hold the same target with the
+    same SNP alts only in a repeat the target lies wholly in, where they hold the same
+    bases (the smaller is the base itself on a row starting on a reference base). Where no
+    place holds every SNP alt the row names (none of them reaches the haplotype read
+    here), the smallest k at which the bases are the target's; none of them, which a row
+    the post-analysis wrote never gives: ``start``.
 
     Cost: the haplotype is cut from the REF text and the ALT in slices and the target
     found in it with ``str.find``, so no Python step is taken per base of the ALT. Built
@@ -555,15 +563,35 @@ def row_first_base(strand, start, alt_aligned, ref_aligned, indel, snps=()):
     c = kept_bases(iref, ialt)
     at = start - ipos + 1
     hap = (refb[0] if at < c else "") + ialt[max(c, at):len(ialt) - t].upper() + refb[1:]
+    held = []  # (first, last) index in hap of each SNP alt the row names that reaches it
     if snps:
-        hap = list(hap)
+        slots = list(hap)
+        put = {}
         for pos1, _r, alt in snps:
             place = haplotype_place(pos1, ipos, iref, ialt)
-            if place is not None and 0 <= place - 1 - start < len(hap):
-                hap[place - 1 - start] = alt.upper()
-        hap = "".join(hap)
+            if place is not None and 0 <= place - 1 - start < len(slots):
+                slots[place - 1 - start] = alt.upper()
+                put[place - 1 - start] = len(alt)
+        # a slot's place in the joined haplotype: its own, plus what the multi-base alts
+        # written before it add (a step per SNP alt, none per base of the ALT)
+        extra = 0
+        for i in sorted(put):
+            held.append((i + extra, i + extra + max(1, put[i]) - 1))
+            extra += put[i] - 1
+        hap = "".join(slots)
     k = hap.find(target)
-    return start + k if 0 <= k <= more else start
+    if not 0 <= k <= more:
+        return start
+    if held:
+        # the smallest k whose reading holds every SNP alt the row names: one between the
+        # last alt's end less the target's length and the first alt's start (one find)
+        lo_k = max(0, max(hi for _lo, hi in held) - n + 1)
+        hi_k = min(more, min(lo for lo, _hi in held))
+        if lo_k <= hi_k:
+            k2 = hap.find(target, lo_k, hi_k + n)
+            if k2 >= 0:
+                return start + k2
+    return start + k
 
 
 def variant_places(strand, start, alt_aligned, ref_aligned, tokens):

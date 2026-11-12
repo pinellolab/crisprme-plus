@@ -1012,7 +1012,15 @@ site, the alignments that name the same variants with the same carriers are one 
 as on every row: they are one target's alignments with different bulges. The merge compares indel
 rows there at their cluster position on the haplotype carrying the indel,
 which on a row that starts inside an insertion is past the anchor by the rank of its first base
-among the inserted ones, read from the row's bases (`indel_snp_cis.row_first_base`). Two
+among the inserted ones, read from the row's bases (`indel_snp_cis.row_first_base`): the first
+place on the haplotype with the row's variants where they are the target's and that holds every
+SNP alt the row names (since 2.10.0; it was the first place they fit, and in a repeat the same
+bases can read from an earlier added base without a SNP the row names, past that reading's end,
+which is another row's target: a row of a synthetic GGT repeat through the real CLI, at 4
+mismatches and 1 DNA and 1 RNA bulge and at 2 and 2, was placed 3 bases short, its SNP
+numbered 25 in `Variant_info_spacer+PAM`, in a target of 23 bases; no row of the 2.10.0
+integration's gate runs is placed otherwise: 0 of the 108,505 indel row blocks naming an
+insertion and SNPs). Two
 alignments whose cluster positions on that haplotype differ are two targets of it, as many bases
 apart as 2.8.1 placed them, and both are listed, as the site's row or one of its alternative
 alignments (a population-level run lists only each site's row); one target's alignments with

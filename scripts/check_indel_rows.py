@@ -3291,7 +3291,10 @@ class Target(object):
 
 def row_target(win, row, named, main):
     """The row's target on the reference with exactly its named variants: (Target,
-    problem class, detail)."""
+    problem class, detail). Where the bases read at the row's start from more than one
+    place (a repeat at an insertion's anchor), the first place whose reading holds every
+    SNV the row names is the target's (snvs_held: the row names the SNP alts its
+    haplotypes hold in its target), else the first place."""
     stripped = row["alt"].replace("-", "").upper()
     probe = stripped if row["strand"] == "+" else rc(stripped)
     n = len(probe)
@@ -3307,10 +3310,12 @@ def row_target(win, row, named, main):
             "the named variants cannot all be on one haplotype: two of them describe the "
             "reference bases %s" % ",".join("%d..%d" % (z[0], z[1] - 1) for z in hap.clash))
     here = reads_at(hap, row["start"], probe)
-    for i in here:
-        if main is None or holds_edit(hap, i, n, main):
-            return Target(win, main, named, probe, row["strand"], hap.place[i:i + n],
-                          hap.src[i:i + n], row["crrna"], row["alt"]), None, None
+    want = frozenset(a.key for a in named if a.kind == "snv")
+    held = [i for i in here if main is None or holds_edit(hap, i, n, main)]
+    if held:
+        i = next((i for i in held if snvs_held(hap, i, n) == want), held[0])
+        return Target(win, main, named, probe, row["strand"], hap.place[i:i + n],
+                      hap.src[i:i + n], row["crrna"], row["alt"]), None, None
     through = []
     k = hap.seq.find(probe)
     while k >= 0:
@@ -6384,8 +6389,10 @@ def row_first_k(win, row):
     """The rank of a reported row's first base among the bases its insertion adds (0 when
     it is any other base), read from the row's own target on the reference with its named
     variants: its cluster position on the haplotype is its Cluster Position plus that.
-    Two places hold the same target only in a repeat it lies wholly in; the first is
-    taken, as CRISPRme takes it (indel_snp_cis.row_first_base, on the fix branch). None
+    Two places hold the same bases only in a repeat; the first whose reading holds every
+    SNV the row names is taken, else the first, as CRISPRme takes it
+    (indel_snp_cis.row_first_base, since 2.10.0: a place where the same bases read
+    without a SNV the row names is another row's target). None
     when the row's target does not read at its own start through its record (a row
     soundness fails, as 2.8.1's rows placed past an insertion's anchor): such a row stands
     for no other alignment."""
@@ -6413,7 +6420,13 @@ def row_first_k(win, row):
     if hap.clash:
         return None
     hits = reads_at(hap, row["start"], probe, main)
-    return hap.place[hits[0]][1] if hits else None
+    if not hits:
+        return None
+    # the first place whose reading holds every SNV the row names, as CRISPRme's
+    # row_first_base takes it since 2.10.0 (M-R3-N2), else the first place
+    want = frozenset(a.key for a in named if a.kind == "snv")
+    k = next((k for k in hits if snvs_held(hap, k, n) == want), hits[0])
+    return hap.place[k][1]
 
 
 class Reported(object):
