@@ -6476,6 +6476,20 @@ class RepeatPlaces(Base):
         rc, found = case.run(mode="both", budget=("0", "0", "0", "0"), guide=REPEAT_GUIDE)
         self.assertEqual((rc, gating(found)), (0, []), found)
 
+    def test_a_population_level_row_of_one_place_demands_nobody_of_the_other(self):
+        """Population-level (one row per cluster, no alternative alignments): the two right
+        rows tie (no mismatch, no bulge, the same bases), and the merge keeps one of them,
+        here the insertion's. Its carriers are right; S03 and S04, whose target is the other
+        row's, are not demanded on it (the check demanded them: carrier-missing, gating, on
+        the population-level row of the synthetic site through the real CLI at 4 + 1 + 1),
+        and their target's cluster has a row as good as it."""
+        seq, recs, row_ins, _row_both = world_repeat_places()
+        case = Case(self.tmp, seq, recs, [row_ins])
+        run_markers(case.res, "population-level")
+        for budget in (("0", "0", "0", "0"), ("4", "1", "1", "6")):
+            rc, found = case.run(mode="both", budget=budget, guide=REPEAT_GUIDE)
+            self.assertEqual((rc, gating(found)), (0, []), (budget, found))
+
     def test_a_carrier_listed_for_its_target_at_the_other_place_is_caught(self):
         """CRISPRme listing S03 and S04 on the insertion's row (whose bases their haplotype
         holds at the anchor only through the SNV the row does not name), with no row naming
