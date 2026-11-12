@@ -126,11 +126,13 @@ for g in "genotypes_$DATASET" "indel_genotypes_$DATASET"; do
 done
 rm -rf "${D:?}/dictionaries_${DATASET:?}"
 L="$D/log_indels_$DATASET"
+# (each inline python runs isolated, -I: it imports no module of the folder it runs in, which
+# others may write; docs/TROUBLESHOOTING.md section 7, test_no_code_from_files)
 for c in "${CHROMS[@]}"; do
   for lf in "$L/log$c.txt.gz" "$L/log$c.txt"; do
     [ -f "$lf" ] || continue
     if [ "${lf%.gz}" != "$lf" ]; then
-      run "$PYTHON" - "$lf" <<'PY'
+      run "$PYTHON" -I - "$lf" <<'PY'
 import gzip, os, sys
 p = sys.argv[1]
 with gzip.open(p, "rt") as fh, gzip.open(p + ".tmp", "wt") as out:
@@ -143,7 +145,7 @@ with gzip.open(p, "rt") as fh, gzip.open(p + ".tmp", "wt") as out:
 os.replace(p + ".tmp", p)
 PY
     else
-      run "$PYTHON" - "$lf" <<'PY'
+      run "$PYTHON" -I - "$lf" <<'PY'
 import os, sys
 p = sys.argv[1]
 with open(p) as fh, open(p + ".tmp", "w") as out:
@@ -177,7 +179,7 @@ say "registry_$DATASET and indel_af_$DATASET written; VCFs/$DATASET holds the bu
 SID="$INSTALL/samplesIDs/$DATASET.samplesID.txt"
 if [ ! -e "$SID" ]; then
   mkdir -p "$INSTALL/samplesIDs"
-  run "$PYTHON" - "$PP" "$SID" <<'PY'
+  run "$PYTHON" -I - "$PP" "$SID" <<'PY'
 import os, sys
 sys.path.insert(0, sys.argv[1])
 import build_mega_registry as b

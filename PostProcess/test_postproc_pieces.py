@@ -1115,6 +1115,14 @@ class IndelPiecesThroughTheRealScript(unittest.TestCase):
                    if k not in ("MAMBA_EXE", "CONDA_EXE", "CRISPRME_CONDA_EXE")}
         run_env["PATH"] = os.path.dirname(sys.executable) + ":/usr/bin:/bin"
         run_env.update(env, PYTHONHASHSEED="0")
+        try:
+            import intervaltree  # noqa: F401
+        except ImportError:
+            # CI's light image has no intervaltree: the pieces read the stub the fixture
+            # wrote, as its one process did (test_indel_overlaid_rows._Fixture); without it
+            # each piece stopped at its import, on lane S's own tree too
+            run_env["PYTHONPATH"] = (os.path.join(tmp, "stub") + os.pathsep
+                                     + run_env.get("PYTHONPATH", ""))
         for i, (a, b) in enumerate(postproc_pool.ranges(n_lines, 3)):
             p = os.path.join(tmp, "out", "piece%d" % i)
             prefixes.append(p)
