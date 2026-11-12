@@ -2,10 +2,14 @@
 
 CRISPRitz add-variants lists every SNP ALT of a position in the per-sample dictionary
 (``my_dict_<chrom>.json``), one '$' entry per ALT, each with its own record's carriers
-and their genotypes as the VCF writes them. A VCF split with ``bcftools norm -m -any``
-(how every published panel is built) has one record per ALT, and its genotypes use 1
-for that ALT. A record that lists several ALTs on one line (C>A,T) keeps its raw
-genotype under every ALT its sample carries: S:2|1 is listed under A and under T.
+and their genotypes. A VCF split with ``bcftools norm -m -any`` (how every published panel
+is built) has one record per ALT, and its genotypes use 1 for that ALT. CRISPRitz 2.10.0
+writes the entries of a record that lists several ALTs on one line (C>A,T) in that same
+split form, 1 each entry's own ALT and 0 the reference or another ALT (S:2|1 is 0|1 under A
+and 1|0 under T), so every position of its dictionaries comes back as it is (below). A
+dictionary of an earlier CRISPRitz (2.9.1, or a 2.10.0 build up to c18c575) keeps such a
+record's raw genotype under every ALT its sample carries: S:2|1 is listed under A and under
+T, and the rest of this note is about reading it.
 CRISPRme reads "1" as "this slot holds this ALT" (the Tier-0 counts, the Tier-1
 haplotypes, the dictionary path's haplotype seeds, the indel path's slots), so each
 ALT's genotypes are first read against that ALT's own allele index: S:2|1 becomes 0|1

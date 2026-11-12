@@ -190,10 +190,12 @@ enriched genome and `log_verbose.txt`; a run of 2.10.0 whose records cannot tell
 genome coded a split site of its VCF, one that ends in a line of a `*` alone included, is
 refused there, where 2.9.1's reading shadowed the earlier lines), one that does not record
 what the check needs (whether it wrote alternative alignments and, where it wrote none, its
-mode, which `--analysis` can give), a run of every allele (CRISPRitz 2.10.0) whose VCF
-holds, near a row or a record it checks, two or more lines that each list several ALTs at
-one position (each line's own allele numbers in the position's one dictionary value, which
-CRISPRme's readers cannot tell apart, METHODS section 4), and a run whose VCF holds there
+mode, which `--analysis` can give), a run of every allele whose VCF holds, near a row or a
+record it checks, two or more lines that each list several ALTs at one position and whose
+own dictionary keeps there each line's own allele numbers (a CRISPRitz before its split
+form, up to c18c575) or does not tell (none in its working directory), numbers CRISPRme's
+readers cannot tell apart (METHODS section 4; CRISPRitz 2.10.0's split form is checked as
+any other position), and a run whose VCF holds there
 an SNV whose ALT is written in lower case (CRISPRitz codes no lower-case ALT, while its
 dictionary lists the carriers; write REF and ALT in upper case). A refused run stops at the
 first work unit that meets such a position. It models a search that read each genotyped

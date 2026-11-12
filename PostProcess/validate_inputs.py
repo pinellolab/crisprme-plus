@@ -577,11 +577,13 @@ def _multi_alt_issue(fname: str, count: int, example: str, scanned: Optional[int
     return Issue(
         WARN,
         f"{fname}: {where} several ALTs on one line (e.g. {example}) — CRISPRme "
-        "reads each ALT with its own carriers, a genotype such as 1|2 read against "
-        "each ALT's own allele index (1|0 under the first, 0|1 under the second); "
-        "where the genotypes cannot tell which index an ALT is (every carrier of "
-        "two ALTs is 1|2; a record of one ALT at the same position tells nothing "
-        "of the line's numbers), its carriers are resolved without phase (PUTATIVE). "
+        "reads each ALT with its own carriers: CRISPRitz 2.10.0 writes each ALT's "
+        "dictionary entry in split form (a genotype such as 1|2 is 1|0 under the first "
+        "ALT, 0|1 under the second), which ties each ALT to its own slot; a dictionary "
+        "of an earlier CRISPRitz keeps 1|2 under both, read against each ALT's own "
+        "allele index, and where the genotypes cannot tell which index an ALT is (every "
+        "carrier of two ALTs is 1|2; a record of one ALT at the same position tells "
+        "nothing of the line's numbers), its carriers are resolved without phase (PUTATIVE). "
         "Each ALT of such a line is given the line's first ID, as CRISPRitz "
         "add-variants writes it: where the ID column lists one per ALT (rs1;rs2), "
         "the rows of the second ALT name the first's (rs1). A VCF split with "
@@ -606,10 +608,13 @@ def _multi_lines_issue(fname: str, count: int, examples: List[str],
         WARN,
         f"{fname}: {where} two or more lines that each list several ALTs (e.g. "
         f"{', '.join(examples)}) — CRISPRitz lists the one-base ALTs of every such line in "
-        "the position's one dictionary value, each with its line's own allele numbers "
-        "(1|2), which CRISPRme's readers cannot tell apart: an ALT of one line can be tied "
-        "to a number of the other's and read on the other haplotype slot. Split such lines "
-        "(`bcftools norm -m -any`, as the published panels are built) or join them into one",
+        "the position's one dictionary value: CRISPRitz 2.10.0 writes each in split form "
+        "(1 its own ALT), which CRISPRme's readers tie to its own slot, but an index built "
+        "with an earlier CRISPRitz keeps each line's own allele numbers (1|2), which they "
+        "cannot tell apart: an ALT of one line can be tied to a number of the other's and "
+        "read on the other haplotype slot. Build such an index again with CRISPRitz 2.10.0, "
+        "or split such lines (`bcftools norm -m -any`, as the published panels are built) or "
+        "join them into one",
     )
 
 
@@ -1504,9 +1509,11 @@ def check_vcf_full_scan(
     - POS bounds vs. chromosome length: a build/genome mismatch causes an
       IndexError in `enricher.py`, only reachable by scanning far enough into
       the file.
-    - Records listing several ALTs on one line (C>A,T): CRISPRme reads each
-      ALT's carriers against that ALT's own allele index (`site_alleles`), and
-      a carrier whose genotypes cannot tell it is resolved without phase.
+    - Records listing several ALTs on one line (C>A,T): CRISPRitz 2.10.0 writes
+      each ALT's dictionary entry in split form, which ties it to its own slot;
+      a dictionary of an earlier CRISPRitz is read against each ALT's own
+      allele index (`site_alleles`), and a carrier whose genotypes cannot tell
+      it is resolved without phase.
     - Breakend/SV notation in ALT (`]`/`[` without a leading `<`): only
       `<DEL>`-style symbolic ALT is filtered out; breakend text is spliced as
       literal sequence into the enriched genome.

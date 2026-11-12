@@ -509,11 +509,18 @@ earlier line of the same REF>ALT is read as shadowed too (the dictionary entry w
 line's, the earlier line's carriers lost: limit-last-alt-wins), and so is every line before
 a last line of a '*' alone (2.9.1's dictionary entry of the position is the '*''s, while its
 genome keeps the code the earlier lines wrote: a '*' adds no base, and one base writes no
-code). A run of every allele whose VCF holds, near a row or a record it checks, two or more
-lines that each list several ALTs at one position is refused (exit 2): each entry of the
-position's dictionary value keeps its line's raw allele numbers, which CRISPRme's readers
-cannot tell apart (METHODS section 4), and what CRISPRme then lists is not modeled (a
-refused run stops at the first work unit that meets such a position). Two lines of one
+code). Where a line of several ALTs is read (every allele coded), the run's own
+dictionary (Dictionaries/dictionaries_<dataset>/my_dict_<chrom>.json[.gz] of its working
+directory) says how its entries are numbered: in split form (CRISPRitz 2.10.0: each ALT's
+entry numbers its own ALT 1, a 1|2 carrier of C>A,T reading 1|0 under A and 0|1 under T),
+CRISPRme's readers tie every alt to its own 1, so the position is checked as any other, two
+lines of several ALTs at one position included; with the lines' raw numbers (1|2 under
+both: CRISPRitz before its split form, up to c18c575), or where the run's dictionary does not
+tell (none, or no value at the position), a run whose VCF holds, near a row or a record it
+checks, two or more lines that each list several ALTs at one position is refused (exit 2):
+CRISPRme's readers cannot tell the two numberings apart (METHODS section 4), and what
+CRISPRme then lists is not modeled (a refused run stops at the first work unit that meets
+such a position). Two lines of one
 indel or MNV REF>ALT at a position, in one case or in two, are one allele on every release,
 their calls merged by the same rule (decision B2: CRISPRme 2.10.0 reads them so, REF and
 ALT in upper case, its readers of the phased indel store merging the two lines, its indel
@@ -559,7 +566,9 @@ report, leaving the integrated results and their alternative alignments as they 
 changes nothing this checker reads. An alt of a VCF line that lists several ALTs whose
 number no genotype ties is resolved PUTATIVE (untied), as by 2.8.x's indel path, now by
 every reader of CRISPRme 2.10.0, which ties numbers over every alt of one character the
-dictionary lists at the position (a '*' too). A run whose log says that the SNP+indel
+dictionary lists at the position (a '*' too), where the dictionary keeps the line's raw
+numbers; a dictionary in split form (CRISPRitz 2.10.0) ties every alt. A run whose log
+says that the SNP+indel
 co-occurrence was off (CRISPRME_INDEL_SNP=0, the search's NOTE since 2.10.0) is REFUSED:
 every SNP code of its fake-indel genomes read as the reference, its indel rows name no SNP
 and list every carrier of their indel, and its SNP rows keep a carrier whose haplotype
@@ -1319,7 +1328,8 @@ class Window(object):
                                   # which its fake-indel windows do not hold (below)
         self.untied = set()
         self.mixed = set()   # 1-based positions whose dictionary lines (every allele coded)
-                             # are two or more lines of several ALTs (_dictionary)
+                             # are two or more lines of several ALTs, the run's dictionary
+                             # keeping their raw numbers or not telling (_dictionary)
         self.lower_snv = set()  # 1-based positions of an SNV allele read whose ALT the VCF
                                 # writes in lower case, which CRISPRitz does not code (a
                                 # lower-case ALT is not a SNP ALT) while its dictionary
@@ -1351,7 +1361,7 @@ class Window(object):
                     continue
                 if r["pos1"] != at:
                     if v.samples:
-                        self._dictionary(group, all_alleles, v.samples)
+                        self._dictionary(group, all_alleles, v.samples, v)
                     at, group, listed = r["pos1"], [], {}
                 passing = r["filter"] in PASS_FILTERS
                 if (len(r["ref"]) == 1 and (passing or not v.samples)
@@ -1441,7 +1451,7 @@ class Window(object):
                         a.kind == "snv" for a in als if a is not None):
                     snv_lines[r["pos1"]].append(lid)
             if v.samples:
-                self._dictionary(group, all_alleles, v.samples)
+                self._dictionary(group, all_alleles, v.samples, v)
                 continue
             for lids in snv_lines.values():
                 if len(lids) < 2 or all_alleles:
@@ -1495,7 +1505,7 @@ class Window(object):
             a.line, a.number = own, 1
         merge_calls(self.calls[a.line], more)
 
-    def _dictionary(self, group, all_alleles, samples):
+    def _dictionary(self, group, all_alleles, samples, vcf=None):
         """Read the dictionary lines ``group`` of one position of a genotyped VCF ([(line id
         or None, record)], file order) as CRISPRitz's per-sample dictionary holds them and
         CRISPRme reads it: on a genome of the last record (CRISPRitz 2.9.1 and earlier) the
@@ -1505,13 +1515,20 @@ class Window(object):
         no base, and one base writes no code), so their ALTs are searched and their
         carriers are in no store, as at any other split site; with every allele coded,
         every line's (two listings of one REF>ALT one entry: Window). Then the alts no
-        allele number ties are untied (_untie)."""
+        allele number ties are untied (_untie). Where the run's own dictionary writes the
+        position's every entry in split form (Semantics.numbering: CRISPRitz 2.10.0, each
+        ALT's entry numbering its own ALT 1), CRISPRme's readers tie every alt to 1, its own:
+        nothing is untied and lines of several ALTs are told apart (not mixed)."""
         if not all_alleles:
             for lid, _r in group[:-1]:
                 for a in (self.line_alleles[lid] if lid is not None else ()):
                     if a is not None and a.kind == "snv":
                         self.shadowed.add(a)
             group = group[-1:]
+        elif (group and vcf is not None and self.sem is not None
+              and any(len(r["alts"]) > 1 for _lid, r in group)
+              and self.sem.numbering(vcf, self.chrom, group[0][1]["pos1"]) == "split"):
+            return
         elif sum(1 for _lid, r in group if len(r["alts"]) > 1) > 1:
             # two lines of several ALTs: each entry keeps its line's raw allele numbers, and
             # CRISPRme's readers cannot tell the two numberings apart (METHODS section 4: an
@@ -2465,10 +2482,12 @@ class Semantics(object):
     ``values`` maps (dataset or None, chromosome or None) to a dict of those, None for one
     the records do not tell; ``dataset_of`` maps a VCF path to its dataset."""
 
-    def __init__(self, release2100, values, dataset_of):
+    def __init__(self, release2100, values, dataset_of, workdir=None):
         self.release2100 = release2100
         self.values = values
         self.dataset_of = dataset_of
+        self.workdir = workdir
+        self._dicts = {}   # (dataset, chromosome) -> the run's dictionary, or None
 
     def _get(self, vcf, chrom, what):
         ds = self.dataset_of.get(getattr(vcf, "path", vcf))
@@ -2496,6 +2515,51 @@ class Semantics(object):
     @property
     def capped(self):
         return not self.release2100
+
+    def numbering(self, vcf, chrom, pos1):
+        """How the run's own per-sample dictionary numbers the alleles of the VCF's dataset at
+        ``pos1``: "split" where its value there holds no allele number above 1 (CRISPRitz
+        2.10.0 writes every ALT's entry in split form, 1 its own ALT: CRISPRme's readers tie
+        each to 1), "raw" where it holds one (a line of several ALTs written with its own
+        numbers, 1|2: CRISPRitz before its split form, up to c18c575), None where nothing of
+        the run tells (no dictionary of the dataset in its working directory, or no value
+        there at the position)."""
+        ds = self.dataset_of.get(getattr(vcf, "path", vcf))
+        if not self.release2100 or self.workdir is None or ds is None:
+            return None
+        if (ds, chrom) not in self._dicts:
+            self._dicts[(ds, chrom)] = read_dictionary(self.workdir, ds, chrom)
+        value = (self._dicts[(ds, chrom)] or {}).get("%s,%d" % (chrom, pos1))
+        if value is None:
+            return None
+        return "raw" if numbers_above_one(value) else "split"
+
+
+def read_dictionary(workdir, dataset, chrom):
+    """The per-sample dictionary CRISPRitz add-variants wrote for ``dataset`` on ``chrom``
+    ({"<chrom>,<POS>": value}), Dictionaries/dictionaries_<dataset>/my_dict_<chrom>.json or
+    .json.gz in the run's working directory, or None where there is none (or it cannot be
+    read). Read only where a window holds a position with a line of several ALTs."""
+    for name in ("my_dict_%s.json" % chrom, "my_dict_%s.json.gz" % chrom):
+        path = os.path.join(workdir, "Dictionaries", "dictionaries_" + dataset, name)
+        if os.path.isfile(path):
+            try:
+                with (gzip.open(path, "rt") if path.endswith(".gz") else open(path)) as fh:
+                    return json.load(fh)
+            except (OSError, ValueError, EOFError):
+                return None
+    return None
+
+
+def numbers_above_one(value):
+    """Whether a dictionary value ("<sample>:<GT>,...;<REF>,<ALT>;<ID>;<AF>" entries joined
+    by '$') holds a genotype with an allele number above 1."""
+    for entry in value.split("$"):
+        for carrier in entry.rsplit(";", 3)[0].split(","):
+            gt = carrier.rsplit(":", 1)[-1] if ":" in carrier else ""
+            if any(a.isdigit() and int(a) > 1 for a in re.split(r"[|/]", gt)):
+                return True
+    return False
 
 
 def _read_log(resdir):
@@ -2819,7 +2883,7 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
                 alls = False   # format 2 with no Q while the VCF has four bases somewhere
             val["all_alleles"] = alls
             values[(ds, ch)] = val
-    return Semantics(True, values, dataset_of), None
+    return Semantics(True, values, dataset_of, workdir), None
 
 
 def four_base_position(vcf, chrom):
@@ -7496,14 +7560,17 @@ def main(argv=None):
         sys.stderr.write(
             "ERROR: %s hold%s two or more VCF lines that each list several ALTs (a REF of "
             "one base, one ALT of one character at least, FILTER PASS or '.'), on a variant "
-            "genome that codes every allele (CRISPRitz 2.10.0): its dictionary lists the "
-            "one-base ALTs of every such line in the position's one value, each entry with "
-            "its line's own allele numbers (1|2), which CRISPRme's readers cannot tell apart "
+            "genome that codes every allele, and the run's dictionary lists the one-base ALTs "
+            "of every such line in the position's one value with each line's own allele "
+            "numbers (1|2: CRISPRitz before its split form, up to c18c575), or no dictionary "
+            "of the run tells how (Dictionaries/dictionaries_<dataset>/my_dict_<chrom>.json[.gz]"
+            " of its working directory): such numbers CRISPRme's readers cannot tell apart "
             "(METHODS section 4: an ALT can be tied to the other line's number and read on "
             "another haplotype slot), and this checker does not model what CRISPRme then "
             "lists: the run is not checked (the first such positions found: the check "
-            "stops at them). Split such lines (bcftools norm -m -any, as the published "
-            "panels are built) or join them into one, and search again.\n"
+            "stops at them). Build the dataset again with CRISPRitz 2.10.0, which writes "
+            "each ALT's entry in split form, or split such lines (bcftools norm -m -any, as "
+            "the published panels are built) or join them into one, and search again.\n"
             % (where(mixed), "s" if len(mixed) == 1 else ""))
     if lower_snv:
         sys.stderr.write(
