@@ -71,21 +71,24 @@ CRISPRme mirror (minutes, not the multi-hour legacy setup):
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 NRR reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
-  crisprme.py download --what index --index-name NRR_3_hg38 --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py download --what index --index-name 20-NRR_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (HGDP + 1000 Genomes, 4,091 samples, re-phased)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
-  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 ```
+
+(`:latest` is the newest release, whose index names these are; to pin a release instead, see
+the [Docker Quickstart](DOCKER_QUICKSTART.md)'s note on reproducibility.)
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
-pre-downloaded `NRR_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
+pre-downloaded `20-NRR_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
 4,091 samples — the recommended default) already makes the default web
 search variant-aware. Sample-level analyses / named carriers / personal risk cards
 come from the **genotype store bundled with that index** (fetched by `download --what
@@ -101,7 +104,7 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.8.1 crisprme.py web-interface
+  pinellolab/crisprme:latest crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
@@ -280,7 +283,7 @@ columns, such as the hosted `hg38_mega` VCFs) is listed too, but **Submit** refu
 search of it, built here or not, and the note under the bulge options says why: a search
 reports its variants only through a per-dataset allele-frequency registry, which a build
 here does not make. To search the mega variants, download the published
-`NRR_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
+`20-NRR_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
 dataset whose sample list is missing too, and the note says so, with how to get one:
 removing a VCF dataset in Settings takes the list it wrote for it and leaves the variant
 index built from it, and the dataset stays listed here only if its name begins with the
@@ -295,11 +298,14 @@ same name, to search that index again.
 
 By default the form exposes a single **Maximum edits** slider — the total number
 of differences (mismatches + DNA/RNA bulges) allowed between a guide and an
-off-target (default **6**, which resolves to 4 mismatches + 1 DNA + 1 RNA bulge;
-raise it for a deeper, slower search). This is all you
-need for a quick search.
+off-target (default **6**, which resolves to 4 mismatches + 1 DNA + 1 RNA bulge, the
+default budget, as on the command line). Lower it for a faster, narrower search; the
+slider caps the total of the per-type caps below, so a deeper search (more mismatches,
+or 2 bulges of a type) is set in **Advanced options**. This is all you need for a quick
+search.
 
-Open **Advanced options** to set the per-type caps individually instead:
+Open **Advanced options** to set the per-type caps individually instead (defaults: 4
+mismatches, 1 DNA bulge, 1 RNA bulge):
 
 - **Mismatches** — the maximum number of base mismatches between the spacer and
   the protospacer. The web interface supports up to **6 mismatches**.
@@ -457,7 +463,7 @@ queued and the interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.8.1 crisprme.py web-interface
+>   pinellolab/crisprme:latest crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme && crisprme.py web-interface)
 > ```
@@ -882,7 +888,7 @@ variants.
 2. **Reference-only selected** — keep the pre-selected **variant** index (not **Reference
    only**) to get variant off-targets.
 3. **Variant index not installed** — re-run
-   `crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA`
+   `crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA`
    (the recommended default panel).
 4. **Confirm success** — `Results/<name>/log_error_no_check.txt` is empty and
    `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its

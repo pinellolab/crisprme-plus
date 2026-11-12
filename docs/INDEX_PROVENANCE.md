@@ -4,6 +4,13 @@ Which published index is valid, for which client, and why — with the measureme
 behind each claim. Written for the 2.8.1 release, when CRISPRitz 2.9.1 changed
 the index builder and a second, non-backward-compatible index family appeared.
 
+> **The indexes of 2.10.0** are rebuilt by CRISPRitz 2.10.0 in index format 2 and published in
+> their own repo, `lucapinello/crisprme-indexes-format2`, from the index set
+> [`seq_script/rebuild/index_set_2.10.0.tsv`](../seq_script/rebuild/index_set_2.10.0.tsv), which
+> gives each archive's build and publish commands (`seq_script/rebuild/README.md`); their
+> provenance is recorded at that rebuild. This page covers the archives of 2.8.1 below, which stay
+> in `lucapinello/crisprme-data` and `lucapinello/crisprme-data-general-index` for 2.8.1.
+
 Two separate questions per archive:
 
 1. **Readability** — can an older CRISPRme release read it? Decided by the

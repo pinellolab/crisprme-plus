@@ -118,9 +118,9 @@ PAM_DEFINITIONS: Dict[str, Tuple[str, int]] = {
     "20bp-NAA-iSpyMacCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNAA", 3),
     # ---- SaCas9
     "22bp-NNGRRN-SaCas9.txt": (
-        "NNNNNNNNNNNNNNNNNNNNNNNNNGRRN",
+        "NNNNNNNNNNNNNNNNNNNNNNNNGRRN",
         6,
-    ),  # 22 nt guide + NNGRRN
+    ),  # 22 nt guide + NNGRRN (as the shipped PAMs/ file, which the index set builds from)
     # ---- CasX
     "TTCN-20bp-CasX.txt": ("TTCNNNNNNNNNNNNNNNNNNNNNN", -4),  # 5′ PAM (TTCN)
     # ---- Cas12a (Cpf1) variants

@@ -347,7 +347,7 @@ class TestCliBulgeCap(unittest.TestCase):
                     f"a search builds none there: it would stop on that after enriching the "
                     f"genome with the dataset's variants (hours on a human genome). Install one "
                     f"in that library (crisprme.py download --what index --index-name "
-                    f"{_MOTIF}_{n}_{_REF} if it is published, or crisprme.py build-index-only), "
+                    f"20-{_MOTIF}_{n}_{_REF} if it is published, or crisprme.py build-index-only), "
                     f"or run without --index-path, where a search takes an index of the working "
                     f"directory's library, pruned to this PAM where only such a one serves it, "
                     f"and builds one from the genome where none does (a "
@@ -514,7 +514,7 @@ class TestPreflightNoVariantIndex(unittest.TestCase):
                       f"{self.DS}, PAM NGG, 1 DNA and 1 RNA bulge(s), a 20-nt guide)", said)
         self.assertIn(f"NRG_3_{_REF}+{self.DS} (up to 2 bulge(s) of each type, built for a 20-nt "
                       "guide)", said)
-        self.assertIn(f"--index-name NGG_3_{_REF}+{self.DS} if it is published", said)
+        self.assertIn(f"--index-name 20-NGG_3_{_REF}+{self.DS} if it is published", said)
         self.assertEqual(len(said.splitlines()), 1)
 
     def test_a_deeper_budget_is_told_the_bulges_there(self):
@@ -725,8 +725,10 @@ class TestDictlessDefaults(unittest.TestCase):
             csrc = fh.read()
         self.assertRegex(csrc, r"max_total_edits\s*=\s*6",
                          "crisprme.py complete-search default max_total_edits must be 6")
-        # and the CLI bulge derivation is capped at a single bulge of each type
-        self.assertRegex(csrc, r"_SIMPLE_BULGE_CAP\s*=\s*1")
+        # and the CLI bulge derivation is capped at a single bulge of each type: the default
+        # budget, DEFAULT_BULGES, which assembly-search takes too
+        self.assertRegex(csrc, r"_SIMPLE_BULGE_CAP\s*=\s*DEFAULT_BULGES\b")
+        self.assertRegex(csrc, r"(?m)^DEFAULT_BULGES\s*=\s*1\b")
 
 
 class TestPruningNotePersisted(unittest.TestCase):

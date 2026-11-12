@@ -64,14 +64,22 @@ major.minor**: CRISPRme 2.10.z runs on CRISPRitz 2.10.z, then 2.11 on 2.11, and 
 
 - **CRISPRme X.Y.z requires CRISPRitz X.Y.\***. The Bioconda `crisprme` recipe pins
   `crispritz >=X.Y.0,<X.(Y+1)` (for 2.10.z, `crispritz >=2.10.0,<2.11`), the Dockerfile's
-  `ARG crispritz_ref` and `install_from_source.sh`'s `CRISPRITZ_REF` default name a CRISPRitz
-  X.Y tag (`v2.10.0`), and `crisprme.py --version` and `crispritz.py version` read X.Y alike.
+  `ARG crispritz_ref` and `install_from_source.sh`'s `CRISPRITZ_REF` default name the CRISPRitz
+  X.Y tag the release was tested with (`v2.10.0`), and `crisprme.py --version` and
+  `crispritz.py version` read X.Y alike.
 - **A breaking change in either package bumps the minor of both**: an index format, the
   enricher's output (the variant genome, the dictionaries, the indel log), a command line or a
   file one package reads of the other. A user can then tell at a glance which versions go
   together, and an index records the CRISPRitz that wrote it (`.index_meta.json`).
 - **A patch of one package moves only that package's patch number**, and needs no release of
   the other while it keeps both packages' interfaces.
+- **When CRISPRitz gets a patch, the pins** (decision D5, Luca, 2026-11-08): the Docker image
+  (`ARG crispritz_ref`) and `install_from_source.sh` (`CRISPRITZ_REF`) pin the exact CRISPRitz
+  tag the release was tested with (a CRISPRme release tested on CRISPRitz 2.10.1 builds
+  `v2.10.1`). The Bioconda range stays `crispritz >=X.Y.0,<X.(Y+1)`: its lower bound moves up
+  only when a CRISPRitz patch fixes something CRISPRme depends on, and then to that patch
+  (`>=2.10.1,<2.11`). So the recipe's lower bound can be below `crispritz_ref`, never above it,
+  and both stay within X.Y.
 
 2.10.0 is the first release under the policy: CRISPRme goes from 2.8.1 to 2.10.0, skipping
 2.9.x, to meet CRISPRitz 2.10.0, which writes index format 2. Before it the two numbered apart
@@ -123,7 +131,7 @@ typical timeline is:
 | `crisprme.py` | `version = "X.Y.Z"` (this also sets `__version__`, surfaced by `crisprme.py --version`) |
 | `Dockerfile` | `ARG crispritz_ref=vA.B.C` — the CRISPRitz tag the image builds from. There is **no** `ARG crisprme_version`: the image is built from source (`COPY .`), so CRISPRme's own version is pinned only in `crisprme.py`. Its header comment (`# CRISPRme+ X.Y.Z — Python 3.11 image, built FROM SOURCE.`) names the release: bump it by hand, as `prepare_release.py` leaves it. |
 | Git tag / GitHub release | tag `vX.Y.Z`, notes from the changelog |
-| `recipes/crisprme/meta.yaml` (in `bioconda/bioconda-recipes`) | `{% set version = "X.Y.Z" %}`, `source.sha256`, `build.number: 0`, and the bounded `crispritz >=A.B.C,<…` pin whenever `crispritz_ref` moves (see the top of this page) |
+| `recipes/crisprme/meta.yaml` (in `bioconda/bioconda-recipes`) | `{% set version = "X.Y.Z" %}`, `source.sha256`, `build.number: 0`, and the bounded `crispritz >=X.Y.0,<X.(Y+1)` pin: a new minor moves both bounds; within a minor the lower bound moves only to a CRISPRitz patch that fixes something CRISPRme depends on, not with every `crispritz_ref` ([Version policy](#version-policy)) |
 
 The Bioconda `source.url` is templated
 (`.../archive/refs/tags/v{{ version }}.tar.gz`) and must not be edited by hand —
@@ -216,7 +224,8 @@ gh pr list --repo bioconda/bioconda-recipes --search "crisprme in:title" --state
 
 Verify the auto-PR carries the correct version, sha256, and `build.number: 0`, and
 that its `crispritz` pin is the bounded one this release needs (the bot only moves the
-version and the hash, so a release that moves `crispritz_ref` corrects the pin by hand),
+version and the hash, so a release that moves the pin, to a new minor or to a lower bound the
+version policy raises, corrects it by hand),
 wait for CI/lint to go green, and once it is approved, comment
 `@BiocondaBot please merge`. To ask the bot to scan immediately rather than wait,
 comment `@BiocondaBot autobump crisprme` on a recipe PR/issue.

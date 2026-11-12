@@ -3611,8 +3611,9 @@ def index_page() -> html.Div:
             html.H4("Select thresholds", style={"fontSize": "2.2rem"}),
             # PRIMARY control: a single "maximum total edits" slider (mismatches +
             # bulges). This is the simple, non-expert knob; the per-type mismatch /
-            # bulge limits live under "Advanced" below and stay wide open by default
-            # so the slider is the governing constraint (CRISPRme issue #107).
+            # bulge limits live under "Advanced" below, at the default budget (4
+            # mismatches, 1 DNA and 1 RNA bulge; up to 6, 2 and 2), and the slider caps
+            # their total (CRISPRme issue #107).
             html.Div(
                 [
                     html.P(
@@ -4284,7 +4285,8 @@ def sync_max_edits_bound(mms, dna, rna, cur_val) -> Tuple:
     caps. DNA and RNA bulges are INDEPENDENT per-type caps and a single alignment
     can carry BOTH, so the most total edits a single off-target can carry is
     ``mismatches + DNA bulges + RNA bulges`` (their SUM, not the larger of the two).
-    With the defaults 6 / 2 / 2 this is 6 + 2 + 2 = 10. This matches what the search
+    With the dropdowns' highest values 6 / 2 / 2 this is 6 + 2 + 2 = 10; with their
+    defaults, the default budget 4 / 1 / 1, it is 6. This matches what the search
     actually submits as --max-total-edits (change_url uses mm + dna + rna), so the
     slider ceiling no longer under-reports the achievable total (which used to make
     in-budget results look like they exceeded the slider's max). The marks and the

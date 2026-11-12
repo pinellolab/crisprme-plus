@@ -1,8 +1,9 @@
 #!/bin/bash
 # gnomAD HGDP+1kGP RE-PHASED single-source, PHASED variant-index build (as-run, resumable) —
 # the "real-haplotypes" variant index NRG_3_hg38+hg38_HGDP1kGP, the default before 2.10.0. The
-# default since 2.10.0, NRR_3_hg38+hg38_HGDP1kGP, is the same build with the NRR PAM
-# (PAM=<data folder>/PAMs/20bp-NRR-SpCas9.txt; the index then says NRR where this says NRG).
+# default since 2.10.0, 20-NRR_3_hg38+hg38_HGDP1kGP (NRR_3_hg38+hg38_HGDP1kGP in 2.8.1), is the
+# same build with the NRR PAM (PAM=<data folder>/PAMs/20bp-NRR-SpCas9.txt; the index then says
+# NRR where this says NRG).
 #
 # WHAT THIS IS: a standard CRISPRme variant-aware index built by ENRICHING hg38 with the gnomAD
 # v3.1.2 HGDP+1kGP jointly-called callset, RE-PHASED by us with SHAPEIT5 (phase_common scaffold
@@ -44,6 +45,10 @@
 # manifest (genotyped-phased), so NO dev overlay is needed (unlike onekg2021_build.sh).
 #
 # PATHS are as-run cluster paths; override via env.
+# EXIT STATUS: non-zero at the first step that fails (the samples of the BCFs, a chromosome's
+# VCF-PREP, the build), so that a rebuild that runs it stops there; a chromosome the genome folder
+# holds needs its re-phased BCF (one it does not hold, on a test genome, is not built, whether $RP
+# holds its BCF or not).
 set -u
 SIF=${SIF:-/srv/local/lp698_crisprme_v262_cleanroom/crisprme.sif}       # apptainer image w/ crisprme v2.6.2 env
 # PAR-aware chrX ploidy overlay: 4 PostProcess files carrying the position-routed
@@ -72,7 +77,8 @@ run() { apptainer exec -B /srv/local -B "$B/tmp:/tmp" \
 
 # 0) samplesID derivation (prescribed metadata, VCF-header order) + chrX ploidy/sex files.
 echo "=== SAMPLESID + chrX ploidy/sex $(date +%H:%M:%S) ==="
-run "bcftools query -l $RP/hgdp1kg.chr22.rephased.bcf" > "$B/samplesIDs/.order.txt"
+run "bcftools query -l $RP/hgdp1kg.chr22.rephased.bcf" > "$B/samplesIDs/.order.txt" \
+  || { echo "[error] cannot read the samples of $RP/hgdp1kg.chr22.rephased.bcf" >&2; exit 1; }
 awk -F'\t' 'BEGIN{OFS="\t"}
   NR==FNR{ if(FNR>1){ pop[$1]=($176==""?"unknown":$176); sup[$1]=($177==""?"unknown":$177);
                        f=tolower($80); sex[$1]=(f=="true"||f=="1"?"female":(f=="false"||f=="0"?"male":"unknown")) } next }
@@ -82,7 +88,9 @@ awk -F'\t' 'BEGIN{OFS="\t"}
   > "$B/samplesIDs/hg38_HGDP1kGP.samplesID.txt"
 rm -f "$B/samplesIDs/.order.txt" "$B/samplesIDs/.body.txt"
 echo "hg38_HGDP1kGP.samplesID.txt" > "$B/hgdp1kgp.samplesID.config.txt"
-echo "samplesID rows: $(($(wc -l < "$B/samplesIDs/hg38_HGDP1kGP.samplesID.txt") - 1))  [expect 4091]"
+NSAMPLES=$(($(wc -l < "$B/samplesIDs/hg38_HGDP1kGP.samplesID.txt") - 1))
+echo "samplesID rows: $NSAMPLES  [expect 4091]"
+[ "$NSAMPLES" -gt 0 ] || { echo "[error] no sample in $B/samplesIDs/hg38_HGDP1kGP.samplesID.txt" >&2; exit 1; }
 # chrX +fixploidy inputs: non-PAR males haploid; PAR males + all females diploid (fall-through)
 printf 'chrX\t%s\t%s\tM\t1\n*\t*\t*\tM\t2\n*\t*\t*\tF\t2\n' "$NONPAR_FROM" "$NONPAR_TO" > "$B/chrX.ploidy.txt"
 awk -F'\t' 'NR>1{print $1"\t"(($4=="male")?"M":"F")}' "$B/samplesIDs/hg38_HGDP1kGP.samplesID.txt" > "$B/chrX.sex.txt"
@@ -90,27 +98,33 @@ awk -F'\t' 'NR>1{print $1"\t"(($4=="male")?"M":"F")}' "$B/samplesIDs/hg38_HGDP1k
 # 1) VCF-PREP each re-phased BCF -> build-ready VCF. Strip the mis-declared PP FORMAT field, split
 #    multiallelics + left-align against the reference (norm -m -any -f), recompute AF/AC/AN from the
 #    genotypes (+fill-tags), SORT (left-alignment can reorder), bgzip + tabix. chrX additionally runs
-#    +fixploidy FIRST (non-PAR males x|x -> x). Resumable (skips a chrom whose .tbi exists).
+#    +fixploidy FIRST (non-PAR males x|x -> x). Resumable (skips a chrom whose .tbi exists; the
+#    .tbi is written last, after the whole pipeline succeeded: pipefail, so a stage that fails
+#    leaves no .tbi and stops the recipe, which a re-run then redoes).
 echo "=== VCF-PREP $(date +%H:%M:%S) ==="
 for c in $CHRS; do
   out="$B/VCFs/hg38_HGDP1kGP/hgdp1kgp.$c.norm.vcf.gz"
   [ -s "$out.tbi" ] && { echo "[$c] exists -> skip"; continue; }
+  # the genome folder first: a chromosome it does not hold is not built (a test genome of a few
+  # chromosomes, whose $RP holds every chromosome's BCF, as the real one does); one it holds
+  # needs its BCF
+  [ -e "$GENOME/$c.fa" ] || { echo "[$c] not in $GENOME -> skip"; continue; }
   in="$RP/hgdp1kg.$c.rephased.bcf"
-  [ -s "$in" ] || { echo "[$c] NO re-phased BCF -> skip"; continue; }
+  [ -s "$in" ] || { echo "[error] [$c] no re-phased BCF $in, and $GENOME holds $c" >&2; exit 1; }
   if [ "$c" = "chrX" ]; then
-    run "mkdir -p /tmp/sort_$c; bcftools view $in -Ou \
+    run "set -o pipefail; mkdir -p /tmp/sort_$c; bcftools view $in -Ou \
           | bcftools +fixploidy -Ou -- -p $B/chrX.ploidy.txt -s $B/chrX.sex.txt \
           | bcftools annotate -x FORMAT/PP -Ou \
           | bcftools norm -m -any -f $GENOME/$c.fa -Ou \
           | bcftools +fill-tags -Ou -- -t AN,AC,AF \
-          | bcftools sort -T /tmp/sort_$c -Oz -o $out - && tabix -f -p vcf $out; rm -rf /tmp/sort_$c"
+          | bcftools sort -T /tmp/sort_$c -Oz -o $out - && tabix -f -p vcf $out; s=\$?; rm -rf /tmp/sort_$c; exit \$s"
   else
-    run "mkdir -p /tmp/sort_$c; bcftools view $in -Ou \
+    run "set -o pipefail; mkdir -p /tmp/sort_$c; bcftools view $in -Ou \
           | bcftools annotate -x FORMAT/PP -Ou \
           | bcftools norm -m -any -f $GENOME/$c.fa -Ou \
           | bcftools +fill-tags -Ou -- -t AN,AC,AF \
-          | bcftools sort -T /tmp/sort_$c -Oz -o $out - && tabix -f -p vcf $out; rm -rf /tmp/sort_$c"
-  fi
+          | bcftools sort -T /tmp/sort_$c -Oz -o $out - && tabix -f -p vcf $out; s=\$?; rm -rf /tmp/sort_$c; exit \$s"
+  fi || { echo "[error] [$c] VCF-PREP failed" >&2; exit 1; }
   echo "[$c] prep done"
 done
 
@@ -120,9 +134,12 @@ echo "=== BUILD-INDEX-ONLY (RAW, NRG, bDNA2/bRNA2, SNP+indel) $(date +%H:%M:%S) 
 run "export CRISPRME_REGISTRY_COMPRESS=0 CRISPRME_INDEL_SNP=1; cd $B; \
      crisprme.py build-index-only --genome $GENOME --pam $PAM --bDNA 2 --bRNA 2 --thread $THREADS \
        --vcf $B/VCFs/hg38_HGDP1kGP --samplesID $B/hgdp1kgp.samplesID.config.txt --path $B"
-echo "BUILD_EXIT=$? $(date +%H:%M:%S)"
+BUILD_EXIT=$?
+echo "BUILD_EXIT=$BUILD_EXIT $(date +%H:%M:%S)"
+[ "$BUILD_EXIT" -eq 0 ] || { echo "[error] build-index-only failed (exit $BUILD_EXIT)" >&2; exit "$BUILD_EXIT"; }
 # the index as the SIF's CRISPRme names it: NRG_3_hg38+hg38_HGDP1kGP before 2.10.0, the name with the
 # guide length and the side from 2.10.0 on (20-NRG_3_hg38+hg38_HGDP1kGP), the PAM's for another PAM=
 for idx in "$B"/genome_library/*_3_hg38+hg38_HGDP1kGP; do
   [ -d "$idx" ] && echo "index: $idx (+ _INDELS)"
 done
+exit 0

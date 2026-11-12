@@ -211,7 +211,7 @@ on run
       if r is "Download & Start" then
         set dmount to "-v " & quoted form of dataDir & ":/DATA -w /DATA " & img
         set dlRef to (quoted form of dk) & " run --rm " & dmount & " crisprme.py download --what all --path /DATA"
-        set dlVar to (quoted form of dk) & " run --rm " & dmount & " crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA"
+        set dlVar to (quoted form of dk) & " run --rm " & dmount & " crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA"
         set mark to quoted form of my setupMark()
         do shell script "touch " & mark
         runInTerminal("if " & dlRef & " && " & dlVar & "; then rm -f " & mark & "; " & runCmd & " && sleep 3 && open http://localhost:8080 && echo && echo 'DONE — CRISPRme is running and your browser is open. You can close this window.'; else echo; echo 'The download did not finish: see above, then open CRISPRme and click Start again to finish setting up.'; fi", "First-time setup — downloading ~70 GB, then starting CRISPRme")

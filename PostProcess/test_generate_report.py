@@ -1196,7 +1196,7 @@ class TestGenerateReport(unittest.TestCase):
             "carriers need not carry every variant in it. To get the tiers, rebuild the index "
             "with <code>build-index-only --samplesID</code>, or with Build an index locally in "
             "the web's Settings, or download a prebuilt one (<code>crisprme.py download --what "
-            "index --index-name NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index "
+            "index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index "
             "in Settings).")
         two = row({**base, "untiered": ["hg38_1000G", "hg38_<x>"]})
         for said in ("named carrier samples only for <code>hg38_1000G</code>, "
@@ -1392,7 +1392,7 @@ class TestGenerateReport(unittest.TestCase):
             "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or with "
             "Build an index locally in the web's Settings, or download a prebuilt one "
             "(<code>crisprme.py download --what index --index-name "
-            "NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index in Settings). ")))
+            "20-NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index in Settings). ")))
         plural = cell({**base, "untiered": two}, "Search mode")
         for said in ("<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
                      "in either mode their variants' allele frequencies",
@@ -1609,7 +1609,36 @@ class TestGenerateReport(unittest.TestCase):
         near the top-ranked sites (they said so of a per-sample search on the tiers too).
         Both say how such a window is reported, and that a flagged row that names no carrier,
         a sites-only dataset's, is still its window's greedy worst-case alignment."""
-        rd = os.path.join(self.tmp, "Results", "job")
+        self.since_2_10_0((".carrier_gate.json", '{"status": "per-sample"}'))
+
+    def test_nor_one_whose_carrier_gate_failed_or_whose_record_was_lost(self):
+        """The report took results without .carrier_gate.json for a search before 2.10.0, and
+        the search removed it when the carrier gate failed: a per-sample report of datasets
+        without the tiers then said that a dense window can be reported by its greedy
+        worst-case alignment, which no search since 2.10.0 does (stage-1 review R3-N6). A
+        failed gate's sidecar now says it failed, and the inputs card says so; with none, the
+        run's .version.txt, of 2.10.0 or later, says the same. Results of an earlier release
+        (no sidecar; a .version.txt before 2.10.0, or none) read as before. (A copy of the
+        folder by a glob loses every dot file, the run's mode and datasets with these: it reads
+        as a population-level search, which none of these texts concerns.)"""
+        html = self.since_2_10_0((".carrier_gate.json",
+                                  '{"status": "failed", "companion": null}'), job="failed")
+        self.assertTrue("The carrier gate failed in this search" in html)
+        for version in ("2.10.0", "2.10.1", "2.11.0rc1"):
+            self.since_2_10_0((".version.txt", f"crisprme_version\t{version}\n"),
+                              job=f"lost_{version}")
+        for version in ("2.8.1", "2.9.1", None):
+            html = self.since_2_10_0(
+                *(((".version.txt", f"crisprme_version\t{version}\n"),) if version else ()),
+                job=f"earlier_{version}", greedy=True)
+            self.assertFalse("The carrier gate" in html, version)
+
+    def since_2_10_0(self, *records, job="job", greedy=False):
+        """The report of a per-sample search of a dataset without the tiers, whose results
+        hold ``records`` (name, text) beside the rest: none of its texts says a dense window
+        can be reported by a greedy alignment (its report.html, returned), or, ``greedy``,
+        it reads as one of a search before 2.10.0, which could."""
+        rd = os.path.join(self.tmp, "Results", job)
         os.makedirs(rd)
         dense = ("high_variant_density (12 variants): the haplotypes its carriers have are "
                  "reported here")
@@ -1626,7 +1655,7 @@ class TestGenerateReport(unittest.TestCase):
                             else dense if fields[1] in ("chr5", "chr7") else "NA")
                     dst.write("\t".join(fields + [flag]) + "\n")
             out = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir, report_full=True,
-                                  out_zip=os.path.join(self.tmp, "since290_report.zip"))
+                                  out_zip=os.path.join(self.tmp, f"since290_{job}_report.zip"))
             with zipfile.ZipFile(out) as zf:
                 return {n: zf.read(n).decode("utf-8") for n in zf.namelist()
                         if n.endswith((".html", ".tsv"))}
@@ -1634,7 +1663,7 @@ class TestGenerateReport(unittest.TestCase):
         for name, text in ((".search_mode", "per-sample"),
                            (".untiered_datasets", "hg38_1000G_HGDP\n"),
                            (".variant_datasets", "hg38_1000G_HGDP\n"),
-                           (".carrier_gate.json", '{"status": "per-sample"}'),
+                           *records,
                            ("job_chr5.high_variant_density_regions.bed",
                             "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
                             "iupac_protospacer\n"
@@ -1645,12 +1674,17 @@ class TestGenerateReport(unittest.TestCase):
         files = results()
         top = [line.split("\t") for line in files["data/top1000.tsv"].splitlines()]
         observed = top[0].index("Observed")
+        # (the rows' own notes say their window is reported by its carriers' haplotypes)
         self.assertEqual({r[observed] for r in top[1:] if r[1] in ("chr5", "chr7")},
-                         {"2 cis carriers"})
-        # (no assertIn/assertNotIn on the page: their message would print all of it)
+                         {"2 cis carriers"}, job)
         html = files["report.html"]
+        if greedy:
+            self.assertTrue("a window can still be reported by its greedy worst-case "
+                            "alignment" in html, job)
+            return html
+        # (no assertIn/assertNotIn on the page: their message would print all of it)
         self.assertEqual(re.findall(r".{0,80}(?:poss\. chimera|greed).{0,80}", html,
-                                    re.I | re.S), [])
+                                    re.I | re.S), [], job)
         for said in ("named carrier samples only for",
                      "Highly complex (high-variant-density) regions:</strong> 1 window(s) "
                      "overlapping the top-ranked reported off-targets carry so many "
@@ -1664,10 +1698,11 @@ class TestGenerateReport(unittest.TestCase):
             self.assertTrue(said in html, said)
         # a flagged row that names no carrier: a sites-only dataset's, the population-level
         # analysis's
-        html = results(no_carrier=("chr7",))["report.html"]
-        self.assertEqual(html.count("; a flagged row that names no carrier, a sites-only "
+        page = results(no_carrier=("chr7",))["report.html"]
+        self.assertEqual(page.count("; a flagged row that names no carrier, a sites-only "
                                     "dataset's, is its window's greedy worst-case alignment, "
-                                    "as in a population-level search."), 2)
+                                    "as in a population-level search."), 2, job)
+        return html
 
     def test_variant_contributed_prose_tracks_whether_file_is_bundled(self):
         """The 'Variant-contributed sites' row must not claim variant_created.tsv is

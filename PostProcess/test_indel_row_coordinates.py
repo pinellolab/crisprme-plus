@@ -25,8 +25,10 @@ Since 2.10.0 a target whose first base is one an insertion adds starts at the in
 anchor (INSIDE), and a PAM holding inserted bases, or a deletion's junction, is judged
 wherever in its repeat the VCF writes the indel (indel_snp_cis.pam_reference_place): a
 target whose PAM an insertion adds right after a reference protospacer does not move, and
-its PAM is not created on a tandem duplication of the PAM's bases or where the reference
-holds another PAM beside the protospacer (DUPS); the geometries where that rule reads
+its PAM is not created on a tandem duplication of the PAM's bases, and is created where
+every placement makes it wholly of the inserted bases, even beside another valid PAM of the
+reference (decision D4), and where the reference holds no PAM beside the protospacer (DUPS);
+the geometries where that rule reads
 another PAM than 2.10.0's unreleased drafts did (PLACED: a repeat insertion moved off the
 PAM, the reference PAM beside the protospacer of a row that starts on its anchor, a deletion
 across a - strand PAM, Cas12a on both strands, and complex records, judged as their replaced
@@ -197,18 +199,21 @@ class _PlantedInsertions(object):
 # shown, the reference's bases after the protospacer (forward), the expected PAM_gen.) The
 # row does not move. Where the insertion copies the reference's own PAM there (a tandem
 # duplication) the REF alignment is the ALT, and a placement past it leaves the PAM on the
-# reference's own: not created; another valid PAM beside the protospacer: not created
-# either (the PAM's place beside the protospacer, whose last base is a reference one); no
-# PAM there, it is.
+# reference's own: not created. Where every placement makes the PAM wholly of the inserted
+# bases, it is an additional PAM: created, even beside another valid PAM of the reference
+# (decision D4; before it that reference PAM beside the protospacer read not created). Where
+# the insertion can also sit past the PAM's first base (TGG beside TCA: one base right;
+# TAAA beside TAAT: three), the reference PAM beside the protospacer decides: none there,
+# created.
 DUPS = {
     "3p": [
         ("+", G20 + "TGG", "TGG", "n"),        # a tandem duplication: REF = ALT
-        ("+", G20 + "TGG", "AGG", "n"),        # the reference's AGG at the PAM's place
+        ("+", G20 + "TGG", "AGG", "TGG"),      # an additional PAM beside the reference's AGG
         ("+", G20 + "TGG", "TCA", "TGG"),      # no PAM there: created
     ],
     "5p": [
         ("-", "TTTA" + G23, "TAAA", "n"),      # a tandem duplication of TAAA (TTTA on -)
-        ("-", "TTTA" + G23, "GAAA", "n"),      # TTTC on - at the PAM's place
+        ("-", "TTTA" + G23, "GAAA", "TTTA"),   # an additional PAM beside TTTC on -
         ("-", "TTTA" + G23, "TAAT", "TTTA"),   # ATTA on -: created
     ],
 }
@@ -272,8 +277,9 @@ def _placed_sites():
             # created [the window CCA, TGG on -: n]
             ("D1", "-", "CCAG" + rc20 + "TTGCA", (1, "CA", "C"), G20 + "CGG", 0, 0, "CGG"),
             # (-) TTCCA after the anchor G, a target from its 3rd base, the PAM wholly
-            # inserted, the reference CCG (CGG on -) beside the protospacer: n [TGG]
-            ("W2", "-", "CCG" + rc20 + "TTGCA", (2, "G", "GTTCCA"), G20 + "TGG", 5, 2, "n"),
+            # inserted wherever the insertion sits, beside the reference's CCG (CGG on -):
+            # an additional PAM, created (decision D4) [TGG; before D4: n]
+            ("W2", "-", "CCG" + rc20 + "TTGCA", (2, "G", "GTTCCA"), G20 + "TGG", 5, 2, "TGG"),
             # complex records (REF bases replaced and bases added or lost), judged as their
             # replaced bases, read as the REF bases they replace, and their added (lost)
             # bases, placed as an insertion's (a deletion's); in brackets, on
@@ -500,11 +506,12 @@ class RowCoordinates(unittest.TestCase):
         """A target whose PAM an insertion adds right after its protospacer, which is
         reference bases from the row's first base on: the row starts at that base (it does
         not move), its REF text is the reference from there, and its PAM_gen is NA where
-        the insertion copies the reference's own PAM (REF = ALT) or the reference holds
-        another valid PAM beside the protospacer, the ALT's PAM where it holds none, as up
-        to 2.8.1, whose REF alignment read those bases. A 2.10.0 draft of the inserted-PAM rule
-        took every such PAM for created (TRAC, HGDP + 1000 Genomes: chr22:20586277 (+),
-        REF = ALT)."""
+        the insertion copies the reference's own PAM (REF = ALT), and the ALT's PAM
+        otherwise: an additional PAM made wholly of inserted bases beside another valid PAM
+        of the reference (decision D4; before it NA, as up to 2.8.1, whose REF alignment
+        read those bases), or one beside no PAM. A 2.10.0 draft of the inserted-PAM rule
+        took every such PAM for created, a tandem duplication's too (TRAC, HGDP + 1000
+        Genomes: chr22:20586277 (+), REF = ALT)."""
         p = _PlantedDuplications(side)
         got = self.analyze(p, side, gate)
         for s in p.sites:

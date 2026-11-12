@@ -57,6 +57,133 @@ and the `release-crisprme` skill.
   dense window's note (3; Changed) or a CRISPR-Bulge score's last digit (4). Such a score can
   differ in its last digit from one batch of the scorer, or one machine, to another: so do 7
   per-sample rows and 1 reference row of the indexes built again.
+- **The indexes of 2.10.0 have a Hugging Face repo of their own, and each variant panel's
+  Dictionaries and genotype store are published and fetched once (decisions C2 and P4).**
+  - **The location.** Every index of index format 2, which CRISPRme 2.8.1 refuses and 2.8.0
+    aborts on, or named for its guide length and side, goes to and comes from
+    `lucapinello/crisprme-indexes-format2` (`crisprme_hf.FORMAT2_HF_REPO`), which no earlier
+    release points at: `publish-index` routes it there by itself, by the format its `.bin` files
+    are in, and refuses to publish one in `lucapinello/crisprme-data` or
+    `lucapinello/crisprme-data-general-index`, the repos 2.8.1 reads, even when named; `download`
+    of such a name fetches it there; `download --what build-inputs` fetches 2.10.0's
+    enriched-genome kits there (2.8.1's, enriched by CRISPRitz 2.9.1 with one allele of a site and
+    narrower fake-indel windows, do not match 2.10.0's Dictionaries); `download --what
+    genotype-oracle` takes this repo's stores first, and 2.8.1's where it holds none; and the
+    web's Settings catalog lists this repo's indexes, no longer 2.8.1's (merged from two repos up
+    to now). The archives of 2.8.1 stay where they are, with a note on their cards that newer
+    indexes exist; `download` still fetches one by its name, and names first, before fetching
+    it, the index of 2.10.0 that replaces it, read offline from the index set (below): its build
+    of 2.10.0, or the index that serves its searches where it is not built again (`NNN_3_*`: the
+    general index `20-NNNNNNNN_3_*`, at the same speed; NRG on HPRC and mega: NRR there, pruned to
+    NRG, which gives the same rows more slowly than a dedicated NRG index: in the engine's search
+    of chr22's reference sequence, three NRG guides at 4 mismatches + 1 DNA + 1 RNA bulge, 107
+    against 57 s wall and 380 against 110 s CPU); and an
+    index of 2.10.0 not found says where it was looked for (the repo of index format 2, then
+    `lucapinello/crisprme-data`). `download --what all` fetches the
+    default reference index `20-NRR_3_hg38`, and 2.8.1's `NRR_3_hg38` where it cannot (saying
+    so, and naming no index of 2.10.0 in its place: the default is that one). Every
+    advice that names an index to download names 2.10.0's (`20-NRR_3_hg38+hg38_HGDP1kGP`;
+    complete-test, the search's refusals, the setup and download help, the per-sample banner,
+    the report, the one-click installers).
+  - **Once per panel.** A variant index of format 2 is published without its panel's
+    Dictionaries: its archive holds the index, its `_INDELS` index and a manifest that names the
+    panel's **Dictionaries bundle** (`dictionaries-bundle_<vcf>.tar.gz`: `registry_`,
+    `log_indels_`, `indel_genotypes_`, mega's `indel_af_`, a classic publish's `dictionaries_`,
+    and the samplesID lists) and its genotype store (`genotypes_<vcf>.tar.gz`) by name and
+    fingerprint (`crisprme_hf.companion_fingerprint`: the SHA-256 of one line per file, its path,
+    size and SHA-256, a gzip header's timestamp read as zeros, which no reader uses). Each
+    companion goes up with a record of what it holds (`<name>.json`) once: `publish-index` of a
+    panel's next index finds it in the repo, the same, and uploads the index alone; one built
+    against another build of the panel's Dictionaries is refused before anything is uploaded,
+    and `--replace-companions` replaces them for a panel built again as a whole. `download`
+    installs each once per panel: kept, and not fetched again, where the install holds it with
+    the fingerprint the index's manifest names (`Dictionaries/.<name>.json` records it and the
+    indexes installed with it); a repo's companion that is not that one is refused, nothing of
+    it installed; an archive of 2.8.1, which carries its own build's Dictionaries, is refused in a
+    working directory that holds a bundle of its panel, and a bundle that replaces another
+    build's Dictionaries names the installed indexes that read them. Up to 2.8.1 every variant
+    archive carried its own copy of the Dictionaries (16.5 GB of each HGDP + 1000 Genomes
+    archive), every install replaced them, and `publish-index` re-packed and re-uploaded the
+    genotype store with every index; for the seven HGDP + 1000 Genomes indexes of 2.10.0's set that
+    is six copies of about 16.5 GB not uploaded, and an install of a second index of a panel
+    fetches its own archive (and its PAM's reference index where that is not installed, as
+    every variant index does), not the Dictionaries again. An index of format 1 is
+    published and installed as before. The catalog no longer lists an `indel_genotypes_`
+    companion as an index (the phased indel genotypes `publish-index` has uploaded since 2.8.1).
+  - Covered by `PostProcess/test_panel_companions.py` (a fake hub that keeps its repos in a
+    folder: the routing, the catalog, the first and the next publish of a panel, another build
+    refused and replaced, a gzip timestamp, an index of format 2 never in a repo of 2.8.1, an
+    index of format 1 unchanged; the first and the next download of a panel, `--no-genotypes`, a
+    complete install that costs no call, a companion that is not the index's refused, an
+    archive of 2.8.1 refused over a bundle, a bundle over another build's Dictionaries named;
+    the successor of an archive of 2.8.1, and what a download says of it: the general index as
+    fast for NNN_3, NRR slower than an NRG index on HPRC and mega; 26 of its 28 tests fail on the
+    code before it, d3722b0, the other two pin 2.8.1's behaviour), `test_legacy_index_access` (the catalog of this release,
+    the repo of 2.8.1 still listed when named), and the advice and installer tests of
+    `test_defaults_and_index_flex`, `test_bulge_cap`, `test_index_resolution`,
+    `test_generate_report` and `test_build_index_only_atomic`.
+- **The index set of 2.10.0, the rebuild manifest** (`seq_script/rebuild/index_set_2.10.0.tsv`,
+  `seq_script/rebuild/README.md`; the lean set approved on 2026-11-08). Every archive the rebuild
+  builds and publishes, one line each, with its panel, PAM file, PAM, side, spacer length, N, the
+  build's bulges, the archives of 2.8.1 it replaces, and its build and publish commands: SpCas9 NRR
+  20-nt on the reference, HGDP + 1000 Genomes, HPRC and mega; NGG and NRG 20-nt, the general
+  PAM-less index (an 8-nt 3′ flank, 20-nt guide), SaCas9 NNGRRN 22-nt and Cas12a TTTN 5′ at 20 and
+  23 nt, each on the reference and HGDP + 1000 Genomes; every index of N = 3 (up to 2 bulges of
+  each type, the web's ceiling); each panel's Dictionaries bundle, genotype store and phased indel
+  genotypes (HGDP + 1000 Genomes, HPRC; mega, sites-only, a bundle alone); and the enriched-genome
+  kits. `NNN_3` is not built again. The rebuild follows it, one working directory per panel so that
+  a panel's indexes share its one Dictionaries, each with hg38 in `Genomes/hg38` as 2.8.1's default
+  index of each panel was built: all of it (455 contigs, as `download --what genome` installs it)
+  for the reference indexes and HGDP + 1000 Genomes (2.8.1's NRR, NGG and NNN indexes of the panel;
+  its NRG index held 24), its chromosomes chr1-22, X and Y alone for HPRC and mega (the 24 contigs
+  of 2.8.1's indexes of those panels; mega's recipe refuses a genome folder that holds any other
+  FASTA, and a working directory of all of hg38, which the README said for every panel, stopped the
+  rebuild at mega's build, after hours of the other panels'). The D7 readiness audit runs
+  `seq_script/rebuild/check_index_set.py` before any build: each PAM file gives its row's PAM, side
+  and spacer; N is the build's bulges + 1; each name is the one `build-index-only` gives the build
+  (`index_fit.index_name`), and routes to the format-2 repo; each index serves its own guide at 2 +
+  2 bulges (`index_fit.fits`); each variant index's reference index is in the set; each panel has
+  its companions once; every index archive of 2.8.1 is replaced by exactly one archive of the set,
+  the one a download of it names; every build and publish command is one bash reads (`bash -n`: a
+  note has a column of its own, and a panel companion, which the panel's first build writes and its
+  first `publish-index` uploads, has no command, `-`), and one the rebuild runs as written: from
+  the repository's root, each on its own (a `cd` only inside `( )`, so no command moves the next),
+  a recipe called by its repository path and given every input it would otherwise read from a path
+  it was written with (the cluster's, or its working directory's), each build first copying its PAM
+  file from the repository's `PAMs/` into its working directory's, `crisprme.py`, `hf` and `pigz`
+  run in the release image (`$RUN`), each command in its own panel's working directory, with the
+  variables the README lists, each read by a command; every upload to the format-2 repo, no token
+  in a command, and every variant index published `--dictless`, so that a panel's indexes name one
+  Dictionaries bundle. `--commands` prints the rebuild as one script, every build command, then
+  every publish command; it stops before its first command where one of those variables is not set
+  or a working directory's genome folder is not what the rebuild builds on (HGDP + 1000 Genomes'
+  not the reference's; HPRC's or mega's holding a FASTA but chr1-22, X and Y, or not those of the
+  reference's; mega's merged VCFs not of its genome folder's chromosomes; a test genome of chr22
+  runs), and at the first command that fails (each ends in `|| exit`: `set -e` does not stop at a
+  command of an `&&` list but its last; and the HGDP + 1000 Genomes and HPRC recipes now stop at a
+  step that fails, under Fixed). The check runs it dry, every program it calls stubbed, in
+  temporary working directories that hold the genome folders and sources the rebuild takes, from a
+  copy of the repository's root made of links: it runs to its end only where every script it calls
+  is there, every PAM file a build reads is in place and every file a publish uploads is where the
+  command says, and writes nothing into the repository's root. mega's build calls
+  `seq_script/merge_panels/mega_rebuild.sh`, the recipe of its full rebuild (decision D2), from the
+  merged VCFs `mega.<chr>.afmax.vcf.gz`. Covered by `PostProcess/test_index_set.py`, which mutates
+  the set and its commands and checks that each mutation is found: by the check and the dry run
+  where both can see it, by the dry run alone (a kit uploaded from the repository's root, or packed
+  into it), and by the check alone where the dry run cannot (an input left to a recipe's default, a
+  variable the rebuild does not set or no command reads, another panel's working directory, a
+  pending script the tree holds, an upload to another repo, a token, a variant index published with
+  its per-sample dictionaries, and the set's own errors); and which runs the script on genome
+  folders the rebuild does not take, where it stops before its first command. The PAM files the set
+  builds ship in `PAMs/`: `20bp-NNNNNNNN-NO-PAM.txt` (the general index), `22bp-NNGRRN-SaCas9.txt`
+  and `20bp-TTTN-Cas12a.txt`; and so do PAM files for the searches its indexes are published for,
+  which no shipped file gave: `22bp-NNGRRT-SaCas9.txt` (the CEP290 guides, served by the 22-nt
+  NNGRRN index, pruned) and `20bp-TTTV-Cas12a.txt` (served by `TTTN-20`). `download --what pams`
+  installs the data repo's `pams/` (and the default `20bp-NRR-SpCas9.txt`), so the release uploads
+  these there (`docs/RELEASE_CHECKLIST.md`); until then the web of a working directory set up by
+  `download` offers none of them. `crisprme.py setup` wrote its own `22bp-NNGRRN-SaCas9.txt`, with
+  a 23-nt guide (25 N, then GRRN), over the shipped one: it now writes the shipped file's 22-nt
+  guide (`test_setup_legacy_database`).
 - **Every index CRISPRme builds records what it holds, in `.index_meta.json`.** `build-index-only`,
   a search's own build and each sub-index of an INDELS index write the index format, the build
   PAM, its side, the flank and guide lengths, the budget, whether the PAM is all `N` and whether the
@@ -724,6 +851,22 @@ and the `release-crisprme` skill.
     method.
 
 ### Changed
+- **The default search budget, 1 DNA + 1 RNA bulge, is every search's** (decision of
+  2026-11-08). complete-search (given neither `--bDNA` nor `--bRNA`, up to the bulges an index it
+  can use or build holds) and the web form (its simple mode, and its Advanced panel's defaults,
+  which offer up to 2 of each) took it already; `assembly-search`, given neither, took **no**
+  bulges, and its web tab the form's 1 + 1: it now takes 1 DNA + 1 RNA bulge, searching each
+  haplotype on an index of its own, and says so (`--bDNA 0 --bRNA 0` for none; given one of
+  them, the other is 0, as complete-search's). The help of complete-search, assembly-search and
+  build-index-only says the default (build-index-only's 0 + 0 builds an index of N = 1, which
+  the default search cannot use: it needs N = 2, and the web's ceiling N = 3, as the published
+  indexes are), METHODS §5 states it, the web user guide no longer tells a user to raise the
+  Max edits slider for a deeper search (with the Advanced panel at its defaults, 4 + 1 + 1, the
+  slider caps a total of 6), and the search examples of `docs/PRECOMPUTED_INDEXES.md` take it
+  (they gave 2 + 2, which the default `--max-total-edits` of 6 prunes). Covered by
+  `test_assembly_haplotype_genomes` (assembly-search given no bulges passes `--bDNA 1 --bRNA 1`
+  to each haplotype's search, and the refusal that names it says so; both fail on the code
+  before it).
 - **CRISPRme and CRISPRitz share their major.minor version; this release is 2.10.0, after 2.8.1.**
   CRISPRme X.Y.z requires CRISPRitz X.Y.* (2.10.z, then 2.11, ...), patch numbers are
   independent, and a breaking change in either package -- an index format, the enricher's output
@@ -736,7 +879,11 @@ and the `release-crisprme` skill.
   every record's `AF` (its CHANGELOG). The pin is the Dockerfile's `ARG crispritz_ref`, which
   `install_from_source.sh`'s `CRISPRITZ_REF` default equals; the recipe's bound, the next minor,
   keeps out a CRISPRitz that may change the index format or the enricher again (the version
-  policy above; 2.8.1's was `>=2.9.1,<2.9.2`).
+  policy above; 2.8.1's was `>=2.9.1,<2.9.2`). When CRISPRitz gets a patch, the image and the
+  source install pin the exact CRISPRitz a release was tested with, and the recipe's lower bound
+  moves up only to a patch that fixes something CRISPRme depends on, so it can be below the
+  image's (decision D5; `docs/RELEASING.md`, the release checklist and the release skill say so,
+  where the checklist and the skill had tied the two).
 - **The two known limits of CRISPRitz `add-variants` that 2.8.1 stated are given as those of an
   index CRISPRitz 2.9.1 or earlier built, every one published until the rebuild for this
   release.** At a split multi-allelic site only the last record's ALT is searched, and a record
@@ -1074,9 +1221,10 @@ and the `release-crisprme` skill.
   `PAMs/20bp-NRR-SpCas9.txt` ships with CRISPRme, and a download of the PAM files (`download --what
   pams`, and so `--what all`) installs it where the data repo has none (the repo's `pams/` holds the
   NRG, NGG and PAM-less files). The web form selects it when it is installed (then NRG, then NGG, as
-  before), `download --what all` fetches the reference index `NRR_3_hg38`, and every surface that
-  names the recommended index names `NRR_3_hg38+hg38_HGDP1kGP` (and its HPRC and mega panels):
-  the README's and the website's commands, the one-click installers (`docs/install.sh`,
+  before), `download --what all` fetches the reference index `20-NRR_3_hg38` (2.8.1's `NRR_3_hg38`
+  where it cannot), and every surface that names the recommended index names
+  `20-NRR_3_hg38+hg38_HGDP1kGP` (and its HPRC and mega panels; 2.8.1's archive was
+  `NRR_3_hg38+hg38_HGDP1kGP`): the README's and the website's commands, the one-click installers (`docs/install.sh`,
   `docs/install.ps1`), the Docker Quickstart, the web user guide, the CLI guide,
   PRECOMPUTED_INDEXES, METHODS, the Hugging Face cards, RELEASE_CHECKLIST's default-index gate, the
   help of `download`, `setup` and `complete-test`, complete-test's advice when no index is
@@ -1252,6 +1400,27 @@ and the `release-crisprme` skill.
     go from 15702, 15703 and 15704 to 15699.
 
 ### Fixed
+- **The HGDP + 1000 Genomes and HPRC build recipes stop at a step that fails**
+  (`seq_script/merge_panels/hgdp1kgp_build.sh`, `hprc_build.sh`, which the rebuild of 2.10.0's
+  index set calls). They printed `BUILD_EXIT` and went on: after a failed `build-index-only` the
+  HGDP + 1000 Genomes recipe exited 0 wherever an earlier index of the panel was in place (its
+  last command lists them), so the rebuild's script, which stops at the first command that fails,
+  went on for hours, published the reference indexes and the panel's first index, and stopped
+  only at the missing index's `publish-index`. The steps before were silent too: a chromosome's
+  VCF pipeline (`bcftools view`/`norm` ... `sort`, then `tabix`) ran without `pipefail`, so it
+  took the status of its last stage, and a VCF cut short by a stage that failed got its `.tbi`,
+  was built on, and was skipped by a run again; a chromosome of the genome folder whose source
+  (re-phased BCF, HPRC VCF) was missing was skipped; and a samples file of no sample, when the
+  samples of the source could not be read, was built on. Each step now stops the recipe with a
+  non-zero status (the build's own exit status for a failed build), and a VCF that fails leaves
+  no `.tbi`, so a run again redoes it. A chromosome the genome folder does not hold is still not
+  built, and no stage reads its source now: on a test genome of a few chromosomes beside the
+  real source folders, which hold every chromosome's, the recipes ran each other chromosome's
+  pipeline against a FASTA that is not there, which failed, and the recipe went on. A build that
+  succeeds writes what it wrote before (on chr22 with the release image: the same VCF records,
+  samples files and index). Covered by `PostProcess/test_panel_recipes.py` (the recipes on stubs:
+  13 of its 15 tests fail on the recipes before this fix, with 2.10.0's index names; the other
+  two, each recipe's build that succeeds, pass there too).
 - **An index folder that holds a macOS AppleDouble file is read by its own trees.** macOS `tar` and
   `cp` leave an AppleDouble file `._<name>` beside each file they copy onto a volume without
   extended attributes. Every reader of an index took `._NGG_chr22_1.bin`, which opens with no
@@ -1522,9 +1691,16 @@ and the `release-crisprme` skill.
   batch), and six the order of their rsID and AF lists alone (an entry above). Neither
   `complete-search` nor the report says any longer that a dense window can be such an alignment
   (but the report of a 2.8.1 search's results, read again), and neither does a per-sample row's
-  `High_variant_density_region` note (see Changed). Covered by
-  `PostProcess/test_haplotype_prioritizer.py`, `PostProcess/test_phased_haplotype.py` and
-  `PostProcess/test_generate_report.py`.
+  `High_variant_density_region` note (see Changed). The report tells a search of this release by
+  the carrier gate's sidecar, `.carrier_gate.json`, which the search now writes when the gate
+  fails too (status `failed`: the inputs card's **Carrier gate** row says the gate failed and the
+  rows are shown unchecked), and, where there is none, by the version `complete-search` records in
+  the run's `.version.txt`; before, a failed gate's search removed it, and the report of such a
+  run said that a dense window could be a greedy alignment. (A copy of a result folder by a glob,
+  which skips dot files, loses these with the run's mode and datasets, `.search_mode` and
+  `.untiered_datasets`, and the report reads it as a population-level search, which no such text
+  concerns: copy the folder whole.) Covered by `PostProcess/test_haplotype_prioritizer.py`,
+  `PostProcess/test_phased_haplotype.py` and `PostProcess/test_generate_report.py`.
 
 - **A per-sample row on an index with the dict-less tiers is no longer noted as a dense window's
   greedy worst-case alignment.** Since 2.7.10 that path reports a dense window by its carriers' own
@@ -1863,13 +2039,16 @@ and the `release-crisprme` skill.
   that is published.** The refusal said to download `<PAM>_<N>_<genome>` with N the search's
   bulges + 1: `NRR_2_hg38` for a search of 1 DNA and 1 RNA bulge, the default, where every index
   published is of N = 3, so the download it advised stopped on `No index 'NRR_2_hg38' found`. It
-  names the one of N = 3 for up to 2 bulges (`NRR_3_hg38`), "if it is published", as the refusal
-  for want of a variant index does, and its other route, to run without `--index-path`, names
+  names the one of N = 3 for up to 2 bulges, under the name of 2.10.0, which says the guide length
+  and the side (`20-NRR_3_hg38` for a 20-nt guide), "if it is published", as the refusal for want
+  of a variant index does, and its other route, to run without `--index-path`, names
   what such a search does since 2.10.0: it takes an index of the working directory's library,
   pruned to the PAM where only such a one serves it, and builds one from the genome where none
   does (it said that it builds one). On chr22 with HGDP + 1000 Genomes, both refusals of a search of
-  1 + 1 bulge under an empty `--index-path` name `NRR_3_hg38`, which the Hub holds, and the Hub
-  holds no `NRR_2_hg38` (`download` stops on it), nor an `NGCG_3_hg38`. Covered by
+  1 + 1 bulge under an empty `--index-path` name `20-NRR_3_hg38`, the reference index of the
+  index set that the rebuild for 2.10.0 publishes in `lucapinello/crisprme-indexes-format2`
+  (2.8.1's of N = 3, `NRR_3_hg38`, is in `lucapinello/crisprme-data`); no repo holds an
+  `NRR_2_hg38` (`download` stops on it), nor an `NGCG_3_hg38`. Covered by
   `PostProcess/test_index_resolution.py` and `test_bulge_cap.py`.
 - **A variant index of `--index-path` whose dictionaries are not in the working directory is
   named.** complete-search said "No prebuilt variant index found" for a dataset whose variant
@@ -2248,16 +2427,18 @@ and the `release-crisprme` skill.
     through its repeat, a deletion's junction moved through it (the VCF writes either at the
     left end of its repeat). A placement that leaves the PAM on reference bases: the bases it
     sits on there, which are its own (not created) but for a SNP alt of the row, read as the
-    reference base it replaces. Else a placement that leaves the protospacer's base touching
-    the PAM on a reference base: the reference PAM beside it. Else, an insertion that holds
-    that base wherever it sits: created. A complex record, which replaces REF bases and adds
-    bases or loses some (A>T and inserted bases after it: HPRC writes many insertions so), is
-    its replaced bases, read as the REF bases they replace (as a SNP alt is), and its added or
-    lost bases, placed as an insertion's or a deletion's. A row whose REF alignment is its ALT
-    is never created; a PAM with a bulge, or holding an MNV's ALT bases, keeps the REF
+    reference base it replaces. Else, a PAM that every placement makes wholly of the inserted
+    bases: an additional PAM, created, even where the reference holds a valid PAM beside the
+    protospacer (decision D4, below). Else a placement that leaves the protospacer's base
+    touching the PAM on a reference base: the reference PAM beside it. Else, an insertion that
+    holds that base wherever it sits: created. A complex record, which replaces REF bases and
+    adds bases or loses some (A>T and inserted bases after it: HPRC writes many insertions so),
+    is its replaced bases, read as the REF bases they replace (as a SNP alt is), and its added
+    or lost bases, placed as an insertion's or a deletion's. A row whose REF alignment is its
+    ALT is never created; a PAM with a bulge, or holding an MNV's ALT bases, keeps the REF
     alignment's (for an MNV, the reference under it). A row that stands for two copies of one
-    target inside one insertion is created when either copy's PAM is (the insertion added
-    that copy, with a PAM it made). METHODS, "`PAM_creation`".
+    target inside one insertion is created when either copy's PAM is (the insertion added that
+    copy, with a PAM it made). METHODS, "`PAM_creation`".
   - The answer does not depend on where in its repeat the VCF writes the indel. Read where it
     writes it, at the anchor where a row that starts inside an insertion now starts, a repeat
     unit inserted beside a reference PAM would put inserted bases in a PAM the reference
@@ -2268,9 +2449,62 @@ and the `release-crisprme` skill.
     duplication of a PAM's bases after a reference protospacer is not created
     either (TRAC guide, the alternative alignment of chr22:20586277 (+), on the anchor of an
     insertion of two more copies of the 16-base unit the reference repeats after it, the same
-    alignment as its site's reference row); a PAM wholly inserted after a protospacer of
-    reference bases is created only where the reference lacks a PAM beside that protospacer
-    (an inserted TGG before the reference's AGG: NA).
+    alignment as its site's reference row).
+  - **Decision D4: an additional PAM is created.** A PAM that every placement of its
+    insertion makes wholly of inserted bases is a PAM the reference does not have there, and
+    a site the search reports within its mismatches and bulges is a site the insertion made:
+    created, even beside a protospacer the reference holds with a valid PAM (an inserted TGG
+    before the reference's AGG: TGG). The placement-invariant exception stays: an "inserted"
+    PAM that a placement puts on the reference's own bases (a tandem duplication of the PAM)
+    is not created, and a PAM partly made of inserted bases in some placement, or across a
+    deletion's junction, is still judged by the reference PAM beside the protospacer, one wholly
+    inserted where the VCF writes it but partly on a reference base one placement along too
+    (TRAC guide, an alternative alignment at chr21:46302051 (+), CFD 0.019: TAG inserted before
+    the reference's TGG, whose T repeats the insertion's first base, reads NA). Before D4
+    (2.10.0's drafts) the reference PAM beside the protospacer decided for a wholly inserted PAM
+    too, and a valid one read NA, the site having existed before the insertion. Genome-wide, on
+    2.8.1's README and TRAC tables (below), D4 turns 11 highest-CFD blocks from NA to created and
+    changes nothing else in them: README guide, per-sample, 2 alternative alignments
+    (chr11:35248792 (+), CFD 0); population-level none; TRAC guide 2 rows (chr17:77419671 (−),
+    CFD 0.008, and chr2:159346 (−), 0.003) and 7 alternative alignments (chr1:246083493 (+),
+    chr20:63226848 (+), chr4:183404212 (−) three, chr5:157864188 (+) two), CFD at most 0.008; 5
+    of them (the insertions at chr17, chr2 and chr4) 2.8.1 also read created. Decision D4 was
+    taken on those 11. Its reach depends on the guide and the panel, and it is largest beside
+    hg38_mega, a sites-only panel whose five sources hold many insertions in short tandem
+    repeats. Every indel block of a run judged with the rule before D4 (d3722b0's) and with
+    D4's (the code of each run of 2.10.0 gives back every value of its tables), it turns NA to
+    created, and changes nothing else:
+    - chr22, the README guide with NRR at 4 mismatches + 1 DNA + 1 RNA bulge, per-sample on
+      HGDP + 1000 Genomes beside hg38_mega (a gate configuration): 260 blocks of each kind
+      (highest CFD, fewest mismatches and bulges, highest CRISPR-Bulge) in 646 of its 762,646
+      alternative alignments; the highest-CFD ones at CFD at most 0.057, 19 above 0.008; 12
+      insertions, 234 of those 260 at three in (TA)n repeats (chr22:18201792 T>TATATCA,
+      18201794 A>ATATATTG, 24238776 T>TAAGATAG; chr22:18201791 (−), its PAM TGA wholly inserted
+      beside the reference's AAA, CFD 0.057). The same configuration population-level: none.
+    - chr22, the checker's three repeat-rich guides with NRG, per-sample on HGDP + 1000 Genomes:
+      4 alternative alignments (chr22:45890423 (+), its PAM CGG wholly inserted beside the
+      reference's AGG, CFD 0.115; 45890407 (+), 0.040; 36821519 (+) and 34025930 (−), CFD 0);
+      population-level none.
+    - Genome-wide, hg38_mega alone, five guides (README, `ACTGAAATCTGTAAGCAGGC`, TRAC, EMX1,
+      VEGFA site 3) with NRG at 4 mismatches and no bulge, population-level (feat/2.10.0 at
+      f873ebb, whose rule is d3722b0's): one block in each of 8 rows on mega's published index (one
+      highest-CFD block, chr14:91881120 (−), VEGFA site 3, its PAM GGG wholly inserted beside
+      the reference's TAG, CFD 0.113; one fewest-mismatches block, chr7:1446227 (+), 0.036; six
+      highest-CRISPR-Bulge blocks), in 7 of them on the judges' rebuilt mega.
+    - Genome-wide, HPRC: the rows of the one genome-wide HPRC table there is (CRISPRme 2.5.4,
+      per-sample, `TGCTTGGTCGGCACTGATAG` with NRG at 4 mismatches + 1 + 1, placed as 2.10.0
+      places them; 63% of its rows and 86% of its alternative alignments hold the variants they
+      list; its own PAM_creation rule is not one this can check): 17 highest-CFD blocks (3 rows,
+      14 alternative alignments), CFD at most 0.011.
+    - None in the other chr22 gate runs: HPRC and its unphased copy (both modes), and the README
+      guide (NRG, both modes; NRR), TRAC and SaCas9 (2/0/0, 4/1/1) on HGDP + 1000 Genomes.
+    The genome-wide mega tables of CRISPRme 2.8.1 (a pre-release, NRR and NRG, 4 mismatches and
+    1 DNA + 1 RNA bulge) cannot be judged so: 76% and 82% of their indel rows hold SNP alleles
+    they do not list. In the SNP+indel oracle T2 and QW, and in `test_indel_row_coordinates`
+    DUPS and W2, now read created;
+    `test_indel_snp_cis.test_pam_reference_place_an_additional_inserted_pam_is_created` pins
+    both strands, 3′ and 5′ PAMs, a complex record's added bases, and the cases D4 leaves as
+    they were.
   - chr22, released 2.8.1 image against 2.10.0's post-analysis on it (CRISPRitz 2.9.1, index format
     1): README guide NRG per-sample 2 alignments, 21052639 (−) (TGG → NA; above, now one of the
     alternative alignments of 21052638's site) and the row of 21056178 (−) (NA → AGG);
@@ -2285,17 +2519,18 @@ and the `release-crisprme` skill.
     reference's own PAM, is not, but its right copy is, and the row of two copies is created when
     either is. The row of 50193928 (−) and its alternative alignment of the 48-base allele that
     repeats the unit exactly keep NA, as 49196564 (−) does. In the SNP+indel oracle Z2 (wholly
-    inserted) reads TGG, Z4 NA and Z5 TGG (partly inserted), T, T2, PR, PM, QN, QW, QZ and the
-    Cas12a profile's C6 and CB1 NA, and QC, QD, QA, QX, QY, QV and CB3 created (below).
+    inserted) reads TGG, Z4 NA and Z5 TGG (partly inserted), T, PR, PM, QN, QZ and the Cas12a
+    profile's C6 and CB1 NA, and T2, QW (both D4), QC, QD, QA, QX, QY, QV and CB3 created
+    (below).
   - Genome-wide, 2.8.1's tables with each row's `PAM_creation` computed by 2.10.0's code
     (2.8.1's code gives back every value in them), highest-CFD alignments: README guide,
-    per-sample, 97 go NA → created (70 rows and 27 alternative alignments): a PAM across a
+    per-sample, 99 go NA → created (70 rows and 29 alternative alignments): a PAM across a
     deletion's junction on the − strand 56 (CFD at most 0.083), a PAM holding inserted bases on
-    a row that starts inside the insertion 27 and on a row that starts on a reference base 14;
+    a row that starts inside the insertion 27 and on a row that starts on a reference base 16;
     and 4 created → NA (3 rows and 1 alternative alignment); population-level 70 and 3 rows;
-    TRAC guide, per-sample, 109 (67 and 42: deletions 29, CFD at most 0.039; rows inside an
-    insertion 58; rows on a reference base 22) and 5 (2 and 3). HGDP + 1000 Genomes holds no
-    complex record.
+    TRAC guide, per-sample, 113 (67 and 46: deletions 29, CFD at most 0.039; rows inside an
+    insertion 58; rows on a reference base 26) and none created → NA (with D4; before it 109
+    and 5). HGDP + 1000 Genomes holds no complex record.
   - HPRC's chr22 holds 8,022 complex records with a net insertion and 1,055 with a net
     deletion (against 106,118 insertions and 80,464 deletions). Every block of a row that names
     one reads as an independent re-derivation from the VCF record reads it (the README guide,
@@ -2305,34 +2540,35 @@ and the `release-crisprme` skill.
     of chr22:37509610 (−) and alternative alignments at 42134819 (−) and 42135364 (−), whose
     added bases repeat the reference after them, so that placed further right their PAM is
     the reference's own GGG.
-- The SNP+indel oracle (`test/indel_snp_oracle`) checks every indel row's start (strictly: at
-  an occurrence on a listed carrier's haplotype that holds the row's variants; up to now a row
-  with no carrier occurrence within 40 bp of its start was not checked),
-  `Variant_info_spacer+PAM` and `PAM_creation` against its carriers' haplotypes, plants Z, Z2,
-  Z3 (rows starting inside an insertion), Z4 and Z5 (a PAM partly inserted, the reference PAM
-  beside the protospacer valid and not), X (an insertion holding two targets: both are listed),
-  X2 (one holding a target twice: one row), T and T2 (an insertion after a reference
-  protospacer that copies the reference's own PAM, or adds one before another reference PAM:
-  not created), PR, PM, QC, QN, QD, QW and QA (PAMs judged wherever in its repeat the VCF
-  writes the indel: tandem duplications of a unit holding a target, an insertion that holds
-  the protospacer's end in both its places, a non-repeat insertion on a row starting on its
-  anchor, a deletion across a − strand PAM, a wholly inserted PAM beside a reference
-  protospacer holding a valid PAM, an insertion of the protospacer's end and the PAM), QX, QY,
-  QZ and QV (complex records: A>T and C>T with a whole target in their added bases, G>CCA on a
-  row starting on the replaced base, TG>C across a − strand PAM), and has a Cas12a profile (5′
-  PAM TTTV, both strands, rows starting inside an insertion, PAMs wholly and partly inserted,
-  a tandem duplication of a PAM (C6), a SNP past a deletion, and CB1 and CB3, the placement
-  rule on each strand); its `PAM_creation` expectation builds every placement of the row's
-  indel on the haplotype the row's variants make. The released v2.8.1 image fails the oracle
-  231 times (SpCas9) and 60 times (Cas12a); 2.10.0 passes both. Unit tests:
-  `test_indel_variant_positions` (the real integrator), `test_indel_pam_creation`,
-  `test_indel_row_coordinates` (rows starting inside an insertion, rows whose PAM an insertion
-  adds after a reference protospacer, PAMs judged wherever in its repeat the VCF writes the
-  indel, complex records, 3′ and 5′ PAMs, both strands), `test_indel_snp_cis` (the placement
-  rule against every placement built whole, on 3,000 random rows and on 3,000 more, over 1,000
-  of them complex records, and the same answer for every record that writes one haplotype) and
-  `test_representative_tiebreak` (the real merge: alignments that start inside one
-  insertion, and two copies of one target, created when either copy is, in either order).
+- The SNP+indel oracle (`test/indel_snp_oracle`) checks every indel row's start (strictly: at an
+  occurrence on a listed carrier's haplotype that holds the row's variants; up to now a row with
+  no carrier occurrence within 40 bp of its start was not checked), `Variant_info_spacer+PAM`
+  and `PAM_creation` against its carriers' haplotypes, plants Z, Z2, Z3 (rows starting inside an
+  insertion), Z4 and Z5 (a PAM partly inserted, the reference PAM beside the protospacer valid
+  and not), X (an insertion holding two targets: both are listed), X2 (one holding a target
+  twice: one row), T and T2 (an insertion after a reference protospacer that copies the
+  reference's own PAM, not created, or adds one before another reference PAM, created by D4),
+  PR, PM, QC, QN, QD, QW and QA (PAMs judged wherever in its repeat the VCF writes the indel:
+  tandem duplications of a unit holding a target, an insertion that holds the protospacer's end
+  in both its places, a non-repeat insertion on a row starting on its anchor, a deletion across
+  a − strand PAM, a wholly inserted PAM beside a reference protospacer holding a valid PAM, an
+  insertion of the protospacer's end and the PAM), QX, QY, QZ and QV (complex records: A>T and
+  C>T with a whole target in their added bases, G>CCA on a row starting on the replaced base,
+  TG>C across a − strand PAM), and has a Cas12a profile (5′ PAM TTTV, both strands, rows
+  starting inside an insertion, PAMs wholly and partly inserted, a tandem duplication of a PAM
+  (C6), a SNP past a deletion, and CB1 and CB3, the placement rule on each strand); its
+  `PAM_creation` expectation builds every placement of the row's indel on the haplotype the
+  row's variants make. The released v2.8.1 image fails the oracle 239 times (SpCas9) and 60
+  times (Cas12a); 2.10.0 passes both, and d3722b0, before D4, fails it 8 times (SpCas9: T2 and
+  QW, three blocks and the site's check each). Unit tests: `test_indel_variant_positions` (the real
+  integrator), `test_indel_pam_creation`, `test_indel_row_coordinates` (rows starting inside an
+  insertion, rows whose PAM an insertion adds after a reference protospacer, PAMs judged
+  wherever in its repeat the VCF writes the indel, complex records, 3′ and 5′ PAMs, both
+  strands), `test_indel_snp_cis` (the placement rule against every placement built whole, on
+  3,000 random rows and on 3,000 more, over 1,000 of them complex records, and the same answer
+  for every record that writes one haplotype) and `test_representative_tiebreak` (the real
+  merge: alignments that start inside one insertion, and two copies of one target, created when
+  either copy is, in either order).
 - **The release gate `scripts/check_alt_pam.py` lets an indel row's REF text hold an N where
   the reference genome does** (the gate's no-N check, since 2.8.1).
   - An indel row's REF text is the reference at the row's coordinates, as many bases as its

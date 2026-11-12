@@ -33,6 +33,10 @@
 #
 # PATHS are the as-run cluster paths — override via env. Requires the CRISPRme code in an
 # apptainer SIF ($SIF) with bcftools/tabix/python3 + the crisprme conda env.
+# EXIT STATUS: non-zero at the first step that fails (a chromosome's NORM, the samples of the
+# VCFs, the build), so that a rebuild that runs it stops there; a chromosome the genome folder
+# holds needs its VCF (one it does not hold, on a test genome, is not built, whether $SRC holds its
+# VCF or not).
 set -u
 SIF=${SIF:-/srv/local/lp698/crisprme_v254.sif}                 # apptainer image w/ crisprme env
 B=${B:-/srv/local/lp698/hprc_build}                            # build working dir (--path)
@@ -51,14 +55,24 @@ run() { apptainer exec --writable-tmpfs -B /srv/local/lp698 -B /data/pinello "$S
 #    AF/AC/AN FROM THE GENOTYPES (+fill-tags; the vcfwave VCF ships no AF and AN must exclude
 #    the half-missing "." alleles), then SORT (left-alignment can reorder positions -> not
 #    tabix-able otherwise; add-variants tolerates unsorted input but sorted is safer + indexable),
-#    then bgzip + tabix. Resumable (skips a chrom whose .tbi already exists).
+#    then bgzip + tabix. Resumable (skips a chrom whose .tbi already exists; the .tbi is written
+#    last, after the whole pipeline succeeded: pipefail, so a stage that fails leaves no .tbi and
+#    stops the recipe, which a re-run then redoes).
 echo "=== NORM $(date +%H:%M:%S) ==="
 for c in $CHRS; do
   out="$B/VCFs/hg38_HPRC/hprc.$c.norm.vcf.gz"
   [ -s "$out.tbi" ] && { echo "[$c] exists -> skip"; continue; }
-  run "bcftools norm -m -any -f $GENOME/$c.fa $SRC/ALL.$c.HPRC.vcfwave.vcf.gz -Ou \
+  # the genome folder first: a chromosome it does not hold is not built (a test genome of a few
+  # chromosomes, whose $SRC holds every chromosome's VCF, as the real one does); one it holds
+  # needs its VCF
+  [ -e "$GENOME/$c.fa" ] || { echo "[$c] not in $GENOME -> skip"; continue; }
+  in="$SRC/ALL.$c.HPRC.vcfwave.vcf.gz"
+  [ -s "$in" ] || { echo "[error] [$c] no HPRC VCF $in, and $GENOME holds $c" >&2; exit 1; }
+  run "set -o pipefail; bcftools norm -m -any -f $GENOME/$c.fa $in -Ou \
         | bcftools +fill-tags -Ou -- -t AF,AC,AN \
-        | bcftools sort -Oz -o $out - && tabix -f -p vcf $out" && echo "[$c] norm+sort done"
+        | bcftools sort -Oz -o $out - && tabix -f -p vcf $out" \
+    || { echo "[error] [$c] NORM failed" >&2; exit 1; }
+  echo "[$c] norm+sort done"
 done
 
 # 2) SAMPLES ID (232 samples): 4-col tab format (#SAMPLE_ID POPULATION_ID SUPERPOPULATION_ID SEX),
@@ -67,6 +81,8 @@ done
 #    SUPERPOP=unknown / SEX=unknown for the rest (incl. HG002/HG005 and CHM13).
 echo "=== SAMPLESID $(date +%H:%M:%S) ==="
 run "zcat $SRC/ALL.chr22.HPRC.vcfwave.vcf.gz | grep -m1 '^#CHROM' | cut -f10- | tr '\t' '\n'" > "$B/samplesIDs/.hprc_order.txt"
+[ -s "$B/samplesIDs/.hprc_order.txt" ] \
+  || { echo "[error] cannot read the samples of $SRC/ALL.chr22.HPRC.vcfwave.vcf.gz" >&2; exit 1; }
 awk -F'\t' 'BEGIN{OFS="\t"} NR==FNR{ if(FNR>1){p[$1]=$2;s[$1]=$3;x[$1]=$4} next }
   { if($1 in p) print $1,p[$1],s[$1],x[$1]; else print $1,"HPRC","unknown","unknown" }' \
   "$P1KG" "$B/samplesIDs/.hprc_order.txt" > "$B/samplesIDs/.body.txt"
@@ -74,7 +90,9 @@ awk -F'\t' 'BEGIN{OFS="\t"} NR==FNR{ if(FNR>1){p[$1]=$2;s[$1]=$3;x[$1]=$4} next 
   > "$B/samplesIDs/hg38_HPRC.samplesID.txt"
 rm -f "$B/samplesIDs/.hprc_order.txt" "$B/samplesIDs/.body.txt"
 echo "hg38_HPRC.samplesID.txt" > "$B/hprc.samplesID.config.txt"
-echo "samplesID rows: $(($(wc -l < "$B/samplesIDs/hg38_HPRC.samplesID.txt") - 1))"
+NSAMPLES=$(($(wc -l < "$B/samplesIDs/hg38_HPRC.samplesID.txt") - 1))
+echo "samplesID rows: $NSAMPLES"
+[ "$NSAMPLES" -gt 0 ] || { echo "[error] no sample in $B/samplesIDs/hg38_HPRC.samplesID.txt" >&2; exit 1; }
 
 # 3) BUILD the variant index. RAW registry (CRISPRME_REGISTRY_COMPRESS=0) + SNP+indel ON
 #    (CRISPRME_INDEL_SNP default). Emits SNP index + _INDELS + registry/genotypes/indel_genotypes/
@@ -83,9 +101,12 @@ echo "=== BUILD-INDEX-ONLY (RAW, NRG, SNP+indel) $(date +%H:%M:%S) ==="
 run "export CRISPRME_REGISTRY_COMPRESS=0 CRISPRME_INDEL_SNP=1; cd $B; \
      crisprme.py build-index-only --genome $GENOME --pam $PAM --bDNA 2 --bRNA 2 --thread $THREADS \
        --vcf $B/VCFs/hg38_HPRC --samplesID $B/hprc.samplesID.config.txt --path $B"
-echo "BUILD_EXIT=$? $(date +%H:%M:%S)"
+BUILD_EXIT=$?
+echo "BUILD_EXIT=$BUILD_EXIT $(date +%H:%M:%S)"
+[ "$BUILD_EXIT" -eq 0 ] || { echo "[error] build-index-only failed (exit $BUILD_EXIT)" >&2; exit "$BUILD_EXIT"; }
 # the index as the SIF's CRISPRme names it: NRG_3_hg38+hg38_HPRC before 2.10.0, the name with the
 # guide length and the side from 2.10.0 on (20-NRG_3_hg38+hg38_HPRC), the PAM's for another PAM=
 for idx in "$B"/genome_library/*_3_hg38+hg38_HPRC; do
   [ -d "$idx" ] && echo "index: $idx (+ _INDELS)"
 done
+exit 0

@@ -18,6 +18,16 @@ A fast, reliable mirror of the reference resources CRISPRme+ needs, plus
 **precomputed indexes** — so users can skip the slow raw-data download, the
 multi-hour variant **enrichment**, and the index build entirely.
 
+> **Newer indexes exist.** CRISPRme+ **2.10.0** publishes its indexes, rebuilt by CRISPRitz
+> 2.10.0 in index format 2 and named for their guide length and side (`20-NRR_3_hg38+hg38_HGDP1kGP`),
+> with each panel's Dictionaries once and the enriched-genome kits they were built from, in
+> [`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2),
+> which 2.10.0's `download` reads by default. The archives under `indexes/` and `build-inputs/`
+> here are CRISPRme+ 2.8.1's (index format 1), kept unchanged for 2.8.1 and earlier, which
+> cannot read index format 2; 2.10.0 still fetches one by its name, and says which index of
+> 2.10.0 replaces it. The genome, annotations, PAMs, sample lists and VCFs here serve every
+> release.
+
 Pulled automatically by `crisprme.py download` (and the web **Settings → Data
 Manager**). See the CRISPRme+ docs for the full data layout and quickstart:
 https://github.com/pinellolab/crisprme-plus
@@ -42,8 +52,8 @@ hours to minutes.
 ```
 crisprme-data/
 ├── indexes/                        # PRECOMPUTED search indexes (genome_library tarballs)
-│   ├── NRR_3_hg38.tar.gz                       # reference-only (no variants), NRR: the default PAM since CRISPRme+ 2.10.0
-│   ├── NRR_3_hg38+hg38_HGDP1kGP.tar.gz         # ← recommended variant DEFAULT
+│   ├── NRR_3_hg38.tar.gz                       # reference-only (no variants), NRR (2.10.0's default PAM: its index is 20-NRR_3_hg38, in the repo above)
+│   ├── NRR_3_hg38+hg38_HGDP1kGP.tar.gz         # ← the recommended variant default's 2.8.1 archive
 │   ├── NRR_3_hg38+hg38_HPRC.tar.gz             # HPRC pangenome panel
 │   ├── NRR_3_hg38+hg38_mega.tar.gz             # sites-only aggregate (worst-case fallback)
 │   ├── NRG_3_hg38{,+hg38_HGDP1kGP,+hg38_HPRC,+hg38_mega}.tar.gz   # NRG PAM (the default before 2.10.0)
@@ -82,7 +92,7 @@ them; use the rebuilt `NNN_3` archives with CRISPRme+ 2.8.1 or later (see below)
 | Index | Variants | Phasing | Notes |
 |---|---|---|---|
 | `NRR_3_hg38` | none | — | reference-only |
-| **`NRR_3_hg38+hg38_HGDP1kGP`** | HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000G) | **genotyped-phased** (SHAPEIT5 re-phased) | **recommended variant default** — CONFIRMED *cis* co-occurrence + named carriers |
+| **`NRR_3_hg38+hg38_HGDP1kGP`** | HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000G) | **genotyped-phased** (SHAPEIT5 re-phased) | **the recommended variant default's 2.8.1 archive** (2.10.0's is `20-NRR_3_hg38+hg38_HGDP1kGP`, in `lucapinello/crisprme-indexes-format2`) — CONFIRMED *cis* co-occurrence + named carriers |
 | `NRR_3_hg38+hg38_HPRC` | HPRC pangenome (232 samples incl. CHM13) | genotyped-phased | pangenome panel |
 | `NRR_3_hg38+hg38_mega` | aggregate (1000G + HGDP + gnomAD + TOPMed + All of Us) | sites-only | worst-case fallback; a listed haplotype may not exist in any individual |
 
@@ -148,10 +158,12 @@ The indexes are fetched automatically:
 
 ```bash
 # one-shot: genome + annotations + PAMs + sample lists + the default reference index
-# (NRR_3_hg38 since CRISPRme+ 2.10.0, NRG_3_hg38 before)
+# (CRISPRme+ 2.8.1: NRG_3_hg38, from here; 2.10.0: 20-NRR_3_hg38, from
+# lucapinello/crisprme-indexes-format2)
 crisprme.py download --what all --path .
 
-# then the recommended variant default (or any other index by name)
+# then the recommended variant default's 2.8.1 archive (or any other index by name; under
+# 2.10.0, 20-NRR_3_hg38+hg38_HGDP1kGP fetches its index of format 2)
 crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path .
 ```
 

@@ -1,6 +1,10 @@
 # CRISPRme+ 2.8.0 Design Plan — Sites-Only Chimera-Aware Prioritization
 
-> Status: **PLANNING ONLY** (no code). Approved concept by Luca 2026-10-22; targeted for 2.8.0.
+> Status: **implemented in CRISPRme 2.10.0 as the carrier gate** (`PostProcess/haplotype_prioritizer.py`;
+> [METHODS §5, "The carrier gate"](../METHODS.md#the-carrier-gate-a-population-level-rows-variants-against-phased-haplotypes);
+> on by default for genotyped panels, opt-in for mega, `complete-search --prioritize-observed`).
+> This page is the design plan as approved by Luca on 2026-10-22 (then targeted for 2.8.0); where
+> it and METHODS differ, METHODS describes what ships.
 > Produced by a 5-agent adversarial exploration (statistics / red-team / implementation / framing →
 > synthesis), grounded in the live codebase. This is the sites-only counterpart to the 2.8.0
 > context-aware default (per-sample on genotyped indexes).

@@ -124,7 +124,7 @@ Mk 'Start' 44 {
       $mnt = "-v `"${Data}:/DATA`" -w /DATA $Image"
       $mark = Setup-Mark
       New-Item -ItemType File -Force -Path $mark | Out-Null
-      Run-InConsole 'First-time setup - downloading ~70 GB, then starting CRISPRme' "docker run --rm $mnt crisprme.py download --what all --path /DATA; if (`$LASTEXITCODE -eq 0) { docker run --rm $mnt crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA }; if (`$LASTEXITCODE -eq 0) { Remove-Item -Force -LiteralPath `"$mark`"; $run; Start-Sleep 3; Start-Process 'http://localhost:8080' } else { Write-Host 'The download did not finish: see above, then click Start again to finish setting up.' -ForegroundColor Red }"
+      Run-InConsole 'First-time setup - downloading ~70 GB, then starting CRISPRme' "docker run --rm $mnt crisprme.py download --what all --path /DATA; if (`$LASTEXITCODE -eq 0) { docker run --rm $mnt crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA }; if (`$LASTEXITCODE -eq 0) { Remove-Item -Force -LiteralPath `"$mark`"; $run; Start-Sleep 3; Start-Process 'http://localhost:8080' } else { Write-Host 'The download did not finish: see above, then click Start again to finish setting up.' -ForegroundColor Red }"
     }
   }
 }

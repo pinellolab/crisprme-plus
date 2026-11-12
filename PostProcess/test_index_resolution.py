@@ -1435,18 +1435,20 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
 
     def assertNoMatchSaysWhy(self, run, note, pam, n=2, guide=20, side=3):
         """Under --index-path: the error, why the all-N index there was not used
-        (`note`, if any), and what would serve: the published name (the indexes published
-        are of N = 3), and the one a build gives it since 2.10.0, of a `guide`-nt guide on
-        the `side` of the guide."""
+        (`note`, if any), and what would serve: an index of the older name (as the indexes
+        published up to 2.8.1 are, of N = 3), and the one a build gives it since 2.10.0, of a
+        `guide`-nt guide on the `side` of the guide; the download it advises names the index
+        as 2.10.0 publishes it (its form, N = 3)."""
         lib = os.path.realpath(self.library)
         named = f"{guide}-{pam}" if side == 3 else f"{pam}-{guide}"
-        published = f"{pam}_{max(n, 3)}_hg38"
+        older = f"{pam}_{max(n, 3)}_hg38"
+        published = f"{named}_{max(n, 3)}_hg38"
         self.assertIsNone(run.searched(variant=False))
         self.assertEqual(run.stderr,
                          f"ERROR: no matching reference index under --index-path '{lib}'\n"
                          + note +
                          f"       expected an index '{pam}_N_hg38' with N >= {n} "
-                         f"(e.g. {published}, or {named}_{n}_hg38 as a build names it "
+                         f"(e.g. {older}, or {named}_{n}_hg38 as a build names it "
                          "since 2.10.0)\n"
                          f"       re-run 'crisprme.py download --what index --index-name "
                          f"{published}' if it is published (it fetches the shared reference "
@@ -3796,7 +3798,7 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
             f"built: neither its VCFs (VCFs/{self.VCF}) nor its enriched genome (Genomes/hg38+"
             f"{self.VCF}) is installed. Variant indexes installed for {self.VCF}: NGG_3_hg38+"
             f"{self.VCF} (up to 2 bulge(s) of each type). To install one: crisprme.py download "
-            f"--what index --index-name NRG_3_hg38+{self.VCF} if it is published, or crisprme.py "
+            f"--what index --index-name 20-NRG_3_hg38+{self.VCF} if it is published, or crisprme.py "
             "build-index-only with the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)")
         self.assertEqual(len(run.stderr.splitlines()), 1, run.stderr)
         self.assertNothingMade()

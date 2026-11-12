@@ -81,7 +81,10 @@ docker pull pinellolab/crisprme:latest
 
 > **Reproducibility:** `:latest` auto-updates to the newest release (and is the
 > GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.8.1`
-> everywhere below in place of `:latest`.
+> everywhere below in place of `:latest`. An image carries the CRISPRitz search engine it was
+> tested with, of its own major.minor from 2.10.0 (CRISPRme+ 2.10.z runs on CRISPRitz 2.10.z:
+> the [version policy](RELEASING.md#version-policy)); `crisprme.py --version` and
+> `crispritz.py version` print the two.
 
 > **Already have an older image?** Docker does **not** re-download a tag you already
 > have — run `docker pull pinellolab/crisprme:latest` again to update. Skipping this makes an
@@ -139,19 +142,20 @@ minutes of CPU; instead, download the ready-made SpCas9 NRR (NGG, NAG, NGA, NAA)
 the default PAM's since 2.10.0 (it was NRG = NGG + NAG).
 
 > **On hg38 you already have this one** — `--what all` in step 3 downloads
-> `NRR_3_hg38` for you. Change `--index-name` in the command below to add a
-> *different* index: another PAM's reference index (`NGG_3_hg38`, `NRG_3_hg38`), or a
-> PAM-less one that serves many PAMs (`NNN_3_hg38` with a 3-nt flank, `NNNNNNNN_3_hg38`
-> with an 8-nt one). The NRR index already serves an NGG, NAG, NRG or NGA search: a
+> `20-NRR_3_hg38` for you. Change `--index-name` in the command below to add a
+> *different* index: another PAM's reference index (`20-NGG_3_hg38`, `20-NRG_3_hg38`,
+> SaCas9 `22-NNGRRN_3_hg38`, Cas12a `TTTN-20_3_hg38` / `TTTN-23_3_hg38`), or the PAM-less
+> general one that serves any 3′ PAM of up to 8 nt (`20-NNNNNNNN_3_hg38`; 2.8.1's 3-nt
+> `NNN_3_hg38` is not built again). The NRR index already serves an NGG, NAG, NRG or NGA search: a
 > search prunes an index to its PAM by itself when no installed index serves it unpruned
-> (one of that PAM, or a PAM-less one of its width), and says so (`--prune-pam`). For any other
-> PAM (e.g. a Cas12a one) or reference genome, build the index yourself (see
+> (one of that PAM, or a PAM-less one of its width), and says so (`--prune-pam`). For a PAM or a
+> guide length no published index serves, or another reference genome, build the index yourself (see
 > **"Installing more indexes"** at the bottom). Variant indexes are always a separate
 > download (see below).
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRR_3_hg38 --path /DATA
+  crisprme.py download --what index --index-name 20-NRR_3_hg38 --path /DATA
 ```
 
 For a variant-aware search (what the default web search uses), download one of the
@@ -164,12 +168,12 @@ complementary production indexes — the recommended default is the fully phased
 # joint AF throughout, including HGDP's seven genetic regions (per-sample analysis is this
 # phased index's default).
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA
+  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 
 # Sites-only "mega" panel — five sources (1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + AoU),
 # per-dataset AF + cross-source AF_max. PUTATIVE haplotypes with a conservative min-AF bound.
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRR_3_hg38+hg38_mega --path /DATA
+  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_mega --path /DATA
 ```
 
 The web interface picks these up automatically — a search that uses the default NRR PAM
@@ -194,7 +198,7 @@ and so does a search of NGG, NAG, NRG or NGA, pruned to that PAM.
 ## 5. (Optional, advanced) Add the raw source VCFs
 
 CRISPRme's superpower is finding off-targets created by genetic variants — and the
-`NRR_3_hg38+hg38_HGDP1kGP` index you downloaded in step 4 **already** makes the
+`20-NRR_3_hg38+hg38_HGDP1kGP` index you downloaded in step 4 **already** makes the
 default web search variant-aware. You do **not** need the raw VCFs for that.
 
 Sample-level analyses — named carriers, per-sample output, personal risk cards —
@@ -211,8 +215,8 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 
 They land in `VCFs/hg38_HGDP1kGP/`; build from them with `build-index-only` (see
 [`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md)). For a new PAM on HGDP + 1000
-Genomes or mega, the pre-enriched kit (`download --what build-inputs --dataset
-hg38_HGDP1kGP`, about 1 GB) is the faster route.
+Genomes, HPRC or mega, the pre-enriched kit of 2.10.0 (`download --what build-inputs --dataset
+hg38_HGDP1kGP`, from `lucapinello/crisprme-indexes-format2`) is the faster route.
 
 ## 6. Start the web interface
 
@@ -238,7 +242,7 @@ running, and open:
    total mismatches + DNA/RNA bulges (the default resolves to 4 mismatches + 1 DNA +
    1 RNA bulge) — or open **Advanced options** to set
    mismatches / DNA bulges / RNA bulges individually (e.g. 4 / 1 / 1). The recommended
-   default variant index (**HGDP + 1000 Genomes**, `NRR_3_hg38+hg38_HGDP1kGP` — the one you
+   default variant index (**HGDP + 1000 Genomes**, `20-NRR_3_hg38+hg38_HGDP1kGP` — the one you
    downloaded in step 4) is pre-selected, so the search is variant-aware out of the box.
 4. Give the job a name and click **Submit**. (Optionally tick **Notify me by
    email** to be sent a results link when the job finishes — set your SMTP details
@@ -413,7 +417,7 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 # Genomes), jointly SHAPEIT5-re-phased: CONFIRMED cis haplotypes with named per-sample
 # carriers + exact joint AF (per-sample analysis is this phased index's default).
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA
+  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 # (The index above bundles its genotype store, so sample-level analyses / named
 #  carriers work too — no raw VCFs needed. The source VCFs are hosted too, for
 #  building an index yourself: --what vcf --dataset hg38_HGDP1kGP.)
@@ -493,13 +497,14 @@ need by its **exact published name** — for example the five-source sites-only
 **mega** index (a useful complement to the default genotyped HGDP + 1000 Genomes index):
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRR_3_hg38+hg38_mega --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_mega --path /DATA
 ```
 
 To see which indexes are published, browse the dataset repository
-(`lucapinello/crisprme-data`, folder `indexes/`; the 8-nt-flank PAM-less indexes are
-in `lucapinello/crisprme-data-general-index`) — the names there are exactly what you
-pass to `--index-name`, and `download` picks the repo for you.
+(`lucapinello/crisprme-indexes-format2`, folder `indexes/`, for the indexes of 2.10.0; 2.8.1's
+are in `lucapinello/crisprme-data` and, PAM-less with an 8-nt flank,
+`lucapinello/crisprme-data-general-index`) — the names there are exactly what you pass to
+`--index-name`, and `download` picks the repo for you.
 
 If an index you need is **not** published, build it once: every later search reuses it.
 A web search builds a missing **reference** index itself, from the installed genome
@@ -584,7 +589,7 @@ and deleting data you no longer need. See
   2. Reference-only selected — keep the pre-selected **variant** index (not **Reference
      only**) to get variant off-targets.
   3. Variant index not installed — re-run
-     `crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA`
+     `crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA`
      (the recommended default panel).
   4. Confirm success: `Results/<name>/log_error_no_check.txt` is empty and
      `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its

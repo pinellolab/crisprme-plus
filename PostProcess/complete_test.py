@@ -136,9 +136,9 @@ def require_prebuilt_index() -> str:
             f"\nNo prebuilt index found for the complete-test (looked in {lib}).\n"
             "CRISPRme does not build one automatically.\n\n"
             "Download an index first, e.g.:\n"
-            "  crisprme.py download --what index --index-name NRR_3_hg38+hg38_HGDP1kGP\n"
+            "  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP\n"
             "  (the recommended default: SpCas9 NRR, phased HGDP + 1000 Genomes, 4,091\n"
-            "   samples; or --index-name NRR_3_hg38 for a reference-only scan)\n\n"
+            "   samples; or --index-name 20-NRR_3_hg38 for a reference-only scan)\n\n"
             "then re-run:  crisprme.py complete-test --chrom chr22 --thread 4\n"
             "  (chromosome 22 only; without --chrom it searches every chromosome)\n"
         )
@@ -1240,7 +1240,7 @@ def _search_in_smoke(index_name, pam_token, ref, is_variant, genome_dir, pam, gu
                      prune_arg, five_prime, threads, debug, chrom) -> None:
     """The smoke's complete-search, and what it left, for _run_prebuilt_index_smoke."""
     # A variant index searches its variants, in complete-search's context-aware default
-    # mode: per-sample on a phased genotyped index such as NRR_3_hg38+hg38_HGDP1kGP,
+    # mode: per-sample on a phased genotyped index such as 20-NRR_3_hg38+hg38_HGDP1kGP,
     # population-level otherwise.
     # `download --what index` writes list_vcf.txt / list_samplesID.txt; a build/DATA dir
     # may instead use vcf_list.txt / samples_list.txt -- accept either.

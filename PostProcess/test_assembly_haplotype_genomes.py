@@ -631,8 +631,9 @@ class AssemblySearchSearchesEachHaplotypeOnItsOwnGenome(_Workdir):
         return pd.DataFrame(), {}
 
     def run_search(self, output, individual=None, explicit=None, bulges=1):
-        args = ["--guide", self.guide, "--pam", self.pam, "--mm", "4",
-                "--bDNA", str(bulges), "--bRNA", str(bulges), "--output", output]
+        args = ["--guide", self.guide, "--pam", self.pam, "--mm", "4", "--output", output]
+        if bulges is not None:  # (None: no --bDNA/--bRNA, the default budget)
+            args += ["--bDNA", str(bulges), "--bRNA", str(bulges)]
         if individual:
             args += ["--assembly-individual", individual]
         else:
@@ -653,6 +654,19 @@ class AssemblySearchSearchesEachHaplotypeOnItsOwnGenome(_Workdir):
         for hap in pa.HAPLOTYPES:
             self.assertEqual(self.searched(f"{output}_{hap}"), self.SEQS[individual][hap],
                              f"{output}_{hap} searched another haplotype's sequence")
+
+    def test_given_no_bulges_it_takes_the_default_budget(self):
+        """Given neither --bDNA nor --bRNA, assembly-search searches each haplotype with 1 DNA
+        + 1 RNA bulge, the default budget, as complete-search and the web's Personal assembly
+        tab do (up to 2.8.1 it took none: --bDNA 0 --bRNA 0); --bDNA 0 --bRNA 0 still
+        takes none."""
+        for bulges, want in ((None, "--bDNA 1 --bRNA 1 "), (0, "--bDNA 0 --bRNA 0 ")):
+            output = f"job{bulges}"
+            self.run_search(output, individual="W1", bulges=bulges)
+            for hap in pa.HAPLOTYPES:
+                with open(os.path.join(self.cwd, "Results", f"{output}_{hap}",
+                                       ".command_line.txt")) as fh:
+                    self.assertIn(want, fh.read(), (bulges, hap))
 
     def test_each_haplotype_of_a_registered_individual(self):
         self.run_search("job", individual="W1")
@@ -1150,10 +1164,10 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
             self.assertIn(f"--genome {self.cwd}/{haps['maternal']} is the maternal haplotype of "
                           f"the personal assembly W1, and {self.lib}/NRG_2_genome records no "
                           f"genome folder", self.err)
-            # given no --bDNA/--bRNA, assembly-search takes no bulges
-            self.assertIn("Search the individual with assembly-search --bDNA 1 --bRNA 1, which "
-                          "searches each haplotype on an index of its own (given no "
-                          "--bDNA/--bRNA, assembly-search takes no bulges).", self.err)
+            # given no --bDNA/--bRNA, assembly-search takes 1 + 1, the default budget
+            self.assertIn("Search the individual with assembly-search, which searches each "
+                          "haplotype on an index of its own (given no --bDNA/--bRNA it takes 1 "
+                          "DNA + 1 RNA bulge, the default budget).", self.err)
             self.assertIn(f"remove it and run this search {again} --bDNA 1 --bRNA 1 (given no "
                           f"--bDNA/--bRNA, this search may then take no bulges): it then builds "
                           f"the index from {self.cwd}/{haps['maternal']}.", self.err)

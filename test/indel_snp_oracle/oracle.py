@@ -139,15 +139,18 @@ def generate(wd):
     # reference's own TGG after the protospacer (a tandem duplication of the bases holding
     # the reference target's PAM): the row's REF alignment is its ALT, the reference holds
     # this very target there, and the inserted copy's PAM is not created. At T2 it adds TGG
-    # before the reference's AGG: the REF alignment, read from the row's start, holds AGG in
-    # the PAM's columns, a valid PAM at the PAM's place: not created either (the row is
-    # judged on its REF alignment, as up to 2.8.1; a 2.10.0 draft of the inserted-PAM rule took
-    # both for created). The reference's own target represents each site in a
-    # population-level run, which writes no alternative alignments: checked per-sample.
-    for site, t, after, sample in (("T", 1500, "TGG", "S62"), ("T2", 2500, "AGG", "S63")):
+    # before the reference's AGG, wholly inserted bases wherever the insertion sits: an
+    # additional PAM, which the reference does not have there, created (TGG) though the
+    # reference holds AGG, a valid PAM, beside the very protospacer (decision D4, 2.10.0;
+    # before it T2 read not created, as its REF alignment did up to 2.8.1; a 2.10.0 draft of
+    # the inserted-PAM rule took T for created too). The reference's own target represents
+    # each site in a population-level run, which writes no alternative alignments: checked
+    # per-sample.
+    for site, t, after, sample, made in (("T", 1500, "TGG", "S62", "NA"),
+                                         ("T2", 2500, "AGG", "S63", "TGG")):
         put(t, G + after)
         var(site, "ins", t + 20, G[19], G[19] + "TGG", {sample: "1|0"})
-        expect[site] = {"perfect": [sample], "pam_creation": {sample: "NA"},
+        expect[site] = {"perfect": [sample], "pam_creation": {sample: made},
                         "per_sample_only": True}
 
     # B (-): a 2-bp insertion restores the target on the minus strand; a C>T SNP at
@@ -453,8 +456,9 @@ def generate(wd):
 
     # 2.10.0: PAMs judged wherever in its repeat the VCF writes the indel (the reference
     # with the row's variants: a place of the indel that leaves the PAM on reference
-    # bases; else the reference PAM beside the protospacer's base that touches the PAM, on
-    # the reference in some place; else created). Each site's PAM_creation differs from
+    # bases; else, a PAM every place makes wholly of inserted bases, created (D4); else the
+    # reference PAM beside the protospacer's base that touches the PAM, on the reference in
+    # some place; else created). Each site's PAM_creation differs from
     # 2.10.0's drafts', which judged a PAM holding inserted bases, or a deletion's
     # junction, where the VCF writes the indel (in brackets).
     # PR (+), PM (-): a tandem duplication of a 27-base unit holding a whole target; the
@@ -491,12 +495,14 @@ def generate(wd):
     var("QD", "del", 19802, "CA", "C", {"S83": "1|0"})
     expect["QD"] = {"perfect": ["S83"], "pam_creation": {"S83": "CGG"}}
     # QW (-): TTCCA inserted after its anchor G: a target starts on the 3rd added base, its
-    # PAM CCA (TGG on -) the last three, and the protospacer is the reference's after the
-    # insertion, which holds CCG before it (CGG on -: the reference's own target, which
-    # represents the site in a population-level run): NA [TGG].
+    # PAM CCA (TGG on -) the last three, wholly inserted bases wherever the insertion sits,
+    # and the protospacer is the reference's after the insertion, which holds CCG before it
+    # (CGG on -: the reference's own target, which represents the site in a
+    # population-level run): an additional PAM, created, TGG (decision D4; before it NA)
+    # [TGG].
     put(20100, "CCG" + rc(G) + "TTGCA")
     var("QW", "ins", 20103, "G", "GTTCCA", {"S84": "1|0"})
-    expect["QW"] = {"perfect": ["S84"], "pam_creation": {"S84": "NA"},
+    expect["QW"] = {"perfect": ["S84"], "pam_creation": {"S84": "TGG"},
                     "per_sample_only": True}
     # QA (+): G[16:] + TGG inserted after G[15], no repeat: the protospacer's last four
     # bases and the PAM are inserted wherever the insertion sits: TGG [NA: the REF
@@ -961,6 +967,9 @@ def expected_pam_creation(ref, f, named, motif, side):
         - a place that leaves the PAM on reference bases: the reference bases there (two
           places can give two readings when a SNP alt sits in the PAM): created when none
           of them holds the motif;
+        - else, an insertion whose every place makes the PAM wholly of its added bases (an
+          additional PAM): created, whatever the reference holds beside the protospacer
+          (decision D4, 2.10.0);
         - else a place that leaves the protospacer's base that touches the PAM on a
           reference base: is the motif on the reference beside it, on the PAM's side;
         - else (an insertion that holds that base wherever it sits): created;
@@ -1049,6 +1058,9 @@ def expected_pam_creation(ref, f, named, motif, side):
                 free.add(ref[lo + refs[0]:lo + refs[0] + kp])
         if free:
             verdicts.add("not" if any(holds(b) for b in free) else "created")
+            continue
+        if m and all(all(x is None for x in pos[p0:p0 + kp]) for pos in maps):
+            verdicts.add("created")  # an additional PAM, wholly inserted bases (D4)
             continue
         beside = next((lo + pos[tb] for pos in maps if pos[tb] is not None), None)
         if beside is None:

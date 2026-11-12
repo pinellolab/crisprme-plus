@@ -1465,9 +1465,13 @@ def _reference_pam(final_result, ref_aligned, hap_start=None):
       the reference holds it whatever place of its repeat the VCF writes the indel at
       (indel_snp_cis.pam_reference_place), on the row's haplotype, the reference with the
       row's indel and SNP alts: the reference bases the PAM sits on in a placement of the
-      indel that leaves it on reference bases; else the reference PAM beside the
-      protospacer's base that touches the PAM, in a placement that leaves that base on the
-      reference; else (an insertion holding that base wherever it is placed) None. A
+      indel that leaves it on reference bases; else, a PAM that every placement makes
+      wholly of the bases an insertion adds, an additional PAM the reference does not have
+      there, None, even where the reference holds a valid PAM beside the protospacer
+      (decision D4, 2.10.0: before it that PAM beside the protospacer decided); else the
+      reference PAM beside the protospacer's base that touches the PAM, in a placement that
+      leaves that base on the reference; else (an insertion holding that base wherever it
+      is placed) None. A
       complex record (REF bases replaced, and bases added or lost: A>T plus inserted
       bases) is its replaced bases, read as the REF bases they replace, as a SNP alt is,
       and its added bases (or lost ones), placed as an insertion's (a deletion's): a PAM

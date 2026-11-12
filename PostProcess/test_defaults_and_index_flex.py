@@ -101,24 +101,31 @@ class TheDefaultIsNRR(unittest.TestCase):
         self.assertEqual(out[1:3], ["20bp-NRR-SpCas9", "hg38"])
 
     def test_download_all_fetches_the_nrr_reference_index(self):
+        # 2.10.0's (a 20-nt guide, a 3' PAM: the name of the format-2 repo), and 2.8.1's in its
+        # place where it cannot be fetched
         tree = ast.parse((_REPO / "crisprme.py").read_text())
-        value = next(ast.literal_eval(n.value) for n in tree.body
-                     if isinstance(n, ast.Assign)
-                     and any(getattr(t, "id", "") == "DEFAULT_REFERENCE_INDEX_HG38"
-                             for t in n.targets))
-        self.assertEqual(value, "NRR_3_hg38")
+
+        def constant(name):
+            return next(ast.literal_eval(n.value) for n in tree.body
+                        if isinstance(n, ast.Assign)
+                        and any(getattr(t, "id", "") == name for t in n.targets))
+        self.assertEqual(constant("DEFAULT_REFERENCE_INDEX_HG38"), "20-NRR_3_hg38")
+        self.assertEqual(constant("_FALLBACK_REFERENCE_INDEX_HG38"), "NRR_3_hg38")
 
     def test_the_advice_names_the_nrr_index(self):
         # what a user is told to download: complete-test with no index, a search with no
-        # variant index, the setup and download help, the per-sample banner and the report
+        # variant index, the setup and download help, the per-sample banner and the report;
+        # since 2.10.0 the index of this release (its name says the guide length and the side:
+        # the format-2 repo's), not 2.8.1's NRR_3_hg38+hg38_HGDP1kGP
         for path in ("crisprme.py", "PostProcess/complete_test.py",
                      "PostProcess/generate_report.py", "PostProcess/crisprme_hf.py"):
-            text = (_REPO / path).read_text()
+            text = " ".join((_REPO / path).read_text().split())
             with self.subTest(path=path):
-                self.assertIn("--index-name NRR_3_hg38+hg38_HGDP1kGP", " ".join(text.split()))
-                for line in text.splitlines():
-                    if "--index-name NRG_3_hg38+hg38_HGDP1kGP" in line:
-                        self.fail(f"{path} still recommends the NRG index: {line.strip()}")
+                self.assertIn("--index-name 20-NRR_3_hg38+hg38_HGDP1kGP", text)
+                for old in ("--index-name NRG_3_hg38+hg38_HGDP1kGP",
+                            "--index-name NRR_3_hg38+hg38_HGDP1kGP",
+                            "--index-name \"NRR_3_hg38+hg38_HGDP1kGP"):
+                    self.assertNotIn(old, text, f"{path} still recommends an index of 2.8.1")
 
     def test_no_surface_calls_the_nrg_index_the_default(self):
         # the build recipes' notes and the paper's table still named NRG the default
@@ -149,8 +156,9 @@ class TheDefaultIsNRR(unittest.TestCase):
         for path in ("docs/install.sh", "docs/install.ps1"):
             text = (_REPO / path).read_text(encoding="utf-8")
             with self.subTest(path=path):
-                self.assertIn("--index-name NRR_3_hg38+hg38_HGDP1kGP --path /DATA", text)
+                self.assertIn("--index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA", text)
                 self.assertNotIn("NRG_3_hg38+hg38_HGDP1kGP", text)
+                self.assertNotIn("--index-name NRR_3_hg38+hg38_HGDP1kGP", text)
 
     def test_install_ps1_starts_nothing_after_a_failed_download(self):
         # Its first Start ran the two downloads and the app with ";" between them, so a failed
@@ -888,10 +896,14 @@ class AnIndexNameMayCarryItsGuideAndSide(unittest.TestCase):
                                                           True, True))
         self.assertFalse(tbc.crisprme._index_serves_search("NRR-20_3_hg38", "hg38", "NRR", 2,
                                                            False, True))
-        # the router reads the flank of a PAM-less one in either form
+        # the router reads the flank of a PAM-less one in either form: the older name's wide
+        # flank is 2.8.1's general index, and a name of 2.10.0 is of the repo of index format 2
+        # (C2), wide flank or not
         self.assertEqual(crisprme_hf.index_flank_width("20-NNNNNNNN_3_hg38+hg38_HGDP1kGP"), 8)
-        self.assertEqual(crisprme_hf.resolve_index_repo("20-NNNNNNNN_3_hg38"),
+        self.assertEqual(crisprme_hf.resolve_index_repo("NNNNNNNN_3_hg38"),
                          crisprme_hf.GENERAL_INDEX_HF_REPO)
+        self.assertEqual(crisprme_hf.resolve_index_repo("20-NNNNNNNN_3_hg38"),
+                         crisprme_hf.FORMAT2_HF_REPO)
         # the web form counts it, on its side
         pu = tbc.pages_utils
         root = Path(tempfile.mkdtemp(dir=self.tmp.name))
@@ -1825,7 +1837,9 @@ class TheDocsNameTheFolderABuildWrites(unittest.TestCase):
 
     def test_the_panel_recipes_print_the_folder_their_build_wrote(self):
         # as a CRISPRme before 2.10.0 names it (the as-run SIFs and overlay), and as 2.10.0
-        # does, for the PAM the recipe takes by default or another one (PAM=...)
+        # does, for the PAM the recipe takes by default or another one (PAM=...), after a
+        # build that succeeded (BUILD_EXIT=0: the rebuild's recipes stop at one that failed,
+        # test_panel_recipes)
         for recipe, ds in (("hgdp1kgp_build.sh", "hg38_HGDP1kGP"),
                            ("hprc_build.sh", "hg38_HPRC"),
                            ("onekg2021_build.sh", "hg38_1000G2021")):
@@ -1837,7 +1851,8 @@ class TheDocsNameTheFolderABuildWrites(unittest.TestCase):
                     for folder in (name, name + "_INDELS"):
                         os.makedirs(os.path.join(build, "genome_library", folder))
                     run = subprocess.run(["bash", "-c", after_build], capture_output=True,
-                                         text=True, env={**os.environ, "B": build})
+                                         text=True,
+                                         env={**os.environ, "B": build, "BUILD_EXIT": "0"})
                     self.assertEqual(run.stdout.splitlines()[1:],
                                      [f"index: {build}/genome_library/{name} (+ _INDELS)"])
                     self.assertEqual(run.stderr, "")

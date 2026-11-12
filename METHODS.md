@@ -52,8 +52,9 @@ index, lossless for detection) otherwise (sites-only/unphased/hybrid/reference-o
 Force the fast population-level mode with **`--population-level`**; force resolution
 with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-only
 index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
-catalog name `NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.10.0; NRG
-before): 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
+catalog name `20-NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.10.0, for a
+20-nt guide; NRG before, `NRG_3_hg38+hg38_HGDP1kGP` up to 2.8.1): 925 HGDP + 3,166 1000 Genomes
+= 4,091 samples,
 jointly SHAPEIT5 re-phased — or `HPRC`. See
 [§5, Search-space control for high-variant-density regions](#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis).
 
@@ -277,8 +278,9 @@ The merge above is the **genotyped, cis-capable** mode (`merge_vcf_panels.sh` /
 feeds the genotype-counting Tier-0 registry. It is correct only when *every* merged
 source is genotyped, and it is what enables indel+SNP cis reconstruction.
 
-The **default** shipped index, **`NRR_3_hg38+hg38_HGDP1kGP`** (the SpCas9 NRR PAM's, the
-default since 2.10.0; the NRG and NGG indexes of the panel are built from the same data), is
+The **default** shipped index, **`20-NRR_3_hg38+hg38_HGDP1kGP`** (the SpCas9 NRR PAM's, the
+default since 2.10.0, for a 20-nt guide; the NRG and NGG indexes of the panel are built from the
+same data; 2.8.1's archive was `NRR_3_hg38+hg38_HGDP1kGP`), is
 built in this genotyped mode
 from the gnomAD **v3.1.2 HGDP+1kGP** jointly-called callset (GRCh38; 4,091 samples = 925 HGDP +
 3,166 1000 Genomes), which CRISPRme+ **re-phases with SHAPEIT5** (`phase_common` scaffold +
@@ -385,9 +387,13 @@ rebuilt by CRISPRitz 2.10.0 codes every PASS ALT.
 An enriched reference genome is **PAM-independent**: the per-position IUPAC overlay and the
 Dictionaries/registry encode the *variants*, not the nuclease. Only the CRISPRitz search index
 (`genome_library/<PAM>_<N>_<ref>+<vcf>`) is PAM-specific. CRISPRme+ therefore publishes the
-PAM-independent **enriched-genome kit** for the flagship datasets (under `build-inputs/<dataset>.tar.gz`
-on the HuggingFace data repo), so a user targeting a different nuclease (NGG, NNGRRT, TTTN, …)
-rebuilds *only* the index off the published enriched genome rather than re-deriving the variants.
+PAM-independent **enriched-genome kit** for the flagship datasets, so a user targeting a different
+nuclease (NGG, NNGRRT, TTTN, …) rebuilds *only* the index off the published enriched genome rather
+than re-deriving the variants: since 2.10.0 under `build-inputs/<dataset>.tar.gz` in
+`lucapinello/crisprme-indexes-format2`, beside the indexes built from them (HGDP + 1000 Genomes,
+HPRC and mega; `download --what build-inputs` fetches them there). The kits of 2.8.1, in
+`lucapinello/crisprme-data`, were enriched by CRISPRitz 2.9.1 (one allele of a site, narrower
+fake-indel windows) and do not match 2.10.0's Dictionaries.
 The complete workflow — downloading the kit, indexing a new PAM, and reproducing the kit from
 source (including the re-phasing above and the mega merge/filters) — is in
 `docs/PRECOMPUTED_INDEXES.md`.
@@ -822,14 +828,28 @@ does not depend on where in its repeat the VCF writes the indel:
    the PAM they are the PAM's own bases: NA. A SNP alt is read as the reference base it
    replaces, as on a SNP row; a PAM that two placements put on the reference (before the
    indel and past it, when the repeat spans it) is not created if either reading holds the
-   motif;
-2. else a placement that leaves the protospacer's base that touches the PAM on a reference
+   motif. A tandem duplication of the PAM's bases is this case: the "inserted" PAM is the
+   reference's own, shifted, and it stays NA;
+2. else, a PAM that every placement makes wholly of the bases the insertion adds: an
+   additional PAM, which the reference does not have there: created, even where the reference
+   holds a valid PAM beside the protospacer (decision D4, 2.10.0: a new PAM within the
+   search's mismatches and bulges is reported as one; before D4 such a PAM went to step 3, and
+   a valid reference PAM beside the protospacer read NA, since the site existed before the
+   insertion);
+3. else a placement that leaves the protospacer's base that touches the PAM on a reference
    base: the reference PAM beside that base, on the PAM's side, the PAM's place beside that
    protospacer. A deletion's PAM always has one, its bases all being reference bases; an
    insertion's has one when some placement puts the inserted bases at or past the PAM's
    first base (the PAM at the target's right end, forward: the + strand with a 3′ PAM, the −
-   strand with a 5′ one) or ending at or before the PAM's last (the PAM at its left end);
-3. else, an insertion that holds that base, with the protospacer's end and the PAM's start,
+   strand with a 5′ one) or ending at or before the PAM's last (the PAM at its left end).
+   Such a PAM holds inserted bases, and reference bases too in some placement, though maybe
+   not in the VCF's: an insertion that is the whole PAM where the VCF writes it, and that a
+   placement one base or more along puts partly on a reference base, is judged here, D4 or
+   not (TRAC guide, an alternative alignment at chr21:46302051 (+), CFD 0.019 in 2.8.1's
+   genome-wide table: TAG inserted after the protospacer's last base, before the reference's
+   TGG, whose T repeats the insertion's first base, so that one base right the PAM is that T
+   and two inserted bases; the reference's TGG beside the protospacer reads NA);
+4. else, an insertion that holds that base, with the protospacer's end and the PAM's start,
    wherever it is placed: no place on the reference, created.
 
 A complex record replaces REF bases and adds bases or loses some (A>T and inserted bases after
@@ -868,10 +888,12 @@ insertion leaves that PAM on the reference's own: NA. Where an insertion after t
 copies the reference's own PAM (T, C6), NA likewise. C>CCAG after its anchor on the − strand
 (QC), whose first base the reference repeats there, holds the protospacer's first forward base
 in both its places: created. Not a repeat, C>CCA after an anchor C that starts a − strand row
-(QN): the protospacer's touching base is a reference base, and the reference holds CTC beside it
-(GAG on −): NA; and with an inserted TGG before the reference's AGG on the + strand (T2), or
-TTCCA inserted between the reference's CCG and its protospacer on the − strand (QW, a wholly
-inserted PAM), the reference holds a valid PAM beside the very protospacer: NA. CA>C inside the
+(QN): the PAM is the anchor and two added bases, the protospacer's touching base a reference
+base, and the reference holds CTC beside it (GAG on −): NA. An inserted TGG before the
+reference's AGG on the + strand (T2), or TTCCA inserted between the reference's CCG and its
+protospacer on the − strand (QW): the PAM is inserted bases wherever the insertion sits, an
+additional PAM, created (TGG), though the reference holds a valid PAM beside the very
+protospacer (decision D4; NA before it). CA>C inside the
 PAM CCG on the − strand (QD) leaves the reference's CAG (CTG on −) beside the protospacer:
 created. Inserted bases holding the protospacer's last four bases and the PAM on the + strand
 (QA): created. Complex records: A>T on the + strand and C>T on the − strand, each with 33
@@ -903,13 +925,38 @@ right puts that PAM on the reference's own bases (with NRR, chr22:25415044 (−)
 alignment as its site's reference row; TRAC guide, chr22:49196564 (−) and the row of
 50193928 (−): NA, as 2.8.1 read them). Genome-wide,
 2.8.1's tables (2.8.1's code gives back every value in them) with each row's PAM_creation
-computed by 2.10.0's code, highest-CFD alignments: README guide, per-sample, 97 go NA → created
-(70 rows and 27 alternative alignments: a PAM across a deletion's junction on the − strand 56,
+computed by 2.10.0's code, highest-CFD alignments: README guide, per-sample, 99 go NA → created
+(70 rows and 29 alternative alignments: a PAM across a deletion's junction on the − strand 56,
 CFD at most 0.083; a PAM holding inserted bases on a row that starts inside the insertion 27, on
-a row that starts on a reference base 14) and 4 created → NA (3 rows and 1 alternative
-alignment); population-level 70 and 3 rows; TRAC guide (CTCTCAGCTGGTACACGGCA), per-sample, 109
-(67 and 42: deletions 29, CFD at most 0.039; rows inside an insertion 58; on a reference base 22)
-and 5 (2 and 3).
+a row that starts on a reference base 16) and 4 created → NA (3 rows and 1 alternative
+alignment); population-level 70 and 3 rows; TRAC guide (CTCTCAGCTGGTACACGGCA), per-sample, 113
+(67 and 46: deletions 29, CFD at most 0.039; rows inside an insertion 58; on a reference base 26)
+and none created → NA. Of these, decision D4 (step 2) accounts for 11 highest-CFD blocks, every
+one a PAM wholly inserted beside a reference protospacer that held a valid PAM, at CFD at most
+0.008: 2 README alternative alignments (chr11:35248792 (+), CFD 0), none population-level, and
+on TRAC 2 rows (chr17:77419671 (−), 0.008; chr2:159346 (−), 0.003) and 7 alternative
+alignments (chr1:246083493 (+), chr20:63226848 (+), chr4:183404212 (−) three,
+chr5:157864188 (+) two), 5 of which 2.8.1 also read created; in these tables D4 changes nothing
+else. Its reach depends on the guide and the panel, and it is largest beside hg38_mega, a
+sites-only panel whose five sources hold many insertions in short tandem repeats. Every indel block
+of a run judged with the rule before D4 and with D4's (the code of each run of 2.10.0 gives back
+every value of its tables), D4 turns NA to created, and changes nothing else: on chr22, the README
+guide with NRR at 4 mismatches + 1 DNA + 1 RNA bulge, per-sample on HGDP + 1000 Genomes beside
+hg38_mega, 260 blocks of each kind in 646 alternative alignments, the highest-CFD ones at CFD at
+most 0.057 (19 above 0.008), from 12 insertions, 234 of those 260 at three in (TA)n repeats
+(chr22:18201792 T>TATATCA, 18201794 A>ATATATTG, 24238776 T>TAAGATAG; chr22:18201791 (−), its PAM
+TGA wholly inserted beside the reference's AAA, CFD 0.057); the checker's three repeat-rich guides
+with NRG, per-sample on HGDP + 1000 Genomes, 4 alternative alignments (chr22:45890423 (+), its PAM
+CGG wholly inserted beside the reference's AGG, CFD 0.115; 45890407 (+), 0.040; two at CFD 0);
+genome-wide, hg38_mega alone, five guides (README, `ACTGAAATCTGTAAGCAGGC`, TRAC, EMX1, VEGFA site
+3) with NRG at 4 mismatches and no bulge, population-level, one block in each of 8 rows (the one
+highest-CFD block chr14:91881120 (−), VEGFA site 3, its PAM GGG wholly inserted beside the
+reference's TAG, CFD 0.113); and genome-wide on HPRC, the rows of the one genome-wide HPRC table
+there is (CRISPRme 2.5.4, per-sample, `TGCTTGGTCGGCACTGATAG` with NRG at 4 + 1 + 1, placed as
+2.10.0 places them; its own rule is not one this can check), 17 highest-CFD blocks, CFD at most
+0.011. It changes nothing in the same chr22 runs population-level, in HPRC's and its unphased
+copy's (both modes), or in the README guide's (NRG, NRR), TRAC's and SaCas9's on HGDP + 1000
+Genomes. These go well beyond the 11 rows at CFD at most 0.008 decision D4 was taken on.
 
 From 2.5.0 to 2.8.0 each code was instead read **column by column without genotypes** —
 the guide's base when it was an allele, else the code's first allele. That reported one
@@ -955,7 +1002,10 @@ complementary controls:
   off-targets. It bounds the
   variant-density combinatorial explosion. (`assembly-search` instead defaults it to
   the full `mm+bDNA+bRNA` budget — a resolved diploid genome has no IUPAC-variant
-  lattice, so it needs no variant-density cap.)
+  lattice, so it needs no variant-density cap.) The default bulge budget is **1 DNA + 1
+  RNA bulge**: a search given neither `--bDNA` nor `--bRNA` takes it (complete-search, up to
+  the bulges an index it can use or build holds; assembly-search, since 2.10.0; the web
+  form's simple and Advanced modes, whose Advanced panel offers up to 2 of each).
 - **High-variant-density cap.** Dense windows, those spelling more sequences than a
   configurable budget, 2 to the power `CRISPRME_IUPAC_CAP` (default 2¹⁰), fall back to a
   bounded procedure instead of full enumeration, so a single pathological window cannot
@@ -1087,7 +1137,12 @@ After `build-index-only --samplesID` the same search returned exactly those 5 ro
 every carrier it lists has all of its row's variants on one phased haplotype; since 2.10.0 the
 index without the tiers gives the same rows (560 against 565, the five rows above gone). The
 2.8.1 report said so of a 2.8.1 search's results, and still does when it reads them again (a
-search since 2.10.0 writes the carrier gate's sidecar, `.carrier_gate.json`, in either mode).
+search since 2.10.0 writes the carrier gate's sidecar, `.carrier_gate.json`, in either mode,
+one that says `failed` where the gate failed; where there is none, the report reads the
+version `complete-search` records in `.version.txt`). These are dot files, as are the run's mode
+and datasets (`.search_mode`, `.untiered_datasets`), which the report reads too: copy a result
+folder whole (`cp -r <folder>`, `rsync -a`), not by a glob (`<folder>/*` skips dot files), or
+the report reads the copy as a population-level search.
 
 ### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
@@ -1301,6 +1356,10 @@ the search without it (`--no-prioritize-observed`).
   haplotypes that carry them together and their samples, E, the frequency product and
   rarest frequency, and the label), and `.carrier_gate.json` (how the gate ran, its panels
   with their samples by superpopulation, and its tiers by each row's highest-CFD alignment).
+  A gate that fails leaves the completed search as it is (issue #143): the search says so on
+  stderr and in its log, removes what the gate wrote of its table, and leaves a
+  `.carrier_gate.json` whose status is `failed`, so that the report's **Carrier gate** row
+  says the gate failed and shows the rows unchecked.
 - **Report.** A C1 row is ranked after every other row in the views ranked by the score of
   the alignment that is C1. A row whose highest-CFD alignment is C1 leaves the top-1000 by
   CFD, panels (a) and (b) of Section 2, the validation panel's CFD thresholds and the risk
@@ -2384,7 +2443,7 @@ records it.
 **Pruning by itself.** Since 2.10.0 a search prunes, as if `--prune-pam` was given, whenever
 no installed index serves it unpruned and one of these does: a wider all-`N` one, or a
 dedicated one of a PAM that holds the search's. It says so first, naming the index that needs
-it ("no installed reference index of hg38 serves PAM NGG unpruned, and NRR_3_hg38 serves it
+it ("no installed reference index of hg38 serves PAM NGG unpruned, and 20-NRR_3_hg38 serves it
 pruned to it at leaf time: searching with --prune-pam, as if it was given"): a search from the
 command line on its console, one from the web, which has none, in its `log_verbose.txt`. The
 run's record of the indexes it searched (`.indexes_searched.txt` in the result folder, beside
@@ -2518,8 +2577,11 @@ under `--prune-pam`; up to 3 bulges), the 136 inside the rule are byte-identical
 dedicated index and the 110 outside it all differ, up to an empty result. Another 70 cells, of
 variant searches (SNP and indel rows, with no bulges too, through the index) and of a 5′ PAM,
 fall on the same side of the rule. So a published 20-nt N = 3 index serves a 21-nt guide at up
-to 1 bulge of each type, a 22-nt guide with one bulge of one type, a 23-nt guide with no bulge
-through the index, and no longer guide. An index built for this very guide is preferred to one
+to 1 DNA bulge with up to 2 RNA bulges, or at 2 DNA bulges with none, a 22-nt guide at 1 DNA
+bulge with none of RNA, or at up to 2 RNA bulges with none of DNA, a 23-nt guide with no bulge
+through the index, and no longer guide (the web, whose cap is one number for both bulge types,
+`index_fit.bulge_cap`, at up to 1 of each for a 21-nt guide, and none for a longer one). An
+index built for this very guide is preferred to one
 that merely fits. With none that fits, a search builds its own under a name that says its guide
 length (`<guide>-<PAM>_<N>_<genome>`, **Index names** above), beside an index of the older name
 `<PAM>_<N>_<genome>` built for another guide, which it stopped on before 2.10.0, as
@@ -2549,9 +2611,12 @@ off a wider flank is supported for a 3′ PAM only; for a 5′ PAM the engine re
 PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its name,
 the header of its `.bin` files or its `.pam_build` records (above). The published
 PAM-less indexes are 3′ builds, so they serve no 5′ PAM: a Cas12a search needs a dedicated
-index. A flank wider than
-3 nt is not readable by CRISPRme versions before this one, so those indexes are published
-in a separate repository rather than alongside the standard ones.
+index. Up to 2.8.1 a
+PAM-less index with a flank wider than 3 nt, which a release before `--prune-pam` misreads, was
+published in a repository of its own (`lucapinello/crisprme-data-general-index`), apart from
+the others; since 2.10.0 every index, the general one among them, is published in
+`lucapinello/crisprme-indexes-format2`, the repository of index format 2, which no release
+before 2.10.0 reads (`docs/PRECOMPUTED_INDEXES.md`).
 
 ---
 

@@ -25,9 +25,11 @@ chr3:20000 (rsW_N_del + rsW_N14) showed PAM_creation TGG over a reference TGG.
 Since 2.10.0 a PAM that holds bases an insertion adds, or a deletion's junction, is judged
 wherever in its repeat the VCF writes the indel (indel_snp_cis.pam_reference_place, whose
 own tests are in test_indel_snp_cis): the reference bases it sits on in a placement that
-leaves it on the reference; else the reference PAM beside the protospacer's base that
-touches the PAM, in a placement that leaves that base on the reference; else (an insertion
-holding that base wherever it is placed) created. A complex record (REF bases replaced, and
+leaves it on the reference; else, a PAM that every placement makes wholly of inserted bases,
+an additional PAM, created, even beside a protospacer the reference holds with a valid PAM
+(decision D4); else the reference PAM beside the protospacer's base that touches the PAM,
+in a placement that leaves that base on the reference; else (an insertion holding that base
+wherever it is placed) created. A complex record (REF bases replaced, and
 bases added or lost) is judged as its replaced bases, read as the REF bases they replace, and
 its added (lost) bases, as an insertion's (a deletion's). A row whose REF alignment is its
 ALT never has a created PAM. Unreleased drafts of 2.10.0 judged such a PAM where the VCF
@@ -377,22 +379,25 @@ class IndelPamCreation(unittest.TestCase):
             self.assertEqual(ns["_reference_pam"](row, ref_aligned, hap), "TGG")
             self.assertEqual(ns["final_result"][PAM_GEN], "n")
 
-    def test_an_inserted_pam_after_a_reference_protospacer_reads_the_pam_beside_it(self):
+    def test_an_additional_pam_inserted_after_a_reference_protospacer_was_created(self):
         """+ strand, 3' PAM: G>GTGG after the protospacer, the reference's next bases not
-        TGG. The PAM is wholly inserted bases wherever the insertion sits (TGG cannot move
-        past AGG or TCA), and the protospacer's last base, the anchor, is a reference base:
-        the reference PAM beside it decides, as the REF alignment, read from the row's
-        start, did up to 2.8.1: AGG there is a valid PAM at the PAM's place beside the
-        protospacer (not created, though REF and ALT differ); TCA is not (created)."""
+        TGG. Beside AGG and CAT the PAM is wholly inserted bases wherever the insertion sits
+        (TGG cannot move past them): an additional PAM, which the reference does not have
+        there, created even where the reference holds a valid PAM beside the protospacer
+        (AGG; decision D4, 2.10.0: before it the reference PAM beside the protospacer
+        decided, as the REF alignment, read from the row's start, did up to 2.8.1, and AGG
+        read not created). Beside TCA the insertion can sit one base right (GGT after the
+        reference's T), where the PAM holds that reference T: the reference PAM beside the
+        protospacer decides, TCA, no PAM: created."""
         g = self.GUIDE
         token = "chr1_70_%s_%sTGG" % (g[19], g[19])
-        for after, made in (("AGG", "n"), ("TCA", "TGG")):
+        for after, beside in (("AGG", None), ("CAT", None), ("TCA", "TCA")):
             genome = "N" * 50 + g + after + "CATTAC" + "N" * 20
             ref_aligned = genome[50:73]
             row = _row(g + "TGG", token, 50, "+")
             ns = _ns(row, ref_aligned, genome=genome, hap_start=50)
-            self.assertEqual(ns["_reference_pam"](row, ref_aligned, 50), after)
-            self.assertEqual(ns["final_result"][PAM_GEN], made)
+            self.assertEqual(ns["_reference_pam"](row, ref_aligned, 50), beside, after)
+            self.assertEqual(ns["final_result"][PAM_GEN], "TGG", after)
 
     def test_a_tandem_duplication_of_a_five_prime_pam_on_the_minus_strand(self):
         """- strand, 5' PAM (TTTV; the Cas12a oracle's C6): the PAM is the target's right
@@ -553,21 +558,22 @@ class IndelPamCreation(unittest.TestCase):
         """- strand, 3' PAM: TTCCA inserted after the protospacer's last base on the
         reference side (forward: its anchor G, then the protospacer), so a target starts on
         the third added base, its PAM CCA (TGG on -) the last three, and its protospacer the
-        reference bases after the insertion. No placement gives the PAM reference bases, but
-        the protospacer's touching base is a reference one, and the reference holds CCG
-        before it (CGG on -): the reference has this very protospacer with a valid PAM, not
-        created (2.10.0 drafts: created, a wholly inserted PAM of a row starting
-        inside the insertion; TRAC, HGDP + 1000 Genomes: chr17:77419671 (-)). The mirror
-        geometry, + strand, is the oracle's T2: AGG beside an inserted TGG."""
+        reference bases after the insertion. No placement gives the PAM a reference base:
+        an additional PAM, created, both where the reference holds CCG before the
+        protospacer (CGG on -: this very protospacer with a valid PAM) and where it holds
+        CAG (CTG on -, none) (decision D4, 2.10.0; before it the reference PAM beside the
+        protospacer decided, and CGG read not created; TRAC, HGDP + 1000 Genomes:
+        chr17:77419671 (-)). The mirror geometry, + strand, is the oracle's T2: TGG
+        inserted beside the reference's AGG."""
         rcg = _revcomp(self.GUIDE)
         genome = "N" * 30 + "CCG" + rcg + "N" * 30
         self.assertEqual(_revcomp(genome[30:53]), self.GUIDE + "CGG")
         token = "chr1_33_G_GTTCCA"
         self.assertEqual(self._case(genome, token, 32, "-", self.GUIDE + "TGG", 35),
-                         ("CGG", "n"))
+                         (None, "TGG"))
         genome = "N" * 30 + "CAG" + rcg + "N" * 30           # CTG on -: no PAM there
         self.assertEqual(self._case(genome, token, 32, "-", self.GUIDE + "TGG", 35),
-                         ("CTG", "TGG"))
+                         (None, "TGG"))
 
     def test_a_deletion_across_the_pam_on_the_minus_strand(self):
         """- strand, 3' PAM (forward CCN, left): CA>C deletes the A of CCAG before the
