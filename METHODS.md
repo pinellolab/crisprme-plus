@@ -1630,7 +1630,9 @@ search's threads, bring it back. None changes a row.
   whole chromosome (the spans of every line, the phased indel store read around them, the
   dictionary keys they need, which the pool reads once a chromosome into a copy the pieces
   load; on the indel side the windows of the indel log that hold its lines' positions, the
-  windows its lines read), then analyses its own lines. The copy is a file of the run's output
+  windows its lines read, and the carriers every line of the log lists, as one process reads
+  them: a record written on two VCF lines has a window for each, and its rows list the carriers
+  of both, the other line's window held or not), then analyses its own lines. The copy is a file of the run's output
   folder, which other members of its group can write under a umask of 002, so it is JSON, the
   dictionary's own format, which loads as data whoever wrote it (a pickle runs what it names
   when loaded), made 0600 in a pieces' folder the pool makes 0700; a file there that is not

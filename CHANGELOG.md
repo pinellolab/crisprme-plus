@@ -1076,10 +1076,14 @@ and the `release-crisprme` skill.
   which its group can write under a umask of 002, and loading a pickle runs what it names),
   made 0600 in a pieces' folder made 0700 (modes that keep others from reading or writing it,
   not from putting a folder of their own in the place of the pieces' one where they can write
-  the output folder). The indel pieces read the windows of the indel log their lines need. The
-  analysis' arguments reach the pieces through a file of a folder the pool makes in `$TMPDIR`
-  (`tempfile.mkdtemp`), never under a name another user of a shared `/tmp` could make first.
-  `log_verbose.txt` keeps one piece's output and what the others add, but their own run times,
+  the output folder). The indel pieces read the windows of the indel log their lines need, and
+  the carriers of every line of it: a record on two VCF lines (an MNV, or an indel read without
+  its phased store) lists the carriers of both, whichever window a piece holds (a piece reading
+  the carriers of its own windows alone would drop the other line's:
+  `test_indel_overlaid_rows`). The analysis' arguments reach the pieces through a file of a
+  folder the pool makes in `$TMPDIR` (`tempfile.mkdtemp`), never under a name another user of a
+  shared `/tmp` could make first. `log_verbose.txt` keeps one piece's output and what the
+  others add, but their own run times,
   the notes one process ends a chromosome with (the pre-check's count, the dense windows),
   which the merge writes from the pieces' counts, and the chromosome's run time ("Post-analysis
   SNP of chr22: done in 101.2 s (16 pieces)").

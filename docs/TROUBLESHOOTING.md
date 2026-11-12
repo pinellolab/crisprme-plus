@@ -319,9 +319,9 @@ window only for an indel a sample carries, so an enrichment of them holds none, 
 logs or its INDELS indexes record windows of ...`, whatever their width. The mega's windows come
 from its enriched-genome kit, whose indels a synthetic sample carries
 (`seq_script/merge_panels/mega_rebuild.sh`, the mega's recipe of 2.10.0, builds the whole kit
-so): enriched anew from its VCFs, it would lose
-every indel off-target. Put its kit back (`Genomes/hg38+hg38_mega` and `_INDELS`: download the
-kit, [Precomputed indexes](PRECOMPUTED_INDEXES.md)) and build or search as before; for the
+so): enriched anew from its VCFs, it would lose every indel off-target. Put its kit back
+(`Genomes/hg38+hg38_mega` and `_INDELS`: download the kit,
+[Precomputed indexes](PRECOMPUTED_INDEXES.md)) and build or search as before; for the
 windows of 2.10.0, install its archive and kit of CRISPRme 2.10.0 in place of what the message
 lists, or build the kit again that way. Its registry, which comes from its VCFs alone (their
 INFO AF fields), is never in that list.
