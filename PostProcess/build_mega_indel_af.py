@@ -16,8 +16,9 @@ The VCF is read as CRISPRitz 2.10.0's enricher reads it
 (build_mega_registry.read_as_enricher): only the records whose FILTER is `PASS` or `.`;
 the alleles it puts in a fake-indel window (a REF or ALT longer than one base, an MNV
 included, no symbolic allele), each ALT of a line listing several with its own AF; and no
-indel within the window's left flank of the chromosome's start (26 bases with the 25/27
-window of CRISPRitz 2.10.0's enricher; --log-dir reads it from the indel log), for which
+indel within the window's left flank of the chromosome's start (31 bases with the 30/30
+window of CRISPRitz 2.10.0's enricher, 26 with 2.9.1's 25/27; --log-dir reads it from the
+indel log), for which
 the enricher writes no window. The store holds an allele once: of one REF>ALT on two
 records, the more frequent record's frequencies (the higher `INFO/AF`; on a tie, the
 earlier). The enricher gives each indel record a window and a log row of its own (it
@@ -52,8 +53,10 @@ __all__ = ["DEFAULT_DATASET_META", "_parse_info_afs", "IndelAfReader",
            "build_indel_af_store", "iter_indel_af_records"]
 
 # The enricher writes no fake-indel window for an indel whose window would start before
-# the chromosome (indel_to_fasta: POS - 26 < 0 with its 25/27 window), so no row can name
-# it. The window is the enricher's: window_left_of_log reads it from a built indel log.
+# the chromosome (indel_to_fasta: POS - 26 < 0 with 2.9.1's 25/27 window, POS - 31 < 0 with
+# 2.10.0's 30/30), so no row can name it. The window is the enricher's: window_left_of_log
+# reads it from a built indel log (mega_rebuild.sh passes --log-dir); WINDOW_LEFT, 2.9.1's,
+# is the fallback when no log is given.
 WINDOW_LEFT = 26
 
 

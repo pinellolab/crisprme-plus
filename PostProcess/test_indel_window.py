@@ -448,7 +448,7 @@ class ADatasetEnrichedAnew(_EngineCase):
                       "enriched-genome kit, whose indels a synthetic sample carries: install its "
                       "archive and enriched-genome kit of CRISPRme 2.10.0 "
                       "(docs/PRECOMPUTED_INDEXES.md), or build its kit again that way "
-                      "(seq_script/merge_panels/mega_build_indels.sh).", note)
+                      "(seq_script/merge_panels/mega_rebuild.sh).", note)
         self.assertNotIn("enrich hg38_mega again", note)
         self.assertIn("enrich ds again with it (build-index-only) to search them.",
                       iw.target_note((25, 27), 27, 1, "complete-search", "ds"))
@@ -562,12 +562,57 @@ class AFakeGenomeAndItsLogs(unittest.TestCase):
         self.assertNotIn(reg, why)
         self.assertTrue(why.endswith(
             "or build that kit again with a synthetic sample "
-            "(seq_script/merge_panels/mega_build_indels.sh), in place of all of the dataset "
+            "(seq_script/merge_panels/mega_rebuild.sh), in place of all of the dataset "
             "that comes from an enrichment (rm -rf '%s' '%s'): ds is sites-only: its VCFs name "
             "no sample, and CRISPRitz writes a fake-indel window only for an indel a sample "
             "carries, so an enrichment of them holds none, so build-index-only would enrich it "
             "anew with no indel off-target." % (os.path.join(w, "Genomes", "hg38+ds_INDELS"),
                                                 logs)), why)
+
+    def test_the_recipe_the_advice_names_builds_the_whole_kit(self):
+        """The advice on a sites-only dataset says to build its kit again with a synthetic
+        sample, in place of all of it that comes from an enrichment (the enriched genome and
+        its indexes among them). The recipe it names must build the whole kit of 2.10.0, the
+        one the index set builds the mega with (seq_script/rebuild/index_set_2.10.0.tsv):
+        lane M's mega_rebuild.sh, one build-index-only of the enriched genome, the SNP index,
+        the fake-indel genome and its INDELS index. It named mega_build_indels.sh, up to
+        2.8.1's recipe of the fake-indel half alone, after which the next search found no
+        enriched genome and was refused, the dataset sites-only and its new logs holding
+        windows (the integration of stage 2b)."""
+        import csv
+        import re
+        here = os.path.dirname(os.path.abspath(__file__))
+        repo = os.path.dirname(here)
+        named = set(re.findall(r"seq_script/merge_panels/[A-Za-z0-9_]+\.sh",
+                               iw.sites_only_way("hg38_mega")))
+        # the fake-genome refusal of a sites-only dataset (test_a_dataset_of_two_enrichments_...)
+        w = os.path.join(self.tmp, "work")
+        fa, log = self.cut(25, 27, "w25", overlay=True)
+        _, log30 = self.cut(30, 30, "w30")
+        fake = os.path.join(w, "Genomes", "hg38+ds_INDELS", "fake_ds_chrT")
+        os.makedirs(fake)
+        shutil.copy(fa, fake)
+        logs = os.path.join(w, "Dictionaries", "log_indels_ds")
+        os.makedirs(logs)
+        shutil.copy(log30, logs)
+        reg = os.path.join(w, "Dictionaries", "registry_ds")
+        os.makedirs(reg)
+        with open(os.path.join(reg, "reg_chrT.idx"), "w") as fh:
+            fh.write('{"aggregation": "info_af"}')
+        why = iw.fake_genome_refusal(w, "hg38", "ds")
+        self.assertIn("or build that kit again with a synthetic sample", why)
+        named |= set(re.findall(r"seq_script/merge_panels/[A-Za-z0-9_]+\.sh", why))
+        manifest = os.path.join(repo, "seq_script", "rebuild", "index_set_2.10.0.tsv")
+        with open(manifest) as fh:
+            lines = [x for x in fh if x.strip() and not x.startswith("#")]
+        mega = [r for r in csv.DictReader(lines, delimiter="\t", quoting=csv.QUOTE_NONE)
+                if r["panel"] == "hg38_mega" and r["kind"] == "variant"]
+        self.assertTrue(mega)
+        builds = set(re.findall(r"seq_script/merge_panels/[A-Za-z0-9_]+\.sh",
+                                " ".join(r["build"] for r in mega)))
+        self.assertEqual(named, builds)
+        for script in named:
+            self.assertTrue(os.path.isfile(os.path.join(repo, script)), script)
 
     def test_the_overlay_refuses_a_genome_its_log_does_not_describe(self):
         """W-R3-F2: the SNP overlay places each code by the log's windows. Given the logs of

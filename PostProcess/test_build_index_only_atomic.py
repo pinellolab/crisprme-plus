@@ -4526,7 +4526,7 @@ class AnEnrichmentInPlaceIsItsLogsOwn(_Fixture):
 class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
     """W-R3-F1: a sites-only dataset (the mega: its VCFs name no sample) has fake-indel
     windows only from its enriched-genome kit, whose indels a synthetic sample carries
-    (seq_script/merge_panels/mega_build_indels.sh), as CRISPRitz writes a window only for an
+    (seq_script/merge_panels/mega_rebuild.sh), as CRISPRitz writes a window only for an
     indel a sample carries; its registry comes from its VCFs' INFO AF fields, and the published
     mega's manifest says so by its aggregation alone, with no data_type. build-index-only took
     that registry for a store of the enrichment, named it in its advice's rm and refused the
@@ -4576,7 +4576,7 @@ class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
             "off-target); its windows come from its enriched-genome kit, whose indels a "
             "synthetic sample carries: install its archive and enriched-genome kit of CRISPRme "
             "2.10.0 (docs/PRECOMPUTED_INDEXES.md), or build its kit again that way "
-            "(seq_script/merge_panels/mega_build_indels.sh). Either replaces that enrichment "
+            "(seq_script/merge_panels/mega_rebuild.sh). Either replaces that enrichment "
             "and all that was built from it", out)
         self.assertNotIn("run build-index-only again", out)
         m = re.search(r"\(rm -rf ([^;)]*)[;)]", out)

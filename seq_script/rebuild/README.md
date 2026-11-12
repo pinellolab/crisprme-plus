@@ -150,7 +150,8 @@ The mega rows follow lane M's full rebuild of `hg38_mega` (decision D2: PASS/'.'
 AF_max, its registry and indel allele frequencies consistent), from the merged VCFs
 `mega.<chr>.afmax.vcf.gz` (`$MEGA_SRC`: `vcfs/hg38_mega` of `lucapinello/crisprme-data`, or what
 `seq_script/merge_panels/mega_gw_merge.sh` writes), whose recipe,
-`seq_script/merge_panels/mega_rebuild.sh <install_dir> <merged_vcf_dir>`, that lane owns. Until
-the integration of stage 2b brings it into this tree, the check names it as pending
-(`check_index_set.PENDING_SCRIPTS`) and the dry run takes its call as done; once the tree holds
-it, the check asks for its entry to go.
+`seq_script/merge_panels/mega_rebuild.sh <install_dir> <merged_vcf_dir>`, that lane wrote; the
+integration of stage 2b brought it into this tree, and the dry run checks its call as it checks
+every other recipe's. (A recipe of a branch not merged yet would be named in
+`check_index_set.PENDING_SCRIPTS`: the check names it as pending and the dry run takes its call
+as done, until the tree holds it and the check asks for its entry to go. None is, now.)

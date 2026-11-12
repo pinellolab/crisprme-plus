@@ -81,10 +81,12 @@ RUN micromamba install -y -n base \
 
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 
-# ---- Build crispritz (the tag crispritz_ref names) from source and install it into the env
-RUN git clone --depth 1 --branch ${crispritz_ref} \
-        https://github.com/pinellolab/CRISPRitz.git /opt/crispritz-src \
+# ---- Build crispritz (the ref crispritz_ref names: a tag, or a commit, as a pull request's CI
+# passes the engine's commit before its tag) from source and install it into the env
+RUN git init -q /opt/crispritz-src \
     && cd /opt/crispritz-src \
+    && git fetch -q --depth 1 https://github.com/pinellolab/CRISPRitz.git ${crispritz_ref} \
+    && git -c advice.detachedHead=false checkout -q FETCH_HEAD \
     && g++ -std=c++11 -O3 -fopenmp \
         sourceCode/CRISPR-Cas-Tree/mainParallel.cpp -o buildTST \
     && g++ -std=c++11 -O3 -fopenmp \

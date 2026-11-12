@@ -389,28 +389,51 @@ class TheRebuildRuns(unittest.TestCase):
         self.assertTrue([p for p in dry if "the script seq_script/merge_panels/hgdp1kgp.sh is "
                          "not there" in p], dry)
 
+    def test_megas_recipe_is_the_trees(self):
+        """mega's build calls lane M's mega_rebuild.sh, which the branch of lane D did not
+        hold, so the check named it pending and the dry run took its call as done. The
+        integration of stage 2b brought it: no script is pending, and the dry run checks
+        mega's call (the script there, its working directory and its source VCFs) as it
+        checks every other recipe's."""
+        build = _row(self.rows, "20-NRR_3_hg38+hg38_mega")["build"]
+        self.assertIn("bash seq_script/merge_panels/mega_rebuild.sh $MEGA $MEGA_SRC", build)
+        self.assertTrue(os.path.isfile(
+            os.path.join(ROOT, "seq_script", "merge_panels", "mega_rebuild.sh")))
+        self.assertEqual(cis.PENDING_SCRIPTS, {})
+        self.assertEqual(cis.pending(), [])
+        rows = self.mutated("20-NRR_3_hg38+hg38_mega", "build", "mega_rebuild.sh",
+                            "mega_rebuilt.sh")
+        dry = cis.dry_run(rows)
+        self.assertTrue([p for p in dry if "the script seq_script/merge_panels/mega_rebuilt.sh "
+                         "is not there" in p], dry)
+
     def test_a_pending_recipe_the_tree_holds(self):
-        """mega's build calls lane M's mega_rebuild.sh, which the branch of lane D does not
-        hold: the check says so, and the dry run takes its call as done, until the tree holds
-        it; then its entry in PENDING_SCRIPTS has to go."""
+        """A recipe a branch not merged yet brings (PENDING_SCRIPTS): the check names it, and
+        the dry run takes its call as done, until the tree holds it; then its entry has to
+        go."""
         import tempfile
-        self.assertIn("seq_script/merge_panels/mega_rebuild.sh",
-                      _row(self.rows, "20-NRR_3_hg38+hg38_mega")["build"])
-        with tempfile.TemporaryDirectory() as t:
-            os.symlink(os.path.join(ROOT, "PAMs"), os.path.join(t, "PAMs"))
-            panels = os.path.join(t, "seq_script", "merge_panels")
-            os.makedirs(panels)
-            for n in os.listdir(os.path.join(ROOT, "seq_script", "merge_panels")):
-                os.symlink(os.path.join(ROOT, "seq_script", "merge_panels", n),
-                           os.path.join(panels, n))
-            for script in cis.PENDING_SCRIPTS:
-                if not os.path.exists(os.path.join(t, script)):
-                    open(os.path.join(t, script), "w").close()
-            problems = cis.check(self.rows, root=t)
-            self.assertEqual(cis.pending(root=t), [])
-        for script in cis.PENDING_SCRIPTS:
-            self.assertIn(f"{script}: this tree holds it, so it is no longer pending: take it out "
-                          f"of check_index_set.PENDING_SCRIPTS", problems)
+        from unittest import mock
+        script = "seq_script/merge_panels/mega_rebuild.sh"
+        with mock.patch.dict(cis.PENDING_SCRIPTS, {script: "a recipe of a branch"}):
+            with tempfile.TemporaryDirectory() as t:
+                os.symlink(os.path.join(ROOT, "PAMs"), os.path.join(t, "PAMs"))
+                panels = os.path.join(t, "seq_script", "merge_panels")
+                os.makedirs(panels)
+                for n in os.listdir(os.path.join(ROOT, "seq_script", "merge_panels")):
+                    if n != "mega_rebuild.sh":
+                        os.symlink(os.path.join(ROOT, "seq_script", "merge_panels", n),
+                                   os.path.join(panels, n))
+                self.assertEqual(cis.pending(root=t), [
+                    f"{script}: a recipe of a branch, which this tree does not hold yet (the "
+                    f"merge of its branch brings it): the dry run takes its call as done"])
+                self.assertNotIn(f"{script}: this tree holds it, so it is no longer pending: "
+                                 f"take it out of check_index_set.PENDING_SCRIPTS",
+                                 cis.check(self.rows, root=t))
+                open(os.path.join(t, script), "w").close()
+                problems = cis.check(self.rows, root=t)
+                self.assertEqual(cis.pending(root=t), [])
+        self.assertIn(f"{script}: this tree holds it, so it is no longer pending: take it out "
+                      f"of check_index_set.PENDING_SCRIPTS", problems)
 
     def run_on_genomes(self, genomes=None, mega_src=None):
         """The rebuild's script run from the repository's root on working directories whose

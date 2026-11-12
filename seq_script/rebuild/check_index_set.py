@@ -127,14 +127,12 @@ UPLOADERS = ("hf", "huggingface-cli")
 # The repository's folders a command names a path in, read from the repository's root (PAMs/
 # names the working directory's after a cd into it)
 REPOSITORY_FOLDERS = ("seq_script", "scripts", "PostProcess", "PAMs")
-# A recipe the set calls that another lane of stage 2b brings, which this tree does not hold
-# yet: the integration of stage 2b brings it, and its entry here goes then (the check says so
-# once the tree holds it). Each is said, not counted as a problem, while it is missing.
-PENDING_SCRIPTS = {
-    "seq_script/merge_panels/mega_rebuild.sh":
-        "lane M's recipe of the mega rebuild (decision D2: PASS/'.' records, AF = AF_max), "
-        "on branch s2b-M",
-}
+# A recipe the set calls that a branch not merged yet brings, which this tree does not hold
+# yet: the merge brings it, and its entry here goes then (the check says so once the tree
+# holds it). Each is said, not counted as a problem, while it is missing. None now: mega's
+# recipe, seq_script/merge_panels/mega_rebuild.sh (lane M's, decision D2), came with the
+# integration of stage 2b, and the dry run checks its call as it checks the others'.
+PENDING_SCRIPTS = {}
 
 
 def read_manifest(path=MANIFEST):
@@ -448,7 +446,7 @@ def check(rows, root=ROOT):
 
 def pending(root=ROOT):
     """What the check says of each script of PENDING_SCRIPTS this tree does not hold yet."""
-    return [f"{script}: {why}, which this tree does not hold yet (the integration of stage 2b "
+    return [f"{script}: {why}, which this tree does not hold yet (the merge of its branch "
             f"brings it): the dry run takes its call as done"
             for script, why in PENDING_SCRIPTS.items()
             if not os.path.exists(os.path.join(root, script))]

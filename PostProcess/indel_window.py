@@ -43,9 +43,11 @@ A sites-only dataset (sites_only: its VCFs name no sample; the mega) is the exce
 enriching anew: CRISPRitz writes a fake-indel window only for an indel a sample of the VCF
 carries, so an enrichment of its VCFs holds none, and the windows it has come from an
 enriched-genome kit whose indels a synthetic sample carries
-(seq_script/merge_panels/mega_build_indels.sh). It is not enriched anew beside windows of
-such a kit, whatever their width (reenrichment_refusal), and every advice on it points to its
-archive and kit of CRISPRme 2.10.0, or that script, not to build-index-only (sites_only_way).
+(seq_script/merge_panels/mega_rebuild.sh, the mega's recipe of 2.10.0, builds the whole kit
+so; mega_build_indels.sh built the published mega's fake-indel half up to 2.8.1). It is not
+enriched anew beside windows of such a kit, whatever their width (reenrichment_refusal), and
+every advice on it points to its archive and kit of CRISPRme 2.10.0, or that recipe, not to
+build-index-only (sites_only_way).
 Its registry, built from its VCFs' INFO AF fields, is no store of an enrichment
 (registry_data_type).
 
@@ -381,7 +383,8 @@ def sites_only(workdir, dataset, vcf_dir=None):
     its VCFs name no sample, so an enrichment of them writes no fake-indel window (CRISPRitz's
     add-variants writes one for an indel a sample carries), and the windows it has come from
     an enriched-genome kit whose indels a synthetic sample carries
-    (seq_script/merge_panels/mega_build_indels.sh, as the published mega's). Told by its
+    (seq_script/merge_panels/mega_rebuild.sh; up to 2.8.1, mega_build_indels.sh, as the
+    published mega's). Told by its
     VCFs, those of ``vcf_dir`` (as crisprme.py's _sites_only_vcfs: .vcf.gz files, none naming
     a sample), where there are any to read, else by its registry (registry_data_type)."""
     if vcf_dir:
@@ -407,12 +410,14 @@ def sites_only_way(dataset):
     """How sites-only dataset ``dataset`` (sites_only) gets the fake-indel windows of
     CRISPRitz 2.10.0, not from build-index-only (sites_only_why): from its archive and
     enriched-genome kit of CRISPRme 2.10.0, or its kit built again with a synthetic sample
-    (seq_script/merge_panels/mega_build_indels.sh)."""
+    (seq_script/merge_panels/mega_rebuild.sh, the mega's recipe of 2.10.0: the enriched
+    genome, the fake-indel genome and their indexes in one build; mega_build_indels.sh, up to
+    2.8.1's, builds the fake-indel half alone)."""
     return ("%s (so build-index-only would leave it with no indel off-target); its windows "
             "come from its enriched-genome kit, whose indels a synthetic sample carries: "
             "install its archive and enriched-genome kit of CRISPRme 2.10.0 "
             "(docs/PRECOMPUTED_INDEXES.md), or build its kit again that way "
-            "(seq_script/merge_panels/mega_build_indels.sh)" % sites_only_why(dataset))
+            "(seq_script/merge_panels/mega_rebuild.sh)" % sites_only_why(dataset))
 
 
 def _holds_a_file(directory):
@@ -537,8 +542,8 @@ def reenrichment_refusal(workdir, genome, dataset, libraries=(), who="build-inde
             return ("no finished enrichment of %s is in place (%s), so %s would enrich it anew "
                     "from its VCFs; but %s, while its indel logs or its INDELS indexes record "
                     "windows of %s, which came from an enriched-genome kit whose indels a "
-                    "synthetic sample carries (seq_script/merge_panels/mega_build_indels.sh, "
-                    "as the published mega's). Enriched anew, it would lose every indel "
+                    "synthetic sample carries (seq_script/merge_panels/mega_rebuild.sh; up to "
+                    "2.8.1, mega_build_indels.sh). Enriched anew, it would lose every indel "
                     "off-target: the new enrichment's indel logs hold no row, and its INDELS "
                     "indexes no window. Put that kit back in place (%s and %s_INDELS: "
                     "of a published dataset, its enriched-genome kit, "
@@ -694,7 +699,7 @@ def fake_genome_refusal(workdir, genome, dataset, who="build-index-only", vcf_di
         return None
     every = " ".join(quote(d) for d in enrichment_stores(workdir, genome, dataset))
     anew = ("or build that kit again with a synthetic sample "
-            "(seq_script/merge_panels/mega_build_indels.sh), in place of all of the dataset "
+            "(seq_script/merge_panels/mega_rebuild.sh), in place of all of the dataset "
             "that comes from an enrichment (rm -rf %s): %s, so build-index-only would enrich "
             "it anew with no indel off-target" % (every, sites_only_why(dataset))
             if sites_only(workdir, dataset, vcf_dir) else

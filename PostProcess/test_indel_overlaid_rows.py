@@ -904,6 +904,45 @@ class FullTiers(_Base):
                                  [(g + "TGG", "S01,S02,S03", "rs_M_mnv"),
                                   (g + "TGG", "S01,S02,S03", "rs_M_mnv_2")])
 
+    def test_a_piece_lists_the_carriers_of_both_lines_of_an_mnv(self):
+        """The integration of stage 2b: a piece of the indel post-analysis (lane S's option P,
+        CRISPRME_POSTPROC_RANGE) builds its window tree from the windows that hold one of its
+        lines' positions, while the carriers of a record on two VCF lines are those of both
+        lines' windows (lane C's _log_carriers, C-R2-1). Read from the piece's windows alone,
+        a piece whose lines lie in one line's window listed that line's carriers alone: S02 or
+        S03 was on no row of the MNV M (test_an_mnv_on_two_lines_is_one_record). Each piece
+        here holds the + strand targets of one window, and lists every carrier, as one process
+        does."""
+        g = GUIDE
+        m0 = 5600
+        w = World()
+        w._put(m0, g[:3] + "TT" + g[5:] + "TGG")
+        w.ref = "".join(w.seq)
+        w.indels.append((m0 + 4, "TT", g[3:5], "rs_M_mnv", {"S01": "1|0", "S02": "0|1"}))
+        w.indels.append((m0 + 4, "tt", g[3:5].lower(), "rs_M_mnv_2", {"S01": "0|1", "S03": "1|0"}))
+        w._snp("M", m0 + 13, g[12], "C", {"S04": "1|0"})
+        windows = w.fake_windows()
+        _fake, starts, rows_in = engine_targets(windows)
+        mnv = [k for k, (ind, _s, _win) in enumerate(windows) if ind[3].startswith("rs_M_mnv")]
+        self.assertEqual(len(mnv), 2)
+        for k in mnv:
+            lo, hi = starts[k], starts[k] + len(windows[k][2])
+            lines = [n for n, r in enumerate(rows_in, 1)
+                     if r[6] == "+" and lo <= int(r[4]) < hi]
+            self.assertTrue(lines, windows[k][0][3])
+            self.assertEqual(lines, list(range(lines[0], lines[-1] + 1)))
+            with self.subTest(piece=windows[k][0][3]):
+                tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_piece_")
+                self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+                fx = _Fixture(tmp, w, env={"CRISPRME_POSTPROC_RANGE": "%d:%d" % (
+                    lines[0], lines[-1]), "CRISPRME_POSTPROC_PIECE": "1"})
+                self.assertEqual(fx.proc.returncode, 0,
+                                 fx.proc.stdout[-2000:] + fx.proc.stderr[-2000:])
+                best = [r for r in fx.rows() if r["cfd"] == 1.0
+                        and int(r["var"].split(",")[0].split("_")[1]) == m0 + 4]
+                self.assertEqual([(r["dna"], r["samples"]) for r in best],
+                                 [(g + "TGG", "S01,S02,S03")])
+
 
 @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
 class OtherInstalls(_Base):

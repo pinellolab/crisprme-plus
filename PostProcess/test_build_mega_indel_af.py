@@ -208,9 +208,9 @@ class TestReadAsTheEnricher(unittest.TestCase):
 
     def test_the_window_is_the_one_the_indel_log_shows(self):
         """The left flank of the enricher's windows is read from the indel log the build
-        wrote (--log-dir): with CRISPRitz 2.10.0's 25/27 window an indel at POS 26 has a
-        window, with a wider one (lane W's 30/30 makes the flank 31 here) it has none, and
-        no row can name it. Up to review r1 of lane M the 26 was fixed in the code, which
+        wrote (--log-dir): with CRISPRitz 2.9.1's 25/27 window an indel at POS 26 has a
+        window, with a wider one (2.10.0's 30/30, lane W's, makes the flank 31 here) it has
+        none, and no row can name it. Up to review r1 of lane M the 26 was fixed in the code, which
         a wider window would have left wrong at the start of every chromosome."""
         d = tempfile.mkdtemp()
         self.addCleanup(__import__("shutil").rmtree, d, True)

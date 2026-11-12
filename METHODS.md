@@ -730,9 +730,11 @@ logs or INDELS indexes record, whatever their width: CRISPRitz writes a window o
 a sample of the VCF carries, so an enrichment of its VCFs holds none (the mega's own SNP-side
 build has, on chr22, a fake-indel genome of a header alone and an indel log of no row), and its
 windows come from an enriched-genome kit whose indels a synthetic sample carries
-(`seq_script/merge_panels/mega_build_indels.sh`). Enriched anew, it would lose every indel
-off-target, as CRISPRme 2.8.1 did, silently; every message on such a dataset points to its kit,
-to its archive and kit of CRISPRme 2.10.0, or to that script, not to build-index-only
+(`seq_script/merge_panels/mega_rebuild.sh`, the mega's recipe of 2.10.0, builds the whole kit
+so, in one build; up to 2.8.1 `mega_build_indels.sh` built its fake-indel half). Enriched anew,
+it would lose every indel off-target, as CRISPRme 2.8.1 did, silently; every message on such a
+dataset points to its kit, to its archive and kit of CRISPRme 2.10.0, or to that recipe, not to
+build-index-only
 (`indel_window.sites_only_way`: build-index-only's warning, the refusals, and the search's and
 the indel search's notes of windows too short). On chr22, with the published mega's registry (no
 `data_type`) and its kit's indel log of 25/27, neither kit nor index in place, build-index-only

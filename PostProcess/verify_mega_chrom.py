@@ -9,8 +9,9 @@ from build_mega_registry.py, which this checks): the records whose FILTER is PAS
 a SNP allele is an ALT of one upper-case A, C, G or T over a REF of one base; an indel-path
 allele is one of a record whose REF or ALT is longer than one base, of another length or
 both longer than one base, not symbolic, at POS LEFT or more (a window from the chromosome's
-start: LEFT the window's left flank, 26 with the 25/27 window of CRISPRitz 2.10.0's enricher,
-read from the indel log with --log); one REF>ALT on two records is one allele, with the more
+start: LEFT the window's left flank, 31 with the 30/30 window of CRISPRitz 2.10.0's enricher,
+26 with 2.9.1's 25/27, read from the indel log with --log, as mega_rebuild.sh runs it; 26
+without it); one REF>ALT on two records is one allele, with the more
 frequent record's frequencies (the higher AF_max, the build input's INFO/AF; on a tie, the
 earlier): the build input keeps that record alone (prepare_mega_build_vcf.py), as the
 enricher, which merges two SNP records of one allele in its dictionaries, gives each indel
@@ -61,8 +62,9 @@ _IUPAC = {frozenset("AG"): "R", frozenset("CT"): "Y", frozenset("CG"): "S",
           frozenset("CGT"): "B", frozenset("AGT"): "D", frozenset("ACT"): "H",
           frozenset("ACG"): "V", frozenset("ACGT"): "Q"}
 _REFERENCE_CODES = set(_BASES) | set("RYSWKMBDHV")
-# the enricher's left flank of a fake-indel window (25/27 in CRISPRitz 2.10.0's enricher): no
-# window of an indel at POS < LEFT. --log reads it from the indel log (window_left_of_log).
+# the enricher's left flank of a fake-indel window (25/27 up to CRISPRitz 2.9.1, 30/30 in
+# 2.10.0's enricher): no window of an indel at POS < LEFT. --log reads it from the indel log
+# (window_left_of_log); LEFT, 2.9.1's, is the fallback without it.
 LEFT = 26
 
 

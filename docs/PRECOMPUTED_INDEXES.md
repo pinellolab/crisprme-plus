@@ -926,8 +926,9 @@ INDELS index of it, or a variant index of it in index format 1; a search or a bu
 naming them). The sites-only mega is not enriched anew beside the windows of its kit that its
 indel logs or INDELS indexes record, whatever their width: an enrichment of its VCFs, which name
 no sample, holds no window, so its windows come from its enriched-genome kit (built with a
-synthetic sample, `mega_build_indels.sh`), and the advice on it is its kit, or its archive and
-kit of CRISPRme 2.10.0. Post-analysis resolves each indel
+synthetic sample: `mega_rebuild.sh`, step 3 of the mega above; up to 2.8.1 its fake-indel half,
+`mega_build_indels.sh`), and the advice on it is its kit, its archive and kit of CRISPRme
+2.10.0, or that recipe. Post-analysis resolves each indel
 target on its carriers' own haplotypes (each gets the SNP alleles it carries, so a row
 lists only the individuals that have its sequence, or, where the phase is unknown, those
 whose own alleles allow it, PUTATIVE, split multi-allelic SNP sites aside on an index

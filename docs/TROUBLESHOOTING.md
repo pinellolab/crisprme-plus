@@ -318,7 +318,8 @@ VCFs; but hg38_mega is sites-only: its VCFs name no sample, and CRISPRitz writes
 window only for an indel a sample carries, so an enrichment of them holds none, while its indel
 logs or its INDELS indexes record windows of ...`, whatever their width. The mega's windows come
 from its enriched-genome kit, whose indels a synthetic sample carries
-(`seq_script/merge_panels/mega_build_indels.sh`): enriched anew from its VCFs, it would lose
+(`seq_script/merge_panels/mega_rebuild.sh`, the mega's recipe of 2.10.0, builds the whole kit
+so): enriched anew from its VCFs, it would lose
 every indel off-target. Put its kit back (`Genomes/hg38+hg38_mega` and `_INDELS`: download the
 kit, [Precomputed indexes](PRECOMPUTED_INDEXES.md)) and build or search as before; for the
 windows of 2.10.0, install its archive and kit of CRISPRme 2.10.0 in place of what the message
@@ -345,5 +346,7 @@ message says (`rm -rf` of the enriched and the fake-indel genome), and install t
 index's enriched-genome kit ([Precomputed indexes](PRECOMPUTED_INDEXES.md)); or remove all of the
 dataset that comes from an enrichment (the message lists it) and run `build-index-only` with its
 VCFs and `--samplesID`, which enriches it anew. For a sites-only dataset (`hg38_mega`) the second
-way is to build its kit again with a synthetic sample (`seq_script/merge_panels/mega_build_indels.sh`),
-as the message says: an enrichment of its VCFs would hold no fake-indel window.
+way is to build its kit again with a synthetic sample (`seq_script/merge_panels/mega_rebuild.sh`,
+the enriched genome, the fake-indel genome and their indexes in one build, in a working
+directory whose `VCFs/hg38_mega` the recipe fills itself), as the message says: an enrichment of
+its VCFs would hold no fake-indel window.
