@@ -149,6 +149,7 @@ typical timeline is:
 |---|---|
 | `crisprme.py` | `version = "X.Y.Z"` (this also sets `__version__`, surfaced by `crisprme.py --version`) |
 | `Dockerfile` | `ARG crispritz_ref=vA.B.C` — the CRISPRitz tag the image builds from. There is **no** `ARG crisprme_version`: the image is built from source (`COPY .`), so CRISPRme's own version is pinned only in `crisprme.py`. Its header comment (`# CRISPRme+ X.Y.Z — Python 3.11 image, built FROM SOURCE.`) names the release: bump it by hand, as `prepare_release.py` leaves it. |
+| `install_from_source.sh`, `environment.yml` | their header comments (`# Install CRISPRme+ X.Y.Z FROM SOURCE, ...`, `# CRISPRme+ X.Y.Z runtime environment ...`) name the release: bump them by hand with the Dockerfile's (step 2). `install_from_source.sh`'s `CRISPRITZ_REF` default equals the Dockerfile's `crispritz_ref`. |
 | Git tag / GitHub release | tag `vX.Y.Z`; notes from the changelog, or short notes that link it where its section is longer than a release body takes (step 4) |
 | `recipes/crisprme/meta.yaml` (in `bioconda/bioconda-recipes`) | `{% set version = "X.Y.Z" %}`, `source.sha256`, `build.number: 0`, and the bounded `crispritz >=X.Y.0,<X.(Y+1)` pin: a new minor moves both bounds; within a minor the lower bound moves only to a CRISPRitz patch that fixes something CRISPRme depends on, not with every `crispritz_ref` ([Version policy](#version-policy)) |
 
@@ -157,6 +158,10 @@ The Bioconda `source.url` is templated
 bumping `version` repoints it automatically.
 
 ## Step-by-step
+
+The commands below are written for bash. In zsh, the default shell of macOS, run
+`setopt interactive_comments` first: an interactive zsh reads a `#` as a word, and passes a
+command's trailing comment to it as arguments.
 
 ### 1. Pre-flight consistency check
 
@@ -168,6 +173,8 @@ was missed), fix that first so you start from a consistent state.
 grep -E '^version *= *' crisprme.py
 grep -E '^ARG crispritz_ref=' Dockerfile     # the CRISPRitz pin, not CRISPRme's version
 grep -E '^# CRISPRme\+ ' Dockerfile          # the release its header comment names
+grep -E '^# Install CRISPRme\+ ' install_from_source.sh   # and those of install_from_source.sh
+grep -E '^# CRISPRme\+ ' environment.yml     # and environment.yml
 git tag --sort=-v:refname | head -1
 curl -sL https://raw.githubusercontent.com/bioconda/bioconda-recipes/master/recipes/crisprme/meta.yaml \
   | grep -E 'set version|sha256|number:'
@@ -187,6 +194,10 @@ python scripts/prepare_release.py X.Y.Z --no-download
 sed -i.bak -E 's/^# CRISPRme\+ [0-9]+\.[0-9]+\.[0-9]+ /# CRISPRme+ X.Y.Z /' Dockerfile && rm Dockerfile.bak
 git diff crisprme.py Dockerfile     # the version line and the header comment
 ```
+
+The header comments of `install_from_source.sh` (`# Install CRISPRme+ X.Y.Z FROM SOURCE, ...`)
+and `environment.yml` (`# CRISPRme+ X.Y.Z runtime environment ...`) name the release too:
+change the version in each by hand, and commit them with the bump (step 4).
 
 (The `--no-download` flag skips the sha256 fetch, which cannot succeed until the
 tag exists. You will re-run the script without it in step 5.)
@@ -229,7 +240,7 @@ Commit the version bump and changelog, push, then create the release. `gh`
 creates the tag `vX.Y.Z` as part of the release.
 
 ```bash
-git add crisprme.py Dockerfile CHANGELOG.md
+git add crisprme.py Dockerfile install_from_source.sh environment.yml CHANGELOG.md
 git commit -m "Release vX.Y.Z"
 git push origin HEAD
 
@@ -313,6 +324,8 @@ more), confirm that `crisprme.py`, the tag and Bioconda all report `X.Y.Z`, that
 ```bash
 grep -E '^version *= *' crisprme.py
 grep -E '^# CRISPRme\+ ' Dockerfile          # the release its header comment names
+grep -E '^# Install CRISPRme\+ ' install_from_source.sh   # and those of install_from_source.sh
+grep -E '^# CRISPRme\+ ' environment.yml     # and environment.yml
 grep -E '^ARG crispritz_ref=' Dockerfile     # the CRISPRitz pin, not CRISPRme's version
 git tag --sort=-v:refname | head -1
 conda search -c bioconda crisprme | tail -3
@@ -356,7 +369,7 @@ env is missing or broken in the shipped artifact.
 
 ## Rollback / troubleshooting
 
-- **Bad in-repo bump:** `git checkout crisprme.py Dockerfile CHANGELOG.md`.
+- **Bad in-repo bump:** `git checkout crisprme.py Dockerfile install_from_source.sh environment.yml CHANGELOG.md`.
 - **Premature/incorrect GitHub release:** `gh release delete vX.Y.Z --repo pinellolab/crisprme-plus --cleanup-tag`, then redo.
 - **sha256 mismatch in the Bioconda PR:** GitHub occasionally regenerates archive tarballs; recompute the hash from the live tarball and update `meta.yaml`.
 - **Version lag between files:** always run the step-1 pre-flight. The `Dockerfile` has pinned no CRISPRme version since the image was first built from source, so the drift to look for is between `crisprme.py`, the tag, the Bioconda recipe and the release the `Dockerfile`'s header comment names (it named 2.4.0 at every tag from v2.5.0 to v2.7.8).
