@@ -17,6 +17,10 @@ and re-running one search command (Section 3). Information on how to include a n
 
 *Estimated time: ~5 minutes on a standard internet connection.*
 
+The commands of this guide are written for bash. In zsh, the default shell of macOS, run
+`setopt interactive_comments` once in the terminal before you paste them: an interactive zsh
+reads the `#` of a comment as a word and runs the comment's text.
+
 ### Configure Bioconda channels (one-time)
 
 ```bash
@@ -31,7 +35,8 @@ conda config --set channel_priority strict
 ```bash
 # CRISPRme+ (2.10.0) from source, Python 3.11 (or from Bioconda instead: README §1.1):
 git clone https://github.com/pinellolab/crisprme-plus.git && cd crisprme-plus
-mamba env create -f environment.yml   # env 'crisprme' (Python 3.11)
+# env 'crisprme' (Python 3.11)
+mamba env create -f environment.yml
 mamba activate crisprme
 bash install_from_source.sh
 ```
@@ -106,7 +111,7 @@ You never have to merge these by hand — that is what "combine everything" mean
 # reference bundle in one shot: genome + annotations + PAMs + sample-ID files
 crisprme.py download --what all --path "$CRISPRME_DIR"
 
-# variant-aware search: fetch a prebuilt variant index (with its panel's Dictionaries and
+# variant-aware search: fetch a prebuilt variant index (with the Dictionaries of its panel and
 # genotype store, fetched once per panel: sample-level / named carriers, no raw VCFs needed)
 crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path "$CRISPRME_DIR"
 ```
@@ -425,10 +430,10 @@ The updated 1KG 2021 release (3,202 samples, eagle2/shapeit2-duohmm phased, GRCh
 
 ```bash
 BASE_URL="https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased"
-CHROMS="chr1 chr2 chr3 chr4 chr5 chr6 chr7 chr8 chr9 chr10 chr11 chr12 chr13 chr14 chr15 chr16 chr17 chr18 chr19 chr20 chr21 chr22"
 
 mkdir -p VCFs/hg38_1000G_2021
-for chrom in $CHROMS; do
+# chr1 to chr22 (a brace list: zsh, the default shell of macOS, does not split an unquoted $VAR)
+for chrom in chr{1..22}; do
     wget -c "${BASE_URL}/CCDG_14151_B01_GRM_WGS_2020-08-05_${chrom}.filtered.shapeit2-duohmm-phased.vcf.gz" \
          -O "VCFs/hg38_1000G_2021/CCDG_14151_B01_GRM_WGS_2020-08-05_${chrom}.filtered.shapeit2-duohmm-phased.vcf.gz"
 done
@@ -467,7 +472,8 @@ Spot-check the result:
 
 ```bash
 head -3 samplesIDs/hg38_1000G_2021.samplesID.txt
-wc -l samplesIDs/hg38_1000G_2021.samplesID.txt   # expect 3203 lines (header + 3202 samples)
+# expect 3203 lines (header + 3202 samples)
+wc -l samplesIDs/hg38_1000G_2021.samplesID.txt
 ```
 
 **Step 4 — Create config files and run the search**
@@ -539,7 +545,8 @@ Build the variant-aware index for your new PAM **once** (a variant index is neve
 
 ```bash
 # EDIT THESE
-PAM_FILE="PAMs/20bp-NRR-SpCas9.txt"   # replace with your new PAM file
+# replace with your new PAM file
+PAM_FILE="PAMs/20bp-NRR-SpCas9.txt"
 GUIDE_FILE="my_guide.txt"
 OUTPUT_NAME="my_search_1"
 

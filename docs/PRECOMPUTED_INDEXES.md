@@ -114,14 +114,21 @@ and **no named carriers**. A dedicated index of another PAM on the same panel (N
 NNGRRN, TTTN) installs beside it in the same working directory and shares its Dictionaries.
 
 All three carry **searchable indels genome-wide** and report **SNP+SNP and SNP+indel**
-co-occurring off-targets. Download the reference data once, then any index:
+co-occurring off-targets. Download the reference data once, then any index (the commands of
+this page are bash: in zsh, the default shell of macOS, run `setopt interactive_comments` first,
+or zsh reads the `#` of a comment as a word):
 
 ```bash
-crisprme.py download --what all  --path .                                                   # reference genome + annotations + the default reference index 20-NRR_3_hg38 (once)
-crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path .         # recommended default (phased HGDP + 1000 Genomes, 4,091 samples; carriers)
-crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HPRC     --path .         # HPRC pangenome (phased assemblies, carriers)
-crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_mega     --path .         # mega (sites-only, per-dataset AF provenance)
-crisprme.py download --what index --index-name 20-NGG_3_hg38+hg38_HGDP1kGP --path .         # another index of the default panel: its own archive (+ 20-NGG_3_hg38 if not installed)
+# reference genome + annotations + the default reference index 20-NRR_3_hg38 (once)
+crisprme.py download --what all  --path .
+# recommended default (phased HGDP + 1000 Genomes, 4,091 samples; carriers)
+crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path .
+# HPRC pangenome (phased assemblies, carriers)
+crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HPRC     --path .
+# mega (sites-only, per-dataset AF provenance)
+crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_mega     --path .
+# another index of the default panel: its own archive (+ 20-NGG_3_hg38 if not installed)
+crisprme.py download --what index --index-name 20-NGG_3_hg38+hg38_HGDP1kGP --path .
 ```
 
 A first-time unauthenticated download of these many-small-file indexes can hit
@@ -427,16 +434,17 @@ Two things the build handles for you, which matter as new merged panels are adde
 ### Publish (maintainers)
 
 ```bash
-export HF_TOKEN=hf_...        # your write token, in the shell only
+# your write token, in the shell only
+export HF_TOKEN=hf_...
 crisprme.py publish-index --index genome_library/20-NRR_3_hg38+hg38_HGDP1kGP --dictless
 # -> lucapinello/crisprme-indexes-format2 (an index of format 2 goes there by itself):
-#    indexes/dictionaries-bundle_hg38_HGDP1kGP.tar.gz (+ .json)  the panel's Dictionaries (registry (+ variant_count.json),
+#    indexes/dictionaries-bundle_hg38_HGDP1kGP.tar.gz (+ .json)  the Dictionaries of the panel (registry (+ variant_count.json),
 #                                                               indel logs, indel genotypes) + samplesIDs, once per panel
 #    indexes/genotypes_hg38_HGDP1kGP.tar.gz (+ .json)            the Tier-1 genotype store, once per panel
 #    indexes/indel_genotypes_hg38_HGDP1kGP.tar.gz (+ .json)      the phased indel genotypes alone (the genotype oracle)
 #    indexes/20-NRR_3_hg38+hg38_HGDP1kGP.tar.gz                  the index + _INDELS + manifest (it names the two above)
 crisprme.py publish-index --index genome_library/20-NGG_3_hg38+hg38_HGDP1kGP --dictless
-# -> indexes/20-NGG_3_hg38+hg38_HGDP1kGP.tar.gz alone: the repo holds the panel's bundle and store, the same
+# -> indexes/20-NGG_3_hg38+hg38_HGDP1kGP.tar.gz alone: the repo holds the bundle and store of the panel, the same
 ```
 
 `--dictless` **drops the ~152 GB per-sample SNP dictionaries**
@@ -460,7 +468,7 @@ repo 2.8.1 reads.
 ### Download (end users)
 
 ```bash
-# fetch the variant-aware index (its archive, the panel's Dictionaries bundle with the
+# fetch the variant-aware index (its archive, the Dictionaries bundle of the panel with the
 # samplesIDs, and the genotype companion: the last two once per panel)
 crisprme.py download --what index \
   --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path "$CRISPRME_DIR"
@@ -599,7 +607,8 @@ printf 'NNNNNNNNNNNNNNNNNNNNNGA 3\n' > PAMs/20bp-NGA-custom.txt
 
 ```bash
 # ~1 GB/dataset download (a few GB once extracted): the SNP-enriched genome + its fake-indel companion, as one tarball.
-crisprme.py download --what build-inputs --dataset hg38_HGDP1kGP --path .   # 2.10.0's kit, its SHA-256 checked
+# the kit of 2.10.0, its SHA-256 checked
+crisprme.py download --what build-inputs --dataset hg38_HGDP1kGP --path .
 # or by hand:
 hf download lucapinello/crisprme-indexes-format2 build-inputs/hg38_HGDP1kGP.tar.gz \
   --repo-type dataset --local-dir .
@@ -623,8 +632,9 @@ NGG index off the HGDP+1kGP enriched genome builds in seconds per chromosome):
 ```bash
 # SNP index -> genome_library/<PAM>_<N>_hg38+hg38_<ds>/ (the engine writes the older name; rename it
 # to the name build-index-only gives it, <guide>-<PAM>_<N>_... or <PAM>-<guide>_<N>_...)
+# -bMax = N = max(bDNA,bRNA)+1 = 3 (the same N as in the index name, e.g. 20-NRG_3)
 crispritz.py index-genome hg38+hg38_<ds> Genomes/hg38+hg38_<ds>/ PAMs/<NEW_PAM>.txt \
-  -bMax 3 -th <T>          # -bMax = N = max(bDNA,bRNA)+1 = 3 (the same N as in the index name, e.g. 20-NRG_3)
+  -bMax 3 -th <T>
 # indel index -> genome_library/<PAM>_<N>_hg38+hg38_<ds>_INDELS/
 python PostProcess/pool_index_indels.py \
   Genomes/hg38+hg38_<ds>_INDELS/ PAMs/<NEW_PAM>.txt <PAM_MOTIF> hg38 hg38_<ds> 3 <T>

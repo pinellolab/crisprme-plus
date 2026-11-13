@@ -140,8 +140,13 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 > give Docker **64 GB+** for it (32 GB will OOM). On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). (On Linux/Docker Engine the
 > container uses host memory directly.) See [System Requirements](#0-system-requirements).
 
+> **In zsh, the default shell of macOS,** run `setopt interactive_comments` once in the terminal
+> before you paste the commands of this README: an interactive zsh reads the `#` of a comment as
+> a word and runs the comment's text. Bash reads them as comments.
+
 ```bash
-mkdir -p ~/crisprme && cd ~/crisprme    # your data folder — ALL shared inputs + per-search Results live here (see docs/DATA_LAYOUT.md)
+# your data folder — ALL shared inputs + per-search Results live here (see docs/DATA_LAYOUT.md)
+mkdir -p ~/crisprme && cd ~/crisprme
 # 1) fast-download the reference data + reference index (minutes, HuggingFace CDN)
 #    (this does NOT include the variant index — that is step 2)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what all --path /DATA
@@ -149,7 +154,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 #    long index build is needed: the reference index, and the compact variant-aware
 #    hg38 + HGDP + 1000 Genomes index (the recommended default; phased HGDP + 1000 Genomes,
 #    4,091 samples jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers
-#    throughout, including HGDP's seven genetic regions; the broadest fully-phased panel of
+#    throughout, including the seven genetic regions of HGDP; the broadest fully-phased panel of
 #    real observed haplotypes)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name 20-NRR_3_hg38 --path /DATA
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA
@@ -258,8 +263,9 @@ wider than the search's PAM, is pruned to it during the search (`--prune-pam`), 
 does by itself when no installed index serves it unpruned, and says so first.
 
 ```bash
+# from an NRR or the general index: pruned to NGG
 crisprme.py complete-search \
-  --pam ./PAMs/20bp-NGG-SpCas9.txt  ...   # from an NRR or the general index: pruned to NGG
+  --pam ./PAMs/20bp-NGG-SpCas9.txt  ...
 ```
 
 The general index of 2.10.0 is `20-NNNNNNNN_3_hg38` (and `+hg38_HGDP1kGP`): an 8-nt flank, any
@@ -349,7 +355,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
   --mm 4 --bDNA 1 --bRNA 1 --per-sample --output my_search --thread 8
 # ^ the recommended default search: up to 4 mismatches + 1 DNA and 1 RNA bulge (a 6-edit
 #   budget, matching the default --max-total-edits 6, so nothing is pruned). This sits in the
-#   CRISPR-Bulge scorer's validated single-bulge domain. Raise the caps for a deeper search,
+#   validated single-bulge domain of the CRISPR-Bulge scorer. Raise the caps for a deeper search,
 #   but also raise --max-total-edits to their sum or alignments over the budget are PRUNED
 #   (e.g. --mm 6 --bDNA 2 --bRNA 2 is a 10-edit budget → add --max-total-edits 10 to keep all).
 #   On the indexes CRISPRitz 2.10.0 builds, more than 1 DNA + 1 RNA bulge makes the variant
@@ -360,7 +366,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 #   genotyped+phased index) per-sample is already the default; pass --population-level to switch to
 #   the worst-possible representatives. --per-sample is a genotype-resolution mode, not a speed
 #   mode: on HGDP1kGP, a dense panel of many samples, it is the faster one (its haplotype
-#   pre-check skips the dense windows' raw targets nobody carries), on a small panel such as
+#   pre-check skips the raw targets of dense windows nobody carries), on a small panel such as
 #   HPRC it can be the slower; on a sites-only index (mega) it cannot resolve carriers and is
 #   inert.
 #   COSMIC cancer annotations ship in the bundle but are OFF by default (licence-gated) — enable
@@ -521,8 +527,10 @@ set up the CRISPR-Bulge scorer, which runs in its own conda env (`cbulge`):
 ```bash
 conda create -n crisprme crisprme=2.10.0 python=3.11
 conda activate crisprme
-crisprme.py scorer-env create    # CPU build; add --gpu for CUDA
-crisprme.py scorer-env doctor    # compute self-test: must report OK
+# CPU build; add --gpu for CUDA
+crisprme.py scorer-env create
+# compute self-test: must report OK
+crisprme.py scorer-env doctor
 ```
 
 > **Always name the version.** Given a bare `crisprme`, the solver silently falls back to the
@@ -559,7 +567,8 @@ version of the tool.
 Install it into the existing environment, replacing `<version>` with the version number:
 ```bash
 conda install -n crisprme crisprme=<version>
-crisprme.py scorer-env doctor    # re-check the scorer env after an update
+# re-check the scorer env after an update
+crisprme.py scorer-env doctor
 ```
 The original CRISPRme 2.1.x line (Python 3.8; last release `crisprme=2.1.14`) cannot be
 updated in place to CRISPRme+: create a new environment as in §1.1.2.
@@ -713,8 +722,9 @@ mkdir crisprme_test && cd crisprme_test
 docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
+# expect: 6 passed, 0 failed, 0 skipped
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
+  crisprme.py validate-test --chrom chr22
 ```
 
 Pass the variable with `-e`, as above. Written in front of `docker run`
@@ -760,7 +770,8 @@ The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then co
 mkdir crisprme_test && cd crisprme_test
 CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
-crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
+# expect: 6 passed, 0 failed, 0 skipped
+crisprme.py validate-test --chrom chr22
 ```
 
 `CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode: without it, `complete-test` runs the prebuilt-index smoke ([§2.2.2](#222-complete-test)), which needs an index you have downloaded and gives `validate-test` nothing to check. The run took 25 to 35 minutes at 8 threads in testing.
@@ -929,7 +940,8 @@ single command — `download --what index` already wrote the `list_vcf.txt` /
 `list_samplesID.txt` the search reads, and the guide is auto-padded to the PAM:
 
 ```bash
-printf '%s\n' CTAACAGTTGCTTTTATCACNNN > my_guide.txt   # 20-nt spacer + NNN for the PAM positions
+# 20-nt spacer + NNN for the PAM positions
+printf '%s\n' CTAACAGTTGCTTTTATCACNNN > my_guide.txt
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-search \
     --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt \
@@ -2393,9 +2405,12 @@ To build a **different PAM** (NGG, NNGRRT, TTTN, …) on the shipped re-phased *
 ```bash
 crisprme.py download --what all --path /data/crisprme
 crisprme.py download --what index --index-name 20-NRR_3_hg38 --path /data/crisprme
-crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /data/crisprme           # recommended default (SpCas9 NRR; phased HGDP + 1000 Genomes, 4,091 samples)
-crisprme.py download --what assembly --sample HG01255 --path /data/crisprme                            # an HPRC individual's diploid assembly (for assembly-search)
-crisprme.py download --what genotype-oracle --path /data/crisprme                                       # the phased HGDP + 1000 Genomes genotypes (complete-search --prioritize-observed on the mega panel)
+# recommended default (SpCas9 NRR; phased HGDP + 1000 Genomes, 4,091 samples)
+crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /data/crisprme
+# the diploid assembly of an HPRC individual (for assembly-search)
+crisprme.py download --what assembly --sample HG01255 --path /data/crisprme
+# the phased HGDP + 1000 Genomes genotypes (complete-search --prioritize-observed on the mega panel)
+crisprme.py download --what genotype-oracle --path /data/crisprme
 ```
 
 **`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`). Add `--dictless` for a variant index to drop the ~152 GB per-sample SNP dicts (the registry + genotype tiers replace them; indel logs kept), upload the genotype store as a separate companion, and bundle the samplesID lists so the index is self-complete. With the genotype store, the index's phased indel genotypes are uploaded on their own too (`indel_genotypes_<vcf>.tar.gz`), for `download --what genotype-oracle`. Since 2.10.0 an index of index format 2 goes to `lucapinello/crisprme-indexes-format2` by itself (never to a repo 2.8.1 reads), and a variant one leaves its panel's Dictionaries and samplesID lists out of its archive: they go once per panel into the Dictionaries bundle (`dictionaries-bundle_<vcf>.tar.gz`), as the genotype store does into its companion, uploaded only where the repo does not hold them already, the same (another build there is refused; `--replace-companions` replaces it). `download` then fetches them once per panel:
@@ -2616,7 +2631,8 @@ of RAM and took 25 to 35 minutes at 8 threads in testing:
 ```bash
 CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
-crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
+# expect: 6 passed, 0 failed, 0 skipped
+crisprme.py validate-test --chrom chr22
 ```
 
 #### 3.2.2 Full Genome Test

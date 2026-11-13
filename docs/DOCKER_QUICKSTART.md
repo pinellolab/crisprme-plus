@@ -16,6 +16,10 @@ fill in a short form, and read the results.
 
 Everything runs inside Docker, so the only thing you install is Docker itself.
 
+The commands are written for bash. In zsh, the default shell of macOS, run
+`setopt interactive_comments` once in the terminal before you paste them: an interactive zsh
+reads the `#` of a comment as a word and runs the comment's text.
+
 ---
 
 ## 1. Install Docker (one time)
@@ -103,8 +107,9 @@ mkdir -p ~/crisprme_test && cd ~/crisprme_test
 docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
+# expect: 6 passed, 0 failed, 0 skipped
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
+  crisprme.py validate-test --chrom chr22
 ```
 
 Pass the variable with `-e`, as above: written in front of `docker run` it is set on your
@@ -168,8 +173,8 @@ complementary production indexes — the recommended default is the fully phased
 ```bash
 # Recommended default — HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000 Genomes),
 # jointly SHAPEIT5-re-phased. CONFIRMED cis haplotypes with named per-sample carriers + exact
-# joint AF throughout, including HGDP's seven genetic regions (per-sample analysis is this
-# phased index's default).
+# joint AF throughout, including the seven genetic regions of HGDP (per-sample analysis is the
+# default of this phased index).
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 
@@ -294,7 +299,8 @@ Put your 20 nt spacer(s) in a file, one per line, **with the PAM positions writt
 search reads, so from your working folder:
 
 ```bash
-printf '%s\n' CTAACAGTTGCTTTTATCACNNN > my_guide.txt   # 20-nt spacer + NNN for the 3 PAM positions
+# 20-nt spacer + NNN for the 3 PAM positions
+printf '%s\n' CTAACAGTTGCTTTTATCACNNN > my_guide.txt
 
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-search \
@@ -434,7 +440,7 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 
 # Recommended default — HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000
 # Genomes), jointly SHAPEIT5-re-phased: CONFIRMED cis haplotypes with named per-sample
-# carriers + exact joint AF (per-sample analysis is this phased index's default).
+# carriers + exact joint AF (per-sample analysis is the default of this phased index).
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 # (The index above bundles its genotype store, so sample-level analyses / named
