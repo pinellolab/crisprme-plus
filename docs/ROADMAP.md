@@ -11,11 +11,11 @@ this file held before is kept at its end, for the record.
   immunoglobulin loci above all), a search above 1 DNA + 1 RNA bulge expands so many IUPAC
   combinations that it runs for hours or out of memory, and 2.10.0 warns of it
   ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14). 2.10.1 is to search there the samples' own
-  haplotype sequences, indels included, in place of the IUPAC search, with the same rows: its
-  design was checked on IGL and IGH, where the IUPAC search's lines that a real haplotype can give
-  are exactly the scan's. The engine's hooks for it (a region skip, keep-only, the skipped-leaf
-  dump and a capability report) ship in CRISPRitz 2.10.0, which 2.10.1 runs on, and the indexes of
-  2.10.0 serve it as they are: no index is rebuilt.
+  haplotype sequences, indels included, in place of the IUPAC search: its design was checked on
+  IGL and IGH, up to 4 mismatches + 2 + 2 bulges, where the lines of the IUPAC search that a real
+  haplotype can give are exactly the scan's. The engine's hooks for it (a region skip, keep-only,
+  the skipped-leaf dump and a capability report) ship in CRISPRitz 2.10.0, which 2.10.1 runs on,
+  and the indexes of 2.10.0 serve it as they are: no index is rebuilt.
 - **One density pass before the search**, defined by the genome and shared by the scan, the speed
   steps of 2.10.0 and the mega's density guard (in 2.10.0 the dense-region file is written from
   each search's own raw targets).

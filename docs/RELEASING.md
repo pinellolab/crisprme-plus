@@ -281,8 +281,9 @@ wait for CI/lint to go green, and once it is approved, comment
 `@BiocondaBot please merge`. A bot PR left as it is gets merged without you: the bot's PR for
 crisprme 2.8.1, opened 2026-11-05, was merged by mergify about 72 h later with the earlier
 recipe's unbounded pin and without the dependencies 2.8.1 had added, which took a build 1 to
-correct. Push the recipe's changes to the bot's PR within that time, or ask for it to be held. To ask the bot to scan immediately rather than wait,
-comment `@BiocondaBot autobump crisprme` on a recipe PR/issue.
+correct. Push the recipe's changes to the bot's PR within that time, or ask for it to be held.
+To ask the bot to scan immediately rather than wait, comment `@BiocondaBot autobump crisprme` on
+a recipe PR/issue.
 
 **Manual PR (when you don't want to wait, or the auto-PR needs correcting).**
 Fork `bioconda/bioconda-recipes`, branch from an up-to-date `master`, edit

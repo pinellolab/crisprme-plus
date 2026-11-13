@@ -228,8 +228,8 @@ Measured (hg38 chr22:20-25Mb, EMX1, NGG 4mm/1/1, same host):
 ~10x slower / ~11x RAM for NGG on this 5-Mb slice. Genome-wide on the reference (2.10.0's
 portfolio measurement, `ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1 DNA + 1 RNA bulge, the engine's
 search), the 8-nt general index took 3.3 times a dedicated NGG index's time (26 against 8 min)
-and 1.7 times the NRR index's (15 min). The penalty scales with PAM SELECTIVITY: largest for selective
-PAMs (NGG ~10-16x, where a dedicated index is tiny), ~4x for NRR, and ~par for near-pamless
+and 1.7 times the NRR index's (15 min). The penalty scales with PAM SELECTIVITY: largest for
+selective PAMs (NGG ~10-16x, where a dedicated index is tiny), ~4x for NRR, and ~par for near-pamless
 (no small dedicated alternative). Higher mm/bulge pam-less searches are proportionally heavier
 (whole tree traversed regardless of the search PAM). **Guidance:** keep dedicated indexes as the
 fast default for a fixed known PAM; use the pam-less index for PAM flexibility / variable /

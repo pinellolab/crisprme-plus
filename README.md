@@ -285,10 +285,10 @@ every 65 bases (on chr22: 65 for HGDP + 1000 Genomes, 67 for mega, with CRISPRit
 of 30/30; 57 and 59 with 2.9.1's of 25/27). On chr22's of hg38_mega, with the windows of 25/27, the
 21-nt SaCas9 guide at 4 mismatches + 1 DNA + 1 RNA bulge gave 456 rows of 149,688 in the engine's
 search of the 20-nt general index that an index built for 21-nt guides does not give, RNA bulges
-at the guide's first base (on chr22's reference sequence, the same 2,664,778 rows). For the rows of a guide length, search an index
-built for it, which the search takes first where one is installed. A guide past that needs its
-own index, which the search builds, under a name of its own (rule:
-[methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+at the guide's first base (on chr22's reference sequence, the same 2,664,778 rows). For the rows
+of a guide length, search an index built for it, which the search takes first where one is
+installed. A guide past that needs its own index, which the search builds, under a name of its
+own (rule: [methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
 
 The older name `<PAM>_<N>_<genome>` says neither the guide length an index was built for nor
 the side of the guide its PAM is on, so two such builds took one name, and the second stopped
@@ -965,9 +965,9 @@ write about 30% more raw targets. On 30/30, the integration's gate, 8 threads a 
 searches at once on a node of 256 hardware threads, took 10 min per sample (12 with NRR, the
 default PAM) and 31 min population-level for the README guide (NRG) on chr22, 14 and 9 min on
 HPRC, and, with mega beside HGDP + 1000 Genomes (NRR), 17 min per sample against 39 min
-population-level: since the sites-only
-density guard (below) withholds mega's densest windows, per sample is the faster beside mega too
-(before the guard, 96 to 107 min per sample, 54 to 62 min of it the report, against 49 to 55).
+population-level: since the sites-only density guard (below) withholds mega's densest windows,
+per sample is the faster beside mega too (before the guard, 96 to 107 min per sample, 54 to 62
+min of it the report, against 49 to 55).
 Genome-wide it has not been timed yet on the indexes of the rebuild for 2.10.0 (its release
 gates do): from its parts we expect about 1.5 to 4 h per sample on 16 threads, against 2.8.1's
 1.2 h on 32 threads and an estimated 9 to 11 h without these steps (METHODS.md says how).
@@ -1200,8 +1200,9 @@ its purpose and usage:
   chromosome what it withheld. `--no-sites-only-density-guard` analyses every candidate.
   Measured at 4 mismatches and 1 + 1 bulges, a search of the mega rebuilt for 2.10.0 with the
   guard took 1.35 to 1.46 (chr22) and 1.53 to 1.73 (chr14) times the shipped mega's, in several
-  measurements side by side on shared nodes during 2.10.0's development; unguarded, 4.4 to 4.9 times on chr22, and the chr14 search was projected at 12 to
-  16 h. The release's gates time it genome-wide. See METHODS §5.
+  measurements side by side on shared nodes during 2.10.0's development; unguarded, 4.4 to 4.9
+  times on chr22, and the chr14 search was projected at 12 to 16 h. The release's gates time it
+  genome-wide. See METHODS §5.
 
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP

@@ -220,9 +220,9 @@ searches has an `N` run about every 65 bases (on chr22: 65 for HGDP + 1000 Genom
 with CRISPRitz 2.10.0's windows of 30/30; 57 and 59 with 2.9.1's of 25/27). On chr22's of
 hg38_mega, with the windows of 25/27, the 21-nt SaCas9 guide at 4 mismatches + 1 DNA + 1 RNA
 bulge gave 456 rows of 149,688 in the engine's search of `20-NNNNNNNN_3` that an index built for
-21-nt guides does not give (on chr22's reference sequence, the same 2,664,778 rows). For the rows of a guide length, search an index built for
-it, which the search takes first where one is installed; a longer guide needs its own index.
-They read the same variant data and `Dictionaries/` as the dedicated index for the
+21-nt guides does not give (on chr22's reference sequence, the same 2,664,778 rows). For the
+rows of a guide length, search an index built for it, which the search takes first where one is
+installed; a longer guide needs its own index. They read the same variant data and `Dictionaries/` as the dedicated index for the
 same panel — those tiers are PAM-independent — and a `--prune-pam` run over one gives the
 dedicated index's report for that PAM: from an index of format 2 (2.10.0's), at any flank
 width, contig ends included; from one of format 1 (2.8.1's), byte for byte from a flank of the
@@ -755,8 +755,8 @@ reported twice, the second time as a reference row on the alt contig.
    `build-index-only` without `--samplesID` for the SNP index). Every check passes too on chr21,
    chr18, chr10 and chr5, four of the seven chromosomes whose merged VCF holds a record written in
    lower case (chr3, chr4, chr5, chr10, chr12, chr18 and chr21), which the recipe reads in upper
-   case, as CRISPRitz 2.10.0 does (read as written, they failed the checks). Run it genome-wide only after
-   the release's readiness audit. Design rationale:
+   case, as CRISPRitz 2.10.0 does (read as written, they failed the checks). Run it genome-wide
+   only after the release's readiness audit. Design rationale:
    [`docs/DESIGN_mega_index.md`](DESIGN_mega_index.md).
 
    The recipe builds the dataset whole, its VCFs, registry and indel frequencies too, in a
