@@ -27,12 +27,13 @@ reads the `#` of a comment as a word and runs the comment's text.
 - **Mac / Windows:** install **Docker Desktop** — https://docs.docker.com/get-started/
 - **Linux:** install **Docker Engine** — https://docs.docker.com/engine/install/
 
-Then, in Docker Desktop → **Settings → Resources**, give Docker enough memory:
-**16 GB** is fine for a first run / reference-only searches, but the default
+Then, in Docker Desktop → **Settings → Resources**, give Docker enough memory: the default
 genome-wide HGDP + 1000 Genomes (HGDP1kGP) variant search is memory-intensive — give it **64 GB**
-(32 GB can run out of memory on a genome-wide variant search). This applies to Docker
-Desktop only: on Linux, Docker Engine sets no memory cap, so containers use host memory
-directly and there is nothing to configure.
+(32 GB can run out of memory on a genome-wide variant search). Smaller searches need less: the
+self-test below fits in **16 GB** (README [§3.2.1](../README.md#321-single-chromosome-test)), and
+the README's [System Requirements](../README.md#0-system-requirements) give what other searches
+took. This applies to Docker Desktop only: on Linux, Docker Engine sets no memory cap, so
+containers use host memory directly and there is nothing to configure.
 
 > **Windows (WSL 2 backend): there is no memory slider.** Docker Desktop instead reports
 > that *"resource limits are managed by Windows"* — Windows caps the whole WSL 2 VM, and

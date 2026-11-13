@@ -225,14 +225,14 @@ log and a **Retry**, which runs it again with the command the server launched it
 in a file of `Settings/`, which others may be able to write (2.10.0): after a restart
 of the web app, start the operation again from its card. A job's folder in `Settings/`
 is writable by the web app's user alone, and the page follows no link another user put
-in `Settings/`, nor anywhere else in the data folder (2.10.0): up to 2.10.0 the log
+in `Settings/`, nor anywhere else in the data folder (2.10.0): before 2.10.0 the log
 panel showed what a link put at a job's log named, any file of yours, to anyone who could
 reach the web app, and a job wrote its log through one. An uploaded genome or
 personal-assembly bundle is unpacked in a folder the page makes for it in `Genomes/` or
 `Assemblies/` and uses through its descriptor alone: another user who renames that folder
-and puts a link to a folder of yours in its place gets nothing written there (up to 2.10.0
+and puts a link to a folder of yours in its place gets nothing written there (before 2.10.0
 the upload was unpacked into that folder of yours). The concurrent searches setting is read
-and saved with no link followed (up to 2.10.0 its Save copied a JSON file of yours that a
+and saved with no link followed (before 2.10.0 its Save copied a JSON file of yours that a
 link named into the data folder). In a data folder your group can write, the page does not
 follow your own links there either: a VCF dataset registered from a server folder, a genome
 linked to a shared copy or `Settings/` linked onto a volume is read only where the folder

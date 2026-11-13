@@ -114,8 +114,8 @@ there is no memory slider**; Windows caps the WSL 2 VM at roughly half your RAM,
 `(docker info --format '{{.MemTotal}}') / 1073741824` — see the
 [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). Many current
 laptops ship with 36–128 GB and can run it; otherwise use a workstation/HPC.
-**Reference-only or single-chromosome / target-region variant** searches fit **~16 GB**,
-so any laptop handles those.)
+Smaller searches need less: [§0](#0-system-requirements) gives what a reference-only search
+and a variant-aware search of one chromosome or region took.)
 Details: [`install/`](install/).
 
 > **GPU acceleration (optional).** The default image `pinellolab/crisprme:latest` is
@@ -134,10 +134,9 @@ Details: [`install/`](install/).
 New to CRISPRme? Get the point-and-click web interface running in a few commands
 — just install Docker, then:
 
-> **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**:
-> **16 GB** is enough for reference-only / single-chromosome runs, but the
+> **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**: the
 > genome-wide 1000G+HGDP variant search shown here peaks around **68–75 GB**, so
-> give Docker **64 GB+** for it (32 GB will OOM). On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). (On Linux/Docker Engine the
+> give Docker **64 GB+** for it (32 GB will OOM); smaller searches need less. On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). (On Linux/Docker Engine the
 > container uses host memory directly.) See [System Requirements](#0-system-requirements).
 
 > **In zsh, the default shell of macOS,** run `setopt interactive_comments` once in the terminal
@@ -251,9 +250,11 @@ reports the NAA and NGA sites, which NRG leaves out, as NRG reports the NAG ones
 out. It costs about twice the search time of NRG genome-wide (2 h 26 min against 1 h 14 min for
 `ACTGAAATCTGTAAGCAGGC` on HGDP + 1000 Genomes, per-sample, 4 mismatches + 1 + 1 bulge, 32
 threads, CRISPRme 2.8.1), at no higher peak memory (66 GB against 82 GB, summed over each run's
-processes). An NRR index also serves an NGG, NAG, NRG or NGA search, and an NRG one an NGG or
-NAG search: the search prunes the index to its PAM by itself, and says so, more slowly than
-from an index of that PAM (see below).
+processes). On chr22, on indexes CRISPRitz 2.10.0 built, the gate runs of this release took 1.2
+times NRG's time per sample and, in the largest process, 1.8 times its memory (8.9 against 5.0
+GiB; 8 threads, METHODS.md §5). An NRR index also serves an NGG, NAG, NRG or NGA search, and an
+NRG one an NGG or NAG search: the search prunes the index to its PAM by itself, and says so,
+more slowly than from an index of that PAM (see below).
 
 **One index for many PAMs.** Each index above is built for one PAM, and serves any PAM its
 own holds at every position (an NRR index serves NGG, NAG, NGA, NAA and NRG). A **PAM-less**
@@ -425,14 +426,32 @@ Memory scales with the search — pick your tier (measured figures):
 
 | Search | RAM | Disk |
 |---|---|---|
-| **Reference-only / single-chromosome** (toy or reference-genome runs) | **8–16 GB** | ~44 GB (reference-only install) |
+| **Reference-only** (no variant dataset) | grows with `--thread`: about 18 GiB genome-wide on 8 threads, the default (below) | ~44 GB (reference-only install) |
+| **Variant-aware, one chromosome or region** | up to 13 GiB on chr22; 25 GiB for the IGH locus of chr14 alone (below) | what its genome and indexes take |
 | **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`20-NRR_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~150 GB (full variant-aware install; keep ~200 GB free) |
 
 The variant-aware genome-wide search is the memory-heavy one: the CRISPRitz search
 process alone peaks around **68–75 GB** loading and traversing the variant index, so
 **16 GB or 32 GB will OOM a real genome-wide variant search** — allocate 64 GB+.
-Reference-only runs are light (a few GB). To estimate the cost of a large search up
-front, see `docs/SCALABILITY_ANALYSIS.md`.
+The smaller searches took, at 4 mismatches + 1 DNA + 1 RNA bulge (the peak of the largest
+process):
+
+- **Reference-only.** CRISPRitz's search loads the index one chromosome per thread, so its
+  memory grows with `--thread`: genome-wide, its search of `ACTGAAATCTGTAAGCAGGC` took 18.4 GiB
+  on 8 threads (the default of `--thread`) and 60.2 GiB on 32, on an NGG reference index of
+  format 1 (measured during 2.10.0's development; on 32 threads the NRR index of format 2 took
+  59.0 GiB). The web interface searches on 4 threads.
+- **Variant-aware, one chromosome or region**, on indexes of HGDP + 1000 Genomes that CRISPRitz
+  2.10.0 built (the gate runs of this release, 8 threads; METHODS.md §5): on chr22, per sample,
+  the README guide took 5.0 GiB with NRG and 8.9 GiB with NRR, the default PAM, and three
+  repeat-rich guides at once, with NRG, 12.5 GiB; population-level, about the same. The
+  immunoglobulin loci are the densest part of these indexes: the IGH locus alone (chr14 with every
+  base outside it set to N, and the panel's records of the locus) took 25.0 GiB, IGK alone 6.2 GiB
+  and IGL alone 3.0 GiB. The gate searched no other chromosome whole (during development, the
+  rebuilt mega's search of chr14 whole, five guides population-level with its density guard on,
+  took 20.5 GiB). Give a search of a chromosome that holds IGH at least what the locus alone took.
+
+To estimate the cost of a large search up front, see `docs/SCALABILITY_ANALYSIS.md`.
 
 ## 1 Installation
 
@@ -629,9 +648,9 @@ are required.
 CRISPRme's searches are memory intensive. By default Docker Desktop caps the
 memory available to containers, which can cause searches to fail with
 out-of-memory errors. Before running large analyses, raise the limit in
-**Docker Desktop → Settings → Resources → Memory** — **16 GB** is fine for
-reference-only runs, but a genome-wide **variant** search needs **64 GB+** (it peaks
-at ~68–75 GB). On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). CRISPRme prints a non-fatal
+**Docker Desktop → Settings → Resources → Memory**: a genome-wide **variant** search
+needs **64 GB+** (it peaks at ~68–75 GB), and smaller searches need less
+([§0](#0-system-requirements)). On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). CRISPRme prints a non-fatal
 `WARNING:` at the start of a `complete-search` / `complete-test` run when it
 detects less than 32 GB of total memory, reminding you to increase this
 allocation. That threshold sits below the 64 GB a genome-wide variant search needs, so a

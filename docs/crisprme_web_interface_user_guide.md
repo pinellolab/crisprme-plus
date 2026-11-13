@@ -914,7 +914,11 @@ variants.
 
 **Cause:** Docker ran out of memory (OOM). Signs: the job stops advancing,
 `log_error.txt` is empty, and the terminal returns to the prompt (or exits with
-code 137). A genome-wide 1000G+HGDP search is the heaviest case; give it enough RAM.
+code 137). Where the kernel killed the index search alone, the container keeps running and
+`log_error.txt` holds `ERROR: searchTST (index search) failed (signal SIGKILL)`
+([TROUBLESHOOTING §14](TROUBLESHOOTING.md#14-a-search-above-1-dna--1-rna-bulge-warns-then-runs-for-hours-or-runs-out-of-memory));
+the steps below apply to both. A genome-wide 1000G+HGDP search is the heaviest case; give it
+enough RAM.
 
 **Steps to resolve:**
 

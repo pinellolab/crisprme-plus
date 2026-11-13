@@ -54,7 +54,7 @@ sends it). A `MPLCONFIGDIR`, `XDG_CACHE_HOME` or `HF_HOME` you set is used as it
 add `--tmpfs /tmp`, or set `CRISPRME_TMPDIR` to a folder of the mounted data folder (or to that
 folder itself: `-w /DATA -e CRISPRME_TMPDIR=/DATA`). Without one,
 the CRISPR-Bulge scorer and the report have nowhere to write, and complete-search stops before
-it starts, saying so (until 2.10.0 the search ended with CRISPR-Bulge scores of -1, no report zip,
+it starts, saying so (before 2.10.0 the search ended with CRISPR-Bulge scores of -1, no report zip,
 and only a WARNING in its error log).
 
 ---
@@ -104,8 +104,10 @@ CRISPRme+ 2.10.0). Only if you run CRISPRme against an older, unpinned CRISPRitz
 
 Per-sample analysis resolves genotypes across the whole panel (e.g. 4,091 individuals
 for the HGDP+1000G index) and reads the panel's genotype store: on a large panel budget
-**tens of GB of RAM** per run. It is the default on a genotyped + phased index (HGDP +
-1000 Genomes, HPRC), and `--per-sample` forces it on any other genotyped one.
+**tens of GB of RAM** per genome-wide run (the README's
+[§0](../README.md#0-system-requirements) gives what a search of one chromosome took). It is the
+default on a genotyped + phased index (HGDP + 1000 Genomes, HPRC), and `--per-sample` forces it
+on any other genotyped one.
 
 - `--per-sample` requires a **genotyped** index. It no-ops (with a warning) on a
   sites-only index such as `20-NRR_3_hg38+hg38_mega`.
@@ -198,13 +200,13 @@ What holds wherever you run it, since 2.10.0:
 
 - Python looks for no module in the folder CRISPRme is run from: every `python -c`, `-m` or
   `-` it runs is isolated (`-I`), and `--debug` keeps the `PostProcess/` beside the
-  `crisprme.py` that runs. Up to 2.10.0 the scorer's health check, which every search runs
+  `crisprme.py` that runs. Before 2.10.0 the scorer's health check, which every search runs
   first from the folder you run `crisprme.py` in, loaded a module put there, and `--debug` took
   that folder's `PostProcess/` for its own;
 - no file CRISPRme writes is loaded as code (they are JSON or text; TensorFlow's own
   modules, above, and the web app's table cache, in a folder of the server's own, below,
   aside), and the web app's Settings Retry re-runs a job with the command the server
-  launched it with, kept in its memory and run without a shell. Up to 2.10.0 it ran through
+  launched it with, kept in its memory and run without a shell. Before 2.10.0 it ran through
   a shell the command a job's `Settings/<job>/cmd.json` held;
 - the values a review found going from a job's files into shell commands as the shell's own
   text are quoted or checked now: the guides of the guide file, the indel targets' header,
@@ -240,7 +242,7 @@ What holds wherever you run it, since 2.10.0:
   job's folder is writable by you alone, and the cache of the results tables, pickles that
   Flask-Caching loads, is in a folder of the server's own in the temporary folder (in memory
   when that folder is not private or sticky), no longer in `Cache/` of the data folder, which
-  can be deleted. Up to 2.10.0 the web app followed such links: it showed and served files of
+  can be deleted. Before 2.10.0 the web app followed such links: it showed and served files of
   yours to anyone who could reach it (it listens on every network interface, `0.0.0.0`), the
   results of any search of yours too, through the haplotype folder a combined job's
   `.Params.txt` named; it wrote through them, a chunked upload's data, the email password and
@@ -541,8 +543,8 @@ combinations (the haplotype scan); the indexes of 2.10.0 serve it as they are.
 
 ## 15. A row that looks wrong: the known limits of 2.10.0
 
-Each is rare and changes no other row. [METHODS.md](../METHODS.md) §10 lists them with their
-scale, and §4 gives the rules behind them.
+Each is rare and changes no other row. [METHODS.md](../METHODS.md) §10 lists them, with their
+scale where it was measured, and §4 gives the rules behind them.
 
 - **A carrier listed for a SNP that its own target does not hold.** On an indel row, a carrier
   whose haplotype holds a second indel that pushes one of the row's named SNPs out of the

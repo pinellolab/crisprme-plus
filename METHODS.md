@@ -1788,6 +1788,17 @@ but the one with `--max-degeneracy 4` and the loci alone, SaCas9 also at 2 misma
 bulges, HPRC chr22 and a copy of it with every fourth sample unphased, in both modes, and the
 default index beside the mega, as published and as rebuilt, in both modes.
 
+**Memory.** In the same runs the largest process (its maximum resident set size, as
+`/usr/bin/time` reads it) peaked, on chr22, at 5.0 GiB for the README guide per sample and 5.0
+to 5.1 GiB population-level, 5.1 GiB for TRAC, 5.1 to 5.3 GiB for VEGFA site 3, 8.9 GiB for the
+README guide with NRR (in runs sampled for it, CRISPRitz's index search, `searchTST`), 12.5 GiB
+for the three repeat-rich guides in either mode and 2.4 GiB for SaCas9; at 4.1 GiB on HPRC chr22;
+and at 3.0, 6.2 and 25.0 GiB for IGL, IGK and IGH alone (one round). NRR's per-sample search of
+chr22 thus took 1.8 times NRG's memory and 1.2 times its time. Of chr14 and chr2 the gate
+searched the loci alone. Of chr14 whole, the rebuilt mega's search of the five guides above
+(population-level, its density guard on; during development, on fake-indel windows of 25/27)
+peaked at 20.5 GiB, and the shipped mega's at 8.9 GiB.
+
 **What the default budget costs.** The bulges drive it: on chr22 per sample the README guide's
 search took 238 s at 4 + 0 + 0, 471 s at 4 + 1 + 0, 481 s at 4 + 0 + 1 and 5,758 s at 4 + 1 + 1
 without these steps (measured during development, 16 threads, on a loaded node); with them it took 8
@@ -3025,10 +3036,11 @@ panels of these configurations have no FILTER other than `.` (HGDP + 1000 Genome
 the insertion of Y1 and an MNV marked `LowQual`, searched through the real CLI, passes in both
 modes, and fails where the run read a store of every FILTER, as one written before 2.10.0 is (14 and
 6 gating findings: S21 and S39 left off); the same world searched with `CRISPRME_INDEL_SNP=0` is
-refused in both modes (read as a default run, it gives 166 and 77 gating findings). On the
-documented chr22 self-test (`complete-test`, as CI runs it) soundness passes every benchmark, the 5′
-Cas12a PAM included, and completeness of `cas9_sg1617` (population-level, its `.search_mode`)
-passes: CI's step, replayed verbatim, passes there (about 4 min on 4 processes). The SNP+indel
+refused in both modes (an earlier version of the check, which read it as a default run, gave
+166 and 77 gating findings). On the documented chr22 self-test (`complete-test`, as CI runs it)
+soundness passes every benchmark, the 5′ Cas12a PAM included, and completeness of `cas9_sg1617`
+(population-level, its `.search_mode`) passes: CI's step, replayed verbatim, passes there (about
+4 min on 4 processes). The SNP+indel
 oracle passes in both profiles and both modes, with no known defect left to list. The negative
 control fails as before: on the released 2.8.1's searches of the README guide soundness reports
 exactly the four rows per mode whose first aligned base is one an insertion adds, and nothing else,
@@ -3393,12 +3405,12 @@ repository of its own (`lucapinello/crisprme-data-general-index`), apart from th
 
 ## 10. Known limits of 2.10.0
 
-The limits below are those a user of 2.10.0 can meet, each with its measured scale. Each is
-stated where its method is described too. `docs/TROUBLESHOOTING.md` says what a user sees of them
-and what to do: §15 for the rows, §14 for the searches above 1 DNA + 1 RNA bulge, §12 for the
-refusal's advice. The haplotype scan of the dense regions, planned for CRISPRme 2.10.1 with no
-index rebuild (its engine hooks are in CRISPRitz 2.10.0), is to lift two of them: two indels on
-one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense regions.
+The limits below are those a user of 2.10.0 can meet, each with its scale where it was measured.
+Each is stated where its method is described too. `docs/TROUBLESHOOTING.md` says what a user sees
+of them and what to do: §15 for the rows, §14 for the searches above 1 DNA + 1 RNA bulge, §12
+for the refusal's advice. The haplotype scan of the dense regions, planned for CRISPRme 2.10.1
+with no index rebuild (its engine hooks are in CRISPRitz 2.10.0), is to lift two of them: two
+indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense regions.
 
 - **Two indels on one haplotype.** A fake-indel window holds one indel, and a carrier is listed
   on an indel row when its own bases read the row's target through the indel, from the

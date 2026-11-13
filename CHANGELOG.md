@@ -43,9 +43,10 @@ major.minor version (Changed). The main changes, each told in its entry below:
   guard and a frequency bound that ranks its least likely combinations after the others.
 - **A check of the indel path on real data.** `scripts/check_indel_rows.py` checks the indel
   rows against haplotypes it writes from the VCF itself. It is a release gate.
-- **Known limits.** They are stated, with their scale, under Changed and in METHODS §10 ("Known
-  limits of 2.10.0"). A haplotype scan of the dense regions, planned for CRISPRme 2.10.1 with no
-  index rebuild, is to lift the largest of them: searches above 1 DNA + 1 RNA bulge there.
+- **Known limits.** They are stated, with their scale where it was measured, under Changed and in
+  METHODS §10 ("Known limits of 2.10.0"). A haplotype scan of the dense regions, planned for
+  CRISPRme 2.10.1 with no index rebuild, is to lift the largest of them: searches above 1 DNA + 1
+  RNA bulge there.
 
 ### Added
 - **CRISPRme reads index format 2, the format CRISPRitz writes from 2.10.0.** An index of format
@@ -662,8 +663,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
     (`CRISPRME_INDEL_SNP=0`, which a search of this release notes in its `log_verbose.txt`):
     every SNP code of its fake-indel genomes reads as the reference, so its indel rows name
     no SNP and list every carrier of their indel, none of the per-carrier resolution the
-    check models (read as a default run, the SNP+indel oracle's world searched so gives 166
-    and 77 gating findings, per sample and population-level), and so is one
+    check models (an earlier version of the check, which read such a run as a default one, gave
+    166 and 77 gating findings on the SNP+indel oracle's world searched so, per sample and
+    population-level), and so is one
     that read a genotyped dataset's indels with no phased indel store, where the VCF holds
     indels (an index built with `CRISPRME_INDEL_SNP=0`, or a store whose compile failed;
     a search of this release notes it in its `log_verbose.txt`, `NOTE [indel-snp]: no
@@ -1676,8 +1678,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
   dictionary, dictionary, population-level), gives a record `rsI1;rsI2` AA>A of one ALT `rsI1` on
   its indel rows and a record `rsS1;rsS2` A>C `rsS1;rsS2` on its SNP rows.
 
-- **The known limits of 2.10.0, stated with their scale** (METHODS §10, "Known limits of
-  2.10.0").
+- **The known limits of 2.10.0, stated with their scale where it was measured** (METHODS §10,
+  "Known limits of 2.10.0").
   - **Two indels on one haplotype.** A fake-indel window holds one indel. A listed carrier whose
     own target holds a second indel that pushes a SNP the row names out of the target stays
     listed on that row, which names the SNP its own target does not hold. On 1000 Genomes chr22,
@@ -1807,8 +1809,10 @@ major.minor version (Changed). The main changes, each told in its entry below:
   ~150 GB); a reference-only setup takes ~44 GB (it took ~25 GB). A genome-wide search takes
   about twice as long (2 h 26 min against 1 h 14 min for `ACTGAAATCTGTAAGCAGGC` on HGDP + 1000
   Genomes, per-sample, 4 mismatches + 1 + 1 bulge, 32 threads, CRISPRme 2.8.1), at no higher peak
-  memory (66 GB, against 82 GB summed over the NRG run's processes). Covered by
-  `PostProcess/test_defaults_and_index_flex.py`.
+  memory (66 GB, against 82 GB summed over the NRG run's processes). On chr22, on indexes
+  CRISPRitz 2.10.0 built, the gate runs of this release took 1.2 times NRG's time per sample and,
+  in the largest process, 1.8 times its memory (8.9 against 5.0 GiB; 8 threads, METHODS §5).
+  Covered by `PostProcess/test_defaults_and_index_flex.py`.
 - **`--prune-pam` no longer needs `--index-path`**, and a search passes it by itself (see Added).
   The refusals that told a user to run again with `--prune-pam --index-path` now say, where the
   engine cannot prune, that an index serves the search pruned and the installed CRISPRitz cannot do
@@ -2947,6 +2951,17 @@ major.minor version (Changed). The main changes, each told in its entry below:
   indels in cis common, "~17–19% of real indel off-targets": it says that this is the raw count,
   mostly repeats, and gives METHODS §8's ~1–2% of indel loci after repeat-masking. Covered by
   `PostProcess/test_ci_workflows.py` and `test_defaults_and_index_flex.py`.
+- **The docs no longer say that a reference-only or one-chromosome search fits in 16 GB.** The
+  README, the Docker Quickstart, install/README and the website said that a reference-only
+  search, or a variant-aware search of one chromosome or region, fits in 8 to 16 GB, on any
+  laptop: a claim of August and September 2026, before every allele was coded. In the gate runs
+  of this release, on indexes CRISPRitz 2.10.0 built (8 threads), the largest process peaked at
+  5.0 GiB for the README guide on chr22 per sample, 8.9 GiB with NRR, 12.5 GiB for three
+  repeat-rich guides, and 25.0 GiB for the IGH locus of chr14 alone; CRISPRitz's search of a
+  reference index genome-wide took 18.4 GiB on 8 threads and 60.2 GiB on 32 (during
+  development), its memory growing with `--thread`. README §0 gives these with their basis, and
+  METHODS §5 the gate runs'; the other surfaces point to §0. RELEASE_CHECKLIST's gate D measures
+  each memory figure of the docs again on the rebuilt indexes.
 - **A carrier is no longer taken off a row for an indel whose FILTER the search skips.** The
   phased indel genotype store (`Dictionaries/indel_genotypes_<vcf>/`, `build_indel_genotypes.py`)
   streamed the VCF without reading FILTER and kept every indel of it, while CRISPRitz's enricher
