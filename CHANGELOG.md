@@ -35,7 +35,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
 - **Speed.** Coding every allele makes the immunoglobulin loci dense. An exact haplotype
   pre-check, a carriers-first check on the indel side and a post-analysis in pieces over the
   search's threads give the same rows about ten times faster (the README guide's per-sample
-  search of chr22). A search above 1 DNA + 1 RNA bulge on such an index is warned of.
+  search of chr22). A search above 1 DNA + 1 RNA bulge on such an index is warned of, unless a
+  cap of 3 total edits or less keeps it near the default's cost.
 - **Population-level rows and the mega.** The carrier gate checks a population-level row's
   variants against phased haplotypes, and the report ranks a combination no haplotype carries
   after the others. The mega is rebuilt from the records the enricher reads, with a density
