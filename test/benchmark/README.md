@@ -172,21 +172,24 @@ and CRISPR-Bulge scores (nor which row the CRISPR-Bulge block keeps),
 `Variant_info_spacer+PAM`, `PAM_creation`, the seed counts, MAF, rsID, `Other_motifs`,
 `Not_found_in_REF` or the annotations, nor the merge's keys after the sorting criteria and
 the CFD (the Cluster Position, the carrier count, the aligned text), which only order
-alignments equal in all of these. Give each VCF a `.tbi` when the panel has deletions longer
-than 20 kb (HPRC's does): a read without one looks back 20 kb, and the checker lists such a
-VCF under its own coverage class. Two genotyped datasets that share samples are refused
-(exit 2): CRISPRme resolves each dataset on its own genotypes and joins their rows, which
-the checker does not model; a sites-only dataset beside a genotyped one is checked. So are
-inputs other than the search's where the run's own record of them says so (its
-`.Params.txt` budget, PAM and variant datasets -- one VCF per dataset for each chromosome
-checked; a search without bulges records `Genome_idx None`, and its `--vcf` list says
-them --, its `.guides.txt`, `.sampleID.txt` and `.search_mode`, the mode it ran), a run
-whose records contradict each other, a search made with `CRISPRME_INDEL_SNP=0` (its
-`log_verbose.txt` notes it since 2.10.0: none of the per-carrier resolution applies), one
-that read a genotyped dataset's indels with no phased indel store (its `log_verbose.txt`
-notes it since 2.10.0, `NOTE [indel-snp]: no phased indel genotype store of ...`: their
-carriers are the indel log's, their slot unknown), a run of 2.10.0 whose `log_verbose.txt`
-is gone where its VCF holds indel or MNV records (only the log says either of the two), one
+alignments equal in all of these, nor whether an alternative alignment is one the merge
+should have folded into a better one of the same target (a redundant fold: a known limit,
+METHODS section 10; the unit tests and the SNP+indel oracle's planted sites check it).
+Give each VCF a `.tbi` when the panel has deletions longer than 20 kb (HPRC's does): a
+read without one looks back 20 kb, and the checker lists such a VCF under its own
+coverage class. Two genotyped datasets that share samples are refused (exit 2): CRISPRme
+resolves each dataset on its own genotypes and joins their rows, which the checker does
+not model; a sites-only dataset beside a genotyped one is checked. So are inputs other
+than the search's where the run's own record of them says so (its `.Params.txt` budget,
+PAM and variant datasets -- one VCF per dataset for each chromosome checked; a search
+without bulges records `Genome_idx None`, and its `--vcf` list says them --, its
+`.guides.txt`, `.sampleID.txt` and `.search_mode`, the mode it ran), a run whose records
+contradict each other, a search made with `CRISPRME_INDEL_SNP=0` (its `log_verbose.txt`
+notes it since 2.10.0: none of the per-carrier resolution applies), one that read a
+genotyped dataset's indels with no phased indel store (its `log_verbose.txt` notes it
+since 2.10.0, `NOTE [indel-snp]: no phased indel genotype store of ...`: their carriers
+are the indel log's, their slot unknown), a run of 2.10.0 whose `log_verbose.txt` is gone
+where its VCF holds indel or MNV records (only the log says either of the two), one
 whose records do not say how its release read data that makes it matter (every allele of a
 split site or the last record, the INDELS index's format, the phased indel store's FILTER
 rule: the check reads them from `.indexes_searched.txt`, the indexes' `.bin` headers, the

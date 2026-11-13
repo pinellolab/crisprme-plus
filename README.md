@@ -951,7 +951,7 @@ gives 766,427 SNP raw targets, 98.6% of them in IGL, and 5,891,413 indel raw tar
 CRISPRitz 2.10.0's fake-indel windows of 30/30 (4,487,567, 99.9% of them in IGL, with the
 windows of 25/27 of its development). The bulges drive it: before the steps below, the README
 guide's per-sample search of chr22 took 4 min at 4 + 0 + 0, 8 min with one bulge of either type
-and 96 min at 4 + 1 + 1 (the 2.10.0 cost judges, 16 threads, on a loaded node). The post-analysis
+and 96 min at 4 + 1 + 1 (measured during development, 16 threads, on a loaded node). The post-analysis
 now skips the raw targets no sample's genotypes can produce (the exact haplotype pre-check),
 skips the overlaid indel targets no carrier of their indel can have, and runs each chromosome in
 pieces over the `--thread` workers, with the same results: on 16 threads the default search of

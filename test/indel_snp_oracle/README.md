@@ -177,10 +177,10 @@ on a haplotype holding every SNP it names, the target's first base at the row's 
 unphased one must carry every SNP it names. A row naming two alts of one position, which no
 haplotype holds, fails. Before 2.10.0 the SNP path read site N2's lone `2|1` carrier of an alt
 on a VCF line of several ALTs as carrying the other alt too, and the per-sample run lists it on
-3 such row blocks (rel/2.8.2 at fe0585a), which the check counted and did not check when the
-counts below were taken; since 2.10.0 every reader reads a genotype against its own alt's
-allele index where the genotypes tell it (a carrier whose alt's index they cannot tell is read
-without phase), and CRISPRitz 2.10.0 writes each alt's dictionary entry of a line of several
+3 such row blocks (fe0585a, during 2.10.0's development), which the check counted and did not
+check when the counts below were taken; since 2.10.0 every reader reads a genotype against its own
+alt's allele index where the genotypes tell it (a carrier whose alt's index they cannot tell is
+read without phase), and CRISPRitz 2.10.0 writes each alt's dictionary entry of a line of several
 ALTs in split form, which tells every one; on a dictionary of an earlier CRISPRitz, where two
 lines of several ALTs share a position, their allele numbers are not told apart, so an alt of
 one can be tied to an index of the other's and its carriers read on the wrong slot (METHODS

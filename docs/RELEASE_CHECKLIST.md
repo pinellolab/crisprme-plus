@@ -275,10 +275,11 @@ done
 #     loaded node, 6 GB, a TSV of about 31 MB) is not a release gate; chr22 above stands
 #     for it.
 #     The checker does not check Variant_info_spacer+PAM (the number of each variant in its
-#     target) nor whether an alternative alignment repeats one of its site's rows (a redundant
-#     fold), with the score, PAM_creation, seed and annotation columns (its NOT CHECKED list;
-#     METHODS section 8): a regression there passes this gate, and only the unit tests
-#     (test_indel_snp_cis, test_check_indel_rows) pin the cases known.
+#     target) nor whether an alternative alignment is one the merge should have folded into a
+#     better one of the same target (a redundant fold), with the score, PAM_creation, seed and
+#     annotation columns (its NOT CHECKED list; METHODS sections 8 and 10): a regression there
+#     passes this gate, and only the unit tests (test_indel_snp_cis, test_check_indel_rows)
+#     and the SNP+indel oracle's planted sites (step 4b) pin the cases known.
 
 # 4d. The speed steps of 2.10.0 change no file (METHODS.md §5): the haplotype pre-check, its
 #     carriers-first twin on the indel side and the K-skip, which --no-haplotype-precheck
@@ -361,6 +362,7 @@ grep -q "^all passed" gate/fmt2_rows.log || echo GATE_FAILED
 
 ### C. Release mechanics (at/after tag)
 - [ ] Bump `crisprme.py` version; move `CHANGELOG [Unreleased]` → `[X.Y.Z]` dated + fresh `[Unreleased]` + fix link footer.
+- [ ] **The texts that name the coming release** — until the bump, METHODS' opening paragraph and closing note call 2.10.0 the coming release and 2.8.1 the last shipped one, and the header comments of `install_from_source.sh` and `environment.yml` name 2.8.1, as `crisprme.py` does: with the bump they name the release, as the Dockerfile's header comment does (Gate A, the version sweep).
 - [ ] **The release notes fit a release body** — GitHub refuses a release body of more than 125,000 characters. 2.10.0's changelog section is about 320,000, so the release takes short notes that link the tag's `CHANGELOG.md` and `METHODS.md`, as 2.8.1's did ([`RELEASING.md`](RELEASING.md#4-create-the-github-release-and-tag), step 4).
 - [ ] Tag → `docker-multiarch` CI publishes `pinellolab/crisprme:vX.Y.Z` + `:latest`; verify `crisprme.py --version` == `X.Y.Z` and that `crispritz.py`'s `VERSION` inside the image equals the Dockerfile's `crispritz_ref` (v2.10.0 for 2.10.0: the same major.minor).
 - [ ] Bioconda: refresh the recipe/Gmail draft + `sha256` of the new release tarball; README's bioconda-status line matches reality.

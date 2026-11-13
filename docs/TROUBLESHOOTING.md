@@ -471,9 +471,10 @@ EOF
 
 The recipe's last step, `verify_mega_chrom.py`, prints `ALL PASS` for every chromosome. The
 index it built is of its PAM; for another, run `build-index-only --pam <it>` on the data folder,
-which reuses the kit. The name patterns of the `find` take an index of up to 9 bulges of a type
-(`_[0-9]_`, as the messages' own removal does): one built with `--bDNA` or `--bRNA` of 9 or more
-(`_10_` and up), which no build of the web or of the README makes, is removed by hand. Each
+which reuses the kit. The name patterns of the `find` take an index of up to 8 bulges of a type
+(`_[0-9]_`, the N of its name being its bulges plus one, as the messages' own removal does): one
+built with `--bDNA` or `--bRNA` of 9 or more (`_10_` and up), which no build of the web or of the
+README makes, is removed by hand. Each
 message's removal and these commands do the same pasted into bash or into zsh.
 
 **A message that says to remove the mega's enriched genome.** Where a search finds the mega's

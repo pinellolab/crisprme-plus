@@ -20,8 +20,8 @@ A panel's companions (its Dictionaries bundle and genotype stores) have no comma
 - SpCas9 **NRR** 20-nt (the default) on the reference, HGDP + 1000 Genomes, HPRC and mega;
 - SpCas9 **NGG** 20-nt, the **general** PAM-less index (an 8-nt 3′ flank, 20-nt guide), SaCas9
   **NNGRRN** 22-nt (Manuel's CEP290 guides), Cas12a **TTTN** 5′ at 20 and 23 nt (every shipped
-  Cas12a PAM and Manuel's Cas12a guides), and SpCas9 **NRG** 20-nt (Kris's TRAC reports), each on
-  the reference and HGDP + 1000 Genomes;
+  Cas12a PAM and Manuel's Cas12a guides), and SpCas9 **NRG** 20-nt (the PAM of the genome-wide
+  TRAC-guide runs made with 2.8.1), each on the reference and HGDP + 1000 Genomes;
 - **NNN_3 is not built again**: the general index serves its searches at the same speed, and a
   download of `NNN_3_*` says so; 2.8.1's archives stay where they are;
 - each variant panel's **Dictionaries bundle** and genotype store once

@@ -15,14 +15,16 @@ push them to Hugging Face as part of the release:
 | `crisprme-data_README.md` | [`lucapinello/crisprme-data`](https://huggingface.co/datasets/lucapinello/crisprme-data): the reference data of every release, and the index archives of 2.8.1 (index format 1) |
 | `crisprme-data-general-index_README.md` | [`lucapinello/crisprme-data-general-index`](https://huggingface.co/datasets/lucapinello/crisprme-data-general-index): the general (8-nt flank) index archives of 2.8.1 |
 
-Push with (requires a write token):
+Push with `hf upload`, the command line of `huggingface_hub`, and a write token (`hf auth login`,
+or `HF_TOKEN`); its older `huggingface-cli` fails with the `huggingface_hub` of CRISPRme 2.8.1's
+image (2.4.0):
 
 ```bash
-huggingface-cli upload lucapinello/crisprme-indexes-format2 \
+hf upload lucapinello/crisprme-indexes-format2 \
   docs/hf/crisprme-indexes-format2_README.md README.md --repo-type dataset
-huggingface-cli upload lucapinello/crisprme-data \
+hf upload lucapinello/crisprme-data \
   docs/hf/crisprme-data_README.md README.md --repo-type dataset
-huggingface-cli upload lucapinello/crisprme-data-general-index \
+hf upload lucapinello/crisprme-data-general-index \
   docs/hf/crisprme-data-general-index_README.md README.md --repo-type dataset
 ```
 

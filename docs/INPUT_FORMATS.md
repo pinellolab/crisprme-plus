@@ -384,7 +384,7 @@ writes some REF or ALT in lower case (which CRISPRitz 2.10.0 reads in upper case
 of CRISPRitz 2.9.1 or earlier does not) can be written in upper case so:
 
 ```bash
-zcat input.vcf.gz | awk 'BEGIN{FS=OFS="\t"} !/^#/{$4=toupper($4); $5=toupper($5)} 1' \
+gzip -dc input.vcf.gz | awk 'BEGIN{FS=OFS="\t"} !/^#/{$4=toupper($4); $5=toupper($5)} 1' \
   | bgzip > upper.vcf.gz
 ```
 

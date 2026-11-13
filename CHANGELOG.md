@@ -589,14 +589,14 @@ major.minor version (Changed). The main changes, each told in its entry below:
     the run read a store written before 2.10.0, which stay on their carriers' haplotypes;
     either way no record of the search holds it (a row naming one fails, `variant-filtered`;
     completeness demands none of their targets, `limit-filtered-record`); a sites-only
-    dataset's keeps its SNVs for its SNP rows (the `hg38_mega` index's hold them: its
-    registry holds all 78,116 of chr22 outside `PASS`, and its SNP rows name some), a SNP
-    row through one being a row CRISPRme may write or not, while its fake-indel windows
-    code its `PASS` SNVs only, every allele of a split site on a genome CRISPRitz 2.10.0
-    built and the last record's on one of 2.9.1 or earlier (as CRISPRitz's overlay does: a
-    carrier-less row naming another fails, `variant-filtered`, as does one naming an SNV of
-    another dataset, `variant-not-in-dataset`), and it drops its indels and MNVs
-    (`hg38_mega`'s indel log holds exactly its `PASS` indels).
+    dataset's keeps its SNVs for its SNP rows (2.8.1's `hg38_mega` index holds them: its
+    registry holds all 78,116 of chr22 outside `PASS`, and its SNP rows name some; the rebuild
+    of 2.10.0 holds those that pass), a SNP row through one being a row CRISPRme may write or
+    not, while its fake-indel windows code its `PASS` SNVs only, every allele of a split site on
+    a genome CRISPRitz 2.10.0 built and the last record's on one of 2.9.1 or earlier (as
+    CRISPRitz's overlay does: a carrier-less row naming another fails, `variant-filtered`, as
+    does one naming an SNV of another dataset, `variant-not-in-dataset`), and it drops its
+    indels and MNVs (`hg38_mega`'s indel log holds exactly its `PASS` indels).
     CRISPRme's documented reading of a carrier (METHODS section 4 and the
     2.8.1 Known limits: one indel per window, resolved with each carrier's own SNP alleles;
     a second indel read from either end of the target through the indel; the phasing
@@ -895,8 +895,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
     as documented, the higher of the REF and ALT scores, while the merge sorts on the ALT's
     (on an indel row the REF text is the reference read from its start, not a target: its
     score is the one printed on 99, 41 and 60 indel row blocks of the 2.8.1 genome-wide
-    README per-sample, population-level and TRAC runs); the published `hg38_mega` index's
-    SNP rows read its VCF otherwise than CRISPRitz's enricher does: they name SNVs whose
+    README per-sample, population-level and TRAC runs); the `hg38_mega` index 2.8.1 published
+    reads its VCF otherwise than CRISPRitz's enricher does in its SNP rows (its rebuild of
+    2.10.0 reads what the enricher reads: Changed, the mega's registry): they name SNVs whose
     FILTER is not `PASS` (chr22:11574550 C>G, `LOW_VQSLOD`; its registry holds all 78,116
     such SNVs of chr22) and an earlier record at 58 split sites of chr22 against the last at
     131 (57 of them a `PASS` record before a later `PASS` one, as chr22:11337076 G>C before
@@ -3204,9 +3205,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
     the reference's TGG, whose T repeats the insertion's first base, reads NA). Judged by the
     reference PAM beside the protospacer, as the rest of the rule judges a PAM partly inserted,
     a wholly inserted PAM beside a valid reference PAM would read NA, the site having existed
-    before the insertion. Genome-wide, on 2.8.1's README and TRAC tables (below), this case turns
-    11 highest-CFD blocks from NA to created and changes nothing else in them: README guide,
-    per-sample, 2 alternative alignments
+    before the insertion. Genome-wide, on 2.8.1's runs of the README guide and the TRAC guide
+    (below), this case turns 11 highest-CFD blocks from NA to created and changes nothing else
+    in them: README guide, per-sample, 2 alternative alignments
     (chr11:35248792 (+), CFD 0); population-level none; TRAC guide 2 rows (chr17:77419671 (−),
     CFD 0.008, and chr2:159346 (−), 0.003) and 7 alternative alignments (chr1:246083493 (+),
     chr20:63226848 (+), chr4:183404212 (−) three, chr5:157864188 (+) two), CFD at most 0.008; 5
