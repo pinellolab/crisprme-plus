@@ -1969,6 +1969,33 @@ and the `release-crisprme` skill.
   (`SplitFormDictionary`: the two lines checked on a split-form dictionary and refused on a raw
   one or none; the alts a split form ties; a carrier the split form ties failed where it is
   listed on another slot's target), each failing with the checker of 6bff65b.
+- **On a classic install a missing allele carries nothing** (`new_simple_analysis.py`, the
+  per-sample dictionary path; ENG-B-R1-2 of the CRISPRitz 2.10.0 review, since 2.8.1 at least). An
+  index built without `--samplesID` (the classic per-sample dictionaries, no Tier-1 store) is read
+  by the dictionary path, which put a SNP carrier on each haplotype slot whose allele was not `0`:
+  a `.|1` carrier was read as holding the ALT on its missing slot too, and listed on that slot's
+  target, which none of its haplotypes holds (METHODS section 4: a missing call carries nothing,
+  as the Tier-1 path reads it). Through the real CLI, the review's world B9 (a split C>A with S01
+  `.|1` and S02 `1|.`, beside an SNV on the slot that holds the A) listed both on the row of the A
+  alone as well as on the perfect row, and world B3's S05 (`.|3` of C>T,G,A) likewise; a Tier-1
+  install listed neither. A `.` now carries nothing on that path too (an unphased call is read as
+  before, on either slot): on the classic installs of B9 and B3 those listings go, three row
+  blocks of the alternative alignments each (B9's row of the A alone with them, its site's
+  `Other_motifs` 150 to 149), and nothing else changes; on their Tier-1 installs, and
+  population-level, nothing changes. Real data, the README guide, NRG, 4 + 1 + 1, per sample: on a
+  classic install of HPRC chr22, whose VCF holds 505,187 calls of a carrier with a missing allele
+  beside an ALT (417,026 in its dictionary), 48 targets of the integrated results and 22 of the
+  alternative alignments hold such a call (421 and 153 target-carrier pairs), and nothing changes
+  either: in each, the carrier's missing slot is missing at every variant of the target (an
+  assembly's gap), where both readings list it on the same rows, the 1,172 rows of the integrated
+  results and the 5,085 of the alternative alignments byte for byte the same; on HGDP + 1000
+  Genomes chr22, which holds none (no listed carrier of its dictionary has a `.`), nothing
+  changes, the 1,583 rows of the integrated results and the 3,784 of the alternative alignments
+  byte for byte the same. On the Tier-1 install of each, the search is byte for byte the same (its
+  logs, report and PDFs apart, for the run's name and times). `test_site_alleles`
+  (`AMissingAlleleCarriesNothing`: B9, and B3's `.|3` in a dictionary of raw numbers and in
+  CRISPRitz 2.10.0's split form, on the dictionary and on the tiers), failing on the dictionary
+  with the code before.
 - **The HGDP + 1000 Genomes and HPRC build recipes stop at a step that fails**
   (`seq_script/merge_panels/hgdp1kgp_build.sh`, `hprc_build.sh`, which the rebuild of 2.10.0's
   index set calls). They printed `BUILD_EXIT` and went on: after a failed `build-index-only` the

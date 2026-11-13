@@ -39,6 +39,7 @@ Run with:
 import gzip
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -952,6 +953,84 @@ class ALineOfSeveralAltsThroughThePostAnalysis(_SnpPostAnalysis):
         phases = {row["SNP"]: row["Phase_Confirmation"] for row in comp["phase_confirmation"]}
         self.assertEqual(phases["chrT_%d_C_T,chrT_%d_A_G" % (_pos1(5), _pos1(9))],
                          "CONFIRMED")
+
+
+def _line_entries(ref, alts, rsid, gts, split):
+    """The dictionary entries CRISPRitz add-variants writes for one VCF line ``ref`` >
+    ``alts`` with genotypes ``gts`` ({sample: GT}): one entry each ALT, listing each sample
+    whose GT holds that ALT's number, with its GT as the line writes it (CRISPRitz up to
+    c18c575) or in split form (``split``: CRISPRitz 2.10.0, 1 the entry's own ALT, 0 another
+    called allele, a missing '.' and the separators as they are)."""
+    out = []
+    for k, alt in enumerate(alts, 1):
+        carriers = {}
+        for s, gt in gts.items():
+            toks = re.split(r"([|/])", gt)
+            if str(k) not in toks[::2]:
+                continue
+            carriers[s] = ("".join(("1" if t == str(k) else "0") if t.isdigit() else t
+                                   for t in toks) if split else gt)
+        out.append((ref, alt, rsid, "0.1", carriers))
+    return out
+
+
+class AMissingAlleleCarriesNothing(_SnpPostAnalysis):
+    """METHODS section 4: a missing call ('.') carries nothing. The dictionary path, which
+    a classic install reads (build-index-only without --samplesID: no Tier-1 store), put a
+    carrier on every slot whose allele is not '0', so a '.|1' carrier of an SNV was read as
+    holding it on both slots and listed on the other slot's target as well (since 2.8.1 at
+    least: ENG-B-R1-2 of the CRISPRitz 2.10.0 review found it through the real CLI); the
+    Tier-1 store's reader reads '.' as no ALT. World B9 of that review, made small: column
+    5 a reference C the guide reads A, column 9 a reference A it reads G; C>A with O .|1,
+    P 1|. and S 1|0, and A>G on the slot that holds the A (O 0|1, P 1|0, S 1|0). Each holds
+    the perfect target on one slot and the reference on the other, so no haplotype holds
+    the A without the G, whose row listed O and P. World B3's S05: a line C>T,G,A whose
+    third ALT is the guide's base (the four bases: Q), with U .|3 beside the G on its slot
+    1, listed as .|3 under A in a dictionary of CRISPRitz up to c18c575 and as .|1 in
+    CRISPRitz 2.10.0's split form: U was listed on the row of the A alone."""
+
+    def _rows_by_variants(self, ref, window, values, tiers):
+        """{tuple of variant tokens: the samples of every row naming them}: the dictionary
+        path writes a row of each haplotype slot, which the merge of a cluster joins."""
+        self.tmp = tempfile.mkdtemp(prefix="sa_miss_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        rows, _comp = self.analyse(ref, [window], values, tiers=tiers)
+        self.assert_no_row_names_two_alts_of_a_position(rows)
+        got = {}
+        for r in rows:
+            if r[SNP] not in ("n", "NA"):
+                got.setdefault(tuple(r[SNP].split(",")), set()).update(
+                    r[SAMPLES_COL].split(","))
+        return got
+
+    def test_b9_a_split_line_with_a_missing_allele(self):
+        ref = _site(c5="C", c9="A")
+        p, q = _pos1(5), _pos1(9)
+        values = {p: [("C", "A", "rsA", "0.1", {"O": ".|1", "P": "1|.", "S": "1|0"})],
+                  q: [("A", "G", "rsG", "0.1", {"O": "0|1", "P": "1|0", "S": "1|0"})]}
+        a, g = "chrT_%d_C_A" % p, "chrT_%d_A_G" % q
+        for tiers in (False, True):
+            with self.subTest(tiers=tiers):
+                got = self._rows_by_variants(ref, _window(ref, {5: "M", 9: "R"}), values,
+                                             tiers)
+                self.assertEqual(got, {(a, g): {"O", "P", "S"}})
+
+    def test_b3c_a_missing_allele_beside_the_third_alt_of_a_line(self):
+        ref = _site(c5="C", c9="A")
+        p, q = _pos1(5), _pos1(9)
+        line = {"V": "2|3", "X": "3|2", "Y": "3|1", "U": ".|3"}
+        snv = ("A", "G", "rsG", "0.1", {"V": "0|1", "X": "1|0", "Y": "1|0", "U": "0|1"})
+        a5, g5, t5 = ("chrT_%d_C_%s" % (p, b) for b in "AGT")
+        g9 = "chrT_%d_A_G" % q
+        for split in (False, True):
+            values = {p: _line_entries("C", ["T", "G", "A"], "rs5", line, split), q: [snv]}
+            self.assertEqual(values[p][2][4]["U"], ".|1" if split else ".|3")
+            for tiers in (False, True):
+                with self.subTest(split=split, tiers=tiers):
+                    got = self._rows_by_variants(ref, _window(ref, {5: "Q", 9: "R"}),
+                                                 values, tiers)
+                    self.assertEqual(got, {(a5, g9): {"V", "X", "Y", "U"},
+                                           (g5,): {"V", "X"}, (t5,): {"Y"}})
 
 
 def _mega_vcf(path, records):

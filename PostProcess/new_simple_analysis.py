@@ -1854,7 +1854,10 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             snp_unphased.add(sampleInfo[0])  # its slot is unknown
                         for haplo in totalDict:
                             allele = gt_alleles[haplo] if len(gt_alleles) > haplo else gt_alleles[0]  # haploid guard
-                            if allele != "0":
+                            # a missing allele ('.') carries nothing (METHODS section 4), as
+                            # the Tier-1 path reads it: up to 2.10.0 a '.|1' carrier was put
+                            # on both slots, and listed on the other slot's target too
+                            if allele not in ("0", "."):
                                 haploSamples[haplo].append(sampleInfo[0])
                     totalDict[0][0][(pos_c, elem)] = [
                         listReplaceTarget,

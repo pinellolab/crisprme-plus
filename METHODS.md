@@ -596,7 +596,17 @@ input genotypes:
   haplotype: that individual carries exactly those variants together on one
   chromosome. A **haploid** call (one allele, no separator: a male's on chrX
   outside PAR) is read the same way since 2.10.0 — it is his one haplotype's, so
-  there is nothing to phase — and a missing call (`.`) carries nothing.
+  there is nothing to phase — and a missing call (`.`) carries nothing. On the
+  classic per-sample dictionaries (an index built without `--samplesID`, no Tier-1
+  store) it does since 2.10.0 too: their path put a carrier on each slot whose
+  allele was not `0`, so a `.|1` carrier of a SNP was listed on the target of its
+  missing slot as well, where that slot holds a called allele at another variant of
+  the target (the CRISPRitz 2.10.0 review's world B9). Where the slot is missing at
+  every variant of the target, as in an assembly's gap, both readings list the
+  carrier on the same rows: on chr22 of HPRC, whose VCF holds 505,187 calls of a
+  carrier with a missing allele, the README guide's per-sample rows at 4 + 1 + 1 are
+  the same either way (70 of its targets hold such a call), and HGDP + 1000 Genomes'
+  dictionary holds none.
 - **Unphased data** (alleles separated by `/`). The cis/trans configuration is
   unknown, so **every** cis/trans arrangement of the individual's carried variants
   is possible. CRISPRme+ therefore reports **every non-empty subset** of that
