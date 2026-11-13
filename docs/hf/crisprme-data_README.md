@@ -110,8 +110,9 @@ sites-only dataset's candidates in windows of 2^20 sequences or more (the immuno
 above all) are withheld and listed in the dense-region files, and noted on the rows there
 (`--no-sites-only-density-guard` analyses them all), and its
 rows of two or more variants whose frequencies fail the bound (product under 1e-06, or the
-rarest under 0.001) are ranked after the others; with the guard a search of it took 1.37 to 1.46
-(chr22) and 1.53 to 1.73 (chr14) times the shipped mega's, at 4 mismatches and 1 + 1 bulges. The
+rarest under 0.001) are ranked after the others; with the guard a search of it took 1.35 to 1.46
+(chr22) and 1.53 to 1.73 (chr14) times the shipped mega's, at 4 mismatches and 1 + 1 bulges
+(during 2.10.0's development; the release's gates time it genome-wide). The
 rebuilt archives are published with the release, in the location of the 2.10.0 indexes; the ones
 above stay for earlier releases.
 

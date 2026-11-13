@@ -26,9 +26,9 @@ with a magic and records its build parameters in a header; CRISPRme+ 2.8.1 refus
 CRISPRme reads index format 1 only") and 2.8.0 aborts on one. The repos earlier releases read,
 [`lucapinello/crisprme-data`](https://huggingface.co/datasets/lucapinello/crisprme-data) and
 [`lucapinello/crisprme-data-general-index`](https://huggingface.co/datasets/lucapinello/crisprme-data-general-index),
-keep their archives (index format 1) unchanged, so an older client never finds an index here
-(decision C2). CRISPRme+ 2.10.0 reads both formats; a download of an archive of 2.8.1 by its
-own name names the index here that replaces it.
+keep their archives (index format 1) unchanged, so an older client never finds an index here.
+CRISPRme+ 2.10.0 reads both formats; a download of an archive of 2.8.1 by its own name names the
+index here that replaces it.
 
 **Versions:** CRISPRme+ and CRISPRitz share their major.minor: CRISPRme+ 2.10.z with CRISPRitz
 2.10.z (Bioconda pins `crispritz >=2.10.0,<2.11`; the Docker image the exact CRISPRitz it was
@@ -61,6 +61,29 @@ a dedicated NRG index (about twice the wall time in the engine's search of chr22
 sequence). HGDP + 1000 Genomes is genotyped and
 phased (4,091 samples), HPRC genotyped and phased (232 assembly-derived genomes), mega
 sites-only (5 sources, allele frequencies only).
+
+**Contigs.** The reference indexes and those of HGDP + 1000 Genomes hold all 455 sequences of
+hg38 (its alt, random and unplaced contigs and chrM included), so a variant search finds every
+site a reference search finds; those of HPRC and mega hold its 24 chromosomes, chr1-22, X and Y.
+An alt contig repeats a region of a primary chromosome (the HLA region, for one) and no VCF of
+these panels covers it, so a site there can be reported twice, the second time as a reference
+row on the alt contig.
+
+**What these indexes hold.** Every allele of a split multi-allelic site is coded (the
+four-allele symbol Q where the alleles cover A, C, G and T), each indel is searched in a
+fake-indel window of 30 reference bases on either side (25 and 27 in 2.8.1's archives), and
+each variant panel's records are those whose FILTER is `PASS` or `.`. The mega is rebuilt from
+the same merged VCFs: its registry and indel frequencies hold exactly the records its genome
+codes, and each indel carries its `AF_max`.
+
+**Searching them.** The default budget is 4 mismatches + 1 DNA + 1 RNA bulge. Above 1 + 1 a
+search of a variant index here warns: the variant search of the densest windows (the
+immunoglobulin loci) grows by orders of magnitude, to hours or out of memory; raise the
+mismatches first (CRISPRme 2.10.1 is planned to search the samples' own haplotypes there, with
+these indexes as they are). A search of mega withholds by default its windows of 2^20
+sequences or more, listing them in the dense-region files (`--no-sites-only-density-guard`
+analyses them), and ranks its combinations whose frequencies fail the safeguards' bound after
+the others.
 
 **`NNN_3` is not built again for 2.10.0.** The general index serves every search `NNN_3`
 served, at the same speed (a 3-nt and an 8-nt PAM-less index cost the same: every position is

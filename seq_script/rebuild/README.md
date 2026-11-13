@@ -72,7 +72,10 @@ it serves for its own guide length (`index_fit.fits`).
    (`hprc_build.sh`), into the image: their working directories and inputs lie there, and `$RUN`
    binds the working directories and the repository's checkout (mega's recipe runs the
    repository's `PostProcess/` in the image).
-3. **Publish each panel as a unit**, then write `indexes/SHA256SUMS` from the Hub's own
+3. **Publish each panel as a unit** into `lucapinello/crisprme-indexes-format2`, which must exist
+   first: `publish-index` creates no repo, so its owner creates the dataset repo, and pushes its
+   card, `docs/hf/crisprme-indexes-format2_README.md` (`docs/hf/README.md`), before the first
+   publish. Then write `indexes/SHA256SUMS` from the Hub's own
    checksums once its uploads are done, `python scripts/hf_sha256sums.py
    lucapinello/crisprme-indexes-format2 > SHA256SUMS`, and upload it as `indexes/SHA256SUMS`
    (`docs/hf/README.md`). `publish-index` packs each archive, uploads it and deletes it, so no
@@ -146,12 +149,11 @@ the build), and a chromosome of the genome folder without its source stops it; o
 of chr22, or of chr21 and chr22, beside a source folder of every chromosome's source, each builds
 those chromosomes alone and reads no other's source.
 
-The mega rows follow lane M's full rebuild of `hg38_mega` (decision D2: PASS/'.' records, AF =
+The mega rows follow the full rebuild of `hg38_mega` (decision D2: PASS/'.' records, AF =
 AF_max, its registry and indel allele frequencies consistent), from the merged VCFs
 `mega.<chr>.afmax.vcf.gz` (`$MEGA_SRC`: `vcfs/hg38_mega` of `lucapinello/crisprme-data`, or what
-`seq_script/merge_panels/mega_gw_merge.sh` writes), whose recipe,
-`seq_script/merge_panels/mega_rebuild.sh <install_dir> <merged_vcf_dir>`, that lane wrote; the
-integration of stage 2b brought it into this tree, and the dry run checks its call as it checks
-every other recipe's. (A recipe of a branch not merged yet would be named in
+`seq_script/merge_panels/mega_gw_merge.sh` writes), with its recipe,
+`seq_script/merge_panels/mega_rebuild.sh <install_dir> <merged_vcf_dir>`; the dry run checks its
+call as it checks every other recipe's. (A recipe of a branch not merged yet would be named in
 `check_index_set.PENDING_SCRIPTS`: the check names it as pending and the dry run takes its call
 as done, until the tree holds it and the check asks for its entry to go. None is, now.)

@@ -3,7 +3,8 @@
 Deferred, non-blocking enhancements. None are correctness bugs; each is a self-contained
 improvement another contributor (or agent) can pick up. For each: **why**, **current behavior**,
 **what to build**, **code pointers**, **acceptance**. Keep this list current — move an item to the
-CHANGELOG when it ships, and delete it from here.
+CHANGELOG when it ships, and delete it from here. What the next release is to bring, the haplotype
+scan of CRISPRme+ 2.10.1 first, is in [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
@@ -91,8 +92,12 @@ shortlist-only.
 the `mega` cap-8 worst-case (6.77M OTs), and at 4/1/1 on HGDP1kGP vs mega — but not on the **HPRC**
 pangenome index at a high budget. A quick coverage item, not a gap.
 
-**What to build.** Run `ACTGAAATCTGTAAGCAGGC` on `NRG_3_hg38+hg38_HPRC` at a high edit budget
-(e.g. 6/2/2 with `--max-total-edits`) and record the result for the validation matrix. (Was tracking
+**What to build.** Run `ACTGAAATCTGTAAGCAGGC` on the HPRC index (`20-NRR_3_hg38+hg38_HPRC` of
+2.10.0, its NRG search pruned; 2.8.1's `NRG_3_hg38+hg38_HPRC`) at a high edit budget (e.g. 6/2/2
+with `--max-total-edits`) and record the result for the validation matrix. On an index of 2.10.0,
+which codes every allele, `complete-search` warns of such a budget, whose variant search can
+explode in the dense loci ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14): measure first how it
+fares on HPRC, a panel of 232 samples, or run it with the haplotype scan of 2.10.1. (Was tracking
 task #242.)
 
 **Acceptance.** HPRC ACTGA high-budget result captured alongside the other indices'.
