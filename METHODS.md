@@ -264,7 +264,7 @@ Each source VCF is normalized so that variant records are directly comparable:
   its carriers were listed on targets of G, which their genome does not hold). The published panels
   hold no SNV written in lower case: HGDP + 1000 Genomes holds 6 records in lower case (deletions on
   chr1, chr2, chr10, chr17 and chr21), the mega's merged VCFs 13 (deletions on chr3, chr4, chr5,
-  chr10, chr12, chr18 and chr21), HPRC normalised 108,178 (indels and MNVs) in v2.0, 2.8.1's
+  chr10, chr12, chr18 and chr21), HPRC normalised 108,178 (all indels) in v2.0, 2.8.1's
   input, and 37,546 (all indels) in v2.1, 2.10.0's; with CRISPRitz 2.10.0 their indel-log rows and
   fake-indel bases name them in upper case, and every index, dictionary and store CRISPRme reads is
   the same (CRISPRitz's MULTIALLELIC §2.9). CRISPRme's own merge of two listings of one allele

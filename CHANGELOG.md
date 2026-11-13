@@ -1263,8 +1263,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
   a lower-case ALT, which its genome does not hold, as no allele (`site_alleles.read_records`,
   `indel_snp_cis.parse_dict_value`, the Tier-0 and Tier-1 compiles). The published panels hold
   no SNV written in lower case (HGDP + 1000 Genomes 6 deletions, on chr1, chr2, chr10, chr17 and
-  chr21; the mega 13; HPRC, normalised as CRISPRme builds it, 108,178 indel and MNV records in
-  v2.0 of its graph, 2.8.1's input, and 37,546 indels in v2.1, 2.10.0's): on
+  chr21; the mega 13; HPRC, normalised as CRISPRme builds it, 108,178 records, all indels, in
+  v2.0 of its graph, 2.8.1's input, and 37,546, all indels, in v2.1, 2.10.0's): on
   them only the indel log's rows and the fake-indel genome's bases of those records change, to
   upper case, and every index, dictionary and store is the same (measured in CRISPRitz's
   MULTIALLELIC §2.9). Covered by `PostProcess/test_build_mega_registry.py`,

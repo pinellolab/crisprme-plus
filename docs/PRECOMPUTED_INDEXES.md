@@ -729,17 +729,19 @@ reported twice, the second time as a reference row on the alt contig.
    (`hprc-v2.0-mc-grch38`), split the same way; the CHANGELOG (2.10.0, Changed) gives what differs.
    HPRC's experimental L95 VCF is not used.
 2. **Split per chromosome** into the form the recipe reads, `ALL.<chr>.HPRC.vcfwave.vcf.gz` and
-   its `.tbi` for chr1-22, X and Y (the rebuild's `$HPRC_SRC`), after checking the download's md5:
+   its `.tbi` for chr1-22, X and Y (the rebuild's `$HPRC_SRC`), once the download's md5 checks
+   (on a mismatch `md5sum -c` prints `FAILED`, and nothing is split):
    ```bash
    U=https://s3-us-west-2.amazonaws.com/human-pangenomics/pangenomes/freeze/release2/minigraph-cactus/v2.1/hprc-v2.1-mc-grch38
    curl -fLO $U/hprc-v2.1-mc-grch38.wave.vcf.gz
    curl -fLO $U/hprc-v2.1-mc-grch38.wave.vcf.gz.tbi
-   md5sum hprc-v2.1-mc-grch38.wave.vcf.gz
-   mkdir -p src
-   for c in chr{1..22} chrX chrY; do
-     bcftools view --regions $c -Oz -o src/ALL.$c.HPRC.vcfwave.vcf.gz hprc-v2.1-mc-grch38.wave.vcf.gz
-     tabix -p vcf src/ALL.$c.HPRC.vcfwave.vcf.gz
-   done
+   if echo "63cc82deb0e010ab98719a9e31dfa352  hprc-v2.1-mc-grch38.wave.vcf.gz" | md5sum -c -; then
+     mkdir -p src
+     for c in chr{1..22} chrX chrY; do
+       bcftools view --regions $c -Oz -o src/ALL.$c.HPRC.vcfwave.vcf.gz hprc-v2.1-mc-grch38.wave.vcf.gz
+       tabix -p vcf src/ALL.$c.HPRC.vcfwave.vcf.gz
+     done
+   fi
    ```
    Each file holds the records of its chromosome in the genome-wide file, in their order, under
    its header and the two lines bcftools adds for the split, one with the split's date: a split
