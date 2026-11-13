@@ -143,8 +143,10 @@ git add crisprme.py Dockerfile CHANGELOG.md
 git commit -m "Release vX.Y.Z"
 git push origin HEAD
 
-# Notes come straight from the changelog section you just wrote:
+# The notes: the changelog section you just wrote, if it fits a release body
 awk '/^## \[X.Y.Z\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > /tmp/crisprme_notes.md
+wc -m < /tmp/crisprme_notes.md    # GitHub refuses a release body of more than 125,000 characters
+# Above that, write short notes in /tmp/crisprme_notes.md instead (see below), then:
 
 gh release create vX.Y.Z \
   --repo pinellolab/crisprme-plus \
@@ -152,6 +154,12 @@ gh release create vX.Y.Z \
   --notes-file /tmp/crisprme_notes.md \
   --target main            # or the branch you released from
 ```
+
+GitHub refuses a release body of more than 125,000 characters, and `gh release create` then
+fails. 2.8.1's changelog section was about 322,000 characters, and its release went out with
+5,012 characters of notes written for it: what changes in results, what is new, how to upgrade,
+and links to the tag's `CHANGELOG.md` and `METHODS.md` for the full list. 2.10.0's `[Unreleased]`
+section is about 320,000 characters, so it needs such notes too.
 
 Verify the tarball is now published:
 

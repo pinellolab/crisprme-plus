@@ -527,7 +527,8 @@ the variant genome, in the immunoglobulin loci (IGL on chr22, IGH on chr14, IGK 
 millions of sequences, and each bulge beyond one of a type multiplies the alignments the search
 writes there: on IGL alone, at the default `--max-total-edits` of 6, 0.76 million SNP raw
 targets at 4 + 1 + 1 and 33.7 million at 4 + 2 + 2 (28 GB of memory), where the indel search
-wrote 204 million (157 GB). No step after the search removes that cost.
+wrote 204 million (157 GB; on the fake-indel windows of 25/27 of 2.10.0's development). No step
+after the search removes that cost.
 
 **Fix.** Keep 1 DNA + 1 RNA bulge, the default, and raise `--mm` first for a wider search; or
 keep `--max-total-edits` at 3 or less, which bounds the alignments; or search the reference
@@ -537,8 +538,8 @@ combinations (the haplotype scan); the indexes of 2.10.0 serve it as they are.
 
 ## 15. A row that looks wrong: the known limits of 2.10.0
 
-Each is rare and changes no other row; [METHODS.md](../METHODS.md) §4 gives the rules behind
-them.
+Each is rare and changes no other row. [METHODS.md](../METHODS.md) §10 lists them with their
+scale, and §4 gives the rules behind them.
 
 - **A carrier listed for a SNP that its own target does not hold.** On an indel row, a carrier
   whose haplotype holds a second indel that pushes one of the row's named SNPs out of the

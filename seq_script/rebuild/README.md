@@ -35,7 +35,7 @@ it serves for its own guide length (`index_fit.fits`).
 
 1. **One working directory per panel**, every index of the panel built in it (`$HGDP`, `$HPRC`,
    `$MEGA`; `$REF` for the reference indexes), each with hg38 in `Genomes/hg38`, one FASTA per
-   contig, as 2.8.1's default index of each panel was built (the contigs of its archives):
+   contig, as most of 2.8.1's indexes were built (the contigs of their archives):
    `$REF`'s and `$HGDP`'s hold all of hg38, as `crisprme.py download --what genome` installs it
    (455 contigs, chrM and the alt, random and chrUn ones among them, as 2.8.1's reference indexes
    and its NRR, NGG and NNN indexes of HGDP + 1000 Genomes hold; its NRG index of the panel held

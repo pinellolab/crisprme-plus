@@ -1564,13 +1564,14 @@ and datasets (`.search_mode`, `.untiered_datasets`), which the report reads too:
 folder whole (`cp -r <folder>`, `rsync -a`), not by a glob (`<folder>/*` skips dot files), or
 the report reads the copy as a population-level search.
 
-### Search speed on indexes that code every allele: the haplotype pre-check, the K-skip and the
-post-analysis in pieces
+### Search speed on indexes that code every allele: the haplotype pre-check, the K-skip and the post-analysis in pieces
 
 Coding every allele of a split site (CRISPRitz 2.10.0) makes the immunoglobulin loci explode
 (above). On chr22 of HGDP + 1000 Genomes, the README guide (NRG, the default 4 mismatches + 1
-DNA + 1 RNA bulge) gives 766,427 SNP and 4,487,567 indel raw targets, 98.6% and 99.9% of them
-in IGL (chr22:21.99-22.96 Mb), where the indexes of CRISPRitz 2.9.1 gave 17,891 and 26,635.
+DNA + 1 RNA bulge) gives 766,427 SNP and 4,487,567 indel raw targets on the fake-indel windows
+of 25/27 of 2.10.0's development, 98.6% and 99.9% of them in IGL (chr22:21.99-22.96 Mb), where
+the indexes of CRISPRitz 2.9.1 gave 17,891 and 26,635; on the release's windows of 30/30 the
+indel search writes 5,891,413.
 A per-sample search expanded each raw target into the haplotypes its carriers have, one process
 a chromosome, and took 98 min on 16 threads (the SNP post-analysis 77 min of it), where 2.8.1
 took 6 min. Almost none of those raw targets is a sequence anybody carries: of the 755,863 of
@@ -1827,12 +1828,14 @@ the same in both modes (the SNP side half a minute or less, the indels about 3.5
 per-sample run writing what the population-level one does not (the alternative alignments, the
 observed-haplotypes sidecar) and integrating its rows for longer. Beside mega (HGDP + 1000
 Genomes and mega, NRR: each dataset searched and post-analysed in turn, then the rows of both
-merged, integrated and reported) the two measurements part: during development the per-sample
-search took 96 to 107 min, 54 to 62 min of it its report, against 49 to 55 min population-level
-(16 threads, the whole runs, the two started together; a search of several datasets writes its
-`log.txt` anew for each, so the times there are its last dataset's), and the gate runs on the
-windows of 30/30 took 1,003 to 1,043 s per sample against 2,307 to 2,378 s population-level (8
-threads, the mega as published and as rebuilt). Choose the mode for what it reports.
+merged, integrated and reported) the two measurements part: during development, before the
+sites-only density guard (above), the per-sample search took 96 to 107 min, 54 to 62 min of it
+its report, against 49 to 55 min population-level (16 threads, the whole runs, the two started
+together; a search of several datasets writes its `log.txt` anew for each, so the times there
+are its last dataset's), and the gate runs on the windows of 30/30, with the guard on (the
+default), took 1,003 to 1,043 s per sample against 2,307 to 2,378 s population-level (8 threads,
+the mega as published and as rebuilt): with the guard, per sample was the faster there too.
+Choose the mode for what it reports.
 
 ### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
@@ -1882,10 +1885,10 @@ default HGDP + 1000 Genomes one) it is per-sample, the phased haplotype resoluti
 *confirmatory / pre-IND* runs need, and `--population-level` the worst-case *screen*, which on
 the indexes CRISPRitz 2.10.0 builds is not the faster on a dense panel of many samples such as
 the default one (the per-sample analysis skips the dense windows' raw targets nobody carries,
-and both run in pieces), though it can be on a small panel such as HPRC, or beside mega
-(above). On a sites-only, unphased, hybrid or reference-only index it is the population-level
-analysis (the only meaningful mode on sites-only panels), and `--per-sample` forces resolution
-on a genotyped one. On sites-only (aggregate) panels there are
+and both run in pieces), though it can be on a small panel such as HPRC, and was beside mega
+before the sites-only density guard (above). On a sites-only, unphased, hybrid or reference-only
+index it is the population-level analysis (the only meaningful mode on sites-only panels), and
+`--per-sample` forces resolution on a genotyped one. On sites-only (aggregate) panels there are
 no per-sample genotypes to recover — verified on the released **mega** index: `--per-sample`
 yields **zero CONFIRMED rows and no cis carriers** in either mode (there is no genotype store to
 enumerate), and the `indel_snp_cooc.tsv` / `indel_af.tsv` companions are **byte-identical**
@@ -1936,8 +1939,8 @@ index) makes the trade concrete and confirms the guarantees hold end-to-end:
   materializes only on the dense/aggregate-panel enumeration wall, not sparse single-guide runs.
   (On the indexes CRISPRitz 2.10.0 builds, which code every allele, the per-sample analysis is
   the faster of the two on a dense panel of many samples such as the default HGDP + 1000
-  Genomes one, and the population-level one can be on a small panel such as HPRC, or beside
-  mega: "Search speed" above.)
+  Genomes one, and the population-level one can be on a small panel such as HPRC; beside mega
+  it was only before the sites-only density guard: "Search speed" above.)
 
 The measured numbers above, side by side (same guide/PAM/thresholds; only `--per-sample` differs):
 
@@ -3390,9 +3393,11 @@ repository of its own (`lucapinello/crisprme-data-general-index`), apart from th
 ## 10. Known limits of 2.10.0
 
 The limits below are those a user of 2.10.0 can meet, each with its measured scale. Each is
-stated where its method is described too; the haplotype scan of the dense regions, planned for
-CRISPRme 2.10.1 with no index rebuild (its engine hooks are in CRISPRitz 2.10.0), is to lift
-the first and the last.
+stated where its method is described too. `docs/TROUBLESHOOTING.md` says what a user sees of them
+and what to do: §15 for the rows, §14 for the searches above 1 DNA + 1 RNA bulge, §12 for the
+refusal's advice. The haplotype scan of the dense regions, planned for CRISPRme 2.10.1 with no
+index rebuild (its engine hooks are in CRISPRitz 2.10.0), is to lift two of them: two indels on
+one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense regions.
 
 - **Two indels on one haplotype.** A fake-indel window holds one indel, and a carrier is listed
   on an indel row when its own bases read the row's target through the indel, from the
@@ -3450,21 +3455,22 @@ the first and the last.
   near the default's cost. The haplotype scan of 2.10.1, which searches the samples' own
   haplotypes in the dense regions in place of the IUPAC search, is to make such searches
   exact and tractable.
-
 - **One refusal's advice on a sites-only dataset.** Where a search refuses the INDELS index of a
   sites-only dataset (the mega) whose fake-indel genome is not in place while its VCFs are, the
   refusal says to remove that index and the dataset's enriched genome (and its variant index,
   where the INDELS index holds other windows than the indel logs), and to build them again with
-  `build-index-only`, which refuses a sites-only dataset: following it
-  loses the kit's enriched genome. Put the kit back instead (its archive of 2.10.0), or build it
-  again with `seq_script/merge_panels/mega_rebuild.sh` (`docs/TROUBLESHOOTING.md` §12).
+  `build-index-only`, which refuses a sites-only dataset: following it loses the kit's enriched
+  genome. Put the kit back instead (its archive of 2.10.0), or build it again with
+  `seq_script/merge_panels/mega_rebuild.sh` (`docs/TROUBLESHOOTING.md` §12).
 
 Limits stated in other sections, which 2.10.0 keeps: one indel per fake-indel window, so an
 off-target that needs two indels in one protospacer is not generated as a candidate (§8, residuals);
 an MNV is in no phased store, so its carriers are resolved PUTATIVE (§4); an indel row, and each ALT
 of a VCF line that lists several ALTs, gives the record's first ID (§8); and an index of format 1,
 as every archive of 2.8.1, keeps the limits at contig ends and `N` runs of §9 until it is built
-again. ---
+again.
+
+---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
 methods as of CRISPRme+ 2.10.0, the coming release (the last shipped release is 2.8.1), on

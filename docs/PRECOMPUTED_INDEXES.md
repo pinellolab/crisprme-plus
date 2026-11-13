@@ -675,9 +675,10 @@ The published kit is produced **once** from the source variants; reproduce it (o
 your **own** VCF) with the full workflow below. Each dataset's authoritative, validated recipe lives
 in its own document — summarized here with the key provenance and filters, and linked for the
 complete protocol. 2.10.0's kits and indexes of HGDP + 1000 Genomes are built on all of hg38
-(455 contigs, as `download --what genome` installs it, as the reference indexes are), those of
-HPRC and mega on its chromosomes chr1-22, X and Y alone (24 contigs), as 2.8.1's default index of
-each panel was (`seq_script/rebuild/README.md`, rule 1). So a variant search of HGDP + 1000
+(455 contigs, as `download --what genome` installs it, as the reference indexes are, and as
+2.8.1's NRR, NGG and NNN indexes of the panel were; its NRG index held 24), those of HPRC and
+mega on its chromosomes chr1-22, X and Y alone (24 contigs), as 2.8.1's indexes of those panels
+were (`seq_script/rebuild/README.md`, rule 1). So a variant search of HGDP + 1000
 Genomes finds every site a reference search finds; an alt contig repeats a region of a primary
 chromosome (the HLA region, for one), and no VCF of the panel covers it, so a site there can be
 reported twice, the second time as a reference row on the alt contig.

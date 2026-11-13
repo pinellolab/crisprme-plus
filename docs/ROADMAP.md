@@ -39,7 +39,9 @@ this file held before is kept at its end, for the record.
 - Messages: `pool_index_indels.py`'s refusal of a fake-indel genome and a log of two enrichments
   could name the paths to remove, as `build-index-only` does; the sites-only advice of
   `indel_window` could be shorter, pointing to TROUBLESHOOTING §12; a few printed `rm -rf`
-  commands quote paths by hand, so a path holding an apostrophe cannot be pasted.
+  commands quote paths by hand, so a path holding an apostrophe cannot be pasted;
+  `complete-search`'s help says the population-level analysis can be the faster beside mega,
+  which was measured only before the sites-only density guard (METHODS §5).
 - The real-data check reads a whole enriched chromosome for each SNV written in lower case: slow
   on a user's VCF written so (none of the published panels holds one).
 

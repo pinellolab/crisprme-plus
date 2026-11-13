@@ -168,8 +168,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
   each type, the web's ceiling); each panel's Dictionaries bundle, genotype store and phased indel
   genotypes (HGDP + 1000 Genomes, HPRC; mega, sites-only, a bundle alone); and the enriched-genome
   kits. `NNN_3` is not built again. The rebuild follows it, one working directory per panel so that
-  a panel's indexes share its one Dictionaries, each with hg38 in `Genomes/hg38` as 2.8.1's default
-  index of each panel was built: all of it (455 contigs, as `download --what genome` installs it)
+  a panel's indexes share its one Dictionaries, each with hg38 in `Genomes/hg38` as most of 2.8.1's
+  indexes were built: all of it (455 contigs, as `download --what genome` installs it)
   for the reference indexes and HGDP + 1000 Genomes (2.8.1's NRR, NGG and NNN indexes of the panel;
   its NRG index held 24), its chromosomes chr1-22, X and Y alone for HPRC and mega (the 24 contigs
   of 2.8.1's indexes of those panels; mega's recipe refuses a genome folder that holds any other
@@ -2083,7 +2083,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
   more (the alternative alignments, the observed-haplotypes sidecar). Beside mega the two
   measurements part: with HGDP + 1000 Genomes and mega, NRR, 49 to 55 min population-level
   against 96 to 107 min per sample, 54 to 62 min of which the per-sample report, during
-  development, and 2,307 to 2,378 s against 1,003 to 1,043 s on 30/30. They now say it is a
+  development, before the sites-only density guard (Added), and 2,307 to 2,378 s against 1,003
+  to 1,043 s on 30/30, with the guard: per sample is the faster there too. They now say it is a
   resolution choice whose speed depends on the panel, and what the default search costs (README,
   "What the default search costs"; METHODS.md §5).
 - **The CRISPR-Bulge scoring of a batch looks its nulled rows up at once.** The scorer writes -1

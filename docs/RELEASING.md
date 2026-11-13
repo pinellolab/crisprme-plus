@@ -149,7 +149,7 @@ typical timeline is:
 |---|---|
 | `crisprme.py` | `version = "X.Y.Z"` (this also sets `__version__`, surfaced by `crisprme.py --version`) |
 | `Dockerfile` | `ARG crispritz_ref=vA.B.C` — the CRISPRitz tag the image builds from. There is **no** `ARG crisprme_version`: the image is built from source (`COPY .`), so CRISPRme's own version is pinned only in `crisprme.py`. Its header comment (`# CRISPRme+ X.Y.Z — Python 3.11 image, built FROM SOURCE.`) names the release: bump it by hand, as `prepare_release.py` leaves it. |
-| Git tag / GitHub release | tag `vX.Y.Z`, notes from the changelog |
+| Git tag / GitHub release | tag `vX.Y.Z`; notes from the changelog, or short notes that link it where its section is longer than a release body takes (step 4) |
 | `recipes/crisprme/meta.yaml` (in `bioconda/bioconda-recipes`) | `{% set version = "X.Y.Z" %}`, `source.sha256`, `build.number: 0`, and the bounded `crispritz >=X.Y.0,<X.(Y+1)` pin: a new minor moves both bounds; within a minor the lower bound moves only to a CRISPRitz patch that fixes something CRISPRme depends on, not with every `crispritz_ref` ([Version policy](#version-policy)) |
 
 The Bioconda `source.url` is templated
@@ -238,6 +238,12 @@ gh release create vX.Y.Z \
   --title "CRISPRme+ vX.Y.Z" \
   --notes-file <changelog-section-for-X.Y.Z>
 ```
+
+GitHub refuses a release body of more than 125,000 characters, and `gh release create` then
+fails. Where the changelog section is longer, write short notes for the release instead: what
+changes in results, what is new, how to upgrade, and links to the tag's `CHANGELOG.md` and
+`METHODS.md` for the full list. 2.8.1's section was about 322,000 characters, and its release
+went out with 5,012 characters of such notes; 2.10.0's `[Unreleased]` section is about 320,000.
 
 Confirm the tarball is live (HTTP 200) before touching Bioconda:
 
