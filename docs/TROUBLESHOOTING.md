@@ -516,11 +516,11 @@ of the messages, each path quoted, does the same in either shell.
 
 ## 14. A search above 1 DNA + 1 RNA bulge warns, then runs for hours or runs out of memory
 
-**Symptom.** `complete-search` prints `WARNING [complete-search]: 4 mismatch(es) + 2 DNA + 1 RNA
-bulge(s) on a variant index that codes every allele (index format 2, CRISPRitz 2.10.0). Above
-the 1 DNA + 1 RNA default, ...` (its `.Params.txt` keeps it, and its `log_verbose.txt` says it
-again, a web search's too); the search then runs for many hours, or is killed for memory (exit
-137, an empty `log_error.txt`).
+**Symptom.** `complete-search` prints `WARNING [complete-search]: <m> mismatch(es) + <d> DNA +
+<r> RNA bulge(s) ... on a variant index that codes every allele (index format 2, CRISPRitz
+2.10.0). Above the 1 DNA + 1 RNA default, ...` (its `.Params.txt` keeps it, and its
+`log_verbose.txt` says it again, a web search's too); the search then runs for many hours, or is
+killed for memory (exit 137, an empty `log_error.txt`).
 
 **Cause.** The indexes of 2.10.0 code every allele of a split site, so the densest windows of
 the variant genome, in the immunoglobulin loci (IGL on chr22, IGH on chr14, IGK on chr2), spell
@@ -549,9 +549,9 @@ them.
 - **One target written as two rows, or twice, in a microsatellite.** In a tandem repeat that
   holds a whole target, the merge places each row by its own bases, and the target's
   alignments can fit different places of the repeat: they can then go to two rows, or the
-  target be written twice (in a model of microsatellites at 1 + 1 bulges and `--merge` 3, 134
-  targets of 10,000 split and 15 written twice). No row is lost or wrong, and no search of real
-  data checked has such a target. To be fixed in 2.10.1.
+  target be written twice (in 10,000 trials of a model of microsatellites at 1 + 1 bulges and
+  `--merge` 3, 134 targets split and 15 were written twice). No row is lost or wrong, and no search
+  of real data checked has such a target. To be fixed in 2.10.1.
 - **An unphased carrier of two ALTs on a row that needs the reference there.** A carrier whose
   call is unphased (`/`) is listed, PUTATIVE, on every subset of its variants a target can hold.
   For a call of two ALTs at one position (`1/2`), that includes a row that needs the reference
