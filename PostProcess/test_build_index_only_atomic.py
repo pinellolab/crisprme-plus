@@ -43,6 +43,8 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+from test_indel_window import paste_both  # noqa: E402  (a printed command, in bash and zsh)
 CRISPRME = os.path.join(REPO, "crisprme.py")
 PAM = os.path.join(REPO, "PAMs", "20bp-NRG-SpCas9.txt")
 # --bDNA 1 --bRNA 1 -> indexes built with -bMax 2, named for the 20-nt guide and the 3' PAM
@@ -4256,9 +4258,7 @@ class TheFakeIndelWindowsAreTheEnrichments(_Fixture):
                       "same enrichment, which it holds no window to tell (rm -rf '%s' '%s'), and "
                       "build them again with build-index-only." % (var, indels, var), warned[0])
         gone = re.search(r"\(rm -rf ([^)]*)\)", warned[0]).group(1)
-        done = subprocess.run(["bash", "-c", "rm -rf " + gone], cwd=self.root,
-                              capture_output=True, text=True)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        paste_both(self, "rm -rf " + gone, self.root)
         rc, out, err = self.run_bio(command=args)
         self.assertEqual((rc, err), (0, ""), out)
         self.assertIn("Building variant index 20-NGG_2_hg38+ds", out)
@@ -4334,13 +4334,12 @@ class ADatasetIsEnrichedAnewWhole(_Fixture):
                       for d, _, files in os.walk(self.work) for f in files if f == self.MARK)
 
     def rm_of(self, text):
-        """The rm command a message gives, run from another directory than the working one
-        (as from a shell anywhere: build-index-only --path), its exit status."""
+        """The rm command a message gives, pasted into zsh and into bash from another
+        directory than the working one (as from a shell anywhere: build-index-only --path;
+        paste_both, zsh on a copy of the fixture), its arguments."""
         m = re.search(r"\(rm -rf ([^;)]*)[;)]", text)
         self.assertIsNotNone(m, text)
-        done = subprocess.run(["bash", "-c", "rm -rf " + m.group(1)], cwd=self.root,
-                              capture_output=True, text=True)
-        self.assertEqual((done.returncode, done.stderr), (0, ""), m.group(1))
+        paste_both(self, "rm -rf " + m.group(1), self.root)
         return m.group(1)
 
     def test_the_warnings_advice_followed_gives_a_fresh_enrichments_dataset(self):
@@ -4650,9 +4649,7 @@ class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
         for d in (self.path("Genomes", "hg38+ds"), self.path("Genomes", "hg38+ds_INDELS"),
                   self.path("Dictionaries", "log_indels_ds"), self.lib(VAR), self.lib(INDELS)):
             self.assertIn(f"'{d}'", m.group(1))
-        done = subprocess.run(["bash", "-c", "rm -rf " + m.group(1)], cwd=self.root,
-                              capture_output=True, text=True)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        paste_both(self, "rm -rf " + m.group(1), self.root)
         self.assertTrue(os.path.isfile(self.path("Dictionaries", "registry_ds", "reg_chr1.idx")))
 
     def test_a_searchs_window_note_points_to_its_kit(self):
@@ -4685,21 +4682,24 @@ class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
         # directory, and section 12's commands, run from the state it left, failed to move
         # the kit in (W1C-B1, the review of wave 1c-a)
         m = re.search(r"Either replaces its kit in place and all that was built from it, .*?"
-                      r"which go first \(rm -rf ([^;)]*); and any copy of those indexes", out)
+                      r"which go first \((.*?); and any copy of those indexes", out)
         self.assertIsNotNone(m, out)
+        commands = m.group(1).split("; ")
+        self.assertTrue(commands[0].startswith("rm -rf "), commands)
         for d in (self.path("Genomes", "hg38+ds"), self.path("Genomes", "hg38+ds_INDELS"),
                   self.path("Dictionaries", "log_indels_ds")):
-            self.assertIn(f"'{d}'", m.group(1))
-        # (its indexes by their patterns, which take those this search built after the note
-        # too: it named those in place, and its own flow left the rest, W1C-B2R2-2)
-        for pattern in ("*_[0-9]_hg38+ds", "*_[0-9]_hg38+ds_INDELS"):
-            self.assertIn(self.path("genome_library", pattern), m.group(1).split())
+            self.assertIn(f"'{d}'", commands[0])
+        # (its indexes by a find of their name patterns, which take those this search built
+        # after the note too: it named those in place, and its own flow left the rest,
+        # W1C-B2R2-2; a find, not patterns given to rm -rf, which zsh expanded itself and
+        # stopped the whole command where one matched nothing, wave 1c-b of 2.10.0)
+        import indel_window
+        self.assertEqual(commands[1:], indel_window.index_removals(
+            self.path("genome_library"), "hg38", "ds"))
         self.assertNotIn("registry_ds", m.group(1))
         built = [n for n in os.listdir(self.path("genome_library")) if "+ds" in n]
         self.assertIn(VAR, built)
-        done = subprocess.run(["bash", "-c", "rm -rf " + m.group(1)], cwd=self.root,
-                              capture_output=True, text=True)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        paste_both(self, m.group(1), self.root)
         self.assertEqual([n for n in os.listdir(self.path("genome_library")) if "+ds" in n], [])
         self.assertTrue(os.path.isdir(self.lib(REF)))
         self.assertIn("(rm -rf %s)" % " ".join(

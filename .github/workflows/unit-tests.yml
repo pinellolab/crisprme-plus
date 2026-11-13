@@ -100,6 +100,14 @@ jobs:
         # they self-skip, leaving the coordinate-lift behaviour unguarded in CI.
         run: python -m pip install --upgrade pip requests numpy pandas matplotlib pysam pyliftover
 
+      - name: Install zsh (each command CRISPRme prints, and the blocks of the docs, are pasted into bash and into zsh)
+        # zsh, the default shell of macOS, reads a pasted '#' as a word, not a comment, and
+        # stops a command at a pattern that matches nothing: test_indel_window,
+        # test_mega_rebuild, test_build_index_only_atomic and test_indel_empty_chromosome paste
+        # the removals CRISPRme prints and docs/TROUBLESHOOTING.md's blocks into an interactive
+        # bash and an interactive zsh (wave 1c-b of 2.10.0), and skip the zsh half without it.
+        run: command -v zsh || { sudo apt-get update -qq && sudo apt-get install -y -qq zsh; }
+
       - name: Byte-compile the pipeline (syntax check)
         # pages/history_page.py + pages/settings_page.py: syntax-only (py_compile
         # doesn't execute imports), included here since test_history_page_assembly.py

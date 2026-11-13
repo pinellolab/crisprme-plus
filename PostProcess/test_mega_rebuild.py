@@ -35,6 +35,7 @@ sys.path.insert(0, HERE)
 
 import test_build_index_only_atomic as bio  # noqa: E402  (the real crisprme.py, a stub engine)
 import synth_sites_gt as sg  # noqa: E402
+from test_indel_window import pasted, shell_errors  # noqa: E402  (bash and zsh, as pasted)
 
 setUpModule = bio.setUpModule
 tearDownModule = bio.tearDownModule
@@ -466,14 +467,29 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
         done = self.rebuild()
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
+    # the shell section 12's commands and a note's removals are pasted into (the class's,
+    # bash; TheRecipeInAFolderOfTheDatasetPastedIntoZsh's, zsh)
+    SHELL = "bash"
+
+    def paste(self, command, cwd=None):
+        """``command``, as a message gives it, pasted into the class's shell (pasted) from
+        ``cwd``, the fixture's root by default: it exits 0, and the shell says no error."""
+        rc, out, err = pasted(self, self.SHELL, command, cwd or self.root)
+        self.assertEqual((rc, shell_errors(err)), (0, []), (command, out, err))
+
     def run_section_12(self, src=None, chroms=None, **stub):
-        """The commands of docs/TROUBLESHOOTING.md section 12, run as a user pastes them into
-        bash, with no -e or -u of the shell's own (the chromosomes and the PAM those of this
-        genome, or the chromosomes ``chroms``), DATA the working directory, NEW a new folder
-        beside it, SRC the merged VCFs (or ``src``), REPO the repository; ``stub``: more of the
-        stub engine's environment. Returns the run. Up to the review of wave 1c-a this test
-        ran them in bash -eu, which a user's shell does not add, and so it missed a removal
-        that ran after the recipe had failed (W1C-B2R2-1)."""
+        """The commands of docs/TROUBLESHOOTING.md section 12, pasted, as a user pastes them,
+        into the class's shell, interactive and with no option of its own (pasted: bash, or
+        zsh, which reads a '#' as a word and stops a command at a pattern that matches
+        nothing), the chromosomes and the PAM those of this genome (or the chromosomes
+        ``chroms``), DATA the working directory, NEW a new folder beside it, SRC the merged
+        VCFs (or ``src``), REPO the repository; ``stub``: more of the stub engine's
+        environment. Returns the run (returncode, stdout, stderr; returncode None where the
+        shell never got past the commands). Up to the review of wave 1c-a this test ran them
+        in bash -eu, which a user's shell does not add, and so it missed a removal that ran
+        after the recipe had failed (W1C-B2R2-1); up to wave 1c-b of 2.10.0, in bash -c alone,
+        and so it missed that zsh, the default shell of macOS, ran them itself, and stopped
+        at their first comment."""
         commands = _section_12_commands()
         self.assertIn('bash "$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"',
                       commands)
@@ -486,8 +502,8 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
                    STUB_MARK=self.mark, STUB_RELEASE=self.release, BDNA="1", BRNA="1",
                    THREADS="2", PYTHON=sys.executable, PP=HERE, DATA=self.work,
                    NEW=os.path.join(self.root, "new"), SRC=src or self.src, REPO=REPO, **stub)
-        return subprocess.run(["bash", "-c", commands], cwd=self.root, env=env,
-                              capture_output=True, text=True, timeout=600)
+        rc, out, err = pasted(self, self.SHELL, commands, self.root, env=env)
+        return subprocess.CompletedProcess(self.SHELL, rc, out, err)
 
     def section_12(self):
         """section 12's commands (run_section_12), and what each says checked: the recipe's
@@ -497,6 +513,7 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
         new = os.path.join(self.root, "new")
         ran = self.run_section_12()
         self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+        self.assertEqual(shell_errors(ran.stderr), [], ran.stderr)
         self.assertIn("SUMMARY: 2 chroms, 2 SNP alleles + 2 indel-path alleles, ALL PASS",
                       ran.stdout)
         self.assertEqual(sorted(self.the_kit(new)), ["samplesIDs/hg38_mega.samplesID.txt"])
@@ -564,6 +581,8 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
             with self.subTest(why=why):
                 shutil.rmtree(new, ignore_errors=True)
                 ran = self.run_section_12(**kw)
+                # (the shell got past the commands, and they stopped with an error of theirs)
+                self.assertIsNotNone(ran.returncode, ran.stdout + ran.stderr)
                 self.assertNotEqual(ran.returncode, 0, ran.stdout + ran.stderr)
                 self.assertNotIn("ALL PASS", ran.stdout)
                 self.assertEqual(bio.tree(self.work), before, ran.stdout + ran.stderr)
@@ -622,10 +641,11 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
 
     @staticmethod
     def removals(said):
-        """The arguments of each ``rm -rf`` a message says, as written (a word of quoted and
-        unquoted parts, a pattern among them, whole)."""
-        arg = r"(?:'(?:[^']|'\\'')*'|[^\s;)'(]+)+"
-        return [m.group(1) for m in re.finditer(r"rm -rf (%s(?:\s+%s)*)" % (arg, arg), said)]
+        """The command of each removal a message gives, as written, in its order: '(rm -rf
+        ...)', or the kit's, '(rm -rf ...; find ...; ...; and any copy of those indexes ...)',
+        its find of each index name pattern among it (indel_window.kit_removal)."""
+        return [m.group(1) for m in re.finditer(
+            r"\((rm -rf .*?)(?:\)|; and any copy of those indexes)", said)]
 
     def section_12_after_the_note(self, every):
         """W1C-B1, the review of wave 1c-a: a search's note of windows too short on a
@@ -645,10 +665,8 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
         note = self.a_searchs_note()
         said = self.removals(note)
         self.assertTrue(said, note)
-        for args in (said if every else said[:1]):
-            done = subprocess.run(["bash", "-c", "rm -rf " + args], cwd=self.work,
-                                  capture_output=True, text=True)
-            self.assertEqual((done.returncode, done.stderr), (0, ""), args)
+        for command in (said if every else said[:1]):
+            self.paste(command, self.work)
         self.section_12()
         self.kit_in_place(kit)
         for name in ("NGG_2_hg38+hg38_mega", "NGG_2_hg38+hg38_mega_INDELS"):
@@ -658,16 +676,18 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
     def test_section_12_after_the_first_removal_a_searchs_note_names(self):
         said = self.section_12_after_the_note(every=False)
         # (the three, by absolute path, and then that of the kit in place: its parts by
-        # absolute path, the dataset's indexes by their patterns, indel_window.index_patterns)
+        # absolute path, the dataset's indexes by a find of their name patterns,
+        # indel_window.index_removals)
+        import indel_window as iw
         self.assertEqual(len(said), 2, said)
-        self.assertEqual(said[0], " ".join("'%s'" % self.path(*p) for p in (
+        self.assertEqual(said[0], "rm -rf " + " ".join("'%s'" % self.path(*p) for p in (
             ("VCFs", "hg38_mega"), ("Dictionaries", "registry_hg38_mega"),
             ("Dictionaries", "indel_af_hg38_mega"))))
         for part in (("Genomes", "hg38+hg38_mega"), ("Genomes", "hg38+hg38_mega_INDELS"),
                      ("Dictionaries", "log_indels_hg38_mega")):
             self.assertIn("'%s'" % self.path(*part), said[1])
-        for pattern in ("*_[0-9]_hg38+hg38_mega", "*_[0-9]_hg38+hg38_mega_INDELS"):
-            self.assertIn(self.path("genome_library", pattern), said[1].split())
+        for find in iw.index_removals(self.path("genome_library"), "hg38", "hg38_mega"):
+            self.assertIn(find, said[1].split("; "))
         self.assertNotIn("registry_hg38_mega", said[1])
 
     def test_section_12_after_every_removal_a_searchs_note_names(self):
@@ -695,9 +715,7 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
             bio._write(os.path.join(self.lib(name), self.EARLIER), "an earlier kit's\n")
         three, gone = self.removals(note)
         # the note's removal of the kit in place and all that was built from it, first
-        done = subprocess.run(["bash", "-c", "rm -rf " + gone], cwd=self.root,
-                              capture_output=True, text=True)
-        self.assertEqual((done.returncode, done.stderr), (0, ""), gone)
+        self.paste(gone)
         # the recipe in a new working directory of its own, whose Genomes/hg38 holds the
         # FASTAs of the chromosomes to build and no other, beside the PAM file
         new = os.path.join(self.root, "new")
@@ -711,9 +729,7 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         # then the note's removal of the dataset's VCFs, registry and indel frequencies, and
         # the moves it names
-        done = subprocess.run(["bash", "-c", "rm -rf " + three], cwd=self.root,
-                              capture_output=True, text=True)
-        self.assertEqual((done.returncode, done.stderr), (0, ""), three)
+        self.paste(three)
         self.assertIn("move in Genomes/hg38+hg38_mega and Genomes/hg38+hg38_mega_INDELS, the "
                       "indexes of hg38_mega of its genome_library (not its reference index), "
                       "Dictionaries/log_indels_hg38_mega, registry_hg38_mega and "
@@ -730,6 +746,42 @@ class TheRecipeInAFolderOfTheDataset(_Recipe):
         for name in built + ("NGG_2_hg38+hg38_mega", "NGG_2_hg38+hg38_mega_INDELS"):
             self.assertFalse(os.path.lexists(self.lib(name)), name)
         self.kit_in_place(kit)
+
+    def test_section_12_beside_the_datasets_variant_indexes_alone(self):
+        """Section 12 removes the dataset's indexes by a find of each name pattern, which may
+        match both kinds, none or one: with an index of each kind in the data folder (an
+        earlier kit's, test_section_12_in_a_data_folder_that_crisprme_2_8_1_set_up), with none
+        (after the advice's removal, test_the_commands_of_section_12_put_a_rebuilt_kit_in_place)
+        and here with the dataset's variant indexes alone, its INDELS indexes removed, the
+        commands put the recipe's kit in place, pasted into bash or into zsh. Up to wave 1c-b
+        of 2.10.0 they gave the two patterns to rm -rf, which zsh, the default shell of macOS,
+        expands itself, and so stops the whole command where one matches nothing."""
+        kit = self.an_earlier_kit_in_place()
+        gone = [n for n in os.listdir(self.path("genome_library"))
+                if n.endswith("_hg38+hg38_mega_INDELS")]
+        self.assertEqual(sorted(gone), ["20-NRG_2_hg38+hg38_mega_INDELS",
+                                        "NGG_2_hg38+hg38_mega_INDELS"])
+        for name in gone:
+            shutil.rmtree(self.lib(name))
+        self.section_12()
+        self.kit_in_place(kit)
+        self.assertFalse(os.path.lexists(self.lib("NGG_2_hg38+hg38_mega")))
+
+
+@unittest.skipUnless(HAVE_PYSAM, "pysam (BGZF and tabix) not installed")
+@unittest.skipUnless(shutil.which("zsh"), "zsh is not installed")
+class TheRecipeInAFolderOfTheDatasetPastedIntoZsh(TheRecipeInAFolderOfTheDataset):
+    """Every test above that pastes section 12's commands or a note's removal, pasted into
+    zsh, the default shell of macOS (wave 1c-b of 2.10.0): zsh ran section 12's subshell,
+    ( set -eu ... ), itself, and stopped at its first comment, a word in an interactive zsh
+    (a command not found), and expanded the index patterns that a note gave rm -rf, stopping
+    the whole command where one matched nothing. The two tests of the recipe's refusals paste
+    nothing."""
+
+    SHELL = "zsh"
+    test_a_folder_that_holds_the_datasets_vcfs_is_refused_with_nothing_made = None
+    test_a_folder_that_holds_a_part_it_builds_is_refused_with_nothing_made = None
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

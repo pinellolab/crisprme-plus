@@ -78,8 +78,10 @@ import tempfile
 import unittest
 
 import complete_test as ct
+import indel_window
 import test_build_index_only_atomic as atomic
 from test_index_resolution import _ShippedScript
+from test_indel_window import paste_both, same_argv
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SEARCH = os.path.join(HERE, "pool_search_indels.py")
@@ -400,6 +402,15 @@ class SearchSide(_Fixture):
         for named in re.findall(r"--pam '([^']*)'", res.stderr):
             self.assertTrue(os.path.isfile(named), named)
         self.assertNotIn(chrom, self.searched() + self.searched(index=False))
+        # and each command it gives, rm -rf and the build or the download after it, pasted
+        # into bash and into zsh, the default shell of macOS, runs the same programs with the
+        # same arguments (stubs that record them: no build, no download; wave 1c-b of 2.10.0)
+        for chain in re.findall(r"(rm -rf '[^']*'(?: '[^']*')* && crisprme\.py [^;\n]*)",
+                                res.stderr):
+            ran = same_argv(self, chain, self.tmp)
+            if ran is not None:
+                self.assertEqual([r[0] for r in ran], ["rm", "crisprme.py"], (chain, ran))
+                self.assertEqual(ran[0][:2], ["rm", "-rf"], ran)
 
     def test_snp_only_chromosome_is_skipped_not_fatal(self):
         res, lines = self.run_search({"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"], "chrB": []},
@@ -988,18 +999,24 @@ class SearchSide(_Fixture):
                       res.stdout)
         self.assertNotIn("enrich ds again", res.stdout)
         # and what goes first, as build-index-only's warning says: all that came from its kit
-        # in place, each part by absolute path, its indel logs among it, and its indexes by
-        # their patterns, which take those built after the note too, and the three the recipe
-        # writes anew by absolute path too (the note named the three alone, relative, and
-        # section 12's commands then left the kit in place: W1C-B1; then the indexes in
-        # place alone, and its own flow left those its search built next: W1C-B2R2-2)
+        # in place, each part by absolute path, its indel logs among it, and its indexes by a
+        # find of their name patterns, which take those built after the note too, and the
+        # three the recipe writes anew by absolute path too (the note named the three alone,
+        # relative, and section 12's commands then left the kit in place: W1C-B1; then the
+        # indexes in place alone, and its own flow left those its search built next:
+        # W1C-B2R2-2; then the patterns given to rm -rf, which zsh, the default shell of
+        # macOS, expanded itself, stopping the whole command where one matched nothing:
+        # wave 1c-b of 2.10.0). Pasted into bash or into zsh, it does the same.
         self.assertIn("Either replaces its kit in place and all that was built from it",
                       res.stdout)
-        gone = re.search(r"which go first \(rm -rf ([^;]*); and any copy", res.stdout)
+        gone = re.search(r"which go first \((.*?); and any copy", res.stdout)
         self.assertIsNotNone(gone, res.stdout)
         lib = os.path.dirname(self.idx)
-        self.assertEqual(gone.group(1), "'%s' %s/*_[0-9]_ref+ds %s/*_[0-9]_ref+ds_INDELS" % (
-            os.path.join(self.work, "Dictionaries", "log_indels_ds"), lib, lib))
+        self.assertEqual(gone.group(1).split("; "), [
+            "rm -rf '%s'" % os.path.join(self.work, "Dictionaries", "log_indels_ds")]
+            + indel_window.index_removals(lib, "ref", "ds"))
+        paste_both(self, gone.group(1), self.tmp)
+        self.assertFalse(os.path.lexists(os.path.join(self.work, "Dictionaries", "log_indels_ds")))
         self.assertIn("(rm -rf '%s' '%s' '%s')" % (
             os.path.join(self.work, "VCFs", "ds"),
             os.path.join(self.work, "Dictionaries", "registry_ds"),
@@ -1016,11 +1033,17 @@ class SearchSide(_Fixture):
         res, _lines = self.run_search({"chrA": window_rows("chrA", 25, 27)}, {"chrA": True},
                                       true_pam="NNGRRT", pam=sa, view="chrA")
         self.assertIn("To search them: ds is sites-only", res.stdout, res.stderr)
-        gone = re.search(r"which go first \(rm -rf ([^;]*); and any copy", res.stdout)
+        gone = re.search(r"which go first \((.*?); and any copy", res.stdout)
         self.assertIsNotNone(gone, res.stdout)
-        named = shlex.split(gone.group(1))
+        commands = gone.group(1).split("; ")
+        self.assertIn(indel_window.index_removals(
+            os.path.join(self.work, "genome_library"), "ref", "ds")[1], commands)
+        # (each path the rm names, and the folder of each find)
+        named = [w for c in commands if c.startswith("rm -rf ") for w in shlex.split(c)[2:]] + [
+            shlex.split(c)[1] for c in commands if c.startswith("find ")]
+        self.assertEqual(len(named), len(commands) - 1 + len(shlex.split(commands[0])[2:]))
         self.assertIn(os.path.join(self.work, "Dictionaries", "log_indels_ds"), named)
-        self.assertIn(os.path.join(self.work, "genome_library", "*_[0-9]_ref+ds_INDELS"), named)
+        self.assertIn(os.path.join(self.work, "genome_library"), named)
         self.assertNotIn(os.path.join(self.work, "Dictionaries", "registry_ds"), named)
         for path in named + re.findall(r"rm -rf '([^']*)'", res.stdout):
             self.assertTrue(path.startswith(self.work + os.sep), path)

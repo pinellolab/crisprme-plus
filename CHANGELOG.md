@@ -1243,22 +1243,27 @@ and the `release-crisprme` skill.
   notes named none (the review of the fix), and the kit they left in place kept every part the
   recipe built from moving in, after which `build-index-only` and every search refused the
   dataset (`test_mega_rebuild` runs §12 from the state such a note leaves). A note names the
-  dataset's indexes by pattern (`<PAM>_<N>_<genome>+<dataset>` and its `_INDELS`, in the working
-  directory's library and in the `--index-path` one), which takes those its search builds from
-  the old kit after it is printed: it named the indexes in place when it was printed, and its
-  own flow left the SaCas9 indexes a search beside 2.8.1's mega had built next, the next SaCas9
-  search reading that variant index of the old kit (on chr22, 16 targets of a clean flow's
-  missing and 2 others reported). An INDELS
+  dataset's indexes by a `find` of each name pattern (`<PAM>_<N>_<genome>+<dataset>` and its
+  `_INDELS`, in the working directory's library and in the `--index-path` one: `find <library>
+  -mindepth 1 -maxdepth 1 -name '*_[0-9]_<genome>+<dataset>' -not -name '.*' -exec rm -rf -- {}
+  +`), which takes those its search builds from the old kit after it is printed: it named the
+  indexes in place when it was printed, and its own flow left the SaCas9 indexes a search beside
+  2.8.1's mega had built next, the next SaCas9 search reading that variant index of the old kit
+  (on chr22, 16 targets of a clean flow's missing and 2 others reported); and then the patterns
+  given to `rm -rf` on the command line, which zsh expands itself (wave 1c-b, under Fixed). An
+  INDELS
   index of another enrichment than the dataset's indel logs is named for its rebuild with the
   variant index of its name, which a build makes with it from one enrichment and which holds no
   window to tell its own, by the search's refusal, by `build-index-only`'s warning and by the
   download's: they named the INDELS index alone, and its rebuild kept that variant index. §12's
-  commands run in a subshell that stops at the first command that fails, take the recipe's PAM
-  file from the repository, and remove nothing from the data folder until the recipe has built
-  the whole dataset, passed its checks and left every part they move in: they ran on whatever
-  failed before them, and took the PAM file from the data folder, which one that CRISPRme 2.8.1
-  set up lacks, so the recipe built nothing and the removal took the dataset whole, the merged
-  VCFs given as `SRC` among them (the review of the fix's fix, wave 1c-a). On chr22, with the
+  commands run in bash whatever shell they are pasted into (`bash -euo pipefail -s "$DATA" "$NEW"
+  "$SRC" "$REPO" <<'EOF'`; a subshell, `( set -eu ... )`, up to wave 1c-b, under Fixed), stop at
+  the first command that fails, take the recipe's PAM file from the repository, and remove
+  nothing from the data folder until the recipe has built the whole dataset, passed its checks
+  and left every part they move in: they ran on whatever failed before them, and took the PAM
+  file from the data folder, which one that CRISPRme 2.8.1 set up lacks, so the recipe built
+  nothing and the removal took the dataset whole, the merged VCFs given as `SRC` among them (the
+  review of the fix's fix, wave 1c-a). On chr22, with the
   published registry and its kit's log of 25/27 or 30/30 and no kit, `build-index-only` refuses
   the mega in 1 s, nothing built, no registry named; with the 25/27 kit in place it builds and
   warns with that advice, whose rm leaves the registry, the indel frequencies and the VCFs, and
@@ -3422,6 +3427,37 @@ and the `release-crisprme` skill.
   put links it writes through (the web app follows none: Security), and change what older
   parts of the pipeline pass to a shell. On a shared machine, keep the data, output and
   temporary folders writable by you alone (`docs/TROUBLESHOOTING.md` §7).
+- **Every command CRISPRme prints, and every block of the docs that removes or moves a part of a
+  dataset, does the same pasted into bash or into zsh, the default shell of macOS** (wave 1c-b of
+  2.10.0). An interactive zsh expands a pattern on the command line itself and stops the whole
+  command where one matches nothing (`no matches found`), where bash passes it on as it is, and
+  reads a pasted `#` as a word, not a comment. So the removal of the kit in place that a search's
+  note of windows too short gives on a sites-only dataset (`indel_window.kit_removal`), which gave
+  the dataset's indexes to `rm -rf` as patterns, removed nothing in zsh, the kit's genomes and
+  indel logs among it, wherever the data folder or the `--index-path` library held no index of
+  the dataset of one kind (an INDELS index, say); it now removes them by a `find` of each name
+  pattern (`indel_window.index_removals`). `docs/TROUBLESHOOTING.md` §12's commands, a subshell
+  `( set -eu ... )`, ran in zsh when pasted into zsh, which stopped at their first comment (a
+  command not found) with nothing done; they are now handed to bash whatever shell they are
+  pasted into (`bash -euo pipefail -s "$DATA" "$NEW" "$SRC" "$REPO" <<'EOF'`, the recipe reading
+  none of them as its input), remove the dataset's indexes by a `find` of each name pattern, and
+  still change nothing in the data folder unless the recipe has built the whole dataset. The
+  removal of the hidden folders a build leaves after a container stop (§10,
+  `docs/DOCKER_QUICKSTART.md`), one `rm -rf` of three patterns, removed none in zsh where one
+  matched nothing; it is a `find` of each pattern now. Every other command the messages give
+  (the refusals, `build-index-only`'s warnings, the download's notes, the indel search's
+  rebuild and download) quotes each path and was already the same in either shell. The tests
+  paste each into an interactive bash and an interactive zsh with their default options
+  (`test_indel_window`'s `pasted`), with no index of the dataset, an index of each kind, or one
+  kind alone: the note's removal, §12's commands with the stub engine (a zsh twin of
+  `test_mega_rebuild`'s class) and with a stub of the recipe that reads its whole input
+  (`test_indel_window`, which runs in macOS's own bash 3.2 and zsh too: without the recipe's
+  `< /dev/null`, it took the commands after it, in either shell), §10's, and the removals of
+  the refusals, warnings and notes, on a copy of the fixture in zsh and in place in bash, the
+  two left the same; a chain that builds or downloads runs with stubs that record each
+  program's arguments, the same in either shell. The `unit-tests` job installs zsh (the light image and GitHub's runner have none) and
+  the release gate's step 1 does too; an HPC node's unprivileged sandbox, which can install
+  none, allows the skip `zsh is not installed` (`docs/RELEASE_CHECKLIST.md`).
 
 ### Security
 

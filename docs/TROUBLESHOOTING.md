@@ -313,9 +313,18 @@ removes the folder of a run that is gone, but one made in another container (eac
 `docker run --rm` has a new host name) cannot be checked, so it is left in place,
 with a line on stdout that says so.
 
-**Fix.** Once no CRISPRme container is building, remove them:
-`rm -rf genome_library/.build-index-only-* Genomes/.build-index-only-enrich-* Dictionaries/.build-index-only-dicts-*`
-from your data folder.
+**Fix.** Once no CRISPRme container is building, remove them, from your data folder:
+
+```bash
+find genome_library -mindepth 1 -maxdepth 1 -name '.build-index-only-*' -exec rm -rf -- {} +
+find Genomes -mindepth 1 -maxdepth 1 -name '.build-index-only-enrich-*' -exec rm -rf -- {} +
+find Dictionaries -mindepth 1 -maxdepth 1 -name '.build-index-only-dicts-*' -exec rm -rf -- {} +
+```
+
+A `find` of each name pattern does the same pasted into bash or into zsh, whichever of the
+three folders holds such a folder. Up to wave 1c-b of 2.10.0 this was one `rm -rf` of the three
+patterns, which zsh, the default shell of macOS, expands itself: where one of them matched
+nothing, it stopped the whole command (`no matches found`) and removed none of them.
 
 ## 11. A search stops and says no index serves it
 
@@ -384,29 +393,38 @@ folder: the commands below remove each such part by name first, whatever a messa
 dictionaries, indel logs, tiers and every index of the dataset, which the messages name for
 removal too) and the dataset's VCFs, registry and indel frequencies, which the recipe wrote
 anew. Remove any copy of the dataset's indexes in a library you search with `--index-path`
-too. The commands are bash, in a subshell that stops at the first command that fails
-(`set -eu`, an unset variable among them): nothing in the data folder is removed or moved
-unless the recipe has built the whole dataset and passed its checks, and every part they move
-in is there. A mistyped `SRC`, a missing chromosome FASTA or a disk that fills during the
-recipe stops them with the data folder as it was; remove `NEW`, which the recipe refuses once
-it holds a part, and run them again. With `DATA` the data folder, `NEW` a new folder outside
-it on the same file system (so that each move is a rename, which needs no space), `SRC` a
-folder of the merged VCFs the mega is built from, `mega.<chrom>.afmax.vcf.gz`, each an absolute path
-(`crisprme.py download --what vcf --dataset hg38_mega --path <dir>` fetches them into
-`<dir>/VCFs/hg38_mega`; a 2.8.1 install's `VCFs/hg38_mega` holds them, so you can give it as
-`SRC`: it is removed only after the recipe has built the dataset from it), and `REPO` the
-CRISPRme repository of 2.10.0 (`/opt/conda/opt/crisprme` in the image), whose `PAMs/` holds
-the recipe's PAM file (a data folder that CRISPRme 2.8.1 set up has none of NRR):
+too. The commands run in bash whatever shell you paste them into, bash or zsh (the
+default shell of macOS, which reads a pasted `#` as a word, not a comment, and stops a command
+at a pattern that matches nothing): `bash -euo pipefail -s ... <<'EOF'` hands them to bash as
+they are written, which stops at the first command that fails (an unset or empty variable
+among them): nothing in the data folder is removed or moved unless the recipe has built the
+whole dataset and passed its checks, and every part they move in is there. A mistyped `SRC`,
+a missing chromosome FASTA or a disk that fills during the recipe stops them with the data
+folder as it was; remove `NEW`, which the recipe refuses once it holds a part, and run them
+again. Set, in the shell you paste them into (no `export` needed: they are passed to bash as
+its arguments), `DATA` the data folder, `NEW` a new folder outside it on the same file system
+(so that each move is a rename, which needs no space), `SRC` a folder of the merged VCFs the
+mega is built from, `mega.<chrom>.afmax.vcf.gz`, each an absolute path (`crisprme.py download
+--what vcf --dataset hg38_mega --path <dir>` fetches them into `<dir>/VCFs/hg38_mega`; a 2.8.1
+install's `VCFs/hg38_mega` holds them, so you can give it as `SRC`: it is removed only after
+the recipe has built the dataset from it), and `REPO` the CRISPRme repository of 2.10.0
+(`/opt/conda/opt/crisprme` in the image), whose `PAMs/` holds the recipe's PAM file (a data
+folder that CRISPRme 2.8.1 set up has none of NRR):
 
 ```bash
-(
-set -eu  # stop at the first command that fails: the data folder changes only after the recipe
+bash -euo pipefail -s "$DATA" "$NEW" "$SRC" "$REPO" <<'EOF'
+# bash, whichever shell this is pasted into: it stops at the first command that fails, so the
+# data folder changes only after the recipe has built the whole dataset
+DATA=${1:?DATA is not set} NEW=${2:?NEW is not set} SRC=${3:?SRC is not set} \
+  REPO=${4:?REPO is not set}
 # a new working directory: the FASTAs of the chromosomes the mega is built on and no other
 # (chr1-22, X and Y), and the PAM file, the repository's
 mkdir -p "$NEW/Genomes/hg38" "$NEW/PAMs"
 for c in chr{1..22} chrX chrY; do ln -s "$DATA/Genomes/hg38/$c.fa" "$NEW/Genomes/hg38/"; done
 cp "$REPO/PAMs/20bp-NRR-SpCas9.txt" "$NEW/PAMs/"
-PAM=PAMs/20bp-NRR-SpCas9.txt bash "$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"
+# (its input /dev/null: bash reads these commands from its own input, the recipe must not)
+PAM=PAMs/20bp-NRR-SpCas9.txt bash "$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC" \
+  < /dev/null
 # each part the recipe built that the moves below take, there before anything is removed
 for p in Genomes/hg38+hg38_mega Genomes/hg38+hg38_mega_INDELS Dictionaries/log_indels_hg38_mega \
   Dictionaries/registry_hg38_mega Dictionaries/indel_af_hg38_mega VCFs/hg38_mega; do
@@ -415,16 +433,19 @@ done
 ls -d "$NEW"/genome_library/*_hg38+hg38_mega "$NEW"/genome_library/*_hg38+hg38_mega_INDELS
 mkdir -p "$DATA/Genomes" "$DATA/genome_library" "$DATA/Dictionaries" "$DATA/VCFs" "$DATA/samplesIDs"
 # in the data folder, every part of the dataset the recipe built (each it refuses where it
-# runs): the kit in place and all that was built from it, its indexes among them
-# (<PAM>_<N>_hg38+hg38_mega and its _INDELS, of every PAM), then the dataset's VCFs,
-# registry and indel frequencies, which the recipe wrote anew
+# runs): the kit in place and all that was built from it, then the dataset's VCFs, registry
+# and indel frequencies, which the recipe wrote anew
 rm -rf "$DATA/Genomes/hg38+hg38_mega" "$DATA/Genomes/hg38+hg38_mega_INDELS" \
   "$DATA/Dictionaries/dictionaries_hg38_mega" "$DATA/Dictionaries/log_indels_hg38_mega" \
   "$DATA/Dictionaries/genotypes_hg38_mega" "$DATA/Dictionaries/indel_genotypes_hg38_mega" \
-  "$DATA"/genome_library/*_[0-9]_hg38+hg38_mega \
-  "$DATA"/genome_library/*_[0-9]_hg38+hg38_mega_INDELS \
   "$DATA/VCFs/hg38_mega" "$DATA/Dictionaries/registry_hg38_mega" \
   "$DATA/Dictionaries/indel_af_hg38_mega"
+# and the dataset's indexes, of every PAM (<PAM>_<N>_hg38+hg38_mega and its _INDELS), a find of
+# each name pattern: none of them, or one kind alone, is no error (a hidden folder is a build's)
+find "$DATA/genome_library" -mindepth 1 -maxdepth 1 -name '*_[0-9]_hg38+hg38_mega' \
+  -not -name '.*' -exec rm -rf -- {} +
+find "$DATA/genome_library" -mindepth 1 -maxdepth 1 -name '*_[0-9]_hg38+hg38_mega_INDELS' \
+  -not -name '.*' -exec rm -rf -- {} +
 # what the recipe built, moved in (not its reference index, genome_library/<guide>-<PAM>_<N>_hg38)
 mv "$NEW/Genomes/hg38+hg38_mega" "$NEW/Genomes/hg38+hg38_mega_INDELS" "$DATA/Genomes/"
 mv "$NEW"/genome_library/*_hg38+hg38_mega "$NEW"/genome_library/*_hg38+hg38_mega_INDELS \
@@ -434,7 +455,7 @@ mv "$NEW/Dictionaries/log_indels_hg38_mega" "$NEW/Dictionaries/registry_hg38_meg
 mv "$NEW/VCFs/hg38_mega" "$DATA/VCFs/"
 [ -e "$DATA/samplesIDs/hg38_mega.samplesID.txt" ] \
   || mv "$NEW/samplesIDs/hg38_mega.samplesID.txt" "$DATA/samplesIDs/"
-)
+EOF
 ```
 
 For a container install, export the recipe's `RUN` prefix first (its header). Its last step,
@@ -451,7 +472,13 @@ these commands ran on whatever failed before them, and took the PAM file from th
 which a 2.8.1 install's lacks: the recipe, refused for it, built nothing, and the removal took
 the dataset whole, the merged VCFs given as `SRC` among them; and the note named the indexes
 of the dataset in place when it was printed, so its own flow left those its search then built
-from the old kit, which a later search read.
+from the old kit, which a later search read. Up to wave 1c-b of 2.10.0 these commands were a
+subshell, `( set -eu ... )`, which a user in zsh ran in zsh, and they and the messages gave the
+dataset's indexes to `rm -rf` as patterns, which zsh expands itself: where one matched nothing
+(no index of the dataset of one kind, say), zsh stopped the whole command (`no matches found`)
+and removed nothing of it, where bash removed the rest; pasted into zsh, the comments of the
+block were words too. Each message's removal and these commands now do the same pasted into
+bash or into zsh.
 
 ## 13. A build or a search says a fake-indel genome and its indel logs come from two enrichments
 
@@ -480,4 +507,5 @@ directory, and what it built goes in place of all of the dataset that comes from
 (the message lists it) and of the dataset's VCFs, registry and indel frequencies, which it
 writes anew: the commands, which remove each of those parts by name once the recipe has built
 the whole dataset, and change nothing in the data folder where it fails, are in section 12,
-"Building the mega's kit again".
+"Building the mega's kit again" (they run in bash, pasted into bash or into zsh). The `rm -rf`
+of the messages, each path quoted, does the same in either shell.

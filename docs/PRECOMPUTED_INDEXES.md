@@ -752,9 +752,11 @@ each panel was (`seq_script/rebuild/README.md`, rule 1).
    every part of the dataset it built (the kit in place and all that was built from it, which
    the advice names for removal first, and the dataset's VCFs, registry and indel
    frequencies) and move its parts in: [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §12 has
-   the commands, which remove each of those parts by name, the dataset's indexes by pattern,
-   once the recipe has built the whole dataset and passed its checks, and change nothing in
-   the data folder where it fails.
+   the commands, which remove each of those parts by name, the dataset's indexes by a `find`
+   of their name patterns, once the recipe has built the whole dataset and passed its checks,
+   and change nothing in the data folder where it fails. They run in bash, pasted into bash or
+   into zsh (the default shell of macOS, which reads a pasted `#` as a word and stops a command
+   at a pattern that matches nothing), and so does each message's removal of the kit.
 4. **Up to 2.8.1: searchable indels** (the shipped mega's). `seq_script/merge_panels/mega_build_indels.sh`
    adds a synthetic `MEGA` pseudo-sample so the enricher materializes fake contigs, builds the
    `_INDELS` genome, then strips the pseudo-sample back out; the registry and the indel

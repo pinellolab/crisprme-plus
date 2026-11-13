@@ -754,9 +754,12 @@ the indel search's notes of windows too short). The recipe builds the dataset wh
 registry and indel frequencies too, and refuses a working directory that holds any of it before
 it makes anything there, so the messages name it run in a new working directory, its parts then
 moved in place of the dataset's: of all that came from the kit in place, which each message
-names for removal first by absolute path, a search's note the dataset's indexes by pattern,
-which take those the search builds from that kit after it is printed too
-(`indel_window.kit_removal`, `index_patterns`; the search's notes named none up to the review
+names for removal first by absolute path, a search's note the dataset's indexes by a `find` of
+their name patterns, which take those the search builds from that kit after it is printed too
+(`indel_window.kit_removal`, `index_removals`: a command that does the same pasted into bash or
+into zsh, the default shell of macOS, which expanded the patterns that the note gave `rm -rf` up
+to wave 1c-b of 2.10.0 itself, and stopped the whole command where one matched nothing; the
+search's notes named none up to the review
 of wave 1c-a, and the kit they left kept the recipe's parts out, and then the indexes in place
 alone, so that a note's own flow left the SaCas9 indexes its search had built next from 2.8.1's
 kit), and of those three (`indel_window.rebuild_kit_way`; `docs/TROUBLESHOOTING.md` §12, whose

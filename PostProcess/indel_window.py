@@ -287,8 +287,9 @@ def target_note(window, target_len, bdna, who, dataset, sites=False, workdir=Non
     the removal of all that came from its kit in place first (kit_removal: in working
     directory ``workdir`` of genome ``genome``, the indexes of ``libraries`` too, the
     libraries the search reads besides the working directory's), as build-index-only's
-    warning names it, the indexes by their patterns, which take those the search builds from
-    that kit after the note too (index_patterns). Up to the review of wave 1c-a (W1C-B1) the
+    warning names it, the indexes by a find of their name patterns, which take those the
+    search builds from that kit after the note too (index_removals). Up to the review of
+    wave 1c-a (W1C-B1) the
     note named only the removal of the dataset's VCFs, registry and indel frequencies, which
     the recipe writes anew: followed with docs/TROUBLESHOOTING.md section 12, the kit was left
     in place, every part the recipe built failed to move in, and build-index-only and every
@@ -344,20 +345,36 @@ def dataset_indexes(library, genome, dataset):
             and os.path.isdir(os.path.join(library, name))]
 
 
-def index_patterns(library, genome, dataset):
-    """The shell patterns, for the rm -rf of an advice, of every index of variant dataset
-    ``dataset`` of genome ``genome`` in ``library``: <library>/*_[0-9]_<genome>+<dataset> and
-    the same with _INDELS (the folder and the names quoted where they hold a character the
-    shell reads, shlex.quote, the pattern not). They take each such index, of every PAM and
-    either form of the name (<PAM>_<N>_..., <guide>-<PAM>_<N>_...), whenever it was built:
-    those a search builds from the kit in place after its note is printed among them, which
-    no list of the indexes in place can name (the review of wave 1c-a, W1C-B2R2-2); and no
-    other: not the reference index (<PAM>_<N>_<genome>), nor an index of another dataset, nor
-    one of a genome whose name ends in _<genome> (<PAM>_<N>_x_<genome>+<dataset>), nor a
-    hidden folder, as docs/TROUBLESHOOTING.md section 12 removes them."""
-    return ["%s*_[0-9]_%s" % (shlex.quote(os.path.join(library, "")),
-                              shlex.quote("%s+%s%s" % (genome, dataset, s)))
-            for s in ("", "_INDELS")]
+def index_name_patterns(genome, dataset):
+    """The name patterns (fnmatch, as find -name reads them) of every index of variant dataset
+    ``dataset`` of genome ``genome``: *_[0-9]_<genome>+<dataset> and the same with _INDELS,
+    a '*', '?', '[' or '\\' of the genome's or the dataset's name escaped, so that it reads
+    as itself. They take each such index, of every PAM and either form of the name
+    (<PAM>_<N>_..., <guide>-<PAM>_<N>_...), whenever it was built: those a search builds from
+    the kit in place after its note is printed among them, which no list of the indexes in
+    place can name (the review of wave 1c-a, W1C-B2R2-2); and no other: not the reference
+    index (<PAM>_<N>_<genome>), nor an index of another dataset, nor one of a genome whose
+    name ends in _<genome> (<PAM>_<N>_x_<genome>+<dataset>)."""
+    own = "".join("\\" + c if c in "*?[\\" else c for c in "%s+%s" % (genome, dataset))
+    return ["*_[0-9]_%s%s" % (own, s) for s in ("", "_INDELS")]
+
+
+def index_removals(library, genome, dataset):
+    """The commands, for an advice, that remove every index of variant dataset ``dataset`` of
+    genome ``genome`` in ``library`` (index_name_patterns), whenever it was built, each a find
+    of the folder's own entries of one pattern, a hidden one left (a build's own, as a shell's
+    pattern leaves it): find <library> -mindepth 1 -maxdepth 1 -name '<pattern>' -not -name
+    '.*' -exec rm -rf -- {} + (the folder and the pattern quoted, shlex.quote). Pasted into
+    bash or into zsh, either does the same, whatever the folder holds: find reads the pattern,
+    the shell does not. Up to wave 1c-b of 2.10.0 the advice gave the patterns to rm -rf on
+    the command line, which zsh, the default shell of macOS, expands itself: one pattern
+    that matched nothing (no index of the dataset of one of the two kinds, or in one of the
+    libraries) stopped the whole command (no matches found), and nothing it named was
+    removed, where bash passed the pattern on to rm as it was, as docs/TROUBLESHOOTING.md
+    section 12 runs it."""
+    return ["find %s -mindepth 1 -maxdepth 1 -name %s -not -name '.*' -exec rm -rf -- {} +"
+            % (shlex.quote(library), shlex.quote(p))
+            for p in index_name_patterns(genome, dataset)]
 
 
 def with_its_variant_index(indels_index):
@@ -572,39 +589,41 @@ def kit_removal(what, dataset, workdir=None, genome=None, libraries=(), stores=N
     With ``stores``, those paths, each by absolute path (build-index-only's warning: the
     stores in place and the indexes it builds next). Else, in working directory ``workdir``
     of genome ``genome``, the parts of the kit in place by absolute path (_enrichment_parts)
-    and the indexes of the dataset by their patterns (index_patterns), in the working
-    directory's genome_library and in each of ``libraries`` (the libraries the search reads
-    besides): a search's note of windows too short is printed before the search builds an
-    index, and the search then builds its variant and INDELS indexes of the dataset from the
-    kit in place, which its note named by none of their names up to the review of wave 1c-a
-    (W1C-B2R2-2: the note's own flow left the SaCas9 indexes a search had built from 2.8.1's
-    kit, and the next SaCas9 search, refused for the INDELS index, read the variant index of
-    the old kit once that one had been built again). Without either, their names in a working
-    directory, its indexes by a pattern too (<PAM>_<N>_<genome>+<dataset>, as
-    docs/TROUBLESHOOTING.md section 12 removes them). The refusals name that removal before
-    the way (rebuild_kit_way)."""
+    and the indexes of the dataset by their name patterns, a find of each (index_removals),
+    in the working directory's genome_library and in each of ``libraries`` (the libraries the
+    search reads besides): a search's note of windows too short is printed before the search
+    builds an index, and the search then builds its variant and INDELS indexes of the dataset
+    from the kit in place, which its note named by none of their names up to the review of
+    wave 1c-a (W1C-B2R2-2: the note's own flow left the SaCas9 indexes a search had built
+    from 2.8.1's kit, and the next SaCas9 search, refused for the INDELS index, read the
+    variant index of the old kit once that one had been built again). Without either, their
+    names in a working directory, its indexes by a find of their name patterns too
+    (<PAM>_<N>_<genome>+<dataset>, as docs/TROUBLESHOOTING.md section 12 removes them). The
+    commands are joined by '; ', each quoted so that it does the same pasted into bash or into
+    zsh (index_removals). The refusals name that removal before the way (rebuild_kit_way)."""
     after = ", of every PAM, those a search builds from it after this note among them"
     if stores is not None:
-        names, after = " ".join(quote(p) for p in stores), ""
+        commands, after = ["rm -rf " + " ".join(quote(p) for p in stores)], ""
     elif workdir:
         libraries_once = []
         for lib in [os.path.join(workdir, "genome_library")] + list(libraries):
             if all(os.path.realpath(lib) != os.path.realpath(seen) for seen in libraries_once):
                 libraries_once.append(lib)
-        names = " ".join([quote(p) for p in _enrichment_parts(workdir, genome, dataset)]
-                         + [p for lib in libraries_once
-                            for p in index_patterns(lib, genome, dataset)])
+        parts = _enrichment_parts(workdir, genome, dataset)
+        commands = (["rm -rf " + " ".join(quote(p) for p in parts)] if parts else []) + [
+            c for lib in libraries_once for c in index_removals(lib, genome, dataset)]
     else:
         g = genome or "<genome>"
-        names = " ".join(["Genomes/%s+%s" % (g, dataset), "Genomes/%s+%s_INDELS" % (g, dataset)]
-                         + ["Dictionaries/%s_%s" % (k, dataset)
-                            for k in ("dictionaries", "log_indels", "genotypes")]
-                         + ["genome_library/*_[0-9]_%s+%s" % (g, dataset),
-                            "genome_library/*_[0-9]_%s+%s_INDELS" % (g, dataset)])
+        commands = ["rm -rf " + " ".join(quote(p) for p in (
+            ["Genomes/%s+%s" % (g, dataset), "Genomes/%s+%s_INDELS" % (g, dataset)]
+            + ["Dictionaries/%s_%s" % (k, dataset)
+               for k in ("dictionaries", "log_indels", "genotypes")]))] + index_removals(
+                   "genome_library", g, dataset)
     return ("Either replaces %s and all that was built from it, as a search would read stores "
             "of the two together: its genomes, dictionaries, indel logs and dict-less tiers, "
-            "and every index of the dataset%s, which go first (rm -rf %s; and any copy of "
-            "those indexes in a library you search with --index-path)." % (what, after, names))
+            "and every index of the dataset%s, which go first (%s; and any copy of those "
+            "indexes in a library you search with --index-path)."
+            % (what, after, "; ".join(commands)))
 
 
 def earlier_windows(workdir, genome, dataset, libraries=(), variant=True):

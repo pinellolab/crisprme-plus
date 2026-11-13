@@ -11,6 +11,7 @@ import gzip
 import importlib.util
 import io
 import os
+import re
 import tarfile
 import tempfile
 import unittest
@@ -1433,6 +1434,11 @@ class TestFakeIndelWindowNotes(unittest.TestCase):
             "indel logs of ds installed now (%s) record windows of 30/30: they come from two "
             "enrichments" % (os.path.join(self.lib, "NRG_3_hg38+ds"), self.logs)), notes)
         self.assertIn("(rm -rf '%s')" % os.path.join(self.lib, "NRG_3_hg38+ds"), notes[0])
+        # its removal, pasted into zsh and into bash (wave 1c-b of 2.10.0), the same
+        from test_indel_window import paste_both
+        paste_both(self, re.search(r"\((rm -rf [^)]*)\)", notes[0]).group(1), self.tmp)
+        self.assertFalse(os.path.lexists(os.path.join(self.lib, "NRG_3_hg38+ds")))
+        self.assertTrue(os.path.isdir(os.path.join(self.lib, "20-NRG_2_hg38+ds")))
         self.log(25, 27)
         with mock.patch.object(hf.index_fit, "engine_index_format", return_value=2):
             self.assertEqual([n for n in self.notes() if "variant index" in n], [])
@@ -1473,6 +1479,11 @@ class TestFakeIndelWindowNotes(unittest.TestCase):
             "another one than the archive's: on chr1, the window of chr1_100_" % (
                 enriched, enriched)), notes)
         self.assertIn("(rm -rf '%s' '%s_INDELS')" % (enriched, enriched), notes[0])
+        # its removal, pasted into zsh and into bash (wave 1c-b of 2.10.0), the same
+        from test_indel_window import paste_both
+        paste_both(self, re.search(r"\((rm -rf [^)]*)\)", notes[0]).group(1), self.tmp)
+        self.assertFalse(os.path.lexists(enriched + "_INDELS"))
+        self.assertTrue(os.path.isdir(self.logs))
 
     def test_another_index_the_logs_no_longer_match_is_warned_of(self):
         self.log(30, 30)
@@ -1498,6 +1509,12 @@ class TestFakeIndelWindowNotes(unittest.TestCase):
             "built with it from the same enrichment, which it holds no window to tell (rm -rf "
             "'%s' '%s'), and build them with build-index-only." % (
                 old[: -len("_INDELS")], old, old[: -len("_INDELS")])), notes[0])
+        # its removal, pasted into zsh and into bash (wave 1c-b of 2.10.0), the same
+        from test_indel_window import paste_both
+        paste_both(self, re.search(r"\((rm -rf [^)]*)\)", notes[0]).group(1), self.tmp)
+        for gone in (old, old[: -len("_INDELS")]):
+            self.assertFalse(os.path.lexists(gone), gone)
+        self.assertTrue(os.path.isdir(os.path.join(self.lib, "20-NRG_2_hg38+ds_INDELS")))
 
 
 if __name__ == "__main__":

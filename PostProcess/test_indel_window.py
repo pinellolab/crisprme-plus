@@ -13,12 +13,16 @@ Run: python -m unittest test_indel_window -v
 
 import fnmatch
 import gzip
+import hashlib
+import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 
@@ -31,6 +35,128 @@ def row(chrom, pos, ref, alt, left, right, k=1):
     return "%s_%d-%d_%d\tS1\trs%d\t0.1\t%s_%d_%s_%s\t0,%d\tN" % (
         chrom, pos - 1 - left, pos - 1 + len(ref) + right, k, k, chrom, pos, ref, alt,
         left + len(alt) + right)
+
+
+# ---- a command CRISPRme prints, or a block of its docs, pasted into bash and into zsh -------
+# (wave 1c-b of 2.10.0: zsh, the default shell of macOS, expanded the index patterns of the
+# advice's rm -rf itself, and stopped it whole where one matched nothing. Imported by
+# test_build_index_only_atomic, test_mega_rebuild and test_indel_empty_chromosome.)
+
+PASTE_SHELLS = ("bash", "zsh")
+# what a shell says of a pasted line it cannot run as written
+SHELL_ERRORS = ("no matches found", "command not found", "event not found", "parse error",
+                "unbound variable", "bad pattern", "unmatched", "syntax error",
+                "no such file or directory: #")
+
+
+def pasted(test, shell, text, cwd, env=None, timeout=600):
+    """``text`` pasted into an interactive ``shell`` ("bash" or "zsh") with its default
+    options, no startup file of the user's (bash --norc --noprofile -i, zsh -f -i), its lines
+    read on its standard input as a paste reaches it: zsh reads a '#' as a word, not a comment
+    (INTERACTIVE_COMMENTS is off), and stops a command at a pattern that matches nothing
+    (NOMATCH), where bash passes the pattern on as it is; either expands a '!' (history). zsh
+    is not on every Linux host: the unit-tests job installs it, and without it the zsh half
+    of a test is skipped ("zsh is not installed", test.skipTest: in a subTest, that one
+    alone). Returns (the exit status of the text's last command, None where the shell never
+    reached the line after it; the text's stdout; the shell's stderr, its prompts and what
+    the text's commands wrote there)."""
+    if shutil.which(shell) is None:
+        test.skipTest("%s is not installed" % shell)
+    argv = {"bash": [shell, "--norc", "--noprofile", "-i"], "zsh": [shell, "-f", "-i"]}[shell]
+    e = {k: v for k, v in (os.environ if env is None else env).items()
+         if k not in ("BASH_ENV", "ENV", "ZDOTDIR", "PROMPT_COMMAND", "TERM_PROGRAM",
+                      "TERM_SESSION_ID")}
+    # no history file written (an interactive bash writes ~/.bash_history), and macOS's
+    # notes off (its bash's deprecation banner, its Terminal's session files)
+    e.update(HISTFILE="", SHELL_SESSIONS_DISABLE="1", BASH_SILENCE_DEPRECATION_WARNING="1")
+    mark = "__pasted_status__"
+    done = subprocess.run(argv, input=text.rstrip("\n") + '\necho "%s=$?"\n' % mark, cwd=cwd,
+                          env=e, capture_output=True, text=True, timeout=timeout)
+    m = re.search(r"^%s=(\d+)$" % mark, done.stdout, re.M)
+    return ((int(m.group(1)) if m else None), done.stdout[:m.start()] if m else done.stdout,
+            done.stderr)
+
+
+def shell_errors(err):
+    """The lines of a pasted text's stderr in which the shell says it could not run a line as
+    written (SHELL_ERRORS)."""
+    return [ln for ln in err.splitlines() if any(s in ln.lower() for s in SHELL_ERRORS)]
+
+
+def tree(root, *same):
+    """{path relative to ``root``: ("dir",), ("file", its sha1), ("link", its target, ``root``
+    and each of ``same`` in it read as <root>)} of everything under ``root``: what two runs
+    left, compared."""
+    out = {}
+    for d, dirs, files in os.walk(root):
+        for n in dirs + files:
+            p = os.path.join(d, n)
+            rel = os.path.relpath(p, root)
+            if os.path.islink(p):
+                target = os.readlink(p)
+                for prefix in (root,) + same:
+                    target = target.replace(prefix, "<root>")
+                out[rel] = ("link", target)
+            elif os.path.isdir(p):
+                out[rel] = ("dir",)
+            else:
+                with open(p, "rb") as fh:
+                    out[rel] = ("file", hashlib.sha1(fh.read()).hexdigest())
+    return out
+
+
+def paste_both(test, command, root, cwd=None, env=None):
+    """``command``, as CRISPRme prints it (its paths absolute, under ``root``, or relative to
+    ``cwd``, by default ``root``), pasted into zsh, on a copy of ``root`` (the command's paths
+    there), then into bash, on ``root`` itself: each exits 0 and says no error of the shell's,
+    and the two leave the same tree. Without zsh, bash alone (its subTest skipped). Returns
+    bash's (status, stdout, stderr)."""
+    cwd = root if cwd is None else cwd
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(root)) as tmp:
+        copy = os.path.join(tmp, os.path.basename(root))
+        shutil.copytree(root, copy, symlinks=True)
+        theirs = None
+        with test.subTest(shell="zsh", command=command):
+            rc, _out, err = pasted(test, "zsh", command.replace(root, copy),
+                                   cwd.replace(root, copy), env)
+            test.assertEqual((rc, shell_errors(err)), (0, []), err)
+            theirs = tree(copy, root)   # (a link copied as it was points into root)
+        rc, out, err = pasted(test, "bash", command, cwd, env)
+        test.assertEqual((rc, shell_errors(err)), (0, []), (command, err))
+        if theirs is not None:
+            test.assertEqual(tree(root), theirs, command)
+    return rc, out, err
+
+
+def same_argv(test, command, cwd, programs=("rm", "find", "mv", "crisprme.py")):
+    """The programs ``command`` (as CRISPRme prints it) runs and their arguments, pasted into
+    bash and into zsh with each of ``programs`` a stub on PATH that records them and does
+    nothing else (exit 0): the same in either shell, and the shell says no error. For a
+    command whose programs a test cannot run (a download, a build). Returns them, [[program,
+    argument, ...], ...] in their order, bash's."""
+    stubs = tempfile.mkdtemp(prefix="pasted_stubs_")
+    test.addCleanup(shutil.rmtree, stubs, True)
+    log = os.path.join(stubs, "argv.jsonl")
+    for name in programs:
+        path = os.path.join(stubs, name)
+        with open(path, "w") as fh:
+            fh.write("#!%s\nimport json, os, sys\nwith open(os.environ['STUB_ARGV'], 'a') as fh:\n"
+                     "    fh.write(json.dumps([os.path.basename(sys.argv[0])] + sys.argv[1:]) "
+                     "+ '\\n')\n" % sys.executable)
+        os.chmod(path, 0o755)
+    got = {}
+    for shell in PASTE_SHELLS:
+        with test.subTest(shell=shell, command=command):
+            open(log, "w").close()
+            env = dict(os.environ, PATH=stubs + os.pathsep + os.environ.get("PATH", ""),
+                       STUB_ARGV=log)
+            rc, _out, err = pasted(test, shell, command, cwd, env)
+            test.assertEqual((rc, shell_errors(err)), (0, []), err)
+            with open(log) as fh:
+                got[shell] = [json.loads(ln) for ln in fh]
+    if len(got) == len(PASTE_SHELLS):
+        test.assertEqual(got["zsh"], got["bash"], command)
+    return got.get("bash")
 
 
 class TheRowsWindow(unittest.TestCase):
@@ -517,13 +643,14 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
         build-index-only's warning does, the note names that removal now (kit_removal): the
         kit's genomes and indel logs, each by absolute path, and every index of the dataset,
         in the working directory's genome_library and in a library the search reads besides,
-        by its patterns (index_patterns); not its registry, its indel frequencies or its VCFs
-        (they come from its VCFs alone), nor the reference index. W1C-B2R2-2, the review of
-        the fix: the note named the indexes in place when it was printed, and the search then
-        built its own indexes of the dataset from the old kit (a SaCas9 search, beside 2.8.1's
-        mega), which the note's own flow left in place, and a later search read: run as a
-        shell runs it, its rm takes those built after the note too, in either library, and
-        not an index of another genome or dataset, the reference index or a hidden folder."""
+        by a find of their name patterns (index_removals); not its registry, its indel
+        frequencies or its VCFs (they come from its VCFs alone), nor the reference index.
+        W1C-B2R2-2, the review of the fix: the note named the indexes in place when it was
+        printed, and the search then built its own indexes of the dataset from the old kit (a
+        SaCas9 search, beside 2.8.1's mega), which the note's own flow left in place, and a
+        later search read: pasted into bash or into zsh, its removal takes those built after
+        the note too, in either library, and not an index of another genome or dataset, the
+        reference index or a hidden folder."""
         top = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, top, True)
         w, lib = os.path.join(top, "work"), os.path.join(top, "lib")
@@ -553,24 +680,23 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
                           r"as a search would read stores of the two together: its genomes, "
                           r"dictionaries, indel logs and dict-less tiers, and every index of the "
                           r"dataset, of every PAM, those a search builds from it after this note "
-                          r"among them, which go first \(rm -rf ([^;]*); and any copy of those "
+                          r"among them, which go first \((.*?); and any copy of those "
                           r"indexes in a library you search with --index-path\)\.$", note)
             self.assertIsNotNone(m, note)
-            self.assertEqual(shlex.split(m.group(1)), [os.path.join(w, *p) for p in kit] + [
-                os.path.join(w, "genome_library", "*_[0-9]_hg38+hg38_mega"),
-                os.path.join(w, "genome_library", "*_[0-9]_hg38+hg38_mega_INDELS"),
-                os.path.join(lib, "*_[0-9]_hg38+hg38_mega"),
-                os.path.join(lib, "*_[0-9]_hg38+hg38_mega_INDELS")])
+            self.assertEqual(m.group(1).split("; "), [
+                "rm -rf " + " ".join(iw.quote(os.path.join(w, *p)) for p in kit)]
+                + iw.index_removals(os.path.join(w, "genome_library"), "hg38", "hg38_mega")
+                + iw.index_removals(lib, "hg38", "hg38_mega"))
+            self.assertIn("; find %s -mindepth 1 -maxdepth 1 -name '*_[0-9]_hg38+hg38_mega_INDELS' "
+                          "-not -name '.*' -exec rm -rf -- {} +" % lib, m.group(1))
             for part in kept:
                 self.assertNotIn(iw.quote(os.path.join(w, *part)), m.group(1))
             if who != "complete-search":
                 continue
-            # the rm as a shell runs it, after the search built its own indexes
+            # the removal pasted into zsh and into bash, after the search built its own indexes
             for d in later + others:
                 os.makedirs(d)
-            done = subprocess.run(["bash", "-c", "rm -rf " + m.group(1)], cwd=top,
-                                  capture_output=True, text=True)
-            self.assertEqual((done.returncode, done.stderr), (0, ""))
+            paste_both(self, m.group(1), top)
             for part in kit + indexes:
                 self.assertFalse(os.path.lexists(os.path.join(w, *part)), part)
             for d in later + [os.path.join(lib, "20-NRR_2_hg38+hg38_mega")]:
@@ -580,6 +706,55 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
             for part in kit + indexes:
                 os.makedirs(os.path.join(w, *part))
             os.makedirs(os.path.join(lib, "20-NRR_2_hg38+hg38_mega"))
+
+    def test_the_notes_removal_does_the_same_pasted_into_bash_or_zsh(self):
+        """Wave 1c-b of 2.10.0: the note gave the dataset's indexes to rm -rf as shell
+        patterns, which zsh, the default shell of macOS, expands itself: where one matched
+        nothing (no index of the dataset of one kind, or in one library), zsh stopped the
+        whole command (no matches found) and removed nothing, the kit in place among it,
+        where bash passed the pattern on to rm as it was and removed the rest. A find of each
+        pattern (index_removals) does the same in either shell: here with an index of each
+        kind in both libraries (matched), with none (unmatched), and with a variant index in
+        one and an INDELS index in the other (partly matched), the kit's genomes and indel
+        logs and every index of the dataset go, in both shells alike, and nothing else."""
+        states = {
+            "matched": [("work", "genome_library", "NGG_2_hg38+hg38_mega"),
+                        ("work", "genome_library", "20-NRR_2_hg38+hg38_mega_INDELS"),
+                        ("lib", "20-NRR_2_hg38+hg38_mega"),
+                        ("lib", "21-NNGRRT_2_hg38+hg38_mega_INDELS")],
+            "unmatched": [],
+            "partly matched": [("work", "genome_library", "NGG_2_hg38+hg38_mega"),
+                               ("lib", "21-NNGRRT_2_hg38+hg38_mega_INDELS")]}
+        kit = [("work", "Genomes", "hg38+hg38_mega"), ("work", "Genomes", "hg38+hg38_mega_INDELS"),
+               ("work", "Dictionaries", "log_indels_hg38_mega")]
+        kept = [("work", "Dictionaries", "registry_hg38_mega"), ("work", "VCFs", "hg38_mega"),
+                ("work", "Dictionaries", "indel_af_hg38_mega"),
+                ("work", "genome_library", "20-NRR_2_hg38"), ("lib", "20-NRR_2_hg38"),
+                ("work", "genome_library", "20-NRR_2_x_hg38+hg38_mega"),
+                ("work", "genome_library", "20-NRR_2_hg38+hg38_HGDP1kGP"),
+                ("work", "genome_library", "20-NRR_2_hg38+hg38_mega.lock"),
+                ("work", "genome_library", ".20-NRR_2_hg38+hg38_mega"),
+                ("lib", ".21-NNGRRT_2_hg38+hg38_mega_INDELS")]
+        for state, indexes in sorted(states.items()):
+            with self.subTest(state=state):
+                top = tempfile.mkdtemp()
+                self.addCleanup(shutil.rmtree, top, True)
+                w, lib = os.path.join(top, "work"), os.path.join(top, "lib")
+                for part in kit + indexes + kept:
+                    os.makedirs(os.path.join(top, *part))
+                with open(os.path.join(w, "Dictionaries", "registry_hg38_mega", "reg_chr1.idx"),
+                          "w") as fh:
+                    fh.write('{"n_records": 1, "aggregation": "info_af", "databases": {}}')
+                note = iw.target_note((25, 27), 27, 1, "complete-search", "hg38_mega",
+                                      sites=True, workdir=w, genome="hg38", libraries=[lib])
+                m = re.search(r"which go first \((.*?); and any copy of those indexes in a "
+                              r"library you search with --index-path\)\.$", note)
+                self.assertIsNotNone(m, note)
+                paste_both(self, m.group(1), top)
+                for part in kit + indexes:
+                    self.assertFalse(os.path.lexists(os.path.join(top, *part)), part)
+                for part in kept:
+                    self.assertTrue(os.path.isdir(os.path.join(top, *part)), part)
 
     def test_section_12_has_its_commands(self):
         here = os.path.dirname(os.path.abspath(__file__))
@@ -594,7 +769,8 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
         # the recipe in a new working directory of the mega's chromosomes alone, with the PAM
         self.assertIn('mkdir -p "$NEW/Genomes/hg38" "$NEW/PAMs"', lines)
         self.assertIn('PAM=PAMs/20bp-NRR-SpCas9.txt bash '
-                      '"$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC"', lines)
+                      '"$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC" < /dev/null',
+                      lines)
         # in the data folder, every part of the dataset the recipe builds, each it refuses in
         # its working directory, removed by name, whatever a message's own rm left: the kit in
         # place and all that was built from it, then the three the recipe writes anew. The
@@ -606,11 +782,18 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
         self.assertEqual(refused, {"dictionaries", "log_indels", "registry", "indel_af",
                                    "genotypes", "indel_genotypes"})
         for part in (['"$DATA/Genomes/hg38+hg38_mega" ', '"$DATA/Genomes/hg38+hg38_mega_INDELS" ',
-                      '"$DATA"/genome_library/*_[0-9]_hg38+hg38_mega ',
-                      '"$DATA"/genome_library/*_[0-9]_hg38+hg38_mega_INDELS ',
                       '"$DATA/VCFs/hg38_mega" ']
                      + ['"$DATA/Dictionaries/%s_hg38_mega" ' % k for k in sorted(refused)]):
             self.assertIn(part, rm)
+        # and the dataset's indexes of every PAM and either form of the name, by a find of the
+        # name patterns the messages' own removal takes (indel_window.index_removals), not by
+        # patterns given to rm -rf, which zsh, the default shell of macOS, expanded itself
+        # and stopped the whole command where one matched nothing (wave 1c-b of 2.10.0)
+        finds = [ln for ln in lines if ln.startswith("find ")]
+        self.assertEqual(finds, ["find \"$DATA/genome_library\" -mindepth 1 -maxdepth 1 -name %s "
+                                 "-not -name '.*' -exec rm -rf -- {} +" % shlex.quote(p)
+                                 for p in iw.index_name_patterns("hg38", "hg38_mega")])
+        self.assertFalse([ln for ln in lines if "*" in ln and ln.startswith("rm ")])
         # (the dataset's indexes of every PAM and either form of the name, not an index of
         # another genome whose name ends in _hg38, nor the reference index)
         for name, theirs in (("NGG_2_hg38+hg38_mega", True), ("20-NRR_2_hg38+hg38_mega", True),
@@ -633,17 +816,22 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
         # W1C-B2R2-1, the review of wave 1c-a: the commands ran on whatever failed before them,
         # and took the PAM file from the data folder, which one that CRISPRme 2.8.1 set up
         # lacks: the recipe built nothing, and the removal took the dataset whole. They run in
-        # a subshell that stops at the first command that fails, the PAM file the
+        # bash, which stops at the first command that fails, an unset or empty variable among
+        # them, whichever shell they are pasted into (wave 1c-b of 2.10.0: a subshell,
+        # ( set -eu ... ), ran in zsh where a user pasted it into zsh), the PAM file the
         # repository's, and the data folder is changed only after the recipe, once every part
-        # the moves take is there (test_mega_rebuild runs them so, with no -e of its own)
-        self.assertEqual((lines[0], lines[1], lines[2], lines[-1]),
-                         ("```bash", "(", "set -eu", ")"))
+        # the moves take is there (test_mega_rebuild pastes them into bash and into zsh)
+        self.assertEqual((lines[0], lines[1], lines[2], lines[-1]), (
+            "```bash", 'bash -euo pipefail -s "$DATA" "$NEW" "$SRC" "$REPO" <<\'EOF\'',
+            "DATA=${1:?DATA is not set} NEW=${2:?NEW is not set} SRC=${3:?SRC is not set} "
+            "REPO=${4:?REPO is not set}", "EOF"))
+        self.assertFalse([ln for ln in lines[1:] if "!" in ln])   # (no history expansion)
         self.assertIn('cp "$REPO/PAMs/20bp-NRR-SpCas9.txt" "$NEW/PAMs/"', lines)
         self.assertFalse([ln for ln in lines if "$DATA/PAMs" in ln])
         recipe = next(i for i, ln in enumerate(lines) if "mega_rebuild.sh" in ln)
         checked = next(i for i, ln in enumerate(lines) if ln.startswith('[ -d "$NEW/$p" ] ||'))
         changes = [i for i, ln in enumerate(lines) if "$DATA" in ln and
-                   ln.startswith(("rm ", "mv ", "[ -e", "mkdir "))]
+                   ln.startswith(("rm ", "mv ", "[ -e", "mkdir ", "find "))]
         self.assertTrue(changes)
         self.assertLess(recipe, checked)
         self.assertLess(checked, min(changes))
@@ -651,28 +839,49 @@ class TheKitBuiltAgainGoesInANewWorkingDirectory(unittest.TestCase):
 
 
 class TheIndexesOfADataset(unittest.TestCase):
-    """index_patterns, the shell patterns an advice names a dataset's indexes by, whenever
-    they were built; and with_its_variant_index, an INDELS index of another enrichment than
-    the logs with the variant index of its name, built with it (W1C-B2R2-2, the review of
-    wave 1c-a)."""
+    """index_name_patterns and index_removals, the find of each name pattern an advice removes
+    a dataset's indexes by, whenever they were built; and with_its_variant_index, an INDELS
+    index of another enrichment than the logs with the variant index of its name, built with
+    it (W1C-B2R2-2, the review of wave 1c-a)."""
 
-    def test_the_patterns_take_the_datasets_indexes_and_no_other(self):
-        pats = iw.index_patterns("/data/w/genome_library", "hg38", "hg38_mega")
-        self.assertEqual(pats, ["/data/w/genome_library/*_[0-9]_hg38+hg38_mega",
-                                "/data/w/genome_library/*_[0-9]_hg38+hg38_mega_INDELS"])
-        for name, ours in (("NGG_2_hg38+hg38_mega", True), ("20-NRR_2_hg38+hg38_mega", True),
-                           ("21-NNGRRT_2_hg38+hg38_mega_INDELS", True),
-                           ("TTTV-23_3_hg38+hg38_mega", True),
-                           ("20-NRR_2_hg38", False), ("20-NRR_2_x_hg38+hg38_mega", False),
-                           ("20-NRR_2_hg38+hg38_HGDP1kGP", False),
-                           ("20-NRR_2_hg38+hg38_mega.lock", False),
-                           ("20-NRR_2_hg38+x_hg38_mega", False)):
-            got = any(fnmatch.fnmatchcase("/data/w/genome_library/" + name, p) for p in pats)
-            self.assertEqual(got, ours, name)
-        # a folder or a name the shell reads is quoted, the pattern not
-        self.assertEqual(iw.index_patterns("/data/my lib", "hg38", "a b"),
-                         ["'/data/my lib/'*_[0-9]_'hg38+a b'",
-                          "'/data/my lib/'*_[0-9]_'hg38+a b_INDELS'"])
+    def test_the_finds_take_the_datasets_indexes_and_no_other(self):
+        self.assertEqual(iw.index_name_patterns("hg38", "hg38_mega"),
+                         ["*_[0-9]_hg38+hg38_mega", "*_[0-9]_hg38+hg38_mega_INDELS"])
+        self.assertEqual(iw.index_removals("/data/w/genome_library", "hg38", "hg38_mega"), [
+            "find /data/w/genome_library -mindepth 1 -maxdepth 1 -name '*_[0-9]_hg38+hg38_mega' "
+            "-not -name '.*' -exec rm -rf -- {} +",
+            "find /data/w/genome_library -mindepth 1 -maxdepth 1 -name "
+            "'*_[0-9]_hg38+hg38_mega_INDELS' -not -name '.*' -exec rm -rf -- {} +"])
+        # a folder or a name the shell reads is quoted, and a character find -name reads (a
+        # '*' or a '[' of a dataset's name) escaped, so that it reads as itself
+        self.assertEqual(iw.index_name_patterns("hg38", "a*b[1]"),
+                         ["*_[0-9]_hg38+a\\*b\\[1]", "*_[0-9]_hg38+a\\*b\\[1]_INDELS"])
+        self.assertEqual(iw.index_removals("/data/my lib", "hg38", "a b")[0],
+                         "find '/data/my lib' -mindepth 1 -maxdepth 1 -name '*_[0-9]_hg38+a b' "
+                         "-not -name '.*' -exec rm -rf -- {} +")
+        # pasted into bash and into zsh, with an index of each kind (matched), with none
+        # (unmatched), with one kind alone (partly matched): every index of the dataset, of
+        # every PAM and either form of the name, and no other folder
+        cases = {"hg38_mega": (["NGG_2_hg38+hg38_mega", "20-NRR_2_hg38+hg38_mega",
+                                "21-NNGRRT_2_hg38+hg38_mega_INDELS", "TTTV-23_3_hg38+hg38_mega"],
+                               ["20-NRR_2_hg38", "20-NRR_2_x_hg38+hg38_mega",
+                                "20-NRR_2_hg38+hg38_HGDP1kGP", "20-NRR_2_hg38+hg38_mega.lock",
+                                "20-NRR_2_hg38+x_hg38_mega", ".20-NRR_2_hg38+hg38_mega",
+                                ".build-index-only-x_2_hg38+hg38_mega_INDELS"]),
+                 "a b": (["NGG_2_hg38+a b", "NGG_2_hg38+a b_INDELS"], ["NGG_2_hg38+a bc"]),
+                 "a*b": (["NGG_2_hg38+a*b", "NGG_2_hg38+a*b_INDELS"],
+                         ["NGG_2_hg38+axyb", "NGG_2_hg38+a*b2"]),
+                 "o'k": (["NGG_2_hg38+o'k_INDELS"], ["NGG_2_hg38+ok"])}
+        for dataset, (ours, others) in sorted(cases.items()):
+            for state, made in (("matched", ours), ("unmatched", []), ("partly matched", ours[:1])):
+                with self.subTest(dataset=dataset, state=state):
+                    top = tempfile.mkdtemp()
+                    self.addCleanup(shutil.rmtree, top, True)
+                    lib = os.path.join(top, "my lib")
+                    for name in made + others:
+                        os.makedirs(os.path.join(lib, name))
+                    paste_both(self, "; ".join(iw.index_removals(lib, "hg38", dataset)), top)
+                    self.assertEqual(sorted(os.listdir(lib)), sorted(others))
 
     def test_an_indels_index_goes_with_its_variant_index(self):
         top = tempfile.mkdtemp()
@@ -682,6 +891,190 @@ class TheIndexesOfADataset(unittest.TestCase):
         self.assertEqual(iw.with_its_variant_index(indels), [indels])
         os.makedirs(indels[: -len("_INDELS")])
         self.assertEqual(iw.with_its_variant_index(indels), [indels, indels[: -len("_INDELS")]])
+
+
+STUB_RECIPE = """#!/bin/bash
+# a stub of seq_script/merge_panels/mega_rebuild.sh <working directory> <merged VCFs>: it reads
+# its standard input to its end, as a program of the recipe that reads it would, then builds
+# each part the recipe builds, a file of this build in each (or fails, with $STUB_FAIL)
+cat > /dev/null
+[ -z "${STUB_FAIL:-}" ] || { echo "the recipe failed" >&2; exit 1; }
+for p in Genomes/hg38+hg38_mega Genomes/hg38+hg38_mega_INDELS Dictionaries/log_indels_hg38_mega \
+    Dictionaries/registry_hg38_mega Dictionaries/indel_af_hg38_mega VCFs/hg38_mega \
+    genome_library/20-NRR_2_hg38+hg38_mega genome_library/20-NRR_2_hg38+hg38_mega_INDELS \
+    genome_library/20-NRR_2_hg38; do
+  mkdir -p "$1/$p" && echo built > "$1/$p/new.txt"
+done
+mkdir -p "$1/samplesIDs" && echo MEGA > "$1/samplesIDs/hg38_mega.samplesID.txt"
+echo "SUMMARY: ALL PASS"
+"""
+
+
+class TheSection12BlockPastedIntoBashOrZsh(unittest.TestCase):
+    """docs/TROUBLESHOOTING.md section 12's commands, pasted into bash and into zsh with a stub
+    of the recipe that builds each part the recipe builds (test_mega_rebuild pastes them with
+    the recipe itself on a stub engine, on Linux: its fixture does not run on macOS, where
+    this one runs in macOS's own bash and zsh). The stub reads its standard input to its end:
+    bash reads the commands from its own (bash -s), and a program of the recipe that read it
+    would take the commands after the recipe, so that none of them ran (the recipe's input is
+    /dev/null). In a data folder holding the dataset's indexes of both kinds (matched), none
+    (unmatched) or its variant index alone (partly matched), they put the recipe's parts in
+    place of the dataset's, each part of the earlier kit gone and nothing else of the folder;
+    where the recipe fails, the data folder is as it was; in either shell alike (wave 1c-b of
+    2.10.0: they were a subshell, ( set -eu ... ), which zsh ran itself and stopped at its
+    first comment, a word in an interactive zsh)."""
+
+    PARTS = [("Genomes", "hg38+hg38_mega"), ("Genomes", "hg38+hg38_mega_INDELS"),
+             ("Dictionaries", "dictionaries_hg38_mega"), ("Dictionaries", "log_indels_hg38_mega"),
+             ("Dictionaries", "genotypes_hg38_mega"), ("Dictionaries", "indel_genotypes_hg38_mega"),
+             ("Dictionaries", "registry_hg38_mega"), ("Dictionaries", "indel_af_hg38_mega"),
+             ("VCFs", "hg38_mega")]
+    KEPT = [("Genomes", "hg38"), ("genome_library", "20-NRR_2_hg38"),
+            ("genome_library", "20-NRR_2_hg38+hg38_HGDP1kGP"),
+            ("genome_library", ".20-NRR_2_hg38+hg38_mega"), ("samplesIDs",)]
+    STATES = {"matched": ["NGG_2_hg38+hg38_mega", "NGG_2_hg38+hg38_mega_INDELS"],
+              "unmatched": [], "partly matched": ["NGG_2_hg38+hg38_mega"]}
+
+    @staticmethod
+    def block():
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(os.path.dirname(here), "docs", "TROUBLESHOOTING.md")) as fh:
+            text = fh.read()
+        start = text.index("**Building the mega's kit again.**", text.index("## 12. "))
+        first = text.index("```bash\n", start) + len("```bash\n")
+        return text[first:text.index("```", first)]
+
+    def folder(self, indexes):
+        """A data folder, the earlier kit's parts and ``indexes`` of the dataset in it, beside
+        what is no part of it, a new folder's name, the merged VCFs and a repository whose
+        recipe is the stub. Returns (top, env)."""
+        top = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, top, True)
+        data, repo = os.path.join(top, "data"), os.path.join(top, "repo")
+        for part in self.PARTS + [("genome_library", n) for n in indexes] + self.KEPT:
+            os.makedirs(os.path.join(data, *part))
+            if part[0] != "samplesIDs":
+                with open(os.path.join(data, *part, "earlier.txt"), "w") as fh:
+                    fh.write("the earlier kit's\n")
+        with open(os.path.join(data, "samplesIDs", "hg38_mega.samplesID.txt"), "w") as fh:
+            fh.write("its own\n")
+        os.makedirs(os.path.join(repo, "PAMs"))
+        os.makedirs(os.path.join(repo, "seq_script", "merge_panels"))
+        os.makedirs(os.path.join(top, "merged"))
+        with open(os.path.join(repo, "PAMs", "20bp-NRR-SpCas9.txt"), "w") as fh:
+            fh.write("NNNNNNNNNNNNNNNNNNNNNRR 3\n")
+        recipe = os.path.join(repo, "seq_script", "merge_panels", "mega_rebuild.sh")
+        with open(recipe, "w") as fh:
+            fh.write(STUB_RECIPE)
+        os.chmod(recipe, 0o755)
+        env = dict(os.environ, DATA=data, NEW=os.path.join(top, "new"),
+                   SRC=os.path.join(top, "merged"), REPO=repo)
+        return top, env
+
+    def test_matched_unmatched_and_partly_matched_in_bash_and_zsh(self):
+        block = self.block()
+        for state, indexes in sorted(self.STATES.items()):
+            left = {}
+            for shell in PASTE_SHELLS:
+                with self.subTest(state=state, shell=shell):
+                    top, env = self.folder(indexes)
+                    data = env["DATA"]
+                    rc, out, err = pasted(self, shell, block, top, env)
+                    self.assertEqual((rc, shell_errors(err)), (0, []), out + err)
+                    self.assertIn("SUMMARY: ALL PASS", out)
+                    got = tree(data)
+                    # the recipe's parts in place, each part of the earlier kit gone
+                    for part in [p for p in self.PARTS if p[1] not in (
+                            "dictionaries_hg38_mega", "genotypes_hg38_mega",
+                            "indel_genotypes_hg38_mega")] + [
+                            ("genome_library", "20-NRR_2_hg38+hg38_mega"),
+                            ("genome_library", "20-NRR_2_hg38+hg38_mega_INDELS")]:
+                        self.assertEqual(got.get(os.path.join(*part, "new.txt")),
+                                         ("file", hashlib.sha1(b"built\n").hexdigest()), part)
+                    self.assertFalse([k for k in got if k.endswith("earlier.txt") and (
+                        "hg38_mega" in k and not k.startswith("genome_library/.")
+                        and "HGDP" not in k)], got)
+                    for name in indexes:
+                        self.assertNotIn(os.path.join("genome_library", name), got)
+                    # what is no part of the dataset stays, the reference index and the
+                    # samplesID file already there among it
+                    for part in self.KEPT:
+                        self.assertIn(os.path.join(*part), got)
+                    self.assertEqual(got[os.path.join("genome_library", "20-NRR_2_hg38",
+                                                      "earlier.txt")][0], "file")
+                    with open(os.path.join(data, "samplesIDs", "hg38_mega.samplesID.txt")) as fh:
+                        self.assertEqual(fh.read(), "its own\n")
+                    left[shell] = got
+            if len(left) == len(PASTE_SHELLS):
+                self.assertEqual(left["zsh"], left["bash"], state)
+
+    def test_a_recipe_that_fails_changes_nothing_in_bash_or_zsh(self):
+        block = self.block()
+        for shell in PASTE_SHELLS:
+            with self.subTest(shell=shell):
+                top, env = self.folder(self.STATES["matched"])
+                before = tree(env["DATA"])
+                rc, out, err = pasted(self, shell, block, top, dict(env, STUB_FAIL="1"))
+                self.assertIsNotNone(rc, out + err)
+                self.assertNotEqual(rc, 0, out + err)
+                self.assertIn("the recipe failed", err)
+                self.assertEqual(shell_errors(err), [], err)
+                self.assertEqual(tree(env["DATA"]), before)
+                # and with a variable not set, it stops before anything is made
+                top, env = self.folder([])
+                before = tree(env["DATA"])
+                rc, out, err = pasted(self, shell, block, top, dict(env, SRC=""))
+                self.assertNotEqual(rc, 0, out + err)
+                self.assertIn("SRC is not set", err)
+                self.assertEqual(tree(env["DATA"]), before)
+                self.assertFalse(os.path.lexists(env["NEW"]))
+
+
+class TheDocsRemovalOfHiddenBuildFolders(unittest.TestCase):
+    """docs/TROUBLESHOOTING.md section 10 and docs/DOCKER_QUICKSTART.md give the removal of the
+    hidden folders a build leaves after a container stop. Up to wave 1c-b of 2.10.0 it was one
+    rm -rf of three patterns, which zsh, the default shell of macOS, expands itself: where one
+    of them matched nothing (a build leaves its folder in one of the three folders alone, say)
+    it stopped the whole command and removed none. A find of each pattern does the same pasted
+    into bash or into zsh: with a hidden build folder of each kind (matched), with none
+    (unmatched) and with one kind alone (partly matched), each goes, and nothing else (in
+    Genomes and Dictionaries a build's own kind alone, as the patterns took them)."""
+
+    KINDS = [("genome_library", ".build-index-only-x1"), ("Genomes", ".build-index-only-enrich-x2"),
+             ("Dictionaries", ".build-index-only-dicts-x3")]
+    KEPT = [("genome_library", "20-NRR_3_hg38"), ("genome_library", "20-NRR_3_hg38.lock"),
+            ("Genomes", "hg38"), ("Genomes", ".build-index-only-x4"),
+            ("Dictionaries", "dictionaries_ds"), ("Dictionaries", ".build-index-only-x5")]
+
+    def blocks(self):
+        """{doc: its block} of the two docs."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        out = {}
+        for doc, start in (("TROUBLESHOOTING.md", "## 10. "),
+                           ("DOCKER_QUICKSTART.md", "Hidden `.build-index-only-*` folders")):
+            with open(os.path.join(os.path.dirname(here), "docs", doc)) as fh:
+                text = fh.read()
+            first = text.index("```bash\n", text.index(start)) + len("```bash\n")
+            out[doc] = textwrap.dedent(text[first:text.index("```", first)])
+        return out
+
+    def test_each_doc_removes_them_alike_in_bash_and_zsh(self):
+        blocks = self.blocks()
+        self.assertEqual(blocks["TROUBLESHOOTING.md"], blocks["DOCKER_QUICKSTART.md"])
+        self.assertNotIn("rm -rf genome_library/", blocks["TROUBLESHOOTING.md"])
+        for doc, block in sorted(blocks.items()):
+            for state, made in (("matched", self.KINDS), ("unmatched", []),
+                                ("partly matched", self.KINDS[1:2])):
+                with self.subTest(doc=doc, state=state):
+                    top = tempfile.mkdtemp()
+                    self.addCleanup(shutil.rmtree, top, True)
+                    for part in made + self.KEPT:
+                        os.makedirs(os.path.join(top, *part))
+                    paste_both(self, block, top)
+                    for part in made:
+                        self.assertFalse(os.path.lexists(os.path.join(top, *part)), part)
+                    for part in self.KEPT:
+                        self.assertTrue(os.path.isdir(os.path.join(top, *part)), part)
 
 
 class AFakeGenomeAndItsLogs(unittest.TestCase):

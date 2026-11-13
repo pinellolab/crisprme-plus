@@ -594,8 +594,16 @@ and deleting data you no longer need. See
   build before it can clean up, and a build in a new container cannot tell whether
   that one still runs elsewhere, so it leaves its folder, which can be as large as
   the finished index (the Settings page names such folders when a build ends). Once
-  no CRISPRme container is building, remove them from your data folder:
-  `rm -rf genome_library/.build-index-only-* Genomes/.build-index-only-enrich-* Dictionaries/.build-index-only-dicts-*`.
+  no CRISPRme container is building, remove them from your data folder (a `find` of each
+  name pattern, which does the same pasted into bash or into zsh, the default shell of macOS;
+  an `rm -rf` of the three patterns removed none of them in zsh where one matched nothing):
+
+  ```bash
+  find genome_library -mindepth 1 -maxdepth 1 -name '.build-index-only-*' -exec rm -rf -- {} +
+  find Genomes -mindepth 1 -maxdepth 1 -name '.build-index-only-enrich-*' -exec rm -rf -- {} +
+  find Dictionaries -mindepth 1 -maxdepth 1 -name '.build-index-only-dicts-*' -exec rm -rf -- {} +
+  ```
+
 - **Search finished but the results table is empty (or shows no variant
   off-targets)** →
   1. Thresholds too strict — raise **Maximum edits**, and if you opened Advanced
