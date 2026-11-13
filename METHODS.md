@@ -3451,6 +3451,14 @@ the first and the last.
   haplotypes in the dense regions in place of the IUPAC search, is to make such searches
   exact and tractable.
 
+- **One refusal's advice on a sites-only dataset.** Where a search refuses the INDELS index of a
+  sites-only dataset (the mega) whose fake-indel genome is not in place while its VCFs are, the
+  refusal says to remove that index and the dataset's enriched genome (and its variant index,
+  where the INDELS index holds other windows than the indel logs), and to build them again with
+  `build-index-only`, which refuses a sites-only dataset: following it
+  loses the kit's enriched genome. Put the kit back instead (its archive of 2.10.0), or build it
+  again with `seq_script/merge_panels/mega_rebuild.sh` (`docs/TROUBLESHOOTING.md` §12).
+
 Limits stated in other sections, which 2.10.0 keeps: one indel per fake-indel window, so an
 off-target that needs two indels in one protospacer is not generated as a candidate (§8, residuals);
 an MNV is in no phased store, so its carriers are resolved PUTATIVE (§4); an indel row, and each ALT
