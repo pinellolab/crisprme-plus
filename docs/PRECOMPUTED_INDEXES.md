@@ -3,8 +3,8 @@
 > **The indexes of CRISPRme 2.10.0.** Since 2.10.0 the precomputed indexes are built by
 > CRISPRitz 2.10.0 in **index format 2** and published in their own dataset repo,
 > **[`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2)**,
-> which no earlier release reads (CRISPRme 2.8.1 refuses an index of format 2, 2.8.0 aborts on
-> one: decision C2). Each is named for its guide length and the side of its PAM, in the order
+> which no earlier release reads (CRISPRme 2.8.1 refuses an index of format 2, and 2.8.0 aborts
+> on one). Each is named for its guide length and the side of its PAM, in the order
 > of the target on the strand (`20-NRR_3_hg38` for a 20-nt guide and a 3′ PAM, `TTTN-23_3_hg38`
 > for a 23-nt guide and a 5′ PAM, `+<dataset>` for a variant index), and each variant panel's
 > Dictionaries and genotype store are published **once**, beside its indexes, and fetched once
@@ -216,12 +216,13 @@ are not always those of an index built for 21-nt guides: they can differ next to
 an `N` run, and, with bulges, at a few other sites
 ([METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering); CRISPRitz's
 `docs/INDEX_FORMAT.md`, section 5.1). The fake-indel genome a variant index's `_INDELS` index
-searches has an `N` run about every 56 bases: on chr22's (hg38_mega's), the 21-nt SaCas9 guide
-at 4 mismatches + 1 DNA + 1 RNA bulge gave 456 rows of 149,688 in the engine's search of
-`20-NNNNNNNN_3` that an index built for 21-nt guides does not give (on chr22's reference
-sequence, the same 2,664,778 rows). For the rows of a guide length, search an index built for
-it, which the search takes first where one is installed; a longer guide needs its own index.
-They read the same variant data and `Dictionaries/` as the dedicated index for the
+searches has an `N` run about every 65 bases (on chr22: 65 for HGDP + 1000 Genomes, 67 for mega,
+with CRISPRitz 2.10.0's windows of 30/30; 57 and 59 with 2.9.1's of 25/27). On chr22's of
+hg38_mega, with the windows of 25/27, the 21-nt SaCas9 guide at 4 mismatches + 1 DNA + 1 RNA
+bulge gave 456 rows of 149,688 in the engine's search of `20-NNNNNNNN_3` that an index built for
+21-nt guides does not give (on chr22's reference sequence, the same 2,664,778 rows). For the
+rows of a guide length, search an index built for it, which the search takes first where one is
+installed; a longer guide needs its own index. They read the same variant data and `Dictionaries/` as the dedicated index for the
 same panel — those tiers are PAM-independent — and a `--prune-pam` run over one gives the
 dedicated index's report for that PAM: from an index of format 2 (2.10.0's), at any flank
 width, contig ends included; from one of format 1 (2.8.1's), byte for byte from a flank of the
@@ -633,6 +634,16 @@ Here `<PAM_MOTIF>` is the PAM region token itself — the IUPAC motif without th
 (e.g. `NGG`, `NRG`, `NNGRRT`, `TTTN`) — the same prefix the index name uses
 (`<PAM_MOTIF>_<N>_hg38+hg38_<ds>`).
 
+The kit and the panel's Dictionaries must come from one release: `pool_index_indels.py` refuses
+a chromosome whose fake-indel genome and indel log come from two enrichments (2.8.1's kit, of
+CRISPRitz 2.9.1's windows of 25/27, beside 2.10.0's Dictionaries bundle, of 30/30, say: `the
+fake-indel genome of <chrom> ... and its indel log ... come from two enrichments`), since every
+indel row of that index would be misplaced. Put back the kit that goes with the installed
+Dictionaries (`Genomes/hg38+hg38_<ds>` and `Genomes/hg38+hg38_<ds>_INDELS`, from the same
+release's `build-inputs/`), or the Dictionaries that go with the kit; `build-index-only`, run on
+the dataset, says what to remove, each path absolute ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
+§13).
+
 > **One-command alternative.** With the enriched genome already in place, `crisprme.py
 > build-index-only --genome Genomes/hg38 --pam PAMs/<NEW_PAM>.txt --bDNA 2 --bRNA 2 --vcf
 > VCFs/hg38_<ds> …` detects it (prints `Enriched genome already present`) and skips straight to the
@@ -666,7 +677,10 @@ in its own document — summarized here with the key provenance and filters, and
 complete protocol. 2.10.0's kits and indexes of HGDP + 1000 Genomes are built on all of hg38
 (455 contigs, as `download --what genome` installs it, as the reference indexes are), those of
 HPRC and mega on its chromosomes chr1-22, X and Y alone (24 contigs), as 2.8.1's default index of
-each panel was (`seq_script/rebuild/README.md`, rule 1).
+each panel was (`seq_script/rebuild/README.md`, rule 1). So a variant search of HGDP + 1000
+Genomes finds every site a reference search finds; an alt contig repeats a region of a primary
+chromosome (the HLA region, for one), and no VCF of the panel covers it, so a site there can be
+reported twice, the second time as a reference row on the alt contig.
 
 ### HGDP + 1000 Genomes (re-phased, genotyped)
 
@@ -738,8 +752,11 @@ each panel was (`seq_script/rebuild/README.md`, rule 1).
 
    Measured on chr22 and chr14 (METHODS section 2): every check passes, and the indexes and the
    indel log are byte for byte those of the two-build recipe it replaces (step 4, and
-   `build-index-only` without `--samplesID` for the SNP index). Run it genome-wide only after
-   the release's readiness audit. Design rationale:
+   `build-index-only` without `--samplesID` for the SNP index). Every check passes too on chr21,
+   chr18, chr10 and chr5, four of the seven chromosomes whose merged VCF holds a record written in
+   lower case (chr3, chr4, chr5, chr10, chr12, chr18 and chr21), which the recipe reads in upper
+   case, as CRISPRitz 2.10.0 does (read as written, they failed the checks). Run it genome-wide
+   only after the release's readiness audit. Design rationale:
    [`docs/DESIGN_mega_index.md`](DESIGN_mega_index.md).
 
    The recipe builds the dataset whole, its VCFs, registry and indel frequencies too, in a
@@ -766,10 +783,11 @@ each panel was (`seq_script/rebuild/README.md`, rule 1).
    (`--no-sites-only-density-guard` turns it off), listed in the dense-region files and noted on
    the rows there, and its rows of two or more variants whose frequencies fail the safeguards'
    bound are ranked after the others by the carrier gate (METHODS section 5). With the guard, a
-   search of five guides at 4 mismatches and 1 + 1 bulges took 1.37 to 1.46 times the shipped
-   mega's on chr22 and 1.53 to 1.73 times on chr14 (IGH), in several measurements side by side on
-   shared nodes; unguarded, 4.4 to 4.9 times on chr22, and the chr14 search was projected at 12
-   to 16 h against 46 min.
+   search of five guides at 4 mismatches and 1 + 1 bulges took 1.35 to 1.46 times the shipped
+   mega's on chr22 and 1.53 to 1.73 times on chr14 (IGH), in several
+   measurements side by side on shared nodes during 2.10.0's development; unguarded, 4.4 to 4.9
+   times on chr22, and the chr14 search was projected at 12 to 16 h against 46 min. The release's
+   gates time it genome-wide (`docs/RELEASE_CHECKLIST.md`).
 
 Once you have an enriched genome (`Genomes/hg38+hg38_<ds>/` + `_INDELS/`) — downloaded or
 rebuilt — **any** PAM reuses it via Step 3.

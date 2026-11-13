@@ -20,8 +20,9 @@ sources are all genotyped and whether you need cross-variant cis:
 > since 2.10.0 (`NRG_3_hg38+hg38_HGDP1kGP` before). This Mode-1 recipe is kept for reproducibility
 > of the merge mechanism; it no longer names a published index.
 
-**Status:** the sites-only `NRG_3_hg38+hg38_mega` index is **built, published, and
-clean-room-validated** on HF `lucapinello/crisprme-data`: genome-wide 5-source merge
+**Status (2.8.1):** the sites-only `NRG_3_hg38+hg38_mega` index is **built, published, and
+clean-room-validated** on HF `lucapinello/crisprme-data` (2.10.0 rebuilds the mega with
+`mega_rebuild.sh`, below): genome-wide 5-source merge
 (66.9M sites, 51.2M SNPs) + INFO-AF registry + searchable indels. The genotyped production
 default is the re-phased HGDP + 1000 Genomes panel, `20-NRR_3_hg38+hg38_HGDP1kGP` since 2.10.0
 (`NRG_3_hg38+hg38_HGDP1kGP` before; built by a separate re-phasing pipeline,
@@ -55,11 +56,22 @@ chromosome's start, read from the indel log), and
 `samplesIDs/hg38_mega.samplesID.txt` lists the five sources as pseudo-samples (the file a search
 names, as the shipped install has it); and `PostProcess/verify_mega_chrom.py` checks every store
 against the source VCF read on its own.
-Validated on chr22 and chr14 (METHODS section 2); not run genome-wide before the release's
-readiness audit. Usage: `mega_rebuild.sh <install_dir> <merged_vcf_dir> [chrom ...]` (its
-header has the environment it reads), in a working directory that holds none of the dataset (it
-refuses one that holds its VCFs or a part it builds, before it makes anything there); to put the
-kit it built in a data folder in place of the dataset's, `docs/TROUBLESHOOTING.md` §12.
+Validated on chr22 and chr14 (METHODS section 2), and on chr21, chr18, chr10 and chr5, four of
+the seven chromosomes whose merged VCF holds a record written in lower case (chr3, chr4, chr5,
+chr10, chr12, chr18 and chr21), which the recipe reads in upper case as CRISPRitz 2.10.0 does;
+not run genome-wide before the release's readiness audit. Usage: `mega_rebuild.sh <install_dir>
+<merged_vcf_dir> [chrom ...]` (its header has the environment it reads), in a working directory
+that holds none of the dataset (it refuses one that holds its VCFs or a part it builds, before
+it makes anything there); to put the kit it built in a data folder in place of the dataset's,
+`docs/TROUBLESHOOTING.md` §12.
+
+Run on their own, `PostProcess/build_mega_indel_af.py` and `PostProcess/verify_mega_chrom.py`
+need the dataset's indel log to know the left flank of its fake-indel windows: give
+`build_mega_indel_af.py --log-dir <install>/Dictionaries/log_indels_hg38_mega` and
+`verify_mega_chrom.py --log <the same folder>`, as `mega_rebuild.sh` does. Without it each takes
+26 bases, the flank of CRISPRitz 2.9.1's windows of 25/27, where a build of 2.10.0 (30/30) has
+31, and so takes an indel at a POS of 26 to 30, which the enricher of 2.10.0 does not window, for
+one it did.
 
 **Whole-genome mega build scripts (as-run up to 2.8.1, in this folder):**
 `mega_gw_merge.sh` (the GW 24-contig 5-source merge driver around `merge_mega_sites.sh`)
@@ -71,7 +83,8 @@ is the design rationale (its "REMAINING/pending" notes are historical — the wo
 
 ## HPRC pangenome index (single-source, phased) — `hprc_build.sh`
 
-A **third** production index, `NRG_3_hg38+hg38_HPRC`, is built by enriching hg38 with the
+A **third** production index, `20-NRR_3_hg38+hg38_HPRC` (2.8.1's `NRG_3_hg38+hg38_HPRC` and
+`NRR_3_hg38+hg38_HPRC`), is built by enriching hg38 with the
 **HPRC Minigraph-Cactus pangenome** — the **HPRC Release 2 graph `hprc-v2.0-mc-grch38`** (GRCh38)
 — decomposed to a per-chromosome VCF (`vg deconstruct` → `vcfbub` → `vcfwave`; 232 samples =
 231 population individuals + CHM13, GRCh38, phased GTs with graph-coverage half-missingness
@@ -88,7 +101,10 @@ See `hprc_build.sh` (as-run, env-overridable). It is **distinct from and orthogo
 + phased indel-GT stores); a `--per-sample` search returned 68,057 CONFIRMED phased-cis
 off-targets, 855 SNP+indel and 140 SNP+SNP co-occurring rows, with named cis carriers
 ground-truth-verified against the source GTs (e.g. HG03579 carries chr10:12896898 `TG>T` +
-chr10:12896900 `T>A` in cis; joint AF 1/464). **Held from HF publish pending review.**
+chr10:12896900 `T>A` in cis; joint AF 1/464). Published since: `NRG_3_hg38+hg38_HPRC` and
+`NRR_3_hg38+hg38_HPRC` are 2.8.1's archives in `lucapinello/crisprme-data`, and
+`20-NRR_3_hg38+hg38_HPRC` is 2.10.0's, in `lucapinello/crisprme-indexes-format2`, built by this
+script for each PAM of the panel (`../rebuild/index_set_2.10.0.tsv`).
 
 ## Source provenance (versions + access)
 

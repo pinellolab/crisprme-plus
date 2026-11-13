@@ -49,7 +49,8 @@ dictionaries (`Dictionaries/`) come with its index download (`download --what in
 with its enriched genome (`Genomes/<genome>+<dataset>/`) and its index by `build-index-only --vcf`;
 `complete-search --vcf` refuses a dataset that has none yet and says how to get them. From the web,
 a search without bulges of a dataset that has only its VCFs (the form then offers no bulges)
-enriches the genome and builds the dictionaries and index itself. A personal-assembly
+enriches the genome and builds the dictionaries and the index of its indels itself (a search
+without bulges scans the variant genome, and builds no index of it). A personal-assembly
 search (`assembly-search`) builds an index for each haplotype, named after the individual and the
 haplotype plus a hash of the haplotype's folder (e.g. `genome_library/20-NRR_2_HG01255_paternal_5aeb0fc6`
 and `20-NRR_2_HG01255_maternal_067bdb25`, each the size of a reference index; before 2.10.0 named

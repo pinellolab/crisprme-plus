@@ -234,9 +234,19 @@ carriers). CRISPRme treats the two differently, by design:
   computed during the variant analysis in `PostProcess/new_simple_analysis.py`
   (the `found_creation` check): the search runs on the IUPAC-enriched variant
   genome, so a variant-created PAM is indexed on the enriched genome and found.
-  Note this requires a **real PAM** at index/search time — a degenerate/“pamless”
-  `NNN` index cannot detect PAM creation (the `found_creation` test can never
-  fire when every PAM base is `N`), which is why CRISPRme uses per-PAM indices.
+  Note this requires a **real search PAM**: a search with an all-`N` PAM (the
+  `20bp-NNN-NO-PAM.txt` file itself) cannot detect PAM creation (the
+  `found_creation` test can never fire when every PAM base is `N`). A PAM-less
+  index searched for a real PAM, pruned to it (`--prune-pam`, which a search
+  passes by itself since 2.10.0), reports it as the dedicated index of that PAM
+  does.
+  On an indel row, a PAM made wholly of the bases an insertion adds, in every
+  placement of the insertion in its repeat, is created, even where the reference
+  holds a valid PAM beside the protospacer (since 2.10.0). A tandem duplication of
+  the PAM's own bases, which only shifts the reference's PAM, is not created, and a
+  PAM that holds reference bases in some placement is created only where the
+  reference PAM beside the protospacer is not a valid one (METHODS §4,
+  `PAM_creation`).
 
 - **PAM disruption is _not_ reported (known limitation).** When a variant
   *removes* a reference PAM (e.g. `TGG` → `TGA`), the site is not flagged as a
@@ -318,8 +328,10 @@ CRISPRme normalizes it.
 
 For a variant-aware search, each VCF record needs:
 
-- a **`FILTER`** value — use `PASS` (records not marked `PASS` may be dropped by
-  filtering);
+- a **`FILTER`** value of `PASS` or `.`: CRISPRitz's enricher reads only those lines, so a
+  record with any other `FILTER` is in no part of the index (the enriched genome, its
+  dictionaries, the indel log and fake-indel windows) and, since 2.10.0, in no store CRISPRme
+  builds from the VCF either (the phased indel genotypes, the mega recipe's registry);
 - **`INFO/AF`** — a **numeric** allele frequency. CRISPRitz 2.10.0, which CRISPRme 2.10.0
   installs, finds each record's `AF` by its key. Up to 2.9.1 `add-variants` reads each record's
   `AF` where the first record has it, so on an index such a CRISPRitz built a record that has it
@@ -438,7 +450,11 @@ Search cost grows **combinatorially** with mismatches and DNA/RNA bulges, and
 again with local variant density. Allowing **more than one bulge in both DNA and
 RNA simultaneously** is especially expensive: a single chromosome at mm6 + 2 DNA +
 2 RNA bulges has produced **~207 GB of intermediate files and OOMed** the
-analysis (see the header of `PostProcess/search_budget.py`).
+analysis (see the header of `PostProcess/search_budget.py`). On the indexes of
+2.10.0, which code every allele of a split site, more than 1 DNA + 1 RNA bulge
+makes the variant search of the immunoglobulin loci explode, and `complete-search`
+warns: keep the default 1 + 1 and raise `--mm` first
+([TROUBLESHOOTING.md](TROUBLESHOOTING.md) §14).
 
 **Estimate before you launch.** A dependency-light heuristic ships in the repo:
 

@@ -29,7 +29,7 @@ conda config --set channel_priority strict
 ### Create and activate the environment
 
 ```bash
-# CRISPRme+ (2.8.1) from source, Python 3.11 (or from Bioconda instead: README §1.1):
+# CRISPRme+ (2.10.0) from source, Python 3.11 (or from Bioconda instead: README §1.1):
 git clone https://github.com/pinellolab/crisprme-plus.git && cd crisprme-plus
 mamba env create -f environment.yml   # env 'crisprme' (Python 3.11)
 mamba activate crisprme
@@ -120,7 +120,7 @@ The default repository is `lucapinello/crisprme-data`; override it with `--hf-re
 *This is the everyday workflow. Everything from here is fast and lightweight.*
 
 > **Before running any search**, ensure the CRISPRme environment is active: `mamba activate crisprme`
-> (the 2.8.1 source build creates env `crisprme`; Docker users skip activation).
+> (the source build creates env `crisprme`; Docker users skip activation).
 
 ### 3a. Choose a PAM file
 
@@ -529,7 +529,7 @@ The 20 leading `N`s define the spacer length; `NGG` is the PAM; `3` is the PAM l
 
 > **Note (historical — bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`, and the default `NRR`, as `NRG` before) combined with bulges could trigger a crash (heap corruption, issue #105) in *older* CRISPRitz engines. The fix ships in the CRISPRitz engine CRISPRme+ pins (v2.10.0) on every install surface (Docker, source build, Bioconda `crispritz >=2.10.0,<2.11`), so the crash **cannot occur** on a supported CRISPRme+ install and no runtime warning is emitted. If you deliberately run CRISPRme against an older, unpinned CRISPRitz and hit this, either add one base to make the motif even-length or reduce bulges to 0.
 
-If a **reference** index for a new PAM does not yet exist, the command-line search builds it on demand from the shipped genome. A **variant-aware** search (with `--vcf`) needs the dataset's dictionaries first: download a prebuilt index, or build it once with `crisprme.py build-index-only` (see Section 3.5); otherwise it stops with guidance to do so. With those in place, an index for another PAM or bulge budget that is not installed is built by the search from the dataset's VCFs (or its enriched genome, from the build-inputs kit); with neither here, the search stops and names the variant indexes installed. (The **web interface** offers a variant panel only the bulges its installed variant index supports: with none, only a 0-bulge search, whose first run prepares a 0-bulge index from the panel's VCF files, one per chromosome. Build the index first, in Settings under "Build an index locally", to search the panel with bulges, or at all for a panel added as a single multi-chromosome VCF file, which only that build splits per chromosome.)
+If a **reference** index for a new PAM does not yet exist, the command-line search builds it on demand from the shipped genome. A **variant-aware** search (with `--vcf`) needs the dataset's dictionaries first: download a prebuilt index, or build it once with `crisprme.py build-index-only` (see Section 3.5); otherwise it stops with guidance to do so. With those in place, an index for another PAM or bulge budget that is not installed is built by the search from the dataset's VCFs (or its enriched genome, from the build-inputs kit); with neither here, the search stops and names the variant indexes installed. (The **web interface** offers a variant panel only the bulges its installed variant index supports: with none, only a 0-bulge search, whose first run prepares the variant genome and the index of its indels from the panel's VCF files, one per chromosome (since 2.10.0 a search without bulges scans the variant genome and builds no index of it). Build the index first, in Settings under "Build an index locally", to search the panel with bulges, or at all for a panel added as a single multi-chromosome VCF file, which only that build splits per chromosome.)
 
 > **New PAM on a shipped variant dataset?** To build a different PAM against the released re-phased **HGDP+1kGP** or sites-only **mega** data without re-deriving the variants, use the published build inputs (a fast enriched-genome kit, or the source VCFs) — see [`docs/PRECOMPUTED_INDEXES.md` → *Building a new-PAM index for a published dataset*](PRECOMPUTED_INDEXES.md#building-a-new-pam-index-for-a-published-dataset-hgdp1kgp-mega).
 

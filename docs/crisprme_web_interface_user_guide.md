@@ -320,7 +320,9 @@ max-total-edits budget. Bulges can be consecutive (e.g., `NN--NN`) or interleave
 2 RNA bulges make the variant search of the dense loci (the immunoglobulin loci) explode, to
 many hours or out of memory, unless the total budget is 3 or less: the job's
 `log_verbose.txt` says so before its variant search. (The **Maximum edits** slider alone never
-asks for more than 1 bulge of each type.)
+asks for more than 1 bulge of each type.) CRISPRme 2.10.1 is planned to search, in those loci,
+the samples' own haplotypes in place of the variant genome's combinations (the haplotype scan),
+with the same indexes ([Troubleshooting](TROUBLESHOOTING.md) §14).
 
 Bulge searches need a genome index. If no installed **reference** index supports the
 bulges you ask for, the search first builds one from the installed genome (once: about
@@ -370,8 +372,8 @@ Per-sample is a **genotype-resolution** dial, **not** a speed dial: which of the
 depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele,
 per-sample is the faster on a dense panel of many samples such as the default HGDP + 1000
 Genomes one (its haplotype pre-check skips the dense windows' raw targets nobody carries);
-population-level can be the faster on a small panel such as HPRC, or with mega selected
-beside it. It **requires a genotyped index** (HGDP +
+population-level can be the faster on a small panel such as HPRC. It **requires a genotyped
+index** (HGDP +
 1000 Genomes [the default], or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
 greyed out and the search automatically uses population-level. (See "Understanding CONFIRMED vs
 PUTATIVE and carriers" in the results section for how these labels appear in the report.)
@@ -939,7 +941,9 @@ code 137). A genome-wide 1000G+HGDP search is the heaviest case; give it enough 
    (macOS/Linux: `docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'`)
 2. Delete the incomplete `Results/<name>/` folder and resubmit.
 3. Or reduce the cost of the search: select **Reference only** or lower
-   **Maximum edits**.
+   **Maximum edits**. A search of a variant index of 2.10.0 with 2 DNA or 2 RNA bulges in
+   **Advanced options** can need more memory than any laptop has, in the immunoglobulin loci
+   (see Step 2, Search thresholds): set the bulges back to 1 and raise the mismatches instead.
 
 ---
 

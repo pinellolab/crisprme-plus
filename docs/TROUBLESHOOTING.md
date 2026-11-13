@@ -122,7 +122,10 @@ for the HGDP+1000G index) and reads the panel's genotype store: on a large panel
   them: on HGDP + 1000 Genomes (4,091 samples) the README guide's population-level search of
   chr22 took 23 to 32 min against 8 to 11 min per sample. On a small panel it can be the faster:
   on HPRC (232 samples) 9 to 12 min against 14 to 17 min per sample (16 threads; METHODS.md
-  §5).
+  §5). These were measured during 2.10.0's development, on fake-indel windows of 25/27; on the
+  release's 30/30 the integration's gate (8 threads a search, with many searches at once) took
+  31 against 10 min on HGDP + 1000 Genomes and 9 against 14 min on HPRC, and beside mega 39
+  against 17 min (README, "What the default search costs").
   On a phased index leaving out `--per-sample` is not enough, since per-sample is that
   index's default; population-level is the default only on a sites-only, unphased,
   hybrid or reference-only index.
@@ -322,7 +325,7 @@ find Dictionaries -mindepth 1 -maxdepth 1 -name '.build-index-only-dicts-*' -exe
 ```
 
 A `find` of each name pattern does the same pasted into bash or into zsh, whichever of the
-three folders holds such a folder. Up to wave 1c-b of 2.10.0 this was one `rm -rf` of the three
+three folders holds such a folder. Up to 2.8.1 this section gave one `rm -rf` of the three
 patterns, which zsh, the default shell of macOS, expands itself: where one of them matched
 nothing, it stopped the whole command (`no matches found`) and removed none of them.
 
@@ -405,11 +408,19 @@ again. Set, in the shell you paste them into (no `export` needed: they are passe
 its arguments), `DATA` the data folder, `NEW` a new folder outside it on the same file system
 (so that each move is a rename, which needs no space), `SRC` a folder of the merged VCFs the
 mega is built from, `mega.<chrom>.afmax.vcf.gz`, each an absolute path (`crisprme.py download
---what vcf --dataset hg38_mega --path <dir>` fetches them into `<dir>/VCFs/hg38_mega`; a 2.8.1
-install's `VCFs/hg38_mega` holds them, so you can give it as `SRC`: it is removed only after
-the recipe has built the dataset from it), and `REPO` the CRISPRme repository of 2.10.0
-(`/opt/conda/opt/crisprme` in the image), whose `PAMs/` holds the recipe's PAM file (a data
-folder that CRISPRme 2.8.1 set up has none of NRR):
+--what vcf --dataset hg38_mega --path <dir>` fetches them into `<dir>/VCFs/hg38_mega`, `<dir>`
+being another folder than `NEW`, which the recipe refuses once it holds the dataset's VCFs; a
+2.8.1 install's `VCFs/hg38_mega` holds them, so you can give it as `SRC`: it is removed only
+after the recipe has built the dataset from it), and `REPO` the CRISPRme repository of 2.10.0,
+whose `PAMs/` holds the recipe's PAM file (a data folder that CRISPRme 2.8.1 set up has none of
+NRR). Run the commands one of two ways. In a shell inside the image (`docker run -it ...
+bash`, or `apptainer run ... crisprme.sif bash`, which start it with the image's environment),
+`REPO` is `/opt/conda/opt/crisprme` and the recipe's `RUN` prefix stays empty. From the host, with the recipe's programs run in the container, export `RUN` first,
+the container prefix the recipe's header describes, and set `REPO` to a checkout of the
+repository of 2.10.0 on the host: the recipe runs the scripts of `$REPO/PostProcess` through
+`RUN`, so the container must see `REPO`, `DATA`, `NEW` and `SRC` at the paths the host gives
+them (bind them so). Set to the image's path on the host, `REPO` stops the commands at their
+first `cp`, the data folder unchanged:
 
 ```bash
 bash -euo pipefail -s "$DATA" "$NEW" "$SRC" "$REPO" <<'EOF'
@@ -458,27 +469,20 @@ mv "$NEW/VCFs/hg38_mega" "$DATA/VCFs/"
 EOF
 ```
 
-For a container install, export the recipe's `RUN` prefix first (its header). Its last step,
-`verify_mega_chrom.py`, prints `ALL PASS` for every chromosome. The index it built is of its
-PAM; for another, run `build-index-only --pam <it>` on the data folder, which reuses the kit.
-Up to the integration review of 2.10.0 the messages named the recipe alone, and the recipe, run
-in the folder their removal left, refused its VCFs after it had made its staging folder
-(`.mega_rebuild_hg38_mega/prepared`) there. Up to the review of its fix (wave 1c-a), a search's
-note of windows too short named no removal of the kit in place, and these commands removed the
-VCFs, registry and indel frequencies alone: run from the state that note left, every move of
-the kit failed (`Directory not empty`), and `build-index-only` and every search then refused the
-dataset, its new INDELS index beside the old kit's indel logs. Up to the review of that fix,
-these commands ran on whatever failed before them, and took the PAM file from the data folder,
-which a 2.8.1 install's lacks: the recipe, refused for it, built nothing, and the removal took
-the dataset whole, the merged VCFs given as `SRC` among them; and the note named the indexes
-of the dataset in place when it was printed, so its own flow left those its search then built
-from the old kit, which a later search read. Up to wave 1c-b of 2.10.0 these commands were a
-subshell, `( set -eu ... )`, which a user in zsh ran in zsh, and they and the messages gave the
-dataset's indexes to `rm -rf` as patterns, which zsh expands itself: where one matched nothing
-(no index of the dataset of one kind, say), zsh stopped the whole command (`no matches found`)
-and removed nothing of it, where bash removed the rest; pasted into zsh, the comments of the
-block were words too. Each message's removal and these commands now do the same pasted into
-bash or into zsh.
+The recipe's last step, `verify_mega_chrom.py`, prints `ALL PASS` for every chromosome. The
+index it built is of its PAM; for another, run `build-index-only --pam <it>` on the data folder,
+which reuses the kit. The name patterns of the `find` take an index of up to 9 bulges of a type
+(`_[0-9]_`, as the messages' own removal does): one built with `--bDNA` or `--bRNA` of 9 or more
+(`_10_` and up), which no build of the web or of the README makes, is removed by hand. Each
+message's removal and these commands do the same pasted into bash or into zsh.
+
+**A message that says to remove the mega's enriched genome.** Where a search finds the mega's
+INDELS index incomplete, or of other windows than its indel logs, and the fake-indel genome
+(`Genomes/hg38+hg38_mega_INDELS`) is not in place while the dataset's VCFs are, its ERROR ends
+`Rebuild it: rm -rf ... <data>/Genomes/hg38+hg38_mega && crisprme.py build-index-only ...` (or
+`Rebuild them:`). For `hg38_mega` do not run it: `build-index-only` refuses the sites-only
+dataset (above), after that `rm` has removed its enriched genome. Put the kit back instead (its
+download, or the recipe above).
 
 ## 13. A build or a search says a fake-indel genome and its indel logs come from two enrichments
 
@@ -509,3 +513,53 @@ writes anew: the commands, which remove each of those parts by name once the rec
 the whole dataset, and change nothing in the data folder where it fails, are in section 12,
 "Building the mega's kit again" (they run in bash, pasted into bash or into zsh). The `rm -rf`
 of the messages, each path quoted, does the same in either shell.
+
+## 14. A search above 1 DNA + 1 RNA bulge warns, then runs for hours or runs out of memory
+
+**Symptom.** `complete-search` prints `WARNING [complete-search]: <m> mismatch(es) + <d> DNA +
+<r> RNA bulge(s) ... on a variant index that codes every allele (index format 2, CRISPRitz
+2.10.0). Above the 1 DNA + 1 RNA default, ...` (its `.Params.txt` keeps it, and its
+`log_verbose.txt` says it again, a web search's too); the search then runs for many hours, or is
+killed for memory (exit 137, an empty `log_error.txt`).
+
+**Cause.** The indexes of 2.10.0 code every allele of a split site, so the densest windows of
+the variant genome, in the immunoglobulin loci (IGL on chr22, IGH on chr14, IGK on chr2), spell
+millions of sequences, and each bulge beyond one of a type multiplies the alignments the search
+writes there: on IGL alone, at the default `--max-total-edits` of 6, 0.76 million SNP raw
+targets at 4 + 1 + 1 and 33.7 million at 4 + 2 + 2 (28 GB of memory), where the indel search
+wrote 204 million (157 GB). No step after the search removes that cost.
+
+**Fix.** Keep 1 DNA + 1 RNA bulge, the default, and raise `--mm` first for a wider search; or
+keep `--max-total-edits` at 3 or less, which bounds the alignments; or search the reference
+alone, or a chromosome that holds none of those loci. CRISPRme 2.10.1 is planned to search, in
+those regions, the samples' own haplotypes, indels included, in place of the variant genome's
+combinations (the haplotype scan); the indexes of 2.10.0 serve it as they are.
+
+## 15. A row that looks wrong: the known limits of 2.10.0
+
+Each is rare and changes no other row; [METHODS.md](../METHODS.md) §4 gives the rules behind
+them.
+
+- **A carrier listed for a SNP that its own target does not hold.** On an indel row, a carrier
+  whose haplotype holds a second indel that pushes one of the row's named SNPs out of the
+  target's bases is listed on the row all the same. On 1000 Genomes chr22, a per-sample search of
+  seven guides at 4 mismatches + 2 DNA + 2 RNA bulges lists one such carrier (NA20515, at VEGFA
+  site 1), and none of the 17 gate searches of 2.10.0 does. The haplotype scan planned for
+  2.10.1 reads each carrier's own bases.
+- **One target written as two rows, or twice, in a microsatellite.** In a tandem repeat that
+  holds a whole target, the merge places each row by its own bases, and the target's
+  alignments can fit different places of the repeat: they can then go to two rows, or the
+  target be written twice (in 10,000 trials of a model of microsatellites at 1 + 1 bulges and
+  `--merge` 3, 134 targets split and 15 were written twice). No row is lost or wrong, and no search
+  of real data checked has such a target. To be fixed in 2.10.1.
+- **An unphased carrier of two ALTs on a row that needs the reference there.** A carrier whose
+  call is unphased (`/`) is listed, PUTATIVE, on every subset of its variants a target can hold.
+  For a call of two ALTs at one position (`1/2`), that includes a row that needs the reference
+  base there, which its genotype rules out: both of its slots hold an ALT. The rows are the same
+  for a line of several ALTs and for its split form.
+- **On a classic install, an unphased carrier only on the row of all its variants.** A
+  per-sample search of an index built without `--samplesID` (a classic install, as the
+  benchmark `complete-test` builds its own) lists a carrier with an unphased call in a phased VCF
+  only on the row of all its variants of a window together, where a dict-less install lists it
+  on the row of each subset too. Build the index with `--samplesID`, or download a published
+  one.
