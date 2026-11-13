@@ -180,6 +180,13 @@ curl -sL https://raw.githubusercontent.com/bioconda/bioconda-recipes/master/reci
   | grep -E 'set version|sha256|number:'
 ```
 
+A release branch may have bumped the version already, before its release: 2.10.0 did, on
+`feat/2.10.0`, so that every index rebuilt for it records `crisprme 2.10.0` in the `built_by` of
+its `.index_meta.json`. Then `crisprme.py` and the header comments of the `Dockerfile`,
+`install_from_source.sh` and `environment.yml` read the new version, X.Y.Z, all four alike, and
+the latest tag and the recipe the previous one. That is consistent: step 2's helper reports
+`crisprme.py       already at X.Y.Z (no change)`, and its `sed` and the hand edits change nothing.
+
 ### 2. Bump the in-repo version pins
 
 Use the helper script, which edits only `crisprme.py` (it looks for an

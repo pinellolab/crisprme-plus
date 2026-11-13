@@ -90,6 +90,13 @@ git fetch -q origin main && git diff --name-status origin/main...HEAD -- 'test/b
 
 Expected before a release: `crisprme.py`, the header comments of the Dockerfile, `install_from_source.sh` and `environment.yml`, the latest tag, and the recipe all show the **previous** version, consistent with each other, and the Dockerfile's `crispritz_ref` (a CRISPRitz version, never CRISPRme's) equals `install_from_source.sh`'s `CRISPRITZ_REF` default. If they disagree, fix that first. **Do not proceed with inconsistent state.**
 
+A release branch may have bumped the version already, before the release: 2.10.0 did, on
+`feat/2.10.0`, so that every index rebuilt for it records `crisprme 2.10.0` in the `built_by` of
+its `.index_meta.json`. Then `crisprme.py` and the header comments of the Dockerfile,
+`install_from_source.sh` and `environment.yml` read the new version, X.Y.Z, all four alike, and
+the latest tag and the recipe the previous one. That is consistent: Step 1 reports
+"already at X.Y.Z", and its `sed` and hand edits change nothing (its `git diff` is empty).
+
 The last command must list no modified or deleted file: the Bioconda package of 2.8.1 runs its
 self-test on the inputs of `test/data` and against the brute-force references of
 `test/benchmark/brute-force-*`, all fetched from the main branch (the references checked by their
