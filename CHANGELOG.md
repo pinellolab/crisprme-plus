@@ -609,9 +609,13 @@ and the `release-crisprme` skill.
     list several ALTs at one position, where the run's dictionary keeps their raw numbers or
     has no dictionary to tell (their allele numbers are not told apart, METHODS section 4; a
     dictionary in CRISPRitz 2.10.0's split form is checked: see the checker entry under
-    Fixed), and a run of any release whose VCF holds there an SNV whose ALT is written in
-    lower case (CRISPRitz codes no lower-case ALT, while its dictionary lists the carriers:
-    read in upper case, the check demanded targets the search cannot find), the check
+    Fixed), and a run whose VCF holds there an SNV whose ALT is written in lower case on a
+    variant genome that does not code it (CRISPRitz 2.9.1 and earlier: an index of format 1,
+    or the run of an earlier CRISPRme; or a run whose enriched genome does not code it, an
+    engine before CRISPRitz 2.10.0's case rule), while its dictionary lists the carriers (read
+    in upper case, the check demanded targets the search cannot find), or whose run does not
+    tell (on an index of CRISPRitz 2.10.0, which reads REF and ALT in upper case and codes it,
+    such an SNV is checked as any: see the entry on lower case under Changed), the check
     stopping at the first work unit that meets such a position (it refused a run of two lines
     of several ALTs only once every unit had been checked, the whole check time of a
     genome-wide run),
@@ -1174,6 +1178,45 @@ and the `release-crisprme` skill.
   release is tested with (`docker-multiarch.yml`'s and `web-e2e.yml`'s image builds pass
   `crispritz_ref=` CRISPRitz pull request #47's head, c18c575); the release checklist removes
   those two lines once the tag is pushed.
+- **CRISPRitz 2.10.0 reads a VCF's REF and every ALT in upper case, as VCF 4.x does, and so do
+  CRISPRme's readers of the VCF itself** (its `docs/MULTIALLELIC_ENRICHMENT.md` §2.1, §2.9 and
+  §6.7; an ALT holding `<`, a symbolic allele, as written). Its enricher read them as written up
+  to 2.9.1: an SNV whose ALT is written in lower case was not coded, though its dictionary listed
+  the carriers, so their targets through it were never searched (lane C's world WLOW: two
+  carriers' perfect target, never reported), `C>G` and `c>g` at one position were two alleles,
+  and the indel log and the fake-indel windows kept the VCF's case. Now such an SNV is coded and
+  searched as any other, two records of one REF>ALT in two cases are one allele (one dictionary
+  entry with the carriers of both), and the dictionary, the indel log and the fake-indel windows
+  name every record in upper case. CRISPRme's readers of the VCF read it so too:
+  - the mega recipe (`mega_rebuild.sh`): its registry (`build_mega_registry.py`) holds a SNP ALT
+    written in lower case as its upper case, which the genome codes (it held no such ALT), and
+    merges `C>G` with `c>g`; its build input (`prepare_mega_build_vcf.py`) keeps one record of a
+    REF>ALT written in two cases, where it kept both (the enricher would write two log rows of
+    one allele); its checks (`verify_mega_chrom.py`) read the source VCF in upper case, as the
+    log names every record, and find a REF>ALT on two records of the build input in two cases.
+    The mega's merged VCFs hold 13 deletions written in mixed case, on chr3, chr4, chr5, chr10,
+    chr12, chr18 and chr21: with CRISPRitz 2.10.0 the recipe failed its checks on each of those
+    seven chromosomes ("indel log alleles ...: N more, N missing"), and passes;
+  - the real-data checker (`scripts/check_indel_rows.py`) checks an SNV whose ALT is written in
+    lower case on an index of CRISPRitz 2.10.0 (format 2), which it refused on every release,
+    and still refuses a run whose VCF holds one near what it checks on a genome that does not
+    code it (an index of format 1, a run of an earlier CRISPRme, or one whose enriched genome,
+    where its working directory holds it, does not code it: an engine before this rule) or
+    whose run does not tell;
+  - the input validator's full scan (`validate_inputs.py`) keys every REF>ALT in upper case in
+    its survey of repeated REF>ALTs, which keyed an SNV's ALT as written, and no longer warns
+    that an SNV ALT written in lower case is not coded.
+  CRISPRme's readers of the engine's dictionary and stores are unchanged: a dictionary of
+  CRISPRitz 2.10.0 holds no lower-case allele, and on an index of an earlier CRISPRitz they read
+  a lower-case ALT, which its genome does not hold, as no allele (`site_alleles.read_records`,
+  `indel_snp_cis.parse_dict_value`, the Tier-0 and Tier-1 compiles). The published panels hold
+  no SNV written in lower case (HGDP + 1000 Genomes 6 deletions, on chr1, chr2, chr10, chr17 and
+  chr21; the mega 13; HPRC, normalised as CRISPRme builds it, 108,178 indel and MNV records): on
+  them only the indel log's rows and the fake-indel genome's bases of those records change, to
+  upper case, and every index, dictionary and store is the same (measured in CRISPRitz's
+  MULTIALLELIC §2.9). Covered by `PostProcess/test_build_mega_registry.py`,
+  `test_build_mega_indel_af.py`, `test_prepare_mega_build_vcf.py`, `test_mega_rebuild.py`,
+  `test_check_indel_rows.py` and `test_validate_inputs.py` (each fails on the code before it).
 - **The fake-indel window is 30 reference bases on either side of an indel (CRISPRitz 2.10.0; 25
   before and 27 after up to 2.9.1), and every reader takes each window's width from its own
   indel log row.** A target of L bases (guide and PAM) with b DNA bulges holds an indel's change
@@ -1589,11 +1632,8 @@ and the `release-crisprme` skill.
   every run now does among a VCF's first 1,000 records. The survey of records that repeat a
   REF>ALT reads an indel's or MNV's REF and ALT in upper case, as CRISPRme reads them (HPRC chr22:
   179 indels on two lines, of which 140 in two cases, which it compared as written and counted
-  none of), and an SNV's REF in upper case and its ALT as written, as CRISPRme's readers of the
-  dictionary read them (C>G beside c>G, which it counted none of either); and the full scan
-  warns of an SNV whose ALT is written in lower case, which CRISPRitz does not code (so it is never
-  searched, though its dictionary lists the carriers), with an `awk` line that writes REF and ALT
-  in upper case (none in the published panels' chr22).
+  none of), and an SNV's REF and ALT in upper case too, as CRISPRitz 2.10.0 reads them (C>G beside
+  c>g, which it counted none of either: see the entry on lower case under Changed).
   `gnomAD-converter --multiallelic` says, in its help, on stdout and in
   the README, what it writes: a position's SNP records joined into one line and its indel records
   into another (`bcftools norm -m+`), with the converter's genotypes, which are unphased (`1/2`),
@@ -1881,12 +1921,13 @@ and the `release-crisprme` skill.
     go from 15702, 15703 and 15704 to 15699.
 - **The mega's registry and indel frequencies read the records as CRISPRitz 2.10.0's enricher
   reads them.** `build_mega_registry.py` and `build_mega_indel_af.py` read every record of the VCF
-  whatever its FILTER, the registry upper-cased a one-base lower-case ALT into a SNP, the indel
+  whatever its FILTER, the indel
   frequencies took a `*` over a one-base REF for an indel, and of one REF>ALT on two records the
   registry kept both and the indel frequencies each source's highest. They now read what the
-  enricher reads (`build_mega_registry.read_as_enricher`): FILTER `PASS` or `.`; a SNP allele is
-  an upper-case A, C, G or T over a REF of one base, each ALT of a line with its own frequencies
-  and ID (a `*`, an `N` or a lower-case base is coded by no one and in no store); an indel-path
+  enricher reads (`build_mega_registry.read_as_enricher`): FILTER `PASS` or `.`; REF and ALT in
+  upper case, as CRISPRitz 2.10.0 reads them (see the entry on lower case under Changed); a SNP
+  allele is an A, C, G or T over a REF of one base, each ALT of a line with its own frequencies
+  and ID (a `*` or an `N` is coded by no one and in no store); an indel-path
   allele is one the enricher windows (an MNV too, none within the window's left flank of the
   chromosome's start, 31 bases with CRISPRitz 2.10.0's window of 30/30, 26 with 2.9.1's 25/27:
   `--log-dir` reads it from the indel log the build wrote, where up to review r1 of lane M it was
@@ -2877,7 +2918,8 @@ and the `release-crisprme` skill.
   the windows hold one sequence (it writes the ALT in place of the REF whatever their case, and the
   search reads the window in upper case). CRISPRme named each window's rows as the log does, and
   its readers of the phased indel store keyed each line as written. So two lines of one indel in
-  two cases (HPRC's `vcfwave` writes 140 indels of chr22 so, chr22:23541792 TG>T beside tg>t) were
+  two cases (HPRC chr22, normalised as CRISPRme builds it against the soft-masked reference,
+  writes 140 indels so, chr22:23541792 TG>T beside tg>t) were
   two records: each window's rows listed its own line's carriers, and the carriers of one target
   were split over two rows named in two cases (8,755 carrier listings on one of the two lines
   only, 917 carriers on both), which the real-data check, reading the two
@@ -2897,12 +2939,12 @@ and the `release-crisprme` skill.
   two windows' rows into one, which gives the ID and the frequency of each line, as it does for two
   lines written alike. A row of an indel written in lower case names it in upper case, in
   `Variant_info_genome` and `Variant_info_spacer+PAM` (`chr22_36126395_CCCTCTCCCTCCTTTCCTTCCTT_C`,
-  which 2.8.1 wrote `chr22_36126395_ccctctccctcctttcctTCCTT_c`). An SNV's row names it as its
-  VCF line writes it (the first, of two lines of one allele); CRISPRme's readers of the dictionary
-  read its REF in upper case and its ALT as written (Changed, B2); one whose ALT is written in
-  lower case is not coded by CRISPRitz and is never searched: the
-  input validator's full scan warns of it (above), and the real-data check refuses a run whose VCF
-  holds one (none in the published panels' chr22). The review's world WDC (WD with one of its
+  which 2.8.1 wrote `chr22_36126395_ccctctccctcctttcctTCCTT_c`). An SNV's row names it as the
+  run's dictionary writes it (the first line, of two lines of one allele): in upper case on an
+  index of CRISPRitz 2.10.0, which reads REF and ALT so and codes an SNV ALT written in lower
+  case, as its VCF line writes it on an earlier one, which codes none; CRISPRme's readers of the
+  dictionary read its REF in upper case and its ALT as written (Changed, B2, and the entry on
+  lower case there). The review's world WDC (WD with one of its
   deletion's two lines in lower case) now gives WD's rows exactly, and the check 0 gating findings in
   both modes; the fresh two-guide per-sample HPRC search gives 18, none at a two-case pair: all are
   an MNV on a carrier's slot, which CRISPRme does not read beside a record (6 sites, 3 blocks each;
@@ -2943,17 +2985,21 @@ and the `release-crisprme` skill.
   `--samplesID`). Where an indel's fake-indel window holds a SNP code, the indel path reads
   each carrier's SNP alleles from the Tier-1 store, keeping the ALTs A, C, G and T, or on a
   classic install from the per-sample dictionary (`indel_snp_cis.parse_dict_value`), which
-  read the ALT in upper case. CRISPRitz codes no ALT written in lower case but lists it in its
-  dictionary, so a line C>g beside C>G at one position was read as a second line of G: its
+  read the ALT in upper case. CRISPRitz 2.9.1 (and 2.10.0 before its case rule) codes no ALT
+  written in lower case but lists it in its dictionary, so a line C>g beside C>G at one position
+  was read as a second line of G: its
   carriers were listed on targets of G that their genome does not hold, and G took the ID and
   AF of the more frequent of the two lines. On the review's world WLOWALT (a deletion whose
   target C>G makes perfect, the line C>G and the line C>g each with two carriers; S05 holds the
   deletion on both slots and g on the first) a classic install listed S01 and S05 on the
   deletion's CFD-1.0 row, and a Tier-1 install S01 alone; the reader now keeps the ALT as
   written, which its base filter drops as the Tier-1 path does, and both installs list S01
-  alone, their rows the same. The real-data check refuses a run whose VCF holds an SNV ALT in
-  lower case (above), so it judged no such row. No published panel's chr22 holds an SNV whose
-  ALT is written in lower case (HGDP + 1000 Genomes, HPRC and mega). Covered by
+  alone, their rows the same. On an index of CRISPRitz 2.10.0, which reads REF and ALT in upper
+  case, the dictionary holds the one entry C,G with the carriers of both lines, and both installs
+  list S01 and S05, as the VCF gives (Changed, the entry on lower case). The real-data check
+  refuses a run whose VCF holds an SNV ALT in lower case on a genome that does not code it
+  (above), so it judged no such row there. No published panel holds an SNV whose ALT is written
+  in lower case (HGDP + 1000 Genomes, HPRC and mega). Covered by
   `PostProcess/test_site_alleles.py` and `test_indel_overlaid_rows.py` (the real
   `analisi_indels_NNN.py` on a Tier-1 and a classic install of that world).
 - **An indel row whose first base is one an insertion adds is placed at the insertion**

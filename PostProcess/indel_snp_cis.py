@@ -326,9 +326,11 @@ def record_name(name):
     indel log writes it, with REF and ALT in upper case (split from the right: a contig
     name can hold '_'). VCF 4.x reads REF and ALT whatever their case, and so does the
     fake-indel window (CRISPRitz writes the ALT in place of the REF, and the search reads
-    the window in upper case), while the log keeps the VCF's text: HPRC's vcfwave writes
-    1,546 indel records of chr22 in lower case, 140 of them beside a line of the same
-    indel in upper case (chr22:23541792 TG>T and tg>t). Named as written, such two lines
+    the window in upper case); CRISPRitz 2.10.0 writes the log in upper case too (its
+    enricher reads REF and ALT so), while one of 2.9.1 or earlier (or of 2.10.0 before that
+    rule) keeps the VCF's text: HPRC chr22, normalised as CRISPRme builds it, writes 1,546
+    indel records in lower case, 140 of them beside a line of the same indel in upper case
+    (chr22:23541792 TG>T and tg>t). Named as written, such two lines
     were two records, the carriers of one target split over two rows; named so, they are
     one, as two lines of one indel written alike are (the merge folds their rows, and the
     readers of the phased indel store merge their carriers:
@@ -1316,10 +1318,13 @@ def parse_dict_value(value):
     lists, a '*' too (the Tier-1 store's compile, tier0_compile.iter_dict_records, reads
     them so: a carrier of the '*' alone tells its index); malformed entries are
     skipped. The REF is read in upper case (C>G beside c>G, which CRISPRitz codes alike,
-    is one allele) and the ALT as written, as the Tier-1 compile reads them: CRISPRitz
-    codes no ALT written in lower case, so C>g is no allele of the genome and the base
-    filter drops it, as the Tier-1 path keeps only ACGT alts (read in upper case, its
-    carriers were read as carriers of G)."""
+    is one allele) and the ALT as the dictionary writes it, as the Tier-1 compile reads
+    them. CRISPRitz 2.10.0 reads REF and ALT in upper case as it reads the VCF, so its
+    dictionary holds no lower-case allele (c>g is the entry C,G, coded); one of CRISPRitz
+    2.9.1 or earlier (or of 2.10.0 before that rule) lists C>g as an entry of g, an ALT its
+    genome does not code, so it is no allele of the genome and the base filter drops it,
+    as the Tier-1 path keeps only ACGT alts (read in upper case, its carriers were read as
+    carriers of G)."""
     out = []
     for entry in str(value).split("$"):
         parts = entry.split(";")

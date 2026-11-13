@@ -5,8 +5,11 @@ the alleles CRISPRitz 2.10.0's enricher reads from the merged VCF, with its freq
 and, given them, the indel log, the enriched genome and the build input agree.
 
 What the enricher reads (its docs/MULTIALLELIC_ENRICHMENT.md, re-derived here, not taken
-from build_mega_registry.py, which this checks): the records whose FILTER is PASS or '.';
-a SNP allele is an ALT of one upper-case A, C, G or T over a REF of one base; an indel-path
+from build_mega_registry.py, which this checks): the records whose FILTER is PASS or '.',
+their REF and every ALT read in upper case (VCF 4.x; CRISPRitz 2.10.0 upper-cases them as
+it reads a line, so its indel log names a record in upper case: an ALT holding '<', a
+symbolic allele, as written); a SNP allele is an ALT of one A, C, G or T over a REF of one
+base; an indel-path
 allele is one of a record whose REF or ALT is longer than one base, of another length or
 both longer than one base, not symbolic, at POS LEFT or more (a window from the chromosome's
 start: LEFT the window's left flank, 31 with the 30/30 window of CRISPRitz 2.10.0's enricher,
@@ -136,12 +139,19 @@ def _rank(info, k, n):
     return mx if mx is not None else 0.0
 
 
+def _alleles(ref, alt_field):
+    """REF and the ALTs of a record as the enricher reads them (CRISPRitz 2.10.0): in upper
+    case, an ALT holding '<' (a symbolic allele) as written."""
+    return ref.upper(), [a if "<" in a else a.upper() for a in alt_field.split(",")]
+
+
 def read_source(vcf, left=LEFT):
     """({(pos, REF, ALT): (afs, af_max)} of the SNP alleles, the same of the indel-path
     alleles, the number of PASS/'.' records, the number of them the build input keeps), as
-    the enricher reads the VCF: one record of each REF>ALT, the more frequent (_rank),
-    gives the allele's frequencies, and a record is left out when another one has each of
-    its ALTs; ``left``, the enricher's left flank (no window of an indel at POS < left)."""
+    the enricher reads the VCF (REF and ALT in upper case, _alleles): one record of each
+    REF>ALT, in one case or in two, the more frequent (_rank), gives the allele's
+    frequencies, and a record is left out when another one has each of its ALTs; ``left``,
+    the enricher's left flank (no window of an indel at POS < left)."""
     best = {}     # (pos, REF, ALT) -> (rank, record, k, ALTs of the record, INFO)
     alleles = []  # the (pos, REF, ALT) of each PASS/'.' record's ALTs, in record order
     with gzip.open(vcf, "rt") as fh:
@@ -151,7 +161,8 @@ def read_source(vcf, left=LEFT):
             f = line.rstrip("\n").split("\t")
             if len(f) < 8 or f[6] not in _PASS:
                 continue
-            pos, ref, alts, info = int(f[1]), f[3], f[4].split(","), f[7]
+            pos, info = int(f[1]), f[7]
+            ref, alts = _alleles(f[3], f[4])
             keys = []
             for k, a in enumerate(alts):
                 key = (pos, ref, a)
@@ -220,7 +231,10 @@ def check_enriched(enr_path, ref_path, snps, errs):
 
 
 def check_log(log_dir, chrom, indels, errs):
-    """The indel log against the indel-path alleles: one row each, no sample, AF_max."""
+    """The indel log against the indel-path alleles: one row each, no sample, AF_max. A row
+    is keyed by its text, which CRISPRitz 2.10.0 writes in upper case, as the alleles are
+    read (read_source): a log naming a record as its VCF writes it, in lower case (an
+    enricher before 2.10.0's case rule), names an allele the VCF does not hold."""
     path = None
     for name in ("log%s.txt.gz" % chrom, "log%s.txt" % chrom):
         if os.path.isfile(os.path.join(log_dir, name)):
@@ -267,7 +281,8 @@ def check_log(log_dir, chrom, indels, errs):
 
 def check_build_vcf(path, n_build, errs):
     """The build input: ``n_build`` records (the source's PASS/'.' ones, one of each
-    REF>ALT), every one PASS or '.', INFO/AF its AF_max, and no REF>ALT on two of them."""
+    REF>ALT), every one PASS or '.', INFO/AF its AF_max, and no REF>ALT on two of them, in
+    one case or in two (_alleles: the enricher would window both)."""
     if not os.path.isfile(path):
         errs.append("no build input %s" % path)
         return
@@ -284,8 +299,9 @@ def check_build_vcf(path, n_build, errs):
                 if bad <= 3:
                     errs.append("build input %s:%s FILTER %s AF %s AF_max %s" % (
                         f[0], f[1], f[6], kv.get("AF"), kv.get("AF_max")))
-            for a in f[4].split(","):
-                key = (f[1], f[3], a)
+            ref, alts = _alleles(f[3], f[4])
+            for a in alts:
+                key = (f[1], ref, a)
                 twice += key in seen
                 seen.add(key)
     if n != n_build:

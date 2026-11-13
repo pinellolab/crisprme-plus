@@ -135,6 +135,56 @@ class TestPrepare(unittest.TestCase):
                          [("45918284", deletion, "A"), ("45918400", "G", "GTT"),
                           ("45918500", "T", "TA"), ("45918501", "T", "TA")])
 
+    def test_a_record_differing_from_another_only_by_case_is_one_allele(self):
+        """CRISPRitz 2.10.0 reads REF and every ALT in upper case, as VCF 4.x does (its
+        docs/MULTIALLELIC_ENRICHMENT.md sections 2.1 and 2.3): a deletion written CTT>C on
+        one line and ctt>c on another is one allele, which the enricher would window twice
+        (two log rows of one allele: the recipe's check fails), and an SNV written C>G and
+        c>g is one dictionary entry. The build input keeps one record of each, the more
+        frequent, written as the input has it (the enricher upper-cases it); a line of
+        several ALTs loses only the one another line has in another case. Keyed as written,
+        both records of each stayed."""
+        rows = [
+            "chr21	1000	.	CTT	C	.	PASS	AF_gnomAD=0.01;AF_max=0.01",
+            "chr21	1000	.	ctt	c	.	PASS	AF_gnomAD=0.02;AF_max=0.02",
+            "chr21	1100	rs1	C	G	.	PASS	AF_HGDP=0.3;AF_max=0.3",
+            "chr21	1100	rs2	c	g	.	.	AF_HGDP=0.1;AF_max=0.1",
+            "chr21	1200	.	A	g,AT	.	PASS	AF_HGDP=0.05,0.2;AF_max=0.05,0.2",
+            "chr21	1200	.	A	G	.	PASS	AF_HGDP=0.4;AF_max=0.4",
+            # a symbolic allele is an ID, read as written: two alleles
+            "chr21	1300	.	A	<DEL>	.	PASS	AF_HGDP=0.1;AF_max=0.1",
+            "chr21	1300	.	a	<del>	.	PASS	AF_HGDP=0.1;AF_max=0.1",
+        ]
+        with gzip.open(self.inp, "wt") as fh:
+            fh.write(HEADER.replace("#CHROM", '##INFO=<ID=AF_HGDP,Number=A,Type=Float,'
+                                              'Description="x">\n#CHROM')
+                     + "\n".join(rows) + "\n")
+        out = os.path.join(self.d, "build.vcf")
+        stats = pm.prepare(self.inp, out)
+        body = [l.split("\t") for l in self.read(out) if not l.startswith("#")]
+        self.assertEqual([(r[1], r[2], r[3], r[4], r[7]) for r in body], [
+            ("1000", ".", "ctt", "c", "AF_gnomAD=0.02;AF_max=0.02;AF=0.02"),
+            ("1100", "rs1", "C", "G", "AF_HGDP=0.3;AF_max=0.3;AF=0.3"),
+            ("1200", ".", "A", "AT", "AF_HGDP=0.2;AF_max=0.2;AF=0.2"),
+            ("1200", ".", "A", "G", "AF_HGDP=0.4;AF_max=0.4;AF=0.4"),
+            ("1300", ".", "A", "<DEL>", "AF_HGDP=0.1;AF_max=0.1;AF=0.1"),
+            ("1300", ".", "a", "<del>", "AF_HGDP=0.1;AF_max=0.1;AF=0.1"),
+        ])
+        self.assertEqual((stats["collapsed"], stats["alts_collapsed"], stats["kept"]),
+                         (2, 1, 6))
+        # every store then reads one record of each allele, in upper case
+        import build_mega_registry as bmr
+        st = {}
+        self.assertEqual([r[:3] for r in bmr.read_as_enricher(out, "indel", {"gnomAD"},
+                                                              stats=st)],
+                         [(1000, "CTT", "C")])
+        self.assertEqual(st["merged"], 0)
+        st = {}
+        self.assertEqual(sorted(r[:3] for r in bmr.read_as_enricher(out, "snp", {"HGDP"},
+                                                                    stats=st)),
+                         [(1100, "C", "G"), (1200, "A", "G")])
+        self.assertEqual(st["merged"], 0)
+
     def test_a_record_without_af_max_gets_the_one_its_sources_give(self):
         """The as-run merge declares AF_max and writes it on none of chrY's records (its
         177,968 PASS records; every other chromosome has it on all): with no AF_max the build

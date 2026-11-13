@@ -13,23 +13,29 @@ nothing else (``read_as_enricher``):
 
   * a record whose FILTER is neither ``PASS`` nor ``.`` is skipped whole (the enricher
     skips the line), its ALTs counted (``filtered``);
-  * a SNP allele is an ALT that is one upper-case A, C, G or T of a record whose REF is
-    one base: the bases the enricher codes (its ``_BASE_BIT``). Every such ALT of a
-    record listing several is read, each with its own AF (``AF_<dataset>`` is
+  * its REF and every ALT are read in upper case, as VCF 4.x reads them and as the
+    enricher reads them since CRISPRitz 2.10.0 (its docs/MULTIALLELIC_ENRICHMENT.md
+    sections 2.1 and 2.9): ``c>g`` is the allele ``C>G``, coded and held as ``G``; an ALT
+    holding ``<`` (a symbolic allele) is kept as written (``iter_records``);
+  * a SNP allele is an ALT that is one A, C, G or T, in either case, of a record whose
+    REF is one base: the bases the enricher codes (its ``_BASE_BIT``). Every such ALT of
+    a record listing several is read, each with its own AF (``AF_<dataset>`` is
     Number=A) and ID. A one-character ALT it does not code -- the ``*`` of a spanning
-    deletion, an ``N``, a lower-case base, a symbolic allele -- is in no store
-    (``not_coded``);
+    deletion, an ``N``, a symbolic allele -- is in no store (``not_coded``);
   * an indel-path ALT (a REF or ALT longer than one base: an indel, or an MNV, which the
     enricher puts in a fake-indel window) goes to the fake-indel path and to the indel
     frequencies of ``build_mega_indel_af.py`` (``indels``);
-  * one REF>ALT on two records is one allele, as the enricher merges it into one
-    dictionary entry: the entry takes the frequencies (and ID) of the more frequent
-    record -- the higher ``INFO/AF``, found by its key (exactly ``AF``), a missing or
-    non-numeric one counting 0; on a tie, the earlier record (``merged``).
+  * one REF>ALT on two records, in one case or in two (``C>G`` beside ``c>g``), is one
+    allele, as the enricher merges it into one dictionary entry: the entry takes the
+    frequencies (and ID) of the more frequent record -- the higher ``INFO/AF``, found by
+    its key (exactly ``AF``), a missing or non-numeric one counting 0; on a tie, the
+    earlier record (``merged``).
 
-Up to CRISPRme 2.8.1 the registry read every record of the VCF whatever its FILTER,
-and kept a one-base lower-case ALT (upper-cased): the shipped mega's registry lists
-2,442,989 SNVs outside PASS that its genome never coded, and its SNP rows named some.
+Up to CRISPRme 2.8.1 the registry read every record of the VCF whatever its FILTER: the
+shipped mega's registry lists 2,442,989 SNVs outside PASS that its genome never coded, and
+its SNP rows named some. It read a one-base lower-case ALT upper-cased, as this release
+does, an allele CRISPRitz 2.9.1 did not code (none of the mega's 13 records written in
+lower case is an SNV: each is a deletion, read by the indel path).
 
 The VCF is parsed with a dependency-free streaming gzip reader (only the 8 fixed
 columns + INFO are needed), so this module imports and unit-tests without pysam.
@@ -117,9 +123,10 @@ def _alt_ids(vid, n_alts):
 # The FILTER values of the lines the enricher reads: any other line is skipped whole
 # (`if line[6] not in ('PASS', '.')`), so nothing of it is coded, listed or windowed.
 PASS_FILTERS = ("PASS", ".")
-# The SNP ALTs the enricher codes into the genome: one upper-case base (its _BASE_BIT).
-# A one-character ALT that is not one of them (the '*' of a spanning deletion, an 'N',
-# a lower-case base) adds nothing to the code.
+# The SNP ALTs the enricher codes into the genome: one base (its _BASE_BIT), read in upper
+# case (iter_records upper-cases every ALT, as the enricher does since CRISPRitz 2.10.0). A
+# one-character ALT that is not one of them (the '*' of a spanning deletion, an 'N') adds
+# nothing to the code.
 CODED_BASES = ("A", "C", "G", "T")
 # A plain decimal number, the only AF string the enricher ranks (its _AF_NUMBER): 'nan',
 # 'inf', '1_000' or a list are not one and rank 0.
@@ -128,8 +135,9 @@ _AF_NUMBER = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]
 
 def snp_alleles(ref, alts):
     """[(k, ALT)] of the SNP alleles the enricher codes on a record of REF ``ref`` and
-    ALTs ``alts`` (k: the ALT's index on the line, from 0): a REF of one base, an ALT of
-    one upper-case A, C, G or T (SNPsProcess: a longer REF codes nothing)."""
+    ALTs ``alts`` (k: the ALT's index on the line, from 0), as iter_records reads them, in
+    upper case: a REF of one base, an ALT of one A, C, G or T (SNPsProcess: a longer REF
+    codes nothing)."""
     if len(ref) != 1:
         return []
     return [(k, a) for k, a in enumerate(alts) if a in CODED_BASES]
@@ -165,7 +173,9 @@ def af_rank(info, k=0, n_alts=1):
 def iter_records(path, chrom=None):
     """Yield ``(pos, id, ref, [alts], filter, info)`` for each data line of a VCF
     (plain or gzipped; the 8 fixed columns are all that is read). ``chrom`` (optional)
-    restricts to one contig."""
+    restricts to one contig. REF and every ALT are yielded in upper case, as VCF 4.x
+    reads them and as CRISPRitz 2.10.0's enricher reads them (its _upper_allele), an ALT
+    holding ``<`` (a symbolic allele) as written."""
     opener = gzip.open if path.endswith(".gz") else open
     with opener(path, "rt") as fh:
         for line in fh:
@@ -177,7 +187,8 @@ def iter_records(path, chrom=None):
             c, pos, vid, ref, alt, _qual, filt, info = f[:8]
             if chrom is not None and c != chrom:
                 continue
-            yield int(pos), vid, ref, alt.split(","), filt, info
+            yield (int(pos), vid, ref.upper(),
+                   [a if "<" in a else a.upper() for a in alt.split(",")], filt, info)
 
 
 def read_as_enricher(path, kind, datasets, chrom=None, stats=None):
@@ -240,8 +251,9 @@ def read_as_enricher(path, kind, datasets, chrom=None, stats=None):
 def iter_vcf_af_records(path, datasets, chrom=None, stats=None):
     """Yield ``(pos, ref, alt, rsid, af_by_dataset)`` for each SNP allele of a sites-only
     merged VCF that CRISPRitz's enricher codes, read as it reads them
-    (read_as_enricher): FILTER PASS or '.', an upper-case A, C, G or T over a REF of
-    one base, one REF>ALT on two records merged into the more frequent one. Each ALT of
+    (read_as_enricher): FILTER PASS or '.', REF and ALT in upper case, an A, C, G or T
+    over a REF of one base, one REF>ALT on two records (in one case or in two) merged
+    into the more frequent one. Each ALT of
     a record listing several is read with its own AF (the k-th of each ``AF_<label>``
     list) and ID (``_alt_ids``). ``stats``: read_as_enricher's counts."""
     for rec in read_as_enricher(path, "snp", datasets, chrom=chrom, stats=stats):
@@ -280,9 +292,10 @@ def build(vcf, chrom, out_dir, dataset_meta=None, compress=False):
 
 # The manifest's account of which VCF records the registry holds (a registry of CRISPRme
 # 2.8.1 or earlier, which read every record, has no such key).
-VCF_RECORDS_READ = ("FILTER PASS or '.'; the SNP ALTs CRISPRitz 2.10.0 add-variants codes "
-                    "(an upper-case A, C, G or T over a REF of one base); one REF>ALT on two "
-                    "records merged into the more frequent one (INFO/AF)")
+VCF_RECORDS_READ = ("FILTER PASS or '.'; REF and ALT read in upper case; the SNP ALTs "
+                    "CRISPRitz 2.10.0 add-variants codes (an A, C, G or T, in either case, "
+                    "over a REF of one base); one REF>ALT on two records, in one case or in "
+                    "two, merged into the more frequent one (INFO/AF)")
 
 
 def main(argv=None):

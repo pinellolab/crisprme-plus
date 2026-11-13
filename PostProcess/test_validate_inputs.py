@@ -1413,11 +1413,10 @@ class TestCheckVcfFullScan(unittest.TestCase):
             self.assertIn("tg>t beside TG>T is one allele", issues[0].message)
 
     def test_an_snv_whose_ref_is_written_in_two_cases_is_one_ref_alt(self):
-        """C-R2-2: CRISPRitz codes C>G and c>G alike but lists them as two entries of G in
-        its dictionary, which CRISPRme's readers read as one allele, the REF in upper case:
-        the survey counts such lines as one REF>ALT, as two lines written alike. It compared
-        an SNV as written and counted none. An ALT in lower case is not coded (warned
-        apart), so C>g is another REF>ALT here."""
+        """C-R2-2: two lines C>G and c>G are one allele (the input validator compared an
+        SNV as written and counted none); since CRISPRitz 2.10.0 reads REF and ALT in upper
+        case, as VCF 4.x does, so is A>T beside A>t, which it counted as another REF>ALT
+        (an ALT in lower case was not coded, and warned apart)."""
         with tempfile.TemporaryDirectory() as tmp:
             records = [
                 vcf_record(pos=100, ref="C", alt="G", samples=("1|0",)),
@@ -1425,36 +1424,58 @@ class TestCheckVcfFullScan(unittest.TestCase):
                 vcf_record(pos=200, ref="A", alt="T", samples=("1|0",)),
                 vcf_record(pos=200, ref="A", alt="t", samples=("0|1",)),
             ]
-            issues = [i for i in self._other_than_multi_alt(self._scan(tmp, records))
-                      if "in lower case" not in i.message]
+            issues = self._other_than_multi_alt(self._scan(tmp, records))
             self.assertEqual(len(issues), 1, issues)
-            self.assertIn("1 record(s) repeat the REF>ALT of an earlier record at their "
-                          "position (e.g. chr1:100 C>G; 2 position(s) hold more than one "
-                          "record)", issues[0].message)
-            self.assertIn("an SNV's REF too (c>G beside C>G is one allele)", issues[0].message)
+            self.assertIn("2 record(s) repeat the REF>ALT of an earlier record at their "
+                          "position (e.g. chr1:100 C>G, chr1:200 A>T; 2 position(s) hold "
+                          "more than one record)", issues[0].message)
+            self.assertIn("and so is c>g beside C>G", issues[0].message)
 
-    def test_an_snv_whose_alt_is_in_lower_case_warns(self):
-        """The sweep of C-R1-1: CRISPRitz codes no lower-case ALT (a lower-case ALT is not
-        a SNP ALT, its docs/MULTIALLELIC_ENRICHMENT.md section 2.1), so an SNV written so is
-        never searched, though its dictionary lists the carriers: warned, with the way to
-        write the VCF in upper case. Nothing said so. A lower-case REF with an upper-case
-        ALT is coded (the enricher reads the reference's base), and a line whose FILTER the
-        enricher skips is read by nothing."""
+    def test_an_snv_whose_alt_is_in_lower_case_is_read_as_its_upper_case(self):
+        """The sweep of C-R1-1 warned that CRISPRitz codes no lower-case ALT (so an SNV
+        written so was never searched, though its dictionary listed the carriers). CRISPRitz
+        2.10.0 reads REF and every ALT in upper case, as VCF 4.x does (its
+        docs/MULTIALLELIC_ENRICHMENT.md sections 2.1 and 2.9): such an SNV is coded and
+        searched, and the warning, which was no longer true, is gone. Nothing else is said
+        of these records."""
         with tempfile.TemporaryDirectory() as tmp:
             records = [
                 vcf_record(pos=100, ref="C", alt="t", samples=("1|0",)),
                 vcf_record(pos=200, ref="c", alt="T", samples=("1|0",)),
-                vcf_record(pos=300, ref="A", alt="G,c", samples=("1|2",)),
+                vcf_record(pos=300, ref="A", alt="G,c", info="AF=0.1,0.2", samples=("1|2",)),
                 vcf_record(pos=400, ref="A", alt="g", filt="LowQual", samples=("1|0",)),
+                vcf_record(pos=500, ref="g", alt="a", samples=("0|1",)),
             ]
             issues = self._other_than_multi_alt(self._scan(tmp, records))
-            warned = [i for i in issues if "in lower case" in i.message]
-            self.assertEqual(len(warned), 1, issues)
-            self.assertEqual(warned[0].severity, vi.WARN)
-            self.assertIn("2 SNV record(s) write an ALT in lower case (e.g. chr1:100 C>t, "
-                          "chr1:300 A>G,c)", warned[0].message)
-            self.assertIn("never searched", warned[0].message)
-            self.assertIn("toupper($5)", warned[0].message)
+            self.assertEqual(issues, [])
+            self.assertFalse(any("lower case" in i.message
+                                 for i in self._scan(tmp, records)), issues)
+
+    def test_a_ref_alt_is_keyed_whatever_its_case(self):
+        """CRISPRitz 2.10.0 reads REF and every ALT in upper case: an SNV written C>G on one
+        line and c>g on another is one allele (one dictionary entry, the carriers merged),
+        as an indel written TG>T and tg>t is, and as an ALT of a line listing several is
+        (A>G,c beside A>C): the survey of repeated REF>ALTs counts each such line, naming
+        the allele in upper case. An ALT holding '<' (a symbolic allele) is an ID, read as
+        written: <DEL> beside <del> is no repeat. Keyed with the SNV's ALT as written, the
+        survey counted only the indel."""
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [
+                vcf_record(pos=100, ref="C", alt="G", samples=("1|0",)),
+                vcf_record(pos=100, ref="c", alt="g", samples=("0|1",)),
+                vcf_record(pos=200, ref="A", alt="C", samples=("1|0",)),
+                vcf_record(pos=200, ref="A", alt="G,c", info="AF=0.1,0.2", samples=("0|1",)),
+                vcf_record(pos=300, ref="TG", alt="T", samples=("1|0",)),
+                vcf_record(pos=300, ref="tg", alt="t", samples=("0|1",)),
+                vcf_record(pos=400, ref="A", alt="<DEL>", samples=("1|0",)),
+                vcf_record(pos=400, ref="a", alt="<del>", samples=("0|1",)),
+            ]
+            issues = [i for i in self._other_than_multi_alt(self._scan(tmp, records))
+                      if "symbolic ALT" not in i.message]
+            self.assertEqual(len(issues), 1, issues)
+            self.assertIn("3 record(s) repeat the REF>ALT of an earlier record at their "
+                          "position (e.g. chr1:100 C>G, chr1:200 A>C, chr1:300 TG>T; 4 "
+                          "position(s) hold more than one record)", issues[0].message)
 
     def test_two_lines_of_several_alts_at_one_position_warn(self):
         """R3A-1: CRISPRitz lists the one-base ALTs of every line of a position in one

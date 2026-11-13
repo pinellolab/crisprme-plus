@@ -6302,20 +6302,25 @@ class StageTwoARoundThree(Base):
         self.assertEqual(ran, [("comp", "chr21", 0, 30)])
 
     def test_an_snv_whose_alt_is_in_lower_case_is_refused(self):
-        """The sweep of C-R1-1: CRISPRitz codes no lower-case ALT (a lower-case ALT is not a
-        SNP ALT, every release), while its dictionary lists the carriers; read in upper case
-        as VCF 4.x reads it, the check put the SNV on its carriers' haplotypes and demanded
-        targets the search cannot find. Not modeled: the run is refused (exit 2) with the
-        position, on every release. A lower-case REF with an upper-case ALT is coded (the
-        enricher reads the reference's base) and is checked, as is an indel written in lower
-        case (CRISPRme names it in upper case)."""
+        """The sweep of C-R1-1: CRISPRitz 2.9.1 and earlier code no lower-case ALT (a
+        lower-case ALT is not a SNP ALT there), while the dictionary lists the carriers; read
+        in upper case as VCF 4.x reads it, the check put the SNV on its carriers' haplotypes
+        and demanded targets the search cannot find. On such a genome it is not modeled: a
+        run of an earlier CRISPRme (281 here) is refused (exit 2) with the position.
+        CRISPRitz 2.10.0 reads REF and ALT in upper case and codes it, so a run on its index
+        (2100: format 2) is checked, the SNV read as any. A lower-case REF with an
+        upper-case ALT is coded by every release (the enricher reads the reference's base)
+        and is checked, as is an indel written in lower case (CRISPRme names it in upper
+        case)."""
         seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
         dpos, spos = len(PRE) + 10, len(PRE) + 4
         ref_b = GUIDE[3]
         alt_b = next(x for x in "ACGT" if x != ref_b)
         start = len(PRE)
-        for name, snv, refused in (("low", (spos, ref_b, alt_b.lower(), {"S03": "1|0"}), True),
-                                   ("ref", (spos, ref_b.lower(), alt_b, {"S03": "1|0"}), False)):
+        for name, snv, refused in (("low", (spos, ref_b, alt_b.lower(), {"S03": "1|0"}),
+                                    {"281"}),
+                                   ("ref", (spos, ref_b.lower(), alt_b, {"S03": "1|0"}),
+                                    set())):
             recs = [snv, (dpos, (GUIDE[9] + "C").lower(), GUIDE[9].lower(),
                           {"S01": "1|0", "S02": "0|1"})]
             row = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
@@ -6330,12 +6335,14 @@ class StageTwoARoundThree(Base):
                 err = io.StringIO()
                 with contextlib.redirect_stderr(err):
                     rc, found = case.run(mode="both", budget=("1", "0", "0", "1"))
-                if refused:
+                if release in refused:
                     self.assertEqual((rc, found), (2, []), (name, release, err.getvalue()))
                     self.assertIn("chr21:%d holds an SNV whose ALT the VCF writes in lower "
                                   "case" % spos, err.getvalue())
                 else:
-                    self.assertEqual((rc, gating(found)), (0, []), (name, release, found))
+                    self.assertEqual((rc, gating(found)), (0, []),
+                                     (name, release, found, err.getvalue()))
+                    self.assertNotIn("in lower case", err.getvalue())
 
     def test_a_snp_row_lists_an_untied_alts_carrier_as_an_unphased_one(self):
         """R3A-1, the SNP rows (the reviewer's world Y, site F): S06 is 1|2 on a line C>A,CT
@@ -6733,6 +6740,97 @@ class SplitFormDictionary(Base):
             self.assertEqual(rc, 1 if want else 0, (name, found))
             self.assertFalse([f for f in found if f[1] == "limit-putative-carrier"],
                              (name, found))
+
+
+# --------------------------------------------------------------------------- #
+# CRISPRitz 2.10.0 reads REF and ALT in upper case (C3 of wave 1c-b)
+# --------------------------------------------------------------------------- #
+class LowerCaseSnvByGenome(Base):
+    """CRISPRitz 2.10.0's enricher reads REF and every ALT in upper case, as VCF 4.x does
+    (its docs/MULTIALLELIC_ENRICHMENT.md sections 2.1 and 2.9): an SNV ALT written in lower
+    case is coded, and its carriers' targets are found (the world WLOW of lane C, made
+    small: the deletion D and the SNV q, whose ALT is written in lower case, on one
+    haplotype make a perfect target). The checker refused every run whose VCF held such an
+    SNV, whatever its genome; it verifies one on a genome of CRISPRitz 2.10.0 (an index of
+    format 2), and still refuses one on a genome of 2.9.1 or earlier, which codes no
+    lower-case ALT (an index of format 1, or a run of an earlier CRISPRme), and one whose
+    enriched genome does not code the ALT (an engine before that rule)."""
+
+    def world(self, tmp, release="2100", enriched="coded"):
+        seq = PRE + GUIDE[:5] + other(GUIDE[5]) + GUIDE[6:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dpos, spos = len(PRE) + 10, len(PRE) + 6
+        ref_b = other(GUIDE[5])
+        recs = [(spos, ref_b, GUIDE[5].lower(), {"S01": "0|1", "S05": "1|0"}),
+                (dpos, GUIDE[9] + "C", GUIDE[9], {"S01": "1|1", "S02": "1|0", "S05": "1|1"})]
+        start = len(PRE)
+        on_ref = list(GUIDE + "TGG")
+        on_ref[5] = ref_b.lower()
+        dtok = tok("chr21", recs[1])
+        qtok = "chr21_%d_%s_%s" % (spos, ref_b, GUIDE[5])   # as a 2.10.0 dictionary names it
+        rows = [row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                           GUIDE + "TGG", "TGG", 0, 0, "X", "%s,%s" % (dtok, qtok), "S01,S05"),
+                row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                           "".join(on_ref), "TGG", 1, 0, "X", dtok, "S01,S02,S05")]
+        os.makedirs(tmp)
+        case = Case(tmp, seq, recs, rows)
+        code = {"coded": "M", "not coded": ref_b}.get(enriched)
+        genome = None if code is None else seq[:spos - 1] + code + seq[spos:]
+        if release == "2100":
+            as_2100(case, enriched=genome, window=(30, 30))
+        elif release == "291":    # CRISPRme 2.10.0 on an index of CRISPRitz 2.9.1
+            as_2100(case, enriched=genome, var_format=1, indels_format=1, var_flags=0)
+        return case, rows, spos
+
+    def check(self, case, mode):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, found = case.run(mode=mode, budget=("1", "0", "0", "1"))
+        return rc, found, err.getvalue()
+
+    def test_a_lower_case_snv_on_a_2_10_0_genome_is_checked(self):
+        for enriched in ("coded", None):
+            case, rows, spos = self.world(os.path.join(self.tmp, str(enriched)),
+                                          enriched=enriched)
+            for mode in ("soundness", "completeness", "both"):
+                rc, found, err = self.check(case, mode)
+                self.assertEqual((rc, gating(found)), (0, []), (enriched, mode, found, err))
+                self.assertIn("read as a run of CRISPRme 2.10.0 or later", err)
+            # the SNV is read as coded: a carrier whose perfect target it makes, left off
+            # its row, is missed (read as not coded, S05's slot would hold D alone, the
+            # one-mismatch row's target, which lists it)
+            write_results(case.res, [set_field(rows[0], samples="S01"), rows[1]])
+            rc, found, err = self.check(case, "completeness")
+            self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("missing-row", "S05")},
+                             (enriched, found, err))
+
+    def test_a_lower_case_snv_on_an_older_genome_is_refused(self):
+        for name, release, enriched in (("291", "291", None), ("291e", "291", "coded"),
+                                        ("281", "281", None),
+                                        ("pre-rule", "2100", "not coded")):
+            case, _rows, spos = self.world(os.path.join(self.tmp, name), release, enriched)
+            for mode in ("soundness", "completeness", "both"):
+                rc, found, err = self.check(case, mode)
+                self.assertEqual((rc, found), (2, []), (name, mode, err))
+                self.assertIn("chr21:%d holds an SNV whose ALT the VCF writes in lower case, "
+                              "on a variant genome that does not code it" % spos, err)
+                self.assertIn("build the dataset's indexes again with it", err)
+
+    def test_the_genome_tells_a_position_written_in_one_case_only(self):
+        """Where another line at the position writes the ALT in upper case (C>A beside
+        C>a), the enriched genome's code holds it whatever the engine, so it tells nothing
+        of the case rule: the index's generation does. Semantics.codes_lower, directly."""
+        case, _rows, spos = self.world(os.path.join(self.tmp, "w"), enriched="not coded")
+        sem = C.Semantics(True, {(None, None): {"lower_alts": True}}, {case.vcf: "v"},
+                          os.path.join(case.tmp, "work"), "hg38")
+        self.assertFalse(sem.codes_lower(case.vcf, "chr21", spos, {"A"}))
+        self.assertTrue(sem.codes_lower(case.vcf, "chr21", spos, set()))
+        self.assertTrue(sem.codes_lower(case.vcf, "chr21", spos, {"C"}))  # the reference's
+        old = C.Semantics(True, {(None, None): {"lower_alts": False}}, {case.vcf: "v"},
+                          os.path.join(case.tmp, "work"), "hg38")
+        self.assertFalse(old.codes_lower(case.vcf, "chr21", spos, set()))
+        self.assertFalse(old.codes_lower(case.vcf, "chr21", spos, {"C"}))
+        untold = C.Semantics(True, {(None, None): {}}, {case.vcf: "v"}, None, None)
+        self.assertIsNone(untold.codes_lower(case.vcf, "chr21", spos, {"A"}))
 
 
 def code_lines(path):

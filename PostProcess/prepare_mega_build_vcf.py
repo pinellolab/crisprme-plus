@@ -21,7 +21,9 @@ rebuilds the mega from those same VCFs, and every part of the index reads the sa
     wrote none on chrY (its 177,968 PASS records), and declares it. One with no source
     frequency either gets no ``AF``.
 
-  * one record of each REF>ALT at a position: of an allele on two PASS/'.' records, the
+  * one record of each REF>ALT at a position, REF and ALT read in upper case as VCF 4.x
+    and the enricher (CRISPRitz 2.10.0) read them (``C>G`` and ``c>g`` are one allele, an
+    ALT holding ``<`` as written): of an allele on two PASS/'.' records, the
     more frequent record's (its INFO/AF, AF_max; on a tie, the earlier), as the enricher
     merges two SNP records of one allele in its dictionaries. The enricher merges no
     indel records: each gets a fake-indel window and an indel-log row of its own, while the
@@ -154,24 +156,33 @@ def _without_alts(f, drop, number_of):
     return f[:4] + [",".join(alts[k] for k in keep)] + f[5:7] + [";".join(info) or "."]
 
 
+def allele_key(ref, alt):
+    """A REF>ALT as VCF 4.x and the enricher (CRISPRitz 2.10.0, which upper-cases REF and
+    every ALT as it reads a line) read it: in upper case, an ALT holding '<' (a symbolic
+    allele) as written. Two records of one allele in two cases (C>G, c>g) are one."""
+    return ref.upper(), alt if "<" in alt else alt.upper()
+
+
 def collapse(records, number_of, stats):
     """The records of one position (FILTER PASS or '.', INFO/AF set), one record of each
-    REF>ALT: of an allele on several, the more frequent record's (af_rank, the enricher's
-    rank of INFO/AF; on a tie, the earlier). Another record of it loses the allele: the
-    whole line when it is its only ALT (``stats["collapsed"]``), else that ALT
-    (``stats["alts_collapsed"]``)."""
+    REF>ALT, in one case or in two (allele_key): of an allele on several, the more frequent
+    record's (af_rank, the enricher's rank of INFO/AF; on a tie, the earlier). Another
+    record of it loses the allele: the whole line when it is its only ALT
+    (``stats["collapsed"]``), else that ALT (``stats["alts_collapsed"]``). A kept record is
+    written as the input has it, its case too (the enricher upper-cases it)."""
     best = {}
     for i, f in enumerate(records):
         alts = f[4].split(",")
         for k, alt in enumerate(alts):
             rank = af_rank(f[7], k, len(alts))
-            have = best.get((f[3], alt))
+            have = best.get(allele_key(f[3], alt))
             if have is None or rank > have[0]:
-                best[(f[3], alt)] = (rank, i, k)
+                best[allele_key(f[3], alt)] = (rank, i, k)
     out = []
     for i, f in enumerate(records):
         alts = f[4].split(",")
-        drop = {k for k, alt in enumerate(alts) if best[(f[3], alt)][1:] != (i, k)}
+        drop = {k for k, alt in enumerate(alts)
+                if best[allele_key(f[3], alt)][1:] != (i, k)}
         if not drop:
             out.append(f)
         elif len(drop) == len(alts):

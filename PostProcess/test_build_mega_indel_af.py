@@ -131,34 +131,40 @@ class TestPartition(unittest.TestCase):
     def test_registry_and_indel_store_partition_the_alleles_the_enricher_reads(self):
         # every allele CRISPRitz's enricher reads lands in EXACTLY ONE store (SNP
         # registry XOR indel sidecar) -- no double-count, no gap -- and one it does not
-        # read (a record outside PASS and '.', an ALT it does not code) in neither
+        # read (a record outside PASS and '.', an ALT it does not code) in neither. REF
+        # and ALT are read in upper case, as CRISPRitz 2.10.0 reads them: an SNV written
+        # a>t is the registry's A>T, an indel written ga>g the sidecar's GA>G
         import build_mega_registry as bmr
         from tier0_registry import RegistryReader
         d = tempfile.mkdtemp()
         vcf = os.path.join(d, "mega.chr1.afmax.vcf.gz")
         rows = [
             ("chr1", 100, ".", "A", "G", "AF_HGDP=0.03;AF_max=0.03"),   # SNP
-            ("chr1", 200, ".", "a", "t", "AF_gnomAD=0.02;AF_max=0.02"), # lower-case: none
+            ("chr1", 200, ".", "a", "t", "AF_gnomAD=0.02;AF_max=0.02"), # lower-case SNP
             ("chr1", 300, ".", "T", "TA", "AF_HGDP=0.01;AF_max=0.01"),  # ins
-            ("chr1", 400, ".", "GA", "G", "AF_AoU=0.02;AF_max=0.02"),   # del
+            ("chr1", 400, ".", "ga", "g", "AF_AoU=0.02;AF_max=0.02"),   # del, lower case
             ("chr1", 500, ".", "AT", "GC", "AF_HGDP=0.02;AF_max=0.02"), # MNV -> indel side
             ("chr1", 600, ".", "C", "G", "AF_HGDP=0.02;AF_max=0.02", "LOW_VQSLOD"),
             ("chr1", 700, ".", "CA", "C", "AF_HGDP=0.02;AF_max=0.02", "ExcHet"),
+            ("chr1", 800, ".", "G", "n", "AF_HGDP=0.02;AF_max=0.02"),   # not coded
         ]
         _write_vcf(vcf, rows)
         _, rbin, ridx, stats = bmr.build(vcf, "chr1", os.path.join(d, "reg"))
         n_ind, iout = bi.build_indel_af_store(vcf, "chr1", os.path.join(d, "ind"))
         reg = RegistryReader(rbin, ridx)
         ind = bi.IndelAfReader(iout)
-        self.assertEqual(stats["written"], 1)   # A>G
+        self.assertEqual(stats["written"], 2)   # A>G, a>t
         self.assertEqual(n_ind, 3)              # ins + del + MNV
+        self.assertEqual(stats["not_coded"], 1)  # the n
         self.assertEqual(stats["written"] + n_ind + stats["not_coded"] + stats["filtered"],
                          len(rows))
         # each variant in exactly one store
         self.assertIsNotNone(reg.lookup(100, "G"));  self.assertIsNone(ind.lookup(100, "A", "G"))
+        self.assertIsNotNone(reg.lookup(200, "T"));  self.assertIsNone(ind.lookup(200, "A", "T"))
         self.assertIsNotNone(ind.lookup(300, "T", "TA")); self.assertIsNone(reg.lookup(300, "TA"))
+        self.assertIsNotNone(ind.lookup(400, "GA", "G")); self.assertIsNone(reg.lookup(400, "G"))
         self.assertIsNotNone(ind.lookup(500, "AT", "GC")); self.assertIsNone(reg.lookup(500, "GC"))
-        for pos, ref, alt in ((200, "A", "T"), (600, "C", "G"), (700, "CA", "C")):
+        for pos, ref, alt in ((600, "C", "G"), (700, "CA", "C"), (800, "G", "N")):
             self.assertIsNone(reg.lookup(pos, alt))
             self.assertIsNone(ind.lookup(pos, ref, alt))
 

@@ -1580,9 +1580,6 @@ def check_vcf_full_scan(
     seen_alleles: set = set()
     same_allele_count = 0
     same_allele_examples: List[str] = []
-    # SNV lines whose FILTER the enricher reads with an ALT of one lower-case base
-    lower_snv_count = 0
-    lower_snv_examples: List[str] = []
     # the lines of the position being read that list several ALTs, one of one character
     # (the dictionary keeps each such line's raw calls), and the positions with two
     block_multi = 0
@@ -1630,25 +1627,19 @@ def check_vcf_full_scan(
                         multi_lines_positions += 1
                         if len(multi_lines_examples) < 5:
                             multi_lines_examples.append(f"{chrom}:{pos_str}")
-                # an indel or MNV whatever the case of its REF and ALT (VCF 4.x reads
-                # them alike, and so does CRISPRme, which names such a record in upper
-                # case: two lines of one indel in two cases, tg>t beside TG>T, are one
-                # allele); an SNV whatever the case of its REF (CRISPRitz codes C>G and
-                # c>G alike and lists them as two entries of G, which CRISPRme's readers
-                # read as one allele: site_alleles.read_records), its ALT as written (one
-                # in lower case is not coded: below)
-                record_alleles = {(ref.upper(), a.upper()) if len(ref) > 1 or len(a) > 1
-                                  else (ref.upper(), a) for a in alt_alleles}
+                # a REF>ALT whatever the case of its REF and ALT: VCF 4.x reads them
+                # alike, and so do CRISPRitz 2.10.0, whose enricher upper-cases REF and
+                # every ALT as it reads a line (C>G beside c>g is one allele, one
+                # dictionary entry, the SNV coded), and CRISPRme, which names an indel or
+                # MNV record in upper case (tg>t beside TG>T is one allele); an ALT
+                # holding '<' (a symbolic allele) as written
+                record_alleles = {(ref.upper(), a if "<" in a else a.upper())
+                                  for a in alt_alleles}
                 for allele in sorted(record_alleles & seen_alleles):
                     same_allele_count += 1
                     if len(same_allele_examples) < 5:
                         same_allele_examples.append(f"{chrom}:{pos_str} {allele[0]}>{allele[1]}")
                 seen_alleles |= record_alleles
-                if len(ref) == 1 and filt in ENRICHER_PASS_VALUES and any(
-                        a in ("a", "c", "g", "t") for a in alt_alleles):
-                    lower_snv_count += 1
-                    if len(lower_snv_examples) < 5:
-                        lower_snv_examples.append(f"{chrom}:{pos_str} {ref}>{alt}")
 
                 # REF/ALT length survey + breakend + multiallelic + indel proximity
                 if len(alt_alleles) > 1:
@@ -1857,10 +1848,10 @@ def check_vcf_full_scan(
                 f"earlier record at their position (e.g. "
                 f"{', '.join(same_allele_examples)}; {dup_count} position(s) hold "
                 "more than one record) — CRISPRme reads the records of one REF>ALT "
-                "as one allele, their carriers merged, an indel's too (an indel's or "
-                "MNV's REF and ALT whatever their case: tg>t beside TG>T is one allele, "
-                "named in upper case; an SNV's REF too (c>G beside C>G is one allele), "
-                "its ALT as written): a haplotype slot "
+                "as one allele, their carriers merged, an indel's too, REF and ALT "
+                "whatever their case (VCF 4.x reads them alike, and so does CRISPRitz "
+                "2.10.0: tg>t beside TG>T is one allele, named in upper case, and so is "
+                "c>g beside C>G): a haplotype slot "
                 "carries the ALT if either record puts it there (a sample whose two calls "
                 "are not phased alike keeps the one with more copies, the earlier on a "
                 "tie, as CRISPRitz merges them). A sample left with two ALTs of "
@@ -1872,19 +1863,6 @@ def check_vcf_full_scan(
     if multi_lines_positions:
         issues.append(_multi_lines_issue(fname, multi_lines_positions, multi_lines_examples,
                                          None))
-    if lower_snv_count:
-        issues.append(
-            Issue(
-                WARN,
-                f"{fname}: {lower_snv_count} SNV record(s) write an ALT in lower case "
-                f"(e.g. {', '.join(lower_snv_examples)}) — CRISPRitz codes no lower-case "
-                "ALT into the enriched genome (a lower-case ALT is not a SNP ALT), so such "
-                "an SNV is never searched, though CRISPRitz's dictionary lists its carriers. "
-                "VCF 4.x reads REF and ALT whatever their case: write them in upper case, "
-                "e.g. `zcat in.vcf.gz | awk 'BEGIN{FS=OFS=\"\\t\"} !/^#/{$4=toupper($4); "
-                "$5=toupper($5)} 1' | bgzip > out.vcf.gz`",
-            )
-        )
     if phased_seen and unphased_seen:
         issues.append(
             Issue(

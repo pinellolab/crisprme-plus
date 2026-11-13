@@ -9,7 +9,8 @@
 #      FILTER is PASS or '.', INFO/AF = AF_max for SNVs and indels alike (the global
 #      frequency the enricher writes into the indel log; the as-run merge wrote no AF, so
 #      every indel row of the shipped mega showed none), and one record of each REF>ALT,
-#      the more frequent (the enricher merges two SNP records of one allele, but gives each
+#      in one case or in two (CRISPRitz 2.10.0 reads REF and ALT in upper case, as VCF 4.x
+#      does), the more frequent (the enricher merges two SNP records of one allele, but gives each
 #      indel record a window and a log row of its own; the as-run merge wrote 8 indels on
 #      two lines genome-wide, none on chr22 or chr14);
 #   2. the presence genotype (PostProcess/synth_sites_gt.py): one pseudo-sample, MEGA,
@@ -25,15 +26,15 @@
 #      store or phased indel store for a sites-only dataset;
 #   5. the registry (PostProcess/build_mega_registry.py) and the per-source indel
 #      frequencies (PostProcess/build_mega_indel_af.py) from the build input, both reading
-#      it as the enricher does: FILTER PASS or '.', the SNP ALTs it codes, every allele of a
-#      line, an allele once; no indel within the windows' left flank of the chromosome's
-#      start, the flank read from the indel log just built;
+#      it as the enricher does: FILTER PASS or '.', REF and ALT in upper case, the SNP ALTs it
+#      codes, every allele of a line, an allele once; no indel within the windows' left flank
+#      of the chromosome's start, the flank read from the indel log just built;
 #   6. samplesIDs/<dataset>.samplesID.txt, the file a search names (--samplesID): the registry's
 #      sources as pseudo-samples, as the shipped install has it (one already there is kept);
 #   7. the build input VCFs left in VCFs/<dataset>/ (sites-only), the checks of
 #      PostProcess/verify_mega_chrom.py run on every chromosome (the source VCF read
-#      independently against the registry, the indel frequencies, the indel log and the
-#      enriched genome).
+#      independently, REF and ALT in upper case as the indel log names every record, against
+#      the registry, the indel frequencies, the indel log and the enriched genome).
 #
 # USAGE
 #   mega_rebuild.sh <install_dir> <merged_vcf_dir> [chrom ...]
@@ -56,8 +57,11 @@
 #     BGZIP=bgzip TABIX=tabix
 #     RUN=''   a prefix for every command, e.g. 'apptainer exec --bind /data crisprme.sif'
 #
-#   Requires CRISPRitz 2.10.0 (format-2 indexes, every allele coded) and the CRISPRme of
-#   this repository. Measured on chr22 and chr14 (METHODS section 2; CHANGELOG, 2.10.0).
+#   Requires CRISPRitz 2.10.0 (format-2 indexes, every allele coded, REF and ALT read in upper
+#   case) and the CRISPRme of this repository. Measured on chr22 and chr14 (METHODS section 2;
+#   CHANGELOG, 2.10.0), and on chr21 and the six other chromosomes whose merged VCF holds a
+#   record written in lower case (chr3, chr4, chr5, chr10, chr12, chr18: CRISPRitz's
+#   docs/MULTIALLELIC_ENRICHMENT.md section 6.7).
 #   Do not run it genome-wide before the release's readiness audit (docs/RELEASE_CHECKLIST).
 set -euo pipefail
 

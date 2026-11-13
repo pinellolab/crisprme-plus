@@ -352,6 +352,134 @@ class TheRecipe(_Recipe):
         self.assertTrue(ok)
 
 
+class TheChecksReadTheVcfInUpperCase(unittest.TestCase):
+    """CRISPRitz 2.10.0 reads a VCF's REF and every ALT in upper case, as VCF 4.x does (its
+    docs/MULTIALLELIC_ENRICHMENT.md sections 2.1 and 2.9): it codes a lower-case SNV ALT and
+    names a record written in lower case in upper case in its indel log, and the recipe's
+    checks (verify_mega_chrom.py) read the source VCF so too. The mega's merged VCFs hold 13
+    deletions written in mixed case (chr3, 4, 5, 10, 12, 18 and 21): read as written, the log
+    check failed each of those chromosomes ("indel log alleles ...: N more, N missing"), and
+    the check of the build input let a REF>ALT on two records in two cases through, which the
+    enricher would window twice. The stores here are written by the recipe's own builders
+    (build_mega_registry.py, build_mega_indel_af.py, prepare_mega_build_vcf.py), the indel log
+    and the enriched genome as CRISPRitz 2.10.0 writes them."""
+
+    SEQ = ("GGCATTACGGATACCATGCAATTGACCGGTATCAGCTAGCCTTAGGCATCGATGCTAGCCTTACTGATCG"
+           "TACGTAGCTAGTACGTTGCAATTGGCCAATTGCATTGACCGGTA")
+
+    def setUp(self):
+        import tempfile
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d, True)
+        seq = self.SEQ
+        assert (seq[10], seq[39], seq[59:62]) == ("A", "C", "CTT"), (seq[10], seq[39],
+                                                                    seq[59:62])
+        self.gw = os.path.join(self.d, "gw")
+        write_vcf(os.path.join(self.gw, "mega.chr1.afmax.vcf.gz"), [
+            ["chr1", "11", "rs1", "A", "T", ".", "PASS", "AF_HGDP=0.1;AF_max=0.1"],
+            # an SNV written in lower case: CRISPRitz 2.10.0 codes it (S at 40)
+            ["chr1", "40", "rs2", "c", "g", ".", "PASS", "AF_gnomAD=0.02;AF_max=0.02"],
+            # a deletion in mixed case, as the mega's 13 are: its log row is upper case
+            ["chr1", "60", "rs3", "cTT", "c", ".", "PASS", "AF_gnomAD=0.01;AF_max=0.01"],
+        ], header=('##INFO=<ID=AF_max,Number=A,Type=Float,Description="max">',))
+        for name, text in (("ref", seq), ("enr", seq[:10] + "W" + seq[11:39] + "S" + seq[40:])):
+            os.makedirs(os.path.join(self.d, name))
+            with open(os.path.join(self.d, name, "chr1.fa" if name == "ref"
+                                   else "chr1.enriched.fa"), "w") as fh:
+                fh.write(">chr1\n%s\n" % text)
+
+    def log(self, indel):
+        """An indel log of the chromosome (the presence sample out), one row naming the
+        deletion as ``indel``, its window 30/30 (CRISPRitz 2.10.0)."""
+        import tempfile
+        d = tempfile.mkdtemp(prefix="log_", dir=self.d)
+        with open(os.path.join(d, "logchr1.txt"), "w") as fh:
+            fh.write("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n"
+                     "chr1_29-92_1\t\trs3\t0.01\tchr1_60_%s\t0,1\tN\n" % indel)
+        return d
+
+    def stores(self, source):
+        """The registry, the indel frequencies and the build input of ``source`` (a merged
+        VCF), built as the recipe builds them, from the build input."""
+        import build_mega_registry as bmr
+        import build_mega_indel_af as bmi
+        import prepare_mega_build_vcf as pm
+        build = os.path.join(self.d, "build")
+        os.makedirs(build, exist_ok=True)
+        plain = os.path.join(build, "mega.chr1.build.vcf")
+        pm.prepare(source, plain)
+        with open(plain, "rb") as fh, gzip.open(plain + ".gz", "wb") as out:
+            out.write(fh.read())
+        os.remove(plain)
+        reg, ind = os.path.join(self.d, "reg"), os.path.join(self.d, "ind")
+        bmr.build(plain + ".gz", "chr1", reg)
+        bmi.build_indel_af_store(plain + ".gz", "chr1", ind, window_left=31)
+        return reg, ind, build
+
+    def verify(self, log, build=None, reg=None, ind=None):
+        import contextlib
+        import io
+        import verify_mega_chrom as vm
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ok, ns, ni = vm.verify(self.gw, reg, ind, "chr1", log=log,
+                                   enriched=os.path.join(self.d, "enr"),
+                                   reference=os.path.join(self.d, "ref"), build_dir=build)
+        return ok, ns, ni, out.getvalue()
+
+    def test_records_written_in_lower_case_match_the_upper_case_stores(self):
+        reg, ind, build = self.stores(os.path.join(self.gw, "mega.chr1.afmax.vcf.gz"))
+        ok, ns, ni, out = self.verify(self.log("CTT_C"), build, reg, ind)
+        self.assertTrue(ok, out)
+        self.assertEqual((ns, ni), (2, 1), out)
+        self.assertIn("chr1: PASS", out)
+        self.assertIn("coded_positions=2", out)
+        # a log that names the deletion as the VCF writes it (an enricher before CRISPRitz
+        # 2.10.0's case rule, whose genome codes no lower-case SNV either) is no log of
+        # these records
+        ok, _ns, _ni, out = self.verify(self.log("cTT_c"), build, reg, ind)
+        self.assertFalse(ok, out)
+        self.assertIn("indel log alleles 1, expected 1: 1 more ([(60, 'cTT', 'c')]), "
+                      "1 missing ([(60, 'CTT', 'C')])", out)
+
+    def test_a_ref_alt_on_two_records_in_two_cases_is_caught_in_the_build_input(self):
+        """verify_mega_chrom.check_build_vcf keys each ALT of the build input as VCF 4.x
+        reads it: C>G and c>g on two records is one REF>ALT on more than one record, as two
+        records written alike are (prepare_mega_build_vcf.py keeps one record of each). Keyed
+        as written, the check let it through."""
+        import verify_mega_chrom as vm
+        path = os.path.join(self.d, "twin.build.vcf.gz")
+        write_vcf(path, [
+            ["chr1", "40", "rs2", "C", "G", ".", "PASS", "AF_max=0.02;AF=0.02"],
+            ["chr1", "40", "rs4", "c", "g", ".", "PASS", "AF_max=0.01;AF=0.01"],
+            ["chr1", "60", "rs3", "CTT", "C", ".", "PASS", "AF_max=0.01;AF=0.01"],
+            ["chr1", "60", "rs5", "ctt", "c,CT", ".", "PASS", "AF_max=0.01,0.1;AF=0.01,0.1"],
+            # a symbolic allele is an ID, read as written: no repeat
+            ["chr1", "70", ".", "A", "<DEL>", ".", "PASS", "AF_max=0.01;AF=0.01"],
+            ["chr1", "70", ".", "A", "<del>", ".", "PASS", "AF_max=0.01;AF=0.01"],
+        ])
+        errs = []
+        vm.check_build_vcf(path, 6, errs)
+        self.assertEqual(errs, ["build input: 2 REF>ALT(s) on more than one record"])
+        # the same twins in the source VCF: the build input keeps one record of each, and
+        # every check passes
+        write_vcf(os.path.join(self.gw, "mega.chr1.afmax.vcf.gz"), [
+            ["chr1", "11", "rs1", "A", "T", ".", "PASS", "AF_HGDP=0.1;AF_max=0.1"],
+            ["chr1", "40", "rs2", "C", "G", ".", "PASS", "AF_gnomAD=0.02;AF_max=0.02"],
+            ["chr1", "40", "rs4", "c", "g", ".", "PASS", "AF_gnomAD=0.01;AF_max=0.01"],
+            ["chr1", "60", "rs3", "cTT", "c", ".", "PASS", "AF_gnomAD=0.01;AF_max=0.01"],
+            ["chr1", "60", "rs6", "CTT", "C", ".", "PASS", "AF_gnomAD=0.005;AF_max=0.005"],
+        ], header=('##INFO=<ID=AF_max,Number=A,Type=Float,Description="max">',))
+        reg, ind, build = self.stores(os.path.join(self.gw, "mega.chr1.afmax.vcf.gz"))
+        with gzip.open(os.path.join(build, "mega.chr1.build.vcf.gz"), "rt") as fh:
+            body = [ln.split("\t")[:5] for ln in fh if not ln.startswith("#")]
+        self.assertEqual(body, [["chr1", "11", "rs1", "A", "T"], ["chr1", "40", "rs2", "C", "G"],
+                                ["chr1", "60", "rs3", "cTT", "c"]])
+        ok, ns, ni, out = self.verify(self.log("CTT_C"), build, reg, ind)
+        self.assertTrue(ok, out)
+        self.assertIn("second_records_of_one_allele=2", out)
+
+
 def _listing(root):
     """Every file, folder and link below ``root``, as relative paths (a link's own name)."""
     out = []

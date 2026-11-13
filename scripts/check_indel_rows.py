@@ -32,11 +32,15 @@ THE TRUTH IS THE VCF, AS THE SEARCH READ IT. A sample's haplotype is the referen
 every ALT allele its genotype puts on that slot, each in place of its REF bases (VCF 4.x),
 of the records CRISPRme reads; a record is read with its REF and ALT in upper case, as
 VCF 4.x reads them, and so is a row's Variant_info (var_text: CRISPRme 2.10.0 names an indel
-or MNV record in upper case, and an SNV record, as an earlier release names every record,
-as its VCF writes it, some HPRC records in lower case). An SNV whose ALT the VCF writes in
-lower case is not modeled: CRISPRitz codes no lower-case ALT (a lower-case ALT is not a SNP
-ALT, every release) while its dictionary lists the carriers, and a run whose VCF holds one
-near a row or a record it checks is REFUSED (exit 2). CRISPRitz's enricher skips every line
+or MNV record in upper case, and an SNV record as the run's dictionary writes it, in upper
+case on an index of CRISPRitz 2.10.0, as an earlier release names every record, as its VCF
+writes it, some HPRC records in lower case). CRISPRitz 2.10.0's enricher reads REF and ALT
+in upper case too, so an SNV whose ALT the VCF writes in lower case is coded and read as any
+SNV; CRISPRitz 2.9.1 and earlier (and 2.10.0 before that rule) read the ALT as written and
+coded no lower-case one (a lower-case ALT is not a SNP ALT there) while the dictionary lists
+its carriers: on such a variant genome the SNV is not modeled, and a run whose VCF holds one
+near a row or a record it checks is REFUSED (exit 2), as it is where the run's records do
+not tell which genome it read (Semantics.codes_lower). CRISPRitz's enricher skips every line
 whose FILTER is
 neither PASS nor '.' (those exact strings): no such line is in the enriched genome, its
 dictionaries, registry and genotype store, the indel log or the fake-indel windows. The
@@ -534,7 +538,13 @@ tell (none, or no value at the position), a run whose VCF holds, near a row or a
 checks, two or more lines that each list several ALTs at one position is refused (exit 2):
 CRISPRme's readers cannot tell the two numberings apart (METHODS section 4), and what
 CRISPRme then lists is not modeled (a refused run stops at the first work unit that meets
-such a position). Two lines of one
+such a position). An SNV whose ALT the VCF writes in lower case is coded where the variant
+genome is CRISPRitz 2.10.0's (an index of format 2: its enricher reads REF and ALT in upper
+case), unless the run's enriched genome, where its working directory holds it, does not code
+the ALT at the SNV's position (an engine before that rule), and is not coded on a genome of
+CRISPRitz 2.9.1 or earlier (an index of format 1, or a run of an earlier CRISPRme): there,
+and where nothing tells, a run whose VCF holds one near a row or a record it checks is
+refused (exit 2), stopping at the first work unit that meets one. Two lines of one
 indel or MNV REF>ALT at a position, in one case or in two, are one allele on every release,
 their calls merged by the same rule (decision B2: CRISPRme 2.10.0 reads them so, REF and
 ALT in upper case, its readers of the phased indel store merging the two lines, its indel
@@ -1039,9 +1049,10 @@ class Vcf(object):
         """A record as a dict; the genotype columns stay unsplit (only the lines a window
         keeps are split). A sites-only line (eight columns, no FORMAT) is a record with no
         genotypes. Its FILTER is kept as written (Window reads it: PASS_FILTERS). REF and
-        ALT are read in upper case, as VCF 4.x reads them, and as CRISPRme 2.10.0 names an
-        indel or MNV record; the ALT column as written is kept too (``alt_text``), for an
-        SNV's ALT written in lower case, which CRISPRitz does not code (Window)."""
+        ALT are read in upper case, as VCF 4.x reads them, as CRISPRitz 2.10.0's enricher
+        reads them, and as CRISPRme 2.10.0 names an indel or MNV record; the ALT column as
+        written is kept too (``alt_text``), for an SNV's ALT written in lower case, which
+        CRISPRitz 2.9.1 and earlier do not code (Window)."""
         if not line or line.startswith("#"):
             return None
         head, sep, tail = line.rstrip("\n").partition("\t")
@@ -1345,9 +1356,11 @@ class Window(object):
                              # are two or more lines of several ALTs, the run's dictionary
                              # keeping their raw numbers or not telling (_dictionary)
         self.lower_snv = set()  # 1-based positions of an SNV allele read whose ALT the VCF
-                                # writes in lower case, which CRISPRitz does not code (a
-                                # lower-case ALT is not a SNP ALT) while its dictionary
-                                # lists the carriers: not modeled (main refuses the run)
+                                # writes in lower case, on a variant genome that does not
+                                # code it (CRISPRitz 2.9.1 and earlier: a lower-case ALT is
+                                # not a SNP ALT) while its dictionary lists the carriers,
+                                # or whose run does not tell (_lower): not modeled (main
+                                # refuses the run)
         self.snv_at = defaultdict(list)  # reference coordinate -> SNV alleles there
         self.filtered_keys = {}  # record key -> the FILTER of a line of it outside
                                  # PASS_FILTERS (kept or not)
@@ -1365,9 +1378,12 @@ class Window(object):
                     self.samples.append(s)
             snv_lines = defaultdict(list)  # POS -> line ids of a sites-only VCF's SNV-only
                                            # lines, file order
-            at = None       # the POS of ``group`` and ``listed``
+            at = None       # the POS of ``group``, ``listed``, ``low`` and ``texts``
             group = []      # its dictionary lines (in_dict), file order: (line id or None, r)
             listed = {}     # (POS, REF, ALT) -> the Allele of its first listing there
+            low = []        # its SNV ALTs written in lower case: (base, the line's FILTER
+                            # passes), read at the position's end (_lower)
+            texts = []      # the ALT columns, as written, of its SNV lines whose FILTER passes
             for r in v.records(chrom, self.beg, self.end):
                 lo = r["pos1"] - 1
                 hi = lo + len(r["ref"])
@@ -1376,16 +1392,23 @@ class Window(object):
                 if r["pos1"] != at:
                     if v.samples:
                         self._dictionary(group, all_alleles, v.samples, v)
+                    if low:
+                        self._lower(v, at, low, texts)
                     at, group, listed = r["pos1"], [], {}
+                    if low or texts:
+                        low, texts = [], []
                 passing = r["filter"] in PASS_FILTERS
-                if (len(r["ref"]) == 1 and (passing or not v.samples)
-                        and r["alt_text"] != r["alt_text"].upper()
-                        and any(x in ("a", "c", "g", "t")
-                                for x in r["alt_text"].split(","))):
+                if len(r["ref"]) == 1 and (passing or not v.samples):
                     # an SNV the run reads whose ALT is written in lower case (the line of
                     # a genotyped dataset that the enricher reads, or any line of a
-                    # sites-only one, whose SNVs mega's SNP rows read whatever their FILTER)
-                    self.lower_snv.add(r["pos1"])
+                    # sites-only one, whose SNVs mega's SNP rows read whatever their FILTER):
+                    # whether its genome codes it is read at the position's end (_lower)
+                    t = r["alt_text"]
+                    if t != t.upper():
+                        low.extend((x.upper(), passing) for x in t.split(",")
+                                   if x in ("a", "c", "g", "t"))
+                    if passing:
+                        texts.append(t)
                 # a line CRISPRitz's enricher lists in the per-sample dictionary: its REF one
                 # base, an ALT of one character at least (a '*' too), its FILTER read
                 in_dict = passing and len(r["ref"]) == 1 and any(len(x) == 1
@@ -1464,6 +1487,8 @@ class Window(object):
                 if not v.samples and len(r["ref"]) == 1 and all(
                         a.kind == "snv" for a in als if a is not None):
                     snv_lines[r["pos1"]].append(lid)
+            if low:
+                self._lower(v, at, low, texts)
             if v.samples:
                 self._dictionary(group, all_alleles, v.samples, v)
                 continue
@@ -1486,6 +1511,24 @@ class Window(object):
                         for a in self.line_alleles[lid]:
                             if a is not None and a.key not in last:
                                 self.so_shadowed.add(a)
+
+    def _lower(self, vcf, pos1, low, texts):
+        """Whether the SNV ALTs that VCF ``vcf`` writes in lower case at ``pos1`` (``low``:
+        [(base, the line's FILTER passes)]; ``texts``: the ALT columns of the position's SNV
+        lines whose FILTER passes, as written) are alleles of the run's variant genome, as
+        CRISPRitz 2.10.0's enricher reads REF and ALT in upper case and codes them
+        (Semantics.codes_lower: a base another line there writes in upper case is coded
+        either way, which tells nothing of the engine); a position where they are not, or
+        where the run's records do not tell, is added to ``lower_snv`` (CRISPRitz 2.9.1 and
+        earlier code no lower-case ALT, while the dictionary lists its carriers: not
+        modeled, main refuses the run)."""
+        if self.sem is None:   # the readings before CRISPRme 2.10.0: CRISPRitz 2.9.1
+            self.lower_snv.add(pos1)
+            return
+        upper = {x for t in texts for x in t.split(",") if x in ("A", "C", "G", "T")}
+        telling = {b for b, passing in low if passing} - upper
+        if not self.sem.codes_lower(vcf, self.chrom, pos1, telling):
+            self.lower_snv.add(pos1)
 
     def _wanted(self, lo, hi):
         if self.needed is None:
@@ -2139,8 +2182,10 @@ def parse_token(tok):
 def var_text(text):
     """A row's Variant_info with each token's REF and ALT in upper case, as Vcf._parse
     reads every record (so an allele's token): a release before 2.10.0 names a record as
-    its VCF writes it (CRISPRme 2.10.0 an SNV record so too, an indel or MNV record in upper
-    case), and HPRC writes 1,546 indel records of chr22 in lower case
+    its VCF writes it (CRISPRme 2.10.0 an indel or MNV record in upper case, and an SNV
+    record as the run's dictionary writes it: in upper case on an index of CRISPRitz 2.10.0,
+    which reads REF and ALT so, as written on one of an earlier CRISPRitz), and HPRC writes
+    1,546 indel records of chr22 in lower case
     (chr22_36126395_ccctctccctcctttcctTCCTT_c), whose rows completeness looked up by their
     raw tokens and never found."""
     if text in NO_VARIANT:
@@ -2506,16 +2551,24 @@ class Semantics(object):
                    log (indel_log_window) or else its INDELS index's record (window_cut);
       capped       whether a per-sample run may report a window over CRISPRME_IUPAC_CAP by
                    its greedy worst-case row (the classic dictionaries up to 2.8.1; 2.10.0
-                   enumerates the carriers' haplotypes there).
+                   enumerates the carriers' haplotypes there);
+      lower_alts   whether the variant genome codes an SNV ALT the VCF writes in lower case
+                   (CRISPRitz 2.10.0, whose enricher reads REF and ALT in upper case, as VCF
+                   4.x does: an index of format 2) or not (CRISPRitz 2.9.1 and earlier, which
+                   read the ALT as written, a lower-case one no SNP ALT: an index of format
+                   1, or the run of an earlier CRISPRme), told at a position by the run's
+                   enriched genome where its working directory holds it (codes_lower).
 
     ``values`` maps (dataset or None, chromosome or None) to a dict of those, None for one
-    the records do not tell; ``dataset_of`` maps a VCF path to its dataset."""
+    the records do not tell; ``dataset_of`` maps a VCF path to its dataset; ``genome`` names
+    the run's reference genome (Genomes/<genome>+<dataset>/ holds its variant genomes)."""
 
-    def __init__(self, release2100, values, dataset_of, workdir=None):
+    def __init__(self, release2100, values, dataset_of, workdir=None, genome=None):
         self.release2100 = release2100
         self.values = values
         self.dataset_of = dataset_of
         self.workdir = workdir
+        self.genome = genome
         self._dicts = {}   # (dataset, chromosome) -> the run's dictionary, or None
 
     def _get(self, vcf, chrom, what):
@@ -2544,6 +2597,33 @@ class Semantics(object):
     @property
     def capped(self):
         return not self.release2100
+
+    def lower_alts(self, vcf, chrom):
+        """Whether the variant genome of the VCF's dataset on ``chrom`` codes an SNV ALT
+        written in lower case, by its generation: True (an index of CRISPRitz 2.10.0),
+        False (one of 2.9.1 or earlier, or a run of an earlier CRISPRme), None where the
+        run's records do not tell."""
+        return self._get(vcf, chrom, "lower_alts")
+
+    def codes_lower(self, vcf, chrom, pos1, bases):
+        """Whether the variant genome of the VCF's dataset on ``chrom`` codes the SNV ALTs the
+        VCF writes in lower case at ``pos1``: no, on a genome of CRISPRitz 2.9.1 or earlier
+        (lower_alts False); else, where the run's working directory holds its enriched
+        genome (Genomes/<genome>+<dataset>/<chrom>.enriched.fa) and ``bases`` (those ALTs,
+        in upper case, that no line there writes in upper case) is not empty, whether the
+        genome's code at the position holds each (a CRISPRitz 2.10.0 before its case rule
+        coded none); else by the genome's generation (lower_alts: None where nothing
+        tells)."""
+        told = self.lower_alts(vcf, chrom)
+        if told is False:
+            return False
+        ds = self.dataset_of.get(getattr(vcf, "path", vcf))
+        if bases and self.workdir and self.genome and ds:
+            got = enriched_bases(os.path.join(self.workdir, "Genomes", "%s+%s" % (
+                self.genome, ds), chrom + ".enriched.fa"), pos1 - 1)
+            if got is not None:
+                return set(bases) <= got
+        return told
 
     def numbering(self, vcf, chrom, pos1):
         """How the run's own per-sample dictionary numbers the alleles of the VCF's dataset at
@@ -2720,6 +2800,29 @@ def _budget_of(name):
     return int(m.group(1)) if m else None
 
 
+def enriched_bases(path, q):
+    """The bases the code of the variant genome at ``path`` (a FASTA of one sequence) holds
+    at the 0-based position ``q`` (its IUPAC letter's; Q, CRISPRitz 2.10.0's four-allele
+    symbol: all four), or None where it cannot be read or tells no base: an N, which a
+    reference N stays whatever the records there (CRISPRitz 2.10.0)."""
+    try:
+        with open(path, "rb") as fh:
+            header = fh.readline()
+            first = fh.readline()
+            width = len(first.rstrip(b"\r\n"))
+            eol = len(first) - width
+            if width <= 0 or q < 0:
+                return None
+            fh.seek(len(header) + (q // width) * (width + eol) + q % width)
+            code = fh.read(1).decode("ascii", "replace").upper()
+    except OSError:
+        return None
+    if code == "N":
+        return None
+    got = set("ACGT") if code == "Q" else set(IUPAC.get(code, code)) & set("ACGT")
+    return got or None
+
+
 def _enriched_reads_all(path, sites):
     """Whether the variant genome at ``path`` (a FASTA of one sequence) codes every allele
     of the split SNP sites ``sites`` (split_sites): True where a site's code holds an
@@ -2827,7 +2930,8 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
     values = {}
     if not release2100:
         values[(None, None)] = {"all_alleles": False, "store_filter": False,
-                                "indels": (1, None), "window": OLD_WINDOW}
+                                "indels": (1, None), "window": OLD_WINDOW,
+                                "lower_alts": False}
         return Semantics(False, values, dataset_of), None
     old = set()
     no_store = set()
@@ -2911,8 +3015,16 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
                     any(four_base_position(v, ch) for v in vs):
                 alls = False   # format 2 with no Q while the VCF has four bases somewhere
             val["all_alleles"] = alls
+            # an SNV ALT in lower case: coded by CRISPRitz 2.10.0 (index format 2), which
+            # reads REF and ALT in upper case, not by 2.9.1 and earlier (format 1); the
+            # variant index's format, else the INDELS index's (one enrichment writes both),
+            # and at a position the enriched genome's code (Semantics.codes_lower)
+            if var_heads:
+                val["lower_alts"] = all(h[0] == 2 for h in var_heads)
+            else:
+                val["lower_alts"] = None if fmt is None else fmt == 2
             values[(ds, ch)] = val
-    return Semantics(True, values, dataset_of, workdir), None
+    return Semantics(True, values, dataset_of, workdir, genome), None
 
 
 def four_base_position(vcf, chrom):
@@ -6980,7 +7092,8 @@ def refused(stats, win):
     """``stats`` with the positions of ``win`` that make the run one this checker does not
     model (main refuses it, as soon as a unit meets one, and checks no further): two lines
     of several ALTs at one position where every allele is coded (Window.mixed), an SNV
-    whose ALT the VCF writes in lower case (Window.lower_snv)."""
+    whose ALT the VCF writes in lower case on a variant genome that does not code it, or
+    whose run does not tell (Window.lower_snv)."""
     stats["mixed"] = sorted(win.mixed)
     stats["lower_snv"] = sorted(win.lower_snv)
     return stats
@@ -7631,13 +7744,18 @@ def main(argv=None):
             % (where(mixed), "s" if len(mixed) == 1 else ""))
     if lower_snv:
         sys.stderr.write(
-            "ERROR: %s hold%s an SNV whose ALT the VCF writes in lower case: CRISPRitz codes "
-            "no lower-case ALT into the enriched genome (a lower-case ALT is not a SNP ALT), "
-            "so the search never reads it, while its dictionary lists its carriers; this "
-            "checker does not model such an allele: the run is not checked (the first such "
-            "positions found: the check stops at them). VCF 4.x reads "
-            "REF and ALT whatever their case: write them in upper case (the input "
-            "validator's full scan, --full_input_validate, says how) and search again.\n"
+            "ERROR: %s hold%s an SNV whose ALT the VCF writes in lower case, on a variant "
+            "genome that does not code it, or whose run's records do not tell whether it "
+            "does: CRISPRitz 2.9.1 and earlier (an index of format 1, or the run of a "
+            "CRISPRme before 2.10.0) read the ALT as written and code no lower-case one (a "
+            "lower-case ALT is not a SNP ALT there), and so does an index whose enriched "
+            "genome, in the run's working directory, holds no code of it: the search never "
+            "reads it, while the dictionary lists its carriers; this checker does not model "
+            "such an allele: the run is not checked (the first such positions found: the "
+            "check stops at them). CRISPRitz 2.10.0 reads REF and ALT in upper case, as VCF 4.x "
+            "does, and codes it: build the dataset's indexes again with it, or write the "
+            "VCF's REF and ALT in upper case (docs/INPUT_FORMATS.md says how), build again "
+            "and search again.\n"
             % (where(lower_snv), "s" if len(lower_snv) == 1 else ""))
     if mixed or lower_snv:
         return 2

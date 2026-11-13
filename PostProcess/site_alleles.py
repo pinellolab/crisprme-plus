@@ -211,12 +211,16 @@ def read_records(records):
     their carriers merged (``merge_carriers``, a sample's two calls as ``merge_gt`` merges
     them), with the rsID and AF of the more frequent record (on a tie, the earlier), as
     CRISPRitz 2.10.0's enricher takes them. The REF is read in upper case, as VCF 4.x
-    reads it: CRISPRitz codes C>G and c>G alike but lists them as two entries of G (its
-    dictionary compares an SNV's REF,ALT as written), which stopped the Tier-1 compile
-    ("duplicate (pos, alt) record"); the record is named as the first writes it. The ALT
-    is read as written: CRISPRitz codes no ALT written in lower case. Returns the same
-    shape, one record per REF>ALT in first-seen order: ``records`` itself when the
-    position is plain and repeats no REF>ALT."""
+    reads it, and the ALT as the dictionary writes it. CRISPRitz 2.10.0 reads REF and ALT
+    in upper case as it reads the VCF, so its dictionary holds no lower-case allele (C>G
+    and c>g are one entry of C,G, the SNV coded). One of CRISPRitz 2.9.1 or earlier (or of
+    2.10.0 before that rule) keeps the VCF's text: it lists C>G and c>G, which it codes
+    alike, as two entries of G (which stopped the Tier-1 compile, "duplicate (pos, alt)
+    record"; the record is named as the first writes it), and lists C>g, a lower-case ALT
+    its genome does not code, as an entry of g, which the readers read as no allele of
+    the genome (an ACGT filter drops it). Returns the same shape, one record per REF>ALT
+    in first-seen order: ``records`` itself when the position is plain and repeats no
+    REF>ALT."""
     keys = [(r[0].upper(), r[1]) for r in records]
     entries = [(r[1], r[4]) for r in records]
     got = per_alt_entries(entries)

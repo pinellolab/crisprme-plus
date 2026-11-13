@@ -101,8 +101,12 @@ CFD, or, in a search that scores no CFD, the reference base, else the first of A
 its copies counted against the record's; a choice only at the fake-indel window's code
 columns, never on the record's own REF span). A record's REF and ALT are read in upper
 case, as VCF 4.x reads them, and so is a row's `Variant_info` (CRISPRme 2.10.0 names an
-indel or MNV record in upper case, an SNV record as its VCF writes it, as earlier releases
-name every record: HPRC writes 1,546 indel records of chr22 in lower case). Two lines of one
+indel or MNV record in upper case, an SNV record as the run's dictionary writes it, in upper
+case on an index of CRISPRitz 2.10.0, as earlier releases name every record as its VCF writes
+it: HPRC chr22, normalised as CRISPRme builds it, holds 1,546 indel records in lower case). An
+SNV whose ALT is written in lower case is read so too on a genome of CRISPRitz 2.10.0, which
+codes it (an index of format 2, unless the run's enriched genome does not code it). Two lines
+of one
 indel or MNV REF>ALT at a position, in one case or in two (TG>T beside tg>t), are one allele
 on every release, their calls merged by METHODS section 2's rule: CRISPRme 2.10.0's readers
 of the phased indel store merge them so, and its indel path reads the indel log's carriers
@@ -196,8 +200,10 @@ own dictionary keeps there each line's own allele numbers (a CRISPRitz before it
 form, up to c18c575) or does not tell (none in its working directory), numbers CRISPRme's
 readers cannot tell apart (METHODS section 4; CRISPRitz 2.10.0's split form is checked as
 any other position), and a run whose VCF holds there
-an SNV whose ALT is written in lower case (CRISPRitz codes no lower-case ALT, while its
-dictionary lists the carriers; write REF and ALT in upper case). A refused run stops at the
+an SNV whose ALT is written in lower case on a variant genome that does not code it
+(CRISPRitz 2.9.1 and earlier, an index of format 1, while its dictionary lists the carriers;
+build the index again with CRISPRitz 2.10.0, which reads REF and ALT in upper case, or write
+them in upper case), or whose run does not tell. A refused run stops at the
 first work unit that meets such a position. It models a search that read each genotyped
 dataset's genotypes
 (its genotype store, or classic dictionaries): an install made with `--no-genotypes`

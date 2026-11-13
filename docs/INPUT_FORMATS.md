@@ -341,14 +341,17 @@ For a variant-aware search, each VCF record needs:
   **only indels** works fine — the missing category simply yields an empty
   branch of results.
 - **`complex` and `mnp` records are treated as indels.**
-- **REF and ALT are read whatever their case for an indel or MNV** (VCF 4.x reads them
-  alike): CRISPRme names such a record in upper case in its results, and two lines of one
-  indel written in two cases (HPRC's `vcfwave` writes `TG>T` beside `tg>t`) are one allele, their
-  carriers merged. An SNV's REF is read whatever its case too: two lines `C>G` and `c>G` at one
-  position are one allele, their carriers merged. **An SNV whose ALT is written in lower case is
-  never searched**: CRISPRitz
-  codes no lower-case ALT into the enriched genome, though its dictionary lists the carriers.
-  The full pre-flight scan (§9) warns of such records; write REF and ALT in upper case (below).
+- **REF and ALT are read whatever their case** (VCF 4.x reads them alike): CRISPRitz 2.10.0,
+  which CRISPRme 2.10.0 installs, reads a record's REF and every ALT in upper case (an ALT
+  holding `<`, a symbolic allele, as written), so an SNV whose ALT is written in lower case is
+  coded and searched as any other, and CRISPRme names every record in upper case in its results.
+  Two lines of one REF>ALT written in two cases are one allele, their carriers merged: an SNV's
+  (`C>G` beside `c>g`) and an indel's (`TG>T` beside `tg>t`, as HPRC's panel, normalised against
+  the soft-masked reference, writes some). An index built with CRISPRitz 2.9.1 or earlier
+  (CRISPRme 2.8.1's) codes no SNV ALT written in lower case, though its dictionary lists the
+  carriers, so such an SNV is never searched on it: build the index again with CRISPRme 2.10.0,
+  or write REF and ALT in upper case (below). The published panels hold no SNV written in lower
+  case.
 - **Structural variants are not supported.** Symbolic ALT alleles such as
   `<DEL>`, `<INS>`, `<DUP>` are skipped, and breakend (BND) notation can corrupt
   parsing — **remove SV records before running.**
@@ -365,7 +368,8 @@ bcftools view -f PASS input.vcf.gz \
 ```
 
 and confirm every record carries a numeric `INFO/AF` and a `FORMAT/GT` field. A VCF that
-writes some REF or ALT in lower case can be written in upper case so:
+writes some REF or ALT in lower case (which CRISPRitz 2.10.0 reads in upper case, and an index
+of CRISPRitz 2.9.1 or earlier does not) can be written in upper case so:
 
 ```bash
 zcat input.vcf.gz | awk 'BEGIN{FS=OFS="\t"} !/^#/{$4=toupper($4); $5=toupper($5)} 1' \
@@ -390,7 +394,8 @@ sample-ID mismatch, or a chromosome-naming mismatch.
 > `--full_input_validate` (the `--full_input_validate` flag in `crisprme.py`) to
 > run a full per-VCF-record check — chromosome coverage,
 > `AF`/`FILTER` consistency, `POS` bounds, and a multiallelic/breakend/duplicate/
-> phasing/lower-case-SNV survey — before the search starts (slower, so it is opt-in).
+> phasing survey (a REF>ALT repeated at a position, in one case or in two) — before the
+> search starts (slower, so it is opt-in).
 >
 > Optional extra checks you can run yourself if you want to eyeball a VCF:
 >
