@@ -109,10 +109,12 @@ class APullRequestBuildsOneEngine(unittest.TestCase):
             self.assertIn("(remove at release)", lines[at - 1], name)
 
     def test_the_changelog_names_the_commit(self):
+        # by the CRISPRitz branch and the commit: a pull request's head moves with the branch's
+        # later commits (CRISPRitz's docs-only commits after 4ded5e6), the pin does not
         found = {sha for shas in self.pins().values() for sha in shas}
         changelog = read(REPO / "CHANGELOG.md")
         for sha in found:
-            self.assertIn("pull request #47's head, %s" % sha[:7], changelog)
+            self.assertRegex(changelog, r"CRISPRitz feat/\d+\.\d+\.\d+ commit %s\b" % sha[:7])
 
 
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")

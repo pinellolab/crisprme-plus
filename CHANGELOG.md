@@ -1225,9 +1225,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
   `crispritz_ref` names (`git fetch` of the ref, where `git clone --branch` took a tag or a branch
   alone), so a pull request's CI builds, before CRISPRitz's tag exists, the CRISPRitz commit the
   release is tested with (`docker-multiarch.yml`'s and `web-e2e.yml`'s image builds pass
-  `crispritz_ref=` CRISPRitz pull request #47's head, 4ded5e6, which reads a VCF's REF and ALT in
-  upper case, below, each line under a comment `(remove at release)`); the release checklist
-  removes those two lines once the tag is pushed.
+  `crispritz_ref=` CRISPRitz feat/2.10.0 commit 4ded5e6, which reads a VCF's REF and ALT in upper
+  case, below; the branch's later commits change its docs only), each line under a comment
+  `(remove at release)`; the release checklist removes those two lines once the tag is pushed.
 - **CRISPRitz 2.10.0 reads a VCF's REF and every ALT in upper case, as VCF 4.x does, and so do
   CRISPRme's readers of the VCF itself** (its `docs/MULTIALLELIC_ENRICHMENT.md` §2.1, §2.9 and §6.7;
   an ALT holding `<`, a symbolic allele, as written). Its enricher read them as written up to 2.9.1:
