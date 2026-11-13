@@ -2704,8 +2704,9 @@ read as the reference: a carrier of such a SNP stays listed for a target the SNP
 oracle's site A, its PAM SNP marked `LowQual`, lists its cis carrier). Of a sites-only dataset such
 a line's indels and MNVs are dropped (the `hg38_mega` index's indel log holds exactly the 222,283
 `PASS` indels of its chr22 VCF, none of its 40,840 others), and its SNVs are read by its SNP rows
-whatever their FILTER: `hg38_mega`'s registry holds all 838,025 SNVs of its chr22 VCF, the 78,116
-outside `PASS` among them, and its SNP rows name some (chr22:11574550 C>G, `LOW_VQSLOD`), while an
+whatever their FILTER: `hg38_mega`'s registry as 2.8.1 published it holds all 838,025 SNVs of its
+chr22 VCF, the 78,116 outside `PASS` among them (that of 2.10.0's rebuild holds those that pass,
+§2), and its SNP rows name some (chr22:11574550 C>G, `LOW_VQSLOD`), while an
 index CRISPRitz's enricher builds from a sites-only VCF holds none of them, and a run does not say
 which it read, so a SNP row through one is a row CRISPRme may write or not (below). Its fake-indel
 windows code what CRISPRitz's overlay codes from the enriched genome: its SNVs whose FILTER passes,
