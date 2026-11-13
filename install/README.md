@@ -26,10 +26,10 @@ the reference + variant data automatically (once) and opens the web interface at
 http://localhost:8080; every Start after that is instant. (Manage additional data
 from the web app's own Settings.)
 
-**Memory:** most searches are light, but the **whole-genome variant-aware search**
-(across 1000G + HGDP) needs **~64 GB of RAM** — give Docker Desktop that much under
-Settings → Resources → Memory. On **Windows with the WSL 2 backend there is no memory
-slider**: set `memory=` in `C:\Users\<you>\.wslconfig`, then run `wsl --shutdown` (see
+**Memory:** the **whole-genome variant-aware search** (across 1000G + HGDP) needs
+**~64 GB of RAM** — give Docker Desktop that much under Settings → Resources → Memory.
+On **Windows with the WSL 2 backend there is no memory slider**: set `memory=` in
+`C:\Users\<you>\.wslconfig`, then run `wsl --shutdown` (see
 the [Docker Quickstart](../docs/DOCKER_QUICKSTART.md#1-install-docker-one-time)). Many current laptops ship with 36–128 GB and can run
 it; otherwise use a workstation or HPC. Smaller searches need less: the README's
 [System Requirements](../README.md#0-system-requirements) give what a reference-only search and

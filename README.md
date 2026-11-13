@@ -427,7 +427,7 @@ Memory scales with the search — pick your tier (measured figures):
 | Search | RAM | Disk |
 |---|---|---|
 | **Reference-only** (no variant dataset) | grows with `--thread`: about 18 GiB genome-wide on 8 threads, the default (below) | ~44 GB (reference-only install) |
-| **Variant-aware, one chromosome or region** | up to 13 GiB on chr22; 25 GiB for the IGH locus of chr14 alone (below) | what its genome and indexes take |
+| **Variant-aware, one chromosome or region** | up to 13 GiB on chr22 and 25 GiB for the IGH locus of chr14 alone, searched with NRG; NRR, the default, took 1.8 times NRG's memory on chr22 (below) | what its genome and indexes take |
 | **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`20-NRR_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~150 GB (full variant-aware install; keep ~200 GB free) |
 
 The variant-aware genome-wide search is the memory-heavy one: the CRISPRitz search
@@ -445,11 +445,14 @@ process):
   2.10.0 built (the gate runs of this release, 8 threads; METHODS.md §5): on chr22, per sample,
   the README guide took 5.0 GiB with NRG and 8.9 GiB with NRR, the default PAM, and three
   repeat-rich guides at once, with NRG, 12.5 GiB; population-level, about the same. The
-  immunoglobulin loci are the densest part of these indexes: the IGH locus alone (chr14 with every
-  base outside it set to N, and the panel's records of the locus) took 25.0 GiB, IGK alone 6.2 GiB
-  and IGL alone 3.0 GiB. The gate searched no other chromosome whole (during development, the
-  rebuilt mega's search of chr14 whole, five guides population-level with its density guard on,
-  took 20.5 GiB). Give a search of a chromosome that holds IGH at least what the locus alone took.
+  immunoglobulin loci are the densest part of these indexes: searched with NRG, the IGH locus
+  alone (chr14 with every base outside it set to N, and the panel's records of the locus) took
+  25.0 GiB, IGK alone 6.2 GiB and IGL alone 3.0 GiB. No search of them with NRR was measured; on
+  chr22, NRR, the default, took 1.8 times NRG's memory. The gate searched no other chromosome
+  whole (during development, the rebuilt mega's search of chr14 whole, five guides
+  population-level with its density guard on, took 20.5 GiB). Give a search of a chromosome that
+  holds IGH at least what the locus alone took with NRG, and more on an index of NRR, the default:
+  a search of chr14 on `20-NRR_3_hg38+hg38_HGDP1kGP` can need more than 25 GiB.
 
 To estimate the cost of a large search up front, see `docs/SCALABILITY_ANALYSIS.md`.
 

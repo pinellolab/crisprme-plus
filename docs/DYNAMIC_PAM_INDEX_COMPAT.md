@@ -214,9 +214,10 @@ unchanged. Pam-less indexes get a new **index-scoped, data-driven** picker:
 - Chosen PAM → `--prune-pam <PAM>` to the search. Default preset = NGG.
 
 ## 9. Performance characteristics (measured)
-A pam-less index is SLOWER + heavier per search than a dedicated per-PAM index, because the
-`--prune-pam` filter is a leaf-time skip-before-write: it saves the OUTPUT + downstream
-scoring/post-analysis, NOT the TST descent (the pam-less tree is traversed in full).
+A pam-less index is SLOWER per search than a dedicated per-PAM index, and on one chromosome or
+less heavier too (genome-wide on 32 threads it peaked below the dedicated indexes, below),
+because the `--prune-pam` filter is a leaf-time skip-before-write: it saves the OUTPUT +
+downstream scoring/post-analysis, NOT the TST descent (the pam-less tree is traversed in full).
 
 Measured (hg38 chr22:20-25Mb, EMX1, NGG 4mm/1/1, same host):
 | search | off-targets | wall | peak RAM |
@@ -225,19 +226,27 @@ Measured (hg38 chr22:20-25Mb, EMX1, NGG 4mm/1/1, same host):
 | pam-less NNN + `--prune-pam NGG` | 772 (identical) | 13.3 s | 3.36 GB |
 | pam-less NNN, no filter | 9,736 | 15.6 s | 3.37 GB |
 
-~10x slower / ~11x RAM for NGG on this 5-Mb slice. Genome-wide on the reference (2.10.0's
-portfolio measurement, `ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1 DNA + 1 RNA bulge, the engine's
-search), the 8-nt general index took 3.3 times a dedicated NGG index's time (26 against 8 min)
-and 1.7 times the NRR index's (15 min). The penalty scales with PAM SELECTIVITY: largest for
-selective PAMs (NGG ~10-16x, where a dedicated index is tiny), ~4x for NRR, and ~par for near-pamless
-(no small dedicated alternative). Higher mm/bulge pam-less searches are proportionally heavier
-(whole tree traversed regardless of the search PAM). **Guidance:** keep dedicated indexes as the
-fast default for a fixed known PAM; use the pam-less index for PAM flexibility / variable /
-arbitrary PAMs, accepting the per-search cost.
+~10x slower / ~11x RAM for NGG on this 5-Mb slice. On the whole of chr22's reference (2.10.0's
+portfolio measurement: the engine's search of five 20-nt guides at 4 mismatches, 4 threads,
+indexes of N = 3), the 8-nt general index took, pruned to NGG, 10 times a dedicated NGG index's
+time at 1 DNA + 1 RNA bulge and 18 times at 2 + 2, and, pruned to NRR, 1.7 and 1.8 times the
+NRR index's. Genome-wide on the reference (`ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1 DNA + 1
+RNA bulge, the engine's search on 32 threads; the NGG and general indexes of format 1, the NRR one
+of format 2), the general index, pruned to NGG, took 3.3 times a dedicated NGG index's time (26
+against 8 min) and 1.7 times the NRR index's (15 min), and its largest process peaked lower than
+either's (55.8 GiB, against 60.2 and 59.0 GiB). So the time penalty scales with PAM SELECTIVITY,
+and for a selective PAM it is smaller genome-wide than on one chromosome: NGG about 10 times on
+the 5-Mb slice and on chr22 (18 times there at 2 + 2 bulges) and 3.3 times genome-wide; NRR 1.7
+to 1.8 times on chr22; ~par for near-pamless (no small dedicated alternative).
+Higher mm/bulge pam-less searches are proportionally heavier (whole tree traversed regardless of
+the search PAM). **Guidance:** keep dedicated indexes as the fast default for a fixed known PAM;
+use the pam-less index for PAM flexibility / variable / arbitrary PAMs, accepting the per-search
+cost.
 
 ## Net
 Not a breaking change: a new, opt-in index **type** + capability, quarantined to a separate HF
 repo (in 2.8.1 the wider flanks only; in 2.10.0 every index, by its format), refused by a release
 that cannot read it (the engine's PAM-length guard since CRISPRitz 2.9.1, the header of index
 format 2 since 2.10.0), distinctly named; defaults and legacy paths untouched. The pam-less index
-trades per-search speed/RAM for one-index-any-PAM flexibility.
+trades per-search speed (and, on one chromosome or less, memory) for one-index-any-PAM
+flexibility.

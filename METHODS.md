@@ -1792,12 +1792,14 @@ default index beside the mega, as published and as rebuilt, in both modes.
 `/usr/bin/time` reads it) peaked, on chr22, at 5.0 GiB for the README guide per sample and 5.0
 to 5.1 GiB population-level, 5.1 GiB for TRAC, 5.1 to 5.3 GiB for VEGFA site 3, 8.9 GiB for the
 README guide with NRR (in runs sampled for it, CRISPRitz's index search, `searchTST`), 12.5 GiB
-for the three repeat-rich guides in either mode and 2.4 GiB for SaCas9; at 4.1 GiB on HPRC chr22;
-and at 3.0, 6.2 and 25.0 GiB for IGL, IGK and IGH alone (one round). NRR's per-sample search of
-chr22 thus took 1.8 times NRG's memory and 1.2 times its time. Of chr14 and chr2 the gate
-searched the loci alone. Of chr14 whole, the rebuilt mega's search of the five guides above
-(population-level, its density guard on; during development, on fake-indel windows of 25/27)
-peaked at 20.5 GiB, and the shipped mega's at 8.9 GiB.
+for the three repeat-rich guides in either mode and 2.44 to 3.03 GiB for SaCas9 (2.44 GiB in both
+rounds; the same search of the same code peaks at either from one run to the next, `searchTST`'s
+search of the variant index); at 4.1 GiB on HPRC chr22; and at 3.0, 6.2 and 25.0 GiB for IGL,
+IGK and IGH alone, searched with NRG (one round). NRR's per-sample search of chr22 thus took 1.8
+times NRG's memory and 1.2 times its time; no search of the loci with NRR was measured. Of chr14
+and chr2 the gate searched the loci alone. Of chr14 whole, the rebuilt mega's search of the five
+guides above (population-level, its density guard on; during development, on fake-indel windows
+of 25/27) peaked at 20.5 GiB, and the shipped mega's at 8.9 GiB.
 
 **What the default budget costs.** The bulges drive it: on chr22 per sample the README guide's
 search took 238 s at 4 + 0 + 0, 471 s at 4 + 1 + 0, 481 s at 4 + 0 + 1 and 5,758 s at 4 + 1 + 1

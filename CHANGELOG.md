@@ -2956,12 +2956,14 @@ major.minor version (Changed). The main changes, each told in its entry below:
   search, or a variant-aware search of one chromosome or region, fits in 8 to 16 GB, on any
   laptop: a claim of August and September 2026, before every allele was coded. In the gate runs
   of this release, on indexes CRISPRitz 2.10.0 built (8 threads), the largest process peaked at
-  5.0 GiB for the README guide on chr22 per sample, 8.9 GiB with NRR, 12.5 GiB for three
-  repeat-rich guides, and 25.0 GiB for the IGH locus of chr14 alone; CRISPRitz's search of a
-  reference index genome-wide took 18.4 GiB on 8 threads and 60.2 GiB on 32 (during
-  development), its memory growing with `--thread`. README §0 gives these with their basis, and
-  METHODS §5 the gate runs'; the other surfaces point to §0. RELEASE_CHECKLIST's gate D measures
-  each memory figure of the docs again on the rebuilt indexes.
+  5.0 GiB for the README guide on chr22 per sample with NRG, 8.9 GiB with NRR (1.8 times NRG's),
+  12.5 GiB for three repeat-rich guides, and 25.0 GiB for the IGH locus of chr14 alone, the last
+  two with NRG (no search of the loci with NRR, the default, was measured, and a search of chr14
+  on the default index can need more); CRISPRitz's search of a reference index genome-wide took
+  18.4 GiB on 8 threads and 60.2 GiB on 32 (during development), its memory growing with
+  `--thread`. README §0 gives these with their basis, and METHODS §5 the gate runs' (SaCas9's
+  peak 2.44 to 3.03 GiB from one run to the next); the other surfaces point to §0.
+  RELEASE_CHECKLIST's gate D measures each memory figure of the docs again on the rebuilt indexes.
 - **A carrier is no longer taken off a row for an indel whose FILTER the search skips.** The
   phased indel genotype store (`Dictionaries/indel_genotypes_<vcf>/`, `build_indel_genotypes.py`)
   streamed the VCF without reading FILTER and kept every indel of it, while CRISPRitz's enricher
