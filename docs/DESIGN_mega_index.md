@@ -7,7 +7,9 @@ hybrid was superseded by the re-phased HGDP1kGP default and retired in v2.7.8. T
 one **sites-only** index so a user can scan once against the union of common
 variation across cohorts, with **per-dataset allele frequencies** + a **global
 `AF_max`**. Individual-level (genotype) data is intentionally discarded (user
-decision, 2026-09-01). NRG (NRG_3) only for now.
+decision, 2026-09-01). It was built for NRG (`NRG_3`) alone at first; the archives of 2.8.1
+hold an NRG and an NRR mega index, and 2.10.0 publishes `20-NRR_3_hg38+hg38_mega` alone, which
+serves NRG searches, pruned (`docs/PRECOMPUTED_INDEXES.md`).
 
 > **CRISPRme 2.10.0.** The mega is rebuilt from the same merged VCFs by
 > `seq_script/merge_panels/mega_rebuild.sh`: every store reads the records CRISPRitz 2.10.0's

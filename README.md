@@ -315,9 +315,11 @@ which no earlier release reads (CRISPRme+ 2.8.1 refuses an index of format 2, an
 on one). The archives of 2.8.1 (index format 1, the older names: `NRR_3_hg38+hg38_HGDP1kGP`,
 `NNN_3_hg38`, the 8-nt `NNNNNNNN_3_hg38`) stay in `lucapinello/crisprme-data` and
 `lucapinello/crisprme-data-general-index` for 2.8.1; 2.10.0 reads both formats and still fetches
-one by its name, saying first which index of 2.10.0 replaces it. Keep an install of an archive of 2.8.1
-apart from one of 2.10.0 of the same panel (another `--path`): each reads its own build of the
-panel's Dictionaries, and `download` refuses to mix them.
+one by its name, saying first which index of 2.10.0 replaces it. Keep an install of an archive of
+2.8.1 apart from one of 2.10.0 of the same panel (another `--path`): each reads its own build of
+the panel's Dictionaries. `download` refuses to put an archive of 2.8.1's Dictionaries over a
+bundle of 2.10.0; the other way, where a bundle of 2.10.0 replaces the Dictionaries of installed
+indexes of 2.8.1, it only warns, naming them, and those indexes then read the bundle's.
 
 A PAM-less index with `--prune-pam` gives the dedicated index's report for the same PAM: from
 an index of format 2 (CRISPRitz 2.10.0), contig ends included; from one of format 1 (CRISPRitz

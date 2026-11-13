@@ -1706,11 +1706,14 @@ major.minor version (Changed). The main changes, each told in its entry below:
   - **What the real-data check does not check.** It does not read `Variant_info_spacer+PAM`, nor
     whether an alternative alignment is one the merge should have folded into a better one
     (Added: the unit tests and the SNP+indel oracle's planted sites check both). And it refuses
-    (exit 2) a run whose VCF holds two lines of one SNV REF>ALT at a position (case twins such
-    as `C>g` beside `C>G` among them) where nothing in the run tells whether its genome codes
-    every allele: no Q in its variant index's headers, and no enriched genome in its working
-    directory that codes an earlier record's ALT at a split site. Runs on the published panels
-    tell it.
+    (exit 2) a run whose VCF holds a split SNP site (two or more lines of an SNV ALT at one
+    position) on a chromosome it checks, where nothing in the run tells whether its genome codes
+    every allele (Added, the check's Releases): an index of format 1, as 2.8.1 published, tells
+    it; one of 2.10.0 tells it where its `.bin` headers flag Q, as they do on a chromosome where
+    its sites hold a position of four bases; else an enriched genome in the working directory
+    tells it at a split site where an earlier line holds an ALT the last line does not (two
+    lines of one SNV REF>ALT, case twins such as `C>g` beside `C>G` among them, never tell). An
+    index download holds no enriched genome, so there only the variant index tells it.
   - **Searches above 1 DNA + 1 RNA bulge in dense regions** (the warning under Added). On an
     index that codes every allele, the IUPAC search of the immunoglobulin loci and some tandem
     repeats grows by orders of magnitude above the default budget, and can run for many hours

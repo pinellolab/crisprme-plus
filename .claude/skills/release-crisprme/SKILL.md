@@ -45,7 +45,7 @@ first, and its `crispritz` recipe of the new minor carries `run_constrained: - c
 (2.10.0: `crisprme >=2.10.0`). The crisprme builds made before the policy do not cap crispritz
 (2.7.9, 2.8.0 and 2.8.1 build 0 ask for `crispritz >=2.9.0`), so without the guard a new install
 of one of them, or an `update --all` of its environment, takes CRISPRitz X.Y, whose index format
-it cannot read. CRISPRme 2.8.1's build 1 (on the channel since 2026-11-11) pins
+it cannot read. CRISPRme 2.8.1's build 1 (on the channel by 2026-11-11) pins
 `crispritz >=2.9.1,<2.10`. The guard is in CRISPRitz's recipe, so CRISPRitz's release puts it
 there (its own skill); this skill checks it is merged before the crisprme recipe is (Step 4).
 

@@ -395,7 +395,9 @@ mismatches are a search-time parameter, run at `--mm 6`). Output
 `genome_library/NRG_3_hg38+hg38_HGDP1kGP` (+ `_INDELS`; CRISPRme 2.10.0 and later name it for
 its guide length and side, `20-NRG_3_hg38+hg38_HGDP1kGP`) + `Dictionaries/{registry,genotypes,
 indel_genotypes,log_indels}_hg38_HGDP1kGP` + `variant_count.json` (**125,180,264 SNPs +
-17,192,381 indels**; `phased:true`); every `reg_<chrom>.idx` carries `data_type=genotyped-phased`.
+17,192,381 indels** in 2.8.1's build, whose CRISPRitz 2.9.1 coded only the last record of a
+split site, METHODS §2: a build with CRISPRitz 2.10.0, which codes every allele, writes its own
+count; `phased:true`); every `reg_<chrom>.idx` carries `data_type=genotyped-phased`.
 
 ### 7.4 chrX pseudoautosomal (PAR) ploidy — a correctness requirement
 chrX is hemizygous in males ONLY outside the pseudoautosomal regions. On GRCh38: PAR1

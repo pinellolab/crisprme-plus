@@ -96,7 +96,7 @@ major.minor**: CRISPRme 2.10.z runs on CRISPRitz 2.10.z, then 2.11 on 2.11, and 
   cannot read; with it, the solver gives such an environment CRISPRitz X.Y only with CRISPRme X.Y.
   The guard was the one safeguard that held in every case the 2.8.1 health check tried, an
   environment already installed included; a repodata patch would cover new installs only.
-  CRISPRme 2.8.1's own build 1 (on the channel since 2026-11-11) pins `crispritz >=2.9.1,<2.10`.
+  CRISPRme 2.8.1's own build 1 (on the channel by 2026-11-11) pins `crispritz >=2.9.1,<2.10`.
   CRISPRitz's release puts the guard in its recipe (its `release-crispritz` skill); CRISPRme's
   checks it is merged before the `crisprme` recipe is (step 5).
 

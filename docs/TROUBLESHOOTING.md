@@ -520,8 +520,10 @@ of the messages, each path quoted, does the same in either shell.
 **Symptom.** `complete-search` prints `WARNING [complete-search]: <m> mismatch(es) + <d> DNA +
 <r> RNA bulge(s) ... on a variant index that codes every allele (index format 2, CRISPRitz
 2.10.0). Above the 1 DNA + 1 RNA default, ...` (its `.Params.txt` keeps it, and its
-`log_verbose.txt` says it again, a web search's too); the search then runs for many hours, or is
-killed for memory (exit 137, an empty `log_error.txt`).
+`log_verbose.txt` says it again, a web search's too); the search then runs for many hours, or its
+index search is killed for memory: `log_error.txt` then holds
+`ERROR: searchTST (index search) failed (signal SIGKILL)` and `complete-search` exits 1 (a
+container or a job killed as a whole ends with exit status 137 and no message).
 
 **Cause.** The indexes of 2.10.0 code every allele of a split site, so the densest windows of
 the variant genome, in the immunoglobulin loci (IGL on chr22, IGH on chr14, IGK on chr2), spell

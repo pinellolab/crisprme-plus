@@ -1772,9 +1772,9 @@ the ranges giving both where both ran) took, in wall time:
 | chr22, the README guide with NRR, per sample | 690 to 734 s | 1,672 s | |
 | chr22, TRAC (NRG), per sample | 617 to 648 s | 1,585 s | |
 | chr22, VEGFA site 3 (NRG), per sample | 994 to 1,052 s | 1,989 s | |
-| chr22, SaCas9 (NNGRRT), per sample | 4,936 s | | |
+| chr22, SaCas9 (NNGRRT), per sample | 4,890 to 4,936 s | | |
 | chr22, three repeat-rich guides (NRG), per sample | 1,799 to 1,907 s | | |
-| chr22, three repeat-rich guides, population-level | 6,650 s | | |
+| chr22, three repeat-rich guides, population-level | 6,451 to 6,650 s | | |
 | IGL alone, per sample | 445 s | 1,127 s | |
 | IGK alone, per sample | 616 s | 2,850 s | |
 | IGH alone, per sample | 2,030 s | 10,498 s | |
@@ -3266,10 +3266,10 @@ PAM-less index of width *K* stores a wider flank than a dedicated index of a sho
 and so is more exposed to one. Three separate gates acted on that — the build-time PAM
 scan, the discard of any window containing an `N`, and the prune test itself — and the
 effect is concentrated on the synthetic indel genome, which is `N`-separated roughly every
-56 bases (65 with CRISPRitz 2.10.0's windows of 30/30, §4: on chr22 of HGDP + 1000 Genomes,
-15,617,574 bases and 240,557 `N` runs): a width-31 window admitted
-34,690,315 start positions on one contig against a width-26 window's 41,454,105, so
-**16.3%** were invisible to a wider index. Real assembly
+57 bases with CRISPRitz 2.9.1's windows of 25/27 (65 with 2.10.0's of 30/30, §4: on chr22 of
+HGDP + 1000 Genomes, 13,693,118 and 15,617,574 bases and 240,557 `N` runs): a width-31
+window admitted 34,690,315 start positions on one contig against a width-26 window's
+41,454,105, so **16.3%** were invisible to a wider index. Real assembly
 `N` sits in megabase gaps where nothing matches, which is why reference and SNP searches
 were never affected. CRISPRitz now keeps a target whose stored PAM/flank region holds an
 `N` and lets the search PAM decide, exactly as a dedicated index does.
@@ -3438,12 +3438,16 @@ one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense regions.
   wrong place, or a redundant alternative alignment, passes it; the unit tests and the
   SNP+indel oracle's planted sites check both.
 - **When the check cannot tell the genome's generation.** The check reads how a run's variant
-  genome was coded from the run's own records (§8, Releases). Where nothing tells whether it
-  codes every allele of a split site (no Q in the variant index's headers, and no enriched
-  genome in the working directory that codes an earlier record's ALT at a split site) and the
-  VCF holds two lines of one SNV REF>ALT at a position (case twins such as `C>g` beside `C>G`
-  among them), the check refuses the run (exit 2), and the run is not checked. Runs on the
-  published panels tell it.
+  genome was coded from the run's own records (§8, Releases, gives each rule). Where they do not
+  tell whether it codes every allele of a split site, a run whose VCF holds a split SNP site (two
+  or more lines of an SNV ALT at one position) on a chromosome it checks is refused (exit 2), and
+  is not checked. An index of format 1, as 2.8.1 published, tells it; one of 2.10.0 tells it where
+  its `.bin` headers flag Q, which they do on a chromosome where its sites hold a position of four
+  bases. Without either, an enriched genome in the working directory tells it at a split site
+  where an earlier line holds an ALT the last line does not (two lines of one SNV REF>ALT, case
+  twins such as `C>g` beside `C>G` among them, never tell), and an index download holds no
+  enriched genome: there a run is refused where a chromosome it checks has a split SNP site in
+  its VCF and no Q in its variant index of 2.10.0.
 - **Searches above 1 DNA + 1 RNA bulge in dense regions.** On an index that codes every allele
   (CRISPRitz 2.10.0), the IUPAC search of the immunoglobulin loci and of some tandem repeats
   grows by orders of magnitude above the default budget, a cost no step after the search

@@ -333,10 +333,10 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   0.76 million SNP and 4.5 million indel raw targets at 4 + 1 + 1, 1.6 and 8.5 million at
   6 + 1 + 1 with a cap of 8, and 33.7 and 204 million at 4 + 2 + 2 with the default cap of 6
   (93.8 million SNP raw targets with a cap of 8), the indel counts on the fake-indel windows of
-  25/27 of 2.10.0's development (its windows of 30/30 write about 30% more). CRISPRme 2.10.1 is
-  planned to search those loci's haplotypes themselves (README, the same section). In the web
-  form the per-type values live under **Advanced options**, while the **Maximum edits** slider
-  is the total budget — the equivalent of `--max-total-edits`.
+  25/27 of 2.10.0's development (at 4 + 1 + 1 its windows of 30/30 write about 30% more).
+  CRISPRme 2.10.1 is planned to search those loci's haplotypes themselves (README, the same
+  section). In the web form the per-type values live under **Advanced options**, while the
+  **Maximum edits** slider is the total budget — the equivalent of `--max-total-edits`.
 - `--max-total-edits` caps the **total** edits (mismatches + bulges) in one alignment,
   and defaults to 6. Setting it *below* `--mm + --bDNA + --bRNA` is the point of the
   flag: `--mm 4 --bDNA 1 --bRNA 1 --max-total-edits 4` allows 4 mismatches, or
