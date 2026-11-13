@@ -25,7 +25,7 @@ through an interactive web-based interface.
 - **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. Since 2.8.1 an indel row lists only the individuals whose own haplotype has its sequence; where the phase is unknown, those whose own alleles allow it (PUTATIVE); on an install without SNP genotypes (`download --what index --no-genotypes`), every carrier of the indel where a SNP makes the site with it (PUTATIVE). Since 2.10.0 a per-sample SNP row does not list an individual whose haplotype holding its SNPs also holds an indel that changes the target (where that indel's phase is unknown, it stays, PUTATIVE; `CRISPRME_INDEL_SNP=0` turns this off too). Split multi-allelic SNP sites are the exception on an index CRISPRitz 2.9.1 or earlier built, as every one published until the rebuild for 2.10.0 ([§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)). An indel off-target is searched in a window of 30 reference bases on either side of its indel (CRISPRitz 2.10.0; 25 before and 27 after up to 2.9.1), which holds a target of up to 31 bases, guide, PAM and DNA bulges counted (27 on 2.9.1's, 26 at an MNV): a search whose targets need more says so, and each window's width is read from its index's own indel log, so an index of either release reads right. ([methods](METHODS.md#snpindel-off-targets-each-carriers-own-haplotype))
 - **Complementary production indexes** — the **recommended default** is the phased **HGDP + 1000 Genomes** index of the default SpCas9 **NRR** PAM (`20-NRR_3_hg38+hg38_HGDP1kGP`: 4,091 samples, jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout), with the **HPRC pangenome** and the sites-only five-source **mega** alternatives. All carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence — see the [index comparison table below](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) and [`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md). (Per-source retrieval recipes for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us are in [`paper/reproducibility/variant-datasets/`](paper/reproducibility/variant-datasets/).)
 - **One index, many PAMs (`--prune-pam`)** — a **PAM-less** index stores the raw genomic flank instead of a fixed PAM, and the PAM you pass is applied during the search, so one index answers any 3′ PAM no longer than that flank (a 3-nt flank serves NRG, NGG, NAG, …). Measured genome-wide on HGDP + 1000 Genomes for one guide, a PAM-less index with `--prune-pam` returned a **byte-identical** report to a dedicated NRG index at both a 3-nt and an 8-nt flank. A flank wider than the PAM, in an index built by CRISPRitz 2.9.1 or earlier (index format 1, as every one published until the rebuild for 2.10.0 is), does not index a PAM at a contig's very end (+ strand) or start (− strand): on hg38 at an 8-nt flank, 145 + 101 NGG and 308 + 241 NRG sites, none on a primary chromosome; the search says so when it uses such a flank. An index of format 2, which CRISPRitz 2.10.0 writes, has no such limit. The trade is size — 2.8.1's 3-nt PAM-less variant index is 110 GB against 28 GB for its `NRG_3_hg38+hg38_HGDP1kGP` — and pruning happens as results are emitted, so it is not *faster* than a dedicated index; it is worth it when you expect to search several PAMs over one genome. Since 2.10.0 a search prunes by itself, from the command line or the web form, whenever no installed index serves it unpruned, and a dedicated index serves any PAM its own holds the same way (an NRR index serves NGG, NAG, NGA and NRG). ([methods](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering))
-- **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the worst-case screen on a phased index; add **`--per-sample`** to force resolution on any genotyped index (on a sites-only index, which has no genotypes, it runs the population-level analysis, with a warning). This is a **genotype-resolution** dial, not a speed dial: which mode is faster depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele, per-sample is the faster on a dense panel of many samples such as the default HGDP + 1000 Genomes one (its haplotype pre-check skips the dense windows' raw targets nobody carries), and population-level can be on a small panel such as HPRC, or beside mega ([Search speed](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces)). The report states which mode was used. ([methods](METHODS.md#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis))
+- **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the worst-case screen on a phased index; add **`--per-sample`** to force resolution on any genotyped index (on a sites-only index, which has no genotypes, it runs the population-level analysis, with a warning). This is a **genotype-resolution** dial, not a speed dial: which mode is faster depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele, per-sample is the faster on a dense panel of many samples such as the default HGDP + 1000 Genomes one (its haplotype pre-check skips the dense windows' raw targets nobody carries), and population-level can be on a small panel such as HPRC ([Search speed](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces)). The report states which mode was used. ([methods](METHODS.md#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis))
 - **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in population-level runs (`--population-level` on a genotyped index, or the default on sites-only/unphased indexes), **on** in per-sample runs (the default on genotyped+phased indexes, or under `--per-sample`) — on **both the CLI and the web**; override on the CLI with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
 - **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, calibrated per-scorer risk card, precision-recall curves, **recommended validation panel**, annotated top hits, per-tier downloads, legend). The panel keys bulges on **CRISPR-Bulge at a principled sensitive threshold** — the **95%-recall operating point** on a 40-guide held-out benchmark (`CB ≥ 1.9×10⁻⁴`; selectable to 90 % / 95 % / 99 % recall via `CRISPRME_CB_RECALL_TARGET`) — plus a high-CFD rescue for no-/single-bulge sites and all perfect/near-perfect and functional / cancer-gene hits, so the shipped panel *is* the recommended default set. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
@@ -68,8 +68,8 @@ that matter most:
   resolution. The two flags are mutually exclusive. It is a genotype-resolution dial, not a
   speed dial: on the indexes CRISPRitz 2.10.0 builds the per-sample analysis is the faster on
   a dense panel of many samples such as the default HGDP + 1000 Genomes one, and the
-  population-level one can be on a small panel such as HPRC, or beside mega (see **What the
-  default search costs** below).
+  population-level one can be on a small panel such as HPRC (see **What the default search
+  costs** below).
 - **Index.** You only need one; pick by what you're after (full detail in the index
   table in the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build)
   below):
@@ -166,11 +166,11 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 
 > **`:latest` vs a pinned tag.** These commands use `pinellolab/crisprme:latest` — the
 > auto-updating, GPU-capable default image. For a fully reproducible run, pin the exact
-> release instead, e.g. `pinellolab/crisprme:v2.8.1`.
+> release instead, e.g. `pinellolab/crisprme:v2.10.0`.
 
 > **On HPC with Apptainer/Singularity.** Use **`apptainer run`**, which invokes the image
 > entrypoint so `crisprme.py` is on `PATH`, binding your data dir to `/DATA` — e.g.
-> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.8.1 crisprme.py --version`
+> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.10.0 crisprme.py --version`
 > (add `crisprme.py web-interface` / `complete-search …` the same way). Note that
 > `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
 > `PATH` — prefer `apptainer run` (or prefix `bash -lc`). A home it cannot write in (`--no-home`,
@@ -187,7 +187,13 @@ a 3′ PAM; `TTTN-23_3_hg38`: a 23-nt guide, a 5′ PAM), and published in their
 repo, [`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2),
 which `download` reads by itself. All variant indexes carry searchable indels genome-wide with
 SNP+SNP / SNP+indel co-occurrence; download whichever you need with `--what index --index-name
-<name>` (or grab more later from the web **Settings**):
+<name>` (or grab more later from the web **Settings**). The reference indexes and those of HGDP +
+1000 Genomes hold all 455 sequences of hg38, its alt, random and unplaced contigs and chrM
+included (as 2.8.1's NRR, NGG and NNN indexes of the panel did; its NRG one held 24), so a variant
+search finds every site a reference search finds; those of HPRC and mega hold its 24 chromosomes,
+chr1-22, X and Y. An alt contig repeats a region of a primary chromosome (the HLA region, for
+one), and no VCF of these panels covers it, so a site there can be reported twice: on the primary
+chromosome, and as a reference row on the alt contig.
 
 | Index (`--index-name`) | Variant sources | Resolution | Best for |
 |---|---|---|---|
@@ -275,10 +281,11 @@ type, from the command line at any budget the rule allows (up to 1 DNA bulge wit
 bulges, or 2 DNA bulges with none). Its rows are not always those of an index built for 21-nt
 guides: they can differ next to a contig end or an `N` run, and, with bulges, at a few other
 sites. The `_INDELS` index of a variant index searches a fake-indel genome with an `N` run about
-every 56 bases: on chr22's (hg38_mega's), the 21-nt SaCas9 guide at 4 mismatches + 1 DNA + 1 RNA
-bulge gave 456 rows of 149,688 in the engine's search of the 20-nt general index that an index
-built for 21-nt guides does not give, RNA bulges at the guide's first base (on chr22's
-reference sequence, the same 2,664,778 rows). For the rows of a guide length, search an index
+every 65 bases (on chr22: 65 for HGDP + 1000 Genomes, 67 for mega, with CRISPRitz 2.10.0's windows
+of 30/30; 57 and 59 with 2.9.1's of 25/27). On chr22's of hg38_mega, with the windows of 25/27, the
+21-nt SaCas9 guide at 4 mismatches + 1 DNA + 1 RNA bulge gave 456 rows of 149,688 in the engine's
+search of the 20-nt general index that an index built for 21-nt guides does not give, RNA bulges
+at the guide's first base (on chr22's reference sequence, the same 2,664,778 rows). For the rows of a guide length, search an index
 built for it, which the search takes first where one is installed. A guide past that needs its
 own index, which the search builds, under a name of its own (rule:
 [methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
@@ -437,13 +444,17 @@ front, see `docs/SCALABILITY_ANALYSIS.md`.
 > glance. Every route below installs the matching CRISPRitz (`crisprme.py --version` and
 > `crispritz.py version` print them). 2.10.0 is the first release under this rule: CRISPRme goes
 > from 2.8.1 to 2.10.0 to meet CRISPRitz 2.10.0 ([RELEASING](docs/RELEASING.md#version-policy)).
+> On Bioconda, the `crispritz` package of 2.10 is not installed beside a `crisprme` older than
+> 2.10.0 (`run_constrained: crisprme >=2.10.0`), and CRISPRme 2.8.1's package (build 1) takes
+> CRISPRitz 2.9 only (`crispritz >=2.9.1,<2.10`): an update never puts CRISPRitz 2.10, whose
+> indexes are of format 2, beside a CRISPRme that reads index format 1 only.
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
 - [Install CRISPRme via Docker (compatible with all operating systems — recommended)](#12-install-crisprme-via-docker)
 
-- [Install CRISPRme from source (§1.3; Linux)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.8.1) line on Python 3.11
+- [Install CRISPRme from source (§1.3; Linux)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.10.0) line on Python 3.11
 
 - [Install CRISPRme via Conda/Mamba (Bioconda; Linux)](#11-install-crisprme-via-condamamba)
 
@@ -508,7 +519,7 @@ By completing these steps, your system will be fully prepared for installing CRI
 Create a dedicated environment, naming the CRISPRme version and Python 3.11 explicitly, then
 set up the CRISPR-Bulge scorer, which runs in its own conda env (`cbulge`):
 ```bash
-conda create -n crisprme crisprme=2.8.1 python=3.11
+conda create -n crisprme crisprme=2.10.0 python=3.11
 conda activate crisprme
 crisprme.py scorer-env create    # CPU build; add --gpu for CUDA
 crisprme.py scorer-env doctor    # compute self-test: must report OK
@@ -517,7 +528,7 @@ crisprme.py scorer-env doctor    # compute self-test: must report OK
 > **Always name the version.** Given a bare `crisprme`, the solver silently falls back to the
 > newest release it can satisfy, which can be years old: in testing, an unsolvable 2.8.0 resolved
 > to `crisprme 2.0.0` on Python 3.6. With an explicit version the install fails loudly instead. If
-> conda reports that nothing provides `crisprme=2.8.1`, the release has not reached Bioconda yet:
+> conda reports that nothing provides `crisprme=2.10.0`, the release has not reached Bioconda yet:
 > use [Docker](#12-install-crisprme-via-docker) or the
 > [source build](#13-install-crisprme-from-source-without-bioconda) until it does.
 
@@ -525,7 +536,7 @@ Every search scores off-targets with both CFD and CRISPR-Bulge, so `complete-sea
 start while the scorer env is missing or broken (`crisprme.py scorer-env doctor` says why), unless
 you opt into CFD-only scoring with `CRISPRME_SKIP_SCORER_ENV=1`.
 
-Verify the installation; it prints the installed version, `v2.8.1`:
+Verify the installation; it prints the installed version, `v2.10.0`:
 
 ```bash
 crisprme.py --version
@@ -672,7 +683,7 @@ included. `:latest` is the auto-updating default image; it runs on **CPU** out o
 box (fully supported — this is the default scoring path), and a **GPU can optionally
 accelerate the CRISPR-Bulge scorer** on an NVIDIA host (add `--gpus all` + `--compute-backend
 cuda`). For a fully reproducible setup pin the exact release instead, e.g.
-`docker pull pinellolab/crisprme:v2.8.1`.
+`docker pull pinellolab/crisprme:v2.10.0`.
 
 Once the download is complete, the CRISPRme Docker image will be ready for use. 
 To confirm the image is successfully installed, you can list all available Docker 
@@ -726,7 +737,7 @@ Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from a checkout, for
 
 ```bash
 # 1. clone the release (omit --branch for the development line on main)
-git clone --branch v2.8.1 https://github.com/pinellolab/crisprme-plus.git
+git clone --branch v2.10.0 https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
 # 2. create + activate the runtime environment (pinned deps from environment.yml)
@@ -835,7 +846,7 @@ The directory organization required by CRISPRme is illustrated below:
 > To run it in **Docker**, prefix it with
 > `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:latest`
 > (add `-p 8080:8080` for `web-interface`; on an NVIDIA host add `--gpus all` to run the
-> CRISPR-Bulge scorer on the GPU). Pin `:v2.8.1` instead of `:latest` for reproducibility.
+> CRISPR-Bulge scorer on the GPU). Pin `:v2.10.0` instead of `:latest` for reproducibility.
 > From a **source / Conda** install, run it as-is inside the activated `crisprme`
 > environment.
 
@@ -935,29 +946,40 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 
 **What the default search costs.** On the indexes CRISPRitz 2.10.0 builds, which code every
 allele of a split site, the immunoglobulin loci (IGL on chr22, IGH on chr14, IGK on chr2) hold
-most of a variant search's raw targets: on chr22 the README guide at the default budget gives
-766,427 SNP and 4,487,567 indel raw targets, 98.6% and 99.9% of them in IGL. The bulges drive
-it: before the steps below, the README guide's per-sample search of chr22 took 4 min at
-4 + 0 + 0, 8 min with one bulge of either type and 96 min at 4 + 1 + 1 (the 2.10.0 cost judges,
-16 threads, on a loaded node). The post-analysis now skips the raw targets no sample's genotypes
-can produce (the exact haplotype pre-check), skips the overlaid indel targets no carrier of
-their indel can have, and runs each chromosome in pieces over the `--thread` workers, with the
-same results: on 16 threads the default search of chr22 takes 8 to 11 min per sample (98 min
-without these steps, on the same node), about what one bulge costs (8 min at 4 + 1 + 0 or
-4 + 0 + 1), and 23 to 32 min population-level (121 min without these steps). On HGDP + 1000
-Genomes, a dense panel of 4,091 samples, per sample is thus the faster mode; on a small panel
-such as HPRC (232 samples) the same search of chr22 took 14 to 17 min per sample against 9 to 12
-min population-level, and with mega beside HGDP + 1000 Genomes 96 to 107 min per sample (54 to
-62 min of it the report) against 49 to 55 min (the whole search of both datasets). Genome-wide
-it has not been timed yet on the indexes of the rebuild for 2.10.0 (its release gates do): from
-its parts we expect about 1.5 to 4 h per sample on 16 threads, against 2.8.1's 1.2 h on 32
-threads and an estimated 9 to 11 h without these steps (METHODS.md says how).
+most of a variant search's raw targets: on chr22 the README guide (NRG) at the default budget
+gives 766,427 SNP raw targets, 98.6% of them in IGL, and 5,891,413 indel raw targets with
+CRISPRitz 2.10.0's fake-indel windows of 30/30 (4,487,567, 99.9% of them in IGL, with the
+windows of 25/27 of its development). The bulges drive it: before the steps below, the README
+guide's per-sample search of chr22 took 4 min at 4 + 0 + 0, 8 min with one bulge of either type
+and 96 min at 4 + 1 + 1 (the 2.10.0 cost judges, 16 threads, on a loaded node). The post-analysis
+now skips the raw targets no sample's genotypes can produce (the exact haplotype pre-check),
+skips the overlaid indel targets no carrier of their indel can have, and runs each chromosome in
+pieces over the `--thread` workers, with the same results: on 16 threads the default search of
+chr22 took 8 to 11 min per sample (98 min without these steps, on the same node), about what one
+bulge costs (8 min at 4 + 1 + 0 or 4 + 0 + 1), and 23 to 32 min population-level (121 min
+without these steps). On HGDP + 1000 Genomes, a dense panel of 4,091 samples, per sample is thus
+the faster mode; on a small panel such as HPRC (232 samples) the same search of chr22 took 14 to
+17 min per sample against 9 to 12 min population-level. These times were measured during
+2.10.0's development, on windows of 25/27; the release's windows of 30/30 make the indel search
+write about 30% more raw targets. On 30/30, the integration's gate, 8 threads a search with many
+searches at once on a node of 256 hardware threads, took 10 min per sample (12 with NRR, the
+default PAM) and 31 min population-level for the README guide (NRG) on chr22, 14 and 9 min on
+HPRC, and, with mega beside HGDP + 1000 Genomes (NRR), 17 min per sample against 39 min
+population-level: since the sites-only
+density guard (below) withholds mega's densest windows, per sample is the faster beside mega too
+(before the guard, 96 to 107 min per sample, 54 to 62 min of it the report, against 49 to 55).
+Genome-wide it has not been timed yet on the indexes of the rebuild for 2.10.0 (its release
+gates do): from its parts we expect about 1.5 to 4 h per sample on 16 threads, against 2.8.1's
+1.2 h on 32 threads and an estimated 9 to 11 h without these steps (METHODS.md says how).
 Above 1 DNA + 1 RNA bulge the variant search itself explodes in those loci (IGL alone, at the
 default `--max-total-edits` of 6: 5.1 million SNP raw targets at 4 + 2 + 1, 33.7 million at
-4 + 2 + 2, where the indel search wrote 204 million and needed 157 GB of memory; with the cap
-raised to the budget's sum, 7.9 and 93.8 million SNP raw targets), and `complete-search` warns,
-unless `--max-total-edits` 3 or less bounds the alignments (6 + 2 + 2 at a cap of 3 wrote fewer
-raw targets there than the default). For a wider search, raise `--mm` first.
+4 + 2 + 2, where the indel search, on windows of 25/27, wrote 204 million and needed 157 GB of
+memory; with the cap raised to the budget's sum, 7.9 and 93.8 million SNP raw targets), and
+`complete-search` warns, unless `--max-total-edits` 3 or less bounds the alignments (6 + 2 + 2 at
+a cap of 3 wrote fewer raw targets there than the default). For a wider search, raise `--mm`
+first. CRISPRme 2.10.1 is planned to search, in those regions, the samples' own haplotypes,
+indels included, in place of the variant genome's combinations (the haplotype scan; CRISPRitz
+2.10.0 already holds what it needs, and the indexes of 2.10.0 serve it as they are).
 See METHODS.md
 [§5](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces).
 
@@ -1138,7 +1160,9 @@ its purpose and usage:
   **use K >= 4 there.** With the cap, a population-level search skips before expanding them the
   raw targets every row of which would rest on more than K columns (the K-skip), and writes
   what the cap alone writes (the README guide's search of chr22 at K = 4: 8 to 10 min, against
-  16 to 18 min with the K-skip off and 23 to 32 min without the cap, on 16 threads).
+  16 to 18 min with the K-skip off and 23 to 32 min without the cap, on 16 threads, on the
+  fake-indel windows of 25/27 of 2.10.0's development; on the release's 30/30, 9, 23 and 31 min in
+  the integration's gate, 8 threads a search with many searches at once).
 
 - `--no-haplotype-precheck` (*Optional*)
   <br>Turn off the exact haplotype pre-check of a per-sample search, its carriers-first twin on
@@ -1175,9 +1199,9 @@ its purpose and usage:
   sites-only dataset's alignments of that window; the run's `log_verbose.txt` says per
   chromosome what it withheld. `--no-sites-only-density-guard` analyses every candidate.
   Measured at 4 mismatches and 1 + 1 bulges, a search of the mega rebuilt for 2.10.0 with the
-  guard took 1.37 to 1.46 (chr22) and 1.53 to 1.73 (chr14) times the shipped mega's, in several
-  measurements side by side on shared nodes; unguarded, 4.4 to 4.9 times on chr22, and the chr14
-  search was projected at 12 to 16 h. See METHODS §5.
+  guard took 1.35 to 1.46 (chr22) and 1.53 to 1.73 (chr14) times the shipped mega's, in several
+  measurements side by side on shared nodes during 2.10.0's development; unguarded, 4.4 to 4.9 times on chr22, and the chr14 search was projected at 12 to
+  16 h. The release's gates time it genome-wide. See METHODS §5.
 
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP
@@ -1199,8 +1223,8 @@ its purpose and usage:
   **`--population-level`**, which runs one worst-possible representative per variant window
   (exact worst-case CFD, dataset-level allele frequencies), lossless for detection; on the
   indexes CRISPRitz 2.10.0 builds it is the slower on a dense panel of many samples such as
-  HGDP + 1000 Genomes, and can be the faster on a small panel such as HPRC, or beside mega
-  (see **What the default search costs**). It replaces the removed `--full` flag;
+  HGDP + 1000 Genomes, and can be the faster on a small panel such as HPRC (see **What the
+  default search costs**). It replaces the removed `--full` flag;
   `--per-sample` is a genotype-resolution dial, not a speed dial (see METHODS §5).
 
 - `--no-prioritize-observed` / `--prioritize-observed` / `--gate-min-expected <E>` (*Optional*)
@@ -1492,7 +1516,7 @@ reference one), in the analysis mode Complete Search picks for that index (per-s
 phased genotyped index such as `20-NRR_3_hg38+hg38_HGDP1kGP`). Of several it takes a 3′ index
 of a 3-nt PAM first (NGG, NRG, NRR), then `NNN`, then any other PAM, and an all-`N` index
 wider than 3 nt last. It searches each in its own geometry: an all-`N` index wider than 3 nt
-(the published `NNNNNNNN_3`) for NRR, the default PAM, with `--prune-pam`, and any other for its own PAM, with
+(the published general index, `20-NNNNNNNN_3`, or 2.8.1's `NNNNNNNN_3`) for NRR, the default PAM, with `--prune-pam`, and any other for its own PAM, with
 the example guide padded for it, on the side of the guide its name (the 2.10.0 form), the
 header of its `.bin` files (index format 2) or its `.pam_build` records (the 3′ side without
 any). With another nuclease's PAM the example guide may have no off-target in
@@ -1505,7 +1529,7 @@ tables hold exactly the off-targets the whole-genome test reports on that chromo
 shareable report's top-1000 view then ranks that chromosome alone, so it can list sites the
 whole-genome report ranks below its top 1000), for a fraction of the cost: with `NRR_3_hg38+hg38_HGDP1kGP` (2.8.1's archive), `--chrom chr22` peaked at about 10 GB of RAM
 and took about 2 minutes at 16 threads in testing (about 5 GB and 1.5 to 4 minutes with `NRG_3_hg38+hg38_HGDP1kGP`). A chromosome that holds none of
-the example guide's off-targets, as `chrM` and most contigs of the reference-only
+the example guide's off-targets, as `chrM` and most contigs of 2.8.1's reference-only
 `NRG_3_hg38` do, passes with an empty result, which Complete Search ends without an
 `integrated_results.tsv`. A chromosome that the genome or the index does not have is
 refused in one line naming those it has.
@@ -2494,7 +2518,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.8.1`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.10.0`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**

@@ -1,6 +1,6 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
-> ℹ️ **CRISPRme+ (v2.8.1)** is the current release of the next-generation line
+> ℹ️ **CRISPRme+ (v2.10.0)** is the current release of the next-generation line
 > (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, context-aware analysis
 > mode — per-sample by default on genotyped+phased indexes, population-level on sites-only,
 > with opt-out `--population-level`). For a frozen
@@ -60,15 +60,18 @@ docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'
 ```
 
 > **Disk:** the batteries-included (variant-aware) setup is a **~70 GB download → ~150 GB
-> on disk** (measured: 150.0 GB; it peaks around 161 GB while the archives unpack), so
-> keep **≈ 200 GB free** on the disk that holds your data folder. CRISPRme+ ships a
+> on disk** (measured: 150.0 GB, with 2.8.1's archive of the default index; it peaks around
+> 161 GB while the archives unpack), so keep **≈ 200 GB free** on the disk that holds your
+> data folder. CRISPRme+ ships a
 > **dict-less** variant index (no per-sample dictionaries). Installed, the genome is ~3 GB,
 > the reference + variant genome indexes (the indel index included) ~94 GB, the compact
 > allele-frequency registry ~8.5 GB (shipped uncompressed for fast lookups), the genotype
 > store (for per-sample carrier annotation; `--no-genotypes` skips it) ~30 GB, the indel
 > genotype store ~7.7 GB and the indel logs ~6.5 GB. The
-> genotyped **HGDP + 1000 Genomes** (HGDP1kGP) index is a ~43 GB download; the sites-only **mega**
-> (five-source) index ~25 GB. A reference-only setup is far smaller (~44 GB).
+> genotyped **HGDP + 1000 Genomes** (HGDP1kGP) index was a ~43 GB download as 2.8.1 published it;
+> the sites-only **mega** (five-source) index ~25 GB (2.10.0 publishes each panel's Dictionaries
+> once, beside its indexes: [`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md)). A reference-only
+> setup is far smaller (~44 GB).
 
 Check Docker works, then pull the CRISPRme+ image:
 
@@ -80,7 +83,7 @@ docker pull pinellolab/crisprme:latest
 ```
 
 > **Reproducibility:** `:latest` auto-updates to the newest release (and is the
-> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.8.1`
+> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.10.0`
 > everywhere below in place of `:latest`. An image carries the CRISPRitz search engine it was
 > tested with, of its own major.minor from 2.10.0 (CRISPRme+ 2.10.z runs on CRISPRitz 2.10.z:
 > the [version policy](RELEASING.md#version-policy)); `crisprme.py --version` and
@@ -194,8 +197,8 @@ and so does a search of NGG, NAG, NRG or NGA, pruned to that PAM.
 > (CLI) or pick **Population-level** in the web form to force the worst-case screen even on
 > a genotyped+phased panel (a resolution choice, whose speed depends on the panel: on the
 > indexes CRISPRitz 2.10.0 builds per-sample is the faster on a dense panel of many samples
-> such as HGDP + 1000 Genomes, and population-level can be on a small panel such as HPRC, or
-> beside mega). The shareable report states which mode ran.
+> such as HGDP + 1000 Genomes, and population-level can be on a small panel such as HPRC). The
+> shareable report states which mode ran.
 
 ## 5. (Optional, advanced) Add the raw source VCFs
 
@@ -323,7 +326,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   README's "What the default search costs"). On the IGL locus alone the variant search wrote
   0.76 million SNP and 4.5 million indel raw targets at 4 + 1 + 1, 1.6 and 8.5 million at
   6 + 1 + 1 with a cap of 8, and 33.7 and 204 million at 4 + 2 + 2 with the default cap of 6
-  (93.8 million SNP raw targets with a cap of 8). In the web form the
+  (93.8 million SNP raw targets with a cap of 8), the indel counts on the fake-indel windows of
+  25/27 of 2.10.0's development (its windows of 30/30 write about 30% more). CRISPRme 2.10.1 is
+  planned to search those loci's haplotypes themselves (README, the same section). In the web form the
   per-type values live under **Advanced options**, while the **Maximum edits** slider
   is the total budget — the equivalent of `--max-total-edits`.
 - `--max-total-edits` caps the **total** edits (mismatches + bulges) in one alignment,
