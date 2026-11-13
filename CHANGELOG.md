@@ -20,10 +20,11 @@ major.minor version (Changed). The main changes, each told in its entry below:
   at contig ends and `N` runs that format 1 loses. It codes every allele of a split
   multi-allelic site (`Q` where the alleles cover A, C, G and T), reads every record's `AF`,
   reads REF and ALT in either case, and cuts fake-indel windows of 30 bases on either side of
-  an indel (25 and 27 up to 2.9.1). Every published index is built again with it, under a name
-  that gives the guide length and the side of the PAM (`20-NRR_3_hg38+hg38_HGDP1kGP`), in a
-  Hugging Face repo of its own, `lucapinello/crisprme-indexes-format2`. The archives of 2.8.1
-  stay where they are.
+  an indel (25 and 27 up to 2.9.1). The published indexes are built again with it, as the index
+  set of 2.10.0 lists them (Added; the general index serves the searches of `NNN_3`, which is not
+  built again), under a name that gives the guide length and the side of the PAM
+  (`20-NRR_3_hg38+hg38_HGDP1kGP`), in a Hugging Face repo of their own,
+  `lucapinello/crisprme-indexes-format2`. The archives of 2.8.1 stay where they are.
 - **The defaults.** SpCas9 NRR is the default PAM and index (it was NRG), and a search given no
   bulges takes 1 DNA + 1 RNA bulge, `assembly-search` included.
 - **Indel rows.** A row that starts inside an insertion starts at the insertion's anchor, and
@@ -41,7 +42,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
   guard and a frequency bound that ranks its least likely combinations after the others.
 - **A check of the indel path on real data.** `scripts/check_indel_rows.py` checks the indel
   rows against haplotypes it writes from the VCF itself. It is a release gate.
-- **Known limits.** They are stated, with their scale, under Changed and in METHODS ("Known
+- **Known limits.** They are stated, with their scale, under Changed and in METHODS §10 ("Known
   limits of 2.10.0"). A haplotype scan of the dense regions, planned for CRISPRme 2.10.1 with no
   index rebuild, is to lift the largest of them: searches above 1 DNA + 1 RNA bulge there.
 
@@ -1698,7 +1699,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
     is listed only on the row of the union of its variants in the target, not on every subset as
     the Tier-1 path lists it: the dictionary path puts an unphased call on both slots, and the
     per-haplotype pruning keeps the largest combination. 2.8.1 does the same. An index built
-    with `--samplesID`, as every published variant index is, lists every subset.
+    with `--samplesID`, as every published variant index of a genotyped panel is, lists every
+    subset.
   - **What the real-data check does not check.** It does not read `Variant_info_spacer+PAM`, nor
     whether an alternative alignment is one the merge should have folded into a better one
     (Added: the unit tests and the SNP+indel oracle's planted sites check both). And it refuses
@@ -2471,7 +2473,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
   PAM's `N` padding, for one, is refused before the search starts, but the run had written
   `.command_line.txt`, `.version.txt`, `Params.txt` and `guides.txt` into `Results/<output>/`,
   so the corrected command, with the same `--output`, stopped on `Output folder ... not
-  empty!`. Found running this release's chr22 searches.
+  empty!`.
 - **Load Example selects the PAM and the genome it computed.** It picked the installed default PAM
   and then returned "20bp-NRG-SpCas9" and "hg38" whatever was installed.
 - **The web form's bulge cap read an index built for the other side of the guide as serving.** Its
