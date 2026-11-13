@@ -863,7 +863,17 @@ haplotype** (`indel_snp_cis.resolve_target`):
   the target's first base on or up to its last base, through the indel (not in a stretch
   that another of its variants lengthened, pushing the indel out of it). In a tandem repeat
   a unit gained or lost at the target's edge leaves the bases as they are (the repeat puts
-  the same bases back), so such a carrier keeps its row; one whose second indel changes the
+  the same bases back), so such a carrier keeps its row. That row is the window's target's: it
+  names the SNP alts the haplotype holds at the window's code columns, not those of the
+  carrier's own target, which holds its second indel (no row names two indel-path records).
+  Where the second indel pushes a SNP the row names out of the stretch read, the carrier's
+  own target does not hold that SNP, and the row names it all the same: a known limit of
+  2.10.0, which the haplotype scan of 2.10.1 is to read on each carrier's own bases. On
+  1000 Genomes chr22, the search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges,
+  per sample, lists one such carrier: NA20515 on chr22:50,299,296 (+) of VEGFA site 1, whose
+  50,299,313 C>CG pushes the row's 50,299,316 T>G out of its target (its own target holds the
+  insertion 50,299,300 T>TG and that second one); no row of the 2.10.0 integration's 17 gate
+  runs lists such a carrier. One whose second indel changes the
   bases is not listed for it, on any indel row (§8, residuals), nor one whose bases cannot
   be read either way: each way meets an unphased or missing SNP call, an unphased indel
   that does not itself change the target, or two of its variants that overlap, two records
@@ -1027,7 +1037,15 @@ site, the alignments that name the same variants with the same carriers are one 
 as on every row: they are one target's alignments with different bulges. The merge compares indel
 rows there at their cluster position on the haplotype carrying the indel,
 which on a row that starts inside an insertion is past the anchor by the rank of its first base
-among the inserted ones, read from the row's bases (`indel_snp_cis.row_first_base`). Two
+among the inserted ones, read from the row's bases (`indel_snp_cis.row_first_base`): the first
+place on the haplotype with the row's variants where they are the target's and that holds every
+SNP alt the row names (since 2.10.0; it was the first place they fit, and in a repeat the same
+bases can read from an earlier added base without a SNP the row names, past that reading's end,
+which is another row's target: a row of a synthetic GGT repeat through the real CLI, at 4
+mismatches and 1 DNA and 1 RNA bulge and at 2 and 2, was placed 3 bases short, its SNP
+numbered 25 in `Variant_info_spacer+PAM`, in a target of 23 bases; no row of the 2.10.0
+integration's gate runs is placed otherwise: 0 of the 108,505 indel row blocks naming an
+insertion and SNPs). Two
 alignments whose cluster positions on that haplotype differ are two targets of it, as many bases
 apart as 2.8.1 placed them, and both are listed, as the site's row or one of its alternative
 alignments (a population-level run lists only each site's row); one target's alignments with
@@ -2604,10 +2622,24 @@ target when it reads the target's bases from the row's start through the row's r
 base the record
 puts in the target at its place, and the base after them (a second insertion between the
 start and the record lengthens the stretch and pushes some of them out of it, which makes
-another target, one that needs two indel-path records). Two alleles of one slot whose REF
-spans meet — a SNP at an insertion's own position, a SNP on a base a deletion removes, one
-complex allele split into overlapping records, two ALTs at one position phased onto one
-haplotype — describe one stretch twice, so the VCF gives no sequence there. Where every
+another target, one that needs two indel-path records), and the slot's SNP alts in the
+stretch read are the SNPs the row names, no other: a row names the SNP alts its haplotypes
+hold in its target (§4), and in a repeat a slot can read a row's bases at an insertion's
+anchor from another base the insertion adds, through an SNP the row does not name, which is
+another row's target (1000 Genomes chr22, VEGFA site 3, 4 mismatches, 2 DNA and 2 RNA
+bulges, per sample: at chr22:26,153,539 (+) the haplotypes of G>GGGTGGT and 26,153,546 C>T
+read the target from the 4th added base, 55 carriers on the row naming the two, and those
+that also hold 26,153,549 T>G read the same bases from the 1st added base, the SNP their
+target's 15th base, 18 carriers on the row naming the three; read from any added base, the
+check demanded the 18 on the first row too, three gating findings on a right row; a listed
+carrier whose own target holds a second indel and not a SNP the row names, pushed out of it,
+which §4's reading of a second indel keeps, is so counted as the documented limit
+`limit-two-indels`, not passed: NA20515 above, and no row of the 2.10.0 integration's 17 gate
+runs lists such a carrier). Two
+alleles of one slot whose REF spans meet — a SNP at an insertion's own position, a SNP on a
+base a deletion removes, one complex allele split into overlapping records, two ALTs at one
+position phased onto one haplotype — describe one stretch twice, so the VCF gives no
+sequence there. Where every
 allele that meets the record's REF is one §4 reads the slot without (another allele at the
 record's own position, an allele only on bases it deletes, an MNV) and no allele kept
 meets one left out, the slot is read without them: the one reading that holds the record,

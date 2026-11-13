@@ -67,8 +67,12 @@ of its VCF). A slot holds a row's target when it reads the target's bases from t
 start THROUGH the record: each base of the target the record's ALT puts there at its place
 (and the base after them), as the row's target has it -- a second insertion between the
 start and the record that lengthens the stretch and pushes some of the record's bases out
-of it makes another target, which needs two indel-path records. Two alleles of one slot
-whose REF spans meet (a SNP at an insertion's own position, a SNP on a base a deletion
+of it makes another target, which needs two indel-path records --, and the SNP alts of the
+slot in the stretch read are the SNVs the row names, no other and none missing (a row names
+the SNP alts its haplotypes hold in its target, METHODS section 4: in a repeat, a slot can
+read a row's bases at an insertion's anchor from another base the insertion adds, through
+an SNV the row does not name, which is another row's target; snvs_held). Two alleles of one
+slot whose REF spans meet (a SNP at an insertion's own position, a SNP on a base a deletion
 removes, a complex allele split into overlapping records, two ALTs at one position phased
 onto one haplotype) describe one stretch twice: the VCF gives no sequence there. Where
 every allele that meets the record's REF is one METHODS section 4 reads the record's slot
@@ -156,7 +160,14 @@ limit (counted and listed under its own class, non-gating) or not (gating):
     (limit-two-indels) -- unless CRISPRme's reading of the slot against the window's
     target of the same bases, start and variants holds (a repeat unit gained or lost at
     the target's edge puts them back), where it keeps the carrier and completeness
-    demands that row;
+    demands that row. The row it keeps such a carrier on names the window's SNP alts, not
+    those of the carrier's own target, which holds the second indel: where that indel
+    pushes a SNP the row names out of the stretch read, the slot's reading holds other SNP
+    alts than the row names, so THE TRUTH lists it on no row of one indel-path record, and
+    its listing is limit-two-indels (documented: second-indel) -- a known limit of 2.10.0
+    (METHODS section 4): one carrier on 1000 Genomes chr22 at 4 mismatches and 2 DNA and 2
+    RNA bulges (NA20515, chr22:50,299,296 (+), VEGFA site 1), and no row of the 2.10.0
+    integration's 17 gate runs lists such a carrier;
   * another allele at the record's own position is a phasing artefact, a variant only on
     bases the record deletes changes nothing, and an overlapping indel at another position
     takes the slot off (limit-overlapping-records; a listed carrier the rule takes off is
@@ -264,7 +275,8 @@ the merge of ``remove_contiguous_samples.py``).
   those files), else every sample of the VCF(s): CRISPRme lists no carrier outside it. The
   pool is the listed samples and every panel carrier of the row's record. A listed sample
   outside the panel fails (carrier-not-in-panel). A listed sample whose haplotypes do not
-  hold the target at its start with every named variant, or that is listed for a weaker
+  hold the target at its start with every named variant (the SNP alts of the reading the
+  named SNVs, no other: THE TRUTH), or that is listed for a weaker
   target than its strongest (PUTATIVE), fails unless the documented view lists it (then a
   limit, with its cause); a sample whose haplotype holds the target at the start with the
   named variants, or whose strongest PUTATIVE target it is, fails when the row omits it,
@@ -304,7 +316,9 @@ the merge of ``remove_contiguous_samples.py``).
   rank of the row's first base among the bases an insertion adds (0 on any other base), as
   the fix branch's merge compares rows that start inside one insertion (c3a75fe; at
   d7a6fff it compared the Cluster Position alone, which folds two targets of one
-  insertion). CRISPRme's fold key holds no strand, while the alignments of one target
+  insertion), the rank the first place of the row's bases that holds every SNV it names
+  (row_first_k, as CRISPRme's row_first_base since 2.10.0). CRISPRme's fold key holds no
+  strand, while the alignments of one target
   share theirs: rows of the other strand are other targets, which a fold across strands
   would lose, so a fold group is taken on one strand. A fold group is NO WORSE than a
   target when its fewest-mm+b block's key under the sorting criteria is at most the least
@@ -1713,6 +1727,21 @@ def reads_at(hap, coord, probe, al=None):
             out.append(k)
         k = hap.seq.find(probe, k + 1, j - 1 + n)
     return out
+
+
+def snvs_held(hap, k, n):
+    """The REF>ALT keys of the SNV alleles whose bases stand in hap[k:k + n]: the SNP alts a
+    reading of a target there holds. A row names exactly the SNP alts its haplotypes hold
+    in its target (METHODS section 4: the haplotypes left with one sequence form one row,
+    naming the SNP alts they hold), so a slot holds a row's target only where its reading
+    holds the row's named SNVs and no other. In a repeat, a target that starts inside an
+    insertion starts at the anchor whichever added base it starts on, and a slot can read a
+    row's bases at the anchor from another added base, through an SNV the row does not
+    name (or past a named one): that reading is another row's target (M-R3-N2,
+    chr22:26,153,539 (+) of VEGFA site 3 at 2 DNA + 2 RNA bulges: 18 carriers of the
+    insertion and two SNVs read the bases of the row of the insertion and one of them from
+    the 1st added base, the row's own 55 carriers from the 4th)."""
+    return frozenset(s.key for s in hap.src[k:k + n] if s is not None and s.kind == "snv")
 
 
 def span_of(places):
@@ -3271,7 +3300,10 @@ class Target(object):
 
 def row_target(win, row, named, main):
     """The row's target on the reference with exactly its named variants: (Target,
-    problem class, detail)."""
+    problem class, detail). Where the bases read at the row's start from more than one
+    place (a repeat at an insertion's anchor), the first place whose reading holds every
+    SNV the row names is the target's (snvs_held: the row names the SNP alts its
+    haplotypes hold in its target), else the first place."""
     stripped = row["alt"].replace("-", "").upper()
     probe = stripped if row["strand"] == "+" else rc(stripped)
     n = len(probe)
@@ -3287,10 +3319,12 @@ def row_target(win, row, named, main):
             "the named variants cannot all be on one haplotype: two of them describe the "
             "reference bases %s" % ",".join("%d..%d" % (z[0], z[1] - 1) for z in hap.clash))
     here = reads_at(hap, row["start"], probe)
-    for i in here:
-        if main is None or holds_edit(hap, i, n, main):
-            return Target(win, main, named, probe, row["strand"], hap.place[i:i + n],
-                          hap.src[i:i + n], row["crrna"], row["alt"]), None, None
+    want = frozenset(a.key for a in named if a.kind == "snv")
+    held = [i for i in here if main is None or holds_edit(hap, i, n, main)]
+    if held:
+        i = next((i for i in held if snvs_held(hap, i, n) == want), held[0])
+        return Target(win, main, named, probe, row["strand"], hap.place[i:i + n],
+                      hap.src[i:i + n], row["crrna"], row["alt"]), None, None
     through = []
     k = hap.seq.find(probe)
     while k >= 0:
@@ -3419,9 +3453,11 @@ def truth(win, tgt, sample, lids):
       ('unknown', info)               which alleles share the record's slot there is unknown
     ``holds``: some slot of the record reads the target from the row's start, through the
     record -- the record's bases the target holds at their places, as the row's target has
-    them (record_core) -- and holds every named variant. A slot holding an allele whose REF
-    meets the record's has no sequence there: where METHODS section 4 reads it without that
-    allele (a phasing artefact at the record's position, an allele only on bases it
+    them (record_core) -- and holds every named variant, the reading holding the named SNVs
+    and no other (snvs_held: a reading of the same bases at the anchor from another added
+    base, through other SNP alts, is another row's target). A slot holding an allele whose
+    REF meets the record's has no sequence there: where METHODS section 4 reads it without
+    that allele (a phasing artefact at the record's position, an allele only on bases it
     deletes, an MNV; slot_reading) the slot is read so -- the one reading of it that holds
     the record, and so the one a row naming the record and not that allele can mean -- and
     otherwise it is a clash, whatever its calls of unknown phase. Two other alleles of the
@@ -3441,6 +3477,8 @@ def truth(win, tgt, sample, lids):
     slots, _known = record_slots(call, main_al.number)
     named = [a for a in tgt.named if a.key != tgt.main.key]
     named_keys = {a.key for a in named}
+    # a reading of the target holds the row's named SNVs and no other (snvs_held)
+    named_snvs = frozenset(a.key for a in named if a.kind == "snv")
     core = record_core(tgt.place, tgt.src, tgt.main)
     info = []
     verdicts = []
@@ -3491,7 +3529,8 @@ def truth(win, tgt, sample, lids):
             hr = hap if r is use else make_hap(win.refseq, [main_al] + r, tgt.lo, tgt.hi)
             rkeys = {a.key for a in r}
             hits = [k for k in reads_at(hr, tgt.start, tgt.probe, main_al)
-                    if core <= set(hr.place[k:k + tgt.n])]
+                    if core <= set(hr.place[k:k + tgt.n])
+                    and snvs_held(hr, k, tgt.n) == named_snvs]
             span = span_of(hr.place[hits[0]:hits[0] + tgt.n]) if hits else tgt.span
             lo_, hi_ = min(span[0], tgt.span[0]), max(span[1], tgt.span[1])
             unk = [a for a in unknown if touches(a, lo_, hi_) and not meets_ref(a, main_al)]
@@ -3534,7 +3573,8 @@ def placements(win, tgt, main_al, present, unk, named, cap=PUTATIVE_CAP):
     """(can, must) for a known slot of the record: whether some placement of the calls of
     unknown phase ``unk`` (each of a line's alleles on the slot, or none) lets the slot
     read the target at its start through the record (record_core) with every named
-    variant, and whether every placement does. (None, None) when a placement gives
+    variant (the reading holding the named SNVs and no other: snvs_held), and whether every
+    placement does. (None, None) when a placement gives
     overlapping alleles that can change what the slot says of the target (zones_for: no
     sequence) or there are too many lines to try. A call whose REF meets the record's is
     left out (truth())."""
@@ -3545,6 +3585,7 @@ def placements(win, tgt, main_al, present, unk, named, cap=PUTATIVE_CAP):
     if len(by_line) > cap:
         return None, None
     want = {a.key for a in named}
+    want_snvs = frozenset(a.key for a in named if a.kind == "snv")
     core = record_core(tgt.place, tgt.src, tgt.main)
     can, must = False, True
     for combo in itertools.product(*[[None] + v for v in by_line.values()]):
@@ -3554,6 +3595,7 @@ def placements(win, tgt, main_al, present, unk, named, cap=PUTATIVE_CAP):
             return None, None
         keys = {a.key for a in present} | {a.key for a in chosen}
         ok = want <= keys and any(core <= set(hap.place[k:k + tgt.n])
+                                  and snvs_held(hap, k, tgt.n) == want_snvs
                                   for k in reads_at(hap, tgt.start, tgt.probe, main_al))
         can = can or ok
         must = must and ok
@@ -3757,6 +3799,8 @@ def documented(win, ctx, tgt, sample, lids):
     # the reading must be through the record: the record's bases the row's target holds,
     # at their places (and the base past them), in the stretch read
     core = record_core(tgt.place, tgt.src, tgt.main)
+    named_snvs = frozenset(a.key for a in tgt.named
+                           if a.kind == "snv" and a.key != tgt.main.key)
     verdicts = []     # per slot: (the rules list it, an MNV on it changes the target)
     put_mnv = []      # the same flag for each slot the rules resolve PUTATIVE
     putative = None   # a call of unknown phase (or an untied alt) on a slot the rules keep
@@ -3837,9 +3881,14 @@ def documented(win, ctx, tgt, sample, lids):
         inside = [a for a in seconds if changes_target(a, tgt)]
         # the window's target as CRISPRme resolves it for this slot: the record with the
         # slot's own SNP alleles (METHODS section 4: a row lists the haplotypes left with
-        # its sequence and names the SNP alts they hold), read at the row's target's place
+        # its sequence and names the SNP alts they hold), read at the row's target's place:
+        # a reading that holds other SNP alts than the row names is another row's
+        # (snvs_held). A reading through the record holds every place of its core, so it
+        # starts on no later added base than the row's target and ends no further: the
+        # slot's SNVs it can hold all touch the target's span, and are written here
         window = make_hap(win.refseq, [main_al] + snvs, tgt.lo, tgt.hi)
         own = any(core <= set(window.place[k:k + tgt.n])
+                  and snvs_held(window, k, tgt.n) == named_snvs
                   for k in reads_at(window, tgt.start, tgt.probe, main_al))
         if not inside:
             if puts:
@@ -6349,8 +6398,10 @@ def row_first_k(win, row):
     """The rank of a reported row's first base among the bases its insertion adds (0 when
     it is any other base), read from the row's own target on the reference with its named
     variants: its cluster position on the haplotype is its Cluster Position plus that.
-    Two places hold the same target only in a repeat it lies wholly in; the first is
-    taken, as CRISPRme takes it (indel_snp_cis.row_first_base, on the fix branch). None
+    Two places hold the same bases only in a repeat; the first whose reading holds every
+    SNV the row names is taken, else the first, as CRISPRme takes it
+    (indel_snp_cis.row_first_base, since 2.10.0: a place where the same bases read
+    without a SNV the row names is another row's target). None
     when the row's target does not read at its own start through its record (a row
     soundness fails, as 2.8.1's rows placed past an insertion's anchor): such a row stands
     for no other alignment."""
@@ -6378,7 +6429,13 @@ def row_first_k(win, row):
     if hap.clash:
         return None
     hits = reads_at(hap, row["start"], probe, main)
-    return hap.place[hits[0]][1] if hits else None
+    if not hits:
+        return None
+    # the first place whose reading holds every SNV the row names, as CRISPRme's
+    # row_first_base takes it since 2.10.0 (M-R3-N2), else the first place
+    want = frozenset(a.key for a in named if a.kind == "snv")
+    k = next((k for k in hits if snvs_held(hap, k, n) == want), hits[0])
+    return hap.place[k][1]
 
 
 class Reported(object):

@@ -509,7 +509,21 @@ and the `release-crisprme` skill.
     carrier of every target).
   - **The truth is the VCF.** A slot holds a row's target when it reads the target's bases
     from the row's start through the row's record: each base the record puts in the target
-    at its place, and the base after them. Two alleles of one slot whose REF spans meet give
+    at its place, and the base after them, its SNP alts in the stretch read the row's named
+    SNPs and no other (a row names the SNP alts its haplotypes hold in its target, METHODS
+    section 4: in a repeat, a slot can read a row's bases at an insertion's anchor from
+    another base the insertion adds through an SNP the row does not name, which is another
+    row's target; read from any added base, the check demanded 18 carriers of
+    chr22:26,153,539 (+) of VEGFA site 3, on 1000 Genomes chr22 at 4 mismatches, 2 DNA and 2
+    RNA bulges, per sample, on the row of G>GGGTGGT and 26,153,546 C>T, which their haplotype
+    reads only through 26,153,549 T>G, from the 1st added base, where CRISPRme lists them on
+    the row of the three: three gating `carrier-missing` on a right row, M-R3-N2). A listed
+    carrier whose own target holds a second indel and not a SNP the row names, pushed out of
+    it, which CRISPRme's reading of a second indel keeps (a known limit of 2.10.0, METHODS
+    section 4), is so counted as `limit-two-indels`, not passed: NA20515 on chr22:50,299,296
+    (+) of VEGFA site 1 in the seven-guide search at 2 DNA and 2 RNA bulges; no row of the
+    2.10.0 integration's 17 gate runs lists such a carrier. Two
+    alleles of one slot whose REF spans meet give
     no sequence; where every allele that meets the record's REF is one METHODS section 4
     reads the slot without (another allele at the record's own position, an allele only on
     bases it deletes, an MNV) the slot is read without them, and a listed carrier must hold
@@ -1919,6 +1933,23 @@ and the `release-crisprme` skill.
   (about 4 s on chr22, 27 s on IGH).
 
 ### Fixed
+- **An indel row that starts inside an insertion is placed where its SNP alts are**
+  (`indel_snp_cis.row_first_base`; M-R3-N2's open question 2). Such a row starts at the
+  insertion's anchor, and its first base on the haplotype, which `Variant_info_spacer+PAM`
+  counts from and the merge places it by, was read from its bases: the first place they fit on
+  the haplotype with the row's variants. In a repeat the same bases can also read from an
+  earlier added base without a SNP alt the row names (the SNP past that reading's end), which is
+  another row's target, and the row was placed there. A synthetic GGT repeat through the real
+  CLI (two units added, an SNV that extends the repeat; 4 mismatches and 1 DNA and 1 RNA bulge,
+  and 2 and 2, per sample) wrote its row of the insertion and the SNV `1A>AGGTGGT,25A>G`, the
+  SNV numbered past the end of a target of 23 bases (its 22nd base), the row's cluster position
+  on the haplotype 3 bases short. It is now the first place where the bases are the target's and
+  that holds every SNP alt the row names, else the first place they fit, as before (one more
+  `str.find`, no step per inserted base). No row of the 2.10.0 integration's gate runs, of the
+  2 + 2 search of seven guides or of the VEGFA site 3 searches is placed otherwise (0 of
+  the 108,505 indel row blocks naming an insertion and SNPs of its 17 gate runs). The real-data
+  check reads such a row at the same place (`row_target`, `row_first_k`): it reported
+  `variant-outside-target` on the right row, and its listed carriers as lacking the target.
 - **The HGDP + 1000 Genomes and HPRC build recipes stop at a step that fails**
   (`seq_script/merge_panels/hgdp1kgp_build.sh`, `hprc_build.sh`, which the rebuild of 2.10.0's
   index set calls). They printed `BUILD_EXIT` and went on: after a failed `build-index-only` the
