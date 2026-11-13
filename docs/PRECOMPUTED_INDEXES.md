@@ -96,7 +96,7 @@ The three variant panels are **complementary**, not alternatives:
 | Panel | Sources | Data model | Co-occurrence confidence |
 |---|---|---|---|
 | `hg38_HGDP1kGP` *(recommended default)* | HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000 Genomes), jointly SHAPEIT5-re-phased | **sample-level genotypes, fully phased** | **CONFIRMED** phased cis throughout with **named carrier samples** + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) — the broadest fully-phased panel of real observed haplotypes |
-| `hg38_HPRC` | HPRC Release 2 pangenome `hprc-v2.0-mc-grch38` (232 assembly-derived genomes incl. CHM13) | **sample-level genotypes, phased** (graph-derived) | **CONFIRMED** phased cis with **named carrier samples** + exact joint AF; captures **pangenome-specific** variation absent from short-read panels |
+| `hg38_HPRC` | HPRC Release 2 pangenome, Minigraph-Cactus graph v2.1 (`hprc-v2.1-mc-grch38`; 2.8.1's archives: v2.0) (232 assembly-derived genomes incl. CHM13) | **sample-level genotypes, phased** (graph-derived) | **CONFIRMED** phased cis with **named carrier samples** + exact joint AF; captures **pangenome-specific** variation absent from short-read panels |
 | `hg38_mega` | 5 sources — 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us | **sites-only** (allele frequencies, no shared samples) | **PUTATIVE** with a conservative **min-AF** joint bound + **per-dataset AF provenance** (`AF_1000G2021 … AF_AoU` + `AF_max`); a co-occurring haplotype here **may or may not exist in any real individual** — no carriers |
 
 **Choosing an index.** You only need **one**. For most use cases pick the **recommended
@@ -720,6 +720,40 @@ reported twice, the second time as a reference row on the alt contig.
    rebuild for 2.10.0 runs it once per PAM of the panel in one working directory,
    `seq_script/rebuild/index_set_2.10.0.tsv`).
 
+### HPRC pangenome (genotyped, phased)
+
+1. **Data source.** HPRC Release 2's Minigraph-Cactus graph **v2.1** on GRCh38, as HPRC decomposes
+   it into a VCF (`vg deconstruct` → `vcfbub` → `vcfwave`): `hprc-v2.1-mc-grch38.wave.vcf.gz`
+   (2,291,014,302 bytes, md5 `63cc82deb0e010ab98719a9e31dfa352`) and its `.tbi`, 232 samples (231
+   individuals and CHM13), phased. 2.8.1's HPRC archives were built from v2.0
+   (`hprc-v2.0-mc-grch38`), split the same way; the CHANGELOG (2.10.0, Changed) gives what differs.
+   HPRC's experimental L95 VCF is not used.
+2. **Split per chromosome** into the form the recipe reads, `ALL.<chr>.HPRC.vcfwave.vcf.gz` and
+   its `.tbi` for chr1-22, X and Y (the rebuild's `$HPRC_SRC`), after checking the download's md5:
+   ```bash
+   U=https://s3-us-west-2.amazonaws.com/human-pangenomics/pangenomes/freeze/release2/minigraph-cactus/v2.1/hprc-v2.1-mc-grch38
+   curl -fLO $U/hprc-v2.1-mc-grch38.wave.vcf.gz
+   curl -fLO $U/hprc-v2.1-mc-grch38.wave.vcf.gz.tbi
+   md5sum hprc-v2.1-mc-grch38.wave.vcf.gz
+   mkdir -p src
+   for c in chr{1..22} chrX chrY; do
+     bcftools view --regions $c -Oz -o src/ALL.$c.HPRC.vcfwave.vcf.gz hprc-v2.1-mc-grch38.wave.vcf.gz
+     tabix -p vcf src/ALL.$c.HPRC.vcfwave.vcf.gz
+   done
+   ```
+   Each file holds the records of its chromosome in the genome-wide file, in their order, under
+   its header and the two lines bcftools adds for the split, one with the split's date: a split
+   made again holds the same records, not the same bytes, and the rebuild checks its own split by
+   sha256. v2.1 also has records on chrM and on 32 random and unplaced contigs, which the recipe
+   does not read.
+3. **Normalise, enrich and index** with `seq_script/merge_panels/hprc_build.sh`, in the image
+   (`SIF=`), on a working directory whose `Genomes/hg38` holds chr1-22, X and Y of hg38. Per
+   chromosome: `bcftools norm -m -any -f <chr>.fa` (split + left-align) → `+fill-tags -t AF,AC,AN`
+   (from the genotypes, the `.` alleles left out) → `sort` → `bgzip` + `tabix`; the samplesID in
+   the VCF's sample order, with the populations of the 1000 Genomes 2021 samplesID (`P1KG=`) where
+   a sample is there; then `build-index-only` with the PAM of the run (`PAM=`). The rebuild for
+   2.10.0 runs it as `seq_script/rebuild/index_set_2.10.0.tsv` writes it (`SRC=$HPRC_SRC`).
+
 ### mega (5-source, sites-only)
 
 1. **Sources (GRCh38).** 1000G-2021 (3,202, phased), HGDP (929, unphased), gnomAD v4.1 (sites-only
@@ -988,7 +1022,8 @@ falls back to a PUTATIVE min-AF bound with no carriers (see METHODS §4/§8). Th
 genotype store keeps only records whose REF and ALT differ in length, so an equal-length
 multi-base record (an MNV, such as AC>TG), which the indel search covers too, has its
 carriers resolved with the phase unknown, PUTATIVE: the HGDP + 1000 Genomes index has
-none, HPRC's chr22 has 9,079 among its 195,813 indel-search records. Since 2.10.0 a
+none, HPRC's chr22 has 9,079 among its 195,813 indel-search records (in v2.0 of its graph,
+2.8.1's input). Since 2.10.0 a
 per-sample search also reads the store for the SNP rows: a SNP row does not list a carrier
 whose haplotype holding its SNPs also holds an indel that changes the target (METHODS §4).
 With the gate off it lists them, as up to 2.8.1.

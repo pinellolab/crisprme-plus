@@ -24,7 +24,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
   set of 2.10.0 lists them (Added; the general index serves the searches of `NNN_3`, which is not
   built again), under a name that gives the guide length and the side of the PAM
   (`20-NRR_3_hg38+hg38_HGDP1kGP`), in a Hugging Face repo of their own,
-  `lucapinello/crisprme-indexes-format2`. The archives of 2.8.1 stay where they are.
+  `lucapinello/crisprme-indexes-format2`. The archives of 2.8.1 stay where they are. The HPRC
+  panel is built from HPRC release 2's Minigraph-Cactus graph v2.1, where 2.8.1's was built from
+  v2.0 (Changed).
 - **The defaults.** SpCas9 NRR is the default PAM and index (it was NRG), and a search given no
   bulges takes 1 DNA + 1 RNA bulge, `assembly-search` included.
 - **Indel rows.** A row that starts inside an insertion starts at the insertion's anchor, and
@@ -1261,7 +1263,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
   a lower-case ALT, which its genome does not hold, as no allele (`site_alleles.read_records`,
   `indel_snp_cis.parse_dict_value`, the Tier-0 and Tier-1 compiles). The published panels hold
   no SNV written in lower case (HGDP + 1000 Genomes 6 deletions, on chr1, chr2, chr10, chr17 and
-  chr21; the mega 13; HPRC, normalised as CRISPRme builds it, 108,178 indel and MNV records): on
+  chr21; the mega 13; HPRC, normalised as CRISPRme builds it, 108,178 indel and MNV records in
+  v2.0 of its graph, 2.8.1's input, and 37,546 indels in v2.1, 2.10.0's): on
   them only the indel log's rows and the fake-indel genome's bases of those records change, to
   upper case, and every index, dictionary and store is the same (measured in CRISPRitz's
   MULTIALLELIC §2.9). Covered by `PostProcess/test_build_mega_registry.py`,
@@ -1882,6 +1885,41 @@ major.minor version (Changed). The main changes, each told in its entry below:
   named for a 5′ PAM is not taken for a 3′ search; and a PAM-less index named for its side with no
   `.pam_build` serves a search of that side (a 3′ one of width 4 an `NGG` search, pruned; a 5′ one
   a 5′ PAM of its width).
+- **The HPRC panel is built from HPRC release 2's Minigraph-Cactus graph v2.1, where 2.8.1's was
+  built from v2.0** (Luca, 2026-11-13). `20-NRR_3_hg38+hg38_HPRC` is built from
+  `hprc-v2.1-mc-grch38.wave.vcf.gz`, HPRC's VCF of the graph on GRCh38 decomposed with `vcfwave`
+  (in `pangenomes/freeze/release2/minigraph-cactus/v2.1/hprc-v2.1-mc-grch38/` of HPRC's S3 bucket
+  `human-pangenomics`; 2,291,014,302 bytes, md5 `63cc82deb0e010ab98719a9e31dfa352`), split per
+  chromosome as 2.8.1's input of v2.0 was (`bcftools view --regions <chr>`, then `tabix`; the
+  commands are in `docs/PRECOMPUTED_INDEXES.md`), and `seq_script/merge_panels/hprc_build.sh`
+  reads it as it read v2.0. Why: v2.1 is HPRC's current release of the graph, which, HPRC says,
+  fixes the start positions of the mitochondrial sequences and orders the minigraph construction
+  per chromosome, from nearly the same assemblies, and HPRC advises using it unless v2.0's results
+  must be reproduced; the index set is built again for 2.10.0 anyway. HPRC's L95 VCF,
+  experimental, is not used. What changes, measured against v2.0 (the files 2.8.1's HPRC indexes
+  were built from):
+  - The same 232 samples (231 individuals and CHM13) in the same order, so the panel's samplesID is
+    the same, byte for byte; the same 194 contigs in the header, and the same `INFO` and `FORMAT`
+    fields; `FILTER` `.` throughout; no REF or ALT in lower case and no haploid genotype, in either.
+  - On chr1-22, X and Y, 42,417,050 records against 42,056,098 (+0.86%). The gain lies in
+    centromeric, pericentromeric, acrocentric and segmental-duplication regions (chr1 at 143-145
+    Mb, chr15 at 17-21 Mb, chr9 at 67 Mb, chr22 at 10-13 Mb, among others), where fewer haplotypes
+    align: the records whose `AN` is below 232, half the panel's 464 alleles, rise from 605,349 to
+    769,017, and a frequency there is one of fewer haplotypes. v2.1 also has records on chrM and
+    on 32 random and unplaced contigs, which the panel, built on chr1-22, X and Y, does not read.
+  - Normalised as the recipe normalises it, the panel's registry is to hold 36,719,470
+    single-base SNV records and its indel log 12,361,907 indels, against 36,554,875 and
+    12,103,264 from v2.0 under the same rules of 2.10.0 (2.8.1's index holds 36,307,866 and
+    12,103,264). Of the SNV alleles, 35,980,089 are in both, 574,786 in v2.0 alone and 739,381
+    in v2.1 alone, and 248,921 of those in both move their frequency by more than 0.05 (107,047
+    by more than 0.20); of the distinct indels of the log, 10,174,897 are in both, 1,917,083 in
+    v2.0 alone and 2,179,909 in v2.1 alone, about 17%. The normalised input holds 37,546 indels
+    written in lower case (v2.0's, 108,178), which CRISPRitz 2.10.0 reads in upper case.
+  - So an HPRC search of 2.10.0 differs from one of 2.8.1 by its data too, not by the code alone,
+    and its rows are not to be compared one for one with those of 2.8.1's HPRC indexes.
+    `download --what vcf --dataset hg38_HPRC` fetches 2.8.1's input of v2.0 from
+    `lucapinello/crisprme-data`; the publish of the rebuild is to host the normalised VCFs of
+    v2.1 that the index reads.
 - **Code that did nothing is gone.** `PostProcess/pool_search_indels.py` drops `_index_pam`, a
   helper nothing called; the results page's sample tab no longer computes paths it never reads;
   and `remove_contiguous_samples.py` reads a variant token as an indel's in one place, for the

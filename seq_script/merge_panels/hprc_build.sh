@@ -3,10 +3,13 @@
 # third production index NRG_3_hg38+hg38_HPRC.
 #
 # WHAT THIS IS: a standard CRISPRme variant-aware index built by ENRICHING hg38 with the
-# HPRC Minigraph-Cactus pangenome -- specifically the HPRC RELEASE 2 graph `hprc-v2.0-mc-grch38`
-# (GRCh38), decomposed to a per-chromosome VCF with `vg deconstruct` -> `vcfbub` (clip.bub) ->
-# `vcfwave` (clip.wave, vcflib + WFA2-lib) then bcftools norm/concat/merge (per the source VCF
-# ##command header trail; decomposition Jan 2026, per-chrom split Mar 2026). INFO carries
+# HPRC Minigraph-Cactus pangenome -- specifically the HPRC RELEASE 2 graph `hprc-v2.1-mc-grch38`
+# (GRCh38; 2.8.1's indexes were built from v2.0, `hprc-v2.0-mc-grch38`), decomposed to a VCF with
+# `vg deconstruct` -> `vcfbub` (clip.bub) -> `vcfwave` (clip.wave, vcflib + WFA2-lib) then bcftools
+# norm/concat/merge (per the source VCF ##command header trail; decomposition Jan 2026), then split
+# per chromosome with `bcftools view --regions <chr>` (v2.1's for 2.10.0 in Nov 2026, as
+# docs/PRECOMPUTED_INDEXES.md gives it, which the rebuild passes as SRC; v2.0's in Mar 2026, the
+# default SRC below). INFO carries
 # LV/PS/CONFLICT snarl fields; FILTER is '.'; GT is diploid and PHASED, "a|b", with
 # graph-coverage half-missingness like "1|.". 232 samples
 # = 231 population individuals + CHM13 (the T2T graph backbone). GRCh38, chr-prefixed, all

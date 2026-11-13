@@ -103,7 +103,8 @@ columns, never on the record's own REF span). A record's REF and ALT are read in
 case, as VCF 4.x reads them, and so is a row's `Variant_info` (CRISPRme 2.10.0 names an
 indel or MNV record in upper case, an SNV record as the run's dictionary writes it, in upper
 case on an index of CRISPRitz 2.10.0, as earlier releases name every record as its VCF writes
-it: HPRC chr22, normalised as CRISPRme builds it, holds 1,546 indel records in lower case). An
+it: HPRC chr22, normalised as CRISPRme builds it, holds 1,546 indel records in lower case in v2.0
+of the HPRC graph, 2.8.1's input, and 956 in v2.1, 2.10.0's). An
 SNV whose ALT is written in lower case is read so too on a genome of CRISPRitz 2.10.0, which
 codes it (an index of format 2, unless the run's enriched genome does not code it). Two lines
 of one

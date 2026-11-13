@@ -85,7 +85,8 @@ is the design rationale (its "REMAINING/pending" notes are historical — the wo
 
 A **third** production index, `20-NRR_3_hg38+hg38_HPRC` (2.8.1's `NRG_3_hg38+hg38_HPRC` and
 `NRR_3_hg38+hg38_HPRC`), is built by enriching hg38 with the
-**HPRC Minigraph-Cactus pangenome** — the **HPRC Release 2 graph `hprc-v2.0-mc-grch38`** (GRCh38)
+**HPRC Minigraph-Cactus pangenome** — the **HPRC Release 2 graph `hprc-v2.1-mc-grch38`** (GRCh38;
+2.8.1's archives were built from v2.0, `hprc-v2.0-mc-grch38`, and so was the validation below)
 — decomposed to a per-chromosome VCF (`vg deconstruct` → `vcfbub` → `vcfwave`; 232 samples =
 231 population individuals + CHM13, GRCh38, phased GTs with graph-coverage half-missingness
 like `1|.`). It is **not** a merge (single genotyped
@@ -94,7 +95,10 @@ per-chrom `bcftools norm -m -any` → `+fill-tags` AF/AC/AN (recomputed from GTs
 VCF ships no AF and AN must exclude the `.` alleles) → `bcftools sort` → build. Because the
 genotypes are **phased**, this index supports **CONFIRMED cis co-occurrence + per-sample
 carriers** (like Mode 1's 1000G-2021+HGDP), and it is RAW + SNP+indel-enabled like the others.
-See `hprc_build.sh` (as-run, env-overridable). It is **distinct from and orthogonal to** the
+See `hprc_build.sh` (as-run, env-overridable). Its input, `SRC`, is the graph's VCF split per
+chromosome, `ALL.<chr>.HPRC.vcfwave.vcf.gz` (+ `.tbi`), which `docs/PRECOMPUTED_INDEXES.md` makes
+from v2.1 (the rebuild passes it as `$HPRC_SRC`; the script's default `SRC` is the v2.0 split of
+2.8.1's builds). It is **distinct from and orthogonal to** the
 `assembly-search` feature (which searches per-individual assembly FASTAs and takes no VCF).
 
 **Validated (v2.5.4, ml007):** clean genome-wide build (24 contigs, RAW registry, `_INDELS`
@@ -121,7 +125,7 @@ aggregate sources contribute per-source AF only (no genotypes, no honest pooled 
 | **gnomAD** | v4.1 (exomes + genomes joint) | GRCh38 | aggregate sites-only (AF) | ~807k individuals (aggregate) | open (gnomAD) | Mode 2 only |
 | **TOPMed** | Bravo freeze (sites-only, `AN=0` shipped) | GRCh38 | aggregate sites-only (AF) | aggregate | controlled-access (dbGaP) | Mode 2 only |
 | **All of Us** | genomic sites release (single pseudo-sample) | GRCh38 | aggregate sites-only (AF) | aggregate | controlled-access (Researcher Workbench) | Mode 2 only |
-| **HPRC** | Release 2 graph `hprc-v2.0-mc-grch38` (Minigraph-Cactus) → `vg deconstruct`/`vcfbub`/`vcfwave`, **phased** | GRCh38 | sample-level genotypes (graph-derived) | 232 incl. CHM13 (AN ≤464, half-missing) | open (HPRC) | HPRC (single-source) |
+| **HPRC** | Release 2 graph `hprc-v2.1-mc-grch38` (Minigraph-Cactus v2.1; v2.0 for 2.8.1's archives) → `vg deconstruct`/`vcfbub`/`vcfwave`, **phased** | GRCh38 | sample-level genotypes (graph-derived) | 232 incl. CHM13 (AN ≤464, half-missing) | open (HPRC) | HPRC (single-source) |
 
 Notes: (1) the **shipped Mode-1 index** used the **2021** 1000G callset (`hg38_1000G2021_HGDP`,
 4,131 samples); the committed `merge_vcf_panels.sh` defaults still point at the older **2019**

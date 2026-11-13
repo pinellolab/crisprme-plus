@@ -54,7 +54,7 @@ crisprme-data/
 ├── indexes/                        # PRECOMPUTED search indexes (genome_library tarballs)
 │   ├── NRR_3_hg38.tar.gz                       # reference-only (no variants), NRR (2.10.0's default PAM: its index is 20-NRR_3_hg38, in the repo above)
 │   ├── NRR_3_hg38+hg38_HGDP1kGP.tar.gz         # ← the recommended variant default's 2.8.1 archive
-│   ├── NRR_3_hg38+hg38_HPRC.tar.gz             # HPRC pangenome panel
+│   ├── NRR_3_hg38+hg38_HPRC.tar.gz             # HPRC pangenome panel (HPRC Release 2, graph v2.0)
 │   ├── NRR_3_hg38+hg38_mega.tar.gz             # sites-only aggregate (worst-case fallback)
 │   ├── NRG_3_hg38{,+hg38_HGDP1kGP,+hg38_HPRC,+hg38_mega}.tar.gz   # NRG PAM (the default before 2.10.0)
 │   ├── NGG_3_hg38{,+hg38_HGDP1kGP}.tar.gz      # NGG PAM (cannot serve NAG off-targets)
@@ -65,7 +65,7 @@ crisprme-data/
 │   ├── hg38_HGDP1kGP.tar.gz (+ .SHA256SUMS)
 │   └── hg38_mega.tar.gz     (+ .SHA256SUMS)
 ├── vcfs/                           # SOURCE VCFs — build any index from scratch / with a new PAM
-│   └── hg38_{HGDP1kGP,HPRC,mega}/         # download --what vcf --dataset <name>
+│   └── hg38_{HGDP1kGP,HPRC,mega}/         # download --what vcf --dataset <name> (hg38_HPRC: graph v2.0, the input of 2.8.1's archives)
 ├── genomes/hg38/                   # hg38 FASTA mirror, one file per sequence (download --what genome unpacks it)
 │   ├── chr1.fa.gz … chrY.fa.gz, chrM.fa.gz     # gzipped; the alt, random and unplaced contigs too (455 files)
 │   └── chr22.fa                                # chr22 also unpacked: complete-test and setup fetch it as is
@@ -93,7 +93,7 @@ them; use the rebuilt `NNN_3` archives with CRISPRme+ 2.8.1 or later (see below)
 |---|---|---|---|
 | `NRR_3_hg38` | none | — | reference-only |
 | **`NRR_3_hg38+hg38_HGDP1kGP`** | HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000G) | **genotyped-phased** (SHAPEIT5 re-phased) | **the recommended variant default's 2.8.1 archive** (2.10.0's is `20-NRR_3_hg38+hg38_HGDP1kGP`, in `lucapinello/crisprme-indexes-format2`) — CONFIRMED *cis* co-occurrence + named carriers |
-| `NRR_3_hg38+hg38_HPRC` | HPRC pangenome (232 samples incl. CHM13) | genotyped-phased | pangenome panel |
+| `NRR_3_hg38+hg38_HPRC` | HPRC pangenome (232 samples incl. CHM13; HPRC Release 2's Minigraph-Cactus graph v2.0, where 2.10.0's `20-NRR_3_hg38+hg38_HPRC` is of v2.1) | genotyped-phased | pangenome panel |
 | `NRR_3_hg38+hg38_mega` | aggregate (1000G + HGDP + gnomAD + TOPMed + All of Us) | sites-only | worst-case fallback; a listed haplotype may not exist in any individual |
 
 The two genotyped panels ship a `genotypes_hg38_*` companion that enables

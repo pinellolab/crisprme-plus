@@ -8,8 +8,13 @@ the index builder and a second, non-backward-compatible index family appeared.
 > their own repo, `lucapinello/crisprme-indexes-format2`, from the index set
 > [`seq_script/rebuild/index_set_2.10.0.tsv`](../seq_script/rebuild/index_set_2.10.0.tsv), which
 > gives each archive's build and publish commands (`seq_script/rebuild/README.md`); their
-> provenance is recorded at that rebuild. This page covers the archives of 2.8.1 below, which stay
-> in `lucapinello/crisprme-data` and `lucapinello/crisprme-data-general-index` for 2.8.1.
+> provenance is recorded at that rebuild. Their HPRC panel is built from HPRC Release 2's
+> Minigraph-Cactus graph v2.1 (`hprc-v2.1-mc-grch38.wave.vcf.gz`, 2,291,014,302 bytes, md5
+> `63cc82deb0e010ab98719a9e31dfa352`), split per chromosome as `docs/PRECOMPUTED_INDEXES.md` gives
+> it, where 2.8.1's HPRC archives below were built from v2.0 (the CHANGELOG, 2.10.0, Changed, gives
+> what differs); the checksums of the split files are recorded with the rest. This page covers the
+> archives of 2.8.1 below, which stay in `lucapinello/crisprme-data` and
+> `lucapinello/crisprme-data-general-index` for 2.8.1.
 
 Two separate questions per archive:
 

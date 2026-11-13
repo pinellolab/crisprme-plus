@@ -149,6 +149,16 @@ the build), and a chromosome of the genome folder without its source stops it; o
 of chr22, or of chr21 and chr22, beside a source folder of every chromosome's source, each builds
 those chromosomes alone and reads no other's source.
 
+The HPRC rows read `$HPRC_SRC`: HPRC Release 2's Minigraph-Cactus graph **v2.1** on GRCh38, the
+VCF HPRC decomposed with `vcfwave` (`hprc-v2.1-mc-grch38.wave.vcf.gz`, 2,291,014,302 bytes, md5
+`63cc82deb0e010ab98719a9e31dfa352`), split per chromosome into `ALL.<chr>.HPRC.vcfwave.vcf.gz` and
+its `.tbi` for chr1-22, X and Y, as `docs/PRECOMPUTED_INDEXES.md` gives the commands
+(`bcftools view --regions <chr>`, then `tabix -p vcf`). The panel moved to v2.1 for 2.10.0
+(decision of 2026-11-13): 2.8.1's HPRC archives were built from v2.0, split the same way (the
+CHANGELOG gives what differs). The recipe reads the samples of `ALL.chr22.HPRC.vcfwave.vcf.gz`,
+the same 232 in both, in the same order, so the panel's samplesID is the same, and stops at a
+chromosome of its genome folder with no VCF.
+
 The mega rows follow the full rebuild of `hg38_mega` (decision D2: PASS/'.' records, AF =
 AF_max, its registry and indel allele frequencies consistent), from the merged VCFs
 `mega.<chr>.afmax.vcf.gz` (`$MEGA_SRC`: `vcfs/hg38_mega` of `lucapinello/crisprme-data`, or what

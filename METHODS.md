@@ -264,11 +264,11 @@ Each source VCF is normalized so that variant records are directly comparable:
   its carriers were listed on targets of G, which their genome does not hold). The published panels
   hold no SNV written in lower case: HGDP + 1000 Genomes holds 6 records in lower case (deletions on
   chr1, chr2, chr10, chr17 and chr21), the mega's merged VCFs 13 (deletions on chr3, chr4, chr5,
-  chr10, chr12, chr18 and chr21), HPRC normalised 108,178 (indels and MNVs); with CRISPRitz 2.10.0
-  their indel-log rows and fake-indel bases name them in upper case, and every index, dictionary and
-  store CRISPRme reads is the same (CRISPRitz's MULTIALLELIC §2.9). CRISPRme's own merge of two
-  listings of one allele (`site_alleles.merge_gt`, for a dictionary that lists one twice) reads them
-  by that rule too.
+  chr10, chr12, chr18 and chr21), HPRC normalised 108,178 (indels and MNVs) in v2.0, 2.8.1's
+  input, and 37,546 (all indels) in v2.1, 2.10.0's; with CRISPRitz 2.10.0 their indel-log rows and
+  fake-indel bases name them in upper case, and every index, dictionary and store CRISPRme reads is
+  the same (CRISPRitz's MULTIALLELIC §2.9). CRISPRme's own merge of two listings of one allele
+  (`site_alleles.merge_gt`, for a dictionary that lists one twice) reads them by that rule too.
 - **Consistent coordinates and contigs** (reference build, chromosome naming)
   across datasets.
 
@@ -319,11 +319,13 @@ protocol, chrX ploidy handling, and validation are documented in
 
 CRISPRme+ also ships an **HPRC pangenome panel** (`hprc_build.sh`) in this same genotyped,
 cis-capable mode. It is a *single* source rather than a merge: the HPRC Minigraph-Cactus pangenome —
-the **HPRC Release 2 graph `hprc-v2.0-mc-grch38`** (GRCh38) — decomposed to a per-chromosome VCF
-(`vg deconstruct` → `vcfbub` → `vcfwave`), 232 assembly-derived genomes (231 individuals + the CHM13
-graph backbone). Because the genotypes are **phased** (each sample is two assembled haplotypes), it
-supports CONFIRMED cis co-occurrence and named per-sample carriers like a short-read 1000 Genomes +
-HGDP panel, while capturing pangenome-specific variation absent from short-read call sets. The
+the **HPRC Release 2 graph `hprc-v2.1-mc-grch38`** (GRCh38; 2.8.1's HPRC indexes were built from
+v2.0, `hprc-v2.0-mc-grch38`, and so were the figures of HPRC's chr22 this document gives) —
+decomposed to a per-chromosome VCF (`vg deconstruct` → `vcfbub` → `vcfwave`), 232 assembly-derived
+genomes (231 individuals + the CHM13 graph backbone). Because the genotypes are **phased** (each
+sample is two assembled haplotypes), it supports CONFIRMED cis co-occurrence and named per-sample
+carriers like a short-read 1000 Genomes + HGDP panel, while capturing pangenome-specific variation
+absent from short-read call sets. The
 graph-coverage half-missingness (`1|.`) is handled by recomputing `AF/AC/AN` from the genotypes
 (`bcftools +fill-tags`), so the allele-number denominator excludes unassembled alleles.
 

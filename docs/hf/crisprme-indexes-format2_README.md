@@ -59,7 +59,8 @@ NRG; NNGRRN serves NNGRRT; TTTN serves TTTV), and the general index any 3′ PAM
 NRG on HPRC and mega is served by the NRR index there, pruned: the same rows, more slowly than
 a dedicated NRG index (about twice the wall time in the engine's search of chr22's reference
 sequence). HGDP + 1000 Genomes is genotyped and
-phased (4,091 samples), HPRC genotyped and phased (232 assembly-derived genomes), mega
+phased (4,091 samples), HPRC genotyped and phased (232 assembly-derived genomes; HPRC Release 2's
+Minigraph-Cactus graph v2.1, `hprc-v2.1-mc-grch38`, where 2.8.1's HPRC archives are of v2.0), mega
 sites-only (5 sources, allele frequencies only).
 
 **Contigs.** The reference indexes and those of HGDP + 1000 Genomes hold all 455 sequences of
