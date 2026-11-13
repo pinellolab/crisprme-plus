@@ -190,7 +190,7 @@ Bioconda runs an autobump bot that periodically scans GitHub releases and opens
 gh pr list --repo bioconda/bioconda-recipes --search "crisprme in:title" --state all -L 5
 ```
 
-If a PR exists, review that it has the right version + sha256 + `build.number: 0` and the bounded `crispritz` pin this release needs (the bot moves only the version and the hash), wait for CI/lint (green), then a Bioconda member or you (once approved) comment on the PR. Do not leave a bot PR with the old pin waiting: the bot's PR for crisprme 2.8.1 was merged by mergify about 72 h after it opened, with the earlier recipe's unbounded pin and without the dependencies 2.8.1 added (it took a build 1 to correct). Push the recipe's changes to the bot's PR within that time, or ask for it to be held:
+If a PR exists, review that it has the right version + sha256 + `build.number: 0` and the bounded `crispritz` pin this release needs (the bot moves only the version and the hash), wait for CI/lint (green), then a Bioconda member or you (once approved) comment on the PR. Do not leave a bot PR with the old pin waiting: the bot's PR for crisprme 2.8.1 was merged by mergify about 72 h after it opened, with the earlier recipe's unbounded pin and without the dependencies 2.8.1's recipe added (it took a build 1 to correct). Push the recipe's changes to the bot's PR within that time, or ask for it to be held:
 
 ```
 @BiocondaBot please merge
