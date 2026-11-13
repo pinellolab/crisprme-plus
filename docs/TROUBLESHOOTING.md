@@ -414,8 +414,8 @@ being another folder than `NEW`, which the recipe refuses once it holds the data
 after the recipe has built the dataset from it), and `REPO` the CRISPRme repository of 2.10.0,
 whose `PAMs/` holds the recipe's PAM file (a data folder that CRISPRme 2.8.1 set up has none of
 NRR). Run the commands one of two ways. In a shell inside the image (`docker run -it ...
-bash`, or `apptainer shell`), `REPO` is `/opt/conda/opt/crisprme` and the recipe's `RUN` prefix
-stays empty. From the host, with the recipe's programs run in the container, export `RUN` first,
+bash`, or `apptainer run ... crisprme.sif bash`, which start it with the image's environment),
+`REPO` is `/opt/conda/opt/crisprme` and the recipe's `RUN` prefix stays empty. From the host, with the recipe's programs run in the container, export `RUN` first,
 the container prefix the recipe's header describes, and set `REPO` to a checkout of the
 repository of 2.10.0 on the host: the recipe runs the scripts of `$REPO/PostProcess` through
 `RUN`, so the container must see `REPO`, `DATA`, `NEW` and `SRC` at the paths the host gives
