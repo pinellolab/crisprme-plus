@@ -83,9 +83,11 @@ def check(name, rd, tables, truth, expect, fail, alt_rows, is_indel_token, rc):
     2.10.0 the SNP path read site N2's lone 2|1 carrier of an alt on a VCF line of several
     ALTs as carrying the other alt too and listed it on such rows; since 2.10.0 every reader
     reads a genotype against its own alt's allele index where the genotypes tell it (else the
-    carrier is read without phase), except where two lines of several ALTs share a position:
-    an alt of one can then be tied to an index of the other's and read on the wrong slot
-    (METHODS section 4; the real-data check refuses a run that holds such a position). Then
+    carrier is read without phase), and CRISPRitz 2.10.0's split-form dictionary tells every
+    alt; on a dictionary of an earlier CRISPRitz, where two lines of several ALTs share a
+    position, an alt of one can be tied to an index of the other's and read on the wrong slot
+    (METHODS section 4; the real-data check refuses a run whose dictionary holds such a
+    position so). Then
     the Y sites' expectations (snp_listed: on a CFD-1 SNP row; snp_never: on no SNP row;
     snp_phase: the phase confirmation of the site's SNP rows)."""
     seen = {}  # site -> [(samples set, cfd)]

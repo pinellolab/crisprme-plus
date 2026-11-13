@@ -6586,6 +6586,155 @@ class RepeatPlaces(Base):
         self.assertEqual({f[3] for f in gating(found)}, {"S07"}, found)
 
 
+def write_dictionary(case, records, split, chrom="chr21", dataset="v"):
+    """The per-sample dictionary CRISPRitz add-variants writes for dataset ``dataset`` of
+    ``case`` laid out as a run of 2.10.0 (as_2100): work/Dictionaries/dictionaries_v/
+    my_dict_<chrom>.json.gz, one value a position of the records whose REF is one base and
+    FILTER PASS, its entries (one each ALT of one character, a '*' too, joined by '$', in
+    file order) listing the carriers of that ALT with their genotypes, in split form
+    (``split``: 1 the entry's own ALT, 0 another called allele: CRISPRitz 2.10.0) or as the
+    line writes them (1|2: CRISPRitz before its split form, up to c18c575)."""
+    value = {}
+    for rec in records:
+        pos1, ref, alt, gts = rec[:4]
+        if len(ref) != 1 or (len(rec) > 4 and rec[4] not in ("PASS", ".")):
+            continue
+        for k, a in enumerate(alt.split(","), 1):
+            if len(a) != 1:
+                continue
+            carriers = []
+            for smp, gt in sorted(gts.items()):
+                alle = re.split(r"([|/])", gt)
+                if str(k) not in alle[::2]:
+                    continue
+                if split:
+                    gt = "".join(("1" if x == str(k) else "0") if x.isdigit() else x
+                                 for x in alle)
+                carriers.append("%s:%s" % (smp, gt))
+            entry = "%s;%s,%s;.;" % (",".join(carriers), ref, a)
+            key = "%s,%d" % (chrom, pos1)
+            value[key] = value[key] + "$" + entry if key in value else entry
+    d = os.path.join(case.tmp, "work", "Dictionaries", "dictionaries_" + dataset)
+    os.makedirs(d, exist_ok=True)
+    with gzip.open(os.path.join(d, "my_dict_%s.json.gz" % chrom), "wt") as fh:
+        json.dump(value, fh)
+
+
+class SplitFormDictionary(Base):
+    """CRISPRitz 2.10.0 writes each ALT's dictionary entry of a line of several ALTs in split
+    form (1 its own ALT, 0 the reference or another ALT: a 1|2 carrier of C>A,T reads 1|0
+    under A and 0|1 under T), so CRISPRme's readers tie every alt to 1, its own (METHODS
+    section 4). The check reads the run's own dictionary where a window holds a line of
+    several ALTs: in split form, no alt is untied and two such lines at one position are
+    checked as any other; with the lines' raw numbers (CRISPRitz up to c18c575), or with no
+    dictionary of the run, as before (untied alts PUTATIVE; two such lines refused)."""
+
+    def _two_lines(self, tmp):
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dpos, spos = len(PRE) + 10, len(PRE) + 4
+        ref_b = GUIDE[3]
+        alts = [x for x in "ACGT" if x != ref_b]
+        recs = [(spos, ref_b, alts[0] + "," + alts[1], {"S03": "1|2"}),
+                (spos, ref_b, alts[2] + "," + ref_b + "T", {"S04": "1|2"}),
+                (dpos, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "0|1"})]
+        start = len(PRE)
+        row = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                         GUIDE + "TGG", "TGG", 0, 0, "X", tok("chr21", recs[2]), "S01,S02")
+        os.makedirs(tmp)
+        return as_2100(Case(tmp, seq, recs, [row]), window=(30, 30)), recs, spos
+
+    def test_two_lines_of_several_alts_are_checked_on_a_dictionary_in_split_form(self):
+        """The world of test_two_lines_of_several_alts_at_one_position_are_refused (C>A,T
+        then C>G,CT on a spacer base of the deletion D's target), built by CRISPRitz 2.10.0:
+        its dictionary holds the four one-base ALTs in split form, which CRISPRme's readers
+        tie each to its own slot (the review's world WMM through the real CLI: every
+        carrier's target, phase and variants right). The run is checked: D's perfect target
+        for S01 and S02, no failure in either mode. With the lines' raw numbers in the
+        dictionary (CRISPRitz up to c18c575, whose readers' rows lost a carrier's target
+        there) it is refused, as before, and so it is where the run has no dictionary.
+        The check refused the run whatever its dictionary held."""
+        case, recs, spos = self._two_lines(os.path.join(self.tmp, "split"))
+        write_dictionary(case, recs, split=True)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, found = case.run(mode="both", budget=("1", "0", "0", "1"))
+        self.assertEqual((rc, gating(found)), (0, []), (found, err.getvalue()))
+        self.assertNotIn("several ALTs", err.getvalue())
+        for name, split in (("raw", False), ("none", None)):
+            case, recs, spos = self._two_lines(os.path.join(self.tmp, name))
+            if split is not None:
+                write_dictionary(case, recs, split=split)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc, found = case.run(mode="both", budget=("1", "0", "0", "1"))
+            self.assertEqual((rc, found), (2, []), (name, err.getvalue()))
+            self.assertIn("chr21:%d holds two or more VCF lines that each list several ALTs"
+                          % spos, err.getvalue())
+
+    def test_a_dictionary_in_split_form_ties_every_alt(self):
+        """Window, through run_semantics: POS 5 A>C (S01 1|0) beside A>G,AT (S02 1|2: G on
+        slot 0, the insertion on slot 1), and POS 9 A>T,* (S03 1|2: no carrier of the '*'
+        alone). Read with the raw numbers, G and T are untied (METHODS section 4: the
+        readers cannot tell their slots, PUTATIVE); a dictionary in split form numbers each
+        entry's ALT 1, which ties both: nothing untied, nothing mixed. Without a dictionary
+        of the run, as with the raw one. The check read every dictionary as raw."""
+        seq = "ACGT" * 20
+        recs = [(5, "A", "C", {"S01": "1|0"}), (5, "A", "G,AT", {"S02": "1|2"}),
+                (9, "A", "T,*", {"S03": "1|2"})]
+        got = {}
+        for name, split in (("split", True), ("raw", False), ("none", None)):
+            tmp = os.path.join(self.tmp, name)
+            os.makedirs(tmp)
+            case = as_2100(Case(tmp, seq, recs, []), window=(30, 30))
+            if split is not None:
+                write_dictionary(case, recs, split=split)
+            vcf = C.Vcf(case.vcf)
+            sem, why = C.run_semantics(case.res, [vcf], ["chr21"], ["v"], "hg38")
+            self.assertIsNone(why)
+            win = C.Window(seq, "chr21", 0, len(seq), [vcf], sem=sem)
+            got[name] = sorted(a.key for a in win.untied), sorted(win.mixed)
+        self.assertEqual(got["split"], ([], []))
+        self.assertEqual(got["raw"], ([(5, "A", "G"), (9, "A", "T")], []))
+        self.assertEqual(got["none"], got["raw"])
+
+    def test_a_carrier_tied_by_the_split_form_must_be_listed_on_its_own_slot(self):
+        """The SNV T of a line G>T,* (S01 1|2: T on slot 0, the '*' on slot 1) beside the
+        deletion D on S01's slot 0 and S02's (test_an_snv_beside_a_star_or_an_indel_on_its_line
+        _is_putative). With the raw numbers CRISPRme cannot tie T and lists S01, PUTATIVE, on
+        D's perfect target, the documented limit. With CRISPRitz 2.10.0's dictionary in split
+        form T is S01's slot 0, beside D, a 1-mismatch target: the perfect row listing S01
+        fails, and the rows CRISPRme writes on such a dictionary (S02 alone on the perfect
+        target, S01 on the target through T) pass. The check took S01 for PUTATIVE whatever
+        the dictionary held, and passed the row that lists S01 for a target it does not
+        hold."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST + LONG
+        dpos, spos = len(PRE) + 10, len(PRE) + 4
+        ref_b = GUIDE[3]
+        alt_b = other(ref_b)
+        start = len(PRE)
+        recs = [(spos, ref_b, alt_b + ",*", {"S01": "1|2"}),
+                (dpos, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "1|0"})]
+        d_tok, t_tok = tok("chr21", recs[1]), "chr21_%d_%s_%s" % (spos, ref_b, alt_b)
+
+        def perfect(who):
+            return row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                              GUIDE + "TGG", "TGG", 0, 0, "X", d_tok, who)
+        through_t = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                               GUIDE[:3] + alt_b.lower() + GUIDE[4:] + "TGG", "TGG", 1, 0,
+                               "X", "%s,%s" % (d_tok, t_tok), "S01")
+        for name, rows, want in (("wrong", [perfect("S01,S02")], {"S01"}),
+                                 ("right", [perfect("S02"), through_t], set())):
+            tmp = os.path.join(self.tmp, name)
+            os.makedirs(tmp)
+            case = as_2100(Case(tmp, seq, recs, rows), window=(30, 30))
+            write_dictionary(case, recs, split=True)
+            rc, found = case.run(mode="soundness", budget=("1", "0", "0", "1"))
+            self.assertEqual({f[3] for f in gating(found)}, want, (name, found))
+            self.assertEqual(rc, 1 if want else 0, (name, found))
+            self.assertFalse([f for f in found if f[1] == "limit-putative-carrier"],
+                             (name, found))
+
+
 def code_lines(path):
     """[(line number, text)] of a Python file's code lines: comments, docstrings (a string
     that is a statement) and blank lines left out, whitespace collapsed."""

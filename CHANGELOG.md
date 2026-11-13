@@ -606,8 +606,10 @@ and the `release-crisprme` skill.
     the guide, PAM and budget that can lie at a fake-indel window's edge; a
     genotyped VCF with an indel record of another FILTER and no log), is refused (exit 2),
     as is a run of every allele whose VCF holds, near what it checks, two lines that each
-    list several ALTs at one position (their allele numbers are not told apart, METHODS
-    section 4), and a run of any release whose VCF holds there an SNV whose ALT is written in
+    list several ALTs at one position, where the run's dictionary keeps their raw numbers or
+    has no dictionary to tell (their allele numbers are not told apart, METHODS section 4; a
+    dictionary in CRISPRitz 2.10.0's split form is checked: see the checker entry under
+    Fixed), and a run of any release whose VCF holds there an SNV whose ALT is written in
     lower case (CRISPRitz codes no lower-case ALT, while its dictionary lists the carriers:
     read in upper case, the check demanded targets the search cannot find), the check
     stopping at the first work unit that meets such a position (it refused a run of two lines
@@ -1950,6 +1952,23 @@ and the `release-crisprme` skill.
   the 108,505 indel row blocks naming an insertion and SNPs of its 17 gate runs). The real-data
   check reads such a row at the same place (`row_target`, `row_first_k`): it reported
   `variant-outside-target` on the right row, and its listed carriers as lacking the target.
+- **The real-data check verifies a position holding two lines that each list several ALTs, and
+  ties every alt of a line of several ALTs, where the run's dictionary is in split form.**
+  CRISPRitz 2.10.0 writes each ALT's dictionary entry of such a line in split form (`1` its own
+  ALT), which CRISPRme's readers tie each to its own slot; `scripts/check_indel_rows.py` read
+  every dictionary as one of raw numbers (`1|2` under every ALT, CRISPRitz up to c18c575), so it
+  refused such a run (exit 2) and read an alt the raw genotypes cannot tie as PUTATIVE, letting a
+  row pass that lists such a carrier for a target its haplotypes do not hold. It now reads the
+  run's own dictionary (`Dictionaries/dictionaries_<dataset>/my_dict_<chrom>.json[.gz]`) at a
+  position with a line of several ALTs: with no allele number above 1 there, every alt is tied
+  to its own `1` and the position is checked as any other; with raw numbers, or no dictionary,
+  as before. On the review's worlds through the real CLI with CRISPRitz 2.10.0, WMM and WMM2
+  (refused) and their classic installs are checked, 0 gating in both modes, and world Y's 12
+  `limit-snp-row-unphased` findings go (every carrier exact); with the c18c575 engine's raw
+  dictionaries WMM and WMM2 are refused as before. `PostProcess/test_check_indel_rows.py`
+  (`SplitFormDictionary`: the two lines checked on a split-form dictionary and refused on a raw
+  one or none; the alts a split form ties; a carrier the split form ties failed where it is
+  listed on another slot's target), each failing with the checker of 6bff65b.
 - **The HGDP + 1000 Genomes and HPRC build recipes stop at a step that fails**
   (`seq_script/merge_panels/hgdp1kgp_build.sh`, `hprc_build.sh`, which the rebuild of 2.10.0's
   index set calls). They printed `BUILD_EXIT` and went on: after a failed `build-index-only` the
@@ -2048,9 +2067,13 @@ and the `release-crisprme` skill.
   the full input validation of every one, and the real-data check refuses a run that holds
   one); no published panel holds one on chr22 (HGDP + 1000 Genomes, HPRC and mega: 0 lines of
   several ALTs, 0 `*`), and the 33,993 lines of several ALTs of
-  HF's raw HPRC `vcfwave` chr22 VCF are each alone at their position. Writing each ALT of such a
-  line in split form in the dictionary, which would tie every one, is CRISPRitz's (left to
-  CRISPRme by B3); the population summary of a phased panel
+  HF's raw HPRC `vcfwave` chr22 VCF are each alone at their position. CRISPRitz 2.10.0 now
+  writes each ALT of such a line in split form in the dictionary (owner decision B3 revisited,
+  2026-11-12: a `1|2` carrier of `C>A,T` reads `1|0` under A and `0|1` under T), which ties
+  every one, two lines of several ALTs at one position included: the narrowing above reads a
+  dictionary of an earlier CRISPRitz (2.9.1, or a 2.10.0 build up to c18c575), and the
+  real-data check verifies the positions a dictionary in split form holds (see the checker
+  entry under Fixed); the population summary of a phased panel
   decides it without phase too (it read the unknown slot as slot 0, a cis copy of the row of each
   ALT of the line). The Tier-1 store holds each ALT's genotypes read so (`1|0` and `0|1` for a
   `1|2`), and a store of an earlier release is read the same way. The sites-only (mega) registry

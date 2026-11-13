@@ -810,8 +810,13 @@ haplotype** (`indel_snp_cis.resolve_target`):
 - every haplotype that carries the indel gets **its own allele** at each code column — the
   SNP alt it carries, else the reference base — and the haplotypes left with the same
   sequence form **one reported row**, listing only their individuals and naming the SNP alts
-  they hold next to the indel (Variant info, rsID, MAF). A SNP with several alts on one VCF
-  line keeps its raw genotype under each alt (2|1 under A and under T), so each genotype is
+  they hold next to the indel (Variant info, rsID, MAF). CRISPRitz 2.10.0 writes the entry of
+  each alt of a SNP with several alts on one VCF line in split form (`1` that entry's alt,
+  `0` the reference or another alt: a 2|1 carrier of C>A,T reads 0|1 under A and 1|0 under
+  T), so every reader ties each such alt to `1`, its own, beside any other line of the
+  position, two lines of several ALTs included. A dictionary of an earlier CRISPRitz (2.9.1,
+  or a 2.10.0 build before its split form, up to c18c575) keeps the line's raw genotype under
+  each alt (2|1 under A and under T), and each genotype is then
   first read against its own alt's allele index: the index every carrier of the alt holds,
   less, where that leaves several, the indexes the position's other alts of a line of several
   ALTs settle (each alt of one character the dictionary lists there, the `*` of a spanning
@@ -825,12 +830,17 @@ haplotype** (`indel_snp_cis.resolve_target`):
   another needs: a carrier of two one-base ALTs is listed under both, with both indexes.
   Where the genotypes still cannot tell (every carrier of two alts is 1|2, or of an SNV and
   an indel or a `*` of its line, also beside a line of one ALT of the position) no slot can be
-  tied to the alt and the carrier is resolved as an unphased one. Two lines of several ALTs
-  at one position are not told apart: an alt of one can be tied to an index of the other's
-  (the input validator warns of such positions, among each VCF's first 1,000 records on
-  every run and in the whole file with `--full_input_validate`; none is in the published
-  panels' chr22, and every line of several ALTs of HF's raw HPRC `vcfwave` chr22 VCF is
-  alone at its position);
+  tied to the alt and the carrier is resolved as an unphased one. With such raw numbers two
+  lines of several ALTs at one position are not told apart: an alt of one can be tied to an
+  index of the other's (the input validator warns of such positions, among each VCF's first
+  1,000 records on every run and in the whole file with `--full_input_validate`; none is in
+  the published panels' chr22, and every line of several ALTs of HF's raw HPRC `vcfwave`
+  chr22 VCF is alone at its position). On the review's synthetic worlds, through the real
+  CLI with CRISPRitz 2.10.0's split form, every carrier's target, phase and variants are
+  those its haplotypes hold (an independent haplotype oracle, per sample), two lines of
+  several ALTs at one position (worlds WMM, WMM2) and a line of several ALTs beside a split
+  record (worlds X and Y) among them, where the raw numbers lost a carrier's phase or its
+  target (WMM2's CFD-1.0 target of S06, which 2.8.1 reported);
 - a sequence whose PAM no longer satisfies the searched motif, or whose mismatches,
   recounted on the concrete sequence, exceed `--mm` or `--max-total-edits`, is **dropped**:
   a raw target that no individual carries gives no row;
@@ -2734,10 +2744,16 @@ record of the site, whose carriers that dictionary lost (its entry was the last 
 earlier lines wrote (a `*` adds no base, and one base writes no code), so their ALTs are
 searched and their carriers are in no store. A position whose lines the two releases read
 otherwise (two lines of an SNV ALT, or such a line before a last `*` line) is one where the
-reading matters. Where every allele is coded, two lines that each list several ALTs at one
-position (§4: their allele numbers are not told apart) are not modeled: a run whose VCF
-holds one near a row or a record it checks is refused, the check stopping at the first work
-unit that meets one (as for an SNV ALT in lower case, above). The INDELS index's format is
+reading matters. Where every allele is coded, the run's own dictionary
+(`Dictionaries/dictionaries_<dataset>/my_dict_<chrom>.json[.gz]`) says how a position with a
+line of several ALTs is numbered: in split form (CRISPRitz 2.10.0: no allele number above 1)
+every alt is tied to its own `1` and the position is checked as any other, two lines of
+several ALTs at one position included; with the lines' raw numbers (a CRISPRitz before its
+split form), or where the run has no dictionary to tell, an alt the genotypes cannot tie is
+read PUTATIVE (§4), and two lines that each list several ALTs at one position (their allele
+numbers are not told apart) are not modeled: a run whose VCF holds one near a row or a
+record it checks is refused, the check stopping at the first work unit that meets one (as
+for an SNV ALT in lower case, above). The INDELS index's format is
 that of its `.bin` files, else the run's format-1 NOTE of it (§9). The phased indel store
 holds only the records whose FILTER passes but where the run's
 `log_verbose.txt` notes a store written before 2.10.0 for the dataset and chromosome (without
@@ -2936,8 +2952,9 @@ The SNP-only rows of a per-sample run can be checked report-only (`--snp-rows re
 their strings, their target and that each named variant lies in it, their listed carriers,
 and the phased carriers a row of their site leaves out, each carrier read as §4 reads a
 SNP row's carriers — an individual with an SNV call of unknown phase in the target, or with
-an alt of a line of several ALTs whose number the genotypes cannot tie (read as one copy on
-an unknown slot), is listed for every non-empty subset of its variants there
+an alt of a line of several ALTs whose number the genotypes cannot tie (a dictionary of raw
+numbers; read as one copy on an unknown slot), is listed for every non-empty subset of its
+variants there
 (`limit-snp-row-unphased`); the
 merge joins the carriers of a site's SNP rows of one variant list (its key for a SNP row
 is the Cluster Position and the variants, no alignment), so a carrier may be listed for
