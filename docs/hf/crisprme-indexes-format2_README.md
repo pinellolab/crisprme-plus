@@ -72,7 +72,8 @@ row on the alt contig.
 **What these indexes hold.** Every allele of a split multi-allelic site is coded (the
 four-allele symbol Q where the alleles cover A, C, G and T), each indel is searched in a
 fake-indel window of 30 reference bases on either side (25 and 27 in 2.8.1's archives), and
-each variant panel's records are those whose FILTER is `PASS` or `.`. The mega is rebuilt from
+an index and its Dictionaries hold the records whose FILTER is `PASS` or `.`, those CRISPRitz's
+enricher reads. The mega is rebuilt from
 the same merged VCFs: its registry and indel frequencies hold exactly the records its genome
 codes, and each indel carries its `AF_max`.
 
