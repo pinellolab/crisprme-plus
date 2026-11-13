@@ -60,7 +60,7 @@ jobs:
           push: false
           tags: crisprme:ci-multiarch
           # CRISPRitz 2.10.0 before its tag: the pushed engine branch's commit (remove at release)
-          build-args: crispritz_ref=c18c57514485a4c75ab7a15c4acfc7caeb4366c8
+          build-args: crispritz_ref=4ded5e62230fcea4a4031ae1bf431e64344b5309
 
   # ---------------------------------------------------------------------------
   # Publish build: build both arches and push to Docker Hub. Only on tags.

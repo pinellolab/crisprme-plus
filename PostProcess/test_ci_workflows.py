@@ -79,6 +79,43 @@ def skipped_tests(case):
 
 
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+class APullRequestBuildsOneEngine(unittest.TestCase):
+    """Before CRISPRitz's tag exists, the image builds of a pull request's CI pass the commit of
+    the CRISPRitz branch the release is tested with (docs/RELEASE_CHECKLIST.md, "The engine pin
+    of a pull request's CI goes"): docker-multiarch.yml and web-e2e.yml each pass
+    `crispritz_ref=<commit>`, under a comment `(remove at release)`, and the CHANGELOG's pin
+    entry names that commit. Re-pinned in one workflow and not in the other, the two jobs would
+    test two engines; once the tag is pushed both lines go, and every build reads the
+    Dockerfile's `ARG crispritz_ref`."""
+
+    PIN = re.compile(r"crispritz_ref=([0-9a-f]+)\b")
+
+    def pins(self):
+        return {name: self.PIN.findall(uncommented(workflow(name)))
+                for name in ("docker-multiarch.yml", "web-e2e.yml")}
+
+    def test_the_two_workflows_pass_one_commit_or_none(self):
+        pins = self.pins()
+        found = {sha for shas in pins.values() for sha in shas}
+        if not found:
+            return   # released: every build reads the Dockerfile's tag
+        self.assertEqual(len(found), 1, pins)
+        sha = found.pop()
+        self.assertRegex(sha, r"^[0-9a-f]{40}$")
+        for name, shas in pins.items():
+            self.assertEqual(shas, [sha], name)
+            lines = workflow(name).splitlines()
+            at = next(i for i, ln in enumerate(lines) if "crispritz_ref=" + sha in ln)
+            self.assertIn("(remove at release)", lines[at - 1], name)
+
+    def test_the_changelog_names_the_commit(self):
+        found = {sha for shas in self.pins().values() for sha in shas}
+        changelog = read(REPO / "CHANGELOG.md")
+        for sha in found:
+            self.assertIn("pull request #47's head, %s" % sha[:7], changelog)
+
+
+@unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
 class TheUnitTestsJobHasTheTimeToFinish(unittest.TestCase):
     """Its limit was 10 minutes. The hosted job took 523 s of those 600 at aa9c54b, and
     side by side under one load the steps of the trial integration of the fixes after it

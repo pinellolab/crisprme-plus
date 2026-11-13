@@ -43,7 +43,7 @@ jobs:
 
       - name: Build Python-3.11 image (linux/amd64)
         # CRISPRitz 2.10.0 before its tag: the pushed engine branch's commit (remove at release)
-        run: docker build --build-arg crispritz_ref=c18c57514485a4c75ab7a15c4acfc7caeb4366c8 -t crisprme:web .
+        run: docker build --build-arg crispritz_ref=4ded5e62230fcea4a4031ae1bf431e64344b5309 -t crisprme:web .
 
       # Regression guard for the alpha bug where a batteries-included install (index
       # only, empty VCFs/) offered only "Reference only" in the variant dropdown, and

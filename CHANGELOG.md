@@ -1176,7 +1176,8 @@ and the `release-crisprme` skill.
   `crispritz_ref` names (`git fetch` of the ref, where `git clone --branch` took a tag or a branch
   alone), so a pull request's CI builds, before CRISPRitz's tag exists, the CRISPRitz commit the
   release is tested with (`docker-multiarch.yml`'s and `web-e2e.yml`'s image builds pass
-  `crispritz_ref=` CRISPRitz pull request #47's head, c18c575); the release checklist removes
+  `crispritz_ref=` CRISPRitz pull request #47's head, 4ded5e6, which reads a VCF's REF and ALT in
+  upper case, below; up to the integration of 2.10.0 its c18c575); the release checklist removes
   those two lines once the tag is pushed.
 - **CRISPRitz 2.10.0 reads a VCF's REF and every ALT in upper case, as VCF 4.x does, and so do
   CRISPRme's readers of the VCF itself** (its `docs/MULTIALLELIC_ENRICHMENT.md` §2.1, §2.9 and
