@@ -76,8 +76,10 @@ on:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    # The hosted job took 523 s at 2.8.1's first release head, and the steps have grown since.
-    timeout-minutes: 20
+    # The hosted job took 523 s at 2.8.1's first release head, and the steps have grown since:
+    # at 2.10.0's ca74f63 it was cancelled at its limit of 20 minutes, in its second-last step,
+    # with no step failed (run 43439883388).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 

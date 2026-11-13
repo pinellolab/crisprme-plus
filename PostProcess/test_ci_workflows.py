@@ -120,11 +120,14 @@ class TheUnitTestsJobHasTheTimeToFinish(unittest.TestCase):
     """Its limit was 10 minutes. The hosted job took 523 s of those 600 at aa9c54b, and
     side by side under one load the steps of the trial integration of the fixes after it
     took 413 s against 334 s, which predicts about 640 s: the job would be cancelled, and
-    a tag needs it green."""
+    a tag needs it green. Raised to 20 minutes then, it was cancelled at those 20 minutes on
+    2.10.0's ca74f63 (pull request #110, run 43439883388), in its second-last step, with no
+    step failed: its steps take more than 20 minutes on the hosted runner now, and the limit
+    is 45."""
 
-    def test_its_limit_is_at_least_twenty_minutes(self):
+    def test_its_limit_is_at_least_forty_five_minutes(self):
         limit = re.search(r"^\s*timeout-minutes:\s*(\d+)\s*$", workflow("unit-tests.yml"), re.M)
-        self.assertGreaterEqual(int(limit.group(1)), 20)
+        self.assertGreaterEqual(int(limit.group(1)), 45)
 
 
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
