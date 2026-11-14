@@ -568,6 +568,14 @@ Every search scores off-targets with both CFD and CRISPR-Bulge, so `complete-sea
 start while the scorer env is missing or broken (`crisprme.py scorer-env doctor` says why), unless
 you opt into CFD-only scoring with `CRISPRME_SKIP_SCORER_ENV=1`.
 
+> **GNU coreutils come with it.** The environment holds conda-forge's GNU coreutils (`sort`,
+> `cut`, `paste` and the rest), and a search or a build run with it activated runs those, not
+> the host's. Ubuntu 26.04's own coreutils are uutils' (rust-coreutils), whose `pr` broke the
+> results table of a search before 2.10.0
+> ([Troubleshooting §17](docs/TROUBLESHOOTING.md#17-a-search-on-ubuntu-2604-stops-at-integrating-results-row-begins-with-a-tab-or-space));
+> 2.10.0 runs no `pr`, and its other calls give the same bytes with either. Run CRISPRme with
+> the environment activated, as above.
+
 Verify the installation; it prints the installed version, `v2.10.0`:
 
 ```bash
@@ -761,7 +769,7 @@ Silicon Mac in testing.
 
 Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from a checkout, for development or on a Linux system where you prefer not to use Bioconda. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.10.0 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
-**Prerequisites:** Linux, `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
+**Prerequisites:** Linux, `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required), and GNU coreutils too, which the search and the builds run in place of the host's (Ubuntu 26.04's are uutils'; see §1.1.2).
 
 > **macOS: use Docker (§1.2).** The source build is Linux-only. CRISPRitz's index builder
 > (`buildTST`) uses GCC's parallel-mode STL (`<parallel/algorithm>`), which the macOS

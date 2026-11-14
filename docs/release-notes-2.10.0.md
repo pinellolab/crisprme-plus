@@ -40,6 +40,11 @@ describes the methods.
 - **HPRC v2.1.** The HPRC panel is built from HPRC Release 2's Minigraph-Cactus graph v2.1, where
   2.8.1's was built from v2.0: the same 232 samples, 0.86 % more records, and alleles gained and
   lost.
+- **Ubuntu 26.04.** Its coreutils are uutils', and a search of a Bioconda or source install of
+  2.8.1 there stopped at "Integrating results", its table of best alignments broken: it joined its
+  three lists with `pr`, which uutils' pads and fuses. 2.10.0 joins them with `paste`, which gives
+  the same bytes with either coreutils, and its conda environment installs GNU coreutils. The
+  Docker image was not affected.
 
 ## New
 

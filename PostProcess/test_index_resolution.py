@@ -2121,10 +2121,13 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
                          "a process's state is read through /proc")
     def test_an_owner_whose_name_holds_a_parenthesis_is_read_rightly(self):
         # /proc/<pid>/stat is "<pid> (<name>) <state> ...", and the name may hold spaces and
-        # parentheses: a live owner named "x) Z y" is no zombie.
+        # parentheses: a live owner named "x) Z y" is no zombie. The link is to Python, not to
+        # sleep: uutils' coreutils (Ubuntu 26.04's) are one program, which runs the tool its
+        # name says and exits at once under another name ("Security violation"), so a link to
+        # their sleep left no owner, and the run took the lock over.
         link = self.dir / "x) Z y"
-        link.symlink_to(shutil.which("sleep"))
-        owner = subprocess.Popen([str(link), "60"])
+        link.symlink_to(sys.executable)
+        owner = subprocess.Popen([str(link), "-c", "import time; time.sleep(60)"])
         self.addCleanup(lambda: (owner.kill(), owner.wait()))
         _wait_for(lambda: Path(f"/proc/{owner.pid}/stat").read_text().startswith(
             f"{owner.pid} (x) Z y) "), 10, "the owner's name")

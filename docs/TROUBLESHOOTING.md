@@ -668,3 +668,28 @@ store, which installs 2.10.0's. Remove too 2.8.1's enrichment of the panel, `Gen
 and `Genomes/hg38+<panel>_INDELS`, or put 2.10.0's kit in its place: a search refuses it where it
 reads it, as above. Or install the indexes of 2.10.0 in a new data folder, which holds none of
 2.8.1's.
+
+## 17. A search on Ubuntu 26.04 stops at Integrating results: Row begins with a tab or space
+
+**Symptom.** A search of a Bioconda or source install of CRISPRme 2.8.1 or earlier, on Ubuntu
+26.04 or another host whose coreutils are uutils' (rust-coreutils), ends with `CRISPRme run
+failed. Failed during stage: Integrating results`, and its `log_error.txt` says `Row begins with
+a tab or space at line <N> in <output folder>/<job>.bestMerge.txt.bed.` and an `IndexError` of
+`resultIntegrator.py`. Its `<job>.bestMerge.txt` holds rows of 70 columns where a row has 72,
+and blank lines after them; the summaries and the plots the search made from it before that
+stage are wrong too.
+
+**Cause.** The search joins its three lists of each site's best alignment (by CFD, by fewest
+mismatches and bulges, by CRISPR-Bulge) line by line into that table. Up to 2.8.1 it joined them
+with `pr -m -t -J`, and the `pr` of uutils, the default coreutils of Ubuntu 26.04, joins the
+lines with no tab between two lists and pads the table with blank lines (a chr22 search of HPRC:
+3,278 rows of 70 columns, then 84 blank lines). The Docker image runs Debian's GNU coreutils and
+gives the right table.
+
+**Fix.** Upgrade to CRISPRme 2.10.0 or later and run the search again (a table written this way
+is not mended in place). It joins the lists with `paste`, which gives the same bytes with GNU
+coreutils and with uutils, and its conda environment (the Bioconda package, and `environment.yml`
+for a source install) holds GNU coreutils, which a search run with the environment activated
+uses in place of the host's. On an older release, install them into its environment and search
+with the environment activated:
+`conda install -n crisprme -c conda-forge coreutils`.
