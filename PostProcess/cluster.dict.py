@@ -104,7 +104,7 @@ if "orderChr" in sys.argv[:]:
         ],
         shell=True,
     )  # sort input file by chr, clusterpos, real guide, direction
-    # (LC_ALL=C, as every sort of the search: in another locale, en_US.UTF-8 say, sort
+    # (LC_ALL=C, as every sort of the search's rows: in another locale, en_US.UTF-8 say, sort
     # compares the rows of a cluster with its rules for case and '-', so the cluster's
     # alignments came in another order, the order the sort by total below keeps for ties)
     print("END Sorting", time.time() - start_time)

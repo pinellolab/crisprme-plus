@@ -2267,14 +2267,14 @@ major.minor version (Changed). The main changes, each told in its entry below:
   `environment.yml`'s environment on Ubuntu 26.04, with its uutils coreutils and with conda-forge's
   GNU coreutils 9.12 (the logs' times and the run's own paths aside). The two sorts of the search
   that ran in the user's locale, `cluster.dict.py`'s of the indel targets and
-  `process_summaries.py`'s of the summary by guide, run with `LC_ALL=C` as every other does: under
-  en_US.UTF-8 the rows of an indel cluster that tie on its keys came in another order, which the
-  sort by total keeps. And `environment.yml` and the Bioconda recipe install conda-forge's GNU
-  coreutils, so a search or a build run with the environment activated runs those, whatever the
-  host's are (README §1.1.2). Covered by `test_merged_lists_join` (the search's own join lines, on
-  the host's `paste`), which the `unit-tests` job runs, with all its other steps, on ubuntu-24.04
-  (GNU coreutils) and on ubuntu-26.04 (uutils); `test_reference_rows_once` and
-  `test_merge_sites_only_rows` join their lists with those lines (they ran `pr` themselves, and
+  `process_summaries.py`'s of the summary by guide, run with `LC_ALL=C`, as every other sort of its
+  rows does: under en_US.UTF-8 the rows of an indel cluster that tie on its keys came in another
+  order, which the sort by total keeps. And `environment.yml` and the Bioconda recipe install
+  conda-forge's GNU coreutils, so a search or a build run with the environment activated runs
+  those, whatever the host's are (README §1.1.2). Covered by `test_merged_lists_join` (the search's
+  own join lines, on the host's `paste`), which the `unit-tests` job runs, with all its other
+  steps, on ubuntu-24.04 (GNU coreutils) and on ubuntu-26.04 (uutils); `test_reference_rows_once`
+  and `test_merge_sites_only_rows` join their lists with those lines (they ran `pr` themselves, and
   failed on ubuntu-26.04: pull request #110, run 43614988938). `test_index_resolution`'s owner
   whose name holds a parenthesis is a link to Python now, not to `sleep`: uutils' coreutils are one
   program, which refuses to run under a name that is not a tool's, so the owner was gone at once on

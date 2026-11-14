@@ -261,7 +261,7 @@ for guide in guides:
 
     _summary = _q(f"{path_output}/{name_job}.summary_by_guide.{guide}_{filter_criterion}.txt")
     _sorted = _q(f"{path_best}.summary_by_guide.{guide}_{filter_criterion}.sorted")
-    # (LC_ALL=C, as every sort of the search: the order of rows that tie on both keys is
+    # (LC_ALL=C, as every sort of the search's rows: the order of rows that tie on both keys is
     # the whole line's, which another locale gives by its own rules)
     os.system(f"LC_ALL=C sort -k2,2n -k3,3n {_summary} -o {_sorted}")
     os.system(f"mv {_sorted} {_summary}")
