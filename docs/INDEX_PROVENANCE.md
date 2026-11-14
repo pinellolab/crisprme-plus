@@ -5,7 +5,7 @@ behind each claim. Written for the 2.8.1 release, when CRISPRitz 2.9.1 changed
 the index builder and a second, non-backward-compatible index family appeared.
 
 > **The indexes of 2.10.0** are rebuilt by CRISPRitz 2.10.0 in index format 2 and published in
-> their own repo, `lucapinello/crisprme-indexes-format2`, from the index set
+> their own repo, `lucapinello/crisprme_plus_indices`, from the index set
 > [`seq_script/rebuild/index_set_2.10.0.tsv`](../seq_script/rebuild/index_set_2.10.0.tsv), which
 > gives each archive's build and publish commands (`seq_script/rebuild/README.md`); their
 > provenance is the next section. The rest of this page covers the archives of 2.8.1, which stay
@@ -51,11 +51,14 @@ At the release, check that the tagged sources that build indexes are those used:
 `git diff --stat 4ded5e6 v2.10.0 -- sourceCode crispritz.py Makefile Makefile_conda conda` in
 CRISPRitz prints nothing, and in CRISPRme `git diff db50986 v2.10.0 -- PAMs
 seq_script/merge_panels seq_script/rebuild/index_set_2.10.0.tsv` prints only comments of the
-recipes, which the docs wave after the build changes (the HPRC recipe's header says v2.1); the
-19 row lines of the build half keep their md5 (`7389f7e234d4e617860f8f9b34abdc49`: those of
-`check_index_set.py --commands build` after its `# build` line, the `if`, `else` and mark lines
-around each left out, as `check_index_set.half_lines` takes them; the printed script, which holds
-its checks and those lines too, has an md5 of its own); and `git diff db50986 v2.10.0 --
+recipes, which the docs wave after the build changes (the HPRC recipe's header says v2.1), and
+the name of the repo the set is published in, `lucapinello/crisprme_plus_indices`, made during
+the build under that name (in the index set's header, its `repo` column and the kits' publish
+commands, and in `seq_script/merge_panels/README.md`; no recipe and no build command names a
+repo); the 19 row lines of the build half keep their md5 (`7389f7e234d4e617860f8f9b34abdc49`:
+those of `check_index_set.py --commands build` after its `# build` line, the `if`, `else` and
+mark lines around each left out, as `check_index_set.half_lines` takes them; the printed script,
+which holds its checks and those lines too, has an md5 of its own); and `git diff db50986 v2.10.0 --
 crisprme.py PostProcess` changes nothing `build-index-only` runs (the changes after `db50986` are
 search, download, publish and checker code, each named in the CHANGELOG).
 

@@ -246,9 +246,9 @@ class TheCheckFindsWhatItIsFor(unittest.TestCase):
         # it would replace 2.8.1's kit in the repo 2.8.1 reads (decision C2)
         kit = _row(self.rows, "build-inputs/hg38_HGDP1kGP")
         problems = self.mutated("build-inputs/hg38_HGDP1kGP", publish=kit["publish"].replace(
-            "upload lucapinello/crisprme-indexes-format2", "upload lucapinello/crisprme-data", 1))
+            "upload lucapinello/crisprme_plus_indices", "upload lucapinello/crisprme-data", 1))
         self.assertIn("build-inputs/hg38_HGDP1kGP: its publish command uploads to "
-                      "lucapinello/crisprme-data, not lucapinello/crisprme-indexes-format2: the "
+                      "lucapinello/crisprme-data, not lucapinello/crisprme_plus_indices: the "
                       "set goes to the repo of index format 2 alone (decision C2), and an upload "
                       "elsewhere replaces what 2.8.1 reads", problems)
 
@@ -257,7 +257,7 @@ class TheCheckFindsWhatItIsFor(unittest.TestCase):
         problems = self.mutated("20-NGG_3_hg38",
                                 publish=r["publish"] + " --hf-repo lucapinello/crisprme-data")
         self.assertIn("20-NGG_3_hg38: its publish command names the repo "
-                      "lucapinello/crisprme-data, not lucapinello/crisprme-indexes-format2",
+                      "lucapinello/crisprme-data, not lucapinello/crisprme_plus_indices",
                       problems)
 
     def test_a_token_in_a_command(self):
@@ -958,7 +958,7 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
         self.assertEqual((rc, err), (0, ""))
         self.assertEqual([c.split()[0] + " " + " ".join(c.split()[3:5]) for c in calls[:2]],
                          ["hf auth whoami", "hf datasets info"])
-        self.assertIn("hf implicit=0 usersite=1 datasets info lucapinello/crisprme-indexes-format2",
+        self.assertIn("hf implicit=0 usersite=1 datasets info lucapinello/crisprme_plus_indices",
                       calls[1])
         # every archive then, each command with the override exported for the image's hf
         self.assertEqual(len(self.uploads(calls)),
@@ -980,7 +980,7 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
                 rc, err, calls = self.run_publish(token=False, **extra)
                 self.assertEqual(rc, 2, err)
                 self.assertIn("publish: HF_TOKEN is not set: the token that publishes, a write "
-                              "token of lucapinello/crisprme-indexes-format2, exported in the "
+                              "token of lucapinello/crisprme_plus_indices, exported in the "
                               "environment: never on a command line", err)
                 self.assertEqual(calls, [])
 
@@ -1074,7 +1074,7 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
         self.assertEqual(self.uploads(calls), [])
         rc, err, calls = self.run_publish(info=1)
         self.assertEqual(rc, 2, err)
-        self.assertIn("publish: lucapinello/crisprme-indexes-format2 is not on the Hub, or "
+        self.assertIn("publish: lucapinello/crisprme_plus_indices is not on the Hub, or "
                       "HF_TOKEN cannot read it: its owner creates it", err)
         self.assertEqual(self.uploads(calls), [])
 
@@ -1145,7 +1145,7 @@ class TheReleaseDocsOfTheSet(unittest.TestCase):
         """B-2: the publish uploads each kit's member list and HPRC's normalised VCFs (E, step
         4), which the card's layout did not list: a file on the Hub the card does not document
         fails the card's own gate."""
-        card = _read("docs", "hf", "crisprme-indexes-format2_README.md")
+        card = _read("docs", "hf", "crisprme_plus_indices_README.md")
         layout = card[card.index("## Layout"):]
         layout = layout[layout.index("```"):layout.index("```", layout.index("```") + 3)]
         for r in self.rows:

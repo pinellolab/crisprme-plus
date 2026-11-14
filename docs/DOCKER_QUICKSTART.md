@@ -227,7 +227,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 They land in `VCFs/hg38_HGDP1kGP/`; build from them with `build-index-only` (see
 [`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md)). For a new PAM on HGDP + 1000
 Genomes, HPRC or mega, the pre-enriched kit of 2.10.0 (`download --what build-inputs --dataset
-hg38_HGDP1kGP`, from `lucapinello/crisprme-indexes-format2`) is the faster route.
+hg38_HGDP1kGP`, from `lucapinello/crisprme_plus_indices`) is the faster route.
 
 ## 6. Start the web interface
 
@@ -527,7 +527,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 ```
 
 To see which indexes are published, browse the dataset repository
-(`lucapinello/crisprme-indexes-format2`, folder `indexes/`, for the indexes of 2.10.0; 2.8.1's
+(`lucapinello/crisprme_plus_indices`, folder `indexes/`, for the indexes of 2.10.0; 2.8.1's
 are in `lucapinello/crisprme-data` and, PAM-less with an 8-nt flank,
 `lucapinello/crisprme-data-general-index`) — the names there are exactly what you pass to
 `--index-name`, and `download` picks the repo for you.

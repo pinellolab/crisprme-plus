@@ -1,7 +1,7 @@
 # The rebuild of the published indexes for CRISPRme 2.10.0
 
 `index_set_2.10.0.tsv` is the **rebuild manifest**: every archive the rebuild for 2.10.0 builds
-and publishes in [`lucapinello/crisprme-indexes-format2`](../../docs/hf/crisprme-indexes-format2_README.md),
+and publishes in [`lucapinello/crisprme_plus_indices`](../../docs/hf/crisprme_plus_indices_README.md),
 the location of index format 2 that no release before 2.10.0 reads (decision C2), one line each,
 with its panel, PAM file, PAM, side, spacer (guide) length, bMax (N, the name's), the build's
 `--bDNA`/`--bRNA`, the archives of 2.8.1 it replaces, its build and publish commands, and a note.
@@ -76,14 +76,14 @@ it serves for its own guide length (`index_fit.fits`).
    (`hprc_build.sh`), into the image: their working directories and inputs lie there, and `$RUN`
    binds the working directories and the repository's checkout (mega's recipe runs the
    repository's `PostProcess/` in the image).
-3. **Publish each panel as a unit** into `lucapinello/crisprme-indexes-format2` (the publish
+3. **Publish each panel as a unit** into `lucapinello/crisprme_plus_indices` (the publish
    half, on each node for the working directories it holds: The publish, below), which must exist
    first: `publish-index` creates no repo, so
    its owner creates the dataset repo, and pushes its card,
-   `docs/hf/crisprme-indexes-format2_README.md` (`docs/hf/README.md`), before the first
+   `docs/hf/crisprme_plus_indices_README.md` (`docs/hf/README.md`), before the first
    publish. Then write `indexes/SHA256SUMS` from the Hub's own
    checksums once its uploads are done, `python scripts/hf_sha256sums.py
-   lucapinello/crisprme-indexes-format2 > SHA256SUMS`, and upload it as `indexes/SHA256SUMS`
+   lucapinello/crisprme_plus_indices > SHA256SUMS`, and upload it as `indexes/SHA256SUMS`
    (`docs/hf/README.md`). `publish-index` packs each archive, uploads it and deletes it, so no
    archive is left to hash before its upload, and `--staged staged.sha256`, which checks that
    the Hub holds what was hashed where it was built, has nothing to read: this list lets a user
@@ -194,7 +194,7 @@ ml008, each needing only the working directories it names. The two publish every
 set once, in either order: `publish-index` uploads a panel's companions with its first index, and
 nothing of one node's panels waits for the other's. The publish half uploads with the image's own
 `hf` and `crisprme.py` (`$RUN`: the rebuild's image, rule 2), with a token given in the
-environment, `HF_TOKEN`, a write token of `lucapinello/crisprme-indexes-format2` (a fine-grained
+environment, `HF_TOKEN`, a write token of `lucapinello/crisprme_plus_indices` (a fine-grained
 token lists the repo, which its owner adds once the repo exists), never on a command line, which
 `ps` shows. The image sets
 `HF_HUB_DISABLE_IMPLICIT_TOKEN=1`, so its `hf upload` sends no token unless that is overridden in
@@ -209,7 +209,7 @@ the image would not send it; the `hf` that `$RUN` runs is not the one installed 
 with a clean `PATH`); the token does not authenticate (`hf auth whoami`); or the repo is not
 there (`hf datasets info`: its owner creates it, with its card, first; `hf upload` would create
 a repo that is not there, under the token's account). The kits go up as the manifest gives it,
-`$RUN hf upload lucapinello/crisprme-indexes-format2 <kit> build-inputs/<kit> --repo-type dataset`,
+`$RUN hf upload lucapinello/crisprme_plus_indices <kit> build-inputs/<kit> --repo-type dataset`,
 the command of `hf` in `huggingface_hub` 2.4.0, the image's. On each node, from the repository's
 root:
 

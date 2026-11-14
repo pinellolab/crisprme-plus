@@ -8,12 +8,18 @@ dataset repo. A WIDER flank cannot be read correctly by a release that predates
 point at. Routing is derived from the flank width rather than kept as a list of
 names, so it cannot be forgotten at publish time.
 
+Since 2.10.0 an index of index format 2, or one named for its guide length and side, goes to
+and comes from a repo of its own, lucapinello/crisprme_plus_indices, whose id this file pins
+(TheRepoOfThisReleasesIndexesIsTheOneOnTheHub).
+
 Hermetic: these are pure functions over names, no network.
 """
 
 import os
 import pathlib
+import types
 import unittest
+from unittest import mock
 
 import crisprme_hf as hf
 
@@ -168,6 +174,71 @@ class GenotypeCompanionNoteIsAttachedToTheRightResult(unittest.TestCase):
 
     def test_reference_index_success_message_is_still_there(self):
         self.assertIn("Also installed the shared reference index", self.src)
+
+
+class TheRepoOfThisReleasesIndexesIsTheOneOnTheHub(unittest.TestCase):
+    """The ids of the dataset repos, as they are on the Hub. The indexes of 2.10.0 (index format
+    2) are published in, and fetched from, lucapinello/crisprme_plus_indices: its owner made it
+    under that name on 2026-11-14, and the name the plan had given it (PLANNED) is no repo's. The
+    archives of 2.8.1 stay in lucapinello/crisprme-data and lucapinello/crisprme-data-general-index.
+    The tests of the download, the catalog and the publish (test_panel_companions,
+    test_legacy_index_access) read crisprme_hf.FORMAT2_HF_REPO, whatever it is; this pins it, and
+    that no file of the repository names the planned repo, where a download or a publish of 2.10.0
+    would find no repo."""
+
+    NEW = "lucapinello/crisprme_plus_indices"
+    PLANNED = "crisprme-indexes-" + "format2"  # (in two parts, so that this file does not name it)
+
+    def setUp(self):
+        saved = os.environ.pop("CRISPRME_HF_REPO", None)  # (a repo named would win)
+        if saved is not None:
+            self.addCleanup(os.environ.__setitem__, "CRISPRME_HF_REPO", saved)
+
+    def test_the_ids(self):
+        self.assertEqual(hf.FORMAT2_HF_REPO, self.NEW)
+        self.assertEqual(hf.DEFAULT_HF_REPO, "lucapinello/crisprme-data")
+        self.assertEqual(hf.GENERAL_INDEX_HF_REPO, "lucapinello/crisprme-data-general-index")
+
+    def test_an_index_of_2_10_0_goes_there_and_one_of_2_8_1_to_its_own_repo(self):
+        for name in ("20-NRR_3_hg38", "20-NRR_3_hg38+hg38_HGDP1kGP", "20-NRR_3_hg38+hg38_HPRC",
+                     "20-NRR_3_hg38+hg38_mega", "TTTN-23_3_hg38", "22-NNGRRN_3_hg38+hg38_HGDP1kGP",
+                     "20-NNNNNNNN_3_hg38+hg38_HGDP1kGP", "20-NGG_3_hg38-dictless+hg38_HGDP1kGP"):
+            self.assertEqual(hf.resolve_index_repo(name), self.NEW, name)
+        # (publish-index reads the format of the .bin files: one of format 2, whatever its name)
+        self.assertEqual(hf.resolve_index_repo("NRR_3_hg38", index_format=2), self.NEW)
+        for name in ("NRR_3_hg38", "NRR_3_hg38+hg38_HGDP1kGP", "NRG_3_hg38+hg38_HPRC",
+                     "NGG_3_hg38+hg38_HGDP1kGP", "NRG_3_hg38+hg38_mega", "NNN_3_hg38"):
+            self.assertEqual(hf.resolve_index_repo(name), "lucapinello/crisprme-data", name)
+        self.assertEqual(hf.resolve_index_repo("NNNNNNNN_3_hg38+hg38_HGDP1kGP"),
+                         "lucapinello/crisprme-data-general-index")
+
+    def test_the_catalog_lists_it(self):
+        """list_available_downloads('index'), the Settings dropdown's list, reads it alone."""
+        asked = []
+
+        class HfApi:
+            def list_repo_tree(self, repo, **kw):
+                asked.append((repo, kw.get("repo_type"), kw.get("path_in_repo")))
+                return iter(())
+
+        with mock.patch.object(hf, "_require_hf", return_value=types.SimpleNamespace(HfApi=HfApi)):
+            self.assertEqual(hf.list_available_downloads("index"), [])
+        self.assertEqual(asked, [(self.NEW, "dataset", "indexes")])
+
+    def test_no_file_of_the_repository_names_the_planned_repo(self):
+        root = pathlib.Path(__file__).resolve().parent.parent
+        files = [root / n for n in ("README.md", "METHODS.md", "CHANGELOG.md", "crisprme.py",
+                                    "index.py", "Dockerfile", "environment.yml")]
+        for top in ("docs", "seq_script", "scripts", "PostProcess", "pages", ".github", "changelog"):
+            if (root / top).is_dir():
+                files += sorted(p for p in (root / top).rglob("*") if p.is_file() and p.suffix in (
+                    ".md", ".py", ".tsv", ".sh", ".html", ".yml", ".txt", ".json"))
+        files = [p for p in files if p.is_file() and p.resolve() != pathlib.Path(__file__).resolve()]
+        self.assertGreater(len(files), 300)  # (the scan reads the docs and the code)
+        named = [str(p.relative_to(root)) for p in files
+                 if self.PLANNED in p.read_text(encoding="utf-8", errors="replace")]
+        self.assertEqual(named, [], f"files that name the planned repo, which is no repo: {named}")
+        self.assertTrue((root / "docs" / "hf" / "crisprme_plus_indices_README.md").is_file())
 
 
 if __name__ == "__main__":

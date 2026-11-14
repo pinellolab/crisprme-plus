@@ -17,7 +17,7 @@ viewer: false
 > **A newer general index exists.** CRISPRme+ **2.10.0** publishes the general index again,
 > built by CRISPRitz 2.10.0 in index format 2, as `20-NNNNNNNN_3_hg38` and
 > `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` in
-> [`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2),
+> [`lucapinello/crisprme_plus_indices`](https://huggingface.co/datasets/lucapinello/crisprme_plus_indices),
 > where it also stands for `NNN_3` (not built again for 2.10.0: it serves every search
 > `NNN_3` serves, at the same speed). The archives here are CRISPRme+ 2.8.1's (index format 1),
 > kept unchanged for 2.8.1.
@@ -81,7 +81,7 @@ at any width: use a dedicated index, which `crisprme.py build-index-only` builds
 
 ```bash
 # the genome, annotations, PAMs and sample lists (plus the default reference index:
-# CRISPRme+ 2.10.0: 20-NRR_3_hg38, from lucapinello/crisprme-indexes-format2; 2.8.1:
+# CRISPRme+ 2.10.0: 20-NRR_3_hg38, from lucapinello/crisprme_plus_indices; 2.8.1:
 # NRG_3_hg38, from lucapinello/crisprme-data)
 crisprme.py download --what all --path .
 

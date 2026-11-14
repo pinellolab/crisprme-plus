@@ -24,7 +24,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
   set of 2.10.0 lists them (Added; the general index serves the searches of `NNN_3`, which is not
   built again), under a name that gives the guide length and the side of the PAM
   (`20-NRR_3_hg38+hg38_HGDP1kGP`), in a Hugging Face repo of their own,
-  `lucapinello/crisprme-indexes-format2`. The archives of 2.8.1 stay where they are. The HPRC
+  `lucapinello/crisprme_plus_indices`. The archives of 2.8.1 stay where they are. The HPRC
   panel is built from HPRC release 2's Minigraph-Cactus graph v2.1, where 2.8.1's was built from
   v2.0 (Changed).
 - **The defaults.** SpCas9 NRR is the default PAM and index (it was NRG), and a search given no
@@ -99,7 +99,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
   Dictionaries and genotype store are published and fetched once.**
   - **The location.** Every index of index format 2, which CRISPRme 2.8.1 refuses and 2.8.0
     aborts on, or named for its guide length and side, goes to and comes from
-    `lucapinello/crisprme-indexes-format2` (`crisprme_hf.FORMAT2_HF_REPO`), which no earlier
+    `lucapinello/crisprme_plus_indices` (`crisprme_hf.FORMAT2_HF_REPO`), which no earlier
     release points at: `publish-index` routes it there by itself, by the format its `.bin` files
     are in, and refuses to publish one in `lucapinello/crisprme-data` or
     `lucapinello/crisprme-data-general-index`, the repos 2.8.1 reads, even when named; `download`
@@ -2929,7 +2929,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
   pruned to the PAM where only such a one serves it, and builds one from the genome where none
   does (it said that it builds one). On chr22 with HGDP + 1000 Genomes, both refusals of a search of
   1 + 1 bulge under an empty `--index-path` name `20-NRR_3_hg38`, the reference index of the
-  index set that the rebuild for 2.10.0 publishes in `lucapinello/crisprme-indexes-format2`
+  index set that the rebuild for 2.10.0 publishes in `lucapinello/crisprme_plus_indices`
   (2.8.1's of N = 3, `NRR_3_hg38`, is in `lucapinello/crisprme-data`); no repo holds an
   `NRR_2_hg38` (`download` stops on it), nor an `NGCG_3_hg38`. Covered by
   `PostProcess/test_index_resolution.py` and `test_bulge_cap.py`.

@@ -44,7 +44,7 @@ describes the methods.
 ## New
 
 - **The indexes of 2.10.0**, in a Hugging Face repo of their own,
-  [`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2),
+  [`lucapinello/crisprme_plus_indices`](https://huggingface.co/datasets/lucapinello/crisprme_plus_indices),
   named for their guide length and the side of their PAM (`20-NRR_3_hg38+hg38_HGDP1kGP`): SpCas9
   NRR on the reference, HGDP + 1000 Genomes, HPRC and the mega; NGG, NRG, the general PAM-less
   index (an 8-nt flank), SaCas9 NNGRRN at 22 nt and Cas12a TTTN at 20 and 23 nt on the reference

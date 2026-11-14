@@ -3,7 +3,7 @@
 code that builds, names, publishes and downloads its archives, and run its commands dry.
 
 The manifest, ``seq_script/rebuild/index_set_2.10.0.tsv``, lists every archive the rebuild for
-2.10.0 builds and publishes in ``lucapinello/crisprme-indexes-format2`` (decision C2), with its
+2.10.0 builds and publishes in ``lucapinello/crisprme_plus_indices`` (decision C2), with its
 build and publish commands. The rebuild follows it, and the D7 readiness audit runs this check
 before any build starts: every index's name must be the one ``build-index-only`` gives its PAM
 file (``index_fit.index_name``: guide length and side, E2), every archive must route to the
