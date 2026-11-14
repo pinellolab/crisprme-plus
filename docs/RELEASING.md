@@ -261,7 +261,15 @@ GitHub refuses a release body of more than 125,000 characters, and `gh release c
 fails. Where the changelog section is longer, write short notes for the release instead: what
 changes in results, what is new, how to upgrade, and links to the tag's `CHANGELOG.md` and
 `METHODS.md` for the full list. 2.8.1's section was about 322,000 characters, and its release
-went out with 5,012 characters of such notes; 2.10.0's `[Unreleased]` section is about 320,000.
+went out with 5,012 characters of such notes; 2.10.0's `[Unreleased]` section is about 320,000,
+and its short notes are `docs/release-notes-2.10.0.md`: `gh release create v2.10.0 ...
+--notes-file docs/release-notes-2.10.0.md`, its links pointing at the tag. Check the size first:
+`wc -c < docs/release-notes-2.10.0.md` under 125,000.
+
+A release that publishes indexes (2.10.0's) follows the order of `RELEASE_CHECKLIST.md`, section E:
+the local gates, the PI's go, the repo and its card, the publish, `indexes/SHA256SUMS`, the archive
+gates and the clean-room from the Hub, the old cards, and only then the tags and the merge, back to
+back.
 
 Confirm the tarball is live (HTTP 200) before touching Bioconda:
 
@@ -282,7 +290,15 @@ curl -sL https://github.com/pinellolab/crisprme-plus/archive/refs/tags/vX.Y.Z.ta
 There are two ways to get this into `bioconda/bioconda-recipes`:
 
 When the release moves the minor, check first that CRISPRitz's recipe of that minor is merged,
-with its guard ([Version policy](#version-policy)), and wait for it if not:
+with its guard ([Version policy](#version-policy)), and wait for it if not. The order, for 2.10.0
+(`RELEASE_CHECKLIST.md`, Gate C, "The Bioconda order"): before CRISPRitz's GitHub release, the email
+to Manuel, who merges the recipes (both recipes, the order, the 72 h windows, the two sha256 once
+the tags exist); the `crispritz` recipe of the new minor, with `run_constrained: - crisprme >=X.Y.0`
+and the compiled enricher, green on linux-64 and linux-aarch64 and merged within 72 h of its bot's
+PR, which merges itself then; then this recipe, its bot PR given the bounded pin
+`crispritz >=X.Y.0,<X.(Y+1)` (`>=2.10.0,<2.11`) within 72 h of this release. CRISPRitz's
+`docs/RELEASING.md` (step 7, "Cross-repo") gives the pins on its side the same way: this repo's
+`ARG crispritz_ref` and `CRISPRITZ_REF` name its tag, the recipe the bounded range.
 
 ```bash
 curl -sL https://raw.githubusercontent.com/bioconda/bioconda-recipes/master/recipes/crispritz/meta.yaml \

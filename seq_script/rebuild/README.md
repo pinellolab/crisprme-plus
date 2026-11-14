@@ -149,7 +149,10 @@ passes the kits and mega. To build a row again, remove its mark and what it buil
 that stopped partway is refused by its recipe until its parts are gone: move `$MEGA` aside, put
 back its genome folder, and run the build half again.
 
-**The publish.** The publish half uploads with the release image's own `hf` and `crisprme.py`
+**The publish.** It is step 4 of the release's order (`docs/RELEASE_CHECKLIST.md`, E): after the
+local gates on the built indexes, the PI's go and the repo with its card; then `indexes/SHA256SUMS`,
+the archive gates and the clean-room from the Hub, the old repos' cards, and the tags. The publish
+half uploads with the release image's own `hf` and `crisprme.py`
 (`$RUN`), with a token given in the environment, `HF_TOKEN`, a write token of
 `lucapinello/crisprme-indexes-format2` (a fine-grained token lists the repo, which its owner adds
 once the repo exists), never on a command line, which `ps` shows. The image sets
