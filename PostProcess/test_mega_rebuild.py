@@ -160,15 +160,16 @@ class _Recipe(bio._Fixture):
                          .replace("PYTHON", sys.executable).replace("CRISPRME", bio.CRISPRME))
             os.chmod(p, 0o755)
 
-    def rebuild(self, install=None):
-        """The recipe, run in the working directory, or in ``install``."""
+    def rebuild(self, install=None, pp=HERE):
+        """The recipe, run in the working directory, or in ``install``, reading its
+        PostProcess scripts from ``pp``."""
         env = {k: v for k, v in os.environ.items() if not k.startswith(("STUB_", "CRISPRME_"))}
         env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
                    PYTHONPATH=os.path.join(bio.SHARED, "py"),
                    MPLCONFIGDIR=os.path.join(bio.SHARED, "mpl"), STUB_LOG=self.log,
                    STUB_MARK=self.mark, STUB_RELEASE=self.release,
                    PAM="PAMs/" + os.path.basename(bio.PAM), BDNA="1", BRNA="1", THREADS="2",
-                   PYTHON=sys.executable, PP=HERE)
+                   PYTHON=sys.executable, PP=pp)
         return subprocess.run(["bash", RECIPE, install or self.work, self.src], env=env,
                               capture_output=True, text=True, timeout=600)
 
@@ -505,6 +506,50 @@ def _section_12_commands():
     start = text.index("**Building the mega's kit again.**", text.index("## 12. "))
     block = text.index("```bash\n", start) + len("```bash\n")
     return text[block:text.index("```", block)]
+
+
+@unittest.skipUnless(HAVE_PYSAM, "pysam (BGZF and tabix) not installed")
+class TheRebuildRunsItAgainAfterItsChecksFailed(_Recipe):
+    """The recipe writes every part of the dataset, and removes its staging folder, before its
+    last step, its checks (verify_mega_chrom.py): a build whose checks failed exits 1 with every
+    part in place. The rebuild's build half (seq_script/rebuild/check_index_set.py --commands
+    build) took mega's build for done where every part was there, so a re-run passed its line,
+    "done before, skipped", and ended with exit 0 (the PP-2 review, A1-PP2-1). Its line now
+    passes on its mark alone, which the half writes once the recipe has exited 0: it runs the
+    recipe again, which refuses the working directory, and the half stops there."""
+
+    def test_a_re_run_stops_at_its_line(self):
+        import importlib.util
+        pp = os.path.join(self.root, "PostProcess")
+        os.makedirs(pp)
+        for name in os.listdir(HERE):
+            if name != "verify_mega_chrom.py":
+                os.symlink(os.path.join(HERE, name), os.path.join(pp, name))
+        with open(os.path.join(pp, "verify_mega_chrom.py"), "w") as fh:
+            fh.write("import sys\nsys.stderr.write('verify: 1 allele(s) FAIL\\n')\nsys.exit(1)\n")
+        done = self.rebuild(pp=pp)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("verify: 1 allele(s) FAIL", done.stderr)
+        self.assertTrue(os.path.isdir(self.lib("20-NRG_2_hg38+hg38_mega")))
+        self.assertFalse(os.path.exists(self.path(".mega_rebuild_hg38_mega")))
+        # mega's row of the build half, as check_index_set prints it, for this fixture's index
+        spec = importlib.util.spec_from_file_location(
+            "check_index_set", os.path.join(REPO, "seq_script", "rebuild", "check_index_set.py"))
+        cis = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cis)
+        row = next(r for r in cis.read_manifest() if r["archive"] == "20-NRR_3_hg38+hg38_mega")
+        row = dict(row, archive="20-NRG_2_hg38+hg38_mega")
+        script = "\n".join(["set -euo pipefail"] + cis._done_checks("build")
+                           + cis._row_lines(row, "build")) + "\n"
+        env = {"PATH": os.pathsep.join([self.bin, "/usr/bin", "/bin"]), "LC_ALL": "C",
+               "RUN": "", "MEGA": self.work, "MEGA_SRC": self.src}
+        again = subprocess.run(["bash", "-c", script], cwd=REPO, env=env, capture_output=True,
+                               text=True, timeout=120)
+        self.assertEqual(again.returncode, 1, again.stdout + again.stderr)
+        self.assertNotIn("done before, skipped", again.stdout)
+        self.assertIn("part(s) of hg38_mega, and nothing was made there", again.stderr)
+        self.assertIn("rebuild: the build of 20-NRG_2_hg38+hg38_mega failed", again.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.work, cis.MARKS)))
 
 
 @unittest.skipUnless(HAVE_PYSAM, "pysam (BGZF and tabix) not installed")

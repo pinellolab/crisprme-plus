@@ -15,8 +15,9 @@ index), as a download of it says (``crisprme_hf.successor_index``).
 
 Its commands are what the rebuild runs, and ``--commands build`` and ``--commands publish`` print
 them as the two halves of the rebuild, a script each (HALVES): the build half publishes nothing,
-and the publish half, which builds nothing, is run once, after the indexes have passed the
-release's gates and the publish is approved. Each command a bash command (``bash -n``; a note has
+and the publish half, which builds nothing, is run once the indexes have passed the release's
+gates and the publish is approved, on each node for the working directories it holds
+(``--panels``: the rows of those alone). Each command a bash command (``bash -n``; a note has
 a column of its own) run from the repository's root on its own, so that none moves the next (a
 ``cd`` only inside ``( )``); a recipe called by its repository path, and given every input it
 would otherwise read from a path of the cluster it was written on; each build first copying its
@@ -25,16 +26,18 @@ PAM file from the repository's ``PAMs/`` into its working directory's, and readi
 panel's working directory, with the variables of VARIABLES alone; a panel companion, which its
 panel's first build writes and first publish uploads, with none ("-"). Each half skips a row it
 ran to its end before (its mark in the working directory, MARKS), and the build half a kit whose
-SHA256SUMS holds and mega's build where every part its recipe makes is there (WHOLE_RECIPES),
-which its recipe refuses. The check reads every command so, then runs the two halves dry, then
-each again (dry_run): every program they call stubbed, in working directories that hold what the
-builds leave, from a copy of the repository's root made of links. Each runs to its end only where
-every script it calls is there, every PAM file a build reads is in place, and every file a
-publish uploads is where the command says; run again, each does nothing again.
+SHA256SUMS holds, written once its tarball is whole; nothing else, as what a recipe leaves does
+not tell that it ran to its end (mega's writes every part of its dataset before its checks). The
+check reads every command so, then runs the two halves dry, then each again (dry_run): every
+program they call stubbed, in working directories that hold what the builds leave, from a copy
+of the repository's root made of links. Each runs to its end only where every script it calls is
+there, every PAM file a build reads is in place, and every file a publish uploads is where the
+command says; run again, each does nothing again.
 
     python seq_script/rebuild/check_index_set.py                       # the check and the dry run; exit 1 on a problem
     python seq_script/rebuild/check_index_set.py --commands build      # the build half: a script bash runs from the repository's root
-    python seq_script/rebuild/check_index_set.py --commands publish    # the publish half, run once, after the gates and the go
+    python seq_script/rebuild/check_index_set.py --commands publish    # the publish half, after the gates and the go
+    python seq_script/rebuild/check_index_set.py --commands publish --panels HGDP   # its rows of $HGDP alone (a node's)
 
 Standard library and the repository's PostProcess modules only; no network.
 """
@@ -140,7 +143,7 @@ REPOSITORY_FOLDERS = ("seq_script", "scripts", "PostProcess", "PAMs")
 # integration of stage 2b, and the dry run checks its call as it checks the others'.
 PENDING_SCRIPTS = {}
 # The two halves of the rebuild, each a script of its own (--commands build, --commands publish):
-# the build half publishes nothing, and the publish half is run once, after the gates and the go
+# the build half publishes nothing, and the publish half is run after the gates and the go
 # (README, "Commands"; PP-2 of the release: the script of both halves published straight after
 # its builds, before any gate)
 HALVES = ("build", "publish")
@@ -148,19 +151,6 @@ HALVES = ("build", "publish")
 # (<half>.<archive>, a "/" as "_"), so that a re-run skips it (README, "A re-run"). A dot folder,
 # which no archive packs: an index's is its genome_library folder, a kit's its Genomes/ folders.
 MARKS = ".rebuild-2.10.0"
-# A recipe that builds its dataset whole and refuses a working directory that holds any part of
-# it, so that its row, run again once done, fails: the parts it makes there (paths of the working
-# directory: {archive} the row's index, {genome} its genome, {dataset} the panel), all there once
-# it ran to its end, which a re-run takes for done (the VCFs it writes, one a chromosome of its
-# sources, are checked apart: SOURCE_CHROMOSOMES). seq_script/merge_panels/mega_rebuild.sh's,
-# which removes its staging folder, .mega_rebuild_<dataset>, before its last step, the checks.
-WHOLE_RECIPES = {
-    "seq_script/merge_panels/mega_rebuild.sh": (
-        "genome_library/{archive}", "genome_library/{archive}_INDELS",
-        "Genomes/{genome}+{dataset}", "Genomes/{genome}+{dataset}_INDELS",
-        "Dictionaries/log_indels_{dataset}", "Dictionaries/registry_{dataset}",
-        "Dictionaries/indel_af_{dataset}", "samplesIDs/{dataset}.samplesID.txt"),
-}
 
 
 def read_manifest(path=MANIFEST):
@@ -563,24 +553,17 @@ def _mark_name(half, archive):
     return f"{half}.{archive.replace('/', '_')}"
 
 
-def _whole_recipe(r):
-    """The parts row ``r``'s recipe makes, if it is one that refuses a working directory holding
-    any of them (WHOLE_RECIPES: mega's), as _done_checks reads them; else None."""
-    for script, parts in WHOLE_RECIPES.items():
-        if script in r["build"]:
-            return parts
-    return None
-
-
 def _done_checks(half):
     """The lines of a half of the rebuild that tell whether a row ran to its end before, so that
     a re-run skips it (README, "A re-run"): the mark the half leaves in the row's working
     directory once its command has run (MARKS: _mark), with, for an index, the index still in
     genome_library (_done); for the build of a kit, the kit's SHA256SUMS holding, written once
-    its tarball is whole (_kit_done); for the build of a row whose recipe builds its dataset
-    whole and refuses a working directory that holds any part of it (WHOLE_RECIPES: mega's,
-    which then exits 1), every part it makes there (_whole), so that a re-run passes it where it
-    ran to its end, mark or none."""
+    its tarball is whole, the last thing its command does (_kit_done). Nothing else: what a
+    recipe leaves does not tell that it ran to its end. mega's recipe writes every part of its
+    dataset before its last step, its checks (verify_mega_chrom.py), so a build that failed them
+    left every part there, and a re-run that took its parts for done passed it with exit 0; its
+    line now runs the recipe, which refuses a working directory that holds any part of the
+    dataset, and the half stops there (the PP-2 review, A1-PP2-1)."""
     lines = [
         f"# a re-run skips each row done before (seq_script/rebuild/README.md, \"A re-run\"): "
         f"its mark in its working directory ({MARKS}/), with its index",
@@ -591,15 +574,10 @@ def _done_checks(half):
     ]
     if half == "build":
         lines += [
-            "# a kit whose SHA256SUMS holds; a recipe's parts, all there (it refuses a working "
-            "directory that holds any of them)",
+            "# a kit whose SHA256SUMS holds, which its command writes last, once the tarball is "
+            "whole",
             "_kit_done() { [ -f \"$1/$2.SHA256SUMS\" ] && [ -f \"$1/$2.tar.gz\" ] "
             "&& (cd \"$1\" && sha256sum -c --status \"$2.SHA256SUMS\"); }",
-            "_whole() { local w=$1 s=$2 x=$3 y=$4 d=$5 f c; shift 5; "
-            "for f; do [ -e \"$w/$f\" ] || return 1; done; "
-            "[ ! -e \"$w/.mega_rebuild_$d\" ] || return 1; "
-            "for f in \"$s\"/\"$x\"*\"$y\"; do [ -e \"$f\" ] || return 1; c=${f##*/\"$x\"}; "
-            "c=${c%\"$y\"}; [ -e \"$w/VCFs/$d/$x$c.build.vcf.gz\" ] || return 1; done; }",
         ]
     return lines
 
@@ -615,7 +593,10 @@ def _publish_checks():
     in it sends no token, and from a login shell `$RUN hf` ran the host's ~/.local/bin/hf: the
     kits' uploads failed as documented, after the indexes' had gone up (the D7 readiness audit,
     R-PUB-1, G-P5). So: HF_TOKEN in the environment (never on a command line: no command of the
-    set passes one); its override for the image's hf, exported for apptainer
+    set passes one), a stop with exit 2 where it is not set, as for each check here, and no line
+    that expands it, so that a trace (bash -x, SHELLOPTS=xtrace) writes none (the PP-1 review,
+    A1-PP1-1 and A1-PP1-2: bash's own check of an unset variable exited 1, and its argument was
+    the token); its override for the image's hf, exported for apptainer
     (APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0; Docker's RUN gives -e HF_TOKEN -e
     HF_HUB_DISABLE_IMPLICIT_TOKEN=0), and PYTHONNOUSERSITE=1, so that the image's python reads
     no package of ~/.local; then, in the image, the token there and not refused by that setting,
@@ -627,11 +608,12 @@ def _publish_checks():
         "# the preflight (seq_script/rebuild/README.md, \"The publish\"): the token in the "
         "environment, sent by the image's own hf, and the repo there",
         "_stop() { echo \"publish: $*\" >&2; exit 2; }",
-        f': "${{HF_TOKEN:?the token that publishes, a write token of {repo}, exported in the '
-        f'environment: never on a command line, which ps shows}}"',
+        f'[ -n "${{HF_TOKEN:+x}}" ] || _stop "HF_TOKEN is not set: the token that publishes, a '
+        f'write token of {repo}, exported in the environment: never on a command line, which ps '
+        f'shows"',
         "export APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0 "
         "SINGULARITYENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0 PYTHONNOUSERSITE=1",
-        "$RUN sh -c '[ -n \"${HF_TOKEN:-}\" ] && case $(printf %s "
+        "$RUN sh -c '[ -n \"${HF_TOKEN:+x}\" ] && case $(printf %s "
         "\"${HF_HUB_DISABLE_IMPLICIT_TOKEN:-}\" | tr a-z A-Z) in 1|ON|YES|TRUE) exit 1;; esac' "
         "|| _stop \"the release image would upload with no token: HF_TOKEN does not reach it, or "
         "its HF_HUB_DISABLE_IMPLICIT_TOKEN=1 holds there (apptainer takes this script's "
@@ -664,35 +646,49 @@ def _row_lines(r, half):
     done = f"_done {w} {mark}" + (f" {r['archive']}" if r["kind"] in INDEX_KINDS else "")
     if half == "build" and r["kind"] == "build-inputs":
         done += f" || _kit_done {w} {r['archive'].split('/', 1)[1]}"
-    parts = _whole_recipe(r) if half == "build" else None
-    if parts is not None:
-        src, prefix, suffix = SOURCE_CHROMOSOMES[WORKDIR[r["panel"]]]
-        genome = index_fit.parse_index_name(r["archive"])[2].partition("+")[0]
-        held = " ".join(p.format(archive=r["archive"], genome=genome, dataset=r["panel"])
-                        for p in parts)
-        done += f" || _whole {w} \"${src}\" {prefix} {suffix} {r['panel']} {held}"
     return [f"if {done}; then _skip \"{half} of {r['archive']}\"; else", line,
             f"_mark {w} {mark}; fi"]
 
 
-def commands_script(rows, manifest=MANIFEST, half="build"):
+def panel_rows(rows, panels):
+    """The rows of ``rows`` whose working directory is one of ``panels`` (the variables that name
+    them, WORKDIR's: REF, HGDP, HPRC, MEGA), in the manifest's order; every row for None. A
+    ValueError for a name that is no working directory's, or none."""
+    if panels is None:
+        return list(rows)
+    known = list(dict.fromkeys(WORKDIR.values()))
+    bad = [p for p in panels if p not in known]
+    if bad or not panels:
+        raise ValueError(f"--panels takes the working directories of the rows to print, by the "
+                         f"variables that name them, comma-separated: {', '.join(known)} "
+                         f"(not {', '.join(bad) or 'none'})")
+    return [r for r in rows if WORKDIR[r["panel"]] in panels]
+
+
+def commands_script(rows, manifest=MANIFEST, half="build", panels=None):
     """A half of the rebuild, ``half`` "build" or "publish", as one script bash runs from the
     repository's root. The build half runs every build command, and publishes nothing; the
-    publish half, run once, after the gates and the go, every publish command; each in the
-    manifest's order, each line as the manifest gives it (_row_lines). It stops before its first
-    command where a variable its commands read is not set, or, the build half, where a working
-    directory's genome folder is not what the rebuild builds on (_genome_checks); it skips a row
-    done before (_done_checks); and it stops at the first command that fails: each ends in ||
-    exit, as set -e does not stop at a command of an && list but its last."""
+    publish half, after the gates and the go, every publish command; each in the manifest's
+    order, each line as the manifest gives it (_row_lines). With ``panels`` (the variables of
+    working directories: panel_rows), the rows of those working directories alone, as a node
+    that holds them runs its part of the half (README, "The publish": HGDP + 1000 Genomes' is on
+    one node, the others on another, so that no one run of the whole half reads them all). It
+    stops before its first command where a variable its commands read is not set, or, the build
+    half, where a working directory's genome folder is not what the rebuild builds on
+    (_genome_checks); it skips a row done before (_done_checks); and it stops at the first
+    command that fails: each ends in || exit, as set -e does not stop at a command of an && list
+    but its last."""
     if half not in HALVES:
         raise ValueError(f"no half {half!r} of the rebuild: {' or '.join(HALVES)}")
+    rows = panel_rows(rows, panels)
     used = []
     for r in rows:
         if r[half] != NO_COMMAND:
             used += [v for v in variables(r[half]) if v not in used]
     lines = ["#!/usr/bin/env bash",
              f"# The rebuild of the index set of CRISPRme 2.10.0 ({os.path.basename(manifest)}), "
-             f"its {half} half, as check_index_set.py --commands {half}"]
+             f"its {half} half, as check_index_set.py --commands {half}"
+             + (f" --panels {','.join(panels)}" if panels is not None else "")]
     if half == "build":
         lines += ["# prints it: every build command, in the manifest's order "
                   "(seq_script/rebuild/README.md). It publishes nothing: the publish half",
@@ -703,6 +699,9 @@ def commands_script(rows, manifest=MANIFEST, half="build"):
                   "(seq_script/rebuild/README.md), each into the repo of index format 2.",
                   "# Run it once, after the build half has built the set and the indexes have "
                   "passed the release's gates, with the publish approved."]
+    if panels is not None:
+        lines.append(f"# The rows of {', '.join('$' + p for p in panels)} alone (--panels), "
+                     f"for the node that holds them.")
     lines += ["# Run it from the repository's root, with the variables below set. A re-run skips "
               "each row done before.",
               "set -euo pipefail",
@@ -842,9 +841,7 @@ def dry_run(rows, root=ROOT, manifest=MANIFEST):
     index of the set is published from its working directory, by the publish half alone (the
     build half publishes nothing, the publish half builds nothing); neither writes into the
     repository's root. Run again, each skips every row it ran (README, "A re-run"), and the build
-    half skips a kit whose SHA256SUMS holds and mega's build where every part its recipe makes is
-    there (WHOLE_RECIPES), with no mark (as after a build run row by row): its recipe refuses a
-    working directory that holds any part of it."""
+    half skips a kit whose SHA256SUMS holds with no mark (as after a build run row by row)."""
     bash = shutil.which("bash")
     if not bash:
         return ["no bash to run the rebuild's script with"]
@@ -974,35 +971,15 @@ def dry_run(rows, root=ROOT, manifest=MANIFEST):
                     problems.append(f"the rebuild's {half} half, run dry again, does again what "
                                     f"it did: {', '.join(sorted(set(acts(log, kind))))}")
         if not problems:
-            # (a build run row by row leaves no mark: a kit whose SHA256SUMS holds, and mega's
-            # build where every part its recipe makes is there, are done)
+            # (a build run row by row leaves no mark: a kit whose SHA256SUMS holds is done)
             for r in rows:
                 w = work.get(r["panel"])
-                parts = next((p for script, p in WHOLE_RECIPES.items() if script in r["build"]),
-                             None)
-                if w and (r["kind"] == "build-inputs" or parts is not None):
+                if w and r["kind"] == "build-inputs":
                     os.remove(os.path.join(w, MARKS, _mark_name("build", r["archive"])))
-                if parts is not None:
-                    genome = index_fit.parse_index_name(r["archive"])[2].partition("+")[0]
-                    src, prefix, suffix = SOURCE_CHROMOSOMES[WORKDIR[r["panel"]]]
-                    for part in parts:
-                        path = os.path.join(w, part.format(archive=r["archive"], genome=genome,
-                                                           dataset=r["panel"]))
-                        if part.endswith(".txt"):
-                            os.makedirs(os.path.dirname(path), exist_ok=True)
-                            open(path, "w").close()
-                        else:
-                            os.makedirs(path, exist_ok=True)
-                    for f in os.listdir(env[src]):
-                        c = f[len(prefix):-len(suffix)]
-                        path = os.path.join(w, "VCFs", r["panel"], f"{prefix}{c}.build.vcf.gz")
-                        os.makedirs(os.path.dirname(path), exist_ok=True)
-                        open(path, "w").close()
-            rc, log = run("build", " again, without the marks of the kits and of mega's build")
+            rc, log = run("build", " again, without the marks of the kits")
             if rc == 0 and acts(log, "build"):
-                problems.append(f"the rebuild's build half, run dry again with no mark, builds a "
-                                f"kit whose SHA256SUMS holds, or runs mega's recipe on a working "
-                                f"directory that holds every part it makes: "
+                problems.append(f"the rebuild's build half, run dry again without the marks of "
+                                f"the kits, builds a kit whose SHA256SUMS holds: "
                                 f"{', '.join(sorted(set(acts(log, 'build'))))}")
         extra = sorted(set(os.listdir(top)) - set(links))
         if extra:
@@ -1017,16 +994,32 @@ def main(argv=None):
     ap.add_argument("--commands", nargs="?", const="", metavar="build|publish",
                     help="print a half of the rebuild, a script bash runs from the repository's "
                          "root: build, every build command (it publishes nothing); publish, "
-                         "every publish command, run once, after the gates and the go")
+                         "every publish command, run once the gates have passed and the publish "
+                         "is approved")
+    ap.add_argument("--panels", metavar="REF,HGDP,HPRC,MEGA",
+                    help="with --commands: the rows of these working directories alone (the "
+                         "variables that name them, comma-separated), in the manifest's order, "
+                         "for the node that holds them: --panels REF,HPRC,MEGA on one node and "
+                         "--panels HGDP on the other (seq_script/rebuild/README.md, The publish)")
     args = ap.parse_args(argv)
     if args.commands is not None and args.commands not in HALVES:
         ap.error("--commands takes the half of the rebuild to print: --commands build (every "
                  "build command; it publishes nothing) or --commands publish (every publish "
                  "command, run once the indexes have passed the gates and the publish is "
                  "approved)")
+    panels = None
+    if args.panels is not None:
+        if not args.commands:
+            ap.error("--panels chooses the rows a half prints: give it with --commands build or "
+                     "--commands publish")
+        panels = list(dict.fromkeys(p.strip() for p in args.panels.split(",") if p.strip()))
+        try:
+            panel_rows([], panels)
+        except ValueError as exc:
+            ap.error(str(exc))
     rows = read_manifest(args.manifest)
     if args.commands:
-        sys.stdout.write(commands_script(rows, args.manifest, args.commands))
+        sys.stdout.write(commands_script(rows, args.manifest, args.commands, panels))
         return 0
     problems = check(rows)
     problems += dry_run(rows, manifest=args.manifest)

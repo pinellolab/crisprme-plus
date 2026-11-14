@@ -223,7 +223,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
   in a command, and every variant index published `--dictless`, so that a panel's indexes name one
   Dictionaries bundle. `--commands build` and `--commands publish` print the rebuild's two halves,
   a script each: the build half publishes nothing, and the publish half, which builds nothing, is
-  run once, after the gates and the PI's go (the one script of the audit published straight after
+  run after the gates and the PI's go (the one script of the audit published straight after
   its builds, before any gate, wherever a token or a node's cached login could upload: PP-2 of the
   release). Each stops before its first command where one of the variables its commands read is
   not set or, the build half, a working directory's genome folder is not what the rebuild builds
@@ -233,17 +233,22 @@ major.minor version (Changed). The main changes, each told in its entry below:
   `|| exit`: `set -e` does not stop at a command of an `&&` list but its last; and the HGDP + 1000
   Genomes and HPRC recipes now stop at a step that fails, under Fixed). A re-run of a half skips
   each row it ran to its end (a mark in the row's working directory, `.rebuild-2.10.0/`), and the
-  build half passes a kit whose `SHA256SUMS` holds and mega's build where every part its recipe
-  makes is there: the recipe refuses a working directory that holds any part of the dataset, so a
-  re-run stopped at its line, exit 1. The lines of the build half are the manifest's, as the
-  rebuild of 2.10.0's indexes ran them (md5 `7389f7e234d4e617860f8f9b34abdc49`). The publish half
+  build half passes a kit whose `SHA256SUMS` holds, which its command writes last; nothing else:
+  mega's recipe writes every part of the dataset before its last step, its checks, so a build that
+  failed them leaves them all, and its line, run again, runs the recipe, which refuses a working
+  directory that holds any of them. `--panels` prints the rows of the working directories it names
+  alone, for the node that holds them: the publish runs on each node, `--panels HGDP` on the one
+  of HGDP + 1000 Genomes and `--panels REF,HPRC,MEGA` on the other's. The lines of the build half
+  are the manifest's, as the rebuild of 2.10.0's indexes ran them (md5
+  `7389f7e234d4e617860f8f9b34abdc49`). The publish half
   uploads with the release image's own `hf` and a token given in the environment, `HF_TOKEN`: the
   image sets `HF_HUB_DISABLE_IMPLICIT_TOKEN=1`, so the kits' uploads (`$RUN hf upload ...`) sent no
   token and failed as documented, after the indexes had gone up (PP-1 of the release). It exports
   `APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0` and `PYTHONNOUSERSITE=1`, and checks before its
   first upload that the token is set, reaches the image and is sent there, that the `hf` it runs
   is the image's own (beside its `crisprme.py`), that the token authenticates and that the repo is
-  there (`hf` creates a repo that is not), stopping with what to do where one fails. The check runs the
+  there (`hf` creates a repo that is not), stopping with exit 2 and what to do where one fails;
+  no line of its checks expands the token, so a trace (`bash -x`) writes none. The check runs the
   two halves dry, then each again, every program they call stubbed, in temporary working
   directories that hold the genome folders and sources the rebuild takes, from a copy of the
   repository's root made of links: each runs to its end only where every script it calls is

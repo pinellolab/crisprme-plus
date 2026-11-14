@@ -30,6 +30,19 @@ def _row(rows, archive):
     return next(r for r in rows if r["archive"] == archive)
 
 
+def printed(*args):
+    """check_index_set's main run with ``args``: (exit status, stdout, stderr)."""
+    import contextlib
+    import io
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            rc = cis.main(list(args))
+        except SystemExit as stop:
+            rc = stop.code
+    return rc, out.getvalue(), err.getvalue()
+
+
 # hg38's chromosomes chr1-22, X and Y, what the working directories of HPRC and mega hold
 # (seq_script/rebuild/README.md, rule 1), and, with the mitochondrion and two of the 431 alt,
 # random and chrUn contigs, all of hg38 as `download --what genome` installs it, what the
@@ -37,6 +50,15 @@ def _row(rows, archive):
 PRIMARY = tuple(f"chr{c}" for c in [*range(1, 23), "X", "Y"])
 HG38 = PRIMARY + ("chrM", "chr10_GL383545v1_alt", "chrUn_KI270302v1")
 GENOMES = {"REF": HG38, "HGDP": HG38, "HPRC": PRIMARY, "MEGA": PRIMARY}
+# What mega's recipe (seq_script/merge_panels/mega_rebuild.sh) leaves in its working directory
+# once it has written every part of the dataset, before its last step, its checks
+# (verify_mega_chrom.py): a build that failed them leaves all of them, its staging folder gone,
+# beside the build VCF of each chromosome of its sources (VCFs/hg38_mega/mega.<chr>.build.vcf.gz)
+MEGA = "20-NRR_3_hg38+hg38_mega"
+MEGA_PARTS = (f"genome_library/{MEGA}", f"genome_library/{MEGA}_INDELS",
+              "Genomes/hg38+hg38_mega", "Genomes/hg38+hg38_mega_INDELS",
+              "Dictionaries/log_indels_hg38_mega", "Dictionaries/registry_hg38_mega",
+              "Dictionaries/indel_af_hg38_mega", "samplesIDs/hg38_mega.samplesID.txt")
 
 
 class TheSetHolds(unittest.TestCase):
@@ -542,24 +564,19 @@ class TheRebuildHasTwoHalves(unittest.TestCase):
     one; a re-run, the way back from a failed upload, stopped at mega's build, whose recipe
     refuses a working directory that holds any part of the dataset (the D7 readiness audit,
     R-PUB-2, CAP-2, CAP-5; PP-2 of the release). Its two halves are scripts of their own now:
-    --commands build, which publishes nothing, and --commands publish, run once after the gates
-    and the go; each skips a row it ran to its end before, and the build half passes a kit whose
-    SHA256SUMS holds and mega's build where every part its recipe makes is there. The lines of
-    the build half are the manifest's, as the rebuild ran them."""
+    --commands build, which publishes nothing, and --commands publish, run after the gates and
+    the go; each skips a row it ran to its end before (its mark), and the build half passes a kit
+    whose SHA256SUMS holds. It passed mega's build too where every part its recipe makes was
+    there, but the recipe writes them all before its checks, its last step: a build that failed
+    them was taken for done, and a re-run exited 0 (the PP-2 review, A1-PP2-1). mega's build is
+    passed on its mark alone, and its recipe refuses a working directory that holds a part of
+    the dataset. The lines of the build half are the manifest's, as the rebuild ran them."""
 
     def setUp(self):
         self.rows = cis.read_manifest()
 
     def printed(self, *args):
-        import contextlib
-        import io
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            try:
-                rc = cis.main(list(args))
-            except SystemExit as stop:
-                rc = stop.code
-        return rc, out.getvalue(), err.getvalue()
+        return printed(*args)
 
     def test_a_half_is_asked_for_by_name(self):
         for args in (["--commands"], ["--commands", "all"]):
@@ -617,18 +634,29 @@ class TheRebuildHasTwoHalves(unittest.TestCase):
         self.assertTrue([p for p in dry if p.startswith(
             "the rebuild's build half, run dry again, does again what it did")], dry)
 
-    def test_a_re_run_that_runs_megas_recipe_on_its_whole_dataset_is_found(self):
-        from unittest import mock
-        with mock.patch.object(cis, "_whole_recipe", lambda r: None):
-            dry = cis.dry_run(self.rows)
-        self.assertTrue([p for p in dry if "runs mega's recipe on a working directory that "
-                         "holds every part it makes: recipe" in p], dry)
+    def test_a_row_is_done_by_its_mark_or_a_kit_by_its_list_and_by_nothing_else(self):
+        """What a recipe leaves does not tell that it ran to its end: the build half's test of
+        each row is its mark (with its index for an index), and for a kit its SHA256SUMS."""
+        script = cis.commands_script(self.rows, half="build")
+        tests = [line for line in script.splitlines() if line.startswith("if ")]
+        self.assertEqual(len(tests), sum(r["build"] != cis.NO_COMMAND for r in self.rows))
+        for r in self.rows:
+            if r["build"] == cis.NO_COMMAND:
+                continue
+            w = "\"$" + cis.WORKDIR[r["panel"]] + "\""
+            done = f"_done {w} build.{r['archive'].replace('/', '_')}"
+            if r["kind"] in cis.INDEX_KINDS:
+                done += f" {r['archive']}"
+            else:
+                done += f" || _kit_done {w} {r['archive'].split('/', 1)[1]}"
+            self.assertIn(f"if {done}; then _skip \"build of {r['archive']}\"; else", tests)
 
-    def run_build(self, done=(), mega_parts=None):
+    def run_build(self, done=(), mega_parts=None, mega_mark=False):
         """The build half run from the repository's root with no program of the image on PATH
-        (RUN empty), every row's mark there but mega's build's, and ``mega_parts`` (all of the
-        parts mega's recipe makes, or the first few of them) in $MEGA: (exit status, stdout,
-        stderr)."""
+        (RUN empty), every row's mark there but mega's build's (unless ``mega_mark``), and
+        ``mega_parts`` in $MEGA: "all", what its recipe leaves once it has written every part of
+        the dataset, as after a build that failed its checks, its last step (MEGA_PARTS and the
+        build VCFs), or "some", the first two parts: (exit status, stdout, stderr)."""
         import shutil
         import subprocess
         import tempfile
@@ -644,9 +672,9 @@ class TheRebuildHasTwoHalves(unittest.TestCase):
                 os.makedirs(env[v])
             for c in PRIMARY:
                 open(os.path.join(env["MEGA_SRC"], f"mega.{c}.afmax.vcf.gz"), "w").close()
-            mega = "20-NRR_3_hg38+hg38_mega"
+            mega = MEGA
             for r in self.rows:
-                if r["build"] == cis.NO_COMMAND or r["archive"] == mega:
+                if r["build"] == cis.NO_COMMAND or (r["archive"] == mega and not mega_mark):
                     continue
                 w = env[cis.WORKDIR[r["panel"]]]
                 os.makedirs(os.path.join(w, cis.MARKS), exist_ok=True)
@@ -654,10 +682,9 @@ class TheRebuildHasTwoHalves(unittest.TestCase):
                      "w").close()
                 if r["kind"] in cis.INDEX_KINDS:
                     os.makedirs(os.path.join(w, "genome_library", r["archive"]))
-            parts = cis.WHOLE_RECIPES["seq_script/merge_panels/mega_rebuild.sh"]
+            parts = MEGA_PARTS
             for part in parts[:len(parts) if mega_parts == "all" else 2] if mega_parts else ():
-                path = os.path.join(env["MEGA"], part.format(archive=mega, genome="hg38",
-                                                             dataset="hg38_mega"))
+                path = os.path.join(env["MEGA"], part)
                 os.makedirs(os.path.dirname(path) if part.endswith(".txt") else path,
                             exist_ok=True)
                 if part.endswith(".txt"):
@@ -672,17 +699,27 @@ class TheRebuildHasTwoHalves(unittest.TestCase):
                                  cwd=ROOT, env=env, capture_output=True, text=True, timeout=300)
             return got.returncode, got.stdout, got.stderr
 
-    def test_megas_build_passes_where_every_part_its_recipe_makes_is_there(self):
-        """mega's recipe refuses a working directory that holds any part of the dataset, so a
-        re-run stopped at its line with exit 1 once it had built them: the build half passes
-        that line where every part it makes is there, as after a build run row by row (no mark),
-        and ends with exit 0, every other row done before."""
-        rc, out, err = self.run_build(mega_parts="all")
+    def test_megas_build_is_passed_on_its_mark(self):
+        """A re-run once the build half has run mega's recipe to its end (its mark), every
+        other row done before too: nothing runs, exit 0."""
+        rc, out, err = self.run_build(mega_parts="all", mega_mark=True)
         self.assertEqual((rc, err), (0, ""))
         self.assertIn("rebuild: the build of 20-NRR_3_hg38+hg38_mega: done before, skipped", out)
         self.assertEqual(out.count(": done before, skipped"), 19, out)
 
-    def test_but_runs_its_recipe_where_a_part_is_missing_which_refuses_it(self):
+    def test_a_mega_build_that_failed_its_checks_is_not_taken_for_done(self):
+        """Every part the recipe makes there, its staging folder gone, the build VCFs there,
+        and no mark: what a build that failed its checks (verify_mega_chrom.py, its last step)
+        leaves, as a build of 2.10.0 run row by row leaves no mark either. The half took it for
+        done and ended with exit 0; its line now runs the recipe, which refuses the working
+        directory, and the half stops there, exit 1 (the PP-2 review, A1-PP2-1)."""
+        rc, out, err = self.run_build(mega_parts="all")
+        self.assertEqual(rc, 1, out + err)
+        self.assertNotIn("the build of 20-NRR_3_hg38+hg38_mega: done before, skipped", out)
+        self.assertIn("part(s) of hg38_mega, and nothing was made there", err)
+        self.assertIn("rebuild: the build of 20-NRR_3_hg38+hg38_mega failed", err)
+
+    def test_and_where_a_part_is_there_its_recipe_refuses_it(self):
         # (the recipe itself, which refuses the working directory before it makes anything)
         rc, out, err = self.run_build(mega_parts="some")
         self.assertEqual(rc, 1, out + err)
@@ -704,10 +741,13 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
     def setUp(self):
         self.rows = cis.read_manifest()
 
-    def run_publish(self, token=True, hf_apart=False, whoami=0, info=0, **env_extra):
-        """The publish half run from the repository's root: (exit status, stderr, the stubs'
-        log, one line a call: the program, then what the image's environment held, then its
-        arguments)."""
+    def run_publish(self, token=True, hf_apart=False, whoami=0, info=0, panels=None,
+                    trace=None, **env_extra):
+        """The publish half run from the repository's root, of the rows of ``panels``'
+        working directories alone where given (and only those set), under bash -x where
+        ``trace`` is "-x", with SHELLOPTS=xtrace exported where it is "SHELLOPTS": (exit status,
+        stderr, the stubs' log, one line a call: the program, then what the image's environment
+        held, then its arguments)."""
         import shutil
         import subprocess
         import tempfile
@@ -728,14 +768,18 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
                 os.chmod(os.path.join(folder, name), 0o755)
             env = {"PATH": os.pathsep.join([local, image, "/usr/bin", "/bin"]),
                    "HOME": os.path.join(t, "home"), "LC_ALL": "C", "RUN": ""}
-            for v in ("REF", "HGDP", "HPRC", "MEGA"):
+            for v in panels or ("REF", "HGDP", "HPRC", "MEGA"):
                 env[v] = os.path.join(t, v)
                 os.makedirs(env[v])
             if token:
                 env["HF_TOKEN"] = "test-not-a-token"
+            if trace == "SHELLOPTS":
+                env["SHELLOPTS"] = "xtrace"
             env.update(env_extra)
-            got = subprocess.run([shutil.which("bash"), "-c",
-                                  cis.commands_script(self.rows, half="publish")],
+            script = cis.commands_script(self.rows, half="publish",
+                                         **({"panels": panels} if panels else {}))
+            got = subprocess.run([shutil.which("bash")] + (["-x"] if trace == "-x" else [])
+                                 + ["-c", script],
                                  cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
             calls = []
             if os.path.exists(log):
@@ -764,12 +808,79 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
             self.assertTrue(c.endswith(" --repo-type dataset"), c)
 
     def test_no_token_in_the_environment_publishes_nothing(self):
-        rc, err, calls = self.run_publish(token=False)
-        self.assertNotEqual(rc, 0)
-        self.assertIn("HF_TOKEN: the token that publishes, a write token of "
-                      "lucapinello/crisprme-indexes-format2, exported in the environment: never "
-                      "on a command line", err)
-        self.assertEqual(calls, [])
+        """It stops with exit 2, the preflight's, as the README says: bash's own check of an
+        unset variable (: "${HF_TOKEN:?...}") exited 1, a failed row's code (the PP-1 review,
+        A1-PP1-1)."""
+        for value in (None, ""):
+            with self.subTest(HF_TOKEN=value):
+                extra = {} if value is None else {"HF_TOKEN": value}
+                rc, err, calls = self.run_publish(token=False, **extra)
+                self.assertEqual(rc, 2, err)
+                self.assertIn("publish: HF_TOKEN is not set: the token that publishes, a write "
+                              "token of lucapinello/crisprme-indexes-format2, exported in the "
+                              "environment: never on a command line", err)
+                self.assertEqual(calls, [])
+
+    def test_its_checks_never_write_the_token_into_a_trace(self):
+        """Under bash -x, or with SHELLOPTS=xtrace exported, bash wrote '+ : <the token>', the
+        argument of its check of the token, to stderr (the PP-1 review, A1-PP1-2): no line of
+        the preflight expands the token, so a trace shows none (the hf of the image reads it
+        from its environment)."""
+        for trace in ("-x", "SHELLOPTS"):
+            with self.subTest(trace=trace):
+                rc, err, calls = self.run_publish(trace=trace)
+                self.assertEqual(rc, 0, err)
+                self.assertIn("+ export APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0", err)
+                self.assertNotIn("test-not-a-token", err)
+                self.assertTrue(self.uploads(calls))
+
+    def test_each_node_publishes_the_rows_of_its_working_directories_alone(self):
+        """The working directories are on two nodes, HGDP + 1000 Genomes' on one and the
+        others on another, and each row reads its own: a half run once on either stopped at the
+        first row of the other's, part of the set published (the PP review B-1). --panels
+        prints the rows of the working directories named alone, which need only theirs set: run
+        on each node, the two publish every archive of the set once."""
+        published = []
+        for panels in (["HGDP"], ["REF", "HPRC", "MEGA"]):
+            with self.subTest(panels=panels):
+                rc, err, calls = self.run_publish(panels=panels)
+                self.assertEqual((rc, err), (0, ""))
+                mine = [r for r in self.rows if r["publish"] != cis.NO_COMMAND
+                        and cis.WORKDIR[r["panel"]] in panels]
+                self.assertEqual(len(self.uploads(calls)),
+                                 sum(1 if r["kind"] in cis.INDEX_KINDS else 2 for r in mine))
+                for c in self.uploads(calls):
+                    published.append(c)
+                    self.assertTrue(any(f"/{p}/" in c for p in panels), c)
+        indexes = [c.split(" --index ", 1)[1].split()[0] for c in published
+                   if " publish-index " in c]
+        self.assertEqual(sorted(i.rsplit("/", 1)[1] for i in indexes),
+                         sorted(r["archive"] for r in self.rows if r["kind"] in cis.INDEX_KINDS))
+        kits = [c.split()[-3] for c in published if " upload " in c]
+        self.assertEqual(sorted(kits), sorted(
+            f"{r['archive']}{ext}" for r in self.rows if r["kind"] == "build-inputs"
+            for ext in (".SHA256SUMS", ".tar.gz")))
+
+    def test_panels_are_named_by_their_working_directories(self):
+        got, out, err = printed("--commands", "publish", "--panels", "HGDP")
+        self.assertEqual(got, 0, err)
+        self.assertIn("# The rows of $HGDP alone (--panels), for the node that holds them.", out)
+        self.assertIn(": \"${HGDP:?", out)
+        for other in ("REF", "HPRC", "MEGA"):
+            self.assertNotIn(f"${other}", out)
+        build = cis.commands_script(self.rows, half="build", panels=["HPRC"])
+        self.assertEqual(
+            [line for line in build.splitlines() if line.startswith(": \"${")],
+            [line for line in build.splitlines() if line.startswith((": \"${HPRC:?",
+                                                                     ": \"${RUN?", ": \"${SIF:?",
+                                                                     ": \"${HPRC_SRC:?",
+                                                                     ": \"${P1KG:?"))])
+        for args in (["--panels", "HGDP"], ["--commands", "publish", "--panels", "HGDP,FOO"],
+                     ["--commands", "publish", "--panels", ","]):
+            with self.subTest(args=args):
+                got, out, err = printed(*args)
+                self.assertEqual((got, out), (2, ""))
+                self.assertIn("--panels", err)
 
     def test_an_image_that_would_send_no_token_publishes_nothing(self):
         for value in ("1", "true", "YES", "on"):
@@ -807,6 +918,7 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
             dry = cis.dry_run(self.rows)
         self.assertIn("the rebuild's publish half, run dry, publishes before it checks that the "
                       "token authenticates and the repo is there", dry)
+
 
 
 if __name__ == "__main__":
