@@ -673,6 +673,15 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_build_index_only_layout -v
 
+      - name: "A search refuses a variant index of one build beside the Dictionaries of another (an index of 2.8.1 in a data folder upgraded to 2.10.0, and the other way)"
+        # A download of an index of 2.10.0 installs its panel's Dictionaries in place of those
+        # an archive of 2.8.1 installed: complete-search, and the search the web launches, ran
+        # the old index on with the new Dictionaries, and its indel search refused it hours
+        # later. Refused first now, in one line (index_dictionaries.py): the real crisprme.py
+        # and the search script, against test_build_index_only_atomic's stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_index_dictionaries -v
+
       - name: "CI and the documented self-test run what they say (job limit, path filters, in-image tests, every benchmark)"
         # The workflows and the docs, read as text: a job that is cancelled, never starts, or
         # skips what it is there to test passes for nothing.

@@ -4205,9 +4205,23 @@ class TheFakeIndelWindowsAreTheEnrichments(_Fixture):
                       "tell (rm -rf '%s' '%s'), and build them again with build-index-only." % (
                           self.lib(INDELS), self.path("Dictionaries", "log_indels_ds"),
                           self.lib(VAR), self.lib(INDELS), self.lib(VAR)), out)
-        # complete-search says, on its console, that its targets (a 23-nt guide and PAM with
-        # a DNA bulge) need more than such windows hold (it stops later, at this stub's
-        # search, which a search refuses at the index: test_indel_empty_chromosome)
+        # and complete-search refuses that index beside the logs, before it writes anything
+        # (index_dictionaries: it refused it at each chromosome's indel search before, hours
+        # later, test_indel_empty_chromosome)
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("Error: %s is an index of a build of ds whose enrichment wrote fake-indel "
+                      "windows of 25/34, and the Dictionaries of ds in %s are of another build, "
+                      "whose indel logs record windows of 20/30" % (
+                          VAR, self.path("Dictionaries")), err)
+        self.assertEqual(os.listdir(self.path("Results", "search")), [])
+        # As the build said: both removed, and build-index-only run again, which builds them
+        # from the enrichment in place. complete-search says, on its console, that its targets
+        # (a 23-nt guide and PAM with a DNA bulge) need more than such windows hold
+        shutil.rmtree(self.lib(INDELS))
+        shutil.rmtree(self.lib(VAR))
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
         rc, out, err = self.run_search()
         self.assertIn("WARNING [complete-search]: the fake-indel windows of ds hold 20 "
                       "reference bases before each indel and 30 after it, so a target that "
@@ -4671,6 +4685,14 @@ class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
                     seq[start:start + len(contig)]))
             _write(self.path("Genomes", "hg38+ds_INDELS", "fake_ds_%s" % chrom,
                              "fake%s.fa" % chrom), ">fake%s\n%s\n" % (chrom, contig))
+            # (and its INDELS index, built from that kit, records its windows, or the search
+            # refuses it beside these logs first: index_dictionaries)
+            meta = os.path.join(self.lib(INDELS), "NRG_2_fake%s" % chrom, ".index_meta.json")
+            with open(meta) as fh:
+                record = json.load(fh)
+            record["indel_window"] = [20, 30]
+            with open(meta, "w") as fh:
+                json.dump(record, fh)
         rc, out, err = self.run_search(samples=False)
         self.assertIn("WARNING [complete-search]: the fake-indel windows of ds hold 20 "
                       "reference bases before each indel and 30 after it", out)

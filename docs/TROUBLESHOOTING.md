@@ -569,3 +569,45 @@ scale where it was measured, and §4 gives the rules behind them.
   only on the row of all its variants of a window together, where a dict-less install lists it
   on the row of each subset too. Build the index with `--samplesID`, or download a published
   one.
+
+## 16. A search refuses an index of one release beside the Dictionaries of another
+
+**Symptom.** `complete-search` stops before it writes anything, with one line:
+`Error: NRG_3_hg38+hg38_HGDP1kGP is an index of a build of hg38_HGDP1kGP whose enrichment wrote
+fake-indel windows of 25/27 (CRISPRme 2.8.1 or earlier), and the Dictionaries of hg38_HGDP1kGP in
+<data folder>/Dictionaries are of another build, whose indel logs record windows of 30/30
+(CRISPRme 2.10.0): a search of it would read the alleles of one build with the carriers and
+frequencies of the other. ...`; a search the web app launched ends at once with the same line,
+`ERROR: ...`, in its `log_error.txt`. Or the other way: an index of 2.10.0 (windows of 30/30)
+beside Dictionaries of 25/27.
+
+**Cause.** The data folder holds indexes of CRISPRme 2.8.1 and was upgraded: a download of an index
+of 2.10.0 (`20-NRR_3_hg38+hg38_HGDP1kGP`, say, from the command line or from the web Settings page)
+installed its panel's Dictionaries in place of those 2.8.1's archives of the panel installed (the
+download said so: `WARNING: ... installed with Dictionaries of another build of <panel>`). An index
+of 2.8.1 is still in `genome_library/`, and a search that takes it (a search of a PAM whose index of
+2.10.0 is not installed: NRG beside `20-NRR_3_...`, say) would read its alleles with the
+Dictionaries of 2.10.0, which code every allele of a split site where 2.8.1 coded the last record's
+alone (1.95 % of HGDP + 1000 Genomes' SNP records), and whose fake-indel windows are another width,
+so every indel row would be misplaced. The two builds are told apart by those windows: 25/27 for
+an index of 2.8.1, which is of index format 1, and 30/30 for the indexes and Dictionaries of 2.10.0
+([METHODS.md](../METHODS.md) §4, "SNP+indel off-targets"). The other way comes from Dictionaries of 2.8.1 put back beside
+an index of 2.10.0: an archive of 2.8.1 installed there by CRISPRme 2.8.1 itself, which
+`download` of 2.10.0 refuses to do. A search of an index of either release with its own
+Dictionaries runs, as does an index of 2.10.0 built from 2.8.1's enriched-genome kit beside that
+kit's Dictionaries.
+
+**Fix.** Either way, keep the indexes of each build in a data folder of their own, with their own
+Dictionaries:
+
+- **Search the index of 2.10.0 that replaces it**, which the message names, and remove the old
+  one with the `rm -rf` the message gives (its paths quoted for bash and zsh):
+  `crisprme.py download --what index --index-name 20-NRG_3_hg38+hg38_HGDP1kGP`. A search then
+  takes the new index; with the old one removed, a search of NRG also takes the installed
+  `20-NRR_3_hg38+hg38_HGDP1kGP`, pruned to NRG, where no index of NRG is installed.
+- **Keep searching the index of 2.8.1** in a new data folder, where `download` of 2.10.0 installs an
+  archive of 2.8.1 by its own name, with its own Dictionaries (and names the index of 2.10.0 that
+  replaces it): `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path
+  <new data folder>`, after `crisprme.py download --what all --path <new data folder>`.
+- **The other way**, an index of 2.10.0 beside Dictionaries of 2.8.1: download it again into a new
+  data folder, which installs the Dictionaries it was built with, and search it there.

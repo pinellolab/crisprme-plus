@@ -1643,6 +1643,19 @@ while read vcf_f; do
 				exit 1
 			fi
 		done
+		# The variant index this search takes and the dataset's Dictionaries here come from one
+		# build of it: an index of CRISPRme 2.8.1 beside the Dictionaries a download of 2.10.0
+		# put in place of its own (or the other way) would have its alleles read with the
+		# carriers of the other build. Refused before the dataset is searched, as complete-search
+		# refuses it before anything is written (index_dictionaries.py); a web search comes here.
+		_vi=$(_variant_index)
+		if [ -n "$_vi" ]; then
+			_mixed=$(python "$starting_dir/index_dictionaries.py" "$_vi" "$current_working_directory" "$vcf_name")
+			if [ $? = 3 ]; then
+				printf "ERROR: %s\n" "$_mixed" >&2
+				exit 1
+			fi
+		fi
 	fi
 	# Detect a precomputed variant index shipped WITHOUT the raw VCFs (a batteries-
 	# included install: `download --what index` fetches genome_library/<name> +

@@ -2647,6 +2647,29 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
         )
 
 
+def _refuse_mixed_builds(vcf_dirs: List[str], genome: str, motif: str, bdna: int, brna: int,
+                         prune: bool, three_prime: bool, guide_len: int,
+                         index_path: str) -> None:
+    """Stops a variant search, before anything is written, where the variant index it takes
+    for a dataset (_index_the_search_takes, as the search script takes it) was built from
+    another enrichment than the one its Dictionaries in the working directory come from: an
+    index of CRISPRme 2.8.1 beside the Dictionaries a download of 2.10.0 put in place of its
+    own, or the other way (index_dictionaries.refusal, which tells the two builds by their
+    fake-indel windows). The search script refuses it too, for a search the web launches."""
+    import index_dictionaries
+
+    want = max(bdna, brna) + 1
+    libs = _variant_libraries(index_path)
+    for vdir in vcf_dirs:
+        vcf = os.path.basename(os.path.normpath(vdir))
+        index = _index_the_search_takes(libs, motif, f"{genome}+{vcf}", want, prune,
+                                        three_prime, guide_len, bdna, brna, True)
+        why = index_dictionaries.refusal(index, current_working_directory, vcf) if index \
+            else None
+        if why:
+            error(why)
+
+
 def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int, prune: bool,
                             three_prime: bool, guide_len: int, bdna: int, brna: int,
                             variant: bool) -> "Optional[str]":
@@ -3516,6 +3539,11 @@ def complete_search() -> None:
         print(_prune_note(prune_auto, pam_char), flush=True)
     if variant:
         _refuse_no_variant_index(
+            resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
+            bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
+        # (an index of one build of a dataset beside the Dictionaries of another, as a data
+        # folder upgraded from CRISPRme 2.8.1 can hold: refused before anything is written)
+        _refuse_mixed_builds(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
             bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
         wide_budget_note = _warn_wide_bulge_budget(

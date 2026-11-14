@@ -726,11 +726,16 @@ each reader takes a window's left flank from its indel log row (`POS - 1 - start
 right; each INDELS sub-index records the windows it was built from (`.index_meta.json`'s
 `indel_window`; 25/27 is inferred for one of index format 1, which only CRISPRitz 2.9.1 and earlier
 build), and a search refuses one beside an indel log of other windows (the two come from two
-enrichments, and the log would place every row of it wrong), as build-index-only does of one in
-place, which also warns of an enrichment in place whose windows the installed CRISPRitz does not
-write, and says how to enrich the dataset again. Each names for the rebuild the variant index of the
-INDELS index's name too, which a build makes with it from one enrichment and which holds no window
-to tell its own (`indel_window.with_its_variant_index`). An enrichment of 25/27 is one of CRISPRitz
+enrichments, and the log would place every row of it wrong), before it writes anything
+(complete-search and the search script, for each dataset of the search, read the index it takes
+against the dataset's indel logs, chromosome by chromosome; a variant index of format 1 whose
+INDELS index tells nothing is of 25/27: `index_dictionaries`), as a data folder upgraded from
+2.8.1 can hold them, an index of 2.8.1 beside the Dictionaries a download of 2.10.0 installed;
+build-index-only refuses one in place, and also warns of an enrichment in place whose windows the
+installed CRISPRitz does not write, and says how to enrich the dataset again. Each names for the
+rebuild the variant index of the INDELS index's name too, which a build makes with it from one
+enrichment and which holds no window to tell its own (`indel_window.with_its_variant_index`).
+An enrichment of 25/27 is one of CRISPRitz
 2.9.1 or earlier, which differs from one of 2.10.0 in its SNPs too (2.9.1 enriched only the last ALT
 of a site written on several records: on chr22 of HGDP + 1000 Genomes its registry holds 1,711,938
 SNPs, 2.10.0's 1,757,775), so all that comes from it goes with it: the advice names, each by
